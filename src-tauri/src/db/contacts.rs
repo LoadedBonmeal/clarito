@@ -1,0 +1,213 @@
+//! Contacte (clienți și furnizori).
+//!
+//! Un contact poate fi CUSTOMER, SUPPLIER sau BOTH. Aparține unei companii
+//! (parent). Pentru contactele cu CUI românesc se permite și fără prefix
+//! "RO" (persoane juridice neînregistrate ca plătitori de TVA).
+
+use serde::{Deserialize, Serialize};
+use sqlx::{FromRow, SqlitePool};
+
+use crate::db::models::{new_id, now_unix, ContactType};
+use crate::error::{AppError, AppResult};
+
+// ─── Model ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct Contact {
+    pub id: String,
+    pub company_id: String,
+
+    pub contact_type: String,
+    pub cui: Option<String>,
+    pub legal_name: String,
+    pub vat_payer: bool,
+
+    pub address: Option<String>,
+    pub city: Option<String>,
+    pub county: Option<String>,
+    pub country: String,
+
+    pub email: Option<String>,
+    pub phone: Option<String>,
+
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+// ─── Inputs ────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateContactInput {
+    pub company_id: String,
+    pub contact_type: ContactType,
+    pub cui: Option<String>,
+    pub legal_name: String,
+    pub vat_payer: Option<bool>,
+
+    pub address: Option<String>,
+    pub city: Option<String>,
+    pub county: Option<String>,
+    pub country: Option<String>,
+
+    pub email: Option<String>,
+    pub phone: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateContactInput {
+    pub contact_type: Option<ContactType>,
+    pub cui: Option<String>,
+    pub legal_name: Option<String>,
+    pub vat_payer: Option<bool>,
+
+    pub address: Option<String>,
+    pub city: Option<String>,
+    pub county: Option<String>,
+    pub country: Option<String>,
+
+    pub email: Option<String>,
+    pub phone: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactFilter {
+    pub company_id: Option<String>,
+    pub query: Option<String>,
+}
+
+// ─── Queries ───────────────────────────────────────────────────────────────
+
+const SELECT_COLUMNS: &str = "id, company_id, contact_type, cui, legal_name, vat_payer, \
+    address, city, county, country, email, phone, created_at, updated_at";
+
+pub async fn list(pool: &SqlitePool, filter: ContactFilter) -> AppResult<Vec<Contact>> {
+    let mut sql = format!("SELECT {SELECT_COLUMNS} FROM contacts WHERE 1=1");
+    if filter.company_id.is_some() {
+        sql.push_str(" AND company_id = ?1");
+    }
+    if filter.query.is_some() {
+        let next = if filter.company_id.is_some() { "?2" } else { "?1" };
+        sql.push_str(&format!(
+            " AND (legal_name LIKE {next} OR cui LIKE {next})"
+        ));
+    }
+    sql.push_str(" ORDER BY legal_name");
+
+    let mut q = sqlx::query_as::<_, Contact>(&sql);
+    if let Some(cid) = &filter.company_id {
+        q = q.bind(cid);
+    }
+    if let Some(query) = &filter.query {
+        q = q.bind(format!("%{query}%"));
+    }
+    Ok(q.fetch_all(pool).await?)
+}
+
+pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Contact> {
+    let sql = format!("SELECT {SELECT_COLUMNS} FROM contacts WHERE id = ?1");
+    sqlx::query_as::<_, Contact>(&sql)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or(AppError::NotFound)
+}
+
+pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<Contact> {
+    let id = new_id();
+    let now = now_unix();
+    let contact_type = serde_json::to_value(input.contact_type)
+        .map(|v| v.as_str().unwrap_or("CUSTOMER").to_string())
+        .unwrap_or_else(|_| "CUSTOMER".to_string());
+
+    sqlx::query(
+        "INSERT INTO contacts (
+            id, company_id, contact_type, cui, legal_name, vat_payer,
+            address, city, county, country, email, phone,
+            created_at, updated_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6,
+            ?7, ?8, ?9, ?10, ?11, ?12,
+            ?13, ?13
+        )",
+    )
+    .bind(&id)
+    .bind(&input.company_id)
+    .bind(&contact_type)
+    .bind(&input.cui)
+    .bind(&input.legal_name)
+    .bind(input.vat_payer.unwrap_or(false))
+    .bind(&input.address)
+    .bind(&input.city)
+    .bind(&input.county)
+    .bind(input.country.as_deref().unwrap_or("RO"))
+    .bind(&input.email)
+    .bind(&input.phone)
+    .bind(now)
+    .execute(pool)
+    .await?;
+
+    get(pool, &id).await
+}
+
+pub async fn update(
+    pool: &SqlitePool,
+    id: &str,
+    input: UpdateContactInput,
+) -> AppResult<Contact> {
+    let current = get(pool, id).await?;
+    let now = now_unix();
+
+    let contact_type = match input.contact_type {
+        Some(t) => serde_json::to_value(t)
+            .map(|v| v.as_str().unwrap_or("CUSTOMER").to_string())
+            .unwrap_or(current.contact_type),
+        None => current.contact_type,
+    };
+
+    sqlx::query(
+        "UPDATE contacts SET
+            contact_type = ?2,
+            cui          = ?3,
+            legal_name   = ?4,
+            vat_payer    = ?5,
+            address      = ?6,
+            city         = ?7,
+            county       = ?8,
+            country      = ?9,
+            email        = ?10,
+            phone        = ?11,
+            updated_at   = ?12
+        WHERE id = ?1",
+    )
+    .bind(id)
+    .bind(&contact_type)
+    .bind(input.cui.or(current.cui))
+    .bind(input.legal_name.unwrap_or(current.legal_name))
+    .bind(input.vat_payer.unwrap_or(current.vat_payer))
+    .bind(input.address.or(current.address))
+    .bind(input.city.or(current.city))
+    .bind(input.county.or(current.county))
+    .bind(input.country.unwrap_or(current.country))
+    .bind(input.email.or(current.email))
+    .bind(input.phone.or(current.phone))
+    .bind(now)
+    .execute(pool)
+    .await?;
+
+    get(pool, id).await
+}
+
+pub async fn delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
+    let res = sqlx::query("DELETE FROM contacts WHERE id = ?1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(())
+}

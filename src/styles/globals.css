@@ -1,0 +1,48 @@
+/* Tailwind base — necesare pentru shadcn/ui și utilități */
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Design system Win32 business — portat din Claude Design.
+   Conține design tokens, variabile, CSS pentru chrome (MenuBar, Ribbon,
+   Sidebar, StatusBar), tabele, butoane, badges, panels, paletă comenzi. */
+@import "./design.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Bridge shadcn → design.css.
+   Shadcn folosește numele lui (--background, --foreground, --primary, etc.).
+   Le mapăm la variabilele design.css ca să avem un singur sistem de culori. */
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--bg-content);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--bg-content);
+  --color-popover-foreground: var(--text);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--on-accent);
+  --color-secondary: var(--bg-sidebar);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--bg-sidebar);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent: var(--accent-soft);
+  --color-accent-foreground: var(--text);
+  --color-destructive: oklch(0.55 0.21 27);
+  --color-destructive-foreground: #fff;
+  --color-border: var(--border);
+  --color-input: var(--input-border);
+  --color-ring: var(--accent);
+  --color-sidebar: var(--bg-sidebar);
+  --color-sidebar-foreground: var(--text);
+  --color-sidebar-accent: var(--accent-soft);
+  --color-sidebar-accent-foreground: var(--text);
+  --color-sidebar-border: var(--border);
+
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+}

@@ -1,0 +1,106 @@
+[package]
+name = "efactura-desktop"
+version = "0.1.0"
+description = "RoFactura — Aplicație desktop pentru e-Factura ANAF"
+authors = ["Lucaris"]
+edition = "2021"
+
+[lib]
+name = "efactura_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri core
+tauri = { version = "2", features = ["tray-icon"] }
+
+# Tauri plugins
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-store = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-os = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-process = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-log = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-http = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-autostart = "2"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Database (sqlx with sqlite, rustls TLS, chrono for dates)
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "macros"] }
+
+# HTTP client (rustls, not openssl)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
+
+# XML
+quick-xml = { version = "0.36", features = ["serialize"] }
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUIDs (v7 time-ordered)
+uuid = { version = "1", features = ["v7", "serde"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# OS Keychain access
+keyring = "3"
+
+# Encryption (AES-GCM)
+aes-gcm = "0.10"
+
+# ZIP archives
+zip = "2"
+
+# Hashing
+sha2 = "0.10"
+
+# Exact monetary math
+rust_decimal = { version = "1", features = ["serde-float"] }
+rust_decimal_macros = "1"
+
+# PDF generation
+printpdf = "0.7"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Filesystem paths (home dir etc.)
+dirs = "5"
+
+# Excel XLSX export
+rust_xlsxwriter = "0.80"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS-specific (placeholders for future use)
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Windows-specific (placeholders for future use)
+
+[features]
+# Default features
+default = []
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

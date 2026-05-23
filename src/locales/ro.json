@@ -1,0 +1,122 @@
+{
+  "common": {
+    "appName": "RoFactura",
+    "save": "Salvează",
+    "cancel": "Anulează",
+    "delete": "Șterge",
+    "edit": "Modifică",
+    "create": "Crează",
+    "search": "Caută",
+    "loading": "Se încarcă...",
+    "error": "Eroare",
+    "success": "Succes",
+    "yes": "Da",
+    "no": "Nu",
+    "confirm": "Confirmă",
+    "close": "Închide",
+    "back": "Înapoi",
+    "next": "Continuă",
+    "finish": "Finalizează",
+    "view": "Vezi",
+    "download": "Descarcă",
+    "upload": "Încarcă",
+    "export": "Exportă",
+    "import": "Importă",
+    "settings": "Setări",
+    "actions": "Acțiuni",
+    "status": "Status",
+    "date": "Dată",
+    "amount": "Sumă",
+    "name": "Nume",
+    "filter": "Filtrează",
+    "all": "Toate",
+    "none": "Niciuna"
+  },
+  "nav": {
+    "dashboard": "Acasă",
+    "companies": "Companii",
+    "invoices": "Facturi emise",
+    "received": "Facturi primite",
+    "contacts": "Contacte",
+    "reports": "Rapoarte",
+    "settings": "Setări"
+  },
+  "sidebar": {
+    "main": "Principal",
+    "operations": "Operațiuni",
+    "data": "Date",
+    "tools": "Instrumente"
+  },
+  "topbar": {
+    "newInvoice": "Factură nouă",
+    "search": "Caută (Cmd+K)",
+    "notifications": "Notificări",
+    "sync": "Sincronizează",
+    "userMenu": "Meniu utilizator",
+    "switchCompany": "Schimbă compania"
+  },
+  "statusbar": {
+    "online": "Conectat",
+    "offline": "Offline",
+    "anafOk": "ANAF: OK",
+    "anafDown": "ANAF: indisponibil",
+    "lastSync": "Ultima sincronizare",
+    "never": "niciodată",
+    "version": "Versiune"
+  },
+  "theme": {
+    "light": "Luminoasă",
+    "dark": "Întunecată",
+    "system": "Sistem"
+  },
+  "dashboard": {
+    "title": "Privire generală",
+    "invoices": "Facturi emise",
+    "received": "Facturi primite",
+    "contacts": "Contacte",
+    "todo": "De făcut azi",
+    "pending": "În așteptare",
+    "rejected": "Respinse",
+    "newReceived": "Primite noi",
+    "certificates": "Certificate",
+    "noTodos": "Nimic de făcut. Bună treabă!"
+  },
+  "invoice": {
+    "status": {
+      "draft": "Ciornă",
+      "queued": "În coadă",
+      "submitted": "Trimisă",
+      "validated": "Validată",
+      "rejected": "Respinsă",
+      "storned": "Stornată"
+    }
+  },
+  "invoices": {
+    "title": "Facturi emise",
+    "newInvoice": "Factură nouă",
+    "exportXlsx": "Export XLSX",
+    "importCsv": "Import CSV",
+    "columns": {
+      "number": "Număr",
+      "date": "Data",
+      "customer": "Client",
+      "total": "Total",
+      "status": "Status ANAF"
+    }
+  },
+  "contacts": {
+    "title": "Contacte",
+    "newContact": "Contact nou",
+    "importCsv": "Import CSV"
+  },
+  "settings": {
+    "title": "Setări",
+    "sections": {
+      "general": "Generale",
+      "notifications": "Notificări",
+      "system": "Sistem",
+      "archive": "Date & Export",
+      "activityLog": "Jurnal activitate"
+    }
+  }
+}

@@ -1,0 +1,364 @@
+//! Tauri commands pentru autentificarea ANAF OAuth2 și API-ul e-Factura.
+//!
+//! Toate comenzile sunt `async` — OAuth2 și HTTP calls sunt blocking I/O.
+
+use crate::anaf::{
+    client::AnafClient,
+    keychain::TokenBundle,
+    oauth,
+};
+use tauri::Manager;
+
+use crate::db::{companies, contacts, invoices as db_invoices};
+use crate::db::models::new_id;
+use crate::error::{AppError, AppResult};
+use crate::state::AppState;
+use crate::ubl::{generator::{generate_ubl, GeneratorInput}, validator::validate_invoice_data};
+
+// ─── Helper: obține token valid, încearcă refresh dacă e expirat ──────────
+
+async fn get_valid_token(company_id: &str) -> AppResult<String> {
+    let bundle = TokenBundle::load(company_id)
+        .ok_or_else(|| AppError::Other("Autentificați-vă la ANAF mai întâi.".into()))?;
+
+    if !bundle.is_expired() {
+        return Ok(bundle.access_token);
+    }
+
+    // Încearcă refresh
+    let result = oauth::refresh_token_bundle(&bundle.refresh_token)
+        .await
+        .map_err(AppError::Other)?;
+
+    let new_bundle = TokenBundle {
+        access_token: result.access_token.clone(),
+        refresh_token: result.refresh_token,
+        expires_at: result.expires_at,
+    };
+    new_bundle.save(company_id).map_err(|e| AppError::Other(e.to_string()))?;
+
+    Ok(result.access_token)
+}
+
+// ─── Commands ──────────────────────────────────────────────────────────────
+
+/// Pornește fluxul OAuth2 PKCE — deschide browser-ul, așteaptă callback.
+/// Returnează `true` dacă autentificarea a reușit.
+/// Emite evenimentul `oauth_completed` { companyId, success } pentru frontend.
+#[tauri::command]
+pub async fn anaf_authorize(
+    app: tauri::AppHandle,
+    _state: tauri::State<'_, AppState>,
+    company_id: String,
+) -> AppResult<bool> {
+    use tauri::Emitter;
+
+    let result = oauth::authorize(&company_id)
+        .await
+        .map_err(AppError::Other)?;
+
+    let bundle = TokenBundle {
+        access_token: result.access_token,
+        refresh_token: result.refresh_token,
+        expires_at: result.expires_at,
+    };
+    bundle.save(&company_id).map_err(|e| AppError::Other(e.to_string()))?;
+
+    // Emit oauth_completed so frontend can react (refresh auth state)
+    let _ = app.emit("oauth_completed", serde_json::json!({
+        "companyId": company_id,
+        "success": true
+    }));
+
+    Ok(true)
+}
+
+/// Verifică dacă există un token valid (ne-expirat) pentru această companie.
+#[tauri::command]
+pub async fn anaf_is_authenticated(company_id: String) -> AppResult<bool> {
+    match TokenBundle::load(&company_id) {
+        Some(bundle) => Ok(!bundle.is_expired()),
+        None => Ok(false),
+    }
+}
+
+/// Șterge token-ul din keychain (logout).
+#[tauri::command]
+pub async fn anaf_logout(company_id: String) -> AppResult<()> {
+    TokenBundle::delete(&company_id);
+    Ok(())
+}
+
+/// Trimite XML-ul facturii la ANAF. Returnează `index_incarcare` (upload ID).
+#[tauri::command]
+pub async fn anaf_submit_invoice(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    company_id: String,
+    invoice_id: String,
+    test_mode: bool,
+) -> AppResult<String> {
+    let pool = &state.db;
+
+    // 1. Încarcă factura + liniile din DB
+    let invoice_with_lines = db_invoices::get_with_lines(pool, &invoice_id).await?;
+    let invoice = invoice_with_lines.invoice;
+    let lines = invoice_with_lines.lines;
+
+    // 2. Încarcă compania + contactul din DB
+    let company = companies::get(pool, &company_id).await?;
+    let buyer = contacts::get(pool, &invoice.contact_id).await?;
+
+    // 3. Generează XML UBL
+    let xml_string = generate_ubl(&GeneratorInput {
+        invoice: invoice.clone(),
+        lines: lines.clone(),
+        seller: company.clone(),
+        buyer: buyer.clone(),
+        storno_ref: None,
+    })?;
+
+    // 4. Validează — dacă sunt erori blocante, oprește
+    let (data_errors, _data_warnings) = validate_invoice_data(
+        &invoice,
+        &lines,
+        &company,
+        &buyer,
+        None,
+    );
+    if !data_errors.is_empty() {
+        let msg = data_errors.join("; ");
+        return Err(AppError::Validation(msg));
+    }
+
+    // 5. Salvează XML în arhivă
+    let year = if invoice.issue_date.len() >= 4 {
+        &invoice.issue_date[..4]
+    } else {
+        "0000"
+    };
+    let archive_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(e.to_string()))?
+        .join("archive")
+        .join("sent")
+        .join(&company.cui)
+        .join(year)
+        .join(&invoice.full_number);
+    std::fs::create_dir_all(&archive_dir).ok();
+    let xml_path = archive_dir.join("invoice.xml");
+    std::fs::write(&xml_path, xml_string.as_bytes()).map_err(AppError::Io)?;
+    // Actualizează xml_path în DB
+    sqlx::query("UPDATE invoices SET xml_path = ?1, updated_at = unixepoch() WHERE id = ?2")
+        .bind(xml_path.to_string_lossy().as_ref())
+        .bind(&invoice_id)
+        .execute(pool)
+        .await
+        .ok();
+
+    // 6. Marchează factura ca QUEUED (în coadă — upload-ul poate dura)
+    sqlx::query(
+        "UPDATE invoices SET status = 'QUEUED', updated_at = unixepoch() WHERE id = ?1",
+    )
+    .bind(&invoice_id)
+    .execute(pool)
+    .await
+    .ok();
+    {
+        use tauri::Emitter;
+        let _ = app.emit(
+            "invoice_status_changed",
+            serde_json::json!({"invoiceId": &invoice_id, "newStatus": "QUEUED"}),
+        );
+    }
+
+    // 7. Obține token valid din keychain
+    let mut token = get_valid_token(&company_id).await?;
+
+    // 8. Upload la ANAF (cu un retry la 401)
+    let client = AnafClient::new(test_mode);
+    let xml_bytes = xml_string.into_bytes();
+    let mut upload_result = client
+        .upload_invoice(&token, &company.cui, xml_bytes.clone())
+        .await;
+    if let Err(ref e) = upload_result {
+        use crate::anaf::client::ERR_UNAUTHORIZED;
+        if e == ERR_UNAUTHORIZED {
+            tracing::info!(company_id, "ANAF 401 on upload — reîmprospătăm token");
+            use crate::anaf::{keychain::TokenBundle, oauth};
+            if let Some(bundle) = TokenBundle::load(&company_id) {
+                if let Ok(refreshed) = oauth::refresh_token_bundle(&bundle.refresh_token).await {
+                    let new_bundle = TokenBundle {
+                        access_token: refreshed.access_token.clone(),
+                        refresh_token: refreshed.refresh_token,
+                        expires_at: refreshed.expires_at,
+                    };
+                    let _ = new_bundle.save(&company_id);
+                    token = refreshed.access_token;
+                    upload_result = client
+                        .upload_invoice(&token, &company.cui, xml_bytes.clone())
+                        .await;
+                }
+            }
+        }
+    }
+    let upload_resp = upload_result.map_err(AppError::Other)?;
+
+    let upload_id = upload_resp.index_incarcare;
+
+    // 9. Actualizează DB cu status SUBMITTED + anaf_upload_id
+    db_invoices::mark_submitted(pool, &invoice_id, &upload_id).await?;
+    {
+        use tauri::Emitter;
+        let _ = app.emit(
+            "invoice_status_changed",
+            serde_json::json!({"invoiceId": &invoice_id, "newStatus": "SUBMITTED"}),
+        );
+    }
+
+    // 10. Inserează eveniment invoice_event
+    let event_id = new_id();
+    let _ = sqlx::query(
+        "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at) \
+         VALUES (?1, ?2, 'SUBMITTED_TO_ANAF', ?3, unixepoch())",
+    )
+    .bind(&event_id)
+    .bind(&invoice_id)
+    .bind(format!("Factură trimisă la ANAF. Upload ID: {}", upload_id))
+    .execute(pool)
+    .await;
+
+    // 11. Notificare
+    crate::notifications::notify(
+        &app,
+        "✓ Factură trimisă",
+        &format!("Factura {} a fost trimisă la ANAF. ID: {}", invoice.full_number, upload_id),
+    )
+    .await;
+
+    Ok(upload_id)
+}
+
+/// Verifică statusul ANAF al unei facturi trimise. Actualizează statusul DB.
+/// Returnează `stare`-ul curent (ex. "ok", "in prelucrare", "nok").
+#[tauri::command]
+pub async fn anaf_check_invoice_status(
+    state: tauri::State<'_, AppState>,
+    company_id: String,
+    invoice_id: String,
+    test_mode: bool,
+) -> AppResult<String> {
+    let pool = &state.db;
+
+    let invoice = db_invoices::get(pool, &invoice_id).await?;
+
+    let upload_id = invoice
+        .anaf_upload_id
+        .ok_or_else(|| AppError::Validation("Factura nu are un upload ID ANAF.".into()))?;
+
+    let token = get_valid_token(&company_id).await?;
+
+    let client = AnafClient::new(test_mode);
+    let status_resp = client
+        .check_status(&token, &upload_id)
+        .await
+        .map_err(AppError::Other)?;
+
+    let stare = status_resp.stare.clone();
+
+    if stare == "ok" {
+        db_invoices::mark_validated(pool, &invoice_id, status_resp.index_incarcare).await?;
+    } else if stare == "nok" || stare.contains("erori") {
+        let raw_reason = status_resp.descriere.or(status_resp.erori);
+        let friendly_reason = raw_reason.as_deref().map(|r| {
+            crate::anaf::errors::friendly_message_from_body(r)
+        });
+        db_invoices::mark_rejected(pool, &invoice_id, friendly_reason, None).await?;
+    }
+    // "in prelucrare" — nu facem nimic
+
+    Ok(stare)
+}
+
+/// Re-pornește fluxul OAuth2 pentru o companie (re-autorizare certificat).
+///
+/// NOTE: Aceasta lansează un flux complet browser OAuth în loc să apeleze
+/// `refresh_token_bundle`. Motivul: certificatele ANAF expirate necesită
+/// re-autentificare interactivă — token refresh nu e suficient după expirarea
+/// certificatului digital. Token-urile curente sunt totuși refreshate automat
+/// de `get_valid_token` înaintea fiecărei operații API.
+#[tauri::command]
+pub async fn anaf_refresh_certificate(
+    _state: tauri::State<'_, AppState>,
+    company_id: String,
+) -> AppResult<bool> {
+    let result = oauth::authorize(&company_id)
+        .await
+        .map_err(AppError::Other)?;
+
+    let bundle = TokenBundle {
+        access_token: result.access_token,
+        refresh_token: result.refresh_token,
+        expires_at: result.expires_at,
+    };
+    bundle.save(&company_id).map_err(|e| AppError::Other(e.to_string()))?;
+
+    Ok(true)
+}
+
+/// Revocă certificatul SPV al unei companii — șterge token-ul și dezactivează certificatele.
+#[tauri::command]
+pub async fn anaf_revoke_certificate(
+    state: tauri::State<'_, AppState>,
+    company_id: String,
+) -> AppResult<()> {
+    let pool = &state.db;
+
+    // Verify the company exists
+    let _company = companies::get(pool, &company_id).await?;
+
+    // Delete token from keychain
+    TokenBundle::delete(&company_id);
+
+    // Mark certificates inactive
+    sqlx::query(
+        "UPDATE certificates SET is_active = 0, updated_at = unixepoch() WHERE company_id = ?1",
+    )
+    .bind(&company_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    // Update company spv_enabled = false
+    sqlx::query(
+        "UPDATE companies SET spv_enabled = 0, updated_at = unixepoch() WHERE id = ?1",
+    )
+    .bind(&company_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    Ok(())
+}
+
+/// Returnează lista de certificate pentru o companie.
+#[tauri::command]
+pub async fn anaf_get_certificates(
+    state: tauri::State<'_, AppState>,
+    company_id: String,
+) -> AppResult<Vec<crate::db::certificates::Certificate>> {
+    crate::db::certificates::list_for_company(&state.db, &company_id).await
+}
+
+/// Sincronizează mesajele SPV pentru o companie. Returnează numărul de mesaje noi.
+/// Descarcă automat facturile primite și le stochează în arhivă + DB.
+#[tauri::command]
+pub async fn anaf_sync_spv(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    company_id: String,
+    _test_mode: bool,
+) -> AppResult<i32> {
+    crate::background::do_sync_spv(&state.db, &company_id, &app).await
+}
