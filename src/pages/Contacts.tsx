@@ -11,6 +11,7 @@ import { CsvImportModal } from "@/components/shared/CsvImportModal";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
+import { fmtShortcut } from "@/lib/platform";
 import type { Contact, ContactType, CreateContactInput, UpdateContactInput } from "@/types";
 
 type TypeFilter = ContactType | "all";
@@ -115,7 +116,7 @@ export function ContactsPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <span className="kbd-hint">Ctrl F</span>
+          <span className="kbd-hint">{fmtShortcut("Ctrl F")}</span>
         </div>
         <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
           {selected.size > 0 && (

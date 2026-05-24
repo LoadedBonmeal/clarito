@@ -14,6 +14,7 @@ import { Icon } from "@/components/shared/Icon";
 import { useAppStore } from "@/lib/store";
 import { api } from "@/lib/tauri";
 import { queryKeys } from "@/lib/queries";
+import { fmtShortcut } from "@/lib/platform";
 
 interface Command {
   id: string;
@@ -150,7 +151,7 @@ export function CommandPalette() {
     {
       id: "act-new-invoice",
       label: "Factură nouă",
-      hint: "Ctrl+N",
+      hint: fmtShortcut("Ctrl+N"),
       icon: "plus",
       section: "Acțiuni",
       action: () => {

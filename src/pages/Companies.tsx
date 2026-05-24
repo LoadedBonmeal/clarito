@@ -11,6 +11,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Icon } from "@/components/shared/Icon";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import { fmtShortcut } from "@/lib/platform";
 import type { AppErrorPayload, Company } from "@/types";
 
 const TIER_LIMITS: Record<string, number> = {
@@ -156,7 +157,7 @@ export function CompaniesPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <span className="kbd-hint">Ctrl F</span>
+          <span className="kbd-hint">{fmtShortcut("Ctrl F")}</span>
         </div>
         <span className="divider-v" style={{ margin: "0 4px" }} />
         <span style={{ fontSize: 11, color: "var(--text-muted)" }}>SPV:</span>
@@ -364,7 +365,7 @@ export function CompaniesPage() {
         </span>
         <span style={{ marginLeft: "auto" }}>
           Click pe rând pentru detalii ·{" "}
-          <span className="kbd">Ctrl K Ctrl C</span> selector rapid companie
+          <span className="kbd">{fmtShortcut("Ctrl K Ctrl C")}</span> selector rapid companie
         </span>
       </div>
     </div>

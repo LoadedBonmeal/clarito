@@ -14,6 +14,7 @@ import { Icon } from "@/components/shared/Icon";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import { fmtShortcut } from "@/lib/platform";
 
 type MenuRow =
   | { type: "row"; icon: string; label: string; kbd?: string; onClick?: () => void }
@@ -29,36 +30,36 @@ function buildMenus(
 ): Record<string, MenuRow[]> {
   return {
     "Fișier": [
-      { type: "row", icon: "plus",      label: "Factură nouă",                  kbd: "Ctrl+N",       onClick: () => { void navigate({ to: "/invoices/new" }); } },
-      { type: "row", icon: "invoiceIn", label: "Înregistrare factură primită",  kbd: "Ctrl+Shift+N", onClick: () => { void navigate({ to: "/received" }); } },
-      { type: "row", icon: "users",     label: "Contact nou (client/furnizor)", kbd: "Ctrl+Alt+C",   onClick: () => { void navigate({ to: "/contacts" }); } },
+      { type: "row", icon: "plus",      label: "Factură nouă",                  kbd: fmtShortcut("Ctrl+N"),       onClick: () => { void navigate({ to: "/invoices/new" }); } },
+      { type: "row", icon: "invoiceIn", label: "Înregistrare factură primită",  kbd: fmtShortcut("Ctrl+Shift+N"), onClick: () => { void navigate({ to: "/received" }); } },
+      { type: "row", icon: "users",     label: "Contact nou (client/furnizor)", kbd: fmtShortcut("Ctrl+Alt+C"),   onClick: () => { void navigate({ to: "/contacts" }); } },
       { type: "sep" },
-      { type: "row", icon: "save",      label: "Salvează",                      kbd: "Ctrl+S" },
-      { type: "row", icon: "copy",      label: "Salvează ca…",                  kbd: "Ctrl+Shift+S" },
+      { type: "row", icon: "save",      label: "Salvează",                      kbd: fmtShortcut("Ctrl+S") },
+      { type: "row", icon: "copy",      label: "Salvează ca…",                  kbd: fmtShortcut("Ctrl+Shift+S") },
       { type: "sep" },
       { type: "section", label: "Import / Export" },
       { type: "row", icon: "upload",    label: "Importă XML e-Factura…" },
       { type: "row", icon: "download",  label: "Exportă SAF-T (D406)…" },
-      { type: "row", icon: "printer",   label: "Tipărește factura curentă",     kbd: "Ctrl+P" },
+      { type: "row", icon: "printer",   label: "Tipărește factura curentă",     kbd: fmtShortcut("Ctrl+P") },
       { type: "sep" },
-      { type: "row", icon: "x",         label: "Ieșire",                        kbd: "Alt+F4",       onClick: () => { void exit(0); } },
+      { type: "row", icon: "x",         label: "Ieșire",                        kbd: fmtShortcut("Alt+F4"),       onClick: () => { void exit(0); } },
     ],
     "Editare": [
-      { type: "row", icon: "pen",     label: "Anulează", kbd: "Ctrl+Z" },
-      { type: "row", icon: "pen",     label: "Refă",     kbd: "Ctrl+Y" },
+      { type: "row", icon: "pen",     label: "Anulează", kbd: fmtShortcut("Ctrl+Z") },
+      { type: "row", icon: "pen",     label: "Refă",     kbd: fmtShortcut("Ctrl+Y") },
       { type: "sep" },
-      { type: "row", icon: "copy",    label: "Decupează", kbd: "Ctrl+X" },
-      { type: "row", icon: "copy",    label: "Copiază",   kbd: "Ctrl+C" },
-      { type: "row", icon: "copy",    label: "Lipește",   kbd: "Ctrl+V" },
+      { type: "row", icon: "copy",    label: "Decupează", kbd: fmtShortcut("Ctrl+X") },
+      { type: "row", icon: "copy",    label: "Copiază",   kbd: fmtShortcut("Ctrl+C") },
+      { type: "row", icon: "copy",    label: "Lipește",   kbd: fmtShortcut("Ctrl+V") },
       { type: "sep" },
-      { type: "row", icon: "search",  label: "Caută…",            kbd: "Ctrl+F" },
-      { type: "row", icon: "command", label: "Paleta de comenzi", kbd: "Ctrl+K", onClick: () => setCommandOpen(true) },
+      { type: "row", icon: "search",  label: "Caută…",            kbd: fmtShortcut("Ctrl+F") },
+      { type: "row", icon: "command", label: "Paleta de comenzi", kbd: fmtShortcut("Ctrl+K"), onClick: () => setCommandOpen(true) },
     ],
     "Operațiuni": [
       { type: "section", label: "e-Factura" },
       { type: "row", icon: "cloudUp", label: "Trimite factura la ANAF", kbd: "F9",       onClick: () => { void navigate({ to: "/invoices" }); } },
       { type: "row", icon: "refresh", label: "Verifică status mesaje",  kbd: "F10",      onClick: () => { void navigate({ to: "/invoices" }); } },
-      { type: "row", icon: "storno",  label: "Storno factură",          kbd: "Ctrl+F9" },
+      { type: "row", icon: "storno",  label: "Storno factură",          kbd: fmtShortcut("Ctrl+F9") },
       { type: "sep" },
       { type: "section", label: "Bancă & casă" },
       { type: "row", icon: "bank",    label: "Punctare extras bancar" },
@@ -92,15 +93,15 @@ function buildMenus(
     ],
     "Vizualizare": [
       { type: "row", icon: "view", label: "Reîncarcă datele",            kbd: "F5" },
-      { type: "row", icon: "view", label: "Mărește densitatea (compact)", kbd: "Ctrl+−" },
-      { type: "row", icon: "view", label: "Micșorează densitatea",       kbd: "Ctrl+=" },
+      { type: "row", icon: "view", label: "Mărește densitatea (compact)", kbd: fmtShortcut("Ctrl+−") },
+      { type: "row", icon: "view", label: "Micșorează densitatea",       kbd: fmtShortcut("Ctrl+=") },
       { type: "sep" },
-      { type: "row", icon: "view", label: "Mod întunecat",               kbd: "Ctrl+Shift+D", onClick: () => setTheme(theme === "dark" ? "light" : "dark") },
+      { type: "row", icon: "view", label: "Mod întunecat",               kbd: fmtShortcut("Ctrl+Shift+D"), onClick: () => setTheme(theme === "dark" ? "light" : "dark") },
       { type: "row", icon: "view", label: "Arată coloane ascunse…" },
     ],
     "Ajutor": [
       { type: "row", icon: "help",     label: "Documentație e-Factura", kbd: "F1" },
-      { type: "row", icon: "keyboard", label: "Scurtături tastatură",   kbd: "Ctrl+/" },
+      { type: "row", icon: "keyboard", label: "Scurtături tastatură",   kbd: fmtShortcut("Ctrl+/") },
       { type: "sep" },
       { type: "row", icon: "info",     label: `Despre RoFactura • v${version}` },
     ],

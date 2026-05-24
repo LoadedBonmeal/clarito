@@ -16,6 +16,7 @@ import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON } from "@/lib/utils";
+import { fmtShortcut } from "@/lib/platform";
 import type { InvoiceStatus } from "@/types";
 
 type StatusFilter = InvoiceStatus | "all";
@@ -175,7 +176,7 @@ export function InvoicesPage() {
                 color: "#fff",
               }}
             >
-              Ctrl N
+              {fmtShortcut("Ctrl N")}
             </span>
           </button>
         </span>
@@ -240,7 +241,7 @@ export function InvoicesPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <span className="kbd-hint">Ctrl F</span>
+          <span className="kbd-hint">{fmtShortcut("Ctrl F")}</span>
         </div>
         <span className="divider-v" style={{ margin: "0 4px" }} />
         {/* Errors-only toggle */}
