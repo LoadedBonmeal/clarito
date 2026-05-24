@@ -41,8 +41,6 @@ function App() {
     "--accent-c": accent.c,
     "--accent-h": accent.h,
   };
-
-  // global keyboard shortcuts
   React.useEffect(() => {
     const onKey = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {

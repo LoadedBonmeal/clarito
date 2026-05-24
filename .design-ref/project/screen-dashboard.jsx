@@ -41,22 +41,22 @@ const DashSummary = () => (
 
 const KpiStrip = () => (
   <div className="kpi-strip">
-    <div className="kpi-cell">
+    <div className="kpi-cell k-sales">
       <span className="lbl">Vânzări — Mai 2026</span>
       <span className="val tnum">1.247.890,50</span>
       <span className="delta up">▲ 12,4% vs aprilie · RON net</span>
     </div>
-    <div className="kpi-cell">
+    <div className="kpi-cell k-vat">
       <span className="lbl">TVA colectată</span>
       <span className="val tnum">237.099,20</span>
       <span className="sub">19% (×142) · 9% (×31) · 5% (×14)</span>
     </div>
-    <div className="kpi-cell">
+    <div className="kpi-cell k-invoices">
       <span className="lbl">Facturi emise · Mai</span>
       <span className="val tnum">187</span>
       <span className="sub">184 validate · 3 respinse · 9 schițe</span>
     </div>
-    <div className="kpi-cell">
+    <div className="kpi-cell k-overdue">
       <span className="lbl">De încasat · Restanțe</span>
       <span className="val tnum">84.220,30</span>
       <span className="delta down">▼ 11 facturi cu termen depășit</span>

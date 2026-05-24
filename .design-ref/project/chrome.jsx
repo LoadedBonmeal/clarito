@@ -130,8 +130,8 @@ const MenuBar = ({ activeCompany, onOpenCompanySwitcher, anafStatus = "ok" }) =>
       ))}
       <div className="menubar-spacer" />
       <span className="menubar-anaf" title="Status conexiune ANAF / SPV">
-        <span className={"anaf-dot " + (anafStatus === "ok" ? "" : anafStatus)} />
-        ANAF · SPV {anafStatus === "ok" ? "OK" : anafStatus.toUpperCase()}
+        <span className="pulse-dot" />
+        ANAF · SPV {anafStatus === "ok" ? "conectat" : anafStatus.toUpperCase()}
       </span>
       <button className="menubar-company" onClick={onOpenCompanySwitcher} title="Schimbă compania activă (Ctrl+K Ctrl+C)">
         <span className="swatch" style={{ background: activeCompany.color }} />
@@ -155,80 +155,66 @@ const Ribbon = ({ activeScreen, onNavigate, onOpenPalette }) => {
       {hint && <span className="caret"><Icon name="caret" size={8} /></span>}
     </button>
   );
-  const BtnSmall = ({ icon, label, onClick }) => (
-    <button className="ribbon-btn-small" onClick={onClick}>
-      <span className="ico"><Icon name={icon} size={14} /></span>
-      <span>{label}</span>
-    </button>
-  );
 
   return (
     <div className="ribbon">
       {/* OPERAȚIUNI */}
-      <div className="ribbon-group" style={{ minWidth: 260 }}>
+      <div className="ribbon-group">
         <div className="ribbon-group-buttons">
           <BtnBig icon="plus"      label="Factură nouă"    primary onClick={() => onNavigate("factura-noua")} hint="Ctrl+N" />
           <BtnBig icon="invoiceIn" label="Primită nouă"            hint="Ctrl+Shift+N" />
           <BtnBig icon="storno"    label="Storno"                  hint="Ctrl+F9" />
-          <div className="ribbon-stack">
-            <BtnSmall icon="receipt" label="Chitanță" />
-            <BtnSmall icon="bank"    label="Plată"    />
-            <BtnSmall icon="users"   label="Contact"  />
-          </div>
+          <BtnBig icon="receipt"   label="Chitanță" />
+          <BtnBig icon="bank"      label="Plată" />
+          <BtnBig icon="users"     label="Contact" />
         </div>
         <div className="ribbon-group-label">Operațiuni</div>
       </div>
 
       {/* SINCRONIZARE */}
-      <div className="ribbon-group" style={{ minWidth: 240 }}>
+      <div className="ribbon-group">
         <div className="ribbon-group-buttons">
           <BtnBig icon="cloudUp"  label="Trimite ANAF"  hint="F9" />
           <BtnBig icon="cloudDn"  label="Descarcă SPV"  hint="Ctrl+D" />
           <BtnBig icon="refresh"  label="Verifică status" hint="F10" />
-          <div className="ribbon-stack">
-            <BtnSmall icon="anaf"     label="Mesaje SPV" />
-            <BtnSmall icon="download" label="Export XML" />
-            <BtnSmall icon="upload"   label="Import XML" />
-          </div>
+          <BtnBig icon="anaf"     label="Mesaje SPV" />
+          <BtnBig icon="download" label="Export XML" />
+          <BtnBig icon="upload"   label="Import XML" />
         </div>
         <div className="ribbon-group-label">Sincronizare ANAF</div>
       </div>
 
       {/* DATE */}
-      <div className="ribbon-group" style={{ minWidth: 200 }}>
+      <div className="ribbon-group">
         <div className="ribbon-group-buttons">
           <BtnBig icon="buildings" label="Companii"
                   active={activeScreen === "companii"}
                   onClick={() => onNavigate("companii")} />
           <BtnBig icon="users"     label="Contacte" />
           <BtnBig icon="stock"     label="Articole" />
-          <div className="ribbon-stack">
-            <BtnSmall icon="database" label="Plan conturi" />
-            <BtnSmall icon="tag"      label="Cote TVA"      />
-            <BtnSmall icon="history"  label="Audit log"     />
-          </div>
+          <BtnBig icon="database"  label="Plan conturi" />
+          <BtnBig icon="tag"       label="Cote TVA" />
+          <BtnBig icon="history"   label="Audit log" />
         </div>
         <div className="ribbon-group-label">Date</div>
       </div>
 
       {/* RAPOARTE */}
-      <div className="ribbon-group" style={{ minWidth: 220 }}>
+      <div className="ribbon-group">
         <div className="ribbon-group-buttons">
           <BtnBig icon="reports" label="D300 TVA" />
           <BtnBig icon="reports" label="D394"     />
           <BtnBig icon="reports" label="D406 SAF-T" />
-          <div className="ribbon-stack">
-            <BtnSmall icon="reports" label="Jurnal vânzări"   />
-            <BtnSmall icon="reports" label="Jurnal cumpărări" />
-            <BtnSmall icon="reports" label="Balanță"          />
-          </div>
+          <BtnBig icon="reports" label="Jurnal vânzări" />
+          <BtnBig icon="reports" label="Jurnal cumpărări" />
+          <BtnBig icon="reports" label="Balanță" />
         </div>
         <div className="ribbon-group-label">Rapoarte & Declarații</div>
       </div>
 
       {/* INSTRUMENTE */}
-      <div className="ribbon-group" style={{ minWidth: 140, flex: 1 }}>
-        <div className="ribbon-group-buttons">
+      <div className="ribbon-group" style={{ flex: 1 }}>
+        <div className="ribbon-group-buttons" style={{ justifyContent: "flex-start" }}>
           <BtnBig icon="command"  label="Comenzi" onClick={onOpenPalette} hint="Ctrl+K" />
           <BtnBig icon="keyboard" label="Scurtături" hint="Ctrl+/" />
           <BtnBig icon="settings" label="Setări" />
@@ -253,7 +239,7 @@ const SIDEBAR_MODULES = [
   { id: "stornate",        label: "Stornate",          ico: "storno",     color: "var(--color-rapoarte)", badge: null },
   { section: "Operativ" },
   { id: "companii",        label: "Companii",          ico: "buildings",  color: "var(--color-companii)", badge: 15 },
-  { id: "contacte",        label: "Clienți & Furnizori", ico: "users",   color: "var(--color-contacte)", badge: 487 },
+  { id: "contacte",        label: "Contacte",          ico: "users",      color: "var(--color-contacte)", badge: 487 },
   { id: "stocuri",         label: "Articole & Stocuri", ico: "stock",     color: "var(--color-stocuri)", badge: null },
   { id: "banca",           label: "Bancă & Casă",      ico: "bank",       color: "var(--color-banca)",   badge: null },
   { section: "Raportare" },
@@ -304,21 +290,42 @@ const Sidebar = ({ activeScreen, onNavigate }) => {
 };
 
 /* ============================================================
-   StatusBar
+   StatusBar — informative, pulsating ANAF live dot
    ============================================================ */
 
 const StatusBar = ({ activeCompany, companyCount = 15 }) => (
   <div className="statusbar">
-    <span className="statusbar-chip ok"><span className="dot" />Conectat</span>
-    <span className="statusbar-chip ok"><span className="dot" />ANAF OK</span>
-    <span className="statusbar-chip">Sync 12:34:09</span>
-    <span className="statusbar-chip">{companyCount} companii administrate</span>
-    <span className="statusbar-chip">Activă: <span style={{ fontWeight: 600, color: "var(--text)" }}>{activeCompany.name}</span></span>
+    <span className="statusbar-chip">
+      <span className="pulse-dot" />
+      <span><b>ANAF · SPV</b> conectat</span>
+    </span>
+    <span className="statusbar-chip">
+      <Icon name="clock" size={12} />
+      <span className="label-dim">Ultima sincronizare</span>
+      <b>12:34:09</b>
+      <span className="label-dim">· acum 14s</span>
+    </span>
+    <span className="statusbar-chip">
+      <Icon name="invoice" size={12} />
+      <span className="label-dim">Astăzi</span>
+      <b>14 facturi</b>
+      <span className="label-dim">· {`118.420,80 RON`}</span>
+    </span>
+    <span className="statusbar-chip">
+      <Icon name="cloudDn" size={12} />
+      <span className="label-dim">Mesaje SPV</span>
+      <b>3 noi</b>
+    </span>
+    <span className="statusbar-chip">
+      <span style={{ width: 8, height: 8, background: activeCompany.color, display: "inline-block", borderRadius: 2 }} />
+      <span className="label-dim">Companie activă</span>
+      <b>{activeCompany.name}</b>
+      <span className="mono label-dim" style={{ fontSize: 10.5 }}>· {activeCompany.cui}</span>
+    </span>
     <span className="statusbar-spacer" />
-    <span className="statusbar-chip">UTF-8</span>
-    <span className="statusbar-chip">RO_CIUS 1.0.1</span>
-    <span className="statusbar-chip">RON · ro-RO</span>
-    <span className="statusbar-chip">v0.1.0</span>
+    <span className="statusbar-chip"><span className="label-dim">{companyCount} companii administrate</span></span>
+    <span className="statusbar-chip"><span className="label-dim">RO_CIUS 1.0.1 · RON · ro-RO</span></span>
+    <span className="statusbar-chip"><span className="label-dim">v0.1.0</span></span>
   </div>
 );
 

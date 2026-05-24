@@ -243,24 +243,24 @@ export function DashboardPage() {
         </div>
 
         <div className="kpi-strip">
-          <div className="kpi-cell" style={{ ["--kpi-color" as string]: "#16A34A" }}>
+          <div className="kpi-cell k-sales">
             <span className="lbl">Vânzări · {monthLabel}</span>
             <span className="val tnum">{fmtRON(totalNet)}</span>
             <span className="sub">RON net · {thisMonth.length} facturi</span>
           </div>
-          <div className="kpi-cell" style={{ ["--kpi-color" as string]: "#7C3AED" }}>
+          <div className="kpi-cell k-vat">
             <span className="lbl">TVA colectată</span>
             <span className="val tnum">{fmtRON(totalVat)}</span>
             <span className="sub">din {thisMonth.length} facturi luna aceasta</span>
           </div>
-          <div className="kpi-cell" style={{ ["--kpi-color" as string]: "#2848A1" }}>
+          <div className="kpi-cell k-invoices">
             <span className="lbl">Facturi emise · {monthLabel.split(" ")[0]}</span>
             <span className="val tnum">{thisMonth.length}</span>
             <span className="sub">
               {validatedCount} validate · {rejectedCount} respinse · {draftCount} schițe
             </span>
           </div>
-          <div className="kpi-cell" style={{ ["--kpi-color" as string]: "#E11D48" }}>
+          <div className="kpi-cell k-overdue">
             <span className="lbl">De încasat · Restanțe</span>
             <span className="val tnum">{fmtRON(overdueTotal)}</span>
             <span className={overdue.length > 0 ? "delta down" : "sub"}>
