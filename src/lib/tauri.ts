@@ -38,8 +38,23 @@ import type {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
+/**
+ * Returnează true dacă rulăm în interiorul ferestrei Tauri (nu în browser obișnuit).
+ * `window.__TAURI_INTERNALS__` este injectat de runtime-ul Tauri.
+ */
+export function isTauriContext(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 /** Folosește direct când ai nevoie de o comandă neacoperită încă. */
-export function invoke<T>(cmd: string, args?: Record<string, unknown>) {
+export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (!isTauriContext()) {
+    return Promise.reject({
+      message:
+        "Aplicația trebuie deschisă ca aplicație nativă (nu din browser). " +
+        "Porniți RoFactura din Finder, Dock sau meniu Start.",
+    });
+  }
   return rawInvoke<T>(cmd, args);
 }
 

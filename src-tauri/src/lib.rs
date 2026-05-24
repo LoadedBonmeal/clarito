@@ -116,7 +116,8 @@ pub fn run() {
                                         continue;
                                     }
                                     let _ = crate::background::poll_submitted_for_company(pool, &company.id, Some(&app_for_sync)).await;
-                                    let _ = crate::background::do_sync_spv(pool, &company.id, &app_for_sync).await;
+                                    let test_mode = crate::db::settings::get_bool(pool, crate::db::settings::keys::USE_ANAF_TEST_ENV, false).await.unwrap_or(false);
+                                    let _ = crate::background::do_sync_spv(pool, &company.id, &app_for_sync, test_mode).await;
                                 }
                                 use tauri::Emitter;
                                 let _ = app_for_sync.emit("sync_completed", serde_json::json!({"source": "tray"}));

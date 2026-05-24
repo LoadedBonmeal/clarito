@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
@@ -75,6 +75,12 @@ export function OnboardingWizard() {
   const queryClient = useQueryClient();
   const setActiveCompanyId = useAppStore((s) => s.setActiveCompanyId);
 
+  /** Called from Step2 right after trial/license activation so the validity
+   *  cache is fresh when handleFinish eventually invalidates companies. */
+  const handleLicenseActivated = () => {
+    void queryClient.invalidateQueries({ queryKey: ["license", "validity"] });
+  };
+
   const create = useMutation({
     mutationFn: (input: CreateCompanyInput) => api.companies.create(input),
     onSuccess: (company) => {
@@ -121,7 +127,10 @@ export function OnboardingWizard() {
 
   const handleFinish = async () => {
     await api.settings.set("first_run_completed", "1");
+    // Invalidate both companies AND license validity so OnboardingGate re-checks
+    // correctly after trial has been started (license was false before trial creation).
     void queryClient.invalidateQueries({ queryKey: queryKeys.companies.list() });
+    void queryClient.invalidateQueries({ queryKey: ["license", "validity"] });
   };
 
   return (
@@ -153,8 +162,8 @@ export function OnboardingWizard() {
 
         {step === 2 && (
           <Step2
-            onStartTrial={() => setStep(3)}
-            onActivate={() => setStep(3)}
+            onStartTrial={() => { handleLicenseActivated(); setStep(3); }}
+            onActivate={() => { handleLicenseActivated(); setStep(3); }}
           />
         )}
 
@@ -254,7 +263,7 @@ function Step1({ onNext }: { onNext: () => void }) {
         }}
       >
         Bine ați venit! Activați o licență sau porniți perioada de probă gratuită
-        de 30 de zile pentru a începe.
+        de 14 zile pentru a începe.
       </p>
       <button
         type="button"
@@ -279,6 +288,40 @@ function Step2({ onStartTrial, onActivate }: Step2Props) {
   const [licenseKey, setLicenseKey] = useState("");
   const [licenseEmail, setLicenseEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // If a license already exists in DB (e.g. app crashed after trial start but
+  // before company creation), skip this step automatically.
+  const { data: existingLicense, isLoading: licenseCheckLoading } = useQuery({
+    queryKey: ["license", "existing"],
+    queryFn: () => api.license.get(),
+    staleTime: 0,
+  });
+
+  // Auto-advance past Step 2 when an active license already exists
+  if (!licenseCheckLoading && existingLicense) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 4px", fontFamily: "var(--font-ui)" }}>
+          Licență
+        </h2>
+        <div style={{ padding: "10px 12px", background: "#D1FAE5", border: "1px solid #A7F3D0", fontSize: 12, color: "#065F46", display: "flex", alignItems: "center", gap: 8 }}>
+          <span>✓</span>
+          <span>
+            Licență activă: <strong>{existingLicense.tier}</strong>
+            {existingLicense.email ? ` — ${existingLicense.email}` : ""}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="btn primary"
+          style={{ width: "100%", justifyContent: "center", height: 34, fontSize: 12 }}
+          onClick={onStartTrial}
+        >
+          Continuă →
+        </button>
+      </div>
+    );
+  }
 
   const trialMutation = useMutation({
     mutationFn: (trialEmail: string) => api.license.startTrial(trialEmail),
@@ -325,7 +368,7 @@ function Step2({ onStartTrial, onActivate }: Step2Props) {
             style={{ width: "100%", justifyContent: "center", height: 38, fontSize: 12 }}
             onClick={() => setMode("trial")}
           >
-            Perioadă de probă gratuită — 30 de zile
+            Perioadă de probă gratuită — 14 zile
           </button>
           <button
             type="button"

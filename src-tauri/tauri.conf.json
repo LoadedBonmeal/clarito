@@ -25,7 +25,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: https://asset.localhost; connect-src ipc: http://ipc.localhost https://webservicesp.anaf.ro https://api.anaf.ro; font-src 'self' data:; object-src 'none'; base-uri 'none'"
     }
   },
   "plugins": {
@@ -48,6 +48,20 @@
     ],
     "category": "Business",
     "shortDescription": "Aplicație desktop pentru e-Factura ANAF",
-    "longDescription": "RoFactura — Aplicație desktop pentru gestionarea facturilor electronice prin sistemul ANAF SPV. Multi-companie, validare RO_CIUS, arhivare locală."
+    "longDescription": "RoFactura — Aplicație desktop pentru gestionarea facturilor electronice prin sistemul ANAF SPV. Multi-companie, validare RO_CIUS, arhivare locală.",
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "minimumSystemVersion": "12.0",
+      "exceptionDomain": "webservicesp.anaf.ro"
+    },
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "nsis": {
+        "displayLanguageSelector": false,
+        "languages": ["English"],
+        "installMode": "currentUser"
+      }
+    }
   }
 }

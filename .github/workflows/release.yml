@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-macos:
+    name: Release macOS (signed)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust targets
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Import Apple signing certificate
+        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: changeme123
+        run: |
+          CERT_PATH=$RUNNER_TEMP/cert.p12
+          KC_PATH=$RUNNER_TEMP/app.keychain-db
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o $CERT_PATH
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KC_PATH
+          security set-keychain-settings -lut 21600 $KC_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KC_PATH
+          security import $CERT_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A \
+            -t cert -f pkcs12 -k $KC_PATH
+          security list-keychain -d user -s $KC_PATH
+
+      - name: Build and sign
+        run: pnpm build:mac
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+
+  release-windows:
+    name: Release Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        run: pnpm build:win-x64
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi

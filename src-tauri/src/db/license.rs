@@ -53,7 +53,7 @@ pub async fn start_trial(
     .execute(pool)
     .await?;
 
-    Ok(get(pool).await?.expect("license inserted"))
+    Ok(get(pool).await?.ok_or_else(|| crate::error::AppError::Other("license not found after insert".into()))?)
 }
 
 pub async fn activate(
@@ -86,5 +86,5 @@ pub async fn activate(
     .execute(pool)
     .await?;
 
-    Ok(get(pool).await?.expect("license inserted"))
+    Ok(get(pool).await?.ok_or_else(|| crate::error::AppError::Other("license not found after insert".into()))?)
 }
