@@ -38,6 +38,8 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "Lucaris SRL",
+    "copyright": "© 2025 Lucaris. Toate drepturile rezervate.",
     "targets": ["dmg", "msi", "nsis"],
     "icon": [
       "icons/32x32.png",
@@ -52,15 +54,26 @@
     "macOS": {
       "entitlements": "entitlements.plist",
       "minimumSystemVersion": "12.0",
-      "exceptionDomain": "webservicesp.anaf.ro"
+      "exceptionDomain": "webservicesp.anaf.ro",
+      "signingIdentity": "-",
+      "providerShortName": "LUCARIS",
+      "dmg": {
+        "background": "resources/dmg-background.png",
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 180, "y": 200 },
+        "applicationFolderPosition": { "x": 480, "y": 200 }
+      }
     },
     "windows": {
       "digestAlgorithm": "sha256",
       "timestampUrl": "http://timestamp.digicert.com",
       "nsis": {
         "displayLanguageSelector": false,
-        "languages": ["English"],
-        "installMode": "currentUser"
+        "languages": ["Romanian", "English"],
+        "installMode": "currentUser",
+        "headerImage": "resources/nsis-header.bmp",
+        "sidebarImage": "resources/nsis-sidebar.bmp",
+        "license": "resources/license.rtf"
       }
     }
   }
