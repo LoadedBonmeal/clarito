@@ -369,7 +369,7 @@ export function DashboardPage() {
                     letterSpacing: 0,
                   }}
                 >
-                  <span className="dot-live" /> conectat
+                  <span className="anaf-dot" style={{ marginRight: 2 }} /> conectat
                 </span>
               </span>
             </div>

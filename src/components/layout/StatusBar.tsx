@@ -76,13 +76,9 @@ export function StatusBar({ activeCompanyName, activeCompanyId, companyCount = 0
 
   return (
     <div className="statusbar">
-      {/* ANAF status — pulse-dot verde/roșu */}
+      {/* ANAF status */}
       <span className="statusbar-chip">
-        {anafOk ? (
-          <span className="pulse-dot" />
-        ) : (
-          <span className="dot-err" />
-        )}
+        <span className={anafOk ? "anaf-dot" : "anaf-dot err"} />
         <span>
           <b>ANAF · SPV</b>{" "}
           <span className="label-dim">
