@@ -12,6 +12,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
+import { fmtShortcut } from "@/lib/platform";
 
 const DOT_COLORS = [
   "#2848A1", "#7C3AED", "#0891B2", "#D97706", "#16A34A",
@@ -148,11 +149,20 @@ export function DashboardPage() {
 
   const monthLabel = now.toLocaleDateString("ro-RO", { month: "long", year: "numeric" });
 
+  const hour = now.getHours();
+  const greeting = hour < 12 ? "Bună dimineața" : hour < 17 ? "Bună ziua" : "Bună seara";
+  const todayStr = now.toLocaleDateString("ro-RO", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
   return (
     <div className="content">
       <div className="content-titlebar">
         <span className="content-title">
-          <span className="crumb">Efactura</span>
+          <span className="crumb">RoFactura</span>
           {t("dashboard.title")}
         </span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
@@ -201,18 +211,16 @@ export function DashboardPage() {
 
       <div className="dash">
         <div className="dash-summary">
-          {activeCompany ? (
-            <>
-              Companie activă:{" "}
-              <span className="b">{activeCompany.legalName}</span>
-              {" · "}
-            </>
-          ) : null}
+          <span className="b">
+            {greeting}
+            {activeCompany ? `, ${activeCompany.legalName}` : ""}.
+          </span>{" "}
+          Astăzi este {todayStr}.{" "}
           {unreadCount > 0 && (
             <>
               <span className="pill">
                 <Icon name="bell" size={11} />
-                {unreadCount} mesaje neprocesate
+                {unreadCount} mesaje SPV neprocesate
               </span>{" "}
             </>
           )}
@@ -226,12 +234,14 @@ export function DashboardPage() {
             </>
           )}
           În luna curentă ai emis{" "}
-          <span className="b">{thisMonth.length} facturi</span> totalizând{" "}
+          <span className="b">
+            {thisMonth.length} {thisMonth.length === 1 ? "factură" : "facturi"}
+          </span>{" "}
+          totalizând{" "}
           <span className="b tnum">{fmtRON(totalNet + totalVat)} RON</span>
           {thisMonth.length > 0 && (
             <>
-              , dintre care{" "}
-              <span className="b">{validatedCount} validate</span> de ANAF
+              , dintre care <span className="b">{validatedCount} validate</span> de ANAF
               {rejectedCount > 0 && (
                 <>
                   {" "}și <span className="neg">{rejectedCount} respinse</span>
@@ -396,7 +406,7 @@ export function DashboardPage() {
                 onClick={() => navigate({ to: "/invoices/new" })}
               >
                 <Icon name="plus" size={12} /> Factură nouă{" "}
-                <span className="kbd" style={{ marginLeft: 6 }}>Ctrl N</span>
+                <span className="kbd" style={{ marginLeft: 6 }}>{fmtShortcut("Ctrl N")}</span>
               </button>
               <button
                 type="button"
