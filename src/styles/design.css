@@ -208,7 +208,9 @@ input, select, textarea { font: inherit; color: inherit; }
 .workspace {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
@@ -282,7 +284,7 @@ input, select, textarea { font: inherit; color: inherit; }
   background: var(--accent-soft);
   color: var(--text);
 }
-.menubar-item u { text-decoration: none; border-bottom: 1px dotted currentColor; }
+.menubar-item u { text-decoration: none; border-bottom: 1.5px solid currentColor; }
 
 .menu-dropdown {
   position: absolute;
@@ -407,15 +409,15 @@ input, select, textarea { font: inherit; color: inherit; }
   user-select: none;
   position: relative;
   z-index: 20;
-  overflow-x: auto;
+  overflow: hidden;
   flex-wrap: nowrap;
+  min-width: 0;
 }
 .ribbon-group {
   display: inline-flex;
   flex-direction: column;
   align-items: stretch;
   flex-shrink: 0;
-  min-width: max-content;
   position: relative;
 }
 .ribbon-group-buttons {
@@ -438,11 +440,11 @@ input, select, textarea { font: inherit; color: inherit; }
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
-  padding: 4px 10px 6px;
+  padding: 4px 10px;
   text-indent: 0.06em;
   white-space: nowrap;
-  border-top: 1px solid var(--border-soft);
-  margin-top: 2px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 2px;
 }
 .ribbon-btn {
   display: flex;
@@ -450,7 +452,7 @@ input, select, textarea { font: inherit; color: inherit; }
   align-items: center;
   justify-content: flex-start;
   padding: 6px 4px 6px;
-  width: 72px;
+  width: 64px;
   height: 64px;
   gap: var(--ribbon-btn-gap);
   border: 1px solid transparent;
