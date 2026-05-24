@@ -169,6 +169,11 @@ async fn sync_spv_messages(
     state: &AppState,
 ) -> crate::error::AppResult<()> {
     let pool = &state.db;
+    let test_mode = crate::db::settings::get_bool(
+        pool,
+        crate::db::settings::keys::USE_ANAF_TEST_ENV,
+        false,
+    ).await.unwrap_or(false);
     let companies = crate::db::companies::list(pool).await?;
 
     for company in companies {
@@ -178,7 +183,7 @@ async fn sync_spv_messages(
         }
 
         // Re-use the same sync logic as the anaf_sync_spv command
-        match do_sync_spv(pool, &company.id, app).await {
+        match do_sync_spv(pool, &company.id, app, test_mode).await {
             Ok(new_count) => {
                 if new_count > 0 {
                     if let Err(e) = app.emit("spv://new-messages", new_count) {
@@ -248,7 +253,13 @@ pub(crate) async fn poll_submitted_for_company(
         result.access_token
     };
 
-    let client = AnafClient::new(false);
+    // Read test_mode from settings so background poll respects the same environment
+    let test_mode = crate::db::settings::get_bool(
+        pool,
+        crate::db::settings::keys::USE_ANAF_TEST_ENV,
+        false,
+    ).await.unwrap_or(false);
+    let client = AnafClient::new(test_mode);
     let submitted = db_inv::list_submitted(pool, company_id).await.unwrap_or_default();
     let mut count = 0u32;
 
@@ -321,8 +332,12 @@ async fn check_certificate_expiry(pool: &sqlx::SqlitePool, app: &AppHandle) {
             continue; // already expired
         }
 
-        // Notify only at tier thresholds to avoid daily spam
-        if ![30i64, 14, 7, 1].contains(&days_left) {
+        // Notifică la praguri: 30, 14, 7, 1 zile — cu fereastră ±1 zi pentru a
+        // prinde certificatul chiar dacă app-ul nu rula exact în ziua-prag.
+        let in_threshold = [30i64, 14, 7, 1]
+            .iter()
+            .any(|&t| days_left >= t - 1 && days_left <= t + 1);
+        if !in_threshold {
             continue;
         }
 
@@ -404,6 +419,7 @@ pub(crate) async fn do_sync_spv(
     pool: &sqlx::SqlitePool,
     company_id: &str,
     app: &AppHandle,
+    test_mode: bool,
 ) -> crate::error::AppResult<i32> {
     use crate::anaf::{client::{AnafClient, ERR_UNAUTHORIZED}, keychain::TokenBundle, oauth};
     use crate::db::notifications;
@@ -428,7 +444,7 @@ pub(crate) async fn do_sync_spv(
     };
 
     let company = crate::db::companies::get(pool, company_id).await?;
-    let client = AnafClient::new(false);
+    let client = AnafClient::new(test_mode);
 
     // list_messages: handle 401 with one refresh+retry
     let mut messages_result = client.list_messages(&access_token, &company.cui, 60).await;
@@ -563,8 +579,8 @@ pub(crate) async fn do_sync_spv(
             .bind(&msg.id_solicitare)
             .bind(&issuer_cui)
             .bind(&issuer_name)
-            .bind("")      // series — parse from XML if available
-            .bind(&msg.id) // number fallback to message id
+            .bind(Option::<String>::None) // series — NULL until extracted from XML
+            .bind(Option::<String>::None) // number — NULL until extracted from XML
             .bind(total_amount)
             .bind(&issue_date)
             .bind(xml_path.to_string_lossy().as_ref())
@@ -617,35 +633,93 @@ fn extract_xml_from_zip(zip_bytes: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
+/// Parsează XML-ul UBL primit de la ANAF folosind quick-xml (namespace-aware).
+/// Extrage: CUI emitent, denumire emitent, valoare totală, dată emisie.
 fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, f64, String) {
-    let xml = String::from_utf8_lossy(xml_bytes);
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
 
-    let issuer_cui = extract_xml_value(&xml, "CompanyID")
-        .or_else(|| extract_xml_value(&xml, "cbc:CompanyID"))
-        .unwrap_or_else(|| "NECUNOSCUT".to_string());
+    // Strip UTF-8 BOM dacă există
+    let xml_str = String::from_utf8_lossy(xml_bytes);
+    let xml_str = xml_str.trim_start_matches('\u{FEFF}');
 
-    let issuer_name = extract_xml_value(&xml, "RegistrationName")
-        .or_else(|| extract_xml_value(&xml, "cbc:RegistrationName"))
-        .unwrap_or_else(|| "Necunoscut".to_string());
+    let mut reader = Reader::from_str(xml_str);
+    reader.config_mut().trim_text(true);
 
-    let total_str = extract_xml_value(&xml, "PayableAmount")
-        .or_else(|| extract_xml_value(&xml, "cbc:PayableAmount"))
-        .unwrap_or_else(|| "0".to_string());
-    let total_amount: f64 = total_str.trim().parse().unwrap_or(0.0);
+    let mut issuer_cui = String::new();
+    let mut issuer_name = String::new();
+    let mut total_amount = 0.0f64;
+    let mut issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
-    let issue_date = extract_xml_value(&xml, "IssueDate")
-        .or_else(|| extract_xml_value(&xml, "cbc:IssueDate"))
-        .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
+    // State machine pentru navigarea structurii UBL
+    let mut depth_supplier = 0i32;      // >0 când suntem în AccountingSupplierParty
+    let mut depth_party_tax = 0i32;     // >0 când suntem în PartyTaxScheme (al supplier)
+    let mut depth_party_legal = 0i32;   // >0 când suntem în PartyLegalEntity (al supplier)
+    let mut current_local = String::new();
+    let mut buf = Vec::new();
 
-    (issuer_cui, issuer_name, total_amount, issue_date)
-}
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                let local = std::str::from_utf8(e.local_name().into_inner())
+                    .unwrap_or("")
+                    .to_string();
+                match local.as_str() {
+                    "AccountingSupplierParty" => depth_supplier += 1,
+                    "PartyTaxScheme" if depth_supplier > 0 => depth_party_tax += 1,
+                    "PartyLegalEntity" if depth_supplier > 0 => depth_party_legal += 1,
+                    _ => {}
+                }
+                current_local = local;
+            }
+            Ok(Event::End(ref e)) => {
+                let local = std::str::from_utf8(e.local_name().into_inner()).unwrap_or("");
+                match local {
+                    "AccountingSupplierParty" => { depth_supplier -= 1; }
+                    "PartyTaxScheme" if depth_supplier > 0 => { depth_party_tax -= 1; }
+                    "PartyLegalEntity" if depth_supplier > 0 => { depth_party_legal -= 1; }
+                    _ => {}
+                }
+                current_local.clear();
+            }
+            Ok(Event::Text(ref e)) => {
+                let text = match e.unescape() {
+                    Ok(t) => t.trim().to_string(),
+                    Err(_) => continue,
+                };
+                if text.is_empty() { continue; }
+                match current_local.as_str() {
+                    // CompanyID în PartyTaxScheme al furnizorului = CUI fiscal
+                    "CompanyID" if depth_supplier > 0 && depth_party_tax > 0 => {
+                        if issuer_cui.is_empty() { issuer_cui = text; }
+                    }
+                    // RegistrationName în PartyLegalEntity al furnizorului = denumire
+                    "RegistrationName" if depth_supplier > 0 && depth_party_legal > 0 => {
+                        if issuer_name.is_empty() { issuer_name = text; }
+                    }
+                    // PayableAmount = valoarea totală de plată
+                    "PayableAmount" => {
+                        total_amount = text.parse().unwrap_or(0.0);
+                    }
+                    // IssueDate = data emiterii
+                    "IssueDate" => {
+                        issue_date = text;
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
 
-fn extract_xml_value(xml: &str, tag: &str) -> Option<String> {
-    let open = format!("<{}>", tag);
-    let close = format!("</{}>", tag);
-    let start = xml.find(&open)? + open.len();
-    let end = xml[start..].find(&close)? + start;
-    Some(xml[start..end].trim().to_string())
+    (
+        if issuer_cui.is_empty() { "NECUNOSCUT".to_string() } else { issuer_cui },
+        if issuer_name.is_empty() { "Necunoscut".to_string() } else { issuer_name },
+        total_amount,
+        issue_date,
+    )
 }
 
 async fn cleanup_audit_log(pool: sqlx::SqlitePool) {

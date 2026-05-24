@@ -48,11 +48,10 @@ pub async fn generate_vat_report(
         format!("issue_date >= ?1"),
         format!("issue_date <= ?2"),
     ];
-    let mut bind_offset = 3usize;
+    let bind_offset = 3usize;
 
     if company_id.is_some() {
         where_clauses.push(format!("company_id = ?{}", bind_offset));
-        bind_offset += 1;
     }
     let where_sql = where_clauses.join(" AND ");
 

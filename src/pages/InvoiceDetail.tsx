@@ -50,10 +50,10 @@ export function InvoiceDetailPage() {
     enabled: !!data?.invoice.companyId,
   });
 
-  // ANAF test mode setting
+  // ANAF test mode setting — key must match backend: settings::keys::USE_ANAF_TEST_ENV
   const { data: testModeSetting } = useQuery({
-    queryKey: ["settings", "anaf_test_mode"],
-    queryFn: () => api.settings.get("anaf_test_mode"),
+    queryKey: ["settings", "use_anaf_test_env"],
+    queryFn: () => api.settings.get("use_anaf_test_env"),
   });
 
   const testMode = testModeSetting === "1";
@@ -486,7 +486,10 @@ export function InvoiceDetailPage() {
 
             {invoice.notes && (
               <div style={{ marginTop: 26, fontSize: 9.5, color: "#777", borderTop: "1px solid #DDD", paddingTop: 8 }}>
-                {invoice.notes}
+                {/* Strip internal STORNO_OF prefix stored for UBL generation */}
+                {invoice.notes.startsWith("STORNO_OF:")
+                  ? invoice.notes.replace(/^STORNO_OF:[^|]*\|?/, "")
+                  : invoice.notes}
               </div>
             )}
           </div>

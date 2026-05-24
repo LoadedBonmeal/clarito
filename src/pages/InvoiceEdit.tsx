@@ -56,6 +56,7 @@ export function InvoiceEditPage() {
   const [issueDate, setIssueDate] = useState<string>("");
   const [dueDate, setDueDate] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
+  const [paymentMeansCode, setPaymentMeansCode] = useState<string>("30");
   const [lines, setLines] = useState<CreateLineInput[]>([{ ...DEFAULT_LINE }]);
   const [initialized, setInitialized] = useState(false);
 
@@ -69,6 +70,7 @@ export function InvoiceEditPage() {
       setIssueDate(inv.issueDate);
       setDueDate(inv.dueDate);
       setNotes(inv.notes ?? "");
+      setPaymentMeansCode(inv.paymentMeansCode ?? "30");
       setLines(
         invoiceData.lines.map((l) => ({
           name: l.name,
@@ -88,7 +90,7 @@ export function InvoiceEditPage() {
   const selectedContact = contacts.find((c) => c.id === contactId) ?? null;
 
   const fullNumber = series
-    ? `${series}-${String(invoiceNumber).padStart(7, "0")}`
+    ? `${series}-${String(invoiceNumber).padStart(4, "0")}`
     : "—";
 
   const net = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
@@ -123,6 +125,7 @@ export function InvoiceEditPage() {
         dueDate,
         currency: "RON",
         notes: notes || undefined,
+        paymentMeansCode,
         lines,
       });
     },
@@ -217,7 +220,7 @@ export function InvoiceEditPage() {
                   />
                   <input
                     className="input mono"
-                    value={String(invoiceNumber).padStart(7, "0")}
+                    value={String(invoiceNumber).padStart(4, "0")}
                     readOnly
                     style={{ width: 120 }}
                   />
@@ -463,6 +466,21 @@ export function InvoiceEditPage() {
             </div>
             <div className="panel-body">
               <div className="form-grid" style={{ gridTemplateColumns: "120px 1fr" }}>
+                <label>Modalitate plată</label>
+                <div className="field">
+                  <select
+                    className="input"
+                    style={{ width: "100%" }}
+                    value={paymentMeansCode}
+                    onChange={(e) => setPaymentMeansCode(e.target.value)}
+                  >
+                    <option value="30">Transfer bancar (30)</option>
+                    <option value="10">Numerar (10)</option>
+                    <option value="48">Card (48)</option>
+                    <option value="42">Cont bancar (42)</option>
+                    <option value="58">SEPA (58)</option>
+                  </select>
+                </div>
                 <label>Observații</label>
                 <div className="field" style={{ alignItems: "flex-start" }}>
                   <textarea

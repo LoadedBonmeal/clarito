@@ -17,7 +17,6 @@ const CLIENT_ID: &str = "efactura-desktop";
 const REDIRECT_URI: &str = "http://localhost:8787/callback";
 const AUTH_URL: &str = "https://logincert.anaf.ro/anaf-oauth2-server/authorize";
 const TOKEN_URL: &str = "https://logincert.anaf.ro/anaf-oauth2-server/token";
-#[allow(dead_code)]
 const REVOKE_URL: &str = "https://logincert.anaf.ro/anaf-oauth2-server/revoke";
 const CALLBACK_PORT: u16 = 8787;
 
@@ -146,8 +145,14 @@ pub async fn authorize(_company_id: &str) -> Result<OAuthResult, String> {
     });
 
     // Așteptăm max 120s
-    let payload = rx
-        .recv_timeout(Duration::from_secs(120))
+    let result = rx.recv_timeout(Duration::from_secs(120));
+
+    // Deblocăm thread-ul de accept() conectându-ne la propriul nostru port, indiferent
+    // de rezultat (timeout sau succes). Astfel thread-ul nu rămâne blocat pe accept()
+    // cu portul 8787 ocupat indefinit.
+    let _ = std::net::TcpStream::connect(format!("127.0.0.1:{CALLBACK_PORT}"));
+
+    let payload = result
         .map_err(|_| "Timeout: autorizarea ANAF nu a primit răspuns în 120s.".to_string())?
         .map_err(|e| e)?;
 
@@ -161,6 +166,30 @@ pub async fn authorize(_company_id: &str) -> Result<OAuthResult, String> {
 
     // 5. Schimbăm code-ul pe token
     exchange_code_for_token(&code, &code_verifier).await
+}
+
+/// Revocă token-ul OAuth2 la serverul ANAF (best-effort: erorile sunt ignorate).
+/// Trebuie apelată la logout înainte de ștergerea token-ului din keychain.
+pub async fn revoke_token(access_token: &str) {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let params = [
+        ("token", access_token),
+        ("client_id", CLIENT_ID),
+    ];
+
+    // Fire-and-forget: dacă ANAF nu suportă revocarea corect, nu e critical.
+    let _ = client
+        .post(REVOKE_URL)
+        .form(&params)
+        .send()
+        .await;
 }
 
 /// Reîmprospătează access_token-ul folosind refresh_token-ul existent.

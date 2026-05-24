@@ -251,80 +251,91 @@ impl AnafClient {
 
     /// Listează mesajele din SPV pentru o companie (ultimele `days` zile).
     ///
-    /// Retry policy: 5xx → backoff; 429 → Retry-After; 401 → ERR_UNAUTHORIZED.
+    /// Paginare completă: iterează toate paginile până la răspuns gol.
+    /// Retry policy per pagină: 5xx → backoff; 429 → Retry-After; 401 → ERR_UNAUTHORIZED.
     pub async fn list_messages(
         &self,
         token: &str,
         company_cui: &str,
         days: u32,
     ) -> Result<Vec<SpvMessage>, String> {
-        let url = format!(
-            "{}/FCTEL/rest/listaMesajePaginatieFiltrare?zile={}&cif={}&tip=F&pagina=1",
-            self.base_url, days, company_cui
-        );
-
-        let mut retry_5xx = 0usize;
-        let mut retry_429 = 0usize;
+        let mut all_messages: Vec<SpvMessage> = Vec::new();
+        let mut page = 1u32;
 
         loop {
-            let resp = self
-                .client
-                .get(&url)
-                .bearer_auth(token)
-                .send()
-                .await
-                .map_err(|e| format!("List messages request eșuat: {e}"))?;
+            let url = format!(
+                "{}/FCTEL/rest/listaMesajePaginatieFiltrare?zile={}&cif={}&tip=F&pagina={}",
+                self.base_url, days, company_cui, page
+            );
 
-            let status = resp.status();
+            let mut retry_5xx = 0usize;
+            let mut retry_429 = 0usize;
 
-            if status == 401 {
-                return Err(ERR_UNAUTHORIZED.to_string());
-            }
+            // Inner retry loop for this page
+            let page_messages: Vec<SpvMessageRaw> = loop {
+                let resp = self
+                    .client
+                    .get(&url)
+                    .bearer_auth(token)
+                    .send()
+                    .await
+                    .map_err(|e| format!("List messages request eșuat (pagina {page}): {e}"))?;
 
-            if status.as_u16() == 429 {
-                if retry_429 < 3 {
-                    let delay = Self::parse_retry_after(&resp);
-                    tokio::time::sleep(Duration::from_secs(delay)).await;
-                    retry_429 += 1;
-                    continue;
+                let status = resp.status();
+
+                if status == 401 {
+                    return Err(ERR_UNAUTHORIZED.to_string());
                 }
-                return Err("ANAF list_messages rate-limited (429)".to_string());
-            }
 
-            if status.is_server_error() {
-                if retry_5xx < BACKOFF_5XX.len() {
-                    tokio::time::sleep(Duration::from_secs(BACKOFF_5XX[retry_5xx])).await;
-                    retry_5xx += 1;
-                    continue;
+                if status.as_u16() == 429 {
+                    if retry_429 < 3 {
+                        let delay = Self::parse_retry_after(&resp);
+                        tokio::time::sleep(Duration::from_secs(delay)).await;
+                        retry_429 += 1;
+                        continue;
+                    }
+                    return Err(format!("ANAF list_messages rate-limited (429) la pagina {page}"));
                 }
-                let body = resp.text().await.unwrap_or_default();
-                return Err(format!("ANAF list_messages server error {status}: {body}"));
+
+                if status.is_server_error() {
+                    if retry_5xx < BACKOFF_5XX.len() {
+                        tokio::time::sleep(Duration::from_secs(BACKOFF_5XX[retry_5xx])).await;
+                        retry_5xx += 1;
+                        continue;
+                    }
+                    let body = resp.text().await.unwrap_or_default();
+                    return Err(format!("ANAF list_messages server error {status} la pagina {page}: {body}"));
+                }
+
+                let body = resp.text().await.map_err(|e| e.to_string())?;
+                if !status.is_success() {
+                    return Err(format!("ANAF list messages error {status} la pagina {page}: {body}"));
+                }
+
+                let raw: MessagesRaw = serde_json::from_str(&body)
+                    .map_err(|e| format!("JSON messages invalid la pagina {page}: {e}"))?;
+
+                break raw.mesaje.unwrap_or_default();
+            };
+
+            if page_messages.is_empty() {
+                // No more pages
+                break;
             }
 
-            let body = resp.text().await.map_err(|e| e.to_string())?;
-            if !status.is_success() {
-                return Err(format!("ANAF list messages error {status}: {body}"));
-            }
+            all_messages.extend(page_messages.into_iter().map(|m| SpvMessage {
+                id: m.id,
+                tip: m.tip,
+                data_creare: m.data_creare,
+                cif: m.cif,
+                id_solicitare: m.id_solicitare,
+                detalii: m.detalii,
+            }));
 
-            let raw: MessagesRaw = serde_json::from_str(&body)
-                .map_err(|e| format!("JSON messages invalid: {e}"))?;
-
-            let messages = raw
-                .mesaje
-                .unwrap_or_default()
-                .into_iter()
-                .map(|m| SpvMessage {
-                    id: m.id,
-                    tip: m.tip,
-                    data_creare: m.data_creare,
-                    cif: m.cif,
-                    id_solicitare: m.id_solicitare,
-                    detalii: m.detalii,
-                })
-                .collect();
-
-            return Ok(messages);
+            page += 1;
         }
+
+        Ok(all_messages)
     }
 
     /// Descarcă un mesaj SPV după ID. Returnează bytes ZIP.

@@ -280,7 +280,6 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
 
     let invoice_id = new_id();
     let now = now_unix();
-    let full_number = format!("{}-{:04}", input.series, input.number);
 
     // Calculăm totaluri cu Decimal pentru precizie (money math — niciodată f64).
     use rust_decimal::Decimal;
@@ -315,6 +314,24 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
 
     let mut tx = pool.begin().await?;
 
+    // Alocăm numărul atomic în aceeași tranzacție pentru a evita goluri de numerotare.
+    // `input.number` este ignorat — numărul real e întotdeauna alocat aici.
+    sqlx::query(
+        "UPDATE companies SET last_invoice_number = last_invoice_number + 1 WHERE id = ?1",
+    )
+    .bind(&input.company_id)
+    .execute(&mut *tx)
+    .await?;
+
+    let allocated_number: i64 = sqlx::query_scalar(
+        "SELECT last_invoice_number FROM companies WHERE id = ?1",
+    )
+    .bind(&input.company_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    let full_number = format!("{}-{:04}", input.series, allocated_number);
+
     sqlx::query(
         "INSERT INTO invoices (
             id, company_id, contact_id, series, number, full_number,
@@ -332,7 +349,7 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
     .bind(&input.company_id)
     .bind(&input.contact_id)
     .bind(&input.series)
-    .bind(input.number)
+    .bind(allocated_number)
     .bind(&full_number)
     .bind(&input.issue_date)
     .bind(&input.due_date)

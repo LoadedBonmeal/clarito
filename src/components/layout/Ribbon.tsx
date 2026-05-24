@@ -1,9 +1,8 @@
 /**
- * Ribbon — toolbar grupat cu icon+label butoane mari și stive de butoane mici.
+ * Ribbon — toolbar grupat cu icon+label butoane mari uniforme.
  *
- * Portat din Claude Design (chrome.jsx). Folosește clasele:
- * .ribbon, .ribbon-group, .ribbon-btn (.primary, .active), .ribbon-btn-small,
- * .ribbon-stack, .ribbon-group-label.
+ * Toate butoanele sunt BtnBig (68×uniform px, icon 22px, label 2 linii clamp).
+ * ribbon-stack / ribbon-btn-small au fost eliminate — layout uniform garantat.
  */
 
 import { useNavigate, useLocation } from "@tanstack/react-router";
@@ -23,20 +22,12 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       {/* OPERAȚIUNI */}
       <div className="ribbon-group">
         <div className="ribbon-group-buttons">
-          <BtnBig
-            icon="plus"
-            label="Factură nouă"
-            primary
-            hint="Ctrl+N"
-            onClick={() => navigate({ to: "/invoices/new" })}
-          />
-          <BtnBig icon="invoiceIn" label="Primită nouă" hint="Ctrl+Shift+N" onClick={() => navigate({ to: "/received" })} />
-          <BtnBig icon="storno" label="Storno" hint="Ctrl+F9" />
-          <div className="ribbon-stack">
-            <BtnSmall icon="receipt" label="Chitanță" />
-            <BtnSmall icon="bank" label="Plată" />
-            <BtnSmall icon="users" label="Contact" onClick={() => navigate({ to: "/contacts" })} />
-          </div>
+          <BtnBig icon="plus"      label="Factură nouă"   primary hint="Ctrl+N" onClick={() => navigate({ to: "/invoices/new" })} />
+          <BtnBig icon="invoiceIn" label="Primită nouă"   hint="Ctrl+Shift+N"   onClick={() => navigate({ to: "/received" })} />
+          <BtnBig icon="storno"    label="Storno"         hint="Ctrl+F9" />
+          <BtnBig icon="receipt"   label="Chitanță"       disabled />
+          <BtnBig icon="bank"      label="Plată"          disabled />
+          <BtnBig icon="users"     label="Contact nou"    onClick={() => navigate({ to: "/contacts" })} />
         </div>
         <div className="ribbon-group-label">Operațiuni</div>
       </div>
@@ -44,14 +35,12 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       {/* SINCRONIZARE */}
       <div className="ribbon-group">
         <div className="ribbon-group-buttons">
-          <BtnBig icon="cloudUp" label="Trimite ANAF" hint="F9" onClick={() => navigate({ to: "/invoices" })} />
-          <BtnBig icon="cloudDn" label="Descarcă SPV" hint="Ctrl+D" onClick={() => navigate({ to: "/received" })} />
-          <BtnBig icon="refresh" label="Verifică status" hint="F10" onClick={() => navigate({ to: "/invoices" })} />
-          <div className="ribbon-stack">
-            <BtnSmall icon="anaf" label="Mesaje SPV" onClick={() => navigate({ to: "/received" })} />
-            <BtnSmall icon="download" label="Export XML" />
-            <BtnSmall icon="upload" label="Import XML" />
-          </div>
+          <BtnBig icon="cloudUp"  label="Trimite ANAF"    hint="F9"      onClick={() => navigate({ to: "/invoices" })} />
+          <BtnBig icon="cloudDn"  label="Descarcă SPV"    hint="Ctrl+D"  onClick={() => navigate({ to: "/received" })} />
+          <BtnBig icon="refresh"  label="Verifică status" hint="F10"     onClick={() => navigate({ to: "/invoices" })} />
+          <BtnBig icon="anaf"     label="Mesaje SPV"                     onClick={() => navigate({ to: "/notifications" })} />
+          <BtnBig icon="download" label="Export XML"      disabled />
+          <BtnBig icon="upload"   label="Import XML"      disabled />
         </div>
         <div className="ribbon-group-label">Sincronizare ANAF</div>
       </div>
@@ -60,22 +49,15 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       <div className="ribbon-group">
         <div className="ribbon-group-buttons">
           <BtnBig
-            icon="buildings"
-            label="Companii"
+            icon="buildings" label="Companii"
             active={location.pathname.startsWith("/companies")}
             onClick={() => navigate({ to: "/companies" })}
           />
-          <BtnBig
-            icon="users"
-            label="Contacte"
-            onClick={() => navigate({ to: "/contacts" })}
-          />
-          <BtnBig icon="stock" label="Articole" />
-          <div className="ribbon-stack">
-            <BtnSmall icon="database" label="Plan conturi" />
-            <BtnSmall icon="tag" label="Cote TVA" />
-            <BtnSmall icon="history" label="Audit log" />
-          </div>
+          <BtnBig icon="users"    label="Contacte"      onClick={() => navigate({ to: "/contacts" })} />
+          <BtnBig icon="stock"    label="Articole"      disabled />
+          <BtnBig icon="database" label="Plan conturi"  disabled />
+          <BtnBig icon="tag"      label="Cote TVA"      disabled />
+          <BtnBig icon="history"  label="Audit log"     disabled />
         </div>
         <div className="ribbon-group-label">Date</div>
       </div>
@@ -83,14 +65,12 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       {/* RAPOARTE */}
       <div className="ribbon-group">
         <div className="ribbon-group-buttons">
-          <BtnBig icon="reports" label="D300 TVA" />
-          <BtnBig icon="reports" label="D394" />
-          <BtnBig icon="reports" label="D406 SAF-T" />
-          <div className="ribbon-stack">
-            <BtnSmall icon="reports" label="Jurnal vânzări" />
-            <BtnSmall icon="reports" label="Jurnal cumpărări" />
-            <BtnSmall icon="reports" label="Balanță" />
-          </div>
+          <BtnBig icon="reports" label="D300 TVA"         disabled />
+          <BtnBig icon="reports" label="D394"             disabled />
+          <BtnBig icon="reports" label="D406 SAF-T"       disabled />
+          <BtnBig icon="reports" label="Jurn. vânzări"    disabled />
+          <BtnBig icon="reports" label="Jurn. cumpărări"  disabled />
+          <BtnBig icon="reports" label="Balanță"          disabled />
         </div>
         <div className="ribbon-group-label">Rapoarte &amp; Declarații</div>
       </div>
@@ -98,18 +78,9 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       {/* INSTRUMENTE */}
       <div className="ribbon-group" style={{ flex: 1 }}>
         <div className="ribbon-group-buttons">
-          <BtnBig
-            icon="command"
-            label="Comenzi"
-            hint="Ctrl+K"
-            onClick={onOpenPalette}
-          />
-          <BtnBig icon="keyboard" label="Scurtături" hint="Ctrl+/" />
-          <BtnBig
-            icon="settings"
-            label="Setări"
-            onClick={() => navigate({ to: "/settings" })}
-          />
+          <BtnBig icon="command"  label="Comenzi"    hint="Ctrl+K" onClick={onOpenPalette} />
+          <BtnBig icon="keyboard" label="Scurtături" hint="Ctrl+/" disabled />
+          <BtnBig icon="settings" label="Setări"     onClick={() => navigate({ to: "/settings" })} />
         </div>
         <div className="ribbon-group-label">Instrumente</div>
       </div>
@@ -117,7 +88,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
   );
 }
 
-// ─── Building blocks ──────────────────────────────────────────────────────
+// ─── Building block ────────────────────────────────────────────────────────
 
 interface BtnBigProps {
   icon: string;
@@ -126,48 +97,33 @@ interface BtnBigProps {
   active?: boolean;
   onClick?: () => void;
   hint?: string;
+  /** Buton neimplementat — afișat estompat, fără click */
+  disabled?: boolean;
 }
 
-function BtnBig({ icon, label, primary, active, onClick, hint }: BtnBigProps) {
+function BtnBig({ icon, label, primary, active, onClick, hint, disabled }: BtnBigProps) {
   return (
     <button
       type="button"
       className={
         "ribbon-btn" +
         (primary ? " primary" : "") +
-        (active ? " active" : "")
+        (active ? " active" : "") +
+        (disabled ? " disabled" : "")
       }
-      onClick={onClick}
-      title={hint}
+      onClick={disabled ? undefined : onClick}
+      title={disabled ? "În curând" : hint}
+      style={disabled ? { opacity: 0.38, cursor: "not-allowed", pointerEvents: "none" } : undefined}
     >
       <span className="ico">
         <Icon name={icon} size={22} />
       </span>
       <span className="lbl">{label}</span>
-      {hint && (
+      {hint && !disabled && (
         <span className="caret">
           <Icon name="caret" size={8} />
         </span>
       )}
-    </button>
-  );
-}
-
-function BtnSmall({
-  icon,
-  label,
-  onClick,
-}: {
-  icon: string;
-  label: string;
-  onClick?: () => void;
-}) {
-  return (
-    <button type="button" className="ribbon-btn-small" onClick={onClick}>
-      <span className="ico">
-        <Icon name={icon} size={14} />
-      </span>
-      <span>{label}</span>
     </button>
   );
 }

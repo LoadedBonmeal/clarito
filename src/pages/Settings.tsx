@@ -71,8 +71,8 @@ export function SettingsPage() {
   });
 
   const { data: testModeSetting } = useQuery({
-    queryKey: ["settings", "anaf_test_mode"],
-    queryFn: () => api.settings.get("anaf_test_mode"),
+    queryKey: ["settings", "use_anaf_test_env"],
+    queryFn: () => api.settings.get("use_anaf_test_env"),
   });
 
   const anafTestMode = testModeSetting === "1";
@@ -159,8 +159,8 @@ export function SettingsPage() {
   });
 
   const handleTestModeToggle = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    await api.settings.set("anaf_test_mode", e.target.checked ? "1" : "0");
-    void queryClient.invalidateQueries({ queryKey: ["settings", "anaf_test_mode"] });
+    await api.settings.set("use_anaf_test_env", e.target.checked ? "1" : "0");
+    void queryClient.invalidateQueries({ queryKey: ["settings", "use_anaf_test_env"] });
   };
 
   const handleDevSeed = async () => {

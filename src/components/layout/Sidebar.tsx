@@ -21,6 +21,8 @@ interface NavItem {
   badge?: number;
   path: string;
   matchPrefix?: string;
+  /** Pagina nu este implementată încă — dezactivează click-ul și estompează itemul */
+  disabled?: boolean;
 }
 
 interface NavSection {
@@ -72,19 +74,19 @@ export function Sidebar() {
     { section: "Tablou de bord" },
     { id: "dashboard", label: "Privire generală", ico: "data", color: "#2848A1", path: "/" },
     { section: "e-Factura" },
-    { id: "facturi-emise",   label: "Facturi emise",    ico: "invoice",   color: "var(--color-facturi)", badge: invoicesBadge, path: "/invoices",    matchPrefix: "/invoices" },
-    { id: "facturi-primite", label: "Facturi primite",  ico: "invoiceIn", color: "var(--color-primite)", badge: receivedBadge, path: "/received",    matchPrefix: "/received" },
-    { id: "spv",             label: "Mesaje SPV",       ico: "anaf",      color: "var(--color-primite)", badge: spvBadge,      path: "/notifications" },
-    { id: "stornate",        label: "Stornate",         ico: "storno",    color: "var(--color-rapoarte)", path: "/invoices" },
+    { id: "facturi-emise",   label: "Facturi emise",   ico: "invoice",   color: "var(--color-facturi)", badge: invoicesBadge, path: "/invoices",    matchPrefix: "/invoices" },
+    { id: "facturi-primite", label: "Facturi primite", ico: "invoiceIn", color: "var(--color-primite)", badge: receivedBadge, path: "/received",    matchPrefix: "/received" },
+    { id: "spv",             label: "Mesaje SPV",      ico: "anaf",      color: "var(--color-primite)", badge: spvBadge,      path: "/notifications" },
+    { id: "stornate",        label: "Stornate",        ico: "storno",    color: "var(--color-rapoarte)", path: "/invoices",   disabled: true },
     { section: "Operativ" },
-    { id: "companii",         label: "Companii",            ico: "buildings", color: "var(--color-companii)", badge: companiesBadge, path: "/companies", matchPrefix: "/companies" },
-    { id: "contacte",         label: "Clienți & Furnizori", ico: "users",     color: "var(--color-contacte)", badge: contactsBadge,  path: "/contacts" },
-    { id: "stocuri",          label: "Articole & Stocuri",  ico: "stock",     color: "var(--color-stocuri)",  path: "/contacts" },
-    { id: "banca",            label: "Bancă & Casă",        ico: "bank",      color: "var(--color-banca)",    path: "/contacts" },
+    { id: "companii",  label: "Companii",           ico: "buildings", color: "var(--color-companii)", badge: companiesBadge, path: "/companies", matchPrefix: "/companies" },
+    { id: "contacte",  label: "Contacte",           ico: "users",     color: "var(--color-contacte)", badge: contactsBadge,  path: "/contacts" },
+    { id: "stocuri",   label: "Articole & Stocuri", ico: "stock",     color: "var(--color-stocuri)",  path: "/contacts",    disabled: true },
+    { id: "banca",     label: "Bancă & Casă",       ico: "bank",      color: "var(--color-banca)",    path: "/contacts",    disabled: true },
     { section: "Raportare" },
     { id: "rapoarte",   label: "Rapoarte",          ico: "reports", color: "var(--color-rapoarte)", path: "/reports" },
-    { id: "declaratii", label: "Declarații ANAF",   ico: "anaf",    color: "var(--color-rapoarte)", path: "/reports" },
-    { id: "audit",      label: "Jurnal modificări", ico: "history", color: "#8A857A",               path: "/settings" },
+    { id: "declaratii", label: "Declarații ANAF",   ico: "anaf",    color: "var(--color-rapoarte)", path: "/reports",   disabled: true },
+    { id: "audit",      label: "Jurnal modificări", ico: "history", color: "#8A857A",               path: "/settings",  disabled: true },
   ];
 
   const activeCompanyName =
@@ -100,10 +102,34 @@ export function Sidebar() {
             </div>
           );
         }
+
+        if (m.disabled) {
+          return (
+            <div
+              key={m.id}
+              className="sidebar-item"
+              style={{
+                ["--module-color" as string]: m.color,
+                opacity: 0.4,
+                cursor: "not-allowed",
+                pointerEvents: "none",
+              }}
+              title="În curând"
+            >
+              <span className="bar" />
+              <span className="ico">
+                <Icon name={m.ico} size={15} />
+              </span>
+              <span>{m.label}</span>
+            </div>
+          );
+        }
+
         const isActive = m.matchPrefix
           ? location.pathname === m.matchPrefix ||
             location.pathname.startsWith(`${m.matchPrefix}/`)
           : location.pathname === m.path;
+
         return (
           <Link
             key={m.id}

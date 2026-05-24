@@ -63,8 +63,13 @@ pub async fn manual_sync(state: State<'_, AppState>, app: tauri::AppHandle) -> A
             .await
             .unwrap_or(0);
 
-        // Sync SPV messages for this company
-        new_received += do_sync_spv(pool, &company.id, &app)
+        // Sync SPV messages for this company (respect USE_ANAF_TEST_ENV setting)
+        let test_mode = crate::db::settings::get_bool(
+            pool,
+            crate::db::settings::keys::USE_ANAF_TEST_ENV,
+            false,
+        ).await.unwrap_or(false);
+        new_received += do_sync_spv(pool, &company.id, &app, test_mode)
             .await
             .unwrap_or(0) as u32;
     }

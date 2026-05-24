@@ -57,8 +57,12 @@ pub async fn update_invoice_draft(
 ) -> AppResult<Invoice> {
     // 1. Verify invoice exists and is DRAFT
     let existing = invoices::get(&state.db, &id).await?;
-    if existing.status != "DRAFT" {
-        return Err(AppError::Other("Factura nu este schiță".to_string()));
+    if existing.status != crate::db::models::InvoiceStatus::Draft.as_str() {
+        return Err(AppError::Validation(format!(
+            "Factura nu este schiță (status curent: {}). \
+             Doar ciornele pot fi modificate.",
+            existing.status
+        )));
     }
 
     // 2. Calculate totals from new lines
@@ -205,13 +209,20 @@ pub async fn validate_invoice_draft(
     // 3. Load contact (customer)
     let buyer = contacts::get(&state.db, &inv.contact_id).await?;
 
-    // 4. Generate XML
+    // 4. Extract storno_ref from notes (format: "STORNO_OF:{full_number}|{reason}")
+    let storno_ref: Option<String> = inv.notes.as_deref().and_then(|n| {
+        n.strip_prefix("STORNO_OF:").map(|rest| {
+            rest.split('|').next().unwrap_or("").to_string()
+        })
+    });
+
+    // 5. Build generator input
     let input = GeneratorInput {
         invoice: inv,
         lines,
         seller,
         buyer,
-        storno_ref: None,
+        storno_ref,
     };
 
     let xml = match generate_ubl(&input) {
@@ -225,10 +236,10 @@ pub async fn validate_invoice_draft(
         }
     };
 
-    // 5. Validate XML structure
+    // 6. Validate XML structure
     let xml_result = validate_ubl(&xml);
 
-    // 6. Validate data-level business rules (50+ BR-RO rules, Decimal math)
+    // 7. Validate data-level business rules (50+ BR-RO rules, Decimal math)
     let (data_errors, data_warnings) = crate::ubl::validator::validate_invoice_data(
         &input.invoice,
         &input.lines,
@@ -265,18 +276,17 @@ pub async fn storno_invoice(
     let orig_inv = original.invoice;
     let orig_lines = original.lines;
 
-    // Doar facturile VALIDATED pot fi stornate
-    if orig_inv.status != "VALIDATED" && orig_inv.status != "DRAFT" {
+    // Doar facturile VALIDATED pot fi stornate (DRAFT se șterge, nu se stornează)
+    if orig_inv.status != crate::db::models::InvoiceStatus::Validated.as_str() {
         return Err(AppError::Validation(
-            "Doar facturile validate pot fi stornate.".into(),
+            "Doar facturile validate de ANAF pot fi stornate. \
+             Ciornele pot fi șterse direct."
+                .into(),
         ));
     }
 
-    // 2. Calculează numărul storno (series + number incremented)
-    let storno_number =
-        companies::next_invoice_number(pool, &orig_inv.company_id).await?;
+    // 2. Seria facturii storno (numărul e alocat atomic de invoices::create)
     let storno_series = format!("S{}", orig_inv.series);
-    let storno_full_number = format!("{}-{:04}", storno_series, storno_number);
 
     // 3. Creează liniile storno (cantități negative)
     let storno_lines: Vec<crate::db::invoices::CreateLineInput> = orig_lines
@@ -294,11 +304,12 @@ pub async fn storno_invoice(
         .collect();
 
     // 4. Creează factura storno
+    // Nota: `number` este ignorat de invoices::create — numărul e alocat atomic acolo.
     let storno_input = crate::db::invoices::CreateInvoiceInput {
         company_id: orig_inv.company_id.clone(),
         contact_id: orig_inv.contact_id.clone(),
         series: storno_series,
-        number: storno_number,
+        number: 0, // ignorat — alocat atomic în invoices::create
         issue_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
         due_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
         currency: Some(orig_inv.currency.clone()),
@@ -307,6 +318,13 @@ pub async fn storno_invoice(
         payment_means_code: Some(orig_inv.payment_means_code.clone()),
         lines: storno_lines,
     };
+    // Pregătim notes înainte de move (pentru referința STORNO_OF)
+    let storno_notes = format!(
+        "STORNO_OF:{}|{}",
+        orig_inv.full_number,
+        storno_input.notes.as_deref().unwrap_or("")
+    );
+
     let storno_inv = invoices::create(pool, storno_input).await?;
 
     // 5. Marchează factura originală ca STORNED
@@ -314,11 +332,11 @@ pub async fn storno_invoice(
         pool,
         &invoice_id,
         crate::db::models::InvoiceStatus::Storned,
-        Some(format!("Stornată prin {}. Motiv: {}", storno_full_number, reason)),
+        Some(format!("Stornată prin {}. Motiv: {}", storno_inv.full_number, reason)),
     )
     .await?;
 
-    // 6. Adaugă referința storno în events
+    // 6. Adaugă referința storno în events și stochează legătura la originală
     let _ = sqlx::query(
         "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at) \
          VALUES (?1, ?2, 'STORNO_CREATED', ?3, unixepoch())",
@@ -328,6 +346,15 @@ pub async fn storno_invoice(
     .bind(format!("Factură storno pentru {}. Motiv: {}", orig_inv.full_number, reason))
     .execute(pool)
     .await;
+
+    // Salvăm numărul facturii originale în notes (prefixat) pentru a fi folosit
+    // la generarea XML-ului UBL — BillingReference → storno_ref.
+    // Format recunoscut de anaf_submit_invoice: "STORNO_OF:{full_number}|..."
+    sqlx::query("UPDATE invoices SET notes = ?2, updated_at = unixepoch() WHERE id = ?1")
+        .bind(&storno_inv.id)
+        .bind(&storno_notes)
+        .execute(pool)
+        .await?;
 
     Ok(storno_inv)
 }

@@ -82,9 +82,13 @@ pub async fn anaf_is_authenticated(company_id: String) -> AppResult<bool> {
     }
 }
 
-/// Șterge token-ul din keychain (logout).
+/// Revocă token-ul la ANAF și îl șterge din keychain (logout).
 #[tauri::command]
 pub async fn anaf_logout(company_id: String) -> AppResult<()> {
+    // Revocă token-ul la ANAF (best-effort) înainte de ștergerea din keychain.
+    if let Some(bundle) = TokenBundle::load(&company_id) {
+        oauth::revoke_token(&bundle.access_token).await;
+    }
     TokenBundle::delete(&company_id);
     Ok(())
 }
@@ -105,9 +109,32 @@ pub async fn anaf_submit_invoice(
     let invoice = invoice_with_lines.invoice;
     let lines = invoice_with_lines.lines;
 
+    // Guard: numai facturile DRAFT pot fi trimise la ANAF
+    if invoice.status != "DRAFT" {
+        return Err(AppError::Validation(format!(
+            "Factura {} nu poate fi trimisă — status curent: {}. \
+             Numai ciornele (DRAFT) pot fi trimise la ANAF.",
+            invoice.full_number, invoice.status
+        )));
+    }
+
+    // Guard: company_id trebuie să corespundă facturii
+    if invoice.company_id != company_id {
+        return Err(AppError::Validation(
+            "Factura nu aparține companiei selectate.".into(),
+        ));
+    }
+
     // 2. Încarcă compania + contactul din DB
     let company = companies::get(pool, &company_id).await?;
     let buyer = contacts::get(pool, &invoice.contact_id).await?;
+
+    // 3. Detectează dacă e factură storno și extrage referința originală
+    // Format stocat în notes: "STORNO_OF:{original_full_number}|{motiv}"
+    let storno_ref = invoice.notes.as_deref().and_then(|n| {
+        n.strip_prefix("STORNO_OF:")
+            .map(|rest| rest.split('|').next().unwrap_or(rest).to_string())
+    });
 
     // 3. Generează XML UBL
     let xml_string = generate_ubl(&GeneratorInput {
@@ -115,7 +142,7 @@ pub async fn anaf_submit_invoice(
         lines: lines.clone(),
         seller: company.clone(),
         buyer: buyer.clone(),
-        storno_ref: None,
+        storno_ref,
     })?;
 
     // 4. Validează — dacă sunt erori blocante, oprește
@@ -358,7 +385,7 @@ pub async fn anaf_sync_spv(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     company_id: String,
-    _test_mode: bool,
+    test_mode: bool,
 ) -> AppResult<i32> {
-    crate::background::do_sync_spv(&state.db, &company_id, &app).await
+    crate::background::do_sync_spv(&state.db, &company_id, &app, test_mode).await
 }

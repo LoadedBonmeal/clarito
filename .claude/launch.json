@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "efactura-vite",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd /Users/cris/Projects/efactura-desktop && npm run dev"],
+      "port": 1420
+    }
+  ]
+}

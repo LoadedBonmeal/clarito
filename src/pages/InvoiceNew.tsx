@@ -82,10 +82,10 @@ export function InvoiceNewPage() {
     staleTime: 30_000,
   });
 
-  // ANAF test mode setting (loaded here so InvoiceDetail doesn't re-fetch)
+  // ANAF test mode setting — key must match backend: settings::keys::USE_ANAF_TEST_ENV
   useQuery({
-    queryKey: ["settings", "anaf_test_mode"],
-    queryFn: () => api.settings.get("anaf_test_mode"),
+    queryKey: ["settings", "use_anaf_test_env"],
+    queryFn: () => api.settings.get("use_anaf_test_env"),
   });
 
   const selectedContact = contacts.find((c) => c.id === contactId) ?? null;
@@ -93,7 +93,7 @@ export function InvoiceNewPage() {
   const activeSeries = series || company?.invoiceSeries || "";
   const activeNumber = nextNumber ?? (company ? company.lastInvoiceNumber + 1 : 1);
   const fullNumber = activeSeries
-    ? `${activeSeries}-${String(activeNumber).padStart(7, "0")}`
+    ? `${activeSeries}-${String(activeNumber).padStart(4, "0")}`
     : "—";
 
   const net = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
@@ -259,14 +259,14 @@ export function InvoiceNewPage() {
                   />
                   <input
                     className="input mono"
-                    value={String(activeNumber).padStart(7, "0")}
+                    value={String(activeNumber).padStart(4, "0")}
                     readOnly
                     style={{ width: 120 }}
                   />
                   {company && (
                     <span className="dim" style={{ fontSize: 11 }}>
                       auto-incrementat · ultima emisă: {company.invoiceSeries}-
-                      {String(company.lastInvoiceNumber).padStart(7, "0")}
+                      {String(company.lastInvoiceNumber).padStart(4, "0")}
                     </span>
                   )}
                 </div>

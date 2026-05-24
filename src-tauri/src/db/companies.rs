@@ -251,29 +251,23 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
     Ok(())
 }
 
-/// Incrementează contorul de facturi și returnează noul număr.
-/// Folosit atomic pentru a evita coliziuni de numerotare.
+/// Returnează `last_invoice_number + 1` fără a modifica baza de date.
+/// Folosit doar pentru afișarea previzualizată a numărului pe formulare.
+/// Numărul real este alocat atomic de `allocate_invoice_number` la salvare.
 pub async fn next_invoice_number(
     pool: &SqlitePool,
     company_id: &str,
 ) -> AppResult<i64> {
-    let mut tx = pool.begin().await?;
-
-    sqlx::query("UPDATE companies SET last_invoice_number = last_invoice_number + 1 WHERE id = ?1")
-        .bind(company_id)
-        .execute(&mut *tx)
-        .await?;
-
-    let new_number: i64 = sqlx::query_scalar(
+    let current: i64 = sqlx::query_scalar(
         "SELECT last_invoice_number FROM companies WHERE id = ?1",
     )
     .bind(company_id)
-    .fetch_one(&mut *tx)
-    .await?;
-
-    tx.commit().await?;
-    Ok(new_number)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    Ok(current + 1)
 }
+
 
 // ─── Validation ────────────────────────────────────────────────────────────
 
