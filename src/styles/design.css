@@ -405,6 +405,7 @@ input, select, textarea { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: stretch;
+  gap: 2px;
   padding: var(--ribbon-pad-top) 0 0;
   user-select: none;
   position: relative;
@@ -424,9 +425,9 @@ input, select, textarea { font: inherit; color: inherit; }
   display: flex;
   align-items: stretch;
   justify-content: center;
-  gap: 2px;
+  gap: 6px;
   flex: 1;
-  padding: var(--ribbon-btnrow-py) 8px var(--ribbon-btnrow-pb);
+  padding: var(--ribbon-btnrow-py) 10px var(--ribbon-btnrow-pb);
   border-right: 1px solid var(--border-strong);
 }
 .ribbon-group:last-child .ribbon-group-buttons { border-right: 0; padding-right: 10px; }
@@ -452,7 +453,7 @@ input, select, textarea { font: inherit; color: inherit; }
   align-items: center;
   justify-content: flex-start;
   padding: 6px 4px 6px;
-  width: 72px;
+  width: 76px;
   min-height: 68px;
   height: auto;
   gap: var(--ribbon-btn-gap);

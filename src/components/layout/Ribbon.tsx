@@ -41,7 +41,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       </div>
 
       {/* INSTRUMENTE */}
-      <div className="ribbon-group" style={{ flex: 1 }}>
+      <div className="ribbon-group" style={{ marginLeft: "auto" }}>
         <div className="ribbon-group-label">Instrumente</div>
         <div className="ribbon-group-buttons">
           <BtnBig icon="command"  label="Comenzi" hint="Ctrl+K" onClick={onOpenPalette} />
