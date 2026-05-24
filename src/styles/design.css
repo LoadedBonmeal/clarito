@@ -199,7 +199,7 @@ input, select, textarea { font: inherit; color: inherit; }
    ------------------------------------------------------------------ */
 .app {
   display: grid;
-  grid-template-rows: var(--menubar-h) var(--ribbon-h) 1fr var(--statusbar-h);
+  grid-template-rows: var(--menubar-h) auto 1fr var(--statusbar-h);
   height: 100vh;
   overflow: hidden;
   background: var(--bg);
@@ -452,9 +452,8 @@ input, select, textarea { font: inherit; color: inherit; }
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  padding: 8px 6px 10px;
+  padding: 6px 4px 8px;
   width: 76px;
-  /* NO fixed height — flex stretch pe .ribbon-group-buttons egalizează toate butoanele */
   gap: var(--ribbon-btn-gap);
   border: 1px solid transparent;
   border-radius: 5px;
