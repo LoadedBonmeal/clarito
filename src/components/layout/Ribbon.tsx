@@ -1,7 +1,7 @@
 /**
  * Ribbon — toolbar grupat cu icon+label butoane mari uniforme.
  *
- * 3 grupuri: Operațiuni · Sincronizare ANAF · Instrumente.
+ * 4 grupuri: Operațiuni · Sincronizare ANAF · Date · Instrumente.
  * Etichetele grupului sunt DEASUPRA butoanelor (nu dedesubt).
  * Lățime fixă fără scroll orizontal: se încadrează de la 1024px.
  */
@@ -23,9 +23,10 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       <div className="ribbon-group">
         <div className="ribbon-group-label">Operațiuni</div>
         <div className="ribbon-group-buttons">
-          <BtnBig icon="plus"      label="Factură nouă" primary hint="Ctrl+N" onClick={() => navigate({ to: "/invoices/new" })} />
-          <BtnBig icon="invoiceIn" label="Primită nouă" hint="Ctrl+Shift+N"   onClick={() => navigate({ to: "/received" })} />
-          <BtnBig icon="users"     label="Contact nou"  onClick={() => navigate({ to: "/contacts" })} />
+          <BtnBig icon="plus"      label="Factură nouă" primary hint="Ctrl+N"   onClick={() => navigate({ to: "/invoices/new" })} />
+          <BtnBig icon="invoiceIn" label="Primită nouă"         hint="Ctrl+Shift+N" onClick={() => navigate({ to: "/received" })} />
+          <BtnBig icon="storno"    label="Storno"                                onClick={() => navigate({ to: "/invoices" })} />
+          <BtnBig icon="users"     label="Contact nou"                           onClick={() => navigate({ to: "/contacts" })} />
         </div>
       </div>
 
@@ -36,7 +37,16 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
           <BtnBig icon="cloudUp" label="Trimite ANAF"    hint="F9"     onClick={() => navigate({ to: "/invoices" })} />
           <BtnBig icon="cloudDn" label="Descarcă SPV"    hint="Ctrl+D" onClick={() => navigate({ to: "/received" })} />
           <BtnBig icon="refresh" label="Verifică status" hint="F10"    onClick={() => navigate({ to: "/invoices" })} />
-          <BtnBig icon="anaf"    label="Mesaje SPV"      onClick={() => navigate({ to: "/notifications" })} />
+          <BtnBig icon="anaf"    label="Mesaje SPV"                    onClick={() => navigate({ to: "/notifications" })} />
+        </div>
+      </div>
+
+      {/* DATE */}
+      <div className="ribbon-group">
+        <div className="ribbon-group-label">Date</div>
+        <div className="ribbon-group-buttons">
+          <BtnBig icon="buildings" label="Companii" onClick={() => navigate({ to: "/companies" })} />
+          <BtnBig icon="users"     label="Contacte" onClick={() => navigate({ to: "/contacts" })} />
         </div>
       </div>
 
@@ -45,7 +55,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
         <div className="ribbon-group-label">Instrumente</div>
         <div className="ribbon-group-buttons">
           <BtnBig icon="command"  label="Comenzi" hint="Ctrl+K" onClick={onOpenPalette} />
-          <BtnBig icon="settings" label="Setări"  onClick={() => navigate({ to: "/settings" })} />
+          <BtnBig icon="settings" label="Setări"                onClick={() => navigate({ to: "/settings" })} />
         </div>
       </div>
     </div>
@@ -61,28 +71,25 @@ interface BtnBigProps {
   active?: boolean;
   onClick?: () => void;
   hint?: string;
-  disabled?: boolean;
 }
 
-function BtnBig({ icon, label, primary, active, onClick, hint, disabled }: BtnBigProps) {
+function BtnBig({ icon, label, primary, active, onClick, hint }: BtnBigProps) {
   return (
     <button
       type="button"
       className={
         "ribbon-btn" +
         (primary ? " primary" : "") +
-        (active ? " active" : "") +
-        (disabled ? " disabled" : "")
+        (active ? " active" : "")
       }
-      onClick={disabled ? undefined : onClick}
-      title={disabled ? "În curând" : hint}
-      style={disabled ? { opacity: 0.38, cursor: "not-allowed", pointerEvents: "none" } : undefined}
+      onClick={onClick}
+      title={hint}
     >
       <span className="ico">
         <Icon name={icon} size={22} />
       </span>
       <span className="lbl">{label}</span>
-      {hint && !disabled && (
+      {hint && (
         <span className="caret">
           <Icon name="caret" size={8} />
         </span>
