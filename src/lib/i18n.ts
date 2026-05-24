@@ -13,6 +13,7 @@ void i18n
       ro: { translation: ro },
       en: { translation: en },
     },
+    lng: "ro",
     fallbackLng: "ro",
     supportedLngs: ["ro", "en"],
     interpolation: {
