@@ -451,10 +451,10 @@ input, select, textarea { font: inherit; color: inherit; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 5px 4px 6px;
-  width: 70px;
-  height: 62px;
+  justify-content: flex-start;
+  padding: 8px 6px 10px;
+  width: 76px;
+  /* NO fixed height — flex stretch pe .ribbon-group-buttons egalizează toate butoanele */
   gap: var(--ribbon-btn-gap);
   border: 1px solid transparent;
   border-radius: 5px;
