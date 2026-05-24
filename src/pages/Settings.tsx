@@ -176,7 +176,7 @@ export function SettingsPage() {
   };
 
   const tierLabels: Record<string, string> = {
-    TRIAL: "Trial gratuit",
+    TRIAL: "Probă gratuită",
     SOLO: "Solo",
     ACCOUNTANT: "Contabil",
     FIRM: "Firmă",
@@ -631,7 +631,7 @@ export function SettingsPage() {
                   <thead>
                     <tr>
                       <th style={{ width: 140 }}>Timp</th>
-                      <th>Task</th>
+                      <th>Sarcină</th>
                       <th>Rezultat</th>
                     </tr>
                   </thead>

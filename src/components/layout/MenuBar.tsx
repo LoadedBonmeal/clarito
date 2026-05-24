@@ -102,7 +102,7 @@ function buildMenus(
       { type: "row", icon: "help",     label: "Documentație e-Factura", kbd: "F1" },
       { type: "row", icon: "keyboard", label: "Scurtături tastatură",   kbd: "Ctrl+/" },
       { type: "sep" },
-      { type: "row", icon: "info",     label: `Despre Efactura • v${version}` },
+      { type: "row", icon: "info",     label: `Despre RoFactura • v${version}` },
     ],
   };
 }
@@ -149,7 +149,7 @@ export function MenuBar({
     <div className="menubar" ref={ref}>
       <div className="menubar-brand">
         <span className="menubar-brand-mark">eF</span>
-        <span>Efactura</span>
+        <span>RoFactura</span>
       </div>
       {Object.keys(MENUS).map((name) => (
         <div
@@ -191,7 +191,7 @@ export function MenuBar({
       <div className="menubar-spacer" />
       <span className="menubar-anaf" title="Status conexiune ANAF / SPV">
         <span className={"anaf-dot " + (anafStatus === "ok" ? "" : anafStatus)} />
-        ANAF · SPV {anafStatus === "ok" ? "OK" : anafStatus.toUpperCase()}
+        ANAF · SPV {anafStatus === "ok" ? "Activ" : anafStatus.toUpperCase()}
       </span>
       <button
         type="button"
