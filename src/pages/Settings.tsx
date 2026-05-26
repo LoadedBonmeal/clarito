@@ -86,14 +86,34 @@ export function SettingsPage() {
     { key: "cert_expired",  label: "Certificat SPV expirat" },
   ];
 
-  const notifPrefs = NOTIF_TYPES.map(({ key }) => {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    const { data } = useQuery({
-      queryKey: ["settings", `notif_pref_${key}`],
-      queryFn: () => api.settings.get(`notif_pref_${key}`),
-    });
-    return { key, pref: data ?? "os" };
+  const { data: notifPref_validated } = useQuery({
+    queryKey: ["settings", "notif_pref_validated"],
+    queryFn: () => api.settings.get("notif_pref_validated"),
   });
+  const { data: notifPref_rejected } = useQuery({
+    queryKey: ["settings", "notif_pref_rejected"],
+    queryFn: () => api.settings.get("notif_pref_rejected"),
+  });
+  const { data: notifPref_received } = useQuery({
+    queryKey: ["settings", "notif_pref_received"],
+    queryFn: () => api.settings.get("notif_pref_received"),
+  });
+  const { data: notifPref_cert_expiring } = useQuery({
+    queryKey: ["settings", "notif_pref_cert_expiring"],
+    queryFn: () => api.settings.get("notif_pref_cert_expiring"),
+  });
+  const { data: notifPref_cert_expired } = useQuery({
+    queryKey: ["settings", "notif_pref_cert_expired"],
+    queryFn: () => api.settings.get("notif_pref_cert_expired"),
+  });
+
+  const notifPrefs = [
+    { key: "validated",     pref: notifPref_validated     ?? "os" },
+    { key: "rejected",      pref: notifPref_rejected      ?? "os" },
+    { key: "received",      pref: notifPref_received      ?? "os" },
+    { key: "cert_expiring", pref: notifPref_cert_expiring ?? "os" },
+    { key: "cert_expired",  pref: notifPref_cert_expired  ?? "os" },
+  ];
 
   const { data: quietHoursSetting } = useQuery({
     queryKey: ["settings", "quiet_hours"],

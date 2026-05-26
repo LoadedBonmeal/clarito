@@ -28,21 +28,26 @@ pub async fn generate_invoice_xml(
     // 3. Încarcă cumpărătorul
     let buyer = contacts::get(&state.db, &inv.contact_id).await?;
 
-    // 4. Generează XML
+    // 4. Determină referința storno (dacă există)
+    let storno_ref = inv.notes.as_deref().and_then(|n| {
+        n.strip_prefix("STORNO_OF:").map(|orig| orig.to_string())
+    });
+
+    // 5. Generează XML
     let input = GeneratorInput {
         invoice: inv.clone(),
         lines,
         seller,
         buyer,
-        storno_ref: None,
+        storno_ref,
     };
     let xml = generate_ubl(&input)?;
 
-    // 5. Calculează calea şi scrie fişierul
+    // 6. Calculează calea şi scrie fişierul
     let path = paths::xml_path(&app, &inv.company_id, &invoice_id);
     std::fs::write(&path, xml.as_bytes())?;
 
-    // 6. Actualizează DB
+    // 7. Actualizează DB
     let path_str = path
         .to_str()
         .ok_or_else(|| AppError::Xml("Cale fişier invalidă UTF-8".to_string()))?;

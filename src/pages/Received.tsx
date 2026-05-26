@@ -57,8 +57,8 @@ export function ReceivedPage() {
 
   // ANAF test mode
   const { data: testModeSetting } = useQuery({
-    queryKey: ["settings", "anaf_test_mode"],
-    queryFn: () => api.settings.get("anaf_test_mode"),
+    queryKey: ["settings", "use_anaf_test_env"],
+    queryFn: () => api.settings.get("use_anaf_test_env"),
   });
   const testMode = testModeSetting === "1";
 
@@ -228,16 +228,40 @@ export function ReceivedPage() {
               <span style={{ fontSize: 11, fontWeight: 600 }}>
                 {selected.size} selectate
               </span>
-              <button type="button" className="btn compact primary">
+              <button
+                type="button"
+                className="btn compact primary"
+                onClick={() => {
+                  [...selected].forEach((id) =>
+                    updateStatus({ id, status: "APPROVED" }),
+                  );
+                  setSelected(new Set());
+                }}
+              >
                 <Icon name="check" size={11} /> Aprobă toate
               </button>
-              <button type="button" className="btn compact">
+              <button
+                type="button"
+                className="btn compact"
+                onClick={() => {
+                  [...selected].forEach((id) =>
+                    updateStatus({ id, status: "ARCHIVED" }),
+                  );
+                  setSelected(new Set());
+                }}
+              >
                 <Icon name="bookmark" size={11} /> Arhivează
               </button>
               <button
                 type="button"
                 className="btn compact danger"
                 style={{ height: 22 }}
+                onClick={() => {
+                  [...selected].forEach((id) =>
+                    updateStatus({ id, status: "REJECTED" }),
+                  );
+                  setSelected(new Set());
+                }}
               >
                 <Icon name="x" size={11} /> Respinge
               </button>

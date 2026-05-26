@@ -187,13 +187,18 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
         &font_normal,
     );
 
-    // Notes
+    // Notes — STORNO_OF: prefix is replaced with a human-readable label
     if let Some(notes) = &inv.notes {
-        if !notes.is_empty() {
+        let display_notes = if let Some(orig) = notes.strip_prefix("STORNO_OF:") {
+            format!("Storno factura {}", orig)
+        } else {
+            notes.clone()
+        };
+        if !display_notes.is_empty() {
             y -= 10.0;
             layer.use_text("Note:", FONT_NORMAL, Mm(MARGIN), Mm(y), &font_bold);
             y -= LINE_H;
-            layer.use_text(notes.clone(), FONT_SMALL, Mm(MARGIN), Mm(y), &font_normal);
+            layer.use_text(display_notes, FONT_SMALL, Mm(MARGIN), Mm(y), &font_normal);
         }
     }
 

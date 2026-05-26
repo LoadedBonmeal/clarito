@@ -192,7 +192,7 @@ function CertificatesSection({ companyId }: { companyId: string }) {
   });
 
   const revokeCert = useMutation({
-    mutationFn: (certId: string) => api.certificates.revoke(certId),
+    mutationFn: (_certId: string) => api.certificates.revoke(companyId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["certificates", companyId] });
     },
@@ -266,6 +266,21 @@ function CertificatesSection({ companyId }: { companyId: string }) {
 }
 
 function CompanySpvSection({ company }: { company: Company }) {
+  const queryClient = useQueryClient();
+
+  const connectSpv = useMutation({
+    mutationFn: () => api.anaf.authorize(company.id),
+    onSuccess: (granted) => {
+      if (granted) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.companies.detail(company.id) });
+        void queryClient.invalidateQueries({ queryKey: ["certificates", company.id] });
+      } else {
+        alert("Autorizarea SPV a fost anulată sau a eșuat. Reîncercați.");
+      }
+    },
+    onError: (e) => alert("Eroare conectare SPV: " + String(e)),
+  });
+
   return (
     <Section title="Sistem ANAF SPV">
       <div className="p-4">
@@ -291,11 +306,12 @@ function CompanySpvSection({ company }: { company: Company }) {
               </p>
               <button
                 type="button"
-                disabled
+                disabled={connectSpv.isPending}
                 className="mt-3 inline-flex h-7 items-center gap-1.5 rounded-sm border border-border bg-background px-2.5 text-[11px] font-medium disabled:opacity-50"
+                onClick={() => connectSpv.mutate()}
               >
                 <ExternalLink className="h-3 w-3" />
-                <span>Conectează SPV (în curând)</span>
+                <span>{connectSpv.isPending ? "Se autorizează…" : "Conectează SPV"}</span>
               </button>
             </div>
           </div>

@@ -83,10 +83,11 @@ export function InvoiceNewPage() {
   });
 
   // ANAF test mode setting — key must match backend: settings::keys::USE_ANAF_TEST_ENV
-  useQuery({
+  const { data: testModeSetting } = useQuery({
     queryKey: ["settings", "use_anaf_test_env"],
     queryFn: () => api.settings.get("use_anaf_test_env"),
   });
+  const testMode = testModeSetting === "1";
 
   const selectedContact = contacts.find((c) => c.id === contactId) ?? null;
 
@@ -132,11 +133,26 @@ export function InvoiceNewPage() {
         lines,
       });
     },
-    onSuccess: (created) => {
+    onSuccess: async (created) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
       setSavedId(created.id);
+      const shouldSubmit = submitAfterSaveRef.current;
       submitAfterSaveRef.current = false;
-      // Navigate to detail — submit button there handles full ANAF flow
+      if (shouldSubmit) {
+        try {
+          // Ensure we are authenticated before submitting
+          const authenticated = await api.anaf.isAuthenticated(created.companyId);
+          if (!authenticated) {
+            await api.anaf.authorize(created.companyId);
+          }
+          await api.anaf.submitInvoice(created.companyId, created.id, testMode);
+        } catch (e) {
+          setSubmitError((e as unknown as AppErrorPayload).message ?? "Eroare la trimitere ANAF.");
+          // Still navigate to detail so the user can see the invoice and retry
+          navigate({ to: "/invoices/$id", params: { id: created.id } });
+          return;
+        }
+      }
       navigate({ to: "/invoices/$id", params: { id: created.id } });
     },
     onError: (e) => {
@@ -153,7 +169,9 @@ export function InvoiceNewPage() {
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
-        // Submit to ANAF — save first then navigate to detail
+        // Submit to ANAF — save first, then auto-submit in onSuccess
+        submitAfterSaveRef.current = true;
+        setSubmitError(null);
         saveDraftMutation.mutate();
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'p') {

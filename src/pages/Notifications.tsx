@@ -5,10 +5,12 @@
 
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 
 import { Icon } from "@/components/shared/Icon";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import type { Notification } from "@/types";
 
 function fmtTime(unix: number): string {
   return new Date(unix * 1000).toLocaleString("ro-RO");
@@ -25,6 +27,7 @@ type TabFilter = "all" | "unread";
 
 export function NotificationsPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<TabFilter>("all");
 
   const { data: notifications = [], isLoading } = useQuery({
@@ -50,6 +53,38 @@ export function NotificationsPage() {
       queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
     },
   });
+
+  /** Mark as read, then navigate to the related entity if possible. */
+  function handleRowClick(n: Notification) {
+    if (!n.isRead) markRead(n.id);
+
+    // Try structured JSON payload: {"entityType": "invoice"|"received", "entityId": "..."}
+    if (n.data) {
+      try {
+        const parsed = JSON.parse(n.data) as Record<string, unknown>;
+        const entityType = parsed["entityType"];
+        const entityId = parsed["entityId"];
+        if (typeof entityId === "string" && typeof entityType === "string") {
+          if (entityType === "invoice") {
+            void navigate({ to: "/invoices/$id", params: { id: entityId } });
+            return;
+          }
+          if (entityType === "received") {
+            void navigate({ to: "/received/$id", params: { id: entityId } });
+            return;
+          }
+        }
+      } catch {
+        // data is not JSON — fall through
+      }
+
+      // Plain key "spv_msg_*" → received invoices list
+      if (n.data.startsWith("spv_msg_")) {
+        void navigate({ to: "/received" });
+        return;
+      }
+    }
+  }
 
   const list = useMemo(() => {
     if (tab === "unread") return notifications.filter((n) => !n.isRead);
@@ -136,9 +171,7 @@ export function NotificationsPage() {
                     cursor: "pointer",
                     background: !n.isRead ? "var(--accent-soft)" : undefined,
                   }}
-                  onClick={() => {
-                    if (!n.isRead) markRead(n.id);
-                  }}
+                  onClick={() => handleRowClick(n)}
                 >
                   <td className="mono muted" style={{ whiteSpace: "nowrap" }}>
                     {fmtTime(n.createdAt)}

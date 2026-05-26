@@ -269,8 +269,8 @@ export function InvoiceDetailPage() {
           <Icon name="download" size={12} /> PDF
         </button>
 
-        {/* Send to ANAF */}
-        {invoice.xmlPath && (
+        {/* Send to ANAF — only available for DRAFT invoices */}
+        {invoice.xmlPath && invoice.status === "DRAFT" && (
           <button
             type="button"
             className={invoice.anafUploadId || invoice.anafIndex ? "btn" : "btn primary"}

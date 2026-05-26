@@ -105,10 +105,18 @@ export function CompaniesPage() {
           {list.length} din {companies.length} companii
         </span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button type="button" className="btn">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => alert("Funcție în curs de implementare")}
+          >
             <Icon name="upload" size={12} /> Import CSV
           </button>
-          <button type="button" className="btn">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => alert("Funcție în curs de implementare")}
+          >
             <Icon name="download" size={12} /> Export
           </button>
           <button
@@ -187,7 +195,11 @@ export function CompaniesPage() {
               <span style={{ fontSize: 11, fontWeight: 600 }}>
                 {selected.size} selectate
               </span>
-              <button type="button" className="btn compact">
+              <button
+                type="button"
+                className="btn compact"
+                onClick={() => alert("Funcție în curs de implementare")}
+              >
                 <Icon name="cloudUp" size={11} /> Sync SPV
               </button>
               <span className="divider-v" style={{ margin: "0 4px" }} />
