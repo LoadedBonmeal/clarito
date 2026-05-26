@@ -16,6 +16,7 @@ import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON } from "@/lib/utils";
+
 import { fmtShortcut } from "@/lib/platform";
 import { notify } from "@/lib/toasts";
 import type { InvoiceStatus } from "@/types";
@@ -26,6 +27,7 @@ export function InvoicesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
+  const setSelectedInvoiceId = useAppStore((s) => s.setSelectedInvoiceId);
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("all");
@@ -488,9 +490,10 @@ export function InvoicesPage() {
                     key={inv.id}
                     data-index={virtualRow.index}
                     ref={rowVirtualizer.measureElement}
-                    onClick={() =>
-                      navigate({ to: "/invoices/$id", params: { id: inv.id } })
-                    }
+                    onClick={() => {
+                      setSelectedInvoiceId(inv.id);
+                      navigate({ to: "/invoices/$id", params: { id: inv.id } });
+                    }}
                     className={selected.has(inv.id) ? "selected" : ""}
                     style={{
                       cursor: "pointer",

@@ -20,6 +20,10 @@ interface AppState {
   // Active company (multi-tenant aware)
   activeCompanyId: string | null;
   setActiveCompanyId: (id: string | null) => void;
+
+  // Last selected invoice (for ribbon actions)
+  selectedInvoiceId: string | null;
+  setSelectedInvoiceId: (id: string | null) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -38,6 +42,9 @@ export const useAppStore = create<AppState>()(
 
       activeCompanyId: null,
       setActiveCompanyId: (id) => set({ activeCompanyId: id }),
+
+      selectedInvoiceId: null,
+      setSelectedInvoiceId: (id) => set({ selectedInvoiceId: id }),
     }),
     {
       name: "rofactura-app-state",

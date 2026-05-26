@@ -14,6 +14,7 @@ import { Icon } from "@/components/shared/Icon";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
+import { notify } from "@/lib/toasts";
 
 interface RibbonProps {
   onOpenPalette: () => void;
@@ -24,11 +25,63 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
   const ribbonRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
+  const selectedInvoiceId = useAppStore((s) => s.selectedInvoiceId);
   const [stornoOpen, setStornoOpen] = useState(false);
   const [stornoNumber, setStornoNumber] = useState("");
   const [stornoReason, setStornoReason] = useState("");
   const [stornoLoading, setStornoLoading] = useState(false);
   const [stornoError, setStornoError] = useState("");
+
+  const handleExportXml = async () => {
+    if (!selectedInvoiceId) { notify.warn("Selectați o factură din listă."); return; }
+    try {
+      const xml = await api.ubl.generateXml(selectedInvoiceId);
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      const path = await save({ defaultPath: "factura.xml", filters: [{ name: "XML", extensions: ["xml"] }] });
+      if (path) { await writeTextFile(path, xml); notify.success(`XML salvat: ${path}`); }
+    } catch (e) { notify.error("Eroare export XML: " + String(e)); }
+  };
+
+  const handleImportXml = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const filePath = await open({ filters: [{ name: "XML e-Factura", extensions: ["xml"] }] });
+      if (!filePath || typeof filePath !== "string") return;
+      const { readTextFile } = await import("@tauri-apps/plugin-fs");
+      const xmlContent = await readTextFile(filePath);
+      const result = await api.importData.invoiceXml(xmlContent, activeCompanyId);
+      if (result.imported > 0) {
+        notify.success(`Factură importată: ${result.invoiceNumber} — ${result.supplierName}`);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
+      } else {
+        notify.error(`Import eșuat: ${result.errors.join("; ")}`);
+      }
+    } catch (e) { notify.error("Eroare import XML: " + String(e)); }
+  };
+
+  const handleSubmitAnaf = async () => {
+    if (!selectedInvoiceId || !activeCompanyId) { notify.warn("Selectați o factură și o companie activă."); return; }
+    const testMode = false;
+    try {
+      await notify.promise(
+        api.anaf.submitInvoice(activeCompanyId, selectedInvoiceId, testMode),
+        { loading: "Se trimite la ANAF…", success: "Trimis cu succes", error: "Eroare la trimitere" }
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
+    } catch (_) {}
+  };
+
+  const handleCheckStatus = async () => {
+    if (!selectedInvoiceId || !activeCompanyId) { notify.warn("Selectați o factură și o companie activă."); return; }
+    const testMode = false;
+    try {
+      const status = await api.anaf.checkStatus(activeCompanyId, selectedInvoiceId, testMode);
+      notify.info(`Status ANAF: ${status}`);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
+    } catch (e) { notify.error("Eroare verificare status: " + String(e)); }
+  };
 
   function handleWheel(e: React.WheelEvent<HTMLDivElement>) {
     // On Windows/Linux a plain vertical scroll wheel won't scroll a horizontal
@@ -60,12 +113,12 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       <div className="ribbon-group">
         <div className="ribbon-group-label">Sincronizare ANAF</div>
         <div className="ribbon-group-buttons">
-          <BtnBig icon="cloudUp"  label="Trimite ANAF"    hint="F9"     disabled />
+          <BtnBig icon="cloudUp"  label="Trimite ANAF"    hint="F9"     onClick={handleSubmitAnaf}   title={selectedInvoiceId ? "F9" : "Selectați o factură"} />
           <BtnBig icon="cloudDn"  label="Descarcă SPV"    hint="Ctrl+D" onClick={() => navigate({ to: "/received" })} />
-          <BtnBig icon="refresh"  label="Verifică status" hint="F10"    disabled />
+          <BtnBig icon="refresh"  label="Verifică status" hint="F10"    onClick={handleCheckStatus}  title={selectedInvoiceId ? "F10" : "Selectați o factură"} />
           <BtnBig icon="anaf"     label="Mesaje SPV"                    onClick={() => navigate({ to: "/notifications" })} />
-          <BtnBig icon="download" label="Export XML"                    disabled />
-          <BtnBig icon="upload"   label="Import XML"                    disabled />
+          <BtnBig icon="download" label="Export XML"                    onClick={handleExportXml}    title={selectedInvoiceId ? undefined : "Selectați o factură"} />
+          <BtnBig icon="upload"   label="Import XML"                    onClick={handleImportXml} />
         </div>
       </div>
 
@@ -206,9 +259,10 @@ interface BtnBigProps {
   onClick?: () => void;
   hint?: string;
   disabled?: boolean;
+  title?: string;
 }
 
-function BtnBig({ icon, label, primary, active, onClick, hint, disabled }: BtnBigProps) {
+function BtnBig({ icon, label, primary, active, onClick, hint, disabled, title }: BtnBigProps) {
   return (
     <button
       type="button"
@@ -219,7 +273,9 @@ function BtnBig({ icon, label, primary, active, onClick, hint, disabled }: BtnBi
         (disabled ? " disabled" : "")
       }
       onClick={disabled ? undefined : onClick}
-      title={disabled ? "În curând" : hint}
+      title={disabled ? "În curând" : (title ?? hint)}
+      aria-label={label}
+      aria-disabled={disabled}
       style={disabled ? { opacity: 0.38, cursor: "not-allowed", pointerEvents: "none" } : undefined}
     >
       <span className="ico">
