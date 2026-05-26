@@ -236,8 +236,8 @@ export function ReceivedDetailPage() {
                   >
                     {inv.xmlPath}
                   </span>
-                  <button type="button" className="btn" disabled title="Fișierul este stocat local">
-                    <Icon name="download" size={12} /> Descarcă
+                  <button type="button" className="btn" onClick={() => api.system.openArchiveFolder()}>
+                    <Icon name="download" size={12} /> Deschide XML
                   </button>
                 </div>
                 {inv.pdfPath && (
@@ -250,8 +250,8 @@ export function ReceivedDetailPage() {
                     >
                       {inv.pdfPath}
                     </span>
-                    <button type="button" className="btn" disabled title="Fișierul este stocat local">
-                      <Icon name="download" size={12} /> Descarcă
+                    <button type="button" className="btn" onClick={() => api.system.openArchiveFolder()}>
+                      <Icon name="download" size={12} /> Deschide PDF
                     </button>
                   </div>
                 )}

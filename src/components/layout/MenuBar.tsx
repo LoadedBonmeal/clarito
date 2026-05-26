@@ -12,7 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { Icon } from "@/components/shared/Icon";
 import { useAppStore } from "@/lib/store";
-import { queryKeys } from "@/lib/queries";
+import { queryClient, queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { fmtShortcut } from "@/lib/platform";
 
@@ -92,7 +92,7 @@ function buildMenus(
       { type: "row", icon: "reports", label: "Balanță de verificare",     onClick: () => { void navigate({ to: "/reports" }); } },
     ],
     "Vizualizare": [
-      { type: "row", icon: "view", label: "Reîncarcă datele",            kbd: "F5", onClick: () => window.location.reload() },
+      { type: "row", icon: "view", label: "Reîncarcă datele",            kbd: "F5", onClick: () => void queryClient.refetchQueries({ type: "active" }) },
       { type: "row", icon: "view", label: "Mărește densitatea (compact)", kbd: fmtShortcut("Ctrl+−") },
       { type: "row", icon: "view", label: "Micșorează densitatea",       kbd: fmtShortcut("Ctrl+=") },
       { type: "sep" },

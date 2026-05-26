@@ -69,7 +69,7 @@ export function ReportsPage() {
 
   // Fetch invoices for the period list table
   const { data: paged, isLoading: invoicesLoading } = useQuery({
-    queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined }),
+    queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 500 } }),
     queryFn: () =>
       api.invoices.list({
         companyId: activeCompanyId ?? undefined,
@@ -174,9 +174,7 @@ export function ReportsPage() {
     ? { base: vatReport.totalBase, vat: vatReport.totalVat, total: vatReport.totalAmount }
     : { base: 0, vat: 0, total: 0 };
 
-  const isLoading = invoicesLoading;
-
-  void vatLoading; // suppress unused warning — used via vatReport
+  const isLoading = invoicesLoading || vatLoading;
 
   return (
     <div className="content">

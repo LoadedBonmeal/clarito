@@ -55,6 +55,13 @@ pub async fn generate_vat_report(
     }
     let where_sql = where_clauses.join(" AND ");
 
+    // Qualified version for the JOIN query (invoices aliased as `i`)
+    let groups_where_sql = where_sql
+        .replace("status IN", "i.status IN")
+        .replace("issue_date >=", "i.issue_date >=")
+        .replace("issue_date <=", "i.issue_date <=")
+        .replace("company_id =", "i.company_id =");
+
     // Summary totals
     let summary_sql = format!(
         "SELECT COUNT(*) as cnt, \
@@ -90,7 +97,7 @@ pub async fn generate_vat_report(
          JOIN invoices i ON i.id = l.invoice_id \
          WHERE {} \
          GROUP BY l.vat_rate ORDER BY l.vat_rate DESC",
-        where_sql
+        groups_where_sql
     );
 
     let mut qg = sqlx::query(&groups_sql).bind(&date_from).bind(&date_to);

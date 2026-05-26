@@ -144,6 +144,7 @@ export function InvoicesPage() {
             type="button"
             className="btn"
             onClick={async () => {
+              if (!activeCompanyId) { alert("Selectați o companie."); return; }
               const { save } = await import("@tauri-apps/plugin-dialog");
               const path = await save({ filters: [{ name: "Excel", extensions: ["xlsx"] }], defaultPath: "facturi.xlsx" });
               if (path) {
@@ -175,7 +176,7 @@ export function InvoicesPage() {
                 const result = await api.importData.invoiceXml(xmlContent, activeCompanyId, dataDir);
                 if (result.imported > 0) {
                   alert(`Factură importată cu succes:\n${result.invoiceNumber} — ${result.supplierName}\nTotal: ${result.totalAmount?.toFixed(2)} ${""}`);
-                  void queryClient.invalidateQueries({ queryKey: ["received"] });
+                  void queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
                 } else {
                   alert(`Import eșuat:\n${result.errors.join("\n")}`);
                 }
@@ -228,7 +229,7 @@ export function InvoicesPage() {
                 errs.push(err.message ?? String(e));
               }
             }
-            void queryClient.invalidateQueries({ queryKey: ["invoices"] });
+            void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
             setSelected(new Set());
             if (errs.length) alert(`${ok} trimise, ${errs.length} erori:\n${errs.slice(0, 3).join("\n")}`);
           }}>Trimite selectate la ANAF</button>
@@ -268,7 +269,7 @@ export function InvoicesPage() {
         >
           Schițe <span className="count">{counts.DRAFT}</span>
         </span>
-        <span className="view-tab" style={{ color: "var(--accent)", borderRight: 0 }}>
+        <span className="view-tab" style={{ color: "var(--accent)", borderRight: 0, opacity: 0.4, cursor: "not-allowed", pointerEvents: "none" }}>
           <Icon name="plus" size={11} /> Salvează vizualizarea
         </span>
       </div>
@@ -395,7 +396,7 @@ export function InvoicesPage() {
                   try { await api.anaf.submitInvoice(activeCompanyId, id); ok++; }
                   catch (e) { errs.push((e as { message?: string }).message ?? String(e)); }
                 }
-                void queryClient.invalidateQueries({ queryKey: ["invoices"] });
+                void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
                 setSelected(new Set());
                 if (errs.length) alert(`${ok} trimise, ${errs.length} erori:\n${errs.slice(0, 3).join("\n")}`);
               }}>
@@ -407,10 +408,10 @@ export function InvoicesPage() {
               <span className="divider-v" style={{ margin: "0 4px" }} />
             </>
           )}
-          <button type="button" className="btn-icon" title="Coloane">
+          <button type="button" className="btn-icon" title="Coloane" disabled>
             <Icon name="filter" size={14} />
           </button>
-          <button type="button" className="btn-icon" title="Mai multe">
+          <button type="button" className="btn-icon" title="Mai multe" disabled>
             <Icon name="more" size={14} />
           </button>
         </span>

@@ -60,12 +60,12 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       <div className="ribbon-group">
         <div className="ribbon-group-label">Sincronizare ANAF</div>
         <div className="ribbon-group-buttons">
-          <BtnBig icon="cloudUp"  label="Trimite ANAF"    hint="F9"     onClick={() => navigate({ to: "/invoices" })} />
+          <BtnBig icon="cloudUp"  label="Trimite ANAF"    hint="F9"     disabled />
           <BtnBig icon="cloudDn"  label="Descarcă SPV"    hint="Ctrl+D" onClick={() => navigate({ to: "/received" })} />
-          <BtnBig icon="refresh"  label="Verifică status" hint="F10"    onClick={() => navigate({ to: "/invoices" })} />
+          <BtnBig icon="refresh"  label="Verifică status" hint="F10"    disabled />
           <BtnBig icon="anaf"     label="Mesaje SPV"                    onClick={() => navigate({ to: "/notifications" })} />
-          <BtnBig icon="download" label="Export XML"                    onClick={() => navigate({ to: "/invoices" })} />
-          <BtnBig icon="upload"   label="Import XML"                    onClick={() => navigate({ to: "/received" })} />
+          <BtnBig icon="download" label="Export XML"                    disabled />
+          <BtnBig icon="upload"   label="Import XML"                    disabled />
         </div>
       </div>
 
@@ -100,7 +100,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
         <div className="ribbon-group-label">Instrumente</div>
         <div className="ribbon-group-buttons">
           <BtnBig icon="command"  label="Comenzi"    hint="Ctrl+K" onClick={onOpenPalette} />
-          <BtnBig icon="keyboard" label="Scurtături" hint="Ctrl+/" onClick={onOpenPalette} />
+          <BtnBig icon="keyboard" label="Scurtături" hint="Ctrl+/" onClick={() => navigate({ to: "/settings" })} />
           <BtnBig icon="settings" label="Setări"                   onClick={() => navigate({ to: "/settings" })} />
         </div>
       </div>

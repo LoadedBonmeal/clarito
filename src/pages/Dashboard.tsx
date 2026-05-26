@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import { queryKeys } from "@/lib/queries";
+import { queryClient, queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtShortcut } from "@/lib/platform";
@@ -82,6 +82,14 @@ export function DashboardPage() {
     queryFn: () => api.contacts.list({ companyId: activeCompanyId ?? undefined }),
     enabled: !!activeCompanyId,
   });
+
+  const { data: isAnafAuth } = useQuery({
+    queryKey: ["anaf", "auth", activeCompanyId ?? ""],
+    queryFn: () => api.anaf.isAuthenticated(activeCompanyId!),
+    enabled: !!activeCompanyId,
+    staleTime: 30_000,
+  });
+  const anafConnected = !activeCompanyId || !!isAnafAuth;
 
   const contactMap = useMemo(
     () => Object.fromEntries(contacts.map((c) => [c.id, c])),
@@ -170,7 +178,7 @@ export function DashboardPage() {
           <div className="seg">
             <span className="seg-item active">{monthLabel}</span>
           </div>
-          <button type="button" className="btn">
+          <button type="button" className="btn" onClick={() => void queryClient.refetchQueries({ type: "active" })}>
             <Icon name="refresh" size={12} /> Reîmprospătează{" "}
             <span className="kbd" style={{ marginLeft: 4 }}>F5</span>
           </button>
@@ -364,12 +372,12 @@ export function DashboardPage() {
                     alignItems: "center",
                     gap: 4,
                     fontSize: 10.5,
-                    color: "#16A34A",
+                    color: anafConnected ? "#16A34A" : "#DC2626",
                     textTransform: "none",
                     letterSpacing: 0,
                   }}
                 >
-                  <span className="anaf-dot" style={{ marginRight: 2 }} /> conectat
+                  <span className={anafConnected ? "anaf-dot" : "anaf-dot err"} style={{ marginRight: 2 }} /> {anafConnected ? "conectat" : "neautentificat"}
                 </span>
               </span>
             </div>

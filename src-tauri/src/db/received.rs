@@ -136,13 +136,15 @@ pub async fn create(pool: &SqlitePool, input: CreateReceivedInput) -> AppResult<
             issuer_cui, issuer_name, series, number,
             total_amount, currency, issue_date,
             xml_path, pdf_path,
+            status,
             downloaded_at, created_at
         ) VALUES (
             ?1, ?2, ?3, ?4,
             ?5, ?6, ?7, ?8,
             ?9, ?10, ?11,
             ?12, ?13,
-            ?14, ?14
+            ?14,
+            ?15, ?15
         )",
     )
     .bind(&id)
@@ -158,6 +160,7 @@ pub async fn create(pool: &SqlitePool, input: CreateReceivedInput) -> AppResult<
     .bind(&input.issue_date)
     .bind(&input.xml_path)
     .bind(&input.pdf_path)
+    .bind("NEW")
     .bind(now)
     .execute(pool)
     .await?;

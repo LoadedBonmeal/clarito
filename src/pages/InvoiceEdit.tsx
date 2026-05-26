@@ -62,7 +62,7 @@ export function InvoiceEditPage() {
 
   // Pre-fill form from loaded invoice
   useEffect(() => {
-    if (invoiceData && !initialized) {
+    if (invoiceData?.invoice && !initialized) {
       const inv = invoiceData.invoice;
       setContactId(inv.contactId);
       setSeries(inv.series);
@@ -144,6 +144,16 @@ export function InvoiceEditPage() {
     );
   }
 
+  if (!isLoading && !initialized && invoiceData !== undefined) {
+    return (
+      <div className="content">
+        <div style={{ padding: 24, fontSize: 12, color: "#DC2626" }}>
+          Factura nu a fost găsită sau nu poate fi editată.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="content">
       <div className="content-titlebar">
@@ -215,8 +225,8 @@ export function InvoiceEditPage() {
                   <input
                     className="input mono"
                     value={series}
-                    onChange={(e) => setSeries(e.target.value)}
-                    style={{ width: 90 }}
+                    readOnly
+                    style={{ width: 90, background: "var(--bg-subtle, var(--bg))", cursor: "default" }}
                   />
                   <input
                     className="input mono"

@@ -122,7 +122,12 @@ export function ContactsPage() {
           {selected.size > 0 && (
             <span style={{ fontSize: 11, fontWeight: 600 }}>{selected.size} selectate</span>
           )}
-          <button type="button" className="btn-icon" title="Reîmprospătează">
+          <button
+            type="button"
+            className="btn-icon"
+            title="Reîmprospătează"
+            onClick={() => void queryClient.invalidateQueries({ queryKey: queryKeys.contacts.all })}
+          >
             <Icon name="refresh" size={14} />
           </button>
         </span>
