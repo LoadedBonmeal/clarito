@@ -30,7 +30,8 @@ pub async fn generate_invoice_xml(
 
     // 4. Determină referința storno (dacă există)
     let storno_ref = inv.notes.as_deref().and_then(|n| {
-        n.strip_prefix("STORNO_OF:").map(|orig| orig.to_string())
+        n.strip_prefix("STORNO_OF:")
+            .map(|rest| rest.split('|').next().unwrap_or(rest).to_string())
     });
 
     // 5. Generează XML

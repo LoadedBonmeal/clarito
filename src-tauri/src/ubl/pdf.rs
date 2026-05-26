@@ -189,8 +189,9 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
 
     // Notes — STORNO_OF: prefix is replaced with a human-readable label
     if let Some(notes) = &inv.notes {
-        let display_notes = if let Some(orig) = notes.strip_prefix("STORNO_OF:") {
-            format!("Storno factura {}", orig)
+        let display_notes = if let Some(rest) = notes.strip_prefix("STORNO_OF:") {
+            let number = rest.split('|').next().unwrap_or(rest);
+            format!("Storno factura {}", number)
         } else {
             notes.clone()
         };
