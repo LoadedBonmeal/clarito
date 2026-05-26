@@ -415,6 +415,7 @@ input, select, textarea { font: inherit; color: inherit; }
   flex-wrap: nowrap;
   min-width: 0;
   width: 100%;
+  overscroll-behavior-x: contain;
 }
 .ribbon-group {
   display: flex;
@@ -1824,3 +1825,83 @@ select:hover:not(:focus) {
   to   { transform: scale(1);    opacity: 1; }
 }
 .badge { animation: badge-pop 0.1s ease-out both; }
+
+/* ==================================================================
+   CROSS-PLATFORM INPUT ADAPTATION
+   ================================================================== */
+
+/* Touch / coarse pointer: enlarge tap targets, remove hover-only cues */
+@media (pointer: coarse) {
+  .ribbon-btn   { min-height: 56px; padding: 8px 6px 10px; width: 80px; }
+  .btn-icon     { min-width: 44px; min-height: 44px; }
+  .sidebar-item { min-height: 44px; }
+  .menubar-item { min-height: 44px; padding: 0 14px; }
+  /* Remove hover-only affordances; active state takes over */
+  .ribbon-btn:hover     { background: transparent; border-color: transparent; }
+  .ribbon-btn:active    { background: var(--accent-soft); border-color: var(--accent-border); }
+}
+
+/* Ensure ribbon overscroll is always contained (macOS swipe-back safety) */
+.ribbon { overscroll-behavior-x: contain; }
+
+/* ─── Print styles ──────────────────────────────────────────────────────── */
+@media print {
+  .menubar,
+  .ribbon,
+  .sidebar,
+  .status-bar,
+  .palette-scrim,
+  .content-titlebar .btn,
+  .content-titlebar .btn-icon,
+  .views-bar,
+  .content-toolbar,
+  .bulk-bar {
+    display: none !important;
+  }
+
+  .app {
+    display: block !important;
+  }
+
+  .workspace {
+    display: block !important;
+  }
+
+  .content-shell {
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .content {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .content-body {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  .dt {
+    width: 100% !important;
+    border-collapse: collapse;
+    font-size: 10pt;
+  }
+
+  .dt th,
+  .dt td {
+    border: 1px solid #ccc !important;
+    padding: 4px 6px !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .dt thead th {
+    background: #1e3a5f !important;
+    color: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

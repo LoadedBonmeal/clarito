@@ -308,9 +308,9 @@ function ContactModal({
   };
 
   return (
-    <div className="palette-scrim" onClick={onClose}>
+    <div className="palette-scrim" style={{ alignItems: "center", paddingTop: 0 }} onClick={onClose}>
       <div
-        style={{ width: 420, background: "var(--bg-content)", border: "1px solid var(--border-strong)", boxShadow: "0 4px 24px rgba(0,0,0,0.12)", padding: "20px 24px 18px" }}
+        style={{ width: 420, background: "var(--bg-content)", border: "1px solid var(--border-strong)", boxShadow: "0 4px 24px rgba(0,0,0,0.12)", padding: "20px 24px 18px", maxHeight: "90vh", overflowY: "auto" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>

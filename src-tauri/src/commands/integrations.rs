@@ -1,6 +1,6 @@
 //! Integrări cu software de contabilitate extern: SmartBill, Saga, WinMentor.
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::db::settings;
 use crate::error::{AppError, AppResult};
@@ -199,10 +199,10 @@ fn iso_to_dmy_slash(date: &str) -> String {
 #[tauri::command]
 pub async fn export_saga_csv(
     state: State<'_, AppState>,
-    app: AppHandle,
     company_id: String,
     date_from: String,
     date_to: String,
+    output_path: Option<String>,
 ) -> AppResult<String> {
     use crate::db::invoices::InvoiceFilter;
 
@@ -265,16 +265,13 @@ pub async fn export_saga_csv(
 
     let csv_content = rows.join("\r\n");
 
-    // 3. Save file
-    let out_dir = app.path().app_data_dir()?;
-    let file_name = format!(
-        "saga_export_{}_{}_{}.csv",
-        company_id, date_from, date_to
-    );
-    let file_path = out_dir.join(&file_name);
-    std::fs::write(&file_path, csv_content.as_bytes()).map_err(AppError::Io)?;
-
-    Ok(file_path.display().to_string())
+    if let Some(path) = output_path {
+        std::fs::write(&path, csv_content.as_bytes())
+            .map_err(|e| AppError::Io(e))?;
+        Ok(path)
+    } else {
+        Ok(csv_content)
+    }
 }
 
 // ─── WinMentor CSV export ───────────────────────────────────────────────────
@@ -282,10 +279,10 @@ pub async fn export_saga_csv(
 #[tauri::command]
 pub async fn export_winmentor_csv(
     state: State<'_, AppState>,
-    app: AppHandle,
     company_id: String,
     date_from: String,
     date_to: String,
+    output_path: Option<String>,
 ) -> AppResult<String> {
     use crate::db::invoices::InvoiceFilter;
 
@@ -344,16 +341,13 @@ pub async fn export_winmentor_csv(
 
     let csv_content = rows.join("\r\n");
 
-    // 3. Save file
-    let out_dir = app.path().app_data_dir()?;
-    let file_name = format!(
-        "winmentor_export_{}_{}_{}.csv",
-        company_id, date_from, date_to
-    );
-    let file_path = out_dir.join(&file_name);
-    std::fs::write(&file_path, csv_content.as_bytes()).map_err(AppError::Io)?;
-
-    Ok(file_path.display().to_string())
+    if let Some(path) = output_path {
+        std::fs::write(&path, csv_content.as_bytes())
+            .map_err(|e| AppError::Io(e))?;
+        Ok(path)
+    } else {
+        Ok(csv_content)
+    }
 }
 
 // ─── XLSX export ────────────────────────────────────────────────────────────
@@ -393,9 +387,10 @@ pub async fn export_invoices_xlsx(
     }
 
     let sql = format!(
-        "SELECT i.full_number, i.issue_date, i.due_date, \
-         c.legal_name as customer_name, i.subtotal_amount, i.vat_amount, \
-         i.total_amount, i.currency, i.status \
+        "SELECT i.full_number, i.series, i.number, i.issue_date, i.due_date, i.currency, i.status, \
+         i.subtotal_amount, i.vat_amount, i.total_amount, i.anaf_index, i.notes, \
+         c.legal_name as customer_name, c.cui as customer_cui, c.address as customer_address, \
+         c.city as customer_city, c.county as customer_county \
          FROM invoices i \
          LEFT JOIN contacts c ON c.id = i.contact_id \
          WHERE {} ORDER BY i.issue_date DESC",
@@ -408,44 +403,255 @@ pub async fn export_invoices_xlsx(
     }
     let rows = q.fetch_all(pool).await.map_err(AppError::Database)?;
 
+    // Get company info if company_id filter is set
+    let company_info: Option<(String, String, String)> = if let Some(cid) = &filter.company_id {
+        let cq = sqlx::query("SELECT legal_name, cui, city FROM companies WHERE id = ?1")
+            .bind(cid)
+            .fetch_optional(pool)
+            .await
+            .map_err(AppError::Database)?;
+        cq.map(|r| (
+            r.try_get::<String, _>("legal_name").unwrap_or_default(),
+            r.try_get::<String, _>("cui").unwrap_or_default(),
+            r.try_get::<String, _>("city").unwrap_or_default(),
+        ))
+    } else {
+        None
+    };
+
     let mut workbook = Workbook::new();
     let ws = workbook.add_worksheet();
+    ws.set_name("Registru facturi")?;
 
-    // Header row with bold format
-    let bold = Format::new().set_bold();
-    let headers = ["Nr. Factură", "Data emiterii", "Scadență", "Client",
-                   "Bază impozabilă", "TVA", "Total", "Monedă", "Status"];
-    for (col, h) in headers.iter().enumerate() {
-        ws.write_with_format(0, col as u16, *h, &bold)
-            .map_err(|e| AppError::Other(e.to_string()))?;
+    // ── Format definitions ───────────────────────────────────────────────────
+    let fmt_title = Format::new()
+        .set_bold()
+        .set_font_size(14)
+        .set_font_color(Color::RGB(0x1E3A5F));
+
+    let fmt_subtitle = Format::new()
+        .set_font_size(10)
+        .set_font_color(Color::RGB(0x6B7280));
+
+    let fmt_header = Format::new()
+        .set_bold()
+        .set_font_size(10)
+        .set_font_color(Color::White)
+        .set_background_color(Color::RGB(0x1E3A5F))
+        .set_align(FormatAlign::Center)
+        .set_border(FormatBorder::Thin)
+        .set_border_color(Color::RGB(0x1E3A5F));
+
+    let fmt_header_num = Format::new()
+        .set_bold()
+        .set_font_size(10)
+        .set_font_color(Color::White)
+        .set_background_color(Color::RGB(0x1E3A5F))
+        .set_align(FormatAlign::Right)
+        .set_border(FormatBorder::Thin)
+        .set_border_color(Color::RGB(0x1E3A5F));
+
+    let fmt_row_odd = Format::new()
+        .set_font_size(10)
+        .set_background_color(Color::RGB(0xF9FAFB))
+        .set_border(FormatBorder::Hair)
+        .set_border_color(Color::RGB(0xE5E7EB));
+
+    let fmt_row_even = Format::new()
+        .set_font_size(10)
+        .set_background_color(Color::White)
+        .set_border(FormatBorder::Hair)
+        .set_border_color(Color::RGB(0xE5E7EB));
+
+    let fmt_row_num_odd = Format::new()
+        .set_font_size(10)
+        .set_background_color(Color::RGB(0xF9FAFB))
+        .set_num_format("#,##0.00")
+        .set_align(FormatAlign::Right)
+        .set_border(FormatBorder::Hair)
+        .set_border_color(Color::RGB(0xE5E7EB));
+
+    let fmt_row_num_even = Format::new()
+        .set_font_size(10)
+        .set_background_color(Color::White)
+        .set_num_format("#,##0.00")
+        .set_align(FormatAlign::Right)
+        .set_border(FormatBorder::Hair)
+        .set_border_color(Color::RGB(0xE5E7EB));
+
+    let fmt_mono_odd = Format::new()
+        .set_font_size(10)
+        .set_font_name("Courier New")
+        .set_background_color(Color::RGB(0xF9FAFB))
+        .set_border(FormatBorder::Hair)
+        .set_border_color(Color::RGB(0xE5E7EB));
+
+    let fmt_mono_even = Format::new()
+        .set_font_size(10)
+        .set_font_name("Courier New")
+        .set_background_color(Color::White)
+        .set_border(FormatBorder::Hair)
+        .set_border_color(Color::RGB(0xE5E7EB));
+
+    let fmt_total_label = Format::new()
+        .set_bold()
+        .set_font_size(10)
+        .set_background_color(Color::RGB(0xF3F4F6))
+        .set_border(FormatBorder::Thin)
+        .set_border_color(Color::RGB(0xD1D5DB));
+
+    let fmt_total_num = Format::new()
+        .set_bold()
+        .set_font_size(11)
+        .set_font_color(Color::RGB(0x1E3A5F))
+        .set_background_color(Color::RGB(0xEFF6FF))
+        .set_num_format("#,##0.00")
+        .set_align(FormatAlign::Right)
+        .set_border(FormatBorder::Medium)
+        .set_border_color(Color::RGB(0x1E3A5F));
+
+    let fmt_status_validated = Format::new()
+        .set_font_size(10)
+        .set_font_color(Color::RGB(0x166534))
+        .set_background_color(Color::RGB(0xDCFCE7))
+        .set_align(FormatAlign::Center)
+        .set_border(FormatBorder::Hair);
+
+    let fmt_status_rejected = Format::new()
+        .set_font_size(10)
+        .set_font_color(Color::RGB(0x991B1B))
+        .set_background_color(Color::RGB(0xFEE2E2))
+        .set_align(FormatAlign::Center)
+        .set_border(FormatBorder::Hair);
+
+    let fmt_status_default = Format::new()
+        .set_font_size(10)
+        .set_align(FormatAlign::Center)
+        .set_border(FormatBorder::Hair);
+
+    // ── Header section ───────────────────────────────────────────────────────
+    ws.set_row_height(0, 28)?;
+    ws.set_row_height(1, 16)?;
+    ws.set_row_height(2, 20)?;
+
+    let title = if let Some((name, cui, city)) = &company_info {
+        format!("Registru Facturi — {} ({}) · {}", name, cui, city)
+    } else {
+        "Registru Facturi e-Factura".to_string()
+    };
+    ws.write_with_format(0, 0, &title, &fmt_title)?;
+    ws.merge_range(0, 0, 0, 10, &title, &fmt_title)?;
+
+    let generated = chrono::Utc::now().format("%d.%m.%Y %H:%M").to_string();
+    let subtitle = format!("Generat la {} · RoFactura v1 · RO_CIUS 1.0.1", generated);
+    ws.write_with_format(1, 0, &subtitle, &fmt_subtitle)?;
+    ws.merge_range(1, 0, 1, 10, &subtitle, &fmt_subtitle)?;
+
+    // Filter info
+    let filter_info = match (&filter.date_from, &filter.date_to) {
+        (Some(from), Some(to)) => format!("Perioadă: {} — {} · {} facturi", from, to, rows.len()),
+        (Some(from), None)     => format!("De la: {} · {} facturi", from, rows.len()),
+        (None, Some(to))       => format!("Până la: {} · {} facturi", to, rows.len()),
+        (None, None)           => format!("{} facturi", rows.len()),
+    };
+    ws.write_with_format(2, 0, &filter_info, &fmt_subtitle)?;
+    ws.merge_range(2, 0, 2, 10, &filter_info, &fmt_subtitle)?;
+
+    // ── Column headers (row 4) ────────────────────────────────────────────────
+    let header_row: u32 = 4;
+    ws.set_row_height(header_row, 22)?;
+
+    let text_headers = [
+        (0u16, "Nr. Factură", 16.0),
+        (1, "Data Emiterii", 13.0),
+        (2, "Scadență", 13.0),
+        (3, "Client", 30.0),
+        (4, "CUI Client", 14.0),
+        (5, "Localitate", 16.0),
+        (9, "Monedă", 8.0),
+        (10, "Status ANAF", 14.0),
+    ];
+    for (col, label, width) in &text_headers {
+        ws.write_with_format(header_row, *col, *label, &fmt_header)?;
+        ws.set_column_width(*col, *width)?;
     }
 
-    for (row_idx, row) in rows.iter().enumerate() {
-        let r = (row_idx + 1) as u32;
-        ws.write(r, 0, row.try_get::<String, _>("full_number").unwrap_or_default())
-            .map_err(|e| AppError::Other(e.to_string()))?;
-        ws.write(r, 1, row.try_get::<String, _>("issue_date").unwrap_or_default())
-            .map_err(|e| AppError::Other(e.to_string()))?;
-        ws.write(r, 2, row.try_get::<String, _>("due_date").unwrap_or_default())
-            .map_err(|e| AppError::Other(e.to_string()))?;
-        ws.write(r, 3, row.try_get::<String, _>("customer_name").unwrap_or_default())
-            .map_err(|e| AppError::Other(e.to_string()))?;
-        ws.write(r, 4, row.try_get::<f64, _>("subtotal_amount").unwrap_or(0.0))
-            .map_err(|e| AppError::Other(e.to_string()))?;
-        ws.write(r, 5, row.try_get::<f64, _>("vat_amount").unwrap_or(0.0))
-            .map_err(|e| AppError::Other(e.to_string()))?;
-        ws.write(r, 6, row.try_get::<f64, _>("total_amount").unwrap_or(0.0))
-            .map_err(|e| AppError::Other(e.to_string()))?;
-        ws.write(r, 7, row.try_get::<String, _>("currency").unwrap_or_default())
-            .map_err(|e| AppError::Other(e.to_string()))?;
-        ws.write(r, 8, row.try_get::<String, _>("status").unwrap_or_default())
-            .map_err(|e| AppError::Other(e.to_string()))?;
+    let num_headers = [(6u16, "Net (RON)", 14.0), (7, "TVA (RON)", 14.0), (8, "Total (RON)", 16.0)];
+    for (col, label, width) in &num_headers {
+        ws.write_with_format(header_row, *col, *label, &fmt_header_num)?;
+        ws.set_column_width(*col, *width)?;
     }
 
-    // Auto-fit columns
-    for col in 0..9u16 {
-        ws.set_column_width(col, 18.0).map_err(|e| AppError::Other(e.to_string()))?;
+    // ── Data rows ─────────────────────────────────────────────────────────────
+    let mut total_net: f64 = 0.0;
+    let mut total_vat: f64 = 0.0;
+    let mut total_amount: f64 = 0.0;
+
+    for (i, row) in rows.iter().enumerate() {
+        let data_row = header_row + 1 + i as u32;
+        let is_odd = i % 2 == 0;
+        ws.set_row_height(data_row, 18)?;
+
+        let (fmt_text, fmt_num, fmt_mono) = if is_odd {
+            (&fmt_row_odd, &fmt_row_num_odd, &fmt_mono_odd)
+        } else {
+            (&fmt_row_even, &fmt_row_num_even, &fmt_mono_even)
+        };
+
+        let full_number = row.try_get::<String, _>("full_number").unwrap_or_default();
+        let issue_date = row.try_get::<String, _>("issue_date").unwrap_or_default();
+        let due_date = row.try_get::<String, _>("due_date").unwrap_or_default();
+        let customer_name = row.try_get::<String, _>("customer_name").unwrap_or_default();
+        let customer_cui = row.try_get::<String, _>("customer_cui").unwrap_or_default();
+        let customer_city = row.try_get::<String, _>("customer_city").unwrap_or_default();
+        let currency = row.try_get::<String, _>("currency").unwrap_or_else(|_| "RON".to_string());
+        let status = row.try_get::<String, _>("status").unwrap_or_default();
+        let net = row.try_get::<f64, _>("subtotal_amount").unwrap_or(0.0);
+        let vat = row.try_get::<f64, _>("vat_amount").unwrap_or(0.0);
+        let total = row.try_get::<f64, _>("total_amount").unwrap_or(0.0);
+
+        total_net += net;
+        total_vat += vat;
+        total_amount += total;
+
+        ws.write_with_format(data_row, 0, &full_number, fmt_mono)?;
+        ws.write_with_format(data_row, 1, &issue_date, fmt_text)?;
+        ws.write_with_format(data_row, 2, &due_date, fmt_text)?;
+        ws.write_with_format(data_row, 3, &customer_name, fmt_text)?;
+        ws.write_with_format(data_row, 4, &customer_cui, fmt_mono)?;
+        ws.write_with_format(data_row, 5, &customer_city, fmt_text)?;
+        ws.write_with_format(data_row, 6, net, fmt_num)?;
+        ws.write_with_format(data_row, 7, vat, fmt_num)?;
+        ws.write_with_format(data_row, 8, total, fmt_num)?;
+        ws.write_with_format(data_row, 9, &currency, fmt_text)?;
+
+        let status_fmt = match status.as_str() {
+            "VALIDATED" => &fmt_status_validated,
+            "REJECTED"  => &fmt_status_rejected,
+            _           => &fmt_status_default,
+        };
+        let status_label = match status.as_str() {
+            "VALIDATED" => "✓ Validat",
+            "REJECTED"  => "✗ Respins",
+            "SUBMITTED" => "→ Trimis",
+            "DRAFT"     => "Schiță",
+            "STORNED"   => "Stornat",
+            other       => other,
+        };
+        ws.write_with_format(data_row, 10, status_label, status_fmt)?;
     }
+
+    // ── Totals row ────────────────────────────────────────────────────────────
+    let total_row = header_row + 1 + rows.len() as u32 + 1;
+    ws.set_row_height(total_row, 22)?;
+    ws.write_with_format(total_row, 0, "TOTAL", &fmt_total_label)?;
+    ws.merge_range(total_row, 0, total_row, 5, "TOTAL", &fmt_total_label)?;
+    ws.write_with_format(total_row, 6, total_net, &fmt_total_num)?;
+    ws.write_with_format(total_row, 7, total_vat, &fmt_total_num)?;
+    ws.write_with_format(total_row, 8, total_amount, &fmt_total_num)?;
+
+    // Freeze header rows
+    ws.set_freeze_panes(header_row + 1, 0)?;
 
     workbook.save(&output_path).map_err(|e| AppError::Other(e.to_string()))?;
     Ok(())

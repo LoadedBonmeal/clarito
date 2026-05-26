@@ -130,12 +130,10 @@ export function InvoicesPage() {
                 const today = new Date().toISOString().slice(0, 10);
                 const yearStart = `${new Date().getFullYear()}-01-01`;
                 try {
-                  const csv = await api.integrations.exportSagaCsv(activeCompanyId, yearStart, today);
-                  const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-                  await writeTextFile(path, csv);
+                      await api.integrations.exportSagaCsv(activeCompanyId, yearStart, today, path);
                 } catch (e) {
                   const err = e as unknown as { message?: string };
-                  console.error("SAGA export error:", err.message);
+                  alert(`Eroare export SAGA: ${err.message ?? e}`);
                 }
               }
             }}
@@ -149,13 +147,44 @@ export function InvoicesPage() {
               const { save } = await import("@tauri-apps/plugin-dialog");
               const path = await save({ filters: [{ name: "Excel", extensions: ["xlsx"] }], defaultPath: "facturi.xlsx" });
               if (path) {
-                await api.integrations.exportInvoicesXlsx({}, path);
+                try {
+                  await api.integrations.exportInvoicesXlsx({ companyId: activeCompanyId ?? undefined }, path);
+                  alert(`Export salvat: ${path}`);
+                } catch (e) {
+                  const err = e as unknown as { message?: string };
+                  alert(`Eroare export XLSX: ${err.message ?? e}`);
+                }
               }
             }}
           >
             <Icon name="table" size={12} /> {t('invoices.exportXlsx')}
           </button>
-          <button type="button" className="btn">
+          <button
+            type="button"
+            className="btn"
+            onClick={async () => {
+              if (!activeCompanyId) { alert("Selectați o companie."); return; }
+              const { open } = await import("@tauri-apps/plugin-dialog");
+              const filePath = await open({ filters: [{ name: "XML e-Factura", extensions: ["xml"] }] });
+              if (!filePath || typeof filePath !== "string") return;
+              try {
+                const { readTextFile } = await import("@tauri-apps/plugin-fs");
+                const { appDataDir } = await import("@tauri-apps/api/path");
+                const xmlContent = await readTextFile(filePath);
+                const dataDir = await appDataDir();
+                const result = await api.importData.invoiceXml(xmlContent, activeCompanyId, dataDir);
+                if (result.imported > 0) {
+                  alert(`Factură importată cu succes:\n${result.invoiceNumber} — ${result.supplierName}\nTotal: ${result.totalAmount?.toFixed(2)} ${""}`);
+                  void queryClient.invalidateQueries({ queryKey: ["received"] });
+                } else {
+                  alert(`Import eșuat:\n${result.errors.join("\n")}`);
+                }
+              } catch (e) {
+                const err = e as unknown as { message?: string };
+                alert(`Eroare import XML: ${err.message ?? e}`);
+              }
+            }}
+          >
             <Icon name="upload" size={12} /> Import XML
           </button>
           <button type="button" className="btn" onClick={() => setShowImportModal(true)}>
@@ -186,10 +215,22 @@ export function InvoicesPage() {
       {selected.size > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 16px", background: "var(--accent-dim, rgba(var(--accent-rgb),0.08))", borderBottom: "1px solid var(--border)" }}>
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{selected.size} selectate</span>
-          <button className="btn compact" onClick={() => {
-            selected.forEach(id => api.invoices.setStatus(id, "SUBMITTED").catch(() => {}));
+          <button className="btn compact" onClick={async () => {
+            if (!activeCompanyId) return;
+            const ids = Array.from(selected);
+            let ok = 0; const errs: string[] = [];
+            for (const id of ids) {
+              try {
+                await api.anaf.submitInvoice(activeCompanyId, id);
+                ok++;
+              } catch (e) {
+                const err = e as unknown as { message?: string };
+                errs.push(err.message ?? String(e));
+              }
+            }
             void queryClient.invalidateQueries({ queryKey: ["invoices"] });
             setSelected(new Set());
+            if (errs.length) alert(`${ok} trimise, ${errs.length} erori:\n${errs.slice(0, 3).join("\n")}`);
           }}>Trimite selectate la ANAF</button>
           <button className="btn compact" onClick={() => setSelected(new Set())}>Deselectează</button>
         </div>
@@ -346,13 +387,21 @@ export function InvoicesPage() {
               <span style={{ fontSize: 11, fontWeight: 600 }}>
                 {selected.size} selectate
               </span>
-              <button type="button" className="btn compact primary">
+              <button type="button" className="btn compact primary" onClick={async () => {
+                if (!activeCompanyId) return;
+                const ids = Array.from(selected);
+                let ok = 0; const errs: string[] = [];
+                for (const id of ids) {
+                  try { await api.anaf.submitInvoice(activeCompanyId, id); ok++; }
+                  catch (e) { errs.push((e as { message?: string }).message ?? String(e)); }
+                }
+                void queryClient.invalidateQueries({ queryKey: ["invoices"] });
+                setSelected(new Set());
+                if (errs.length) alert(`${ok} trimise, ${errs.length} erori:\n${errs.slice(0, 3).join("\n")}`);
+              }}>
                 <Icon name="cloudUp" size={11} /> Trimite la ANAF
               </button>
-              <button type="button" className="btn compact">
-                <Icon name="download" size={11} /> Export XML
-              </button>
-              <button type="button" className="btn compact">
+              <button type="button" className="btn compact" onClick={() => window.print()}>
                 <Icon name="printer" size={11} /> Tipărește
               </button>
               <span className="divider-v" style={{ margin: "0 4px" }} />

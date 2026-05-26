@@ -303,3 +303,216 @@ pub async fn import_contacts_csv(
 
     Ok(ImportResult { imported, errors })
 }
+
+// ─── Import XML e-Factura UBL 2.1 ─────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct XmlImportResult {
+    pub imported: u32,
+    pub invoice_number: Option<String>,
+    pub supplier_name: Option<String>,
+    pub supplier_cui: Option<String>,
+    pub issue_date: Option<String>,
+    pub total_amount: Option<f64>,
+    pub errors: Vec<String>,
+}
+
+/// Importă o factură din XML UBL 2.1 (format e-Factura ANAF) în tabela received_invoices.
+/// `xml_content` este conținutul fișierului XML ca string UTF-8.
+/// `company_id` este compania destinatară.
+/// `app_data_dir` — directorul de date al aplicației (primit din frontend via path.appDataDir()).
+#[tauri::command]
+pub async fn import_invoice_xml(
+    state: State<'_, AppState>,
+    xml_content: String,
+    company_id: String,
+    app_data_dir: String,
+) -> AppResult<XmlImportResult> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let pool = &state.db;
+    let mut errors: Vec<String> = Vec::new();
+
+    // Strip BOM if present
+    let xml_str = xml_content.trim_start_matches('\u{FEFF}');
+
+    // ── Parse XML ────────────────────────────────────────────────────────────
+    let mut reader = Reader::from_str(xml_str);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut depth_supplier = 0i32;
+    let mut depth_party_tax = 0i32;
+    let mut depth_party_legal = 0i32;
+    let mut depth_monetary = 0i32;
+    let mut current_local = String::new();
+
+    let mut issuer_cui = String::new();
+    let mut issuer_name = String::new();
+    let mut issue_date = String::new();
+    let mut invoice_number = String::new();
+    let mut currency = String::from("RON");
+    let mut total_amount = 0.0f64;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                let local = std::str::from_utf8(e.local_name().into_inner())
+                    .unwrap_or("")
+                    .to_string();
+                match local.as_str() {
+                    "AccountingSupplierParty" => depth_supplier += 1,
+                    "PartyTaxScheme" if depth_supplier > 0 => depth_party_tax += 1,
+                    "PartyLegalEntity" if depth_supplier > 0 => depth_party_legal += 1,
+                    "LegalMonetaryTotal" => depth_monetary += 1,
+                    _ => {}
+                }
+                current_local = local;
+            }
+            Ok(Event::End(ref e)) => {
+                let local = std::str::from_utf8(e.local_name().into_inner()).unwrap_or("");
+                match local {
+                    "AccountingSupplierParty" => { depth_supplier -= 1; }
+                    "PartyTaxScheme" if depth_supplier > 0 => { depth_party_tax -= 1; }
+                    "PartyLegalEntity" if depth_supplier > 0 => { depth_party_legal -= 1; }
+                    "LegalMonetaryTotal" => { depth_monetary -= 1; }
+                    _ => {}
+                }
+                current_local.clear();
+            }
+            Ok(Event::Text(ref e)) => {
+                let text = match e.unescape() {
+                    Ok(t) => t.trim().to_string(),
+                    Err(_) => { buf.clear(); continue; }
+                };
+                if text.is_empty() { buf.clear(); continue; }
+                match current_local.as_str() {
+                    "ID" if depth_supplier == 0 && invoice_number.is_empty() => {
+                        invoice_number = text;
+                    }
+                    "IssueDate" if depth_supplier == 0 => { issue_date = text; }
+                    "DocumentCurrencyCode" => { currency = text; }
+                    "CompanyID" if depth_supplier > 0 && depth_party_tax > 0 => {
+                        if issuer_cui.is_empty() { issuer_cui = text; }
+                    }
+                    "RegistrationName" if depth_supplier > 0 && depth_party_legal > 0 => {
+                        if issuer_name.is_empty() { issuer_name = text; }
+                    }
+                    "Name" if depth_supplier > 0 && issuer_name.is_empty() => {
+                        issuer_name = text;
+                    }
+                    "PayableAmount" if depth_monetary > 0 => {
+                        total_amount = text.parse().unwrap_or(0.0);
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                errors.push(format!("Eroare parsare XML: {}", e));
+                return Ok(XmlImportResult {
+                    imported: 0,
+                    invoice_number: None,
+                    supplier_name: None,
+                    supplier_cui: None,
+                    issue_date: None,
+                    total_amount: None,
+                    errors,
+                });
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    if invoice_number.is_empty() {
+        errors.push("Numărul facturii lipsește din XML.".into());
+        return Ok(XmlImportResult {
+            imported: 0, invoice_number: None, supplier_name: None,
+            supplier_cui: None, issue_date: None, total_amount: None, errors,
+        });
+    }
+    if issue_date.is_empty() {
+        issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    }
+    if issuer_name.is_empty() {
+        issuer_name = issuer_cui.clone();
+    }
+
+    // ── Save XML to disk ─────────────────────────────────────────────────────
+    let year = if issue_date.len() >= 4 { &issue_date[..4] } else { "0000" };
+    let unique_id = uuid::Uuid::now_v7().to_string();
+    let archive_dir = std::path::PathBuf::from(&app_data_dir)
+        .join("archive")
+        .join("received")
+        .join("manual")
+        .join(year)
+        .join(&unique_id);
+    std::fs::create_dir_all(&archive_dir).map_err(AppError::Io)?;
+    let xml_path = archive_dir.join("invoice.xml");
+    std::fs::write(&xml_path, xml_str.as_bytes()).map_err(AppError::Io)?;
+
+    // ── Insert into received_invoices ─────────────────────────────────────────
+    let recv_id = uuid::Uuid::now_v7().to_string();
+    let now = chrono::Utc::now().timestamp();
+    let anaf_download_id = format!("manual-{}", &unique_id);
+
+    let res = sqlx::query(
+        "INSERT OR IGNORE INTO received_invoices \
+         (id, company_id, anaf_download_id, anaf_index, issuer_cui, issuer_name, \
+          series, number, total_amount, currency, issue_date, xml_path, status, \
+          downloaded_at, created_at) \
+         VALUES (?1, ?2, ?3, NULL, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, 'NEW', ?11, ?11)",
+    )
+    .bind(&recv_id)
+    .bind(&company_id)
+    .bind(&anaf_download_id)
+    .bind(&issuer_cui)
+    .bind(&issuer_name)
+    .bind(&invoice_number)
+    .bind(total_amount)
+    .bind(&currency)
+    .bind(&issue_date)
+    .bind(xml_path.to_string_lossy().as_ref())
+    .bind(now)
+    .execute(pool)
+    .await;
+
+    match res {
+        Ok(r) if r.rows_affected() > 0 => Ok(XmlImportResult {
+            imported: 1,
+            invoice_number: Some(invoice_number),
+            supplier_name: Some(issuer_name),
+            supplier_cui: Some(issuer_cui),
+            issue_date: Some(issue_date),
+            total_amount: Some(total_amount),
+            errors,
+        }),
+        Ok(_) => {
+            errors.push(format!("Factura {} există deja în sistem.", invoice_number));
+            Ok(XmlImportResult {
+                imported: 0,
+                invoice_number: Some(invoice_number),
+                supplier_name: Some(issuer_name),
+                supplier_cui: Some(issuer_cui),
+                issue_date: Some(issue_date),
+                total_amount: Some(total_amount),
+                errors,
+            })
+        }
+        Err(e) => {
+            errors.push(format!("Eroare DB: {}", e));
+            Ok(XmlImportResult {
+                imported: 0,
+                invoice_number: Some(invoice_number),
+                supplier_name: Some(issuer_name),
+                supplier_cui: Some(issuer_cui),
+                issue_date: Some(issue_date),
+                total_amount: Some(total_amount),
+                errors,
+            })
+        }
+    }
+}

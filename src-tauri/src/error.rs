@@ -45,8 +45,17 @@ pub enum AppError {
     #[error("PDF: {0}")]
     Pdf(String),
 
+    #[error("Excel: {0}")]
+    Xlsx(String),
+
     #[error("{0}")]
     Other(String),
+}
+
+impl From<rust_xlsxwriter::XlsxError> for AppError {
+    fn from(e: rust_xlsxwriter::XlsxError) -> Self {
+        AppError::Xlsx(e.to_string())
+    }
 }
 
 impl AppError {
@@ -69,6 +78,7 @@ impl AppError {
             AppError::Conflict(_) => "Conflict",
             AppError::Xml(_) => "Xml",
             AppError::Pdf(_) => "Pdf",
+            AppError::Xlsx(_) => "Xlsx",
             AppError::Other(_) => "Other",
         }
     }

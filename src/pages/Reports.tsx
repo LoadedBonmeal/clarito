@@ -93,12 +93,18 @@ export function ReportsPage() {
 
   const handleExportSaga = async () => {
     if (!activeCompanyId) { alert("Selectați o companie activă."); return; }
+    const savePath = await saveDialog({
+      title: "Salvează export SAGA",
+      defaultPath: `facturi-saga-${dateFrom}-${dateTo}.csv`,
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (!savePath) return;
     setExportingSaga(true);
     try {
-      const path = await api.integrations.exportSagaCsv(activeCompanyId, dateFrom, dateTo);
-      alert(`Export Saga salvat:\n${path}`);
+      await api.integrations.exportSagaCsv(activeCompanyId, dateFrom, dateTo, savePath);
+      alert(`Export SAGA salvat:\n${savePath}`);
     } catch (err) {
-      alert("Eroare export Saga: " + String(err));
+      alert("Eroare export SAGA: " + String(err));
     } finally {
       setExportingSaga(false);
     }
@@ -106,10 +112,16 @@ export function ReportsPage() {
 
   const handleExportWinmentor = async () => {
     if (!activeCompanyId) { alert("Selectați o companie activă."); return; }
+    const savePath = await saveDialog({
+      title: "Salvează export WinMentor",
+      defaultPath: `facturi-winmentor-${dateFrom}-${dateTo}.csv`,
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (!savePath) return;
     setExportingWinmentor(true);
     try {
-      const path = await api.integrations.exportWinmentorCsv(activeCompanyId, dateFrom, dateTo);
-      alert(`Export WinMentor salvat:\n${path}`);
+      await api.integrations.exportWinmentorCsv(activeCompanyId, dateFrom, dateTo, savePath);
+      alert(`Export WinMentor salvat:\n${savePath}`);
     } catch (err) {
       alert("Eroare export WinMentor: " + String(err));
     } finally {

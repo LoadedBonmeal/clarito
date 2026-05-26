@@ -250,6 +250,16 @@ export const importData = {
       companyId,
       dryRun: true,
     }),
+  invoiceXml: (xmlContent: string, companyId: string, appDataDir: string) =>
+    invoke<{
+      imported: number;
+      invoiceNumber?: string;
+      supplierName?: string;
+      supplierCui?: string;
+      issueDate?: string;
+      totalAmount?: number;
+      errors: string[];
+    }>("import_invoice_xml", { xmlContent, companyId, appDataDir }),
 };
 
 // ─── Integrations ─────────────────────────────────────────────────────────
@@ -263,10 +273,10 @@ export interface SmartBillCredentials {
 export const integrations = {
   smartbillPush: (companyId: string, invoiceId: string) =>
     invoke<string>("smartbill_push_invoice", { companyId, invoiceId }),
-  exportSagaCsv: (companyId: string, dateFrom: string, dateTo: string) =>
-    invoke<string>("export_saga_csv", { companyId, dateFrom, dateTo }),
-  exportWinmentorCsv: (companyId: string, dateFrom: string, dateTo: string) =>
-    invoke<string>("export_winmentor_csv", { companyId, dateFrom, dateTo }),
+  exportSagaCsv: (companyId: string, dateFrom: string, dateTo: string, outputPath?: string) =>
+    invoke<string>("export_saga_csv", { companyId, dateFrom, dateTo, outputPath: outputPath ?? null }),
+  exportWinmentorCsv: (companyId: string, dateFrom: string, dateTo: string, outputPath?: string) =>
+    invoke<string>("export_winmentor_csv", { companyId, dateFrom, dateTo, outputPath: outputPath ?? null }),
   getSmartbillCredentials: (companyId: string) =>
     invoke<SmartBillCredentials>("get_smartbill_credentials", { companyId }),
   exportInvoicesXlsx: (filter: { companyId?: string; dateFrom?: string; dateTo?: string }, outputPath: string) =>
