@@ -12,6 +12,7 @@ import { Icon } from "@/components/shared/Icon";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { fmtShortcut } from "@/lib/platform";
+import { notify } from "@/lib/toasts";
 import type { AppErrorPayload, Company } from "@/types";
 
 const TIER_LIMITS: Record<string, number> = {
@@ -78,7 +79,7 @@ export function CompaniesPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
     } catch (err) {
       const payload = err as AppErrorPayload;
-      alert(payload?.message ?? "Eroare la ștergerea companiei.");
+      notify.error(payload?.message ?? "Eroare la ștergerea companiei.");
     }
   };
 
@@ -108,14 +109,14 @@ export function CompaniesPage() {
           <button
             type="button"
             className="btn"
-            onClick={() => alert("Funcție în curs de implementare")}
+            onClick={() => notify.info("Funcție în curs de implementare")}
           >
             <Icon name="upload" size={12} /> Import CSV
           </button>
           <button
             type="button"
             className="btn"
-            onClick={() => alert("Funcție în curs de implementare")}
+            onClick={() => notify.info("Funcție în curs de implementare")}
           >
             <Icon name="download" size={12} /> Export
           </button>
@@ -198,7 +199,7 @@ export function CompaniesPage() {
               <button
                 type="button"
                 className="btn compact"
-                onClick={() => alert("Funcție în curs de implementare")}
+                onClick={() => notify.info("Funcție în curs de implementare")}
               >
                 <Icon name="cloudUp" size={11} /> Sync SPV
               </button>
@@ -225,7 +226,7 @@ export function CompaniesPage() {
                 type="button"
                 className="btn"
                 style={{ fontSize: 10.5 }}
-                onClick={() => alert("Contactați-ne pentru upgrade")}
+                onClick={() => notify.info("Contactați-ne pentru upgrade la support@efactura.ro")}
               >
                 Upgrade
               </button>

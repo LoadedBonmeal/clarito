@@ -14,6 +14,7 @@ import { Icon } from "@/components/shared/Icon";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore, type ThemeMode } from "@/lib/store";
+import { notify } from "@/lib/toasts";
 import type { Company } from "@/types";
 
 function fmtBytes(bytes: number): string {
@@ -161,7 +162,7 @@ export function SettingsPage() {
       setSmartbillSaved(true);
       setTimeout(() => setSmartbillSaved(false), 3000);
     } catch {
-      alert("Eroare la salvare credențiale SmartBill.");
+      notify.error("Eroare la salvare credențiale SmartBill.");
     } finally {
       setSavingSmartbill(false);
     }
@@ -189,9 +190,9 @@ export function SettingsPage() {
       await api.system.devSeed();
       void queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
-      alert("Date de test adăugate cu succes.");
+      notify.success("Date de test adăugate cu succes.");
     } catch {
-      alert("Seed-ul a eșuat sau DB-ul nu este gol.");
+      notify.error("Seed-ul a eșuat sau DB-ul nu este gol.");
     }
   };
 
@@ -503,9 +504,9 @@ export function SettingsPage() {
                     onClick={async () => {
                       try {
                         const path = await api.archive.exportZip(activeCompanyId);
-                        alert(`Arhivă exportată:\n${path}`);
+                        notify.success(`Arhivă exportată: ${path}`);
                       } catch (err) {
-                        alert("Export eșuat: " + String(err));
+                        notify.error("Export eșuat: " + String(err));
                       }
                     }}
                   >
@@ -518,7 +519,7 @@ export function SettingsPage() {
                       type="button"
                       className="btn"
                       onClick={() => {
-                        api.system.openArchiveFolder().catch((e) => alert(String(e)));
+                        api.system.openArchiveFolder().catch((e) => notify.error(String(e)));
                       }}
                     >
                       <Icon name="database" size={12} /> Deschide folder arhivă
@@ -532,7 +533,7 @@ export function SettingsPage() {
                         if (dir && typeof dir === "string") {
                           if (confirm(`Schimbi locația arhivei în:\n${dir}\n\nFișierele existente vor fi copiate. Continuați?`)) {
                             await api.archive.changeArchiveLocation(dir);
-                            alert("Locație arhivă schimbată cu succes.");
+                            notify.success("Locație arhivă schimbată cu succes.");
                           }
                         }
                       }}
@@ -548,9 +549,9 @@ export function SettingsPage() {
                     onClick={async () => {
                       try {
                         const path = await api.system.exportBackup();
-                        alert(`Backup salvat:\n${path}`);
+                        notify.success(`Backup salvat: ${path}`);
                       } catch (e) {
-                        alert("Eroare backup: " + String(e));
+                        notify.error("Eroare backup: " + String(e));
                       }
                     }}
                   >
@@ -565,16 +566,16 @@ export function SettingsPage() {
                       try {
                         const result = await api.archive.verifyIntegrity();
                         if (result.ok) {
-                          alert(`Arhiva este integră. ${result.totalChecked} fișiere verificate.`);
+                          notify.success(`Arhiva este integră. ${result.totalChecked} fișiere verificate.`);
                         } else {
-                          alert(
-                            `Fișiere lipsă (${result.missingFiles.length} din ${result.totalChecked}):\n` +
-                            result.missingFiles.slice(0, 10).join("\n") +
-                            (result.missingFiles.length > 10 ? "\n…" : "")
+                          notify.error(
+                            `Fișiere lipsă (${result.missingFiles.length} din ${result.totalChecked}): ` +
+                            result.missingFiles.slice(0, 5).join(", ") +
+                            (result.missingFiles.length > 5 ? " …" : "")
                           );
                         }
                       } catch (e) {
-                        alert("Eroare verificare: " + String(e));
+                        notify.error("Eroare verificare: " + String(e));
                       }
                     }}
                   >
@@ -597,7 +598,7 @@ export function SettingsPage() {
                             }
                           }
                         } catch (e) {
-                          alert("Eroare restaurare: " + String(e));
+                          notify.error("Eroare restaurare: " + String(e));
                         }
                       }}
                     >
@@ -627,7 +628,7 @@ export function SettingsPage() {
                         await api.system.setAutostart(e.target.checked);
                         void queryClient.invalidateQueries({ queryKey: ["autostart"] });
                       } catch (err) {
-                        alert("Eroare setare autostart: " + String(err));
+                        notify.error("Eroare setare autostart: " + String(err));
                       }
                     }}
                   />

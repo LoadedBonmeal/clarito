@@ -13,6 +13,7 @@ import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON } from "@/lib/utils";
+import { notify } from "@/lib/toasts";
 import type { Invoice, Contact } from "@/types";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -92,7 +93,7 @@ export function ReportsPage() {
   );
 
   const handleExportSaga = async () => {
-    if (!activeCompanyId) { alert("Selectați o companie activă."); return; }
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
     const savePath = await saveDialog({
       title: "Salvează export SAGA",
       defaultPath: `facturi-saga-${dateFrom}-${dateTo}.csv`,
@@ -102,16 +103,16 @@ export function ReportsPage() {
     setExportingSaga(true);
     try {
       await api.integrations.exportSagaCsv(activeCompanyId, dateFrom, dateTo, savePath);
-      alert(`Export SAGA salvat:\n${savePath}`);
+      notify.success(`Export SAGA salvat: ${savePath}`);
     } catch (err) {
-      alert("Eroare export SAGA: " + String(err));
+      notify.error("Eroare export SAGA: " + String(err));
     } finally {
       setExportingSaga(false);
     }
   };
 
   const handleExportWinmentor = async () => {
-    if (!activeCompanyId) { alert("Selectați o companie activă."); return; }
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
     const savePath = await saveDialog({
       title: "Salvează export WinMentor",
       defaultPath: `facturi-winmentor-${dateFrom}-${dateTo}.csv`,
@@ -121,9 +122,9 @@ export function ReportsPage() {
     setExportingWinmentor(true);
     try {
       await api.integrations.exportWinmentorCsv(activeCompanyId, dateFrom, dateTo, savePath);
-      alert(`Export WinMentor salvat:\n${savePath}`);
+      notify.success(`Export WinMentor salvat: ${savePath}`);
     } catch (err) {
-      alert("Eroare export WinMentor: " + String(err));
+      notify.error("Eroare export WinMentor: " + String(err));
     } finally {
       setExportingWinmentor(false);
     }
@@ -144,9 +145,9 @@ export function ReportsPage() {
         "csv",
         outputPath
       );
-      alert(`Raport TVA salvat:\n${saved}`);
+      notify.success(`Raport TVA salvat: ${saved}`);
     } catch (err) {
-      alert("Eroare export raport TVA: " + String(err));
+      notify.error("Eroare export raport TVA: " + String(err));
     } finally {
       setExportingVat(false);
     }

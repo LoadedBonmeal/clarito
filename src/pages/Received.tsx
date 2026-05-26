@@ -17,6 +17,7 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON } from "@/lib/utils";
 import { fmtShortcut } from "@/lib/platform";
+import { notify } from "@/lib/toasts";
 import type { ReceivedStatus } from "@/types";
 
 type StatusFilter = ReceivedStatus | "all";
@@ -71,10 +72,10 @@ export function ReceivedPage() {
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
-      if (count > 0) alert(`${count} facturi noi descărcate din SPV.`);
-      else alert("Nicio factură nouă în SPV.");
+      if (count > 0) notify.success(`${count} facturi noi descărcate din SPV.`);
+      else notify.info("Nicio factură nouă în SPV.");
     },
-    onError: (e) => alert("Eroare sincronizare SPV: " + (e as Error).message),
+    onError: (e) => notify.error("Eroare sincronizare SPV: " + (e as Error).message),
   });
 
   const allInvoices = paged?.items ?? [];

@@ -18,6 +18,7 @@ import {
 } from "@/components/shared/PageHeader";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import { notify } from "@/lib/toasts";
 import type { Certificate, Company } from "@/types";
 
 export function CompanyDetailPage() {
@@ -188,7 +189,7 @@ function CertificatesSection({ companyId }: { companyId: string }) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["certificates", companyId] });
     },
-    onError: (e) => alert("Eroare reautorizare: " + String(e)),
+    onError: (e) => notify.error("Eroare reautorizare: " + String(e)),
   });
 
   const revokeCert = useMutation({
@@ -196,7 +197,7 @@ function CertificatesSection({ companyId }: { companyId: string }) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["certificates", companyId] });
     },
-    onError: (e) => alert("Eroare revocare: " + String(e)),
+    onError: (e) => notify.error("Eroare revocare: " + String(e)),
   });
 
   const fmt = (unix: number) => new Date(unix * 1000).toLocaleDateString("ro-RO");
@@ -275,10 +276,10 @@ function CompanySpvSection({ company }: { company: Company }) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.companies.detail(company.id) });
         void queryClient.invalidateQueries({ queryKey: ["certificates", company.id] });
       } else {
-        alert("Autorizarea SPV a fost anulată sau a eșuat. Reîncercați.");
+        notify.error("Autorizarea SPV a fost anulată sau a eșuat. Reîncercați.");
       }
     },
-    onError: (e) => alert("Eroare conectare SPV: " + String(e)),
+    onError: (e) => notify.error("Eroare conectare SPV: " + String(e)),
   });
 
   return (

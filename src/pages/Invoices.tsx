@@ -17,6 +17,7 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON } from "@/lib/utils";
 import { fmtShortcut } from "@/lib/platform";
+import { notify } from "@/lib/toasts";
 import type { InvoiceStatus } from "@/types";
 
 type StatusFilter = InvoiceStatus | "all";
@@ -131,9 +132,10 @@ export function InvoicesPage() {
                 const yearStart = `${new Date().getFullYear()}-01-01`;
                 try {
                       await api.integrations.exportSagaCsv(activeCompanyId, yearStart, today, path);
+                      notify.success(`Export SAGA salvat: ${path}`);
                 } catch (e) {
                   const err = e as unknown as { message?: string };
-                  alert(`Eroare export SAGA: ${err.message ?? e}`);
+                  notify.error(`Eroare export SAGA: ${err.message ?? e}`);
                 }
               }
             }}
@@ -144,16 +146,16 @@ export function InvoicesPage() {
             type="button"
             className="btn"
             onClick={async () => {
-              if (!activeCompanyId) { alert("Selectați o companie."); return; }
+              if (!activeCompanyId) { notify.warn("Selectați o companie."); return; }
               const { save } = await import("@tauri-apps/plugin-dialog");
               const path = await save({ filters: [{ name: "Excel", extensions: ["xlsx"] }], defaultPath: "facturi.xlsx" });
               if (path) {
                 try {
                   await api.integrations.exportInvoicesXlsx({ companyId: activeCompanyId ?? undefined }, path);
-                  alert(`Export salvat: ${path}`);
+                  notify.success(`Export salvat: ${path}`);
                 } catch (e) {
                   const err = e as unknown as { message?: string };
-                  alert(`Eroare export XLSX: ${err.message ?? e}`);
+                  notify.error(`Eroare export XLSX: ${err.message ?? e}`);
                 }
               }
             }}
@@ -164,7 +166,7 @@ export function InvoicesPage() {
             type="button"
             className="btn"
             onClick={async () => {
-              if (!activeCompanyId) { alert("Selectați o companie."); return; }
+              if (!activeCompanyId) { notify.warn("Selectați o companie."); return; }
               const { open } = await import("@tauri-apps/plugin-dialog");
               const filePath = await open({ filters: [{ name: "XML e-Factura", extensions: ["xml"] }] });
               if (!filePath || typeof filePath !== "string") return;
@@ -173,14 +175,14 @@ export function InvoicesPage() {
                 const xmlContent = await readTextFile(filePath);
                 const result = await api.importData.invoiceXml(xmlContent, activeCompanyId);
                 if (result.imported > 0) {
-                  alert(`Factură importată cu succes:\n${result.invoiceNumber} — ${result.supplierName}\nTotal: ${result.totalAmount?.toFixed(2)} ${""}`);
+                  notify.success(`Factură importată: ${result.invoiceNumber} — ${result.supplierName} · ${result.totalAmount?.toFixed(2)} RON`);
                   void queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
                 } else {
-                  alert(`Import eșuat:\n${result.errors.join("\n")}`);
+                  notify.error(`Import eșuat: ${result.errors.join("; ")}`);
                 }
               } catch (e) {
                 const err = e as unknown as { message?: string };
-                alert(`Eroare import XML: ${err.message ?? e}`);
+                notify.error(`Eroare import XML: ${err.message ?? e}`);
               }
             }}
           >
@@ -229,7 +231,8 @@ export function InvoicesPage() {
             }
             void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
             setSelected(new Set());
-            if (errs.length) alert(`${ok} trimise, ${errs.length} erori:\n${errs.slice(0, 3).join("\n")}`);
+            if (errs.length) notify.error(`${ok} trimise, ${errs.length} erori: ${errs.slice(0, 3).join("; ")}`);
+            else notify.success(`${ok} facturi trimise la ANAF`);
           }}>Trimite selectate la ANAF</button>
           <button className="btn compact" onClick={() => setSelected(new Set())}>Deselectează</button>
         </div>
@@ -396,7 +399,8 @@ export function InvoicesPage() {
                 }
                 void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
                 setSelected(new Set());
-                if (errs.length) alert(`${ok} trimise, ${errs.length} erori:\n${errs.slice(0, 3).join("\n")}`);
+                if (errs.length) notify.error(`${ok} trimise, ${errs.length} erori: ${errs.slice(0, 3).join("; ")}`);
+                else notify.success(`${ok} facturi trimise la ANAF`);
               }}>
                 <Icon name="cloudUp" size={11} /> Trimite la ANAF
               </button>
