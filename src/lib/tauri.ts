@@ -250,7 +250,7 @@ export const importData = {
       companyId,
       dryRun: true,
     }),
-  invoiceXml: (xmlContent: string, companyId: string, appDataDir: string) =>
+  invoiceXml: (xmlContent: string, companyId: string) =>
     invoke<{
       imported: number;
       invoiceNumber?: string;
@@ -259,7 +259,7 @@ export const importData = {
       issueDate?: string;
       totalAmount?: number;
       errors: string[];
-    }>("import_invoice_xml", { xmlContent, companyId, appDataDir }),
+    }>("import_invoice_xml", { xmlContent, companyId }),
 };
 
 // ─── Integrations ─────────────────────────────────────────────────────────

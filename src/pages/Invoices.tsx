@@ -170,10 +170,8 @@ export function InvoicesPage() {
               if (!filePath || typeof filePath !== "string") return;
               try {
                 const { readTextFile } = await import("@tauri-apps/plugin-fs");
-                const { appDataDir } = await import("@tauri-apps/api/path");
                 const xmlContent = await readTextFile(filePath);
-                const dataDir = await appDataDir();
-                const result = await api.importData.invoiceXml(xmlContent, activeCompanyId, dataDir);
+                const result = await api.importData.invoiceXml(xmlContent, activeCompanyId);
                 if (result.imported > 0) {
                   alert(`Factură importată cu succes:\n${result.invoiceNumber} — ${result.supplierName}\nTotal: ${result.totalAmount?.toFixed(2)} ${""}`);
                   void queryClient.invalidateQueries({ queryKey: queryKeys.received.all });

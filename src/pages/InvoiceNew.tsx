@@ -120,6 +120,14 @@ export function InvoiceNewPage() {
       if (!activeCompanyId) throw new Error("Nicio companie activă.");
       if (!contactId) throw new Error("Selectați un cumpărător.");
       if (lines.length === 0) throw new Error("Adăugați cel puțin o linie.");
+      const lineErrors: string[] = [];
+      lines.forEach((line, i) => {
+        if (!line.name?.trim()) lineErrors.push(`Linia ${i + 1}: denumirea produsului/serviciului este obligatorie`);
+        if ((line.quantity ?? 0) <= 0) lineErrors.push(`Linia ${i + 1}: cantitatea trebuie să fie mai mare decât 0`);
+        if ((line.unitPrice ?? 0) < 0) lineErrors.push(`Linia ${i + 1}: prețul unitar nu poate fi negativ`);
+        if (![0, 5, 9, 19].includes(line.vatRate ?? 19)) lineErrors.push(`Linia ${i + 1}: cota TVA trebuie să fie 0%, 5%, 9% sau 19%`);
+      });
+      if (lineErrors.length > 0) throw new Error(lineErrors.join("\n"));
       return api.invoices.createDraft({
         companyId: activeCompanyId,
         contactId,

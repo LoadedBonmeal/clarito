@@ -550,12 +550,137 @@ fn write_amount(
     Ok(())
 }
 
-/// Formatează `f64` ca string cu 2 zecimale.
+/// Formatează `f64` ca string cu 2 zecimale, rutând prin `Decimal` pentru
+/// rotunjire zecimală corectă (evită artefactele binary-float).
 fn fmt_amount(v: f64) -> String {
-    format!("{:.2}", v)
+    let d = Decimal::from_str(&format!("{:.10}", v)).unwrap_or(Decimal::ZERO);
+    format!("{:.2}", d.round_dp(2))
 }
 
 /// Formatează un număr `f64` ca string cu 2 zecimale (pentru rate/cantităţi).
+/// Identic cu `fmt_amount` — ambele rutează prin `Decimal`.
 fn format_decimal_2(v: f64) -> String {
-    format!("{:.2}", v)
+    fmt_amount(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_input() -> GeneratorInput {
+        use crate::db::companies::Company;
+        use crate::db::contacts::Contact;
+        use crate::db::invoices::{Invoice, LineItem};
+
+        let seller = Company {
+            id: "company-1".to_string(),
+            cui: "RO12345678".to_string(),
+            legal_name: "Test SRL".to_string(),
+            trade_name: None,
+            registry_number: None,
+            vat_payer: true,
+            address: "Str. Exemplu nr. 1".to_string(),
+            city: "București".to_string(),
+            county: "Sector 1".to_string(),
+            postal_code: None,
+            country: "RO".to_string(),
+            email: None,
+            phone: None,
+            iban: None,
+            bank_name: None,
+            is_active: true,
+            spv_enabled: false,
+            invoice_series: "FAC".to_string(),
+            last_invoice_number: 1,
+            logo_path: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+
+        let buyer = Contact {
+            id: "contact-1".to_string(),
+            company_id: "company-1".to_string(),
+            contact_type: "CUSTOMER".to_string(),
+            cui: Some("RO87654321".to_string()),
+            legal_name: "Client SRL".to_string(),
+            vat_payer: true,
+            address: Some("Str. Client nr. 2".to_string()),
+            city: Some("Cluj-Napoca".to_string()),
+            county: Some("Cluj".to_string()),
+            country: "RO".to_string(),
+            email: None,
+            phone: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+
+        let invoice = Invoice {
+            id: "invoice-1".to_string(),
+            company_id: "company-1".to_string(),
+            contact_id: "contact-1".to_string(),
+            series: "FAC".to_string(),
+            number: 1,
+            full_number: "FAC-2024-0001".to_string(),
+            issue_date: "2024-01-15".to_string(),
+            due_date: "2024-02-15".to_string(),
+            currency: "RON".to_string(),
+            exchange_rate: None,
+            subtotal_amount: 100.0,
+            vat_amount: 19.0,
+            total_amount: 119.0,
+            status: "DRAFT".to_string(),
+            anaf_upload_id: None,
+            anaf_index: None,
+            anaf_submitted_at: None,
+            anaf_validated_at: None,
+            anaf_rejected_at: None,
+            xml_path: None,
+            pdf_path: None,
+            signature_xml_path: None,
+            rejection_reason: None,
+            rejection_code: None,
+            notes: None,
+            payment_means_code: "30".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        };
+
+        let line = LineItem {
+            id: "line-1".to_string(),
+            invoice_id: "invoice-1".to_string(),
+            position: 1,
+            name: "Serviciu consultanță".to_string(),
+            description: None,
+            quantity: 1.0,
+            unit: "H87".to_string(),
+            unit_price: 100.0,
+            vat_rate: 19.0,
+            vat_category: "S".to_string(),
+            subtotal_amount: 100.0,
+            vat_amount: 19.0,
+            total_amount: 119.0,
+            cpv_code: None,
+        };
+
+        GeneratorInput {
+            invoice,
+            lines: vec![line],
+            seller,
+            buyer,
+            storno_ref: None,
+        }
+    }
+
+    #[test]
+    fn xml_starts_with_utf8_bom() {
+        let input = sample_input();
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let bytes = xml.as_bytes();
+        assert!(bytes.len() >= 3, "XML too short");
+        assert_eq!(
+            &bytes[..3],
+            &[0xEF, 0xBB, 0xBF],
+            "XML must start with UTF-8 BOM (EF BB BF)"
+        );
+    }
 }

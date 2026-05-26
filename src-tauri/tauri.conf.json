@@ -25,7 +25,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: https://asset.localhost; connect-src ipc: http://ipc.localhost https://webservicesp.anaf.ro https://api.anaf.ro; font-src 'self' data:; object-src 'none'; base-uri 'none'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: https://asset.localhost; connect-src ipc: http://ipc.localhost https://webservicesp.anaf.ro https://api.anaf.ro; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
     }
   },
   "plugins": {
@@ -72,8 +72,7 @@
         "languages": ["Romanian", "English"],
         "installMode": "currentUser",
         "headerImage": "resources/nsis-header.bmp",
-        "sidebarImage": "resources/nsis-sidebar.bmp",
-        "license": "resources/license.rtf"
+        "sidebarImage": "resources/nsis-sidebar.bmp"
       }
     }
   }

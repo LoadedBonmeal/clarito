@@ -182,7 +182,7 @@ pub async fn anaf_submit_invoice(
         .bind(&invoice_id)
         .execute(pool)
         .await
-        .ok();
+        .map_err(AppError::Database)?;
 
     // 6. Marchează factura ca QUEUED (în coadă — upload-ul poate dura)
     sqlx::query(
@@ -191,7 +191,7 @@ pub async fn anaf_submit_invoice(
     .bind(&invoice_id)
     .execute(pool)
     .await
-    .ok();
+    .map_err(AppError::Database)?;
     {
         use tauri::Emitter;
         let _ = app.emit(
@@ -279,6 +279,10 @@ pub async fn anaf_check_invoice_status(
     let pool = &state.db;
 
     let invoice = db_invoices::get(pool, &invoice_id).await?;
+
+    if invoice.company_id != company_id {
+        return Err(AppError::Validation("Factura nu aparține companiei selectate.".into()));
+    }
 
     let upload_id = invoice
         .anaf_upload_id

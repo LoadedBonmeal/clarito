@@ -34,7 +34,7 @@ pub async fn generate_invoice_xml(
             .map(|rest| rest.split('|').next().unwrap_or(rest).to_string())
     });
 
-    // 5. Generează XML
+    // 5. Generează XML (CPU-bound — rulăm în spawn_blocking)
     let input = GeneratorInput {
         invoice: inv.clone(),
         lines,
@@ -42,19 +42,23 @@ pub async fn generate_invoice_xml(
         buyer,
         storno_ref,
     };
-    let xml = generate_ubl(&input)?;
-
-    // 6. Calculează calea şi scrie fişierul
     let path = paths::xml_path(&app, &inv.company_id, &invoice_id);
-    std::fs::write(&path, xml.as_bytes())?;
+    let path_clone = path.clone();
+    let path_str_result = tauri::async_runtime::spawn_blocking(move || -> AppResult<String> {
+        let xml = generate_ubl(&input)?;
+        std::fs::write(&path_clone, xml.as_bytes()).map_err(AppError::Io)?;
+        path_clone
+            .to_str()
+            .ok_or_else(|| AppError::Xml("Cale fişier invalidă UTF-8".to_string()))
+            .map(|s| s.to_string())
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))??;
 
-    // 7. Actualizează DB
-    let path_str = path
-        .to_str()
-        .ok_or_else(|| AppError::Xml("Cale fişier invalidă UTF-8".to_string()))?;
-    invoices::set_xml_path(&state.db, &invoice_id, path_str).await?;
+    // 6. Actualizează DB
+    invoices::set_xml_path(&state.db, &invoice_id, &path_str_result).await?;
 
-    Ok(path_str.to_string())
+    Ok(path_str_result)
 }
 
 #[tauri::command]
@@ -74,7 +78,7 @@ pub async fn generate_invoice_pdf(
     // 3. Încarcă cumpărătorul
     let buyer = contacts::get(&state.db, &inv.contact_id).await?;
 
-    // 4. Generează PDF
+    // 4. Generează PDF (CPU-bound — rulăm în spawn_blocking)
     let input = GeneratorInput {
         invoice: inv.clone(),
         lines,
@@ -82,19 +86,23 @@ pub async fn generate_invoice_pdf(
         buyer,
         storno_ref: None,
     };
-    let pdf_bytes = generate_pdf(&input)?;
-
-    // 5. Calculează calea şi scrie fişierul
     let path = paths::pdf_path(&app, &inv.company_id, &invoice_id);
-    std::fs::write(&path, &pdf_bytes)?;
+    let path_clone = path.clone();
+    let path_str_result = tauri::async_runtime::spawn_blocking(move || -> AppResult<String> {
+        let pdf_bytes = generate_pdf(&input)?;
+        std::fs::write(&path_clone, &pdf_bytes).map_err(AppError::Io)?;
+        path_clone
+            .to_str()
+            .ok_or_else(|| AppError::Pdf("Cale fişier invalidă UTF-8".to_string()))
+            .map(|s| s.to_string())
+    })
+    .await
+    .map_err(|e| AppError::Pdf(e.to_string()))??;
 
-    // 6. Actualizează DB
-    let path_str = path
-        .to_str()
-        .ok_or_else(|| AppError::Pdf("Cale fişier invalidă UTF-8".to_string()))?;
-    invoices::set_pdf_path(&state.db, &invoice_id, path_str).await?;
+    // 5. Actualizează DB
+    invoices::set_pdf_path(&state.db, &invoice_id, &path_str_result).await?;
 
-    Ok(path_str.to_string())
+    Ok(path_str_result)
 }
 
 #[tauri::command]

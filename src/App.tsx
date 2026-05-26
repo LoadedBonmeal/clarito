@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { queryClient } from "@/lib/queries";
 import { router } from "@/router";
 import { isTauriContext } from "@/lib/tauri";
+import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 
 /** Afișat când utilizatorul deschide URL-ul în browser în loc de aplicația nativă. */
 function NotTauriScreen() {
@@ -62,7 +63,9 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <ErrorBoundary>
+        <RouterProvider router={router} />
+      </ErrorBoundary>
       <Toaster />
     </QueryClientProvider>
   );

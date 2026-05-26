@@ -295,6 +295,13 @@ function ContactModal({
     e.preventDefault();
     setError(null);
     if (!form.legalName.trim()) { setError("Denumirea este obligatorie."); return; }
+    if (form.cui?.trim()) {
+      const cuiClean = form.cui.trim().toUpperCase().replace(/^RO/, "");
+      if (!/^\d{2,10}$/.test(cuiClean)) {
+        setError("CUI invalid — trebuie să conțină 2-10 cifre (ex: RO12345678 sau 12345678)");
+        return;
+      }
+    }
     const input: CreateContactInput = {
       ...form,
       cui: form.cui?.trim() || undefined,

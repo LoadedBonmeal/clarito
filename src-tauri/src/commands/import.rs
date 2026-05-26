@@ -1,7 +1,7 @@
 //! Importuri CSV pentru facturi și contacte.
 
 use sqlx::Row;
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -321,13 +321,12 @@ pub struct XmlImportResult {
 /// Importă o factură din XML UBL 2.1 (format e-Factura ANAF) în tabela received_invoices.
 /// `xml_content` este conținutul fișierului XML ca string UTF-8.
 /// `company_id` este compania destinatară.
-/// `app_data_dir` — directorul de date al aplicației (primit din frontend via path.appDataDir()).
 #[tauri::command]
 pub async fn import_invoice_xml(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     xml_content: String,
     company_id: String,
-    app_data_dir: String,
 ) -> AppResult<XmlImportResult> {
     use quick_xml::events::Event;
     use quick_xml::Reader;
@@ -442,16 +441,19 @@ pub async fn import_invoice_xml(
     }
 
     // ── Save XML to disk ─────────────────────────────────────────────────────
-    let year = if issue_date.len() >= 4 { &issue_date[..4] } else { "0000" };
+    let base = app.path().app_data_dir().map_err(|e| AppError::Other(e.to_string()))?;
+    let year_str = if issue_date.len() >= 4 { issue_date[..4].to_string() } else { "0000".to_string() };
     let unique_id = uuid::Uuid::now_v7().to_string();
-    let archive_dir = std::path::PathBuf::from(&app_data_dir)
-        .join("archive")
-        .join("received")
-        .join("manual")
-        .join(year)
-        .join(&unique_id);
+    let archive_root = base.join("archive").join("received").join("manual");
+    std::fs::create_dir_all(&archive_root).map_err(AppError::Io)?;
+    let archive_dir = archive_root.join(&year_str).join(&unique_id);
     std::fs::create_dir_all(&archive_dir).map_err(AppError::Io)?;
     let xml_path = archive_dir.join("invoice.xml");
+    // Verify the path stays under base (canonicalize resolves symlinks/.. components):
+    let canon = xml_path.canonicalize().unwrap_or_else(|_| xml_path.clone());
+    if !canon.starts_with(&base) {
+        return Err(AppError::Validation("Cale invalidă".into()));
+    }
     std::fs::write(&xml_path, xml_str.as_bytes()).map_err(AppError::Io)?;
 
     // ── Insert into received_invoices ─────────────────────────────────────────
