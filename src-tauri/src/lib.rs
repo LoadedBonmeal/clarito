@@ -222,6 +222,17 @@ pub fn run() {
             // reports
             commands::reports::generate_vat_report,
             commands::reports::export_report,
+            // payments
+            commands::payments::add_payment,
+            commands::payments::list_payments,
+            commands::payments::delete_payment,
+            commands::payments::get_payment_summary,
+            // recurring invoices
+            commands::recurring::create_recurring_invoice,
+            commands::recurring::list_recurring_invoices,
+            commands::recurring::delete_recurring_invoice,
+            // saft d406
+            commands::saft::export_saft_d406,
         ])
         .plugin(tauri_plugin_sql::Builder::default().build())
         .run(tauri::generate_context!())

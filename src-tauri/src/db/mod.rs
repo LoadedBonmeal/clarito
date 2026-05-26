@@ -20,3 +20,5 @@ pub mod settings;
 pub mod license;
 
 pub mod seed;
+pub mod payments;
+pub mod recurring;

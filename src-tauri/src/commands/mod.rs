@@ -17,3 +17,6 @@ pub mod archive;
 pub mod integrations;
 pub mod import;
 pub mod reports;
+pub mod payments;
+pub mod recurring;
+pub mod saft;
