@@ -21,6 +21,14 @@ const LABELS: Record<string, string> = {
   archived:   "ARHIVATĂ",
   // legacy (sample data uses "pending" instead of "queued")
   pending:    "ÎN AȘTEPTARE",
+  // Payment statuses
+  paid:       "PLĂTIT",
+  unpaid:     "NEPLĂTIT",
+  partial:    "PARȚIAL",
+  overdue:    "RESTANȚĂ",
+  // Recurring statuses
+  active:     "ACTIV",
+  inactive:   "INACTIV",
 };
 
 /** Returnează clasa CSS corespunzătoare (toate clasele din design.css sunt lowercase). */

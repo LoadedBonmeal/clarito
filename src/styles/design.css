@@ -969,6 +969,16 @@ input, select, textarea { font: inherit; color: inherit; }
 .badge.reviewed  { background: var(--st-pending-bg);   color: var(--st-pending-fg); }
 .badge.approved  { background: var(--st-validated-bg); color: var(--st-validated-fg); }
 
+/* payment statuses */
+.badge.paid     { background: var(--st-validated-bg); color: var(--st-validated-fg); }
+.badge.partial  { background: var(--st-pending-bg);   color: var(--st-pending-fg); }
+.badge.unpaid   { background: var(--st-draft-bg);     color: var(--st-draft-fg); }
+.badge.overdue  { background: var(--st-rejected-bg);  color: var(--st-rejected-fg); }
+
+/* recurring invoice statuses */
+.badge.active   { background: var(--st-validated-bg); color: var(--st-validated-fg); }
+.badge.inactive { background: var(--st-draft-bg);     color: var(--st-draft-fg); }
+
 /* ------------------------------------------------------------------
    Misc
    ------------------------------------------------------------------ */
