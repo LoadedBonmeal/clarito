@@ -34,7 +34,7 @@ const DEFAULT_LINE: CreateLineInput = {
   quantity: 1,
   unit: "buc",
   unitPrice: 0,
-  vatRate: 19,
+  vatRate: 21,
   vatCategory: "S" as VatCategory,
 };
 
@@ -125,7 +125,8 @@ export function InvoiceNewPage() {
         if (!line.name?.trim()) lineErrors.push(`Linia ${i + 1}: denumirea produsului/serviciului este obligatorie`);
         if ((line.quantity ?? 0) <= 0) lineErrors.push(`Linia ${i + 1}: cantitatea trebuie să fie mai mare decât 0`);
         if ((line.unitPrice ?? 0) < 0) lineErrors.push(`Linia ${i + 1}: prețul unitar nu poate fi negativ`);
-        if (![0, 5, 9, 19].includes(line.vatRate ?? 19)) lineErrors.push(`Linia ${i + 1}: cota TVA trebuie să fie 0%, 5%, 9% sau 19%`);
+        // Valid RO VAT rates: 0%, 5%, 9% (≤2025-07-31), 11% (≥2025-08-01), 19% (≤2025-07-31), 21% (≥2025-08-01)
+        if (![0, 5, 9, 11, 19, 21].includes(line.vatRate ?? 21)) lineErrors.push(`Linia ${i + 1}: cota TVA trebuie să fie 0%, 5%, 9%, 11%, 19% sau 21%`);
       });
       if (lineErrors.length > 0) throw new Error(lineErrors.join("\n"));
       return api.invoices.createDraft({

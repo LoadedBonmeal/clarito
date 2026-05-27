@@ -417,10 +417,16 @@ fn rule_br_ro_035_line_vat_rates(ctx: &RuleContext<'_>) -> Option<String> {
         let pos = i + 1;
         match line.vat_category.as_str() {
             "S" => {
-                // Standard rate: 19, 9, or 5 for Romania
-                if line.vat_rate != 19.0 && line.vat_rate != 9.0 && line.vat_rate != 5.0 {
+                // Valid RO TVA rates for category S:
+                //   5% — super-redusă (permanent)
+                //   9% — redusă (până la 2025-07-31)
+                //  11% — redusă (din 2025-08-01)
+                //  19% — standard (până la 2025-07-31)
+                //  21% — standard (din 2025-08-01)
+                const VALID_S: &[f64] = &[5.0, 9.0, 11.0, 19.0, 21.0];
+                if !VALID_S.contains(&line.vat_rate) {
                     errs.push(format!(
-                        "linia {}: categoria S trebuie să aibă cota TVA 5%, 9% sau 19% (actual: {}%)",
+                        "linia {}: categoria S trebuie să aibă cota TVA 5%, 9%, 11%, 19% sau 21% (actual: {}%)",
                         pos, line.vat_rate
                     ));
                 }

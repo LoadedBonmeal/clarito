@@ -260,6 +260,17 @@ export const importData = {
       totalAmount?: number;
       errors: string[];
     }>("import_invoice_xml", { xmlContent, companyId }),
+  /** Preferred: citește fișierul în Rust, ocolind scope-ul FS plugin. */
+  invoiceXmlFromFile: (filePath: string, companyId: string) =>
+    invoke<{
+      imported: number;
+      invoiceNumber?: string;
+      supplierName?: string;
+      supplierCui?: string;
+      issueDate?: string;
+      totalAmount?: number;
+      errors: string[];
+    }>("import_invoice_xml_from_file", { filePath, companyId }),
 };
 
 // ─── Integrations ─────────────────────────────────────────────────────────

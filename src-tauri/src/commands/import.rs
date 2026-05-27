@@ -318,11 +318,37 @@ pub struct XmlImportResult {
     pub errors: Vec<String>,
 }
 
+/// Importă o factură XML dintr-un fișier selectat de utilizator prin dialog.
+/// Citim fișierul în Rust (nu prin plugin-fs din frontend) pentru a ocoli restricțiile
+/// de scope ale plugin-ului FS (care permit doar $APPDATA/**).
+/// Orice cale returnată de dialog::open este validă pentru tokio::fs::read_to_string.
+#[tauri::command]
+pub async fn import_invoice_xml_from_file(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    file_path: String,
+    company_id: String,
+) -> AppResult<XmlImportResult> {
+    let xml_content = tokio::fs::read_to_string(&file_path)
+        .await
+        .map_err(|e| AppError::Other(format!("Nu se poate citi fișierul: {e}")))?;
+    import_invoice_xml_inner(app, state, xml_content, company_id).await
+}
+
 /// Importă o factură din XML UBL 2.1 (format e-Factura ANAF) în tabela received_invoices.
 /// `xml_content` este conținutul fișierului XML ca string UTF-8.
 /// `company_id` este compania destinatară.
 #[tauri::command]
 pub async fn import_invoice_xml(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    xml_content: String,
+    company_id: String,
+) -> AppResult<XmlImportResult> {
+    import_invoice_xml_inner(app, state, xml_content, company_id).await
+}
+
+async fn import_invoice_xml_inner(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     xml_content: String,
@@ -440,6 +466,39 @@ pub async fn import_invoice_xml(
         issuer_name = issuer_cui.clone();
     }
 
+    // ── Dedup: derivăm ID-ul din hash-ul conținutului XML ───────────────────
+    // Astfel, importul aceluiași fișier de două ori va lovi UNIQUE(anaf_download_id)
+    // și INSERT OR IGNORE va returna 0 rows affected → mesaj clar pentru utilizator.
+    use sha2::{Digest, Sha256};
+    let xml_hash = {
+        let mut h = Sha256::new();
+        h.update(xml_str.as_bytes());
+        format!("{:x}", h.finalize())
+    };
+    let anaf_download_id = format!("manual-{}", &xml_hash[..32]); // primii 128 biți
+
+    // Verificăm în avans dacă există deja (pentru mesaj de eroare mai clar)
+    let existing: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM received_invoices WHERE anaf_download_id = ?1 LIMIT 1",
+    )
+    .bind(&anaf_download_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    if existing.is_some() {
+        errors.push(format!("Factura {} a fost deja importată (același fișier XML).", invoice_number));
+        return Ok(XmlImportResult {
+            imported: 0,
+            invoice_number: Some(invoice_number),
+            supplier_name: Some(issuer_name),
+            supplier_cui: Some(issuer_cui),
+            issue_date: Some(issue_date),
+            total_amount: Some(total_amount),
+            errors,
+        });
+    }
+
     // ── Save XML to disk ─────────────────────────────────────────────────────
     let base = app.path().app_data_dir().map_err(|e| AppError::Other(e.to_string()))?;
     let year_str = if issue_date.len() >= 4 { issue_date[..4].to_string() } else { "0000".to_string() };
@@ -459,7 +518,7 @@ pub async fn import_invoice_xml(
     // ── Insert into received_invoices ─────────────────────────────────────────
     let recv_id = uuid::Uuid::now_v7().to_string();
     let now = chrono::Utc::now().timestamp();
-    let anaf_download_id = format!("manual-{}", &unique_id);
+    // anaf_download_id already set above from XML content hash
 
     let res = sqlx::query(
         "INSERT OR IGNORE INTO received_invoices \

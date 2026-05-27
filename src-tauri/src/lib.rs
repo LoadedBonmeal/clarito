@@ -211,6 +211,7 @@ pub fn run() {
             commands::import::import_invoices_csv,
             commands::import::import_contacts_csv,
             commands::import::import_invoice_xml,
+            commands::import::import_invoice_xml_from_file,
             commands::import::get_invoices_csv_template,
             commands::import::get_contacts_csv_template,
             // integrations

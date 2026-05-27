@@ -15,6 +15,18 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::ubl::{generator::{generate_ubl, GeneratorInput}, validator::validate_invoice_data};
 
+// ─── Helper: sanitizare componentă de cale filesystem ─────────────────────
+
+/// Permite doar caractere safe pentru name-uri de directoare/fișiere.
+/// Elimină `..`, `/`, `\` și orice caracter în afară de [a-zA-Z0-9._-].
+/// Limitează la 64 de caractere pentru a preveni path-uri excesiv de lungi.
+fn sanitize_path_component(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .take(64)
+        .collect()
+}
+
 // ─── Helper: obține token valid, încearcă refresh dacă e expirat ──────────
 
 async fn get_valid_token(company_id: &str) -> AppResult<String> {
@@ -164,15 +176,27 @@ pub async fn anaf_submit_invoice(
     } else {
         "0000"
     };
-    let archive_dir = app
+    // Sanitizăm componentele de cale: permitem doar [a-zA-Z0-9._-], max 64 chars.
+    // CUI-ul e deja în format RO + cifre; full_number e validat în BR-RO-025
+    // (doar [a-zA-Z0-9-_]), dar aplicăm sanitizare defensivă oricum.
+    let safe_cui = sanitize_path_component(&company.cui);
+    let safe_year = sanitize_path_component(year);
+    let safe_full_number = sanitize_path_component(&invoice.full_number);
+    let base = app
         .path()
         .app_data_dir()
-        .map_err(|e| AppError::Other(e.to_string()))?
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    let archive_dir = base
         .join("archive")
         .join("sent")
-        .join(&company.cui)
-        .join(year)
-        .join(&invoice.full_number);
+        .join(&safe_cui)
+        .join(&safe_year)
+        .join(&safe_full_number);
+    // Belt-and-suspenders: verificăm că path-ul rămâne sub base
+    // (nu putem canonicaliza înainte de create_dir_all, dar verificăm prefix-ul direct)
+    if !archive_dir.starts_with(&base) {
+        return Err(AppError::Validation("Cale de arhivă invalidă".into()));
+    }
     std::fs::create_dir_all(&archive_dir).ok();
     let xml_path = archive_dir.join("invoice.xml");
     std::fs::write(&xml_path, xml_string.as_bytes()).map_err(AppError::Io)?;

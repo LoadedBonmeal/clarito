@@ -173,9 +173,8 @@ export function InvoicesPage() {
               const filePath = await open({ filters: [{ name: "XML e-Factura", extensions: ["xml"] }] });
               if (!filePath || typeof filePath !== "string") return;
               try {
-                const { readTextFile } = await import("@tauri-apps/plugin-fs");
-                const xmlContent = await readTextFile(filePath);
-                const result = await api.importData.invoiceXml(xmlContent, activeCompanyId);
+                // Citim fișierul în Rust (ocolim scope-ul FS plugin care permite doar $APPDATA):
+                const result = await api.importData.invoiceXmlFromFile(filePath, activeCompanyId);
                 if (result.imported > 0) {
                   notify.success(`Factură importată: ${result.invoiceNumber} — ${result.supplierName} · ${result.totalAmount?.toFixed(2)} RON`);
                   void queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
