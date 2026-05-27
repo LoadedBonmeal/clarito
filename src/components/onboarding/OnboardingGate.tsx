@@ -6,6 +6,10 @@ import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import type { AppErrorPayload } from "@/types";
 
+function isAppErrorPayload(e: unknown): e is AppErrorPayload {
+  return typeof e === "object" && e !== null && ("message" in e || "code" in e);
+}
+
 function LoadingScreen() {
   return (
     <div
@@ -39,8 +43,8 @@ function LicenseExpiredScreen() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.companies.list() });
     },
     onError: (err) => {
-      const payload = err as unknown as AppErrorPayload;
-      setActivateError(payload?.message ?? "Licența nu a putut fi activată.");
+      const message = isAppErrorPayload(err) ? err.message : String(err);
+      setActivateError(message || "Licența nu a putut fi activată.");
     },
   });
 

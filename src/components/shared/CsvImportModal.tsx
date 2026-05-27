@@ -149,7 +149,7 @@ export function CsvImportModal({
           <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>
             Import {TYPE_LABELS[type]} din CSV
           </h3>
-          <button type="button" className="btn-icon" onClick={onClose}>
+          <button type="button" className="btn-icon" aria-label="Închide" onClick={onClose}>
             <Icon name="x" size={14} />
           </button>
         </div>

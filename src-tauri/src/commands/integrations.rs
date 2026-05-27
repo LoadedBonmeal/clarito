@@ -78,8 +78,8 @@ pub async fn smartbill_push_invoice(
         .iter()
         .map(|line| {
             let tax_name = match line.vat_rate as u32 {
-                19 => "Normala",
-                9 | 5 => "Redusa",
+                21 | 19 => "Normala",
+                11 | 9 | 5 => "Redusa",
                 0 => "Scutita",
                 _ => "Normala",
             };
@@ -313,30 +313,82 @@ pub async fn export_winmentor_csv(
         let denumire = contact.legal_name.replace(';', " ");
         let observatii = invoice.notes.as_deref().unwrap_or("").replace(';', " ");
 
-        // Compute vat rate from invoice totals
-        let vat_rate = if invoice.subtotal_amount > 0.0 {
-            (invoice.vat_amount / invoice.subtotal_amount * 100.0).round() as i64
-        } else {
-            19
-        };
+        // Fetch line items to group by VAT rate — avoids blended rate on mixed-VAT invoices.
+        use rust_decimal::Decimal;
+        use rust_decimal::prelude::ToPrimitive;
+        use std::collections::BTreeMap;
 
-        let row = format!(
-            "FACT;{serie};{numar};{data};{cui};{denumire};\
-            {net:.2};{vat_rate};{tva:.2};{total:.2};RON;1;{scadenta};{observatii}",
-            serie = invoice.series,
-            numar = invoice.number,
-            data = data,
-            cui = cui,
-            denumire = denumire,
-            net = invoice.subtotal_amount,
-            vat_rate = vat_rate,
-            tva = invoice.vat_amount,
-            total = invoice.total_amount,
-            scadenta = scadenta,
-            observatii = observatii,
-        );
+        let line_rows = sqlx::query(
+            "SELECT vat_rate, subtotal_amount, vat_amount, total_amount \
+             FROM invoice_line_items WHERE invoice_id = ?1 ORDER BY position",
+        )
+        .bind(&invoice.id)
+        .fetch_all(&state.db)
+        .await
+        .map_err(AppError::Database)?;
 
-        rows.push(row);
+        // Group by vat_rate (stored as f64 in DB; use integer key for bucketing).
+        // BTreeMap keeps rates sorted ascending for deterministic output.
+        let mut groups: BTreeMap<i64, (Decimal, Decimal, Decimal)> = BTreeMap::new();
+        for lr in &line_rows {
+            use sqlx::Row;
+            let rate_f: f64 = lr.try_get("vat_rate").unwrap_or(0.0);
+            let net_f: f64  = lr.try_get("subtotal_amount").unwrap_or(0.0);
+            let tva_f: f64  = lr.try_get("vat_amount").unwrap_or(0.0);
+            let tot_f: f64  = lr.try_get("total_amount").unwrap_or(0.0);
+            let rate_key = rate_f.round() as i64;
+            let net = Decimal::try_from(net_f).unwrap_or(Decimal::ZERO);
+            let tva = Decimal::try_from(tva_f).unwrap_or(Decimal::ZERO);
+            let tot = Decimal::try_from(tot_f).unwrap_or(Decimal::ZERO);
+            let entry = groups.entry(rate_key).or_insert((Decimal::ZERO, Decimal::ZERO, Decimal::ZERO));
+            entry.0 += net;
+            entry.1 += tva;
+            entry.2 += tot;
+        }
+
+        // If we ended up with no lines (shouldn't happen), emit one row from invoice totals
+        // using 19 as fallback rate — better than a silently wrong blended rate.
+        if groups.is_empty() {
+            let net = Decimal::try_from(invoice.subtotal_amount).unwrap_or(Decimal::ZERO);
+            let tva = Decimal::try_from(invoice.vat_amount).unwrap_or(Decimal::ZERO);
+            let tot = Decimal::try_from(invoice.total_amount).unwrap_or(Decimal::ZERO);
+            groups.insert(19, (net, tva, tot));
+            tracing::warn!(invoice_id = %invoice.id, "WinMentor export: no line items found, using fallback rate 19%");
+        }
+
+        // Warn if multiple VAT rates are present — WinMentor will get one row per rate.
+        if groups.len() > 1 {
+            tracing::warn!(
+                invoice_id = %invoice.id,
+                full_number = %invoice.full_number,
+                rate_count = groups.len(),
+                "WinMentor export: invoice has {} VAT rate groups — emitting one row per group",
+                groups.len()
+            );
+        }
+
+        for (vat_rate, (net_dec, tva_dec, tot_dec)) in &groups {
+            let net = net_dec.to_f64().unwrap_or(0.0);
+            let tva = tva_dec.to_f64().unwrap_or(0.0);
+            let total = tot_dec.to_f64().unwrap_or(0.0);
+
+            let row = format!(
+                "FACT;{serie};{numar};{data};{cui};{denumire};\
+                {net:.2};{vat_rate};{tva:.2};{total:.2};RON;1;{scadenta};{observatii}",
+                serie = invoice.series,
+                numar = invoice.number,
+                data = data,
+                cui = cui,
+                denumire = denumire,
+                net = net,
+                vat_rate = vat_rate,
+                tva = tva,
+                total = total,
+                scadenta = scadenta,
+                observatii = observatii,
+            );
+            rows.push(row);
+        }
     }
 
     let csv_content = rows.join("\r\n");

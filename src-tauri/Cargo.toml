@@ -75,6 +75,9 @@ sha2 = "0.10"
 rust_decimal = { version = "1", features = ["serde-float"] }
 rust_decimal_macros = "1"
 
+# Cryptographically secure random number generation (PKCE, CSRF state)
+rand = "0.8"
+
 # PDF generation
 printpdf = "0.7"
 

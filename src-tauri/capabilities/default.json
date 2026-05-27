@@ -16,6 +16,8 @@
     "store:default",
     "window-state:default",
     "log:default",
-    "sql:default"
+    "sql:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install"
   ]
 }

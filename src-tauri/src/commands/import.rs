@@ -47,6 +47,9 @@ pub async fn import_invoices_csv(
     company_id: String,
     dry_run: bool,
 ) -> AppResult<ImportResult> {
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
     let pool = &state.db;
     let mut lines = content.lines();
     // Skip header
@@ -54,6 +57,13 @@ pub async fn import_invoices_csv(
 
     let mut imported: u32 = 0;
     let mut errors: Vec<String> = Vec::new();
+
+    // Fetch the active company's CUI once so we can validate fields[0] per row.
+    let company = crate::db::companies::get(pool, &company_id).await?;
+    fn normalize_cui_csv(s: &str) -> String {
+        s.trim().to_uppercase().trim_start_matches("RO").trim().to_string()
+    }
+    let company_cui_norm = normalize_cui_csv(&company.cui);
 
     for (idx, line) in lines.enumerate() {
         let line = line.trim();
@@ -63,6 +73,16 @@ pub async fn import_invoices_csv(
         let fields: Vec<&str> = line.split(';').map(str::trim).collect();
         if fields.len() < 12 {
             errors.push(format!("Linia {}: câmpuri insuficiente ({})", idx + 2, fields.len()));
+            continue;
+        }
+
+        // Validate that fields[0] (company_cui) matches the active company.
+        let row_company_cui = normalize_cui_csv(fields[0]);
+        if !row_company_cui.is_empty() && row_company_cui != company_cui_norm {
+            errors.push(format!(
+                "Linia {}: CUI companie din CSV ({}) nu corespunde companiei active ({}).",
+                idx + 2, fields[0], company.cui
+            ));
             continue;
         }
 
@@ -86,21 +106,21 @@ pub async fn import_invoices_csv(
                 continue;
             }
         };
-        let qty: f64 = match qty_str.parse() {
+        let qty: Decimal = match Decimal::from_str(qty_str) {
             Ok(v) => v,
             Err(_) => {
                 errors.push(format!("Linia {}: cantitate invalidă '{}'", idx + 2, qty_str));
                 continue;
             }
         };
-        let unit_price: f64 = match unit_price_str.replace(',', ".").parse() {
+        let unit_price: Decimal = match Decimal::from_str(&unit_price_str.replace(',', ".")) {
             Ok(v) => v,
             Err(_) => {
                 errors.push(format!("Linia {}: preț unitar invalid '{}'", idx + 2, unit_price_str));
                 continue;
             }
         };
-        let vat_rate: f64 = match vat_rate_str.parse() {
+        let vat_rate: Decimal = match Decimal::from_str(vat_rate_str) {
             Ok(v) => v,
             Err(_) => {
                 errors.push(format!("Linia {}: cotă TVA invalidă '{}'", idx + 2, vat_rate_str));
@@ -114,22 +134,45 @@ pub async fn import_invoices_csv(
             continue;
         }
 
-        // Find or create contact
+        // Calculate amounts with Decimal precision
+        let subtotal = (qty * unit_price).round_dp(2);
+        let vat_amount = (subtotal * vat_rate / Decimal::from(100)).round_dp(2);
+        let total = (subtotal + vat_amount).round_dp(2);
+        let full_number = format!("{}{}", series, number);
+        let now = chrono::Utc::now().timestamp();
+        let invoice_id = crate::db::models::new_id();
+        let line_id = crate::db::models::new_id();
+
+        // Begin transaction — ensures header + line item are atomic.
+        let mut tx = match pool.begin().await {
+            Ok(t) => t,
+            Err(e) => {
+                errors.push(format!("Linia {}: eroare tranzacție DB: {}", idx + 2, e));
+                continue;
+            }
+        };
+
+        // Find or create contact (outside the per-invoice tx — contacts are shared)
         let contact_id: String = {
             let existing = sqlx::query(
                 "SELECT id FROM contacts WHERE cui = ?1 AND company_id = ?2 LIMIT 1",
             )
             .bind(customer_cui)
             .bind(&company_id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *tx)
             .await;
 
             match existing {
-                Ok(Some(row)) => row.try_get::<String, _>("id").map_err(AppError::Database)?,
+                Ok(Some(row)) => match row.try_get::<String, _>("id") {
+                    Ok(id) => id,
+                    Err(e) => {
+                        errors.push(format!("Linia {}: eroare DB contact: {}", idx + 2, e));
+                        continue;
+                    }
+                },
                 Ok(None) => {
-                    // Create contact
+                    // Create contact inside the transaction
                     let new_id = crate::db::models::new_id();
-                    let now = chrono::Utc::now().timestamp();
                     let res = sqlx::query(
                         "INSERT INTO contacts (id, company_id, contact_type, cui, legal_name, vat_payer, country, created_at, updated_at) \
                          VALUES (?1, ?2, 'CUSTOMER', ?3, ?4, 0, 'RO', ?5, ?5)",
@@ -139,7 +182,7 @@ pub async fn import_invoices_csv(
                     .bind(customer_cui)
                     .bind(customer_name)
                     .bind(now)
-                    .execute(pool)
+                    .execute(&mut *tx)
                     .await;
                     if let Err(e) = res {
                         errors.push(format!("Linia {}: eroare creare contact: {}", idx + 2, e));
@@ -154,16 +197,7 @@ pub async fn import_invoices_csv(
             }
         };
 
-        // Calculate amounts
-        let subtotal = qty * unit_price;
-        let vat_amount = subtotal * vat_rate / 100.0;
-        let total = subtotal + vat_amount;
-        let full_number = format!("{}{}", series, number);
-        let now = chrono::Utc::now().timestamp();
-        let invoice_id = crate::db::models::new_id();
-        let line_id = crate::db::models::new_id();
-
-        // Insert invoice
+        // Insert invoice header
         let inv_res = sqlx::query(
             "INSERT INTO invoices \
              (id, company_id, contact_id, series, number, full_number, issue_date, due_date, \
@@ -178,21 +212,22 @@ pub async fn import_invoices_csv(
         .bind(&full_number)
         .bind(issue_date)
         .bind(due_date)
-        .bind(subtotal)
-        .bind(vat_amount)
-        .bind(total)
+        .bind(subtotal.to_string())
+        .bind(vat_amount.to_string())
+        .bind(total.to_string())
         .bind(now)
-        .execute(pool)
+        .execute(&mut *tx)
         .await;
 
         if let Err(e) = inv_res {
             errors.push(format!("Linia {}: eroare inserare factură: {}", idx + 2, e));
+            // tx is dropped here — rolled back automatically
             continue;
         }
 
-        // Insert line item
-        let vat_cat = if vat_rate == 0.0 { "Z" } else { "S" };
-        let _ = sqlx::query(
+        // Insert line item — error propagates and rolls back the transaction
+        let vat_cat = if vat_rate == Decimal::ZERO { "Z" } else { "S" };
+        let line_res = sqlx::query(
             "INSERT INTO invoice_line_items \
              (id, invoice_id, position, name, quantity, unit, unit_price, vat_rate, vat_category, \
               subtotal_amount, vat_amount, total_amount) \
@@ -201,18 +236,28 @@ pub async fn import_invoices_csv(
         .bind(&line_id)
         .bind(&invoice_id)
         .bind(item_name)
-        .bind(qty)
+        .bind(qty.to_string())
         .bind(unit)
-        .bind(unit_price)
-        .bind(vat_rate)
+        .bind(unit_price.to_string())
+        .bind(vat_rate.to_string())
         .bind(vat_cat)
-        .bind(subtotal)
-        .bind(vat_amount)
-        .bind(total)
-        .execute(pool)
+        .bind(subtotal.to_string())
+        .bind(vat_amount.to_string())
+        .bind(total.to_string())
+        .execute(&mut *tx)
         .await;
 
-        imported += 1;
+        if let Err(e) = line_res {
+            errors.push(format!("Linia {}: eroare inserare linie factură: {}", idx + 2, e));
+            // tx dropped — rolled back automatically
+            continue;
+        }
+
+        // Commit — only now count as imported
+        match tx.commit().await {
+            Ok(_) => imported += 1,
+            Err(e) => errors.push(format!("Linia {}: eroare commit tranzacție: {}", idx + 2, e)),
+        }
     }
 
     Ok(ImportResult { imported, errors })
@@ -538,23 +583,18 @@ async fn import_invoice_xml_inner(
         }
     }
 
-    // ── Save XML to disk ─────────────────────────────────────────────────────
+    // ── Compute archive path (but do NOT write yet) ───────────────────────────
     let base = app.path().app_data_dir().map_err(|e| AppError::Other(e.to_string()))?;
     let year_str = if issue_date.len() >= 4 { issue_date[..4].to_string() } else { "0000".to_string() };
     let unique_id = crate::db::models::new_id();
     let archive_root = base.join("archive").join("received").join("manual");
-    tokio::fs::create_dir_all(&archive_root).await.map_err(AppError::Io)?;
     let archive_dir = archive_root.join(&year_str).join(&unique_id);
-    tokio::fs::create_dir_all(&archive_dir).await.map_err(AppError::Io)?;
     let xml_path = archive_dir.join("invoice.xml");
-    // Verify the path stays under base (canonicalize resolves symlinks/.. components):
-    let canon = xml_path.canonicalize().unwrap_or_else(|_| xml_path.clone());
-    if !canon.starts_with(&base) {
-        return Err(AppError::Validation("Cale invalidă".into()));
-    }
-    tokio::fs::write(&xml_path, xml_str.as_bytes()).await.map_err(AppError::Io)?;
 
-    // ── Insert into received_invoices ─────────────────────────────────────────
+    // ── Insert into received_invoices FIRST ───────────────────────────────────
+    // Writing the file first and then inserting into DB risks leaving an orphaned
+    // archive file if the DB insert fails (e.g., duplicate). Instead: insert first,
+    // write to disk only on success.
     let recv_id = crate::db::models::new_id();
     let now = chrono::Utc::now().timestamp();
     // anaf_download_id already set above from XML content hash
@@ -581,16 +621,28 @@ async fn import_invoice_xml_inner(
     .await;
 
     match res {
-        Ok(r) if r.rows_affected() > 0 => Ok(XmlImportResult {
-            imported: 1,
-            invoice_number: Some(invoice_number),
-            supplier_name: Some(issuer_name),
-            supplier_cui: Some(issuer_cui),
-            issue_date: Some(issue_date),
-            total_amount: Some(total_amount),
-            errors,
-        }),
+        Ok(r) if r.rows_affected() > 0 => {
+            // DB insert succeeded — now write the XML archive file.
+            // If the file write fails the DB record still has all invoice data;
+            // the archive copy is just missing. Log the error but still report success.
+            if let Err(e) = tokio::fs::create_dir_all(&archive_dir).await {
+                eprintln!("WARN: impossibil de creat directorul arhivă {}: {}", archive_dir.display(), e);
+            } else if let Err(e) = tokio::fs::write(&xml_path, xml_str.as_bytes()).await {
+                eprintln!("WARN: imposibil de scris fișierul XML arhivă {}: {}", xml_path.display(), e);
+            }
+            Ok(XmlImportResult {
+                imported: 1,
+                invoice_number: Some(invoice_number),
+                supplier_name: Some(issuer_name),
+                supplier_cui: Some(issuer_cui),
+                issue_date: Some(issue_date),
+                total_amount: Some(total_amount),
+                errors,
+            })
+        }
         Ok(_) => {
+            // INSERT OR IGNORE returned 0 rows — duplicate (anaf_download_id already exists).
+            // Do NOT write any file.
             errors.push(format!("Factura {} există deja în sistem.", invoice_number));
             Ok(XmlImportResult {
                 imported: 0,
@@ -603,6 +655,7 @@ async fn import_invoice_xml_inner(
             })
         }
         Err(e) => {
+            // DB error — no file written.
             errors.push(format!("Eroare DB: {}", e));
             Ok(XmlImportResult {
                 imported: 0,

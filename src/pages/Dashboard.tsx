@@ -100,8 +100,7 @@ export function DashboardPage() {
   const invoiceTotal = invoicesPage?.total ?? 0;
 
   const now = new Date();
-  const today = now.toISOString().split("T")[0];
-  const currentMonth = today.slice(0, 7);
+  const currentMonth = now.toISOString().split("T")[0].slice(0, 7);
 
   const thisMonth = useMemo(
     () => invoices.filter((inv) => inv.issueDate.startsWith(currentMonth)),
@@ -132,12 +131,18 @@ export function DashboardPage() {
 
   const overdue = useMemo(
     () =>
-      invoices.filter(
-        (inv) =>
-          inv.dueDate < today &&
-          !["VALIDATED", "STORNED"].includes(inv.status),
-      ),
-    [invoices, today],
+      invoices.filter((inv) => {
+        if (!inv.dueDate) return false;
+        const due = new Date(inv.dueDate);
+        const todayMidnight = new Date();
+        todayMidnight.setHours(0, 0, 0, 0);
+        const isPastDue = due < todayMidnight;
+        // Exclude drafts, storned and rejected invoices — ACCEPTED/SUBMITTED/VALIDATED
+        // invoices with a past due date are considered potentially unpaid (overdue).
+        const isActive = !["DRAFT", "STORNED", "REJECTED"].includes(inv.status);
+        return isPastDue && isActive;
+      }),
+    [invoices],
   );
 
   const overdueTotal = useMemo(

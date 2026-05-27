@@ -101,6 +101,8 @@ pub async fn manual_sync(state: State<'_, AppState>, app: tauri::AppHandle) -> A
 }
 
 /// Seed pentru development. Idempotent — nu face nimic dacă DB-ul are date.
+/// Disponibil numai în build-urile de debug (dev). Exclus din release.
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn dev_seed(state: State<'_, AppState>) -> AppResult<()> {
     crate::db::seed::run_if_empty(&state.db).await

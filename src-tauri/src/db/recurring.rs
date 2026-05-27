@@ -157,7 +157,7 @@ pub fn advance_date(current: &str, frequency: &str, day_of_month: u32) -> String
                 (date.year(), date.month() + 1)
             };
             NaiveDate::from_ymd_opt(y, m, day)
-                .unwrap_or_else(|| NaiveDate::from_ymd_opt(y, m, 28).unwrap())
+                .unwrap_or_else(|| NaiveDate::from_ymd_opt(y, m, 28).expect("day 28 is always valid in any month — constant infallible"))
         }
         "quarterly" => {
             let months = date.month() + 3;
@@ -167,7 +167,7 @@ pub fn advance_date(current: &str, frequency: &str, day_of_month: u32) -> String
                 (date.year(), months)
             };
             NaiveDate::from_ymd_opt(y, m, day)
-                .unwrap_or_else(|| NaiveDate::from_ymd_opt(y, m, 28).unwrap())
+                .unwrap_or_else(|| NaiveDate::from_ymd_opt(y, m, 28).expect("day 28 is always valid in any month — constant infallible"))
         }
         "annual" => {
             NaiveDate::from_ymd_opt(date.year() + 1, date.month(), day)

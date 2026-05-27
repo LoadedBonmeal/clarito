@@ -28,16 +28,14 @@ pub struct OAuthResult {
 
 // ─── Helpers criptografice ─────────────────────────────────────────────────
 
-/// Generează un șir de N caractere hex din UUID-uri (caractere valide base64url).
-fn random_hex(n: usize) -> String {
-    let mut s = String::with_capacity(n + 32);
-    while s.len() < n {
-        // uuid::Uuid::now_v7() furnizează entropie suficientă pentru PKCE
-        let u = uuid::Uuid::now_v7().to_string().replace('-', "");
-        s.push_str(&u);
-    }
-    s.truncate(n);
-    s
+/// Generează un șir de N octeți aleatori criptografic securizat, encodat hex.
+/// Folosit pentru code_verifier (PKCE) și state (CSRF). Furnizează 8*N biți
+/// de entropie reală — în contrast cu UUID v7 care este timestamp-dominat.
+fn random_bytes_hex(n: usize) -> String {
+    use rand::RngCore;
+    let mut bytes = vec![0u8; n];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// Encodare base64url (fără padding) — RFC 4648 §5.
@@ -77,9 +75,9 @@ fn sha256_base64url(s: &str) -> String {
 /// Blochează până la autorizare sau timeout 120s.
 pub async fn authorize(_company_id: &str) -> Result<OAuthResult, String> {
     // 1. PKCE
-    let code_verifier = random_hex(64);
+    let code_verifier = random_bytes_hex(32); // 32 bytes = 64 hex chars = 256 bits entropy
     let code_challenge = sha256_base64url(&code_verifier);
-    let state = random_hex(16);
+    let state = random_bytes_hex(16); // 16 bytes = 32 hex chars = 128 bits entropy
 
     // 2. URL autorizare
     let auth_url = format!(

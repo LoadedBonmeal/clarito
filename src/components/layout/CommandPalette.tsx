@@ -161,7 +161,7 @@ export function CommandPalette() {
     },
     {
       id: "act-new-contact",
-      label: "Contact / furnizor nou",
+      label: "Deschide lista contacte",
       icon: "users",
       section: "Acțiuni",
       action: () => {
@@ -293,9 +293,17 @@ export function CommandPalette() {
                     return (
                       <div
                         key={cmd.id}
+                        role="button"
+                        tabIndex={0}
                         className={"palette-row" + (idx === activeIdx ? " active" : "")}
                         onMouseEnter={() => setActiveIdx(idx)}
                         onClick={cmd.action}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            cmd.action();
+                          }
+                        }}
                       >
                         <span className="ico">
                           <Icon name={cmd.icon} size={14} />

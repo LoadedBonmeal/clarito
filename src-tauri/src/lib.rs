@@ -180,6 +180,7 @@ pub fn run() {
             commands::system::get_app_info,
             commands::system::get_db_path,
             commands::system::manual_sync,
+            #[cfg(debug_assertions)]
             commands::system::dev_seed,
             commands::system::open_archive_folder,
             commands::system::get_activity_log,

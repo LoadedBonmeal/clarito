@@ -129,7 +129,7 @@ async fn sleep_until_local_time(hour: u32, minute: u32) {
     use chrono::{Local, NaiveTime};
     let now = Local::now();
     let target_time = NaiveTime::from_hms_opt(hour, minute, 0)
-        .unwrap_or_else(|| NaiveTime::from_hms_opt(4, 0, 0).unwrap());
+        .unwrap_or_else(|| NaiveTime::from_hms_opt(4, 0, 0).expect("04:00 is a valid time — constant infallible"));
     let mut target = now.date_naive().and_time(target_time)
         .and_local_timezone(Local)
         .single()
@@ -596,7 +596,7 @@ pub(crate) async fn do_sync_spv(
             // ── Insert received_invoice row ───────────────────────────────
             let recv_id = crate::db::models::new_id();
             let now = chrono::Utc::now().timestamp();
-            let _ = sqlx::query(
+            if let Err(e) = sqlx::query(
                 "INSERT OR IGNORE INTO received_invoices \
                  (id, company_id, anaf_download_id, anaf_index, issuer_cui, issuer_name, \
                   series, number, total_amount, currency, issue_date, xml_path, status, \
@@ -616,7 +616,15 @@ pub(crate) async fn do_sync_spv(
             .bind(xml_path.to_string_lossy().as_ref())
             .bind(now)
             .execute(pool)
-            .await;
+            .await
+            {
+                tracing::error!(
+                    error = ?e,
+                    anaf_download_id = %msg.id,
+                    issuer_cui = %issuer_cui,
+                    "Failed to insert received_invoice — invoice will be lost unless re-downloaded from SPV"
+                );
+            }
 
             // ── Create SPV notification ───────────────────────────────────
             let title = format!("Factură primită de la {}", issuer_name);

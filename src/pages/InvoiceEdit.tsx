@@ -5,7 +5,11 @@ import { Icon } from "@/components/shared/Icon";
 import { useAppStore } from "@/lib/store";
 import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
+import { notify } from "@/lib/toasts";
 import type { CreateLineInput, VatCategory } from "@/types";
+
+/** Extends CreateLineInput with a stable row key for React list rendering. */
+type LineRow = CreateLineInput & { rowId: string };
 
 function fmtRON(n: number): string {
   return n.toLocaleString("ro-RO", {
@@ -27,6 +31,10 @@ const DEFAULT_LINE: CreateLineInput = {
   vatRate: 21,
   vatCategory: "S" as VatCategory,
 };
+
+function newLineRow(base?: Partial<CreateLineInput>): LineRow {
+  return { ...DEFAULT_LINE, ...base, rowId: crypto.randomUUID() };
+}
 
 export function InvoiceEditPage() {
   const navigate = useNavigate();
@@ -57,7 +65,7 @@ export function InvoiceEditPage() {
   const [dueDate, setDueDate] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [paymentMeansCode, setPaymentMeansCode] = useState<string>("30");
-  const [lines, setLines] = useState<CreateLineInput[]>([{ ...DEFAULT_LINE }]);
+  const [lines, setLines] = useState<LineRow[]>([newLineRow()]);
   const [initialized, setInitialized] = useState(false);
 
   // Pre-fill form from loaded invoice
@@ -72,7 +80,8 @@ export function InvoiceEditPage() {
       setNotes(inv.notes ?? "");
       setPaymentMeansCode(inv.paymentMeansCode ?? "30");
       setLines(
-        invoiceData.lines.map((l) => ({
+        invoiceData.lines.map((l, i) => ({
+          rowId: (l as { id?: string }).id ?? `line-${i}`,
           name: l.name,
           description: l.description ?? undefined,
           quantity: l.quantity,
@@ -97,7 +106,7 @@ export function InvoiceEditPage() {
   const vat = lines.reduce((s, l) => s + l.quantity * l.unitPrice * (l.vatRate / 100), 0);
   const total = net + vat;
 
-  const addLine = () => setLines((prev) => [...prev, { ...DEFAULT_LINE }]);
+  const addLine = () => setLines((prev) => [...prev, newLineRow()]);
 
   const removeLine = (idx: number) =>
     setLines((prev) => prev.filter((_, i) => i !== idx));
@@ -108,7 +117,7 @@ export function InvoiceEditPage() {
     value: CreateLineInput[K],
   ) =>
     setLines((prev) =>
-      prev.map((l, i) => (i === idx ? { ...l, [key]: value } : l)),
+      prev.map((l, i) => (i === idx ? ({ ...l, [key]: value } as LineRow) : l)),
     );
 
   const editMutation = useMutation({
@@ -116,6 +125,33 @@ export function InvoiceEditPage() {
       if (!activeCompanyId) throw new Error("Nicio companie activă.");
       if (!contactId) throw new Error("Selectați un cumpărător.");
       if (lines.length === 0) throw new Error("Adăugați cel puțin o linie.");
+
+      // Per-line validation (mirrors InvoiceNew validation)
+      const validVatRates = [0, 5, 9, 11, 19, 21];
+      for (const [i, line] of lines.entries()) {
+        if (!line.name?.trim()) {
+          notify.warn(`Linia ${i + 1}: denumirea produsului/serviciului este obligatorie.`);
+          throw new Error(`Linia ${i + 1}: denumirea produsului/serviciului este obligatorie.`);
+        }
+        const qty = Number(line.quantity);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          notify.warn(`Linia ${i + 1}: cantitatea trebuie să fie mai mare decât 0.`);
+          throw new Error(`Linia ${i + 1}: cantitatea trebuie să fie mai mare decât 0.`);
+        }
+        const price = Number(line.unitPrice);
+        if (!Number.isFinite(price) || price < 0) {
+          notify.warn(`Linia ${i + 1}: prețul unitar nu poate fi negativ.`);
+          throw new Error(`Linia ${i + 1}: prețul unitar nu poate fi negativ.`);
+        }
+        if (!validVatRates.includes(Number(line.vatRate))) {
+          notify.warn(`Linia ${i + 1}: cotă TVA invalidă (${line.vatRate}). Valori permise: ${validVatRates.join(", ")}%.`);
+          throw new Error(`Linia ${i + 1}: cotă TVA invalidă.`);
+        }
+      }
+
+      // Strip internal rowId before sending to backend
+      const apiLines: CreateLineInput[] = lines.map(({ rowId: _rowId, ...rest }) => rest);
+
       return api.invoices.updateDraft(id, {
         companyId: activeCompanyId,
         contactId,
@@ -126,7 +162,7 @@ export function InvoiceEditPage() {
         currency: "RON",
         notes: notes || undefined,
         paymentMeansCode,
-        lines,
+        lines: apiLines,
       });
     },
     onSuccess: async () => {
@@ -337,7 +373,7 @@ export function InvoiceEditPage() {
                     const lineNet = l.quantity * l.unitPrice;
                     const lineTotal = lineNet * (1 + l.vatRate / 100);
                     return (
-                      <tr key={i}>
+                      <tr key={l.rowId}>
                         <td
                           style={{
                             textAlign: "center",

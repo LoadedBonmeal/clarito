@@ -145,21 +145,35 @@ pub async fn summary_for_invoice(
     .fetch_optional(pool)
     .await?;
 
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
     let total_str = total.ok_or(AppError::NotFound)?;
 
-    // Sum payments — scoped to company_id
-    let paid_sum: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(CAST(amount AS REAL)), 0.0) FROM payments WHERE invoice_id = ?1 AND company_id = ?2",
+    // Sum payments with Decimal precision — fetch each amount as TEXT to avoid
+    // any REAL/f64 cast that could lose precision.
+    let payment_rows: Vec<String> = sqlx::query_scalar(
+        "SELECT amount FROM payments WHERE invoice_id = ?1 AND company_id = ?2",
     )
     .bind(invoice_id)
     .bind(company_id)
-    .fetch_one(pool)
-    .await?;
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
 
-    let total_f: f64 = total_str.parse().unwrap_or(0.0);
-    let payment_status = if paid_sum <= 0.0 {
+    let paid_total = payment_rows
+        .iter()
+        .map(|s| Decimal::from_str(s).unwrap_or(Decimal::ZERO))
+        .fold(Decimal::ZERO, |acc, d| acc + d)
+        .round_dp(2);
+
+    let invoice_total = Decimal::from_str(&total_str)
+        .unwrap_or(Decimal::ZERO)
+        .round_dp(2);
+
+    let payment_status = if paid_total <= Decimal::ZERO {
         "UNPAID"
-    } else if paid_sum >= total_f {
+    } else if paid_total >= invoice_total {
         "PAID"
     } else {
         "PARTIAL"
@@ -170,7 +184,7 @@ pub async fn summary_for_invoice(
     Ok(PaymentSummary {
         invoice_id: invoice_id.to_string(),
         total_amount: total_str,
-        paid_amount: format!("{paid_sum:.2}"),
+        paid_amount: paid_total.round_dp(2).to_string(),
         payment_status: payment_status.to_string(),
         payments,
     })

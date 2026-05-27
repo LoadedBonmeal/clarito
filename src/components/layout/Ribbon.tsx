@@ -8,7 +8,7 @@
 
 import { useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Icon } from "@/components/shared/Icon";
 import { api } from "@/lib/tauri";
@@ -26,6 +26,14 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
   const queryClient = useQueryClient();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const selectedInvoiceId = useAppStore((s) => s.selectedInvoiceId);
+
+  // Read ANAF test mode from persistent settings (same key as Settings.tsx / backend)
+  const { data: testModeSetting } = useQuery({
+    queryKey: ["settings", "use_anaf_test_env"],
+    queryFn: () => api.settings.get("use_anaf_test_env"),
+  });
+  const anafTestMode = testModeSetting === "1";
+
   const [stornoOpen, setStornoOpen] = useState(false);
   const [stornoNumber, setStornoNumber] = useState("");
   const [stornoReason, setStornoReason] = useState("");
@@ -61,7 +69,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
 
   const handleSubmitAnaf = async () => {
     if (!selectedInvoiceId || !activeCompanyId) { notify.warn("Selectați o factură și o companie activă."); return; }
-    const testMode = false;
+    const testMode = anafTestMode;
     try {
       await notify.promise(
         api.anaf.submitInvoice(activeCompanyId, selectedInvoiceId, testMode),
@@ -73,7 +81,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
 
   const handleCheckStatus = async () => {
     if (!selectedInvoiceId || !activeCompanyId) { notify.warn("Selectați o factură și o companie activă."); return; }
-    const testMode = false;
+    const testMode = anafTestMode;
     try {
       const status = await api.anaf.checkStatus(activeCompanyId, selectedInvoiceId, testMode);
       notify.info(`Status ANAF: ${status}`);

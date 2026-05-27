@@ -213,12 +213,15 @@ pub async fn anaf_submit_invoice(
         let pool = pool.clone();
         let invoice_id = invoice_id.to_string();
         async move {
-            let _ = sqlx::query(
+            if let Err(e) = sqlx::query(
                 "UPDATE invoices SET status = 'DRAFT', updated_at = unixepoch() WHERE id = ?1",
             )
             .bind(&invoice_id)
             .execute(&pool)
-            .await;
+            .await
+            {
+                tracing::error!(error = ?e, %invoice_id, "Failed to revert invoice to DRAFT status after ANAF error");
+            }
         }
     };
 
@@ -249,7 +252,9 @@ pub async fn anaf_submit_invoice(
                         refresh_token: refreshed.refresh_token,
                         expires_at: refreshed.expires_at,
                     };
-                    let _ = new_bundle.save(&company_id);
+                    if let Err(e) = new_bundle.save(&company_id) {
+                        tracing::error!(error = ?e, %company_id, "Failed to persist refreshed ANAF token bundle — user will be forced to re-authenticate");
+                    }
                     token = refreshed.access_token;
                     upload_result = client
                         .upload_invoice(&token, &company.cui, xml_bytes.clone())
@@ -296,7 +301,7 @@ pub async fn anaf_submit_invoice(
 
     // 10. Inserează eveniment invoice_event
     let event_id = new_id();
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at) \
          VALUES (?1, ?2, 'SUBMITTED_TO_ANAF', ?3, unixepoch())",
     )
@@ -304,7 +309,10 @@ pub async fn anaf_submit_invoice(
     .bind(&invoice_id)
     .bind(format!("Factură trimisă la ANAF. Upload ID: {}", upload_id))
     .execute(pool)
-    .await;
+    .await
+    {
+        tracing::warn!(error = ?e, %invoice_id, "Failed to insert invoice event for SUBMITTED_TO_ANAF");
+    }
 
     // 11. Notificare
     crate::notifications::notify(

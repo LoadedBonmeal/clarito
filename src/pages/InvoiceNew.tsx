@@ -7,6 +7,9 @@ import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
 import type { AppErrorPayload, CreateLineInput, VatCategory } from "@/types";
 
+/** Extends CreateLineInput with a stable row key for React list rendering. */
+type LineRow = CreateLineInput & { rowId: string };
+
 function fmtRON(n: number): string {
   return n.toLocaleString("ro-RO", {
     minimumFractionDigits: 2,
@@ -45,6 +48,10 @@ const DEFAULT_LINE: CreateLineInput = {
   vatCategory: "S" as VatCategory,
 };
 
+function newLineRow(base?: Partial<CreateLineInput>): LineRow {
+  return { ...DEFAULT_LINE, ...base, rowId: crypto.randomUUID() };
+}
+
 
 export function InvoiceNewPage() {
   const navigate = useNavigate();
@@ -74,7 +81,7 @@ export function InvoiceNewPage() {
   const [dueDate, setDueDate] = useState<string>(plusDaysISO(30));
   const [notes, setNotes] = useState<string>("");
   const [paymentMeansCode, setPaymentMeansCode] = useState<string>("30");
-  const [lines, setLines] = useState<CreateLineInput[]>([{ ...DEFAULT_LINE }]);
+  const [lines, setLines] = useState<LineRow[]>([newLineRow()]);
   // Track the saved draft ID for live validation
   const [savedId, setSavedId] = useState<string | null>(null);
   // True when "Trimite la ANAF" was clicked — navigate to detail to trigger submit there
@@ -108,7 +115,7 @@ export function InvoiceNewPage() {
   const vat = lines.reduce((s, l) => s + l.quantity * l.unitPrice * (l.vatRate / 100), 0);
   const total = net + vat;
 
-  const addLine = () => setLines((prev) => [...prev, { ...DEFAULT_LINE }]);
+  const addLine = () => setLines((prev) => [...prev, newLineRow()]);
 
   const removeLine = (idx: number) =>
     setLines((prev) => prev.filter((_, i) => i !== idx));
@@ -119,7 +126,7 @@ export function InvoiceNewPage() {
     value: CreateLineInput[K],
   ) =>
     setLines((prev) =>
-      prev.map((l, i) => (i === idx ? { ...l, [key]: value } : l)),
+      prev.map((l, i) => (i === idx ? ({ ...l, [key]: value } as LineRow) : l)),
     );
 
   const saveDraftMutation = useMutation({
@@ -136,6 +143,8 @@ export function InvoiceNewPage() {
         if (![0, 5, 9, 11, 19, 21].includes(line.vatRate ?? 21)) lineErrors.push(`Linia ${i + 1}: cota TVA trebuie să fie 0%, 5%, 9%, 11%, 19% sau 21%`);
       });
       if (lineErrors.length > 0) throw new Error(lineErrors.join("\n"));
+      // Strip internal rowId before sending to backend
+      const apiLines: CreateLineInput[] = lines.map(({ rowId: _rowId, ...rest }) => rest);
       return api.invoices.createDraft({
         companyId: activeCompanyId,
         contactId,
@@ -146,7 +155,7 @@ export function InvoiceNewPage() {
         currency: "RON",
         notes: notes || undefined,
         paymentMeansCode,
-        lines,
+        lines: apiLines,
       });
     },
     onSuccess: async (created) => {
@@ -421,7 +430,7 @@ export function InvoiceNewPage() {
                     const lineNet = l.quantity * l.unitPrice;
                     const lineTotal = lineNet * (1 + l.vatRate / 100);
                     return (
-                      <tr key={i}>
+                      <tr key={l.rowId}>
                         <td
                           style={{
                             textAlign: "center",
