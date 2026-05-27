@@ -101,6 +101,7 @@ pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Recurrin
         .await?)
 }
 
+#[allow(dead_code)]
 pub async fn list_due(pool: &SqlitePool) -> AppResult<Vec<RecurringInvoice>> {
     let sql = format!(
         "SELECT {SELECT_COLS} FROM recurring_invoices \
@@ -112,6 +113,7 @@ pub async fn list_due(pool: &SqlitePool) -> AppResult<Vec<RecurringInvoice>> {
         .await?)
 }
 
+#[allow(dead_code)]
 pub async fn update_next_date(pool: &SqlitePool, id: &str, next_date: &str) -> AppResult<()> {
     sqlx::query(
         "UPDATE recurring_invoices SET next_issue_date = ?1, updated_at = unixepoch() WHERE id = ?2",
@@ -140,6 +142,7 @@ pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<
 }
 
 /// Advance next_issue_date by one frequency period.
+#[allow(dead_code)]
 pub fn advance_date(current: &str, frequency: &str, day_of_month: u32) -> String {
     use chrono::{Datelike, NaiveDate};
     let day = day_of_month.clamp(1, 28);

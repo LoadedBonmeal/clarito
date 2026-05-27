@@ -301,6 +301,100 @@ export const reports = {
     invoke<string>("export_report", { reportType, params, format, outputPath }),
 };
 
+// ─── Payments ─────────────────────────────────────────────────────────────
+
+export interface Payment {
+  id: string;
+  invoiceId: string;
+  companyId: string;
+  amount: string;
+  currency: string;
+  paidAt: string;
+  method: string;
+  reference?: string;
+  notes?: string;
+  createdAt: number;
+}
+
+export interface PaymentSummary {
+  invoiceId: string;
+  totalAmount: string;
+  paidAmount: string;
+  paymentStatus: "UNPAID" | "PARTIAL" | "PAID";
+  payments: Payment[];
+}
+
+export interface AddPaymentArgs {
+  invoiceId: string;
+  companyId: string;
+  amount: string;
+  currency?: string;
+  paidAt: string;
+  method?: string;
+  reference?: string;
+  notes?: string;
+}
+
+export const payments = {
+  add: (args: AddPaymentArgs) => invoke<Payment>("add_payment", { args }),
+  list: (invoiceId: string, companyId: string) =>
+    invoke<Payment[]>("list_payments", { invoiceId, companyId }),
+  delete: (paymentId: string, companyId: string) =>
+    invoke<void>("delete_payment", { paymentId, companyId }),
+  summary: (invoiceId: string, companyId: string) =>
+    invoke<PaymentSummary>("get_payment_summary", { invoiceId, companyId }),
+};
+
+// ─── Recurring invoices ────────────────────────────────────────────────────
+
+export interface RecurringInvoice {
+  id: string;
+  companyId: string;
+  templateName: string;
+  clientId: string;
+  frequency: "monthly" | "quarterly" | "annual";
+  nextIssueDate: string;
+  dayOfMonth: number;
+  autoSubmitAnaf: boolean;
+  active: boolean;
+  series: string;
+  linesJson: string;
+  notes?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateRecurringArgs {
+  companyId: string;
+  templateName: string;
+  clientId: string;
+  frequency: string;
+  nextIssueDate: string;
+  dayOfMonth: number;
+  autoSubmitAnaf: boolean;
+  series: string;
+  linesJson: string;
+  notes?: string;
+}
+
+export const recurring = {
+  create: (args: CreateRecurringArgs) =>
+    invoke<RecurringInvoice>("create_recurring_invoice", { args }),
+  list: (companyId: string) =>
+    invoke<RecurringInvoice[]>("list_recurring_invoices", { companyId }),
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_recurring_invoice", { id, companyId }),
+};
+
+// ─── SAF-T ────────────────────────────────────────────────────────────────
+
+export const saft = {
+  exportD406: (companyId: string, year: number, month?: number) =>
+    invoke<string>("export_saft_d406", {
+      params: { companyId, year, month: month ?? null },
+    }),
+};
+
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
@@ -319,4 +413,7 @@ export const api = {
   integrations,
   importData,
   reports,
+  payments,
+  recurring,
+  saft,
 };

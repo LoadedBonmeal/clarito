@@ -30,6 +30,8 @@ import { NotificationsPage } from "@/pages/Notifications";
 import { ContactsPage } from "@/pages/Contacts";
 import { ReportsPage } from "@/pages/Reports";
 import { SettingsPage } from "@/pages/Settings";
+import { PaymentsPage } from "@/pages/Payments";
+import { RecurringPage } from "@/pages/Recurring";
 
 // ─── Layout root ──────────────────────────────────────────────────────────
 
@@ -137,6 +139,18 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+const paymentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/payments",
+  component: PaymentsPage,
+});
+
+const recurringRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/recurring",
+  component: RecurringPage,
+});
+
 // ─── Build tree + router ──────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -155,6 +169,8 @@ const routeTree = rootRoute.addChildren([
   contactsRoute,
   reportsRoute,
   settingsRoute,
+  paymentsRoute,
+  recurringRoute,
 ]);
 
 export const router = createRouter({

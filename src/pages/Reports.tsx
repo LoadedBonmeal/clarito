@@ -55,6 +55,7 @@ export function ReportsPage() {
   const [exportingSaga, setExportingSaga] = useState(false);
   const [exportingWinmentor, setExportingWinmentor] = useState(false);
   const [exportingVat, setExportingVat] = useState(false);
+  const [exportingSaft, setExportingSaft] = useState(false);
 
   const yearOptions = buildYearOptions();
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
@@ -91,6 +92,27 @@ export function ReportsPage() {
     () => new Map(contactList.map((c: Contact) => [c.id, c.legalName])),
     [contactList],
   );
+
+  const handleExportSaft = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    const savePath = await saveDialog({
+      title: "Salvează SAF-T D406",
+      defaultPath: `saft-d406-${selectedYear}.xml`,
+      filters: [{ name: "XML", extensions: ["xml"] }],
+    });
+    if (!savePath) return;
+    setExportingSaft(true);
+    try {
+      const xml = await api.saft.exportD406(activeCompanyId, selectedYear, undefined);
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      await writeTextFile(savePath, xml);
+      notify.success(`SAF-T D406 salvat: ${savePath}`);
+    } catch (err) {
+      notify.error("Eroare export SAF-T D406: " + String(err));
+    } finally {
+      setExportingSaft(false);
+    }
+  };
 
   const handleExportSaga = async () => {
     if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
@@ -208,6 +230,15 @@ export function ReportsPage() {
             onClick={handleExportWinmentor}
           >
             <Icon name="download" size={12} /> {exportingWinmentor ? "Export…" : "Export WinMentor"}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={exportingSaft || !activeCompanyId}
+            onClick={handleExportSaft}
+            title={`SAF-T D406 — standard ANAF de audit fiscal pentru ${selectedYear}`}
+          >
+            <Icon name="file" size={12} /> {exportingSaft ? "Export…" : `SAF-T D406 ${selectedYear}`}
           </button>
         </span>
       </div>

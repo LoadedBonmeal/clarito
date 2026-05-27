@@ -67,6 +67,10 @@
     "windows": {
       "digestAlgorithm": "sha256",
       "timestampUrl": "http://timestamp.digicert.com",
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "allowDowngrades": false,
       "nsis": {
         "displayLanguageSelector": false,
         "languages": ["Romanian", "English"],
@@ -74,6 +78,14 @@
         "headerImage": "resources/nsis-header.bmp",
         "sidebarImage": "resources/nsis-sidebar.bmp"
       }
-    }
+    },
+    "fileAssociations": [
+      {
+        "name": "RO e-Factură XML",
+        "description": "Fișier factură electronică RO",
+        "ext": ["xml"],
+        "mimeType": "application/xml"
+      }
+    ]
   }
 }
