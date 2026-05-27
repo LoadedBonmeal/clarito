@@ -19,6 +19,13 @@ const FREQ_LABELS: Record<string, string> = {
   annual:    "Anual",
 };
 
+function localDateISO(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function nextDatePreview(freq: string, day: number): string {
   const today = new Date();
   let next = new Date(today.getFullYear(), today.getMonth(), day);
@@ -27,7 +34,7 @@ function nextDatePreview(freq: string, day: number): string {
     else if (freq === "quarterly") next = new Date(today.getFullYear(), today.getMonth() + 3, day);
     else next = new Date(today.getFullYear() + 1, today.getMonth(), day);
   }
-  return next.toISOString().slice(0, 10);
+  return localDateISO(next);
 }
 
 const EMPTY_FORM = {
@@ -35,11 +42,11 @@ const EMPTY_FORM = {
   clientId: "",
   frequency: "monthly",
   dayOfMonth: 1,
-  nextIssueDate: new Date().toISOString().slice(0, 10),
+  nextIssueDate: localDateISO(new Date()),
   series: "FCT",
   autoSubmitAnaf: false,
   linesJson: JSON.stringify([
-    { description: "Servicii", quantity: 1, unitPrice: "0.00", vatRate: 19 }
+    { description: "Servicii", quantity: 1, unitPrice: "0.00", vatRate: 21 }
   ], null, 2),
   notes: "",
 };

@@ -53,6 +53,22 @@ pub async fn create(pool: &SqlitePool, input: CreatePaymentInput) -> AppResult<P
     Decimal::from_str(&input.amount)
         .map_err(|_| AppError::Validation("Sumă invalidă — folosiți formatul 1234.56".into()))?;
 
+    // Verify the invoice belongs to the given company before inserting
+    let invoice_exists: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM invoices WHERE id = ?1 AND company_id = ?2 LIMIT 1",
+    )
+    .bind(&input.invoice_id)
+    .bind(&input.company_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    if invoice_exists.is_none() {
+        return Err(AppError::Validation(
+            "Factura nu aparține companiei specificate.".into(),
+        ));
+    }
+
     let id = new_id();
     let currency = input.currency.unwrap_or_else(|| "RON".to_string());
     let method = input.method.unwrap_or_else(|| "transfer".to_string());
@@ -120,21 +136,23 @@ pub async fn summary_for_invoice(
     invoice_id: &str,
     company_id: &str,
 ) -> AppResult<PaymentSummary> {
-    // Fetch invoice total
+    // Fetch invoice total — scoped to company_id to prevent cross-company leakage
     let total: Option<String> = sqlx::query_scalar(
-        "SELECT total_amount FROM invoices WHERE id = ?1",
+        "SELECT total_amount FROM invoices WHERE id = ?1 AND company_id = ?2",
     )
     .bind(invoice_id)
+    .bind(company_id)
     .fetch_optional(pool)
     .await?;
 
     let total_str = total.ok_or(AppError::NotFound)?;
 
-    // Sum payments
+    // Sum payments — scoped to company_id
     let paid_sum: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(CAST(amount AS REAL)), 0.0) FROM payments WHERE invoice_id = ?1",
+        "SELECT COALESCE(SUM(CAST(amount AS REAL)), 0.0) FROM payments WHERE invoice_id = ?1 AND company_id = ?2",
     )
     .bind(invoice_id)
+    .bind(company_id)
     .fetch_one(pool)
     .await?;
 

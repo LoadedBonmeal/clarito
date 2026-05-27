@@ -285,76 +285,204 @@ pub async fn storno_invoice(
         ));
     }
 
-    // 2. Seria facturii storno (numărul e alocat atomic de invoices::create)
+    // 2. Seria facturii storno
     let storno_series = format!("S{}", orig_inv.series);
 
-    // 3. Creează liniile storno (cantități negative)
-    let storno_lines: Vec<crate::db::invoices::CreateLineInput> = orig_lines
+    // 3. Calculăm liniile storno (cantități negative) și totalurile
+    use rust_decimal::Decimal;
+    use rust_decimal::prelude::ToPrimitive;
+    let hundred = Decimal::from(100u32);
+
+    let mut subtotal_dec = Decimal::ZERO;
+    let mut vat_total_dec = Decimal::ZERO;
+
+    struct StornoLine {
+        id: String,
+        name: String,
+        description: Option<String>,
+        quantity: f64,
+        unit: String,
+        unit_price: f64,
+        vat_rate: f64,
+        vat_category: String,
+        cpv_code: Option<String>,
+        subtotal: f64,
+        vat_amount: f64,
+        total: f64,
+    }
+
+    let storno_lines: Vec<StornoLine> = orig_lines
         .iter()
-        .map(|l| crate::db::invoices::CreateLineInput {
-            name: l.name.clone(),
-            description: Some(format!("Storno: {}", l.name)),
-            quantity: -l.quantity,
-            unit: l.unit.clone(),
-            unit_price: l.unit_price,
-            vat_rate: l.vat_rate,
-            vat_category: l.vat_category.clone(),
-            cpv_code: l.cpv_code.clone(),
+        .enumerate()
+        .map(|(_, l)| {
+            let qty = Decimal::try_from(-l.quantity).unwrap_or(Decimal::ZERO);
+            let price = Decimal::try_from(l.unit_price).unwrap_or(Decimal::ZERO);
+            let rate = Decimal::try_from(l.vat_rate).unwrap_or(Decimal::ZERO);
+            let ls = (qty * price).round_dp(2);
+            let lv = (ls * rate / hundred).round_dp(2);
+            let lt = ls + lv;
+            subtotal_dec += ls;
+            vat_total_dec += lv;
+            StornoLine {
+                id: new_id(),
+                name: l.name.clone(),
+                description: Some(format!("Storno: {}", l.name)),
+                quantity: -l.quantity,
+                unit: l.unit.clone(),
+                unit_price: l.unit_price,
+                vat_rate: l.vat_rate,
+                vat_category: l.vat_category.clone(),
+                cpv_code: l.cpv_code.clone(),
+                subtotal: ls.to_f64().unwrap_or(0.0),
+                vat_amount: lv.to_f64().unwrap_or(0.0),
+                total: lt.to_f64().unwrap_or(0.0),
+            }
         })
         .collect();
 
-    // 4. Creează factura storno
-    // Nota: `number` este ignorat de invoices::create — numărul e alocat atomic acolo.
-    let storno_input = crate::db::invoices::CreateInvoiceInput {
-        company_id: orig_inv.company_id.clone(),
-        contact_id: orig_inv.contact_id.clone(),
-        series: storno_series,
-        number: 0, // ignorat — alocat atomic în invoices::create
-        issue_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
-        due_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
-        currency: Some(orig_inv.currency.clone()),
-        exchange_rate: orig_inv.exchange_rate,
-        notes: Some(format!("Storno pentru factura {}. Motiv: {}", orig_inv.full_number, reason)),
-        payment_means_code: Some(orig_inv.payment_means_code.clone()),
-        lines: storno_lines,
-    };
-    // Pregătim notes înainte de move (pentru referința STORNO_OF)
-    let storno_notes = format!(
-        "STORNO_OF:{}|{}",
-        orig_inv.full_number,
-        storno_input.notes.as_deref().unwrap_or("")
+    let subtotal = subtotal_dec.to_f64().unwrap_or(0.0);
+    let vat_total = vat_total_dec.to_f64().unwrap_or(0.0);
+    let total = (subtotal_dec + vat_total_dec).to_f64().unwrap_or(0.0);
+
+    let issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let storno_id = new_id();
+    let now = chrono::Utc::now().timestamp();
+    let initial_notes = format!(
+        "Storno pentru factura {}. Motiv: {}",
+        orig_inv.full_number, reason
     );
+    let storno_notes = format!("STORNO_OF:{}|{}", orig_inv.full_number, initial_notes);
 
-    let storno_inv = invoices::create(pool, storno_input).await?;
+    // 4. Toate scrierile în DB într-o singură tranzacție atomică
+    let mut tx = pool.begin().await.map_err(AppError::Database)?;
 
-    // 5. Marchează factura originală ca STORNED
-    invoices::set_status(
-        pool,
-        &invoice_id,
-        crate::db::models::InvoiceStatus::Storned,
-        Some(format!("Stornată prin {}. Motiv: {}", storno_inv.full_number, reason)),
+    // 4a. Alocăm numărul atomic
+    sqlx::query(
+        "UPDATE companies SET last_invoice_number = last_invoice_number + 1 WHERE id = ?1",
     )
-    .await?;
+    .bind(&orig_inv.company_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
 
-    // 6. Adaugă referința storno în events și stochează legătura la originală
-    let _ = sqlx::query(
-        "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at) \
-         VALUES (?1, ?2, 'STORNO_CREATED', ?3, unixepoch())",
+    let allocated_number: i64 = sqlx::query_scalar(
+        "SELECT last_invoice_number FROM companies WHERE id = ?1",
+    )
+    .bind(&orig_inv.company_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
+
+    let full_number = format!("{}-{:04}", storno_series, allocated_number);
+
+    // 4b. Inserăm factura storno (cu notes finale STORNO_OF deja)
+    sqlx::query(
+        "INSERT INTO invoices (
+            id, company_id, contact_id, series, number, full_number,
+            issue_date, due_date, currency, exchange_rate,
+            subtotal_amount, vat_amount, total_amount, status, notes,
+            payment_means_code, created_at, updated_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6,
+            ?7, ?8, ?9, ?10,
+            ?11, ?12, ?13, 'DRAFT', ?14,
+            ?15, ?16, ?16
+        )",
+    )
+    .bind(&storno_id)
+    .bind(&orig_inv.company_id)
+    .bind(&orig_inv.contact_id)
+    .bind(&storno_series)
+    .bind(allocated_number)
+    .bind(&full_number)
+    .bind(&issue_date)
+    .bind(&issue_date)
+    .bind(&orig_inv.currency)
+    .bind(orig_inv.exchange_rate)
+    .bind(subtotal)
+    .bind(vat_total)
+    .bind(total)
+    .bind(&storno_notes)
+    .bind(&orig_inv.payment_means_code)
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
+
+    // 4c. Inserăm liniile storno
+    for (position, line) in storno_lines.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO invoice_line_items (
+                id, invoice_id, position, name, description,
+                quantity, unit, unit_price, vat_rate, vat_category,
+                subtotal_amount, vat_amount, total_amount, cpv_code
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5,
+                ?6, ?7, ?8, ?9, ?10,
+                ?11, ?12, ?13, ?14
+            )",
+        )
+        .bind(&line.id)
+        .bind(&storno_id)
+        .bind((position as i64) + 1)
+        .bind(&line.name)
+        .bind(&line.description)
+        .bind(line.quantity)
+        .bind(&line.unit)
+        .bind(line.unit_price)
+        .bind(line.vat_rate)
+        .bind(&line.vat_category)
+        .bind(line.subtotal)
+        .bind(line.vat_amount)
+        .bind(line.total)
+        .bind(&line.cpv_code)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::Database)?;
+    }
+
+    // 4d. Marchează factura originală ca STORNED
+    sqlx::query("UPDATE invoices SET status = 'STORNED', updated_at = ?2 WHERE id = ?1")
+        .bind(&invoice_id)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::Database)?;
+
+    sqlx::query(
+        "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at)
+         VALUES (?1, ?2, 'STATUS_STORNED', ?3, ?4)",
     )
     .bind(new_id())
-    .bind(&storno_inv.id)
-    .bind(format!("Factură storno pentru {}. Motiv: {}", orig_inv.full_number, reason))
-    .execute(pool)
-    .await;
+    .bind(&invoice_id)
+    .bind(format!(
+        "Stornată prin {}. Motiv: {}",
+        full_number, reason
+    ))
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
 
-    // Salvăm numărul facturii originale în notes (prefixat) pentru a fi folosit
-    // la generarea XML-ului UBL — BillingReference → storno_ref.
-    // Format recunoscut de anaf_submit_invoice: "STORNO_OF:{full_number}|..."
-    sqlx::query("UPDATE invoices SET notes = ?2, updated_at = unixepoch() WHERE id = ?1")
-        .bind(&storno_inv.id)
-        .bind(&storno_notes)
-        .execute(pool)
-        .await?;
+    // 4e. Eveniment STORNO_CREATED pe factura storno
+    sqlx::query(
+        "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at) \
+         VALUES (?1, ?2, 'STORNO_CREATED', ?3, ?4)",
+    )
+    .bind(new_id())
+    .bind(&storno_id)
+    .bind(format!(
+        "Factură storno pentru {}. Motiv: {}",
+        orig_inv.full_number, reason
+    ))
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
 
-    Ok(storno_inv)
+    // 5. Commit atomic — toate operațiile reușesc sau niciuna
+    tx.commit().await.map_err(AppError::Database)?;
+
+    // 6. Re-fetch factura storno pentru a returna datele complete
+    invoices::get(pool, &storno_id).await
 }

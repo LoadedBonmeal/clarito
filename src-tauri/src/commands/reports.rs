@@ -44,7 +44,7 @@ pub async fn generate_vat_report(
 
     // Build WHERE clause
     let mut where_clauses = vec![
-        "status IN ('VALIDATED', 'SUBMITTED', 'DRAFT')".to_string(),
+        "status IN ('VALIDATED', 'SUBMITTED', 'QUEUED', 'SENT', 'ACCEPTED', 'REJECTED')".to_string(),
         format!("issue_date >= ?1"),
         format!("issue_date <= ?2"),
     ];

@@ -208,26 +208,30 @@ pub async fn anaf_submit_invoice(
         .await
         .map_err(AppError::Database)?;
 
-    // 6. Marchează factura ca QUEUED (în coadă — upload-ul poate dura)
-    sqlx::query(
-        "UPDATE invoices SET status = 'QUEUED', updated_at = unixepoch() WHERE id = ?1",
-    )
-    .bind(&invoice_id)
-    .execute(pool)
-    .await
-    .map_err(AppError::Database)?;
-    {
-        use tauri::Emitter;
-        let _ = app.emit(
-            "invoice_status_changed",
-            serde_json::json!({"invoiceId": &invoice_id, "newStatus": "QUEUED"}),
-        );
-    }
+    // Helper: revert invoice to DRAFT so the user can retry after any error.
+    let revert_to_draft = |pool: &sqlx::SqlitePool, invoice_id: &str| {
+        let pool = pool.clone();
+        let invoice_id = invoice_id.to_string();
+        async move {
+            let _ = sqlx::query(
+                "UPDATE invoices SET status = 'DRAFT', updated_at = unixepoch() WHERE id = ?1",
+            )
+            .bind(&invoice_id)
+            .execute(&pool)
+            .await;
+        }
+    };
 
-    // 7. Obține token valid din keychain
-    let mut token = get_valid_token(&company_id).await?;
+    // 6. Obține token valid din keychain (înainte de a schimba statusul)
+    let mut token = match get_valid_token(&company_id).await {
+        Ok(t) => t,
+        Err(e) => {
+            revert_to_draft(pool, &invoice_id).await;
+            return Err(e);
+        }
+    };
 
-    // 8. Upload la ANAF (cu un retry la 401)
+    // 7. Upload la ANAF (cu un retry la 401)
     let client = AnafClient::new(test_mode);
     let xml_bytes = xml_string.into_bytes();
     let mut upload_result = client
@@ -254,7 +258,29 @@ pub async fn anaf_submit_invoice(
             }
         }
     }
-    let upload_resp = upload_result.map_err(AppError::Other)?;
+    let upload_resp = match upload_result {
+        Ok(r) => r,
+        Err(e) => {
+            revert_to_draft(pool, &invoice_id).await;
+            return Err(AppError::Other(e));
+        }
+    };
+
+    // Upload succeeded — mark as QUEUED then immediately SUBMITTED below.
+    sqlx::query(
+        "UPDATE invoices SET status = 'QUEUED', updated_at = unixepoch() WHERE id = ?1",
+    )
+    .bind(&invoice_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::Database)?;
+    {
+        use tauri::Emitter;
+        let _ = app.emit(
+            "invoice_status_changed",
+            serde_json::json!({"invoiceId": &invoice_id, "newStatus": "QUEUED"}),
+        );
+    }
 
     let upload_id = upload_resp.index_incarcare;
 

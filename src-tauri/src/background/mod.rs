@@ -28,7 +28,7 @@ pub fn spawn_background_tasks(app: AppHandle) {
                     let _ = sqlx::query(
                         "INSERT INTO audit_log (id, action, entity_type, entity_id, metadata, created_at) VALUES (?1, ?2, ?3, ?4, ?5, unixepoch())"
                     )
-                    .bind(uuid::Uuid::now_v7().to_string())
+                    .bind(crate::db::models::new_id())
                     .bind("background_task_run")
                     .bind("background")
                     .bind("poll_status")
@@ -52,7 +52,7 @@ pub fn spawn_background_tasks(app: AppHandle) {
                     let _ = sqlx::query(
                         "INSERT INTO audit_log (id, action, entity_type, entity_id, metadata, created_at) VALUES (?1, ?2, ?3, ?4, ?5, unixepoch())"
                     )
-                    .bind(uuid::Uuid::now_v7().to_string())
+                    .bind(crate::db::models::new_id())
                     .bind("background_task_run")
                     .bind("background")
                     .bind("sync_spv_messages")
@@ -391,7 +391,7 @@ async fn refresh_expiring_certificates(pool: &sqlx::SqlitePool, app: &AppHandle)
                         "INSERT INTO audit_log (id, action, entity_type, entity_id, metadata, created_at) \
                          VALUES (?1, ?2, ?3, ?4, ?5, unixepoch())"
                     )
-                    .bind(uuid::Uuid::now_v7().to_string())
+                    .bind(crate::db::models::new_id())
                     .bind("token_refreshed")
                     .bind("company")
                     .bind(&company.id)
@@ -547,24 +547,54 @@ pub(crate) async fn do_sync_spv(
             } else {
                 "0000"
             };
+            // Sanitize msg.id (received from ANAF) to prevent path traversal.
+            let safe_msg_id: String = msg.id
+                .chars()
+                .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+                .take(64)
+                .collect();
+            let safe_cui: String = company.cui
+                .chars()
+                .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+                .take(64)
+                .collect();
+            let safe_year: String = year
+                .chars()
+                .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+                .take(64)
+                .collect();
             let archive_path = app_data_dir
                 .join("archive")
                 .join("received")
-                .join(&company.cui)
-                .join(year)
-                .join(&msg.id);
-            std::fs::create_dir_all(&archive_path).ok();
+                .join(&safe_cui)
+                .join(&safe_year)
+                .join(&safe_msg_id);
+            // Belt-and-suspenders: verify the resolved path stays under app_data_dir.
+            if !archive_path.starts_with(&app_data_dir) {
+                tracing::error!("Archive path escape attempt for msg {}: {:?}", msg.id, archive_path);
+                continue;
+            }
+            if let Err(e) = std::fs::create_dir_all(&archive_path) {
+                tracing::error!("Failed to create archive dir for msg {}: {}", msg.id, e);
+                continue;
+            }
             let xml_path = archive_path.join("invoice.xml");
             let zip_path = archive_path.join("original.zip");
-            std::fs::write(&xml_path, &xml_content).ok();
-            std::fs::write(&zip_path, &zip_bytes).ok();
+            if let Err(e) = std::fs::write(&xml_path, &xml_content) {
+                tracing::error!("Failed to write XML archive for msg {}: {}", msg.id, e);
+                continue;
+            }
+            if let Err(e) = std::fs::write(&zip_path, &zip_bytes) {
+                tracing::warn!("Failed to write ZIP archive for msg {}: {}", msg.id, e);
+                // ZIP is supplementary; proceed even if it fails.
+            }
 
             // ── Parse XML for basic info ──────────────────────────────────
             let (issuer_cui, issuer_name, total_amount, issue_date) =
                 parse_received_xml(&xml_content);
 
             // ── Insert received_invoice row ───────────────────────────────
-            let recv_id = uuid::Uuid::now_v7().to_string();
+            let recv_id = crate::db::models::new_id();
             let now = chrono::Utc::now().timestamp();
             let _ = sqlx::query(
                 "INSERT OR IGNORE INTO received_invoices \

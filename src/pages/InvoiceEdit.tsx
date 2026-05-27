@@ -129,9 +129,8 @@ export function InvoiceEditPage() {
         lines,
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
       navigate({ to: "/invoices/$id", params: { id } });
     },
   });

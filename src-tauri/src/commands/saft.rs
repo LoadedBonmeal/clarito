@@ -65,12 +65,12 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
             i.issue_date, \
             COALESCE(c.legal_name, '') AS client_name, \
             COALESCE(c.cui, '') AS client_cui, \
-            COALESCE(i.net_amount, i.total_amount) AS net_amount, \
+            COALESCE(i.subtotal_amount, i.total_amount) AS net_amount, \
             COALESCE(i.vat_amount, '0') AS vat_amount, \
             i.total_amount, \
             COALESCE(i.currency, 'RON') AS currency \
          FROM invoices i \
-         LEFT JOIN contacts c ON i.client_id = c.id \
+         LEFT JOIN contacts c ON i.contact_id = c.id \
          WHERE i.company_id = ?1 \
            AND i.issue_date >= ?2 \
            AND i.issue_date <= ?3 \

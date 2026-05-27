@@ -75,34 +75,41 @@ pub async fn export_backup(
     let data_dir = app.path().app_data_dir()?;
     let db_path = data_dir.join("data.db");
 
-    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
     let out_path = data_dir.join(format!("efactura_backup_{timestamp}.zip"));
+    let out_path_clone = out_path.clone();
 
-    let file = std::fs::File::create(&out_path).map_err(AppError::Io)?;
-    let mut zip = zip::ZipWriter::new(file);
-    let opts = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<String, AppError> {
+        let file = std::fs::File::create(&out_path_clone).map_err(AppError::Io)?;
+        let mut zip = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
 
-    // Add data.db
-    if db_path.exists() {
-        zip.start_file("data.db", opts)
+        // Add data.db
+        if db_path.exists() {
+            zip.start_file("data.db", opts)
+                .map_err(|e| AppError::Other(e.to_string()))?;
+            let db_bytes = std::fs::read(&db_path).map_err(AppError::Io)?;
+            zip.write_all(&db_bytes).map_err(AppError::Io)?;
+        }
+
+        // Add README
+        zip.start_file("README.txt", opts)
             .map_err(|e| AppError::Other(e.to_string()))?;
-        let db_bytes = std::fs::read(&db_path).map_err(AppError::Io)?;
-        zip.write_all(&db_bytes).map_err(AppError::Io)?;
-    }
+        let readme = format!(
+            "Backup eFactura Desktop\nData: {}\n\nConține:\n- data.db: baza de date SQLite\n\nRestaurare: copiați data.db în folderul de date al aplicației.\n",
+            chrono::Utc::now().format("%d.%m.%Y %H:%M UTC")
+        );
+        zip.write_all(readme.as_bytes()).map_err(AppError::Io)?;
 
-    // Add README
-    zip.start_file("README.txt", opts)
-        .map_err(|e| AppError::Other(e.to_string()))?;
-    let readme = format!(
-        "Backup eFactura Desktop\nData: {}\n\nConține:\n- data.db: baza de date SQLite\n\nRestaurare: copiați data.db în folderul de date al aplicației.\n",
-        chrono::Utc::now().format("%d.%m.%Y %H:%M UTC")
-    );
-    zip.write_all(readme.as_bytes()).map_err(AppError::Io)?;
+        zip.finish().map_err(|e| AppError::Other(e.to_string()))?;
 
-    zip.finish().map_err(|e| AppError::Other(e.to_string()))?;
+        Ok(out_path_clone.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))??;
 
-    Ok(out_path.to_string_lossy().to_string())
+    Ok(result)
 }
 
 /// Importă un backup ZIP, înlocuind DB-ul curent.

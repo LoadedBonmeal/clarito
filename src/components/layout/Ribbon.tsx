@@ -49,9 +49,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const filePath = await open({ filters: [{ name: "XML e-Factura", extensions: ["xml"] }] });
       if (!filePath || typeof filePath !== "string") return;
-      const { readTextFile } = await import("@tauri-apps/plugin-fs");
-      const xmlContent = await readTextFile(filePath);
-      const result = await api.importData.invoiceXml(xmlContent, activeCompanyId);
+      const result = await api.importData.invoiceXmlFromFile(filePath, activeCompanyId);
       if (result.imported > 0) {
         notify.success(`Factură importată: ${result.invoiceNumber} — ${result.supplierName}`);
         void queryClient.invalidateQueries({ queryKey: queryKeys.received.all });

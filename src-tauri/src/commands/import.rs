@@ -128,7 +128,7 @@ pub async fn import_invoices_csv(
                 Ok(Some(row)) => row.try_get::<String, _>("id").map_err(AppError::Database)?,
                 Ok(None) => {
                     // Create contact
-                    let new_id = uuid::Uuid::now_v7().to_string();
+                    let new_id = crate::db::models::new_id();
                     let now = chrono::Utc::now().timestamp();
                     let res = sqlx::query(
                         "INSERT INTO contacts (id, company_id, contact_type, cui, legal_name, vat_payer, country, created_at, updated_at) \
@@ -160,8 +160,8 @@ pub async fn import_invoices_csv(
         let total = subtotal + vat_amount;
         let full_number = format!("{}{}", series, number);
         let now = chrono::Utc::now().timestamp();
-        let invoice_id = uuid::Uuid::now_v7().to_string();
-        let line_id = uuid::Uuid::now_v7().to_string();
+        let invoice_id = crate::db::models::new_id();
+        let line_id = crate::db::models::new_id();
 
         // Insert invoice
         let inv_res = sqlx::query(
@@ -271,7 +271,7 @@ pub async fn import_contacts_csv(
         let email = fields.get(6).copied().filter(|s| !s.is_empty());
         let phone = fields.get(7).copied().filter(|s| !s.is_empty());
 
-        let new_id = uuid::Uuid::now_v7().to_string();
+        let new_id = crate::db::models::new_id();
         let now = chrono::Utc::now().timestamp();
 
         let res = sqlx::query(
@@ -372,6 +372,8 @@ async fn import_invoice_xml_inner(
     let mut depth_party_tax = 0i32;
     let mut depth_party_legal = 0i32;
     let mut depth_monetary = 0i32;
+    let mut depth_customer = 0i32;
+    let mut depth_customer_tax = 0i32;
     let mut current_local = String::new();
 
     let mut issuer_cui = String::new();
@@ -380,6 +382,7 @@ async fn import_invoice_xml_inner(
     let mut invoice_number = String::new();
     let mut currency = String::from("RON");
     let mut total_amount = 0.0f64;
+    let mut buyer_cui = String::new();
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -389,7 +392,9 @@ async fn import_invoice_xml_inner(
                     .to_string();
                 match local.as_str() {
                     "AccountingSupplierParty" => depth_supplier += 1,
+                    "AccountingCustomerParty" => depth_customer += 1,
                     "PartyTaxScheme" if depth_supplier > 0 => depth_party_tax += 1,
+                    "PartyTaxScheme" if depth_customer > 0 => depth_customer_tax += 1,
                     "PartyLegalEntity" if depth_supplier > 0 => depth_party_legal += 1,
                     "LegalMonetaryTotal" => depth_monetary += 1,
                     _ => {}
@@ -400,7 +405,9 @@ async fn import_invoice_xml_inner(
                 let local = std::str::from_utf8(e.local_name().into_inner()).unwrap_or("");
                 match local {
                     "AccountingSupplierParty" => { depth_supplier -= 1; }
+                    "AccountingCustomerParty" => { depth_customer -= 1; }
                     "PartyTaxScheme" if depth_supplier > 0 => { depth_party_tax -= 1; }
+                    "PartyTaxScheme" if depth_customer > 0 => { depth_customer_tax -= 1; }
                     "PartyLegalEntity" if depth_supplier > 0 => { depth_party_legal -= 1; }
                     "LegalMonetaryTotal" => { depth_monetary -= 1; }
                     _ => {}
@@ -421,6 +428,9 @@ async fn import_invoice_xml_inner(
                     "DocumentCurrencyCode" => { currency = text; }
                     "CompanyID" if depth_supplier > 0 && depth_party_tax > 0 => {
                         if issuer_cui.is_empty() { issuer_cui = text; }
+                    }
+                    "CompanyID" if depth_customer > 0 && depth_customer_tax > 0 => {
+                        if buyer_cui.is_empty() { buyer_cui = text; }
                     }
                     "RegistrationName" if depth_supplier > 0 && depth_party_legal > 0 => {
                         if issuer_name.is_empty() { issuer_name = text; }
@@ -499,24 +509,53 @@ async fn import_invoice_xml_inner(
         });
     }
 
+    // ── Verify buyer CUI matches active company ───────────────────────────────
+    fn normalize_cui(s: &str) -> String {
+        s.trim().to_uppercase()
+            .trim_start_matches("RO")
+            .trim()
+            .to_string()
+    }
+
+    if !buyer_cui.is_empty() {
+        let company = crate::db::companies::get(pool, &company_id).await?;
+        let xml_buyer = normalize_cui(&buyer_cui);
+        let company_cui = normalize_cui(&company.cui);
+        if !xml_buyer.is_empty() && xml_buyer != company_cui {
+            errors.push(format!(
+                "Factura XML este adresată companiei cu CUI {} — nu companiei active ({}).",
+                buyer_cui, company.cui
+            ));
+            return Ok(XmlImportResult {
+                imported: 0,
+                invoice_number: Some(invoice_number),
+                supplier_name: Some(issuer_name),
+                supplier_cui: Some(issuer_cui),
+                issue_date: Some(issue_date),
+                total_amount: Some(total_amount),
+                errors,
+            });
+        }
+    }
+
     // ── Save XML to disk ─────────────────────────────────────────────────────
     let base = app.path().app_data_dir().map_err(|e| AppError::Other(e.to_string()))?;
     let year_str = if issue_date.len() >= 4 { issue_date[..4].to_string() } else { "0000".to_string() };
-    let unique_id = uuid::Uuid::now_v7().to_string();
+    let unique_id = crate::db::models::new_id();
     let archive_root = base.join("archive").join("received").join("manual");
-    std::fs::create_dir_all(&archive_root).map_err(AppError::Io)?;
+    tokio::fs::create_dir_all(&archive_root).await.map_err(AppError::Io)?;
     let archive_dir = archive_root.join(&year_str).join(&unique_id);
-    std::fs::create_dir_all(&archive_dir).map_err(AppError::Io)?;
+    tokio::fs::create_dir_all(&archive_dir).await.map_err(AppError::Io)?;
     let xml_path = archive_dir.join("invoice.xml");
     // Verify the path stays under base (canonicalize resolves symlinks/.. components):
     let canon = xml_path.canonicalize().unwrap_or_else(|_| xml_path.clone());
     if !canon.starts_with(&base) {
         return Err(AppError::Validation("Cale invalidă".into()));
     }
-    std::fs::write(&xml_path, xml_str.as_bytes()).map_err(AppError::Io)?;
+    tokio::fs::write(&xml_path, xml_str.as_bytes()).await.map_err(AppError::Io)?;
 
     // ── Insert into received_invoices ─────────────────────────────────────────
-    let recv_id = uuid::Uuid::now_v7().to_string();
+    let recv_id = crate::db::models::new_id();
     let now = chrono::Utc::now().timestamp();
     // anaf_download_id already set above from XML content hash
 
