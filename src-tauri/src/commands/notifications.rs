@@ -29,3 +29,18 @@ pub async fn mark_notification_read(
 pub async fn mark_all_notifications_read(state: State<'_, AppState>) -> AppResult<()> {
     notifications::mark_all_read(&state.db).await
 }
+
+#[tauri::command]
+pub async fn delete_notification(
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<()> {
+    notifications::delete_notification(&state.db, &id).await
+}
+
+#[tauri::command]
+pub async fn delete_all_read_notifications(
+    state: State<'_, AppState>,
+) -> AppResult<u64> {
+    notifications::delete_all_read(&state.db).await
+}

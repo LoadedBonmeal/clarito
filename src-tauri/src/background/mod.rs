@@ -15,6 +15,7 @@ pub fn spawn_background_tasks(app: AppHandle) {
     let app4 = app.clone();
     let app5 = app.clone();
     let app6 = app.clone();
+    let app7 = app.clone();
 
     // Task 1: Poll status of SUBMITTED invoices every 15 min
     tauri::async_runtime::spawn(async move {
@@ -119,6 +120,18 @@ pub fn spawn_background_tasks(app: AppHandle) {
             sleep_until_local_time(3, 0).await;
             if let Some(state) = app6.try_state::<AppState>() {
                 refresh_expiring_certificates(&state.db, &app6).await;
+            }
+        }
+    });
+
+    // Task 7: Generate recurring invoices — daily at 08:00 local time
+    tauri::async_runtime::spawn(async move {
+        loop {
+            sleep_until_local_time(8, 0).await;
+            if let Some(state) = app7.try_state::<AppState>() {
+                if let Err(e) = process_recurring_invoices(&state.db, &app7).await {
+                    tracing::warn!("Recurring invoice processing error: {:?}", e);
+                }
             }
         }
     });
@@ -758,6 +771,297 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, f64, String) {
         total_amount,
         issue_date,
     )
+}
+
+/// Generate invoices for all active recurring templates whose next_issue_date is today or earlier.
+/// One invoice is created per template per run (even if multiple periods were missed).
+/// next_issue_date is advanced through ALL missed periods so it lands in the future.
+async fn process_recurring_invoices(
+    pool: &sqlx::SqlitePool,
+    app: &AppHandle,
+) -> crate::error::AppResult<()> {
+    use crate::db::recurring;
+    use crate::db::models::new_id;
+    use chrono::Local;
+    use rust_decimal::Decimal;
+    use rust_decimal::prelude::ToPrimitive;
+
+    let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
+    let hundred = Decimal::from(100u32);
+
+    let due = recurring::list_due(pool).await?;
+
+    for template in due {
+        // Parse lines_json
+        let lines: Vec<serde_json::Value> = match serde_json::from_str(&template.lines_json) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(
+                    error = ?e,
+                    template_id = %template.id,
+                    "Failed to parse lines_json for recurring template — skipping"
+                );
+                continue;
+            }
+        };
+
+        if lines.is_empty() {
+            tracing::warn!(template_id = %template.id, "Recurring template has no lines — skipping");
+            continue;
+        }
+
+        let mut tx = match pool.begin().await {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!(error = ?e, template_id = %template.id, "Failed to begin transaction — skipping");
+                continue;
+            }
+        };
+
+        // Allocate invoice number atomically by bumping companies.last_invoice_number
+        if let Err(e) = sqlx::query(
+            "UPDATE companies SET last_invoice_number = last_invoice_number + 1 WHERE id = ?1",
+        )
+        .bind(&template.company_id)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = ?e, template_id = %template.id, "Failed to allocate invoice number — skipping");
+            continue;
+        }
+
+        let allocated_number: i64 = match sqlx::query_scalar(
+            "SELECT last_invoice_number FROM companies WHERE id = ?1",
+        )
+        .bind(&template.company_id)
+        .fetch_one(&mut *tx)
+        .await
+        {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::error!(error = ?e, template_id = %template.id, "Failed to read allocated number — skipping");
+                continue;
+            }
+        };
+
+        let invoice_id = new_id();
+        let full_number = format!("{}-{:04}", template.series, allocated_number);
+        let issue_date = today.clone();
+        let due_date = (Local::now() + chrono::Duration::days(30))
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
+
+        // Calculate totals from lines using Decimal
+        let mut subtotal_dec = Decimal::ZERO;
+        let mut vat_total_dec = Decimal::ZERO;
+
+        struct LineCalc {
+            name: String,
+            description: Option<String>,
+            quantity: Decimal,
+            unit: String,
+            unit_price: Decimal,
+            vat_rate: Decimal,
+            vat_rate_f64: f64,
+            vat_category: String,
+            subtotal: f64,
+            vat_amount: f64,
+            total_amount: f64,
+        }
+
+        let mut line_calcs: Vec<LineCalc> = Vec::with_capacity(lines.len());
+
+        for line in &lines {
+            let name = line["name"].as_str()
+                .or_else(|| line["description"].as_str())
+                .unwrap_or("Servicii")
+                .to_string();
+            let description = line["description"].as_str().map(|s| s.to_string());
+            let unit = line["unit"].as_str().unwrap_or("BUC").to_string();
+            let vat_category = line["vatCategory"].as_str().unwrap_or("S").to_string();
+
+            let qty = line["quantity"].as_f64()
+                .and_then(|v| Decimal::try_from(v).ok())
+                .unwrap_or(Decimal::ONE);
+            let price = line["unitPrice"].as_str()
+                .and_then(|s| s.parse::<Decimal>().ok())
+                .or_else(|| line["unitPrice"].as_f64().and_then(|v| Decimal::try_from(v).ok()))
+                .unwrap_or(Decimal::ZERO);
+            let vat_rate_i = line["vatRate"].as_i64().unwrap_or(21);
+            let vat_rate = Decimal::from(vat_rate_i);
+
+            let ls = (qty * price).round_dp(2);
+            let lv = (ls * vat_rate / hundred).round_dp(2);
+            let lt = ls + lv;
+            subtotal_dec += ls;
+            vat_total_dec += lv;
+
+            line_calcs.push(LineCalc {
+                name,
+                description,
+                quantity: qty,
+                unit,
+                unit_price: price,
+                vat_rate,
+                vat_rate_f64: vat_rate_i as f64,
+                vat_category,
+                subtotal: ls.to_f64().unwrap_or(0.0),
+                vat_amount: lv.to_f64().unwrap_or(0.0),
+                total_amount: lt.to_f64().unwrap_or(0.0),
+            });
+        }
+
+        let subtotal = subtotal_dec.to_f64().unwrap_or(0.0);
+        let vat_total = vat_total_dec.to_f64().unwrap_or(0.0);
+        let total = (subtotal_dec + vat_total_dec).to_f64().unwrap_or(0.0);
+
+        let now_unix = chrono::Utc::now().timestamp();
+
+        // Insert invoice header
+        let insert_result = sqlx::query(
+            "INSERT INTO invoices (
+                id, company_id, contact_id, series, number, full_number,
+                issue_date, due_date, currency, exchange_rate,
+                subtotal_amount, vat_amount, total_amount, status, notes,
+                payment_means_code, created_at, updated_at
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6,
+                ?7, ?8, 'RON', NULL,
+                ?9, ?10, ?11, 'DRAFT', ?12,
+                '30', ?13, ?13
+            )",
+        )
+        .bind(&invoice_id)
+        .bind(&template.company_id)
+        .bind(&template.client_id)
+        .bind(&template.series)
+        .bind(allocated_number)
+        .bind(&full_number)
+        .bind(&issue_date)
+        .bind(&due_date)
+        .bind(subtotal)
+        .bind(vat_total)
+        .bind(total)
+        .bind(template.notes.as_deref().unwrap_or(""))
+        .bind(now_unix)
+        .execute(&mut *tx)
+        .await;
+
+        if let Err(e) = insert_result {
+            tracing::error!(error = ?e, template_id = %template.id, "Failed to insert recurring invoice header — skipping");
+            continue; // tx drops, auto-rolls-back
+        }
+
+        // Insert line items
+        let mut lines_ok = true;
+        for (i, lc) in line_calcs.iter().enumerate() {
+            let line_id = new_id();
+            if let Err(e) = sqlx::query(
+                "INSERT INTO invoice_line_items (
+                    id, invoice_id, position, name, description,
+                    quantity, unit, unit_price, vat_rate, vat_category,
+                    subtotal_amount, vat_amount, total_amount, cpv_code
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5,
+                    ?6, ?7, ?8, ?9, ?10,
+                    ?11, ?12, ?13, NULL
+                )",
+            )
+            .bind(&line_id)
+            .bind(&invoice_id)
+            .bind((i as i64) + 1)
+            .bind(&lc.name)
+            .bind(&lc.description)
+            .bind(lc.quantity.to_f64().unwrap_or(1.0))
+            .bind(&lc.unit)
+            .bind(lc.unit_price.to_f64().unwrap_or(0.0))
+            .bind(lc.vat_rate_f64)
+            .bind(&lc.vat_category)
+            .bind(lc.subtotal)
+            .bind(lc.vat_amount)
+            .bind(lc.total_amount)
+            .execute(&mut *tx)
+            .await
+            {
+                tracing::error!(error = ?e, template_id = %template.id, "Failed to insert line item — aborting template");
+                lines_ok = false;
+                break;
+            }
+        }
+
+        if !lines_ok {
+            continue; // tx drops, auto-rolls-back
+        }
+
+        // Insert CREATED event
+        let _ = sqlx::query(
+            "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at)
+             VALUES (?1, ?2, 'CREATED', 'Factură creată automat din șablon recurent', ?3)",
+        )
+        .bind(new_id())
+        .bind(&invoice_id)
+        .bind(now_unix)
+        .execute(&mut *tx)
+        .await;
+
+        // Advance next_issue_date through all missed periods until it's in the future
+        let mut current_date = template.next_issue_date.clone();
+        loop {
+            let next = recurring::advance_date(
+                &current_date,
+                &template.frequency,
+                template.day_of_month as u32,
+            );
+            if next > today {
+                // This is the correct next future date — write it
+                if let Err(e) = sqlx::query(
+                    "UPDATE recurring_invoices SET next_issue_date = ?1, updated_at = unixepoch() WHERE id = ?2",
+                )
+                .bind(&next)
+                .bind(&template.id)
+                .execute(&mut *tx)
+                .await
+                {
+                    tracing::error!(error = ?e, template_id = %template.id, "Failed to advance next_issue_date — aborting template");
+                    lines_ok = false; // reuse flag to skip commit
+                }
+                break;
+            }
+            current_date = next;
+        }
+
+        if !lines_ok {
+            continue; // tx drops, auto-rolls-back
+        }
+
+        // Commit
+        if let Err(e) = tx.commit().await {
+            tracing::error!(error = ?e, template_id = %template.id, "Failed to commit recurring invoice transaction");
+            continue;
+        }
+
+        tracing::info!(
+            invoice_id = %invoice_id,
+            full_number = %full_number,
+            template_id = %template.id,
+            template_name = %template.template_name,
+            "Generated recurring invoice"
+        );
+
+        // Notify frontend
+        let _ = app.emit(
+            "recurring_invoice_generated",
+            serde_json::json!({
+                "invoiceId": invoice_id,
+                "templateId": template.id,
+                "templateName": template.template_name,
+                "fullNumber": full_number,
+            }),
+        );
+    }
+
+    Ok(())
 }
 
 async fn cleanup_audit_log(pool: sqlx::SqlitePool) {

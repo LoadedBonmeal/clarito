@@ -10,6 +10,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Icon } from "@/components/shared/Icon";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import { notify } from "@/lib/toasts";
 import type { Notification } from "@/types";
 
 function fmtTime(unix: number): string {
@@ -52,6 +53,23 @@ export function NotificationsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
     },
+  });
+
+  const { mutate: deleteOne, isPending: deletingOne } = useMutation({
+    mutationFn: (id: string) => api.notifications.deleteOne(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
+    },
+    onError: (e) => notify.error("Eroare la ștergere: " + String(e)),
+  });
+
+  const { mutate: deleteAllRead, isPending: deletingAllRead } = useMutation({
+    mutationFn: () => api.notifications.deleteAllRead(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
+      notify.success("Notificările citite au fost șterse.");
+    },
+    onError: (e) => notify.error("Eroare la ștergere: " + String(e)),
   });
 
   /** Mark as read, then navigate to the related entity if possible. */
@@ -112,6 +130,14 @@ export function NotificationsPage() {
           >
             <Icon name="check" size={12} /> Marchează toate ca citite
           </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={notifications.filter((n) => n.isRead).length === 0 || deletingAllRead}
+            onClick={() => deleteAllRead()}
+          >
+            <Icon name="trash" size={12} /> Șterge citite
+          </button>
         </span>
       </div>
 
@@ -161,6 +187,7 @@ export function NotificationsPage() {
                 <th style={{ width: 220 }}>Titlu</th>
                 <th>Mesaj</th>
                 <th style={{ width: 90 }}>Status</th>
+                <th style={{ width: 40 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -210,6 +237,19 @@ export function NotificationsPage() {
                         Necitit
                       </span>
                     )}
+                  </td>
+                  <td
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ textAlign: "center" }}
+                  >
+                    <button
+                      className="btn compact"
+                      title="Șterge notificare"
+                      onClick={() => deleteOne(n.id)}
+                      disabled={deletingOne}
+                    >
+                      <Icon name="trash" size={11} />
+                    </button>
                   </td>
                 </tr>
               ))}

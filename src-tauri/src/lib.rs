@@ -167,6 +167,8 @@ pub fn run() {
             commands::notifications::unread_notification_count,
             commands::notifications::mark_notification_read,
             commands::notifications::mark_all_notifications_read,
+            commands::notifications::delete_notification,
+            commands::notifications::delete_all_read_notifications,
             // settings
             commands::settings::get_setting,
             commands::settings::set_setting,

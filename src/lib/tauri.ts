@@ -129,6 +129,8 @@ export const notifications = {
   unreadCount: () => invoke<number>("unread_notification_count"),
   markRead: (id: string) => invoke<void>("mark_notification_read", { id }),
   markAllRead: () => invoke<void>("mark_all_notifications_read"),
+  deleteOne: (id: string) => invoke<void>("delete_notification", { id }),
+  deleteAllRead: () => invoke<number>("delete_all_read_notifications"),
 };
 
 // ─── Settings ─────────────────────────────────────────────────────────────

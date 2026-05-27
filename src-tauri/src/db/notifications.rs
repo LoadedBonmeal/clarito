@@ -90,3 +90,24 @@ pub async fn mark_all_read(pool: &SqlitePool) -> AppResult<()> {
         .await?;
     Ok(())
 }
+
+pub async fn delete_notification(pool: &SqlitePool, id: &str) -> AppResult<()> {
+    use crate::error::AppError;
+    let rows = sqlx::query("DELETE FROM notifications WHERE id = ?1")
+        .bind(id)
+        .execute(pool)
+        .await?
+        .rows_affected();
+    if rows == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(())
+}
+
+pub async fn delete_all_read(pool: &SqlitePool) -> AppResult<u64> {
+    let rows = sqlx::query("DELETE FROM notifications WHERE is_read = 1")
+        .execute(pool)
+        .await?
+        .rows_affected();
+    Ok(rows)
+}
