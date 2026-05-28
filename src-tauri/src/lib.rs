@@ -231,6 +231,7 @@ pub fn run() {
             commands::payments::list_payments,
             commands::payments::delete_payment,
             commands::payments::get_payment_summary,
+            commands::payments::list_payment_summaries,
             // recurring invoices
             commands::recurring::create_recurring_invoice,
             commands::recurring::list_recurring_invoices,

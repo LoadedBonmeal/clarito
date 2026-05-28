@@ -67,3 +67,11 @@ pub async fn get_payment_summary(
 ) -> AppResult<PaymentSummary> {
     payments::summary_for_invoice(&state.db, &invoice_id, &company_id).await
 }
+
+#[tauri::command]
+pub async fn list_payment_summaries(
+    state: State<'_, AppState>,
+    company_id: String,
+) -> AppResult<Vec<PaymentSummary>> {
+    payments::list_all_summaries(&state.db, &company_id).await
+}

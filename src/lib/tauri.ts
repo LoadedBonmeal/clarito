@@ -356,6 +356,8 @@ export const payments = {
     invoke<void>("delete_payment", { paymentId, companyId }),
   summary: (invoiceId: string, companyId: string) =>
     invoke<PaymentSummary>("get_payment_summary", { invoiceId, companyId }),
+  listSummaries: (companyId: string) =>
+    invoke<PaymentSummary[]>("list_payment_summaries", { companyId }),
 };
 
 // ─── Recurring invoices ────────────────────────────────────────────────────

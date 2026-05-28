@@ -97,35 +97,45 @@ pub struct UpdateCompanyInput {
 
 // ─── Queries ───────────────────────────────────────────────────────────────
 
-const SELECT_COLUMNS: &str = "id, cui, legal_name, trade_name, registry_number, vat_payer, \
-    address, city, county, postal_code, country, email, phone, iban, bank_name, \
-    is_active, spv_enabled, invoice_series, last_invoice_number, logo_path, \
-    created_at, updated_at";
-
 pub async fn list(pool: &SqlitePool) -> AppResult<Vec<Company>> {
-    let sql = format!(
-        "SELECT {SELECT_COLUMNS} FROM companies WHERE is_active = 1 ORDER BY legal_name",
-    );
-    let rows = sqlx::query_as::<_, Company>(&sql).fetch_all(pool).await?;
+    let rows = sqlx::query_as::<_, Company>(
+        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, \
+         address, city, county, postal_code, country, email, phone, iban, bank_name, \
+         is_active, spv_enabled, invoice_series, last_invoice_number, logo_path, \
+         created_at, updated_at \
+         FROM companies WHERE is_active = 1 ORDER BY legal_name",
+    )
+    .fetch_all(pool)
+    .await?;
     Ok(rows)
 }
 
 pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Company> {
-    let sql = format!("SELECT {SELECT_COLUMNS} FROM companies WHERE id = ?1");
-    let row = sqlx::query_as::<_, Company>(&sql)
-        .bind(id)
-        .fetch_optional(pool)
-        .await?
-        .ok_or(AppError::NotFound)?;
+    let row = sqlx::query_as::<_, Company>(
+        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, \
+         address, city, county, postal_code, country, email, phone, iban, bank_name, \
+         is_active, spv_enabled, invoice_series, last_invoice_number, logo_path, \
+         created_at, updated_at \
+         FROM companies WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
     Ok(row)
 }
 
 pub async fn get_by_cui(pool: &SqlitePool, cui: &str) -> AppResult<Option<Company>> {
-    let sql = format!("SELECT {SELECT_COLUMNS} FROM companies WHERE cui = ?1");
-    let row = sqlx::query_as::<_, Company>(&sql)
-        .bind(cui)
-        .fetch_optional(pool)
-        .await?;
+    let row = sqlx::query_as::<_, Company>(
+        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, \
+         address, city, county, postal_code, country, email, phone, iban, bank_name, \
+         is_active, spv_enabled, invoice_series, last_invoice_number, logo_path, \
+         created_at, updated_at \
+         FROM companies WHERE cui = ?1",
+    )
+    .bind(cui)
+    .fetch_optional(pool)
+    .await?;
     Ok(row)
 }
 

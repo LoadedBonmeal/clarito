@@ -30,15 +30,18 @@ pub struct CreateNotificationInput {
     pub data: Option<String>,
 }
 
-const SELECT_COLUMNS: &str = "id, notification_type, title, body, data, is_read, read_at, \
-    os_notification_shown, created_at";
-
 pub async fn list(pool: &SqlitePool, only_unread: bool) -> AppResult<Vec<Notification>> {
-    let where_sql = if only_unread { "WHERE is_read = 0" } else { "" };
-    let sql = format!(
-        "SELECT {SELECT_COLUMNS} FROM notifications {where_sql} ORDER BY created_at DESC LIMIT 200"
-    );
-    Ok(sqlx::query_as::<_, Notification>(&sql).fetch_all(pool).await?)
+    // ?1 only_unread flag: when 1, filter is_read = 0; when 0, all rows pass.
+    Ok(sqlx::query_as::<_, Notification>(
+        "SELECT id, notification_type, title, body, data, is_read, read_at, \
+         os_notification_shown, created_at \
+         FROM notifications \
+         WHERE (NOT ?1 OR is_read = 0) \
+         ORDER BY created_at DESC LIMIT 200",
+    )
+    .bind(only_unread as i64)
+    .fetch_all(pool)
+    .await?)
 }
 
 pub async fn count_unread(pool: &SqlitePool) -> AppResult<i64> {
@@ -65,11 +68,14 @@ pub async fn create(pool: &SqlitePool, input: CreateNotificationInput) -> AppRes
     .execute(pool)
     .await?;
 
-    let sql = format!("SELECT {SELECT_COLUMNS} FROM notifications WHERE id = ?1");
-    Ok(sqlx::query_as::<_, Notification>(&sql)
-        .bind(&id)
-        .fetch_one(pool)
-        .await?)
+    Ok(sqlx::query_as::<_, Notification>(
+        "SELECT id, notification_type, title, body, data, is_read, read_at, \
+         os_notification_shown, created_at \
+         FROM notifications WHERE id = ?1",
+    )
+    .bind(&id)
+    .fetch_one(pool)
+    .await?)
 }
 
 pub async fn mark_read(pool: &SqlitePool, id: &str) -> AppResult<()> {

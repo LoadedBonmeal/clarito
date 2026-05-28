@@ -81,39 +81,36 @@ pub struct ContactFilter {
 
 // ─── Queries ───────────────────────────────────────────────────────────────
 
-const SELECT_COLUMNS: &str = "id, company_id, contact_type, cui, legal_name, vat_payer, \
-    address, city, county, country, email, phone, created_at, updated_at";
-
 pub async fn list(pool: &SqlitePool, filter: ContactFilter) -> AppResult<Vec<Contact>> {
-    let mut sql = format!("SELECT {SELECT_COLUMNS} FROM contacts WHERE 1=1");
-    if filter.company_id.is_some() {
-        sql.push_str(" AND company_id = ?1");
-    }
-    if filter.query.is_some() {
-        let next = if filter.company_id.is_some() { "?2" } else { "?1" };
-        sql.push_str(&format!(
-            " AND (legal_name LIKE {next} OR cui LIKE {next})"
-        ));
-    }
-    sql.push_str(" ORDER BY legal_name");
+    let company_id = filter.company_id.as_ref().filter(|s| !s.is_empty());
+    let query_term = filter.query.as_ref().filter(|s| !s.is_empty());
 
-    let mut q = sqlx::query_as::<_, Contact>(&sql);
-    if let Some(cid) = &filter.company_id {
-        q = q.bind(cid);
-    }
-    if let Some(query) = &filter.query {
-        q = q.bind(format!("%{query}%"));
-    }
-    Ok(q.fetch_all(pool).await?)
+    // ?1 company_id (Option<&str>), ?2 query_term (Option<&str>)
+    let items = sqlx::query_as::<_, Contact>(
+        "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, \
+         address, city, county, country, email, phone, created_at, updated_at \
+         FROM contacts \
+         WHERE (?1 IS NULL OR company_id = ?1) \
+           AND (?2 IS NULL OR legal_name LIKE '%' || ?2 || '%' OR cui LIKE '%' || ?2 || '%') \
+         ORDER BY legal_name",
+    )
+    .bind(company_id)
+    .bind(query_term)
+    .fetch_all(pool)
+    .await?;
+    Ok(items)
 }
 
 pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Contact> {
-    let sql = format!("SELECT {SELECT_COLUMNS} FROM contacts WHERE id = ?1");
-    sqlx::query_as::<_, Contact>(&sql)
-        .bind(id)
-        .fetch_optional(pool)
-        .await?
-        .ok_or(AppError::NotFound)
+    sqlx::query_as::<_, Contact>(
+        "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, \
+         address, city, county, country, email, phone, created_at, updated_at \
+         FROM contacts WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
 }
 
 pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<Contact> {

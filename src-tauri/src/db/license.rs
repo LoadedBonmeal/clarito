@@ -19,12 +19,13 @@ pub struct License {
     pub last_validated_at: Option<i64>,
 }
 
-const SELECT_COLUMNS: &str =
-    "id, license_key, tier, activated_at, expires_at, machine_id, email, last_validated_at";
-
 pub async fn get(pool: &SqlitePool) -> AppResult<Option<License>> {
-    let sql = format!("SELECT {SELECT_COLUMNS} FROM license WHERE id = 1");
-    Ok(sqlx::query_as::<_, License>(&sql).fetch_optional(pool).await?)
+    Ok(sqlx::query_as::<_, License>(
+        "SELECT id, license_key, tier, activated_at, expires_at, machine_id, email, last_validated_at \
+         FROM license WHERE id = 1",
+    )
+    .fetch_optional(pool)
+    .await?)
 }
 
 pub async fn start_trial(

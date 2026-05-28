@@ -42,45 +42,27 @@ pub async fn generate_vat_report(
 ) -> AppResult<VatReport> {
     let pool = &state.db;
 
-    // Build WHERE clause
-    let mut where_clauses = vec![
-        "status IN ('VALIDATED', 'SUBMITTED', 'QUEUED', 'SENT', 'ACCEPTED')".to_string(),
-        format!("issue_date >= ?1"),
-        format!("issue_date <= ?2"),
-    ];
-    let bind_offset = 3usize;
+    // ?1 date_from, ?2 date_to, ?3 company_id (Option<String> — None → NULL → filter skipped)
+    let cid = company_id.as_deref().filter(|s| !s.is_empty());
 
-    if company_id.is_some() {
-        where_clauses.push(format!("company_id = ?{}", bind_offset));
-    }
-    let where_sql = where_clauses.join(" AND ");
-
-    // Qualified version for the JOIN query (invoices aliased as `i`)
-    let groups_where_sql = where_sql
-        .replace("status IN", "i.status IN")
-        .replace("issue_date >=", "i.issue_date >=")
-        .replace("issue_date <=", "i.issue_date <=")
-        .replace("company_id =", "i.company_id =");
-
-    // Summary totals
-    let summary_sql = format!(
+    // Summary totals — static SQL with nullable company_id bind
+    let summary_row = sqlx::query(
         "SELECT COUNT(*) as cnt, \
          COALESCE(SUM(subtotal_amount),0) as base_total, \
          COALESCE(SUM(vat_amount),0) as vat_total, \
          COALESCE(SUM(total_amount),0) as grand_total \
-         FROM invoices WHERE {}",
-        where_sql
-    );
-
-    let mut q = sqlx::query(&summary_sql).bind(&date_from).bind(&date_to);
-    if let Some(ref cid) = company_id {
-        q = q.bind(cid);
-    }
-
-    let summary_row = q
-        .fetch_one(pool)
-        .await
-        .map_err(AppError::Database)?;
+         FROM invoices \
+         WHERE status IN ('VALIDATED','SUBMITTED','QUEUED','SENT','ACCEPTED') \
+           AND issue_date >= ?1 \
+           AND issue_date <= ?2 \
+           AND (?3 IS NULL OR company_id = ?3)",
+    )
+    .bind(&date_from)
+    .bind(&date_to)
+    .bind(cid)
+    .fetch_one(pool)
+    .await
+    .map_err(AppError::Database)?;
 
     let invoice_count: i64 = summary_row.try_get("cnt").unwrap_or(0);
     let total_base: f64 = summary_row.try_get("base_total").unwrap_or(0.0);
@@ -88,24 +70,25 @@ pub async fn generate_vat_report(
     let total_amount: f64 = summary_row.try_get("grand_total").unwrap_or(0.0);
 
     // VAT groups — join with line items to get breakdown per rate
-    let groups_sql = format!(
+    let group_rows = sqlx::query(
         "SELECT l.vat_rate, \
          COALESCE(SUM(l.subtotal_amount),0) as base_sum, \
          COALESCE(SUM(l.vat_amount),0) as vat_sum, \
          COUNT(DISTINCT i.id) as inv_count \
          FROM invoice_line_items l \
          JOIN invoices i ON i.id = l.invoice_id \
-         WHERE {} \
+         WHERE i.status IN ('VALIDATED','SUBMITTED','QUEUED','SENT','ACCEPTED') \
+           AND i.issue_date >= ?1 \
+           AND i.issue_date <= ?2 \
+           AND (?3 IS NULL OR i.company_id = ?3) \
          GROUP BY l.vat_rate ORDER BY l.vat_rate DESC",
-        groups_where_sql
-    );
-
-    let mut qg = sqlx::query(&groups_sql).bind(&date_from).bind(&date_to);
-    if let Some(ref cid) = company_id {
-        qg = qg.bind(cid);
-    }
-
-    let group_rows = qg.fetch_all(pool).await.map_err(AppError::Database)?;
+    )
+    .bind(&date_from)
+    .bind(&date_to)
+    .bind(cid)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
 
     let vat_groups: Vec<VatGroup> = group_rows
         .iter()

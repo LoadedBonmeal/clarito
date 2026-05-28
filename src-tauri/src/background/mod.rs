@@ -135,6 +135,14 @@ pub fn spawn_background_tasks(app: AppHandle) {
             }
         }
     });
+
+    // Task 8: One-shot crash recovery — reset QUEUED invoices with no upload_id
+    let app8 = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(state) = app8.try_state::<AppState>() {
+            recover_stuck_queued_invoices(app8.clone(), state.db.clone()).await;
+        }
+    });
 }
 
 /// Dorme până la ora locală specificată (HH:MM) din ziua curentă sau mâine.
@@ -1071,6 +1079,70 @@ async fn cleanup_audit_log(pool: sqlx::SqlitePool) {
         .execute(&pool)
         .await;
     tracing::info!("Audit log cleanup done");
+}
+
+/// Crash recovery: on startup, find invoices stuck in QUEUED with no anaf_upload_id
+/// (meaning the app crashed after the ANAF upload succeeded but before mark_submitted ran).
+/// Any such invoice older than 10 minutes is reset to DRAFT so it can be retried.
+async fn recover_stuck_queued_invoices(app: tauri::AppHandle, db: sqlx::SqlitePool) {
+    // Brief delay so the DB pool is fully warmed up before we query it.
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+    let sql = "SELECT id
+               FROM invoices
+               WHERE status = 'QUEUED'
+                 AND (anaf_upload_id IS NULL OR anaf_upload_id = '')
+                 AND updated_at < (unixepoch() - 600)";
+
+    let rows = match sqlx::query(sql).fetch_all(&db).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("Recuperare facturi blocate: query eșuat: {e}");
+            return;
+        }
+    };
+
+    if rows.is_empty() {
+        return;
+    }
+
+    use sqlx::Row;
+    for row in rows {
+        let invoice_id: String = match row.try_get("id") {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let update_sql =
+            "UPDATE invoices SET status = 'DRAFT', updated_at = unixepoch() WHERE id = ?1";
+        if let Err(e) = sqlx::query(update_sql).bind(&invoice_id).execute(&db).await {
+            tracing::error!("Recuperare factura {invoice_id}: update eșuat: {e}");
+            continue;
+        }
+
+        let event_id = crate::db::models::new_id();
+        let event_sql =
+            "INSERT INTO invoice_events (id, invoice_id, event_type, message, metadata, created_at)
+             VALUES (?1, ?2, ?3, ?4, NULL, unixepoch())";
+        let _ = sqlx::query(event_sql)
+            .bind(&event_id)
+            .bind(&invoice_id)
+            .bind("RECOVERED_FROM_QUEUED")
+            .bind("Factura resetata la DRAFT dupa esec de incarcare ANAF (crash recovery)")
+            .execute(&db)
+            .await;
+
+        tracing::warn!("Factura {invoice_id} recuperata: QUEUED → DRAFT (crash recovery)");
+
+        let _ = app.emit(
+            "invoice_status_changed",
+            serde_json::json!({
+                "invoice_id": invoice_id,
+                "new_status": "DRAFT",
+                "reason": "recovery",
+            }),
+        );
+    }
 }
 
 async fn archive_check(pool: sqlx::SqlitePool, app: AppHandle) {

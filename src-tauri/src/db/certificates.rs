@@ -39,45 +39,45 @@ pub struct CreateCertificateInput {
     pub refreshable_until: i64,
 }
 
-const SELECT_COLUMNS: &str = "id, company_id, keychain_ref, issued_at, expires_at, \
-    refreshable_until, is_active, last_refreshed_at, last_used_at, created_at, updated_at";
-
 pub async fn list_for_company(
     pool: &SqlitePool,
     company_id: &str,
 ) -> AppResult<Vec<Certificate>> {
-    let sql = format!(
-        "SELECT {SELECT_COLUMNS} FROM certificates \
-         WHERE company_id = ?1 ORDER BY created_at DESC"
-    );
-    Ok(sqlx::query_as::<_, Certificate>(&sql)
-        .bind(company_id)
-        .fetch_all(pool)
-        .await?)
+    Ok(sqlx::query_as::<_, Certificate>(
+        "SELECT id, company_id, keychain_ref, issued_at, expires_at, \
+         refreshable_until, is_active, last_refreshed_at, last_used_at, created_at, updated_at \
+         FROM certificates WHERE company_id = ?1 ORDER BY created_at DESC",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?)
 }
 
 pub async fn get_active(
     pool: &SqlitePool,
     company_id: &str,
 ) -> AppResult<Option<Certificate>> {
-    let sql = format!(
-        "SELECT {SELECT_COLUMNS} FROM certificates \
-         WHERE company_id = ?1 AND is_active = 1 \
-         ORDER BY created_at DESC LIMIT 1"
-    );
-    Ok(sqlx::query_as::<_, Certificate>(&sql)
-        .bind(company_id)
-        .fetch_optional(pool)
-        .await?)
+    Ok(sqlx::query_as::<_, Certificate>(
+        "SELECT id, company_id, keychain_ref, issued_at, expires_at, \
+         refreshable_until, is_active, last_refreshed_at, last_used_at, created_at, updated_at \
+         FROM certificates WHERE company_id = ?1 AND is_active = 1 \
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(company_id)
+    .fetch_optional(pool)
+    .await?)
 }
 
 pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Certificate> {
-    let sql = format!("SELECT {SELECT_COLUMNS} FROM certificates WHERE id = ?1");
-    sqlx::query_as::<_, Certificate>(&sql)
-        .bind(id)
-        .fetch_optional(pool)
-        .await?
-        .ok_or(AppError::NotFound)
+    sqlx::query_as::<_, Certificate>(
+        "SELECT id, company_id, keychain_ref, issued_at, expires_at, \
+         refreshable_until, is_active, last_refreshed_at, last_used_at, created_at, updated_at \
+         FROM certificates WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
 }
 
 pub async fn create(pool: &SqlitePool, input: CreateCertificateInput) -> AppResult<Certificate> {
@@ -141,13 +141,13 @@ pub async fn deactivate(pool: &SqlitePool, id: &str) -> AppResult<()> {
 /// încă active. Folosit de background task pentru notificări.
 pub async fn list_expiring(pool: &SqlitePool, days: i64) -> AppResult<Vec<Certificate>> {
     let cutoff = now_unix() + days * 86_400;
-    let sql = format!(
-        "SELECT {SELECT_COLUMNS} FROM certificates \
-         WHERE is_active = 1 AND expires_at < ?1 \
-         ORDER BY expires_at"
-    );
-    Ok(sqlx::query_as::<_, Certificate>(&sql)
-        .bind(cutoff)
-        .fetch_all(pool)
-        .await?)
+    Ok(sqlx::query_as::<_, Certificate>(
+        "SELECT id, company_id, keychain_ref, issued_at, expires_at, \
+         refreshable_until, is_active, last_refreshed_at, last_used_at, created_at, updated_at \
+         FROM certificates WHERE is_active = 1 AND expires_at < ?1 \
+         ORDER BY expires_at",
+    )
+    .bind(cutoff)
+    .fetch_all(pool)
+    .await?)
 }

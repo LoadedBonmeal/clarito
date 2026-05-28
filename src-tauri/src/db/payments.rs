@@ -44,9 +44,6 @@ pub struct PaymentSummary {
     pub payments: Vec<Payment>,
 }
 
-const SELECT_COLS: &str =
-    "id, invoice_id, company_id, amount, currency, paid_at, method, reference, notes, created_at";
-
 pub async fn create(pool: &SqlitePool, input: CreatePaymentInput) -> AppResult<Payment> {
     use rust_decimal::Decimal;
     use std::str::FromStr;
@@ -93,11 +90,13 @@ pub async fn create(pool: &SqlitePool, input: CreatePaymentInput) -> AppResult<P
 }
 
 pub async fn get_by_id(pool: &SqlitePool, id: &str) -> AppResult<Payment> {
-    let sql = format!("SELECT {SELECT_COLS} FROM payments WHERE id = ?1");
-    Ok(sqlx::query_as::<_, Payment>(&sql)
-        .bind(id)
-        .fetch_one(pool)
-        .await?)
+    Ok(sqlx::query_as::<_, Payment>(
+        "SELECT id, invoice_id, company_id, amount, currency, paid_at, method, reference, notes, created_at \
+         FROM payments WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?)
 }
 
 pub async fn list_for_invoice(
@@ -105,14 +104,14 @@ pub async fn list_for_invoice(
     invoice_id: &str,
     company_id: &str,
 ) -> AppResult<Vec<Payment>> {
-    let sql = format!(
-        "SELECT {SELECT_COLS} FROM payments WHERE invoice_id = ?1 AND company_id = ?2 ORDER BY paid_at DESC"
-    );
-    Ok(sqlx::query_as::<_, Payment>(&sql)
-        .bind(invoice_id)
-        .bind(company_id)
-        .fetch_all(pool)
-        .await?)
+    Ok(sqlx::query_as::<_, Payment>(
+        "SELECT id, invoice_id, company_id, amount, currency, paid_at, method, reference, notes, created_at \
+         FROM payments WHERE invoice_id = ?1 AND company_id = ?2 ORDER BY paid_at DESC",
+    )
+    .bind(invoice_id)
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?)
 }
 
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
@@ -129,6 +128,93 @@ pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<
         return Err(AppError::NotFound);
     }
     Ok(())
+}
+
+pub async fn list_all_summaries(
+    pool: &SqlitePool,
+    company_id: &str,
+) -> AppResult<Vec<PaymentSummary>> {
+    use rust_decimal::Decimal;
+    use std::collections::HashMap;
+    use std::str::FromStr;
+    use sqlx::Row;
+
+    // Fetch all invoices for the company — total_amount stored as TEXT
+    let invoice_rows = sqlx::query(
+        "SELECT id, total_amount FROM invoices WHERE company_id = ?1",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    // Fetch all payments for this company's invoices in ONE query
+    let payment_rows = sqlx::query(
+        "SELECT p.id, p.invoice_id, p.company_id, p.amount, p.currency, p.paid_at, \
+                p.method, p.reference, p.notes, p.created_at \
+         FROM payments p \
+         INNER JOIN invoices i ON i.id = p.invoice_id \
+         WHERE i.company_id = ?1 \
+         ORDER BY p.paid_at DESC",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    // Aggregate payments and build per-invoice lists
+    let mut paid_map: HashMap<String, Decimal> = HashMap::new();
+    let mut payments_by_invoice: HashMap<String, Vec<Payment>> = HashMap::new();
+
+    for row in payment_rows {
+        let invoice_id: String = row.try_get("invoice_id").map_err(AppError::Database)?;
+        let amount_str: String = row.try_get("amount").unwrap_or_else(|_| "0".to_string());
+        let amount = Decimal::from_str(&amount_str).unwrap_or(Decimal::ZERO);
+        *paid_map.entry(invoice_id.clone()).or_insert(Decimal::ZERO) += amount;
+
+        let payment = Payment {
+            id: row.try_get("id").map_err(AppError::Database)?,
+            invoice_id: invoice_id.clone(),
+            company_id: row.try_get("company_id").map_err(AppError::Database)?,
+            amount: amount_str,
+            currency: row.try_get("currency").unwrap_or_else(|_| "RON".to_string()),
+            paid_at: row.try_get("paid_at").map_err(AppError::Database)?,
+            method: row.try_get("method").unwrap_or_else(|_| "transfer".to_string()),
+            reference: row.try_get("reference").ok().flatten(),
+            notes: row.try_get("notes").ok().flatten(),
+            created_at: row.try_get("created_at").unwrap_or(0),
+        };
+        payments_by_invoice.entry(invoice_id).or_default().push(payment);
+    }
+
+    // Build one PaymentSummary per invoice
+    let mut out = Vec::with_capacity(invoice_rows.len());
+    for row in invoice_rows {
+        let invoice_id: String = row.try_get("id").map_err(AppError::Database)?;
+        let total_str: String = row.try_get("total_amount").unwrap_or_else(|_| "0".to_string());
+        let total = Decimal::from_str(&total_str).unwrap_or(Decimal::ZERO).round_dp(2);
+        let paid = paid_map.get(&invoice_id).copied().unwrap_or(Decimal::ZERO).round_dp(2);
+
+        let payment_status = if paid <= Decimal::ZERO {
+            "UNPAID"
+        } else if paid >= total {
+            "PAID"
+        } else {
+            "PARTIAL"
+        };
+
+        let payments = payments_by_invoice.remove(&invoice_id).unwrap_or_default();
+
+        out.push(PaymentSummary {
+            invoice_id,
+            total_amount: total_str,
+            paid_amount: paid.to_string(),
+            payment_status: payment_status.to_string(),
+            payments,
+        });
+    }
+
+    Ok(out)
 }
 
 pub async fn summary_for_invoice(

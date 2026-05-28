@@ -58,32 +58,25 @@ export function PaymentsPage() {
 
   const allInvoices = useMemo(() => paged?.items ?? [], [paged]);
 
-  // Fetch payment summaries for all invoices
-  const { data: summaries = [] } = useQuery({
-    queryKey: ["paymentSummaries", activeCompanyId, allInvoices.map((i) => i.id).join(",")],
-    queryFn: async () => {
-      if (!activeCompanyId || allInvoices.length === 0) return [];
-      return Promise.all(
-        allInvoices.map((inv) =>
-          api.payments.summary(inv.id, activeCompanyId).catch(() => null),
-        ),
-      );
-    },
-    enabled: !!activeCompanyId && allInvoices.length > 0,
+  // Fetch payment summaries for all invoices — single batch query (replaces N+1)
+  const { data: summariesArray = [] } = useQuery({
+    queryKey: ["payment_summaries", activeCompanyId],
+    queryFn: () => api.payments.listSummaries(activeCompanyId!),
+    enabled: !!activeCompanyId,
   });
 
   const summaryMap = useMemo(() => {
     const m = new Map<string, { paidAmount: string; paymentStatus: string; payments: Payment[] }>();
-    for (const s of summaries) {
-      if (s) m.set(s.invoiceId, { paidAmount: s.paidAmount, paymentStatus: s.paymentStatus, payments: s.payments });
+    for (const s of summariesArray) {
+      m.set(s.invoiceId, { paidAmount: s.paidAmount, paymentStatus: s.paymentStatus, payments: s.payments });
     }
     return m;
-  }, [summaries]);
+  }, [summariesArray]);
 
   const addMutation = useMutation({
     mutationFn: (args: AddPaymentArgs) => api.payments.add(args),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["paymentSummaries"] });
+      void queryClient.invalidateQueries({ queryKey: ["payment_summaries", activeCompanyId] });
       notify.success("Plată adăugată cu succes");
       setAddModal(null);
       setForm({ amount: "", paidAt: new Date().toISOString().slice(0, 10), method: "transfer", reference: "" });
@@ -95,7 +88,7 @@ export function PaymentsPage() {
     mutationFn: ({ paymentId }: { paymentId: string }) =>
       api.payments.delete(paymentId, activeCompanyId!),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["paymentSummaries"] });
+      void queryClient.invalidateQueries({ queryKey: ["payment_summaries", activeCompanyId] });
       notify.success("Plată ștearsă");
     },
     onError: (e) => notify.error("Eroare la ștergere: " + String(e)),

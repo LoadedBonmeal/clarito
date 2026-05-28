@@ -40,10 +40,6 @@ pub struct CreateRecurringInput {
     pub notes: Option<String>,
 }
 
-const SELECT_COLS: &str =
-    "id, company_id, template_name, client_id, frequency, next_issue_date, \
-     day_of_month, auto_submit_anaf, active, series, lines_json, notes, created_at, updated_at";
-
 pub async fn create(pool: &SqlitePool, input: CreateRecurringInput) -> AppResult<RecurringInvoice> {
     let valid_frequencies = ["monthly", "quarterly", "annual"];
     if !valid_frequencies.contains(&input.frequency.as_str()) {
@@ -84,32 +80,37 @@ pub async fn create(pool: &SqlitePool, input: CreateRecurringInput) -> AppResult
 }
 
 pub async fn get_by_id(pool: &SqlitePool, id: &str) -> AppResult<RecurringInvoice> {
-    let sql = format!("SELECT {SELECT_COLS} FROM recurring_invoices WHERE id = ?1");
-    Ok(sqlx::query_as::<_, RecurringInvoice>(&sql)
-        .bind(id)
-        .fetch_one(pool)
-        .await?)
+    Ok(sqlx::query_as::<_, RecurringInvoice>(
+        "SELECT id, company_id, template_name, client_id, frequency, next_issue_date, \
+         day_of_month, auto_submit_anaf, active, series, lines_json, notes, created_at, updated_at \
+         FROM recurring_invoices WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?)
 }
 
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<RecurringInvoice>> {
-    let sql = format!(
-        "SELECT {SELECT_COLS} FROM recurring_invoices WHERE company_id = ?1 ORDER BY next_issue_date ASC"
-    );
-    Ok(sqlx::query_as::<_, RecurringInvoice>(&sql)
-        .bind(company_id)
-        .fetch_all(pool)
-        .await?)
+    Ok(sqlx::query_as::<_, RecurringInvoice>(
+        "SELECT id, company_id, template_name, client_id, frequency, next_issue_date, \
+         day_of_month, auto_submit_anaf, active, series, lines_json, notes, created_at, updated_at \
+         FROM recurring_invoices WHERE company_id = ?1 ORDER BY next_issue_date ASC",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?)
 }
 
 pub async fn list_due(pool: &SqlitePool) -> AppResult<Vec<RecurringInvoice>> {
-    let sql = format!(
-        "SELECT {SELECT_COLS} FROM recurring_invoices \
+    Ok(sqlx::query_as::<_, RecurringInvoice>(
+        "SELECT id, company_id, template_name, client_id, frequency, next_issue_date, \
+         day_of_month, auto_submit_anaf, active, series, lines_json, notes, created_at, updated_at \
+         FROM recurring_invoices \
          WHERE active = 1 AND next_issue_date <= date('now') \
-         ORDER BY next_issue_date ASC"
-    );
-    Ok(sqlx::query_as::<_, RecurringInvoice>(&sql)
-        .fetch_all(pool)
-        .await?)
+         ORDER BY next_issue_date ASC",
+    )
+    .fetch_all(pool)
+    .await?)
 }
 
 pub async fn update_next_date(pool: &SqlitePool, id: &str, next_date: &str) -> AppResult<()> {

@@ -146,82 +146,102 @@ pub struct InvoiceFilter {
 
 // ─── Queries: list / get ───────────────────────────────────────────────────
 
-const SELECT_INVOICE: &str = "id, company_id, contact_id, series, number, full_number, \
-    issue_date, due_date, currency, exchange_rate, subtotal_amount, vat_amount, total_amount, \
-    status, anaf_upload_id, anaf_index, anaf_submitted_at, anaf_validated_at, anaf_rejected_at, \
-    xml_path, pdf_path, signature_xml_path, rejection_reason, rejection_code, notes, \
-    payment_means_code, created_at, updated_at";
-
-const SELECT_LINE: &str = "id, invoice_id, position, name, description, quantity, unit, \
-    unit_price, vat_rate, vat_category, subtotal_amount, vat_amount, total_amount, cpv_code";
-
-const SELECT_EVENT: &str = "id, invoice_id, event_type, message, metadata, created_at";
-
 pub async fn list(pool: &SqlitePool, filter: InvoiceFilter) -> AppResult<Paginated<Invoice>> {
     let page = filter.page.unwrap_or_default();
 
-    // Construim WHERE-ul progresiv. Binding-urile sunt apoi adăugate în
-    // aceeași ordine.
-    let mut where_clauses = vec!["1=1".to_string()];
-    let mut binds: Vec<String> = Vec::new();
+    // Normalizăm filtrele opționale: string gol → None (tratat ca NULL în SQL).
+    let company_id = filter.company_id.as_ref().filter(|s| !s.is_empty());
+    let date_from  = filter.date_from.as_ref().filter(|s| !s.is_empty());
+    let date_to    = filter.date_to.as_ref().filter(|s| !s.is_empty());
+    let query_term = filter.query.as_ref().filter(|s| !s.is_empty());
 
-    if let Some(cid) = &filter.company_id {
-        where_clauses.push(format!("company_id = ?{}", binds.len() + 1));
-        binds.push(cid.clone());
-    }
-    if let Some(statuses) = &filter.statuses {
-        if !statuses.is_empty() {
-            let placeholders: Vec<String> = statuses
-                .iter()
-                .enumerate()
-                .map(|(i, _)| format!("?{}", binds.len() + i + 1))
-                .collect();
-            where_clauses.push(format!("status IN ({})", placeholders.join(",")));
-            binds.extend(statuses.iter().map(|s| s.as_str().to_string()));
-        }
-    }
-    if let Some(from) = &filter.date_from {
-        where_clauses.push(format!("issue_date >= ?{}", binds.len() + 1));
-        binds.push(from.clone());
-    }
-    if let Some(to) = &filter.date_to {
-        where_clauses.push(format!("issue_date <= ?{}", binds.len() + 1));
-        binds.push(to.clone());
-    }
-    if let Some(query) = &filter.query {
-        where_clauses.push(format!(
-            "(full_number LIKE ?{} OR notes LIKE ?{})",
-            binds.len() + 1,
-            binds.len() + 1
-        ));
-        binds.push(format!("%{query}%"));
-    }
+    // Statusurile sunt o listă cu număr variabil de elemente. Le extindem
+    // manual la OR-uri pentru cele 6 valori posibile ale enum-ului, astfel
+    // încât SQL-ul rămâne static.
+    //
+    // Dacă `filter.statuses` e None sau goală, toate statusurile trec.
+    let statuses = filter.statuses.as_deref().unwrap_or(&[]);
+    let has_status_filter = !statuses.is_empty();
+    let want_draft     = has_status_filter && statuses.contains(&InvoiceStatus::Draft);
+    let want_queued    = has_status_filter && statuses.contains(&InvoiceStatus::Queued);
+    let want_submitted = has_status_filter && statuses.contains(&InvoiceStatus::Submitted);
+    let want_validated = has_status_filter && statuses.contains(&InvoiceStatus::Validated);
+    let want_rejected  = has_status_filter && statuses.contains(&InvoiceStatus::Rejected);
+    let want_storned   = has_status_filter && statuses.contains(&InvoiceStatus::Storned);
 
-    let where_sql = where_clauses.join(" AND ");
+    // SQL static cu toate filtrele opționale exprimate ca predicate nullable.
+    // ?1  company_id       (Option<&str>)
+    // ?2  date_from        (Option<&str>)
+    // ?3  date_to          (Option<&str>)
+    // ?4  query_term       (Option<&str>) — legat fără %; LIKE concatenează în SQL
+    // ?5  has_status_filter (bool → i64)
+    // ?6..?11  want_DRAFT/QUEUED/SUBMITTED/VALIDATED/REJECTED/STORNED (bool → i64)
+    // ?12 limit, ?13 offset
+    let count_sql = "\
+        SELECT COUNT(*) FROM invoices \
+        WHERE (?1 IS NULL OR company_id = ?1) \
+          AND (?2 IS NULL OR issue_date >= ?2) \
+          AND (?3 IS NULL OR issue_date <= ?3) \
+          AND (?4 IS NULL OR full_number LIKE '%' || ?4 || '%' OR notes LIKE '%' || ?4 || '%') \
+          AND (NOT ?5 OR status = CASE WHEN ?6  THEN 'DRAFT'     ELSE NULL END \
+                      OR status = CASE WHEN ?7  THEN 'QUEUED'    ELSE NULL END \
+                      OR status = CASE WHEN ?8  THEN 'SUBMITTED' ELSE NULL END \
+                      OR status = CASE WHEN ?9  THEN 'VALIDATED' ELSE NULL END \
+                      OR status = CASE WHEN ?10 THEN 'REJECTED'  ELSE NULL END \
+                      OR status = CASE WHEN ?11 THEN 'STORNED'   ELSE NULL END)";
 
-    // Count total (separat de pagination).
-    let count_sql = format!("SELECT COUNT(*) FROM invoices WHERE {where_sql}");
-    let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
-    for b in &binds {
-        count_q = count_q.bind(b);
-    }
-    let total: i64 = count_q.fetch_one(pool).await?;
+    let total: i64 = sqlx::query_scalar(count_sql)
+        .bind(company_id)
+        .bind(date_from)
+        .bind(date_to)
+        .bind(query_term)
+        .bind(has_status_filter as i64)
+        .bind(want_draft as i64)
+        .bind(want_queued as i64)
+        .bind(want_submitted as i64)
+        .bind(want_validated as i64)
+        .bind(want_rejected as i64)
+        .bind(want_storned as i64)
+        .fetch_one(pool)
+        .await?;
 
-    // Page de date.
-    let limit_offset = format!(
-        " ORDER BY issue_date DESC, number DESC LIMIT ?{} OFFSET ?{}",
-        binds.len() + 1,
-        binds.len() + 2
+    let data_sql = concat!(
+        "SELECT id, company_id, contact_id, series, number, full_number, \
+         issue_date, due_date, currency, exchange_rate, subtotal_amount, vat_amount, total_amount, \
+         status, anaf_upload_id, anaf_index, anaf_submitted_at, anaf_validated_at, anaf_rejected_at, \
+         xml_path, pdf_path, signature_xml_path, rejection_reason, rejection_code, notes, \
+         payment_means_code, created_at, updated_at \
+         FROM invoices \
+         WHERE (?1 IS NULL OR company_id = ?1) \
+           AND (?2 IS NULL OR issue_date >= ?2) \
+           AND (?3 IS NULL OR issue_date <= ?3) \
+           AND (?4 IS NULL OR full_number LIKE '%' || ?4 || '%' OR notes LIKE '%' || ?4 || '%') \
+           AND (NOT ?5 OR status = CASE WHEN ?6  THEN 'DRAFT'     ELSE NULL END \
+                       OR status = CASE WHEN ?7  THEN 'QUEUED'    ELSE NULL END \
+                       OR status = CASE WHEN ?8  THEN 'SUBMITTED' ELSE NULL END \
+                       OR status = CASE WHEN ?9  THEN 'VALIDATED' ELSE NULL END \
+                       OR status = CASE WHEN ?10 THEN 'REJECTED'  ELSE NULL END \
+                       OR status = CASE WHEN ?11 THEN 'STORNED'   ELSE NULL END) \
+         ORDER BY issue_date DESC, number DESC \
+         LIMIT ?12 OFFSET ?13"
     );
-    let sql = format!("SELECT {SELECT_INVOICE} FROM invoices WHERE {where_sql}{limit_offset}");
 
-    let mut q = sqlx::query_as::<_, Invoice>(&sql);
-    for b in &binds {
-        q = q.bind(b);
-    }
-    q = q.bind(page.limit).bind(page.offset);
-
-    let items = q.fetch_all(pool).await?;
+    let items = sqlx::query_as::<_, Invoice>(data_sql)
+        .bind(company_id)
+        .bind(date_from)
+        .bind(date_to)
+        .bind(query_term)
+        .bind(has_status_filter as i64)
+        .bind(want_draft as i64)
+        .bind(want_queued as i64)
+        .bind(want_submitted as i64)
+        .bind(want_validated as i64)
+        .bind(want_rejected as i64)
+        .bind(want_storned as i64)
+        .bind(page.limit)
+        .bind(page.offset)
+        .fetch_all(pool)
+        .await?;
 
     Ok(Paginated {
         items,
@@ -232,12 +252,18 @@ pub async fn list(pool: &SqlitePool, filter: InvoiceFilter) -> AppResult<Paginat
 }
 
 pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Invoice> {
-    let sql = format!("SELECT {SELECT_INVOICE} FROM invoices WHERE id = ?1");
-    sqlx::query_as::<_, Invoice>(&sql)
-        .bind(id)
-        .fetch_optional(pool)
-        .await?
-        .ok_or(AppError::NotFound)
+    sqlx::query_as::<_, Invoice>(
+        "SELECT id, company_id, contact_id, series, number, full_number, \
+         issue_date, due_date, currency, exchange_rate, subtotal_amount, vat_amount, total_amount, \
+         status, anaf_upload_id, anaf_index, anaf_submitted_at, anaf_validated_at, anaf_rejected_at, \
+         xml_path, pdf_path, signature_xml_path, rejection_reason, rejection_code, notes, \
+         payment_means_code, created_at, updated_at \
+         FROM invoices WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
 }
 
 pub async fn get_with_lines(pool: &SqlitePool, id: &str) -> AppResult<InvoiceWithLines> {
@@ -248,23 +274,24 @@ pub async fn get_with_lines(pool: &SqlitePool, id: &str) -> AppResult<InvoiceWit
 }
 
 async fn list_lines(pool: &SqlitePool, invoice_id: &str) -> AppResult<Vec<LineItem>> {
-    let sql = format!(
-        "SELECT {SELECT_LINE} FROM invoice_line_items WHERE invoice_id = ?1 ORDER BY position"
-    );
-    Ok(sqlx::query_as::<_, LineItem>(&sql)
-        .bind(invoice_id)
-        .fetch_all(pool)
-        .await?)
+    Ok(sqlx::query_as::<_, LineItem>(
+        "SELECT id, invoice_id, position, name, description, quantity, unit, \
+         unit_price, vat_rate, vat_category, subtotal_amount, vat_amount, total_amount, cpv_code \
+         FROM invoice_line_items WHERE invoice_id = ?1 ORDER BY position",
+    )
+    .bind(invoice_id)
+    .fetch_all(pool)
+    .await?)
 }
 
 async fn list_events(pool: &SqlitePool, invoice_id: &str) -> AppResult<Vec<InvoiceEvent>> {
-    let sql = format!(
-        "SELECT {SELECT_EVENT} FROM invoice_events WHERE invoice_id = ?1 ORDER BY created_at"
-    );
-    Ok(sqlx::query_as::<_, InvoiceEvent>(&sql)
-        .bind(invoice_id)
-        .fetch_all(pool)
-        .await?)
+    Ok(sqlx::query_as::<_, InvoiceEvent>(
+        "SELECT id, invoice_id, event_type, message, metadata, created_at \
+         FROM invoice_events WHERE invoice_id = ?1 ORDER BY created_at",
+    )
+    .bind(invoice_id)
+    .fetch_all(pool)
+    .await?)
 }
 
 // ─── Create / Update ───────────────────────────────────────────────────────
@@ -525,15 +552,19 @@ pub async fn list_submitted(
     pool: &SqlitePool,
     company_id: &str,
 ) -> AppResult<Vec<Invoice>> {
-    let sql = format!(
-        "SELECT {SELECT_INVOICE} FROM invoices \
+    Ok(sqlx::query_as::<_, Invoice>(
+        "SELECT id, company_id, contact_id, series, number, full_number, \
+         issue_date, due_date, currency, exchange_rate, subtotal_amount, vat_amount, total_amount, \
+         status, anaf_upload_id, anaf_index, anaf_submitted_at, anaf_validated_at, anaf_rejected_at, \
+         xml_path, pdf_path, signature_xml_path, rejection_reason, rejection_code, notes, \
+         payment_means_code, created_at, updated_at \
+         FROM invoices \
          WHERE company_id = ?1 AND status = 'SUBMITTED' \
-         ORDER BY anaf_submitted_at"
-    );
-    Ok(sqlx::query_as::<_, Invoice>(&sql)
-        .bind(company_id)
-        .fetch_all(pool)
-        .await?)
+         ORDER BY anaf_submitted_at",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?)
 }
 
 pub async fn set_pdf_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<()> {

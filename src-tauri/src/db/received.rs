@@ -58,59 +58,74 @@ pub struct ReceivedFilter {
     pub page: Option<Page>,
 }
 
-const SELECT_COLUMNS: &str = "id, company_id, anaf_download_id, anaf_index, issuer_cui, \
-    issuer_name, series, number, total_amount, currency, issue_date, xml_path, pdf_path, \
-    status, downloaded_at, created_at";
-
 pub async fn list(
     pool: &SqlitePool,
     filter: ReceivedFilter,
 ) -> AppResult<Paginated<ReceivedInvoice>> {
     let page = filter.page.unwrap_or_default();
-    let mut where_sql = String::from("1=1");
-    let mut binds: Vec<String> = Vec::new();
 
-    if let Some(cid) = &filter.company_id {
-        where_sql.push_str(&format!(" AND company_id = ?{}", binds.len() + 1));
-        binds.push(cid.clone());
-    }
-    if let Some(statuses) = &filter.statuses {
-        if !statuses.is_empty() {
-            let placeholders: Vec<String> = (0..statuses.len())
-                .map(|i| format!("?{}", binds.len() + i + 1))
-                .collect();
-            where_sql.push_str(&format!(" AND status IN ({})", placeholders.join(",")));
-            for s in statuses {
-                let value = serde_json::to_value(s)
-                    .ok()
-                    .and_then(|v| v.as_str().map(|s| s.to_string()))
-                    .unwrap_or_default();
-                binds.push(value);
-            }
-        }
-    }
+    let company_id = filter.company_id.as_ref().filter(|s| !s.is_empty());
 
-    let count_sql = format!("SELECT COUNT(*) FROM received_invoices WHERE {where_sql}");
-    let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
-    for b in &binds {
-        count_q = count_q.bind(b);
-    }
-    let total = count_q.fetch_one(pool).await?;
+    // ReceivedStatus has 5 variants: New, Reviewed, Approved, Rejected, Archived.
+    // Expand to boolean flags so SQL remains static.
+    let statuses = filter.statuses.as_deref().unwrap_or(&[]);
+    let has_status_filter = !statuses.is_empty();
+    let want_new      = has_status_filter && statuses.contains(&ReceivedStatus::New);
+    let want_reviewed = has_status_filter && statuses.contains(&ReceivedStatus::Reviewed);
+    let want_approved = has_status_filter && statuses.contains(&ReceivedStatus::Approved);
+    let want_rejected = has_status_filter && statuses.contains(&ReceivedStatus::Rejected);
+    let want_archived = has_status_filter && statuses.contains(&ReceivedStatus::Archived);
 
-    let sql = format!(
-        "SELECT {SELECT_COLUMNS} FROM received_invoices WHERE {where_sql} \
-         ORDER BY issue_date DESC LIMIT ?{} OFFSET ?{}",
-        binds.len() + 1,
-        binds.len() + 2
-    );
-    let mut q = sqlx::query_as::<_, ReceivedInvoice>(&sql);
-    for b in &binds {
-        q = q.bind(b);
-    }
-    q = q.bind(page.limit).bind(page.offset);
+    // ?1 company_id, ?2 has_status_filter, ?3..?7 want_* flags, ?8 limit, ?9 offset
+    let count_sql = "\
+        SELECT COUNT(*) FROM received_invoices \
+        WHERE (?1 IS NULL OR company_id = ?1) \
+          AND (NOT ?2 OR status = CASE WHEN ?3 THEN 'NEW'      ELSE NULL END \
+                      OR status = CASE WHEN ?4 THEN 'REVIEWED' ELSE NULL END \
+                      OR status = CASE WHEN ?5 THEN 'APPROVED' ELSE NULL END \
+                      OR status = CASE WHEN ?6 THEN 'REJECTED' ELSE NULL END \
+                      OR status = CASE WHEN ?7 THEN 'ARCHIVED' ELSE NULL END)";
+
+    let total: i64 = sqlx::query_scalar(count_sql)
+        .bind(company_id)
+        .bind(has_status_filter as i64)
+        .bind(want_new as i64)
+        .bind(want_reviewed as i64)
+        .bind(want_approved as i64)
+        .bind(want_rejected as i64)
+        .bind(want_archived as i64)
+        .fetch_one(pool)
+        .await?;
+
+    let data_sql = "\
+        SELECT id, company_id, anaf_download_id, anaf_index, issuer_cui, \
+               issuer_name, series, number, total_amount, currency, issue_date, xml_path, pdf_path, \
+               status, downloaded_at, created_at \
+        FROM received_invoices \
+        WHERE (?1 IS NULL OR company_id = ?1) \
+          AND (NOT ?2 OR status = CASE WHEN ?3 THEN 'NEW'      ELSE NULL END \
+                      OR status = CASE WHEN ?4 THEN 'REVIEWED' ELSE NULL END \
+                      OR status = CASE WHEN ?5 THEN 'APPROVED' ELSE NULL END \
+                      OR status = CASE WHEN ?6 THEN 'REJECTED' ELSE NULL END \
+                      OR status = CASE WHEN ?7 THEN 'ARCHIVED' ELSE NULL END) \
+        ORDER BY issue_date DESC \
+        LIMIT ?8 OFFSET ?9";
+
+    let items = sqlx::query_as::<_, ReceivedInvoice>(data_sql)
+        .bind(company_id)
+        .bind(has_status_filter as i64)
+        .bind(want_new as i64)
+        .bind(want_reviewed as i64)
+        .bind(want_approved as i64)
+        .bind(want_rejected as i64)
+        .bind(want_archived as i64)
+        .bind(page.limit)
+        .bind(page.offset)
+        .fetch_all(pool)
+        .await?;
 
     Ok(Paginated {
-        items: q.fetch_all(pool).await?,
+        items,
         total,
         offset: page.offset,
         limit: page.limit,
@@ -118,12 +133,16 @@ pub async fn list(
 }
 
 pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<ReceivedInvoice> {
-    let sql = format!("SELECT {SELECT_COLUMNS} FROM received_invoices WHERE id = ?1");
-    sqlx::query_as::<_, ReceivedInvoice>(&sql)
-        .bind(id)
-        .fetch_optional(pool)
-        .await?
-        .ok_or(AppError::NotFound)
+    sqlx::query_as::<_, ReceivedInvoice>(
+        "SELECT id, company_id, anaf_download_id, anaf_index, issuer_cui, \
+         issuer_name, series, number, total_amount, currency, issue_date, xml_path, pdf_path, \
+         status, downloaded_at, created_at \
+         FROM received_invoices WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
 }
 
 pub async fn create(pool: &SqlitePool, input: CreateReceivedInput) -> AppResult<ReceivedInvoice> {
