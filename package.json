@@ -12,7 +12,9 @@
     "build:mac-arm": "tauri build --target aarch64-apple-darwin",
     "build:mac-intel": "tauri build --target x86_64-apple-darwin",
     "build:win-x64": "tauri build --target x86_64-pc-windows-msvc",
-    "build:win-arm": "tauri build --target aarch64-pc-windows-msvc"
+    "build:win-arm": "tauri build --target aarch64-pc-windows-msvc",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -62,7 +64,10 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "@vitest/ui": "^4.1.7",
+    "jsdom": "^29.1.1",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^4.1.7"
   }
 }
