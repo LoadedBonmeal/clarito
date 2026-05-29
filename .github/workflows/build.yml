@@ -26,6 +26,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: TypeScript typecheck
+        run: pnpm exec tsc --noEmit
+
+      - name: Frontend tests
+        run: pnpm test
+
+      - name: Rust fmt check
+        run: cargo fmt --check
+        working-directory: src-tauri
+
+      - name: Rust clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: src-tauri
+
+      - name: Rust tests
+        run: cargo test --lib
+        working-directory: src-tauri
+
       - name: Build (unsigned)
         run: pnpm build:mac
         env:
@@ -50,6 +68,24 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install
+
+      - name: TypeScript typecheck
+        run: pnpm exec tsc --noEmit
+
+      - name: Frontend tests
+        run: pnpm test
+
+      - name: Rust fmt check
+        run: cargo fmt --check
+        working-directory: src-tauri
+
+      - name: Rust clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: src-tauri
+
+      - name: Rust tests
+        run: cargo test --lib
+        working-directory: src-tauri
 
       - name: Build
         run: pnpm build:win-x64
