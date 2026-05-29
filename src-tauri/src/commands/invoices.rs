@@ -72,6 +72,16 @@ pub async fn update_invoice_draft(
         ));
     }
 
+    const VALID_VAT_RATES: &[f64] = &[0.0, 5.0, 9.0, 11.0, 19.0, 21.0];
+    for line in &input.lines {
+        if !VALID_VAT_RATES.iter().any(|&r| (r - line.vat_rate).abs() < 0.001) {
+            return Err(AppError::Validation(format!(
+                "Cotă TVA invalidă: {}%. Valori permise: 0, 5, 9, 11, 19, 21.",
+                line.vat_rate
+            )));
+        }
+    }
+
     // Use rust_decimal for exact monetary math (plan rule: never f64 for money)
     use rust_decimal::Decimal;
     use rust_decimal::prelude::ToPrimitive;

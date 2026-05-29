@@ -305,6 +305,16 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         ));
     }
 
+    const VALID_VAT_RATES: &[f64] = &[0.0, 5.0, 9.0, 11.0, 19.0, 21.0];
+    for line in &input.lines {
+        if !VALID_VAT_RATES.iter().any(|&r| (r - line.vat_rate).abs() < 0.001) {
+            return Err(AppError::Validation(format!(
+                "Cotă TVA invalidă: {}%. Valori permise: 0, 5, 9, 11, 19, 21.",
+                line.vat_rate
+            )));
+        }
+    }
+
     let invoice_id = new_id();
     let now = now_unix();
 

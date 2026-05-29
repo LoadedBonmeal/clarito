@@ -3,7 +3,7 @@
  * cu vizualul Win32 portat din Claude Design.
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -15,11 +15,19 @@ import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { fmtRON } from "@/lib/utils";
 import type { AppErrorPayload } from "@/types";
+import { useAppStore } from "@/lib/store";
 
 export function InvoiceDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { id } = useParams({ from: "/invoices/$id" });
+  const setSelectedInvoiceId = useAppStore((s) => s.setSelectedInvoiceId);
+
+  useEffect(() => {
+    setSelectedInvoiceId(id);
+    return () => setSelectedInvoiceId(null);
+  }, [id, setSelectedInvoiceId]);
+
   const [actionError, setActionError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [showStornoModal, setShowStornoModal] = useState(false);

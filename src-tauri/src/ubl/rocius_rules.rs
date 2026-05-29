@@ -612,8 +612,8 @@ fn rule_br_ro_043_vat_breakdown_by_category(ctx: &RuleContext<'_>) -> Option<Str
 // ─── Storno rules ─────────────────────────────────────────────────────────────
 
 fn rule_br_ro_050_storno_needs_billing_ref(ctx: &RuleContext<'_>) -> Option<String> {
-    let is_storno = ctx.invoice.series.starts_with("S-")
-        || ctx.invoice.full_number.starts_with("S-");
+    let is_storno = ctx.storno_ref.is_some()
+        || ctx.invoice.series.starts_with('S');
     if is_storno && ctx.storno_ref.map(|r| r.is_empty()).unwrap_or(true) {
         Some("[BR-RO-050] Factura storno (tip 381) necesită referință la factura originală (BillingReference). Refaceți storno-ul din detaliile facturii originale.".into())
     } else {
@@ -622,7 +622,8 @@ fn rule_br_ro_050_storno_needs_billing_ref(ctx: &RuleContext<'_>) -> Option<Stri
 }
 
 fn rule_br_ro_051_storno_lines_negative(ctx: &RuleContext<'_>) -> Option<String> {
-    let is_storno = ctx.invoice.series.starts_with("S-");
+    let is_storno = ctx.storno_ref.is_some()
+        || ctx.invoice.series.starts_with('S');
     if is_storno {
         let positive: Vec<usize> = ctx
             .lines

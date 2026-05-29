@@ -293,7 +293,8 @@ async fn parse_token_response(
         .map_err(|e| format!("Nu pot citi răspunsul token: {e}"))?;
 
     if !status.is_success() {
-        return Err(format!("Token endpoint error {status}: {body}"));
+        tracing::warn!(%status, "ANAF token endpoint returned non-success");
+        return Err(format!("Autentificare ANAF eșuată (HTTP {status}). Verificați conexiunea și reîncercați."));
     }
 
     let json: serde_json::Value =

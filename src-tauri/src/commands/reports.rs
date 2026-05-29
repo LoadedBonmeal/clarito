@@ -52,7 +52,7 @@ pub async fn generate_vat_report(
          COALESCE(SUM(vat_amount),0) as vat_total, \
          COALESCE(SUM(total_amount),0) as grand_total \
          FROM invoices \
-         WHERE status IN ('VALIDATED','SUBMITTED','QUEUED','SENT','ACCEPTED') \
+         WHERE status IN ('VALIDATED','SUBMITTED','QUEUED') \
            AND issue_date >= ?1 \
            AND issue_date <= ?2 \
            AND (?3 IS NULL OR company_id = ?3)",
