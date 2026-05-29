@@ -2,6 +2,12 @@
 src-tauri/target/
 src-tauri/gen/
 
+# Signing keys — NEVER commit private keys
+*.key
+*.pem
+*.p12
+~/.tauri/
+
 # Logs
 logs
 *.log

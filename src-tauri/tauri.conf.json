@@ -30,7 +30,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRCNjUyNzJDMkRBMEM2NzkKUldSNXhxQXRMQ2RsUzZaQWxYNk5rWW0vQXhyUE1KYlFaR292TExPR1FrTXRFMWdHeUZHU0FvK1oK",
       "endpoints": [
         "https://releases.lucaris.ro/efactura/{{target}}/{{arch}}/latest.json"
       ]
