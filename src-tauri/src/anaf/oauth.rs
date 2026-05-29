@@ -32,10 +32,11 @@ pub struct OAuthResult {
 /// Folosit pentru code_verifier (PKCE) și state (CSRF). Furnizează 8*N biți
 /// de entropie reală — în contrast cu UUID v7 care este timestamp-dominat.
 fn random_bytes_hex(n: usize) -> String {
+    use rand::rngs::OsRng;
     use rand::RngCore;
     let mut bytes = vec![0u8; n];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Encodare base64url (fără padding) — RFC 4648 §5.

@@ -157,7 +157,7 @@ impl AnafClient {
                     continue;
                 }
                 let body = resp.text().await.unwrap_or_default();
-                tracing::warn!(%body, "ANAF upload rate-limited (429)");
+                tracing::warn!(body_len = body.len(), "ANAF upload rate-limited (429)");
                 return Err(
                     "Limita ANAF depășită (429). Așteptați câteva minute și reîncercați."
                         .to_string(),
@@ -178,7 +178,11 @@ impl AnafClient {
                     continue;
                 }
                 let body = resp.text().await.unwrap_or_default();
-                tracing::warn!(%status, %body, "ANAF upload server error");
+                tracing::warn!(
+                    status = status.as_u16(),
+                    body_len = body.len(),
+                    "ANAF upload server error"
+                );
                 return Err(format!(
                     "Eroare server ANAF ({status}). Serviciul poate fi temporar indisponibil."
                 ));
@@ -186,7 +190,11 @@ impl AnafClient {
 
             let body = resp.text().await.map_err(|e| e.to_string())?;
             if !status.is_success() {
-                tracing::warn!(%status, %body, "ANAF upload error");
+                tracing::warn!(
+                    status = status.as_u16(),
+                    body_len = body.len(),
+                    "ANAF upload error"
+                );
                 return Err(format!(
                     "Eroare comunicare ANAF ({status}). Reîncercați sau contactați suportul."
                 ));
@@ -249,7 +257,11 @@ impl AnafClient {
                     continue;
                 }
                 let body = resp.text().await.unwrap_or_default();
-                tracing::warn!(%status, %body, "ANAF check_status server error");
+                tracing::warn!(
+                    status = status.as_u16(),
+                    body_len = body.len(),
+                    "ANAF check_status server error"
+                );
                 return Err(format!(
                     "Eroare server ANAF ({status}). Serviciul poate fi temporar indisponibil."
                 ));
@@ -257,7 +269,11 @@ impl AnafClient {
 
             let body = resp.text().await.map_err(|e| e.to_string())?;
             if !status.is_success() {
-                tracing::warn!(%status, %body, "ANAF status error");
+                tracing::warn!(
+                    status = status.as_u16(),
+                    body_len = body.len(),
+                    "ANAF status error"
+                );
                 return Err(format!(
                     "Eroare comunicare ANAF ({status}). Reîncercați sau contactați suportul."
                 ));
@@ -327,7 +343,12 @@ impl AnafClient {
                         continue;
                     }
                     let body = resp.text().await.unwrap_or_default();
-                    tracing::warn!(%status, %body, page, "ANAF list_messages server error");
+                    tracing::warn!(
+                        status = status.as_u16(),
+                        body_len = body.len(),
+                        page,
+                        "ANAF list_messages server error"
+                    );
                     return Err(format!(
                         "Eroare server ANAF ({status}). Serviciul poate fi temporar indisponibil."
                     ));
@@ -335,7 +356,12 @@ impl AnafClient {
 
                 let body = resp.text().await.map_err(|e| e.to_string())?;
                 if !status.is_success() {
-                    tracing::warn!(%status, %body, page, "ANAF list messages error");
+                    tracing::warn!(
+                        status = status.as_u16(),
+                        body_len = body.len(),
+                        page,
+                        "ANAF list messages error"
+                    );
                     return Err(format!(
                         "Eroare comunicare ANAF ({status}). Reîncercați sau contactați suportul."
                     ));
@@ -408,7 +434,11 @@ impl AnafClient {
                     continue;
                 }
                 let body = resp.text().await.unwrap_or_default();
-                tracing::warn!(%status, %body, "ANAF download server error");
+                tracing::warn!(
+                    status = status.as_u16(),
+                    body_len = body.len(),
+                    "ANAF download server error"
+                );
                 return Err(format!(
                     "Eroare server ANAF ({status}). Serviciul poate fi temporar indisponibil."
                 ));
@@ -416,7 +446,11 @@ impl AnafClient {
 
             if !status.is_success() {
                 let body = resp.text().await.unwrap_or_default();
-                tracing::warn!(%status, %body, "ANAF download error");
+                tracing::warn!(
+                    status = status.as_u16(),
+                    body_len = body.len(),
+                    "ANAF download error"
+                );
                 return Err(format!(
                     "Eroare comunicare ANAF ({status}). Reîncercați sau contactați suportul."
                 ));
