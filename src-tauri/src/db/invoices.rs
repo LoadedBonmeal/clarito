@@ -11,7 +11,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
-use crate::db::models::{new_id, now_unix, InvoiceStatus, Page, Paginated};
+use crate::db::models::{new_id, now_unix, InvoiceStatus, Page, Paginated, VALID_VAT_RATES};
 use crate::error::{AppError, AppResult};
 
 // ─── Models ────────────────────────────────────────────────────────────────
@@ -305,9 +305,9 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         ));
     }
 
-    const VALID_VAT_RATES: &[f64] = &[0.0, 5.0, 9.0, 11.0, 19.0, 21.0];
     for line in &input.lines {
-        if !VALID_VAT_RATES.iter().any(|&r| (r - line.vat_rate).abs() < 0.001) {
+        let rate = Decimal::try_from(line.vat_rate).unwrap_or(Decimal::ZERO);
+        if !VALID_VAT_RATES.iter().any(|&r| (Decimal::from(r) - rate).abs() < Decimal::new(1, 3)) {
             return Err(AppError::Validation(format!(
                 "Cotă TVA invalidă: {}%. Valori permise: 0, 5, 9, 11, 19, 21.",
                 line.vat_rate

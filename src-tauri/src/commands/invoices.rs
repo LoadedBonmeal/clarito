@@ -3,7 +3,7 @@ use tauri::State;
 use crate::db::invoices::{
     self, CreateInvoiceInput, Invoice, InvoiceFilter, InvoiceWithLines,
 };
-use crate::db::models::{new_id, InvoiceStatus, Paginated};
+use crate::db::models::{new_id, InvoiceStatus, Paginated, VALID_VAT_RATES};
 use crate::db::{companies, contacts};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -72,9 +72,9 @@ pub async fn update_invoice_draft(
         ));
     }
 
-    const VALID_VAT_RATES: &[f64] = &[0.0, 5.0, 9.0, 11.0, 19.0, 21.0];
     for line in &input.lines {
-        if !VALID_VAT_RATES.iter().any(|&r| (r - line.vat_rate).abs() < 0.001) {
+        let rate = rust_decimal::Decimal::try_from(line.vat_rate).unwrap_or(rust_decimal::Decimal::ZERO);
+        if !VALID_VAT_RATES.iter().any(|&r| (rust_decimal::Decimal::from(r) - rate).abs() < rust_decimal::Decimal::new(1, 3)) {
             return Err(AppError::Validation(format!(
                 "Cotă TVA invalidă: {}%. Valori permise: 0, 5, 9, 11, 19, 21.",
                 line.vat_rate

@@ -154,7 +154,7 @@ pub async fn anaf_submit_invoice(
         lines: lines.clone(),
         seller: company.clone(),
         buyer: buyer.clone(),
-        storno_ref,
+        storno_ref: storno_ref.clone(),
     })?;
 
     // 4. Validează — dacă sunt erori blocante, oprește
@@ -163,7 +163,7 @@ pub async fn anaf_submit_invoice(
         &lines,
         &company,
         &buyer,
-        None,
+        storno_ref.as_deref(),
     );
     if !data_errors.is_empty() {
         let msg = data_errors.join("; ");

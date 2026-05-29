@@ -97,6 +97,11 @@ pub struct Paginated<T> {
     pub limit: i64,
 }
 
+// ─── VAT rates ─────────────────────────────────────────────────────────────
+
+/// Cotele TVA valide conform legislației RO (2025+)
+pub const VALID_VAT_RATES: &[i64] = &[0, 5, 9, 11, 19, 21];
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /// Generează un UUID v7 (time-ordered, mai bun pentru index decât v4).

@@ -47,8 +47,11 @@ pub struct PaymentSummary {
 pub async fn create(pool: &SqlitePool, input: CreatePaymentInput) -> AppResult<Payment> {
     use rust_decimal::Decimal;
     use std::str::FromStr;
-    Decimal::from_str(&input.amount)
+    let amount_dec = Decimal::from_str(input.amount.trim())
         .map_err(|_| AppError::Validation("Sumă invalidă — folosiți formatul 1234.56".into()))?;
+    if amount_dec <= Decimal::ZERO {
+        return Err(AppError::Validation("Suma plății trebuie să fie pozitivă.".into()));
+    }
 
     // Verify the invoice belongs to the given company before inserting
     let invoice_exists: Option<String> = sqlx::query_scalar(

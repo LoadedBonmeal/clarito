@@ -40,6 +40,16 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
   const [stornoLoading, setStornoLoading] = useState(false);
   const [stornoError, setStornoError] = useState("");
 
+  const handleDownloadPdf = async () => {
+    if (!selectedInvoiceId) { notify.warn("Selectați o factură din listă."); return; }
+    try {
+      const pdfPath = await api.ubl.generatePdf(selectedInvoiceId);
+      const { openPath } = await import("@tauri-apps/plugin-opener");
+      await openPath(pdfPath);
+      notify.success("PDF deschis");
+    } catch (e) { notify.error("Eroare generare PDF: " + String(e)); }
+  };
+
   const handleExportXml = async () => {
     if (!selectedInvoiceId) { notify.warn("Selectați o factură din listă."); return; }
     try {
@@ -124,6 +134,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
           <BtnBig icon="refresh"  label="Verifică status" hint="F10"    onClick={handleCheckStatus}  title={selectedInvoiceId ? "F10" : "Selectați o factură"} />
           <BtnBig icon="anaf"     label="Mesaje SPV"                    onClick={() => navigate({ to: "/notifications" })} />
           <BtnBig icon="download" label="Export XML"                    onClick={handleExportXml}    title={selectedInvoiceId ? undefined : "Selectați o factură"} />
+          <BtnBig icon="file"     label="Descarcă PDF"                  onClick={handleDownloadPdf}  title={selectedInvoiceId ? undefined : "Selectați o factură"} />
           <BtnBig icon="upload"   label="Import XML"                    onClick={handleImportXml} />
         </div>
       </div>

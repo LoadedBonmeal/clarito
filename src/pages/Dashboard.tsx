@@ -13,7 +13,7 @@ import { queryClient, queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtShortcut } from "@/lib/platform";
-import { parseDec } from "@/lib/utils";
+import { parseDec, fmtRON } from "@/lib/utils";
 
 const DOT_COLORS = [
   "#2848A1", "#7C3AED", "#0891B2", "#D97706", "#16A34A",
@@ -23,13 +23,6 @@ function dotColor(cui: string): string {
   let h = 0;
   for (let i = 0; i < cui.length; i++) h = (h * 31 + cui.charCodeAt(i)) >>> 0;
   return DOT_COLORS[h % DOT_COLORS.length];
-}
-
-function fmtRON(n: string | number): string {
-  return new Intl.NumberFormat("ro-RO", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(parseDec(n));
 }
 
 function fmtTime(unix: number): string {

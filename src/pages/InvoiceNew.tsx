@@ -6,16 +6,10 @@ import { useAppStore } from "@/lib/store";
 import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
 import type { AppErrorPayload, CreateLineInput, VatCategory } from "@/types";
+import { fmtRON } from "@/lib/utils";
 
 /** Extends CreateLineInput with a stable row key for React list rendering. */
 type LineRow = CreateLineInput & { rowId: string };
-
-function fmtRON(n: number): string {
-  return n.toLocaleString("ro-RO", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
 
 function localDateISO(d: Date): string {
   const y = d.getFullYear();

@@ -128,9 +128,8 @@ pub async fn import_invoices_csv(
                 continue;
             }
         };
-        const VALID_VAT_RATES_DEC: &[i64] = &[0, 5, 9, 11, 19, 21];
         let vat_rate_rounded = vat_rate.round_dp(0).to_i64().unwrap_or(-1);
-        if !VALID_VAT_RATES_DEC.contains(&vat_rate_rounded) {
+        if !crate::db::models::VALID_VAT_RATES.contains(&vat_rate_rounded) {
             errors.push(format!(
                 "Linia {}: cotă TVA invalidă '{}'. Valori permise: 0, 5, 9, 11, 19, 21.",
                 idx + 2, vat_rate_str

@@ -7,17 +7,10 @@ import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
 import { notify } from "@/lib/toasts";
 import type { CreateLineInput, VatCategory } from "@/types";
-import { parseDec } from "@/lib/utils";
+import { parseDec, fmtRON } from "@/lib/utils";
 
 /** Extends CreateLineInput with a stable row key for React list rendering. */
 type LineRow = CreateLineInput & { rowId: string };
-
-function fmtRON(n: number): string {
-  return n.toLocaleString("ro-RO", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
 
 function fmtDateRO(iso: string): string {
   const [y, m, d] = iso.split("-");
