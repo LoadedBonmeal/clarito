@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
 import { Icon } from "@/components/shared/Icon";
+import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { fmtShortcut } from "@/lib/platform";
@@ -42,7 +43,7 @@ export function CompaniesPage() {
   const [filterSPV, setFilterSPV] = useState<SpvFilter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const { data: companies = [], isLoading } = useQuery({
+  const { data: companies = [], isLoading, isError: companiesError, error: companiesErr, refetch: refetchCompanies } = useQuery({
     queryKey: queryKeys.companies.list(),
     queryFn: () => api.companies.list(),
   });
@@ -237,6 +238,8 @@ export function CompaniesPage() {
           <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>
             Se încarcă…
           </div>
+        ) : companiesError ? (
+          <QueryErrorBanner error={companiesErr} label="companiile" onRetry={() => void refetchCompanies()} />
         ) : list.length === 0 ? (
           <div style={{ padding: 40, textAlign: "center", fontSize: 12, color: "var(--text-muted)" }}>
             {companies.length === 0

@@ -39,10 +39,7 @@ pub struct CreateCertificateInput {
     pub refreshable_until: i64,
 }
 
-pub async fn list_for_company(
-    pool: &SqlitePool,
-    company_id: &str,
-) -> AppResult<Vec<Certificate>> {
+pub async fn list_for_company(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Certificate>> {
     Ok(sqlx::query_as::<_, Certificate>(
         "SELECT id, company_id, keychain_ref, issued_at, expires_at, \
          refreshable_until, is_active, last_refreshed_at, last_used_at, created_at, updated_at \
@@ -53,10 +50,7 @@ pub async fn list_for_company(
     .await?)
 }
 
-pub async fn get_active(
-    pool: &SqlitePool,
-    company_id: &str,
-) -> AppResult<Option<Certificate>> {
+pub async fn get_active(pool: &SqlitePool, company_id: &str) -> AppResult<Option<Certificate>> {
     Ok(sqlx::query_as::<_, Certificate>(
         "SELECT id, company_id, keychain_ref, issued_at, expires_at, \
          refreshable_until, is_active, last_refreshed_at, last_used_at, created_at, updated_at \
@@ -104,11 +98,7 @@ pub async fn create(pool: &SqlitePool, input: CreateCertificateInput) -> AppResu
     get(pool, &id).await
 }
 
-pub async fn mark_refreshed(
-    pool: &SqlitePool,
-    id: &str,
-    new_expires_at: i64,
-) -> AppResult<()> {
+pub async fn mark_refreshed(pool: &SqlitePool, id: &str, new_expires_at: i64) -> AppResult<()> {
     let now = now_unix();
     sqlx::query(
         "UPDATE certificates SET
@@ -127,13 +117,11 @@ pub async fn mark_refreshed(
 
 pub async fn deactivate(pool: &SqlitePool, id: &str) -> AppResult<()> {
     let now = now_unix();
-    sqlx::query(
-        "UPDATE certificates SET is_active = 0, updated_at = ?2 WHERE id = ?1",
-    )
-    .bind(id)
-    .bind(now)
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE certificates SET is_active = 0, updated_at = ?2 WHERE id = ?1")
+        .bind(id)
+        .bind(now)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

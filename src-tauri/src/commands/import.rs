@@ -47,8 +47,8 @@ pub async fn import_invoices_csv(
     company_id: String,
     dry_run: bool,
 ) -> AppResult<ImportResult> {
-    use rust_decimal::Decimal;
     use rust_decimal::prelude::ToPrimitive;
+    use rust_decimal::Decimal;
     use std::str::FromStr;
 
     let pool = &state.db;
@@ -62,7 +62,11 @@ pub async fn import_invoices_csv(
     // Fetch the active company's CUI once so we can validate fields[0] per row.
     let company = crate::db::companies::get(pool, &company_id).await?;
     fn normalize_cui_csv(s: &str) -> String {
-        s.trim().to_uppercase().trim_start_matches("RO").trim().to_string()
+        s.trim()
+            .to_uppercase()
+            .trim_start_matches("RO")
+            .trim()
+            .to_string()
     }
     let company_cui_norm = normalize_cui_csv(&company.cui);
 
@@ -73,7 +77,11 @@ pub async fn import_invoices_csv(
         }
         let fields: Vec<&str> = line.split(';').map(str::trim).collect();
         if fields.len() < 12 {
-            errors.push(format!("Linia {}: câmpuri insuficiente ({})", idx + 2, fields.len()));
+            errors.push(format!(
+                "Linia {}: câmpuri insuficiente ({})",
+                idx + 2,
+                fields.len()
+            ));
             continue;
         }
 
@@ -82,7 +90,9 @@ pub async fn import_invoices_csv(
         if !row_company_cui.is_empty() && row_company_cui != company_cui_norm {
             errors.push(format!(
                 "Linia {}: CUI companie din CSV ({}) nu corespunde companiei active ({}).",
-                idx + 2, fields[0], company.cui
+                idx + 2,
+                fields[0],
+                company.cui
             ));
             continue;
         }
@@ -103,28 +113,44 @@ pub async fn import_invoices_csv(
         let number: i64 = match number_str.parse() {
             Ok(n) => n,
             Err(_) => {
-                errors.push(format!("Linia {}: număr factură invalid '{}'", idx + 2, number_str));
+                errors.push(format!(
+                    "Linia {}: număr factură invalid '{}'",
+                    idx + 2,
+                    number_str
+                ));
                 continue;
             }
         };
         let qty: Decimal = match Decimal::from_str(qty_str) {
             Ok(v) => v,
             Err(_) => {
-                errors.push(format!("Linia {}: cantitate invalidă '{}'", idx + 2, qty_str));
+                errors.push(format!(
+                    "Linia {}: cantitate invalidă '{}'",
+                    idx + 2,
+                    qty_str
+                ));
                 continue;
             }
         };
         let unit_price: Decimal = match Decimal::from_str(&unit_price_str.replace(',', ".")) {
             Ok(v) => v,
             Err(_) => {
-                errors.push(format!("Linia {}: preț unitar invalid '{}'", idx + 2, unit_price_str));
+                errors.push(format!(
+                    "Linia {}: preț unitar invalid '{}'",
+                    idx + 2,
+                    unit_price_str
+                ));
                 continue;
             }
         };
         let vat_rate: Decimal = match Decimal::from_str(vat_rate_str) {
             Ok(v) => v,
             Err(_) => {
-                errors.push(format!("Linia {}: cotă TVA invalidă '{}'", idx + 2, vat_rate_str));
+                errors.push(format!(
+                    "Linia {}: cotă TVA invalidă '{}'",
+                    idx + 2,
+                    vat_rate_str
+                ));
                 continue;
             }
         };
@@ -132,7 +158,8 @@ pub async fn import_invoices_csv(
         if !crate::db::models::VALID_VAT_RATES.contains(&vat_rate_rounded) {
             errors.push(format!(
                 "Linia {}: cotă TVA invalidă '{}'. Valori permise: 0, 5, 9, 11, 19, 21.",
-                idx + 2, vat_rate_str
+                idx + 2,
+                vat_rate_str
             ));
             continue;
         }
@@ -163,13 +190,12 @@ pub async fn import_invoices_csv(
 
         // Find or create contact (outside the per-invoice tx — contacts are shared)
         let contact_id: String = {
-            let existing = sqlx::query(
-                "SELECT id FROM contacts WHERE cui = ?1 AND company_id = ?2 LIMIT 1",
-            )
-            .bind(customer_cui)
-            .bind(&company_id)
-            .fetch_optional(&mut *tx)
-            .await;
+            let existing =
+                sqlx::query("SELECT id FROM contacts WHERE cui = ?1 AND company_id = ?2 LIMIT 1")
+                    .bind(customer_cui)
+                    .bind(&company_id)
+                    .fetch_optional(&mut *tx)
+                    .await;
 
             match existing {
                 Ok(Some(row)) => match row.try_get::<String, _>("id") {
@@ -257,7 +283,11 @@ pub async fn import_invoices_csv(
         .await;
 
         if let Err(e) = line_res {
-            errors.push(format!("Linia {}: eroare inserare linie factură: {}", idx + 2, e));
+            errors.push(format!(
+                "Linia {}: eroare inserare linie factură: {}",
+                idx + 2,
+                e
+            ));
             // tx dropped — rolled back automatically
             continue;
         }
@@ -265,7 +295,11 @@ pub async fn import_invoices_csv(
         // Commit — only now count as imported
         match tx.commit().await {
             Ok(_) => imported += 1,
-            Err(e) => errors.push(format!("Linia {}: eroare commit tranzacție: {}", idx + 2, e)),
+            Err(e) => errors.push(format!(
+                "Linia {}: eroare commit tranzacție: {}",
+                idx + 2,
+                e
+            )),
         }
     }
 
@@ -299,7 +333,10 @@ pub async fn import_contacts_csv(
         }
         let fields: Vec<&str> = line.split(';').map(str::trim).collect();
         if fields.len() < 3 {
-            errors.push(format!("Linia {}: câmpuri insuficiente (minim 3 necesare)", idx + 2));
+            errors.push(format!(
+                "Linia {}: câmpuri insuficiente (minim 3 necesare)",
+                idx + 2
+            ));
             continue;
         }
 
@@ -461,12 +498,24 @@ async fn import_invoice_xml_inner(
             Ok(Event::End(ref e)) => {
                 let local = std::str::from_utf8(e.local_name().into_inner()).unwrap_or("");
                 match local {
-                    "AccountingSupplierParty" => { depth_supplier -= 1; }
-                    "AccountingCustomerParty" => { depth_customer -= 1; }
-                    "PartyTaxScheme" if depth_supplier > 0 => { depth_party_tax -= 1; }
-                    "PartyTaxScheme" if depth_customer > 0 => { depth_customer_tax -= 1; }
-                    "PartyLegalEntity" if depth_supplier > 0 => { depth_party_legal -= 1; }
-                    "LegalMonetaryTotal" => { depth_monetary -= 1; }
+                    "AccountingSupplierParty" => {
+                        depth_supplier -= 1;
+                    }
+                    "AccountingCustomerParty" => {
+                        depth_customer -= 1;
+                    }
+                    "PartyTaxScheme" if depth_supplier > 0 => {
+                        depth_party_tax -= 1;
+                    }
+                    "PartyTaxScheme" if depth_customer > 0 => {
+                        depth_customer_tax -= 1;
+                    }
+                    "PartyLegalEntity" if depth_supplier > 0 => {
+                        depth_party_legal -= 1;
+                    }
+                    "LegalMonetaryTotal" => {
+                        depth_monetary -= 1;
+                    }
                     _ => {}
                 }
                 current_local.clear();
@@ -474,23 +523,39 @@ async fn import_invoice_xml_inner(
             Ok(Event::Text(ref e)) => {
                 let text = match e.unescape() {
                     Ok(t) => t.trim().to_string(),
-                    Err(_) => { buf.clear(); continue; }
+                    Err(_) => {
+                        buf.clear();
+                        continue;
+                    }
                 };
-                if text.is_empty() { buf.clear(); continue; }
+                if text.is_empty() {
+                    buf.clear();
+                    continue;
+                }
                 match current_local.as_str() {
                     "ID" if depth_supplier == 0 && invoice_number.is_empty() => {
                         invoice_number = text;
                     }
-                    "IssueDate" if depth_supplier == 0 => { issue_date = text; }
-                    "DocumentCurrencyCode" => { currency = text; }
+                    "IssueDate" if depth_supplier == 0 => {
+                        issue_date = text;
+                    }
+                    "DocumentCurrencyCode" => {
+                        currency = text;
+                    }
                     "CompanyID" if depth_supplier > 0 && depth_party_tax > 0 => {
-                        if issuer_cui.is_empty() { issuer_cui = text; }
+                        if issuer_cui.is_empty() {
+                            issuer_cui = text;
+                        }
                     }
                     "CompanyID" if depth_customer > 0 && depth_customer_tax > 0 => {
-                        if buyer_cui.is_empty() { buyer_cui = text; }
+                        if buyer_cui.is_empty() {
+                            buyer_cui = text;
+                        }
                     }
                     "RegistrationName" if depth_supplier > 0 && depth_party_legal > 0 => {
-                        if issuer_name.is_empty() { issuer_name = text; }
+                        if issuer_name.is_empty() {
+                            issuer_name = text;
+                        }
                     }
                     "Name" if depth_supplier > 0 && issuer_name.is_empty() => {
                         issuer_name = text;
@@ -526,8 +591,13 @@ async fn import_invoice_xml_inner(
     if invoice_number.is_empty() {
         errors.push("Numărul facturii lipsește din XML.".into());
         return Ok(XmlImportResult {
-            imported: 0, invoice_number: None, supplier_name: None,
-            supplier_cui: None, issue_date: None, total_amount: None, errors,
+            imported: 0,
+            invoice_number: None,
+            supplier_name: None,
+            supplier_cui: None,
+            issue_date: None,
+            total_amount: None,
+            errors,
         });
     }
     if issue_date.is_empty() {
@@ -549,16 +619,18 @@ async fn import_invoice_xml_inner(
     let anaf_download_id = format!("manual-{}", &xml_hash[..32]); // primii 128 biți
 
     // Verificăm în avans dacă există deja (pentru mesaj de eroare mai clar)
-    let existing: Option<String> = sqlx::query_scalar(
-        "SELECT id FROM received_invoices WHERE anaf_download_id = ?1 LIMIT 1",
-    )
-    .bind(&anaf_download_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(AppError::Database)?;
+    let existing: Option<String> =
+        sqlx::query_scalar("SELECT id FROM received_invoices WHERE anaf_download_id = ?1 LIMIT 1")
+            .bind(&anaf_download_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(AppError::Database)?;
 
     if existing.is_some() {
-        errors.push(format!("Factura {} a fost deja importată (același fișier XML).", invoice_number));
+        errors.push(format!(
+            "Factura {} a fost deja importată (același fișier XML).",
+            invoice_number
+        ));
         return Ok(XmlImportResult {
             imported: 0,
             invoice_number: Some(invoice_number),
@@ -572,7 +644,8 @@ async fn import_invoice_xml_inner(
 
     // ── Verify buyer CUI matches active company ───────────────────────────────
     fn normalize_cui(s: &str) -> String {
-        s.trim().to_uppercase()
+        s.trim()
+            .to_uppercase()
             .trim_start_matches("RO")
             .trim()
             .to_string()
@@ -600,8 +673,15 @@ async fn import_invoice_xml_inner(
     }
 
     // ── Compute archive path (but do NOT write yet) ───────────────────────────
-    let base = app.path().app_data_dir().map_err(|e| AppError::Other(e.to_string()))?;
-    let year_str = if issue_date.len() >= 4 { issue_date[..4].to_string() } else { "0000".to_string() };
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    let year_str = if issue_date.len() >= 4 {
+        issue_date[..4].to_string()
+    } else {
+        "0000".to_string()
+    };
     let unique_id = crate::db::models::new_id();
     let archive_root = base.join("archive").join("received").join("manual");
     let archive_dir = archive_root.join(&year_str).join(&unique_id);
@@ -642,9 +722,17 @@ async fn import_invoice_xml_inner(
             // If the file write fails the DB record still has all invoice data;
             // the archive copy is just missing. Log the error but still report success.
             if let Err(e) = tokio::fs::create_dir_all(&archive_dir).await {
-                eprintln!("WARN: impossibil de creat directorul arhivă {}: {}", archive_dir.display(), e);
+                eprintln!(
+                    "WARN: impossibil de creat directorul arhivă {}: {}",
+                    archive_dir.display(),
+                    e
+                );
             } else if let Err(e) = tokio::fs::write(&xml_path, xml_str.as_bytes()).await {
-                eprintln!("WARN: imposibil de scris fișierul XML arhivă {}: {}", xml_path.display(), e);
+                eprintln!(
+                    "WARN: imposibil de scris fișierul XML arhivă {}: {}",
+                    xml_path.display(),
+                    e
+                );
             }
             Ok(XmlImportResult {
                 imported: 1,

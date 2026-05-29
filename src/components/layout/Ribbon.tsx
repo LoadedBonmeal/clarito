@@ -29,7 +29,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
 
   // Read ANAF test mode from persistent settings (same key as Settings.tsx / backend)
   const { data: testModeSetting } = useQuery({
-    queryKey: ["settings", "use_anaf_test_env"],
+    queryKey: queryKeys.anaf.testMode,
     queryFn: () => api.settings.get("use_anaf_test_env"),
   });
   const anafTestMode = testModeSetting === "1";
@@ -89,6 +89,23 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
     } catch (_) {}
   };
 
+  const handleSyncSpv = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    try {
+      const newCount = await api.anaf.syncSpv(activeCompanyId, anafTestMode);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
+      if (newCount > 0) {
+        notify.success(`${newCount} mesaje SPV noi descărcate`);
+      } else {
+        notify.info("Nicio factură nouă în SPV");
+      }
+      navigate({ to: "/received" });
+    } catch (e) {
+      notify.error("Eroare la sincronizarea SPV: " + String(e));
+    }
+  };
+
   const handleCheckStatus = async () => {
     if (!selectedInvoiceId || !activeCompanyId) { notify.warn("Selectați o factură și o companie activă."); return; }
     const testMode = anafTestMode;
@@ -130,7 +147,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
         <div className="ribbon-group-label">Sincronizare ANAF</div>
         <div className="ribbon-group-buttons">
           <BtnBig icon="cloudUp"  label="Trimite ANAF"    hint="F9"     onClick={handleSubmitAnaf}   title={selectedInvoiceId ? "F9" : "Selectați o factură"} />
-          <BtnBig icon="cloudDn"  label="Descarcă SPV"    hint="Ctrl+D" onClick={() => navigate({ to: "/received" })} />
+          <BtnBig icon="cloudDn"  label="Descarcă SPV"    hint="Ctrl+D" onClick={handleSyncSpv} />
           <BtnBig icon="refresh"  label="Verifică status" hint="F10"    onClick={handleCheckStatus}  title={selectedInvoiceId ? "F10" : "Selectați o factură"} />
           <BtnBig icon="anaf"     label="Mesaje SPV"                    onClick={() => navigate({ to: "/notifications" })} />
           <BtnBig icon="download" label="Export XML"                    onClick={handleExportXml}    title={selectedInvoiceId ? undefined : "Selectați o factură"} />

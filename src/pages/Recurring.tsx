@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import type { CreateRecurringArgs } from "@/lib/tauri";
@@ -61,7 +62,7 @@ export function RecurringPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   // Fetch recurring invoices
-  const { data: recurringList = [], isLoading } = useQuery({
+  const { data: recurringList = [], isLoading, isError: recurringError, error: recurringErr, refetch: refetchRecurring } = useQuery({
     queryKey: ["recurringInvoices", activeCompanyId],
     queryFn: () => api.recurring.list(activeCompanyId!),
     enabled: !!activeCompanyId,
@@ -166,6 +167,8 @@ export function RecurringPage() {
       <div className="content-body" style={{ overflowY: "auto", flex: 1 }}>
         {isLoading ? (
           <div style={{ padding: 24, color: "var(--text-muted)" }}>Se încarcă…</div>
+        ) : recurringError ? (
+          <QueryErrorBanner error={recurringErr} label="facturile recurente" onRetry={() => void refetchRecurring()} />
         ) : recurringList.length === 0 ? (
           <div style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>
             <Icon name="refresh" size={32} />

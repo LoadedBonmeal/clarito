@@ -48,8 +48,7 @@ const LAST_SEEN_KEY: &str = "license_last_seen_v2";
 /// Secret obfuscat în binar pentru fingerprint-ul de integritate.
 /// Nu este securitate perfectă, dar ridică substanțial bara față de un
 /// utilizator care editează manual SQLite-ul.
-const INTEGRITY_SECRET: &[u8] =
-    b"RoF@ctura#2026!intgr1ty_K3y\xd4\x9a\x7f\x01\xbe\xc3v2";
+const INTEGRITY_SECRET: &[u8] = b"RoF@ctura#2026!intgr1ty_K3y\xd4\x9a\x7f\x01\xbe\xc3v2";
 
 // ─── License Key Validation ─────────────────────────────────────────────────
 
@@ -66,7 +65,9 @@ fn validate_license_key(key: &str) -> bool {
     }
     for part in &parts {
         if part.len() != 4
-            || !part.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+            || !part
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
         {
             return false;
         }
@@ -173,7 +174,22 @@ async fn get_setting(pool: &sqlx::SqlitePool, key: &str) -> Option<String> {
 
 #[tauri::command]
 pub async fn get_license(state: State<'_, AppState>) -> AppResult<Option<License>> {
-    license::get(&state.db).await
+    let Some(mut lic) = license::get(&state.db).await? else {
+        return Ok(None);
+    };
+
+    let now = chrono::Utc::now().timestamp();
+
+    // Populate computed expiry field
+    lic.is_expired = lic.expires_at <= now;
+
+    // For TRIAL licenses, compute days remaining (negative = already expired)
+    if lic.tier == "TRIAL" {
+        let seconds_remaining = lic.expires_at - now;
+        lic.trial_days_remaining = Some(seconds_remaining / 86_400);
+    }
+
+    Ok(Some(lic))
 }
 
 /// Verifică dacă licența curentă este validă, cu trei straturi de securitate:
@@ -186,12 +202,10 @@ pub async fn check_license_validity(state: State<'_, AppState>) -> AppResult<boo
     let now = chrono::Utc::now().timestamp();
 
     // ── 1. Citire licență + expirare de bază ──────────────────────────────
-    let row = sqlx::query(
-        "SELECT expires_at, tier, email, machine_id FROM license WHERE id = 1",
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(AppError::Database)?;
+    let row = sqlx::query("SELECT expires_at, tier, email, machine_id FROM license WHERE id = 1")
+        .fetch_optional(pool)
+        .await
+        .map_err(AppError::Database)?;
 
     let Some(row) = row else {
         return Ok(false);
@@ -269,8 +283,7 @@ pub async fn start_trial(state: State<'_, AppState>, email: String) -> AppResult
     if let Ok(Some(existing)) = license::get(pool).await {
         if existing.tier == "TRIAL" {
             return Err(AppError::Validation(
-                "Există deja o perioadă de probă activă sau expirată pe acest dispozitiv."
-                    .into(),
+                "Există deja o perioadă de probă activă sau expirată pe acest dispozitiv.".into(),
             ));
         }
     }

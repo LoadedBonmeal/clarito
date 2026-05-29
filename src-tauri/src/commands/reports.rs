@@ -40,8 +40,8 @@ pub async fn generate_vat_report(
     date_to: String,
     company_id: Option<String>,
 ) -> AppResult<VatReport> {
-    use rust_decimal::Decimal;
     use rust_decimal::prelude::ToPrimitive;
+    use rust_decimal::Decimal;
     use std::collections::BTreeMap;
     use std::str::FromStr;
 
@@ -106,7 +106,9 @@ pub async fn generate_vat_report(
         let vat_s: String = row.try_get("vat_amount").unwrap_or_default();
         let rate = Decimal::from_str(&rate_s).unwrap_or(Decimal::ZERO);
         let key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
-        let e = groups.entry(key).or_insert((rate, Decimal::ZERO, Decimal::ZERO, 0));
+        let e = groups
+            .entry(key)
+            .or_insert((rate, Decimal::ZERO, Decimal::ZERO, 0));
         e.1 += Decimal::from_str(&base_s).unwrap_or(Decimal::ZERO);
         e.2 += Decimal::from_str(&vat_s).unwrap_or(Decimal::ZERO);
         e.3 += 1;
@@ -162,21 +164,14 @@ pub async fn export_report(
 
     match report_type.as_str() {
         "vat" => {
-            let report = generate_vat_report(
-                state,
-                date_from,
-                date_to,
-                params.company_id,
-            )
-            .await?;
+            let report = generate_vat_report(state, date_from, date_to, params.company_id).await?;
 
             let content = match format.as_str() {
                 "json" => serde_json::to_string_pretty(&report)
                     .map_err(|e| AppError::Other(e.to_string()))?,
                 _ => {
                     // CSV format
-                    let mut csv =
-                        String::from("Cotă TVA,Bază impozabilă,TVA,Nr. Facturi\n");
+                    let mut csv = String::from("Cotă TVA,Bază impozabilă,TVA,Nr. Facturi\n");
                     for g in &report.vat_groups {
                         csv.push_str(&format!(
                             "{}%,{},{},{}\n",

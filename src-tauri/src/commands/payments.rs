@@ -21,10 +21,7 @@ pub struct AddPaymentArgs {
 }
 
 #[tauri::command]
-pub async fn add_payment(
-    state: State<'_, AppState>,
-    args: AddPaymentArgs,
-) -> AppResult<Payment> {
+pub async fn add_payment(state: State<'_, AppState>, args: AddPaymentArgs) -> AppResult<Payment> {
     payments::create(
         &state.db,
         CreatePaymentInput {

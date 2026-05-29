@@ -187,11 +187,7 @@ pub async fn create(pool: &SqlitePool, input: CreateCompanyInput) -> AppResult<C
     get(pool, &id).await
 }
 
-pub async fn update(
-    pool: &SqlitePool,
-    id: &str,
-    input: UpdateCompanyInput,
-) -> AppResult<Company> {
+pub async fn update(pool: &SqlitePool, id: &str, input: UpdateCompanyInput) -> AppResult<Company> {
     // Asigură existența + colectează vechile valori.
     let current = get(pool, id).await?;
     let now = now_unix();
@@ -247,13 +243,11 @@ pub async fn update(
 /// pentru a păstra integritatea referențială cu facturile istorice.
 pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
     let now = now_unix();
-    let res = sqlx::query(
-        "UPDATE companies SET is_active = 0, updated_at = ?2 WHERE id = ?1",
-    )
-    .bind(id)
-    .bind(now)
-    .execute(pool)
-    .await?;
+    let res = sqlx::query("UPDATE companies SET is_active = 0, updated_at = ?2 WHERE id = ?1")
+        .bind(id)
+        .bind(now)
+        .execute(pool)
+        .await?;
 
     if res.rows_affected() == 0 {
         return Err(AppError::NotFound);
@@ -264,20 +258,15 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
 /// Returnează `last_invoice_number + 1` fără a modifica baza de date.
 /// Folosit doar pentru afișarea previzualizată a numărului pe formulare.
 /// Numărul real este alocat atomic de `allocate_invoice_number` la salvare.
-pub async fn next_invoice_number(
-    pool: &SqlitePool,
-    company_id: &str,
-) -> AppResult<i64> {
-    let current: i64 = sqlx::query_scalar(
-        "SELECT last_invoice_number FROM companies WHERE id = ?1",
-    )
-    .bind(company_id)
-    .fetch_optional(pool)
-    .await?
-    .ok_or(AppError::NotFound)?;
+pub async fn next_invoice_number(pool: &SqlitePool, company_id: &str) -> AppResult<i64> {
+    let current: i64 =
+        sqlx::query_scalar("SELECT last_invoice_number FROM companies WHERE id = ?1")
+            .bind(company_id)
+            .fetch_optional(pool)
+            .await?
+            .ok_or(AppError::NotFound)?;
     Ok(current + 1)
 }
-
 
 // ─── Validation ────────────────────────────────────────────────────────────
 

@@ -73,24 +73,44 @@ pub fn generate_ubl(input: &GeneratorInput) -> AppResult<String> {
 
     // InvoiceTypeCode: 380 = factură normală, 381 = notă de credit (storno)
     // listID="UNCL1001" este obligatoriu per EN 16931 / CIUS-RO
-    let type_code = if input.storno_ref.is_some() { "381" } else { "380" };
+    let type_code = if input.storno_ref.is_some() {
+        "381"
+    } else {
+        "380"
+    };
     {
         let mut tc_elem = BytesStart::new("cbc:InvoiceTypeCode");
         tc_elem.push_attribute(("listID", "UNCL1001"));
-        writer.write_event(Event::Start(tc_elem)).map_err(|e| AppError::Xml(e.to_string()))?;
-        writer.write_event(Event::Text(BytesText::new(type_code))).map_err(|e| AppError::Xml(e.to_string()))?;
-        writer.write_event(Event::End(BytesEnd::new("cbc:InvoiceTypeCode"))).map_err(|e| AppError::Xml(e.to_string()))?;
+        writer
+            .write_event(Event::Start(tc_elem))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        writer
+            .write_event(Event::Text(BytesText::new(type_code)))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("cbc:InvoiceTypeCode")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
     }
 
     write_text(&mut writer, "cbc:DocumentCurrencyCode", currency)?;
 
     // BillingReference — obligatoriu pentru factura de storno (381)
     if let Some(ref original_number) = input.storno_ref {
-        writer.write_event(Event::Start(BytesStart::new("cac:BillingReference"))).map_err(|e| AppError::Xml(e.to_string()))?;
-        writer.write_event(Event::Start(BytesStart::new("cac:InvoiceDocumentReference"))).map_err(|e| AppError::Xml(e.to_string()))?;
+        writer
+            .write_event(Event::Start(BytesStart::new("cac:BillingReference")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        writer
+            .write_event(Event::Start(BytesStart::new(
+                "cac:InvoiceDocumentReference",
+            )))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
         write_text(&mut writer, "cbc:ID", original_number)?;
-        writer.write_event(Event::End(BytesEnd::new("cac:InvoiceDocumentReference"))).map_err(|e| AppError::Xml(e.to_string()))?;
-        writer.write_event(Event::End(BytesEnd::new("cac:BillingReference"))).map_err(|e| AppError::Xml(e.to_string()))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("cac:InvoiceDocumentReference")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("cac:BillingReference")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
     }
 
     // ── AccountingSupplierParty ──────────────────────────────────────────────
@@ -172,14 +192,9 @@ pub fn generate_ubl(input: &GeneratorInput) -> AppResult<String> {
 
 // ─── Supplier party ──────────────────────────────────────────────────────────
 
-fn write_supplier_party(
-    writer: &mut Writer<Cursor<Vec<u8>>>,
-    seller: &Company,
-) -> AppResult<()> {
+fn write_supplier_party(writer: &mut Writer<Cursor<Vec<u8>>>, seller: &Company) -> AppResult<()> {
     writer
-        .write_event(Event::Start(BytesStart::new(
-            "cac:AccountingSupplierParty",
-        )))
+        .write_event(Event::Start(BytesStart::new("cac:AccountingSupplierParty")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
     writer
         .write_event(Event::Start(BytesStart::new("cac:Party")))
@@ -216,7 +231,11 @@ fn write_supplier_party(
     writer
         .write_event(Event::Start(BytesStart::new("cac:PartyTaxScheme")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
-    let seller_cui_digits = seller.cui.trim().trim_start_matches("RO").trim_start_matches("ro");
+    let seller_cui_digits = seller
+        .cui
+        .trim()
+        .trim_start_matches("RO")
+        .trim_start_matches("ro");
     write_text(writer, "cbc:CompanyID", &format!("RO{}", seller_cui_digits))?;
     writer
         .write_event(Event::Start(BytesStart::new("cac:TaxScheme")))
@@ -243,9 +262,7 @@ fn write_supplier_party(
         .write_event(Event::End(BytesEnd::new("cac:Party")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
     writer
-        .write_event(Event::End(BytesEnd::new(
-            "cac:AccountingSupplierParty",
-        )))
+        .write_event(Event::End(BytesEnd::new("cac:AccountingSupplierParty")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
     Ok(())
 }
@@ -258,9 +275,7 @@ fn write_customer_party(
     _currency: &str,
 ) -> AppResult<()> {
     writer
-        .write_event(Event::Start(BytesStart::new(
-            "cac:AccountingCustomerParty",
-        )))
+        .write_event(Event::Start(BytesStart::new("cac:AccountingCustomerParty")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
     writer
         .write_event(Event::Start(BytesStart::new("cac:Party")))
@@ -334,9 +349,7 @@ fn write_customer_party(
         .write_event(Event::End(BytesEnd::new("cac:Party")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
     writer
-        .write_event(Event::End(BytesEnd::new(
-            "cac:AccountingCustomerParty",
-        )))
+        .write_event(Event::End(BytesEnd::new("cac:AccountingCustomerParty")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
     Ok(())
 }
@@ -356,10 +369,8 @@ fn write_tax_total(
         let rate_str = format_decimal_2(&line.vat_rate);
         let key = (rate_str, line.vat_category.clone());
         let entry = groups.entry(key).or_insert((Decimal::ZERO, Decimal::ZERO));
-        entry.0 += Decimal::from_str(&fmt_amount(&line.subtotal_amount))
-            .unwrap_or(Decimal::ZERO);
-        entry.1 += Decimal::from_str(&fmt_amount(&line.vat_amount))
-            .unwrap_or(Decimal::ZERO);
+        entry.0 += Decimal::from_str(&fmt_amount(&line.subtotal_amount)).unwrap_or(Decimal::ZERO);
+        entry.1 += Decimal::from_str(&fmt_amount(&line.vat_amount)).unwrap_or(Decimal::ZERO);
     }
 
     let total_vat = fmt_amount(&inv.vat_amount);
@@ -385,12 +396,7 @@ fn write_tax_total(
             &format!("{:.2}", taxable),
             currency,
         )?;
-        write_amount(
-            writer,
-            "cbc:TaxAmount",
-            &format!("{:.2}", vat),
-            currency,
-        )?;
+        write_amount(writer, "cbc:TaxAmount", &format!("{:.2}", vat), currency)?;
         writer
             .write_event(Event::Start(BytesStart::new("cac:TaxCategory")))
             .map_err(|e| AppError::Xml(e.to_string()))?;
@@ -457,24 +463,15 @@ fn write_invoice_line(
         .write_event(Event::Start(BytesStart::new("cac:Item")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
 
-    let description = line
-        .description
-        .as_deref()
-        .unwrap_or(&line.name);
+    let description = line.description.as_deref().unwrap_or(&line.name);
     write_text(writer, "cbc:Description", description)?;
     write_text(writer, "cbc:Name", &line.name)?;
 
     writer
-        .write_event(Event::Start(BytesStart::new(
-            "cac:ClassifiedTaxCategory",
-        )))
+        .write_event(Event::Start(BytesStart::new("cac:ClassifiedTaxCategory")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
     write_text(writer, "cbc:ID", &line.vat_category)?;
-    write_text(
-        writer,
-        "cbc:Percent",
-        &format_decimal_2(&line.vat_rate),
-    )?;
+    write_text(writer, "cbc:Percent", &format_decimal_2(&line.vat_rate))?;
     writer
         .write_event(Event::Start(BytesStart::new("cac:TaxScheme")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
@@ -512,11 +509,7 @@ fn write_invoice_line(
 
 // ─── Low-level helpers ────────────────────────────────────────────────────────
 
-fn write_text(
-    writer: &mut Writer<Cursor<Vec<u8>>>,
-    tag: &str,
-    value: &str,
-) -> AppResult<()> {
+fn write_text(writer: &mut Writer<Cursor<Vec<u8>>>, tag: &str, value: &str) -> AppResult<()> {
     writer
         .write_event(Event::Start(BytesStart::new(tag)))
         .map_err(|e| AppError::Xml(e.to_string()))?;
@@ -553,7 +546,9 @@ fn write_amount(
 /// Formatează un `&str` numeric ca string cu 2 zecimale, rutând prin `Decimal`
 /// pentru rotunjire zecimală corectă (evită artefactele binary-float).
 fn fmt_amount(s: &str) -> String {
-    let d = Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO).round_dp(2);
+    let d = Decimal::from_str(s.trim())
+        .unwrap_or(Decimal::ZERO)
+        .round_dp(2);
     format!("{:.2}", d)
 }
 

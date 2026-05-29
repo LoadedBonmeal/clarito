@@ -158,30 +158,42 @@ impl AnafClient {
                 }
                 let body = resp.text().await.unwrap_or_default();
                 tracing::warn!(%body, "ANAF upload rate-limited (429)");
-                return Err("Limita ANAF depășită (429). Așteptați câteva minute și reîncercați.".to_string());
+                return Err(
+                    "Limita ANAF depășită (429). Așteptați câteva minute și reîncercați."
+                        .to_string(),
+                );
             }
 
             if status.is_server_error() {
                 if retry_5xx < BACKOFF_5XX.len() {
                     let delay = BACKOFF_5XX[retry_5xx];
-                    tracing::warn!(attempt = retry_5xx + 1, delay, status = status.as_u16(), "ANAF 5xx — reîncercare");
+                    tracing::warn!(
+                        attempt = retry_5xx + 1,
+                        delay,
+                        status = status.as_u16(),
+                        "ANAF 5xx — reîncercare"
+                    );
                     tokio::time::sleep(Duration::from_secs(delay)).await;
                     retry_5xx += 1;
                     continue;
                 }
                 let body = resp.text().await.unwrap_or_default();
                 tracing::warn!(%status, %body, "ANAF upload server error");
-                return Err(format!("Eroare server ANAF ({status}). Serviciul poate fi temporar indisponibil."));
+                return Err(format!(
+                    "Eroare server ANAF ({status}). Serviciul poate fi temporar indisponibil."
+                ));
             }
 
             let body = resp.text().await.map_err(|e| e.to_string())?;
             if !status.is_success() {
                 tracing::warn!(%status, %body, "ANAF upload error");
-                return Err(format!("Eroare comunicare ANAF ({status}). Reîncercați sau contactați suportul."));
+                return Err(format!(
+                    "Eroare comunicare ANAF ({status}). Reîncercați sau contactați suportul."
+                ));
             }
 
-            let raw: UploadRaw = serde_json::from_str(&body)
-                .map_err(|e| format!("Răspuns ANAF invalid: {e}"))?;
+            let raw: UploadRaw =
+                serde_json::from_str(&body).map_err(|e| format!("Răspuns ANAF invalid: {e}"))?;
 
             return Ok(UploadResponse {
                 index_incarcare: raw.date_response.index_incarcare,
@@ -238,17 +250,21 @@ impl AnafClient {
                 }
                 let body = resp.text().await.unwrap_or_default();
                 tracing::warn!(%status, %body, "ANAF check_status server error");
-                return Err(format!("Eroare server ANAF ({status}). Serviciul poate fi temporar indisponibil."));
+                return Err(format!(
+                    "Eroare server ANAF ({status}). Serviciul poate fi temporar indisponibil."
+                ));
             }
 
             let body = resp.text().await.map_err(|e| e.to_string())?;
             if !status.is_success() {
                 tracing::warn!(%status, %body, "ANAF status error");
-                return Err(format!("Eroare comunicare ANAF ({status}). Reîncercați sau contactați suportul."));
+                return Err(format!(
+                    "Eroare comunicare ANAF ({status}). Reîncercați sau contactați suportul."
+                ));
             }
 
-            let parsed: StatusResponse = serde_json::from_str(&body)
-                .map_err(|e| format!("JSON status invalid: {e}"))?;
+            let parsed: StatusResponse =
+                serde_json::from_str(&body).map_err(|e| format!("JSON status invalid: {e}"))?;
 
             return Ok(parsed);
         }
@@ -299,7 +315,9 @@ impl AnafClient {
                         retry_429 += 1;
                         continue;
                     }
-                    return Err(format!("ANAF list_messages rate-limited (429) la pagina {page}"));
+                    return Err(format!(
+                        "ANAF list_messages rate-limited (429) la pagina {page}"
+                    ));
                 }
 
                 if status.is_server_error() {
@@ -310,13 +328,17 @@ impl AnafClient {
                     }
                     let body = resp.text().await.unwrap_or_default();
                     tracing::warn!(%status, %body, page, "ANAF list_messages server error");
-                    return Err(format!("Eroare server ANAF ({status}). Serviciul poate fi temporar indisponibil."));
+                    return Err(format!(
+                        "Eroare server ANAF ({status}). Serviciul poate fi temporar indisponibil."
+                    ));
                 }
 
                 let body = resp.text().await.map_err(|e| e.to_string())?;
                 if !status.is_success() {
                     tracing::warn!(%status, %body, page, "ANAF list messages error");
-                    return Err(format!("Eroare comunicare ANAF ({status}). Reîncercați sau contactați suportul."));
+                    return Err(format!(
+                        "Eroare comunicare ANAF ({status}). Reîncercați sau contactați suportul."
+                    ));
                 }
 
                 let raw: MessagesRaw = serde_json::from_str(&body)
@@ -348,11 +370,7 @@ impl AnafClient {
     /// Descarcă un mesaj SPV după ID. Returnează bytes ZIP.
     ///
     /// Retry policy: 5xx → backoff; 429 → Retry-After; 401 → ERR_UNAUTHORIZED.
-    pub async fn download_message(
-        &self,
-        token: &str,
-        message_id: &str,
-    ) -> Result<Vec<u8>, String> {
+    pub async fn download_message(&self, token: &str, message_id: &str) -> Result<Vec<u8>, String> {
         let url = format!("{}/FCTEL/rest/descarca/{}", self.base_url, message_id);
 
         let mut retry_5xx = 0usize;
@@ -391,13 +409,17 @@ impl AnafClient {
                 }
                 let body = resp.text().await.unwrap_or_default();
                 tracing::warn!(%status, %body, "ANAF download server error");
-                return Err(format!("Eroare server ANAF ({status}). Serviciul poate fi temporar indisponibil."));
+                return Err(format!(
+                    "Eroare server ANAF ({status}). Serviciul poate fi temporar indisponibil."
+                ));
             }
 
             if !status.is_success() {
                 let body = resp.text().await.unwrap_or_default();
                 tracing::warn!(%status, %body, "ANAF download error");
-                return Err(format!("Eroare comunicare ANAF ({status}). Reîncercați sau contactați suportul."));
+                return Err(format!(
+                    "Eroare comunicare ANAF ({status}). Reîncercați sau contactați suportul."
+                ));
             }
 
             let bytes = resp.bytes().await.map_err(|e| e.to_string())?;

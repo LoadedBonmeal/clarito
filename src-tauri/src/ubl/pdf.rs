@@ -28,12 +28,10 @@ const LINE_H: f32 = 5.0; // mm per text line
 // Liberation Sans embedded at compile-time — supports Romanian diacritics (ș, ț, ă, â, î)
 static FONT_REGULAR_BYTES: &[u8] =
     include_bytes!("../../resources/fonts/LiberationSans-Regular.ttf");
-static FONT_BOLD_BYTES: &[u8] =
-    include_bytes!("../../resources/fonts/LiberationSans-Bold.ttf");
+static FONT_BOLD_BYTES: &[u8] = include_bytes!("../../resources/fonts/LiberationSans-Bold.ttf");
 
 pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
-    let (doc, page1, layer1) =
-        PdfDocument::new("Factura", Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
+    let (doc, page1, layer1) = PdfDocument::new("Factura", Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
     let layer = doc.get_page(page1).get_layer(layer1);
 
     let font_normal = doc
@@ -106,7 +104,15 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     y -= 5.0;
 
     // Table header
-    let headers = ["Nr", "Denumire", "UM", "Cant", "Pret unitar", "TVA%", "Valoare"];
+    let headers = [
+        "Nr",
+        "Denumire",
+        "UM",
+        "Cant",
+        "Pret unitar",
+        "TVA%",
+        "Valoare",
+    ];
     let col_x = col_positions();
     for (i, h) in headers.iter().enumerate() {
         layer.use_text(*h, FONT_SMALL, Mm(col_x[i]), Mm(y), &font_bold);
@@ -126,11 +132,14 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
 
     // ── VAT breakdown table (left side) ──────────────────────────────────────
     {
-        let mut vat_groups: std::collections::BTreeMap<i64, (Decimal, Decimal)> = std::collections::BTreeMap::new();
+        let mut vat_groups: std::collections::BTreeMap<i64, (Decimal, Decimal)> =
+            std::collections::BTreeMap::new();
         for line in &input.lines {
             let rate_dec = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
             let rate_key = (rate_dec * Decimal::from(100)).to_i64().unwrap_or(0);
-            let entry = vat_groups.entry(rate_key).or_insert((Decimal::ZERO, Decimal::ZERO));
+            let entry = vat_groups
+                .entry(rate_key)
+                .or_insert((Decimal::ZERO, Decimal::ZERO));
             entry.0 += Decimal::from_str(&line.subtotal_amount).unwrap_or(Decimal::ZERO);
             entry.1 += Decimal::from_str(&line.vat_amount).unwrap_or(Decimal::ZERO);
         }
@@ -146,9 +155,27 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
             draw_hline(&layer, MARGIN, MARGIN + 75.0, y + 1.0);
             for (rate_key, (base, vat)) in &vat_groups {
                 let rate_pct = *rate_key as f64 / 100.0;
-                layer.use_text(format!("{:.0}%", rate_pct), FONT_SMALL, Mm(vt_cols[0]), Mm(y), &font_normal);
-                layer.use_text(format!("{:.2} {}", base, inv.currency), FONT_SMALL, Mm(vt_cols[1]), Mm(y), &font_normal);
-                layer.use_text(format!("{:.2} {}", vat, inv.currency), FONT_SMALL, Mm(vt_cols[2]), Mm(y), &font_normal);
+                layer.use_text(
+                    format!("{:.0}%", rate_pct),
+                    FONT_SMALL,
+                    Mm(vt_cols[0]),
+                    Mm(y),
+                    &font_normal,
+                );
+                layer.use_text(
+                    format!("{:.2} {}", base, inv.currency),
+                    FONT_SMALL,
+                    Mm(vt_cols[1]),
+                    Mm(y),
+                    &font_normal,
+                );
+                layer.use_text(
+                    format!("{:.2} {}", vat, inv.currency),
+                    FONT_SMALL,
+                    Mm(vt_cols[2]),
+                    Mm(y),
+                    &font_normal,
+                );
                 y -= LINE_H - 1.0;
             }
         }
@@ -314,7 +341,10 @@ fn write_line_row(
         format!("{} {}", line.unit_price, currency),
         format!(
             "{:.0}%",
-            Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO).to_f64().unwrap_or(0.0)
+            Decimal::from_str(&line.vat_rate)
+                .unwrap_or(Decimal::ZERO)
+                .to_f64()
+                .unwrap_or(0.0)
         ),
         format!("{} {}", line.subtotal_amount, currency),
     ];
@@ -326,11 +356,11 @@ fn write_line_row(
 /// Coordonate X pentru coloanele tabelului.
 fn col_positions() -> [f32; 7] {
     [
-        MARGIN,       // Nr
-        MARGIN + 8.0, // Denumire
-        MARGIN + 65.0, // UM
-        MARGIN + 75.0, // Cant
-        MARGIN + 90.0, // Pret unitar
+        MARGIN,         // Nr
+        MARGIN + 8.0,   // Denumire
+        MARGIN + 65.0,  // UM
+        MARGIN + 75.0,  // Cant
+        MARGIN + 90.0,  // Pret unitar
         MARGIN + 120.0, // TVA%
         MARGIN + 135.0, // Valoare
     ]
@@ -397,14 +427,38 @@ fn number_to_words_ro(n: u64) -> String {
     }
 
     const ONES: &[&str] = &[
-        "", "unu", "doi", "trei", "patru", "cinci",
-        "șase", "șapte", "opt", "nouă", "zece",
-        "unsprezece", "doisprezece", "treisprezece", "paisprezece", "cincisprezece",
-        "șaisprezece", "șaptesprezece", "optsprezece", "nouăsprezece",
+        "",
+        "unu",
+        "doi",
+        "trei",
+        "patru",
+        "cinci",
+        "șase",
+        "șapte",
+        "opt",
+        "nouă",
+        "zece",
+        "unsprezece",
+        "doisprezece",
+        "treisprezece",
+        "paisprezece",
+        "cincisprezece",
+        "șaisprezece",
+        "șaptesprezece",
+        "optsprezece",
+        "nouăsprezece",
     ];
     const TENS: &[&str] = &[
-        "", "", "douăzeci", "treizeci", "patruzeci",
-        "cincizeci", "șaizeci", "șaptezeci", "optzeci", "nouăzeci",
+        "",
+        "",
+        "douăzeci",
+        "treizeci",
+        "patruzeci",
+        "cincizeci",
+        "șaizeci",
+        "șaptezeci",
+        "optzeci",
+        "nouăzeci",
     ];
 
     if n < 20 {

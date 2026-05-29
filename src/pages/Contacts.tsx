@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 
 import { Icon } from "@/components/shared/Icon";
 import { CsvImportModal } from "@/components/shared/CsvImportModal";
+import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -34,7 +35,7 @@ export function ContactsPage() {
   const [modal, setModal] = useState<"create" | { edit: Contact } | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
 
-  const { data: contacts = [], isLoading } = useQuery({
+  const { data: contacts = [], isLoading, isError: contactsError, error: contactsErr, refetch: refetchContacts } = useQuery({
     queryKey: queryKeys.contacts.list({ companyId: activeCompanyId ?? undefined }),
     queryFn: () => api.contacts.list({ companyId: activeCompanyId ?? undefined }),
   });
@@ -136,6 +137,8 @@ export function ContactsPage() {
       <div className="content-body">
         {isLoading ? (
           <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>Se încarcă…</div>
+        ) : contactsError ? (
+          <QueryErrorBanner error={contactsErr} label="contactele" onRetry={() => void refetchContacts()} />
         ) : list.length === 0 ? (
           <div style={{ padding: 40, textAlign: "center", fontSize: 12, color: "var(--text-muted)" }}>
             {contacts.length === 0

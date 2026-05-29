@@ -58,7 +58,7 @@ export function ReceivedPage() {
 
   // ANAF test mode
   const { data: testModeSetting } = useQuery({
-    queryKey: ["settings", "use_anaf_test_env"],
+    queryKey: queryKeys.anaf.testMode,
     queryFn: () => api.settings.get("use_anaf_test_env"),
   });
   const testMode = testModeSetting === "1";

@@ -294,6 +294,10 @@ export interface License {
   machineId: string;
   email: string | null;
   lastValidatedAt: number | null;
+  /** True if `expiresAt` is in the past. Computed by the backend on each fetch. */
+  isExpired: boolean;
+  /** Days remaining in a TRIAL period (negative when expired). Null for non-TRIAL tiers. */
+  trialDaysRemaining: number | null;
 }
 
 // ─── System ───────────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::state::AppState;
 
-const STATUS_POLL_SECS: u64 = 900;   // 15 minutes — per plan
+const STATUS_POLL_SECS: u64 = 900; // 15 minutes — per plan
 
 pub fn spawn_background_tasks(app: AppHandle) {
     let app1 = app.clone();
@@ -73,9 +73,15 @@ pub fn spawn_background_tasks(app: AppHandle) {
                     // Update tray tooltip with pending invoice count
                     if let Some(tray) = app2.tray_by_id("main") {
                         let pending_count: i64 = sqlx::query_scalar(
-                            "SELECT COUNT(*) FROM invoices WHERE status = 'SUBMITTED'"
-                        ).fetch_one(&pool).await.unwrap_or(0);
-                        let _ = tray.set_tooltip(Some(&format!("RoFactura — {} în așteptare", pending_count)));
+                            "SELECT COUNT(*) FROM invoices WHERE status = 'SUBMITTED'",
+                        )
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap_or(0);
+                        let _ = tray.set_tooltip(Some(&format!(
+                            "RoFactura — {} în așteptare",
+                            pending_count
+                        )));
                     }
                 }
             }
@@ -149,25 +155,23 @@ pub fn spawn_background_tasks(app: AppHandle) {
 async fn sleep_until_local_time(hour: u32, minute: u32) {
     use chrono::{Local, NaiveTime};
     let now = Local::now();
-    let target_time = NaiveTime::from_hms_opt(hour, minute, 0)
-        .unwrap_or_else(|| NaiveTime::from_hms_opt(4, 0, 0).expect("04:00 is a valid time — constant infallible"));
-    let mut target = now.date_naive().and_time(target_time)
+    let target_time = NaiveTime::from_hms_opt(hour, minute, 0).unwrap_or_else(|| {
+        NaiveTime::from_hms_opt(4, 0, 0).expect("04:00 is a valid time — constant infallible")
+    });
+    let mut target = now
+        .date_naive()
+        .and_time(target_time)
         .and_local_timezone(Local)
         .single()
         .unwrap_or(now);
     if target <= now {
         target = target + chrono::Duration::days(1);
     }
-    let duration = (target - now)
-        .to_std()
-        .unwrap_or(Duration::from_secs(3600));
+    let duration = (target - now).to_std().unwrap_or(Duration::from_secs(3600));
     tokio::time::sleep(duration).await;
 }
 
-async fn poll_submitted_invoices(
-    app: &AppHandle,
-    state: &AppState,
-) -> crate::error::AppResult<()> {
+async fn poll_submitted_invoices(app: &AppHandle, state: &AppState) -> crate::error::AppResult<()> {
     let pool = &state.db;
     let companies = crate::db::companies::list(pool).await?;
 
@@ -178,23 +182,23 @@ async fn poll_submitted_invoices(
         }
 
         if let Err(e) = poll_submitted_for_company(pool, &company.id, Some(app)).await {
-            tracing::warn!("poll_submitted_for_company error for {}: {:?}", company.id, e);
+            tracing::warn!(
+                "poll_submitted_for_company error for {}: {:?}",
+                company.id,
+                e
+            );
         }
     }
 
     Ok(())
 }
 
-async fn sync_spv_messages(
-    app: &AppHandle,
-    state: &AppState,
-) -> crate::error::AppResult<()> {
+async fn sync_spv_messages(app: &AppHandle, state: &AppState) -> crate::error::AppResult<()> {
     let pool = &state.db;
-    let test_mode = crate::db::settings::get_bool(
-        pool,
-        crate::db::settings::keys::USE_ANAF_TEST_ENV,
-        false,
-    ).await.unwrap_or(false);
+    let test_mode =
+        crate::db::settings::get_bool(pool, crate::db::settings::keys::USE_ANAF_TEST_ENV, false)
+            .await
+            .unwrap_or(false);
     let companies = crate::db::companies::list(pool).await?;
 
     for company in companies {
@@ -250,7 +254,11 @@ pub(crate) async fn poll_submitted_for_company(
     company_id: &str,
     app: Option<&AppHandle>,
 ) -> crate::error::AppResult<u32> {
-    use crate::anaf::{client::{AnafClient, ERR_UNAUTHORIZED}, keychain::TokenBundle, oauth};
+    use crate::anaf::{
+        client::{AnafClient, ERR_UNAUTHORIZED},
+        keychain::TokenBundle,
+        oauth,
+    };
     use crate::db::invoices as db_inv;
     use crate::error::AppError;
 
@@ -270,18 +278,21 @@ pub(crate) async fn poll_submitted_for_company(
             refresh_token: result.refresh_token,
             expires_at: result.expires_at,
         };
-        new_bundle.save(company_id).map_err(|e| AppError::Other(e.to_string()))?;
+        new_bundle
+            .save(company_id)
+            .map_err(|e| AppError::Other(e.to_string()))?;
         result.access_token
     };
 
     // Read test_mode from settings so background poll respects the same environment
-    let test_mode = crate::db::settings::get_bool(
-        pool,
-        crate::db::settings::keys::USE_ANAF_TEST_ENV,
-        false,
-    ).await.unwrap_or(false);
+    let test_mode =
+        crate::db::settings::get_bool(pool, crate::db::settings::keys::USE_ANAF_TEST_ENV, false)
+            .await
+            .unwrap_or(false);
     let client = AnafClient::new(test_mode);
-    let submitted = db_inv::list_submitted(pool, company_id).await.unwrap_or_default();
+    let submitted = db_inv::list_submitted(pool, company_id)
+        .await
+        .unwrap_or_default();
     let mut count = 0u32;
 
     for invoice in &submitted {
@@ -303,28 +314,42 @@ pub(crate) async fn poll_submitted_for_company(
             if let Ok(status_resp) = result {
                 let stare = status_resp.stare.as_str();
                 if stare == "ok" {
-                    let _ = db_inv::mark_validated(pool, &invoice.id, status_resp.index_incarcare).await;
+                    let _ = db_inv::mark_validated(pool, &invoice.id, status_resp.index_incarcare)
+                        .await;
                     if let Some(app) = app {
-                        crate::notifications::notify_invoice_validated(app, &invoice.full_number).await;
+                        crate::notifications::notify_invoice_validated(app, &invoice.full_number)
+                            .await;
                         // Emit reactive event for frontend
-                        let _ = app.emit("invoice_status_changed", serde_json::json!({
-                            "invoiceId": &invoice.id,
-                            "newStatus": "VALIDATED"
-                        }));
+                        let _ = app.emit(
+                            "invoice_status_changed",
+                            serde_json::json!({
+                                "invoiceId": &invoice.id,
+                                "newStatus": "VALIDATED"
+                            }),
+                        );
                     }
                 } else if stare == "nok" || stare.contains("erori") {
                     let raw_reason = status_resp.descriere.or(status_resp.erori);
-                    let friendly_reason: Option<String> = raw_reason.as_deref().map(|r| {
-                        crate::anaf::errors::friendly_message_from_body(r)
-                    });
+                    let friendly_reason: Option<String> = raw_reason
+                        .as_deref()
+                        .map(|r| crate::anaf::errors::friendly_message_from_body(r));
                     if let Some(app) = app {
-                        let reason_str = friendly_reason.as_deref().unwrap_or("Verificați detaliile");
-                        crate::notifications::notify_invoice_rejected(app, &invoice.full_number, reason_str).await;
+                        let reason_str =
+                            friendly_reason.as_deref().unwrap_or("Verificați detaliile");
+                        crate::notifications::notify_invoice_rejected(
+                            app,
+                            &invoice.full_number,
+                            reason_str,
+                        )
+                        .await;
                         // Emit reactive event for frontend
-                        let _ = app.emit("invoice_status_changed", serde_json::json!({
-                            "invoiceId": &invoice.id,
-                            "newStatus": "REJECTED"
-                        }));
+                        let _ = app.emit(
+                            "invoice_status_changed",
+                            serde_json::json!({
+                                "invoiceId": &invoice.id,
+                                "newStatus": "REJECTED"
+                            }),
+                        );
                     }
                     let _ = db_inv::mark_rejected(pool, &invoice.id, friendly_reason, None).await;
                 }
@@ -395,7 +420,10 @@ async fn refresh_expiring_certificates(pool: &sqlx::SqlitePool, app: &AppHandle)
             continue; // token is still valid
         }
 
-        tracing::info!(company_id = company.id.as_str(), "Reîmprospătăm token OAuth2");
+        tracing::info!(
+            company_id = company.id.as_str(),
+            "Reîmprospătăm token OAuth2"
+        );
         match oauth::refresh_token_bundle(&bundle.refresh_token).await {
             Ok(refreshed) => {
                 let new_bundle = TokenBundle {
@@ -404,7 +432,10 @@ async fn refresh_expiring_certificates(pool: &sqlx::SqlitePool, app: &AppHandle)
                     expires_at: refreshed.expires_at,
                 };
                 if let Err(e) = new_bundle.save(&company.id) {
-                    tracing::warn!("Nu s-a putut salva token reîmprospătat pentru {}: {e}", company.id);
+                    tracing::warn!(
+                        "Nu s-a putut salva token reîmprospătat pentru {}: {e}",
+                        company.id
+                    );
                 } else {
                     tracing::info!("Token reîmprospătat pentru compania {}", company.legal_name);
                     // Log to audit
@@ -424,12 +455,15 @@ async fn refresh_expiring_certificates(pool: &sqlx::SqlitePool, app: &AppHandle)
             Err(e) => {
                 tracing::warn!(
                     "Refresh token eșuat pentru compania {} ({}): {}",
-                    company.legal_name, company.id, e
+                    company.legal_name,
+                    company.id,
+                    e
                 );
                 // Notify user — they need to re-authorize manually
                 let title = format!("Re-autorizare necesară: {}", company.legal_name);
                 let body = "Token-ul ANAF a expirat și nu a putut fi reîmprospătat automat. \
-                            Mergeți la Setări → Certificate.".to_string();
+                            Mergeți la Setări → Certificate."
+                    .to_string();
                 crate::notifications::notify(app, &title, &body).await;
             }
         }
@@ -442,12 +476,15 @@ pub(crate) async fn do_sync_spv(
     app: &AppHandle,
     test_mode: bool,
 ) -> crate::error::AppResult<i32> {
-    use crate::anaf::{client::{AnafClient, ERR_UNAUTHORIZED}, keychain::TokenBundle, oauth};
+    use crate::anaf::{
+        client::{AnafClient, ERR_UNAUTHORIZED},
+        keychain::TokenBundle,
+        oauth,
+    };
     use crate::db::notifications;
     use crate::error::AppError;
 
-    let bundle = TokenBundle::load(company_id)
-        .ok_or_else(|| AppError::Other("No token".into()))?;
+    let bundle = TokenBundle::load(company_id).ok_or_else(|| AppError::Other("No token".into()))?;
 
     let mut access_token = if !bundle.is_expired() {
         bundle.access_token.clone()
@@ -460,7 +497,9 @@ pub(crate) async fn do_sync_spv(
             refresh_token: result.refresh_token,
             expires_at: result.expires_at,
         };
-        new_bundle.save(company_id).map_err(|e| AppError::Other(e.to_string()))?;
+        new_bundle
+            .save(company_id)
+            .map_err(|e| AppError::Other(e.to_string()))?;
         result.access_token
     };
 
@@ -471,7 +510,10 @@ pub(crate) async fn do_sync_spv(
     let mut messages_result = client.list_messages(&access_token, &company.cui, 60).await;
     if let Err(ref e) = messages_result {
         if e == ERR_UNAUTHORIZED {
-            tracing::info!(company_id, "ANAF 401 on list_messages — reîmprospătăm token");
+            tracing::info!(
+                company_id,
+                "ANAF 401 on list_messages — reîmprospătăm token"
+            );
             if let Ok(new_tok) = refresh_token_for(company_id).await {
                 access_token = new_tok;
                 messages_result = client.list_messages(&access_token, &company.cui, 60).await;
@@ -489,21 +531,23 @@ pub(crate) async fn do_sync_spv(
     let mut new_count = 0i32;
     for msg in messages {
         let data_key = format!("spv_msg_{}", msg.id);
-        let exists: bool = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM notifications WHERE data = ?1",
-        )
-        .bind(&data_key)
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0)
-            > 0;
+        let exists: bool =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM notifications WHERE data = ?1")
+                .bind(&data_key)
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0)
+                > 0;
 
         if !exists {
             // ── Download the ZIP from ANAF (with 401 refresh-once) ───────
             let mut dl_result = client.download_message(&access_token, &msg.id).await;
             if let Err(ref e) = dl_result {
                 if e == ERR_UNAUTHORIZED {
-                    tracing::info!(msg_id = msg.id.as_str(), "ANAF 401 on download — reîmprospătăm token");
+                    tracing::info!(
+                        msg_id = msg.id.as_str(),
+                        "ANAF 401 on download — reîmprospătăm token"
+                    );
                     if let Ok(new_tok) = refresh_token_for(company_id).await {
                         access_token = new_tok;
                         dl_result = client.download_message(&access_token, &msg.id).await;
@@ -569,12 +613,14 @@ pub(crate) async fn do_sync_spv(
                 "0000"
             };
             // Sanitize msg.id (received from ANAF) to prevent path traversal.
-            let safe_msg_id: String = msg.id
+            let safe_msg_id: String = msg
+                .id
                 .chars()
                 .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
                 .take(64)
                 .collect();
-            let safe_cui: String = company.cui
+            let safe_cui: String = company
+                .cui
                 .chars()
                 .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
                 .take(64)
@@ -592,7 +638,11 @@ pub(crate) async fn do_sync_spv(
                 .join(&safe_msg_id);
             // Belt-and-suspenders: verify the resolved path stays under app_data_dir.
             if !archive_path.starts_with(&app_data_dir) {
-                tracing::error!("Archive path escape attempt for msg {}: {:?}", msg.id, archive_path);
+                tracing::error!(
+                    "Archive path escape attempt for msg {}: {:?}",
+                    msg.id,
+                    archive_path
+                );
                 continue;
             }
             if let Err(e) = std::fs::create_dir_all(&archive_path) {
@@ -649,10 +699,7 @@ pub(crate) async fn do_sync_spv(
 
             // ── Create SPV notification ───────────────────────────────────
             let title = format!("Factură primită de la {}", issuer_name);
-            let body = format!(
-                "Sumă: {} RON — {}",
-                total_amount, issue_date
-            );
+            let body = format!("Sumă: {} RON — {}", total_amount, issue_date);
 
             notifications::create(
                 pool,
@@ -713,9 +760,9 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
     let mut issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
     // State machine pentru navigarea structurii UBL
-    let mut depth_supplier = 0i32;      // >0 când suntem în AccountingSupplierParty
-    let mut depth_party_tax = 0i32;     // >0 când suntem în PartyTaxScheme (al supplier)
-    let mut depth_party_legal = 0i32;   // >0 când suntem în PartyLegalEntity (al supplier)
+    let mut depth_supplier = 0i32; // >0 când suntem în AccountingSupplierParty
+    let mut depth_party_tax = 0i32; // >0 când suntem în PartyTaxScheme (al supplier)
+    let mut depth_party_legal = 0i32; // >0 când suntem în PartyLegalEntity (al supplier)
     let mut current_local = String::new();
     let mut buf = Vec::new();
 
@@ -736,9 +783,15 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
             Ok(Event::End(ref e)) => {
                 let local = std::str::from_utf8(e.local_name().into_inner()).unwrap_or("");
                 match local {
-                    "AccountingSupplierParty" => { depth_supplier -= 1; }
-                    "PartyTaxScheme" if depth_supplier > 0 => { depth_party_tax -= 1; }
-                    "PartyLegalEntity" if depth_supplier > 0 => { depth_party_legal -= 1; }
+                    "AccountingSupplierParty" => {
+                        depth_supplier -= 1;
+                    }
+                    "PartyTaxScheme" if depth_supplier > 0 => {
+                        depth_party_tax -= 1;
+                    }
+                    "PartyLegalEntity" if depth_supplier > 0 => {
+                        depth_party_legal -= 1;
+                    }
                     _ => {}
                 }
                 current_local.clear();
@@ -748,15 +801,21 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
                     Ok(t) => t.trim().to_string(),
                     Err(_) => continue,
                 };
-                if text.is_empty() { continue; }
+                if text.is_empty() {
+                    continue;
+                }
                 match current_local.as_str() {
                     // CompanyID în PartyTaxScheme al furnizorului = CUI fiscal
                     "CompanyID" if depth_supplier > 0 && depth_party_tax > 0 => {
-                        if issuer_cui.is_empty() { issuer_cui = text; }
+                        if issuer_cui.is_empty() {
+                            issuer_cui = text;
+                        }
                     }
                     // RegistrationName în PartyLegalEntity al furnizorului = denumire
                     "RegistrationName" if depth_supplier > 0 && depth_party_legal > 0 => {
-                        if issuer_name.is_empty() { issuer_name = text; }
+                        if issuer_name.is_empty() {
+                            issuer_name = text;
+                        }
                     }
                     // PayableAmount = valoarea totală de plată
                     "PayableAmount" => {
@@ -778,8 +837,16 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
     }
 
     (
-        if issuer_cui.is_empty() { "NECUNOSCUT".to_string() } else { issuer_cui },
-        if issuer_name.is_empty() { "Necunoscut".to_string() } else { issuer_name },
+        if issuer_cui.is_empty() {
+            "NECUNOSCUT".to_string()
+        } else {
+            issuer_cui
+        },
+        if issuer_name.is_empty() {
+            "Necunoscut".to_string()
+        } else {
+            issuer_name
+        },
         total_amount_str,
         issue_date,
     )
@@ -792,11 +859,11 @@ async fn process_recurring_invoices(
     pool: &sqlx::SqlitePool,
     app: &AppHandle,
 ) -> crate::error::AppResult<()> {
-    use crate::db::recurring;
     use crate::db::models::new_id;
+    use crate::db::recurring;
     use chrono::Local;
-    use rust_decimal::Decimal;
     use rust_decimal::prelude::ToPrimitive;
+    use rust_decimal::Decimal;
 
     let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
     let hundred = Decimal::from(100u32);
@@ -884,7 +951,8 @@ async fn process_recurring_invoices(
         let mut line_calcs: Vec<LineCalc> = Vec::with_capacity(lines.len());
 
         for line in &lines {
-            let name = line["name"].as_str()
+            let name = line["name"]
+                .as_str()
                 .or_else(|| line["description"].as_str())
                 .unwrap_or("Servicii")
                 .to_string();
@@ -892,12 +960,18 @@ async fn process_recurring_invoices(
             let unit = line["unit"].as_str().unwrap_or("BUC").to_string();
             let vat_category = line["vatCategory"].as_str().unwrap_or("S").to_string();
 
-            let qty = line["quantity"].as_f64()
+            let qty = line["quantity"]
+                .as_f64()
                 .and_then(|v| Decimal::try_from(v).ok())
                 .unwrap_or(Decimal::ONE);
-            let price = line["unitPrice"].as_str()
+            let price = line["unitPrice"]
+                .as_str()
                 .and_then(|s| s.parse::<Decimal>().ok())
-                .or_else(|| line["unitPrice"].as_f64().and_then(|v| Decimal::try_from(v).ok()))
+                .or_else(|| {
+                    line["unitPrice"]
+                        .as_f64()
+                        .and_then(|v| Decimal::try_from(v).ok())
+                })
                 .unwrap_or(Decimal::ZERO);
             let vat_rate = if let Some(n) = line["vatRate"].as_i64() {
                 if !crate::db::models::VALID_VAT_RATES.contains(&n) {
@@ -1106,6 +1180,49 @@ async fn process_recurring_invoices(
                 "fullNumber": full_number,
             }),
         );
+
+        // F-09: auto-submit to ANAF if template requests it and token exists
+        if template.auto_submit_anaf {
+            let has_token =
+                crate::anaf::keychain::TokenBundle::load(&template.company_id).is_some();
+            if has_token {
+                let test_mode = crate::db::settings::get_bool(
+                    pool,
+                    crate::db::settings::keys::USE_ANAF_TEST_ENV,
+                    false,
+                )
+                .await
+                .unwrap_or(false);
+                match crate::commands::anaf::submit_invoice_inner(
+                    app,
+                    pool,
+                    &template.company_id,
+                    &invoice_id,
+                    test_mode,
+                )
+                .await
+                {
+                    Ok(upload_id) => {
+                        tracing::info!(
+                            invoice_id = %invoice_id,
+                            upload_id = %upload_id,
+                            "Recurring invoice auto-submitted to ANAF"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            invoice_id = %invoice_id,
+                            "Recurring auto-submit failed, invoice left as DRAFT: {:?}", e
+                        );
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    template_id = %template.id,
+                    "auto_submit_anaf=true but no ANAF token found — invoice left as DRAFT"
+                );
+            }
+        }
     }
 
     Ok(())
@@ -1192,7 +1309,8 @@ async fn archive_check(pool: sqlx::SqlitePool, app: AppHandle) {
         .await
         .unwrap_or_default();
 
-    let missing: Vec<String> = rows.iter()
+    let missing: Vec<String> = rows
+        .iter()
         .filter_map(|r| r.try_get::<String, _>("xml_path").ok())
         .filter(|p| !std::path::Path::new(p).exists())
         .collect();

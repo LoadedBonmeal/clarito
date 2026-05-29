@@ -1,8 +1,6 @@
 use tauri::State;
 
-use crate::db::contacts::{
-    self, Contact, ContactFilter, CreateContactInput, UpdateContactInput,
-};
+use crate::db::contacts::{self, Contact, ContactFilter, CreateContactInput, UpdateContactInput};
 use crate::error::AppResult;
 use crate::state::AppState;
 
@@ -42,10 +40,7 @@ pub async fn delete_contact(state: State<'_, AppState>, id: String) -> AppResult
 }
 
 #[tauri::command]
-pub async fn search_contacts(
-    state: State<'_, AppState>,
-    query: String,
-) -> AppResult<Vec<Contact>> {
+pub async fn search_contacts(state: State<'_, AppState>, query: String) -> AppResult<Vec<Contact>> {
     contacts::list(
         &state.db,
         ContactFilter {

@@ -7,9 +7,9 @@ use crate::db::{companies, contacts, invoices};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::ubl::generator::{generate_ubl, GeneratorInput};
+use crate::ubl::paths;
 use crate::ubl::pdf::generate_pdf;
 use crate::ubl::validator::{validate_ubl, ValidationResult};
-use crate::ubl::paths;
 
 #[tauri::command]
 pub async fn generate_invoice_xml(

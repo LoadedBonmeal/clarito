@@ -33,7 +33,11 @@ pub async fn get_smartbill_credentials(
 
     let configured = !user.is_empty() && !token.is_empty();
 
-    Ok(SmartBillCredentials { user, token, configured })
+    Ok(SmartBillCredentials {
+        user,
+        token,
+        configured,
+    })
 }
 
 // ─── SmartBill push invoice ─────────────────────────────────────────────────
@@ -49,12 +53,12 @@ pub async fn smartbill_push_invoice(
     let user_key = format!("smartbill_user_{}", company_id);
     let token_key = format!("smartbill_token_{}", company_id);
 
-    let user = settings::get(&state.db, &user_key).await?.ok_or_else(|| {
-        AppError::Other("Credențialele SmartBill nu sunt configurate.".into())
-    })?;
-    let token = settings::get(&state.db, &token_key).await?.ok_or_else(|| {
-        AppError::Other("Credențialele SmartBill nu sunt configurate.".into())
-    })?;
+    let user = settings::get(&state.db, &user_key)
+        .await?
+        .ok_or_else(|| AppError::Other("Credențialele SmartBill nu sunt configurate.".into()))?;
+    let token = settings::get(&state.db, &token_key)
+        .await?
+        .ok_or_else(|| AppError::Other("Credențialele SmartBill nu sunt configurate.".into()))?;
 
     if user.is_empty() || token.is_empty() {
         return Err(AppError::Other(
@@ -77,8 +81,8 @@ pub async fn smartbill_push_invoice(
     let products: Vec<serde_json::Value> = lines
         .iter()
         .map(|line| {
-            use rust_decimal::Decimal;
             use rust_decimal::prelude::ToPrimitive;
+            use rust_decimal::Decimal;
             use std::str::FromStr;
             let vat_rate_dec = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
             let vat_rate_u32 = vat_rate_dec.to_u32().unwrap_or(0);
@@ -216,7 +220,10 @@ pub async fn export_saga_csv(
         company_id: Some(company_id.clone()),
         date_from: Some(date_from.clone()),
         date_to: Some(date_to.clone()),
-        page: Some(crate::db::models::Page { offset: 0, limit: 10_000 }),
+        page: Some(crate::db::models::Page {
+            offset: 0,
+            limit: 10_000,
+        }),
         ..Default::default()
     };
     let result = crate::db::invoices::list(&state.db, filter).await?;
@@ -237,16 +244,29 @@ pub async fn export_saga_csv(
 
         let cui = contact.cui.as_deref().unwrap_or("").to_string();
         let denumire = contact.legal_name.replace('"', "\"\"");
-        let adresa = contact.address.as_deref().unwrap_or("").replace('"', "\"\"");
+        let adresa = contact
+            .address
+            .as_deref()
+            .unwrap_or("")
+            .replace('"', "\"\"");
         let localitate = contact.city.as_deref().unwrap_or("").replace('"', "\"\"");
         let judet = contact.county.as_deref().unwrap_or("").replace('"', "\"\"");
         let observatii = invoice.notes.as_deref().unwrap_or("").replace('"', "\"\"");
 
         use rust_decimal::Decimal;
         use std::str::FromStr;
-        let net   = format!("{:.2}", Decimal::from_str(&invoice.subtotal_amount).unwrap_or_default());
-        let tva   = format!("{:.2}", Decimal::from_str(&invoice.vat_amount).unwrap_or_default());
-        let total = format!("{:.2}", Decimal::from_str(&invoice.total_amount).unwrap_or_default());
+        let net = format!(
+            "{:.2}",
+            Decimal::from_str(&invoice.subtotal_amount).unwrap_or_default()
+        );
+        let tva = format!(
+            "{:.2}",
+            Decimal::from_str(&invoice.vat_amount).unwrap_or_default()
+        );
+        let total = format!(
+            "{:.2}",
+            Decimal::from_str(&invoice.total_amount).unwrap_or_default()
+        );
 
         let row = format!(
             "\"FC\";\"{serie}\";\"{numar}\";\"{data}\";\"{cui}\";\"{denumire}\";\
@@ -273,8 +293,7 @@ pub async fn export_saga_csv(
     let csv_content = rows.join("\r\n");
 
     if let Some(path) = output_path {
-        std::fs::write(&path, csv_content.as_bytes())
-            .map_err(|e| AppError::Io(e))?;
+        std::fs::write(&path, csv_content.as_bytes()).map_err(|e| AppError::Io(e))?;
         Ok(path)
     } else {
         Ok(csv_content)
@@ -298,14 +317,16 @@ pub async fn export_winmentor_csv(
         company_id: Some(company_id.clone()),
         date_from: Some(date_from.clone()),
         date_to: Some(date_to.clone()),
-        page: Some(crate::db::models::Page { offset: 0, limit: 10_000 }),
+        page: Some(crate::db::models::Page {
+            offset: 0,
+            limit: 10_000,
+        }),
         ..Default::default()
     };
     let result = crate::db::invoices::list(&state.db, filter).await?;
 
     // 2. Build CSV
-    let header =
-        "Tip;Serie;Numar;Data;CUI_Partener;Denumire_Partener;Suma_Net;Cota_TVA;Suma_TVA;\
+    let header = "Tip;Serie;Numar;Data;CUI_Partener;Denumire_Partener;Suma_Net;Cota_TVA;Suma_TVA;\
         Total;Moneda;Curs;Scadenta;Observatii";
 
     let mut rows = vec![header.to_string()];
@@ -321,8 +342,8 @@ pub async fn export_winmentor_csv(
         let observatii = invoice.notes.as_deref().unwrap_or("").replace(';', " ");
 
         // Fetch line items to group by VAT rate — avoids blended rate on mixed-VAT invoices.
-        use rust_decimal::Decimal;
         use rust_decimal::prelude::ToPrimitive;
+        use rust_decimal::Decimal;
         use std::collections::BTreeMap;
 
         let line_rows = sqlx::query(
@@ -340,16 +361,27 @@ pub async fn export_winmentor_csv(
         let mut groups: BTreeMap<i64, (Decimal, Decimal, Decimal)> = BTreeMap::new();
         for lr in &line_rows {
             use sqlx::Row;
-            let rate_s: String = lr.try_get("vat_rate").unwrap_or_else(|_| "0.00".to_string());
-            let net_s: String  = lr.try_get("subtotal_amount").unwrap_or_else(|_| "0.00".to_string());
-            let tva_s: String  = lr.try_get("vat_amount").unwrap_or_else(|_| "0.00".to_string());
-            let tot_s: String  = lr.try_get("total_amount").unwrap_or_else(|_| "0.00".to_string());
+            let rate_s: String = lr
+                .try_get("vat_rate")
+                .unwrap_or_else(|_| "0.00".to_string());
+            let net_s: String = lr
+                .try_get("subtotal_amount")
+                .unwrap_or_else(|_| "0.00".to_string());
+            let tva_s: String = lr
+                .try_get("vat_amount")
+                .unwrap_or_else(|_| "0.00".to_string());
+            let tot_s: String = lr
+                .try_get("total_amount")
+                .unwrap_or_else(|_| "0.00".to_string());
             let rate_dec = Decimal::from_str(&rate_s).unwrap_or(Decimal::ZERO);
             let net = Decimal::from_str(&net_s).unwrap_or(Decimal::ZERO);
             let tva = Decimal::from_str(&tva_s).unwrap_or(Decimal::ZERO);
             let tot = Decimal::from_str(&tot_s).unwrap_or(Decimal::ZERO);
             let rate_key = rate_dec.round().to_i64().unwrap_or(0);
-            let entry = groups.entry(rate_key).or_insert((Decimal::ZERO, Decimal::ZERO, Decimal::ZERO));
+            let entry =
+                groups
+                    .entry(rate_key)
+                    .or_insert((Decimal::ZERO, Decimal::ZERO, Decimal::ZERO));
             entry.0 += net;
             entry.1 += tva;
             entry.2 += tot;
@@ -377,8 +409,8 @@ pub async fn export_winmentor_csv(
         }
 
         for (vat_rate, (net_dec, tva_dec, tot_dec)) in &groups {
-            let net   = format!("{:.2}", net_dec.round_dp(2));
-            let tva   = format!("{:.2}", tva_dec.round_dp(2));
+            let net = format!("{:.2}", net_dec.round_dp(2));
+            let tva = format!("{:.2}", tva_dec.round_dp(2));
             let total = format!("{:.2}", tot_dec.round_dp(2));
 
             let row = format!(
@@ -403,11 +435,9 @@ pub async fn export_winmentor_csv(
     let csv_content = rows.join("\r\n");
 
     if let Some(path) = output_path {
-        std::fs::write(&path, csv_content.as_bytes())
-            .map_err(|e| AppError::Io(e))?;
+        std::fs::write(&path, csv_content.as_bytes()).map_err(|e| AppError::Io(e))?;
         Ok(path)
     } else {
         Ok(csv_content)
     }
 }
-

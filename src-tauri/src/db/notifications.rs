@@ -45,11 +45,11 @@ pub async fn list(pool: &SqlitePool, only_unread: bool) -> AppResult<Vec<Notific
 }
 
 pub async fn count_unread(pool: &SqlitePool) -> AppResult<i64> {
-    Ok(sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM notifications WHERE is_read = 0",
+    Ok(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM notifications WHERE is_read = 0")
+            .fetch_one(pool)
+            .await?,
     )
-    .fetch_one(pool)
-    .await?)
 }
 
 pub async fn create(pool: &SqlitePool, input: CreateNotificationInput) -> AppResult<Notification> {

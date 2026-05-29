@@ -79,41 +79,54 @@ pub async fn export_invoices_xlsx(
             .fetch_optional(pool)
             .await
             .map_err(AppError::Database)?;
-        cq.map(|r| (
-            r.try_get::<String, _>("legal_name").unwrap_or_default(),
-            r.try_get::<String, _>("cui").unwrap_or_default(),
-            r.try_get::<String, _>("city").unwrap_or_default(),
-        ))
+        cq.map(|r| {
+            (
+                r.try_get::<String, _>("legal_name").unwrap_or_default(),
+                r.try_get::<String, _>("cui").unwrap_or_default(),
+                r.try_get::<String, _>("city").unwrap_or_default(),
+            )
+        })
     } else {
         None
     };
 
     // Extract owned data from sqlx rows before crossing the spawn_blocking boundary
-    let row_data: Vec<XlsxRowData> = raw_rows.iter().map(|row| XlsxRowData {
-        full_number:   row.try_get::<String, _>("full_number").unwrap_or_default(),
-        issue_date:    row.try_get::<String, _>("issue_date").unwrap_or_default(),
-        due_date:      row.try_get::<String, _>("due_date").unwrap_or_default(),
-        customer_name: row.try_get::<String, _>("customer_name").unwrap_or_default(),
-        customer_cui:  row.try_get::<String, _>("customer_cui").unwrap_or_default(),
-        customer_city: row.try_get::<String, _>("customer_city").unwrap_or_default(),
-        currency:      row.try_get::<String, _>("currency").unwrap_or_else(|_| "RON".to_string()),
-        status:        row.try_get::<String, _>("status").unwrap_or_default(),
-        net:           {
-            let s = row.try_get::<String, _>("subtotal_amount").unwrap_or_default();
-            s.parse::<f64>().unwrap_or(0.0)
-        },
-        vat:           {
-            let s = row.try_get::<String, _>("vat_amount").unwrap_or_default();
-            s.parse::<f64>().unwrap_or(0.0)
-        },
-        total:         {
-            let s = row.try_get::<String, _>("total_amount").unwrap_or_default();
-            s.parse::<f64>().unwrap_or(0.0)
-        },
-    }).collect();
+    let row_data: Vec<XlsxRowData> = raw_rows
+        .iter()
+        .map(|row| XlsxRowData {
+            full_number: row.try_get::<String, _>("full_number").unwrap_or_default(),
+            issue_date: row.try_get::<String, _>("issue_date").unwrap_or_default(),
+            due_date: row.try_get::<String, _>("due_date").unwrap_or_default(),
+            customer_name: row
+                .try_get::<String, _>("customer_name")
+                .unwrap_or_default(),
+            customer_cui: row.try_get::<String, _>("customer_cui").unwrap_or_default(),
+            customer_city: row
+                .try_get::<String, _>("customer_city")
+                .unwrap_or_default(),
+            currency: row
+                .try_get::<String, _>("currency")
+                .unwrap_or_else(|_| "RON".to_string()),
+            status: row.try_get::<String, _>("status").unwrap_or_default(),
+            net: {
+                let s = row
+                    .try_get::<String, _>("subtotal_amount")
+                    .unwrap_or_default();
+                s.parse::<f64>().unwrap_or(0.0)
+            },
+            vat: {
+                let s = row.try_get::<String, _>("vat_amount").unwrap_or_default();
+                s.parse::<f64>().unwrap_or(0.0)
+            },
+            total: {
+                let s = row.try_get::<String, _>("total_amount").unwrap_or_default();
+                s.parse::<f64>().unwrap_or(0.0)
+            },
+        })
+        .collect();
 
     let date_from = filter.date_from.clone();
-    let date_to   = filter.date_to.clone();
+    let date_to = filter.date_to.clone();
 
     // CPU-bound workbook creation runs on the blocking thread pool
     tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
@@ -249,10 +262,12 @@ pub async fn export_invoices_xlsx(
 
         // Filter info
         let filter_info = match (&date_from, &date_to) {
-            (Some(from), Some(to)) => format!("Perioadă: {} — {} · {} facturi", from, to, row_data.len()),
-            (Some(from), None)     => format!("De la: {} · {} facturi", from, row_data.len()),
-            (None, Some(to))       => format!("Până la: {} · {} facturi", to, row_data.len()),
-            (None, None)           => format!("{} facturi", row_data.len()),
+            (Some(from), Some(to)) => {
+                format!("Perioadă: {} — {} · {} facturi", from, to, row_data.len())
+            }
+            (Some(from), None) => format!("De la: {} · {} facturi", from, row_data.len()),
+            (None, Some(to)) => format!("Până la: {} · {} facturi", to, row_data.len()),
+            (None, None) => format!("{} facturi", row_data.len()),
         };
         ws.write_with_format(2, 0, &filter_info, &fmt_subtitle)?;
         ws.merge_range(2, 0, 2, 10, &filter_info, &fmt_subtitle)?;
@@ -276,17 +291,21 @@ pub async fn export_invoices_xlsx(
             ws.set_column_width(*col, *width)?;
         }
 
-        let num_headers = [(6u16, "Net (RON)", 14.0), (7, "TVA (RON)", 14.0), (8, "Total (RON)", 16.0)];
+        let num_headers = [
+            (6u16, "Net (RON)", 14.0),
+            (7, "TVA (RON)", 14.0),
+            (8, "Total (RON)", 16.0),
+        ];
         for (col, label, width) in &num_headers {
             ws.write_with_format(header_row, *col, *label, &fmt_header_num)?;
             ws.set_column_width(*col, *width)?;
         }
 
         // ── Data rows ─────────────────────────────────────────────────────
-        use rust_decimal::Decimal as XlsxDecimal;
         use rust_decimal::prelude::ToPrimitive as XlsxToPrimitive;
-        let mut total_net_dec    = XlsxDecimal::ZERO;
-        let mut total_vat_dec    = XlsxDecimal::ZERO;
+        use rust_decimal::Decimal as XlsxDecimal;
+        let mut total_net_dec = XlsxDecimal::ZERO;
+        let mut total_vat_dec = XlsxDecimal::ZERO;
         let mut total_amount_dec = XlsxDecimal::ZERO;
 
         for (i, row) in row_data.iter().enumerate() {
@@ -301,8 +320,8 @@ pub async fn export_invoices_xlsx(
             };
 
             // Accumulate as Decimal to avoid f64 rounding drift on money sums.
-            total_net_dec    += XlsxDecimal::try_from(row.net).unwrap_or_default();
-            total_vat_dec    += XlsxDecimal::try_from(row.vat).unwrap_or_default();
+            total_net_dec += XlsxDecimal::try_from(row.net).unwrap_or_default();
+            total_vat_dec += XlsxDecimal::try_from(row.vat).unwrap_or_default();
             total_amount_dec += XlsxDecimal::try_from(row.total).unwrap_or_default();
 
             ws.write_with_format(data_row, 0, &row.full_number, fmt_mono)?;
@@ -318,16 +337,16 @@ pub async fn export_invoices_xlsx(
 
             let status_fmt = match row.status.as_str() {
                 "VALIDATED" => &fmt_status_validated,
-                "REJECTED"  => &fmt_status_rejected,
-                _           => &fmt_status_default,
+                "REJECTED" => &fmt_status_rejected,
+                _ => &fmt_status_default,
             };
             let status_label = match row.status.as_str() {
                 "VALIDATED" => "✓ Validat",
-                "REJECTED"  => "✗ Respins",
+                "REJECTED" => "✗ Respins",
                 "SUBMITTED" => "→ Trimis",
-                "DRAFT"     => "Schiță",
-                "STORNED"   => "Stornat",
-                other       => other,
+                "DRAFT" => "Schiță",
+                "STORNED" => "Stornat",
+                other => other,
             };
             ws.write_with_format(data_row, 10, status_label, status_fmt)?;
         }
@@ -337,14 +356,31 @@ pub async fn export_invoices_xlsx(
         ws.set_row_height(total_row, 22)?;
         ws.write_with_format(total_row, 0, "TOTAL", &fmt_total_label)?;
         ws.merge_range(total_row, 0, total_row, 5, "TOTAL", &fmt_total_label)?;
-        ws.write_with_format(total_row, 6, total_net_dec.to_f64().unwrap_or(0.0), &fmt_total_num)?;
-        ws.write_with_format(total_row, 7, total_vat_dec.to_f64().unwrap_or(0.0), &fmt_total_num)?;
-        ws.write_with_format(total_row, 8, total_amount_dec.to_f64().unwrap_or(0.0), &fmt_total_num)?;
+        ws.write_with_format(
+            total_row,
+            6,
+            total_net_dec.to_f64().unwrap_or(0.0),
+            &fmt_total_num,
+        )?;
+        ws.write_with_format(
+            total_row,
+            7,
+            total_vat_dec.to_f64().unwrap_or(0.0),
+            &fmt_total_num,
+        )?;
+        ws.write_with_format(
+            total_row,
+            8,
+            total_amount_dec.to_f64().unwrap_or(0.0),
+            &fmt_total_num,
+        )?;
 
         // Freeze header rows
         ws.set_freeze_panes(header_row + 1, 0)?;
 
-        workbook.save(&output_path).map_err(|e| AppError::Other(e.to_string()))?;
+        workbook
+            .save(&output_path)
+            .map_err(|e| AppError::Other(e.to_string()))?;
         Ok(())
     })
     .await

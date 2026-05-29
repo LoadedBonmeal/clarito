@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import type { AddPaymentArgs, Payment } from "@/lib/tauri";
@@ -59,7 +60,7 @@ export function PaymentsPage() {
   const allInvoices = useMemo(() => paged?.items ?? [], [paged]);
 
   // Fetch payment summaries for all invoices — single batch query (replaces N+1)
-  const { data: summariesArray = [] } = useQuery({
+  const { data: summariesArray = [], isError: summariesError, error: summariesErr, refetch: refetchSummaries } = useQuery({
     queryKey: ["payment_summaries", activeCompanyId],
     queryFn: () => api.payments.listSummaries(activeCompanyId!),
     enabled: !!activeCompanyId,
@@ -179,6 +180,8 @@ export function PaymentsPage() {
       <div className="content-body" style={{ overflowY: "auto", flex: 1 }}>
         {isLoading ? (
           <div style={{ padding: 24, color: "var(--text-muted)" }}>Se încarcă…</div>
+        ) : summariesError ? (
+          <QueryErrorBanner error={summariesErr} label="plățile" onRetry={() => void refetchSummaries()} />
         ) : list.length === 0 ? (
           <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
             Nicio factură corespunzătoare filtrelor selectate.

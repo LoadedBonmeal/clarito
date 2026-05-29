@@ -24,12 +24,12 @@ pub mod keys {
 }
 
 pub async fn get(pool: &SqlitePool, key: &str) -> AppResult<Option<String>> {
-    Ok(sqlx::query_scalar::<_, String>(
-        "SELECT value FROM settings WHERE key = ?1",
+    Ok(
+        sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = ?1")
+            .bind(key)
+            .fetch_optional(pool)
+            .await?,
     )
-    .bind(key)
-    .fetch_optional(pool)
-    .await?)
 }
 
 pub async fn set(pool: &SqlitePool, key: &str, value: &str) -> AppResult<()> {

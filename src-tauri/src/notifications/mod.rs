@@ -99,7 +99,11 @@ pub async fn notify_new_received(app: &AppHandle, count: u32) {
 }
 
 pub async fn notify_certificate_expiring(app: &AppHandle, company_name: &str, days: i64) {
-    let notif_type = if days <= 7 { "cert_expired" } else { "cert_expiring" };
+    let notif_type = if days <= 7 {
+        "cert_expired"
+    } else {
+        "cert_expiring"
+    };
     notify_typed(
         app,
         notif_type,

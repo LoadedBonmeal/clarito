@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryClient, queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -55,7 +56,7 @@ export function DashboardPage() {
     () => ({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 200 } }),
     [activeCompanyId],
   );
-  const { data: invoicesPage } = useQuery({
+  const { data: invoicesPage, isError: invoicesError, error: invoicesErr, refetch: refetchInvoices } = useQuery({
     queryKey: queryKeys.invoices.list(invoiceFilter),
     queryFn: () => api.invoices.list(invoiceFilter),
   });
@@ -78,7 +79,7 @@ export function DashboardPage() {
   });
 
   const { data: isAnafAuth } = useQuery({
-    queryKey: ["anaf", "auth", activeCompanyId ?? ""],
+    queryKey: queryKeys.anaf.auth(activeCompanyId ?? ""),
     queryFn: () => api.anaf.isAuthenticated(activeCompanyId!),
     enabled: !!activeCompanyId,
     staleTime: 30_000,
@@ -185,6 +186,11 @@ export function DashboardPage() {
       </div>
 
       <div className="content-body">
+      {invoicesError && (
+        <div style={{ padding: "0 14px" }}>
+          <QueryErrorBanner error={invoicesErr} label="facturile" onRetry={() => void refetchInvoices()} />
+        </div>
+      )}
       {lastRejected && (
         <div
           className="callout"

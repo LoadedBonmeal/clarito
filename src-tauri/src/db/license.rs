@@ -17,6 +17,15 @@ pub struct License {
     pub machine_id: String,
     pub email: Option<String>,
     pub last_validated_at: Option<i64>,
+    /// Computed: true if `expires_at` is in the past relative to call time.
+    /// Not stored in the DB — set to a sentinel value by the query layer and
+    /// overwritten by the command layer.
+    #[sqlx(default)]
+    pub is_expired: bool,
+    /// Computed: days remaining in a TRIAL period (negative when past expiry).
+    /// `None` for non-TRIAL tiers.
+    #[sqlx(default)]
+    pub trial_days_remaining: Option<i64>,
 }
 
 pub async fn get(pool: &SqlitePool) -> AppResult<Option<License>> {
@@ -54,7 +63,9 @@ pub async fn start_trial(
     .execute(pool)
     .await?;
 
-    Ok(get(pool).await?.ok_or_else(|| crate::error::AppError::Other("license not found after insert".into()))?)
+    Ok(get(pool)
+        .await?
+        .ok_or_else(|| crate::error::AppError::Other("license not found after insert".into()))?)
 }
 
 pub async fn activate(
@@ -87,5 +98,7 @@ pub async fn activate(
     .execute(pool)
     .await?;
 
-    Ok(get(pool).await?.ok_or_else(|| crate::error::AppError::Other("license not found after insert".into()))?)
+    Ok(get(pool)
+        .await?
+        .ok_or_else(|| crate::error::AppError::Other("license not found after insert".into()))?)
 }

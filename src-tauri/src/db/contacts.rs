@@ -150,11 +150,7 @@ pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<C
     get(pool, &id).await
 }
 
-pub async fn update(
-    pool: &SqlitePool,
-    id: &str,
-    input: UpdateContactInput,
-) -> AppResult<Contact> {
+pub async fn update(pool: &SqlitePool, id: &str, input: UpdateContactInput) -> AppResult<Contact> {
     let current = get(pool, id).await?;
     let now = now_unix();
 

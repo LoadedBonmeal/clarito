@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 
 import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { CsvImportModal } from "@/components/shared/CsvImportModal";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
@@ -38,7 +39,7 @@ export function InvoicesPage() {
   const [showImportModal, setShowImportModal] = useState(false);
 
   // Fetch invoices (default page: first 50)
-  const { data: paged, isLoading } = useQuery({
+  const { data: paged, isLoading, isError: pagedError, error: pagedErr, refetch: refetchPaged } = useQuery({
     queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined }),
     queryFn: () => api.invoices.list({ companyId: activeCompanyId ?? undefined }),
   });
@@ -429,6 +430,8 @@ export function InvoicesPage() {
           <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>
             Se încarcă…
           </div>
+        ) : pagedError ? (
+          <QueryErrorBanner error={pagedErr} label="facturile" onRetry={() => void refetchPaged()} />
         ) : list.length === 0 ? (
           <div style={{ padding: 40, textAlign: "center", fontSize: 12, color: "var(--text-muted)" }}>
             {allInvoices.length === 0

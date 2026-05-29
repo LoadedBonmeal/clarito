@@ -162,8 +162,7 @@ fn rule_br_ro_016_buyer_identifier(ctx: &RuleContext<'_>) -> Option<String> {
         .unwrap_or(false);
     if !has_cui {
         Some(
-            "[BR-RO-016] CIF/identificator cumpărător lipsește. Adăugați CIF-ul clientului."
-                .into(),
+            "[BR-RO-016] CIF/identificator cumpărător lipsește. Adăugați CIF-ul clientului.".into(),
         )
     } else {
         None
@@ -195,7 +194,10 @@ fn rule_br_ro_018_buyer_country(ctx: &RuleContext<'_>) -> Option<String> {
 
 fn rule_br_ro_020_has_lines(ctx: &RuleContext<'_>) -> Option<String> {
     if ctx.lines.is_empty() {
-        Some("[BR-RO-020] Factura nu conține nicio linie. Adăugați cel puțin un produs/serviciu.".into())
+        Some(
+            "[BR-RO-020] Factura nu conține nicio linie. Adăugați cel puțin un produs/serviciu."
+                .into(),
+        )
     } else {
         None
     }
@@ -359,7 +361,10 @@ fn rule_br_ro_032_line_unit_codes(ctx: &RuleContext<'_>) -> Option<String> {
     if !bad.is_empty() {
         Some(format!(
             "[BR-RO-032] Liniile {} nu au unitate de măsură. Unitatea este obligatorie.",
-            bad.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ")
+            bad.iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         ))
     } else {
         None
@@ -420,8 +425,11 @@ fn rule_br_ro_035_line_vat_rates(ctx: &RuleContext<'_>) -> Option<String> {
                 //  21% — standard (din 2025-08-01)
                 let rate_dec = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
                 let valid_s_rates = [
-                    Decimal::from(5), Decimal::from(9), Decimal::from(11),
-                    Decimal::from(19), Decimal::from(21),
+                    Decimal::from(5),
+                    Decimal::from(9),
+                    Decimal::from(11),
+                    Decimal::from(19),
+                    Decimal::from(21),
                 ];
                 if !valid_s_rates.contains(&rate_dec) {
                     errs.push(format!(
@@ -456,7 +464,9 @@ fn rule_br_ro_036_line_totals_match(ctx: &RuleContext<'_>) -> Option<String> {
     for (i, line) in ctx.lines.iter().enumerate() {
         let qty = Decimal::from_str(&line.quantity).unwrap_or(Decimal::ZERO);
         let price = Decimal::from_str(&line.unit_price).unwrap_or(Decimal::ZERO);
-        let stored = Decimal::from_str(&line.subtotal_amount).unwrap_or(Decimal::ZERO).round_dp(2);
+        let stored = Decimal::from_str(&line.subtotal_amount)
+            .unwrap_or(Decimal::ZERO)
+            .round_dp(2);
         let expected = (qty * price).round_dp(2);
         let diff = (expected - stored).abs();
         if diff > Decimal::new(1, 2) {
@@ -487,7 +497,9 @@ fn rule_br_ro_037_line_vat_amounts_match(ctx: &RuleContext<'_>) -> Option<String
         let rate = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
         let net = (qty * price).round_dp(2);
         let expected_vat = (net * rate / hundred).round_dp(2);
-        let stored_vat = Decimal::from_str(&line.vat_amount).unwrap_or(Decimal::ZERO).round_dp(2);
+        let stored_vat = Decimal::from_str(&line.vat_amount)
+            .unwrap_or(Decimal::ZERO)
+            .round_dp(2);
         let diff = (expected_vat - stored_vat).abs();
         if diff > Decimal::new(1, 2) {
             errs.push(format!(
@@ -517,7 +529,9 @@ fn rule_br_ro_040_subtotal_equals_lines(ctx: &RuleContext<'_>) -> Option<String>
         .map(|l| Decimal::from_str(&l.subtotal_amount).unwrap_or(Decimal::ZERO))
         .fold(Decimal::ZERO, |a, b| a + b)
         .round_dp(2);
-    let header = Decimal::from_str(&ctx.invoice.subtotal_amount).unwrap_or(Decimal::ZERO).round_dp(2);
+    let header = Decimal::from_str(&ctx.invoice.subtotal_amount)
+        .unwrap_or(Decimal::ZERO)
+        .round_dp(2);
     let diff = (sum - header).abs();
     if diff > Decimal::new(1, 2) {
         Some(format!(
@@ -536,7 +550,9 @@ fn rule_br_ro_041_vat_total_equals_lines(ctx: &RuleContext<'_>) -> Option<String
         .map(|l| Decimal::from_str(&l.vat_amount).unwrap_or(Decimal::ZERO))
         .fold(Decimal::ZERO, |a, b| a + b)
         .round_dp(2);
-    let header = Decimal::from_str(&ctx.invoice.vat_amount).unwrap_or(Decimal::ZERO).round_dp(2);
+    let header = Decimal::from_str(&ctx.invoice.vat_amount)
+        .unwrap_or(Decimal::ZERO)
+        .round_dp(2);
     let diff = (sum - header).abs();
     if diff > Decimal::new(1, 2) {
         Some(format!(
@@ -549,10 +565,16 @@ fn rule_br_ro_041_vat_total_equals_lines(ctx: &RuleContext<'_>) -> Option<String
 }
 
 fn rule_br_ro_042_total_equals_subtotal_plus_vat(ctx: &RuleContext<'_>) -> Option<String> {
-    let net = Decimal::from_str(&ctx.invoice.subtotal_amount).unwrap_or(Decimal::ZERO).round_dp(2);
-    let vat = Decimal::from_str(&ctx.invoice.vat_amount).unwrap_or(Decimal::ZERO).round_dp(2);
+    let net = Decimal::from_str(&ctx.invoice.subtotal_amount)
+        .unwrap_or(Decimal::ZERO)
+        .round_dp(2);
+    let vat = Decimal::from_str(&ctx.invoice.vat_amount)
+        .unwrap_or(Decimal::ZERO)
+        .round_dp(2);
     let expected = (net + vat).round_dp(2);
-    let actual = Decimal::from_str(&ctx.invoice.total_amount).unwrap_or(Decimal::ZERO).round_dp(2);
+    let actual = Decimal::from_str(&ctx.invoice.total_amount)
+        .unwrap_or(Decimal::ZERO)
+        .round_dp(2);
     let diff = (expected - actual).abs();
     if diff > Decimal::new(1, 2) {
         Some(format!(
@@ -571,8 +593,12 @@ fn rule_br_ro_043_vat_breakdown_by_category(ctx: &RuleContext<'_>) -> Option<Str
     let mut cat_rate: HashMap<String, Decimal> = HashMap::new();
 
     for line in ctx.lines {
-        let net = Decimal::from_str(&line.subtotal_amount).unwrap_or(Decimal::ZERO).round_dp(2);
-        let vat = Decimal::from_str(&line.vat_amount).unwrap_or(Decimal::ZERO).round_dp(2);
+        let net = Decimal::from_str(&line.subtotal_amount)
+            .unwrap_or(Decimal::ZERO)
+            .round_dp(2);
+        let vat = Decimal::from_str(&line.vat_amount)
+            .unwrap_or(Decimal::ZERO)
+            .round_dp(2);
         let rate = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
         *cat_net
             .entry(line.vat_category.clone())
@@ -580,9 +606,7 @@ fn rule_br_ro_043_vat_breakdown_by_category(ctx: &RuleContext<'_>) -> Option<Str
         *cat_vat
             .entry(line.vat_category.clone())
             .or_insert(Decimal::ZERO) += vat;
-        cat_rate
-            .entry(line.vat_category.clone())
-            .or_insert(rate);
+        cat_rate.entry(line.vat_category.clone()).or_insert(rate);
     }
 
     let mut errs: Vec<String> = Vec::new();
@@ -611,8 +635,7 @@ fn rule_br_ro_043_vat_breakdown_by_category(ctx: &RuleContext<'_>) -> Option<Str
 // ─── Storno rules ─────────────────────────────────────────────────────────────
 
 fn rule_br_ro_050_storno_needs_billing_ref(ctx: &RuleContext<'_>) -> Option<String> {
-    let is_storno = ctx.storno_ref.is_some()
-        || ctx.invoice.series.starts_with('S');
+    let is_storno = ctx.storno_ref.is_some() || ctx.invoice.series.starts_with('S');
     if is_storno && ctx.storno_ref.map(|r| r.is_empty()).unwrap_or(true) {
         Some("[BR-RO-050] Factura storno (tip 381) necesită referință la factura originală (BillingReference). Refaceți storno-ul din detaliile facturii originale.".into())
     } else {
@@ -621,14 +644,15 @@ fn rule_br_ro_050_storno_needs_billing_ref(ctx: &RuleContext<'_>) -> Option<Stri
 }
 
 fn rule_br_ro_051_storno_lines_negative(ctx: &RuleContext<'_>) -> Option<String> {
-    let is_storno = ctx.storno_ref.is_some()
-        || ctx.invoice.series.starts_with('S');
+    let is_storno = ctx.storno_ref.is_some() || ctx.invoice.series.starts_with('S');
     if is_storno {
         let positive: Vec<usize> = ctx
             .lines
             .iter()
             .enumerate()
-            .filter(|(_, l)| Decimal::from_str(&l.quantity).unwrap_or(Decimal::ZERO) > Decimal::ZERO)
+            .filter(|(_, l)| {
+                Decimal::from_str(&l.quantity).unwrap_or(Decimal::ZERO) > Decimal::ZERO
+            })
             .map(|(i, _)| i + 1)
             .collect();
         if !positive.is_empty() {
@@ -699,4 +723,348 @@ fn warn_br_ro_w03_vat_payer_missing_prefix(ctx: &RuleContext<'_>) -> Option<Stri
         }
     }
     None
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::companies::Company;
+    use crate::db::contacts::Contact;
+    use crate::db::invoices::{Invoice, LineItem};
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    fn sample_supplier() -> Company {
+        Company {
+            id: "sup-1".into(),
+            cui: "RO12345678".into(),
+            legal_name: "Furnizor SRL".into(),
+            trade_name: None,
+            registry_number: None,
+            vat_payer: true,
+            address: "Str. Principala 1".into(),
+            city: "Bucuresti".into(),
+            county: "Ilfov".into(),
+            postal_code: None,
+            country: "RO".into(),
+            email: None,
+            phone: None,
+            iban: None,
+            bank_name: None,
+            is_active: true,
+            spv_enabled: false,
+            invoice_series: "FACT".into(),
+            last_invoice_number: 0,
+            logo_path: None,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn sample_buyer() -> Contact {
+        Contact {
+            id: "buy-1".into(),
+            company_id: "sup-1".into(),
+            contact_type: "CUSTOMER".into(),
+            cui: Some("RO87654321".into()),
+            legal_name: "Client SA".into(),
+            vat_payer: true,
+            address: Some("Bd. Unirii 10".into()),
+            city: Some("Cluj-Napoca".into()),
+            county: Some("Cluj".into()),
+            country: "RO".into(),
+            email: None,
+            phone: None,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn sample_invoice() -> Invoice {
+        Invoice {
+            id: "inv-1".into(),
+            company_id: "sup-1".into(),
+            contact_id: "buy-1".into(),
+            series: "FACT".into(),
+            number: 1,
+            full_number: "FACT-0001".into(),
+            issue_date: "2025-01-15".into(),
+            due_date: "2025-02-15".into(),
+            currency: "RON".into(),
+            exchange_rate: None,
+            subtotal_amount: "100.00".into(),
+            vat_amount: "19.00".into(),
+            total_amount: "119.00".into(),
+            status: "DRAFT".into(),
+            anaf_upload_id: None,
+            anaf_index: None,
+            anaf_submitted_at: None,
+            anaf_validated_at: None,
+            anaf_rejected_at: None,
+            xml_path: None,
+            pdf_path: None,
+            signature_xml_path: None,
+            rejection_reason: None,
+            rejection_code: None,
+            notes: None,
+            payment_means_code: "30".into(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn sample_line() -> LineItem {
+        LineItem {
+            id: "line-1".into(),
+            invoice_id: "inv-1".into(),
+            position: 1,
+            name: "Serviciu consultanta".into(),
+            description: None,
+            quantity: "1.00".into(),
+            unit: "H".into(),
+            unit_price: "100.00".into(),
+            vat_rate: "19.00".into(),
+            vat_category: "S".into(),
+            subtotal_amount: "100.00".into(),
+            vat_amount: "19.00".into(),
+            total_amount: "119.00".into(),
+            cpv_code: None,
+        }
+    }
+
+    // ── Test 1: valid invoice passes all rules ────────────────────────────────
+
+    #[test]
+    fn valid_invoice_has_no_errors() {
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _warnings) = run_all(&ctx);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for a valid invoice, but got: {:?}",
+            errors
+        );
+    }
+
+    // ── Test 2: storno without billing ref fails BR-RO-050 ───────────────────
+
+    #[test]
+    fn storno_without_billing_ref_fails_br_ro_050() {
+        let mut invoice = sample_invoice();
+        // Negative quantity line to satisfy BR-RO-051 (storno lines must be negative)
+        let mut line = sample_line();
+        line.quantity = "-1.00".into();
+        line.subtotal_amount = "-100.00".into();
+        line.vat_amount = "-19.00".into();
+        line.total_amount = "-119.00".into();
+        // Adjust invoice totals to match
+        invoice.subtotal_amount = "-100.00".into();
+        invoice.vat_amount = "-19.00".into();
+        invoice.total_amount = "-119.00".into();
+        // storno_ref is None — missing billing reference
+        let lines = vec![line];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: Some(""), // empty string triggers the "storno without ref" error
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_050 = errors.iter().any(|e| e.contains("[BR-RO-050]"));
+        assert!(
+            has_050,
+            "Expected BR-RO-050 error for storno without billing reference, got: {:?}",
+            errors
+        );
+    }
+
+    // ── Test 3: storno with billing ref passes BR-RO-050 ────────────────────
+
+    #[test]
+    fn storno_with_billing_ref_passes_br_ro_050() {
+        let mut invoice = sample_invoice();
+        let mut line = sample_line();
+        line.quantity = "-1.00".into();
+        line.subtotal_amount = "-100.00".into();
+        line.vat_amount = "-19.00".into();
+        line.total_amount = "-119.00".into();
+        invoice.subtotal_amount = "-100.00".into();
+        invoice.vat_amount = "-19.00".into();
+        invoice.total_amount = "-119.00".into();
+        let lines = vec![line];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: Some("FACT-0001"), // valid non-empty reference
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_050 = errors.iter().any(|e| e.contains("[BR-RO-050]"));
+        assert!(
+            !has_050,
+            "Expected no BR-RO-050 error when billing reference is provided, got: {:?}",
+            errors
+        );
+    }
+
+    // ── Test 4: storno with positive quantities fails BR-RO-051 ─────────────
+
+    #[test]
+    fn storno_positive_quantity_fails_br_ro_051() {
+        let mut invoice = sample_invoice();
+        invoice.series = "S".into(); // series starting with 'S' marks it as storno
+                                     // Line has positive quantity — invalid for storno
+        let line = sample_line(); // quantity is "1.00" (positive)
+        let lines = vec![line];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: Some("FACT-0001"),
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_051 = errors.iter().any(|e| e.contains("[BR-RO-051]"));
+        assert!(
+            has_051,
+            "Expected BR-RO-051 error for storno with positive line quantities, got: {:?}",
+            errors
+        );
+    }
+
+    // ── Test 5: invalid VAT rate for category S fails BR-RO-035 ─────────────
+
+    #[test]
+    fn invalid_vat_rate_category_s_fails_br_ro_035() {
+        let invoice = sample_invoice();
+        let mut line = sample_line();
+        // Category S with 7% is invalid (allowed: 5, 9, 11, 19, 21)
+        line.vat_rate = "7.00".into();
+        // Keep amounts consistent so other rules don't interfere with the one we test
+        // (BR-RO-037 would fire too; that is acceptable — we just assert 035 is present)
+        let lines = vec![line];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_035 = errors.iter().any(|e| e.contains("[BR-RO-035]"));
+        assert!(
+            has_035,
+            "Expected BR-RO-035 error for category S with 7% VAT rate, got: {:?}",
+            errors
+        );
+    }
+
+    // ── Test 6: negative unit price fails BR-RO-033 ──────────────────────────
+
+    #[test]
+    fn negative_unit_price_fails_br_ro_033() {
+        let invoice = sample_invoice();
+        let mut line = sample_line();
+        line.unit_price = "-10.00".into();
+        let lines = vec![line];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_033 = errors.iter().any(|e| e.contains("[BR-RO-033]"));
+        assert!(
+            has_033,
+            "Expected BR-RO-033 error for negative unit price, got: {:?}",
+            errors
+        );
+    }
+
+    // ── Test 7: invoice subtotal mismatch fails BR-RO-040 ───────────────────
+
+    #[test]
+    fn totals_mismatch_fails_br_ro_040() {
+        let mut invoice = sample_invoice();
+        // Line sums to 100.00 but invoice header says 200.00
+        invoice.subtotal_amount = "200.00".into();
+        // Keep total consistent with the (wrong) subtotal so only 040 fires
+        invoice.total_amount = "219.00".into();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_040 = errors.iter().any(|e| e.contains("[BR-RO-040]"));
+        assert!(
+            has_040,
+            "Expected BR-RO-040 error for subtotal mismatch, got: {:?}",
+            errors
+        );
+    }
+
+    // ── Test 8: missing buyer address fails the buyer-address rule ───────────
+
+    #[test]
+    fn missing_buyer_address_fails() {
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let mut buyer = sample_buyer();
+        // Contact.address and city are Option<String>; set them to None
+        buyer.address = None;
+        buyer.city = None;
+        // Also set country to empty to trigger BR-RO-018 as a definite hit
+        buyer.country = "".into();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        // BR-RO-018 fires when buyer country is empty; the address fields are
+        // Option<String> in Contact (no dedicated buyer-address rule exists in
+        // this rule set), so we verify the country rule at minimum.
+        let has_buyer_error = errors
+            .iter()
+            .any(|e| e.contains("[BR-RO-018]") || e.contains("cumpărător"));
+        assert!(
+            has_buyer_error,
+            "Expected a buyer-related error when buyer country/address is missing, got: {:?}",
+            errors
+        );
+    }
 }

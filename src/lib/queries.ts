@@ -55,4 +55,18 @@ export const queryKeys = {
   },
   license: ["license"] as const,
   appInfo: ["appInfo"] as const,
+  settings: {
+    get: (key: string) => ["settings", key] as const,
+    all: ["settings"] as const,
+  },
+  anaf: {
+    auth: (companyId: string) => ["anaf", "auth", companyId] as const,
+    testMode: ["settings", "use_anaf_test_env"] as const,
+  },
+  system: {
+    archiveSize: ["archive-size"] as const,
+    autostart: ["autostart"] as const,
+    activityLog: ["activity-log"] as const,
+    licenseStatus: ["license-status"] as const,
+  },
 } as const;

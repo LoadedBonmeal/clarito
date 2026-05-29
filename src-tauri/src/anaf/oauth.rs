@@ -40,14 +40,21 @@ fn random_bytes_hex(n: usize) -> String {
 
 /// Encodare base64url (fără padding) — RFC 4648 §5.
 fn base64url_encode(bytes: &[u8]) -> String {
-    const TABLE: &[u8] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut result = String::with_capacity(((bytes.len() + 2) / 3) * 4);
     let mut i = 0;
     while i < bytes.len() {
         let b0 = bytes[i] as u32;
-        let b1 = if i + 1 < bytes.len() { bytes[i + 1] as u32 } else { 0 };
-        let b2 = if i + 2 < bytes.len() { bytes[i + 2] as u32 } else { 0 };
+        let b1 = if i + 1 < bytes.len() {
+            bytes[i + 1] as u32
+        } else {
+            0
+        };
+        let b2 = if i + 2 < bytes.len() {
+            bytes[i + 2] as u32
+        } else {
+            0
+        };
         let n = (b0 << 16) | (b1 << 8) | b2;
         result.push(TABLE[((n >> 18) & 63) as usize] as char);
         result.push(TABLE[((n >> 12) & 63) as usize] as char);
@@ -93,9 +100,7 @@ pub async fn authorize(_company_id: &str) -> Result<OAuthResult, String> {
     // 4. TCP listener pe port 8787 cu timeout 120s
     let listener = TcpListener::bind(format!("127.0.0.1:{CALLBACK_PORT}"))
         .map_err(|e| format!("Nu pot asculta pe portul {CALLBACK_PORT}: {e}"))?;
-    listener
-        .set_nonblocking(false)
-        .map_err(|e| e.to_string())?;
+    listener.set_nonblocking(false).map_err(|e| e.to_string())?;
 
     // Folosim un thread dedicat pentru accept() cu timeout simulat prin channel
     let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
@@ -104,9 +109,7 @@ pub async fn authorize(_company_id: &str) -> Result<OAuthResult, String> {
         // Setăm read_timeout pe socketul acceptat, nu pe listener
         match listener.accept() {
             Ok((mut stream, _)) => {
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(10)))
-                    .ok();
+                stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
 
                 let mut reader = BufReader::new(&stream);
                 let mut request_line = String::new();
@@ -132,8 +135,12 @@ pub async fn authorize(_company_id: &str) -> Result<OAuthResult, String> {
                 let _ = stream.write_all(resp.as_bytes());
 
                 match code {
-                    Some(c) => tx.send(Ok(format!("{c}|||{}", recv_state.unwrap_or_default()))).ok(),
-                    None => tx.send(Err("Parametrul 'code' lipsește din callback".into())).ok(),
+                    Some(c) => tx
+                        .send(Ok(format!("{c}|||{}", recv_state.unwrap_or_default())))
+                        .ok(),
+                    None => tx
+                        .send(Err("Parametrul 'code' lipsește din callback".into()))
+                        .ok(),
                 };
             }
             Err(e) => {
@@ -177,23 +184,14 @@ pub async fn revoke_token(access_token: &str) {
         Err(_) => return,
     };
 
-    let params = [
-        ("token", access_token),
-        ("client_id", CLIENT_ID),
-    ];
+    let params = [("token", access_token), ("client_id", CLIENT_ID)];
 
     // Fire-and-forget: dacă ANAF nu suportă revocarea corect, nu e critical.
-    let _ = client
-        .post(REVOKE_URL)
-        .form(&params)
-        .send()
-        .await;
+    let _ = client.post(REVOKE_URL).form(&params).send().await;
 }
 
 /// Reîmprospătează access_token-ul folosind refresh_token-ul existent.
-pub async fn refresh_token_bundle(
-    refresh_tok: &str,
-) -> Result<OAuthResult, String> {
+pub async fn refresh_token_bundle(refresh_tok: &str) -> Result<OAuthResult, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -245,21 +243,13 @@ fn extract_query_param(request_line: &str, param: &str) -> Option<String> {
     let query = path.split('?').nth(1)?;
     for pair in query.split('&') {
         if let Some(val) = pair.strip_prefix(&format!("{param}=")) {
-            return Some(
-                val.split_whitespace()
-                    .next()
-                    .unwrap_or(val)
-                    .to_string(),
-            );
+            return Some(val.split_whitespace().next().unwrap_or(val).to_string());
         }
     }
     None
 }
 
-async fn exchange_code_for_token(
-    code: &str,
-    code_verifier: &str,
-) -> Result<OAuthResult, String> {
+async fn exchange_code_for_token(code: &str, code_verifier: &str) -> Result<OAuthResult, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -283,9 +273,7 @@ async fn exchange_code_for_token(
     parse_token_response(resp).await
 }
 
-async fn parse_token_response(
-    resp: reqwest::Response,
-) -> Result<OAuthResult, String> {
+async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthResult, String> {
     let status = resp.status();
     let body = resp
         .text()
@@ -294,7 +282,9 @@ async fn parse_token_response(
 
     if !status.is_success() {
         tracing::warn!(%status, "ANAF token endpoint returned non-success");
-        return Err(format!("Autentificare ANAF eșuată (HTTP {status}). Verificați conexiunea și reîncercați."));
+        return Err(format!(
+            "Autentificare ANAF eșuată (HTTP {status}). Verificați conexiunea și reîncercați."
+        ));
     }
 
     let json: serde_json::Value =

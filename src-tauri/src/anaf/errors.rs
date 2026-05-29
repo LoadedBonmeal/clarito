@@ -31,7 +31,11 @@ impl AnafError {
                 "Sesiunea ANAF a expirat. Reautentificați-vă din Setări → Certificate.".into()
             }
             Self::Validation { details } => {
-                format!("Factura conține {} erori de validare:\n{}", details.len(), details.join("\n"))
+                format!(
+                    "Factura conține {} erori de validare:\n{}",
+                    details.len(),
+                    details.join("\n")
+                )
             }
             Self::ServerError { status, .. } => {
                 format!("Serverul ANAF a returnat eroare {status}. Reîncercați în câteva minute.")

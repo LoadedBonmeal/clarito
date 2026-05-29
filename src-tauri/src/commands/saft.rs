@@ -3,8 +3,8 @@
 //! Generates a simplified SAF-T XML following the Romanian ANAF adaptation of
 //! the OECD SAF-T schema. Covers SalesInvoices for the selected period.
 
-use rust_decimal::Decimal;
 use rust_decimal::prelude::Zero;
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use sqlx::Row;
 use std::collections::BTreeMap;
@@ -37,10 +37,7 @@ struct SaftLineItem {
 }
 
 #[tauri::command]
-pub async fn export_saft_d406(
-    state: State<'_, AppState>,
-    params: SaftParams,
-) -> AppResult<String> {
+pub async fn export_saft_d406(state: State<'_, AppState>, params: SaftParams) -> AppResult<String> {
     let pool = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let rt = tokio::runtime::Handle::current();
@@ -65,13 +62,11 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
     };
 
     // Fetch company using dynamic query (no query! macro to avoid compile-time DB requirement)
-    let company_row = sqlx::query(
-        "SELECT legal_name, cui FROM companies WHERE id = ?1",
-    )
-    .bind(&params.company_id)
-    .fetch_optional(pool)
-    .await?
-    .ok_or(AppError::NotFound)?;
+    let company_row = sqlx::query("SELECT legal_name, cui FROM companies WHERE id = ?1")
+        .bind(&params.company_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or(AppError::NotFound)?;
 
     let company_name: String = company_row.try_get("legal_name").unwrap_or_default();
     let company_cui: String = company_row.try_get("cui").unwrap_or_default();
@@ -112,8 +107,7 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
 
     if !invoice_ids.is_empty() {
         // Build ?1,?2,... placeholder list (no user data interpolated — safe)
-        let placeholders: Vec<String> =
-            (1..=invoice_ids.len()).map(|i| format!("?{i}")).collect();
+        let placeholders: Vec<String> = (1..=invoice_ids.len()).map(|i| format!("?{i}")).collect();
         let in_clause = placeholders.join(",");
         let sql = format!(
             "SELECT invoice_id, position, name, description, quantity, unit_price, \
@@ -138,7 +132,11 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
             let name: String = row.try_get("name").unwrap_or_default();
             let description: String = row.try_get("description").unwrap_or_default();
             // Use description if non-empty, otherwise fall back to name
-            let desc = if !description.is_empty() { description } else { name };
+            let desc = if !description.is_empty() {
+                description
+            } else {
+                name
+            };
 
             lines_by_invoice
                 .entry(invoice_id.clone())
@@ -147,12 +145,30 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
                     invoice_id,
                     position: row.try_get("position").unwrap_or(0),
                     description: desc,
-                    quantity: to_dec(&row.try_get::<String, _>("quantity").unwrap_or_else(|_| "0".to_string())),
-                    unit_price: to_dec(&row.try_get::<String, _>("unit_price").unwrap_or_else(|_| "0".to_string())),
-                    vat_rate: to_dec(&row.try_get::<String, _>("vat_rate").unwrap_or_else(|_| "0".to_string())),
-                    subtotal_amount: to_dec(&row.try_get::<String, _>("subtotal_amount").unwrap_or_else(|_| "0".to_string())),
-                    vat_amount: to_dec(&row.try_get::<String, _>("vat_amount").unwrap_or_else(|_| "0".to_string())),
-                    total_amount: to_dec(&row.try_get::<String, _>("total_amount").unwrap_or_else(|_| "0".to_string())),
+                    quantity: to_dec(
+                        &row.try_get::<String, _>("quantity")
+                            .unwrap_or_else(|_| "0".to_string()),
+                    ),
+                    unit_price: to_dec(
+                        &row.try_get::<String, _>("unit_price")
+                            .unwrap_or_else(|_| "0".to_string()),
+                    ),
+                    vat_rate: to_dec(
+                        &row.try_get::<String, _>("vat_rate")
+                            .unwrap_or_else(|_| "0".to_string()),
+                    ),
+                    subtotal_amount: to_dec(
+                        &row.try_get::<String, _>("subtotal_amount")
+                            .unwrap_or_else(|_| "0".to_string()),
+                    ),
+                    vat_amount: to_dec(
+                        &row.try_get::<String, _>("vat_amount")
+                            .unwrap_or_else(|_| "0".to_string()),
+                    ),
+                    total_amount: to_dec(
+                        &row.try_get::<String, _>("total_amount")
+                            .unwrap_or_else(|_| "0".to_string()),
+                    ),
                 });
         }
     }
@@ -196,14 +212,18 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
         let issue_date: String = row.try_get("issue_date").unwrap_or_default();
         let client_name: String = row.try_get("client_name").unwrap_or_default();
         let client_cui: String = row.try_get("client_cui").unwrap_or_default();
-        let net_amount: String =
-            row.try_get("net_amount").unwrap_or_else(|_| "0".to_string());
-        let vat_amount: String =
-            row.try_get("vat_amount").unwrap_or_else(|_| "0".to_string());
-        let total_amount: String =
-            row.try_get("total_amount").unwrap_or_else(|_| "0".to_string());
-        let currency: String =
-            row.try_get("currency").unwrap_or_else(|_| "RON".to_string());
+        let net_amount: String = row
+            .try_get("net_amount")
+            .unwrap_or_else(|_| "0".to_string());
+        let vat_amount: String = row
+            .try_get("vat_amount")
+            .unwrap_or_else(|_| "0".to_string());
+        let total_amount: String = row
+            .try_get("total_amount")
+            .unwrap_or_else(|_| "0".to_string());
+        let currency: String = row
+            .try_get("currency")
+            .unwrap_or_else(|_| "RON".to_string());
 
         xml.push_str("      <Invoice>\n");
         xml_elem(&mut xml, 8, "InvoiceNo", &escape_xml(&full_number));
@@ -217,7 +237,10 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
         xml_elem(&mut xml, 8, "Currency", &escape_xml(&currency));
 
         // ── Lines ─────────────────────────────────────────────────────────────
-        let lines = lines_by_invoice.get(&invoice_id).cloned().unwrap_or_default();
+        let lines = lines_by_invoice
+            .get(&invoice_id)
+            .cloned()
+            .unwrap_or_default();
 
         xml.push_str("        <Lines>\n");
         for line in &lines {
@@ -264,8 +287,7 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
 
         // ── DocumentTotals — per-VAT-rate tax breakdown ───────────────────────
         // BTreeMap keeps rates in ascending order for deterministic output
-        let mut by_rate: BTreeMap<String, (Decimal, Decimal, &'static str)> =
-            BTreeMap::new();
+        let mut by_rate: BTreeMap<String, (Decimal, Decimal, &'static str)> = BTreeMap::new();
         for line in &lines {
             let rate_key = dec_str(&line.vat_rate);
             let code = saft_tax_code(&line.vat_rate);

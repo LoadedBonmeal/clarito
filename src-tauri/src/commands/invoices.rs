@@ -1,8 +1,6 @@
 use tauri::State;
 
-use crate::db::invoices::{
-    self, CreateInvoiceInput, Invoice, InvoiceFilter, InvoiceWithLines,
-};
+use crate::db::invoices::{self, CreateInvoiceInput, Invoice, InvoiceFilter, InvoiceWithLines};
 use crate::db::models::{new_id, InvoiceStatus, Paginated, VALID_VAT_RATES};
 use crate::db::{companies, contacts};
 use crate::error::{AppError, AppResult};
@@ -19,10 +17,7 @@ pub async fn list_invoices(
 }
 
 #[tauri::command]
-pub async fn get_invoice(
-    state: State<'_, AppState>,
-    id: String,
-) -> AppResult<InvoiceWithLines> {
+pub async fn get_invoice(state: State<'_, AppState>, id: String) -> AppResult<InvoiceWithLines> {
     invoices::get_with_lines(&state.db, &id).await
 }
 
@@ -73,8 +68,11 @@ pub async fn update_invoice_draft(
     }
 
     for line in &input.lines {
-        let rate = rust_decimal::Decimal::try_from(line.vat_rate).unwrap_or(rust_decimal::Decimal::ZERO);
-        if !VALID_VAT_RATES.iter().any(|&r| (rust_decimal::Decimal::from(r) - rate).abs() < rust_decimal::Decimal::new(1, 3)) {
+        let rate =
+            rust_decimal::Decimal::try_from(line.vat_rate).unwrap_or(rust_decimal::Decimal::ZERO);
+        if !VALID_VAT_RATES.iter().any(|&r| {
+            (rust_decimal::Decimal::from(r) - rate).abs() < rust_decimal::Decimal::new(1, 3)
+        }) {
             return Err(AppError::Validation(format!(
                 "Cotă TVA invalidă: {}%. Valori permise: 0, 5, 9, 11, 19, 21.",
                 line.vat_rate
@@ -108,9 +106,9 @@ pub async fn update_invoice_draft(
             )
         })
         .collect();
-    let subtotal  = subtotal_dec.round_dp(2).to_string();
+    let subtotal = subtotal_dec.round_dp(2).to_string();
     let vat_total = vat_total_dec.round_dp(2).to_string();
-    let total     = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
+    let total = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
     // Fix 2: preserve the existing series/number — do not let the client change them on a draft edit
     let full_number = format!("{}-{:04}", existing.series, existing.number);
 
@@ -176,10 +174,25 @@ pub async fn update_invoice_draft(
         .bind((position as i64) + 1)
         .bind(&line.name)
         .bind(&line.description)
-        .bind(Decimal::try_from(line.quantity).unwrap_or(Decimal::ZERO).round_dp(2).to_string())
+        .bind(
+            Decimal::try_from(line.quantity)
+                .unwrap_or(Decimal::ZERO)
+                .round_dp(2)
+                .to_string(),
+        )
         .bind(&line.unit)
-        .bind(Decimal::try_from(line.unit_price).unwrap_or(Decimal::ZERO).round_dp(2).to_string())
-        .bind(Decimal::try_from(line.vat_rate).unwrap_or(Decimal::ZERO).round_dp(2).to_string())
+        .bind(
+            Decimal::try_from(line.unit_price)
+                .unwrap_or(Decimal::ZERO)
+                .round_dp(2)
+                .to_string(),
+        )
+        .bind(
+            Decimal::try_from(line.vat_rate)
+                .unwrap_or(Decimal::ZERO)
+                .round_dp(2)
+                .to_string(),
+        )
         .bind(&line.vat_category)
         .bind(line_subtotal)
         .bind(line_vat)
@@ -221,9 +234,8 @@ pub async fn validate_invoice_draft(
 
     // 4. Extract storno_ref from notes (format: "STORNO_OF:{full_number}|{reason}")
     let storno_ref: Option<String> = inv.notes.as_deref().and_then(|n| {
-        n.strip_prefix("STORNO_OF:").map(|rest| {
-            rest.split('|').next().unwrap_or("").to_string()
-        })
+        n.strip_prefix("STORNO_OF:")
+            .map(|rest| rest.split('|').next().unwrap_or("").to_string())
     });
 
     // 5. Build generator input
@@ -259,7 +271,11 @@ pub async fn validate_invoice_draft(
     );
 
     let all_errors: Vec<String> = xml_result.errors.into_iter().chain(data_errors).collect();
-    let all_warnings: Vec<String> = xml_result.warnings.into_iter().chain(data_warnings).collect();
+    let all_warnings: Vec<String> = xml_result
+        .warnings
+        .into_iter()
+        .chain(data_warnings)
+        .collect();
 
     Ok(InvoiceDraftValidation {
         is_valid: all_errors.is_empty(),
@@ -367,21 +383,18 @@ pub async fn storno_invoice(
     let mut tx = pool.begin().await.map_err(AppError::Database)?;
 
     // 4a. Alocăm numărul atomic
-    sqlx::query(
-        "UPDATE companies SET last_invoice_number = last_invoice_number + 1 WHERE id = ?1",
-    )
-    .bind(&orig_inv.company_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(AppError::Database)?;
+    sqlx::query("UPDATE companies SET last_invoice_number = last_invoice_number + 1 WHERE id = ?1")
+        .bind(&orig_inv.company_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::Database)?;
 
-    let allocated_number: i64 = sqlx::query_scalar(
-        "SELECT last_invoice_number FROM companies WHERE id = ?1",
-    )
-    .bind(&orig_inv.company_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(AppError::Database)?;
+    let allocated_number: i64 =
+        sqlx::query_scalar("SELECT last_invoice_number FROM companies WHERE id = ?1")
+            .bind(&orig_inv.company_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(AppError::Database)?;
 
     let full_number = format!("{}-{:04}", storno_series, allocated_number);
 
@@ -465,10 +478,7 @@ pub async fn storno_invoice(
     )
     .bind(new_id())
     .bind(&invoice_id)
-    .bind(format!(
-        "Stornată prin {}. Motiv: {}",
-        full_number, reason
-    ))
+    .bind(format!("Stornată prin {}. Motiv: {}", full_number, reason))
     .bind(now)
     .execute(&mut *tx)
     .await

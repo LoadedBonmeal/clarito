@@ -8,8 +8,7 @@ use crate::db::companies::Company;
 use crate::db::contacts::Contact;
 use crate::db::invoices::{Invoice, LineItem};
 
-const CIUS_RO_ID: &str =
-    "urn:cen.eu:en16931:2017#compliant#urn:efactura.mfinante.ro:CIUS-RO:1.0.1";
+const CIUS_RO_ID: &str = "urn:cen.eu:en16931:2017#compliant#urn:efactura.mfinante.ro:CIUS-RO:1.0.1";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

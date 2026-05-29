@@ -125,14 +125,12 @@ pub async fn update_next_date(pool: &SqlitePool, id: &str, next_date: &str) -> A
 }
 
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
-    let rows = sqlx::query(
-        "DELETE FROM recurring_invoices WHERE id = ?1 AND company_id = ?2",
-    )
-    .bind(id)
-    .bind(company_id)
-    .execute(pool)
-    .await?
-    .rows_affected();
+    let rows = sqlx::query("DELETE FROM recurring_invoices WHERE id = ?1 AND company_id = ?2")
+        .bind(id)
+        .bind(company_id)
+        .execute(pool)
+        .await?
+        .rows_affected();
 
     if rows == 0 {
         return Err(AppError::NotFound);
@@ -154,8 +152,10 @@ pub fn advance_date(current: &str, frequency: &str, day_of_month: u32) -> String
             } else {
                 (date.year(), date.month() + 1)
             };
-            NaiveDate::from_ymd_opt(y, m, day)
-                .unwrap_or_else(|| NaiveDate::from_ymd_opt(y, m, 28).expect("day 28 is always valid in any month — constant infallible"))
+            NaiveDate::from_ymd_opt(y, m, day).unwrap_or_else(|| {
+                NaiveDate::from_ymd_opt(y, m, 28)
+                    .expect("day 28 is always valid in any month — constant infallible")
+            })
         }
         "quarterly" => {
             let months = date.month() + 3;
@@ -164,13 +164,13 @@ pub fn advance_date(current: &str, frequency: &str, day_of_month: u32) -> String
             } else {
                 (date.year(), months)
             };
-            NaiveDate::from_ymd_opt(y, m, day)
-                .unwrap_or_else(|| NaiveDate::from_ymd_opt(y, m, 28).expect("day 28 is always valid in any month — constant infallible"))
+            NaiveDate::from_ymd_opt(y, m, day).unwrap_or_else(|| {
+                NaiveDate::from_ymd_opt(y, m, 28)
+                    .expect("day 28 is always valid in any month — constant infallible")
+            })
         }
-        "annual" => {
-            NaiveDate::from_ymd_opt(date.year() + 1, date.month(), day)
-                .unwrap_or_else(|| date.with_year(date.year() + 1).unwrap_or(date))
-        }
+        "annual" => NaiveDate::from_ymd_opt(date.year() + 1, date.month(), day)
+            .unwrap_or_else(|| date.with_year(date.year() + 1).unwrap_or(date)),
         _ => date,
     };
 

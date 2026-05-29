@@ -28,11 +28,11 @@ pub async fn create_company(
                 .await
                 .unwrap_or(0);
         let limit: Option<i64> = match lic.tier.as_str() {
-            "TRIAL"      => Some(3),
-            "SOLO"       => Some(1),
+            "TRIAL" => Some(3),
+            "SOLO" => Some(1),
             "ACCOUNTANT" => Some(15),
-            "FIRM"       => None, // nelimitat
-            _            => Some(3), // tier necunoscut → fallback la TRIAL
+            "FIRM" => None, // nelimitat
+            _ => Some(3),   // tier necunoscut → fallback la TRIAL
         };
         if let Some(max) = limit {
             if current_count >= max {
@@ -127,7 +127,10 @@ pub async fn fetch_anaf_company_data(cui: String) -> AppResult<AnafCompanyData> 
 
     // Also check notFound array contains our cui
     if let Some(nf) = not_found {
-        if nf.iter().any(|v| v.as_u64() == Some(cui_number) || v.as_str().map(|s| s == cleaned.as_str()).unwrap_or(false)) {
+        if nf.iter().any(|v| {
+            v.as_u64() == Some(cui_number)
+                || v.as_str().map(|s| s == cleaned.as_str()).unwrap_or(false)
+        }) {
             return Err(AppError::NotFound);
         }
     }
@@ -152,7 +155,11 @@ pub async fn fetch_anaf_company_data(cui: String) -> AppResult<AnafCompanyData> 
             .unwrap_or("")
             .trim()
             .to_string();
-        if s.is_empty() { None } else { Some(s) }
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
     };
 
     let legal_name = str_field("denumire");

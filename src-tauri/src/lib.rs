@@ -16,9 +16,9 @@ pub mod notifications;
 mod state;
 mod ubl;
 
-use tauri::Manager;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
+use tauri::Manager;
 
 use state::AppState;
 
@@ -81,11 +81,17 @@ pub fn run() {
             });
 
             // System tray
-            let show_item = MenuItem::with_id(app, "show", "Deschide RoFactura", true, None::<&str>)?;
-            let new_invoice_item = MenuItem::with_id(app, "new_invoice", "Factură nouă", true, None::<&str>)?;
-            let sync_item = MenuItem::with_id(app, "sync", "Sincronizare ANAF", true, None::<&str>)?;
+            let show_item =
+                MenuItem::with_id(app, "show", "Deschide RoFactura", true, None::<&str>)?;
+            let new_invoice_item =
+                MenuItem::with_id(app, "new_invoice", "Factură nouă", true, None::<&str>)?;
+            let sync_item =
+                MenuItem::with_id(app, "sync", "Sincronizare ANAF", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Ieșire", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &new_invoice_item, &sync_item, &quit_item])?;
+            let menu = Menu::with_items(
+                app,
+                &[&show_item, &new_invoice_item, &sync_item, &quit_item],
+            )?;
             let _tray = TrayIconBuilder::with_id("main")
                 .menu(&menu)
                 .show_menu_on_left_click(true)
@@ -110,17 +116,38 @@ pub fn run() {
                         tauri::async_runtime::spawn(async move {
                             if let Some(state) = app_for_sync.try_state::<AppState>() {
                                 let pool = &state.db;
-                                let all_companies = crate::db::companies::list(pool).await.unwrap_or_default();
+                                let all_companies =
+                                    crate::db::companies::list(pool).await.unwrap_or_default();
                                 for company in &all_companies {
-                                    if crate::anaf::keychain::TokenBundle::load(&company.id).is_none() {
+                                    if crate::anaf::keychain::TokenBundle::load(&company.id)
+                                        .is_none()
+                                    {
                                         continue;
                                     }
-                                    let _ = crate::background::poll_submitted_for_company(pool, &company.id, Some(&app_for_sync)).await;
-                                    let test_mode = crate::db::settings::get_bool(pool, crate::db::settings::keys::USE_ANAF_TEST_ENV, false).await.unwrap_or(false);
-                                    let _ = crate::background::do_sync_spv(pool, &company.id, &app_for_sync, test_mode).await;
+                                    let _ = crate::background::poll_submitted_for_company(
+                                        pool,
+                                        &company.id,
+                                        Some(&app_for_sync),
+                                    )
+                                    .await;
+                                    let test_mode = crate::db::settings::get_bool(
+                                        pool,
+                                        crate::db::settings::keys::USE_ANAF_TEST_ENV,
+                                        false,
+                                    )
+                                    .await
+                                    .unwrap_or(false);
+                                    let _ = crate::background::do_sync_spv(
+                                        pool,
+                                        &company.id,
+                                        &app_for_sync,
+                                        test_mode,
+                                    )
+                                    .await;
                                 }
                                 use tauri::Emitter;
-                                let _ = app_for_sync.emit("sync_completed", serde_json::json!({"source": "tray"}));
+                                let _ = app_for_sync
+                                    .emit("sync_completed", serde_json::json!({"source": "tray"}));
                             }
                         });
                     }

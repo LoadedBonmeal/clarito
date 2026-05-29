@@ -59,14 +59,14 @@ export function InvoiceDetailPage() {
 
   // ANAF auth status
   const { data: isAnafAuth, refetch: refetchAnafAuth } = useQuery({
-    queryKey: ["anaf", "auth", data?.invoice.companyId ?? ""],
+    queryKey: queryKeys.anaf.auth(data?.invoice.companyId ?? ""),
     queryFn: () => api.anaf.isAuthenticated(data!.invoice.companyId),
     enabled: !!data?.invoice.companyId,
   });
 
   // ANAF test mode setting — key must match backend: settings::keys::USE_ANAF_TEST_ENV
   const { data: testModeSetting } = useQuery({
-    queryKey: ["settings", "use_anaf_test_env"],
+    queryKey: queryKeys.anaf.testMode,
     queryFn: () => api.settings.get("use_anaf_test_env"),
   });
 
@@ -115,7 +115,7 @@ export function InvoiceDetailPage() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
-      void queryClient.invalidateQueries({ queryKey: ["anaf", "auth", data?.invoice.companyId ?? ""] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.anaf.auth(data?.invoice.companyId ?? "") });
       setActionError(null);
       setStatusMessage(null);
     },

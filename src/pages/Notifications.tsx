@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
 import { Icon } from "@/components/shared/Icon";
+import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { notify } from "@/lib/toasts";
@@ -31,7 +32,7 @@ export function NotificationsPage() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<TabFilter>("all");
 
-  const { data: notifications = [], isLoading } = useQuery({
+  const { data: notifications = [], isLoading, isError: notifError, error: notifErr, refetch: refetchNotifications } = useQuery({
     queryKey: queryKeys.notifications.list(false),
     queryFn: () => api.notifications.list(false),
   });
@@ -165,6 +166,8 @@ export function NotificationsPage() {
           <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>
             Se încarcă…
           </div>
+        ) : notifError ? (
+          <QueryErrorBanner error={notifErr} label="notificările" onRetry={() => void refetchNotifications()} />
         ) : list.length === 0 ? (
           <div
             style={{

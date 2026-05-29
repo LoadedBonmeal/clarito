@@ -68,10 +68,7 @@ pub async fn export_invoices_zip(
 /// Exportă un backup complet (DB + README) într-un fișier ZIP.
 /// Returnează path-ul fișierului ZIP generat.
 #[tauri::command]
-pub async fn export_backup(
-    _state: State<'_, AppState>,
-    app: AppHandle,
-) -> AppResult<String> {
+pub async fn export_backup(_state: State<'_, AppState>, app: AppHandle) -> AppResult<String> {
     let data_dir = app.path().app_data_dir()?;
     let db_path = data_dir.join("data.db");
 
@@ -116,14 +113,14 @@ pub async fn export_backup(
 /// Aplicația se repornește automat după import.
 #[tauri::command]
 pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
-
     // 1. Deschide ZIP-ul
     let file = std::fs::File::open(&path).map_err(AppError::Io)?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| AppError::Other(e.to_string()))?;
 
     // 2. Verifică că ZIP-ul conține data.db
     let has_db = (0..archive.len()).any(|i| {
-        archive.by_index(i)
+        archive
+            .by_index(i)
             .map(|f| f.name() == "data.db")
             .unwrap_or(false)
     });
@@ -138,7 +135,9 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
     std::fs::copy(&db_path, db_path.with_extension("db.bak")).map_err(AppError::Io)?;
 
     // 5. Extrage data.db din ZIP și scrie la calea DB-ului
-    let mut db_entry = archive.by_name("data.db").map_err(|e| AppError::Other(e.to_string()))?;
+    let mut db_entry = archive
+        .by_name("data.db")
+        .map_err(|e| AppError::Other(e.to_string()))?;
     let mut buf = Vec::new();
     db_entry.read_to_end(&mut buf).map_err(AppError::Io)?;
     std::fs::write(&db_path, &buf).map_err(AppError::Io)?;
@@ -180,13 +179,19 @@ pub async fn verify_archive_integrity(state: State<'_, AppState>) -> AppResult<I
     }
 
     let ok = missing_files.is_empty();
-    Ok(IntegrityResult { total_checked, missing_files, ok })
+    Ok(IntegrityResult {
+        total_checked,
+        missing_files,
+        ok,
+    })
 }
 
 // ─── Archive size ──────────────────────────────────────────────────────────
 
 fn dir_size(path: &std::path::Path) -> u64 {
-    let Ok(entries) = std::fs::read_dir(path) else { return 0 };
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
     entries.flatten().fold(0u64, |acc, e| {
         let p = e.path();
         if p.is_dir() {

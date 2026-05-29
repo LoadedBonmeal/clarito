@@ -36,14 +36,14 @@ export function StatusBar({ activeCompanyName, activeCompanyId, companyCount = 0
   });
 
   const { data: isAnafAuth } = useQuery({
-    queryKey: ["anaf", "auth", activeCompanyId ?? ""],
+    queryKey: queryKeys.anaf.auth(activeCompanyId ?? ""),
     queryFn: () => api.anaf.isAuthenticated(activeCompanyId!),
     enabled: !!activeCompanyId,
     staleTime: 30_000,
   });
 
   const { data: lastSyncRaw } = useQuery({
-    queryKey: ["settings", "last_sync_at"],
+    queryKey: queryKeys.settings.get("last_sync_at"),
     queryFn: () => api.settings.get("last_sync_at"),
     refetchInterval: 60_000,
   });

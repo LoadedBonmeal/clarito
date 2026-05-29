@@ -54,25 +54,25 @@ export function SettingsPage() {
   });
 
   const { data: archiveSize } = useQuery({
-    queryKey: ["archive-size"],
+    queryKey: queryKeys.system.archiveSize,
     queryFn: () => api.archive.getSize(),
     staleTime: 60_000,
   });
 
   const { data: autostartEnabled } = useQuery({
-    queryKey: ["autostart"],
+    queryKey: queryKeys.system.autostart,
     queryFn: () => api.system.getAutostart(),
     staleTime: Infinity,
   });
 
   const { data: activityLog = [] } = useQuery({
-    queryKey: ["activity-log"],
+    queryKey: queryKeys.system.activityLog,
     queryFn: () => api.system.getActivityLog(),
     refetchInterval: 30_000,
   });
 
   const { data: testModeSetting } = useQuery({
-    queryKey: ["settings", "use_anaf_test_env"],
+    queryKey: queryKeys.anaf.testMode,
     queryFn: () => api.settings.get("use_anaf_test_env"),
   });
 
@@ -88,23 +88,23 @@ export function SettingsPage() {
   ];
 
   const { data: notifPref_validated } = useQuery({
-    queryKey: ["settings", "notif_pref_validated"],
+    queryKey: queryKeys.settings.get("notif_pref_validated"),
     queryFn: () => api.settings.get("notif_pref_validated"),
   });
   const { data: notifPref_rejected } = useQuery({
-    queryKey: ["settings", "notif_pref_rejected"],
+    queryKey: queryKeys.settings.get("notif_pref_rejected"),
     queryFn: () => api.settings.get("notif_pref_rejected"),
   });
   const { data: notifPref_received } = useQuery({
-    queryKey: ["settings", "notif_pref_received"],
+    queryKey: queryKeys.settings.get("notif_pref_received"),
     queryFn: () => api.settings.get("notif_pref_received"),
   });
   const { data: notifPref_cert_expiring } = useQuery({
-    queryKey: ["settings", "notif_pref_cert_expiring"],
+    queryKey: queryKeys.settings.get("notif_pref_cert_expiring"),
     queryFn: () => api.settings.get("notif_pref_cert_expiring"),
   });
   const { data: notifPref_cert_expired } = useQuery({
-    queryKey: ["settings", "notif_pref_cert_expired"],
+    queryKey: queryKeys.settings.get("notif_pref_cert_expired"),
     queryFn: () => api.settings.get("notif_pref_cert_expired"),
   });
 
@@ -117,17 +117,17 @@ export function SettingsPage() {
   ];
 
   const { data: quietHoursSetting } = useQuery({
-    queryKey: ["settings", "quiet_hours"],
+    queryKey: queryKeys.settings.get("quiet_hours"),
     queryFn: () => api.settings.get("quiet_hours"),
   });
 
   const handleNotifToggle = async (key: string, checked: boolean) => {
     await api.settings.set(key, checked ? "1" : "0");
-    void queryClient.invalidateQueries({ queryKey: ["settings", key] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.settings.get(key) });
   };
 
   const { data: isAnafAuthenticated, refetch: refetchAnafAuth } = useQuery({
-    queryKey: ["anaf", "auth", activeCompanyId ?? ""],
+    queryKey: queryKeys.anaf.auth(activeCompanyId ?? ""),
     queryFn: () => api.anaf.isAuthenticated(activeCompanyId!),
     enabled: !!activeCompanyId,
   });
@@ -181,7 +181,7 @@ export function SettingsPage() {
 
   const handleTestModeToggle = async (e: React.ChangeEvent<HTMLInputElement>) => {
     await api.settings.set("use_anaf_test_env", e.target.checked ? "1" : "0");
-    void queryClient.invalidateQueries({ queryKey: ["settings", "use_anaf_test_env"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.anaf.testMode });
   };
 
   const handleDevSeed = async () => {
@@ -386,7 +386,7 @@ export function SettingsPage() {
                       value={pref}
                       onChange={async (e) => {
                         await api.settings.set(`notif_pref_${key}`, e.target.value);
-                        void queryClient.invalidateQueries({ queryKey: ["settings", `notif_pref_${key}`] });
+                        void queryClient.invalidateQueries({ queryKey: queryKeys.settings.get(`notif_pref_${key}`) });
                       }}
                     >
                       <option value="os">Desktop + In-app</option>
@@ -626,7 +626,7 @@ export function SettingsPage() {
                     onChange={async (e) => {
                       try {
                         await api.system.setAutostart(e.target.checked);
-                        void queryClient.invalidateQueries({ queryKey: ["autostart"] });
+                        void queryClient.invalidateQueries({ queryKey: queryKeys.system.autostart });
                       } catch (err) {
                         notify.error("Eroare setare autostart: " + String(err));
                       }

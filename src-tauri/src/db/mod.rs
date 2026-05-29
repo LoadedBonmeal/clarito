@@ -7,18 +7,18 @@
 //!
 //! Toate funcțiile primesc `&SqlitePool` ca prim argument.
 
-pub mod pool;
 pub mod models;
+pub mod pool;
 
+pub mod certificates;
 pub mod companies;
 pub mod contacts;
-pub mod certificates;
 pub mod invoices;
-pub mod received;
-pub mod notifications;
-pub mod settings;
 pub mod license;
+pub mod notifications;
+pub mod received;
+pub mod settings;
 
-pub mod seed;
 pub mod payments;
 pub mod recurring;
+pub mod seed;

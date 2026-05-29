@@ -70,7 +70,7 @@ pub async fn list(
     // Expand to boolean flags so SQL remains static.
     let statuses = filter.statuses.as_deref().unwrap_or(&[]);
     let has_status_filter = !statuses.is_empty();
-    let want_new      = has_status_filter && statuses.contains(&ReceivedStatus::New);
+    let want_new = has_status_filter && statuses.contains(&ReceivedStatus::New);
     let want_reviewed = has_status_filter && statuses.contains(&ReceivedStatus::Reviewed);
     let want_approved = has_status_filter && statuses.contains(&ReceivedStatus::Approved);
     let want_rejected = has_status_filter && statuses.contains(&ReceivedStatus::Rejected);
@@ -194,11 +194,7 @@ pub async fn create(pool: &SqlitePool, input: CreateReceivedInput) -> AppResult<
     get(pool, &id).await
 }
 
-pub async fn set_status(
-    pool: &SqlitePool,
-    id: &str,
-    status: ReceivedStatus,
-) -> AppResult<()> {
+pub async fn set_status(pool: &SqlitePool, id: &str, status: ReceivedStatus) -> AppResult<()> {
     let value = serde_json::to_value(status)
         .ok()
         .and_then(|v| v.as_str().map(|s| s.to_string()))

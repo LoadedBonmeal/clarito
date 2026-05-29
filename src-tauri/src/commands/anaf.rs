@@ -2,18 +2,17 @@
 //!
 //! Toate comenzile sunt `async` — OAuth2 și HTTP calls sunt blocking I/O.
 
-use crate::anaf::{
-    client::AnafClient,
-    keychain::TokenBundle,
-    oauth,
-};
+use crate::anaf::{client::AnafClient, keychain::TokenBundle, oauth};
 use tauri::Manager;
 
-use crate::db::{companies, contacts, invoices as db_invoices};
 use crate::db::models::new_id;
+use crate::db::{companies, contacts, invoices as db_invoices};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use crate::ubl::{generator::{generate_ubl, GeneratorInput}, validator::validate_invoice_data};
+use crate::ubl::{
+    generator::{generate_ubl, GeneratorInput},
+    validator::validate_invoice_data,
+};
 
 // ─── Helper: sanitizare componentă de cale filesystem ─────────────────────
 
@@ -47,7 +46,9 @@ async fn get_valid_token(company_id: &str) -> AppResult<String> {
         refresh_token: result.refresh_token,
         expires_at: result.expires_at,
     };
-    new_bundle.save(company_id).map_err(|e| AppError::Other(e.to_string()))?;
+    new_bundle
+        .save(company_id)
+        .map_err(|e| AppError::Other(e.to_string()))?;
 
     Ok(result.access_token)
 }
@@ -74,13 +75,18 @@ pub async fn anaf_authorize(
         refresh_token: result.refresh_token,
         expires_at: result.expires_at,
     };
-    bundle.save(&company_id).map_err(|e| AppError::Other(e.to_string()))?;
+    bundle
+        .save(&company_id)
+        .map_err(|e| AppError::Other(e.to_string()))?;
 
     // Emit oauth_completed so frontend can react (refresh auth state)
-    let _ = app.emit("oauth_completed", serde_json::json!({
-        "companyId": company_id,
-        "success": true
-    }));
+    let _ = app.emit(
+        "oauth_completed",
+        serde_json::json!({
+            "companyId": company_id,
+            "success": true
+        }),
+    );
 
     Ok(true)
 }
@@ -114,10 +120,18 @@ pub async fn anaf_submit_invoice(
     invoice_id: String,
     test_mode: bool,
 ) -> AppResult<String> {
-    let pool = &state.db;
+    submit_invoice_inner(&app, &state.db, &company_id, &invoice_id, test_mode).await
+}
 
+pub(crate) async fn submit_invoice_inner(
+    app: &tauri::AppHandle,
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    invoice_id: &str,
+    test_mode: bool,
+) -> AppResult<String> {
     // 1. Încarcă factura + liniile din DB
-    let invoice_with_lines = db_invoices::get_with_lines(pool, &invoice_id).await?;
+    let invoice_with_lines = db_invoices::get_with_lines(pool, invoice_id).await?;
     let invoice = invoice_with_lines.invoice;
     let lines = invoice_with_lines.lines;
 
@@ -131,14 +145,14 @@ pub async fn anaf_submit_invoice(
     }
 
     // Guard: company_id trebuie să corespundă facturii
-    if invoice.company_id != company_id {
+    if invoice.company_id.as_str() != company_id {
         return Err(AppError::Validation(
             "Factura nu aparține companiei selectate.".into(),
         ));
     }
 
     // 2. Încarcă compania + contactul din DB
-    let company = companies::get(pool, &company_id).await?;
+    let company = companies::get(pool, company_id).await?;
     let buyer = contacts::get(pool, &invoice.contact_id).await?;
 
     // 3. Detectează dacă e factură storno și extrage referința originală
@@ -158,13 +172,8 @@ pub async fn anaf_submit_invoice(
     })?;
 
     // 4. Validează — dacă sunt erori blocante, oprește
-    let (data_errors, _data_warnings) = validate_invoice_data(
-        &invoice,
-        &lines,
-        &company,
-        &buyer,
-        storno_ref.as_deref(),
-    );
+    let (data_errors, _data_warnings) =
+        validate_invoice_data(&invoice, &lines, &company, &buyer, storno_ref.as_deref());
     if !data_errors.is_empty() {
         let msg = data_errors.join("; ");
         return Err(AppError::Validation(msg));
@@ -203,7 +212,7 @@ pub async fn anaf_submit_invoice(
     // Actualizează xml_path în DB
     sqlx::query("UPDATE invoices SET xml_path = ?1, updated_at = unixepoch() WHERE id = ?2")
         .bind(xml_path.to_string_lossy().as_ref())
-        .bind(&invoice_id)
+        .bind(invoice_id)
         .execute(pool)
         .await
         .map_err(AppError::Database)?;
@@ -226,10 +235,10 @@ pub async fn anaf_submit_invoice(
     };
 
     // 6. Obține token valid din keychain (înainte de a schimba statusul)
-    let mut token = match get_valid_token(&company_id).await {
+    let mut token = match get_valid_token(company_id).await {
         Ok(t) => t,
         Err(e) => {
-            revert_to_draft(pool, &invoice_id).await;
+            revert_to_draft(pool, invoice_id).await;
             return Err(e);
         }
     };
@@ -245,14 +254,14 @@ pub async fn anaf_submit_invoice(
         if e == ERR_UNAUTHORIZED {
             tracing::info!(company_id, "ANAF 401 on upload — reîmprospătăm token");
             use crate::anaf::{keychain::TokenBundle, oauth};
-            if let Some(bundle) = TokenBundle::load(&company_id) {
+            if let Some(bundle) = TokenBundle::load(company_id) {
                 if let Ok(refreshed) = oauth::refresh_token_bundle(&bundle.refresh_token).await {
                     let new_bundle = TokenBundle {
                         access_token: refreshed.access_token.clone(),
                         refresh_token: refreshed.refresh_token,
                         expires_at: refreshed.expires_at,
                     };
-                    if let Err(e) = new_bundle.save(&company_id) {
+                    if let Err(e) = new_bundle.save(company_id) {
                         tracing::error!(error = ?e, %company_id, "Failed to persist refreshed ANAF token bundle — user will be forced to re-authenticate");
                     }
                     token = refreshed.access_token;
@@ -266,36 +275,34 @@ pub async fn anaf_submit_invoice(
     let upload_resp = match upload_result {
         Ok(r) => r,
         Err(e) => {
-            revert_to_draft(pool, &invoice_id).await;
+            revert_to_draft(pool, invoice_id).await;
             return Err(AppError::Other(e));
         }
     };
 
     // Upload succeeded — mark as QUEUED then immediately SUBMITTED below.
-    sqlx::query(
-        "UPDATE invoices SET status = 'QUEUED', updated_at = unixepoch() WHERE id = ?1",
-    )
-    .bind(&invoice_id)
-    .execute(pool)
-    .await
-    .map_err(AppError::Database)?;
+    sqlx::query("UPDATE invoices SET status = 'QUEUED', updated_at = unixepoch() WHERE id = ?1")
+        .bind(invoice_id)
+        .execute(pool)
+        .await
+        .map_err(AppError::Database)?;
     {
         use tauri::Emitter;
         let _ = app.emit(
             "invoice_status_changed",
-            serde_json::json!({"invoiceId": &invoice_id, "newStatus": "QUEUED"}),
+            serde_json::json!({"invoiceId": invoice_id, "newStatus": "QUEUED"}),
         );
     }
 
     let upload_id = upload_resp.index_incarcare;
 
     // 9. Actualizează DB cu status SUBMITTED + anaf_upload_id
-    db_invoices::mark_submitted(pool, &invoice_id, &upload_id).await?;
+    db_invoices::mark_submitted(pool, invoice_id, &upload_id).await?;
     {
         use tauri::Emitter;
         let _ = app.emit(
             "invoice_status_changed",
-            serde_json::json!({"invoiceId": &invoice_id, "newStatus": "SUBMITTED"}),
+            serde_json::json!({"invoiceId": invoice_id, "newStatus": "SUBMITTED"}),
         );
     }
 
@@ -306,7 +313,7 @@ pub async fn anaf_submit_invoice(
          VALUES (?1, ?2, 'SUBMITTED_TO_ANAF', ?3, unixepoch())",
     )
     .bind(&event_id)
-    .bind(&invoice_id)
+    .bind(invoice_id)
     .bind(format!("Factură trimisă la ANAF. Upload ID: {}", upload_id))
     .execute(pool)
     .await
@@ -316,9 +323,12 @@ pub async fn anaf_submit_invoice(
 
     // 11. Notificare
     crate::notifications::notify(
-        &app,
+        app,
         "✓ Factură trimisă",
-        &format!("Factura {} a fost trimisă la ANAF. ID: {}", invoice.full_number, upload_id),
+        &format!(
+            "Factura {} a fost trimisă la ANAF. ID: {}",
+            invoice.full_number, upload_id
+        ),
     )
     .await;
 
@@ -339,7 +349,9 @@ pub async fn anaf_check_invoice_status(
     let invoice = db_invoices::get(pool, &invoice_id).await?;
 
     if invoice.company_id != company_id {
-        return Err(AppError::Validation("Factura nu aparține companiei selectate.".into()));
+        return Err(AppError::Validation(
+            "Factura nu aparține companiei selectate.".into(),
+        ));
     }
 
     let upload_id = invoice
@@ -360,9 +372,9 @@ pub async fn anaf_check_invoice_status(
         db_invoices::mark_validated(pool, &invoice_id, status_resp.index_incarcare).await?;
     } else if stare == "nok" || stare.contains("erori") {
         let raw_reason = status_resp.descriere.or(status_resp.erori);
-        let friendly_reason = raw_reason.as_deref().map(|r| {
-            crate::anaf::errors::friendly_message_from_body(r)
-        });
+        let friendly_reason = raw_reason
+            .as_deref()
+            .map(|r| crate::anaf::errors::friendly_message_from_body(r));
         db_invoices::mark_rejected(pool, &invoice_id, friendly_reason, None).await?;
     }
     // "in prelucrare" — nu facem nimic
@@ -391,7 +403,9 @@ pub async fn anaf_refresh_certificate(
         refresh_token: result.refresh_token,
         expires_at: result.expires_at,
     };
-    bundle.save(&company_id).map_err(|e| AppError::Other(e.to_string()))?;
+    bundle
+        .save(&company_id)
+        .map_err(|e| AppError::Other(e.to_string()))?;
 
     Ok(true)
 }
@@ -420,13 +434,11 @@ pub async fn anaf_revoke_certificate(
     .map_err(AppError::Database)?;
 
     // Update company spv_enabled = false
-    sqlx::query(
-        "UPDATE companies SET spv_enabled = 0, updated_at = unixepoch() WHERE id = ?1",
-    )
-    .bind(&company_id)
-    .execute(pool)
-    .await
-    .map_err(AppError::Database)?;
+    sqlx::query("UPDATE companies SET spv_enabled = 0, updated_at = unixepoch() WHERE id = ?1")
+        .bind(&company_id)
+        .execute(pool)
+        .await
+        .map_err(AppError::Database)?;
 
     Ok(())
 }

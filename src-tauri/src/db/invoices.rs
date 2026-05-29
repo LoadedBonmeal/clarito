@@ -151,8 +151,8 @@ pub async fn list(pool: &SqlitePool, filter: InvoiceFilter) -> AppResult<Paginat
 
     // Normalizăm filtrele opționale: string gol → None (tratat ca NULL în SQL).
     let company_id = filter.company_id.as_ref().filter(|s| !s.is_empty());
-    let date_from  = filter.date_from.as_ref().filter(|s| !s.is_empty());
-    let date_to    = filter.date_to.as_ref().filter(|s| !s.is_empty());
+    let date_from = filter.date_from.as_ref().filter(|s| !s.is_empty());
+    let date_to = filter.date_to.as_ref().filter(|s| !s.is_empty());
     let query_term = filter.query.as_ref().filter(|s| !s.is_empty());
 
     // Statusurile sunt o listă cu număr variabil de elemente. Le extindem
@@ -162,12 +162,12 @@ pub async fn list(pool: &SqlitePool, filter: InvoiceFilter) -> AppResult<Paginat
     // Dacă `filter.statuses` e None sau goală, toate statusurile trec.
     let statuses = filter.statuses.as_deref().unwrap_or(&[]);
     let has_status_filter = !statuses.is_empty();
-    let want_draft     = has_status_filter && statuses.contains(&InvoiceStatus::Draft);
-    let want_queued    = has_status_filter && statuses.contains(&InvoiceStatus::Queued);
+    let want_draft = has_status_filter && statuses.contains(&InvoiceStatus::Draft);
+    let want_queued = has_status_filter && statuses.contains(&InvoiceStatus::Queued);
     let want_submitted = has_status_filter && statuses.contains(&InvoiceStatus::Submitted);
     let want_validated = has_status_filter && statuses.contains(&InvoiceStatus::Validated);
-    let want_rejected  = has_status_filter && statuses.contains(&InvoiceStatus::Rejected);
-    let want_storned   = has_status_filter && statuses.contains(&InvoiceStatus::Storned);
+    let want_rejected = has_status_filter && statuses.contains(&InvoiceStatus::Rejected);
+    let want_storned = has_status_filter && statuses.contains(&InvoiceStatus::Storned);
 
     // SQL static cu toate filtrele opționale exprimate ca predicate nullable.
     // ?1  company_id       (Option<&str>)
@@ -270,7 +270,11 @@ pub async fn get_with_lines(pool: &SqlitePool, id: &str) -> AppResult<InvoiceWit
     let invoice = get(pool, id).await?;
     let lines = list_lines(pool, id).await?;
     let events = list_events(pool, id).await?;
-    Ok(InvoiceWithLines { invoice, lines, events })
+    Ok(InvoiceWithLines {
+        invoice,
+        lines,
+        events,
+    })
 }
 
 async fn list_lines(pool: &SqlitePool, invoice_id: &str) -> AppResult<Vec<LineItem>> {
@@ -307,7 +311,10 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
 
     for line in &input.lines {
         let rate = Decimal::try_from(line.vat_rate).unwrap_or(Decimal::ZERO);
-        if !VALID_VAT_RATES.iter().any(|&r| (Decimal::from(r) - rate).abs() < Decimal::new(1, 3)) {
+        if !VALID_VAT_RATES
+            .iter()
+            .any(|&r| (Decimal::from(r) - rate).abs() < Decimal::new(1, 3))
+        {
             return Err(AppError::Validation(format!(
                 "Cotă TVA invalidă: {}%. Valori permise: 0, 5, 9, 11, 19, 21.",
                 line.vat_rate
@@ -327,9 +334,9 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         .lines
         .iter()
         .map(|l| {
-            let qty   = Decimal::try_from(l.quantity).unwrap_or(Decimal::ZERO);
+            let qty = Decimal::try_from(l.quantity).unwrap_or(Decimal::ZERO);
             let price = Decimal::try_from(l.unit_price).unwrap_or(Decimal::ZERO);
-            let rate  = Decimal::try_from(l.vat_rate).unwrap_or(Decimal::ZERO);
+            let rate = Decimal::try_from(l.vat_rate).unwrap_or(Decimal::ZERO);
             let ls = (qty * price).round_dp(2);
             let lv = (ls * rate / hundred).round_dp(2);
             let lt = ls + lv;
@@ -343,27 +350,24 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
             )
         })
         .collect();
-    let subtotal  = subtotal_dec.round_dp(2).to_string();
+    let subtotal = subtotal_dec.round_dp(2).to_string();
     let vat_total = vat_total_dec.round_dp(2).to_string();
-    let total     = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
+    let total = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
 
     let mut tx = pool.begin().await?;
 
     // Alocăm numărul atomic în aceeași tranzacție pentru a evita goluri de numerotare.
     // `input.number` este ignorat — numărul real e întotdeauna alocat aici.
-    sqlx::query(
-        "UPDATE companies SET last_invoice_number = last_invoice_number + 1 WHERE id = ?1",
-    )
-    .bind(&input.company_id)
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query("UPDATE companies SET last_invoice_number = last_invoice_number + 1 WHERE id = ?1")
+        .bind(&input.company_id)
+        .execute(&mut *tx)
+        .await?;
 
-    let allocated_number: i64 = sqlx::query_scalar(
-        "SELECT last_invoice_number FROM companies WHERE id = ?1",
-    )
-    .bind(&input.company_id)
-    .fetch_one(&mut *tx)
-    .await?;
+    let allocated_number: i64 =
+        sqlx::query_scalar("SELECT last_invoice_number FROM companies WHERE id = ?1")
+            .bind(&input.company_id)
+            .fetch_one(&mut *tx)
+            .await?;
 
     let full_number = format!("{}-{:04}", input.series, allocated_number);
 
@@ -418,10 +422,25 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         .bind((position as i64) + 1)
         .bind(&line.name)
         .bind(&line.description)
-        .bind(Decimal::try_from(line.quantity).unwrap_or(Decimal::ZERO).round_dp(2).to_string())
+        .bind(
+            Decimal::try_from(line.quantity)
+                .unwrap_or(Decimal::ZERO)
+                .round_dp(2)
+                .to_string(),
+        )
         .bind(&line.unit)
-        .bind(Decimal::try_from(line.unit_price).unwrap_or(Decimal::ZERO).round_dp(2).to_string())
-        .bind(Decimal::try_from(line.vat_rate).unwrap_or(Decimal::ZERO).round_dp(2).to_string())
+        .bind(
+            Decimal::try_from(line.unit_price)
+                .unwrap_or(Decimal::ZERO)
+                .round_dp(2)
+                .to_string(),
+        )
+        .bind(
+            Decimal::try_from(line.vat_rate)
+                .unwrap_or(Decimal::ZERO)
+                .round_dp(2)
+                .to_string(),
+        )
         .bind(&line.vat_category)
         .bind(line_subtotal)
         .bind(line_vat)
@@ -556,10 +575,7 @@ pub async fn mark_rejected(
     Ok(())
 }
 
-pub async fn list_submitted(
-    pool: &SqlitePool,
-    company_id: &str,
-) -> AppResult<Vec<Invoice>> {
+pub async fn list_submitted(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Invoice>> {
     Ok(sqlx::query_as::<_, Invoice>(
         "SELECT id, company_id, contact_id, series, number, full_number, \
          issue_date, due_date, currency, exchange_rate, subtotal_amount, vat_amount, total_amount, \

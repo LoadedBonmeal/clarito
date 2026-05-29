@@ -67,7 +67,7 @@ export function AppShell({ children }: AppShellProps) {
 
     // sync_completed: refresh settings (last_sync_at) + received invoices
     void listen("sync_completed", () => {
-      void queryClient.invalidateQueries({ queryKey: ["settings", "last_sync_at"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.settings.get("last_sync_at") });
       void queryClient.invalidateQueries({ queryKey: queryKeys.received.list() });
     }).then(fn => unlisteners.push(fn));
 

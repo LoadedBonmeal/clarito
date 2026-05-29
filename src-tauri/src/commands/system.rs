@@ -44,7 +44,10 @@ pub struct SyncResult {
 }
 
 #[tauri::command]
-pub async fn manual_sync(state: State<'_, AppState>, app: tauri::AppHandle) -> AppResult<SyncResult> {
+pub async fn manual_sync(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> AppResult<SyncResult> {
     use crate::background::{do_sync_spv, poll_submitted_for_company};
 
     let pool = &state.db;
@@ -68,7 +71,9 @@ pub async fn manual_sync(state: State<'_, AppState>, app: tauri::AppHandle) -> A
             pool,
             crate::db::settings::keys::USE_ANAF_TEST_ENV,
             false,
-        ).await.unwrap_or(false);
+        )
+        .await
+        .unwrap_or(false);
         new_received += do_sync_spv(pool, &company.id, &app, test_mode)
             .await
             .unwrap_or(0) as u32;
@@ -91,11 +96,14 @@ pub async fn manual_sync(state: State<'_, AppState>, app: tauri::AppHandle) -> A
     };
 
     // Emit sync_completed event for frontend reactive updates
-    let _ = app.emit("sync_completed", serde_json::json!({
-        "statusPolls": result.status_polls,
-        "newReceived": result.new_received,
-        "updatedAt": result.updated_at
-    }));
+    let _ = app.emit(
+        "sync_completed",
+        serde_json::json!({
+            "statusPolls": result.status_polls,
+            "newReceived": result.new_received,
+            "updatedAt": result.updated_at
+        }),
+    );
 
     Ok(result)
 }
@@ -110,9 +118,7 @@ pub async fn dev_seed(state: State<'_, AppState>) -> AppResult<()> {
 
 /// Returnează ultimele 50 de înregistrări din audit_log cu action = 'background_task_run'.
 #[tauri::command]
-pub async fn get_activity_log(
-    state: State<'_, AppState>,
-) -> AppResult<Vec<serde_json::Value>> {
+pub async fn get_activity_log(state: State<'_, AppState>) -> AppResult<Vec<serde_json::Value>> {
     let rows = sqlx::query(
         "SELECT id, entity_id, metadata, created_at FROM audit_log \
          WHERE action = 'background_task_run' \
@@ -138,9 +144,7 @@ pub async fn get_activity_log(
 
 /// Exportă jurnalul de activitate ca CSV și returnează conținutul.
 #[tauri::command]
-pub async fn export_activity_log_csv(
-    state: State<'_, AppState>,
-) -> AppResult<String> {
+pub async fn export_activity_log_csv(state: State<'_, AppState>) -> AppResult<String> {
     let rows = sqlx::query(
         "SELECT id, entity_id, metadata, created_at FROM audit_log \
          WHERE action = 'background_task_run' \

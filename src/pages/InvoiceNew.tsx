@@ -92,7 +92,7 @@ export function InvoiceNewPage() {
 
   // ANAF test mode setting — key must match backend: settings::keys::USE_ANAF_TEST_ENV
   const { data: testModeSetting } = useQuery({
-    queryKey: ["settings", "use_anaf_test_env"],
+    queryKey: queryKeys.anaf.testMode,
     queryFn: () => api.settings.get("use_anaf_test_env"),
   });
   const testMode = testModeSetting === "1";

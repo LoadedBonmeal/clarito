@@ -9,6 +9,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -61,7 +62,7 @@ export function ReportsPage() {
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
 
   // Backend VAT report — accurate per-rate breakdown from invoice_line_items
-  const { data: vatReport, isLoading: vatLoading } = useQuery({
+  const { data: vatReport, isLoading: vatLoading, isError: vatError, error: vatErr, refetch: refetchVat } = useQuery({
     queryKey: ["vatReport", selectedYear, selectedMonth, activeCompanyId],
     queryFn: () =>
       api.reports.generateVatReport(dateFrom, dateTo, activeCompanyId ?? undefined),
@@ -305,6 +306,8 @@ export function ReportsPage() {
           </h2>
           {isLoading ? (
             <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Se încarcă…</div>
+          ) : vatError ? (
+            <QueryErrorBanner error={vatErr} label="raportul TVA" onRetry={() => void refetchVat()} />
           ) : vatGroups.length === 0 ? (
             <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Nicio factură în perioada selectată.</div>
           ) : (
