@@ -17,7 +17,7 @@ import { api } from "@/lib/tauri";
 import { fmtShortcut } from "@/lib/platform";
 
 type MenuRow =
-  | { type: "row"; icon: string; label: string; kbd?: string; onClick?: () => void }
+  | { type: "row"; icon: string; label: string; kbd?: string; onClick?: () => void; disabled?: boolean }
   | { type: "sep" }
   | { type: "section"; label: string };
 
@@ -35,7 +35,7 @@ function buildMenus(
       { type: "row", icon: "users",     label: "Contact nou (client/furnizor)", kbd: fmtShortcut("Ctrl+Alt+C"),   onClick: () => { void navigate({ to: "/contacts" }); } },
       { type: "sep" },
       { type: "row", icon: "save",      label: "Salvează",                      kbd: fmtShortcut("Ctrl+S"), onClick: () => { /* context-sensitive — handled by active page */ } },
-      { type: "row", icon: "copy",      label: "Salvează ca…",                  kbd: fmtShortcut("Ctrl+Shift+S") },
+      { type: "row", icon: "copy",      label: "Salvează ca…",                  kbd: fmtShortcut("Ctrl+Shift+S"), disabled: true },
       { type: "sep" },
       { type: "section", label: "Import / Export" },
       { type: "row", icon: "upload",    label: "Importă XML e-Factura…",                                          onClick: () => { void navigate({ to: "/received" }); } },
@@ -45,39 +45,39 @@ function buildMenus(
       { type: "row", icon: "x",         label: "Ieșire",                        kbd: fmtShortcut("Alt+F4"),       onClick: () => { void exit(0); } },
     ],
     "Editare": [
-      { type: "row", icon: "pen",     label: "Anulează", kbd: fmtShortcut("Ctrl+Z") },
-      { type: "row", icon: "pen",     label: "Refă",     kbd: fmtShortcut("Ctrl+Y") },
+      { type: "row", icon: "pen",     label: "Anulează", kbd: fmtShortcut("Ctrl+Z"), disabled: true },
+      { type: "row", icon: "pen",     label: "Refă",     kbd: fmtShortcut("Ctrl+Y"), disabled: true },
       { type: "sep" },
-      { type: "row", icon: "copy",    label: "Decupează", kbd: fmtShortcut("Ctrl+X") },
-      { type: "row", icon: "copy",    label: "Copiază",   kbd: fmtShortcut("Ctrl+C") },
-      { type: "row", icon: "copy",    label: "Lipește",   kbd: fmtShortcut("Ctrl+V") },
+      { type: "row", icon: "copy",    label: "Decupează", kbd: fmtShortcut("Ctrl+X"), disabled: true },
+      { type: "row", icon: "copy",    label: "Copiază",   kbd: fmtShortcut("Ctrl+C"), disabled: true },
+      { type: "row", icon: "copy",    label: "Lipește",   kbd: fmtShortcut("Ctrl+V"), disabled: true },
       { type: "sep" },
-      { type: "row", icon: "search",  label: "Caută…",            kbd: fmtShortcut("Ctrl+F") },
+      { type: "row", icon: "search",  label: "Caută…",            kbd: fmtShortcut("Ctrl+F"), disabled: true },
       { type: "row", icon: "command", label: "Paleta de comenzi", kbd: fmtShortcut("Ctrl+K"), onClick: () => setCommandOpen(true) },
     ],
     "Operațiuni": [
       { type: "section", label: "e-Factura" },
       { type: "row", icon: "cloudUp", label: "Trimite factura la ANAF", kbd: "F9",       onClick: () => { void navigate({ to: "/invoices" }); } },
       { type: "row", icon: "refresh", label: "Verifică status mesaje",  kbd: "F10",      onClick: () => { void navigate({ to: "/invoices" }); } },
-      { type: "row", icon: "storno",  label: "Storno factură",          kbd: fmtShortcut("Ctrl+F9") },
+      { type: "row", icon: "storno",  label: "Storno factură",          kbd: fmtShortcut("Ctrl+F9"), disabled: true },
       { type: "sep" },
       { type: "section", label: "Bancă & casă" },
-      { type: "row", icon: "bank",    label: "Punctare extras bancar" },
-      { type: "row", icon: "receipt", label: "Înregistrare chitanță" },
+      { type: "row", icon: "bank",    label: "Punctare extras bancar",  disabled: true },
+      { type: "row", icon: "receipt", label: "Înregistrare chitanță",   disabled: true },
       { type: "sep" },
       { type: "section", label: "Bulk" },
-      { type: "row", icon: "check",   label: "Trimite selecția la ANAF" },
-      { type: "row", icon: "tag",     label: "Aplică categorie pe selecție" },
+      { type: "row", icon: "check",   label: "Trimite selecția la ANAF",    disabled: true },
+      { type: "row", icon: "tag",     label: "Aplică categorie pe selecție", disabled: true },
     ],
     "Date": [
       { type: "row", icon: "buildings", label: "Companii administrate", kbd: "G C", onClick: () => { void navigate({ to: "/companies" }); } },
       { type: "row", icon: "users",     label: "Clienți",                           onClick: () => { void navigate({ to: "/contacts" }); } },
       { type: "row", icon: "users",     label: "Furnizori",                         onClick: () => { void navigate({ to: "/contacts" }); } },
-      { type: "row", icon: "stock",     label: "Articole / Stocuri" },
+      { type: "row", icon: "stock",     label: "Articole / Stocuri",        disabled: true },
       { type: "sep" },
-      { type: "row", icon: "database",  label: "Plan de conturi" },
-      { type: "row", icon: "tag",       label: "Cote TVA și taxe" },
-      { type: "row", icon: "history",   label: "Audit & jurnal modificări" },
+      { type: "row", icon: "database",  label: "Plan de conturi",            disabled: true },
+      { type: "row", icon: "tag",       label: "Cote TVA și taxe",           disabled: true },
+      { type: "row", icon: "history",   label: "Audit & jurnal modificări",  disabled: true },
     ],
     "Rapoarte": [
       { type: "section", label: "Declarații ANAF" },
@@ -88,22 +88,22 @@ function buildMenus(
       { type: "section", label: "Operative" },
       { type: "row", icon: "reports", label: "Jurnal de vânzări",         onClick: () => { void navigate({ to: "/reports" }); } },
       { type: "row", icon: "reports", label: "Jurnal de cumpărări",       onClick: () => { void navigate({ to: "/reports" }); } },
-      { type: "row", icon: "reports", label: "Cartea mare",               onClick: () => { void navigate({ to: "/reports" }); } },
-      { type: "row", icon: "reports", label: "Balanță de verificare",     onClick: () => { void navigate({ to: "/reports" }); } },
+      { type: "row", icon: "reports", label: "Cartea mare",           disabled: true },
+      { type: "row", icon: "reports", label: "Balanță de verificare", disabled: true },
     ],
     "Vizualizare": [
       { type: "row", icon: "view", label: "Reîncarcă datele",            kbd: "F5", onClick: () => void queryClient.refetchQueries({ type: "active" }) },
-      { type: "row", icon: "view", label: "Mărește densitatea (compact)", kbd: fmtShortcut("Ctrl+−") },
-      { type: "row", icon: "view", label: "Micșorează densitatea",       kbd: fmtShortcut("Ctrl+=") },
+      { type: "row", icon: "view", label: "Mărește densitatea (compact)", kbd: fmtShortcut("Ctrl+−"), disabled: true },
+      { type: "row", icon: "view", label: "Micșorează densitatea",       kbd: fmtShortcut("Ctrl+="),  disabled: true },
       { type: "sep" },
       { type: "row", icon: "view", label: "Mod întunecat",               kbd: fmtShortcut("Ctrl+Shift+D"), onClick: () => setTheme(theme === "dark" ? "light" : "dark") },
-      { type: "row", icon: "view", label: "Arată coloane ascunse…" },
+      { type: "row", icon: "view", label: "Arată coloane ascunse…", disabled: true },
     ],
     "Ajutor": [
       { type: "row", icon: "help",     label: "Documentație e-Factura", kbd: "F1", onClick: () => { void import("@tauri-apps/plugin-opener").then(m => m.openUrl("https://mfinante.gov.ro/ro/web/efactura/informatii-tehnice")); } },
       { type: "row", icon: "keyboard", label: "Scurtături tastatură",   kbd: fmtShortcut("Ctrl+/"), onClick: () => setCommandOpen(true) },
       { type: "sep" },
-      { type: "row", icon: "info",     label: `Despre RoFactura • v${version}` },
+      { type: "row", icon: "info",     label: `Despre RoFactura • v${version}`, disabled: true },
     ],
   };
 }
@@ -176,7 +176,11 @@ export function MenuBar({
                 if (row.type === "section")
                   return <div key={i} className="menu-section">{row.label}</div>;
                 return (
-                  <div key={i} className="menu-row" onClick={row.onClick}>
+                  <div
+                    key={i}
+                    className={"menu-row" + (row.disabled ? " opacity-50 pointer-events-none" : "")}
+                    onClick={row.disabled ? undefined : row.onClick}
+                  >
                     <span className="menu-icon">
                       <Icon name={row.icon} size={13} />
                     </span>
