@@ -222,7 +222,7 @@ pub fn run() {
             commands::integrations::export_saga_csv,
             commands::integrations::export_winmentor_csv,
             commands::integrations::get_smartbill_credentials,
-            commands::integrations::export_invoices_xlsx,
+            commands::xlsx::export_invoices_xlsx,
             // reports
             commands::reports::generate_vat_report,
             commands::reports::export_report,

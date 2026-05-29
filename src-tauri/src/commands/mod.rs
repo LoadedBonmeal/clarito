@@ -15,6 +15,7 @@ pub mod ubl;
 pub mod anaf;
 pub mod archive;
 pub mod integrations;
+pub mod xlsx;
 pub mod import;
 pub mod reports;
 pub mod payments;

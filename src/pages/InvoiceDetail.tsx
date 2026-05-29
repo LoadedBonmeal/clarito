@@ -13,7 +13,7 @@ import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
-import { fmtRON } from "@/lib/utils";
+import { fmtRON, parseDec } from "@/lib/utils";
 import type { AppErrorPayload } from "@/types";
 import { useAppStore } from "@/lib/store";
 
@@ -49,6 +49,12 @@ export function InvoiceDetailPage() {
     queryKey: queryKeys.contacts.detail(data?.invoice.contactId ?? ""),
     queryFn: () => api.contacts.get(data!.invoice.contactId),
     enabled: !!data?.invoice.contactId,
+  });
+
+  const { data: paymentSummary } = useQuery({
+    queryKey: ["payments", "summary", id, data?.invoice.companyId ?? ""],
+    queryFn: () => api.payments.summary(id, data!.invoice.companyId),
+    enabled: !!data?.invoice.companyId,
   });
 
   // ANAF auth status
@@ -529,6 +535,71 @@ export function InvoiceDetailPage() {
                 </>
               )}
             </dl>
+          </div>
+
+          <div className="invoice-meta-section">
+            <h3>Plăți</h3>
+            {(() => {
+              const total = parseDec(invoice.totalAmount);
+              const paid = parseDec(paymentSummary?.paidAmount ?? "0");
+              const remaining = total - paid;
+              const status = paymentSummary?.paymentStatus ?? "UNPAID";
+              return (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                    <StatusBadge status={status} />
+                  </div>
+                  <dl className="invoice-meta-kv">
+                    <dt>Total factură</dt>
+                    <dd className="tnum">{fmtRON(total)} {invoice.currency}</dd>
+                    <dt>Total plătit</dt>
+                    <dd className="tnum">{fmtRON(paid)} {invoice.currency}</dd>
+                    <dt>Rest de plată</dt>
+                    <dd className="tnum" style={{ fontWeight: 600, color: remaining > 0 ? "#B91C1C" : "#166534" }}>
+                      {fmtRON(remaining)} {invoice.currency}
+                    </dd>
+                  </dl>
+                  {paymentSummary && paymentSummary.payments.length > 0 ? (
+                    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                      {paymentSummary.payments.map((p) => (
+                        <div
+                          key={p.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: 6,
+                            border: "1px solid var(--border-soft)",
+                            background: "var(--bg)",
+                            fontSize: 11,
+                          }}
+                        >
+                          <span style={{ flex: 1 }}>
+                            <b className="tnum">{fmtRON(p.amount)} {p.currency}</b>
+                            <span style={{ color: "var(--text-muted)" }}> · {p.paidAt}</span>
+                          </span>
+                          <span style={{ fontSize: 10, color: "var(--text-dim)" }}>
+                            {p.method}{p.reference ? ` · ${p.reference}` : ""}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="dim" style={{ fontSize: 11, marginTop: 8 }}>
+                      Nicio plată înregistrată.
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ marginTop: 10 }}
+                    onClick={() => navigate({ to: "/payments" })}
+                  >
+                    Adaugă plată
+                  </button>
+                </>
+              );
+            })()}
           </div>
 
           <div className="invoice-meta-section">

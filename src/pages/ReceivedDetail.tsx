@@ -154,19 +154,24 @@ export function ReceivedDetailPage() {
                       type="button"
                       className="btn primary"
                       disabled={isPending}
+                      title="Marchează factura ca aprobată în evidența locală. Nu trimite niciun răspuns la ANAF/SPV."
                       onClick={() => updateStatus("APPROVED")}
                     >
-                      <Icon name="check" size={12} /> Aprobă
+                      <Icon name="check" size={12} /> Aprobă local
                     </button>
                     <button
                       type="button"
                       className="btn"
                       disabled={isPending}
                       style={{ borderColor: "#FCA5A5", color: "#B91C1C" }}
+                      title="Marchează factura ca respinsă în evidența locală. Nu trimite niciun răspuns la ANAF/SPV."
                       onClick={() => updateStatus("REJECTED")}
                     >
-                      <Icon name="x" size={12} /> Respinge
+                      <Icon name="x" size={12} /> Respinge local
                     </button>
+                    <div style={{ flexBasis: "100%", fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>
+                      Status intern — nu trimite răspuns la ANAF/SPV.
+                    </div>
                   </>
                 )}
                 {inv.status === "APPROVED" && (

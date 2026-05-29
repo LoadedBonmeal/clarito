@@ -185,3 +185,4 @@ ALTER TABLE received_invoices_new RENAME TO received_invoices;
 CREATE INDEX IF NOT EXISTS idx_received_company_status ON received_invoices(company_id, status);
 
 PRAGMA foreign_keys = ON;
+PRAGMA foreign_key_check;
