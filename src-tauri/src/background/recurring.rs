@@ -1,19 +1,26 @@
 //! Background recurring invoice generation.
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Generate invoices for all active recurring templates whose next_issue_date is today or earlier.
 /// One invoice is created per template per run (even if multiple periods were missed).
 /// next_issue_date is advanced through ALL missed periods so it lands in the future.
-pub(crate) async fn process_recurring_invoices(
+pub(crate) async fn generate_recurring(app: &AppHandle) -> crate::error::AppResult<()> {
+    let state = app
+        .try_state::<crate::state::AppState>()
+        .ok_or_else(|| crate::error::AppError::Other("AppState not available".into()))?;
+    process_recurring_invoices(&state.db, app).await
+}
+
+async fn process_recurring_invoices(
     pool: &sqlx::SqlitePool,
     app: &AppHandle,
 ) -> crate::error::AppResult<()> {
-    use crate::db::recurring;
     use crate::db::models::new_id;
+    use crate::db::recurring;
     use chrono::Local;
-    use rust_decimal::Decimal;
     use rust_decimal::prelude::ToPrimitive;
+    use rust_decimal::Decimal;
 
     let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
     let hundred = Decimal::from(100u32);
@@ -101,7 +108,8 @@ pub(crate) async fn process_recurring_invoices(
         let mut line_calcs: Vec<LineCalc> = Vec::with_capacity(lines.len());
 
         for line in &lines {
-            let name = line["name"].as_str()
+            let name = line["name"]
+                .as_str()
                 .or_else(|| line["description"].as_str())
                 .unwrap_or("Servicii")
                 .to_string();
@@ -109,12 +117,18 @@ pub(crate) async fn process_recurring_invoices(
             let unit = line["unit"].as_str().unwrap_or("BUC").to_string();
             let vat_category = line["vatCategory"].as_str().unwrap_or("S").to_string();
 
-            let qty = line["quantity"].as_f64()
+            let qty = line["quantity"]
+                .as_f64()
                 .and_then(|v| Decimal::try_from(v).ok())
                 .unwrap_or(Decimal::ONE);
-            let price = line["unitPrice"].as_str()
+            let price = line["unitPrice"]
+                .as_str()
                 .and_then(|s| s.parse::<Decimal>().ok())
-                .or_else(|| line["unitPrice"].as_f64().and_then(|v| Decimal::try_from(v).ok()))
+                .or_else(|| {
+                    line["unitPrice"]
+                        .as_f64()
+                        .and_then(|v| Decimal::try_from(v).ok())
+                })
                 .unwrap_or(Decimal::ZERO);
             let vat_rate = if let Some(n) = line["vatRate"].as_i64() {
                 if !crate::db::models::VALID_VAT_RATES.contains(&n) {
@@ -323,6 +337,52 @@ pub(crate) async fn process_recurring_invoices(
                 "fullNumber": full_number,
             }),
         );
+
+        // F-09: auto-submit to ANAF if template requests it and token exists
+        if template.auto_submit_anaf {
+            let has_token =
+                crate::anaf::keychain::TokenBundle::load(&template.company_id).is_some();
+            if has_token {
+                let test_mode = crate::db::settings::get_bool(
+                    pool,
+                    crate::db::settings::keys::USE_ANAF_TEST_ENV,
+                    false,
+                )
+                .await
+                .unwrap_or(false);
+                match crate::commands::anaf::submit_invoice_inner(
+                    app,
+                    pool,
+                    &template.company_id,
+                    &invoice_id,
+                    test_mode,
+                )
+                .await
+                {
+                    Ok(upload_id) => {
+                        tracing::info!(
+                            invoice_id = %invoice_id,
+                            upload_id = %upload_id,
+                            "Recurring invoice auto-submitted to ANAF"
+                        );
+                    }
+                    Err(e) => {
+                        // If auto-submit fails, the invoice remains in VALIDATED state (not deleted).
+                        // This is intentional — the user can manually submit later.
+                        tracing::warn!(
+                            invoice_id = %invoice_id,
+                            "Recurring auto-submit failed, invoice left as DRAFT: {:?}",
+                            e
+                        );
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    template_id = %template.id,
+                    "auto_submit_anaf=true but no ANAF token found — invoice left as DRAFT"
+                );
+            }
+        }
     }
 
     Ok(())

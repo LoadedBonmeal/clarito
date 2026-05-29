@@ -1,6 +1,6 @@
 //! Background polling: check ANAF status for all SUBMITTED invoices.
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Reîmprospătează token-ul OAuth2 pentru o companie și îl salvează în keychain.
 /// Returnează noul access_token.
@@ -22,10 +22,10 @@ pub(crate) async fn refresh_token_for(company_id: &str) -> Result<String, String
     Ok(result.access_token)
 }
 
-pub(crate) async fn poll_submitted_invoices(
-    app: &AppHandle,
-    state: &crate::state::AppState,
-) -> crate::error::AppResult<()> {
+pub(crate) async fn poll_submitted_invoices(app: &AppHandle) -> crate::error::AppResult<()> {
+    let state = app
+        .try_state::<crate::state::AppState>()
+        .ok_or_else(|| crate::error::AppError::Other("AppState not available".into()))?;
     let pool = &state.db;
     let companies = crate::db::companies::list(pool).await?;
 
@@ -36,7 +36,11 @@ pub(crate) async fn poll_submitted_invoices(
         }
 
         if let Err(e) = poll_submitted_for_company(pool, &company.id, Some(app)).await {
-            tracing::warn!("poll_submitted_for_company error for {}: {:?}", company.id, e);
+            tracing::warn!(
+                "poll_submitted_for_company error for {}: {:?}",
+                company.id,
+                e
+            );
         }
     }
 
@@ -51,10 +55,13 @@ pub(crate) async fn poll_submitted_for_company(
     company_id: &str,
     app: Option<&AppHandle>,
 ) -> crate::error::AppResult<u32> {
-    use crate::anaf::{client::{AnafClient, ERR_UNAUTHORIZED}, keychain::TokenBundle, oauth};
+    use crate::anaf::{
+        client::{AnafClient, ERR_UNAUTHORIZED},
+        keychain::TokenBundle,
+        oauth,
+    };
     use crate::db::invoices as db_inv;
     use crate::error::AppError;
-    use tauri::Emitter;
 
     let bundle = match TokenBundle::load(company_id) {
         Some(b) => b,
@@ -72,18 +79,21 @@ pub(crate) async fn poll_submitted_for_company(
             refresh_token: result.refresh_token,
             expires_at: result.expires_at,
         };
-        new_bundle.save(company_id).map_err(|e| AppError::Other(e.to_string()))?;
+        new_bundle
+            .save(company_id)
+            .map_err(|e| AppError::Other(e.to_string()))?;
         result.access_token
     };
 
     // Read test_mode from settings so background poll respects the same environment
-    let test_mode = crate::db::settings::get_bool(
-        pool,
-        crate::db::settings::keys::USE_ANAF_TEST_ENV,
-        false,
-    ).await.unwrap_or(false);
+    let test_mode =
+        crate::db::settings::get_bool(pool, crate::db::settings::keys::USE_ANAF_TEST_ENV, false)
+            .await
+            .unwrap_or(false);
     let client = AnafClient::new(test_mode);
-    let submitted = db_inv::list_submitted(pool, company_id).await.unwrap_or_default();
+    let submitted = db_inv::list_submitted(pool, company_id)
+        .await
+        .unwrap_or_default();
     let mut count = 0u32;
 
     for invoice in &submitted {
@@ -105,28 +115,42 @@ pub(crate) async fn poll_submitted_for_company(
             if let Ok(status_resp) = result {
                 let stare = status_resp.stare.as_str();
                 if stare == "ok" {
-                    let _ = db_inv::mark_validated(pool, &invoice.id, status_resp.index_incarcare).await;
+                    let _ = db_inv::mark_validated(pool, &invoice.id, status_resp.index_incarcare)
+                        .await;
                     if let Some(app) = app {
-                        crate::notifications::notify_invoice_validated(app, &invoice.full_number).await;
+                        crate::notifications::notify_invoice_validated(app, &invoice.full_number)
+                            .await;
                         // Emit reactive event for frontend
-                        let _ = app.emit("invoice_status_changed", serde_json::json!({
-                            "invoiceId": &invoice.id,
-                            "newStatus": "VALIDATED"
-                        }));
+                        let _ = app.emit(
+                            "invoice_status_changed",
+                            serde_json::json!({
+                                "invoiceId": &invoice.id,
+                                "newStatus": "VALIDATED"
+                            }),
+                        );
                     }
                 } else if stare == "nok" || stare.contains("erori") {
                     let raw_reason = status_resp.descriere.or(status_resp.erori);
-                    let friendly_reason: Option<String> = raw_reason.as_deref().map(|r| {
-                        crate::anaf::errors::friendly_message_from_body(r)
-                    });
+                    let friendly_reason: Option<String> = raw_reason
+                        .as_deref()
+                        .map(|r| crate::anaf::errors::friendly_message_from_body(r));
                     if let Some(app) = app {
-                        let reason_str = friendly_reason.as_deref().unwrap_or("Verificați detaliile");
-                        crate::notifications::notify_invoice_rejected(app, &invoice.full_number, reason_str).await;
+                        let reason_str =
+                            friendly_reason.as_deref().unwrap_or("Verificați detaliile");
+                        crate::notifications::notify_invoice_rejected(
+                            app,
+                            &invoice.full_number,
+                            reason_str,
+                        )
+                        .await;
                         // Emit reactive event for frontend
-                        let _ = app.emit("invoice_status_changed", serde_json::json!({
-                            "invoiceId": &invoice.id,
-                            "newStatus": "REJECTED"
-                        }));
+                        let _ = app.emit(
+                            "invoice_status_changed",
+                            serde_json::json!({
+                                "invoiceId": &invoice.id,
+                                "newStatus": "REJECTED"
+                            }),
+                        );
                     }
                     let _ = db_inv::mark_rejected(pool, &invoice.id, friendly_reason, None).await;
                 }

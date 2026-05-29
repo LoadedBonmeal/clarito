@@ -1,11 +1,16 @@
 //! Startup recovery and periodic maintenance tasks.
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Crash recovery: on startup, find invoices stuck in QUEUED with no anaf_upload_id
 /// (meaning the app crashed after the ANAF upload succeeded but before mark_submitted ran).
 /// Any such invoice older than 10 minutes is reset to DRAFT so it can be retried.
-pub async fn recover_stuck_queued_invoices(app: AppHandle, db: sqlx::SqlitePool) {
+pub(crate) async fn recover_stale_queued(app: &AppHandle) {
+    let db = match app.try_state::<crate::state::AppState>() {
+        Some(s) => s.db.clone(),
+        None => return,
+    };
+
     // Brief delay so the DB pool is fully warmed up before we query it.
     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
@@ -126,7 +131,10 @@ pub(crate) async fn refresh_expiring_certificates(pool: &sqlx::SqlitePool, app: 
             continue; // token is still valid
         }
 
-        tracing::info!(company_id = company.id.as_str(), "Reîmprospătăm token OAuth2");
+        tracing::info!(
+            company_id = company.id.as_str(),
+            "Reîmprospătăm token OAuth2"
+        );
         match oauth::refresh_token_bundle(&bundle.refresh_token).await {
             Ok(refreshed) => {
                 let new_bundle = TokenBundle {
@@ -135,7 +143,10 @@ pub(crate) async fn refresh_expiring_certificates(pool: &sqlx::SqlitePool, app: 
                     expires_at: refreshed.expires_at,
                 };
                 if let Err(e) = new_bundle.save(&company.id) {
-                    tracing::warn!("Nu s-a putut salva token reîmprospătat pentru {}: {e}", company.id);
+                    tracing::warn!(
+                        "Nu s-a putut salva token reîmprospătat pentru {}: {e}",
+                        company.id
+                    );
                 } else {
                     tracing::info!("Token reîmprospătat pentru compania {}", company.legal_name);
                     // Log to audit
@@ -155,12 +166,15 @@ pub(crate) async fn refresh_expiring_certificates(pool: &sqlx::SqlitePool, app: 
             Err(e) => {
                 tracing::warn!(
                     "Refresh token eșuat pentru compania {} ({}): {}",
-                    company.legal_name, company.id, e
+                    company.legal_name,
+                    company.id,
+                    e
                 );
                 // Notify user — they need to re-authorize manually
                 let title = format!("Re-autorizare necesară: {}", company.legal_name);
                 let body = "Token-ul ANAF a expirat și nu a putut fi reîmprospătat automat. \
-                            Mergeți la Setări → Certificate.".to_string();
+                            Mergeți la Setări → Certificate."
+                    .to_string();
                 crate::notifications::notify(app, &title, &body).await;
             }
         }
@@ -184,7 +198,8 @@ pub(crate) async fn archive_check(pool: sqlx::SqlitePool, app: AppHandle) {
         .await
         .unwrap_or_default();
 
-    let missing: Vec<String> = rows.iter()
+    let missing: Vec<String> = rows
+        .iter()
         .filter_map(|r| r.try_get::<String, _>("xml_path").ok())
         .filter(|p| !std::path::Path::new(p).exists())
         .collect();

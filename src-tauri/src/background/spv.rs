@@ -1,17 +1,16 @@
 //! Background SPV sync: download and store received invoices from ANAF SPV.
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
-pub(crate) async fn sync_spv_messages(
-    app: &AppHandle,
-    state: &crate::state::AppState,
-) -> crate::error::AppResult<()> {
+pub(crate) async fn sync_spv(app: &AppHandle) -> crate::error::AppResult<()> {
+    let state = app
+        .try_state::<crate::state::AppState>()
+        .ok_or_else(|| crate::error::AppError::Other("AppState not available".into()))?;
     let pool = &state.db;
-    let test_mode = crate::db::settings::get_bool(
-        pool,
-        crate::db::settings::keys::USE_ANAF_TEST_ENV,
-        false,
-    ).await.unwrap_or(false);
+    let test_mode =
+        crate::db::settings::get_bool(pool, crate::db::settings::keys::USE_ANAF_TEST_ENV, false)
+            .await
+            .unwrap_or(false);
     let companies = crate::db::companies::list(pool).await?;
 
     for company in companies {
@@ -45,12 +44,15 @@ pub(crate) async fn do_sync_spv(
     app: &AppHandle,
     test_mode: bool,
 ) -> crate::error::AppResult<i32> {
-    use crate::anaf::{client::{AnafClient, ERR_UNAUTHORIZED}, keychain::TokenBundle, oauth};
+    use crate::anaf::{
+        client::{AnafClient, ERR_UNAUTHORIZED},
+        keychain::TokenBundle,
+        oauth,
+    };
     use crate::db::notifications;
     use crate::error::AppError;
 
-    let bundle = TokenBundle::load(company_id)
-        .ok_or_else(|| AppError::Other("No token".into()))?;
+    let bundle = TokenBundle::load(company_id).ok_or_else(|| AppError::Other("No token".into()))?;
 
     let mut access_token = if !bundle.is_expired() {
         bundle.access_token.clone()
@@ -63,7 +65,9 @@ pub(crate) async fn do_sync_spv(
             refresh_token: result.refresh_token,
             expires_at: result.expires_at,
         };
-        new_bundle.save(company_id).map_err(|e| AppError::Other(e.to_string()))?;
+        new_bundle
+            .save(company_id)
+            .map_err(|e| AppError::Other(e.to_string()))?;
         result.access_token
     };
 
@@ -74,7 +78,10 @@ pub(crate) async fn do_sync_spv(
     let mut messages_result = client.list_messages(&access_token, &company.cui, 60).await;
     if let Err(ref e) = messages_result {
         if e == ERR_UNAUTHORIZED {
-            tracing::info!(company_id, "ANAF 401 on list_messages — reîmprospătăm token");
+            tracing::info!(
+                company_id,
+                "ANAF 401 on list_messages — reîmprospătăm token"
+            );
             if let Ok(new_tok) = super::poll::refresh_token_for(company_id).await {
                 access_token = new_tok;
                 messages_result = client.list_messages(&access_token, &company.cui, 60).await;
@@ -92,21 +99,23 @@ pub(crate) async fn do_sync_spv(
     let mut new_count = 0i32;
     for msg in messages {
         let data_key = format!("spv_msg_{}", msg.id);
-        let exists: bool = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM notifications WHERE data = ?1",
-        )
-        .bind(&data_key)
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0)
-            > 0;
+        let exists: bool =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM notifications WHERE data = ?1")
+                .bind(&data_key)
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0)
+                > 0;
 
         if !exists {
             // ── Download the ZIP from ANAF (with 401 refresh-once) ───────
             let mut dl_result = client.download_message(&access_token, &msg.id).await;
             if let Err(ref e) = dl_result {
                 if e == ERR_UNAUTHORIZED {
-                    tracing::info!(msg_id = msg.id.as_str(), "ANAF 401 on download — reîmprospătăm token");
+                    tracing::info!(
+                        msg_id = msg.id.as_str(),
+                        "ANAF 401 on download — reîmprospătăm token"
+                    );
                     if let Ok(new_tok) = super::poll::refresh_token_for(company_id).await {
                         access_token = new_tok;
                         dl_result = client.download_message(&access_token, &msg.id).await;
@@ -172,12 +181,14 @@ pub(crate) async fn do_sync_spv(
                 "0000"
             };
             // Sanitize msg.id (received from ANAF) to prevent path traversal.
-            let safe_msg_id: String = msg.id
+            let safe_msg_id: String = msg
+                .id
                 .chars()
                 .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
                 .take(64)
                 .collect();
-            let safe_cui: String = company.cui
+            let safe_cui: String = company
+                .cui
                 .chars()
                 .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
                 .take(64)
@@ -195,7 +206,11 @@ pub(crate) async fn do_sync_spv(
                 .join(&safe_msg_id);
             // Belt-and-suspenders: verify the resolved path stays under app_data_dir.
             if !archive_path.starts_with(&app_data_dir) {
-                tracing::error!("Archive path escape attempt for msg {}: {:?}", msg.id, archive_path);
+                tracing::error!(
+                    "Archive path escape attempt for msg {}: {:?}",
+                    msg.id,
+                    archive_path
+                );
                 continue;
             }
             if let Err(e) = std::fs::create_dir_all(&archive_path) {
@@ -252,10 +267,7 @@ pub(crate) async fn do_sync_spv(
 
             // ── Create SPV notification ───────────────────────────────────
             let title = format!("Factură primită de la {}", issuer_name);
-            let body = format!(
-                "Sumă: {} RON — {}",
-                total_amount, issue_date
-            );
+            let body = format!("Sumă: {} RON — {}", total_amount, issue_date);
 
             notifications::create(
                 pool,
@@ -316,9 +328,9 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
     let mut issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
     // State machine pentru navigarea structurii UBL
-    let mut depth_supplier = 0i32;      // >0 când suntem în AccountingSupplierParty
-    let mut depth_party_tax = 0i32;     // >0 când suntem în PartyTaxScheme (al supplier)
-    let mut depth_party_legal = 0i32;   // >0 când suntem în PartyLegalEntity (al supplier)
+    let mut depth_supplier = 0i32; // >0 când suntem în AccountingSupplierParty
+    let mut depth_party_tax = 0i32; // >0 când suntem în PartyTaxScheme (al supplier)
+    let mut depth_party_legal = 0i32; // >0 când suntem în PartyLegalEntity (al supplier)
     let mut current_local = String::new();
     let mut buf = Vec::new();
 
@@ -339,9 +351,15 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
             Ok(Event::End(ref e)) => {
                 let local = std::str::from_utf8(e.local_name().into_inner()).unwrap_or("");
                 match local {
-                    "AccountingSupplierParty" => { depth_supplier -= 1; }
-                    "PartyTaxScheme" if depth_supplier > 0 => { depth_party_tax -= 1; }
-                    "PartyLegalEntity" if depth_supplier > 0 => { depth_party_legal -= 1; }
+                    "AccountingSupplierParty" => {
+                        depth_supplier -= 1;
+                    }
+                    "PartyTaxScheme" if depth_supplier > 0 => {
+                        depth_party_tax -= 1;
+                    }
+                    "PartyLegalEntity" if depth_supplier > 0 => {
+                        depth_party_legal -= 1;
+                    }
                     _ => {}
                 }
                 current_local.clear();
@@ -351,15 +369,21 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
                     Ok(t) => t.trim().to_string(),
                     Err(_) => continue,
                 };
-                if text.is_empty() { continue; }
+                if text.is_empty() {
+                    continue;
+                }
                 match current_local.as_str() {
                     // CompanyID în PartyTaxScheme al furnizorului = CUI fiscal
                     "CompanyID" if depth_supplier > 0 && depth_party_tax > 0 => {
-                        if issuer_cui.is_empty() { issuer_cui = text; }
+                        if issuer_cui.is_empty() {
+                            issuer_cui = text;
+                        }
                     }
                     // RegistrationName în PartyLegalEntity al furnizorului = denumire
                     "RegistrationName" if depth_supplier > 0 && depth_party_legal > 0 => {
-                        if issuer_name.is_empty() { issuer_name = text; }
+                        if issuer_name.is_empty() {
+                            issuer_name = text;
+                        }
                     }
                     // PayableAmount = valoarea totală de plată
                     "PayableAmount" => {
@@ -381,8 +405,16 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
     }
 
     (
-        if issuer_cui.is_empty() { "NECUNOSCUT".to_string() } else { issuer_cui },
-        if issuer_name.is_empty() { "Necunoscut".to_string() } else { issuer_name },
+        if issuer_cui.is_empty() {
+            "NECUNOSCUT".to_string()
+        } else {
+            issuer_cui
+        },
+        if issuer_name.is_empty() {
+            "Necunoscut".to_string()
+        } else {
+            issuer_name
+        },
         total_amount_str,
         issue_date,
     )
