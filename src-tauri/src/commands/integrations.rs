@@ -377,13 +377,13 @@ pub async fn export_winmentor_csv(
         }
 
         for (vat_rate, (net_dec, tva_dec, tot_dec)) in &groups {
-            let net = net_dec.to_f64().unwrap_or(0.0);
-            let tva = tva_dec.to_f64().unwrap_or(0.0);
-            let total = tot_dec.to_f64().unwrap_or(0.0);
+            let net   = format!("{:.2}", net_dec.round_dp(2));
+            let tva   = format!("{:.2}", tva_dec.round_dp(2));
+            let total = format!("{:.2}", tot_dec.round_dp(2));
 
             let row = format!(
                 "FACT;{serie};{numar};{data};{cui};{denumire};\
-                {net:.2};{vat_rate};{tva:.2};{total:.2};RON;1;{scadenta};{observatii}",
+                {net};{vat_rate};{tva};{total};RON;1;{scadenta};{observatii}",
                 serie = invoice.series,
                 numar = invoice.number,
                 data = data,
