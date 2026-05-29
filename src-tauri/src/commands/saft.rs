@@ -38,6 +38,8 @@ struct SaftLineItem {
 
 #[tauri::command]
 pub async fn export_saft_d406(state: State<'_, AppState>, params: SaftParams) -> AppResult<String> {
+    // NOTE: This is a simplified SAF-T export covering SalesInvoices only.
+    // It is NOT a complete ANAF D406 submission. Label the UI accordingly.
     let pool = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let rt = tokio::runtime::Handle::current();

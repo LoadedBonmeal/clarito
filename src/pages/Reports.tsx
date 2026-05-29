@@ -239,7 +239,7 @@ export function ReportsPage() {
             onClick={handleExportSaft}
             title={`SAF-T D406 — standard ANAF de audit fiscal pentru ${selectedYear}`}
           >
-            <Icon name="file" size={12} /> {exportingSaft ? "Export…" : `SAF-T D406 ${selectedYear}`}
+            <Icon name="file" size={12} /> {exportingSaft ? "Export…" : `SAF-T D406 (vânzări, beta) ${selectedYear}`}
           </button>
         </span>
       </div>
