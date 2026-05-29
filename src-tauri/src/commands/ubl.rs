@@ -78,13 +78,19 @@ pub async fn generate_invoice_pdf(
     // 3. Încarcă cumpărătorul
     let buyer = contacts::get(&state.db, &inv.contact_id).await?;
 
-    // 4. Generează PDF (CPU-bound — rulăm în spawn_blocking)
+    // 4. Determină referința storno (dacă există)
+    let storno_ref = inv.notes.as_deref().and_then(|n| {
+        n.strip_prefix("STORNO_OF:")
+            .map(|rest| rest.split('|').next().unwrap_or(rest).to_string())
+    });
+
+    // 5. Generează PDF (CPU-bound — rulăm în spawn_blocking)
     let input = GeneratorInput {
         invoice: inv.clone(),
         lines,
         seller,
         buyer,
-        storno_ref: None,
+        storno_ref,
     };
     let path = paths::pdf_path(&app, &inv.company_id, &invoice_id);
     let path_clone = path.clone();
@@ -99,7 +105,7 @@ pub async fn generate_invoice_pdf(
     .await
     .map_err(|e| AppError::Pdf(e.to_string()))??;
 
-    // 5. Actualizează DB
+    // 6. Actualizează DB
     invoices::set_pdf_path(&state.db, &invoice_id, &path_str_result).await?;
 
     Ok(path_str_result)
