@@ -54,7 +54,7 @@ pub async fn generate_vat_report(
     let summary_rows = sqlx::query(
         "SELECT subtotal_amount, vat_amount, total_amount \
          FROM invoices \
-         WHERE status IN ('VALIDATED','SUBMITTED','QUEUED') \
+         WHERE status IN ('VALIDATED','SUBMITTED') \
            AND issue_date >= ?1 \
            AND issue_date <= ?2 \
            AND (?3 IS NULL OR company_id = ?3)",
@@ -86,7 +86,7 @@ pub async fn generate_vat_report(
         "SELECT l.vat_rate, l.subtotal_amount, l.vat_amount \
          FROM invoice_line_items l \
          JOIN invoices i ON i.id = l.invoice_id \
-         WHERE i.status IN ('VALIDATED','SUBMITTED','QUEUED') \
+         WHERE i.status IN ('VALIDATED','SUBMITTED') \
            AND i.issue_date >= ?1 \
            AND i.issue_date <= ?2 \
            AND (?3 IS NULL OR i.company_id = ?3)",
