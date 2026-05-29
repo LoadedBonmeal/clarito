@@ -242,9 +242,11 @@ pub async fn export_saga_csv(
         let judet = contact.county.as_deref().unwrap_or("").replace('"', "\"\"");
         let observatii = invoice.notes.as_deref().unwrap_or("").replace('"', "\"\"");
 
-        let net = format!("{:.2}", invoice.subtotal_amount);
-        let tva = format!("{:.2}", invoice.vat_amount);
-        let total = format!("{:.2}", invoice.total_amount);
+        use rust_decimal::Decimal;
+        use std::str::FromStr;
+        let net   = format!("{:.2}", Decimal::from_str(&invoice.subtotal_amount).unwrap_or_default());
+        let tva   = format!("{:.2}", Decimal::from_str(&invoice.vat_amount).unwrap_or_default());
+        let total = format!("{:.2}", Decimal::from_str(&invoice.total_amount).unwrap_or_default());
 
         let row = format!(
             "\"FC\";\"{serie}\";\"{numar}\";\"{data}\";\"{cui}\";\"{denumire}\";\
@@ -687,9 +689,11 @@ pub async fn export_invoices_xlsx(
         }
 
         // ── Data rows ─────────────────────────────────────────────────────
-        let mut total_net: f64 = 0.0;
-        let mut total_vat: f64 = 0.0;
-        let mut total_amount: f64 = 0.0;
+        use rust_decimal::Decimal as XlsxDecimal;
+        use rust_decimal::prelude::ToPrimitive as XlsxToPrimitive;
+        let mut total_net_dec    = XlsxDecimal::ZERO;
+        let mut total_vat_dec    = XlsxDecimal::ZERO;
+        let mut total_amount_dec = XlsxDecimal::ZERO;
 
         for (i, row) in row_data.iter().enumerate() {
             let data_row = header_row + 1 + i as u32;
@@ -702,9 +706,10 @@ pub async fn export_invoices_xlsx(
                 (&fmt_row_even, &fmt_row_num_even, &fmt_mono_even)
             };
 
-            total_net    += row.net;
-            total_vat    += row.vat;
-            total_amount += row.total;
+            // Accumulate as Decimal to avoid f64 rounding drift on money sums.
+            total_net_dec    += XlsxDecimal::try_from(row.net).unwrap_or_default();
+            total_vat_dec    += XlsxDecimal::try_from(row.vat).unwrap_or_default();
+            total_amount_dec += XlsxDecimal::try_from(row.total).unwrap_or_default();
 
             ws.write_with_format(data_row, 0, &row.full_number, fmt_mono)?;
             ws.write_with_format(data_row, 1, &row.issue_date, fmt_text)?;
@@ -738,9 +743,9 @@ pub async fn export_invoices_xlsx(
         ws.set_row_height(total_row, 22)?;
         ws.write_with_format(total_row, 0, "TOTAL", &fmt_total_label)?;
         ws.merge_range(total_row, 0, total_row, 5, "TOTAL", &fmt_total_label)?;
-        ws.write_with_format(total_row, 6, total_net, &fmt_total_num)?;
-        ws.write_with_format(total_row, 7, total_vat, &fmt_total_num)?;
-        ws.write_with_format(total_row, 8, total_amount, &fmt_total_num)?;
+        ws.write_with_format(total_row, 6, total_net_dec.to_f64().unwrap_or(0.0), &fmt_total_num)?;
+        ws.write_with_format(total_row, 7, total_vat_dec.to_f64().unwrap_or(0.0), &fmt_total_num)?;
+        ws.write_with_format(total_row, 8, total_amount_dec.to_f64().unwrap_or(0.0), &fmt_total_num)?;
 
         // Freeze header rows
         ws.set_freeze_panes(header_row + 1, 0)?;

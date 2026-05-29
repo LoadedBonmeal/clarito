@@ -7,19 +7,12 @@
 //!
 //! Money: stocat ca TEXT (Decimal string) în DB. Exchange rate rămâne REAL (rată FX, nu bani).
 
-use std::str::FromStr;
-
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
 use crate::db::models::{new_id, now_unix, InvoiceStatus, Page, Paginated};
 use crate::error::{AppError, AppResult};
-
-#[allow(dead_code)]
-fn parse_dec(s: &str) -> Decimal {
-    Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO).round_dp(2)
-}
 
 // ─── Models ────────────────────────────────────────────────────────────────
 

@@ -796,6 +796,7 @@ async fn process_recurring_invoices(
     use crate::db::models::new_id;
     use chrono::Local;
     use rust_decimal::Decimal;
+    use rust_decimal::prelude::ToPrimitive;
 
     let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
     let hundred = Decimal::from(100u32);
@@ -898,8 +899,46 @@ async fn process_recurring_invoices(
                 .and_then(|s| s.parse::<Decimal>().ok())
                 .or_else(|| line["unitPrice"].as_f64().and_then(|v| Decimal::try_from(v).ok()))
                 .unwrap_or(Decimal::ZERO);
-            let vat_rate_i = line["vatRate"].as_i64().unwrap_or(21);
-            let vat_rate = Decimal::from(vat_rate_i);
+            const VALID_VAT_RATES: &[i64] = &[0, 5, 9, 11, 19, 21];
+            let vat_rate = if let Some(n) = line["vatRate"].as_i64() {
+                if !VALID_VAT_RATES.contains(&n) {
+                    tracing::warn!(
+                        template_id = %template.id,
+                        vat_rate = n,
+                        "Recurring invoice: invalid VAT rate in template, skipping line"
+                    );
+                    continue;
+                }
+                Decimal::from(n)
+            } else if let Some(s) = line["vatRate"].as_str() {
+                match s.parse::<Decimal>() {
+                    Ok(d) => {
+                        let rounded = d.round_dp(0).to_i64().unwrap_or(-1);
+                        if !VALID_VAT_RATES.contains(&rounded) {
+                            tracing::warn!(
+                                template_id = %template.id,
+                                vat_rate = s,
+                                "Recurring invoice: invalid VAT rate in template, skipping line"
+                            );
+                            continue;
+                        }
+                        d
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            template_id = %template.id,
+                            "Recurring invoice: unparseable VAT rate in template, skipping line"
+                        );
+                        continue;
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    template_id = %template.id,
+                    "Recurring invoice: missing vatRate in template line, skipping"
+                );
+                continue;
+            };
 
             let ls = (qty * price).round_dp(2);
             let lv = (ls * vat_rate / hundred).round_dp(2);

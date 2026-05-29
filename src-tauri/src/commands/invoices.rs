@@ -84,12 +84,11 @@ pub async fn update_invoice_draft(
 
     // Use rust_decimal for exact monetary math (plan rule: never f64 for money)
     use rust_decimal::Decimal;
-    use rust_decimal::prelude::ToPrimitive;
     let hundred = Decimal::from(100u32);
 
     let mut subtotal_dec = Decimal::ZERO;
     let mut vat_total_dec = Decimal::ZERO;
-    let line_rows: Vec<(String, f64, f64, f64)> = input
+    let line_rows: Vec<(String, String, String, String)> = input
         .lines
         .iter()
         .map(|l| {
@@ -103,16 +102,17 @@ pub async fn update_invoice_draft(
             vat_total_dec += lv;
             (
                 new_id(),
-                ls.to_f64().unwrap_or(0.0),
-                lv.to_f64().unwrap_or(0.0),
-                lt.to_f64().unwrap_or(0.0),
+                ls.round_dp(2).to_string(),
+                lv.round_dp(2).to_string(),
+                lt.round_dp(2).to_string(),
             )
         })
         .collect();
-    let subtotal = subtotal_dec.to_f64().unwrap_or(0.0);
-    let vat_total = vat_total_dec.to_f64().unwrap_or(0.0);
-    let total = (subtotal_dec + vat_total_dec).to_f64().unwrap_or(0.0);
-    let full_number = format!("{}-{:04}", input.series, input.number);
+    let subtotal  = subtotal_dec.round_dp(2).to_string();
+    let vat_total = vat_total_dec.round_dp(2).to_string();
+    let total     = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
+    // Fix 2: preserve the existing series/number — do not let the client change them on a draft edit
+    let full_number = format!("{}-{:04}", existing.series, existing.number);
 
     let mut tx = state.db.begin().await?;
 
@@ -136,8 +136,8 @@ pub async fn update_invoice_draft(
     )
     .bind(&id)
     .bind(&input.contact_id)
-    .bind(&input.series)
-    .bind(input.number)
+    .bind(&existing.series)
+    .bind(existing.number)
     .bind(&full_number)
     .bind(&input.issue_date)
     .bind(&input.due_date)
@@ -176,10 +176,10 @@ pub async fn update_invoice_draft(
         .bind((position as i64) + 1)
         .bind(&line.name)
         .bind(&line.description)
-        .bind(line.quantity)
+        .bind(Decimal::try_from(line.quantity).unwrap_or(Decimal::ZERO).round_dp(2).to_string())
         .bind(&line.unit)
-        .bind(line.unit_price)
-        .bind(line.vat_rate)
+        .bind(Decimal::try_from(line.unit_price).unwrap_or(Decimal::ZERO).round_dp(2).to_string())
+        .bind(Decimal::try_from(line.vat_rate).unwrap_or(Decimal::ZERO).round_dp(2).to_string())
         .bind(&line.vat_category)
         .bind(line_subtotal)
         .bind(line_vat)

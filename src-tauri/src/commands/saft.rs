@@ -80,7 +80,7 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
     let invoice_rows = sqlx::query(
         "SELECT \
             i.id, \
-            i.series || '-' || i.number AS full_number, \
+            i.series || '-' || printf('%04d', i.number) AS full_number, \
             i.issue_date, \
             COALESCE(c.legal_name, '') AS client_name, \
             COALESCE(c.cui, '') AS client_cui, \
@@ -171,12 +171,12 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
     xml.push_str("  <Header>\n");
     xml_elem(&mut xml, 4, "AuditFileVersion", "1.0");
     xml_elem(&mut xml, 4, "AuditFileCountry", "RO");
-    xml_elem(&mut xml, 4, "AuditFileDateCreated", &today);
+    xml_elem(&mut xml, 4, "AuditFileDateCreated", &escape_xml(&today));
     xml_elem(&mut xml, 4, "SoftwareCompanyName", "Lucaris SRL");
     xml_elem(&mut xml, 4, "SoftwareID", "efactura-desktop");
     xml_elem(&mut xml, 4, "SoftwareVersion", version);
     xml.push_str("    <Company>\n");
-    xml_elem(&mut xml, 6, "RegistrationNumber", &company_cui);
+    xml_elem(&mut xml, 6, "RegistrationNumber", &escape_xml(&company_cui));
     xml_elem(&mut xml, 6, "Name", &escape_xml(&company_name));
     xml.push_str("    </Company>\n");
     xml_elem(&mut xml, 4, "DefaultCurrencyCode", "RON");
@@ -210,11 +210,11 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
         xml_elem(&mut xml, 8, "InvoiceDate", &issue_date);
         xml_elem(&mut xml, 8, "InvoiceType", "380"); // Commercial invoice
         xml_elem(&mut xml, 8, "CustomerName", &escape_xml(&client_name));
-        xml_elem(&mut xml, 8, "CustomerTaxID", &client_cui);
+        xml_elem(&mut xml, 8, "CustomerTaxID", &escape_xml(&client_cui));
         xml_elem(&mut xml, 8, "NetTotal", &format_decimal(&net_amount));
         xml_elem(&mut xml, 8, "VatTotal", &format_decimal(&vat_amount));
         xml_elem(&mut xml, 8, "GrossTotal", &format_decimal(&total_amount));
-        xml_elem(&mut xml, 8, "Currency", &currency);
+        xml_elem(&mut xml, 8, "Currency", &escape_xml(&currency));
 
         // ── Lines ─────────────────────────────────────────────────────────────
         let lines = lines_by_invoice.get(&invoice_id).cloned().unwrap_or_default();
