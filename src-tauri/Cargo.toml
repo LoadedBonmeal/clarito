@@ -91,6 +91,9 @@ dirs = "5"
 # Excel XLSX export
 rust_xlsxwriter = "0.80"
 
+# CSV parsing (handles quoted fields with embedded delimiters)
+csv = "1"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # macOS-specific (placeholders for future use)
 

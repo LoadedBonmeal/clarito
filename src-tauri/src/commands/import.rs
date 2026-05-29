@@ -52,9 +52,6 @@ pub async fn import_invoices_csv(
     use std::str::FromStr;
 
     let pool = &state.db;
-    let mut lines = content.lines();
-    // Skip header
-    lines.next();
 
     let mut imported: u32 = 0;
     let mut errors: Vec<String> = Vec::new();
@@ -70,44 +67,54 @@ pub async fn import_invoices_csv(
     }
     let company_cui_norm = normalize_cui_csv(&company.cui);
 
-    for (idx, line) in lines.enumerate() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let fields: Vec<&str> = line.split(';').map(str::trim).collect();
-        if fields.len() < 12 {
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(b';')
+        .has_headers(true)
+        .flexible(true)
+        .from_reader(content.as_bytes());
+
+    for (idx, result) in reader.records().enumerate() {
+        let record = match result {
+            Ok(r) => r,
+            Err(e) => {
+                errors.push(format!("Linia {}: eroare parsare CSV: {}", idx + 2, e));
+                continue;
+            }
+        };
+
+        if record.len() < 12 {
             errors.push(format!(
                 "Linia {}: câmpuri insuficiente ({})",
                 idx + 2,
-                fields.len()
+                record.len()
             ));
             continue;
         }
 
-        // Validate that fields[0] (company_cui) matches the active company.
-        let row_company_cui = normalize_cui_csv(fields[0]);
+        // Validate that field 0 (company_cui) matches the active company.
+        let raw_company_cui = record.get(0).unwrap_or("").trim();
+        let row_company_cui = normalize_cui_csv(raw_company_cui);
         if !row_company_cui.is_empty() && row_company_cui != company_cui_norm {
             errors.push(format!(
                 "Linia {}: CUI companie din CSV ({}) nu corespunde companiei active ({}).",
                 idx + 2,
-                fields[0],
+                raw_company_cui,
                 company.cui
             ));
             continue;
         }
 
-        let customer_cui = fields[1];
-        let customer_name = fields[2];
-        let series = fields[3];
-        let number_str = fields[4];
-        let issue_date = fields[5];
-        let due_date = fields[6];
-        let item_name = fields[7];
-        let qty_str = fields[8];
-        let unit = fields[9];
-        let unit_price_str = fields[10];
-        let vat_rate_str = fields[11];
+        let customer_cui = record.get(1).unwrap_or("").trim().to_string();
+        let customer_name = record.get(2).unwrap_or("").trim().to_string();
+        let series = record.get(3).unwrap_or("").trim().to_string();
+        let number_str = record.get(4).unwrap_or("").trim().to_string();
+        let issue_date = record.get(5).unwrap_or("").trim().to_string();
+        let due_date = record.get(6).unwrap_or("").trim().to_string();
+        let item_name = record.get(7).unwrap_or("").trim().to_string();
+        let qty_str = record.get(8).unwrap_or("").trim().to_string();
+        let unit = record.get(9).unwrap_or("").trim().to_string();
+        let unit_price_str = record.get(10).unwrap_or("").trim().to_string();
+        let vat_rate_str = record.get(11).unwrap_or("").trim().to_string();
 
         // Parse number fields
         let number: i64 = match number_str.parse() {
@@ -121,7 +128,7 @@ pub async fn import_invoices_csv(
                 continue;
             }
         };
-        let qty: Decimal = match Decimal::from_str(qty_str) {
+        let qty: Decimal = match Decimal::from_str(&qty_str) {
             Ok(v) => v,
             Err(_) => {
                 errors.push(format!(
@@ -143,7 +150,7 @@ pub async fn import_invoices_csv(
                 continue;
             }
         };
-        let vat_rate: Decimal = match Decimal::from_str(vat_rate_str) {
+        let vat_rate: Decimal = match Decimal::from_str(&vat_rate_str) {
             Ok(v) => v,
             Err(_) => {
                 errors.push(format!(
@@ -192,7 +199,7 @@ pub async fn import_invoices_csv(
         let contact_id: String = {
             let existing =
                 sqlx::query("SELECT id FROM contacts WHERE cui = ?1 AND company_id = ?2 LIMIT 1")
-                    .bind(customer_cui)
+                    .bind(&customer_cui)
                     .bind(&company_id)
                     .fetch_optional(&mut *tx)
                     .await;
@@ -214,8 +221,8 @@ pub async fn import_invoices_csv(
                     )
                     .bind(&new_id)
                     .bind(&company_id)
-                    .bind(customer_cui)
-                    .bind(customer_name)
+                    .bind(&customer_cui)
+                    .bind(&customer_name)
                     .bind(now)
                     .execute(&mut *tx)
                     .await;
@@ -319,20 +326,26 @@ pub async fn import_contacts_csv(
     dry_run: bool,
 ) -> AppResult<ImportResult> {
     let pool = &state.db;
-    let mut lines = content.lines();
-    // Skip header
-    lines.next();
 
     let mut imported: u32 = 0;
     let mut errors: Vec<String> = Vec::new();
 
-    for (idx, line) in lines.enumerate() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let fields: Vec<&str> = line.split(';').map(str::trim).collect();
-        if fields.len() < 3 {
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(b';')
+        .has_headers(true)
+        .flexible(true)
+        .from_reader(content.as_bytes());
+
+    for (idx, result) in reader.records().enumerate() {
+        let record = match result {
+            Ok(r) => r,
+            Err(e) => {
+                errors.push(format!("Linia {}: eroare parsare CSV: {}", idx + 2, e));
+                continue;
+            }
+        };
+
+        if record.len() < 3 {
             errors.push(format!(
                 "Linia {}: câmpuri insuficiente (minim 3 necesare)",
                 idx + 2
@@ -340,9 +353,9 @@ pub async fn import_contacts_csv(
             continue;
         }
 
-        let _contact_type = fields[0];
-        let cui = if fields.len() > 1 { fields[1] } else { "" };
-        let name = fields[2];
+        let contact_type = record.get(0).unwrap_or("").trim().to_string();
+        let cui = record.get(1).unwrap_or("").trim().to_string();
+        let name = record.get(2).unwrap_or("").trim().to_string();
 
         if name.is_empty() {
             errors.push(format!("Linia {}: numele este obligatoriu", idx + 2));
@@ -355,12 +368,31 @@ pub async fn import_contacts_csv(
             continue;
         }
 
-        let contact_type = fields[0];
-        let address = fields.get(3).copied().filter(|s| !s.is_empty());
-        let city = fields.get(4).copied().filter(|s| !s.is_empty());
-        let county = fields.get(5).copied().filter(|s| !s.is_empty());
-        let email = fields.get(6).copied().filter(|s| !s.is_empty());
-        let phone = fields.get(7).copied().filter(|s| !s.is_empty());
+        let address = record
+            .get(3)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let city = record
+            .get(4)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let county = record
+            .get(5)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let email = record
+            .get(6)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let phone = record
+            .get(7)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
 
         let new_id = crate::db::models::new_id();
         let now = chrono::Utc::now().timestamp();
@@ -373,9 +405,9 @@ pub async fn import_contacts_csv(
         )
         .bind(&new_id)
         .bind(&company_id)
-        .bind(contact_type)
-        .bind(if cui.is_empty() { None } else { Some(cui) })
-        .bind(name)
+        .bind(&contact_type)
+        .bind(if cui.is_empty() { None } else { Some(&cui) })
+        .bind(&name)
         .bind(address)
         .bind(city)
         .bind(county)
@@ -771,5 +803,24 @@ async fn import_invoice_xml_inner(
                 errors,
             })
         }
+    }
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn csv_with_quoted_semicolons() {
+        let csv = "series;number;issue_date;client_name;client_cui;description;quantity;unit_price;vat_rate\nACME;1;2026-05-30;\"SC Client; Test SRL\";RO123456;\"Serviciu; consultanta\";1;100.00;19";
+        let mut reader = csv::ReaderBuilder::new()
+            .delimiter(b';')
+            .has_headers(true)
+            .flexible(true)
+            .from_reader(csv.as_bytes());
+        let records: Vec<_> = reader.records().collect();
+        assert_eq!(records.len(), 1);
+        let r = records[0].as_ref().unwrap();
+        assert_eq!(r.get(3).unwrap(), "SC Client; Test SRL");
     }
 }
