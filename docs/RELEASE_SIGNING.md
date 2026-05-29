@@ -1,9 +1,10 @@
 # Release Signing — REQUIRED BEFORE SHIPPING
 
-## Current status: WARNING — Updater pubkey is EMPTY — auto-updates are UNSIGNED
+## Current status
 
-The `plugins.updater.pubkey` field in `src-tauri/tauri.conf.json` is currently an empty string.
-This means the Tauri updater will not verify update signatures, which is a supply-chain security risk.
+- Tauri updater pubkey is configured in `src-tauri/tauri.conf.json`. ✅
+- macOS app signing: `signingIdentity = "-"` (ad-hoc only). Public distribution requires Developer ID + notarization — **external blocker, not code**.
+- Windows installer signing: no Authenticode certificate configured yet — **external blocker, not code**.
 
 Before any public release:
 

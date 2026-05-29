@@ -177,7 +177,10 @@ export function InvoicesPage() {
                 // Citim fișierul în Rust (ocolim scope-ul FS plugin care permite doar $APPDATA):
                 const result = await api.importData.invoiceXmlFromFile(filePath, activeCompanyId);
                 if (result.imported > 0) {
-                  notify.success(`Factură importată: ${result.invoiceNumber} — ${result.supplierName} · ${result.totalAmount?.toFixed(2)} RON`);
+                  const totalText = result.totalAmount
+                    ? `${Number(result.totalAmount).toFixed(2)} RON`
+                    : "sumă necunoscută";
+                  notify.success(`Factură importată: ${result.invoiceNumber} — ${result.supplierName} · ${totalText}`);
                   void queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
                 } else {
                   notify.error(`Import eșuat: ${result.errors.join("; ")}`);

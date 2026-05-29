@@ -259,7 +259,7 @@ export const importData = {
       supplierName?: string;
       supplierCui?: string;
       issueDate?: string;
-      totalAmount?: number;
+      totalAmount?: string;
       errors: string[];
     }>("import_invoice_xml", { xmlContent, companyId }),
   /** Preferred: citește fișierul în Rust, ocolind scope-ul FS plugin. */
@@ -270,7 +270,7 @@ export const importData = {
       supplierName?: string;
       supplierCui?: string;
       issueDate?: string;
-      totalAmount?: number;
+      totalAmount?: string;
       errors: string[];
     }>("import_invoice_xml_from_file", { filePath, companyId }),
 };
