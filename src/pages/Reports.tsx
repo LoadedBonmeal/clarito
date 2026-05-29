@@ -12,7 +12,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
-import { fmtRON } from "@/lib/utils";
+import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import type { Invoice, Contact } from "@/types";
 
@@ -185,16 +185,16 @@ export function ReportsPage() {
   // Invoice statistics from period list
   const stats = useMemo(() => {
     const totalCount = periodInvoices.length;
-    const totalNet = periodInvoices.reduce((s, i) => s + i.subtotalAmount, 0);
-    const totalVat = periodInvoices.reduce((s, i) => s + i.vatAmount, 0);
-    const totalGross = periodInvoices.reduce((s, i) => s + i.totalAmount, 0);
+    const totalNet = periodInvoices.reduce((s, i) => s + parseDec(i.subtotalAmount), 0);
+    const totalVat = periodInvoices.reduce((s, i) => s + parseDec(i.vatAmount), 0);
+    const totalGross = periodInvoices.reduce((s, i) => s + parseDec(i.totalAmount), 0);
     return { totalCount, totalNet, totalVat, totalGross };
   }, [periodInvoices]);
 
   // Use backend VAT groups if available, fallback to zeros
   const vatGroups = vatReport?.vatGroups ?? [];
   const vatTotals = vatReport
-    ? { base: vatReport.totalBase, vat: vatReport.totalVat, total: vatReport.totalAmount }
+    ? { base: parseDec(vatReport.totalBase), vat: parseDec(vatReport.totalVat), total: parseDec(vatReport.totalAmount) }
     : { base: 0, vat: 0, total: 0 };
 
   const isLoading = invoicesLoading || vatLoading;
@@ -324,7 +324,7 @@ export function ReportsPage() {
                       <td><span className="mono">{g.rate}%</span></td>
                       <td className="num tnum">{fmtRON(g.baseAmount)}</td>
                       <td className="num tnum muted">{fmtRON(g.vatAmount)}</td>
-                      <td className="num tnum"><b>{fmtRON(g.baseAmount + g.vatAmount)}</b></td>
+                      <td className="num tnum"><b>{fmtRON(parseDec(g.baseAmount) + parseDec(g.vatAmount))}</b></td>
                     </tr>
                   ))}
                 </tbody>
@@ -340,7 +340,7 @@ export function ReportsPage() {
               {/* Simple CSS bar chart for VAT groups */}
               <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 80, marginTop: 12 }}>
                 {vatGroups.map(g => {
-                  const gTotal = g.baseAmount + g.vatAmount;
+                  const gTotal = parseDec(g.baseAmount) + parseDec(g.vatAmount);
                   const pct = vatTotals.total > 0 ? (gTotal / vatTotals.total) * 100 : 0;
                   return (
                     <div key={g.rate} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>

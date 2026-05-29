@@ -15,7 +15,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
-import { fmtRON } from "@/lib/utils";
+import { fmtRON, parseDec } from "@/lib/utils";
 import { fmtShortcut } from "@/lib/platform";
 import { notify } from "@/lib/toasts";
 import type { ReceivedStatus } from "@/types";
@@ -95,7 +95,7 @@ export function ReceivedPage() {
       );
   }, [allInvoices, filter, query]);
 
-  const totalSum = list.reduce((s, i) => s + i.totalAmount, 0);
+  const totalSum = list.reduce((s, i) => s + parseDec(i.totalAmount), 0);
 
   // Status counts (from loaded page)
   const counts = {

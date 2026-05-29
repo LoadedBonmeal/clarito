@@ -77,7 +77,12 @@ pub async fn smartbill_push_invoice(
     let products: Vec<serde_json::Value> = lines
         .iter()
         .map(|line| {
-            let tax_name = match line.vat_rate as u32 {
+            use rust_decimal::Decimal;
+            use rust_decimal::prelude::ToPrimitive;
+            use std::str::FromStr;
+            let vat_rate_dec = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
+            let vat_rate_u32 = vat_rate_dec.to_u32().unwrap_or(0);
+            let tax_name = match vat_rate_u32 {
                 21 | 19 => "Normala",
                 11 | 9 | 5 => "Redusa",
                 0 => "Scutita",
@@ -327,19 +332,21 @@ pub async fn export_winmentor_csv(
         .await
         .map_err(AppError::Database)?;
 
-        // Group by vat_rate (stored as f64 in DB; use integer key for bucketing).
+        // Group by vat_rate (stored as String in DB; use integer key for bucketing).
         // BTreeMap keeps rates sorted ascending for deterministic output.
+        use std::str::FromStr;
         let mut groups: BTreeMap<i64, (Decimal, Decimal, Decimal)> = BTreeMap::new();
         for lr in &line_rows {
             use sqlx::Row;
-            let rate_f: f64 = lr.try_get("vat_rate").unwrap_or(0.0);
-            let net_f: f64  = lr.try_get("subtotal_amount").unwrap_or(0.0);
-            let tva_f: f64  = lr.try_get("vat_amount").unwrap_or(0.0);
-            let tot_f: f64  = lr.try_get("total_amount").unwrap_or(0.0);
-            let rate_key = rate_f.round() as i64;
-            let net = Decimal::try_from(net_f).unwrap_or(Decimal::ZERO);
-            let tva = Decimal::try_from(tva_f).unwrap_or(Decimal::ZERO);
-            let tot = Decimal::try_from(tot_f).unwrap_or(Decimal::ZERO);
+            let rate_s: String = lr.try_get("vat_rate").unwrap_or_else(|_| "0.00".to_string());
+            let net_s: String  = lr.try_get("subtotal_amount").unwrap_or_else(|_| "0.00".to_string());
+            let tva_s: String  = lr.try_get("vat_amount").unwrap_or_else(|_| "0.00".to_string());
+            let tot_s: String  = lr.try_get("total_amount").unwrap_or_else(|_| "0.00".to_string());
+            let rate_dec = Decimal::from_str(&rate_s).unwrap_or(Decimal::ZERO);
+            let net = Decimal::from_str(&net_s).unwrap_or(Decimal::ZERO);
+            let tva = Decimal::from_str(&tva_s).unwrap_or(Decimal::ZERO);
+            let tot = Decimal::from_str(&tot_s).unwrap_or(Decimal::ZERO);
+            let rate_key = rate_dec.round().to_i64().unwrap_or(0);
             let entry = groups.entry(rate_key).or_insert((Decimal::ZERO, Decimal::ZERO, Decimal::ZERO));
             entry.0 += net;
             entry.1 += tva;
@@ -349,9 +356,9 @@ pub async fn export_winmentor_csv(
         // If we ended up with no lines (shouldn't happen), emit one row from invoice totals
         // using 19 as fallback rate — better than a silently wrong blended rate.
         if groups.is_empty() {
-            let net = Decimal::try_from(invoice.subtotal_amount).unwrap_or(Decimal::ZERO);
-            let tva = Decimal::try_from(invoice.vat_amount).unwrap_or(Decimal::ZERO);
-            let tot = Decimal::try_from(invoice.total_amount).unwrap_or(Decimal::ZERO);
+            let net = Decimal::from_str(&invoice.subtotal_amount).unwrap_or(Decimal::ZERO);
+            let tva = Decimal::from_str(&invoice.vat_amount).unwrap_or(Decimal::ZERO);
+            let tot = Decimal::from_str(&invoice.total_amount).unwrap_or(Decimal::ZERO);
             groups.insert(19, (net, tva, tot));
             tracing::warn!(invoice_id = %invoice.id, "WinMentor export: no line items found, using fallback rate 19%");
         }
@@ -495,9 +502,18 @@ pub async fn export_invoices_xlsx(
         customer_city: row.try_get::<String, _>("customer_city").unwrap_or_default(),
         currency:      row.try_get::<String, _>("currency").unwrap_or_else(|_| "RON".to_string()),
         status:        row.try_get::<String, _>("status").unwrap_or_default(),
-        net:           row.try_get::<f64, _>("subtotal_amount").unwrap_or(0.0),
-        vat:           row.try_get::<f64, _>("vat_amount").unwrap_or(0.0),
-        total:         row.try_get::<f64, _>("total_amount").unwrap_or(0.0),
+        net:           {
+            let s = row.try_get::<String, _>("subtotal_amount").unwrap_or_default();
+            s.parse::<f64>().unwrap_or(0.0)
+        },
+        vat:           {
+            let s = row.try_get::<String, _>("vat_amount").unwrap_or_default();
+            s.parse::<f64>().unwrap_or(0.0)
+        },
+        total:         {
+            let s = row.try_get::<String, _>("total_amount").unwrap_or_default();
+            s.parse::<f64>().unwrap_or(0.0)
+        },
     }).collect();
 
     let date_from = filter.date_from.clone();

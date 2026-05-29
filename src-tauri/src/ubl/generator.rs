@@ -139,8 +139,8 @@ pub fn generate_ubl(input: &GeneratorInput) -> AppResult<String> {
     write_tax_total(&mut writer, &input.lines, inv, currency)?;
 
     // ── LegalMonetaryTotal ───────────────────────────────────────────────────
-    let subtotal = fmt_amount(inv.subtotal_amount);
-    let total = fmt_amount(inv.total_amount);
+    let subtotal = fmt_amount(&inv.subtotal_amount);
+    let total = fmt_amount(&inv.total_amount);
     writer
         .write_event(Event::Start(BytesStart::new("cac:LegalMonetaryTotal")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
@@ -353,16 +353,16 @@ fn write_tax_total(
     // group by (vat_rate_str, vat_category)
     let mut groups: HashMap<(String, String), (Decimal, Decimal)> = HashMap::new();
     for line in lines {
-        let rate_str = format_decimal_2(line.vat_rate);
+        let rate_str = format_decimal_2(&line.vat_rate);
         let key = (rate_str, line.vat_category.clone());
         let entry = groups.entry(key).or_insert((Decimal::ZERO, Decimal::ZERO));
-        entry.0 += Decimal::from_str(&fmt_amount(line.subtotal_amount))
+        entry.0 += Decimal::from_str(&fmt_amount(&line.subtotal_amount))
             .unwrap_or(Decimal::ZERO);
-        entry.1 += Decimal::from_str(&fmt_amount(line.vat_amount))
+        entry.1 += Decimal::from_str(&fmt_amount(&line.vat_amount))
             .unwrap_or(Decimal::ZERO);
     }
 
-    let total_vat = fmt_amount(inv.vat_amount);
+    let total_vat = fmt_amount(&inv.vat_amount);
 
     writer
         .write_event(Event::Start(BytesStart::new("cac:TaxTotal")))
@@ -438,7 +438,7 @@ fn write_invoice_line(
         .map_err(|e| AppError::Xml(e.to_string()))?;
     writer
         .write_event(Event::Text(BytesText::new(&format_decimal_2(
-            line.quantity,
+            &line.quantity,
         ))))
         .map_err(|e| AppError::Xml(e.to_string()))?;
     writer
@@ -448,7 +448,7 @@ fn write_invoice_line(
     write_amount(
         writer,
         "cbc:LineExtensionAmount",
-        &fmt_amount(line.subtotal_amount),
+        &fmt_amount(&line.subtotal_amount),
         currency,
     )?;
 
@@ -473,7 +473,7 @@ fn write_invoice_line(
     write_text(
         writer,
         "cbc:Percent",
-        &format_decimal_2(line.vat_rate),
+        &format_decimal_2(&line.vat_rate),
     )?;
     writer
         .write_event(Event::Start(BytesStart::new("cac:TaxScheme")))
@@ -497,7 +497,7 @@ fn write_invoice_line(
     write_amount(
         writer,
         "cbc:PriceAmount",
-        &fmt_amount(line.unit_price),
+        &fmt_amount(&line.unit_price),
         currency,
     )?;
     writer
@@ -550,17 +550,17 @@ fn write_amount(
     Ok(())
 }
 
-/// Formatează `f64` ca string cu 2 zecimale, rutând prin `Decimal` pentru
-/// rotunjire zecimală corectă (evită artefactele binary-float).
-fn fmt_amount(v: f64) -> String {
-    let d = Decimal::from_str(&format!("{:.10}", v)).unwrap_or(Decimal::ZERO);
-    format!("{:.2}", d.round_dp(2))
+/// Formatează un `&str` numeric ca string cu 2 zecimale, rutând prin `Decimal`
+/// pentru rotunjire zecimală corectă (evită artefactele binary-float).
+fn fmt_amount(s: &str) -> String {
+    let d = Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO).round_dp(2);
+    format!("{:.2}", d)
 }
 
-/// Formatează un număr `f64` ca string cu 2 zecimale (pentru rate/cantităţi).
+/// Formatează un `&str` numeric ca string cu 2 zecimale (pentru rate/cantităţi).
 /// Identic cu `fmt_amount` — ambele rutează prin `Decimal`.
-fn format_decimal_2(v: f64) -> String {
-    fmt_amount(v)
+fn format_decimal_2(s: &str) -> String {
+    fmt_amount(s)
 }
 
 #[cfg(test)]
@@ -625,9 +625,9 @@ mod tests {
             due_date: "2024-02-15".to_string(),
             currency: "RON".to_string(),
             exchange_rate: None,
-            subtotal_amount: 100.0,
-            vat_amount: 19.0,
-            total_amount: 119.0,
+            subtotal_amount: "100.00".to_string(),
+            vat_amount: "19.00".to_string(),
+            total_amount: "119.00".to_string(),
             status: "DRAFT".to_string(),
             anaf_upload_id: None,
             anaf_index: None,
@@ -651,14 +651,14 @@ mod tests {
             position: 1,
             name: "Serviciu consultanță".to_string(),
             description: None,
-            quantity: 1.0,
+            quantity: "1.00".to_string(),
             unit: "H87".to_string(),
-            unit_price: 100.0,
-            vat_rate: 19.0,
+            unit_price: "100.00".to_string(),
+            vat_rate: "19.00".to_string(),
             vat_category: "S".to_string(),
-            subtotal_amount: 100.0,
-            vat_amount: 19.0,
-            total_amount: 119.0,
+            subtotal_amount: "100.00".to_string(),
+            vat_amount: "19.00".to_string(),
+            total_amount: "119.00".to_string(),
             cpv_code: None,
         };
 

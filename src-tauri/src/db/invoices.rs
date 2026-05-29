@@ -5,14 +5,21 @@
 //! - `invoice_line_items` — produse/servicii (1..N)
 //! - `invoice_events` — istoric (submit, validate, reject)
 //!
-//! Money: la nivel DB folosim `f64` (REAL). Pentru calcule, convertește la
-//! `rust_decimal::Decimal` în business logic.
+//! Money: stocat ca TEXT (Decimal string) în DB. Exchange rate rămâne REAL (rată FX, nu bani).
 
+use std::str::FromStr;
+
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
 use crate::db::models::{new_id, now_unix, InvoiceStatus, Page, Paginated};
 use crate::error::{AppError, AppResult};
+
+#[allow(dead_code)]
+fn parse_dec(s: &str) -> Decimal {
+    Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO).round_dp(2)
+}
 
 // ─── Models ────────────────────────────────────────────────────────────────
 
@@ -33,9 +40,9 @@ pub struct Invoice {
     pub currency: String,
     pub exchange_rate: Option<f64>,
 
-    pub subtotal_amount: f64,
-    pub vat_amount: f64,
-    pub total_amount: f64,
+    pub subtotal_amount: String,
+    pub vat_amount: String,
+    pub total_amount: String,
 
     pub status: String,
 
@@ -68,16 +75,16 @@ pub struct LineItem {
     pub position: i64,
     pub name: String,
     pub description: Option<String>,
-    pub quantity: f64,
+    pub quantity: String,
     pub unit: String,
-    pub unit_price: f64,
+    pub unit_price: String,
 
-    pub vat_rate: f64,
+    pub vat_rate: String,
     pub vat_category: String,
 
-    pub subtotal_amount: f64,
-    pub vat_amount: f64,
-    pub total_amount: f64,
+    pub subtotal_amount: String,
+    pub vat_amount: String,
+    pub total_amount: String,
 
     pub cpv_code: Option<String>,
 }
@@ -319,13 +326,11 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
     let now = now_unix();
 
     // Calculăm totaluri cu Decimal pentru precizie (money math — niciodată f64).
-    use rust_decimal::Decimal;
-    use rust_decimal::prelude::ToPrimitive;
     let hundred = Decimal::from(100u32);
 
     let mut subtotal_dec = Decimal::ZERO;
     let mut vat_total_dec = Decimal::ZERO;
-    let line_rows: Vec<(String, f64, f64, f64)> = input
+    let line_rows: Vec<(String, String, String, String)> = input
         .lines
         .iter()
         .map(|l| {
@@ -339,15 +344,15 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
             vat_total_dec += lv;
             (
                 new_id(),
-                ls.to_f64().unwrap_or(0.0),
-                lv.to_f64().unwrap_or(0.0),
-                lt.to_f64().unwrap_or(0.0),
+                ls.round_dp(2).to_string(),
+                lv.round_dp(2).to_string(),
+                lt.round_dp(2).to_string(),
             )
         })
         .collect();
-    let subtotal  = subtotal_dec.to_f64().unwrap_or(0.0);
-    let vat_total = vat_total_dec.to_f64().unwrap_or(0.0);
-    let total     = (subtotal_dec + vat_total_dec).to_f64().unwrap_or(0.0);
+    let subtotal  = subtotal_dec.round_dp(2).to_string();
+    let vat_total = vat_total_dec.round_dp(2).to_string();
+    let total     = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
 
     let mut tx = pool.begin().await?;
 
@@ -420,10 +425,10 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         .bind((position as i64) + 1)
         .bind(&line.name)
         .bind(&line.description)
-        .bind(line.quantity)
+        .bind(Decimal::try_from(line.quantity).unwrap_or(Decimal::ZERO).round_dp(2).to_string())
         .bind(&line.unit)
-        .bind(line.unit_price)
-        .bind(line.vat_rate)
+        .bind(Decimal::try_from(line.unit_price).unwrap_or(Decimal::ZERO).round_dp(2).to_string())
+        .bind(Decimal::try_from(line.vat_rate).unwrap_or(Decimal::ZERO).round_dp(2).to_string())
         .bind(&line.vat_category)
         .bind(line_subtotal)
         .bind(line_vat)

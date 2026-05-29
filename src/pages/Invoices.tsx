@@ -15,7 +15,7 @@ import { CsvImportModal } from "@/components/shared/CsvImportModal";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
-import { fmtRON } from "@/lib/utils";
+import { fmtRON, parseDec } from "@/lib/utils";
 
 import { fmtShortcut } from "@/lib/platform";
 import { notify } from "@/lib/toasts";
@@ -70,8 +70,8 @@ export function InvoicesPage() {
         return filter === "all" || i.status === filter;
       })
       .filter((i) => {
-        if (minVal !== null && !isNaN(minVal) && i.totalAmount < minVal) return false;
-        if (maxVal !== null && !isNaN(maxVal) && i.totalAmount > maxVal) return false;
+        if (minVal !== null && !isNaN(minVal) && parseDec(i.totalAmount) < minVal) return false;
+        if (maxVal !== null && !isNaN(maxVal) && parseDec(i.totalAmount) > maxVal) return false;
         return true;
       })
       .filter((i) => {

@@ -156,9 +156,9 @@ export interface Invoice {
   dueDate: string;
   currency: string;
   exchangeRate: number | null;
-  subtotalAmount: number;
-  vatAmount: number;
-  totalAmount: number;
+  subtotalAmount: string;
+  vatAmount: string;
+  totalAmount: string;
   status: InvoiceStatus;
   anafUploadId: string | null;
   anafIndex: string | null;
@@ -182,14 +182,14 @@ export interface LineItem {
   position: number;
   name: string;
   description: string | null;
-  quantity: number;
+  quantity: string;
   unit: string;
-  unitPrice: number;
-  vatRate: number;
+  unitPrice: string;
+  vatRate: string;
   vatCategory: VatCategory;
-  subtotalAmount: number;
-  vatAmount: number;
-  totalAmount: number;
+  subtotalAmount: string;
+  vatAmount: string;
+  totalAmount: string;
   cpvCode: string | null;
 }
 
@@ -253,7 +253,7 @@ export interface ReceivedInvoice {
   issuerName: string;
   series: string | null;
   number: string | null;
-  totalAmount: number;
+  totalAmount: string;
   currency: string;
   issueDate: string;
   xmlPath: string;
@@ -358,8 +358,8 @@ export interface AnafStatusResult {
 
 export interface VatGroup {
   rate: number;
-  baseAmount: number;
-  vatAmount: number;
+  baseAmount: string;
+  vatAmount: string;
   invoiceCount: number;
 }
 
@@ -367,9 +367,9 @@ export interface VatReport {
   dateFrom: string;
   dateTo: string;
   companyId: string | null;
-  totalBase: number;
-  totalVat: number;
-  totalAmount: number;
+  totalBase: string;
+  totalVat: string;
+  totalAmount: string;
   invoiceCount: number;
   vatGroups: VatGroup[];
   generatedAt: number;

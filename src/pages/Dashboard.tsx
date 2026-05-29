@@ -13,6 +13,7 @@ import { queryClient, queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtShortcut } from "@/lib/platform";
+import { parseDec } from "@/lib/utils";
 
 const DOT_COLORS = [
   "#2848A1", "#7C3AED", "#0891B2", "#D97706", "#16A34A",
@@ -24,11 +25,11 @@ function dotColor(cui: string): string {
   return DOT_COLORS[h % DOT_COLORS.length];
 }
 
-function fmtRON(n: number): string {
+function fmtRON(n: string | number): string {
   return new Intl.NumberFormat("ro-RO", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(n);
+  }).format(parseDec(n));
 }
 
 function fmtTime(unix: number): string {
@@ -108,11 +109,11 @@ export function DashboardPage() {
   );
 
   const totalNet = useMemo(
-    () => thisMonth.reduce((s, inv) => s + inv.subtotalAmount, 0),
+    () => thisMonth.reduce((s, inv) => s + parseDec(inv.subtotalAmount), 0),
     [thisMonth],
   );
   const totalVat = useMemo(
-    () => thisMonth.reduce((s, inv) => s + inv.vatAmount, 0),
+    () => thisMonth.reduce((s, inv) => s + parseDec(inv.vatAmount), 0),
     [thisMonth],
   );
 
@@ -146,7 +147,7 @@ export function DashboardPage() {
   );
 
   const overdueTotal = useMemo(
-    () => overdue.reduce((s, inv) => s + inv.totalAmount, 0),
+    () => overdue.reduce((s, inv) => s + parseDec(inv.totalAmount), 0),
     [overdue],
   );
 

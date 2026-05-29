@@ -11,7 +11,7 @@ import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import type { AddPaymentArgs, Payment } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
-import { fmtRON } from "@/lib/utils";
+import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 
 type PayFilter = "all" | "UNPAID" | "PARTIAL" | "PAID" | "OVERDUE";
@@ -201,8 +201,8 @@ export function PaymentsPage() {
             <tbody>
               {list.map((inv) => {
                 const s = summaryMap.get(inv.id);
-                const paidAmt = parseFloat(s?.paidAmount ?? "0");
-                const totalAmt = inv.totalAmount;
+                const paidAmt = parseDec(s?.paidAmount);
+                const totalAmt = parseDec(inv.totalAmount);
                 const rest = Math.max(0, totalAmt - paidAmt);
                 const payStatus = s?.paymentStatus ?? "UNPAID";
                 const overdue = isOverdue(inv.dueDate, payStatus);
@@ -232,8 +232,8 @@ export function PaymentsPage() {
                         className="btn compact"
                         disabled={payStatus === "PAID"}
                         onClick={() => {
-                          setAddModal({ invoiceId: inv.id, totalAmount: String(totalAmt) });
-                          setForm({ amount: String(rest.toFixed(2)), paidAt: new Date().toISOString().slice(0, 10), method: "transfer", reference: "" });
+                          setAddModal({ invoiceId: inv.id, totalAmount: inv.totalAmount });
+                          setForm({ amount: rest.toFixed(2), paidAt: new Date().toISOString().slice(0, 10), method: "transfer", reference: "" });
                         }}
                         title="Adaugă plată"
                       >

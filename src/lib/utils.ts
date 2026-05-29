@@ -5,13 +5,17 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatRON(amount: number): string {
+/** Parse a Decimal string (or legacy number) to a JS number for arithmetic/display. */
+export const parseDec = (s: string | number | undefined | null): number =>
+  parseFloat(String(s ?? "0")) || 0;
+
+export function formatRON(amount: string | number): string {
   return new Intl.NumberFormat("ro-RO", {
     style: "currency",
     currency: "RON",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(amount);
+  }).format(parseDec(amount));
 }
 
 /**
@@ -19,8 +23,8 @@ export function formatRON(amount: number): string {
  * Folosit în tabelele dense unde coloana deja indică RON.
  * Echivalent cu fmtRON din @/data/sample.
  */
-export function fmtRON(amount: number): string {
-  return amount.toLocaleString("ro-RO", {
+export function fmtRON(amount: string | number): string {
+  return parseDec(amount).toLocaleString("ro-RO", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });

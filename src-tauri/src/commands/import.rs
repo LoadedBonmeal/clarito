@@ -359,7 +359,7 @@ pub struct XmlImportResult {
     pub supplier_name: Option<String>,
     pub supplier_cui: Option<String>,
     pub issue_date: Option<String>,
-    pub total_amount: Option<f64>,
+    pub total_amount: Option<String>,
     pub errors: Vec<String>,
 }
 
@@ -421,12 +421,15 @@ async fn import_invoice_xml_inner(
     let mut depth_customer_tax = 0i32;
     let mut current_local = String::new();
 
+    use rust_decimal::Decimal;
+    use std::str::FromStr as _;
+
     let mut issuer_cui = String::new();
     let mut issuer_name = String::new();
     let mut issue_date = String::new();
     let mut invoice_number = String::new();
     let mut currency = String::from("RON");
-    let mut total_amount = 0.0f64;
+    let mut total_amount_str = String::from("0.00");
     let mut buyer_cui = String::new();
 
     loop {
@@ -484,7 +487,11 @@ async fn import_invoice_xml_inner(
                         issuer_name = text;
                     }
                     "PayableAmount" if depth_monetary > 0 => {
-                        total_amount = text.parse().unwrap_or(0.0);
+                        total_amount_str = if let Ok(d) = Decimal::from_str(text.trim()) {
+                            d.round_dp(2).to_string()
+                        } else {
+                            "0.00".to_string()
+                        };
                     }
                     _ => {}
                 }
@@ -549,7 +556,7 @@ async fn import_invoice_xml_inner(
             supplier_name: Some(issuer_name),
             supplier_cui: Some(issuer_cui),
             issue_date: Some(issue_date),
-            total_amount: Some(total_amount),
+            total_amount: Some(total_amount_str),
             errors,
         });
     }
@@ -577,7 +584,7 @@ async fn import_invoice_xml_inner(
                 supplier_name: Some(issuer_name),
                 supplier_cui: Some(issuer_cui),
                 issue_date: Some(issue_date),
-                total_amount: Some(total_amount),
+                total_amount: Some(total_amount_str),
                 errors,
             });
         }
@@ -612,7 +619,7 @@ async fn import_invoice_xml_inner(
     .bind(&issuer_cui)
     .bind(&issuer_name)
     .bind(&invoice_number)
-    .bind(total_amount)
+    .bind(&total_amount_str)
     .bind(&currency)
     .bind(&issue_date)
     .bind(xml_path.to_string_lossy().as_ref())
@@ -636,7 +643,7 @@ async fn import_invoice_xml_inner(
                 supplier_name: Some(issuer_name),
                 supplier_cui: Some(issuer_cui),
                 issue_date: Some(issue_date),
-                total_amount: Some(total_amount),
+                total_amount: Some(total_amount_str),
                 errors,
             })
         }
@@ -650,7 +657,7 @@ async fn import_invoice_xml_inner(
                 supplier_name: Some(issuer_name),
                 supplier_cui: Some(issuer_cui),
                 issue_date: Some(issue_date),
-                total_amount: Some(total_amount),
+                total_amount: Some(total_amount_str),
                 errors,
             })
         }
@@ -663,7 +670,7 @@ async fn import_invoice_xml_inner(
                 supplier_name: Some(issuer_name),
                 supplier_cui: Some(issuer_cui),
                 issue_date: Some(issue_date),
-                total_amount: Some(total_amount),
+                total_amount: Some(total_amount_str),
                 errors,
             })
         }

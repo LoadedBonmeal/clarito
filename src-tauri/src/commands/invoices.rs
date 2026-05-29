@@ -300,7 +300,7 @@ pub async fn storno_invoice(
 
     // 3. Calculăm liniile storno (cantități negative) și totalurile
     use rust_decimal::Decimal;
-    use rust_decimal::prelude::ToPrimitive;
+    use std::str::FromStr;
     let hundred = Decimal::from(100u32);
 
     let mut subtotal_dec = Decimal::ZERO;
@@ -310,24 +310,24 @@ pub async fn storno_invoice(
         id: String,
         name: String,
         description: Option<String>,
-        quantity: f64,
+        quantity: String,
         unit: String,
-        unit_price: f64,
-        vat_rate: f64,
+        unit_price: String,
+        vat_rate: String,
         vat_category: String,
         cpv_code: Option<String>,
-        subtotal: f64,
-        vat_amount: f64,
-        total: f64,
+        subtotal: String,
+        vat_amount: String,
+        total: String,
     }
 
     let storno_lines: Vec<StornoLine> = orig_lines
         .iter()
         .enumerate()
         .map(|(_, l)| {
-            let qty = Decimal::try_from(-l.quantity).unwrap_or(Decimal::ZERO);
-            let price = Decimal::try_from(l.unit_price).unwrap_or(Decimal::ZERO);
-            let rate = Decimal::try_from(l.vat_rate).unwrap_or(Decimal::ZERO);
+            let qty = -Decimal::from_str(&l.quantity).unwrap_or(Decimal::ZERO);
+            let price = Decimal::from_str(&l.unit_price).unwrap_or(Decimal::ZERO);
+            let rate = Decimal::from_str(&l.vat_rate).unwrap_or(Decimal::ZERO);
             let ls = (qty * price).round_dp(2);
             let lv = (ls * rate / hundred).round_dp(2);
             let lt = ls + lv;
@@ -337,22 +337,22 @@ pub async fn storno_invoice(
                 id: new_id(),
                 name: l.name.clone(),
                 description: Some(format!("Storno: {}", l.name)),
-                quantity: -l.quantity,
+                quantity: qty.round_dp(6).to_string(),
                 unit: l.unit.clone(),
-                unit_price: l.unit_price,
-                vat_rate: l.vat_rate,
+                unit_price: price.round_dp(2).to_string(),
+                vat_rate: rate.round_dp(2).to_string(),
                 vat_category: l.vat_category.clone(),
                 cpv_code: l.cpv_code.clone(),
-                subtotal: ls.to_f64().unwrap_or(0.0),
-                vat_amount: lv.to_f64().unwrap_or(0.0),
-                total: lt.to_f64().unwrap_or(0.0),
+                subtotal: ls.to_string(),
+                vat_amount: lv.to_string(),
+                total: lt.to_string(),
             }
         })
         .collect();
 
-    let subtotal = subtotal_dec.to_f64().unwrap_or(0.0);
-    let vat_total = vat_total_dec.to_f64().unwrap_or(0.0);
-    let total = (subtotal_dec + vat_total_dec).to_f64().unwrap_or(0.0);
+    let subtotal = subtotal_dec.round_dp(2).to_string();
+    let vat_total = vat_total_dec.round_dp(2).to_string();
+    let total = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
 
     let issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let storno_id = new_id();
@@ -437,14 +437,14 @@ pub async fn storno_invoice(
         .bind((position as i64) + 1)
         .bind(&line.name)
         .bind(&line.description)
-        .bind(line.quantity)
+        .bind(&line.quantity)
         .bind(&line.unit)
-        .bind(line.unit_price)
-        .bind(line.vat_rate)
+        .bind(&line.unit_price)
+        .bind(&line.vat_rate)
         .bind(&line.vat_category)
-        .bind(line.subtotal)
-        .bind(line.vat_amount)
-        .bind(line.total)
+        .bind(&line.subtotal)
+        .bind(&line.vat_amount)
+        .bind(&line.total)
         .bind(&line.cpv_code)
         .execute(&mut *tx)
         .await

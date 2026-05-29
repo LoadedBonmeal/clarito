@@ -1,6 +1,9 @@
 //! Generare PDF simplu pentru factură folosind `printpdf 0.7`.
 
 use printpdf::*;
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
+use std::str::FromStr;
 
 use crate::db::companies::Company;
 use crate::db::contacts::Contact;
@@ -123,12 +126,13 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
 
     // ── VAT breakdown table (left side) ──────────────────────────────────────
     {
-        let mut vat_groups: std::collections::BTreeMap<u32, (f64, f64)> = std::collections::BTreeMap::new();
+        let mut vat_groups: std::collections::BTreeMap<i64, (Decimal, Decimal)> = std::collections::BTreeMap::new();
         for line in &input.lines {
-            let rate_key = (line.vat_rate * 100.0).round() as u32;
-            let entry = vat_groups.entry(rate_key).or_insert((0.0, 0.0));
-            entry.0 += line.subtotal_amount;
-            entry.1 += line.vat_amount;
+            let rate_dec = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
+            let rate_key = (rate_dec * Decimal::from(100)).to_i64().unwrap_or(0);
+            let entry = vat_groups.entry(rate_key).or_insert((Decimal::ZERO, Decimal::ZERO));
+            entry.0 += Decimal::from_str(&line.subtotal_amount).unwrap_or(Decimal::ZERO);
+            entry.1 += Decimal::from_str(&line.vat_amount).unwrap_or(Decimal::ZERO);
         }
         if !vat_groups.is_empty() {
             layer.use_text("Detaliu TVA:", FONT_SMALL, Mm(MARGIN), Mm(y), &font_bold);
@@ -153,7 +157,7 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     // ── Totals (right side) ───────────────────────────────────────────────────
     let totals_x = PAGE_W - MARGIN - 70.0;
     layer.use_text(
-        format!("Subtotal: {:.2} {}", inv.subtotal_amount, inv.currency),
+        format!("Subtotal: {} {}", inv.subtotal_amount, inv.currency),
         FONT_NORMAL,
         Mm(totals_x),
         Mm(y),
@@ -161,7 +165,7 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     );
     y -= LINE_H;
     layer.use_text(
-        format!("TVA: {:.2} {}", inv.vat_amount, inv.currency),
+        format!("TVA: {} {}", inv.vat_amount, inv.currency),
         FONT_NORMAL,
         Mm(totals_x),
         Mm(y),
@@ -169,7 +173,7 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     );
     y -= LINE_H;
     layer.use_text(
-        format!("TOTAL: {:.2} {}", inv.total_amount, inv.currency),
+        format!("TOTAL: {} {}", inv.total_amount, inv.currency),
         FONT_HEADING,
         Mm(totals_x),
         Mm(y),
@@ -178,7 +182,8 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     y -= LINE_H;
 
     // Total în cuvinte (Romanian words) — plan Task 5.3
-    let words = amount_to_romanian_words(inv.total_amount);
+    let total_dec = Decimal::from_str(&inv.total_amount).unwrap_or(Decimal::ZERO);
+    let words = amount_to_romanian_words(total_dec.to_f64().unwrap_or(0.0));
     layer.use_text(
         format!("({words})"),
         FONT_SMALL,
@@ -305,10 +310,13 @@ fn write_line_row(
         line.position.to_string(),
         truncate(&line.name, 28),
         line.unit.clone(),
-        format!("{:.2}", line.quantity),
-        format!("{:.2} {}", line.unit_price, currency),
-        format!("{:.0}%", line.vat_rate),
-        format!("{:.2} {}", line.subtotal_amount, currency),
+        line.quantity.clone(),
+        format!("{} {}", line.unit_price, currency),
+        format!(
+            "{:.0}%",
+            Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO).to_f64().unwrap_or(0.0)
+        ),
+        format!("{} {}", line.subtotal_amount, currency),
     ];
     for (i, val) in values.iter().enumerate() {
         layer.use_text(val.clone(), FONT_SMALL, Mm(col_x[i]), Mm(y), font);

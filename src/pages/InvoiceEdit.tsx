@@ -7,6 +7,7 @@ import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
 import { notify } from "@/lib/toasts";
 import type { CreateLineInput, VatCategory } from "@/types";
+import { parseDec } from "@/lib/utils";
 
 /** Extends CreateLineInput with a stable row key for React list rendering. */
 type LineRow = CreateLineInput & { rowId: string };
@@ -84,10 +85,10 @@ export function InvoiceEditPage() {
           rowId: (l as { id?: string }).id ?? `line-${i}`,
           name: l.name,
           description: l.description ?? undefined,
-          quantity: l.quantity,
+          quantity: parseDec(l.quantity),
           unit: l.unit,
-          unitPrice: l.unitPrice,
-          vatRate: l.vatRate,
+          unitPrice: parseDec(l.unitPrice),
+          vatRate: parseDec(l.vatRate),
           vatCategory: l.vatCategory,
           cpvCode: l.cpvCode ?? undefined,
         }))

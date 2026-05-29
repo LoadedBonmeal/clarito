@@ -632,7 +632,7 @@ pub(crate) async fn do_sync_spv(
             .bind(&issuer_name)
             .bind(Option::<String>::None) // series — NULL until extracted from XML
             .bind(Option::<String>::None) // number — NULL until extracted from XML
-            .bind(total_amount)
+            .bind(&total_amount)
             .bind(&issue_date)
             .bind(xml_path.to_string_lossy().as_ref())
             .bind(now)
@@ -650,7 +650,7 @@ pub(crate) async fn do_sync_spv(
             // ── Create SPV notification ───────────────────────────────────
             let title = format!("Factură primită de la {}", issuer_name);
             let body = format!(
-                "Sumă: {:.2} RON — {}",
+                "Sumă: {} RON — {}",
                 total_amount, issue_date
             );
 
@@ -694,9 +694,11 @@ fn extract_xml_from_zip(zip_bytes: &[u8]) -> Option<Vec<u8>> {
 
 /// Parsează XML-ul UBL primit de la ANAF folosind quick-xml (namespace-aware).
 /// Extrage: CUI emitent, denumire emitent, valoare totală, dată emisie.
-fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, f64, String) {
+fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
     use quick_xml::events::Event;
     use quick_xml::Reader;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
 
     // Strip UTF-8 BOM dacă există
     let xml_str = String::from_utf8_lossy(xml_bytes);
@@ -707,7 +709,7 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, f64, String) {
 
     let mut issuer_cui = String::new();
     let mut issuer_name = String::new();
-    let mut total_amount = 0.0f64;
+    let mut total_amount_str = "0.00".to_string();
     let mut issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
     // State machine pentru navigarea structurii UBL
@@ -758,7 +760,9 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, f64, String) {
                     }
                     // PayableAmount = valoarea totală de plată
                     "PayableAmount" => {
-                        total_amount = text.parse().unwrap_or(0.0);
+                        if let Ok(d) = Decimal::from_str(text.trim()) {
+                            total_amount_str = d.round_dp(2).to_string();
+                        }
                     }
                     // IssueDate = data emiterii
                     "IssueDate" => {
@@ -776,7 +780,7 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, f64, String) {
     (
         if issuer_cui.is_empty() { "NECUNOSCUT".to_string() } else { issuer_cui },
         if issuer_name.is_empty() { "Necunoscut".to_string() } else { issuer_name },
-        total_amount,
+        total_amount_str,
         issue_date,
     )
 }
@@ -792,7 +796,6 @@ async fn process_recurring_invoices(
     use crate::db::models::new_id;
     use chrono::Local;
     use rust_decimal::Decimal;
-    use rust_decimal::prelude::ToPrimitive;
 
     let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
     let hundred = Decimal::from(100u32);
@@ -867,15 +870,14 @@ async fn process_recurring_invoices(
         struct LineCalc {
             name: String,
             description: Option<String>,
-            quantity: Decimal,
+            quantity: String,
             unit: String,
-            unit_price: Decimal,
-            vat_rate: Decimal,
-            vat_rate_f64: f64,
+            unit_price: String,
+            vat_rate: String,
             vat_category: String,
-            subtotal: f64,
-            vat_amount: f64,
-            total_amount: f64,
+            subtotal: String,
+            vat_amount: String,
+            total_amount: String,
         }
 
         let mut line_calcs: Vec<LineCalc> = Vec::with_capacity(lines.len());
@@ -908,21 +910,20 @@ async fn process_recurring_invoices(
             line_calcs.push(LineCalc {
                 name,
                 description,
-                quantity: qty,
+                quantity: qty.round_dp(2).to_string(),
                 unit,
-                unit_price: price,
-                vat_rate,
-                vat_rate_f64: vat_rate_i as f64,
+                unit_price: price.round_dp(2).to_string(),
+                vat_rate: vat_rate.round_dp(2).to_string(),
                 vat_category,
-                subtotal: ls.to_f64().unwrap_or(0.0),
-                vat_amount: lv.to_f64().unwrap_or(0.0),
-                total_amount: lt.to_f64().unwrap_or(0.0),
+                subtotal: ls.round_dp(2).to_string(),
+                vat_amount: lv.round_dp(2).to_string(),
+                total_amount: lt.round_dp(2).to_string(),
             });
         }
 
-        let subtotal = subtotal_dec.to_f64().unwrap_or(0.0);
-        let vat_total = vat_total_dec.to_f64().unwrap_or(0.0);
-        let total = (subtotal_dec + vat_total_dec).to_f64().unwrap_or(0.0);
+        let subtotal = subtotal_dec.round_dp(2).to_string();
+        let vat_total = vat_total_dec.round_dp(2).to_string();
+        let total = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
 
         let now_unix = chrono::Utc::now().timestamp();
 
@@ -948,9 +949,9 @@ async fn process_recurring_invoices(
         .bind(&full_number)
         .bind(&issue_date)
         .bind(&due_date)
-        .bind(subtotal)
-        .bind(vat_total)
-        .bind(total)
+        .bind(&subtotal)
+        .bind(&vat_total)
+        .bind(&total)
         .bind(template.notes.as_deref().unwrap_or(""))
         .bind(now_unix)
         .execute(&mut *tx)
@@ -981,14 +982,14 @@ async fn process_recurring_invoices(
             .bind((i as i64) + 1)
             .bind(&lc.name)
             .bind(&lc.description)
-            .bind(lc.quantity.to_f64().unwrap_or(1.0))
+            .bind(&lc.quantity)
             .bind(&lc.unit)
-            .bind(lc.unit_price.to_f64().unwrap_or(0.0))
-            .bind(lc.vat_rate_f64)
+            .bind(&lc.unit_price)
+            .bind(&lc.vat_rate)
             .bind(&lc.vat_category)
-            .bind(lc.subtotal)
-            .bind(lc.vat_amount)
-            .bind(lc.total_amount)
+            .bind(&lc.subtotal)
+            .bind(&lc.vat_amount)
+            .bind(&lc.total_amount)
             .execute(&mut *tx)
             .await
             {

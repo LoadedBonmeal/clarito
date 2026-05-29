@@ -20,7 +20,7 @@ pub struct ReceivedInvoice {
     pub series: Option<String>,
     pub number: Option<String>,
 
-    pub total_amount: f64,
+    pub total_amount: String,
     pub currency: String,
     pub issue_date: String,
 
@@ -43,7 +43,7 @@ pub struct CreateReceivedInput {
     pub issuer_name: String,
     pub series: Option<String>,
     pub number: Option<String>,
-    pub total_amount: f64,
+    pub total_amount: String,
     pub currency: String,
     pub issue_date: String,
     pub xml_path: String,
@@ -146,6 +146,13 @@ pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<ReceivedInvoice> {
 }
 
 pub async fn create(pool: &SqlitePool, input: CreateReceivedInput) -> AppResult<ReceivedInvoice> {
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    // Validate that total_amount is a parseable Decimal.
+    Decimal::from_str(input.total_amount.trim())
+        .map_err(|_| AppError::Validation("Sumă totală invalidă".into()))?;
+
     let id = new_id();
     let now = now_unix();
 
@@ -174,7 +181,7 @@ pub async fn create(pool: &SqlitePool, input: CreateReceivedInput) -> AppResult<
     .bind(&input.issuer_name)
     .bind(&input.series)
     .bind(&input.number)
-    .bind(input.total_amount)
+    .bind(&input.total_amount)
     .bind(&input.currency)
     .bind(&input.issue_date)
     .bind(&input.xml_path)

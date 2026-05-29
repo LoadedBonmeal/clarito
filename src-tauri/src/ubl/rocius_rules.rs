@@ -4,6 +4,7 @@
 //! (None = OK, Some(msg) = eroare).
 
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use rust_decimal::Decimal;
 
@@ -89,12 +90,6 @@ pub fn run_all(ctx: &RuleContext<'_>) -> (Vec<String>, Vec<String>) {
     warn!(warn_br_ro_w03_vat_payer_missing_prefix);
 
     (errors, warnings)
-}
-
-// ─── Decimal helper ──────────────────────────────────────────────────────────
-
-fn f64_to_dec(v: f64) -> Decimal {
-    Decimal::from_f64_retain(v).unwrap_or(Decimal::ZERO)
 }
 
 // ─── Supplier rules ──────────────────────────────────────────────────────────
@@ -340,7 +335,7 @@ fn rule_br_ro_031_line_quantities(ctx: &RuleContext<'_>) -> Option<String> {
         .lines
         .iter()
         .enumerate()
-        .filter(|(_, l)| l.quantity == 0.0)
+        .filter(|(_, l)| Decimal::from_str(&l.quantity).unwrap_or(Decimal::ZERO) == Decimal::ZERO)
         .map(|(i, _)| i + 1)
         .collect();
     if !bad.is_empty() {
@@ -376,7 +371,7 @@ fn rule_br_ro_033_line_unit_price_nonneg(ctx: &RuleContext<'_>) -> Option<String
         .lines
         .iter()
         .enumerate()
-        .filter(|(_, l)| l.unit_price < 0.0)
+        .filter(|(_, l)| Decimal::from_str(&l.unit_price).unwrap_or(Decimal::ZERO) < Decimal::ZERO)
         .map(|(i, _)| i + 1)
         .collect();
     if !bad.is_empty() {
@@ -423,8 +418,12 @@ fn rule_br_ro_035_line_vat_rates(ctx: &RuleContext<'_>) -> Option<String> {
                 //  11% — redusă (din 2025-08-01)
                 //  19% — standard (până la 2025-07-31)
                 //  21% — standard (din 2025-08-01)
-                const VALID_S: &[f64] = &[5.0, 9.0, 11.0, 19.0, 21.0];
-                if !VALID_S.contains(&line.vat_rate) {
+                let rate_dec = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
+                let valid_s_rates = [
+                    Decimal::from(5), Decimal::from(9), Decimal::from(11),
+                    Decimal::from(19), Decimal::from(21),
+                ];
+                if !valid_s_rates.contains(&rate_dec) {
                     errs.push(format!(
                         "linia {}: categoria S trebuie să aibă cota TVA 5%, 9%, 11%, 19% sau 21% (actual: {}%)",
                         pos, line.vat_rate
@@ -432,7 +431,7 @@ fn rule_br_ro_035_line_vat_rates(ctx: &RuleContext<'_>) -> Option<String> {
                 }
             }
             "Z" | "E" | "AE" | "K" | "G" | "O" => {
-                if line.vat_rate != 0.0 {
+                if Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO) != Decimal::ZERO {
                     errs.push(format!(
                         "linia {}: categoria {} trebuie să aibă cota TVA 0% (actual: {}%)",
                         pos, line.vat_category, line.vat_rate
@@ -455,9 +454,9 @@ fn rule_br_ro_035_line_vat_rates(ctx: &RuleContext<'_>) -> Option<String> {
 fn rule_br_ro_036_line_totals_match(ctx: &RuleContext<'_>) -> Option<String> {
     let mut errs: Vec<String> = Vec::new();
     for (i, line) in ctx.lines.iter().enumerate() {
-        let qty = f64_to_dec(line.quantity);
-        let price = f64_to_dec(line.unit_price);
-        let stored = f64_to_dec(line.subtotal_amount).round_dp(2);
+        let qty = Decimal::from_str(&line.quantity).unwrap_or(Decimal::ZERO);
+        let price = Decimal::from_str(&line.unit_price).unwrap_or(Decimal::ZERO);
+        let stored = Decimal::from_str(&line.subtotal_amount).unwrap_or(Decimal::ZERO).round_dp(2);
         let expected = (qty * price).round_dp(2);
         let diff = (expected - stored).abs();
         if diff > Decimal::new(1, 2) {
@@ -483,12 +482,12 @@ fn rule_br_ro_037_line_vat_amounts_match(ctx: &RuleContext<'_>) -> Option<String
     let hundred = Decimal::from(100u32);
     let mut errs: Vec<String> = Vec::new();
     for (i, line) in ctx.lines.iter().enumerate() {
-        let qty = f64_to_dec(line.quantity);
-        let price = f64_to_dec(line.unit_price);
-        let rate = f64_to_dec(line.vat_rate);
+        let qty = Decimal::from_str(&line.quantity).unwrap_or(Decimal::ZERO);
+        let price = Decimal::from_str(&line.unit_price).unwrap_or(Decimal::ZERO);
+        let rate = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
         let net = (qty * price).round_dp(2);
         let expected_vat = (net * rate / hundred).round_dp(2);
-        let stored_vat = f64_to_dec(line.vat_amount).round_dp(2);
+        let stored_vat = Decimal::from_str(&line.vat_amount).unwrap_or(Decimal::ZERO).round_dp(2);
         let diff = (expected_vat - stored_vat).abs();
         if diff > Decimal::new(1, 2) {
             errs.push(format!(
@@ -515,10 +514,10 @@ fn rule_br_ro_040_subtotal_equals_lines(ctx: &RuleContext<'_>) -> Option<String>
     let sum: Decimal = ctx
         .lines
         .iter()
-        .map(|l| f64_to_dec(l.subtotal_amount))
+        .map(|l| Decimal::from_str(&l.subtotal_amount).unwrap_or(Decimal::ZERO))
         .fold(Decimal::ZERO, |a, b| a + b)
         .round_dp(2);
-    let header = f64_to_dec(ctx.invoice.subtotal_amount).round_dp(2);
+    let header = Decimal::from_str(&ctx.invoice.subtotal_amount).unwrap_or(Decimal::ZERO).round_dp(2);
     let diff = (sum - header).abs();
     if diff > Decimal::new(1, 2) {
         Some(format!(
@@ -534,10 +533,10 @@ fn rule_br_ro_041_vat_total_equals_lines(ctx: &RuleContext<'_>) -> Option<String
     let sum: Decimal = ctx
         .lines
         .iter()
-        .map(|l| f64_to_dec(l.vat_amount))
+        .map(|l| Decimal::from_str(&l.vat_amount).unwrap_or(Decimal::ZERO))
         .fold(Decimal::ZERO, |a, b| a + b)
         .round_dp(2);
-    let header = f64_to_dec(ctx.invoice.vat_amount).round_dp(2);
+    let header = Decimal::from_str(&ctx.invoice.vat_amount).unwrap_or(Decimal::ZERO).round_dp(2);
     let diff = (sum - header).abs();
     if diff > Decimal::new(1, 2) {
         Some(format!(
@@ -550,10 +549,10 @@ fn rule_br_ro_041_vat_total_equals_lines(ctx: &RuleContext<'_>) -> Option<String
 }
 
 fn rule_br_ro_042_total_equals_subtotal_plus_vat(ctx: &RuleContext<'_>) -> Option<String> {
-    let net = f64_to_dec(ctx.invoice.subtotal_amount).round_dp(2);
-    let vat = f64_to_dec(ctx.invoice.vat_amount).round_dp(2);
+    let net = Decimal::from_str(&ctx.invoice.subtotal_amount).unwrap_or(Decimal::ZERO).round_dp(2);
+    let vat = Decimal::from_str(&ctx.invoice.vat_amount).unwrap_or(Decimal::ZERO).round_dp(2);
     let expected = (net + vat).round_dp(2);
-    let actual = f64_to_dec(ctx.invoice.total_amount).round_dp(2);
+    let actual = Decimal::from_str(&ctx.invoice.total_amount).unwrap_or(Decimal::ZERO).round_dp(2);
     let diff = (expected - actual).abs();
     if diff > Decimal::new(1, 2) {
         Some(format!(
@@ -572,9 +571,9 @@ fn rule_br_ro_043_vat_breakdown_by_category(ctx: &RuleContext<'_>) -> Option<Str
     let mut cat_rate: HashMap<String, Decimal> = HashMap::new();
 
     for line in ctx.lines {
-        let net = f64_to_dec(line.subtotal_amount).round_dp(2);
-        let vat = f64_to_dec(line.vat_amount).round_dp(2);
-        let rate = f64_to_dec(line.vat_rate);
+        let net = Decimal::from_str(&line.subtotal_amount).unwrap_or(Decimal::ZERO).round_dp(2);
+        let vat = Decimal::from_str(&line.vat_amount).unwrap_or(Decimal::ZERO).round_dp(2);
+        let rate = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
         *cat_net
             .entry(line.vat_category.clone())
             .or_insert(Decimal::ZERO) += net;
@@ -629,7 +628,7 @@ fn rule_br_ro_051_storno_lines_negative(ctx: &RuleContext<'_>) -> Option<String>
             .lines
             .iter()
             .enumerate()
-            .filter(|(_, l)| l.quantity > 0.0)
+            .filter(|(_, l)| Decimal::from_str(&l.quantity).unwrap_or(Decimal::ZERO) > Decimal::ZERO)
             .map(|(i, _)| i + 1)
             .collect();
         if !positive.is_empty() {
@@ -669,7 +668,10 @@ fn warn_br_ro_w02_zero_value_line(ctx: &RuleContext<'_>) -> Option<String> {
         .lines
         .iter()
         .enumerate()
-        .filter(|(_, l)| l.subtotal_amount == 0.0 && l.unit_price == 0.0)
+        .filter(|(_, l)| {
+            Decimal::from_str(&l.subtotal_amount).unwrap_or(Decimal::ZERO) == Decimal::ZERO
+                && Decimal::from_str(&l.unit_price).unwrap_or(Decimal::ZERO) == Decimal::ZERO
+        })
         .map(|(i, _)| i + 1)
         .collect();
     if !zeros.is_empty() {

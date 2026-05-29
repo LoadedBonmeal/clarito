@@ -130,8 +130,8 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
         }
         let rows = q.fetch_all(pool).await.map_err(AppError::Database)?;
 
-        // Helper: REAL column → Decimal (convert via string to avoid f64 precision loss)
-        let to_dec = |v: f64| Decimal::from_str(&v.to_string()).unwrap_or_default();
+        // Helper: TEXT column → Decimal (columns are stored as TEXT after String migration)
+        let to_dec = |s: &str| Decimal::from_str(s.trim()).unwrap_or_default();
 
         for row in rows {
             let invoice_id: String = row.try_get("invoice_id").map_err(AppError::Database)?;
@@ -147,14 +147,12 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
                     invoice_id,
                     position: row.try_get("position").unwrap_or(0),
                     description: desc,
-                    quantity: to_dec(row.try_get("quantity").unwrap_or(0.0)),
-                    unit_price: to_dec(row.try_get("unit_price").unwrap_or(0.0)),
-                    vat_rate: to_dec(row.try_get("vat_rate").unwrap_or(0.0)),
-                    subtotal_amount: to_dec(
-                        row.try_get("subtotal_amount").unwrap_or(0.0),
-                    ),
-                    vat_amount: to_dec(row.try_get("vat_amount").unwrap_or(0.0)),
-                    total_amount: to_dec(row.try_get("total_amount").unwrap_or(0.0)),
+                    quantity: to_dec(&row.try_get::<String, _>("quantity").unwrap_or_else(|_| "0".to_string())),
+                    unit_price: to_dec(&row.try_get::<String, _>("unit_price").unwrap_or_else(|_| "0".to_string())),
+                    vat_rate: to_dec(&row.try_get::<String, _>("vat_rate").unwrap_or_else(|_| "0".to_string())),
+                    subtotal_amount: to_dec(&row.try_get::<String, _>("subtotal_amount").unwrap_or_else(|_| "0".to_string())),
+                    vat_amount: to_dec(&row.try_get::<String, _>("vat_amount").unwrap_or_else(|_| "0".to_string())),
+                    total_amount: to_dec(&row.try_get::<String, _>("total_amount").unwrap_or_else(|_| "0".to_string())),
                 });
         }
     }
