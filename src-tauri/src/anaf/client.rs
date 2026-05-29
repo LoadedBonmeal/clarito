@@ -247,7 +247,7 @@ impl AnafClient {
                     retry_429 += 1;
                     continue;
                 }
-                return Err(format!("ANAF check_status rate-limited (429)"));
+                return Err("ANAF check_status rate-limited (429)".to_string());
             }
 
             if status.is_server_error() {

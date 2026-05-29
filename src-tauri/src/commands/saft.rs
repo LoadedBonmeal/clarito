@@ -3,7 +3,6 @@
 //! Generates a simplified SAF-T XML following the Romanian ANAF adaptation of
 //! the OECD SAF-T schema. Covers SalesInvoices for the selected period.
 
-use rust_decimal::prelude::Zero;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use sqlx::Row;
@@ -25,7 +24,6 @@ pub struct SaftParams {
 
 #[derive(Clone)]
 struct SaftLineItem {
-    invoice_id: String,
     position: i64,
     description: String,
     quantity: Decimal,
@@ -144,7 +142,6 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
                 .entry(invoice_id.clone())
                 .or_default()
                 .push(SaftLineItem {
-                    invoice_id,
                     position: row.try_get("position").unwrap_or(0),
                     description: desc,
                     quantity: to_dec(

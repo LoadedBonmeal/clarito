@@ -574,20 +574,22 @@ async fn import_invoice_xml_inner(
                     "DocumentCurrencyCode" => {
                         currency = text;
                     }
-                    "CompanyID" if depth_supplier > 0 && depth_party_tax > 0 => {
-                        if issuer_cui.is_empty() {
-                            issuer_cui = text;
-                        }
+                    "CompanyID"
+                        if depth_supplier > 0 && depth_party_tax > 0 && issuer_cui.is_empty() =>
+                    {
+                        issuer_cui = text;
                     }
-                    "CompanyID" if depth_customer > 0 && depth_customer_tax > 0 => {
-                        if buyer_cui.is_empty() {
-                            buyer_cui = text;
-                        }
+                    "CompanyID"
+                        if depth_customer > 0 && depth_customer_tax > 0 && buyer_cui.is_empty() =>
+                    {
+                        buyer_cui = text;
                     }
-                    "RegistrationName" if depth_supplier > 0 && depth_party_legal > 0 => {
-                        if issuer_name.is_empty() {
-                            issuer_name = text;
-                        }
+                    "RegistrationName"
+                        if depth_supplier > 0
+                            && depth_party_legal > 0
+                            && issuer_name.is_empty() =>
+                    {
+                        issuer_name = text;
                     }
                     "Name" if depth_supplier > 0 && issuer_name.is_empty() => {
                         issuer_name = text;

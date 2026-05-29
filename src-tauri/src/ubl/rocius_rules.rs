@@ -219,7 +219,7 @@ fn parse_iso_date(s: &str) -> bool {
     let y: u16 = parts[0].parse().unwrap_or(0);
     let m: u8 = parts[1].parse().unwrap_or(0);
     let d: u8 = parts[2].parse().unwrap_or(0);
-    y >= 2000 && y <= 2099 && m >= 1 && m <= 12 && d >= 1 && d <= 31
+    (2000..=2099).contains(&y) && (1..=12).contains(&m) && (1..=31).contains(&d)
 }
 
 fn rule_br_ro_022_issue_date_format(ctx: &RuleContext<'_>) -> Option<String> {
@@ -438,14 +438,15 @@ fn rule_br_ro_035_line_vat_rates(ctx: &RuleContext<'_>) -> Option<String> {
                     ));
                 }
             }
-            "Z" | "E" | "AE" | "K" | "G" | "O" => {
-                if Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO) != Decimal::ZERO {
-                    errs.push(format!(
-                        "linia {}: categoria {} trebuie să aibă cota TVA 0% (actual: {}%)",
-                        pos, line.vat_category, line.vat_rate
-                    ));
-                }
+            "Z" | "E" | "AE" | "K" | "G" | "O"
+                if Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO) != Decimal::ZERO =>
+            {
+                errs.push(format!(
+                    "linia {}: categoria {} trebuie să aibă cota TVA 0% (actual: {}%)",
+                    pos, line.vat_category, line.vat_rate
+                ));
             }
+            "Z" | "E" | "AE" | "K" | "G" | "O" => {}
             _ => {} // already caught by rule 034
         }
     }

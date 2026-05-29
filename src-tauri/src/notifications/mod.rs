@@ -31,7 +31,7 @@ async fn should_notify_os(app: &AppHandle, notif_type: &str) -> bool {
     if quiet {
         let hour = chrono::Local::now().hour();
         // Quiet hours: 22:00–07:00
-        if hour >= 22 || hour < 7 {
+        if !(7..22).contains(&hour) {
             return false;
         }
     }

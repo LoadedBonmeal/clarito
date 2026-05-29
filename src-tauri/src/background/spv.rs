@@ -374,16 +374,18 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
                 }
                 match current_local.as_str() {
                     // CompanyID în PartyTaxScheme al furnizorului = CUI fiscal
-                    "CompanyID" if depth_supplier > 0 && depth_party_tax > 0 => {
-                        if issuer_cui.is_empty() {
-                            issuer_cui = text;
-                        }
+                    "CompanyID"
+                        if depth_supplier > 0 && depth_party_tax > 0 && issuer_cui.is_empty() =>
+                    {
+                        issuer_cui = text;
                     }
                     // RegistrationName în PartyLegalEntity al furnizorului = denumire
-                    "RegistrationName" if depth_supplier > 0 && depth_party_legal > 0 => {
-                        if issuer_name.is_empty() {
-                            issuer_name = text;
-                        }
+                    "RegistrationName"
+                        if depth_supplier > 0
+                            && depth_party_legal > 0
+                            && issuer_name.is_empty() =>
+                    {
+                        issuer_name = text;
                     }
                     // PayableAmount = valoarea totală de plată
                     "PayableAmount" => {

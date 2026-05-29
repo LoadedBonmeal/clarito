@@ -42,7 +42,7 @@ fn random_bytes_hex(n: usize) -> String {
 /// Encodare base64url (fără padding) — RFC 4648 §5.
 fn base64url_encode(bytes: &[u8]) -> String {
     const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut result = String::with_capacity(((bytes.len() + 2) / 3) * 4);
+    let mut result = String::with_capacity(bytes.len().div_ceil(3) * 4);
     let mut i = 0;
     while i < bytes.len() {
         let b0 = bytes[i] as u32;
@@ -159,8 +159,7 @@ pub async fn authorize(_company_id: &str) -> Result<OAuthResult, String> {
     let _ = std::net::TcpStream::connect(format!("127.0.0.1:{CALLBACK_PORT}"));
 
     let payload = result
-        .map_err(|_| "Timeout: autorizarea ANAF nu a primit răspuns în 120s.".to_string())?
-        .map_err(|e| e)?;
+        .map_err(|_| "Timeout: autorizarea ANAF nu a primit răspuns în 120s.".to_string())??;
 
     let mut parts = payload.splitn(2, "|||");
     let code = parts.next().unwrap_or("").to_string();

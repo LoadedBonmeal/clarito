@@ -374,7 +374,7 @@ pub async fn anaf_check_invoice_status(
         let raw_reason = status_resp.descriere.or(status_resp.erori);
         let friendly_reason = raw_reason
             .as_deref()
-            .map(|r| crate::anaf::errors::friendly_message_from_body(r));
+            .map(crate::anaf::errors::friendly_message_from_body);
         db_invoices::mark_rejected(pool, &invoice_id, friendly_reason, None).await?;
     }
     // "in prelucrare" — nu facem nimic

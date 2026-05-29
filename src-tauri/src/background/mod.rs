@@ -164,7 +164,7 @@ async fn sleep_until_local_time(hour: u32, minute: u32) {
         .single()
         .unwrap_or(now);
     if target <= now {
-        target = target + chrono::Duration::days(1);
+        target += chrono::Duration::days(1);
     }
     let duration = (target - now).to_std().unwrap_or(Duration::from_secs(3600));
     tokio::time::sleep(duration).await;

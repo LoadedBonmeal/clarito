@@ -339,8 +339,7 @@ pub async fn storno_invoice(
 
     let storno_lines: Vec<StornoLine> = orig_lines
         .iter()
-        .enumerate()
-        .map(|(_, l)| {
+        .map(|l| {
             let qty = -Decimal::from_str(&l.quantity).unwrap_or(Decimal::ZERO);
             let price = Decimal::from_str(&l.unit_price).unwrap_or(Decimal::ZERO);
             let rate = Decimal::from_str(&l.vat_rate).unwrap_or(Decimal::ZERO);

@@ -133,7 +133,7 @@ pub(crate) async fn poll_submitted_for_company(
                     let raw_reason = status_resp.descriere.or(status_resp.erori);
                     let friendly_reason: Option<String> = raw_reason
                         .as_deref()
-                        .map(|r| crate::anaf::errors::friendly_message_from_body(r));
+                        .map(crate::anaf::errors::friendly_message_from_body);
                     if let Some(app) = app {
                         let reason_str =
                             friendly_reason.as_deref().unwrap_or("Verificați detaliile");

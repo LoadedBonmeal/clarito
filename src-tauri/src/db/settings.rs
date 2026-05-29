@@ -61,7 +61,3 @@ pub async fn get_bool(pool: &SqlitePool, key: &str, default: bool) -> AppResult<
         .map(|v| v == "true" || v == "1")
         .unwrap_or(default))
 }
-
-pub async fn set_bool(pool: &SqlitePool, key: &str, value: bool) -> AppResult<()> {
-    set(pool, key, if value { "true" } else { "false" }).await
-}

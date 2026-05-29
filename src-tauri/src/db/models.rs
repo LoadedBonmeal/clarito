@@ -47,34 +47,6 @@ pub enum ContactType {
     Both,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum LicenseTier {
-    Trial,
-    Solo,
-    Accountant,
-    Firm,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum VatCategory {
-    /// Standard rate (cota standard 19%)
-    S,
-    /// Zero-rated (cotă zero pentru export)
-    Z,
-    /// Exempt without VAT (scutit fără TVA)
-    E,
-    /// Reverse charge (taxare inversă)
-    Ae,
-    /// VAT exempt for small business
-    K,
-    /// Free export item
-    G,
-    /// Other
-    O,
-}
-
 // ─── Pagination ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

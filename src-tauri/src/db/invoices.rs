@@ -123,7 +123,6 @@ pub struct CreateInvoiceInput {
     pub company_id: String,
     pub contact_id: String,
     pub series: String,
-    pub number: i64,
     pub issue_date: String,
     pub due_date: String,
     pub currency: Option<String>,
@@ -205,8 +204,7 @@ pub async fn list(pool: &SqlitePool, filter: InvoiceFilter) -> AppResult<Paginat
         .fetch_one(pool)
         .await?;
 
-    let data_sql = concat!(
-        "SELECT id, company_id, contact_id, series, number, full_number, \
+    let data_sql = "SELECT id, company_id, contact_id, series, number, full_number, \
          issue_date, due_date, currency, exchange_rate, subtotal_amount, vat_amount, total_amount, \
          status, anaf_upload_id, anaf_index, anaf_submitted_at, anaf_validated_at, anaf_rejected_at, \
          xml_path, pdf_path, signature_xml_path, rejection_reason, rejection_code, notes, \
@@ -223,8 +221,7 @@ pub async fn list(pool: &SqlitePool, filter: InvoiceFilter) -> AppResult<Paginat
                        OR status = CASE WHEN ?10 THEN 'REJECTED'  ELSE NULL END \
                        OR status = CASE WHEN ?11 THEN 'STORNED'   ELSE NULL END) \
          ORDER BY issue_date DESC, number DESC \
-         LIMIT ?12 OFFSET ?13"
-    );
+         LIMIT ?12 OFFSET ?13";
 
     let items = sqlx::query_as::<_, Invoice>(data_sql)
         .bind(company_id)

@@ -3,56 +3,6 @@
 //! Plan Task 4.3 — `lookup_anaf_error(code)` returnează mesajul prietenos.
 //! Mesajele includ acțiunea sugerată acolo unde e posibil.
 
-use serde::Serialize;
-
-/// Tipuri de erori ANAF structurate.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
-pub enum AnafError {
-    /// 401 — token expirat sau lipsă
-    Unauthorized { message: String },
-    /// Erori de validare în XML (lista de detalii)
-    Validation { details: Vec<String> },
-    /// 5xx — server ANAF indisponibil
-    ServerError { status: u16, message: String },
-    /// Timeout sau eroare de rețea
-    NetworkError { message: String },
-    /// 429 — prea multe cereri
-    RateLimited { retry_after_secs: u64 },
-    /// Alt cod de eroare ANAF cunoscut
-    AnafCode { code: String, message: String },
-}
-
-impl AnafError {
-    /// Mesaj prietenos pentru afișare în UI.
-    pub fn user_message(&self) -> String {
-        match self {
-            Self::Unauthorized { .. } => {
-                "Sesiunea ANAF a expirat. Reautentificați-vă din Setări → Certificate.".into()
-            }
-            Self::Validation { details } => {
-                format!(
-                    "Factura conține {} erori de validare:\n{}",
-                    details.len(),
-                    details.join("\n")
-                )
-            }
-            Self::ServerError { status, .. } => {
-                format!("Serverul ANAF a returnat eroare {status}. Reîncercați în câteva minute.")
-            }
-            Self::NetworkError { message } => {
-                format!("Nu s-a putut contacta ANAF: {message}. Verificați conexiunea la internet.")
-            }
-            Self::RateLimited { retry_after_secs } => {
-                format!("Prea multe cereri ANAF. Reîncercați după {retry_after_secs} secunde.")
-            }
-            Self::AnafCode { code, message } => {
-                format!("[{code}] {message}")
-            }
-        }
-    }
-}
-
 /// Returnează mesajul în română pentru un cod de eroare ANAF.
 /// Acoperă 50+ coduri documentate în ghidul tehnic ANAF.
 pub fn lookup_anaf_error(code: &str) -> &'static str {

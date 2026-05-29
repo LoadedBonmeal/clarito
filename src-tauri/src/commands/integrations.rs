@@ -293,7 +293,7 @@ pub async fn export_saga_csv(
     let csv_content = rows.join("\r\n");
 
     if let Some(path) = output_path {
-        std::fs::write(&path, csv_content.as_bytes()).map_err(|e| AppError::Io(e))?;
+        std::fs::write(&path, csv_content.as_bytes()).map_err(AppError::Io)?;
         Ok(path)
     } else {
         Ok(csv_content)
@@ -435,7 +435,7 @@ pub async fn export_winmentor_csv(
     let csv_content = rows.join("\r\n");
 
     if let Some(path) = output_path {
-        std::fs::write(&path, csv_content.as_bytes()).map_err(|e| AppError::Io(e))?;
+        std::fs::write(&path, csv_content.as_bytes()).map_err(AppError::Io)?;
         Ok(path)
     } else {
         Ok(csv_content)

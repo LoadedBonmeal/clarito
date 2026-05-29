@@ -113,17 +113,6 @@ pub async fn list_due(pool: &SqlitePool) -> AppResult<Vec<RecurringInvoice>> {
     .await?)
 }
 
-pub async fn update_next_date(pool: &SqlitePool, id: &str, next_date: &str) -> AppResult<()> {
-    sqlx::query(
-        "UPDATE recurring_invoices SET next_issue_date = ?1, updated_at = unixepoch() WHERE id = ?2",
-    )
-    .bind(next_date)
-    .bind(id)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
     let rows = sqlx::query("DELETE FROM recurring_invoices WHERE id = ?1 AND company_id = ?2")
         .bind(id)
