@@ -131,14 +131,17 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     y -= 6.0;
 
     // ── VAT breakdown table (left side) ──────────────────────────────────────
+    // BIZ-19: group by (rate, vat_category) so 0% Exempt and 0% Zero-rated
+    // surface as separate rows instead of being merged into "0%".
     {
-        let mut vat_groups: std::collections::BTreeMap<i64, (Decimal, Decimal)> =
+        let mut vat_groups: std::collections::BTreeMap<(i64, String), (Decimal, Decimal)> =
             std::collections::BTreeMap::new();
         for line in &input.lines {
             let rate_dec = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
             let rate_key = (rate_dec * Decimal::from(100)).to_i64().unwrap_or(0);
+            let category = line.vat_category.clone();
             let entry = vat_groups
-                .entry(rate_key)
+                .entry((rate_key, category))
                 .or_insert((Decimal::ZERO, Decimal::ZERO));
             entry.0 += Decimal::from_str(&line.subtotal_amount).unwrap_or(Decimal::ZERO);
             entry.1 += Decimal::from_str(&line.vat_amount).unwrap_or(Decimal::ZERO);
@@ -147,21 +150,16 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
             layer.use_text("Detaliu TVA:", FONT_SMALL, Mm(MARGIN), Mm(y), &font_bold);
             y -= LINE_H - 1.0;
             let hdrs = ["Cotă", "Bază impozabilă", "TVA"];
-            let vt_cols = [MARGIN, MARGIN + 18.0, MARGIN + 50.0];
+            let vt_cols = [MARGIN, MARGIN + 22.0, MARGIN + 54.0];
             for (i, h) in hdrs.iter().enumerate() {
                 layer.use_text(*h, FONT_SMALL - 0.5, Mm(vt_cols[i]), Mm(y), &font_bold);
             }
             y -= LINE_H - 1.0;
-            draw_hline(&layer, MARGIN, MARGIN + 75.0, y + 1.0);
-            for (rate_key, (base, vat)) in &vat_groups {
+            draw_hline(&layer, MARGIN, MARGIN + 79.0, y + 1.0);
+            for ((rate_key, category), (base, vat)) in &vat_groups {
                 let rate_pct = *rate_key as f64 / 100.0;
-                layer.use_text(
-                    format!("{:.0}%", rate_pct),
-                    FONT_SMALL,
-                    Mm(vt_cols[0]),
-                    Mm(y),
-                    &font_normal,
-                );
+                let label = vat_label(rate_pct, category);
+                layer.use_text(label, FONT_SMALL, Mm(vt_cols[0]), Mm(y), &font_normal);
                 layer.use_text(
                     format!("{:.2} {}", base, inv.currency),
                     FONT_SMALL,
@@ -350,6 +348,21 @@ fn write_line_row(
     ];
     for (i, val) in values.iter().enumerate() {
         layer.use_text(val.clone(), FONT_SMALL, Mm(col_x[i]), Mm(y), font);
+    }
+}
+
+/// BIZ-19: produces a human-readable label for a (rate, vat_category) tuple
+/// used in the PDF VAT breakdown. Distinguishes the various 0% categories.
+fn vat_label(rate_pct: f64, category: &str) -> String {
+    match category {
+        "S" => format!("{:.0}%", rate_pct),
+        "Z" => "0% (cotă zero)".to_string(),
+        "E" => "0% (scutit)".to_string(),
+        "AE" => "0% (taxare inversă)".to_string(),
+        "K" => "0% (intracomunitar)".to_string(),
+        "G" => "0% (export)".to_string(),
+        "O" => "0% (în afara sferei)".to_string(),
+        _ => format!("{:.0}% ({})", rate_pct, category),
     }
 }
 
