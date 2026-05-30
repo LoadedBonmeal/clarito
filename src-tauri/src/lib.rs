@@ -16,6 +16,11 @@ pub mod notifications;
 mod state;
 mod ubl;
 
+// `license-gen` binary (in src/bin/) reaches commands::license::{key_checksum,
+// validate_license_key} via a narrow re-export. They are pub (not pub(crate))
+// because the binary is a separate crate that links against this library.
+pub use commands::license::{key_checksum, validate_license_key};
+
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;

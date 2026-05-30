@@ -51,6 +51,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # XML
 quick-xml = { version = "0.36", features = ["serialize"] }
 
+# CLI argument parsing (used by license-gen binary)
+clap = { version = "4", features = ["derive"] }
+
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }
 

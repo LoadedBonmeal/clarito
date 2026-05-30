@@ -68,14 +68,14 @@ fn integrity_secret() -> &'static [u8] {
         .as_slice()
 }
 
-fn key_hmac_secret() -> &'static [u8] {
+pub fn key_hmac_secret() -> &'static [u8] {
     KEY_HMAC_SECRET_CACHE
         .get_or_init(key_hmac_secret_bytes)
         .as_slice()
 }
 
 /// Returns true if the key format is valid AND the embedded checksum matches.
-fn validate_license_key(key: &str) -> bool {
+pub fn validate_license_key(key: &str) -> bool {
     let parts: Vec<&str> = key.split('-').collect();
     if parts.len() != 4 {
         return false;
@@ -118,7 +118,7 @@ fn validate_license_key(key: &str) -> bool {
 
 /// SHA-256(KEY_HMAC_SECRET || 0x00 || data) → full hex digest.
 /// Callers slice the prefix they need (`..4` legacy, `..8` current).
-fn key_checksum(data: &[u8]) -> String {
+pub fn key_checksum(data: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(key_hmac_secret());
     h.update(b"\x00");
