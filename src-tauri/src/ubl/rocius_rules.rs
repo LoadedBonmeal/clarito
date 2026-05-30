@@ -584,10 +584,15 @@ fn rule_br_ro_042_total_equals_subtotal_plus_vat(ctx: &RuleContext<'_>) -> Optio
 }
 
 fn rule_br_ro_043_vat_breakdown_by_category(ctx: &RuleContext<'_>) -> Option<String> {
+    // BIZ-20: group by (category, rate) — multiple rates on the same category
+    // must be validated independently. Previously, grouping by category alone
+    // caused multi-rate categories (e.g. S@9% + S@19%) to collide and either
+    // miss real errors or report false positives.
     let hundred = Decimal::from(100u32);
-    let mut cat_net: HashMap<String, Decimal> = HashMap::new();
-    let mut cat_vat: HashMap<String, Decimal> = HashMap::new();
-    let mut cat_rate: HashMap<String, Decimal> = HashMap::new();
+    // Key: (vat_category, rate string for stable hashing).
+    let mut group_net: HashMap<(String, String), Decimal> = HashMap::new();
+    let mut group_vat: HashMap<(String, String), Decimal> = HashMap::new();
+    let mut group_rate: HashMap<(String, String), Decimal> = HashMap::new();
 
     for line in ctx.lines {
         let net = Decimal::from_str(&line.subtotal_amount)
@@ -597,24 +602,21 @@ fn rule_br_ro_043_vat_breakdown_by_category(ctx: &RuleContext<'_>) -> Option<Str
             .unwrap_or(Decimal::ZERO)
             .round_dp(2);
         let rate = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
-        *cat_net
-            .entry(line.vat_category.clone())
-            .or_insert(Decimal::ZERO) += net;
-        *cat_vat
-            .entry(line.vat_category.clone())
-            .or_insert(Decimal::ZERO) += vat;
-        cat_rate.entry(line.vat_category.clone()).or_insert(rate);
+        let key = (line.vat_category.clone(), rate.to_string());
+        *group_net.entry(key.clone()).or_insert(Decimal::ZERO) += net;
+        *group_vat.entry(key.clone()).or_insert(Decimal::ZERO) += vat;
+        group_rate.entry(key).or_insert(rate);
     }
 
     let mut errs: Vec<String> = Vec::new();
-    for (cat, net) in &cat_net {
-        if let (Some(&rate), Some(&vat)) = (cat_rate.get(cat), cat_vat.get(cat)) {
+    for (key, net) in &group_net {
+        if let (Some(&rate), Some(&vat)) = (group_rate.get(key), group_vat.get(key)) {
             let expected_vat = (net * rate / hundred).round_dp(2);
             let diff = (expected_vat - vat.round_dp(2)).abs();
             if diff > Decimal::new(2, 2) {
                 errs.push(format!(
-                    "categoria {}: TVA calculat {:.2} ≠ TVA sumă linii {:.2}",
-                    cat, expected_vat, vat
+                    "categoria {} @ {}%: TVA calculat {:.2} ≠ TVA sumă linii {:.2}",
+                    key.0, key.1, expected_vat, vat
                 ));
             }
         }
@@ -1203,6 +1205,55 @@ mod tests {
         assert!(
             has_buyer_error,
             "Expected a buyer-related error when buyer country/address is missing, got: {:?}",
+            errors
+        );
+    }
+
+    // ── BIZ-20: BR-RO-043 must group by (category, rate), not category alone ──
+
+    #[test]
+    fn br_ro_043_handles_multi_rate_same_category() {
+        // Two lines, both category "S", different rates (9% and 19%).
+        // Per-(cat,rate) VAT is computed correctly on each line, so the rule
+        // must NOT report a false positive when grouping is done properly.
+        let mut invoice = sample_invoice();
+
+        let mut line1 = sample_line();
+        line1.vat_rate = "9.00".into();
+        line1.vat_category = "S".into();
+        line1.subtotal_amount = "100.00".into();
+        line1.vat_amount = "9.00".into(); // 100 * 9% = 9.00
+        line1.total_amount = "109.00".into();
+
+        let mut line2 = sample_line();
+        line2.id = "line-2".into();
+        line2.position = 2;
+        line2.vat_rate = "19.00".into();
+        line2.vat_category = "S".into();
+        line2.subtotal_amount = "100.00".into();
+        line2.vat_amount = "19.00".into(); // 100 * 19% = 19.00
+        line2.total_amount = "119.00".into();
+
+        // Header totals consistent with the lines so other rules don't fire.
+        invoice.subtotal_amount = "200.00".into();
+        invoice.vat_amount = "28.00".into();
+        invoice.total_amount = "228.00".into();
+
+        let lines = vec![line1, line2];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _warnings) = run_all(&ctx);
+        let has_043 = errors.iter().any(|e| e.contains("[BR-RO-043]"));
+        assert!(
+            !has_043,
+            "BR-RO-043 must not fire when multi-rate within one category is correctly grouped, got: {:?}",
             errors
         );
     }

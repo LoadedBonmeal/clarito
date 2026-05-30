@@ -207,8 +207,9 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     y -= LINE_H;
 
     // Total în cuvinte (Romanian words) — plan Task 5.3
+    // BIZ-21: pass Decimal directly to preserve exact cents (no f64 round-trip).
     let total_dec = Decimal::from_str(&inv.total_amount).unwrap_or(Decimal::ZERO);
-    let words = amount_to_romanian_words(total_dec.to_f64().unwrap_or(0.0));
+    let words = amount_to_romanian_words(total_dec);
     layer.use_text(
         format!("({words})"),
         FONT_SMALL,
@@ -408,10 +409,16 @@ fn draw_hline(layer: &PdfLayerReference, x1: f32, x2: f32, y: f32) {
 /// Convertește o sumă în lei + bani în cuvinte românești.
 /// Ex: 425.50 → "Patru sute douăzeci și cinci lei și 50 bani"
 /// Planul specifică această funcție în Task 5.3 (PDF generation).
-pub fn amount_to_romanian_words(amount: f64) -> String {
-    let total_bani = (amount * 100.0).round() as u64;
-    let lei = total_bani / 100;
-    let bani = total_bani % 100;
+///
+/// BIZ-21: operates directly on `Decimal` to avoid f64 precision loss on
+/// fractional amounts (e.g. 1234.99 must yield exactly "99 bani").
+pub fn amount_to_romanian_words(amount: Decimal) -> String {
+    // Work on the absolute value rounded to 2 decimals (1 ban precision).
+    let amount = amount.abs().round_dp(2);
+    let lei = amount.trunc().to_u64().unwrap_or(0);
+    let bani = ((amount.fract() * Decimal::from(100u32)).round())
+        .to_u64()
+        .unwrap_or(0);
 
     let lei_str = if lei == 0 {
         "zero lei".to_string()
@@ -525,4 +532,35 @@ fn number_to_words_ro(n: u64) -> String {
     }
     // For amounts >= 1 billion, just return the number
     n.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // BIZ-21: amount-in-words must preserve exact decimal cents
+    // (the old f64-based path lost precision on values like 1234.99).
+    #[test]
+    fn amount_in_words_uses_exact_decimal() {
+        let val = Decimal::from_str("1234.99").unwrap();
+        let words = amount_to_romanian_words(val);
+        assert!(
+            words.contains("99 bani"),
+            "expected '99 bani' in output, got: {words}"
+        );
+    }
+
+    #[test]
+    fn amount_in_words_handles_whole_lei() {
+        let val = Decimal::from_str("100.00").unwrap();
+        let words = amount_to_romanian_words(val);
+        assert!(
+            !words.contains("bani"),
+            "no bani suffix expected when fraction is zero, got: {words}"
+        );
+        assert!(
+            words.to_lowercase().contains("lei"),
+            "expected 'lei' in output, got: {words}"
+        );
+    }
 }
