@@ -61,7 +61,7 @@ export function PaymentsPage() {
 
   // Fetch payment summaries for all invoices — single batch query (replaces N+1)
   const { data: summariesArray = [], isError: summariesError, error: summariesErr, refetch: refetchSummaries } = useQuery({
-    queryKey: ["payment_summaries", activeCompanyId],
+    queryKey: queryKeys.payments.summaries(activeCompanyId!),
     queryFn: () => api.payments.listSummaries(activeCompanyId!),
     enabled: !!activeCompanyId,
   });
@@ -77,7 +77,7 @@ export function PaymentsPage() {
   const addMutation = useMutation({
     mutationFn: (args: AddPaymentArgs) => api.payments.add(args),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["payment_summaries", activeCompanyId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.payments.summaries(activeCompanyId!) });
       notify.success("Plată adăugată cu succes");
       setAddModal(null);
       setForm({ amount: "", paidAt: new Date().toISOString().slice(0, 10), method: "transfer", reference: "" });
@@ -89,7 +89,7 @@ export function PaymentsPage() {
     mutationFn: ({ paymentId }: { paymentId: string }) =>
       api.payments.delete(paymentId, activeCompanyId!),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["payment_summaries", activeCompanyId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.payments.summaries(activeCompanyId!) });
       notify.success("Plată ștearsă");
     },
     onError: (e) => notify.error("Eroare la ștergere: " + String(e)),

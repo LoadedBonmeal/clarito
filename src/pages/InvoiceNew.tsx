@@ -84,7 +84,7 @@ export function InvoiceNewPage() {
 
   // Live validation — runs after draft is saved
   const { data: validation, isFetching: validating } = useQuery({
-    queryKey: ["validation", savedId],
+    queryKey: queryKeys.invoiceValidation.get(savedId ?? ""),
     queryFn: () => api.invoices.validateDraft(savedId!),
     enabled: !!savedId,
     staleTime: 30_000,

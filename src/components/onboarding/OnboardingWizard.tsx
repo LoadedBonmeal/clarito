@@ -78,7 +78,7 @@ export function OnboardingWizard() {
   /** Called from Step2 right after trial/license activation so the validity
    *  cache is fresh when handleFinish eventually invalidates companies. */
   const handleLicenseActivated = () => {
-    void queryClient.invalidateQueries({ queryKey: ["license", "validity"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.licenseValidity });
   };
 
   const create = useMutation({
@@ -130,7 +130,7 @@ export function OnboardingWizard() {
     // Invalidate both companies AND license validity so OnboardingGate re-checks
     // correctly after trial has been started (license was false before trial creation).
     void queryClient.invalidateQueries({ queryKey: queryKeys.companies.list() });
-    void queryClient.invalidateQueries({ queryKey: ["license", "validity"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.licenseValidity });
   };
 
   return (
@@ -292,7 +292,7 @@ function Step2({ onStartTrial, onActivate }: Step2Props) {
   // If a license already exists in DB (e.g. app crashed after trial start but
   // before company creation), skip this step automatically.
   const { data: existingLicense, isLoading: licenseCheckLoading } = useQuery({
-    queryKey: ["license", "existing"],
+    queryKey: queryKeys.licenseExisting,
     queryFn: () => api.license.get(),
     staleTime: 0,
   });

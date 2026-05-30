@@ -52,7 +52,7 @@ export function InvoiceDetailPage() {
   });
 
   const { data: paymentSummary } = useQuery({
-    queryKey: ["payments", "summary", id, data?.invoice.companyId ?? ""],
+    queryKey: queryKeys.payments.summary(id, data?.invoice.companyId ?? ""),
     queryFn: () => api.payments.summary(id, data!.invoice.companyId),
     enabled: !!data?.invoice.companyId,
   });

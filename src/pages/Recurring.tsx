@@ -63,7 +63,7 @@ export function RecurringPage() {
 
   // Fetch recurring invoices
   const { data: recurringList = [], isLoading, isError: recurringError, error: recurringErr, refetch: refetchRecurring } = useQuery({
-    queryKey: ["recurringInvoices", activeCompanyId],
+    queryKey: queryKeys.recurring.list(activeCompanyId!),
     queryFn: () => api.recurring.list(activeCompanyId!),
     enabled: !!activeCompanyId,
   });
@@ -83,7 +83,7 @@ export function RecurringPage() {
   const createMutation = useMutation({
     mutationFn: (args: CreateRecurringArgs) => api.recurring.create(args),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["recurringInvoices"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.recurring.list(activeCompanyId!) });
       notify.success("Factură recurentă creată cu succes");
       setShowModal(false);
       setForm({ ...EMPTY_FORM });
@@ -94,7 +94,7 @@ export function RecurringPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.recurring.delete(id, activeCompanyId!),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["recurringInvoices"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.recurring.list(activeCompanyId!) });
       notify.success("Șablon șters");
       setDeleteConfirm(null);
     },

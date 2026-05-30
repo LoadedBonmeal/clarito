@@ -39,7 +39,7 @@ function LicenseExpiredScreen() {
   const activateMutation = useMutation({
     mutationFn: () => api.license.activate(key.trim(), actEmail.trim()),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["license", "validity"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.licenseValidity });
       void queryClient.invalidateQueries({ queryKey: queryKeys.companies.list() });
     },
     onError: (err) => {
@@ -215,7 +215,7 @@ export function OnboardingGate({ children }: OnboardingGateProps) {
 
   // Re-check validity every 5 minutes to catch expiry mid-session
   const { data: isLicenseValid, isLoading: licenseLoading } = useQuery({
-    queryKey: ["license", "validity"],
+    queryKey: queryKeys.licenseValidity,
     queryFn: () => api.license.checkLicenseValidity(),
     refetchInterval: 5 * 60 * 1000,
     staleTime: 60_000,

@@ -180,14 +180,14 @@ function CertificatesSection({ companyId }: { companyId: string }) {
   const queryClient = useQueryClient();
 
   const { data: certs = [], isLoading } = useQuery({
-    queryKey: ["certificates", companyId],
+    queryKey: queryKeys.certificates.list(companyId),
     queryFn: () => api.certificates.list(companyId),
   });
 
   const refreshCert = useMutation({
     mutationFn: () => api.certificates.refresh(companyId),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["certificates", companyId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.certificates.list(companyId) });
     },
     onError: (e) => notify.error("Eroare reautorizare: " + String(e)),
   });
@@ -195,7 +195,7 @@ function CertificatesSection({ companyId }: { companyId: string }) {
   const revokeCert = useMutation({
     mutationFn: (_certId: string) => api.certificates.revoke(companyId),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["certificates", companyId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.certificates.list(companyId) });
     },
     onError: (e) => notify.error("Eroare revocare: " + String(e)),
   });
@@ -274,7 +274,7 @@ function CompanySpvSection({ company }: { company: Company }) {
     onSuccess: (granted) => {
       if (granted) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.companies.detail(company.id) });
-        void queryClient.invalidateQueries({ queryKey: ["certificates", company.id] });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.certificates.list(company.id) });
       } else {
         notify.error("Autorizarea SPV a fost anulată sau a eșuat. Reîncercați.");
       }

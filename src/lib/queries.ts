@@ -54,6 +54,33 @@ export const queryKeys = {
     unreadCount: () => [...queryKeys.notifications.all, "unreadCount"] as const,
   },
   license: ["license"] as const,
+  licenseValidity: ["license", "validity"] as const,
+  licenseExisting: ["license", "existing"] as const,
+
+  certificates: {
+    list: (companyId: string) => ["certificates", companyId] as const,
+  },
+
+  invoiceValidation: {
+    get: (id: string) => ["validation", id] as const,
+  },
+
+  payments: {
+    summary: (invoiceId: string, companyId: string) =>
+      ["payments", "summary", invoiceId, companyId] as const,
+    summaries: (companyId: string) =>
+      ["payment_summaries", companyId] as const,
+  },
+
+  recurring: {
+    list: (companyId: string) => ["recurringInvoices", companyId] as const,
+  },
+
+  vatReport: {
+    get: (year: number, month: number | string, companyId: string) =>
+      ["vatReport", year, month, companyId] as const,
+  },
+
   appInfo: ["appInfo"] as const,
   settings: {
     get: (key: string) => ["settings", key] as const,

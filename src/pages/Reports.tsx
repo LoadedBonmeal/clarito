@@ -63,7 +63,7 @@ export function ReportsPage() {
 
   // Backend VAT report — accurate per-rate breakdown from invoice_line_items
   const { data: vatReport, isLoading: vatLoading, isError: vatError, error: vatErr, refetch: refetchVat } = useQuery({
-    queryKey: ["vatReport", selectedYear, selectedMonth, activeCompanyId],
+    queryKey: queryKeys.vatReport.get(selectedYear, selectedMonth, activeCompanyId ?? ""),
     queryFn: () =>
       api.reports.generateVatReport(dateFrom, dateTo, activeCompanyId ?? undefined),
     enabled: true,
