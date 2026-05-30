@@ -332,6 +332,15 @@ pub(crate) async fn submit_invoice_inner(
     )
     .await;
 
+    let _ = crate::db::audit::log_user_action(
+        pool,
+        "invoice_submitted_anaf",
+        "invoice",
+        invoice_id,
+        Some(&upload_id),
+    )
+    .await;
+
     Ok(upload_id)
 }
 

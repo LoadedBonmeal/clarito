@@ -50,12 +50,24 @@ pub async fn create_invoice_draft(
     state: State<'_, AppState>,
     input: CreateInvoiceInput,
 ) -> AppResult<Invoice> {
-    invoices::create(&state.db, input).await
+    let new_invoice = invoices::create(&state.db, input).await?;
+    let _ = crate::db::audit::log_user_action(
+        &state.db,
+        "invoice_created",
+        "invoice",
+        &new_invoice.id,
+        None,
+    )
+    .await;
+    Ok(new_invoice)
 }
 
 #[tauri::command]
 pub async fn delete_invoice(state: State<'_, AppState>, id: String) -> AppResult<()> {
-    invoices::delete(&state.db, &id).await
+    invoices::delete(&state.db, &id).await?;
+    let _ =
+        crate::db::audit::log_user_action(&state.db, "invoice_deleted", "invoice", &id, None).await;
+    Ok(())
 }
 
 /// RUST-02: Verifică dacă tranziția de status este permisă din punct de
@@ -263,6 +275,9 @@ pub async fn update_invoice_draft(
     }
 
     tx.commit().await?;
+
+    let _ =
+        crate::db::audit::log_user_action(&state.db, "invoice_updated", "invoice", &id, None).await;
 
     // 6. Return updated invoice
     invoices::get(&state.db, &id).await
@@ -564,6 +579,15 @@ pub async fn storno_invoice(
 
     // 5. Commit atomic — toate operațiile reușesc sau niciuna
     tx.commit().await.map_err(AppError::Database)?;
+
+    let _ = crate::db::audit::log_user_action(
+        pool,
+        "invoice_stornoed",
+        "invoice",
+        &storno_id,
+        Some(&orig_inv.full_number),
+    )
+    .await;
 
     // 6. Re-fetch factura storno pentru a returna datele complete
     invoices::get(pool, &storno_id).await

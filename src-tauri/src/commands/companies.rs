@@ -44,7 +44,16 @@ pub async fn create_company(
             }
         }
     }
-    companies::create(&state.db, input).await
+    let new_company = companies::create(&state.db, input).await?;
+    let _ = crate::db::audit::log_user_action(
+        &state.db,
+        "company_created",
+        "company",
+        &new_company.id,
+        Some(&new_company.cui),
+    )
+    .await;
+    Ok(new_company)
 }
 
 #[tauri::command]
@@ -53,7 +62,10 @@ pub async fn update_company(
     id: String,
     input: UpdateCompanyInput,
 ) -> AppResult<Company> {
-    companies::update(&state.db, &id, input).await
+    let updated = companies::update(&state.db, &id, input).await?;
+    let _ =
+        crate::db::audit::log_user_action(&state.db, "company_updated", "company", &id, None).await;
+    Ok(updated)
 }
 
 #[tauri::command]

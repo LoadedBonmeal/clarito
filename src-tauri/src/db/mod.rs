@@ -10,6 +10,7 @@
 pub mod models;
 pub mod pool;
 
+pub mod audit;
 pub mod certificates;
 pub mod companies;
 pub mod contacts;

@@ -121,7 +121,13 @@ pub async fn dev_seed(state: State<'_, AppState>) -> AppResult<()> {
 pub async fn get_activity_log(state: State<'_, AppState>) -> AppResult<Vec<serde_json::Value>> {
     let rows = sqlx::query(
         "SELECT id, entity_id, metadata, created_at FROM audit_log \
-         WHERE action = 'background_task_run' \
+         WHERE action IN ( \
+             'background_task_run', \
+             'invoice_created', 'invoice_updated', 'invoice_deleted', \
+             'invoice_stornoed', 'invoice_duplicated', 'invoice_submitted_anaf', \
+             'company_created', 'company_updated', \
+             'recurring_updated' \
+         ) \
          ORDER BY created_at DESC LIMIT 50",
     )
     .fetch_all(&state.db)
@@ -147,7 +153,13 @@ pub async fn get_activity_log(state: State<'_, AppState>) -> AppResult<Vec<serde
 pub async fn export_activity_log_csv(state: State<'_, AppState>) -> AppResult<String> {
     let rows = sqlx::query(
         "SELECT id, entity_id, metadata, created_at FROM audit_log \
-         WHERE action = 'background_task_run' \
+         WHERE action IN ( \
+             'background_task_run', \
+             'invoice_created', 'invoice_updated', 'invoice_deleted', \
+             'invoice_stornoed', 'invoice_duplicated', 'invoice_submitted_anaf', \
+             'company_created', 'company_updated', \
+             'recurring_updated' \
+         ) \
          ORDER BY created_at DESC LIMIT 500",
     )
     .fetch_all(&state.db)
