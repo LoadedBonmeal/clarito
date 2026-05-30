@@ -367,12 +367,52 @@ async fn process_recurring_invoices(
                         );
                     }
                     Err(e) => {
-                        // If auto-submit fails, the invoice remains in VALIDATED state (not deleted).
+                        // If auto-submit fails, the invoice remains in DRAFT state (not deleted).
                         // This is intentional — the user can manually submit later.
                         tracing::warn!(
                             invoice_id = %invoice_id,
-                            "Recurring auto-submit failed, invoice left as DRAFT: {:?}",
-                            e
+                            full_number = %full_number,
+                            error = ?e,
+                            "Auto-submit ANAF failed; invoice remains DRAFT"
+                        );
+
+                        // User-visible notification — auto-submit has a 5-working-day
+                        // deadline, so the user must know to submit manually.
+                        if let Err(notif_err) = crate::db::notifications::create(
+                            pool,
+                            crate::db::notifications::CreateNotificationInput {
+                                notification_type: "auto_submit_failed".into(),
+                                title: format!("Trimitere automată eșuată: {full_number}"),
+                                body: format!(
+                                    "Factura {full_number} nu a putut fi trimisă automat la ANAF: {e}. \
+                                     A fost salvată ca DRAFT — trimitere manuală necesară."
+                                ),
+                                data: Some(
+                                    serde_json::json!({
+                                        "invoiceId": invoice_id,
+                                        "fullNumber": full_number,
+                                    })
+                                    .to_string(),
+                                ),
+                            },
+                        )
+                        .await
+                        {
+                            tracing::error!(
+                                invoice_id = %invoice_id,
+                                error = ?notif_err,
+                                "Failed to persist auto_submit_failed notification"
+                            );
+                        }
+
+                        // Frontend event so UI can refresh
+                        let _ = app.emit(
+                            "invoice_status_changed",
+                            serde_json::json!({
+                                "invoiceId": invoice_id,
+                                "newStatus": "DRAFT",
+                                "reason": "auto_submit_failed"
+                            }),
                         );
                     }
                 }
