@@ -15,6 +15,7 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
+import { formatError } from "@/lib/error-mapper";
 import type { Invoice, Contact } from "@/types";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -109,7 +110,7 @@ export function ReportsPage() {
       await writeTextFile(savePath, xml);
       notify.success(`SAF-T D406 salvat: ${savePath}`);
     } catch (err) {
-      notify.error("Eroare export SAF-T D406: " + String(err));
+      notify.error(formatError(err, 'Nu s-a putut exporta SAF-T D406.'));
     } finally {
       setExportingSaft(false);
     }
@@ -128,7 +129,7 @@ export function ReportsPage() {
       await api.integrations.exportSagaCsv(activeCompanyId, dateFrom, dateTo, savePath);
       notify.success(`Export SAGA salvat: ${savePath}`);
     } catch (err) {
-      notify.error("Eroare export SAGA: " + String(err));
+      notify.error(formatError(err, 'Nu s-a putut exporta în SAGA.'));
     } finally {
       setExportingSaga(false);
     }
@@ -147,7 +148,7 @@ export function ReportsPage() {
       await api.integrations.exportWinmentorCsv(activeCompanyId, dateFrom, dateTo, savePath);
       notify.success(`Export WinMentor salvat: ${savePath}`);
     } catch (err) {
-      notify.error("Eroare export WinMentor: " + String(err));
+      notify.error(formatError(err, 'Nu s-a putut exporta în WinMentor.'));
     } finally {
       setExportingWinmentor(false);
     }
@@ -170,7 +171,7 @@ export function ReportsPage() {
       );
       notify.success(`Raport TVA salvat: ${saved}`);
     } catch (err) {
-      notify.error("Eroare export raport TVA: " + String(err));
+      notify.error(formatError(err, 'Nu s-a putut exporta raportul TVA.'));
     } finally {
       setExportingVat(false);
     }

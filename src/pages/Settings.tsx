@@ -15,6 +15,7 @@ import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore, type ThemeMode } from "@/lib/store";
 import { notify } from "@/lib/toasts";
+import { formatError } from "@/lib/error-mapper";
 import type { Company } from "@/types";
 
 function fmtBytes(bytes: number): string {
@@ -497,7 +498,7 @@ export function SettingsPage() {
                         const path = await api.archive.exportZip(activeCompanyId);
                         notify.success(`Arhivă exportată: ${path}`);
                       } catch (err) {
-                        notify.error("Export eșuat: " + String(err));
+                        notify.error(formatError(err, 'Exportul arhivei a eșuat.'));
                       }
                     }}
                   >
@@ -510,7 +511,7 @@ export function SettingsPage() {
                       type="button"
                       className="btn"
                       onClick={() => {
-                        api.system.openArchiveFolder().catch((e) => notify.error(String(e)));
+                        api.system.openArchiveFolder().catch((e) => notify.error(formatError(e, 'Nu s-a putut deschide folderul arhivei.')));
                       }}
                     >
                       <Icon name="database" size={12} /> Deschide folder arhivă
@@ -545,7 +546,7 @@ export function SettingsPage() {
                         const path = await api.system.exportBackup();
                         notify.success(`Backup salvat: ${path}`);
                       } catch (e) {
-                        notify.error("Eroare backup: " + String(e));
+                        notify.error(formatError(e, 'Exportul backup-ului a eșuat.'));
                       }
                     }}
                   >
@@ -569,7 +570,7 @@ export function SettingsPage() {
                           );
                         }
                       } catch (e) {
-                        notify.error("Eroare verificare: " + String(e));
+                        notify.error(formatError(e, 'Verificarea integrității a eșuat.'));
                       }
                     }}
                   >
@@ -596,7 +597,7 @@ export function SettingsPage() {
                             }
                           }
                         } catch (e) {
-                          notify.error("Eroare restaurare: " + String(e));
+                          notify.error(formatError(e, 'Restaurarea backup-ului a eșuat.'));
                         }
                       }}
                     >
@@ -626,7 +627,7 @@ export function SettingsPage() {
                         await api.system.setAutostart(e.target.checked);
                         void queryClient.invalidateQueries({ queryKey: queryKeys.system.autostart });
                       } catch (err) {
-                        notify.error("Eroare setare autostart: " + String(err));
+                        notify.error(formatError(err, 'Nu s-a putut modifica setarea de pornire automată.'));
                       }
                     }}
                   />

@@ -12,6 +12,7 @@ import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { notify } from "@/lib/toasts";
+import { formatError } from "@/lib/error-mapper";
 import type { Notification } from "@/types";
 
 function fmtTime(unix: number): string {
@@ -61,7 +62,7 @@ export function NotificationsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
     },
-    onError: (e) => notify.error("Eroare la ștergere: " + String(e)),
+    onError: (e) => notify.error(formatError(e, 'Nu s-a putut șterge notificarea.')),
   });
 
   const { mutate: deleteAllRead, isPending: deletingAllRead } = useMutation({
@@ -70,7 +71,7 @@ export function NotificationsPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
       notify.success("Notificările citite au fost șterse.");
     },
-    onError: (e) => notify.error("Eroare la ștergere: " + String(e)),
+    onError: (e) => notify.error(formatError(e, 'Nu s-au putut șterge notificările.')),
   });
 
   /** Mark as read, then navigate to the related entity if possible. */

@@ -14,6 +14,7 @@ import type { AddPaymentArgs, Payment } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
+import { formatError } from "@/lib/error-mapper";
 
 type PayFilter = "all" | "UNPAID" | "PARTIAL" | "PAID" | "OVERDUE";
 
@@ -82,7 +83,7 @@ export function PaymentsPage() {
       setAddModal(null);
       setForm({ amount: "", paidAt: new Date().toISOString().slice(0, 10), method: "transfer", reference: "" });
     },
-    onError: (e) => notify.error("Eroare la adăugarea plății: " + String(e)),
+    onError: (e) => notify.error(formatError(e, 'Nu s-a putut adăuga plata.')),
   });
 
   const deleteMutation = useMutation({
@@ -92,7 +93,7 @@ export function PaymentsPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.payments.summaries(activeCompanyId!) });
       notify.success("Plată ștearsă");
     },
-    onError: (e) => notify.error("Eroare la ștergere: " + String(e)),
+    onError: (e) => notify.error(formatError(e, 'Nu s-a putut șterge plata.')),
   });
 
   // Filter + search

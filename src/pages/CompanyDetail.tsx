@@ -19,6 +19,7 @@ import {
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { notify } from "@/lib/toasts";
+import { formatError } from "@/lib/error-mapper";
 import type { Certificate, Company } from "@/types";
 
 export function CompanyDetailPage() {
@@ -198,7 +199,7 @@ function CertificatesSection({ companyId }: { companyId: string }) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.certificates.list(companyId) });
     },
-    onError: (e) => notify.error("Eroare reautorizare: " + String(e)),
+    onError: (e) => notify.error(formatError(e, 'Reautorizarea certificatului a eșuat.')),
   });
 
   const revokeCert = useMutation({
@@ -206,7 +207,7 @@ function CertificatesSection({ companyId }: { companyId: string }) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.certificates.list(companyId) });
     },
-    onError: (e) => notify.error("Eroare revocare: " + String(e)),
+    onError: (e) => notify.error(formatError(e, 'Revocarea certificatului a eșuat.')),
   });
 
   const fmt = (unix: number) => new Date(unix * 1000).toLocaleDateString("ro-RO");
@@ -288,7 +289,7 @@ function CompanySpvSection({ company }: { company: Company }) {
         notify.error("Autorizarea SPV a fost anulată sau a eșuat. Reîncercați.");
       }
     },
-    onError: (e) => notify.error("Eroare conectare SPV: " + String(e)),
+    onError: (e) => notify.error(formatError(e, 'Conectarea la SPV a eșuat.')),
   });
 
   return (

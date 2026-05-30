@@ -1871,13 +1871,16 @@ select:hover:not(:focus) {
   .menubar,
   .ribbon,
   .sidebar,
+  .statusbar,
   .status-bar,
   .palette-scrim,
-  .content-titlebar .btn,
-  .content-titlebar .btn-icon,
+  .content-titlebar,
   .views-bar,
   .content-toolbar,
-  .bulk-bar {
+  .bulk-bar,
+  .detail-actions,
+  .invoice-meta,
+  button {
     display: none !important;
   }
 
@@ -1904,6 +1907,36 @@ select:hover:not(:focus) {
   .content-body {
     overflow: visible !important;
     height: auto !important;
+  }
+
+  /* Invoice detail: render only the preview pane at full width */
+  .split-60-40 {
+    display: block !important;
+  }
+
+  .invoice-preview {
+    width: 100% !important;
+    max-width: none !important;
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .invoice-paper {
+    max-width: none !important;
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+  }
+
+  body, html {
+    background: white !important;
+    color: black !important;
+  }
+
+  @page {
+    margin: 1.5cm;
   }
 
   .dt {

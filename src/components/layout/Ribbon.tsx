@@ -15,6 +15,7 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
 import { notify } from "@/lib/toasts";
+import { formatError } from "@/lib/error-mapper";
 
 interface RibbonProps {
   onOpenPalette: () => void;
@@ -47,7 +48,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       const { openPath } = await import("@tauri-apps/plugin-opener");
       await openPath(pdfPath);
       notify.success("PDF deschis");
-    } catch (e) { notify.error("Eroare generare PDF: " + String(e)); }
+    } catch (e) { notify.error(formatError(e, 'Nu s-a putut genera PDF-ul.')); }
   };
 
   const handleExportXml = async () => {
@@ -58,7 +59,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       const { writeTextFile } = await import("@tauri-apps/plugin-fs");
       const path = await save({ defaultPath: "factura.xml", filters: [{ name: "XML", extensions: ["xml"] }] });
       if (path) { await writeTextFile(path, xml); notify.success(`XML salvat: ${path}`); }
-    } catch (e) { notify.error("Eroare export XML: " + String(e)); }
+    } catch (e) { notify.error(formatError(e, 'Nu s-a putut exporta XML-ul.')); }
   };
 
   const handleImportXml = async () => {
@@ -74,7 +75,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       } else {
         notify.error(`Import eșuat: ${result.errors.join("; ")}`);
       }
-    } catch (e) { notify.error("Eroare import XML: " + String(e)); }
+    } catch (e) { notify.error(formatError(e, 'Nu s-a putut importa fișierul XML.')); }
   };
 
   const handleSubmitAnaf = async () => {
@@ -102,7 +103,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       }
       navigate({ to: "/received" });
     } catch (e) {
-      notify.error("Eroare la sincronizarea SPV: " + String(e));
+      notify.error(formatError(e, 'Sincronizarea SPV a eșuat.'));
     }
   };
 
@@ -113,7 +114,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       const status = await api.anaf.checkStatus(activeCompanyId, selectedInvoiceId, testMode);
       notify.info(`Status ANAF: ${status}`);
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
-    } catch (e) { notify.error("Eroare verificare status: " + String(e)); }
+    } catch (e) { notify.error(formatError(e, 'Nu s-a putut verifica statusul la ANAF.')); }
   };
 
   function handleWheel(e: React.WheelEvent<HTMLDivElement>) {
@@ -268,7 +269,7 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
                   setStornoOpen(false);
                   navigate({ to: "/invoices" });
                 } catch (e) {
-                  setStornoError((e as { message?: string }).message ?? String(e));
+                  setStornoError(formatError(e, 'Stornarea a eșuat.'));
                 } finally {
                   setStornoLoading(false);
                 }

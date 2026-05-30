@@ -5,6 +5,7 @@
 import { useRef, useState } from "react";
 import { Icon } from "@/components/shared/Icon";
 import { api } from "@/lib/tauri";
+import { formatError } from "@/lib/error-mapper";
 
 interface CsvImportModalProps {
   type: "invoices" | "contacts";
@@ -71,7 +72,7 @@ export function CsvImportModal({
       setResult(res);
       if (res.imported > 0) onSuccess(res.imported);
     } catch (e) {
-      setError("Eroare la import: " + String(e));
+      setError(formatError(e, 'Importul CSV a eșuat.'));
     } finally {
       setImporting(false);
     }
@@ -115,7 +116,7 @@ export function CsvImportModal({
           : await api.importData.contactsCsvDryRun(content, companyId);
       setPreviewResult(res);
     } catch (e) {
-      setError("Eroare la validare: " + String(e));
+      setError(formatError(e, 'Validarea CSV a eșuat.'));
     } finally {
       setPreviewing(false);
     }

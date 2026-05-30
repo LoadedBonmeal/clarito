@@ -13,6 +13,7 @@ import { api } from "@/lib/tauri";
 import type { CreateRecurringArgs } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
+import { formatError } from "@/lib/error-mapper";
 
 const FREQ_LABELS: Record<string, string> = {
   monthly:   "Lunar",
@@ -88,7 +89,7 @@ export function RecurringPage() {
       setShowModal(false);
       setForm({ ...EMPTY_FORM });
     },
-    onError: (e) => notify.error("Eroare la creare: " + String(e)),
+    onError: (e) => notify.error(formatError(e, 'Nu s-a putut crea șablonul recurent.')),
   });
 
   const deleteMutation = useMutation({
@@ -98,7 +99,7 @@ export function RecurringPage() {
       notify.success("Șablon șters");
       setDeleteConfirm(null);
     },
-    onError: (e) => notify.error("Eroare la ștergere: " + String(e)),
+    onError: (e) => notify.error(formatError(e, 'Nu s-a putut șterge șablonul.')),
   });
 
   const toggleActive = useMutation({
@@ -108,7 +109,7 @@ export function RecurringPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.recurring.list(activeCompanyId!) });
       notify.success("Status șablon actualizat.");
     },
-    onError: (e) => notify.error("Eroare: " + String(e)),
+    onError: (e) => notify.error(formatError(e, 'Nu s-a putut actualiza statusul șablonului.')),
   });
 
   const handleOpenModal = () => {
@@ -129,7 +130,7 @@ export function RecurringPage() {
       if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Cel puțin un articol necesar");
       setLinesError(null);
     } catch (e) {
-      setLinesError("JSON invalid: " + String(e));
+      setLinesError(e instanceof Error ? `JSON invalid: ${e.message}` : "JSON invalid.");
       return;
     }
 
