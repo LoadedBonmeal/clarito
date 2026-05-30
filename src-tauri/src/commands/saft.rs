@@ -68,8 +68,10 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
         .await?
         .ok_or(AppError::NotFound)?;
 
-    let company_name: String = company_row.try_get("legal_name").unwrap_or_default();
-    let company_cui: String = company_row.try_get("cui").unwrap_or_default();
+    let company_name: String = company_row
+        .try_get("legal_name")
+        .map_err(AppError::Database)?;
+    let company_cui: String = company_row.try_get("cui").map_err(AppError::Database)?;
 
     // Fetch invoices — include id for line-item correlation
     let invoice_rows = sqlx::query(
@@ -206,9 +208,10 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
     xml.push_str("    <SalesInvoices>\n");
 
     for row in &invoice_rows {
-        let invoice_id: String = row.try_get("id").unwrap_or_default();
-        let full_number: String = row.try_get("full_number").unwrap_or_default();
-        let issue_date: String = row.try_get("issue_date").unwrap_or_default();
+        let invoice_id: String = row.try_get("id").map_err(AppError::Database)?;
+        let full_number: String = row.try_get("full_number").map_err(AppError::Database)?;
+        let issue_date: String = row.try_get("issue_date").map_err(AppError::Database)?;
+        // client_name / client_cui are LEFT JOIN columns — may legitimately be empty
         let client_name: String = row.try_get("client_name").unwrap_or_default();
         let client_cui: String = row.try_get("client_cui").unwrap_or_default();
         let net_amount: String = row

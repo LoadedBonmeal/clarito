@@ -193,10 +193,16 @@ pub(crate) async fn cleanup_audit_log(pool: sqlx::SqlitePool) {
 pub(crate) async fn archive_check(pool: sqlx::SqlitePool, app: AppHandle) {
     use sqlx::Row;
 
-    let rows = sqlx::query("SELECT xml_path FROM invoices WHERE xml_path IS NOT NULL")
+    let rows = match sqlx::query("SELECT xml_path FROM invoices WHERE xml_path IS NOT NULL")
         .fetch_all(&pool)
         .await
-        .unwrap_or_default();
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = ?e, "archive_check: failed to query invoices, skipping run");
+            return;
+        }
+    };
 
     let missing: Vec<String> = rows
         .iter()

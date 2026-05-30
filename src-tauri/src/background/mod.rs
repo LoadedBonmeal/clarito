@@ -17,6 +17,10 @@ pub(crate) use spv::do_sync_spv;
 
 const STATUS_POLL_SECS: u64 = 900; // 15 minutes — per plan
 
+// NOTE: MISS-09 — Background tasks log errors but do not auto-restart on panic.
+// Future enhancement: wrap each tokio::spawn body with panic recovery
+// (e.g. via FutureExt::catch_unwind) so a single panic in one supervisor loop
+// does not silently stop polling for the rest of the process lifetime.
 pub fn spawn_background_tasks(app: AppHandle) {
     let app1 = app.clone();
     let app2 = app.clone();
@@ -34,7 +38,7 @@ pub fn spawn_background_tasks(app: AppHandle) {
                 tracing::warn!("Status poll error: {:?}", e);
             } else if let Some(state) = app1.try_state::<AppState>() {
                 let pool = state.db.clone();
-                let _ = sqlx::query(
+                if let Err(e) = sqlx::query(
                     "INSERT INTO audit_log (id, action, entity_type, entity_id, metadata, created_at) VALUES (?1, ?2, ?3, ?4, ?5, unixepoch())"
                 )
                 .bind(crate::db::models::new_id())
@@ -43,7 +47,10 @@ pub fn spawn_background_tasks(app: AppHandle) {
                 .bind("poll_status")
                 .bind("{\"result\":\"ok\"}")
                 .execute(&pool)
-                .await;
+                .await
+                {
+                    tracing::debug!(error = ?e, "Failed to write audit_log entry (non-fatal)");
+                }
             }
         }
     });
@@ -56,7 +63,7 @@ pub fn spawn_background_tasks(app: AppHandle) {
                 tracing::warn!("SPV sync error: {:?}", e);
             } else if let Some(state) = app2.try_state::<AppState>() {
                 let pool = state.db.clone();
-                let _ = sqlx::query(
+                if let Err(e) = sqlx::query(
                     "INSERT INTO audit_log (id, action, entity_type, entity_id, metadata, created_at) VALUES (?1, ?2, ?3, ?4, ?5, unixepoch())"
                 )
                 .bind(crate::db::models::new_id())
@@ -65,7 +72,10 @@ pub fn spawn_background_tasks(app: AppHandle) {
                 .bind("sync_spv_messages")
                 .bind("{\"result\":\"ok\"}")
                 .execute(&pool)
-                .await;
+                .await
+                {
+                    tracing::debug!(error = ?e, "Failed to write audit_log entry (non-fatal)");
+                }
 
                 // Update last_sync_at in settings for StatusBar
                 let _ = sqlx::query(
@@ -161,7 +171,7 @@ async fn sleep_until_local_time(hour: u32, minute: u32) {
         .date_naive()
         .and_time(target_time)
         .and_local_timezone(Local)
-        .single()
+        .earliest()
         .unwrap_or(now);
     if target <= now {
         target += chrono::Duration::days(1);
