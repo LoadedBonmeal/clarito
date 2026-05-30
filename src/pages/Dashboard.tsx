@@ -2,7 +2,7 @@
  * Dashboard — Privire generală, date reale din backend.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
@@ -15,6 +15,7 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtShortcut } from "@/lib/platform";
 import { parseDec, fmtRON } from "@/lib/utils";
+import { notify } from "@/lib/toasts";
 
 const DOT_COLORS = [
   "#2848A1", "#7C3AED", "#0891B2", "#D97706", "#16A34A",
@@ -46,6 +47,7 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
+  const [periodMode, setPeriodMode] = useState<'today' | 'week' | 'month' | 'ytd'>('month');
 
   const { data: companies = [] } = useQuery({
     queryKey: queryKeys.companies.list(),
@@ -97,31 +99,61 @@ export function DashboardPage() {
   const now = new Date();
   const currentMonth = now.toISOString().split("T")[0].slice(0, 7);
 
-  const thisMonth = useMemo(
-    () => invoices.filter((inv) => inv.issueDate.startsWith(currentMonth)),
-    [invoices, currentMonth],
+  // Compute [from, to] date range strings (YYYY-MM-DD) for the selected period
+  const [periodFrom, periodTo] = useMemo((): [string, string] => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const fmt = (d: Date) =>
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    const todayStr = fmt(now);
+
+    if (periodMode === 'today') {
+      return [todayStr, todayStr];
+    }
+    if (periodMode === 'week') {
+      const day = now.getDay(); // 0=Sun..6=Sat; Romanian week starts Monday
+      const diffToMon = (day === 0 ? -6 : 1 - day);
+      const mon = new Date(now);
+      mon.setDate(now.getDate() + diffToMon);
+      const sun = new Date(mon);
+      sun.setDate(mon.getDate() + 6);
+      return [fmt(mon), fmt(sun)];
+    }
+    if (periodMode === 'ytd') {
+      return [`${now.getFullYear()}-01-01`, todayStr];
+    }
+    // 'month' — first to last day of current month
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return [fmt(firstDay), fmt(lastDay)];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodMode, currentMonth]);
+
+  const periodInvoices = useMemo(
+    () => invoices.filter((inv) => inv.issueDate >= periodFrom && inv.issueDate <= periodTo),
+    [invoices, periodFrom, periodTo],
   );
 
   const totalNet = useMemo(
-    () => thisMonth.reduce((s, inv) => s + parseDec(inv.subtotalAmount), 0),
-    [thisMonth],
+    () => periodInvoices.reduce((s, inv) => s + parseDec(inv.subtotalAmount), 0),
+    [periodInvoices],
   );
   const totalVat = useMemo(
-    () => thisMonth.reduce((s, inv) => s + parseDec(inv.vatAmount), 0),
-    [thisMonth],
+    () => periodInvoices.reduce((s, inv) => s + parseDec(inv.vatAmount), 0),
+    [periodInvoices],
   );
 
   const validatedCount = useMemo(
-    () => thisMonth.filter((inv) => inv.status === "VALIDATED").length,
-    [thisMonth],
+    () => periodInvoices.filter((inv) => inv.status === "VALIDATED").length,
+    [periodInvoices],
   );
   const rejectedCount = useMemo(
-    () => thisMonth.filter((inv) => inv.status === "REJECTED").length,
-    [thisMonth],
+    () => periodInvoices.filter((inv) => inv.status === "REJECTED").length,
+    [periodInvoices],
   );
   const draftCount = useMemo(
-    () => thisMonth.filter((inv) => inv.status === "DRAFT").length,
-    [thisMonth],
+    () => periodInvoices.filter((inv) => inv.status === "DRAFT").length,
+    [periodInvoices],
   );
 
   const overdue = useMemo(
@@ -175,9 +207,15 @@ export function DashboardPage() {
         </span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Perioadă:</span>
-          <div className="seg">
-            <span className="seg-item active">{monthLabel}</span>
+          <div className="seg" role="tablist" aria-label="Perioadă">
+            <button type="button" className={`seg-item ${periodMode === 'today' ? 'active' : ''}`} onClick={() => setPeriodMode('today')}>Astăzi</button>
+            <button type="button" className={`seg-item ${periodMode === 'week' ? 'active' : ''}`} onClick={() => setPeriodMode('week')}>Săptămâna</button>
+            <button type="button" className={`seg-item ${periodMode === 'month' ? 'active' : ''}`} onClick={() => setPeriodMode('month')}>{monthLabel}</button>
+            <button type="button" className={`seg-item ${periodMode === 'ytd' ? 'active' : ''}`} onClick={() => setPeriodMode('ytd')}>YTD</button>
           </div>
+          <button type="button" className="btn compact" onClick={() => notify.info('Export disponibil în R8')}>
+            <Icon name="download" size={11} /> Export
+          </button>
           <button type="button" className="btn" onClick={() => void queryClient.refetchQueries({ type: "active" })}>
             <Icon name="refresh" size={12} /> Reîmprospătează{" "}
             <span className="kbd" style={{ marginLeft: 4 }}>F5</span>
@@ -193,26 +231,32 @@ export function DashboardPage() {
       )}
       {lastRejected && (
         <div
-          className="callout"
-          style={{
-            margin: "10px 14px 0",
-            borderColor: "#FCD34D",
-            background: "#FFFBEB",
-            color: "#854D0E",
-            borderLeftColor: "#D97706",
-          }}
+          className="callout callout-warn"
+          style={{ margin: "10px 14px 0", display: "flex", gap: 12, alignItems: "center" }}
         >
           <Icon name="alert" size={15} />
-          <span>
-            Factura <b>{lastRejected.fullNumber}</b> a fost respinsă de ANAF.
-            {lastRejected.rejectionReason && (
-              <> <i>{lastRejected.rejectionReason}</i></>
+          <p style={{ margin: 0, flex: 1 }}>
+            Factura <strong>{lastRejected.fullNumber}</strong>
+            {contactMap[lastRejected.contactId]?.legalName && (
+              <> către <strong>{contactMap[lastRejected.contactId]?.legalName}</strong></>
             )}
-          </span>
+            {' '}a fost respinsă de ANAF
+            {lastRejected.rejectionReason && (
+              <>: <em>{lastRejected.rejectionReason}</em></>
+            )}.
+          </p>
           <button
             type="button"
             className="fix"
-            style={{ background: "#D97706" }}
+            onClick={() =>
+              navigate({ to: "/invoices/$id", params: { id: lastRejected.id } })
+            }
+          >
+            <Icon name="edit" size={11} /> Corectează
+          </button>
+          <button
+            type="button"
+            className="btn compact"
             onClick={() =>
               navigate({ to: "/invoices/$id", params: { id: lastRejected.id } })
             }
@@ -246,13 +290,13 @@ export function DashboardPage() {
               </span>{" "}
             </>
           )}
-          În luna curentă ai emis{" "}
+          În perioada selectată ai emis{" "}
           <span className="b">
-            {thisMonth.length} {thisMonth.length === 1 ? "factură" : "facturi"}
+            {periodInvoices.length} {periodInvoices.length === 1 ? "factură" : "facturi"}
           </span>{" "}
           totalizând{" "}
           <span className="b tnum">{fmtRON(totalNet + totalVat)} RON</span>
-          {thisMonth.length > 0 && (
+          {periodInvoices.length > 0 && (
             <>
               , dintre care <span className="b">{validatedCount} validate</span> de ANAF
               {rejectedCount > 0 && (
@@ -269,16 +313,16 @@ export function DashboardPage() {
           <div className="kpi-cell k-sales">
             <span className="lbl">Vânzări · {monthLabel}</span>
             <span className="val tnum">{fmtRON(totalNet)}</span>
-            <span className="sub">RON net · {thisMonth.length} facturi</span>
+            <span className="sub">RON net · {periodInvoices.length} facturi</span>
           </div>
           <div className="kpi-cell k-vat">
             <span className="lbl">TVA colectată</span>
             <span className="val tnum">{fmtRON(totalVat)}</span>
-            <span className="sub">din {thisMonth.length} facturi luna aceasta</span>
+            <span className="sub">din {periodInvoices.length} facturi în perioada selectată</span>
           </div>
           <div className="kpi-cell k-invoices">
             <span className="lbl">Facturi emise · {monthLabel.split(" ")[0]}</span>
-            <span className="val tnum">{thisMonth.length}</span>
+            <span className="val tnum">{periodInvoices.length}</span>
             <span className="sub">
               {validatedCount} validate · {rejectedCount} respinse · {draftCount} schițe
             </span>
@@ -297,7 +341,7 @@ export function DashboardPage() {
         <div className="dash-row">
           <div className="panel">
             <div className="panel-header">
-              <span>{t("nav.companies")} · {companies.length}</span>
+              <span>{t("nav.companies")} administrate · {companies.length} {companies.length === 1 ? "companie" : "companii"}</span>
               <span style={{ display: "flex", gap: 6 }}>
                 <button
                   type="button"
@@ -369,7 +413,7 @@ export function DashboardPage() {
 
           <div className="panel">
             <div className="panel-header">
-              <span>Notificări ANAF · recent</span>
+              <span>Activitate ANAF · live</span>
               <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 <span
                   style={{

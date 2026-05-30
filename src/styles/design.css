@@ -1643,6 +1643,28 @@ input, select, textarea { font: inherit; color: inherit; }
   border-radius: 5px;
 }
 
+/* Yellow/amber warning variant */
+.callout.callout-warn {
+  background: #FFFBEB;
+  border: 1px solid #FCD34D;
+  border-left: 4px solid #D97706;
+  color: #92400E;
+}
+.callout.callout-warn .fix {
+  background: #D97706;
+  color: #fff;
+  border-color: #D97706;
+}
+.callout.callout-warn .fix:hover {
+  background: #B45309;
+  border-color: #B45309;
+}
+[data-theme="dark"] .callout.callout-warn {
+  background: #422C0E;
+  border-color: #B45309;
+  color: #FCD34D;
+}
+
 /* dialog skeleton (multi-company switcher) */
 .popover {
   position: absolute;
