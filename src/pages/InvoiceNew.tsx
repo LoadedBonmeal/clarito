@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useId } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Icon } from "@/components/shared/Icon";
@@ -79,6 +79,18 @@ export function InvoiceNewPage() {
   const [paymentReference, setPaymentReference] = useState<string>("");
   const vatPayer = company?.vatPayer ?? true;
   const [lines, setLines] = useState<LineRow[]>([newLineRow(vatPayer)]);
+  // IDs for label↔input association (A11Y-06)
+  const companyEmitentId = useId();
+  const seriesId = useId();
+  const issueDateId = useId();
+  const dueDateId = useId();
+  const currencyId = useId();
+  const paymentMethodId = useId();
+  const paymentIbanId = useId();
+  const paymentReferenceId = useId();
+  const paymentMeansCodeId = useId();
+  const notesId = useId();
+
   // Track the saved draft ID for live validation
   const [savedId, setSavedId] = useState<string | null>(null);
   // True when "Trimite la ANAF" was clicked — navigate to detail to trigger submit there
@@ -294,9 +306,10 @@ export function InvoiceNewPage() {
             <div className="panel-body">
               <div className="form-grid">
                 <div className="form-section-title">Emitent</div>
-                <label>Companie emitentă</label>
+                <label htmlFor={companyEmitentId}>Companie emitentă</label>
                 <div className="field">
                   <input
+                    id={companyEmitentId}
                     className="input"
                     value={company?.legalName ?? ""}
                     readOnly
@@ -309,9 +322,10 @@ export function InvoiceNewPage() {
                     </span>
                   )}
                 </div>
-                <label>Serie / Număr</label>
+                <label htmlFor={seriesId}>Serie / Număr</label>
                 <div className="field">
                   <input
+                    id={seriesId}
                     className="input mono"
                     value={activeSeries}
                     onChange={(e) => setSeries(e.target.value)}
@@ -330,9 +344,10 @@ export function InvoiceNewPage() {
                     </span>
                   )}
                 </div>
-                <label>Data emiterii</label>
+                <label htmlFor={issueDateId}>Data emiterii</label>
                 <div className="field">
                   <input
+                    id={issueDateId}
                     className="input"
                     type="date"
                     value={issueDate}
@@ -341,9 +356,10 @@ export function InvoiceNewPage() {
                   />
                   <Icon name="calendar" size={14} style={{ color: "var(--text-muted)" }} />
                 </div>
-                <label>Data scadenței</label>
+                <label htmlFor={dueDateId}>Data scadenței</label>
                 <div className="field">
                   <input
+                    id={dueDateId}
                     className="input"
                     type="date"
                     value={dueDate}
@@ -357,9 +373,10 @@ export function InvoiceNewPage() {
                   </span>
                 </div>
 
-                <label>Monedă</label>
+                <label htmlFor={currencyId}>Monedă</label>
                 <div className="field">
                   <select
+                    id={currencyId}
                     className="select"
                     value={currency}
                     onChange={(e) => setCurrency(e.target.value)}
@@ -593,9 +610,10 @@ export function InvoiceNewPage() {
               </div>
               <div className="panel-body">
                 <div className="form-grid" style={{ gridTemplateColumns: "120px 1fr" }}>
-                  <label>Metodă</label>
+                  <label htmlFor={paymentMethodId}>Metodă</label>
                   <div className="field">
                     <select
+                      id={paymentMethodId}
                       className="select"
                       value={paymentMethod}
                       onChange={(e) => setPaymentMethod(e.target.value)}
@@ -606,9 +624,10 @@ export function InvoiceNewPage() {
                       <option value="comp">Compensare</option>
                     </select>
                   </div>
-                  <label>Cont bancar</label>
+                  <label htmlFor={paymentIbanId}>Cont bancar</label>
                   <div className="field">
                     <input
+                      id={paymentIbanId}
                       className="input mono"
                       value={paymentIban || company?.iban || ""}
                       onChange={(e) => setPaymentIban(e.target.value)}
@@ -620,9 +639,10 @@ export function InvoiceNewPage() {
                       </span>
                     )}
                   </div>
-                  <label>Referință</label>
+                  <label htmlFor={paymentReferenceId}>Referință</label>
                   <div className="field">
                     <input
+                      id={paymentReferenceId}
                       className="input"
                       value={paymentReference}
                       onChange={(e) => setPaymentReference(e.target.value)}
@@ -648,9 +668,10 @@ export function InvoiceNewPage() {
               </div>
               <div className="panel-body">
                 <div className="form-grid" style={{ gridTemplateColumns: "120px 1fr" }}>
-                  <label>Mod plată</label>
+                  <label htmlFor={paymentMeansCodeId}>Mod plată</label>
                   <div className="field">
                     <select
+                      id={paymentMeansCodeId}
                       className="input"
                       value={paymentMeansCode}
                       onChange={(e) => setPaymentMeansCode(e.target.value)}
@@ -662,9 +683,10 @@ export function InvoiceNewPage() {
                       <option value="58">SEPA (58)</option>
                     </select>
                   </div>
-                  <label>Observații</label>
+                  <label htmlFor={notesId}>Observații</label>
                   <div className="field" style={{ alignItems: "flex-start" }}>
                     <textarea
+                      id={notesId}
                       className="input"
                       style={{ width: "100%", height: 64, padding: 6, resize: "vertical" }}
                       value={notes}

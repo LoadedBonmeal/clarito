@@ -2,7 +2,7 @@
  * Contacte (clienți / furnizori) — date reale din backend.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useId, isValidElement, cloneElement } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { confirm } from "@tauri-apps/plugin-dialog";
@@ -443,10 +443,14 @@ function MField({
   children: React.ReactNode;
   style?: React.CSSProperties;
 }) {
+  const fieldId = useId();
+  const child = isValidElement(children)
+    ? cloneElement(children as React.ReactElement<{ id?: string }>, { id: fieldId })
+    : children;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3, ...style }}>
-      <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>{label}</label>
-      {children}
+      <label htmlFor={fieldId} style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>{label}</label>
+      {child}
     </div>
   );
 }
