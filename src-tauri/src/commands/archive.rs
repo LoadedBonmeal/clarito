@@ -128,18 +128,54 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
         return Err(AppError::Other("ZIP invalid: lipsește data.db".to_string()));
     }
 
+    // 2a. Extrage conținutul data.db din ZIP în memorie (necesar și pentru verificare)
+    let buf = {
+        let mut db_entry = archive
+            .by_name("data.db")
+            .map_err(|e| AppError::Other(e.to_string()))?;
+        let mut b = Vec::new();
+        db_entry.read_to_end(&mut b).map_err(AppError::Io)?;
+        b
+    };
+
+    // 2b. Validează integritatea SQLite a backup-ului înainte de a suprascrie DB-ul curent
+    let temp_check_path = {
+        let data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| AppError::Other(e.to_string()))?;
+        data_dir.join("data_restore_check.db")
+    };
+    std::fs::write(&temp_check_path, &buf).map_err(AppError::Io)?;
+
+    {
+        let check_url = format!("sqlite:{}?mode=ro", temp_check_path.to_string_lossy());
+        let check_pool = sqlx::SqlitePool::connect(&check_url).await.map_err(|_| {
+            AppError::Other("Backup invalid: DB-ul nu poate fi deschis.".to_string())
+        })?;
+
+        let integrity: String = sqlx::query_scalar("PRAGMA integrity_check")
+            .fetch_one(&check_pool)
+            .await
+            .unwrap_or_else(|_| "error".to_string());
+        check_pool.close().await;
+
+        if integrity != "ok" {
+            let _ = std::fs::remove_file(&temp_check_path);
+            return Err(AppError::Other(format!(
+                "Backup corupt: PRAGMA integrity_check a returnat: {integrity}"
+            )));
+        }
+    }
+    std::fs::remove_file(&temp_check_path).ok();
+
     // 3. Determină calea curentă a DB
     let db_path = crate::db::pool::resolve_db_path(&app)?;
 
     // 4. Backup DB curent
     std::fs::copy(&db_path, db_path.with_extension("db.bak")).map_err(AppError::Io)?;
 
-    // 5. Extrage data.db din ZIP și scrie la calea DB-ului
-    let mut db_entry = archive
-        .by_name("data.db")
-        .map_err(|e| AppError::Other(e.to_string()))?;
-    let mut buf = Vec::new();
-    db_entry.read_to_end(&mut buf).map_err(AppError::Io)?;
+    // 5. Scrie data.db extrasă din ZIP la calea DB-ului
     std::fs::write(&db_path, &buf).map_err(AppError::Io)?;
 
     // 6. Repornește aplicația
