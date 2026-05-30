@@ -779,6 +779,7 @@ mod tests {
             country: "RO".into(),
             email: None,
             phone: None,
+            currency: None,
             created_at: 0,
             updated_at: 0,
         }

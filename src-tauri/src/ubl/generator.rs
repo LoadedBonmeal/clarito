@@ -662,6 +662,7 @@ mod tests {
             country: "RO".to_string(),
             email: None,
             phone: None,
+            currency: None,
             created_at: 0,
             updated_at: 0,
         };
