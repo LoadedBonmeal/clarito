@@ -91,9 +91,17 @@ pub(crate) async fn poll_submitted_for_company(
             .await
             .unwrap_or(false);
     let client = AnafClient::new(test_mode);
-    let submitted = db_inv::list_submitted(pool, company_id)
-        .await
-        .unwrap_or_default();
+    let submitted = match db_inv::list_submitted(pool, company_id).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!(
+                company_id = %company_id,
+                error = ?e,
+                "Failed to list submitted invoices"
+            );
+            return Err(e);
+        }
+    };
     let mut count = 0u32;
 
     for invoice in &submitted {
@@ -115,8 +123,15 @@ pub(crate) async fn poll_submitted_for_company(
             if let Ok(status_resp) = result {
                 let stare = status_resp.stare.as_str();
                 if stare == "ok" {
-                    let _ = db_inv::mark_validated(pool, &invoice.id, status_resp.index_incarcare)
-                        .await;
+                    if let Err(e) =
+                        db_inv::mark_validated(pool, &invoice.id, status_resp.index_incarcare).await
+                    {
+                        tracing::error!(
+                            invoice_id = %invoice.id,
+                            error = ?e,
+                            "Failed to persist VALIDATED status after ANAF confirmation"
+                        );
+                    }
                     if let Some(app) = app {
                         crate::notifications::notify_invoice_validated(app, &invoice.full_number)
                             .await;
@@ -152,7 +167,15 @@ pub(crate) async fn poll_submitted_for_company(
                             }),
                         );
                     }
-                    let _ = db_inv::mark_rejected(pool, &invoice.id, friendly_reason, None).await;
+                    if let Err(e) =
+                        db_inv::mark_rejected(pool, &invoice.id, friendly_reason, None).await
+                    {
+                        tracing::error!(
+                            invoice_id = %invoice.id,
+                            error = ?e,
+                            "Failed to persist REJECTED status after ANAF rejection"
+                        );
+                    }
                 }
             }
         }
