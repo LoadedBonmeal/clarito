@@ -45,26 +45,34 @@ const FP_SETTINGS_KEY: &str = "license_fp_v2";
 /// Cheie settings pentru timestamp-ul last-seen (anti-rollback ceas).
 const LAST_SEEN_KEY: &str = "license_last_seen_v2";
 
-/// Secret obfuscat în binar pentru fingerprint-ul de integritate.
-/// Nu este securitate perfectă, dar ridică substanțial bara față de un
-/// utilizator care editează manual SQLite-ul.
-///
-/// NOTE: SEC-05 — these constants (INTEGRITY_SECRET, KEY_HMAC_SECRET below)
-/// are extractable via `strings` on the compiled binary. Offline license
-/// validation is fundamentally limited in this regard. Server-side activation
-/// would be required for stronger tamper-resistance.
-const INTEGRITY_SECRET: &[u8] = b"RoF@ctura#2026!intgr1ty_K3y\xd4\x9a\x7f\x01\xbe\xc3v2";
+// SEC-05: secrets are obfuscated at build time via XOR cycle with build-derived salt.
+// See build.rs for the obfuscation scheme. The compiled binary contains only
+// XOR-ed bytes — a `strings` scan reveals no readable secret material.
+// This raises the reverse-engineering bar but is not cryptographically strong:
+// a determined attacker with a disassembler can still extract the secrets at runtime.
+// Server-side license validation would be required for stronger tamper resistance.
+//
+// SEC-10 note: the key checksum was extended from 4 to 8 hex chars (16-bit →
+// 32-bit) for significantly better collision resistance. Legacy 4-char keys
+// are still accepted during transition to avoid breaking deployed installations.
+include!(concat!(env!("OUT_DIR"), "/license_secrets.rs"));
 
-// ─── License Key Validation ─────────────────────────────────────────────────
+use std::sync::OnceLock;
 
-/// Format: XXXX-XXXX-XXXX-XXXXXXXX (A-Z0-9 only).
-/// Segment 4 = first 8 hex chars of SHA-256(KEY_HMAC_SECRET || 0x00 || "SEG1-SEG2-SEG3").
-/// Offline validation without server — prevents random key guessing.
-///
-/// SEC-10: checksum was extended from 4 to 8 hex chars (16-bit → 32-bit) for
-/// significantly better collision resistance. Legacy 4-char keys are still
-/// accepted during transition to avoid breaking deployed installations.
-const KEY_HMAC_SECRET: &[u8] = b"RoF@ctura#Key!HMAC2026\xb2\x7f\xd4\x91\xc3\x0a";
+static INTEGRITY_SECRET_CACHE: OnceLock<Vec<u8>> = OnceLock::new();
+static KEY_HMAC_SECRET_CACHE: OnceLock<Vec<u8>> = OnceLock::new();
+
+fn integrity_secret() -> &'static [u8] {
+    INTEGRITY_SECRET_CACHE
+        .get_or_init(integrity_secret_bytes)
+        .as_slice()
+}
+
+fn key_hmac_secret() -> &'static [u8] {
+    KEY_HMAC_SECRET_CACHE
+        .get_or_init(key_hmac_secret_bytes)
+        .as_slice()
+}
 
 /// Returns true if the key format is valid AND the embedded checksum matches.
 fn validate_license_key(key: &str) -> bool {
@@ -112,7 +120,7 @@ fn validate_license_key(key: &str) -> bool {
 /// Callers slice the prefix they need (`..4` legacy, `..8` current).
 fn key_checksum(data: &[u8]) -> String {
     let mut h = Sha256::new();
-    h.update(KEY_HMAC_SECRET);
+    h.update(key_hmac_secret());
     h.update(b"\x00");
     h.update(data);
     format!("{:x}", h.finalize())
@@ -231,7 +239,7 @@ fn read_username_os() -> Option<String> {
 /// Modificarea `expires_at` în SQLite fără a cunoaște secretul → fingerprint invalid.
 fn compute_fingerprint(email: &str, mid: &str, expires_at: i64, tier: &str) -> String {
     let mut h = Sha256::new();
-    h.update(INTEGRITY_SECRET);
+    h.update(integrity_secret());
     h.update(b"\x00");
     h.update(email.as_bytes());
     h.update(b"\x00");
@@ -464,4 +472,36 @@ pub async fn activate_license(
     set_setting(pool, LAST_SEEN_KEY, &now.to_string()).await;
 
     Ok(lic)
+}
+
+#[cfg(test)]
+mod sec_tests {
+    use super::*;
+
+    #[test]
+    fn secrets_decode_to_expected_length() {
+        let int_sec = integrity_secret();
+        let key_sec = key_hmac_secret();
+        // Original byte-string lengths from build.rs
+        assert_eq!(int_sec.len(), 35);
+        assert_eq!(key_sec.len(), 28);
+    }
+
+    #[test]
+    fn secrets_consistent_across_calls() {
+        let a = integrity_secret().to_vec();
+        let b = integrity_secret().to_vec();
+        assert_eq!(a, b);
+
+        let c = key_hmac_secret().to_vec();
+        let d = key_hmac_secret().to_vec();
+        assert_eq!(c, d);
+    }
+
+    #[test]
+    fn secrets_decode_correctly() {
+        // The decoded secret should match the expected first bytes ("RoF...")
+        assert_eq!(&integrity_secret()[..3], b"RoF");
+        assert_eq!(&key_hmac_secret()[..3], b"RoF");
+    }
 }
