@@ -2,14 +2,25 @@
  * platform — detecție SO și formatare scurtături de tastatură.
  *
  * Pe macOS afișăm simbolurile native (⌘ ⌥ ⇧); pe Windows/Linux păstrăm
- * forma "Ctrl+N". Detecția folosește `navigator`, deci funcționează atât în
- * Tauri (WebView) cât și în browser.
+ * forma "Ctrl+N". Detecție bazată pe userAgentData (modern) cu fallback
+ * pe userAgent — navigator.platform e deprecat.
  */
 
-export const isMac: boolean =
-  typeof navigator !== "undefined" &&
-  (navigator.platform.toLowerCase().startsWith("mac") ||
-    navigator.userAgent.toLowerCase().includes("mac os"));
+interface NavigatorUAData {
+  platform?: string;
+}
+
+function detectMac(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const uaData = (navigator as Navigator & { userAgentData?: NavigatorUAData })
+    .userAgentData;
+  if (uaData?.platform) {
+    return uaData.platform.toLowerCase().includes("mac");
+  }
+  return navigator.userAgent.toLowerCase().includes("mac os");
+}
+
+export const isMac: boolean = detectMac();
 
 /**
  * Convertește o scurtătură în forma potrivită SO-ului curent.
