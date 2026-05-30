@@ -18,7 +18,6 @@ jobs:
           if [ -z "${{ secrets.APPLE_CERTIFICATE }}" ]; then
             echo "❌ APPLE_CERTIFICATE secret is not set"
             echo "   Set this in GitHub → Settings → Secrets → Actions"
-            echo "   See docs/RELEASE_SIGNING.md for instructions"
             exit 1
           fi
           if [ -z "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" ]; then
@@ -43,7 +42,6 @@ jobs:
         run: |
           if [ -z "${{ secrets.WINDOWS_CERTIFICATE }}" ]; then
             echo "❌ WINDOWS_CERTIFICATE secret is not set"
-            echo "   See docs/RELEASE_SIGNING.md for instructions"
             exit 1
           fi
           if [ -z "${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}" ]; then
