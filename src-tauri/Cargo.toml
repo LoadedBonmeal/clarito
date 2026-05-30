@@ -4,6 +4,10 @@ version = "0.2.0"
 description = "RoFactura — Aplicație desktop pentru e-Factura ANAF"
 authors = ["Lucaris"]
 edition = "2021"
+# Tauri bundler picks this as the app's main binary. Without it, multi-bin
+# crates (we ship license-gen alongside) cause the bundler to grab the
+# alphabetically first binary (license-gen) as the .app/.exe main executable.
+default-run = "efactura-desktop"
 
 [lib]
 name = "efactura_desktop_lib"
