@@ -17,6 +17,7 @@ import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
+import { formatOptionalRon } from "@/lib/formatters";
 
 import { fmtShortcut } from "@/lib/platform";
 import { notify } from "@/lib/toasts";
@@ -177,10 +178,9 @@ export function InvoicesPage() {
                 // Citim fișierul în Rust (ocolim scope-ul FS plugin care permite doar $APPDATA):
                 const result = await api.importData.invoiceXmlFromFile(filePath, activeCompanyId);
                 if (result.imported > 0) {
-                  const totalText = result.totalAmount
-                    ? `${Number(result.totalAmount).toFixed(2)} RON`
-                    : "sumă necunoscută";
-                  notify.success(`Factură importată: ${result.invoiceNumber} — ${result.supplierName} · ${totalText}`);
+                  notify.success(
+                    `Factură importată: ${result.invoiceNumber ?? "?"} — ${result.supplierName ?? "?"} · ${formatOptionalRon(result.totalAmount)}`,
+                  );
                   void queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
                 } else {
                   notify.error(`Import eșuat: ${result.errors.join("; ")}`);
@@ -274,6 +274,12 @@ export function InvoicesPage() {
           onClick={() => setFilter("DRAFT")}
         >
           Schițe <span className="count">{counts.DRAFT}</span>
+        </span>
+        <span
+          className={"view-tab " + (filter === "STORNED" ? "active" : "")}
+          onClick={() => setFilter("STORNED")}
+        >
+          Stornate <span className="count">{counts.STORNED}</span>
         </span>
         <span className="view-tab" style={{ color: "var(--accent)", borderRight: 0, opacity: 0.4, cursor: "not-allowed", pointerEvents: "none" }}>
           <Icon name="plus" size={11} /> Salvează vizualizarea
@@ -384,6 +390,12 @@ export function InvoicesPage() {
             onClick={() => setFilter("DRAFT")}
           >
             Schițe
+          </span>
+          <span
+            className={"seg-item " + (filter === "STORNED" ? "active" : "")}
+            onClick={() => setFilter("STORNED")}
+          >
+            Stornate
           </span>
         </div>
         <span

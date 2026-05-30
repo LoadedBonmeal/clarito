@@ -213,6 +213,20 @@ export function InvoiceNewPage() {
     return () => window.removeEventListener('keydown', handler);
   }, [saveDraftMutation]);
 
+  // TS-07: Guard against rendering the editor without an active company.
+  // Must be placed after all hook calls to respect rules-of-hooks.
+  if (!activeCompanyId) {
+    return (
+      <div className="content">
+        <div style={{ padding: 40, textAlign: "center" }}>
+          <p style={{ fontSize: 14, color: "var(--muted-color, #888)", marginBottom: 16 }}>
+            Selectați o companie activă din bara laterală pentru a emite o factură.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="content">
       <div className="content-titlebar">
@@ -348,6 +362,7 @@ export function InvoiceNewPage() {
                 <div className="form-section-title">Cumpărător</div>
                 <label>Cumpărător</label>
                 <div className="field">
+                  {/* TODO MISS-05: Replace select with typeahead using api.contacts.search() for large contact lists. */}
                   <select
                     className="select"
                     value={contactId}

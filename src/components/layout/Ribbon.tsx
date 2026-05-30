@@ -263,7 +263,8 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
                     return;
                   }
                   await api.invoices.storno(inv.id, stornoReason.trim() || "Stornare");
-                  void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.list() });
+                  // TS-12: invalidate the full invoices namespace (including filtered list queries)
+                  void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
                   setStornoOpen(false);
                   navigate({ to: "/invoices" });
                 } catch (e) {

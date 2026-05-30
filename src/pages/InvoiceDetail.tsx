@@ -366,7 +366,7 @@ export function InvoiceDetailPage() {
             onClick={() => {
               const subject = encodeURIComponent(`Factură ${invoice.fullNumber}`);
               const body = encodeURIComponent(
-                `Bună ziua,\n\nVă transmitem factura ${invoice.fullNumber} din data ${invoice.issueDate}, în valoare de ${invoice.totalAmount} ${invoice.currency}.\n\nCu stimă`
+                `Bună ziua,\n\nVă transmitem factura ${invoice.fullNumber} din data ${invoice.issueDate}, în valoare de ${fmtRON(invoice.totalAmount)} ${invoice.currency}.\n\nCu stimă`
               );
               void openUrl(`mailto:${contact.email}?subject=${subject}&body=${body}`);
             }}

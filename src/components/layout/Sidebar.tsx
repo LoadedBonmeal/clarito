@@ -77,7 +77,7 @@ export function Sidebar() {
     { id: "facturi-emise",   label: "Facturi emise",   ico: "invoice",   color: "var(--color-facturi)", badge: invoicesBadge, path: "/invoices",    matchPrefix: "/invoices" },
     { id: "facturi-primite", label: "Facturi primite", ico: "invoiceIn", color: "var(--color-primite)", badge: receivedBadge, path: "/received",    matchPrefix: "/received" },
     { id: "spv",             label: "Mesaje SPV",      ico: "anaf",      color: "var(--color-primite)", badge: spvBadge,      path: "/notifications" },
-    { id: "stornate",        label: "Stornate",        ico: "storno",    color: "var(--color-rapoarte)", path: "/invoices",   disabled: true },
+    { id: "stornate",        label: "Stornate",        ico: "storno",    color: "var(--color-rapoarte)", path: "/invoices" },
     { section: "Operativ" },
     { id: "companii",  label: "Companii",           ico: "buildings", color: "var(--color-companii)", badge: companiesBadge, path: "/companies", matchPrefix: "/companies" },
     { id: "contacte",  label: "Contacte",           ico: "users",     color: "var(--color-contacte)", badge: contactsBadge,  path: "/contacts" },

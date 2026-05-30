@@ -5,7 +5,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, CheckCircle2, ExternalLink, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ExternalLink, Pencil, XCircle } from "lucide-react";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -86,6 +86,15 @@ export function CompanyDetailPage() {
         >
           <ArrowLeft className="h-3 w-3" />
           <span>Înapoi la listă</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate({ to: "/companies/$id/edit", params: { id: data.id } })}
+          className="flex h-7 items-center gap-1.5 rounded-sm border border-border bg-background px-2 text-[11px] hover:bg-muted/60"
+          title="Editează datele companiei"
+        >
+          <Pencil className="h-3 w-3" />
+          <span>Editează</span>
         </button>
       </Toolbar>
 
