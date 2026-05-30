@@ -693,6 +693,7 @@ mod tests {
             rejection_code: None,
             notes: None,
             payment_means_code: "30".to_string(),
+            storno_of_invoice_id: None,
             created_at: 0,
             updated_at: 0,
         };
