@@ -101,6 +101,16 @@ export function RecurringPage() {
     onError: (e) => notify.error("Eroare la ștergere: " + String(e)),
   });
 
+  const toggleActive = useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) =>
+      api.recurring.toggleActive(id, active),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.recurring.list(activeCompanyId!) });
+      notify.success("Status șablon actualizat.");
+    },
+    onError: (e) => notify.error("Eroare: " + String(e)),
+  });
+
   const handleOpenModal = () => {
     setForm({ ...EMPTY_FORM });
     setLinesError(null);
@@ -192,7 +202,7 @@ export function RecurringPage() {
                 <th style={{ width: 60 }}>Serie</th>
                 <th style={{ width: 90 }}>Auto ANAF</th>
                 <th style={{ width: 70 }}>Stare</th>
-                <th style={{ width: 60 }}>Acțiuni</th>
+                <th style={{ width: 180 }}>Acțiuni</th>
               </tr>
             </thead>
             <tbody>
@@ -242,13 +252,33 @@ export function RecurringPage() {
                         </button>
                       </span>
                     ) : (
-                      <button
-                        className="btn compact"
-                        onClick={() => setDeleteConfirm(r.id)}
-                        title="Șterge șablon"
-                      >
-                        <Icon name="trash" size={11} />
-                      </button>
+                      <span style={{ display: "flex", gap: 4 }}>
+                        <button
+                          type="button"
+                          className="btn compact"
+                          onClick={() => toggleActive.mutate({ id: r.id, active: !r.active })}
+                          disabled={toggleActive.isPending}
+                          title={r.active ? "Pune pe pauză șablonul" : "Reia șablonul"}
+                        >
+                          {r.active ? "Pauză" : "Reia"}
+                        </button>
+                        {/* TODO MISS-03: full edit modal — for now use delete + create */}
+                        <button
+                          type="button"
+                          className="btn compact"
+                          disabled
+                          title="În curând: editare completă"
+                        >
+                          Editează
+                        </button>
+                        <button
+                          className="btn compact"
+                          onClick={() => setDeleteConfirm(r.id)}
+                          title="Șterge șablon"
+                        >
+                          <Icon name="trash" size={11} />
+                        </button>
+                      </span>
                     )}
                   </td>
                 </tr>

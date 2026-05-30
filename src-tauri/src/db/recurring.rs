@@ -127,6 +127,77 @@ pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRecurringInput {
+    pub template_name: String,
+    pub frequency: String,
+    pub next_issue_date: String,
+    pub day_of_month: i64,
+    pub auto_submit_anaf: bool,
+    pub active: bool,
+    pub series: String,
+    pub lines_json: String,
+    pub notes: Option<String>,
+}
+
+pub async fn update(pool: &SqlitePool, id: &str, input: UpdateRecurringInput) -> AppResult<()> {
+    let valid_frequencies = ["monthly", "quarterly", "annual"];
+    if !valid_frequencies.contains(&input.frequency.as_str()) {
+        return Err(AppError::Validation(
+            "Frecvență invalidă. Valori acceptate: monthly, quarterly, annual".into(),
+        ));
+    }
+    if !(1..=28).contains(&input.day_of_month) {
+        return Err(AppError::Validation(
+            "Ziua lunii trebuie să fie între 1 și 28".into(),
+        ));
+    }
+
+    let rows = sqlx::query(
+        "UPDATE recurring_invoices SET \
+            template_name = ?1, frequency = ?2, next_issue_date = ?3, \
+            day_of_month = ?4, auto_submit_anaf = ?5, active = ?6, \
+            series = ?7, lines_json = ?8, notes = ?9, \
+            updated_at = unixepoch() \
+         WHERE id = ?10",
+    )
+    .bind(&input.template_name)
+    .bind(&input.frequency)
+    .bind(&input.next_issue_date)
+    .bind(input.day_of_month)
+    .bind(if input.auto_submit_anaf { 1_i64 } else { 0 })
+    .bind(if input.active { 1_i64 } else { 0 })
+    .bind(&input.series)
+    .bind(&input.lines_json)
+    .bind(&input.notes)
+    .bind(id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    if rows == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(())
+}
+
+pub async fn set_active(pool: &SqlitePool, id: &str, active: bool) -> AppResult<()> {
+    let rows = sqlx::query(
+        "UPDATE recurring_invoices SET active = ?1, updated_at = unixepoch() WHERE id = ?2",
+    )
+    .bind(if active { 1_i64 } else { 0 })
+    .bind(id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    if rows == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(())
+}
+
 /// Advance next_issue_date by one frequency period.
 pub fn advance_date(current: &str, frequency: &str, day_of_month: u32) -> String {
     use chrono::{Datelike, NaiveDate};
@@ -164,4 +235,109 @@ pub fn advance_date(current: &str, frequency: &str, day_of_month: u32) -> String
     };
 
     next.format("%Y-%m-%d").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn setup_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(":memory:")
+            .await
+            .unwrap();
+        // Schema mirrors migration 0003 (without the FK on contacts so tests stay
+        // self-contained — we never join through this table in these tests).
+        sqlx::query(
+            "CREATE TABLE recurring_invoices (
+                id               TEXT PRIMARY KEY NOT NULL,
+                company_id       TEXT NOT NULL,
+                template_name    TEXT NOT NULL,
+                client_id        TEXT NOT NULL,
+                frequency        TEXT NOT NULL,
+                next_issue_date  TEXT NOT NULL,
+                day_of_month     INTEGER NOT NULL DEFAULT 1,
+                auto_submit_anaf INTEGER NOT NULL DEFAULT 0,
+                active           INTEGER NOT NULL DEFAULT 1,
+                series           TEXT NOT NULL,
+                lines_json       TEXT NOT NULL,
+                notes            TEXT,
+                created_at       INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at       INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn create_sample(pool: &SqlitePool) -> RecurringInvoice {
+        create(
+            pool,
+            CreateRecurringInput {
+                company_id: "comp-1".into(),
+                template_name: "Hosting lunar".into(),
+                client_id: "client-1".into(),
+                frequency: "monthly".into(),
+                next_issue_date: "2026-06-01".into(),
+                day_of_month: 1,
+                auto_submit_anaf: false,
+                series: "FCT".into(),
+                lines_json: "[]".into(),
+                notes: None,
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn update_changes_template_name() {
+        let pool = setup_pool().await;
+        let created = create_sample(&pool).await;
+
+        update(
+            &pool,
+            &created.id,
+            UpdateRecurringInput {
+                template_name: "Abonament SaaS".into(),
+                frequency: "quarterly".into(),
+                next_issue_date: "2026-07-15".into(),
+                day_of_month: 15,
+                auto_submit_anaf: true,
+                active: true,
+                series: "ABO".into(),
+                lines_json: "[]".into(),
+                notes: Some("note".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let refreshed = get_by_id(&pool, &created.id).await.unwrap();
+        assert_eq!(refreshed.template_name, "Abonament SaaS");
+        assert_eq!(refreshed.frequency, "quarterly");
+        assert_eq!(refreshed.day_of_month, 15);
+        assert_eq!(refreshed.series, "ABO");
+        assert!(refreshed.auto_submit_anaf);
+        assert_eq!(refreshed.notes.as_deref(), Some("note"));
+    }
+
+    #[tokio::test]
+    async fn set_active_toggles_flag() {
+        let pool = setup_pool().await;
+        let created = create_sample(&pool).await;
+        assert!(created.active, "template should start active by default");
+
+        set_active(&pool, &created.id, false).await.unwrap();
+        let paused = get_by_id(&pool, &created.id).await.unwrap();
+        assert!(!paused.active);
+
+        set_active(&pool, &created.id, true).await.unwrap();
+        let resumed = get_by_id(&pool, &created.id).await.unwrap();
+        assert!(resumed.active);
+    }
 }

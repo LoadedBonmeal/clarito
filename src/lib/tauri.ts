@@ -108,6 +108,8 @@ export const invoices = {
     invoke<void>("set_invoice_status", { id, status, message }),
   storno: (invoiceId: string, reason: string) =>
     invoke<Invoice>("storno_invoice", { invoiceId, reason }),
+  duplicate: (invoiceId: string) =>
+    invoke<string>("duplicate_invoice", { invoiceId }),
 };
 
 // ─── Received ─────────────────────────────────────────────────────────────
@@ -392,6 +394,19 @@ export interface CreateRecurringArgs {
   notes?: string;
 }
 
+export interface UpdateRecurringArgs {
+  id: string;
+  templateName: string;
+  frequency: string;
+  nextIssueDate: string;
+  dayOfMonth: number;
+  autoSubmitAnaf: boolean;
+  active: boolean;
+  series: string;
+  linesJson: string;
+  notes?: string | null;
+}
+
 export const recurring = {
   create: (args: CreateRecurringArgs) =>
     invoke<RecurringInvoice>("create_recurring_invoice", { args }),
@@ -399,6 +414,10 @@ export const recurring = {
     invoke<RecurringInvoice[]>("list_recurring_invoices", { companyId }),
   delete: (id: string, companyId: string) =>
     invoke<void>("delete_recurring_invoice", { id, companyId }),
+  update: (args: UpdateRecurringArgs) =>
+    invoke<void>("update_recurring_invoice", { args }),
+  toggleActive: (id: string, active: boolean) =>
+    invoke<void>("toggle_recurring_active", { id, active }),
 };
 
 // ─── SAF-T ────────────────────────────────────────────────────────────────

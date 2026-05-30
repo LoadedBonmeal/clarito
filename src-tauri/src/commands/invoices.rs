@@ -369,8 +369,17 @@ pub async fn storno_invoice(
     state: State<'_, AppState>,
     invoice_id: String,
     reason: String,
+    due_date: Option<String>,
 ) -> AppResult<Invoice> {
     let pool = &state.db;
+
+    // BIZ-14: validate optional due_date format up-front (YYYY-MM-DD).
+    let due_date_input = due_date;
+    if let Some(ref d) = due_date_input {
+        if chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_err() {
+            return Err(AppError::Validation(format!("Data scadență invalidă: {d}")));
+        }
+    }
 
     // 1. Încarcă factura originală
     let original = invoices::get_with_lines(pool, &invoice_id).await?;
@@ -445,6 +454,8 @@ pub async fn storno_invoice(
     let total = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
 
     let issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    // BIZ-14: due_date defaults to issue_date when not explicitly provided.
+    let due_date = due_date_input.unwrap_or_else(|| issue_date.clone());
     let storno_id = new_id();
     let now = chrono::Utc::now().timestamp();
     let initial_notes = format!(
@@ -495,7 +506,7 @@ pub async fn storno_invoice(
     .bind(allocated_number)
     .bind(&full_number)
     .bind(&issue_date)
-    .bind(&issue_date)
+    .bind(&due_date)
     .bind(&orig_inv.currency)
     .bind(orig_inv.exchange_rate)
     .bind(subtotal)
@@ -591,6 +602,151 @@ pub async fn storno_invoice(
 
     // 6. Re-fetch factura storno pentru a returna datele complete
     invoices::get(pool, &storno_id).await
+}
+
+/// MISS-04: Duplică o factură existentă într-o nouă ciornă (DRAFT).
+///
+/// Copiază header-ul (fără date ANAF, fără referință storno) și toate liniile
+/// facturii sursă. Alocă un nou număr atomic pentru compania emitentă (același
+/// pattern ca `create_invoice_draft`/`storno_invoice`). Data emiterii și
+/// scadența noii ciorne sunt setate la ziua curentă — utilizatorul le poate
+/// edita ulterior. Întreaga operațiune rulează într-o tranzacție atomică.
+#[tauri::command]
+pub async fn duplicate_invoice(
+    state: State<'_, AppState>,
+    invoice_id: String,
+) -> AppResult<String> {
+    let pool = &state.db;
+
+    // 1. Încarcă factura sursă + liniile (folosim get_with_lines pentru că
+    //    `list_lines` este privat în modulul db::invoices).
+    let source_bundle = invoices::get_with_lines(pool, &invoice_id).await?;
+    let source = source_bundle.invoice;
+    let source_lines = source_bundle.lines;
+
+    if source_lines.is_empty() {
+        return Err(AppError::Validation(
+            "Factura sursă nu are linii — nu poate fi duplicată.".into(),
+        ));
+    }
+
+    let new_invoice_id = new_id();
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let now = chrono::Utc::now().timestamp();
+    let dup_note = format!("Duplicat din {}", source.full_number);
+
+    let mut tx = pool.begin().await.map_err(AppError::Database)?;
+
+    // 2. Alocăm numărul atomic în aceeași tranzacție (același pattern ca
+    //    `create` și `storno_invoice`). Numerotarea e per-companie.
+    sqlx::query("UPDATE companies SET last_invoice_number = last_invoice_number + 1 WHERE id = ?1")
+        .bind(&source.company_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::Database)?;
+
+    let allocated_number: i64 =
+        sqlx::query_scalar("SELECT last_invoice_number FROM companies WHERE id = ?1")
+            .bind(&source.company_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(AppError::Database)?;
+
+    let full_number = format!("{}-{:04}", source.series, allocated_number);
+
+    // 3. INSERT factură nouă ca DRAFT, fără date ANAF, fără referință storno.
+    sqlx::query(
+        "INSERT INTO invoices (
+            id, company_id, contact_id, series, number, full_number,
+            issue_date, due_date, currency, exchange_rate,
+            subtotal_amount, vat_amount, total_amount, status, notes,
+            payment_means_code, storno_of_invoice_id, created_at, updated_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6,
+            ?7, ?8, ?9, ?10,
+            ?11, ?12, ?13, 'DRAFT', ?14,
+            ?15, NULL, ?16, ?16
+        )",
+    )
+    .bind(&new_invoice_id)
+    .bind(&source.company_id)
+    .bind(&source.contact_id)
+    .bind(&source.series)
+    .bind(allocated_number)
+    .bind(&full_number)
+    .bind(&today)
+    .bind(&today)
+    .bind(&source.currency)
+    .bind(source.exchange_rate)
+    .bind(&source.subtotal_amount)
+    .bind(&source.vat_amount)
+    .bind(&source.total_amount)
+    .bind(&dup_note)
+    .bind(&source.payment_means_code)
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
+
+    // 4. Copiem liniile (id-uri noi, restul câmpurilor identice).
+    for (idx, line) in source_lines.iter().enumerate() {
+        let line_id = new_id();
+        sqlx::query(
+            "INSERT INTO invoice_line_items (
+                id, invoice_id, position, name, description,
+                quantity, unit, unit_price, vat_rate, vat_category,
+                subtotal_amount, vat_amount, total_amount, cpv_code
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5,
+                ?6, ?7, ?8, ?9, ?10,
+                ?11, ?12, ?13, ?14
+            )",
+        )
+        .bind(&line_id)
+        .bind(&new_invoice_id)
+        .bind((idx as i64) + 1)
+        .bind(&line.name)
+        .bind(&line.description)
+        .bind(&line.quantity)
+        .bind(&line.unit)
+        .bind(&line.unit_price)
+        .bind(&line.vat_rate)
+        .bind(&line.vat_category)
+        .bind(&line.subtotal_amount)
+        .bind(&line.vat_amount)
+        .bind(&line.total_amount)
+        .bind(&line.cpv_code)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::Database)?;
+    }
+
+    // 5. Eveniment de audit pe noua factură.
+    sqlx::query(
+        "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at)
+         VALUES (?1, ?2, 'DUPLICATED', ?3, ?4)",
+    )
+    .bind(new_id())
+    .bind(&new_invoice_id)
+    .bind(format!("Duplicat din factura {}", source.full_number))
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
+
+    tx.commit().await.map_err(AppError::Database)?;
+
+    // 6. Audit log (best-effort, never fatal).
+    let _ = crate::db::audit::log_user_action(
+        pool,
+        "invoice_duplicated",
+        "invoice",
+        &new_invoice_id,
+        Some(&source.full_number),
+    )
+    .await;
+
+    Ok(new_invoice_id)
 }
 
 #[cfg(test)]

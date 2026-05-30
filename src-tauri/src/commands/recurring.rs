@@ -3,7 +3,7 @@
 use serde::Deserialize;
 use tauri::State;
 
-use crate::db::recurring::{self, CreateRecurringInput, RecurringInvoice};
+use crate::db::recurring::{self, CreateRecurringInput, RecurringInvoice, UpdateRecurringInput};
 use crate::error::AppResult;
 use crate::state::AppState;
 
@@ -60,4 +60,69 @@ pub async fn delete_recurring_invoice(
     company_id: String,
 ) -> AppResult<()> {
     recurring::delete(&state.db, &id, &company_id).await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRecurringArgs {
+    pub id: String,
+    pub template_name: String,
+    pub frequency: String,
+    pub next_issue_date: String,
+    pub day_of_month: i64,
+    pub auto_submit_anaf: bool,
+    pub active: bool,
+    pub series: String,
+    pub lines_json: String,
+    pub notes: Option<String>,
+}
+
+#[tauri::command]
+pub async fn update_recurring_invoice(
+    state: State<'_, AppState>,
+    args: UpdateRecurringArgs,
+) -> AppResult<()> {
+    recurring::update(
+        &state.db,
+        &args.id,
+        UpdateRecurringInput {
+            template_name: args.template_name,
+            frequency: args.frequency,
+            next_issue_date: args.next_issue_date,
+            day_of_month: args.day_of_month,
+            auto_submit_anaf: args.auto_submit_anaf,
+            active: args.active,
+            series: args.series,
+            lines_json: args.lines_json,
+            notes: args.notes,
+        },
+    )
+    .await?;
+    let _ = crate::db::audit::log_user_action(
+        &state.db,
+        "recurring_updated",
+        "recurring",
+        &args.id,
+        None,
+    )
+    .await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn toggle_recurring_active(
+    state: State<'_, AppState>,
+    id: String,
+    active: bool,
+) -> AppResult<()> {
+    recurring::set_active(&state.db, &id, active).await?;
+    let _ = crate::db::audit::log_user_action(
+        &state.db,
+        "recurring_updated",
+        "recurring",
+        &id,
+        Some(if active { "activated" } else { "paused" }),
+    )
+    .await;
+    Ok(())
 }

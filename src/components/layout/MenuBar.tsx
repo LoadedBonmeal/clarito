@@ -14,6 +14,7 @@ import { Icon } from "@/components/shared/Icon";
 import { useAppStore } from "@/lib/store";
 import { queryClient, queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import { notify } from "@/lib/toasts";
 import { fmtShortcut } from "@/lib/platform";
 
 type MenuRow =
@@ -35,7 +36,17 @@ function buildMenus(
       { type: "row", icon: "users",     label: "Contact nou (client/furnizor)", kbd: fmtShortcut("Ctrl+Alt+C"),   onClick: () => { void navigate({ to: "/contacts" }); } },
       { type: "sep" },
       { type: "row", icon: "save",      label: "Salvează",                      kbd: fmtShortcut("Ctrl+S"), onClick: () => { /* context-sensitive — handled by active page */ } },
-      { type: "row", icon: "copy",      label: "Salvează ca…",                  kbd: fmtShortcut("Ctrl+Shift+S"), disabled: true },
+      { type: "row", icon: "copy",      label: "Salvează ca…",                  kbd: fmtShortcut("Ctrl+Shift+S"), onClick: () => {
+        const selectedId = useAppStore.getState().selectedInvoiceId;
+        if (!selectedId) {
+          notify.error("Selectați o factură mai întâi.");
+          return;
+        }
+        api.invoices.duplicate(selectedId).then((newId) => {
+          notify.success("Factură duplicată.");
+          void navigate({ to: "/invoices/$id", params: { id: newId } });
+        }).catch((e) => notify.error(`Eroare duplicare: ${e}`));
+      } },
       { type: "sep" },
       { type: "section", label: "Import / Export" },
       { type: "row", icon: "upload",    label: "Importă XML e-Factura…",                                          onClick: () => { void navigate({ to: "/received" }); } },

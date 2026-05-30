@@ -140,6 +140,18 @@ export function InvoiceDetailPage() {
     onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare verificare status."),
   });
 
+  // Duplicate invoice — clones header + lines into a new DRAFT
+  const duplicateInvoice = useMutation({
+    mutationFn: () => api.invoices.duplicate(id),
+    onSuccess: (newId) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
+      notify.success("Factură duplicată.");
+      void navigate({ to: "/invoices/$id", params: { id: newId } });
+    },
+    onError: (e) =>
+      setActionError((e as unknown as AppErrorPayload).message ?? "Eroare duplicare."),
+  });
+
   // Storno invoice — creates a proper 381 credit note
   const stornoInvoice = useMutation({
     mutationFn: (reason: string) => api.invoices.storno(id, reason),
@@ -210,12 +222,26 @@ export function InvoiceDetailPage() {
           <button
             type="button"
             className="btn"
+            onClick={() => duplicateInvoice.mutate()}
+            disabled={duplicateInvoice.isPending}
+            title="Creează o factură nouă cu aceleași linii"
+          >
+            <Icon name="copy" size={12} /> {duplicateInvoice.isPending ? "Duplicare…" : "Duplicare"}
+          </button>
+          <button
+            type="button"
+            className="btn"
             disabled={invoice.status !== "VALIDATED" || stornoInvoice.isPending}
             onClick={() => setShowStornoModal(true)}
           >
             <Icon name="storno" size={12} /> {stornoInvoice.isPending ? "Stornare…" : "Storno"}
           </button>
-          <button type="button" className="btn" disabled>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => window.print()}
+            title="Tipărește factura curentă (Ctrl+P)"
+          >
             <Icon name="printer" size={12} /> Tipărește
           </button>
         </span>

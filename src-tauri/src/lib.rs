@@ -185,6 +185,7 @@ pub fn run() {
             commands::invoices::update_invoice_draft,
             commands::invoices::validate_invoice_draft,
             commands::invoices::storno_invoice,
+            commands::invoices::duplicate_invoice,
             // received
             commands::received::list_received_invoices,
             commands::received::get_received_invoice,
@@ -265,6 +266,8 @@ pub fn run() {
             commands::recurring::create_recurring_invoice,
             commands::recurring::list_recurring_invoices,
             commands::recurring::delete_recurring_invoice,
+            commands::recurring::update_recurring_invoice,
+            commands::recurring::toggle_recurring_active,
             // saft d406
             commands::saft::export_saft_d406,
         ])
