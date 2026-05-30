@@ -131,19 +131,27 @@ pub(crate) async fn submit_invoice_inner(
     invoice_id: &str,
     test_mode: bool,
 ) -> AppResult<String> {
-    // 1. Încarcă factura + liniile din DB
+    // 1. Claim atomic DRAFT → QUEUED. Dacă alt apel concurrent a revendicat deja
+    //    factura (sau statusul e altul decât DRAFT), respingem imediat — fără
+    //    window de dublă trimitere.
+    let claim = sqlx::query(
+        "UPDATE invoices SET status = 'QUEUED', updated_at = unixepoch() WHERE id = ?1 AND status = 'DRAFT'",
+    )
+    .bind(invoice_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::Database)?;
+    if claim.rows_affected() != 1 {
+        return Err(AppError::Validation(
+            "Factura nu mai este în stadiu de ciornă (este posibil să fi fost deja trimisă)."
+                .into(),
+        ));
+    }
+
+    // 2. Încarcă factura + liniile din DB (acum cu status QUEUED)
     let invoice_with_lines = db_invoices::get_with_lines(pool, invoice_id).await?;
     let invoice = invoice_with_lines.invoice;
     let lines = invoice_with_lines.lines;
-
-    // Guard: numai facturile DRAFT pot fi trimise la ANAF
-    if invoice.status != "DRAFT" {
-        return Err(AppError::Validation(format!(
-            "Factura {} nu poate fi trimisă — status curent: {}. \
-             Numai ciornele (DRAFT) pot fi trimise la ANAF.",
-            invoice.full_number, invoice.status
-        )));
-    }
 
     // Guard: company_id trebuie să corespundă facturii
     if invoice.company_id.as_str() != company_id {
@@ -218,19 +226,21 @@ pub(crate) async fn submit_invoice_inner(
         .map_err(AppError::Database)?;
 
     // Helper: revert invoice to DRAFT so the user can retry after any error.
+    // Only reverts if still QUEUED — avoids accidentally overwriting a later status.
     let revert_to_draft = |pool: &sqlx::SqlitePool, invoice_id: &str| {
         let pool = pool.clone();
         let invoice_id = invoice_id.to_string();
         async move {
-            if let Err(e) = sqlx::query(
-                "UPDATE invoices SET status = 'DRAFT', updated_at = unixepoch() WHERE id = ?1",
+            let _ = sqlx::query(
+                "UPDATE invoices SET status = 'DRAFT', updated_at = unixepoch() \
+                 WHERE id = ?1 AND status = 'QUEUED'",
             )
             .bind(&invoice_id)
             .execute(&pool)
             .await
-            {
+            .map_err(|e| {
                 tracing::error!(error = ?e, %invoice_id, "Failed to revert invoice to DRAFT status after ANAF error");
-            }
+            });
         }
     };
 
@@ -280,20 +290,8 @@ pub(crate) async fn submit_invoice_inner(
         }
     };
 
-    // Upload succeeded — mark as QUEUED then immediately SUBMITTED below.
-    sqlx::query("UPDATE invoices SET status = 'QUEUED', updated_at = unixepoch() WHERE id = ?1")
-        .bind(invoice_id)
-        .execute(pool)
-        .await
-        .map_err(AppError::Database)?;
-    {
-        use tauri::Emitter;
-        let _ = app.emit(
-            "invoice_status_changed",
-            serde_json::json!({"invoiceId": invoice_id, "newStatus": "QUEUED"}),
-        );
-    }
-
+    // Upload succeeded — status is already QUEUED (set atomically at the start).
+    // Proceed to mark SUBMITTED via mark_submitted below.
     let upload_id = upload_resp.index_incarcare;
 
     // 9. Actualizează DB cu status SUBMITTED + anaf_upload_id

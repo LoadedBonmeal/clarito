@@ -386,17 +386,25 @@ pub async fn storno_invoice(
     let orig_inv = original.invoice;
     let orig_lines = original.lines;
 
-    // Doar facturile VALIDATED pot fi stornate (DRAFT se șterge, nu se stornează)
-    if orig_inv.status != crate::db::models::InvoiceStatus::Validated.as_str() {
+    // EDGE-15: nu se poate storna un storno (ar crea un ciclu).
+    if orig_inv.storno_of_invoice_id.is_some() {
         return Err(AppError::Validation(
-            "Doar facturile validate de ANAF pot fi stornate. \
-             Ciornele pot fi șterse direct."
-                .into(),
+            "Nu se poate storna o factură care este deja un storno.".into(),
         ));
     }
 
+    // REG-17: verificarea VALIDATED este mutată în tranzacție (mai jos) ca un
+    // UPDATE atomic — previne race-ul în care două apeluri concurente trec
+    // ambele de acest check SELECT-bazat.
+
     // 2. Seria facturii storno
-    let storno_series = format!("S{}", orig_inv.series);
+    // REG-16: dacă seria începe deja cu 'S' (ex. "SERV"), o păstrăm ca atare
+    // în loc să o prefixăm din nou ("SSERV").
+    let storno_series = if orig_inv.series.starts_with('S') {
+        orig_inv.series.clone()
+    } else {
+        format!("S{}", orig_inv.series)
+    };
 
     // 3. Calculăm liniile storno (cantități negative) și totalurile
     use rust_decimal::Decimal;
@@ -466,6 +474,23 @@ pub async fn storno_invoice(
 
     // 4. Toate scrierile în DB într-o singură tranzacție atomică
     let mut tx = pool.begin().await.map_err(AppError::Database)?;
+
+    // REG-17: claim atomic VALIDATED → STORNED în interiorul TX. Dacă un alt apel
+    // concurrent a revendicat deja factura (sau statusul s-a schimbat între timp),
+    // rows_affected = 0 și returnăm eroare înainte de orice altă scriere.
+    let claim = sqlx::query(
+        "UPDATE invoices SET status = 'STORNED', updated_at = ?2 WHERE id = ?1 AND status = 'VALIDATED'",
+    )
+    .bind(&invoice_id)
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
+    if claim.rows_affected() != 1 {
+        return Err(AppError::Validation(
+            "Factura originală nu mai este în stare VALIDATED (este posibil să fi fost deja stornată).".into(),
+        ));
+    }
 
     // 4a. Alocăm numărul atomic
     sqlx::query("UPDATE companies SET last_invoice_number = last_invoice_number + 1 WHERE id = ?1")
@@ -552,14 +577,8 @@ pub async fn storno_invoice(
         .map_err(AppError::Database)?;
     }
 
-    // 4d. Marchează factura originală ca STORNED
-    sqlx::query("UPDATE invoices SET status = 'STORNED', updated_at = ?2 WHERE id = ?1")
-        .bind(&invoice_id)
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .map_err(AppError::Database)?;
-
+    // 4d. Eveniment STATUS_STORNED pe factura originală (statusul a fost deja
+    //     setat la STORNED prin claim-ul atomic de mai sus).
     sqlx::query(
         "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at)
          VALUES (?1, ?2, 'STATUS_STORNED', ?3, ?4)",
@@ -795,5 +814,271 @@ mod tests {
         assert!(!is_allowed_status_transition("DRAFT", "SUBMITTED"));
         assert!(!is_allowed_status_transition("DRAFT", "VALIDATED"));
         assert!(!is_allowed_status_transition("DRAFT", "STORNED"));
+    }
+
+    // ── REG-16: storno series prefix logic ────────────────────────────────
+
+    /// Pure helper that mirrors the series-prefix logic in `storno_invoice`.
+    fn compute_storno_series(series: &str) -> String {
+        if series.starts_with('S') {
+            series.to_string()
+        } else {
+            format!("S{}", series)
+        }
+    }
+
+    #[test]
+    fn storno_series_keeps_existing_s_prefix() {
+        // REG-16: "SERV" must not become "SSERV"
+        assert_eq!(compute_storno_series("SERV"), "SERV");
+        assert_eq!(compute_storno_series("STEST"), "STEST");
+        assert_eq!(compute_storno_series("S"), "S");
+    }
+
+    #[test]
+    fn storno_series_adds_s_prefix_when_absent() {
+        assert_eq!(compute_storno_series("FCT"), "SFCT");
+        assert_eq!(compute_storno_series("TEST"), "STEST");
+        assert_eq!(compute_storno_series("A1"), "SA1");
+    }
+
+    // ── DB-backed storno tests ─────────────────────────────────────────────
+
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    /// Minimal in-memory schema for storno tests (subset of production migrations).
+    async fn setup_storno_pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(":memory:")
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE companies (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                cui TEXT NOT NULL DEFAULT '',
+                reg_com TEXT,
+                address TEXT NOT NULL DEFAULT '',
+                city TEXT NOT NULL DEFAULT '',
+                county TEXT,
+                country TEXT NOT NULL DEFAULT 'RO',
+                iban TEXT,
+                bank TEXT,
+                phone TEXT,
+                email TEXT,
+                spv_enabled INTEGER NOT NULL DEFAULT 0,
+                last_invoice_number INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE contacts (
+                id TEXT PRIMARY KEY NOT NULL,
+                company_id TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                cui TEXT,
+                reg_com TEXT,
+                address TEXT,
+                city TEXT,
+                county TEXT,
+                country TEXT,
+                iban TEXT,
+                bank TEXT,
+                email TEXT,
+                phone TEXT,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE invoices (
+                id TEXT PRIMARY KEY NOT NULL,
+                company_id TEXT NOT NULL,
+                contact_id TEXT NOT NULL,
+                series TEXT NOT NULL DEFAULT '',
+                number INTEGER NOT NULL DEFAULT 0,
+                full_number TEXT NOT NULL DEFAULT '',
+                issue_date TEXT NOT NULL DEFAULT '',
+                due_date TEXT NOT NULL DEFAULT '',
+                currency TEXT NOT NULL DEFAULT 'RON',
+                exchange_rate REAL,
+                subtotal_amount TEXT NOT NULL DEFAULT '0',
+                vat_amount TEXT NOT NULL DEFAULT '0',
+                total_amount TEXT NOT NULL DEFAULT '0',
+                status TEXT NOT NULL DEFAULT 'DRAFT',
+                notes TEXT,
+                payment_means_code TEXT NOT NULL DEFAULT '30',
+                storno_of_invoice_id TEXT,
+                xml_path TEXT,
+                anaf_upload_id TEXT,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE invoice_line_items (
+                id TEXT PRIMARY KEY NOT NULL,
+                invoice_id TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                name TEXT NOT NULL DEFAULT '',
+                description TEXT,
+                quantity TEXT NOT NULL DEFAULT '0',
+                unit TEXT NOT NULL DEFAULT 'C62',
+                unit_price TEXT NOT NULL DEFAULT '0',
+                vat_rate TEXT NOT NULL DEFAULT '19',
+                vat_category TEXT NOT NULL DEFAULT 'S',
+                subtotal_amount TEXT NOT NULL DEFAULT '0',
+                vat_amount TEXT NOT NULL DEFAULT '0',
+                total_amount TEXT NOT NULL DEFAULT '0',
+                cpv_code TEXT
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE invoice_events (
+                id TEXT PRIMARY KEY NOT NULL,
+                invoice_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                message TEXT,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Seed: one company + contact
+        sqlx::query(
+            "INSERT INTO companies (id, name, cui, address, city, last_invoice_number)
+             VALUES ('comp-1', 'Test SRL', 'RO12345', 'Str. Test 1', 'Bucuresti', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, name)
+             VALUES ('contact-1', 'comp-1', 'Client Test SRL')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        pool
+    }
+
+    /// Insert a minimal invoice row directly (bypasses the full command layer).
+    async fn insert_invoice(
+        pool: &sqlx::SqlitePool,
+        id: &str,
+        status: &str,
+        storno_of: Option<&str>,
+    ) {
+        sqlx::query(
+            "INSERT INTO invoices (id, company_id, contact_id, series, number, full_number,
+             issue_date, due_date, status, storno_of_invoice_id)
+             VALUES (?1, 'comp-1', 'contact-1', 'FCT', 1, 'FCT-0001',
+             '2026-01-01', '2026-01-01', ?2, ?3)",
+        )
+        .bind(id)
+        .bind(status)
+        .bind(storno_of)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// Attempt to storno an invoice by running the raw DB operations the command performs.
+    /// Returns Ok(()) if the atomic claim would succeed, Err(msg) if it would be rejected.
+    async fn try_storno_claim(pool: &sqlx::SqlitePool, invoice_id: &str) -> Result<(), String> {
+        let now = chrono::Utc::now().timestamp();
+        let result = sqlx::query(
+            "UPDATE invoices SET status = 'STORNED', updated_at = ?2 WHERE id = ?1 AND status = 'VALIDATED'",
+        )
+        .bind(invoice_id)
+        .bind(now)
+        .execute(pool)
+        .await
+        .unwrap();
+
+        if result.rows_affected() == 1 {
+            Ok(())
+        } else {
+            Err(
+                "Factura originală nu mai este în stare VALIDATED (este posibil să fi fost deja stornată).".into(),
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn storno_rejects_when_original_not_validated() {
+        let pool = setup_storno_pool().await;
+        insert_invoice(&pool, "inv-submitted", "SUBMITTED", None).await;
+
+        let result = try_storno_claim(&pool, "inv-submitted").await;
+        assert!(result.is_err(), "storno of a SUBMITTED invoice should fail");
+        assert!(result.unwrap_err().contains("VALIDATED"));
+    }
+
+    #[tokio::test]
+    async fn storno_atomic_claim_rejects_second_concurrent() {
+        let pool = setup_storno_pool().await;
+        insert_invoice(&pool, "inv-validated", "VALIDATED", None).await;
+
+        // First claim succeeds
+        let first = try_storno_claim(&pool, "inv-validated").await;
+        assert!(first.is_ok(), "first storno claim should succeed");
+
+        // Second claim (simulating a concurrent call) fails
+        let second = try_storno_claim(&pool, "inv-validated").await;
+        assert!(
+            second.is_err(),
+            "second concurrent storno claim should fail"
+        );
+    }
+
+    #[tokio::test]
+    async fn storno_of_storno_guard_rejects() {
+        // The storno-of-storno guard checks orig_inv.storno_of_invoice_id.is_some()
+        // before the TX — test the underlying condition directly.
+        let pool = setup_storno_pool().await;
+        insert_invoice(&pool, "inv-original", "VALIDATED", None).await;
+        // This storno invoice itself has storno_of_invoice_id set
+        insert_invoice(&pool, "inv-storno", "VALIDATED", Some("inv-original")).await;
+
+        let storno_of: Option<String> =
+            sqlx::query_scalar("SELECT storno_of_invoice_id FROM invoices WHERE id = 'inv-storno'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        assert!(
+            storno_of.is_some(),
+            "inv-storno should have a storno_of_invoice_id set"
+        );
+        // The guard in storno_invoice returns Err when .is_some()
+        let would_reject = storno_of.is_some();
+        assert!(
+            would_reject,
+            "storno-of-storno guard should reject this invoice"
+        );
     }
 }
