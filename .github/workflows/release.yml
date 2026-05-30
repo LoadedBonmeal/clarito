@@ -3,17 +3,78 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - "v[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
   contents: write
 
 jobs:
+  check-signing-secrets:
+    name: Verify signing secrets are configured
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check macOS signing secrets
+        run: |
+          if [ -z "${{ secrets.APPLE_CERTIFICATE }}" ]; then
+            echo "❌ APPLE_CERTIFICATE secret is not set"
+            echo "   Set this in GitHub → Settings → Secrets → Actions"
+            echo "   See docs/RELEASE_SIGNING.md for instructions"
+            exit 1
+          fi
+          if [ -z "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" ]; then
+            echo "❌ APPLE_CERTIFICATE_PASSWORD secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.APPLE_SIGNING_IDENTITY }}" ]; then
+            echo "❌ APPLE_SIGNING_IDENTITY secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.APPLE_API_KEY_ID }}" ]; then
+            echo "❌ APPLE_API_KEY_ID (notarization) secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.APPLE_API_ISSUER_ID }}" ]; then
+            echo "❌ APPLE_API_ISSUER_ID (notarization) secret is not set"
+            exit 1
+          fi
+          echo "✅ All macOS signing secrets are configured"
+
+      - name: Check Windows signing secrets
+        run: |
+          if [ -z "${{ secrets.WINDOWS_CERTIFICATE }}" ]; then
+            echo "❌ WINDOWS_CERTIFICATE secret is not set"
+            echo "   See docs/RELEASE_SIGNING.md for instructions"
+            exit 1
+          fi
+          if [ -z "${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}" ]; then
+            echo "❌ WINDOWS_CERTIFICATE_PASSWORD secret is not set"
+            exit 1
+          fi
+          echo "✅ All Windows signing secrets are configured"
+
   release-macos:
-    name: Release macOS (signed)
+    name: Release macOS (universal)
+    needs: check-signing-secrets
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+
+      - name: Import Apple Developer Certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security import certificate.p12 -k build.keychain \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          rm certificate.p12
 
       - name: Install Rust targets
         run: |
@@ -28,41 +89,35 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Import Apple signing certificate
-        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: changeme123
+      - name: Quality gates
         run: |
-          CERT_PATH=$RUNNER_TEMP/cert.p12
-          KC_PATH=$RUNNER_TEMP/app.keychain-db
-          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o $CERT_PATH
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KC_PATH
-          security set-keychain-settings -lut 21600 $KC_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KC_PATH
-          security import $CERT_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A \
-            -t cert -f pkcs12 -k $KC_PATH
-          security list-keychain -d user -s $KC_PATH
+          pnpm exec tsc --noEmit
+          pnpm test
+          cd src-tauri
+          cargo fmt --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --lib
 
-      - name: Build and sign
+      - name: Build and sign macOS (universal)
         run: pnpm build:mac
         env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
 
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
         with:
-          draft: true
-          files: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          name: RoFactura-macOS-${{ github.ref_name }}
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
 
   release-windows:
     name: Release Windows x64
+    needs: check-signing-secrets
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,16 +130,45 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build
+      - name: Quality gates
+        run: |
+          pnpm exec tsc --noEmit
+          pnpm test
+          cd src-tauri
+          cargo fmt --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --lib
+
+      - name: Build and sign Windows
         run: pnpm build:win-x64
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
-      - name: Publish release
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: RoFactura-Windows-${{ github.ref_name }}
+          path: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+
+  create-release:
+    name: Create GitHub Release
+    needs: [release-macos, release-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
           files: |
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+            RoFactura-macOS-${{ github.ref_name }}/*.dmg
+            RoFactura-Windows-${{ github.ref_name }}/*.msi
+            RoFactura-Windows-${{ github.ref_name }}/*.exe
+          generate_release_notes: true
+          draft: true
