@@ -53,7 +53,17 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .plugin(tauri_plugin_log::Builder::default().build())
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("efactura".into()),
+                    }),
+                ])
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
@@ -282,6 +292,9 @@ pub fn run() {
             commands::recurring::toggle_recurring_active,
             // saft d406
             commands::saft::export_saft_d406,
+            // feedback / diagnostic
+            commands::feedback::gather_diagnostic,
+            commands::feedback::build_feedback_mailto,
         ])
         .plugin(tauri_plugin_sql::Builder::default().build())
         .run(tauri::generate_context!())

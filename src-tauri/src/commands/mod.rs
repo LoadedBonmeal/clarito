@@ -7,6 +7,7 @@ pub mod anaf;
 pub mod archive;
 pub mod companies;
 pub mod contacts;
+pub mod feedback;
 pub mod import;
 pub mod integrations;
 pub mod invoices;

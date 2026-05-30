@@ -137,6 +137,13 @@ pub fn key_checksum(data: &[u8]) -> String {
 /// sistem), nu via variabile de mediu, deoarece variabilele de mediu sunt
 /// trivial de modificat de utilizator. Variabilele de mediu rămân ca fallback
 /// final dacă apelurile OS eșuează.
+/// Public wrapper exposing the machine_id hash for the diagnostic command.
+/// We re-expose machine_id() via a stable name so feedback.rs doesn't depend
+/// on the private function name.
+pub fn machine_id_for_diagnostic() -> String {
+    machine_id()
+}
+
 fn machine_id() -> String {
     let host = read_hostname_os().unwrap_or_else(|| {
         std::env::var("HOSTNAME")
