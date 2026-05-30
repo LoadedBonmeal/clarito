@@ -236,7 +236,13 @@ fn write_supplier_party(writer: &mut Writer<Cursor<Vec<u8>>>, seller: &Company) 
         .trim()
         .trim_start_matches("RO")
         .trim_start_matches("ro");
-    write_text(writer, "cbc:CompanyID", &format!("RO{}", seller_cui_digits))?;
+    // BIZ-02: only VAT-registered sellers get the "RO" prefix in PartyTaxScheme/CompanyID
+    let supplier_cui_xml = if seller.vat_payer {
+        format!("RO{}", seller_cui_digits)
+    } else {
+        seller_cui_digits.to_string()
+    };
+    write_text(writer, "cbc:CompanyID", &supplier_cui_xml)?;
     writer
         .write_event(Event::Start(BytesStart::new("cac:TaxScheme")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
@@ -319,8 +325,25 @@ fn write_customer_party(
         writer
             .write_event(Event::Start(BytesStart::new("cac:PartyTaxScheme")))
             .map_err(|e| AppError::Xml(e.to_string()))?;
-        let buyer_cui_digits = cui.trim().trim_start_matches("RO").trim_start_matches("ro");
-        write_text(writer, "cbc:CompanyID", &format!("RO{}", buyer_cui_digits))?;
+        // BIZ-03: emit the original VAT ID for non-RO buyers; only RO buyers get the
+        // "RO" prefix normalization. If the stored CUI already begins with a
+        // two-letter ISO country code (e.g. "DE123456789"), keep it as-is.
+        let trimmed = cui.trim();
+        let country_code = buyer.country.trim().to_ascii_uppercase();
+        let starts_with_country_prefix = trimmed.len() >= 2
+            && trimmed.as_bytes()[0].is_ascii_alphabetic()
+            && trimmed.as_bytes()[1].is_ascii_alphabetic();
+        let buyer_cui_xml = if starts_with_country_prefix {
+            // Caller already provided VAT-ID with country prefix — trust it.
+            trimmed.to_string()
+        } else if country_code.is_empty() || country_code == "RO" {
+            format!("RO{}", trimmed)
+        } else {
+            // Non-RO buyer, no prefix in stored value — leave digits as-is
+            // (we cannot safely synthesize a foreign VAT-ID prefix here).
+            trimmed.to_string()
+        };
+        write_text(writer, "cbc:CompanyID", &buyer_cui_xml)?;
         writer
             .write_event(Event::Start(BytesStart::new("cac:TaxScheme")))
             .map_err(|e| AppError::Xml(e.to_string()))?;
@@ -402,6 +425,8 @@ fn write_tax_total(
             .map_err(|e| AppError::Xml(e.to_string()))?;
         write_text(writer, "cbc:ID", category)?;
         write_text(writer, "cbc:Percent", rate_str)?;
+        // BIZ-05: emit exemption code for non-standard categories
+        write_tax_exemption(writer, category)?;
         writer
             .write_event(Event::Start(BytesStart::new("cac:TaxScheme")))
             .map_err(|e| AppError::Xml(e.to_string()))?;
@@ -442,9 +467,12 @@ fn write_invoice_line(
     writer
         .write_event(Event::Start(qty_elem))
         .map_err(|e| AppError::Xml(e.to_string()))?;
+    // BIZ-09: quantity uses 6-decimal precision (CIUS-RO allows it; avoids
+    // truncating fractional units like grams or per-hour billing).
     writer
-        .write_event(Event::Text(BytesText::new(&format_decimal_2(
+        .write_event(Event::Text(BytesText::new(&format_decimal_n(
             &line.quantity,
+            6,
         ))))
         .map_err(|e| AppError::Xml(e.to_string()))?;
     writer
@@ -472,6 +500,8 @@ fn write_invoice_line(
         .map_err(|e| AppError::Xml(e.to_string()))?;
     write_text(writer, "cbc:ID", &line.vat_category)?;
     write_text(writer, "cbc:Percent", &format_decimal_2(&line.vat_rate))?;
+    // BIZ-05: line-level exemption code (mirrors TaxSubtotal/TaxCategory)
+    write_tax_exemption(writer, &line.vat_category)?;
     writer
         .write_event(Event::Start(BytesStart::new("cac:TaxScheme")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
@@ -556,6 +586,33 @@ fn fmt_amount(s: &str) -> String {
 /// Identic cu `fmt_amount` — ambele rutează prin `Decimal`.
 fn format_decimal_2(s: &str) -> String {
     fmt_amount(s)
+}
+
+/// Formatează un `&str` numeric ca string cu `n` zecimale, rutând prin `Decimal`.
+/// Folosit pentru cantităţi unde CIUS-RO permite până la 6 zecimale.
+fn format_decimal_n(s: &str, n: u32) -> String {
+    let d = Decimal::from_str(s.trim())
+        .unwrap_or(Decimal::ZERO)
+        .round_dp(n);
+    format!("{:.*}", n as usize, d)
+}
+
+/// BIZ-05: emite `<cbc:TaxExemptionReasonCode>` + `<cbc:TaxExemptionReason>`
+/// pentru categoriile TVA care nu sunt cota standard ("S"). Codurile urmează
+/// lista VATEX-EU publicată de CEF (EN 16931 / CIUS-RO).
+fn write_tax_exemption(writer: &mut Writer<Cursor<Vec<u8>>>, category: &str) -> AppResult<()> {
+    let (code, reason) = match category {
+        "E" => ("VATEX-EU-132", "Scutire fără drept de deducere"),
+        "Z" => ("VATEX-EU-G", "Cota zero"),
+        "AE" => ("VATEX-EU-AE", "Taxare inversă"),
+        "K" => ("VATEX-EU-IC", "Livrare intracomunitară"),
+        "G" => ("VATEX-EU-G", "Export în afara UE"),
+        "O" => ("VATEX-EU-O", "În afara sferei TVA"),
+        _ => return Ok(()), // "S" standard rate — no exemption emitted
+    };
+    write_text(writer, "cbc:TaxExemptionReasonCode", code)?;
+    write_text(writer, "cbc:TaxExemptionReason", reason)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -676,6 +733,119 @@ mod tests {
             &bytes[..3],
             &[0xEF, 0xBB, 0xBF],
             "XML must start with UTF-8 BOM (EF BB BF)"
+        );
+    }
+
+    #[test]
+    fn non_vat_payer_seller_omits_ro_prefix() {
+        // BIZ-02: a non-VAT-registered seller must NOT have the "RO" prefix on
+        // its PartyTaxScheme/CompanyID.
+        let mut input = sample_input();
+        input.seller.vat_payer = false;
+        input.seller.cui = "12345678".to_string();
+        let xml = generate_ubl(&input).expect("should generate XML");
+
+        // Strip BOM for substring search clarity.
+        let body = xml.trim_start_matches('\u{FEFF}');
+        // Supplier PartyTaxScheme block must contain the bare digits, not "RO…".
+        assert!(
+            body.contains("<cbc:CompanyID>12345678</cbc:CompanyID>"),
+            "expected bare CUI in supplier PartyTaxScheme, got: {}",
+            body
+        );
+        // And specifically should not produce "RO12345678" in the supplier party.
+        // (PartyLegalEntity may still carry the raw stored value.)
+        let supplier_block = body
+            .split("</cac:AccountingSupplierParty>")
+            .next()
+            .unwrap_or(body);
+        assert!(
+            !supplier_block.contains("RO12345678"),
+            "supplier party should not contain RO-prefixed CUI for non-VAT-payer"
+        );
+    }
+
+    #[test]
+    fn eu_buyer_keeps_original_vat_id() {
+        // BIZ-03: a German buyer with VAT-ID "DE123456789" must keep that
+        // identifier verbatim in the customer PartyTaxScheme.
+        let mut input = sample_input();
+        input.buyer.country = "DE".to_string();
+        input.buyer.cui = Some("DE123456789".to_string());
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+
+        let customer_block = body
+            .split("</cac:AccountingCustomerParty>")
+            .next()
+            .unwrap_or(body);
+        // Must contain the original DE VAT-ID verbatim.
+        assert!(
+            customer_block.contains("<cbc:CompanyID>DE123456789</cbc:CompanyID>"),
+            "expected DE VAT-ID kept as-is, got: {}",
+            customer_block
+        );
+        // Must NOT have synthesized "RODE123456789" or "RO123456789".
+        assert!(
+            !customer_block.contains("RODE123456789"),
+            "must not double-prefix DE VAT-ID"
+        );
+    }
+
+    #[test]
+    fn ro_buyer_gets_ro_prefix() {
+        // BIZ-03: a Romanian buyer with raw digits stored gets the "RO" prefix
+        // synthesized in PartyTaxScheme/CompanyID.
+        let mut input = sample_input();
+        input.buyer.country = "RO".to_string();
+        input.buyer.cui = Some("87654321".to_string());
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+
+        let customer_block = body
+            .split("</cac:AccountingCustomerParty>")
+            .next()
+            .unwrap_or(body);
+        assert!(
+            customer_block.contains("<cbc:CompanyID>RO87654321</cbc:CompanyID>"),
+            "expected RO-prefixed buyer CUI, got: {}",
+            customer_block
+        );
+    }
+
+    #[test]
+    fn exemption_code_emitted_for_reverse_charge() {
+        // BIZ-05: vat_category "AE" (reverse charge) must emit
+        // <cbc:TaxExemptionReasonCode>VATEX-EU-AE</cbc:TaxExemptionReasonCode>
+        // in both the TaxSubtotal/TaxCategory and the line ClassifiedTaxCategory.
+        let mut input = sample_input();
+        input.lines[0].vat_category = "AE".to_string();
+        input.lines[0].vat_rate = "0.00".to_string();
+        input.lines[0].vat_amount = "0.00".to_string();
+        input.invoice.vat_amount = "0.00".to_string();
+        input.invoice.total_amount = input.invoice.subtotal_amount.clone();
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+        let occurrences = body.matches("VATEX-EU-AE").count();
+        assert!(
+            occurrences >= 2,
+            "expected VATEX-EU-AE in both TaxCategory and ClassifiedTaxCategory, found {}: {}",
+            occurrences,
+            body
+        );
+    }
+
+    #[test]
+    fn quantity_uses_six_decimal_precision() {
+        // BIZ-09: quantities must serialize with 6 decimals, not 2.
+        let mut input = sample_input();
+        input.lines[0].quantity = "1.234567".to_string();
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+        assert!(
+            body.contains(">1.234567<"),
+            "expected 6-decimal quantity in XML, got: {}",
+            body
         );
     }
 }
