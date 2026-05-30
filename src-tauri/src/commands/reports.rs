@@ -13,6 +13,10 @@ use crate::state::AppState;
 #[serde(rename_all = "camelCase")]
 pub struct VatGroup {
     pub rate: String,
+    /// BIZ-12: VAT category (e.g. "S", "Z", "E", "AE", "K", "G", "O"). Two
+    /// lines at the same rate but with different categories must surface as
+    /// separate groups so D300/D394 reporting stays accurate.
+    pub vat_category: String,
     pub base_amount: String,
     pub vat_amount: String,
     pub invoice_count: i64,
@@ -50,11 +54,13 @@ pub async fn generate_vat_report(
     // ?1 date_from, ?2 date_to, ?3 company_id (Option<String> — None → NULL → filter skipped)
     let cid = company_id.as_deref().filter(|s| !s.is_empty());
 
-    // Summary totals — fetch all matching rows and accumulate in Rust using Decimal
+    // Summary totals — fetch all matching rows and accumulate in Rust using Decimal.
+    // BIZ-11: SUBMITTED invoices are still pending ANAF validation and must NOT be
+    // counted as fiscal events — only VALIDATED ones land in TVA reports.
     let summary_rows = sqlx::query(
         "SELECT subtotal_amount, vat_amount, total_amount \
          FROM invoices \
-         WHERE status IN ('VALIDATED','SUBMITTED') \
+         WHERE status = 'VALIDATED' \
            AND issue_date >= ?1 \
            AND issue_date <= ?2 \
            AND (?3 IS NULL OR company_id = ?3)",
@@ -81,12 +87,15 @@ pub async fn generate_vat_report(
         },
     );
 
-    // VAT groups — fetch individual line rows and group in Rust with BTreeMap
+    // VAT groups — fetch individual line rows and group in Rust with BTreeMap.
+    // BIZ-12: group by (rate, vat_category) so that e.g. 0% Exempt ("E") and
+    // 0% Zero-rated ("Z") stay separate rows even though their numeric rate
+    // collides.
     let line_rows = sqlx::query(
-        "SELECT l.vat_rate, l.subtotal_amount, l.vat_amount \
+        "SELECT l.vat_rate, l.vat_category, l.subtotal_amount, l.vat_amount \
          FROM invoice_line_items l \
          JOIN invoices i ON i.id = l.invoice_id \
-         WHERE i.status IN ('VALIDATED','SUBMITTED') \
+         WHERE i.status = 'VALIDATED' \
            AND i.issue_date >= ?1 \
            AND i.issue_date <= ?2 \
            AND (?3 IS NULL OR i.company_id = ?3)",
@@ -98,32 +107,40 @@ pub async fn generate_vat_report(
     .await
     .map_err(AppError::Database)?;
 
-    // key = rate * 100 rounded to i64 (e.g. 19% → 1900), val = (base_sum, vat_sum, line_count)
-    let mut groups: BTreeMap<i64, (Decimal, Decimal, Decimal, i64)> = BTreeMap::new();
+    // key = (rate * 100 rounded to i64, vat_category), val = (rate, base_sum, vat_sum, line_count)
+    let mut groups: BTreeMap<(i64, String), (Decimal, Decimal, Decimal, i64)> = BTreeMap::new();
     for row in &line_rows {
         let rate_s: String = row.try_get("vat_rate").unwrap_or_default();
+        let category: String = row
+            .try_get("vat_category")
+            .unwrap_or_else(|_| String::from("S"));
         let base_s: String = row.try_get("subtotal_amount").unwrap_or_default();
         let vat_s: String = row.try_get("vat_amount").unwrap_or_default();
         let rate = Decimal::from_str(&rate_s).unwrap_or(Decimal::ZERO);
-        let key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
-        let e = groups
-            .entry(key)
-            .or_insert((rate, Decimal::ZERO, Decimal::ZERO, 0));
+        let rate_key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
+        let e =
+            groups
+                .entry((rate_key, category))
+                .or_insert((rate, Decimal::ZERO, Decimal::ZERO, 0));
         e.1 += Decimal::from_str(&base_s).unwrap_or(Decimal::ZERO);
         e.2 += Decimal::from_str(&vat_s).unwrap_or(Decimal::ZERO);
         e.3 += 1;
     }
 
-    // Build vat_groups sorted descending by rate (BTreeMap is ascending, reverse)
+    // Build vat_groups sorted descending by rate, then category ascending.
+    // BTreeMap is ascending on (rate_key, category); reverse for descending rate.
     let vat_groups: Vec<VatGroup> = groups
         .into_iter()
         .rev()
-        .map(|(_key, (rate, base_sum, vat_sum, count))| VatGroup {
-            rate: rate.round_dp(2).to_string(),
-            base_amount: base_sum.round_dp(2).to_string(),
-            vat_amount: vat_sum.round_dp(2).to_string(),
-            invoice_count: count,
-        })
+        .map(
+            |((_rate_key, category), (rate, base_sum, vat_sum, count))| VatGroup {
+                rate: rate.round_dp(2).to_string(),
+                vat_category: category,
+                base_amount: base_sum.round_dp(2).to_string(),
+                vat_amount: vat_sum.round_dp(2).to_string(),
+                invoice_count: count,
+            },
+        )
         .collect();
 
     Ok(VatReport {
@@ -204,12 +221,40 @@ mod tests {
 
     #[test]
     fn draft_excluded_from_fiscal_statuses() {
-        // Fiscal statuses that should appear in VAT reports
-        let fiscal = ["VALIDATED", "SUBMITTED"];
+        // BIZ-11: only VALIDATED counts as a fiscal event. DRAFT, QUEUED, and
+        // SUBMITTED (awaiting ANAF outcome) must all be excluded from VAT
+        // reports.
+        let fiscal = ["VALIDATED"];
         assert!(!fiscal.contains(&"DRAFT"));
         assert!(!fiscal.contains(&"QUEUED"));
+        assert!(!fiscal.contains(&"SUBMITTED"));
         assert!(fiscal.contains(&"VALIDATED"));
-        assert!(fiscal.contains(&"SUBMITTED"));
+    }
+
+    #[test]
+    fn vat_groups_split_by_category() {
+        // BIZ-12: two lines at 0% but with different categories (E vs Z) must
+        // produce two distinct VAT groups, never collapse into one.
+        use std::collections::BTreeMap;
+
+        let mut groups: BTreeMap<(i64, String), (Decimal, Decimal)> = BTreeMap::new();
+        // Both lines have rate 0%, but different categories.
+        let rate_key = 0_i64;
+        for (cat, base) in [("E", "100.00"), ("Z", "50.00")] {
+            let e = groups
+                .entry((rate_key, cat.to_string()))
+                .or_insert((Decimal::ZERO, Decimal::ZERO));
+            e.0 += Decimal::from_str(base).unwrap();
+        }
+        assert_eq!(groups.len(), 2, "0% Exempt and 0% Zero-rated must split");
+        assert_eq!(
+            groups[&(0, "E".to_string())].0,
+            Decimal::from_str("100.00").unwrap()
+        );
+        assert_eq!(
+            groups[&(0, "Z".to_string())].0,
+            Decimal::from_str("50.00").unwrap()
+        );
     }
 
     #[test]
