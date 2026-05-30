@@ -32,3 +32,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local-only: audit docs, design references, plans
+docs/
+.design-ref/
