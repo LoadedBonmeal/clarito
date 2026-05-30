@@ -24,7 +24,7 @@ pnpm test
 echo ""
 
 echo "▶ frontend build (vite)"
-pnpm build --silent
+pnpm build
 echo "  ✓ Build OK"
 echo ""
 
