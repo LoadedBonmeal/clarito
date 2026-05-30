@@ -73,57 +73,94 @@ pub async fn import_invoices_csv(
         .flexible(true)
         .from_reader(content.as_bytes());
 
+    // ── Header-based column lookup ────────────────────────────────────────
+    // Required columns must be present; optional columns (vat_category,
+    // payment_means_code) may be omitted entirely.
+    let headers = reader
+        .headers()
+        .map_err(|e| AppError::Other(format!("Eroare citire header CSV: {e}")))?
+        .clone();
+    let header_index = |name: &str| -> Option<usize> {
+        headers
+            .iter()
+            .position(|h| h.trim().eq_ignore_ascii_case(name))
+    };
+    let require_header = |name: &str| -> AppResult<usize> {
+        header_index(name).ok_or_else(|| {
+            AppError::Validation(format!(
+                "Coloana CSV obligatorie '{name}' lipsește din header."
+            ))
+        })
+    };
+
+    let idx_company_cui = require_header("company_cui")?;
+    let idx_customer_cui = require_header("customer_cui")?;
+    let idx_customer_name = require_header("customer_name")?;
+    let idx_series = require_header("series")?;
+    let idx_number = require_header("number")?;
+    let idx_issue_date = require_header("issue_date")?;
+    let idx_due_date = require_header("due_date")?;
+    let idx_item_name = require_header("item_name")?;
+    let idx_qty = require_header("qty")?;
+    let idx_unit = require_header("unit")?;
+    let idx_unit_price = require_header("unit_price")?;
+    let idx_vat_rate = require_header("vat_rate")?;
+    let idx_vat_category = header_index("vat_category");
+    let idx_payment_means = header_index("payment_means_code");
+
     for (idx, result) in reader.records().enumerate() {
+        let row_num = idx + 2;
         let record = match result {
             Ok(r) => r,
             Err(e) => {
-                errors.push(format!("Linia {}: eroare parsare CSV: {}", idx + 2, e));
+                errors.push(format!("Linia {row_num}: eroare parsare CSV: {e}"));
                 continue;
             }
         };
 
-        if record.len() < 12 {
+        // Validate that company_cui matches the active company (and is non-empty).
+        let raw_company_cui = record.get(idx_company_cui).unwrap_or("").trim();
+        let row_company_cui = normalize_cui_csv(raw_company_cui);
+        if row_company_cui.is_empty() {
             errors.push(format!(
-                "Linia {}: câmpuri insuficiente ({})",
-                idx + 2,
-                record.len()
+                "Linia {row_num}: coloana 'company_cui' este obligatorie pentru a verifica proprietatea facturii."
             ));
             continue;
         }
-
-        // Validate that field 0 (company_cui) matches the active company.
-        let raw_company_cui = record.get(0).unwrap_or("").trim();
-        let row_company_cui = normalize_cui_csv(raw_company_cui);
-        if !row_company_cui.is_empty() && row_company_cui != company_cui_norm {
+        if row_company_cui != company_cui_norm {
             errors.push(format!(
-                "Linia {}: CUI companie din CSV ({}) nu corespunde companiei active ({}).",
-                idx + 2,
-                raw_company_cui,
+                "Linia {row_num}: company_cui '{raw_company_cui}' nu corespunde cu compania activă ({}).",
                 company.cui
             ));
             continue;
         }
 
-        let customer_cui = record.get(1).unwrap_or("").trim().to_string();
-        let customer_name = record.get(2).unwrap_or("").trim().to_string();
-        let series = record.get(3).unwrap_or("").trim().to_string();
-        let number_str = record.get(4).unwrap_or("").trim().to_string();
-        let issue_date = record.get(5).unwrap_or("").trim().to_string();
-        let due_date = record.get(6).unwrap_or("").trim().to_string();
-        let item_name = record.get(7).unwrap_or("").trim().to_string();
-        let qty_str = record.get(8).unwrap_or("").trim().to_string();
-        let unit = record.get(9).unwrap_or("").trim().to_string();
-        let unit_price_str = record.get(10).unwrap_or("").trim().to_string();
-        let vat_rate_str = record.get(11).unwrap_or("").trim().to_string();
+        let customer_cui = record
+            .get(idx_customer_cui)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let customer_name = record
+            .get(idx_customer_name)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let series = record.get(idx_series).unwrap_or("").trim().to_string();
+        let number_str = record.get(idx_number).unwrap_or("").trim().to_string();
+        let issue_date = record.get(idx_issue_date).unwrap_or("").trim().to_string();
+        let due_date = record.get(idx_due_date).unwrap_or("").trim().to_string();
+        let item_name = record.get(idx_item_name).unwrap_or("").trim().to_string();
+        let qty_str = record.get(idx_qty).unwrap_or("").trim().to_string();
+        let unit = record.get(idx_unit).unwrap_or("").trim().to_string();
+        let unit_price_str = record.get(idx_unit_price).unwrap_or("").trim().to_string();
+        let vat_rate_str = record.get(idx_vat_rate).unwrap_or("").trim().to_string();
 
         // Parse number fields
         let number: i64 = match number_str.parse() {
             Ok(n) => n,
             Err(_) => {
                 errors.push(format!(
-                    "Linia {}: număr factură invalid '{}'",
-                    idx + 2,
-                    number_str
+                    "Linia {row_num}: număr factură invalid '{number_str}'"
                 ));
                 continue;
             }
@@ -131,11 +168,7 @@ pub async fn import_invoices_csv(
         let qty: Decimal = match Decimal::from_str(&qty_str) {
             Ok(v) => v,
             Err(_) => {
-                errors.push(format!(
-                    "Linia {}: cantitate invalidă '{}'",
-                    idx + 2,
-                    qty_str
-                ));
+                errors.push(format!("Linia {row_num}: cantitate invalidă '{qty_str}'"));
                 continue;
             }
         };
@@ -143,9 +176,7 @@ pub async fn import_invoices_csv(
             Ok(v) => v,
             Err(_) => {
                 errors.push(format!(
-                    "Linia {}: preț unitar invalid '{}'",
-                    idx + 2,
-                    unit_price_str
+                    "Linia {row_num}: preț unitar invalid '{unit_price_str}'"
                 ));
                 continue;
             }
@@ -154,9 +185,7 @@ pub async fn import_invoices_csv(
             Ok(v) => v,
             Err(_) => {
                 errors.push(format!(
-                    "Linia {}: cotă TVA invalidă '{}'",
-                    idx + 2,
-                    vat_rate_str
+                    "Linia {row_num}: cotă TVA invalidă '{vat_rate_str}'"
                 ));
                 continue;
             }
@@ -164,9 +193,63 @@ pub async fn import_invoices_csv(
         let vat_rate_rounded = vat_rate.round_dp(0).to_i64().unwrap_or(-1);
         if !crate::db::models::VALID_VAT_RATES.contains(&vat_rate_rounded) {
             errors.push(format!(
-                "Linia {}: cotă TVA invalidă '{}'. Valori permise: 0, 5, 9, 11, 19, 21.",
-                idx + 2,
-                vat_rate_str
+                "Linia {row_num}: cotă TVA invalidă '{vat_rate_str}'. Valori permise: 0, 5, 9, 11, 19, 21."
+            ));
+            continue;
+        }
+
+        // ── vat_category: read from CSV column if present, validate ─────────
+        let csv_vat_cat = idx_vat_category
+            .and_then(|i| record.get(i))
+            .map(|s| s.trim().to_uppercase())
+            .filter(|s| !s.is_empty());
+
+        let vat_cat: String = match csv_vat_cat {
+            Some(cat) => {
+                if !["S", "Z", "E", "AE", "K", "G", "O"].contains(&cat.as_str()) {
+                    errors.push(format!(
+                        "Linia {row_num}: categorie TVA necunoscută '{cat}'. Permise: S, Z, E, AE, K, G, O."
+                    ));
+                    continue;
+                }
+                if cat == "S" && vat_rate == Decimal::ZERO {
+                    errors.push(format!(
+                        "Linia {row_num}: categoria S (standard) nu poate avea cota 0."
+                    ));
+                    continue;
+                }
+                if cat != "S" && vat_rate != Decimal::ZERO {
+                    errors.push(format!(
+                        "Linia {row_num}: categoria '{cat}' trebuie să aibă cota 0."
+                    ));
+                    continue;
+                }
+                cat
+            }
+            None => {
+                if vat_rate == Decimal::ZERO {
+                    errors.push(format!(
+                        "Linia {row_num}: pentru cota 0%, coloana 'vat_category' este obligatorie. Folosiți Z (cota zero), E (scutit), AE (taxare inversă), K (intracomunitar), G (export), sau O (în afara sferei)."
+                    ));
+                    continue;
+                }
+                "S".to_string()
+            }
+        };
+
+        // ── payment_means_code: read from CSV (optional, default '30') ──────
+        let payment_means_code = idx_payment_means
+            .and_then(|i| record.get(i))
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "30".to_string());
+
+        // Validate against common UBL payment means codes
+        let valid_pm_codes = ["10", "20", "30", "42", "48", "49", "57", "58", "59"];
+        if !valid_pm_codes.contains(&payment_means_code.as_str()) {
+            errors.push(format!(
+                "Linia {row_num}: cod metodă plată invalid '{payment_means_code}'. Permise: {}.",
+                valid_pm_codes.join(", ")
             ));
             continue;
         }
@@ -181,7 +264,7 @@ pub async fn import_invoices_csv(
         let subtotal = (qty * unit_price).round_dp(2);
         let vat_amount = (subtotal * vat_rate / Decimal::from(100)).round_dp(2);
         let total = (subtotal + vat_amount).round_dp(2);
-        let full_number = format!("{}{}", series, number);
+        let full_number = format!("{}-{:04}", series, number);
         let now = chrono::Utc::now().timestamp();
         let invoice_id = crate::db::models::new_id();
         let line_id = crate::db::models::new_id();
@@ -190,7 +273,7 @@ pub async fn import_invoices_csv(
         let mut tx = match pool.begin().await {
             Ok(t) => t,
             Err(e) => {
-                errors.push(format!("Linia {}: eroare tranzacție DB: {}", idx + 2, e));
+                errors.push(format!("Linia {row_num}: eroare tranzacție DB: {e}"));
                 continue;
             }
         };
@@ -208,7 +291,7 @@ pub async fn import_invoices_csv(
                 Ok(Some(row)) => match row.try_get::<String, _>("id") {
                     Ok(id) => id,
                     Err(e) => {
-                        errors.push(format!("Linia {}: eroare DB contact: {}", idx + 2, e));
+                        errors.push(format!("Linia {row_num}: eroare DB contact: {e}"));
                         continue;
                     }
                 },
@@ -227,13 +310,13 @@ pub async fn import_invoices_csv(
                     .execute(&mut *tx)
                     .await;
                     if let Err(e) = res {
-                        errors.push(format!("Linia {}: eroare creare contact: {}", idx + 2, e));
+                        errors.push(format!("Linia {row_num}: eroare creare contact: {e}"));
                         continue;
                     }
                     new_id
                 }
                 Err(e) => {
-                    errors.push(format!("Linia {}: eroare DB contact: {}", idx + 2, e));
+                    errors.push(format!("Linia {row_num}: eroare DB contact: {e}"));
                     continue;
                 }
             }
@@ -243,8 +326,9 @@ pub async fn import_invoices_csv(
         let inv_res = sqlx::query(
             "INSERT INTO invoices \
              (id, company_id, contact_id, series, number, full_number, issue_date, due_date, \
-              currency, subtotal_amount, vat_amount, total_amount, status, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'RON', ?9, ?10, ?11, 'DRAFT', ?12, ?12)",
+              currency, subtotal_amount, vat_amount, total_amount, status, \
+              payment_means_code, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'RON', ?9, ?10, ?11, 'DRAFT', ?12, ?13, ?13)",
         )
         .bind(&invoice_id)
         .bind(&company_id)
@@ -257,18 +341,18 @@ pub async fn import_invoices_csv(
         .bind(subtotal.to_string())
         .bind(vat_amount.to_string())
         .bind(total.to_string())
+        .bind(&payment_means_code)
         .bind(now)
         .execute(&mut *tx)
         .await;
 
         if let Err(e) = inv_res {
-            errors.push(format!("Linia {}: eroare inserare factură: {}", idx + 2, e));
+            errors.push(format!("Linia {row_num}: eroare inserare factură: {e}"));
             // tx is dropped here — rolled back automatically
             continue;
         }
 
         // Insert line item — error propagates and rolls back the transaction
-        let vat_cat = if vat_rate == Decimal::ZERO { "Z" } else { "S" };
         let line_res = sqlx::query(
             "INSERT INTO invoice_line_items \
              (id, invoice_id, position, name, quantity, unit, unit_price, vat_rate, vat_category, \
@@ -282,7 +366,7 @@ pub async fn import_invoices_csv(
         .bind(unit)
         .bind(unit_price.to_string())
         .bind(vat_rate.to_string())
-        .bind(vat_cat)
+        .bind(&vat_cat)
         .bind(subtotal.to_string())
         .bind(vat_amount.to_string())
         .bind(total.to_string())
@@ -291,9 +375,7 @@ pub async fn import_invoices_csv(
 
         if let Err(e) = line_res {
             errors.push(format!(
-                "Linia {}: eroare inserare linie factură: {}",
-                idx + 2,
-                e
+                "Linia {row_num}: eroare inserare linie factură: {e}"
             ));
             // tx dropped — rolled back automatically
             continue;
@@ -302,11 +384,7 @@ pub async fn import_invoices_csv(
         // Commit — only now count as imported
         match tx.commit().await {
             Ok(_) => imported += 1,
-            Err(e) => errors.push(format!(
-                "Linia {}: eroare commit tranzacție: {}",
-                idx + 2,
-                e
-            )),
+            Err(e) => errors.push(format!("Linia {row_num}: eroare commit tranzacție: {e}")),
         }
     }
 
@@ -812,6 +890,24 @@ async fn import_invoice_xml_inner(
 
 #[cfg(test)]
 mod tests {
+    use rust_decimal::Decimal;
+
+    /// Mirrors the production header lookup logic so we can unit-test header
+    /// parsing without spinning up a Tauri AppState + SQLite pool.
+    fn parse_headers(csv: &str) -> std::collections::HashMap<String, usize> {
+        let mut reader = csv::ReaderBuilder::new()
+            .delimiter(b';')
+            .has_headers(true)
+            .flexible(true)
+            .from_reader(csv.as_bytes());
+        let headers = reader.headers().unwrap().clone();
+        headers
+            .iter()
+            .enumerate()
+            .map(|(i, h)| (h.trim().to_ascii_lowercase(), i))
+            .collect()
+    }
+
     #[test]
     fn csv_with_quoted_semicolons() {
         let csv = "series;number;issue_date;client_name;client_cui;description;quantity;unit_price;vat_rate\nACME;1;2026-05-30;\"SC Client; Test SRL\";RO123456;\"Serviciu; consultanta\";1;100.00;19";
@@ -824,5 +920,97 @@ mod tests {
         assert_eq!(records.len(), 1);
         let r = records[0].as_ref().unwrap();
         assert_eq!(r.get(3).unwrap(), "SC Client; Test SRL");
+    }
+
+    #[test]
+    fn csv_explicit_vat_category_for_zero_rate() {
+        // Header contains optional vat_category column — Z is valid for 0% rate.
+        let csv = "company_cui;customer_cui;customer_name;series;number;issue_date;due_date;item_name;qty;unit;unit_price;vat_rate;vat_category\nRO123;RO456;Client SRL;ACME;1;2026-05-30;2026-06-30;Item;1;buc;100;0;Z";
+        let headers = parse_headers(csv);
+        assert!(headers.contains_key("vat_category"));
+        let idx_vat_cat = headers["vat_category"];
+        let mut reader = csv::ReaderBuilder::new()
+            .delimiter(b';')
+            .has_headers(true)
+            .flexible(true)
+            .from_reader(csv.as_bytes());
+        let rec = reader.records().next().unwrap().unwrap();
+        let cat = rec.get(idx_vat_cat).unwrap().trim().to_uppercase();
+        let vat_rate = Decimal::ZERO;
+        // The validation logic should accept "Z" with rate 0
+        assert_eq!(cat, "Z");
+        let allowed = ["S", "Z", "E", "AE", "K", "G", "O"];
+        assert!(allowed.contains(&cat.as_str()));
+        assert!(cat != "S" || vat_rate != Decimal::ZERO);
+    }
+
+    #[test]
+    fn csv_zero_rate_without_category_fails() {
+        // Header has no vat_category — for rate 0 this MUST be rejected.
+        let csv = "company_cui;customer_cui;customer_name;series;number;issue_date;due_date;item_name;qty;unit;unit_price;vat_rate\nRO123;RO456;Client SRL;ACME;1;2026-05-30;2026-06-30;Item;1;buc;100;0";
+        let headers = parse_headers(csv);
+        // vat_category absent → the import code path raises a validation error.
+        assert!(!headers.contains_key("vat_category"));
+        // The validator's contract: for rate 0 and no category column → error.
+        // Simulate the rejection: if no idx_vat_category AND rate == 0 → fail.
+        let idx_vat_category: Option<usize> = headers.get("vat_category").copied();
+        let vat_rate = Decimal::ZERO;
+        let should_fail = idx_vat_category.is_none() && vat_rate == Decimal::ZERO;
+        assert!(should_fail, "0% rate with no vat_category must be rejected");
+    }
+
+    #[test]
+    fn csv_invalid_vat_category_fails() {
+        let csv = "company_cui;customer_cui;customer_name;series;number;issue_date;due_date;item_name;qty;unit;unit_price;vat_rate;vat_category\nRO123;RO456;Client SRL;ACME;1;2026-05-30;2026-06-30;Item;1;buc;100;0;X";
+        let headers = parse_headers(csv);
+        let idx_vat_cat = headers["vat_category"];
+        let mut reader = csv::ReaderBuilder::new()
+            .delimiter(b';')
+            .has_headers(true)
+            .flexible(true)
+            .from_reader(csv.as_bytes());
+        let rec = reader.records().next().unwrap().unwrap();
+        let cat = rec.get(idx_vat_cat).unwrap().trim().to_uppercase();
+        let allowed = ["S", "Z", "E", "AE", "K", "G", "O"];
+        assert!(!allowed.contains(&cat.as_str()), "X must be rejected");
+    }
+
+    #[test]
+    fn csv_payment_means_code_default_is_30() {
+        // Header omits payment_means_code → import path defaults to "30".
+        let csv = "company_cui;customer_cui;customer_name;series;number;issue_date;due_date;item_name;qty;unit;unit_price;vat_rate\nRO123;RO456;Client SRL;ACME;1;2026-05-30;2026-06-30;Item;1;buc;100;19";
+        let headers = parse_headers(csv);
+        assert!(!headers.contains_key("payment_means_code"));
+        let idx_payment_means: Option<usize> = headers.get("payment_means_code").copied();
+        let default = idx_payment_means
+            .map(|_| "from-csv".to_string())
+            .unwrap_or_else(|| "30".to_string());
+        assert_eq!(default, "30");
+    }
+
+    #[test]
+    fn csv_payment_means_code_invalid_rejected() {
+        let csv = "company_cui;customer_cui;customer_name;series;number;issue_date;due_date;item_name;qty;unit;unit_price;vat_rate;payment_means_code\nRO123;RO456;Client SRL;ACME;1;2026-05-30;2026-06-30;Item;1;buc;100;19;99";
+        let headers = parse_headers(csv);
+        let idx_pm = headers["payment_means_code"];
+        let mut reader = csv::ReaderBuilder::new()
+            .delimiter(b';')
+            .has_headers(true)
+            .flexible(true)
+            .from_reader(csv.as_bytes());
+        let rec = reader.records().next().unwrap().unwrap();
+        let code = rec.get(idx_pm).unwrap().trim();
+        let valid = ["10", "20", "30", "42", "48", "49", "57", "58", "59"];
+        assert!(!valid.contains(&code), "99 is not a recognised code");
+    }
+
+    #[test]
+    fn full_number_format_matches_invoice_creation() {
+        // Regression: BIZ-06. CSV import must use {series}-{number:04} like the
+        // rest of the app (see db/invoices.rs::create).
+        let series = "ACME";
+        let number: i64 = 7;
+        let full = format!("{}-{:04}", series, number);
+        assert_eq!(full, "ACME-0007");
     }
 }

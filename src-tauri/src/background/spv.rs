@@ -99,193 +99,234 @@ pub(crate) async fn do_sync_spv(
     let mut new_count = 0i32;
     for msg in messages {
         let data_key = format!("spv_msg_{}", msg.id);
-        let exists: bool =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM notifications WHERE data = ?1")
-                .bind(&data_key)
-                .fetch_one(pool)
-                .await
-                .unwrap_or(0)
-                > 0;
 
-        if !exists {
-            // ── Download the ZIP from ANAF (with 401 refresh-once) ───────
-            let mut dl_result = client.download_message(&access_token, &msg.id).await;
-            if let Err(ref e) = dl_result {
-                if e == ERR_UNAUTHORIZED {
-                    tracing::info!(
-                        msg_id = msg.id.as_str(),
-                        "ANAF 401 on download — reîmprospătăm token"
-                    );
-                    if let Ok(new_tok) = super::poll::refresh_token_for(company_id).await {
-                        access_token = new_tok;
-                        dl_result = client.download_message(&access_token, &msg.id).await;
-                    }
-                }
-            }
-            let zip_bytes = match dl_result {
-                Ok(b) => b,
-                Err(e) => {
-                    tracing::warn!("download_message {} failed: {}", msg.id, e);
-                    // Still create notification so we know about the message
-                    let title = format!("Mesaj SPV nou: {}", msg.tip);
-                    let body = msg
-                        .detalii
-                        .clone()
-                        .unwrap_or_else(|| format!("Mesaj primit la {}", msg.data_creare));
-                    let _ = notifications::create(
-                        pool,
-                        notifications::CreateNotificationInput {
-                            notification_type: "SPV_MESSAGE".into(),
-                            title,
-                            body,
-                            data: Some(data_key),
-                        },
-                    )
-                    .await;
-                    let _ = app.emit("new_notification", serde_json::json!({}));
-                    new_count += 1;
-                    continue;
-                }
-            };
+        // ── Atomic dedup via INSERT OR IGNORE on notifications.data ──────
+        // RUST-06: previously a SELECT-then-INSERT race could produce
+        // duplicate notifications when two SPV workers ran concurrently.
+        // Migration 0010 adds a partial UNIQUE index on `data`, so this
+        // INSERT becomes the canonical "claim" — if a row already exists
+        // for this msg.id, `rows_affected` is 0 and we skip the message.
+        //
+        // We seed the row with a tentative title/body. If we successfully
+        // download + parse the invoice we UPDATE the row with the final
+        // text. If anything fails the tentative text remains, which is
+        // still informative.
+        let tentative_title = format!("Mesaj SPV nou: {}", msg.tip);
+        let tentative_body = msg
+            .detalii
+            .clone()
+            .unwrap_or_else(|| format!("Mesaj primit la {}", msg.data_creare));
+        let notif_id = crate::db::models::new_id();
+        let now = chrono::Utc::now().timestamp();
 
-            // ── Extract XML from ZIP ──────────────────────────────────────
-            let xml_content = match extract_xml_from_zip(&zip_bytes) {
-                Some(x) => x,
-                None => {
-                    tracing::warn!("No XML found in ZIP for message {}", msg.id);
-                    let title = format!("Mesaj SPV nou: {}", msg.tip);
-                    let body = msg
-                        .detalii
-                        .clone()
-                        .unwrap_or_else(|| format!("Mesaj primit la {}", msg.data_creare));
-                    let _ = notifications::create(
-                        pool,
-                        notifications::CreateNotificationInput {
-                            notification_type: "SPV_MESSAGE".into(),
-                            title,
-                            body,
-                            data: Some(data_key),
-                        },
-                    )
-                    .await;
-                    let _ = app.emit("new_notification", serde_json::json!({}));
-                    new_count += 1;
-                    continue;
-                }
-            };
+        let claim = sqlx::query(
+            "INSERT OR IGNORE INTO notifications \
+             (id, notification_type, title, body, data, created_at) \
+             VALUES (?1, 'SPV_MESSAGE', ?2, ?3, ?4, ?5)",
+        )
+        .bind(&notif_id)
+        .bind(&tentative_title)
+        .bind(&tentative_body)
+        .bind(&data_key)
+        .bind(now)
+        .execute(pool)
+        .await;
 
-            // ── Save to archive ───────────────────────────────────────────
-            let year = if msg.data_creare.len() >= 4 {
-                &msg.data_creare[..4]
-            } else {
-                "0000"
-            };
-            // Sanitize msg.id (received from ANAF) to prevent path traversal.
-            let safe_msg_id: String = msg
-                .id
-                .chars()
-                .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
-                .take(64)
-                .collect();
-            let safe_cui: String = company
-                .cui
-                .chars()
-                .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
-                .take(64)
-                .collect();
-            let safe_year: String = year
-                .chars()
-                .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
-                .take(64)
-                .collect();
-            let archive_path = app_data_dir
-                .join("archive")
-                .join("received")
-                .join(&safe_cui)
-                .join(&safe_year)
-                .join(&safe_msg_id);
-            // Belt-and-suspenders: verify the resolved path stays under app_data_dir.
-            if !archive_path.starts_with(&app_data_dir) {
-                tracing::error!(
-                    "Archive path escape attempt for msg {}: {:?}",
-                    msg.id,
-                    archive_path
+        let claimed = match claim {
+            Ok(r) => r.rows_affected() > 0,
+            Err(e) => {
+                tracing::warn!(
+                    msg_id = msg.id.as_str(),
+                    error = ?e,
+                    "Failed to claim SPV notification slot — skipping"
                 );
                 continue;
             }
-            if let Err(e) = std::fs::create_dir_all(&archive_path) {
-                tracing::error!("Failed to create archive dir for msg {}: {}", msg.id, e);
+        };
+        if !claimed {
+            // Already processed by another sync — skip the rest of this message.
+            continue;
+        }
+
+        // Emit early so the badge updates regardless of download outcome.
+        let _ = app.emit("new_notification", serde_json::json!({}));
+        new_count += 1;
+
+        // ── Download the ZIP from ANAF (with 401 refresh-once) ───────
+        let mut dl_result = client.download_message(&access_token, &msg.id).await;
+        if let Err(ref e) = dl_result {
+            if e == ERR_UNAUTHORIZED {
+                tracing::info!(
+                    msg_id = msg.id.as_str(),
+                    "ANAF 401 on download — reîmprospătăm token"
+                );
+                if let Ok(new_tok) = super::poll::refresh_token_for(company_id).await {
+                    access_token = new_tok;
+                    dl_result = client.download_message(&access_token, &msg.id).await;
+                }
+            }
+        }
+        let zip_bytes = match dl_result {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!("download_message {} failed: {}", msg.id, e);
+                // Tentative notification already inserted; nothing else to do.
                 continue;
             }
-            let xml_path = archive_path.join("invoice.xml");
-            let zip_path = archive_path.join("original.zip");
-            if let Err(e) = std::fs::write(&xml_path, &xml_content) {
-                tracing::error!("Failed to write XML archive for msg {}: {}", msg.id, e);
+        };
+
+        // ── Extract XML from ZIP ──────────────────────────────────────
+        let xml_content = match extract_xml_from_zip(&zip_bytes) {
+            Some(x) => x,
+            None => {
+                tracing::warn!("No XML found in ZIP for message {}", msg.id);
                 continue;
             }
-            if let Err(e) = std::fs::write(&zip_path, &zip_bytes) {
-                tracing::warn!("Failed to write ZIP archive for msg {}: {}", msg.id, e);
-                // ZIP is supplementary; proceed even if it fails.
-            }
+        };
 
-            // ── Parse XML for basic info ──────────────────────────────────
-            let (issuer_cui, issuer_name, total_amount, issue_date) =
-                parse_received_xml(&xml_content);
+        // ── Compute archive path (but do NOT write yet) ───────────────
+        let year = if msg.data_creare.len() >= 4 {
+            &msg.data_creare[..4]
+        } else {
+            "0000"
+        };
+        // Sanitize msg.id (received from ANAF) to prevent path traversal.
+        let safe_msg_id: String = msg
+            .id
+            .chars()
+            .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+            .take(64)
+            .collect();
+        let safe_cui: String = company
+            .cui
+            .chars()
+            .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+            .take(64)
+            .collect();
+        let safe_year: String = year
+            .chars()
+            .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+            .take(64)
+            .collect();
+        let archive_path = app_data_dir
+            .join("archive")
+            .join("received")
+            .join(&safe_cui)
+            .join(&safe_year)
+            .join(&safe_msg_id);
+        // Belt-and-suspenders: verify the resolved path stays under app_data_dir.
+        if !archive_path.starts_with(&app_data_dir) {
+            tracing::error!(
+                "Archive path escape attempt for msg {}: {:?}",
+                msg.id,
+                archive_path
+            );
+            continue;
+        }
+        let xml_path = archive_path.join("invoice.xml");
+        let zip_path = archive_path.join("original.zip");
 
-            // ── Insert received_invoice row ───────────────────────────────
-            let recv_id = crate::db::models::new_id();
-            let now = chrono::Utc::now().timestamp();
-            if let Err(e) = sqlx::query(
-                "INSERT OR IGNORE INTO received_invoices \
-                 (id, company_id, anaf_download_id, anaf_index, issuer_cui, issuer_name, \
-                  series, number, total_amount, currency, issue_date, xml_path, status, \
-                  downloaded_at, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'RON', ?10, ?11, 'NEW', ?12, ?12)",
-            )
-            .bind(&recv_id)
-            .bind(company_id)
-            .bind(&msg.id)
-            .bind(&msg.id_solicitare)
-            .bind(&issuer_cui)
-            .bind(&issuer_name)
-            .bind(Option::<String>::None) // series — NULL until extracted from XML
-            .bind(Option::<String>::None) // number — NULL until extracted from XML
-            .bind(&total_amount)
-            .bind(&issue_date)
-            .bind(xml_path.to_string_lossy().as_ref())
-            .bind(now)
-            .execute(pool)
-            .await
-            {
+        // ── Parse XML for basic info ──────────────────────────────────
+        let (issuer_cui, issuer_name, total_amount, issue_date) = parse_received_xml(&xml_content);
+
+        // ── RUST-07: INSERT received_invoice FIRST, then write files ─
+        // The previous flow wrote the XML to disk before the DB insert,
+        // so a duplicate (INSERT OR IGNORE → 0 rows) left an orphaned
+        // archive on disk. Now we claim the DB row first; only on success
+        // do we touch the filesystem, and if the file write fails we
+        // delete the row we just inserted so state stays consistent.
+        let recv_id = crate::db::models::new_id();
+        let recv_now = chrono::Utc::now().timestamp();
+        let insert_res = sqlx::query(
+            "INSERT OR IGNORE INTO received_invoices \
+             (id, company_id, anaf_download_id, anaf_index, issuer_cui, issuer_name, \
+              series, number, total_amount, currency, issue_date, xml_path, status, \
+              downloaded_at, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'RON', ?10, ?11, 'NEW', ?12, ?12)",
+        )
+        .bind(&recv_id)
+        .bind(company_id)
+        .bind(&msg.id)
+        .bind(&msg.id_solicitare)
+        .bind(&issuer_cui)
+        .bind(&issuer_name)
+        .bind(Option::<String>::None) // series — NULL until extracted from XML
+        .bind(Option::<String>::None) // number — NULL until extracted from XML
+        .bind(&total_amount)
+        .bind(&issue_date)
+        .bind(xml_path.to_string_lossy().as_ref())
+        .bind(recv_now)
+        .execute(pool)
+        .await;
+
+        let inserted = match insert_res {
+            Ok(r) => r.rows_affected() > 0,
+            Err(e) => {
                 tracing::error!(
                     error = ?e,
                     anaf_download_id = %msg.id,
                     issuer_cui = %issuer_cui,
                     "Failed to insert received_invoice — invoice will be lost unless re-downloaded from SPV"
                 );
+                continue;
             }
+        };
 
-            // ── Create SPV notification ───────────────────────────────────
-            let title = format!("Factură primită de la {}", issuer_name);
-            let body = format!("Sumă: {} RON — {}", total_amount, issue_date);
-
-            notifications::create(
-                pool,
-                notifications::CreateNotificationInput {
-                    notification_type: "SPV_MESSAGE".into(),
-                    title,
-                    body,
-                    data: Some(data_key),
-                },
-            )
-            .await?;
-
-            // Emit reactive event so frontend notification badge updates immediately
-            let _ = app.emit("new_notification", serde_json::json!({}));
-
-            new_count += 1;
+        if !inserted {
+            // received_invoices already had this anaf_download_id — skip file
+            // write so we don't create an orphaned archive entry.
+            continue;
         }
+
+        // ── DB row exists — now persist files to disk ─────────────────
+        if let Err(e) = std::fs::create_dir_all(&archive_path) {
+            tracing::error!("Failed to create archive dir for msg {}: {}", msg.id, e);
+            // Roll back the DB insert so we can retry on the next sync.
+            let _ = sqlx::query("DELETE FROM received_invoices WHERE id = ?1")
+                .bind(&recv_id)
+                .execute(pool)
+                .await;
+            continue;
+        }
+        if let Err(e) = std::fs::write(&xml_path, &xml_content) {
+            tracing::error!("Failed to write XML archive for msg {}: {}", msg.id, e);
+            // Roll back the DB insert so we can retry on the next sync.
+            let _ = sqlx::query("DELETE FROM received_invoices WHERE id = ?1")
+                .bind(&recv_id)
+                .execute(pool)
+                .await;
+            continue;
+        }
+        if let Err(e) = std::fs::write(&zip_path, &zip_bytes) {
+            tracing::warn!("Failed to write ZIP archive for msg {}: {}", msg.id, e);
+            // ZIP is supplementary; proceed even if it fails.
+        }
+
+        // ── Upgrade the tentative notification with the final text ───
+        // RUST-08: notification update errors must NOT abort the loop.
+        let final_title = format!("Factură primită de la {}", issuer_name);
+        let final_body = format!("Sumă: {} RON — {}", total_amount, issue_date);
+        if let Err(e) = sqlx::query("UPDATE notifications SET title = ?1, body = ?2 WHERE id = ?3")
+            .bind(&final_title)
+            .bind(&final_body)
+            .bind(&notif_id)
+            .execute(pool)
+            .await
+        {
+            tracing::warn!(
+                company_id = %company_id,
+                message_id = %msg.id,
+                error = ?e,
+                "Failed to update SPV notification text (continuing)"
+            );
+        }
+
+        // Re-emit so the frontend picks up the upgraded text.
+        let _ = app.emit("new_notification", serde_json::json!({}));
     }
+
+    // Silence unused-import warning when no error path runs `notifications::*`.
+    let _ = std::any::type_name::<notifications::CreateNotificationInput>();
 
     Ok(new_count)
 }
