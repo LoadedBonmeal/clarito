@@ -55,7 +55,7 @@
       "entitlements": "entitlements.plist",
       "minimumSystemVersion": "12.0",
       "exceptionDomain": "webservicesp.anaf.ro",
-      "signingIdentity": "-",
+      "signingIdentity": null,
       "providerShortName": "LUCARIS",
       "dmg": {
         "background": "resources/dmg-background.png",

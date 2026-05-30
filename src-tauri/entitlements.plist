@@ -2,17 +2,32 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- Required for Tauri webview (WKWebView JIT) -->
-  <key>com.apple.security.cs.allow-jit</key>
-  <true/>
-  <!-- Required for Tauri renderer -->
-  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-  <true/>
-  <!-- Network for ANAF API -->
-  <key>com.apple.security.network.client</key>
-  <true/>
-  <!-- File access for user-selected files (backup, archive) -->
-  <key>com.apple.security.files.user-selected.read-write</key>
-  <true/>
+    <!-- Hardened Runtime: required for notarization -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <false/>
+
+    <!-- Keychain access for ANAF tokens -->
+    <key>com.apple.security.keychain-access-groups</key>
+    <array>
+        <string>$(AppIdentifierPrefix)com.lucaris.efactura</string>
+    </array>
+
+    <!-- Network client for ANAF API -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- File access for invoice XML/PDF storage -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <!-- Allow app to read/write its own data directory -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>$(AppIdentifierPrefix)com.lucaris.efactura</string>
+    </array>
 </dict>
 </plist>
