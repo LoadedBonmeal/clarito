@@ -129,3 +129,98 @@ Comutarea se face din Setări → Avansat → "Folosește mediul test ANAF".
 ## Licență
 
 Proprietary © Lucaris
+
+## Support
+
+- **Email**: support@lucaris.ro
+- **Issues**: https://github.com/LoadedBonmeal/RoFactura/issues
+- **Buton "Trimite feedback"** în app: Setări → Suport și feedback → deschide clientul de email cu diagnostic atașat (versiunea app, OS, machine ID anonimizat, ultimele 50 linii log)
+
+### FAQ rapid
+
+- **"Licența a expirat"** — vezi secțiunea Troubleshooting de mai jos
+- **"Vreau să facturez un client EU"** — Contacte → Editează → setează Țară (orice ISO-3166) + Monedă (EUR/USD/etc.). VAT category-ul liniilor se va corecta automat la 0%/AE pentru intracomunitar
+- **"App nu pornește după update"** — vezi secțiunea "License invalidated after version bump" de mai jos
+- **"Cum trimit factura la ANAF"** — InvoiceDetail → buton "Trimite la ANAF". Necesită autorizare SPV (Setări → ANAF → Autorizează)
+
+## Cumpărare licență
+
+### Pentru utilizatori
+
+1. Click "Cumpără licență →" în app (Setări → Suport și feedback) sau în ecranul "Licența a expirat"
+2. Se deschide Stripe Payment Link în browser-ul tău
+3. După plată, primești cheia pe email în câteva ore (manual la început)
+4. Introdu cheia: Setări → Licență → Activează, sau în ecranul de expirare → "Am deja o licență"
+
+### Pentru dev (issue manual al cheilor)
+
+```bash
+cd /path/to/efactura-desktop
+cargo run --bin license-gen -- \
+  --tier SOLO \
+  --email customer@example.com \
+  --expires-days 365
+```
+
+Output (stdout): cheia `XXXX-XXXX-XXXX-CCCCCCCC` — copy-paste în email-ul către client. Stderr conține metadata: tier, email, build version.
+
+⚠️ **Important**: cheile sunt legate de build-ul curent (versiunea din `Cargo.toml`). Dacă faci version bump (ex: 0.2.0 → 0.3.0), salt-ul XOR din `build.rs` se schimbă și cheile vechi devin invalide. Re-emite cheile pentru clienții existenți după fiecare release.
+
+### Setup Stripe Payment Link (one-time, ~10 minute)
+
+1. `dashboard.stripe.com` → Products → New → "RoFactura SOLO 1-an" → preț (ex: €120 / RON 599)
+2. → Create Payment Link → copy URL-ul (format: `https://buy.stripe.com/xxxxx`)
+3. În app: Setări → setări avansate → `purchase_url` = URL-ul de mai sus. Butonul "Cumpără licență" din app va folosi automat acest URL.
+4. (Opțional, pentru auto-issue) Webhook: `dashboard.stripe.com → Developers → Webhooks → Add endpoint` → eveniment `checkout.session.completed`. Endpoint-ul tău (Vercel / Cloudflare Worker) primește event-ul cu email-ul clientului → invocă `license-gen` → trimite cheia automat. Effort estimat: 2-3h.
+
+Fără webhook: monitorizezi `Payments` în Stripe dashboard și rulezi `license-gen` manual de fiecare dată (acceptabil până la ~50 vânzări / lună).
+
+## Troubleshooting
+
+### Licența invalidată după version bump
+
+**Simptom**: după update la o versiune nouă, app-ul arată "Licența a expirat" deși licența ta era validă în versiunea anterioară.
+
+**Cauza**: salt-ul XOR din `build.rs` se calculează din `pkg_name + pkg_version`. Bump-ul de versiune schimbă salt-ul → fingerprint-urile vechi nu mai corespund.
+
+**Fix utilizator**: contactează support@lucaris.ro cu email-ul cu care ai cumpărat → primești cheie nouă în câteva ore.
+
+**Fix dev pe propria mașină**:
+
+```bash
+# Stop app
+pkill -f "RoFactura|efactura-desktop"
+
+# Clean state
+sqlite3 ~/Library/Application\ Support/com.lucaris.efactura/data.db \
+  "DELETE FROM license WHERE id=1; \
+   DELETE FROM settings WHERE key LIKE 'license_%';"
+security delete-generic-password \
+  -s "ro.lucaris.efactura.trial.v1" -a "trial_status" 2>/dev/null
+
+# Re-generate trial / activation key (de pe Mac-ul tău, în repo dir)
+cargo run --bin license-gen -- --tier SOLO --email tu@tine.ro
+# Apoi pornește app + activează cheia obținută
+```
+
+### Mailto button doesn't open the mail client (Linux)
+
+```bash
+sudo apt install xdg-utils    # sau equivalentul pentru distroul tău
+```
+
+Asigură-te că ai un client default setat: `xdg-mime default thunderbird.desktop x-scheme-handler/mailto` (înlocuiește `thunderbird.desktop` cu clientul tău).
+
+### Anti-rollback hard-fail după sleep lung / NTP correction
+
+**Simptom**: după ce laptop-ul a stat ore în sleep, app-ul refuză să pornească: "Licența nu mai este validă pe această mașină".
+
+**Cauza** (rezolvată în v0.2.0): vechiul anti-rollback check refuza dacă `last_seen > now`. Acum tolerează drift până la 30 zile (1 zi silent, 1-30 zile warning, > 30 zile hard fail).
+
+**Dacă ai versiune < 0.2.0**: update la latest.
+
+**Dacă ai > 0.2.0 și tot apare**: clean state cu sql-ul din "Licența invalidată" de mai sus.
+
+### Build local: "Blocking waiting for file lock on build directory"
+
+`pnpm tauri dev` și `pnpm build:mac` (sau `cargo build`) intră în conflict pe lock-ul cargo target. Oprește dev (Ctrl+C în terminalul respectiv) înainte de un release build, sau folosește `CARGO_TARGET_DIR=/tmp/cargo-release pnpm build:mac` pentru target separat.
