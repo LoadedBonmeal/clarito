@@ -8,6 +8,7 @@ import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
 import type { AppErrorPayload, Contact, CreateLineInput, VatCategory } from "@/types";
 import { fmtRON } from "@/lib/utils";
+import { VAT_RATES, CURRENCIES } from "@/lib/constants";
 
 /** Extends CreateLineInput with a stable row key for React list rendering. */
 type LineRow = CreateLineInput & { rowId: string };
@@ -34,17 +35,19 @@ function fmtDateRO(iso: string): string {
   return `${d}.${m}.${y}`;
 }
 
-const DEFAULT_LINE: CreateLineInput = {
-  name: "",
-  quantity: 1,
-  unit: "buc",
-  unitPrice: 0,
-  vatRate: 21,
-  vatCategory: "S" as VatCategory,
-};
+function makeDefaultLine(vatPayer: boolean): CreateLineInput {
+  return {
+    name: "",
+    quantity: 1,
+    unit: "buc",
+    unitPrice: 0,
+    vatRate: vatPayer ? 19 : 0,
+    vatCategory: (vatPayer ? "S" : "AE") as VatCategory,
+  };
+}
 
-function newLineRow(base?: Partial<CreateLineInput>): LineRow {
-  return { ...DEFAULT_LINE, ...base, rowId: crypto.randomUUID() };
+function newLineRow(vatPayer: boolean, base?: Partial<CreateLineInput>): LineRow {
+  return { ...makeDefaultLine(vatPayer), ...base, rowId: crypto.randomUUID() };
 }
 
 
@@ -68,12 +71,14 @@ export function InvoiceNewPage() {
   const [series, setSeries] = useState<string>("");
   const [issueDate, setIssueDate] = useState<string>(todayISO());
   const [dueDate, setDueDate] = useState<string>(plusDaysISO(30));
+  const [currency, setCurrency] = useState<string>("RON");
   const [notes, setNotes] = useState<string>("");
   const [paymentMeansCode, setPaymentMeansCode] = useState<string>("30");
   const [paymentMethod, setPaymentMethod] = useState<string>("ot");
   const [paymentIban, setPaymentIban] = useState<string>("");
   const [paymentReference, setPaymentReference] = useState<string>("");
-  const [lines, setLines] = useState<LineRow[]>([newLineRow()]);
+  const vatPayer = company?.vatPayer ?? true;
+  const [lines, setLines] = useState<LineRow[]>([newLineRow(vatPayer)]);
   // Track the saved draft ID for live validation
   const [savedId, setSavedId] = useState<string | null>(null);
   // True when "Trimite la ANAF" was clicked — navigate to detail to trigger submit there
@@ -105,7 +110,7 @@ export function InvoiceNewPage() {
   const vat = lines.reduce((s, l) => s + l.quantity * l.unitPrice * (l.vatRate / 100), 0);
   const total = net + vat;
 
-  const addLine = () => setLines((prev) => [...prev, newLineRow()]);
+  const addLine = () => setLines((prev) => [...prev, newLineRow(vatPayer)]);
 
   const removeLine = (idx: number) =>
     setLines((prev) => prev.filter((_, i) => i !== idx));
@@ -150,7 +155,7 @@ export function InvoiceNewPage() {
         number: activeNumber,
         issueDate,
         dueDate,
-        currency: "RON",
+        currency,
         notes: finalNotes || undefined,
         paymentMeansCode,
         lines: apiLines,
@@ -352,6 +357,20 @@ export function InvoiceNewPage() {
                   </span>
                 </div>
 
+                <label>Monedă</label>
+                <div className="field">
+                  <select
+                    className="select"
+                    value={currency}
+                    onChange={(e) => setCurrency(e.target.value)}
+                    style={{ width: 100 }}
+                  >
+                    {CURRENCIES.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="form-section-title">Cumpărător</div>
                 <label>Cumpărător</label>
                 <div className="field">
@@ -407,8 +426,7 @@ export function InvoiceNewPage() {
                     color: "var(--text-muted)",
                   }}
                 >
-                  Tasta <span className="kbd">↓</span> pe ultima linie creează una nouă ·{" "}
-                  <span className="kbd">F4</span> deschide catalog articole
+                  Tasta <span className="kbd">↓</span> pe ultima linie creează una nouă
                 </span>
               </span>
             </div>
@@ -479,12 +497,15 @@ export function InvoiceNewPage() {
                           />
                         </td>
                         <td className="num">
-                          <input
-                            type="number"
-                            value={l.vatRate}
-                            onChange={(e) => updateLine(i, "vatRate", parseFloat(e.target.value) || 0)}
+                          <select
                             className="num"
-                          />
+                            value={l.vatRate}
+                            onChange={(e) => updateLine(i, "vatRate", Number(e.target.value))}
+                          >
+                            {VAT_RATES.map((r) => (
+                              <option key={r} value={r}>{r}%</option>
+                            ))}
+                          </select>
                         </td>
                         <td className="num">
                           <input
@@ -516,8 +537,7 @@ export function InvoiceNewPage() {
                   })}
                   <tr className="line-add-row" onClick={addLine} style={{ cursor: "pointer" }}>
                     <td colSpan={10}>
-                      <Icon name="plus" size={12} /> Adaugă linie · sau caută articol din catalog cu{" "}
-                      <span className="kbd">F4</span>
+                      <Icon name="plus" size={12} /> Adaugă linie
                     </td>
                   </tr>
                 </tbody>

@@ -8,27 +8,27 @@
 
 const LABELS: Record<string, string> = {
   // InvoiceStatus (real API — UPPERCASE)
-  draft:      "SCHIȚĂ",
-  queued:     "ÎN AȘTEPTARE",
-  submitted:  "TRIMISĂ",
-  validated:  "VALIDATĂ",
-  rejected:   "RESPINSĂ",
-  storned:    "STORNATĂ",
+  draft:      "Schiță",
+  queued:     "În așteptare",
+  submitted:  "Trimisă",
+  validated:  "Validată",
+  rejected:   "Respinsă",
+  storned:    "Stornată",
   // ReceivedStatus (real API — UPPERCASE)
-  new:        "NOUĂ",
-  reviewed:   "REVIZUITĂ",
-  approved:   "APROBATĂ",
-  archived:   "ARHIVATĂ",
+  new:        "Nouă",
+  reviewed:   "Revizuită",
+  approved:   "Aprobată",
+  archived:   "Arhivată",
   // legacy (sample data uses "pending" instead of "queued")
-  pending:    "ÎN AȘTEPTARE",
+  pending:    "În așteptare",
   // Payment statuses
-  paid:       "PLĂTIT",
-  unpaid:     "NEPLĂTIT",
-  partial:    "PARȚIAL",
-  overdue:    "RESTANȚĂ",
+  paid:       "Plătit",
+  unpaid:     "Neplătit",
+  partial:    "Parțial",
+  overdue:    "Restanță",
   // Recurring statuses
-  active:     "ACTIV",
-  inactive:   "INACTIV",
+  active:     "Activ",
+  inactive:   "Inactiv",
 };
 
 /** Returnează clasa CSS corespunzătoare (toate clasele din design.css sunt lowercase). */
@@ -42,7 +42,7 @@ function cssClass(status: string): string {
 export function StatusBadge({ status }: { status: string }) {
   const lower = status.toLowerCase();
   return (
-    <span className={"badge " + cssClass(status)}>
+    <span className={"badge " + cssClass(status)} style={{ textTransform: "none" }}>
       <span className="dot" />
       {LABELS[lower] ?? status}
     </span>

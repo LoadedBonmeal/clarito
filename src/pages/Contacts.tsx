@@ -15,6 +15,7 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtShortcut } from "@/lib/platform";
 import type { Contact, ContactType, CreateContactInput, UpdateContactInput } from "@/types";
+import { COUNTRIES, CURRENCIES } from "@/lib/constants";
 
 type TypeFilter = ContactType | "all";
 
@@ -265,6 +266,7 @@ function ContactModal({
   onSaved: () => void;
 }) {
   const isEdit = contact !== null;
+  const [currency, setCurrency] = useState<string>((contact as (Contact & { currency?: string | null }) | null)?.currency ?? "RON");
   const [form, setForm] = useState<CreateContactInput>({
     companyId,
     contactType: contact?.contactType ?? "CUSTOMER",
@@ -310,7 +312,10 @@ function ContactModal({
         return;
       }
     }
-    const input: CreateContactInput = {
+    // TODO(Agent1): currency is stored via the DB column added in migration 0011.
+    // Once CreateContactInput / UpdateContactInput in src/types/index.ts include `currency`,
+    // remove the cast below and add `currency` directly to both types.
+    const input = {
       ...form,
       cui: form.cui?.trim() || undefined,
       address: form.address?.trim() || undefined,
@@ -318,10 +323,11 @@ function ContactModal({
       county: form.county?.trim() || undefined,
       email: form.email?.trim() || undefined,
       phone: form.phone?.trim() || undefined,
-    };
+      currency: currency || undefined,
+    } as CreateContactInput;
     if (isEdit) {
       const { companyId: _cid, ...updateInput } = input;
-      update.mutate(updateInput);
+      update.mutate(updateInput as UpdateContactInput);
     } else {
       create.mutate(input);
     }
@@ -370,6 +376,23 @@ function ContactModal({
           <MField label="Adresă">
             <input className="field" placeholder="Str. Exemplu nr. 1" {...field("address")} />
           </MField>
+
+          <div style={{ display: "flex", gap: 9 }}>
+            <MField label="Țară" style={{ flex: 1 }}>
+              <select className="field" value={form.country ?? "RO"} onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))}>
+                {COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+                ))}
+              </select>
+            </MField>
+            <MField label="Monedă" style={{ flex: 1 }}>
+              <select className="field" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                {CURRENCIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </MField>
+          </div>
 
           <div style={{ display: "flex", gap: 9 }}>
             <MField label="Email" style={{ flex: 1 }}>
