@@ -31,6 +31,8 @@ pub struct Contact {
     pub email: Option<String>,
     pub phone: Option<String>,
 
+    pub currency: Option<String>,
+
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -53,6 +55,8 @@ pub struct CreateContactInput {
 
     pub email: Option<String>,
     pub phone: Option<String>,
+
+    pub currency: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -70,6 +74,8 @@ pub struct UpdateContactInput {
 
     pub email: Option<String>,
     pub phone: Option<String>,
+
+    pub currency: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -88,7 +94,7 @@ pub async fn list(pool: &SqlitePool, filter: ContactFilter) -> AppResult<Vec<Con
     // ?1 company_id (Option<&str>), ?2 query_term (Option<&str>)
     let items = sqlx::query_as::<_, Contact>(
         "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, \
-         address, city, county, country, email, phone, created_at, updated_at \
+         address, city, county, country, email, phone, currency, created_at, updated_at \
          FROM contacts \
          WHERE (?1 IS NULL OR company_id = ?1) \
            AND (?2 IS NULL OR legal_name LIKE '%' || ?2 || '%' OR cui LIKE '%' || ?2 || '%') \
@@ -104,7 +110,7 @@ pub async fn list(pool: &SqlitePool, filter: ContactFilter) -> AppResult<Vec<Con
 pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Contact> {
     sqlx::query_as::<_, Contact>(
         "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, \
-         address, city, county, country, email, phone, created_at, updated_at \
+         address, city, county, country, email, phone, currency, created_at, updated_at \
          FROM contacts WHERE id = ?1",
     )
     .bind(id)
@@ -123,12 +129,12 @@ pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<C
     sqlx::query(
         "INSERT INTO contacts (
             id, company_id, contact_type, cui, legal_name, vat_payer,
-            address, city, county, country, email, phone,
+            address, city, county, country, email, phone, currency,
             created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
-            ?7, ?8, ?9, ?10, ?11, ?12,
-            ?13, ?13
+            ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+            ?14, ?14
         )",
     )
     .bind(&id)
@@ -143,6 +149,7 @@ pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<C
     .bind(input.country.as_deref().unwrap_or("RO"))
     .bind(&input.email)
     .bind(&input.phone)
+    .bind(&input.currency)
     .bind(now)
     .execute(pool)
     .await?;
@@ -173,7 +180,8 @@ pub async fn update(pool: &SqlitePool, id: &str, input: UpdateContactInput) -> A
             country      = ?9,
             email        = ?10,
             phone        = ?11,
-            updated_at   = ?12
+            currency     = ?12,
+            updated_at   = ?13
         WHERE id = ?1",
     )
     .bind(id)
@@ -187,6 +195,7 @@ pub async fn update(pool: &SqlitePool, id: &str, input: UpdateContactInput) -> A
     .bind(input.country.unwrap_or(current.country))
     .bind(input.email.or(current.email))
     .bind(input.phone.or(current.phone))
+    .bind(input.currency.or(current.currency))
     .bind(now)
     .execute(pool)
     .await?;

@@ -42,7 +42,7 @@ function cssClass(status: string): string {
 export function StatusBadge({ status }: { status: string }) {
   const lower = status.toLowerCase();
   return (
-    <span className={"badge " + cssClass(status)} style={{ textTransform: "none" }}>
+    <span className={"badge " + cssClass(status)}>
       <span className="dot" />
       {LABELS[lower] ?? status}
     </span>

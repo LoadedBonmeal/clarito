@@ -266,7 +266,7 @@ function ContactModal({
   onSaved: () => void;
 }) {
   const isEdit = contact !== null;
-  const [currency, setCurrency] = useState<string>((contact as (Contact & { currency?: string | null }) | null)?.currency ?? "RON");
+  const [currency, setCurrency] = useState<string>(contact?.currency ?? "RON");
   const [form, setForm] = useState<CreateContactInput>({
     companyId,
     contactType: contact?.contactType ?? "CUSTOMER",
@@ -312,10 +312,7 @@ function ContactModal({
         return;
       }
     }
-    // TODO(Agent1): currency is stored via the DB column added in migration 0011.
-    // Once CreateContactInput / UpdateContactInput in src/types/index.ts include `currency`,
-    // remove the cast below and add `currency` directly to both types.
-    const input = {
+    const input: CreateContactInput = {
       ...form,
       cui: form.cui?.trim() || undefined,
       address: form.address?.trim() || undefined,
@@ -324,7 +321,7 @@ function ContactModal({
       email: form.email?.trim() || undefined,
       phone: form.phone?.trim() || undefined,
       currency: currency || undefined,
-    } as CreateContactInput;
+    };
     if (isEdit) {
       const { companyId: _cid, ...updateInput } = input;
       update.mutate(updateInput as UpdateContactInput);

@@ -118,6 +118,7 @@ export interface Contact {
   country: string;
   email: string | null;
   phone: string | null;
+  currency: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -134,6 +135,7 @@ export interface CreateContactInput {
   country?: string;
   email?: string;
   phone?: string;
+  currency?: string;
 }
 
 export type UpdateContactInput = Partial<Omit<CreateContactInput, "companyId">>;
