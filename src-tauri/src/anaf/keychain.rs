@@ -6,6 +6,46 @@
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 
+use crate::error::{AppError, AppResult};
+
+// ─── SmartBill token storage ────────────────────────────────────────────────
+//
+// Token-ul SmartBill (parolă API) este stocat în OS keychain, NU în SQLite,
+// pentru a evita expunerea către renderer-ul JS prin IPC.
+
+const SMARTBILL_SERVICE: &str = "com.lucaris.efactura.smartbill";
+
+/// Stochează token-ul SmartBill pentru o companie în OS keychain.
+pub fn store_smartbill_token(company_id: &str, token: &str) -> AppResult<()> {
+    let entry =
+        Entry::new(SMARTBILL_SERVICE, company_id).map_err(|e| AppError::Other(e.to_string()))?;
+    entry
+        .set_password(token)
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    Ok(())
+}
+
+/// Citește token-ul SmartBill pentru o companie din OS keychain.
+/// Returnează `None` dacă nu există nicio intrare.
+pub fn get_smartbill_token(company_id: &str) -> AppResult<Option<String>> {
+    let entry =
+        Entry::new(SMARTBILL_SERVICE, company_id).map_err(|e| AppError::Other(e.to_string()))?;
+    match entry.get_password() {
+        Ok(token) => Ok(Some(token)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(AppError::Other(e.to_string())),
+    }
+}
+
+/// Șterge token-ul SmartBill al unei companii din OS keychain.
+#[allow(dead_code)]
+pub fn delete_smartbill_token(company_id: &str) -> AppResult<()> {
+    let entry =
+        Entry::new(SMARTBILL_SERVICE, company_id).map_err(|e| AppError::Other(e.to_string()))?;
+    let _ = entry.delete_credential();
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenBundle {
     pub access_token: String,

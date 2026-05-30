@@ -6,13 +6,81 @@ use crate::db::settings;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
+// ─── Path validation pentru export-uri ──────────────────────────────────────
+//
+// Apărare împotriva path-traversal și a scrierii arbitrare în filesystem:
+// - cale absolută obligatorie
+// - fără UNC / SMB (`\\server\share`)
+// - fără componente `..`
+// - extensie permisă (csv, xlsx, xml, txt)
+// - părintele trebuie să fie în $HOME al utilizatorului
+
+pub(crate) fn validate_export_path(path: &str) -> AppResult<std::path::PathBuf> {
+    use std::path::PathBuf;
+
+    let p = PathBuf::from(path);
+
+    if !p.is_absolute() {
+        return Err(AppError::Validation(
+            "Calea trebuie să fie absolută.".into(),
+        ));
+    }
+
+    let path_str = p.to_string_lossy();
+    if path_str.starts_with(r"\\") || path_str.starts_with("//") {
+        return Err(AppError::Validation(
+            "Locațiile de rețea (UNC/SMB) nu sunt permise.".into(),
+        ));
+    }
+
+    if p.components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(AppError::Validation(
+            "Calea nu poate conține componente '..'.".into(),
+        ));
+    }
+
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if !matches!(ext, "csv" | "xlsx" | "xml" | "txt") {
+        return Err(AppError::Validation(format!(
+            "Extensie fișier nepermisă: .{ext}. Permise: csv, xlsx, xml, txt."
+        )));
+    }
+
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| AppError::Other("Nu pot determina directorul home.".into()))?;
+
+    let parent = p
+        .parent()
+        .ok_or_else(|| AppError::Validation("Cale invalidă.".into()))?;
+    let parent_canon = parent
+        .canonicalize()
+        .map_err(|_| AppError::Validation("Directorul țintă nu există.".into()))?;
+    let home_canon = std::path::PathBuf::from(&home)
+        .canonicalize()
+        .map_err(AppError::Io)?;
+
+    if !parent_canon.starts_with(&home_canon) {
+        return Err(AppError::Validation(
+            "Fișierul trebuie să fie în directorul home al utilizatorului.".into(),
+        ));
+    }
+
+    Ok(p)
+}
+
 // ─── SmartBill credentials ──────────────────────────────────────────────────
+//
+// Token-ul SmartBill (API key) este stocat în OS keychain, NU în tabela
+// `settings`. Endpoint-ul `get_smartbill_credentials` NU returnează niciodată
+// token-ul către frontend; expune doar username-ul și un flag `configured`.
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SmartBillCredentials {
-    pub user: String,
-    pub token: String,
+pub struct SmartbillCredentialsView {
+    pub user: Option<String>,
     pub configured: bool,
 }
 
@@ -20,24 +88,56 @@ pub struct SmartBillCredentials {
 pub async fn get_smartbill_credentials(
     state: State<'_, AppState>,
     company_id: String,
-) -> AppResult<SmartBillCredentials> {
+) -> AppResult<SmartbillCredentialsView> {
     let user_key = format!("smartbill_user_{}", company_id);
-    let token_key = format!("smartbill_token_{}", company_id);
+    let user = settings::get(&state.db, &user_key).await?;
+    let has_user = user.as_ref().is_some_and(|u| !u.is_empty());
+    let configured = has_user && crate::anaf::keychain::get_smartbill_token(&company_id)?.is_some();
+    Ok(SmartbillCredentialsView { user, configured })
+}
 
-    let user = settings::get(&state.db, &user_key)
-        .await?
-        .unwrap_or_default();
-    let token = settings::get(&state.db, &token_key)
-        .await?
-        .unwrap_or_default();
+/// Salvează credențialele SmartBill: username în settings, token în OS keychain.
+/// Dacă `token` este `None` sau vid, token-ul existent în keychain este păstrat
+/// (permite update doar al username-ului fără re-introducerea token-ului).
+#[tauri::command]
+pub async fn set_smartbill_credentials(
+    state: State<'_, AppState>,
+    company_id: String,
+    user: String,
+    token: Option<String>,
+) -> AppResult<()> {
+    if company_id.trim().is_empty() {
+        return Err(AppError::Validation(
+            "ID-ul companiei este obligatoriu.".into(),
+        ));
+    }
+    let user_key = format!("smartbill_user_{}", company_id);
+    settings::set(&state.db, &user_key, user.trim()).await?;
 
-    let configured = !user.is_empty() && !token.is_empty();
+    if let Some(tok) = token {
+        let t = tok.trim();
+        if !t.is_empty() {
+            crate::anaf::keychain::store_smartbill_token(&company_id, t)?;
+        }
+    }
+    Ok(())
+}
 
-    Ok(SmartBillCredentials {
-        user,
-        token,
-        configured,
-    })
+/// Șterge credențialele SmartBill pentru o companie (username + token).
+#[tauri::command]
+pub async fn clear_smartbill_credentials(
+    state: State<'_, AppState>,
+    company_id: String,
+) -> AppResult<()> {
+    if company_id.trim().is_empty() {
+        return Err(AppError::Validation(
+            "ID-ul companiei este obligatoriu.".into(),
+        ));
+    }
+    let user_key = format!("smartbill_user_{}", company_id);
+    settings::set(&state.db, &user_key, "").await?;
+    crate::anaf::keychain::delete_smartbill_token(&company_id)?;
+    Ok(())
 }
 
 // ─── SmartBill push invoice ─────────────────────────────────────────────────
@@ -49,19 +149,18 @@ pub async fn smartbill_push_invoice(
     company_id: String,
     invoice_id: String,
 ) -> AppResult<String> {
-    // 1. Load credentials
+    // 1. Load credentials — username din settings, token din OS keychain
     let user_key = format!("smartbill_user_{}", company_id);
-    let token_key = format!("smartbill_token_{}", company_id);
 
-    let user = settings::get(&state.db, &user_key)
-        .await?
-        .ok_or_else(|| AppError::Other("Credențialele SmartBill nu sunt configurate.".into()))?;
-    let token = settings::get(&state.db, &token_key)
-        .await?
-        .ok_or_else(|| AppError::Other("Credențialele SmartBill nu sunt configurate.".into()))?;
+    let user = settings::get(&state.db, &user_key).await?.ok_or_else(|| {
+        AppError::Validation("Credențialele SmartBill nu sunt configurate.".into())
+    })?;
+    let token = crate::anaf::keychain::get_smartbill_token(&company_id)?.ok_or_else(|| {
+        AppError::Validation("SmartBill nu este configurat pentru această companie.".into())
+    })?;
 
     if user.is_empty() || token.is_empty() {
-        return Err(AppError::Other(
+        return Err(AppError::Validation(
             "Credențialele SmartBill nu sunt configurate.".into(),
         ));
     }
@@ -293,8 +392,9 @@ pub async fn export_saga_csv(
     let csv_content = rows.join("\r\n");
 
     if let Some(path) = output_path {
-        std::fs::write(&path, csv_content.as_bytes()).map_err(AppError::Io)?;
-        Ok(path)
+        let validated = validate_export_path(&path)?;
+        std::fs::write(&validated, csv_content.as_bytes()).map_err(AppError::Io)?;
+        Ok(validated.to_string_lossy().to_string())
     } else {
         Ok(csv_content)
     }
@@ -435,8 +535,9 @@ pub async fn export_winmentor_csv(
     let csv_content = rows.join("\r\n");
 
     if let Some(path) = output_path {
-        std::fs::write(&path, csv_content.as_bytes()).map_err(AppError::Io)?;
-        Ok(path)
+        let validated = validate_export_path(&path)?;
+        std::fs::write(&validated, csv_content.as_bytes()).map_err(AppError::Io)?;
+        Ok(validated.to_string_lossy().to_string())
     } else {
         Ok(csv_content)
     }

@@ -158,14 +158,70 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
             .fetch_one(&check_pool)
             .await
             .unwrap_or_else(|_| "error".to_string());
-        check_pool.close().await;
 
         if integrity != "ok" {
+            check_pool.close().await;
             let _ = std::fs::remove_file(&temp_check_path);
             return Err(AppError::Other(format!(
                 "Backup corupt: PRAGMA integrity_check a returnat: {integrity}"
             )));
         }
+
+        // SEC-06: schema validation — verifică tabelele și coloanele cheie pentru
+        // a respinge DB-uri SQLite valide dar cu altă schemă (potențial crafted).
+        let required_tables = [
+            "companies",
+            "invoices",
+            "invoice_line_items",
+            "contacts",
+            "settings",
+            "received_invoices",
+        ];
+
+        for table in required_tables.iter() {
+            let exists: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            )
+            .bind(table)
+            .fetch_one(&check_pool)
+            .await
+            .unwrap_or(0);
+
+            if exists == 0 {
+                check_pool.close().await;
+                let _ = std::fs::remove_file(&temp_check_path);
+                return Err(AppError::Other(format!(
+                    "Backup invalid: tabelul '{table}' lipsește. Acest fișier nu pare să fie un backup RoFactura valid."
+                )));
+            }
+        }
+
+        // Validează că `invoices` are coloanele cheie pe care le folosește aplicația.
+        let invoice_cols: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('invoices')")
+                .fetch_all(&check_pool)
+                .await
+                .unwrap_or_default();
+
+        let required_cols = [
+            "id",
+            "company_id",
+            "series",
+            "number",
+            "status",
+            "issue_date",
+        ];
+        for col in required_cols.iter() {
+            if !invoice_cols.iter().any(|c| c == col) {
+                check_pool.close().await;
+                let _ = std::fs::remove_file(&temp_check_path);
+                return Err(AppError::Other(format!(
+                    "Backup invalid: coloana '{col}' lipsește din tabelul invoices."
+                )));
+            }
+        }
+
+        check_pool.close().await;
     }
     std::fs::remove_file(&temp_check_path).ok();
 
@@ -255,7 +311,56 @@ pub async fn change_archive_location(
     new_path: String,
     app: AppHandle,
 ) -> AppResult<()> {
-    let new_dir = std::path::Path::new(&new_path);
+    use std::path::PathBuf;
+
+    let new_path_buf = PathBuf::from(&new_path);
+
+    // SEC-02: validează calea înainte de a o folosi.
+    // 1. Trebuie să fie absolută.
+    if !new_path_buf.is_absolute() {
+        return Err(AppError::Validation(
+            "Calea trebuie să fie absolută.".into(),
+        ));
+    }
+
+    // 2. Refuză UNC paths / network shares.
+    let path_str = new_path_buf.to_string_lossy();
+    if path_str.starts_with(r"\\") || path_str.starts_with("//") {
+        return Err(AppError::Validation(
+            "Locațiile de rețea (UNC/SMB) nu sunt permise.".into(),
+        ));
+    }
+
+    // 3. Refuză path-uri ce conțin componente `..`.
+    if new_path_buf
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(AppError::Validation(
+            "Calea nu poate conține componente '..'.".into(),
+        ));
+    }
+
+    // 4. Părintele trebuie să existe și să fie în $HOME.
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| AppError::Other("Nu pot determina directorul home.".into()))?;
+    let home_canon = PathBuf::from(&home).canonicalize().map_err(AppError::Io)?;
+
+    let parent = new_path_buf
+        .parent()
+        .ok_or_else(|| AppError::Validation("Cale invalidă.".into()))?;
+    let parent_canon = parent
+        .canonicalize()
+        .map_err(|_| AppError::Validation("Calea părinte nu există.".into()))?;
+
+    if !parent_canon.starts_with(&home_canon) {
+        return Err(AppError::Validation(
+            "Calea trebuie să fie în directorul home al utilizatorului.".into(),
+        ));
+    }
+
+    let new_dir = new_path_buf.as_path();
     std::fs::create_dir_all(new_dir).map_err(|e| AppError::Other(e.to_string()))?;
 
     // Get current archive path

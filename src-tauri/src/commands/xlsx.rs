@@ -38,6 +38,10 @@ pub async fn export_invoices_xlsx(
 ) -> AppResult<()> {
     use sqlx::Row;
 
+    // SEC-03: validate path before writing (no UNC, no traversal, must be in $HOME)
+    let validated_output = crate::commands::integrations::validate_export_path(&output_path)?;
+    let output_path = validated_output.to_string_lossy().to_string();
+
     let pool = &state.db;
     let mut where_clauses = vec!["1=1".to_string()];
     let mut binds: Vec<String> = Vec::new();
