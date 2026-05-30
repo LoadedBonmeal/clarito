@@ -88,8 +88,8 @@ jobs:
         run: cargo test --lib
         working-directory: src-tauri
 
-      - name: Build
-        run: pnpm build:win-x64
+      - name: Build NSIS installer (skip MSI — WiX light.exe flaky on CI)
+        run: pnpm tauri build --target x86_64-pc-windows-msvc --bundles nsis
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
