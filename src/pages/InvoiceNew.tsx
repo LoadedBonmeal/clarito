@@ -2,10 +2,11 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Icon } from "@/components/shared/Icon";
+import { ContactCombobox } from "@/components/shared/ContactCombobox";
 import { useAppStore } from "@/lib/store";
 import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
-import type { AppErrorPayload, CreateLineInput, VatCategory } from "@/types";
+import type { AppErrorPayload, Contact, CreateLineInput, VatCategory } from "@/types";
 import { fmtRON } from "@/lib/utils";
 
 /** Extends CreateLineInput with a stable row key for React list rendering. */
@@ -63,13 +64,7 @@ export function InvoiceNewPage() {
     enabled: !!activeCompanyId,
   });
 
-  const { data: contacts = [] } = useQuery({
-    queryKey: queryKeys.contacts.list({ companyId: activeCompanyId ?? undefined }),
-    queryFn: () => api.contacts.list({ companyId: activeCompanyId ?? undefined }),
-    enabled: !!activeCompanyId,
-  });
-
-  const [contactId, setContactId] = useState<string>("");
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [series, setSeries] = useState<string>("");
   const [issueDate, setIssueDate] = useState<string>(todayISO());
   const [dueDate, setDueDate] = useState<string>(plusDaysISO(30));
@@ -100,8 +95,6 @@ export function InvoiceNewPage() {
   });
   const testMode = testModeSetting === "1";
 
-  const selectedContact = contacts.find((c) => c.id === contactId) ?? null;
-
   const activeSeries = series || company?.invoiceSeries || "";
   const activeNumber = nextNumber ?? (company ? company.lastInvoiceNumber + 1 : 1);
   const fullNumber = activeSeries
@@ -129,7 +122,7 @@ export function InvoiceNewPage() {
   const saveDraftMutation = useMutation({
     mutationFn: () => {
       if (!activeCompanyId) throw new Error("Nicio companie activă.");
-      if (!contactId) throw new Error("Selectați un cumpărător.");
+      if (!selectedContact) throw new Error("Selectați un client.");
       if (lines.length === 0) throw new Error("Adăugați cel puțin o linie.");
       const lineErrors: string[] = [];
       lines.forEach((line, i) => {
@@ -152,7 +145,7 @@ export function InvoiceNewPage() {
         : notes;
       return api.invoices.createDraft({
         companyId: activeCompanyId,
-        contactId,
+        contactId: selectedContact.id,
         series: activeSeries,
         number: activeNumber,
         issueDate,
@@ -362,23 +355,13 @@ export function InvoiceNewPage() {
                 <div className="form-section-title">Cumpărător</div>
                 <label>Cumpărător</label>
                 <div className="field">
-                  {/* TODO MISS-05: Replace select with typeahead using api.contacts.search() for large contact lists. */}
-                  <select
-                    className="select"
-                    value={contactId}
-                    onChange={(e) => setContactId(e.target.value)}
-                    style={{ width: 320 }}
-                  >
-                    <option value="">— selectați cumpărătorul —</option>
-                    {contacts
-                      .filter((c) => c.contactType === "CUSTOMER" || c.contactType === "BOTH")
-                      .map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.legalName}
-                          {c.cui ? ` · ${c.cui}` : ""}
-                        </option>
-                      ))}
-                  </select>
+                  <ContactCombobox
+                    value={selectedContact}
+                    onChange={setSelectedContact}
+                    disabled={!activeCompanyId}
+                    filterType={["CUSTOMER", "BOTH"]}
+                    width={320}
+                  />
                 </div>
                 {selectedContact && (
                   <>

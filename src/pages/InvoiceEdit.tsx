@@ -2,11 +2,12 @@ import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Icon } from "@/components/shared/Icon";
+import { ContactCombobox } from "@/components/shared/ContactCombobox";
 import { useAppStore } from "@/lib/store";
 import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
 import { notify } from "@/lib/toasts";
-import type { CreateLineInput, VatCategory } from "@/types";
+import type { Contact, CreateLineInput, VatCategory } from "@/types";
 import { parseDec, fmtRON } from "@/lib/utils";
 
 /** Extends CreateLineInput with a stable row key for React list rendering. */
@@ -46,13 +47,7 @@ export function InvoiceEditPage() {
     enabled: !!activeCompanyId,
   });
 
-  const { data: contacts = [] } = useQuery({
-    queryKey: queryKeys.contacts.list({ companyId: activeCompanyId ?? undefined }),
-    queryFn: () => api.contacts.list({ companyId: activeCompanyId ?? undefined }),
-    enabled: !!activeCompanyId,
-  });
-
-  const [contactId, setContactId] = useState<string>("");
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [series, setSeries] = useState<string>("");
   const [invoiceNumber, setInvoiceNumber] = useState<number>(1);
   const [issueDate, setIssueDate] = useState<string>("");
@@ -66,7 +61,11 @@ export function InvoiceEditPage() {
   useEffect(() => {
     if (invoiceData?.invoice && !initialized) {
       const inv = invoiceData.invoice;
-      setContactId(inv.contactId);
+      // Load the attached contact by id (avoids fetching the full list)
+      void api.contacts
+        .get(inv.contactId)
+        .then((c) => setSelectedContact(c))
+        .catch(() => setSelectedContact(null));
       setSeries(inv.series);
       setInvoiceNumber(inv.number);
       setIssueDate(inv.issueDate);
@@ -89,8 +88,6 @@ export function InvoiceEditPage() {
       setInitialized(true);
     }
   }, [invoiceData, initialized]);
-
-  const selectedContact = contacts.find((c) => c.id === contactId) ?? null;
 
   const fullNumber = series
     ? `${series}-${String(invoiceNumber).padStart(4, "0")}`
@@ -117,7 +114,7 @@ export function InvoiceEditPage() {
   const editMutation = useMutation({
     mutationFn: () => {
       if (!activeCompanyId) throw new Error("Nicio companie activă.");
-      if (!contactId) throw new Error("Selectați un cumpărător.");
+      if (!selectedContact) throw new Error("Selectați un client.");
       if (lines.length === 0) throw new Error("Adăugați cel puțin o linie.");
 
       // Per-line validation (mirrors InvoiceNew validation)
@@ -148,7 +145,7 @@ export function InvoiceEditPage() {
 
       return api.invoices.updateDraft(id, {
         companyId: activeCompanyId,
-        contactId,
+        contactId: selectedContact.id,
         series,
         number: invoiceNumber,
         issueDate,
@@ -294,22 +291,13 @@ export function InvoiceEditPage() {
                 <div className="form-section-title">Cumpărător</div>
                 <label>Cumpărător</label>
                 <div className="field">
-                  <select
-                    className="select"
-                    value={contactId}
-                    onChange={(e) => setContactId(e.target.value)}
-                    style={{ width: 320 }}
-                  >
-                    <option value="">— selectați cumpărătorul —</option>
-                    {contacts
-                      .filter((c) => c.contactType === "CUSTOMER" || c.contactType === "BOTH")
-                      .map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.legalName}
-                          {c.cui ? ` · ${c.cui}` : ""}
-                        </option>
-                      ))}
-                  </select>
+                  <ContactCombobox
+                    value={selectedContact}
+                    onChange={setSelectedContact}
+                    disabled={!activeCompanyId}
+                    filterType={["CUSTOMER", "BOTH"]}
+                    width={320}
+                  />
                 </div>
                 {selectedContact && (
                   <>
