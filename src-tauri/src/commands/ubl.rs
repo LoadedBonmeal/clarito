@@ -3,6 +3,7 @@
 use tauri::AppHandle;
 use tauri::State;
 
+use crate::commands::invoices::resolve_storno_ref;
 use crate::db::{companies, contacts, invoices};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -28,11 +29,9 @@ pub async fn generate_invoice_xml(
     // 3. Încarcă cumpărătorul
     let buyer = contacts::get(&state.db, &inv.contact_id).await?;
 
-    // 4. Determină referința storno (dacă există)
-    let storno_ref = inv.notes.as_deref().and_then(|n| {
-        n.strip_prefix("STORNO_OF:")
-            .map(|rest| rest.split('|').next().unwrap_or(rest).to_string())
-    });
+    // 4. Determină referința storno (dacă există). Preferă FK-ul (BIZ-13),
+    //    cu fallback pe parserul notes pentru rândurile vechi.
+    let storno_ref = resolve_storno_ref(&state.db, &inv).await?;
 
     // 5. Generează XML (CPU-bound — rulăm în spawn_blocking)
     let input = GeneratorInput {
@@ -78,11 +77,9 @@ pub async fn generate_invoice_pdf(
     // 3. Încarcă cumpărătorul
     let buyer = contacts::get(&state.db, &inv.contact_id).await?;
 
-    // 4. Determină referința storno (dacă există)
-    let storno_ref = inv.notes.as_deref().and_then(|n| {
-        n.strip_prefix("STORNO_OF:")
-            .map(|rest| rest.split('|').next().unwrap_or(rest).to_string())
-    });
+    // 4. Determină referința storno (dacă există). Preferă FK-ul (BIZ-13),
+    //    cu fallback pe parserul notes pentru rândurile vechi.
+    let storno_ref = resolve_storno_ref(&state.db, &inv).await?;
 
     // 5. Generează PDF (CPU-bound — rulăm în spawn_blocking)
     let input = GeneratorInput {

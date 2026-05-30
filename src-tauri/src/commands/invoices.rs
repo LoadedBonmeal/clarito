@@ -1,3 +1,4 @@
+use sqlx::SqlitePool;
 use tauri::State;
 
 use crate::db::invoices::{self, CreateInvoiceInput, Invoice, InvoiceFilter, InvoiceWithLines};
@@ -7,6 +8,29 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::ubl::generator::{generate_ubl, GeneratorInput};
 use crate::ubl::validator::validate_ubl;
+
+/// BIZ-13: Determină `full_number`-ul facturii originale referențiate de un
+/// storno. Sursa autoritativă este FK-ul `storno_of_invoice_id`. Dacă acesta
+/// lipsește (facturi anterioare migrației 0008), recurgem la parserul
+/// moștenit al notei `STORNO_OF:{full_number}|{motiv}`.
+pub(crate) async fn resolve_storno_ref(
+    pool: &SqlitePool,
+    inv: &Invoice,
+) -> AppResult<Option<String>> {
+    if let Some(orig_id) = inv.storno_of_invoice_id.as_deref() {
+        match invoices::get(pool, orig_id).await {
+            Ok(original) => return Ok(Some(original.full_number)),
+            // Dacă FK-ul a rămas dangling dintr-un motiv neașteptat, ne
+            // întoarcem la legacy parser în loc să eșuăm întreaga validare.
+            Err(AppError::NotFound) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(inv.notes.as_deref().and_then(|n| {
+        n.strip_prefix("STORNO_OF:")
+            .map(|rest| rest.split('|').next().unwrap_or("").to_string())
+    }))
+}
 
 #[tauri::command]
 pub async fn list_invoices(
@@ -34,6 +58,31 @@ pub async fn delete_invoice(state: State<'_, AppState>, id: String) -> AppResult
     invoices::delete(&state.db, &id).await
 }
 
+/// RUST-02: Verifică dacă tranziția de status este permisă din punct de
+/// vedere al ciclului de viață al unei facturi. Reguli:
+/// - DRAFT → QUEUED
+/// - QUEUED → SUBMITTED | VALIDATED | REJECTED
+/// - SUBMITTED → VALIDATED | REJECTED
+/// - VALIDATED → STORNED
+/// - REJECTED / STORNED → (terminale, nicio tranziție)
+///
+/// Returnează `true` pentru no-op (acelaşi status) — UI-ul poate emite
+/// idempotent același status fără să primească o eroare.
+fn is_allowed_status_transition(current: &str, target: &str) -> bool {
+    if current == target {
+        return true;
+    }
+    match target {
+        "QUEUED" => current == "DRAFT",
+        "SUBMITTED" => current == "QUEUED",
+        "VALIDATED" => matches!(current, "SUBMITTED" | "QUEUED"),
+        "REJECTED" => matches!(current, "SUBMITTED" | "QUEUED"),
+        "STORNED" => current == "VALIDATED",
+        // DRAFT este starea inițială — nu se mai poate reveni la ea.
+        _ => false,
+    }
+}
+
 #[tauri::command]
 pub async fn set_invoice_status(
     state: State<'_, AppState>,
@@ -41,6 +90,17 @@ pub async fn set_invoice_status(
     status: InvoiceStatus,
     message: Option<String>,
 ) -> AppResult<()> {
+    // RUST-02: blocăm tranziții ilegale (ex. VALIDATED → DRAFT) înainte de
+    // a executa UPDATE-ul. Statul curent este citit din DB pentru a evita
+    // race-uri cu un client care ar trimite un status învechit.
+    let current = invoices::get(&state.db, &id).await?;
+    if !is_allowed_status_transition(current.status.as_str(), status.as_str()) {
+        return Err(AppError::Validation(format!(
+            "Tranziție de status nepermisă: {} → {}.",
+            current.status,
+            status.as_str()
+        )));
+    }
     invoices::set_status(&state.db, &id, status, message).await
 }
 
@@ -232,11 +292,11 @@ pub async fn validate_invoice_draft(
     // 3. Load contact (customer)
     let buyer = contacts::get(&state.db, &inv.contact_id).await?;
 
-    // 4. Extract storno_ref from notes (format: "STORNO_OF:{full_number}|{reason}")
-    let storno_ref: Option<String> = inv.notes.as_deref().and_then(|n| {
-        n.strip_prefix("STORNO_OF:")
-            .map(|rest| rest.split('|').next().unwrap_or("").to_string())
-    });
+    // 4. Determină referința storno.
+    //    Preferăm FK-ul explicit `storno_of_invoice_id` (BIZ-13). Dacă lipsește
+    //    (factură creată înainte de migrația 0008), recurgem la parserul
+    //    moștenit al notei "STORNO_OF:{full_number}|{motiv}".
+    let storno_ref: Option<String> = resolve_storno_ref(&state.db, &inv).await?;
 
     // 5. Build generator input
     let input = GeneratorInput {
@@ -397,18 +457,20 @@ pub async fn storno_invoice(
 
     let full_number = format!("{}-{:04}", storno_series, allocated_number);
 
-    // 4b. Inserăm factura storno (cu notes finale STORNO_OF deja)
+    // 4b. Inserăm factura storno. `storno_of_invoice_id` este FK explicit
+    //     (BIZ-13) — sursa autoritativă a referinței. Notes-ul rămâne pentru
+    //     compatibilitate cu rândurile vechi/UI care încă citesc din el.
     sqlx::query(
         "INSERT INTO invoices (
             id, company_id, contact_id, series, number, full_number,
             issue_date, due_date, currency, exchange_rate,
             subtotal_amount, vat_amount, total_amount, status, notes,
-            payment_means_code, created_at, updated_at
+            payment_means_code, storno_of_invoice_id, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10,
             ?11, ?12, ?13, 'DRAFT', ?14,
-            ?15, ?16, ?16
+            ?15, ?17, ?16, ?16
         )",
     )
     .bind(&storno_id)
@@ -427,6 +489,7 @@ pub async fn storno_invoice(
     .bind(&storno_notes)
     .bind(&orig_inv.payment_means_code)
     .bind(now)
+    .bind(&orig_inv.id)
     .execute(&mut *tx)
     .await
     .map_err(AppError::Database)?;
@@ -504,4 +567,53 @@ pub async fn storno_invoice(
 
     // 6. Re-fetch factura storno pentru a returna datele complete
     invoices::get(pool, &storno_id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_allowed_status_transition;
+
+    #[test]
+    fn status_cannot_go_backwards_from_validated() {
+        assert!(!is_allowed_status_transition("VALIDATED", "DRAFT"));
+        assert!(!is_allowed_status_transition("VALIDATED", "QUEUED"));
+        assert!(!is_allowed_status_transition("VALIDATED", "SUBMITTED"));
+        assert!(!is_allowed_status_transition("VALIDATED", "REJECTED"));
+    }
+
+    #[test]
+    fn status_terminal_states_block_further_transitions() {
+        for target in ["DRAFT", "QUEUED", "SUBMITTED", "VALIDATED"] {
+            assert!(
+                !is_allowed_status_transition("STORNED", target),
+                "STORNED → {} should be blocked",
+                target
+            );
+            assert!(
+                !is_allowed_status_transition("REJECTED", target),
+                "REJECTED → {} should be blocked",
+                target
+            );
+        }
+    }
+
+    #[test]
+    fn status_happy_path_transitions_allowed() {
+        assert!(is_allowed_status_transition("DRAFT", "QUEUED"));
+        assert!(is_allowed_status_transition("QUEUED", "SUBMITTED"));
+        assert!(is_allowed_status_transition("SUBMITTED", "VALIDATED"));
+        assert!(is_allowed_status_transition("SUBMITTED", "REJECTED"));
+        assert!(is_allowed_status_transition("QUEUED", "VALIDATED"));
+        assert!(is_allowed_status_transition("VALIDATED", "STORNED"));
+        // No-op (UI idempotent emits) must succeed.
+        assert!(is_allowed_status_transition("DRAFT", "DRAFT"));
+        assert!(is_allowed_status_transition("VALIDATED", "VALIDATED"));
+    }
+
+    #[test]
+    fn status_cannot_skip_steps_from_draft() {
+        assert!(!is_allowed_status_transition("DRAFT", "SUBMITTED"));
+        assert!(!is_allowed_status_transition("DRAFT", "VALIDATED"));
+        assert!(!is_allowed_status_transition("DRAFT", "STORNED"));
+    }
 }

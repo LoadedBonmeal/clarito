@@ -212,14 +212,10 @@ fn rule_br_ro_021_invoice_id(ctx: &RuleContext<'_>) -> Option<String> {
 }
 
 fn parse_iso_date(s: &str) -> bool {
-    let parts: Vec<&str> = s.split('-').collect();
-    if parts.len() != 3 {
-        return false;
-    }
-    let y: u16 = parts[0].parse().unwrap_or(0);
-    let m: u8 = parts[1].parse().unwrap_or(0);
-    let d: u8 = parts[2].parse().unwrap_or(0);
-    (2000..=2099).contains(&y) && (1..=12).contains(&m) && (1..=31).contains(&d)
+    // Validăm formatul ISO (YYYY-MM-DD) ȘI existența reală a datei în calendar
+    // (chrono respinge 2024-02-30, 2024-04-31 etc. — ce verificările manuale
+    // bazate pe range nu surprind).
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
 }
 
 fn rule_br_ro_022_issue_date_format(ctx: &RuleContext<'_>) -> Option<String> {
@@ -636,7 +632,9 @@ fn rule_br_ro_043_vat_breakdown_by_category(ctx: &RuleContext<'_>) -> Option<Str
 // ─── Storno rules ─────────────────────────────────────────────────────────────
 
 fn rule_br_ro_050_storno_needs_billing_ref(ctx: &RuleContext<'_>) -> Option<String> {
-    let is_storno = ctx.storno_ref.is_some() || ctx.invoice.series.starts_with('S');
+    // Stornoul este determinat exclusiv de prezența `storno_ref`. Heuristica
+    // pe seria "S..." era falsă pozitivă pentru serii legitime (SERV, SALARII).
+    let is_storno = ctx.storno_ref.is_some();
     if is_storno && ctx.storno_ref.map(|r| r.is_empty()).unwrap_or(true) {
         Some("[BR-RO-050] Factura storno (tip 381) necesită referință la factura originală (BillingReference). Refaceți storno-ul din detaliile facturii originale.".into())
     } else {
@@ -645,7 +643,8 @@ fn rule_br_ro_050_storno_needs_billing_ref(ctx: &RuleContext<'_>) -> Option<Stri
 }
 
 fn rule_br_ro_051_storno_lines_negative(ctx: &RuleContext<'_>) -> Option<String> {
-    let is_storno = ctx.storno_ref.is_some() || ctx.invoice.series.starts_with('S');
+    // Vezi BR-RO-050: nu mai folosim heuristica pe prefixul seriei.
+    let is_storno = ctx.storno_ref.is_some();
     if is_storno {
         let positive: Vec<usize> = ctx
             .lines
@@ -811,6 +810,7 @@ mod tests {
             rejection_code: None,
             notes: None,
             payment_means_code: "30".into(),
+            storno_of_invoice_id: None,
             created_at: 0,
             updated_at: 0,
         }
@@ -1031,6 +1031,144 @@ mod tests {
         assert!(
             has_040,
             "Expected BR-RO-040 error for subtotal mismatch, got: {:?}",
+            errors
+        );
+    }
+
+    // ── BIZ-10: calendar date validation via chrono ──────────────────────────
+
+    #[test]
+    fn rejects_february_30() {
+        let mut invoice = sample_invoice();
+        invoice.issue_date = "2024-02-30".into();
+        invoice.due_date = "2024-02-30".into();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_date_err = errors
+            .iter()
+            .any(|e| e.contains("[BR-RO-022]") || e.contains("[BR-RO-023]"));
+        assert!(
+            has_date_err,
+            "Expected BR-RO-022/023 for 2024-02-30, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn rejects_april_31() {
+        let mut invoice = sample_invoice();
+        invoice.issue_date = "2024-04-31".into();
+        invoice.due_date = "2024-04-31".into();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_date_err = errors
+            .iter()
+            .any(|e| e.contains("[BR-RO-022]") || e.contains("[BR-RO-023]"));
+        assert!(
+            has_date_err,
+            "Expected BR-RO-022/023 for 2024-04-31, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn accepts_valid_leap_year_date() {
+        // 2024 e an bisect — 29 februarie este o dată validă.
+        let mut invoice = sample_invoice();
+        invoice.issue_date = "2024-02-29".into();
+        invoice.due_date = "2024-02-29".into();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_date_err = errors
+            .iter()
+            .any(|e| e.contains("[BR-RO-022]") || e.contains("[BR-RO-023]"));
+        assert!(
+            !has_date_err,
+            "Expected no date errors for 2024-02-29 (leap year), got: {:?}",
+            errors
+        );
+    }
+
+    // ── BIZ-15/22: stornoul nu mai e dedus din prefix seriei ────────────────
+
+    #[test]
+    fn normal_invoice_in_serv_series_is_not_treated_as_storno() {
+        // Seria "SERV", fără storno_ref — nu trebuie să fie marcată ca storno.
+        let mut invoice = sample_invoice();
+        invoice.series = "SERV".into();
+        invoice.full_number = "SERV-0001".into();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_storno_err = errors
+            .iter()
+            .any(|e| e.contains("[BR-RO-050]") || e.contains("[BR-RO-051]"));
+        assert!(
+            !has_storno_err,
+            "Expected no storno errors for normal invoice in SERV series, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn normal_invoice_in_s_prefix_series_passes_storno_rules() {
+        // Seria "SALARII" (începe cu 'S') + cantități pozitive + fără storno_ref.
+        // Nu trebuie să declanșeze nicio regulă storno.
+        let mut invoice = sample_invoice();
+        invoice.series = "SALARII".into();
+        invoice.full_number = "SALARII-0001".into();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_storno_err = errors
+            .iter()
+            .any(|e| e.contains("[BR-RO-050]") || e.contains("[BR-RO-051]"));
+        assert!(
+            !has_storno_err,
+            "Expected no storno errors for SALARII series invoice, got: {:?}",
             errors
         );
     }

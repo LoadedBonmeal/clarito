@@ -55,6 +55,12 @@ pub struct Invoice {
     pub notes: Option<String>,
     pub payment_means_code: String,
 
+    /// BIZ-13: Referință explicită (FK) către factura originală pentru un
+    /// storno. `None` pentru facturi normale. Pentru rândurile vechi (înainte
+    /// de migrația 0008) câmpul poate rămâne `None`; în acest caz codul
+    /// recurge la parserul moștenit al notei "STORNO_OF:...".
+    pub storno_of_invoice_id: Option<String>,
+
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -208,7 +214,7 @@ pub async fn list(pool: &SqlitePool, filter: InvoiceFilter) -> AppResult<Paginat
          issue_date, due_date, currency, exchange_rate, subtotal_amount, vat_amount, total_amount, \
          status, anaf_upload_id, anaf_index, anaf_submitted_at, anaf_validated_at, anaf_rejected_at, \
          xml_path, pdf_path, signature_xml_path, rejection_reason, rejection_code, notes, \
-         payment_means_code, created_at, updated_at \
+         payment_means_code, storno_of_invoice_id, created_at, updated_at \
          FROM invoices \
          WHERE (?1 IS NULL OR company_id = ?1) \
            AND (?2 IS NULL OR issue_date >= ?2) \
@@ -254,7 +260,7 @@ pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Invoice> {
          issue_date, due_date, currency, exchange_rate, subtotal_amount, vat_amount, total_amount, \
          status, anaf_upload_id, anaf_index, anaf_submitted_at, anaf_validated_at, anaf_rejected_at, \
          xml_path, pdf_path, signature_xml_path, rejection_reason, rejection_code, notes, \
-         payment_means_code, created_at, updated_at \
+         payment_means_code, storno_of_invoice_id, created_at, updated_at \
          FROM invoices WHERE id = ?1",
     )
     .bind(id)
@@ -368,17 +374,20 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
 
     let full_number = format!("{}-{:04}", input.series, allocated_number);
 
+    // `storno_of_invoice_id` rămâne NULL pentru ciornele create direct —
+    // facturile storno sunt create exclusiv prin `commands::storno_invoice`
+    // care setează FK-ul explicit.
     sqlx::query(
         "INSERT INTO invoices (
             id, company_id, contact_id, series, number, full_number,
             issue_date, due_date, currency, exchange_rate,
             subtotal_amount, vat_amount, total_amount, status, notes,
-            payment_means_code, created_at, updated_at
+            payment_means_code, storno_of_invoice_id, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10,
             ?11, ?12, ?13, 'DRAFT', ?14,
-            ?15, ?16, ?16
+            ?15, NULL, ?16, ?16
         )",
     )
     .bind(&invoice_id)
@@ -578,7 +587,7 @@ pub async fn list_submitted(pool: &SqlitePool, company_id: &str) -> AppResult<Ve
          issue_date, due_date, currency, exchange_rate, subtotal_amount, vat_amount, total_amount, \
          status, anaf_upload_id, anaf_index, anaf_submitted_at, anaf_validated_at, anaf_rejected_at, \
          xml_path, pdf_path, signature_xml_path, rejection_reason, rejection_code, notes, \
-         payment_means_code, created_at, updated_at \
+         payment_means_code, storno_of_invoice_id, created_at, updated_at \
          FROM invoices \
          WHERE company_id = ?1 AND status = 'SUBMITTED' \
          ORDER BY anaf_submitted_at",

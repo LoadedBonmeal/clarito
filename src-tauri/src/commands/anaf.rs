@@ -5,6 +5,7 @@
 use crate::anaf::{client::AnafClient, keychain::TokenBundle, oauth};
 use tauri::Manager;
 
+use crate::commands::invoices::resolve_storno_ref;
 use crate::db::models::new_id;
 use crate::db::{companies, contacts, invoices as db_invoices};
 use crate::error::{AppError, AppResult};
@@ -155,12 +156,11 @@ pub(crate) async fn submit_invoice_inner(
     let company = companies::get(pool, company_id).await?;
     let buyer = contacts::get(pool, &invoice.contact_id).await?;
 
-    // 3. Detectează dacă e factură storno și extrage referința originală
-    // Format stocat în notes: "STORNO_OF:{original_full_number}|{motiv}"
-    let storno_ref = invoice.notes.as_deref().and_then(|n| {
-        n.strip_prefix("STORNO_OF:")
-            .map(|rest| rest.split('|').next().unwrap_or(rest).to_string())
-    });
+    // 3. Detectează dacă e factură storno și extrage referința originală.
+    //    BIZ-13: sursa autoritativă este `invoices.storno_of_invoice_id`;
+    //    parserul `STORNO_OF:{full_number}|{motiv}` din notes rămâne fallback
+    //    pentru rândurile create înainte de migrația 0008.
+    let storno_ref = resolve_storno_ref(pool, &invoice).await?;
 
     // 3. Generează XML UBL
     let xml_string = generate_ubl(&GeneratorInput {
