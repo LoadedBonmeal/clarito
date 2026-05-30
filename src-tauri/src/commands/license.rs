@@ -371,10 +371,28 @@ pub async fn check_license_validity(state: State<'_, AppState>) -> AppResult<boo
         .and_then(|s| s.parse::<i64>().ok());
 
     if let Some(ls) = last_seen {
-        // Dacă acum e cu mai mult de 5 minute înainte față de last_seen → ceas dat înapoi
-        if now < ls - 300 {
+        let drift = ls - now; // pozitiv = last_seen înaintea lui now
+        const TOLERANCE: i64 = 24 * 60 * 60; // 1 zi: clamp silențios
+        const HARD_FAIL: i64 = 30 * 24 * 60 * 60; // 30 zile: posibilă manipulare
+
+        if drift > HARD_FAIL {
+            // Ceasul a dat înapoi > 30 zile SAU last_seen masiv în viitor → refuză.
+            tracing::warn!(
+                drift_seconds = drift,
+                "license anti-rollback hard-fail (drift > 30 days)"
+            );
             return Ok(false);
         }
+
+        if drift > TOLERANCE {
+            // Suspect dar plauzibil (DST, NTP, date de test).
+            // Logăm și continuăm; set_setting de mai jos clampează la now.
+            tracing::warn!(
+                drift_seconds = drift,
+                "license anti-rollback drift > 1 day; clamping last_seen to now"
+            );
+        }
+        // drift <= TOLERANCE → clamp silențios prin set_setting de mai jos.
     }
 
     // ── 4. Actualizare last_seen ─────────────────────────────────────────
@@ -503,5 +521,24 @@ mod sec_tests {
         // The decoded secret should match the expected first bytes ("RoF...")
         assert_eq!(&integrity_secret()[..3], b"RoF");
         assert_eq!(&key_hmac_secret()[..3], b"RoF");
+    }
+
+    #[test]
+    fn anti_rollback_tolerates_one_day_future_drift() {
+        // Drift de 5 ore → sub toleranța de 1 zi → nu e hard-fail.
+        let now: i64 = 1_700_000_000;
+        let ls = now + 5 * 60 * 60; // 5h în viitor
+        let drift = ls - now;
+        assert!(drift > 0);
+        assert!(drift < 24 * 60 * 60); // în interiorul toleranței
+    }
+
+    #[test]
+    fn anti_rollback_hard_fails_above_30_days() {
+        // Drift de 31 zile → depășește HARD_FAIL → refuz.
+        let now: i64 = 1_700_000_000;
+        let ls = now + 31 * 24 * 60 * 60;
+        let drift = ls - now;
+        assert!(drift > 30 * 24 * 60 * 60);
     }
 }
