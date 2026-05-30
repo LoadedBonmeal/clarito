@@ -20,6 +20,7 @@ import type {
   CreateCompanyInput,
   CreateContactInput,
   CreateInvoiceInput,
+  DiagnosticReport,
   Invoice,
   InvoiceFilter,
   InvoiceStatus,
@@ -420,6 +421,14 @@ export const recurring = {
     invoke<void>("toggle_recurring_active", { id, active }),
 };
 
+// ─── Feedback ─────────────────────────────────────────────────────────────
+
+export const feedback = {
+  gather: () => invoke<DiagnosticReport>("gather_diagnostic"),
+  mailto: (report: DiagnosticReport, userMessage?: string) =>
+    invoke<string>("build_feedback_mailto", { report, userMessage }),
+};
+
 // ─── SAF-T ────────────────────────────────────────────────────────────────
 
 export const saft = {
@@ -450,4 +459,5 @@ export const api = {
   payments,
   recurring,
   saft,
+  feedback,
 };

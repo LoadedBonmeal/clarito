@@ -3,8 +3,9 @@
  */
 
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId } from "react";
 import { open, confirm } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { useTranslation } from "react-i18next";
 
 import { Skeleton } from "@/components/ui/skeleton";
@@ -193,6 +194,40 @@ export function SettingsPage() {
     SOLO: "Solo",
     ACCOUNTANT: "Contabil",
     FIRM: "Firmă",
+  };
+
+  // Feedback section state
+  const feedbackMsgId = useId();
+  const [feedbackMsg, setFeedbackMsg] = useState("");
+  const [feedbackSending, setFeedbackSending] = useState(false);
+
+  const sendFeedback = async () => {
+    setFeedbackSending(true);
+    try {
+      const report = await api.feedback.gather();
+      const url = await api.feedback.mailto(report, feedbackMsg || undefined);
+      await openPath(url);
+      notify.success("Email pregătit în clientul tău de email");
+    } catch (e) {
+      notify.error(
+        formatError(
+          e,
+          "Nu pot deschide clientul de email — trimite manual la support@lucaris.ro",
+        ),
+      );
+    } finally {
+      setFeedbackSending(false);
+    }
+  };
+
+  const openPurchase = async () => {
+    try {
+      const purchase = await api.settings.get("purchase_url");
+      const url = purchase || "https://lucaris.ro/rofactura#pret";
+      await openPath(url);
+    } catch (e) {
+      notify.error(formatError(e, "Nu pot deschide pagina de cumpărare."));
+    }
   };
 
   return (
@@ -429,6 +464,60 @@ export function SettingsPage() {
                 Nicio licență activă. Porniți trial-ul gratuit din meniul Ajutor.
               </div>
             )}
+          </Section>
+
+          {/* Suport și feedback */}
+          <Section
+            title="Suport și feedback"
+            highlight
+            badge="NOU"
+          >
+            <FieldGroup>
+              <FieldRow label="Mesajul tău (opțional)" htmlFor={feedbackMsgId}>
+                <textarea
+                  id={feedbackMsgId}
+                  className="input"
+                  rows={4}
+                  value={feedbackMsg}
+                  onChange={(e) => setFeedbackMsg(e.target.value)}
+                  placeholder="Descrie problema sau sugestia (nu e obligatoriu — diagnosticul se atașează automat)..."
+                  style={{ width: "100%", resize: "vertical", fontSize: 11, fontFamily: "var(--font-ui)" }}
+                />
+              </FieldRow>
+              <FieldRow label="">
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => void sendFeedback()}
+                    disabled={feedbackSending}
+                  >
+                    <Icon name="mail" size={12} />
+                    {feedbackSending ? "Pregătesc…" : "Trimite feedback prin email"}
+                  </button>
+                  <button type="button" className="btn" onClick={() => void openPurchase()}>
+                    <Icon name="arrowRight" size={12} />
+                    Cumpără licență →
+                  </button>
+                </div>
+              </FieldRow>
+              <FieldRow label="">
+                <div
+                  style={{
+                    padding: "8px 10px",
+                    border: "1px dashed var(--border)",
+                    fontSize: 11,
+                    color: "var(--text-muted)",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <strong>Atașăm automat:</strong> versiunea{" "}
+                  {appInfo?.version ?? "0.2.0"}, sistemul de operare, machine ID
+                  anonimizat, ultimele 50 linii log. La click se deschide clientul
+                  tău de email — nu trimitem nimic fără tine.
+                </div>
+              </FieldRow>
+            </FieldGroup>
           </Section>
 
           {/* Informații aplicație */}

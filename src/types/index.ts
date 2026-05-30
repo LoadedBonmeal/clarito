@@ -387,6 +387,17 @@ export interface ExportReportParams {
   companyId?: string;
 }
 
+// ─── Feedback / Diagnostic ────────────────────────────────────────────────
+
+export interface DiagnosticReport {
+  appVersion: string;
+  os: string;
+  arch: string;
+  machineIdHash: string;
+  logTail: string[];
+  licenseSummary: { tier: string; daysRemaining: number | null };
+}
+
 // ─── Error (din backend) ──────────────────────────────────────────────────
 
 export interface AppErrorPayload {

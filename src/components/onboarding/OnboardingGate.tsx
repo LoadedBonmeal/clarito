@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { openPath } from "@tauri-apps/plugin-opener";
 
 import { OnboardingWizard } from "./OnboardingWizard";
 import { queryKeys } from "@/lib/queries";
@@ -111,9 +112,14 @@ function LicenseExpiredScreen() {
                 type="button"
                 className="btn primary"
                 style={{ width: "100%", justifyContent: "center", height: 36, fontSize: 12 }}
-                onClick={() =>
-                  window.open("https://lucaris.ro/rofactura#pret", "_blank")
-                }
+                onClick={async () => {
+                  try {
+                    const purchase = await api.settings.get("purchase_url");
+                    await openPath(purchase || "https://lucaris.ro/rofactura#pret");
+                  } catch {
+                    window.open("https://lucaris.ro/rofactura#pret", "_blank");
+                  }
+                }}
               >
                 Cumpărați licența →
               </button>
