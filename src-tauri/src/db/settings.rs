@@ -16,7 +16,7 @@ pub mod keys {
     pub const FIRST_RUN_COMPLETED: &str = "first_run_completed";
     pub const USE_ANAF_TEST_ENV: &str = "use_anaf_test_env";
     pub const POLLING_ENABLED: &str = "polling_enabled";
-    pub const NOTIFICATIONS_QUIET_HOURS: &str = "notifications_quiet_hours";
+    pub const NOTIFICATIONS_QUIET_HOURS: &str = "quiet_hours";
     pub const NOTIFICATIONS_SOUND: &str = "notifications_sound";
     pub const RUN_ON_STARTUP: &str = "run_on_startup";
     pub const ARCHIVE_PATH_OVERRIDE: &str = "archive_path_override";

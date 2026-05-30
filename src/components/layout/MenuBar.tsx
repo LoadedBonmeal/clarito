@@ -66,7 +66,7 @@ function buildMenus(
       { type: "row", icon: "receipt", label: "Înregistrare chitanță",   disabled: true },
       { type: "sep" },
       { type: "section", label: "Bulk" },
-      { type: "row", icon: "check",   label: "Trimite selecția la ANAF",    disabled: true },
+      { type: "row", icon: "check",   label: "Trimite selecția la ANAF",    onClick: () => { void navigate({ to: "/invoices" }); } },
       { type: "row", icon: "tag",     label: "Aplică categorie pe selecție", disabled: true },
     ],
     "Date": [
@@ -77,7 +77,7 @@ function buildMenus(
       { type: "sep" },
       { type: "row", icon: "database",  label: "Plan de conturi",            disabled: true },
       { type: "row", icon: "tag",       label: "Cote TVA și taxe",           disabled: true },
-      { type: "row", icon: "history",   label: "Audit & jurnal modificări",  disabled: true },
+      { type: "row", icon: "history",   label: "Audit & jurnal modificări",  onClick: () => { void navigate({ to: "/settings" }); } },
     ],
     "Rapoarte": [
       { type: "section", label: "Declarații ANAF" },

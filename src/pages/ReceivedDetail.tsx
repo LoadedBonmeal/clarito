@@ -7,9 +7,11 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { openPath } from "@tauri-apps/plugin-opener";
 
 import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { notify } from "@/lib/toasts";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { fmtRON } from "@/lib/utils";
@@ -35,6 +37,7 @@ export function ReceivedDetailPage() {
       api.received.updateStatus(id, status),
     onSuccess: (_data, status) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.received.detail(id) });
       const labels: Record<ReceivedStatus, string> = {
         NEW: "nouă",
         REVIEWED: "revizuită",
@@ -241,7 +244,15 @@ export function ReceivedDetailPage() {
                   >
                     {inv.xmlPath}
                   </span>
-                  <button type="button" className="btn" onClick={() => api.system.openArchiveFolder()}>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={!inv?.xmlPath}
+                    onClick={async () => {
+                      if (!inv?.xmlPath) { notify.error("XML indisponibil"); return; }
+                      try { await openPath(inv.xmlPath); } catch (e) { notify.error(`Eroare: ${e}`); }
+                    }}
+                  >
                     <Icon name="download" size={12} /> Deschide XML
                   </button>
                 </div>
@@ -255,7 +266,15 @@ export function ReceivedDetailPage() {
                     >
                       {inv.pdfPath}
                     </span>
-                    <button type="button" className="btn" onClick={() => api.system.openArchiveFolder()}>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={!inv?.pdfPath}
+                      onClick={async () => {
+                        if (!inv?.pdfPath) { notify.error("PDF indisponibil"); return; }
+                        try { await openPath(inv.pdfPath); } catch (e) { notify.error(`Eroare: ${e}`); }
+                      }}
+                    >
                       <Icon name="download" size={12} /> Deschide PDF
                     </button>
                   </div>

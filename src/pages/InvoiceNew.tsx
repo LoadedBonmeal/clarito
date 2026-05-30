@@ -75,6 +75,9 @@ export function InvoiceNewPage() {
   const [dueDate, setDueDate] = useState<string>(plusDaysISO(30));
   const [notes, setNotes] = useState<string>("");
   const [paymentMeansCode, setPaymentMeansCode] = useState<string>("30");
+  const [paymentMethod, setPaymentMethod] = useState<string>("ot");
+  const [paymentIban, setPaymentIban] = useState<string>("");
+  const [paymentReference, setPaymentReference] = useState<string>("");
   const [lines, setLines] = useState<LineRow[]>([newLineRow()]);
   // Track the saved draft ID for live validation
   const [savedId, setSavedId] = useState<string | null>(null);
@@ -139,6 +142,14 @@ export function InvoiceNewPage() {
       if (lineErrors.length > 0) throw new Error(lineErrors.join("\n"));
       // Strip internal rowId before sending to backend
       const apiLines: CreateLineInput[] = lines.map(({ rowId: _rowId, ...rest }) => rest);
+      const extraNotes = [
+        paymentMethod !== "ot" && `Metodă plată: ${paymentMethod}`,
+        paymentIban && `IBAN: ${paymentIban}`,
+        paymentReference && `Ref: ${paymentReference}`,
+      ].filter(Boolean).join(" | ");
+      const finalNotes = extraNotes
+        ? (notes ? `${notes}\n${extraNotes}` : extraNotes)
+        : notes;
       return api.invoices.createDraft({
         companyId: activeCompanyId,
         contactId,
@@ -147,7 +158,7 @@ export function InvoiceNewPage() {
         issueDate,
         dueDate,
         currency: "RON",
-        notes: notes || undefined,
+        notes: finalNotes || undefined,
         paymentMeansCode,
         lines: apiLines,
       });
@@ -566,7 +577,11 @@ export function InvoiceNewPage() {
                 <div className="form-grid" style={{ gridTemplateColumns: "120px 1fr" }}>
                   <label>Metodă</label>
                   <div className="field">
-                    <select className="select" defaultValue="ot">
+                    <select
+                      className="select"
+                      value={paymentMethod}
+                      onChange={(e) => setPaymentMethod(e.target.value)}
+                    >
                       <option value="ot">Ordin de plată (OP)</option>
                       <option value="cash">Numerar</option>
                       <option value="card">Card bancar</option>
@@ -577,7 +592,8 @@ export function InvoiceNewPage() {
                   <div className="field">
                     <input
                       className="input mono"
-                      defaultValue={company?.iban ?? ""}
+                      value={paymentIban || company?.iban || ""}
+                      onChange={(e) => setPaymentIban(e.target.value)}
                       style={{ width: 250 }}
                     />
                     {company?.bankName && (
@@ -590,7 +606,9 @@ export function InvoiceNewPage() {
                   <div className="field">
                     <input
                       className="input"
-                      defaultValue="Plătiți în 30 zile de la data emiterii"
+                      value={paymentReference}
+                      onChange={(e) => setPaymentReference(e.target.value)}
+                      placeholder="Plătiți în 30 zile de la data emiterii"
                     />
                   </div>
                   <label>Tip fiscal</label>

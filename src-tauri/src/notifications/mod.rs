@@ -16,7 +16,8 @@ async fn should_notify_os(app: &AppHandle, notif_type: &str) -> bool {
     let pool = app.state::<crate::state::AppState>();
 
     // 1. Check global quiet hours
-    let quiet = sqlx::query("SELECT value FROM settings WHERE key = 'quiet_hours'")
+    let quiet = sqlx::query("SELECT value FROM settings WHERE key = ?1")
+        .bind(crate::db::settings::keys::NOTIFICATIONS_QUIET_HOURS)
         .fetch_optional(&pool.db)
         .await
         .ok()

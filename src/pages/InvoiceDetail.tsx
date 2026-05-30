@@ -7,10 +7,11 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 
 import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { notify } from "@/lib/toasts";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { fmtRON, parseDec } from "@/lib/utils";
@@ -83,9 +84,14 @@ export function InvoiceDetailPage() {
 
   const generatePdf = useMutation({
     mutationFn: () => api.ubl.generatePdf(id),
-    onSuccess: () => {
+    onSuccess: async (pdfPath) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
       setActionError(null);
+      notify.success("PDF generat.");
+      if (pdfPath) {
+        try { await openPath(pdfPath); }
+        catch (e) { notify.error(`Nu pot deschide PDF: ${e}`); }
+      }
     },
     onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare generare PDF."),
   });
@@ -115,6 +121,7 @@ export function InvoiceDetailPage() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.anaf.auth(data?.invoice.companyId ?? "") });
       setActionError(null);
       setStatusMessage(null);
