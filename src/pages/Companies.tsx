@@ -7,6 +7,7 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { confirm } from "@tauri-apps/plugin-dialog";
 
 import { Icon } from "@/components/shared/Icon";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -49,7 +50,7 @@ export function CompaniesPage() {
   });
 
   const { data: license } = useQuery({
-    queryKey: ["license"],
+    queryKey: queryKeys.license,
     queryFn: () => api.license.get(),
   });
 
@@ -74,7 +75,11 @@ export function CompaniesPage() {
   const withSpv = companies.filter((c) => c.spvEnabled).length;
 
   const handleDelete = async (c: Company) => {
-    if (!window.confirm(`Ștergeți compania "${c.legalName}"? Această acțiune nu poate fi anulată.`)) return;
+    const ok = await confirm(`Ștergeți compania "${c.legalName}"? Această acțiune nu poate fi anulată.`, {
+      title: "Confirmare ștergere",
+      kind: "warning",
+    });
+    if (!ok) return;
     try {
       await api.companies.delete(c.id);
       void queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });

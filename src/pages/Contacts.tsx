@@ -5,6 +5,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { confirm } from "@tauri-apps/plugin-dialog";
 
 import { Icon } from "@/components/shared/Icon";
 import { CsvImportModal } from "@/components/shared/CsvImportModal";
@@ -63,8 +64,12 @@ export function ContactsPage() {
     },
   });
 
-  const handleDelete = (c: Contact) => {
-    if (!window.confirm(`Șterge contactul "${c.legalName}"? Această acțiune nu poate fi anulată.`)) return;
+  const handleDelete = async (c: Contact) => {
+    const ok = await confirm(`Șterge contactul "${c.legalName}"? Această acțiune nu poate fi anulată.`, {
+      title: "Confirmare ștergere",
+      kind: "warning",
+    });
+    if (!ok) return;
     deleteMutation.mutate(c.id);
   };
 
@@ -203,7 +208,7 @@ export function ContactsPage() {
                       type="button"
                       className="btn-icon"
                       title="Șterge"
-                      onClick={() => handleDelete(c)}
+                      onClick={() => void handleDelete(c)}
                     >
                       <Icon name="x" size={13} />
                     </button>

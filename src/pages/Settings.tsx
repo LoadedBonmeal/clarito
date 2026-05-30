@@ -2,9 +2,9 @@
  * Setări aplicație — temă, companie activă, ANAF, licență, informații sistem.
  */
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, confirm } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 
 import { Skeleton } from "@/components/ui/skeleton";
@@ -87,34 +87,21 @@ export function SettingsPage() {
     { key: "cert_expired",  label: "Certificat SPV expirat" },
   ];
 
-  const { data: notifPref_validated } = useQuery({
-    queryKey: queryKeys.settings.get("notif_pref_validated"),
-    queryFn: () => api.settings.get("notif_pref_validated"),
-  });
-  const { data: notifPref_rejected } = useQuery({
-    queryKey: queryKeys.settings.get("notif_pref_rejected"),
-    queryFn: () => api.settings.get("notif_pref_rejected"),
-  });
-  const { data: notifPref_received } = useQuery({
-    queryKey: queryKeys.settings.get("notif_pref_received"),
-    queryFn: () => api.settings.get("notif_pref_received"),
-  });
-  const { data: notifPref_cert_expiring } = useQuery({
-    queryKey: queryKeys.settings.get("notif_pref_cert_expiring"),
-    queryFn: () => api.settings.get("notif_pref_cert_expiring"),
-  });
-  const { data: notifPref_cert_expired } = useQuery({
-    queryKey: queryKeys.settings.get("notif_pref_cert_expired"),
-    queryFn: () => api.settings.get("notif_pref_cert_expired"),
+  const NOTIF_KEYS = ["validated", "rejected", "received", "cert_expiring", "cert_expired"] as const;
+  type NotifKey = typeof NOTIF_KEYS[number];
+
+  const notifResults = useQueries({
+    queries: NOTIF_KEYS.map((key) => ({
+      queryKey: queryKeys.settings.get(`notif_pref_${key}`),
+      queryFn: () => api.settings.get(`notif_pref_${key}`),
+    })),
   });
 
-  const notifPrefs = [
-    { key: "validated",     pref: notifPref_validated     ?? "os" },
-    { key: "rejected",      pref: notifPref_rejected      ?? "os" },
-    { key: "received",      pref: notifPref_received      ?? "os" },
-    { key: "cert_expiring", pref: notifPref_cert_expiring ?? "os" },
-    { key: "cert_expired",  pref: notifPref_cert_expired  ?? "os" },
-  ];
+  const notifPrefMap = Object.fromEntries(
+    NOTIF_KEYS.map((key, i) => [key, notifResults[i].data ?? "os"])
+  ) as Record<NotifKey, string>;
+
+  const notifPrefs = NOTIF_KEYS.map((key) => ({ key, pref: notifPrefMap[key] }));
 
   const { data: quietHoursSetting } = useQuery({
     queryKey: queryKeys.settings.get("quiet_hours"),
@@ -185,7 +172,11 @@ export function SettingsPage() {
   };
 
   const handleDevSeed = async () => {
-    if (!window.confirm("Populați baza de date cu date de test? Funcționează doar dacă DB-ul este gol.")) return;
+    const ok = await confirm("Populați baza de date cu date de test? Funcționează doar dacă DB-ul este gol.", {
+      title: "Date de test",
+      kind: "info",
+    });
+    if (!ok) return;
     try {
       await api.system.devSeed();
       void queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
@@ -528,10 +519,13 @@ export function SettingsPage() {
                       type="button"
                       className="btn compact"
                       onClick={async () => {
-                        const { open } = await import("@tauri-apps/plugin-dialog");
                         const dir = await open({ directory: true, title: "Selectează noua locație arhivă" });
                         if (dir && typeof dir === "string") {
-                          if (confirm(`Schimbi locația arhivei în:\n${dir}\n\nFișierele existente vor fi copiate. Continuați?`)) {
+                          const ok = await confirm(`Schimbi locația arhivei în:\n${dir}\n\nFișierele existente vor fi copiate. Continuați?`, {
+                            title: "Schimbare locație arhivă",
+                            kind: "warning",
+                          });
+                          if (ok) {
                             await api.archive.changeArchiveLocation(dir);
                             notify.success("Locație arhivă schimbată cu succes.");
                           }
@@ -593,7 +587,11 @@ export function SettingsPage() {
                             filters: [{ name: "ZIP", extensions: ["zip"] }],
                           });
                           if (file) {
-                            if (confirm("Aceasta va înlocui baza de date curentă. Continuați?")) {
+                            const ok = await confirm("Aceasta va înlocui baza de date curentă cu backup-ul selectat. Operațiunea nu poate fi anulată.", {
+                              title: "⚠️ Restaurare bază de date",
+                              kind: "warning",
+                            });
+                            if (ok) {
                               await api.archive.importBackup(file as string);
                             }
                           }
