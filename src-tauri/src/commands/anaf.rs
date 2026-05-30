@@ -206,7 +206,7 @@ pub(crate) async fn submit_invoice_inner(
     if !archive_dir.starts_with(&base) {
         return Err(AppError::Validation("Cale de arhivă invalidă".into()));
     }
-    std::fs::create_dir_all(&archive_dir).ok();
+    std::fs::create_dir_all(&archive_dir).map_err(AppError::Io)?;
     let xml_path = archive_dir.join("invoice.xml");
     std::fs::write(&xml_path, xml_string.as_bytes()).map_err(AppError::Io)?;
     // Actualizează xml_path în DB
