@@ -13,6 +13,8 @@ interface ContactComboboxProps {
   filterType?: ContactType[];
   /** Width of the input / selected pill, mirroring the previous <select> sizing. */
   width?: number | string;
+  /** Forwarded to the underlying <input> so an outer <label htmlFor=…> can target it (A11Y-06). */
+  inputId?: string;
 }
 
 /**
@@ -30,6 +32,7 @@ export function ContactCombobox({
   disabled,
   filterType,
   width = 320,
+  inputId,
 }: ContactComboboxProps) {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -180,6 +183,7 @@ export function ContactCombobox({
     >
       <input
         ref={inputRef}
+        id={inputId}
         className="input"
         type="text"
         value={query}

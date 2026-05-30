@@ -85,11 +85,19 @@ export function InvoiceNewPage() {
   const issueDateId = useId();
   const dueDateId = useId();
   const currencyId = useId();
+  const contactId = useId();
   const paymentMethodId = useId();
   const paymentIbanId = useId();
   const paymentReferenceId = useId();
   const paymentMeansCodeId = useId();
   const notesId = useId();
+
+  // Auto-prefill currency from the selected contact's preferred currency (Fix 4 polish).
+  useEffect(() => {
+    if (selectedContact?.currency) {
+      setCurrency(selectedContact.currency);
+    }
+  }, [selectedContact]);
 
   // Track the saved draft ID for live validation
   const [savedId, setSavedId] = useState<string | null>(null);
@@ -389,9 +397,10 @@ export function InvoiceNewPage() {
                 </div>
 
                 <div className="form-section-title">Cumpărător</div>
-                <label>Cumpărător</label>
+                <label htmlFor={contactId}>Cumpărător</label>
                 <div className="field">
                   <ContactCombobox
+                    inputId={contactId}
                     value={selectedContact}
                     onChange={setSelectedContact}
                     disabled={!activeCompanyId}
@@ -401,7 +410,7 @@ export function InvoiceNewPage() {
                 </div>
                 {selectedContact && (
                   <>
-                    <label>CUI</label>
+                    <div className="form-grid-label">CUI</div>
                     <div className="field">
                       <span className="mono muted" style={{ fontSize: 12 }}>
                         {selectedContact.cui ?? "—"}
@@ -416,7 +425,7 @@ export function InvoiceNewPage() {
                         </span>
                       )}
                     </div>
-                    <label>Adresă</label>
+                    <div className="form-grid-label">Adresă</div>
                     <div className="field">
                       <span className="muted" style={{ fontSize: 12 }}>
                         {[selectedContact.address, selectedContact.city, selectedContact.county, selectedContact.country]
@@ -649,7 +658,7 @@ export function InvoiceNewPage() {
                       placeholder="Plătiți în 30 zile de la data emiterii"
                     />
                   </div>
-                  <label>Tip fiscal</label>
+                  <div className="form-grid-label">Tip fiscal</div>
                   <div className="field">
                     <div className="seg">
                       <span className="seg-item active">Standard</span>

@@ -18,6 +18,7 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { formatOptionalRon } from "@/lib/formatters";
+import { formatError } from "@/lib/error-mapper";
 
 import { fmtShortcut } from "@/lib/platform";
 import { notify } from "@/lib/toasts";
@@ -230,8 +231,7 @@ export function InvoicesPage() {
                 await api.anaf.submitInvoice(activeCompanyId, id);
                 ok++;
               } catch (e) {
-                const err = e as unknown as { message?: string };
-                errs.push(err.message ?? String(e));
+                errs.push(formatError(e, "Trimitere eșuată."));
               }
             }
             void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
@@ -412,7 +412,7 @@ export function InvoicesPage() {
                 let ok = 0; const errs: string[] = [];
                 for (const id of ids) {
                   try { await api.anaf.submitInvoice(activeCompanyId, id); ok++; }
-                  catch (e) { errs.push((e as { message?: string }).message ?? String(e)); }
+                  catch (e) { errs.push(formatError(e, "Trimitere eșuată.")); }
                 }
                 void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
                 setSelected(new Set());
