@@ -48,13 +48,22 @@ const LAST_SEEN_KEY: &str = "license_last_seen_v2";
 /// Secret obfuscat în binar pentru fingerprint-ul de integritate.
 /// Nu este securitate perfectă, dar ridică substanțial bara față de un
 /// utilizator care editează manual SQLite-ul.
+///
+/// NOTE: SEC-05 — these constants (INTEGRITY_SECRET, KEY_HMAC_SECRET below)
+/// are extractable via `strings` on the compiled binary. Offline license
+/// validation is fundamentally limited in this regard. Server-side activation
+/// would be required for stronger tamper-resistance.
 const INTEGRITY_SECRET: &[u8] = b"RoF@ctura#2026!intgr1ty_K3y\xd4\x9a\x7f\x01\xbe\xc3v2";
 
 // ─── License Key Validation ─────────────────────────────────────────────────
 
-/// Format: XXXX-XXXX-XXXX-XXXX (A-Z0-9 only).
-/// Segment 4 = first 4 hex chars of SHA-256(KEY_HMAC_SECRET || 0x00 || "SEG1-SEG2-SEG3").
-/// Offline validation without server — prevents random key guessing (1/65536 false positive rate).
+/// Format: XXXX-XXXX-XXXX-XXXXXXXX (A-Z0-9 only).
+/// Segment 4 = first 8 hex chars of SHA-256(KEY_HMAC_SECRET || 0x00 || "SEG1-SEG2-SEG3").
+/// Offline validation without server — prevents random key guessing.
+///
+/// SEC-10: checksum was extended from 4 to 8 hex chars (16-bit → 32-bit) for
+/// significantly better collision resistance. Legacy 4-char keys are still
+/// accepted during transition to avoid breaking deployed installations.
 const KEY_HMAC_SECRET: &[u8] = b"RoF@ctura#Key!HMAC2026\xb2\x7f\xd4\x91\xc3\x0a";
 
 /// Returns true if the key format is valid AND the embedded checksum matches.
@@ -63,7 +72,8 @@ fn validate_license_key(key: &str) -> bool {
     if parts.len() != 4 {
         return false;
     }
-    for part in &parts {
+    // First three segments are always 4 chars.
+    for part in &parts[..3] {
         if part.len() != 4
             || !part
                 .chars()
@@ -72,13 +82,34 @@ fn validate_license_key(key: &str) -> bool {
             return false;
         }
     }
-    // Checksum: SHA-256(KEY_HMAC_SECRET || 0x00 || "P1-P2-P3"), first 4 hex chars == parts[3]
+    // Last segment is the checksum: 8 chars (new format) or 4 chars (legacy).
+    let checksum_part = parts[3];
+    if !checksum_part
+        .chars()
+        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+    {
+        return false;
+    }
+
     let payload = format!("{}-{}-{}", parts[0], parts[1], parts[2]);
-    let checksum = key_checksum(payload.as_bytes());
-    parts[3].eq_ignore_ascii_case(&checksum[..4])
+    let full_checksum = key_checksum(payload.as_bytes());
+
+    match checksum_part.len() {
+        8 => checksum_part.eq_ignore_ascii_case(&full_checksum[..8]),
+        4 => {
+            // Legacy keys (16-bit checksum). Deprecated — keep accepting for
+            // transitional compatibility but warn in logs.
+            tracing::warn!(
+                "Legacy 4-char license checksum detected — please request a new 8-char key."
+            );
+            checksum_part.eq_ignore_ascii_case(&full_checksum[..4])
+        }
+        _ => false,
+    }
 }
 
-/// SHA-256(KEY_HMAC_SECRET || 0x00 || data) → first 8 hex chars (we use first 4).
+/// SHA-256(KEY_HMAC_SECRET || 0x00 || data) → full hex digest.
+/// Callers slice the prefix they need (`..4` legacy, `..8` current).
 fn key_checksum(data: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(KEY_HMAC_SECRET);
@@ -93,19 +124,105 @@ fn key_checksum(data: &[u8]) -> String {
 /// Combină hostname + username + OS, hash-uite cu SHA-256.
 /// Mai rezistent decât simplu `hostname` — schimbarea numelui mașinii nu
 /// schimbă username-ul și viceversa.
+///
+/// SEC-09: Hostname/username sunt citite preferențial via OS API (comenzi de
+/// sistem), nu via variabile de mediu, deoarece variabilele de mediu sunt
+/// trivial de modificat de utilizator. Variabilele de mediu rămân ca fallback
+/// final dacă apelurile OS eșuează.
 fn machine_id() -> String {
-    let host = std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("COMPUTERNAME"))
-        .unwrap_or_else(|_| "host_unknown".into());
-    let user = std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .unwrap_or_else(|_| "user_unknown".into());
+    let host = read_hostname_os().unwrap_or_else(|| {
+        std::env::var("HOSTNAME")
+            .or_else(|_| std::env::var("COMPUTERNAME"))
+            .unwrap_or_else(|_| "host_unknown".into())
+    });
+    let user = read_username_os().unwrap_or_else(|| {
+        std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "user_unknown".into())
+    });
     let os = std::env::consts::OS;
 
     let raw = format!("{}||{}||{}", host, user, os);
     let hash = Sha256::digest(raw.as_bytes());
     // Primii 24 hex chars = 96 biți — suficient pentru unicitate, compact pentru stocare
     format!("{:x}", hash)[..24].to_string()
+}
+
+/// Reads the system hostname via OS-specific tooling, bypassing env vars.
+/// Returns `None` if the call fails — caller falls back to env vars.
+fn read_hostname_os() -> Option<String> {
+    use std::process::Command;
+
+    #[cfg(target_os = "macos")]
+    let out = Command::new("scutil")
+        .arg("--get")
+        .arg("LocalHostName")
+        .output()
+        .ok()?;
+
+    #[cfg(target_os = "windows")]
+    let out = Command::new("hostname").output().ok()?;
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        // Linux/BSD: /etc/hostname is the canonical source.
+        if let Ok(s) = std::fs::read_to_string("/etc/hostname") {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        // Fall back to `hostname` binary.
+        let out = Command::new("hostname").output().ok()?;
+        let s = String::from_utf8(out.stdout).ok()?;
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        return Some(trimmed.to_string());
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        let s = String::from_utf8(out.stdout).ok()?;
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        Some(trimmed.to_string())
+    }
+}
+
+/// Reads the current user's login name via OS tooling, bypassing env vars.
+/// Returns `None` if the call fails — caller falls back to env vars.
+fn read_username_os() -> Option<String> {
+    use std::process::Command;
+
+    #[cfg(unix)]
+    {
+        // `id -un` queries the password DB via the OS, not env vars.
+        let out = Command::new("id").arg("-un").output().ok()?;
+        let s = String::from_utf8(out.stdout).ok()?;
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        Some(trimmed.to_string())
+    }
+
+    #[cfg(windows)]
+    {
+        // `whoami` prints "DOMAIN\user"; strip the domain.
+        let out = Command::new("whoami").output().ok()?;
+        let s = String::from_utf8(out.stdout).ok()?;
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        // Strip everything up to and including the last backslash.
+        let bare = trimmed.rsplit('\\').next().unwrap_or(trimmed);
+        Some(bare.to_string())
+    }
 }
 
 // ─── Fingerprint integritate ──────────────────────────────────────────────────
