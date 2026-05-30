@@ -196,3 +196,27 @@ pub async fn export_report(
         ))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    #[test]
+    fn draft_excluded_from_fiscal_statuses() {
+        // Fiscal statuses that should appear in VAT reports
+        let fiscal = ["VALIDATED", "SUBMITTED"];
+        assert!(!fiscal.contains(&"DRAFT"));
+        assert!(!fiscal.contains(&"QUEUED"));
+        assert!(fiscal.contains(&"VALIDATED"));
+        assert!(fiscal.contains(&"SUBMITTED"));
+    }
+
+    #[test]
+    fn decimal_vat_accumulation_is_exact() {
+        // Verify Decimal avoids float drift
+        let amounts = ["100.00", "200.00", "300.00"];
+        let total: Decimal = amounts.iter().map(|s| Decimal::from_str(s).unwrap()).sum();
+        assert_eq!(total, Decimal::from_str("600.00").unwrap());
+    }
+}

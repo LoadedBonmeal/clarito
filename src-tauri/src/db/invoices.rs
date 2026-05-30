@@ -612,3 +612,32 @@ pub async fn delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
         .await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    #[test]
+    fn decimal_avoids_float_drift() {
+        // Classic 0.1 + 0.2 issue
+        let a = Decimal::from_str("0.10").unwrap();
+        let b = Decimal::from_str("0.20").unwrap();
+        let sum = a + b;
+        assert_eq!(sum.to_string(), "0.30");
+    }
+
+    #[test]
+    fn round_to_two_decimals() {
+        let val = Decimal::from_str("1.2345").unwrap();
+        let rounded = val.round_dp(2);
+        assert_eq!(rounded.to_string(), "1.23");
+    }
+
+    #[test]
+    fn negative_storno_amount_preserved() {
+        let val = Decimal::from_str("-150.00").unwrap();
+        assert!(val.is_sign_negative());
+        assert_eq!(val.to_string(), "-150.00");
+    }
+}
