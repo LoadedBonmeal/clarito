@@ -65,12 +65,25 @@ pub async fn export_invoices_zip(
     Ok(zip_path.display().to_string())
 }
 
-/// Exportă un backup complet (DB + README) într-un fișier ZIP.
+/// Exportă un backup complet (DB + archive/**) într-un fișier ZIP.
 /// Returnează path-ul fișierului ZIP generat.
 #[tauri::command]
-pub async fn export_backup(_state: State<'_, AppState>, app: AppHandle) -> AppResult<String> {
+pub async fn export_backup(state: State<'_, AppState>, app: AppHandle) -> AppResult<String> {
     let data_dir = app.path().app_data_dir()?;
     let db_path = data_dir.join("data.db");
+
+    // Resolve archive directory: prefer user-configured override, fall back to
+    // <app_data>/archive.
+    let archive_dir = {
+        let override_val =
+            crate::db::settings::get(&state.db, crate::db::settings::keys::ARCHIVE_PATH_OVERRIDE)
+                .await
+                .unwrap_or(None);
+        match override_val {
+            Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+            _ => data_dir.join("archive"),
+        }
+    };
 
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
     let out_path = data_dir.join(format!("efactura_backup_{timestamp}.zip"));
@@ -90,11 +103,17 @@ pub async fn export_backup(_state: State<'_, AppState>, app: AppHandle) -> AppRe
             zip.write_all(&db_bytes).map_err(AppError::Io)?;
         }
 
+        // Add archive/**  (all XML + PDF files under the archive directory),
+        // preserving relative paths so restore can recreate the same layout.
+        if archive_dir.exists() {
+            zip_dir_recursive(&archive_dir, &archive_dir, &mut zip, opts)?;
+        }
+
         // Add README
         zip.start_file("README.txt", opts)
             .map_err(|e| AppError::Other(e.to_string()))?;
         let readme = format!(
-            "Backup eFactura Desktop\nData: {}\n\nConține:\n- data.db: baza de date SQLite\n\nRestaurare: copiați data.db în folderul de date al aplicației.\n",
+            "Backup eFactura Desktop\nData: {}\n\nConține:\n- data.db: baza de date SQLite\n- archive/: fișiere XML+PDF facturi\n\nRestaurare: folosiți funcția Import Backup din aplicație.\n",
             chrono::Utc::now().format("%d.%m.%Y %H:%M UTC")
         );
         zip.write_all(readme.as_bytes()).map_err(AppError::Io)?;
@@ -109,7 +128,42 @@ pub async fn export_backup(_state: State<'_, AppState>, app: AppHandle) -> AppRe
     Ok(result)
 }
 
-/// Importă un backup ZIP, înlocuind DB-ul curent.
+/// Recursively add all files under `dir` into the ZIP archive, using paths
+/// relative to `root_dir` (so the ZIP entry is e.g. `archive/sent/2026/INV.xml`).
+fn zip_dir_recursive<W: Write + std::io::Seek>(
+    dir: &std::path::Path,
+    root_dir: &std::path::Path,
+    zip: &mut zip::ZipWriter<W>,
+    opts: zip::write::SimpleFileOptions,
+) -> Result<(), AppError> {
+    for entry in std::fs::read_dir(dir).map_err(AppError::Io)? {
+        let entry = entry.map_err(AppError::Io)?;
+        let path = entry.path();
+        if path.is_dir() {
+            zip_dir_recursive(&path, root_dir, zip, opts)?;
+        } else {
+            // Build a relative path anchored at root_dir's *parent* so the
+            // archive prefix is preserved (e.g. root_dir = …/archive ⇒
+            // entry = "archive/sent/INV.xml").
+            let rel = path
+                .strip_prefix(root_dir.parent().unwrap_or(root_dir))
+                .map_err(|e| AppError::Other(e.to_string()))?;
+            // Normalise to forward-slash for cross-platform ZIP entries.
+            let entry_name = rel
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            zip.start_file(&entry_name, opts)
+                .map_err(|e| AppError::Other(e.to_string()))?;
+            let bytes = std::fs::read(&path).map_err(AppError::Io)?;
+            zip.write_all(&bytes).map_err(AppError::Io)?;
+        }
+    }
+    Ok(())
+}
+
+/// Importă un backup ZIP, înlocuind DB-ul curent și restaurând fișierele archive.
 /// Aplicația se repornește automat după import.
 #[tauri::command]
 pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
@@ -234,46 +288,117 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
     // 5. Scrie data.db extrasă din ZIP la calea DB-ului
     std::fs::write(&db_path, &buf).map_err(AppError::Io)?;
 
-    // 6. Repornește aplicația
+    // 6. Restaurează fișierele archive/* din ZIP (dacă există), cu protecție
+    //    zip-slip: orice intrare al cărei path normalizat iese din archive_dir
+    //    este respinsă (consistent cu SEC-06 de mai sus).
+    let archive_dir = app.path().app_data_dir()?.join("archive");
+    // Re-open the archive for a second pass (first was consumed above).
+    let file2 = std::fs::File::open(&path).map_err(AppError::Io)?;
+    let mut archive2 = zip::ZipArchive::new(file2).map_err(|e| AppError::Other(e.to_string()))?;
+
+    for i in 0..archive2.len() {
+        let mut entry = archive2
+            .by_index(i)
+            .map_err(|e| AppError::Other(e.to_string()))?;
+
+        let raw_name = entry.name().to_string();
+
+        // Only process entries that start with "archive/" (skip data.db / README).
+        if !raw_name.starts_with("archive/") {
+            continue;
+        }
+
+        // SEC-ZIP-01: zip-slip guard — build absolute target path and verify it
+        // stays inside archive_dir after normalisation.
+        let target = archive_dir.join(&raw_name["archive/".len()..]);
+        let canonical_archive = archive_dir
+            .canonicalize()
+            .unwrap_or_else(|_| archive_dir.clone());
+        // Use clean path normalisation without requiring the file to exist yet.
+        let normalised = normalise_path(&target);
+        if !normalised.starts_with(&canonical_archive) {
+            return Err(AppError::Other(format!(
+                "Backup invalid: intrarea '{raw_name}' iese din directorul arhivă (zip-slip)."
+            )));
+        }
+
+        if entry.is_dir() {
+            std::fs::create_dir_all(&target).map_err(AppError::Io)?;
+        } else {
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(AppError::Io)?;
+            }
+            let mut out = std::fs::File::create(&target).map_err(AppError::Io)?;
+            std::io::copy(&mut entry, &mut out).map_err(AppError::Io)?;
+        }
+    }
+
+    // 7. Repornește aplicația
     app.request_restart();
     #[allow(unreachable_code)]
     Ok(())
 }
 
+/// Normalise a path (resolve `.` and `..` components) without hitting the
+/// filesystem.  Returns an absolute path; if the input is relative it is
+/// kept relative (this helper is only called with absolute paths in practice).
+fn normalise_path(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 // ─── Integrity check ───────────────────────────────────────────────────────
 
+/// Report returned by [`verify_archive_integrity`].
+///
+/// - `checked`: total number of invoice XML paths examined.
+/// - `missing`: list of paths that were recorded in the DB but absent on disk.
+/// - `ok`: `true` iff `missing` is empty.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct IntegrityResult {
-    pub total_checked: u32,
-    pub missing_files: Vec<String>,
+pub struct ArchiveIntegrityReport {
+    pub checked: usize,
+    pub missing: Vec<String>,
     pub ok: bool,
 }
 
 /// Verifică că toate fișierele XML referențiate în DB există pe disc.
+/// Returnează un raport structurat; apelat din frontend ca `verify_archive_integrity`.
 #[tauri::command]
-pub async fn verify_archive_integrity(state: State<'_, AppState>) -> AppResult<IntegrityResult> {
+pub async fn verify_archive_integrity(
+    state: State<'_, AppState>,
+) -> AppResult<ArchiveIntegrityReport> {
     use sqlx::Row;
 
     let rows = sqlx::query("SELECT xml_path FROM invoices WHERE xml_path IS NOT NULL")
         .fetch_all(&state.db)
         .await?;
 
-    let mut total_checked: u32 = 0;
-    let mut missing_files: Vec<String> = Vec::new();
+    let mut checked: usize = 0;
+    let mut missing: Vec<String> = Vec::new();
 
     for row in &rows {
         let xml_path: String = row.try_get("xml_path").map_err(AppError::Database)?;
-        total_checked += 1;
+        checked += 1;
         if !std::path::Path::new(&xml_path).exists() {
-            missing_files.push(xml_path);
+            missing.push(xml_path);
         }
     }
 
-    let ok = missing_files.is_empty();
-    Ok(IntegrityResult {
-        total_checked,
-        missing_files,
+    let ok = missing.is_empty();
+    Ok(ArchiveIntegrityReport {
+        checked,
+        missing,
         ok,
     })
 }
@@ -402,4 +527,111 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
         }
     }
     Ok(())
+}
+
+// ─── Tests ─────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── normalise_path ───────────────────────────────────────────────────────
+    #[test]
+    fn normalise_path_removes_dot_dot() {
+        let p = std::path::Path::new("/tmp/archive/../../../etc/passwd");
+        let norm = normalise_path(p);
+        assert_eq!(norm, std::path::Path::new("/etc/passwd"));
+    }
+
+    #[test]
+    fn normalise_path_keeps_valid_path() {
+        let p = std::path::Path::new("/tmp/archive/sent/2026/INV-0001.xml");
+        let norm = normalise_path(p);
+        assert_eq!(norm, p);
+    }
+
+    // ── backup_includes_archive_files ────────────────────────────────────────
+    /// Create a temp archive directory with a fake XML file, run
+    /// zip_dir_recursive, and assert the ZIP contains the entry.
+    #[test]
+    fn backup_includes_archive_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Simulate <app_data>/archive/sent/2026/INV-0001.xml
+        let sent_dir = tmp.path().join("archive").join("sent").join("2026");
+        std::fs::create_dir_all(&sent_dir).unwrap();
+        let xml_path = sent_dir.join("INV-0001.xml");
+        std::fs::write(&xml_path, b"<Invoice/>").unwrap();
+
+        let zip_file_path = tmp.path().join("backup.zip");
+        let file = std::fs::File::create(&zip_file_path).unwrap();
+        let mut zw = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        let archive_dir = tmp.path().join("archive");
+        zip_dir_recursive(&archive_dir, &archive_dir, &mut zw, opts).unwrap();
+        zw.finish().unwrap();
+
+        // Re-open and check entry names
+        let zip_file = std::fs::File::open(&zip_file_path).unwrap();
+        let mut za = zip::ZipArchive::new(zip_file).unwrap();
+        let names: Vec<String> = (0..za.len())
+            .map(|i| za.by_index(i).unwrap().name().to_string())
+            .collect();
+
+        assert!(
+            names
+                .iter()
+                .any(|n| n.ends_with("INV-0001.xml") && n.contains("archive")),
+            "Expected archive/sent/2026/INV-0001.xml in ZIP, got: {names:?}"
+        );
+    }
+
+    // ── restore_rejects_zip_slip ─────────────────────────────────────────────
+    /// A ZIP entry whose path traverses `..` must be rejected by normalise_path
+    /// before extraction so it can't escape the archive directory.
+    #[test]
+    fn restore_rejects_zip_slip() {
+        // Craft a malicious entry name.
+        let malicious = "archive/../../../etc/passwd";
+        let target_base = std::path::Path::new("/tmp/safe_archive_dir");
+
+        // Simulate the zip-slip check performed in import_backup.
+        let raw_suffix = &malicious["archive/".len()..]; // "../../../etc/passwd"
+        let target = target_base.join(raw_suffix);
+        let normalised = normalise_path(&target);
+
+        // Normalised path must NOT start with target_base → we would reject it.
+        assert!(
+            !normalised.starts_with(target_base),
+            "zip-slip guard should have rejected this path, normalised = {normalised:?}"
+        );
+    }
+
+    // ── zip_dir_recursive skips root correctly ───────────────────────────────
+    #[test]
+    fn zip_dir_recursive_produces_archive_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive_dir = tmp.path().join("archive");
+        let sub = archive_dir.join("sent");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("test.xml"), b"<x/>").unwrap();
+
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zw = zip::ZipWriter::new(buf);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip_dir_recursive(&archive_dir, &archive_dir, &mut zw, opts).unwrap();
+        let inner = zw.finish().unwrap().into_inner();
+
+        let cursor = std::io::Cursor::new(inner);
+        let mut za = zip::ZipArchive::new(cursor).unwrap();
+        let names: Vec<_> = (0..za.len())
+            .map(|i| za.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert!(
+            names.iter().any(|n| n == "archive/sent/test.xml"),
+            "expected 'archive/sent/test.xml', got: {names:?}"
+        );
+    }
 }

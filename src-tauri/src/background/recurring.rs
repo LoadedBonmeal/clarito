@@ -283,30 +283,60 @@ async fn process_recurring_invoices(
         .execute(&mut *tx)
         .await;
 
-        // Advance next_issue_date through all missed periods until it's in the future
+        // Advance next_issue_date through all missed periods until it's in the
+        // future, capped at MAX_CATCHUP iterations.
+        //
+        // MAX_CATCHUP = 120 covers ~10 years of monthly billing — more than
+        // enough for any realistic catch-up scenario.  A template whose date
+        // is pathologically old (e.g. 1970, or a stale test record) would
+        // otherwise spin thousands of iterations inside an open transaction.
+        // After hitting the cap we fast-forward to the next date computed from
+        // today, log a warning, and continue normally.
+        const MAX_CATCHUP: u32 = 120;
         let mut current_date = template.next_issue_date.clone();
-        loop {
+        let mut iterations: u32 = 0;
+        let next_date = loop {
             let next = recurring::advance_date(
                 &current_date,
                 &template.frequency,
                 template.day_of_month as u32,
             );
             if next > today {
-                // This is the correct next future date — write it
-                if let Err(e) = sqlx::query(
-                    "UPDATE recurring_invoices SET next_issue_date = ?1, updated_at = unixepoch() WHERE id = ?2",
-                )
-                .bind(&next)
-                .bind(&template.id)
-                .execute(&mut *tx)
-                .await
-                {
-                    tracing::error!(error = ?e, template_id = %template.id, "Failed to advance next_issue_date — aborting template");
-                    lines_ok = false; // reuse flag to skip commit
-                }
-                break;
+                // Found the correct next future date.
+                break next;
             }
             current_date = next;
+            iterations += 1;
+            if iterations >= MAX_CATCHUP {
+                // Pathological catch-up: fast-forward from today instead of
+                // spinning further.  This is safe — we already generated one
+                // invoice for the current run; the next one will be scheduled
+                // from a sane baseline.
+                tracing::warn!(
+                    template_id = %template.id,
+                    next_issue_date = %template.next_issue_date,
+                    iterations = MAX_CATCHUP,
+                    "Recurring template catch-up hit MAX_CATCHUP ({MAX_CATCHUP}) — \
+                     advancing next_issue_date from today to avoid infinite loop"
+                );
+                break recurring::advance_date(
+                    &today,
+                    &template.frequency,
+                    template.day_of_month as u32,
+                );
+            }
+        };
+
+        if let Err(e) = sqlx::query(
+            "UPDATE recurring_invoices SET next_issue_date = ?1, updated_at = unixepoch() WHERE id = ?2",
+        )
+        .bind(&next_date)
+        .bind(&template.id)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = ?e, template_id = %template.id, "Failed to advance next_issue_date — aborting template");
+            lines_ok = false; // reuse flag to skip commit
         }
 
         if !lines_ok {
@@ -426,4 +456,83 @@ async fn process_recurring_invoices(
     }
 
     Ok(())
+}
+
+// ─── Tests ─────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use crate::db::recurring::advance_date;
+
+    // MAX_CATCHUP mirrors the constant in process_recurring_invoices.
+    // We test the pure advance_date logic to verify the cap arithmetic.
+    const MAX_CATCHUP: u32 = 120;
+
+    /// A next_issue_date from 1970 must not produce more than MAX_CATCHUP
+    /// iterations in the catch-up loop before we bail out.
+    #[test]
+    fn advance_date_caps_at_max() {
+        let start = "1970-01-01";
+        let today = "2026-05-31";
+        let frequency = "monthly";
+
+        let mut current = start.to_string();
+        let mut iterations: u32 = 0;
+
+        let next_date = loop {
+            let next = advance_date(&current, frequency, 1);
+            if next.as_str() > today {
+                break next;
+            }
+            current = next;
+            iterations += 1;
+            if iterations >= MAX_CATCHUP {
+                // Simulate the fast-forward from today.
+                break advance_date(today, frequency, 1);
+            }
+        };
+
+        assert!(
+            iterations == MAX_CATCHUP,
+            "Expected loop to hit exactly MAX_CATCHUP={MAX_CATCHUP}, got {iterations}"
+        );
+        // The result should be a date in the future relative to today.
+        assert!(
+            next_date.as_str() > today,
+            "next_date {next_date} should be after today {today}"
+        );
+    }
+
+    /// A recently-started template (date slightly in the past) should complete
+    /// in well under MAX_CATCHUP iterations.
+    #[test]
+    fn advance_date_normal_catchup_stays_under_max() {
+        let start = "2026-03-01"; // two months behind
+        let today = "2026-05-31";
+        let frequency = "monthly";
+
+        let mut current = start.to_string();
+        let mut iterations: u32 = 0;
+
+        let next_date = loop {
+            let next = advance_date(&current, frequency, 1);
+            if next.as_str() > today {
+                break next;
+            }
+            current = next;
+            iterations += 1;
+            if iterations >= MAX_CATCHUP {
+                break advance_date(today, frequency, 1);
+            }
+        };
+
+        assert!(
+            iterations < MAX_CATCHUP,
+            "Normal catch-up should not reach MAX_CATCHUP, got {iterations}"
+        );
+        assert!(
+            next_date.as_str() > today,
+            "next_date {next_date} should be after today {today}"
+        );
+    }
 }
