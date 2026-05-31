@@ -1,46 +1,11 @@
 /**
- * Tests for deduceVatCategory (pure exported function from LineItemsEditor).
- *
- * SKIP REASON: vitest.config.ts is missing the `resolve.alias` for "@" → "./src",
- * so importing LineItemsEditor.tsx causes Vite transform errors on its internal
- * "@/components/shared/Icon", "@/components/ui/tooltip", etc. imports, even with
- * vi.mock stubs (mocks intercept at load time, alias resolution fails at transform time).
- *
- * Fix: add `resolve: { alias: { "@": path.resolve(__dirname, "./src") } }` to
- * vitest.config.ts — then remove the .skip and this comment.
- *
- * The logic under test (deduceVatCategory) is verified below via inline duplication
- * so the rules are documented and will catch regressions once the alias is fixed.
- *
- * NOTE: @testing-library/react is NOT in package.json — no render smoke tests.
+ * Tests for deduceVatCategory — the real exported pure function from
+ * LineItemsEditor.tsx (imported via the "@" alias now configured in
+ * vitest.config.ts). @testing-library/react is not installed, so these are
+ * pure-logic tests only (no render smoke tests).
  */
 import { describe, expect, it } from "vitest";
-
-// ─── Inline duplicate of deduceVatCategory for isolated testing ───────────────
-// This mirrors the implementation in LineItemsEditor.tsx exactly.
-// Remove once vitest alias config is fixed and we can import the real export.
-
-const EU_CODES = new Set([
-  "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI",
-  "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU",
-  "MT", "NL", "PL", "PT", "SK", "SI", "ES", "SE",
-]);
-
-function deduceVatCategory(
-  vatRate: number,
-  buyerCountry: string,
-  sellerVatPayer: boolean,
-): string {
-  if (vatRate > 0) return "S";
-  if (vatRate === 0) {
-    if (!sellerVatPayer) return "AE";
-    const country = (buyerCountry ?? "").toUpperCase().trim();
-    if (EU_CODES.has(country)) return "K";
-    if (country && country !== "RO") return "G";
-    return "E";
-  }
-  return "S";
-}
+import { deduceVatCategory } from "@/components/shared/LineItemsEditor";
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 

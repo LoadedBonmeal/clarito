@@ -1403,7 +1403,6 @@ version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "chrono",
- "clap",
  "csv",
  "dirs 5.0.1",
  "hmac",
@@ -2863,6 +2862,15 @@ dependencies = [
  "cc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "license-gen"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "efactura-desktop",
+ "rand 0.8.6",
 ]
 
 [[package]]

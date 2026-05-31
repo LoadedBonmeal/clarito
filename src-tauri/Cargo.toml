@@ -4,10 +4,14 @@ version = "0.2.0"
 description = "RoFactura — Aplicație desktop pentru e-Factura ANAF"
 authors = ["Lucaris"]
 edition = "2021"
-# Tauri bundler picks this as the app's main binary. Without it, multi-bin
-# crates (we ship license-gen alongside) cause the bundler to grab the
-# alphabetically first binary (license-gen) as the .app/.exe main executable.
-default-run = "efactura-desktop"
+
+# license-gen lives in its own workspace member (see ./license-gen) so the
+# Tauri bundler only ever sees the single app binary. default-members keeps
+# `cargo build` / `tauri build` scoped to the app; build the CLI explicitly
+# with `cargo build -p license-gen`.
+[workspace]
+members = ["license-gen"]
+default-members = ["."]
 
 [lib]
 name = "efactura_desktop_lib"
@@ -53,9 +57,6 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 
 # XML
 quick-xml = { version = "0.36", features = ["serialize"] }
-
-# CLI argument parsing (used by license-gen binary)
-clap = { version = "4", features = ["derive"] }
 
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }
@@ -115,22 +116,6 @@ tempfile = "3"
 [features]
 # Default features
 default = []
-# Gates the license-gen CLI binary so `tauri build` (which doesn't enable it)
-# never builds/bundles it. Without this, the macOS universal bundler tries to
-# copy a license-gen universal binary that was never lipo-merged and fails.
-# Issue keys with: cargo run --bin license-gen --features cli -- ...
-cli = []
-
-# license-gen is a maintenance CLI, NOT part of the shipped app bundle.
-[[bin]]
-name = "license-gen"
-path = "src/bin/license-gen.rs"
-required-features = ["cli"]
-
-# The Tauri app binary (default for cargo run / tauri build).
-[[bin]]
-name = "efactura-desktop"
-path = "src/main.rs"
 
 [profile.release]
 opt-level = 3

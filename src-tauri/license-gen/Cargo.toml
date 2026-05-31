@@ -1,0 +1,25 @@
+# license-gen — maintenance CLI for issuing RoFactura license keys.
+#
+# Separate workspace member (NOT a [[bin]] of the app package) so that
+# `tauri build` bundles ONLY the efactura-desktop app binary. When license-gen
+# lived in the app crate as a [[bin]], Tauri's bundler enumerated it from cargo
+# metadata and tried to copy a binary it hadn't built → "license-gen does not
+# exist" on both macOS-universal and Windows.
+#
+# Issue keys with:  cargo run -p license-gen -- --tier SOLO --email x@y.ro
+[package]
+name = "license-gen"
+version = "0.2.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "license-gen"
+path = "src/main.rs"
+
+[dependencies]
+# Path-dep on the app crate's lib for the SHARED key_checksum +
+# validate_license_key (single source of truth for the HMAC algorithm).
+efactura-desktop = { path = ".." }
+clap = { version = "4", features = ["derive"] }
+rand = "0.8"

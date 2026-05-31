@@ -16,9 +16,9 @@ pub mod notifications;
 mod state;
 mod ubl;
 
-// `license-gen` binary (in src/bin/) reaches commands::license::{key_checksum,
-// validate_license_key} via a narrow re-export. They are pub (not pub(crate))
-// because the binary is a separate crate that links against this library.
+// The `license-gen` workspace crate (./license-gen) reaches
+// commands::license::{key_checksum, validate_license_key} via this narrow
+// re-export — single source of truth for the HMAC key algorithm.
 pub use commands::license::{key_checksum, validate_license_key};
 
 use tauri::menu::{Menu, MenuItem};
