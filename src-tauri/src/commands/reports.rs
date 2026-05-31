@@ -203,7 +203,8 @@ pub async fn export_report(
                 }
             };
 
-            std::fs::write(&output_path, content.as_bytes())
+            tokio::fs::write(&output_path, content.as_bytes())
+                .await
                 .map_err(|e| AppError::Other(e.to_string()))?;
             Ok(output_path)
         }

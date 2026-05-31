@@ -5,11 +5,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { OnboardingWizard } from "./OnboardingWizard";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
-import type { AppErrorPayload } from "@/types";
-
-function isAppErrorPayload(e: unknown): e is AppErrorPayload {
-  return typeof e === "object" && e !== null && ("message" in e || "code" in e);
-}
+import { formatError } from "@/lib/error-mapper";
 
 function LoadingScreen() {
   return (
@@ -44,8 +40,7 @@ function LicenseExpiredScreen() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.companies.list() });
     },
     onError: (err) => {
-      const message = isAppErrorPayload(err) ? err.message : String(err);
-      setActivateError(message || "Licența nu a putut fi activată.");
+      setActivateError(formatError(err, "Licența nu a putut fi activată."));
     },
   });
 
@@ -126,10 +121,10 @@ function LicenseExpiredScreen() {
               <button
                 type="button"
                 className="btn"
-                style={{ width: "100%", justifyContent: "center", height: 30, fontSize: 11 }}
+                style={{ width: "100%", justifyContent: "center", height: 32, fontSize: 12, fontWeight: 600 }}
                 onClick={() => setShowActivate(true)}
               >
-                Am deja o licență — Activează
+                Am deja o licență — Introduceți cheia →
               </button>
             </div>
           </>
@@ -163,10 +158,15 @@ function LicenseExpiredScreen() {
                 <input
                   className="field"
                   placeholder="XXXX-XXXX-XXXX-XXXX"
-                  style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase" }}
+                  style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.05em" }}
                   value={key}
-                  onChange={(e) => setKey(e.target.value)}
+                  onChange={(e) => setKey(e.target.value.toUpperCase())}
+                  autoComplete="off"
+                  spellCheck={false}
                 />
+                <span style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                  Introduceți cheia primită prin email după achiziție (format XXXX-XXXX-XXXX-XXXX).
+                </span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                 <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>

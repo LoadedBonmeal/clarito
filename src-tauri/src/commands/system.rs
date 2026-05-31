@@ -233,7 +233,9 @@ pub async fn open_archive_folder(app: AppHandle) -> AppResult<()> {
 
     let data_dir = app.path().app_data_dir()?;
     let archive_dir = data_dir.join("archive");
-    std::fs::create_dir_all(&archive_dir).map_err(crate::error::AppError::Io)?;
+    tokio::fs::create_dir_all(&archive_dir)
+        .await
+        .map_err(crate::error::AppError::Io)?;
     app.opener()
         .open_path(archive_dir.to_string_lossy().to_string(), None::<&str>)
         .map_err(|e| crate::error::AppError::Other(e.to_string()))?;

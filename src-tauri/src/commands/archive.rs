@@ -23,36 +23,48 @@ pub async fn export_invoices_zip(
     };
     let result = crate::db::invoices::list(pool, filter).await?;
 
-    // Build ZIP in memory
-    let buf = std::io::Cursor::new(Vec::new());
-    let mut zip = zip::ZipWriter::new(buf);
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
-
+    // Collect all (name, bytes) pairs we need — read files concurrently then
+    // build the ZIP in a spawn_blocking so we don't block the Tokio worker.
+    struct FileEntry {
+        name: String,
+        bytes: Vec<u8>,
+    }
+    let mut entries: Vec<FileEntry> = Vec::new();
     for invoice in &result.items {
-        // Add XML if exists
         if let Some(xml_path) = &invoice.xml_path {
-            if let Ok(bytes) = std::fs::read(xml_path) {
-                let name = format!("{}.xml", invoice.full_number.replace('/', "_"));
-                zip.start_file(&name, options)
-                    .map_err(|e| AppError::Other(e.to_string()))?;
-                zip.write_all(&bytes)
-                    .map_err(|e| AppError::Other(e.to_string()))?;
+            if let Ok(bytes) = tokio::fs::read(xml_path).await {
+                entries.push(FileEntry {
+                    name: format!("{}.xml", invoice.full_number.replace('/', "_")),
+                    bytes,
+                });
             }
         }
-        // Add PDF if exists
         if let Some(pdf_path) = &invoice.pdf_path {
-            if let Ok(bytes) = std::fs::read(pdf_path) {
-                let name = format!("{}.pdf", invoice.full_number.replace('/', "_"));
-                zip.start_file(&name, options)
-                    .map_err(|e| AppError::Other(e.to_string()))?;
-                zip.write_all(&bytes)
-                    .map_err(|e| AppError::Other(e.to_string()))?;
+            if let Ok(bytes) = tokio::fs::read(pdf_path).await {
+                entries.push(FileEntry {
+                    name: format!("{}.pdf", invoice.full_number.replace('/', "_")),
+                    bytes,
+                });
             }
         }
     }
 
-    let cursor = zip.finish().map_err(|e| AppError::Other(e.to_string()))?;
+    let zip_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, AppError> {
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(buf);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for entry in entries {
+            zip.start_file(&entry.name, options)
+                .map_err(|e| AppError::Other(e.to_string()))?;
+            zip.write_all(&entry.bytes)
+                .map_err(|e| AppError::Other(e.to_string()))?;
+        }
+        let cursor = zip.finish().map_err(|e| AppError::Other(e.to_string()))?;
+        Ok(cursor.into_inner())
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))??;
 
     // Save to app_data_dir
     let out_dir = app.path().app_data_dir()?;
@@ -60,7 +72,9 @@ pub async fn export_invoices_zip(
         "export_{}.zip",
         chrono::Utc::now().format("%Y%m%d_%H%M%S")
     ));
-    std::fs::write(&zip_path, cursor.into_inner()).map_err(AppError::Io)?;
+    tokio::fs::write(&zip_path, &zip_bytes)
+        .await
+        .map_err(AppError::Io)?;
 
     Ok(zip_path.display().to_string())
 }
@@ -167,30 +181,33 @@ fn zip_dir_recursive<W: Write + std::io::Seek>(
 /// Aplicația se repornește automat după import.
 #[tauri::command]
 pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
-    // 1. Deschide ZIP-ul
-    let file = std::fs::File::open(&path).map_err(AppError::Io)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| AppError::Other(e.to_string()))?;
+    // 1+2. Deschide ZIP-ul și extrage data.db în memorie (zip crate este sync).
+    let path_clone = path.clone();
+    let buf = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, AppError> {
+        let file = std::fs::File::open(&path_clone).map_err(AppError::Io)?;
+        let mut archive = zip::ZipArchive::new(file).map_err(|e| AppError::Other(e.to_string()))?;
 
-    // 2. Verifică că ZIP-ul conține data.db
-    let has_db = (0..archive.len()).any(|i| {
-        archive
-            .by_index(i)
-            .map(|f| f.name() == "data.db")
-            .unwrap_or(false)
-    });
-    if !has_db {
-        return Err(AppError::Other("ZIP invalid: lipsește data.db".to_string()));
-    }
+        // Verifică că ZIP-ul conține data.db
+        let has_db = (0..archive.len()).any(|i| {
+            archive
+                .by_index(i)
+                .map(|f| f.name() == "data.db")
+                .unwrap_or(false)
+        });
+        if !has_db {
+            return Err(AppError::Other("ZIP invalid: lipsește data.db".to_string()));
+        }
 
-    // 2a. Extrage conținutul data.db din ZIP în memorie (necesar și pentru verificare)
-    let buf = {
+        // Extrage conținutul data.db din ZIP în memorie (necesar și pentru verificare)
         let mut db_entry = archive
             .by_name("data.db")
             .map_err(|e| AppError::Other(e.to_string()))?;
         let mut b = Vec::new();
         db_entry.read_to_end(&mut b).map_err(AppError::Io)?;
-        b
-    };
+        Ok(b)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))??;
 
     // 2b. Validează integritatea SQLite a backup-ului înainte de a suprascrie DB-ul curent
     let temp_check_path = {
@@ -200,7 +217,9 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
             .map_err(|e| AppError::Other(e.to_string()))?;
         data_dir.join("data_restore_check.db")
     };
-    std::fs::write(&temp_check_path, &buf).map_err(AppError::Io)?;
+    tokio::fs::write(&temp_check_path, &buf)
+        .await
+        .map_err(AppError::Io)?;
 
     {
         let check_url = format!("sqlite:{}?mode=ro", temp_check_path.to_string_lossy());
@@ -215,7 +234,7 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
 
         if integrity != "ok" {
             check_pool.close().await;
-            let _ = std::fs::remove_file(&temp_check_path);
+            let _ = tokio::fs::remove_file(&temp_check_path).await;
             return Err(AppError::Other(format!(
                 "Backup corupt: PRAGMA integrity_check a returnat: {integrity}"
             )));
@@ -243,7 +262,7 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
 
             if exists == 0 {
                 check_pool.close().await;
-                let _ = std::fs::remove_file(&temp_check_path);
+                let _ = tokio::fs::remove_file(&temp_check_path).await;
                 return Err(AppError::Other(format!(
                     "Backup invalid: tabelul '{table}' lipsește. Acest fișier nu pare să fie un backup RoFactura valid."
                 )));
@@ -268,7 +287,7 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
         for col in required_cols.iter() {
             if !invoice_cols.iter().any(|c| c == col) {
                 check_pool.close().await;
-                let _ = std::fs::remove_file(&temp_check_path);
+                let _ = tokio::fs::remove_file(&temp_check_path).await;
                 return Err(AppError::Other(format!(
                     "Backup invalid: coloana '{col}' lipsește din tabelul invoices."
                 )));
@@ -277,61 +296,72 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
 
         check_pool.close().await;
     }
-    std::fs::remove_file(&temp_check_path).ok();
+    let _ = tokio::fs::remove_file(&temp_check_path).await;
 
     // 3. Determină calea curentă a DB
     let db_path = crate::db::pool::resolve_db_path(&app)?;
 
     // 4. Backup DB curent
-    std::fs::copy(&db_path, db_path.with_extension("db.bak")).map_err(AppError::Io)?;
+    let db_bak = db_path.with_extension("db.bak");
+    tokio::fs::copy(&db_path, &db_bak)
+        .await
+        .map_err(AppError::Io)?;
 
     // 5. Scrie data.db extrasă din ZIP la calea DB-ului
-    std::fs::write(&db_path, &buf).map_err(AppError::Io)?;
+    tokio::fs::write(&db_path, &buf)
+        .await
+        .map_err(AppError::Io)?;
 
     // 6. Restaurează fișierele archive/* din ZIP (dacă există), cu protecție
     //    zip-slip: orice intrare al cărei path normalizat iese din archive_dir
     //    este respinsă (consistent cu SEC-06 de mai sus).
     let archive_dir = app.path().app_data_dir()?.join("archive");
-    // Re-open the archive for a second pass (first was consumed above).
-    let file2 = std::fs::File::open(&path).map_err(AppError::Io)?;
-    let mut archive2 = zip::ZipArchive::new(file2).map_err(|e| AppError::Other(e.to_string()))?;
+    // Re-open and extract archive entries in spawn_blocking (zip crate is sync).
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+        let file2 = std::fs::File::open(&path).map_err(AppError::Io)?;
+        let mut archive2 =
+            zip::ZipArchive::new(file2).map_err(|e| AppError::Other(e.to_string()))?;
 
-    for i in 0..archive2.len() {
-        let mut entry = archive2
-            .by_index(i)
-            .map_err(|e| AppError::Other(e.to_string()))?;
+        for i in 0..archive2.len() {
+            let mut entry = archive2
+                .by_index(i)
+                .map_err(|e| AppError::Other(e.to_string()))?;
 
-        let raw_name = entry.name().to_string();
+            let raw_name = entry.name().to_string();
 
-        // Only process entries that start with "archive/" (skip data.db / README).
-        if !raw_name.starts_with("archive/") {
-            continue;
-        }
-
-        // SEC-ZIP-01: zip-slip guard — build absolute target path and verify it
-        // stays inside archive_dir after normalisation.
-        let target = archive_dir.join(&raw_name["archive/".len()..]);
-        let canonical_archive = archive_dir
-            .canonicalize()
-            .unwrap_or_else(|_| archive_dir.clone());
-        // Use clean path normalisation without requiring the file to exist yet.
-        let normalised = normalise_path(&target);
-        if !normalised.starts_with(&canonical_archive) {
-            return Err(AppError::Other(format!(
-                "Backup invalid: intrarea '{raw_name}' iese din directorul arhivă (zip-slip)."
-            )));
-        }
-
-        if entry.is_dir() {
-            std::fs::create_dir_all(&target).map_err(AppError::Io)?;
-        } else {
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent).map_err(AppError::Io)?;
+            // Only process entries that start with "archive/" (skip data.db / README).
+            if !raw_name.starts_with("archive/") {
+                continue;
             }
-            let mut out = std::fs::File::create(&target).map_err(AppError::Io)?;
-            std::io::copy(&mut entry, &mut out).map_err(AppError::Io)?;
+
+            // SEC-ZIP-01: zip-slip guard — build absolute target path and verify it
+            // stays inside archive_dir after normalisation.
+            let target = archive_dir.join(&raw_name["archive/".len()..]);
+            let canonical_archive = archive_dir
+                .canonicalize()
+                .unwrap_or_else(|_| archive_dir.clone());
+            // Use clean path normalisation without requiring the file to exist yet.
+            let normalised = normalise_path(&target);
+            if !normalised.starts_with(&canonical_archive) {
+                return Err(AppError::Other(format!(
+                    "Backup invalid: intrarea '{raw_name}' iese din directorul arhivă (zip-slip)."
+                )));
+            }
+
+            if entry.is_dir() {
+                std::fs::create_dir_all(&target).map_err(AppError::Io)?;
+            } else {
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent).map_err(AppError::Io)?;
+                }
+                let mut out = std::fs::File::create(&target).map_err(AppError::Io)?;
+                std::io::copy(&mut entry, &mut out).map_err(AppError::Io)?;
+            }
         }
-    }
+        Ok(())
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))??;
 
     // 7. Repornește aplicația
     app.request_restart();
@@ -426,7 +456,9 @@ pub async fn get_archive_size(app: AppHandle) -> AppResult<u64> {
     if !archive_dir.exists() {
         return Ok(0);
     }
-    Ok(dir_size(&archive_dir))
+    tokio::task::spawn_blocking(move || dir_size(&archive_dir))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))
 }
 
 /// Schimbă locația arhivei: copiază fișierele existente în noul path și salvează setarea.
@@ -485,8 +517,9 @@ pub async fn change_archive_location(
         ));
     }
 
-    let new_dir = new_path_buf.as_path();
-    std::fs::create_dir_all(new_dir).map_err(|e| AppError::Other(e.to_string()))?;
+    tokio::fs::create_dir_all(&new_path_buf)
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?;
 
     // Get current archive path
     let app_data = app
@@ -495,10 +528,15 @@ pub async fn change_archive_location(
         .map_err(|e| AppError::Other(e.to_string()))?;
     let current_archive = app_data.join("archive");
 
-    // Copy existing files if directory exists
+    // Copy existing files if directory exists (sync recursive walk — spawn_blocking).
     if current_archive.exists() {
-        copy_dir_recursive(&current_archive, new_dir)
-            .map_err(|e| AppError::Other(format!("Copiere arhivă eșuată: {}", e)))?;
+        let new_path_buf_clone = new_path_buf.clone();
+        tokio::task::spawn_blocking(move || {
+            copy_dir_recursive(&current_archive, &new_path_buf_clone)
+        })
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
+        .map_err(|e| AppError::Other(format!("Copiere arhivă eșuată: {}", e)))?;
     }
 
     // Save new path in settings

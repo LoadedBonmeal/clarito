@@ -279,7 +279,7 @@ pub(crate) async fn do_sync_spv(
         }
 
         // ── DB row exists — now persist files to disk ─────────────────
-        if let Err(e) = std::fs::create_dir_all(&archive_path) {
+        if let Err(e) = tokio::fs::create_dir_all(&archive_path).await {
             tracing::error!("Failed to create archive dir for msg {}: {}", msg.id, e);
             // Roll back the DB insert so we can retry on the next sync.
             let _ = sqlx::query("DELETE FROM received_invoices WHERE id = ?1")
@@ -288,7 +288,7 @@ pub(crate) async fn do_sync_spv(
                 .await;
             continue;
         }
-        if let Err(e) = std::fs::write(&xml_path, &xml_content) {
+        if let Err(e) = tokio::fs::write(&xml_path, &xml_content).await {
             tracing::error!("Failed to write XML archive for msg {}: {}", msg.id, e);
             // Roll back the DB insert so we can retry on the next sync.
             let _ = sqlx::query("DELETE FROM received_invoices WHERE id = ?1")
@@ -297,7 +297,7 @@ pub(crate) async fn do_sync_spv(
                 .await;
             continue;
         }
-        if let Err(e) = std::fs::write(&zip_path, &zip_bytes) {
+        if let Err(e) = tokio::fs::write(&zip_path, &zip_bytes).await {
             tracing::warn!("Failed to write ZIP archive for msg {}: {}", msg.id, e);
             // ZIP is supplementary; proceed even if it fails.
         }

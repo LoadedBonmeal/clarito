@@ -393,7 +393,9 @@ pub async fn export_saga_csv(
 
     if let Some(path) = output_path {
         let validated = validate_export_path(&path)?;
-        std::fs::write(&validated, csv_content.as_bytes()).map_err(AppError::Io)?;
+        tokio::fs::write(&validated, csv_content.as_bytes())
+            .await
+            .map_err(AppError::Io)?;
         Ok(validated.to_string_lossy().to_string())
     } else {
         Ok(csv_content)
@@ -536,7 +538,9 @@ pub async fn export_winmentor_csv(
 
     if let Some(path) = output_path {
         let validated = validate_export_path(&path)?;
-        std::fs::write(&validated, csv_content.as_bytes()).map_err(AppError::Io)?;
+        tokio::fs::write(&validated, csv_content.as_bytes())
+            .await
+            .map_err(AppError::Io)?;
         Ok(validated.to_string_lossy().to_string())
     } else {
         Ok(csv_content)

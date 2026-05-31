@@ -120,7 +120,7 @@ pub async fn validate_invoice_xml(
     })?;
 
     // 2. Citeşte fişierul
-    let xml = std::fs::read_to_string(&xml_path)?;
+    let xml = tokio::fs::read_to_string(&xml_path).await?;
 
     // 3. Validează
     Ok(validate_ubl(&xml))

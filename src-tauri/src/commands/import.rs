@@ -112,6 +112,30 @@ pub async fn import_invoices_csv(
     let idx_vat_category = header_index("vat_category");
     let idx_payment_means = header_index("payment_means_code");
 
+    // ── Collect validated rows before opening the transaction ─────────────
+    // We validate all rows first (without touching the DB) so we can report
+    // per-row errors upfront.  Only valid, non-dry-run rows are then inserted
+    // inside a single transaction together with the last_invoice_number bump.
+
+    struct ValidRow {
+        row_num: usize,
+        customer_cui: String,
+        customer_name: String,
+        series: String,
+        number: i64,
+        issue_date: String,
+        due_date: String,
+        item_name: String,
+        qty: Decimal,
+        unit: String,
+        unit_price: Decimal,
+        vat_rate: Decimal,
+        vat_cat: String,
+        payment_means_code: String,
+    }
+
+    let mut valid_rows: Vec<ValidRow> = Vec::new();
+
     for (idx, result) in reader.records().enumerate() {
         let row_num = idx + 2;
         let record = match result {
@@ -264,154 +288,173 @@ pub async fn import_invoices_csv(
             continue;
         }
 
-        // Calculate amounts with Decimal precision
-        let subtotal = (qty * unit_price).round_dp(2);
-        let vat_amount = (subtotal * vat_rate / Decimal::from(100)).round_dp(2);
-        let total = (subtotal + vat_amount).round_dp(2);
-        let full_number = format!("{}-{:04}", series, number);
-        let now = chrono::Utc::now().timestamp();
-        let invoice_id = crate::db::models::new_id();
-        let line_id = crate::db::models::new_id();
-
-        // Begin transaction — ensures header + line item are atomic.
-        let mut tx = match pool.begin().await {
-            Ok(t) => t,
-            Err(e) => {
-                errors.push(format!("Linia {row_num}: eroare tranzacție DB: {e}"));
-                continue;
-            }
-        };
-
-        // Find or create contact (outside the per-invoice tx — contacts are shared)
-        let contact_id: String = {
-            let existing =
-                sqlx::query("SELECT id FROM contacts WHERE cui = ?1 AND company_id = ?2 LIMIT 1")
-                    .bind(&customer_cui)
-                    .bind(&company_id)
-                    .fetch_optional(&mut *tx)
-                    .await;
-
-            match existing {
-                Ok(Some(row)) => match row.try_get::<String, _>("id") {
-                    Ok(id) => id,
-                    Err(e) => {
-                        errors.push(format!("Linia {row_num}: eroare DB contact: {e}"));
-                        continue;
-                    }
-                },
-                Ok(None) => {
-                    // Create contact inside the transaction
-                    let new_id = crate::db::models::new_id();
-                    let res = sqlx::query(
-                        "INSERT INTO contacts (id, company_id, contact_type, cui, legal_name, vat_payer, country, created_at, updated_at) \
-                         VALUES (?1, ?2, 'CUSTOMER', ?3, ?4, 0, 'RO', ?5, ?5)",
-                    )
-                    .bind(&new_id)
-                    .bind(&company_id)
-                    .bind(&customer_cui)
-                    .bind(&customer_name)
-                    .bind(now)
-                    .execute(&mut *tx)
-                    .await;
-                    if let Err(e) = res {
-                        errors.push(format!("Linia {row_num}: eroare creare contact: {e}"));
-                        continue;
-                    }
-                    new_id
-                }
-                Err(e) => {
-                    errors.push(format!("Linia {row_num}: eroare DB contact: {e}"));
-                    continue;
-                }
-            }
-        };
-
-        // Insert invoice header
-        let inv_res = sqlx::query(
-            "INSERT INTO invoices \
-             (id, company_id, contact_id, series, number, full_number, issue_date, due_date, \
-              currency, subtotal_amount, vat_amount, total_amount, status, \
-              payment_means_code, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'RON', ?9, ?10, ?11, 'DRAFT', ?12, ?13, ?13)",
-        )
-        .bind(&invoice_id)
-        .bind(&company_id)
-        .bind(&contact_id)
-        .bind(series)
-        .bind(number)
-        .bind(&full_number)
-        .bind(issue_date)
-        .bind(due_date)
-        .bind(subtotal.to_string())
-        .bind(vat_amount.to_string())
-        .bind(total.to_string())
-        .bind(&payment_means_code)
-        .bind(now)
-        .execute(&mut *tx)
-        .await;
-
-        if let Err(e) = inv_res {
-            errors.push(format!("Linia {row_num}: eroare inserare factură: {e}"));
-            // tx is dropped here — rolled back automatically
-            continue;
-        }
-
-        // Insert line item — error propagates and rolls back the transaction
-        let line_res = sqlx::query(
-            "INSERT INTO invoice_line_items \
-             (id, invoice_id, position, name, quantity, unit, unit_price, vat_rate, vat_category, \
-              subtotal_amount, vat_amount, total_amount) \
-             VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        )
-        .bind(&line_id)
-        .bind(&invoice_id)
-        .bind(item_name)
-        .bind(qty.to_string())
-        .bind(unit)
-        .bind(unit_price.to_string())
-        .bind(vat_rate.to_string())
-        .bind(&vat_cat)
-        .bind(subtotal.to_string())
-        .bind(vat_amount.to_string())
-        .bind(total.to_string())
-        .execute(&mut *tx)
-        .await;
-
-        if let Err(e) = line_res {
-            errors.push(format!(
-                "Linia {row_num}: eroare inserare linie factură: {e}"
-            ));
-            // tx dropped — rolled back automatically
-            continue;
-        }
-
-        // Commit — only now count as imported
-        match tx.commit().await {
-            Ok(_) => {
-                imported += 1;
-                if number > max_imported_number {
-                    max_imported_number = number;
-                }
-            }
-            Err(e) => errors.push(format!("Linia {row_num}: eroare commit tranzacție: {e}")),
-        }
+        valid_rows.push(ValidRow {
+            row_num,
+            customer_cui,
+            customer_name,
+            series,
+            number,
+            issue_date,
+            due_date,
+            item_name,
+            qty,
+            unit,
+            unit_price,
+            vat_rate,
+            vat_cat,
+            payment_means_code,
+        });
     }
 
-    // ── Advance companies.last_invoice_number past the max imported number ────
-    // This prevents UNIQUE collisions when the user later creates manual invoices
-    // (R5 EDGE-03). Only runs when at least one row was actually committed.
-    if !dry_run && max_imported_number > 0 {
-        // SQLite does not support MAX() in an UPDATE directly; use a CASE expression.
-        let _ = sqlx::query(
+    // ── Single transaction: all valid rows + last_invoice_number bump ─────
+    // This prevents a partial-import race where some rows commit but the number
+    // bump is skipped (R9 #9 hardening).  If any INSERT fails the whole batch
+    // rolls back and no bump happens.
+    if !dry_run && !valid_rows.is_empty() {
+        let mut tx = pool.begin().await.map_err(AppError::Database)?;
+
+        for row in &valid_rows {
+            let row_num = row.row_num;
+
+            // Calculate amounts with Decimal precision
+            let subtotal = (row.qty * row.unit_price).round_dp(2);
+            let vat_amount = (subtotal * row.vat_rate / Decimal::from(100)).round_dp(2);
+            let total = (subtotal + vat_amount).round_dp(2);
+            let full_number = format!("{}-{:04}", row.series, row.number);
+            let now = chrono::Utc::now().timestamp();
+            let invoice_id = crate::db::models::new_id();
+            let line_id = crate::db::models::new_id();
+
+            // Find or create contact within the transaction
+            let contact_id: String = {
+                let existing = sqlx::query(
+                    "SELECT id FROM contacts WHERE cui = ?1 AND company_id = ?2 LIMIT 1",
+                )
+                .bind(&row.customer_cui)
+                .bind(&company_id)
+                .fetch_optional(&mut *tx)
+                .await;
+
+                match existing {
+                    Ok(Some(r)) => match r.try_get::<String, _>("id") {
+                        Ok(id) => id,
+                        Err(e) => {
+                            errors.push(format!("Linia {row_num}: eroare DB contact: {e}"));
+                            let _ = tx.rollback().await;
+                            return Ok(ImportResult { imported, errors });
+                        }
+                    },
+                    Ok(None) => {
+                        let new_id = crate::db::models::new_id();
+                        let res = sqlx::query(
+                            "INSERT INTO contacts \
+                             (id, company_id, contact_type, cui, legal_name, vat_payer, country, created_at, updated_at) \
+                             VALUES (?1, ?2, 'CUSTOMER', ?3, ?4, 0, 'RO', ?5, ?5)",
+                        )
+                        .bind(&new_id)
+                        .bind(&company_id)
+                        .bind(&row.customer_cui)
+                        .bind(&row.customer_name)
+                        .bind(now)
+                        .execute(&mut *tx)
+                        .await;
+                        if let Err(e) = res {
+                            errors.push(format!("Linia {row_num}: eroare creare contact: {e}"));
+                            let _ = tx.rollback().await;
+                            return Ok(ImportResult { imported, errors });
+                        }
+                        new_id
+                    }
+                    Err(e) => {
+                        errors.push(format!("Linia {row_num}: eroare DB contact: {e}"));
+                        let _ = tx.rollback().await;
+                        return Ok(ImportResult { imported, errors });
+                    }
+                }
+            };
+
+            // Insert invoice header
+            let inv_res = sqlx::query(
+                "INSERT INTO invoices \
+                 (id, company_id, contact_id, series, number, full_number, issue_date, due_date, \
+                  currency, subtotal_amount, vat_amount, total_amount, status, \
+                  payment_means_code, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'RON', ?9, ?10, ?11, 'DRAFT', ?12, ?13, ?13)",
+            )
+            .bind(&invoice_id)
+            .bind(&company_id)
+            .bind(&contact_id)
+            .bind(&row.series)
+            .bind(row.number)
+            .bind(&full_number)
+            .bind(&row.issue_date)
+            .bind(&row.due_date)
+            .bind(subtotal.to_string())
+            .bind(vat_amount.to_string())
+            .bind(total.to_string())
+            .bind(&row.payment_means_code)
+            .bind(now)
+            .execute(&mut *tx)
+            .await;
+
+            if let Err(e) = inv_res {
+                errors.push(format!("Linia {row_num}: eroare inserare factură: {e}"));
+                let _ = tx.rollback().await;
+                return Ok(ImportResult { imported, errors });
+            }
+
+            // Insert line item
+            let line_res = sqlx::query(
+                "INSERT INTO invoice_line_items \
+                 (id, invoice_id, position, name, quantity, unit, unit_price, vat_rate, vat_category, \
+                  subtotal_amount, vat_amount, total_amount) \
+                 VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            )
+            .bind(&line_id)
+            .bind(&invoice_id)
+            .bind(&row.item_name)
+            .bind(row.qty.to_string())
+            .bind(&row.unit)
+            .bind(row.unit_price.to_string())
+            .bind(row.vat_rate.to_string())
+            .bind(&row.vat_cat)
+            .bind(subtotal.to_string())
+            .bind(vat_amount.to_string())
+            .bind(total.to_string())
+            .execute(&mut *tx)
+            .await;
+
+            if let Err(e) = line_res {
+                errors.push(format!(
+                    "Linia {row_num}: eroare inserare linie factură: {e}"
+                ));
+                let _ = tx.rollback().await;
+                return Ok(ImportResult { imported, errors });
+            }
+
+            // Track highest number among rows scheduled for this transaction.
+            if row.number > max_imported_number {
+                max_imported_number = row.number;
+            }
+        }
+
+        // ── Advance companies.last_invoice_number inside the same tx ──────
+        // The bump is part of this transaction: either the invoices AND the
+        // number advance commit together, or none do (R9 #9 hardening).
+        // SQLite does not support MAX() in an UPDATE directly; use CASE.
+        sqlx::query(
             "UPDATE companies SET last_invoice_number = \
              CASE WHEN last_invoice_number < ?1 THEN ?1 ELSE last_invoice_number END \
              WHERE id = ?2",
         )
         .bind(max_imported_number)
         .bind(&company_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(AppError::Database)?;
+
+        tx.commit().await.map_err(AppError::Database)?;
+        imported = valid_rows.len() as u32;
     }
 
     Ok(ImportResult { imported, errors })
