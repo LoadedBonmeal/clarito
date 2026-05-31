@@ -87,8 +87,17 @@ pub(crate) async fn build_oauth_config(pool: &sqlx::SqlitePool) -> oauth::OAuthC
         }
     }
     if let Ok(Some(v)) = settings::get(pool, "anaf_oauth_redirect_uri").await {
-        if !v.trim().is_empty() {
-            cfg.redirect_uri = v.trim().to_string();
+        let candidate = v.trim().to_string();
+        if !candidate.is_empty() {
+            if oauth::is_allowed_redirect_uri(&candidate) {
+                cfg.redirect_uri = candidate;
+            } else {
+                tracing::warn!(
+                    uri = %candidate,
+                    "anaf_oauth_redirect_uri din setări nu este un loopback localhost valid \
+                     (http(s)://localhost|127.0.0.1|[::1]) — se folosește URI-ul implicit"
+                );
+            }
         }
     }
     if let Ok(Some(v)) = settings::get(pool, "anaf_oauth_callback_port").await {

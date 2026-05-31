@@ -6,7 +6,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { Icon } from "@/components/shared/Icon";
 import { queryKeys } from "@/lib/queries";
@@ -162,7 +162,7 @@ export function StatusBar({ activeCompanyName, activeCompanyId, companyCount = 0
           ? async () => {
               try {
                 const url = purchaseUrl || "https://lucaris.ro/rofactura#pret";
-                await openPath(url);
+                await openUrl(url);
               } catch {
                 window.open("https://lucaris.ro/rofactura#pret", "_blank");
               }

@@ -188,8 +188,8 @@ export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
           <tfoot>
             <tr style={{ background: "var(--bg-hover)", fontWeight: 600 }}>
               <td colSpan={5}>TOTAL perioadă</td>
-              <td className="num tnum">{totalNet > 0 ? <b>{fmtRON(totalNet)}</b> : <span className="muted">—</span>}</td>
-              <td className="num tnum">{totalVat > 0 ? <b>{fmtRON(totalVat)}</b> : <span className="muted">—</span>}</td>
+              <td className="num tnum">{Number.isFinite(totalNet) ? <b>{fmtRON(totalNet)}</b> : <span className="muted">—</span>}</td>
+              <td className="num tnum">{Number.isFinite(totalVat) ? <b>{fmtRON(totalVat)}</b> : <span className="muted">—</span>}</td>
               <td className="num tnum"><b>{fmtRON(totalAmount)}</b></td>
             </tr>
           </tfoot>

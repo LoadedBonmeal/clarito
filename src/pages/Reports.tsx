@@ -112,7 +112,13 @@ export function ReportsPage() {
   });
 
   // Fetch invoices for period list (shared by tva + sales-journal + accounting-export)
-  const { data: paged, isLoading: invoicesLoading } = useQuery({
+  const {
+    data: paged,
+    isLoading: invoicesLoading,
+    isError: invoicesError,
+    error: invoicesErr,
+    refetch: refetchInvoices,
+  } = useQuery({
     queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 500 } }),
     queryFn: () =>
       api.invoices.list({
@@ -122,7 +128,10 @@ export function ReportsPage() {
     enabled: true,
   });
 
+  // All invoices (for the invoice list table — shows all statuses including DRAFT for visibility)
   const allInvoices = paged?.items ?? [];
+  // VALIDATED-only invoices — used for stats and SAF-T guard to match the backend VAT report
+  const validatedInvoices = allInvoices.filter((inv) => inv.status === "VALIDATED");
 
   const { data: contactList = [] } = useQuery({
     queryKey: queryKeys.contacts.list({ companyId: activeCompanyId ?? undefined }),
@@ -135,27 +144,33 @@ export function ReportsPage() {
     [contactList],
   );
 
-  // Filter by selected period
+  // Filter by selected period — all statuses (used in the invoice list table)
   const prefix = periodPrefix(selectedYear, selectedMonth);
   const periodInvoices = useMemo(
     () => allInvoices.filter((inv) => inv.issueDate.startsWith(prefix)),
     [allInvoices, prefix],
   );
 
-  // Invoices for the selected year (SAF-T)
-  const yearInvoices = useMemo(
-    () => allInvoices.filter((inv) => inv.issueDate.startsWith(String(selectedYear))),
-    [allInvoices, selectedYear],
+  // VALIDATED-only period invoices — used for stats cards (to match the VAT breakdown table)
+  const periodValidatedInvoices = useMemo(
+    () => validatedInvoices.filter((inv) => inv.issueDate.startsWith(prefix)),
+    [validatedInvoices, prefix],
   );
 
-  // Invoice statistics from period list
+  // VALIDATED-only invoices for the selected year (SAF-T guard: avoid near-empty exports)
+  const yearValidatedInvoices = useMemo(
+    () => validatedInvoices.filter((inv) => inv.issueDate.startsWith(String(selectedYear))),
+    [validatedInvoices, selectedYear],
+  );
+
+  // Invoice statistics from VALIDATED period invoices (consistent with the VAT breakdown table)
   const stats = useMemo(() => {
-    const totalCount = periodInvoices.length;
-    const totalNet   = periodInvoices.reduce((s, i) => s + parseDec(i.subtotalAmount), 0);
-    const totalVat   = periodInvoices.reduce((s, i) => s + parseDec(i.vatAmount), 0);
-    const totalGross = periodInvoices.reduce((s, i) => s + parseDec(i.totalAmount), 0);
+    const totalCount = periodValidatedInvoices.length;
+    const totalNet   = periodValidatedInvoices.reduce((s, i) => s + parseDec(i.subtotalAmount), 0);
+    const totalVat   = periodValidatedInvoices.reduce((s, i) => s + parseDec(i.vatAmount), 0);
+    const totalGross = periodValidatedInvoices.reduce((s, i) => s + parseDec(i.totalAmount), 0);
     return { totalCount, totalNet, totalVat, totalGross };
-  }, [periodInvoices]);
+  }, [periodValidatedInvoices]);
 
   // VAT groups from backend
   const vatGroups = vatReport?.vatGroups ?? [];
@@ -422,21 +437,31 @@ export function ReportsPage() {
 
         {/* ── SAF-T ──────────────────────────────────────────────────────────── */}
         {view === "saft" && (
-          <SaftView
-            selectedYear={selectedYear}
-            allInvoicesForYear={yearInvoices}
-          />
+          <>
+            {invoicesError && (
+              <QueryErrorBanner error={invoicesErr} label="facturile anului" onRetry={() => void refetchInvoices()} />
+            )}
+            <SaftView
+              selectedYear={selectedYear}
+              allInvoicesForYear={yearValidatedInvoices}
+            />
+          </>
         )}
 
         {/* ── Jurnal vânzări ─────────────────────────────────────────────────── */}
         {view === "sales-journal" && (
-          <SalesJournalView
-            periodInvoices={periodInvoices}
-            contactMap={contactMap}
-            dateFrom={dateFrom}
-            dateTo={dateTo}
-            isLoading={invoicesLoading}
-          />
+          <>
+            {invoicesError && (
+              <QueryErrorBanner error={invoicesErr} label="facturile perioadei" onRetry={() => void refetchInvoices()} />
+            )}
+            <SalesJournalView
+              periodInvoices={periodInvoices}
+              contactMap={contactMap}
+              dateFrom={dateFrom}
+              dateTo={dateTo}
+              isLoading={invoicesLoading}
+            />
+          </>
         )}
 
         {/* ── Jurnal cumpărări ───────────────────────────────────────────────── */}
@@ -446,11 +471,16 @@ export function ReportsPage() {
 
         {/* ── Export contabil ────────────────────────────────────────────────── */}
         {view === "accounting-export" && (
-          <AccountingExportView
-            periodInvoices={periodInvoices}
-            dateFrom={dateFrom}
-            dateTo={dateTo}
-          />
+          <>
+            {invoicesError && (
+              <QueryErrorBanner error={invoicesErr} label="facturile perioadei" onRetry={() => void refetchInvoices()} />
+            )}
+            <AccountingExportView
+              periodInvoices={periodInvoices}
+              dateFrom={dateFrom}
+              dateTo={dateTo}
+            />
+          </>
         )}
 
       </div>

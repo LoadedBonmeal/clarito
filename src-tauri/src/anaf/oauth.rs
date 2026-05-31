@@ -250,6 +250,43 @@ pub async fn revoke_token(access_token: &str, client_id: &str) {
     let _ = client.post(DEFAULT_REVOKE_URL).form(&params).send().await;
 }
 
+/// Verifică dacă un URL este permis ca redirect_uri OAuth.
+///
+/// Un redirect_uri valid este o adresă loopback localhost:
+/// - Schema TREBUIE să fie `http://` sau `https://`.
+/// - Host-ul TREBUIE să fie `localhost`, `127.0.0.1` sau `[::1]`.
+/// - Orice alt host (extern, gol, etc.) → `false`.
+///
+/// Notă: ANAF OAuth folosește implicit `http://localhost:{port}/callback`;
+/// `https://` este acceptat pentru compatibilitate, dar în practică ANAF
+/// nu trimite TLS pe loopback.
+pub fn is_allowed_redirect_uri(url: &str) -> bool {
+    // Strip http:// or https://
+    let rest = if let Some(r) = url.strip_prefix("http://") {
+        r
+    } else if let Some(r) = url.strip_prefix("https://") {
+        r
+    } else {
+        return false;
+    };
+    // Handle IPv6 literal host: http://[::1]:port/path
+    // The bracket-enclosed part is the host; strip it first.
+    if rest.starts_with('[') {
+        let close = match rest.find(']') {
+            Some(i) => i,
+            None => return false,
+        };
+        let host = &rest[..=close]; // includes the brackets, e.g. "[::1]"
+        return host == "[::1]";
+    }
+    // Extract host for IPv4 / hostname (everything before first '/', '?', '#', or ':')
+    let host = rest.split(['/', '?', '#', ':']).next().unwrap_or(rest);
+    if host.is_empty() {
+        return false;
+    }
+    matches!(host, "localhost" | "127.0.0.1")
+}
+
 /// Verifică dacă un URL este permis ca override OAuth ANAF.
 ///
 /// Reguli:
@@ -343,7 +380,7 @@ fn extract_query_param(request_line: &str, param: &str) -> Option<String> {
 
 /// Percent-decode un șir application/x-www-form-urlencoded:
 /// `%XX` → byte cu valoarea hexazecimală XX; `+` → spațiu.
-/// Octeții invalizi (secvențe incomplete/non-hex) sunt păstrați ca `?`.
+/// Octeții invalizi (secvențe incomplete/non-hex) sunt păstrați ca `%` literal.
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = String::with_capacity(s.len());
@@ -502,7 +539,40 @@ async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthResult, St
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_query_param, is_allowed_anaf_url, percent_decode};
+    use super::{
+        extract_query_param, is_allowed_anaf_url, is_allowed_redirect_uri, percent_decode,
+    };
+
+    // ─── is_allowed_redirect_uri tests ──────────────────────────────────────
+
+    #[test]
+    fn redirect_uri_localhost_ok() {
+        assert!(is_allowed_redirect_uri("http://localhost:8787/callback"));
+        assert!(is_allowed_redirect_uri("http://localhost/callback"));
+        assert!(is_allowed_redirect_uri("https://localhost:9000/cb"));
+    }
+
+    #[test]
+    fn redirect_uri_loopback_ip_ok() {
+        assert!(is_allowed_redirect_uri("http://127.0.0.1:8787/callback"));
+        assert!(is_allowed_redirect_uri("http://[::1]:8787/callback"));
+    }
+
+    #[test]
+    fn redirect_uri_external_host_rejected() {
+        assert!(!is_allowed_redirect_uri("http://evil.com/callback"));
+        assert!(!is_allowed_redirect_uri("https://anaf.ro/callback"));
+        assert!(!is_allowed_redirect_uri("http://192.168.1.1:8787/callback"));
+    }
+
+    #[test]
+    fn redirect_uri_bad_scheme_rejected() {
+        assert!(!is_allowed_redirect_uri("ftp://localhost/callback"));
+        assert!(!is_allowed_redirect_uri("localhost:8787/callback"));
+        assert!(!is_allowed_redirect_uri(""));
+    }
+
+    // ─── is_allowed_anaf_url tests ───────────────────────────────────────────
 
     #[test]
     fn allowed_anaf_urls() {

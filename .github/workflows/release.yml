@@ -50,6 +50,30 @@ jobs:
           fi
           echo "✅ All Windows signing secrets are configured"
 
+      - name: Check Tauri updater and keychain secrets
+        run: |
+          if [ -z "${{ secrets.KEYCHAIN_PASSWORD }}" ]; then
+            echo "❌ KEYCHAIN_PASSWORD secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.APPLE_ID }}" ]; then
+            echo "❌ APPLE_ID secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.APPLE_TEAM_ID }}" ]; then
+            echo "❌ APPLE_TEAM_ID secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
+            echo "❌ TAURI_SIGNING_PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" ]; then
+            echo "❌ TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is not set"
+            exit 1
+          fi
+          echo "✅ All Tauri updater and keychain secrets are configured"
+
   release-macos:
     name: Release macOS (universal)
     needs: check-signing-secrets

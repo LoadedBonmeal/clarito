@@ -30,7 +30,7 @@ export function formatError(e: unknown, fallback = 'A apărut o eroare neaștept
         return 'Eroare la generarea PDF.';
       case 'Archive':
         console.error('[app-error:archive]', p);
-        return `Eroare la arhivă/backup: ${p.message || 'operațiune eșuată.'}`;
+        return 'Eroare la arhivă/backup. Verificați spațiul pe disc și permisiunile.';
       // ── Internal: log + generic fallback ───────────────────────────────
       case 'Database':
       case 'Migration':

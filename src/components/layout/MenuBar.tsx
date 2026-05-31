@@ -78,7 +78,7 @@ function buildMenus(
       { type: "section", label: "e-Factura" },
       { type: "row", icon: "cloudUp", label: "Trimite factura la ANAF", kbd: "F9",       onClick: () => { void navigate({ to: "/invoices" }); } },
       { type: "row", icon: "refresh", label: "Verifică status mesaje",  kbd: "F10",      onClick: () => { void navigate({ to: "/invoices" }); } },
-      { type: "row", icon: "storno",  label: "Storno factură",          kbd: fmtShortcut("Ctrl+F9"), disabled: true },
+      { type: "row", icon: "storno",  label: "Storno factură",          kbd: fmtShortcut("Ctrl+F9"), onClick: () => { void navigate({ to: "/invoices" }); } },
       { type: "sep" },
       { type: "section", label: "Bancă & casă" },
       { type: "row", icon: "bank",    label: "Punctare extras bancar",  disabled: true },
@@ -125,7 +125,7 @@ function buildMenus(
       { type: "sep" },
       { type: "section", label: "Licență" },
       { type: "row", icon: "tag",      label: "Cumpără licență…", onClick: () => {
-        void import("@tauri-apps/plugin-opener").then(m => m.openPath(purchaseUrl)).catch(() => {
+        void import("@tauri-apps/plugin-opener").then(m => m.openUrl(purchaseUrl)).catch(() => {
           window.open(purchaseUrl, "_blank");
         });
       } },

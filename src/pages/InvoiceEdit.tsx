@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Icon } from "@/components/shared/Icon";
@@ -145,6 +145,22 @@ export function InvoiceEditPage() {
       navigate({ to: "/invoices/$id", params: { id } });
     },
   });
+
+  // Ctrl+S / Cmd+S — save the draft (mirrors InvoiceNew.tsx)
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        editMutation.mutate();
+      }
+    },
+    [editMutation],
+  );
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
 
   if (isLoading || !initialized) {
     return (

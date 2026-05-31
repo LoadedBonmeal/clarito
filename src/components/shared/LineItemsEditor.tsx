@@ -202,7 +202,7 @@ export function LineItemsEditor({
                       <br />
                       <b>S</b> — Standard (TVA aplicată normal)
                       <br />
-                      <b>AE</b> — Taxare inversă (neplătitor TVA sau B2B intracomunitar)
+                      <b>AE</b> — Taxare inversă (reverse-charge B2B intracomunitar sau intern, TVA 0%)
                       <br />
                       <b>E</b> — Scutit cu drept de deducere (intern)
                       <br />
