@@ -93,6 +93,9 @@ function CompanySwitcher({ companies, activeCompanyId, onSelect, onClose }: Comp
       style={{ alignItems: "flex-start", paddingTop: 54 }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Selectare companie activă"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
         style={{

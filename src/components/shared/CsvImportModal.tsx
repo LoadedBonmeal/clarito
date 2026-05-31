@@ -6,6 +6,13 @@ import { useRef, useState } from "react";
 import { Icon } from "@/components/shared/Icon";
 import { api } from "@/lib/tauri";
 import { formatError } from "@/lib/error-mapper";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 interface CsvImportModalProps {
   type: "invoices" | "contacts";
@@ -123,37 +130,35 @@ export function CsvImportModal({
   };
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.45)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
-      onClick={onClose}
+    <Dialog
+      open
+      onOpenChange={(open) => { if (!open) onClose(); }}
     >
-      <div
+      <DialogContent
         style={{
           width: 520,
+          maxWidth: "calc(100% - 2rem)",
           background: "var(--bg-content)",
           border: "1px solid var(--border-strong)",
           boxShadow: "0 4px 24px rgba(0,0,0,0.18)",
           padding: "20px 24px 18px",
         }}
-        onClick={(e) => e.stopPropagation()}
+        showCloseButton={false}
       >
         {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>
-            Import {TYPE_LABELS[type]} din CSV
-          </h3>
-          <button type="button" className="btn-icon" aria-label="Închide" onClick={onClose}>
-            <Icon name="x" size={14} />
-          </button>
-        </div>
+        <DialogHeader style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <DialogTitle style={{ fontSize: 14, fontWeight: 700 }}>
+              Import {TYPE_LABELS[type]} din CSV
+            </DialogTitle>
+            <button type="button" className="btn-icon" aria-label="Închide" onClick={onClose}>
+              <Icon name="x" size={14} />
+            </button>
+          </div>
+          <DialogDescription className="sr-only">
+            Importați {TYPE_LABELS[type].toLowerCase()} dintr-un fișier CSV.
+          </DialogDescription>
+        </DialogHeader>
 
         {/* Template download */}
         <div style={{ marginBottom: 12 }}>
@@ -308,7 +313,7 @@ export function CsvImportModal({
             {importing ? "Se importă…" : "Importă"}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -17,6 +17,13 @@ import { api } from "@/lib/tauri";
 import { fmtRON, parseDec } from "@/lib/utils";
 import type { AppErrorPayload } from "@/types";
 import { useAppStore } from "@/lib/store";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 export function InvoiceDetailPage() {
   const navigate = useNavigate();
@@ -714,48 +721,56 @@ export function InvoiceDetailPage() {
         </div>
       </div>
 
-      {/* Storno confirmation modal */}
-      {showStornoModal && (
-        <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
-          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999
-        }}>
-          <div className="panel" style={{ width: 420, padding: 20, boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
-            <h3 style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 600 }}>Stornare factură {invoice.fullNumber}</h3>
-            <p style={{ fontSize: 11.5, color: "var(--text-muted)", margin: "0 0 10px" }}>
+      {/* Storno confirmation modal — Radix Dialog (focus trap, Esc-close, role=dialog, aria-modal) */}
+      <Dialog
+        open={showStornoModal}
+        onOpenChange={(open) => {
+          if (!open) { setShowStornoModal(false); setStornoReason(""); }
+        }}
+      >
+        <DialogContent
+          className="panel"
+          style={{ width: 420, maxWidth: "calc(100% - 2rem)", padding: 20, boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}
+          showCloseButton={false}
+        >
+          <DialogHeader>
+            <DialogTitle style={{ fontSize: 13, fontWeight: 600 }}>
+              Stornare factură {invoice.fullNumber}
+            </DialogTitle>
+            <DialogDescription style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
               Această acțiune marchează factura ca anulată. Introduceți motivul stornării:
-            </p>
-            <textarea
-              value={stornoReason}
-              onChange={e => setStornoReason(e.target.value)}
-              placeholder="Ex: Eroare de preț, anulare comandă..."
-              style={{
-                width: "100%", minHeight: 72, padding: "6px 8px", boxSizing: "border-box",
-                border: "1px solid var(--border)", borderRadius: 3,
-                background: "var(--surface)", color: "var(--text)",
-                fontSize: 11.5, resize: "vertical", fontFamily: "inherit"
+            </DialogDescription>
+          </DialogHeader>
+          <textarea
+            value={stornoReason}
+            onChange={e => setStornoReason(e.target.value)}
+            placeholder="Ex: Eroare de preț, anulare comandă..."
+            style={{
+              width: "100%", minHeight: 72, padding: "6px 8px", boxSizing: "border-box",
+              border: "1px solid var(--border)", borderRadius: 3,
+              background: "var(--surface)", color: "var(--text)",
+              fontSize: 11.5, resize: "vertical", fontFamily: "inherit"
+            }}
+            autoFocus
+          />
+          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 4 }}>
+            <button className="btn" onClick={() => { setShowStornoModal(false); setStornoReason(""); }}>
+              Anulează
+            </button>
+            <button
+              className="btn danger"
+              disabled={!stornoReason.trim() || stornoInvoice.isPending}
+              onClick={() => {
+                stornoInvoice.mutate(stornoReason.trim());
+                setShowStornoModal(false);
+                setStornoReason("");
               }}
-              autoFocus
-            />
-            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 12 }}>
-              <button className="btn" onClick={() => { setShowStornoModal(false); setStornoReason(""); }}>
-                Anulează
-              </button>
-              <button
-                className="btn danger"
-                disabled={!stornoReason.trim() || stornoInvoice.isPending}
-                onClick={() => {
-                  stornoInvoice.mutate(stornoReason.trim());
-                  setShowStornoModal(false);
-                  setStornoReason("");
-                }}
-              >
-                {stornoInvoice.isPending ? "Se stornează…" : "Stornează factura"}
-              </button>
-            </div>
+            >
+              {stornoInvoice.isPending ? "Se stornează…" : "Stornează factura"}
+            </button>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
