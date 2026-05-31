@@ -14,6 +14,25 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 
+// ─── Report view search param type ───────────────────────────────────────────
+
+export type ReportView =
+  | "tva"
+  | "d394"
+  | "saft"
+  | "sales-journal"
+  | "purchase-journal"
+  | "accounting-export";
+
+const REPORT_VIEWS: ReportView[] = [
+  "tva",
+  "d394",
+  "saft",
+  "sales-journal",
+  "purchase-journal",
+  "accounting-export",
+];
+
 import { AppShell } from "@/components/layout/AppShell";
 import { DashboardPage } from "@/pages/Dashboard";
 import { CompaniesPage } from "@/pages/Companies";
@@ -132,6 +151,13 @@ const reportsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/reports",
   component: ReportsPage,
+  validateSearch: (search: Record<string, unknown>): { view?: ReportView } => ({
+    view:
+      typeof search.view === "string" &&
+      REPORT_VIEWS.includes(search.view as ReportView)
+        ? (search.view as ReportView)
+        : undefined,
+  }),
 });
 
 const settingsRoute = createRoute({

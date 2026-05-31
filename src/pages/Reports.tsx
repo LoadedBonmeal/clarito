@@ -1,10 +1,18 @@
 /**
- * Rapoarte — TVA summary, statistici facturi, tabel per perioadă.
- * TVA breakdown din backend (generate_vat_report); lista facturi din invoices.list.
+ * Rapoarte — shell cu tab-uri per tip de raport, selectat prin ?view= param.
+ *
+ * Views disponibile:
+ *  tva              — sumar TVA (default, conținut original)
+ *  d394             — D394 livrări per partener
+ *  saft             — D406 SAF-T export
+ *  sales-journal    — jurnal de vânzări
+ *  purchase-journal — jurnal de cumpărări
+ *  accounting-export— export SAGA / WinMentor
  */
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearch, useNavigate } from "@tanstack/react-router";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
@@ -18,6 +26,13 @@ import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import type { Invoice, Contact } from "@/types";
+import type { ReportView } from "@/router";
+
+import { D394View } from "./reports/D394View";
+import { SaftView } from "./reports/SaftView";
+import { SalesJournalView } from "./reports/SalesJournalView";
+import { PurchaseJournalView } from "./reports/PurchaseJournalView";
+import { AccountingExportView } from "./reports/AccountingExportView";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -47,24 +62,48 @@ function periodDateRange(year: number, month: number): { dateFrom: string; dateT
   };
 }
 
+// ─── Tab definitions ─────────────────────────────────────────────────────────
+
+interface TabDef {
+  view: ReportView;
+  label: string;
+}
+
+const TABS: TabDef[] = [
+  { view: "tva",               label: "TVA / D300" },
+  { view: "d394",              label: "D394" },
+  { view: "saft",              label: "D406 SAF-T" },
+  { view: "sales-journal",     label: "Jurnal vânzări" },
+  { view: "purchase-journal",  label: "Jurnal cumpărări" },
+  { view: "accounting-export", label: "Export contabil" },
+];
+
 // ─── component ───────────────────────────────────────────────────────────────
 
 export function ReportsPage() {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
+  const navigate = useNavigate();
+
+  // Active view from search param (validated in router.tsx; undefined → default "tva")
+  const { view: viewParam } = useSearch({ from: "/reports" });
+  const view: ReportView = viewParam ?? "tva";
 
   const now = new Date();
-  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+  const [selectedYear, setSelectedYear]   = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1); // 1-indexed
-  const [exportingSaga, setExportingSaga] = useState(false);
-  const [exportingWinmentor, setExportingWinmentor] = useState(false);
-  const [exportingVat, setExportingVat] = useState(false);
-  const [exportingSaft, setExportingSaft] = useState(false);
+  const [exportingVat, setExportingVat]   = useState(false);
 
   const yearOptions = buildYearOptions();
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
 
-  // Backend VAT report — accurate per-rate breakdown from invoice_line_items
-  const { data: vatReport, isLoading: vatLoading, isError: vatError, error: vatErr, refetch: refetchVat } = useQuery({
+  // Backend VAT report — only fetch when tva view is active (or always; it's cheap)
+  const {
+    data: vatReport,
+    isLoading: vatLoading,
+    isError: vatError,
+    error: vatErr,
+    refetch: refetchVat,
+  } = useQuery({
     queryKey: queryKeys.vatReport.get(selectedYear, selectedMonth, activeCompanyId ?? ""),
     queryFn: () =>
       api.reports.generateVatReport(dateFrom, dateTo, activeCompanyId ?? undefined),
@@ -72,7 +111,7 @@ export function ReportsPage() {
     staleTime: 60_000,
   });
 
-  // Fetch invoices for the period list table
+  // Fetch invoices for period list (shared by tva + sales-journal + accounting-export)
   const { data: paged, isLoading: invoicesLoading } = useQuery({
     queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 500 } }),
     queryFn: () =>
@@ -96,82 +135,37 @@ export function ReportsPage() {
     [contactList],
   );
 
-  const handleExportSaft = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
-    // Empty-period guard: SAF-T is yearly — warn if no invoices exist at all for that year
-    const yearInvoices = allInvoices.filter((inv) => inv.issueDate.startsWith(String(selectedYear)));
-    if (yearInvoices.length === 0) {
-      notify.info(`Nu există date pentru anul ${selectedYear}.`);
-      return;
-    }
-    const savePath = await saveDialog({
-      title: "Salvează SAF-T D406",
-      defaultPath: `saft-d406-${selectedYear}.xml`,
-      filters: [{ name: "XML", extensions: ["xml"] }],
-    });
-    if (!savePath) return;
-    setExportingSaft(true);
-    try {
-      const xml = await api.saft.exportD406(activeCompanyId, selectedYear, undefined);
-      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-      await writeTextFile(savePath, xml);
-      notify.success(`SAF-T D406 salvat: ${savePath}`);
-      try { await openPath(savePath); } catch { /* reveal best-effort */ }
-    } catch (err) {
-      notify.error(formatError(err, 'Nu s-a putut exporta SAF-T D406.'));
-    } finally {
-      setExportingSaft(false);
-    }
-  };
+  // Filter by selected period
+  const prefix = periodPrefix(selectedYear, selectedMonth);
+  const periodInvoices = useMemo(
+    () => allInvoices.filter((inv) => inv.issueDate.startsWith(prefix)),
+    [allInvoices, prefix],
+  );
 
-  const handleExportSaga = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
-    if (periodInvoices.length === 0) {
-      notify.info("Nu există date pentru perioada selectată.");
-      return;
-    }
-    const savePath = await saveDialog({
-      title: "Salvează export SAGA",
-      defaultPath: `facturi-saga-${dateFrom}-${dateTo}.csv`,
-      filters: [{ name: "CSV", extensions: ["csv"] }],
-    });
-    if (!savePath) return;
-    setExportingSaga(true);
-    try {
-      await api.integrations.exportSagaCsv(activeCompanyId, dateFrom, dateTo, savePath);
-      notify.success(`Export SAGA salvat: ${savePath}`);
-      try { await openPath(savePath); } catch { /* reveal best-effort */ }
-    } catch (err) {
-      notify.error(formatError(err, 'Nu s-a putut exporta în SAGA.'));
-    } finally {
-      setExportingSaga(false);
-    }
-  };
+  // Invoices for the selected year (SAF-T)
+  const yearInvoices = useMemo(
+    () => allInvoices.filter((inv) => inv.issueDate.startsWith(String(selectedYear))),
+    [allInvoices, selectedYear],
+  );
 
-  const handleExportWinmentor = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
-    if (periodInvoices.length === 0) {
-      notify.info("Nu există date pentru perioada selectată.");
-      return;
-    }
-    const savePath = await saveDialog({
-      title: "Salvează export WinMentor",
-      defaultPath: `facturi-winmentor-${dateFrom}-${dateTo}.csv`,
-      filters: [{ name: "CSV", extensions: ["csv"] }],
-    });
-    if (!savePath) return;
-    setExportingWinmentor(true);
-    try {
-      await api.integrations.exportWinmentorCsv(activeCompanyId, dateFrom, dateTo, savePath);
-      notify.success(`Export WinMentor salvat: ${savePath}`);
-      try { await openPath(savePath); } catch { /* reveal best-effort */ }
-    } catch (err) {
-      notify.error(formatError(err, 'Nu s-a putut exporta în WinMentor.'));
-    } finally {
-      setExportingWinmentor(false);
-    }
-  };
+  // Invoice statistics from period list
+  const stats = useMemo(() => {
+    const totalCount = periodInvoices.length;
+    const totalNet   = periodInvoices.reduce((s, i) => s + parseDec(i.subtotalAmount), 0);
+    const totalVat   = periodInvoices.reduce((s, i) => s + parseDec(i.vatAmount), 0);
+    const totalGross = periodInvoices.reduce((s, i) => s + parseDec(i.totalAmount), 0);
+    return { totalCount, totalNet, totalVat, totalGross };
+  }, [periodInvoices]);
 
+  // VAT groups from backend
+  const vatGroups = vatReport?.vatGroups ?? [];
+  const vatTotals = vatReport
+    ? { base: parseDec(vatReport.totalBase), vat: parseDec(vatReport.totalVat), total: parseDec(vatReport.totalAmount) }
+    : { base: 0, vat: 0, total: 0 };
+
+  const isLoading = invoicesLoading || vatLoading;
+
+  // ── Export TVA CSV (only used in tva view) ────────────────────────────────
   const handleExportVatCsv = async () => {
     if (periodInvoices.length === 0 && vatGroups.length === 0) {
       notify.info("Nu există date pentru perioada selectată.");
@@ -189,40 +183,21 @@ export function ReportsPage() {
         "vat",
         { dateFrom, dateTo, companyId: activeCompanyId ?? undefined },
         "csv",
-        outputPath
+        outputPath,
       );
       notify.success(`Raport TVA salvat: ${saved}`);
       try { await openPath(saved); } catch { /* reveal best-effort */ }
     } catch (err) {
-      notify.error(formatError(err, 'Nu s-a putut exporta raportul TVA.'));
+      notify.error(formatError(err, "Nu s-a putut exporta raportul TVA."));
     } finally {
       setExportingVat(false);
     }
   };
 
-  // Filter by selected period for the invoice list
-  const prefix = periodPrefix(selectedYear, selectedMonth);
-  const periodInvoices = useMemo(
-    () => allInvoices.filter((inv) => inv.issueDate.startsWith(prefix)),
-    [allInvoices, prefix],
-  );
-
-  // Invoice statistics from period list
-  const stats = useMemo(() => {
-    const totalCount = periodInvoices.length;
-    const totalNet = periodInvoices.reduce((s, i) => s + parseDec(i.subtotalAmount), 0);
-    const totalVat = periodInvoices.reduce((s, i) => s + parseDec(i.vatAmount), 0);
-    const totalGross = periodInvoices.reduce((s, i) => s + parseDec(i.totalAmount), 0);
-    return { totalCount, totalNet, totalVat, totalGross };
-  }, [periodInvoices]);
-
-  // Use backend VAT groups if available, fallback to zeros
-  const vatGroups = vatReport?.vatGroups ?? [];
-  const vatTotals = vatReport
-    ? { base: parseDec(vatReport.totalBase), vat: parseDec(vatReport.totalVat), total: parseDec(vatReport.totalAmount) }
-    : { base: 0, vat: 0, total: 0 };
-
-  const isLoading = invoicesLoading || vatLoading;
+  // ── Tab navigation helper ─────────────────────────────────────────────────
+  function goToView(v: ReportView) {
+    void navigate({ to: "/reports", search: { view: v } });
+  }
 
   return (
     <div className="content">
@@ -231,56 +206,60 @@ export function ReportsPage() {
           <span className="crumb">e-Factura</span>
           Rapoarte
         </span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
-          <button
-            type="button"
-            className="btn"
-            disabled={exportingVat}
-            onClick={handleExportVatCsv}
-          >
-            <Icon name="download" size={12} /> {exportingVat ? "Export…" : "Export TVA CSV"}
-          </button>
-          <button
-            type="button"
-            className="btn"
-            disabled={exportingSaga || !activeCompanyId}
-            onClick={handleExportSaga}
-          >
-            <Icon name="download" size={12} /> {exportingSaga ? "Export…" : "Export Saga"}
-          </button>
-          <button
-            type="button"
-            className="btn"
-            disabled={exportingWinmentor || !activeCompanyId}
-            onClick={handleExportWinmentor}
-          >
-            <Icon name="download" size={12} /> {exportingWinmentor ? "Export…" : "Export WinMentor"}
-          </button>
-          <button
-            type="button"
-            className="btn"
-            disabled={exportingSaft || !activeCompanyId}
-            onClick={handleExportSaft}
-            title={`SAF-T D406 — standard ANAF de audit fiscal pentru ${selectedYear}`}
-          >
-            <Icon name="file" size={12} /> {exportingSaft ? "Export…" : `SAF-T D406 (vânzări, beta) ${selectedYear}`}
-          </button>
-        </span>
       </div>
 
-      {/* Period selector */}
+      {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          gap: 0,
+          borderBottom: "1px solid var(--border)",
+          padding: "0 14px",
+          background: "var(--bg)",
+        }}
+      >
+        {TABS.map((tab) => {
+          const active = view === tab.view;
+          return (
+            <button
+              key={tab.view}
+              type="button"
+              onClick={() => goToView(tab.view)}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent",
+                padding: "7px 13px",
+                fontSize: 11.5,
+                fontWeight: active ? 600 : 400,
+                color: active ? "var(--accent)" : "var(--text-muted)",
+                cursor: "pointer",
+                marginBottom: -1,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Period selector (shared) ──────────────────────────────────────────── */}
       <div style={{ padding: "10px 14px 0", display: "flex", gap: 8, alignItems: "center" }}>
         <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Perioadă:</span>
         <div className="field" style={{ display: "inline-flex", gap: 6 }}>
-          <select
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(Number(e.target.value))}
-            style={{ fontSize: 12, padding: "3px 6px" }}
-          >
-            {MONTHS.map((m, idx) => (
-              <option key={idx + 1} value={idx + 1}>{m}</option>
-            ))}
-          </select>
+          {/* Month selector hidden for SAF-T (yearly) */}
+          {view !== "saft" && (
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(Number(e.target.value))}
+              style={{ fontSize: 12, padding: "3px 6px" }}
+            >
+              {MONTHS.map((m, idx) => (
+                <option key={idx + 1} value={idx + 1}>{m}</option>
+              ))}
+            </select>
+          )}
           <select
             value={selectedYear}
             onChange={(e) => setSelectedYear(Number(e.target.value))}
@@ -291,135 +270,175 @@ export function ReportsPage() {
             ))}
           </select>
         </div>
-        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-          {periodInvoices.length} facturi în perioadă
-        </span>
+        {view !== "saft" && (
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+            {periodInvoices.length} facturi emise în perioadă
+          </span>
+        )}
       </div>
 
+      {/* ── View content ─────────────────────────────────────────────────────── */}
       <div style={{ padding: "14px 14px 0" }}>
 
-        {/* ── Statistics cards ─────────────────────────────────────────────── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 18 }}>
-          <StatCard
-            label="Total facturi emise"
-            value={String(stats.totalCount)}
-            icon="invoice"
-          />
-          <StatCard
-            label="Total net (RON)"
-            value={fmtRON(stats.totalNet)}
-            icon="bank"
-          />
-          <StatCard
-            label="Total TVA (RON)"
-            value={fmtRON(stats.totalVat)}
-            icon="receipt"
-          />
-          <StatCard
-            label="Total cu TVA (RON)"
-            value={fmtRON(stats.totalGross)}
-            icon="reports"
-            highlight
-          />
-        </div>
+        {/* ── TVA (default) ──────────────────────────────────────────────────── */}
+        {view === "tva" && (
+          <>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={exportingVat}
+                onClick={handleExportVatCsv}
+              >
+                <Icon name="download" size={12} /> {exportingVat ? "Export…" : "Export TVA CSV"}
+              </button>
+            </div>
 
-        {/* ── TVA Summary table ─────────────────────────────────────────────── */}
-        <section style={{ marginBottom: 24 }}>
-          <h2 style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
-            Sumar TVA — {MONTHS[selectedMonth - 1]} {selectedYear}
-          </h2>
-          {isLoading ? (
-            <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Se încarcă…</div>
-          ) : vatError ? (
-            <QueryErrorBanner error={vatErr} label="raportul TVA" onRetry={() => void refetchVat()} />
-          ) : vatGroups.length === 0 ? (
-            <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Nicio factură în perioada selectată.</div>
-          ) : (
-            <>
-              <table className="dt">
-                <thead>
-                  <tr>
-                    <th style={{ width: 120 }}>Rată TVA</th>
-                    <th className="num" style={{ width: 160 }}>Bază impozabilă (RON)</th>
-                    <th className="num" style={{ width: 130 }}>TVA (RON)</th>
-                    <th className="num" style={{ width: 160 }}>Total (RON)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {vatGroups.map((g) => (
-                    <tr key={g.rate}>
-                      <td><span className="mono">{g.rate}%</span></td>
-                      <td className="num tnum">{fmtRON(g.baseAmount)}</td>
-                      <td className="num tnum muted">{fmtRON(g.vatAmount)}</td>
-                      <td className="num tnum"><b>{fmtRON(parseDec(g.baseAmount) + parseDec(g.vatAmount))}</b></td>
+            {/* Statistics cards */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 18 }}>
+              <StatCard label="Total facturi emise" value={String(stats.totalCount)} icon="invoice" />
+              <StatCard label="Total net (RON)"     value={fmtRON(stats.totalNet)}   icon="bank" />
+              <StatCard label="Total TVA (RON)"     value={fmtRON(stats.totalVat)}   icon="receipt" />
+              <StatCard label="Total cu TVA (RON)"  value={fmtRON(stats.totalGross)} icon="reports" highlight />
+            </div>
+
+            {/* TVA Summary table */}
+            <section style={{ marginBottom: 24 }}>
+              <h2 style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                Sumar TVA — {MONTHS[selectedMonth - 1]} {selectedYear}
+              </h2>
+              {isLoading ? (
+                <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Se încarcă…</div>
+              ) : vatError ? (
+                <QueryErrorBanner error={vatErr} label="raportul TVA" onRetry={() => void refetchVat()} />
+              ) : vatGroups.length === 0 ? (
+                <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Nicio factură în perioada selectată.</div>
+              ) : (
+                <>
+                  <table className="dt">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 120 }}>Rată TVA</th>
+                        <th className="num" style={{ width: 160 }}>Bază impozabilă (RON)</th>
+                        <th className="num" style={{ width: 130 }}>TVA (RON)</th>
+                        <th className="num" style={{ width: 160 }}>Total (RON)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vatGroups.map((g) => (
+                        <tr key={g.rate}>
+                          <td><span className="mono">{g.rate}%</span></td>
+                          <td className="num tnum">{fmtRON(g.baseAmount)}</td>
+                          <td className="num tnum muted">{fmtRON(g.vatAmount)}</td>
+                          <td className="num tnum"><b>{fmtRON(parseDec(g.baseAmount) + parseDec(g.vatAmount))}</b></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{ background: "var(--bg-hover)", fontWeight: 600 }}>
+                        <td>TOTAL</td>
+                        <td className="num tnum">{fmtRON(vatTotals.base)}</td>
+                        <td className="num tnum">{fmtRON(vatTotals.vat)}</td>
+                        <td className="num tnum"><b>{fmtRON(vatTotals.total)}</b></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                  {/* Simple CSS bar chart for VAT groups */}
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 80, marginTop: 12 }}>
+                    {vatGroups.map(g => {
+                      const gTotal = parseDec(g.baseAmount) + parseDec(g.vatAmount);
+                      const pct = vatTotals.total > 0 ? (gTotal / vatTotals.total) * 100 : 0;
+                      return (
+                        <div key={g.rate} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                          <div style={{ fontSize: 9, color: "var(--text-muted)" }}>{fmtRON(gTotal)}</div>
+                          <div style={{ width: 32, height: `${Math.max(pct * 0.7, 4)}px`, background: "var(--accent)", borderRadius: 2 }} />
+                          <div style={{ fontSize: 9, color: "var(--text-muted)" }}>{g.rate}%</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </section>
+
+            {/* Invoice list */}
+            <section style={{ marginBottom: 24 }}>
+              <h2 style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                Facturi emise — {MONTHS[selectedMonth - 1]} {selectedYear}
+              </h2>
+              {isLoading ? (
+                <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Se încarcă…</div>
+              ) : periodInvoices.length === 0 ? (
+                <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Nicio factură în perioada selectată.</div>
+              ) : (
+                <table className="dt">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 130 }}>Număr</th>
+                      <th>Client / ID contact</th>
+                      <th style={{ width: 96 }}>Data</th>
+                      <th style={{ width: 120 }}>Status</th>
+                      <th className="num" style={{ width: 130 }}>Valoare net (RON)</th>
+                      <th className="num" style={{ width: 110 }}>TVA (RON)</th>
+                      <th className="num" style={{ width: 130 }}>Total (RON)</th>
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr style={{ background: "var(--bg-hover)", fontWeight: 600 }}>
-                    <td>TOTAL</td>
-                    <td className="num tnum">{fmtRON(vatTotals.base)}</td>
-                    <td className="num tnum">{fmtRON(vatTotals.vat)}</td>
-                    <td className="num tnum"><b>{fmtRON(vatTotals.total)}</b></td>
-                  </tr>
-                </tfoot>
-              </table>
-              {/* Simple CSS bar chart for VAT groups */}
-              <div style={{ display: "flex", gap: 8, alignItems: "flex-end", height: 80, marginTop: 12 }}>
-                {vatGroups.map(g => {
-                  const gTotal = parseDec(g.baseAmount) + parseDec(g.vatAmount);
-                  const pct = vatTotals.total > 0 ? (gTotal / vatTotals.total) * 100 : 0;
-                  return (
-                    <div key={g.rate} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                      <div style={{ fontSize: 9, color: "var(--text-muted)" }}>{fmtRON(gTotal)}</div>
-                      <div style={{ width: 32, height: `${Math.max(pct * 0.7, 4)}px`, background: "var(--accent)", borderRadius: 2 }} />
-                      <div style={{ fontSize: 9, color: "var(--text-muted)" }}>{g.rate}%</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </section>
+                  </thead>
+                  <tbody>
+                    {periodInvoices.map((inv) => (
+                      <InvoiceRow key={inv.id} invoice={inv} contactMap={contactMap} />
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ background: "var(--bg-hover)", fontWeight: 600 }}>
+                      <td colSpan={4}>TOTAL perioadă</td>
+                      <td className="num tnum">{fmtRON(stats.totalNet)}</td>
+                      <td className="num tnum">{fmtRON(stats.totalVat)}</td>
+                      <td className="num tnum"><b>{fmtRON(stats.totalGross)}</b></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+            </section>
+          </>
+        )}
 
-        {/* ── Invoice list ──────────────────────────────────────────────────── */}
-        <section style={{ marginBottom: 24 }}>
-          <h2 style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
-            Facturi emise — {MONTHS[selectedMonth - 1]} {selectedYear}
-          </h2>
-          {isLoading ? (
-            <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Se încarcă…</div>
-          ) : periodInvoices.length === 0 ? (
-            <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Nicio factură în perioada selectată.</div>
-          ) : (
-            <table className="dt">
-              <thead>
-                <tr>
-                  <th style={{ width: 130 }}>Număr</th>
-                  <th>Client / ID contact</th>
-                  <th style={{ width: 96 }}>Data</th>
-                  <th style={{ width: 120 }}>Status</th>
-                  <th className="num" style={{ width: 130 }}>Valoare net (RON)</th>
-                  <th className="num" style={{ width: 110 }}>TVA (RON)</th>
-                  <th className="num" style={{ width: 130 }}>Total (RON)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {periodInvoices.map((inv) => (
-                  <InvoiceRow key={inv.id} invoice={inv} contactMap={contactMap} />
-                ))}
-              </tbody>
-              <tfoot>
-                <tr style={{ background: "var(--bg-hover)", fontWeight: 600 }}>
-                  <td colSpan={4}>TOTAL perioadă</td>
-                  <td className="num tnum">{fmtRON(stats.totalNet)}</td>
-                  <td className="num tnum">{fmtRON(stats.totalVat)}</td>
-                  <td className="num tnum"><b>{fmtRON(stats.totalGross)}</b></td>
-                </tr>
-              </tfoot>
-            </table>
-          )}
-        </section>
+        {/* ── D394 ───────────────────────────────────────────────────────────── */}
+        {view === "d394" && (
+          <D394View dateFrom={dateFrom} dateTo={dateTo} />
+        )}
+
+        {/* ── SAF-T ──────────────────────────────────────────────────────────── */}
+        {view === "saft" && (
+          <SaftView
+            selectedYear={selectedYear}
+            allInvoicesForYear={yearInvoices}
+          />
+        )}
+
+        {/* ── Jurnal vânzări ─────────────────────────────────────────────────── */}
+        {view === "sales-journal" && (
+          <SalesJournalView
+            periodInvoices={periodInvoices}
+            contactMap={contactMap}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            isLoading={invoicesLoading}
+          />
+        )}
+
+        {/* ── Jurnal cumpărări ───────────────────────────────────────────────── */}
+        {view === "purchase-journal" && (
+          <PurchaseJournalView dateFrom={dateFrom} dateTo={dateTo} />
+        )}
+
+        {/* ── Export contabil ────────────────────────────────────────────────── */}
+        {view === "accounting-export" && (
+          <AccountingExportView
+            periodInvoices={periodInvoices}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+          />
+        )}
 
       </div>
     </div>

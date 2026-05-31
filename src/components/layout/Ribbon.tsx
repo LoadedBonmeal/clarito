@@ -176,12 +176,12 @@ export function Ribbon({ onOpenPalette, onOpenShortcuts }: RibbonProps) {
       <div className="ribbon-group">
         <div className="ribbon-group-label">Rapoarte & Declarații</div>
         <div className="ribbon-group-buttons">
-          <BtnBig icon="reports" label="D300 TVA"          onClick={() => navigate({ to: "/reports" })} />
-          <BtnBig icon="reports" label="D394"              onClick={() => navigate({ to: "/reports" })} />
-          <BtnBig icon="reports" label="D406 SAF-T"        onClick={() => navigate({ to: "/reports" })} />
-          <BtnBig icon="reports" label="Jurnal vânzări"    onClick={() => navigate({ to: "/reports" })} />
-          <BtnBig icon="reports" label="Jurnal cumpărări"  onClick={() => navigate({ to: "/reports" })} />
-          <BtnBig icon="reports" label="Export contabil"   onClick={() => navigate({ to: "/reports" })} />
+          <BtnBig icon="reports" label="D300 TVA"          onClick={() => navigate({ to: "/declarations" })} />
+          <BtnBig icon="reports" label="D394"              onClick={() => navigate({ to: "/reports", search: { view: "d394" } })} />
+          <BtnBig icon="reports" label="D406 SAF-T"        onClick={() => navigate({ to: "/reports", search: { view: "saft" } })} />
+          <BtnBig icon="reports" label="Jurnal vânzări"    onClick={() => navigate({ to: "/reports", search: { view: "sales-journal" } })} />
+          <BtnBig icon="reports" label="Jurnal cumpărări"  onClick={() => navigate({ to: "/reports", search: { view: "purchase-journal" } })} />
+          <BtnBig icon="reports" label="Export contabil"   onClick={() => navigate({ to: "/reports", search: { view: "accounting-export" } })} />
         </div>
       </div>
 
