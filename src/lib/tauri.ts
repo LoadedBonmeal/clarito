@@ -107,10 +107,11 @@ export const invoices = {
   /** R14 Wave A: companyId is required — cross-company update returns NotFound. */
   updateDraft: (id: string, companyId: string, input: CreateInvoiceInput) =>
     invoke<Invoice>("update_invoice_draft", { id, companyId, input }),
-  validateDraft: (id: string) =>
+  /** G3: companyId is required — cross-company validation returns NotFound. */
+  validateDraft: (id: string, companyId: string) =>
     invoke<{ isValid: boolean; errors: string[]; warnings: string[] }>(
       "validate_invoice_draft",
-      { id }
+      { id, companyId }
     ),
   /** R13 Wave G: companyId is required — cross-company deletion returns NotFound. */
   delete: (id: string, companyId: string) =>

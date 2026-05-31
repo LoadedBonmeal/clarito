@@ -108,11 +108,13 @@ export function InvoiceNewPage() {
   const submitAfterSaveRef = useRef(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Live validation — runs after draft is saved
+  // Live validation — runs after draft is saved.
+  // G3: companyId is required; also gate on activeCompanyId so we never call
+  // validateDraft with an empty company string.
   const { data: validation, isFetching: validating } = useQuery({
     queryKey: queryKeys.invoiceValidation.get(savedId ?? ""),
-    queryFn: () => api.invoices.validateDraft(savedId!),
-    enabled: !!savedId,
+    queryFn: () => api.invoices.validateDraft(savedId!, activeCompanyId!),
+    enabled: !!savedId && !!activeCompanyId,
     staleTime: 30_000,
   });
 

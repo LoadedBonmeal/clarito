@@ -248,10 +248,15 @@ pub(crate) async fn submit_invoice_inner(
     // 1. Claim atomic DRAFT → QUEUED. Dacă alt apel concurrent a revendicat deja
     //    factura (sau statusul e altul decât DRAFT), respingem imediat — fără
     //    window de dublă trimitere.
+    //    G2: company_id is bound as ?2 so a foreign-company DRAFT is never flipped
+    //    to QUEUED — rows_affected == 0 for any wrong-company call, and the existing
+    //    "not draft" error path covers the wrong-company case without any status mutation.
     let claim = sqlx::query(
-        "UPDATE invoices SET status = 'QUEUED', updated_at = unixepoch() WHERE id = ?1 AND status = 'DRAFT'",
+        "UPDATE invoices SET status = 'QUEUED', updated_at = unixepoch() \
+         WHERE id = ?1 AND status = 'DRAFT' AND company_id = ?2",
     )
     .bind(invoice_id)
+    .bind(company_id)
     .execute(pool)
     .await
     .map_err(AppError::Database)?;
@@ -267,11 +272,10 @@ pub(crate) async fn submit_invoice_inner(
     let invoice = invoice_with_lines.invoice;
     let lines = invoice_with_lines.lines;
 
-    // Guard: company_id trebuie să corespundă facturii
+    // G2 defence-in-depth: verify ownership after fetch — mirrors anaf_check_invoice_status
+    // (~L500). Even if the claim SQL above has a bug, a foreign invoice cannot proceed.
     if invoice.company_id.as_str() != company_id {
-        return Err(AppError::Validation(
-            "Factura nu aparține companiei selectate.".into(),
-        ));
+        return Err(AppError::NotFound);
     }
 
     // 2. Încarcă compania + contactul din DB
