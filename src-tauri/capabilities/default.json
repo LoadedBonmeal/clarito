@@ -7,10 +7,30 @@
     "core:default",
     "opener:default",
     "dialog:default",
-    "fs:allow-read-file",
-    "fs:allow-write-file",
-    "fs:allow-read-dir",
-    "fs:allow-mkdir",
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$APPCONFIG/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$TEMP/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$APPCONFIG/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$TEMP/**" }
+      ]
+    },
     "fs:allow-app-read-recursive",
     "fs:allow-app-write-recursive",
     "os:default",
@@ -21,7 +41,6 @@
     "store:default",
     "window-state:default",
     "log:default",
-    "sql:default",
     "updater:allow-check",
     "updater:allow-download-and-install"
   ]

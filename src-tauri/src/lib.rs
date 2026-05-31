@@ -296,7 +296,6 @@ pub fn run() {
             commands::feedback::gather_diagnostic,
             commands::feedback::build_feedback_mailto,
         ])
-        .plugin(tauri_plugin_sql::Builder::default().build())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

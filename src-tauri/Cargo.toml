@@ -22,7 +22,6 @@ sha2 = "0.10"
 tauri = { version = "2", features = ["tray-icon"] }
 
 # Tauri plugins
-tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-store = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
