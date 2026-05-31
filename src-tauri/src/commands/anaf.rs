@@ -92,13 +92,31 @@ async fn build_oauth_config(pool: &sqlx::SqlitePool) -> oauth::OAuthConfig {
         }
     }
     if let Ok(Some(v)) = settings::get(pool, "anaf_oauth_authorize_url").await {
-        if !v.trim().is_empty() {
-            cfg.authorize_url = v.trim().to_string();
+        let candidate = v.trim().to_string();
+        if !candidate.is_empty() {
+            if oauth::is_allowed_anaf_url(&candidate) {
+                cfg.authorize_url = candidate;
+            } else {
+                tracing::warn!(
+                    url = %candidate,
+                    "anaf_oauth_authorize_url din setări nu respectă allowlist-ul \
+                     (https + *.anaf.ro) — se folosește URL-ul prod implicit"
+                );
+            }
         }
     }
     if let Ok(Some(v)) = settings::get(pool, "anaf_oauth_token_url").await {
-        if !v.trim().is_empty() {
-            cfg.token_url = v.trim().to_string();
+        let candidate = v.trim().to_string();
+        if !candidate.is_empty() {
+            if oauth::is_allowed_anaf_url(&candidate) {
+                cfg.token_url = candidate;
+            } else {
+                tracing::warn!(
+                    url = %candidate,
+                    "anaf_oauth_token_url din setări nu respectă allowlist-ul \
+                     (https + *.anaf.ro) — se folosește URL-ul prod implicit"
+                );
+            }
         }
     }
 
@@ -264,9 +282,13 @@ pub(crate) async fn submit_invoice_inner(
     if !archive_dir.starts_with(&base) {
         return Err(AppError::Validation("Cale de arhivă invalidă".into()));
     }
-    std::fs::create_dir_all(&archive_dir).map_err(AppError::Io)?;
+    tokio::fs::create_dir_all(&archive_dir)
+        .await
+        .map_err(AppError::Io)?;
     let xml_path = archive_dir.join("invoice.xml");
-    std::fs::write(&xml_path, xml_string.as_bytes()).map_err(AppError::Io)?;
+    tokio::fs::write(&xml_path, xml_string.as_bytes())
+        .await
+        .map_err(AppError::Io)?;
     // Actualizează xml_path în DB
     sqlx::query("UPDATE invoices SET xml_path = ?1, updated_at = unixepoch() WHERE id = ?2")
         .bind(xml_path.to_string_lossy().as_ref())

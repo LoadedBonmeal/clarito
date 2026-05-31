@@ -247,6 +247,28 @@ pub async fn revoke_token(access_token: &str) {
     let _ = client.post(DEFAULT_REVOKE_URL).form(&params).send().await;
 }
 
+/// Verifică dacă un URL este permis ca override OAuth ANAF.
+///
+/// Reguli:
+/// - Schema TREBUIE să fie `https://` (nu `http://`).
+/// - Host-ul TREBUIE să fie exact `anaf.ro` sau să se termine cu `.anaf.ro`
+///   (acoperă `logincert.anaf.ro` prod + orice `*.anaf.ro` test).
+/// - Orice altceva (scheme diferit, host terț, atac suffix `anaf.ro.evil.com`) → `false`.
+pub fn is_allowed_anaf_url(url: &str) -> bool {
+    // Trebuie să înceapă cu https://
+    let rest = match url.strip_prefix("https://") {
+        Some(r) => r,
+        None => return false,
+    };
+    // Extrage host-ul (tot ce precede primul '/', '?', '#')
+    let host = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    // Host gol → invalid
+    if host.is_empty() {
+        return false;
+    }
+    host == "anaf.ro" || host.ends_with(".anaf.ro")
+}
+
 /// Reîmprospătează access_token-ul folosind refresh_token-ul existent.
 /// Folosește URL-ul token din configurație (dacă s-a schimbat).
 pub async fn refresh_token_bundle(refresh_tok: &str) -> Result<OAuthResult, String> {
@@ -430,4 +452,57 @@ async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthResult, St
         refresh_token,
         expires_at,
     })
+}
+
+// ─── Tests ─────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::is_allowed_anaf_url;
+
+    #[test]
+    fn allowed_anaf_urls() {
+        // Prod host
+        assert!(is_allowed_anaf_url(
+            "https://logincert.anaf.ro/anaf-oauth2-server/authorize"
+        ));
+        // Prod token endpoint
+        assert!(is_allowed_anaf_url(
+            "https://logincert.anaf.ro/anaf-oauth2-server/token"
+        ));
+        // Any *.anaf.ro subdomain (e.g. test/staging)
+        assert!(is_allowed_anaf_url("https://x.anaf.ro/path"));
+        assert!(is_allowed_anaf_url(
+            "https://test.sandbox.anaf.ro/oauth/token"
+        ));
+        // Bare anaf.ro (no subdomain)
+        assert!(is_allowed_anaf_url("https://anaf.ro/oauth/authorize"));
+    }
+
+    #[test]
+    fn rejected_non_https() {
+        assert!(!is_allowed_anaf_url(
+            "http://logincert.anaf.ro/anaf-oauth2-server/authorize"
+        ));
+        assert!(!is_allowed_anaf_url("ftp://anaf.ro/token"));
+    }
+
+    #[test]
+    fn rejected_wrong_host() {
+        assert!(!is_allowed_anaf_url("https://evil.com/anaf.ro/authorize"));
+        assert!(!is_allowed_anaf_url("https://notanaf.ro/authorize"));
+        // Suffix attack: host is "anaf.ro.evil.com" — ends_with(".anaf.ro") is false
+        assert!(!is_allowed_anaf_url(
+            "https://anaf.ro.evil.com/anaf-oauth2-server/token"
+        ));
+        // Suffix attack variant: prefix match but not subdomain
+        assert!(!is_allowed_anaf_url("https://fake-anaf.ro/token"));
+    }
+
+    #[test]
+    fn rejected_empty_or_relative() {
+        assert!(!is_allowed_anaf_url(""));
+        assert!(!is_allowed_anaf_url("/relative/path"));
+        assert!(!is_allowed_anaf_url("https://"));
+    }
 }

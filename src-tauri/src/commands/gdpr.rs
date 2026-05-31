@@ -80,19 +80,19 @@ fn zip_dir_recursive<W: Write + std::io::Seek>(
 }
 
 /// Recursively delete all contents of a directory (but keep the directory itself).
-fn clear_dir_contents(dir: &std::path::Path) -> Result<(), AppError> {
+async fn clear_dir_contents(dir: &std::path::Path) -> Result<(), AppError> {
     if !dir.exists() {
         return Ok(());
     }
-    for entry in std::fs::read_dir(dir).map_err(AppError::Io)? {
-        let entry = entry.map_err(AppError::Io)?;
+    let mut read_dir = tokio::fs::read_dir(dir).await.map_err(AppError::Io)?;
+    while let Some(entry) = read_dir.next_entry().await.map_err(AppError::Io)? {
         let path = entry.path();
         if path.is_dir() {
-            std::fs::remove_dir_all(&path).map_err(|e| {
+            tokio::fs::remove_dir_all(&path).await.map_err(|e| {
                 AppError::Archive(format!("Eroare ștergere director {}: {e}", path.display()))
             })?;
         } else {
-            std::fs::remove_file(&path).map_err(|e| {
+            tokio::fs::remove_file(&path).await.map_err(|e| {
                 AppError::Archive(format!("Eroare ștergere fișier {}: {e}", path.display()))
             })?;
         }
@@ -218,7 +218,7 @@ pub async fn wipe_all_data(app: AppHandle, state: State<'_, AppState>) -> AppRes
     // Step 3: clear archive directory contents.
     let archive_dir = resolve_archive_dir(&state, &app).await?;
     if archive_dir.exists() {
-        if let Err(e) = clear_dir_contents(&archive_dir) {
+        if let Err(e) = clear_dir_contents(&archive_dir).await {
             tracing::warn!(error = ?e, "GDPR wipe: archive clear partially failed");
             return Err(e);
         }
@@ -246,15 +246,15 @@ pub async fn wipe_all_data(app: AppHandle, state: State<'_, AppState>) -> AppRes
 mod tests {
     use super::*;
 
-    #[test]
-    fn clear_dir_contents_removes_files_and_subdirs() {
+    #[tokio::test]
+    async fn clear_dir_contents_removes_files_and_subdirs() {
         let tmp = tempfile::tempdir().unwrap();
         let subdir = tmp.path().join("subdir");
         std::fs::create_dir(&subdir).unwrap();
         std::fs::write(tmp.path().join("file.xml"), b"<x/>").unwrap();
         std::fs::write(subdir.join("nested.pdf"), b"%PDF").unwrap();
 
-        clear_dir_contents(tmp.path()).unwrap();
+        clear_dir_contents(tmp.path()).await.unwrap();
 
         // Directory itself should still exist but be empty
         assert!(tmp.path().exists());
@@ -265,11 +265,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn clear_dir_contents_noop_if_missing() {
+    #[tokio::test]
+    async fn clear_dir_contents_noop_if_missing() {
         let missing = std::path::Path::new("/tmp/nonexistent_gdpr_test_dir_xyz");
         // Should not error if the directory doesn't exist
-        assert!(clear_dir_contents(missing).is_ok());
+        assert!(clear_dir_contents(missing).await.is_ok());
     }
 
     #[test]
