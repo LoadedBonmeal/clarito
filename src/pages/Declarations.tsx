@@ -1,12 +1,15 @@
 /**
- * Declarații ANAF — D300 Decont TVA (vânzări).
+ * Declarații ANAF — D300 Decont TVA.
  *
  * Această pagină calculează și exportă decontul de TVA (D300) — **partea de
  * vânzări** (TVA colectat), pe baza facturilor cu status VALIDATED din perioada
  * selectată.
  *
- * Partea de achiziții (TVA deductibilă) necesită date din facturi primite +
- * ajustări manuale și va fi adăugată ulterior.
+ * Partea de achiziții (TVA deductibilă): facturile primite stochează doar
+ * total_amount (fără defalcare pe cotă TVA — XMLurile nu sunt parsate în linii).
+ * Calculul automat nu este posibil fiabil; utilizatorul poate introduce manual
+ * totalul TVA deductibilă, iar aplicația calculează TVA de plată/recuperat.
+ * (Path B — schema received_invoices confirmată fără câmp vat_amount.)
  */
 
 import { useState } from "react";
@@ -56,6 +59,12 @@ export function DeclarationsPage() {
   const [report, setReport] = useState<D300Report | null>(null);
   const [computing, setComputing] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  // TVA deductibilă introdusă manual (achiziții).
+  // Facturile primite stochează doar total_amount, fără defalcare pe cotă TVA,
+  // deci calculul automat nu este posibil. Utilizatorul introduce totalul din
+  // evidența contabilă sau din facturile primite procesate manual.
+  const [manualDeductible, setManualDeductible] = useState<string>("0.00");
 
   const yearOptions = buildYearOptions();
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
@@ -112,6 +121,8 @@ export function DeclarationsPage() {
 
   const totalBase = report ? parseDec(report.totalBase) : 0;
   const totalVat = report ? parseDec(report.totalVat) : 0;
+  const deductibleVat = parseDec(manualDeductible) || 0;
+  const netTvaDePlata = totalVat - deductibleVat;
 
   return (
     <div className="content">
@@ -156,10 +167,12 @@ export function DeclarationsPage() {
           lineHeight: 1.6,
         }}
       >
-        <b style={{ color: "var(--text)" }}>Decont TVA — partea de vânzări (livrări).</b>{" "}
+        <b style={{ color: "var(--text)" }}>Decont TVA — partea de vânzări (TVA colectată).</b>{" "}
         Sunt incluse facturile cu status VALIDATED emise în perioada selectată, grupate pe
-        cotă și categorie TVA. Partea de achiziții (TVA deductibilă) va fi adăugată ulterior
-        (necesită date din facturi primite + ajustări manuale).
+        cotă și categorie TVA.{" "}
+        <b style={{ color: "var(--text)" }}>Partea de achiziții (TVA deductibilă)</b>{" "}
+        necesită facturile primite procesate și se va completa manual în formularul ANAF.
+        Introduceți mai jos totalul TVA deductibilă pentru a calcula TVA de plată netă.
       </div>
 
       {/* Period selector */}
@@ -232,7 +245,7 @@ export function DeclarationsPage() {
                 }}
               >
                 <span>CUI: <b style={{ color: "var(--text)" }}>{report.companyCui}</b></span>
-                <span>Factturi incluse: <b style={{ color: "var(--text)" }}>{report.invoiceCount}</b></span>
+                <span>Facturi incluse: <b style={{ color: "var(--text)" }}>{report.invoiceCount}</b></span>
               </div>
 
               {/* Tabel grupuri TVA */}
@@ -279,7 +292,7 @@ export function DeclarationsPage() {
                 </tbody>
                 <tfoot>
                   <tr style={{ background: "var(--bg-hover)", fontWeight: 600 }}>
-                    <td colSpan={2}>TOTAL</td>
+                    <td colSpan={2}>TOTAL VÂNZĂRI</td>
                     <td className="num tnum">{fmtRON(totalBase)}</td>
                     <td className="num tnum">{fmtRON(totalVat)}</td>
                     <td className="num tnum"><b>{fmtRON(totalBase + totalVat)}</b></td>
@@ -290,34 +303,99 @@ export function DeclarationsPage() {
           )}
         </section>
 
-        {/* ── Achiziții (out of scope) ───────────────────────────────────────── */}
+        {/* ── Achiziții — TVA deductibilă (manual) ──────────────────────────── */}
         <section style={{ marginBottom: 24 }}>
           <h2
             style={{
               fontSize: 12,
               fontWeight: 600,
               marginBottom: 8,
-              color: "var(--text-muted)",
+              color: "var(--text)",
               letterSpacing: "0.04em",
               textTransform: "uppercase",
-              opacity: 0.6,
             }}
           >
-            D300 — TVA Deductibil (Achiziții) — în curând
+            D300 — TVA Deductibil (Achiziții) — {MONTHS[selectedMonth - 1]} {selectedYear}
           </h2>
+
           <div
             style={{
               padding: "10px 14px",
-              background: "var(--bg)",
-              border: "1px dashed var(--border)",
+              background: "var(--bg-hover)",
+              border: "1px solid var(--border)",
               borderRadius: 4,
               fontSize: 11,
               color: "var(--text-muted)",
-              opacity: 0.7,
+              lineHeight: 1.6,
+              marginBottom: 12,
             }}
           >
-            Necesită date din facturi primite (SPV/manual) + ajustări pentru achiziții intracomunitare,
-            importuri, autolichidare. Va fi implementat în release-urile viitoare.
+            Facturile primite (SPV) stochează doar totalul — defalcarea pe cotă TVA necesită
+            procesare manuală a XMLurilor sau date contabile. Introduceți totalul TVA deductibilă
+            din evidența contabilă sau din formularul ANAF D300 (secțiunea achiziții).
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+            <label
+              htmlFor="manual-deductible"
+              style={{ fontSize: 12, fontWeight: 500, color: "var(--text)", whiteSpace: "nowrap" }}
+            >
+              Total TVA deductibilă (RON):
+            </label>
+            <input
+              id="manual-deductible"
+              type="number"
+              min="0"
+              step="0.01"
+              value={manualDeductible}
+              onChange={(e) => setManualDeductible(e.target.value)}
+              style={{
+                fontSize: 12,
+                padding: "4px 8px",
+                width: 140,
+                fontFamily: "var(--font-mono, monospace)",
+                textAlign: "right",
+              }}
+            />
+          </div>
+
+          {/* Net TVA de plată / recuperat */}
+          <div
+            style={{
+              display: "flex",
+              gap: 24,
+              padding: "10px 14px",
+              background: netTvaDePlata >= 0 ? "var(--bg-hover)" : "rgba(22,163,74,0.06)",
+              border: `1px solid ${netTvaDePlata >= 0 ? "var(--border)" : "#16A34A44"}`,
+              borderRadius: 4,
+              fontSize: 12,
+            }}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>TVA Colectată</span>
+              <span className="tnum" style={{ fontWeight: 600 }}>{fmtRON(totalVat)} RON</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", color: "var(--text-muted)", fontSize: 14 }}>−</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>TVA Deductibilă</span>
+              <span className="tnum" style={{ fontWeight: 600 }}>{fmtRON(deductibleVat)} RON</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", color: "var(--text-muted)", fontSize: 14 }}>=</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", color: netTvaDePlata >= 0 ? "var(--text-muted)" : "#16A34A" }}>
+                {netTvaDePlata >= 0 ? "TVA de plată" : "TVA de recuperat"}
+              </span>
+              <span
+                className="tnum"
+                style={{
+                  fontWeight: 700,
+                  fontSize: 14,
+                  color: netTvaDePlata >= 0 ? "var(--text)" : "#16A34A",
+                }}
+              >
+                {fmtRON(Math.abs(netTvaDePlata))} RON
+              </span>
+            </div>
           </div>
         </section>
 

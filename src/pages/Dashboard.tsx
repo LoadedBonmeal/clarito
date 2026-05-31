@@ -214,8 +214,8 @@ export function DashboardPage() {
             <button type="button" className={`seg-item ${periodMode === 'month' ? 'active' : ''}`} onClick={() => setPeriodMode('month')}>{monthLabel}</button>
             <button type="button" className={`seg-item ${periodMode === 'ytd' ? 'active' : ''}`} onClick={() => setPeriodMode('ytd')}>YTD</button>
           </div>
-          <button type="button" className="btn compact" onClick={() => notify.info('Export disponibil în R8')}>
-            <Icon name="download" size={11} /> Export
+          <button type="button" className="btn compact" onClick={() => void navigate({ to: "/reports" })}>
+            <Icon name="download" size={11} /> Export →
           </button>
           <button
             type="button"
