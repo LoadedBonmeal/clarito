@@ -166,7 +166,7 @@ export function Ribbon({ onOpenPalette, onOpenShortcuts }: RibbonProps) {
           <BtnBig icon="buildings" label="Companii"     onClick={() => navigate({ to: "/companies" })} />
           <BtnBig icon="users"     label="Contacte"     onClick={() => navigate({ to: "/contacts" })} />
           <BtnBig icon="stock"     label="Articole"     onClick={() => navigate({ to: "/products" })} />
-          <BtnBig icon="database"  label="Plan conturi" disabled />
+          <BtnBig icon="database"  label="Plan conturi" onClick={() => navigate({ to: "/accounts" })} />
           <BtnBig icon="tag"       label="Cote TVA"     onClick={() => navigate({ to: "/vat-rates" })} />
           <BtnBig icon="history"   label="Audit log"    onClick={() => navigate({ to: "/notifications" })} />
         </div>

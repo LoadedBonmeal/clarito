@@ -20,6 +20,7 @@ pub mod notifications;
 pub mod received;
 pub mod settings;
 
+pub mod accounts;
 pub mod payments;
 pub mod products;
 pub mod receipts;

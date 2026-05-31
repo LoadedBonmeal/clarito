@@ -581,6 +581,40 @@ export interface ReceiptInput {
   notes?: string;
 }
 
+// ─── Account (plan de conturi) — R15 Wave 4 ──────────────────────────────
+
+/**
+ * R15 Wave 4: A single entry in the company-scoped chart of accounts (PCG).
+ * Each company has its own catalog; account codes are unique per company.
+ */
+export interface Account {
+  id: string;
+  companyId: string;
+  accountCode: string;
+  accountName: string;
+  accountClass: number | null;
+  parentCode: string | null;
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AccountInput {
+  accountCode: string;
+  accountName: string;
+  accountClass?: number;
+  parentCode?: string;
+  active?: boolean;
+}
+
+export interface UpdateAccountInput {
+  accountCode?: string;
+  accountName?: string;
+  accountClass?: number;
+  parentCode?: string;
+  active?: boolean;
+}
+
 // ─── Error (din backend) ──────────────────────────────────────────────────
 
 export interface AppErrorPayload {

@@ -94,7 +94,7 @@ function buildMenus(
       { type: "row", icon: "users",     label: "Furnizori",                         onClick: () => { void navigate({ to: "/contacts" }); } },
       { type: "row", icon: "stock",     label: "Articole / Stocuri",        onClick: () => { void navigate({ to: "/products" }); } },
       { type: "sep" },
-      { type: "row", icon: "database",  label: "Plan de conturi",            disabled: true },
+      { type: "row", icon: "database",  label: "Plan de conturi",            onClick: () => { void navigate({ to: "/accounts" }); } },
       { type: "row", icon: "tag",       label: "Cote TVA și taxe",           onClick: () => { void navigate({ to: "/vat-rates" }); } },
       { type: "row", icon: "history",   label: "Audit & jurnal modificări",  onClick: () => { void navigate({ to: "/settings" }); } },
     ],

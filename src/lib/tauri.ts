@@ -11,6 +11,8 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 
 import type {
+  Account,
+  AccountInput,
   AnafCompanyData,
   AppInfo,
   Certificate,
@@ -37,6 +39,7 @@ import type {
   ReceivedInvoice,
   ReceivedStatus,
   SyncResult,
+  UpdateAccountInput,
   UpdateCompanyInput,
   UpdateContactInput,
   UpdateProductInput,
@@ -569,6 +572,30 @@ export const receipts = {
     invoke<string>("generate_receipt_pdf", { id, companyId }),
 };
 
+// ─── Accounts — plan de conturi (R15 Wave 4) ──────────────────────────────
+
+/** R15 Wave 4: All account commands are company_id-scoped. */
+export const accounts = {
+  /** List all accounts for a company, ordered by account_code. */
+  list: (companyId: string) =>
+    invoke<Account[]>("list_accounts", { companyId }),
+  /** Get a single account. Returns NotFound for wrong company. */
+  get: (id: string, companyId: string) =>
+    invoke<Account>("get_account", { id, companyId }),
+  /** Create an account for the given company. */
+  create: (companyId: string, input: AccountInput) =>
+    invoke<Account>("create_account", { companyId, input }),
+  /** Update an account. Cross-company update returns NotFound. */
+  update: (id: string, companyId: string, input: UpdateAccountInput) =>
+    invoke<Account>("update_account", { id, companyId, input }),
+  /** Delete an account. Cross-company deletion returns NotFound. */
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_account", { id, companyId }),
+  /** Seed the standard Romanian chart of accounts (idempotent). */
+  seedStandard: (companyId: string) =>
+    invoke<number>("seed_standard_accounts", { companyId }),
+};
+
 // ─── GDPR / data portability ──────────────────────────────────────────────
 
 export const gdpr = {
@@ -582,6 +609,7 @@ export const gdpr = {
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
+  accounts,
   companies,
   contacts,
   invoices,

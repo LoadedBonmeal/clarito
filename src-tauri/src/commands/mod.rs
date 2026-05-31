@@ -3,6 +3,7 @@
 //! Fiecare submodul mapează 1:1 cu un modul DB. Commands sunt subțiri:
 //! validare minimă + dispatch către layer-ul DB.
 
+pub mod accounts;
 pub mod anaf;
 pub mod archive;
 pub mod companies;

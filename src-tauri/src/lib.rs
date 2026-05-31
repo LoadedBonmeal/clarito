@@ -398,6 +398,13 @@ pub fn run() {
             commands::receipts::create_receipt,
             commands::receipts::delete_receipt,
             commands::receipts::generate_receipt_pdf,
+            // chart of accounts — plan de conturi (R15 Wave 4)
+            commands::accounts::list_accounts,
+            commands::accounts::get_account,
+            commands::accounts::create_account,
+            commands::accounts::update_account,
+            commands::accounts::delete_account,
+            commands::accounts::seed_standard_accounts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
