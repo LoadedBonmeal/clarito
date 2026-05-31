@@ -232,7 +232,10 @@ pub async fn authorize(_company_id: &str, config: &OAuthConfig) -> Result<OAuthR
 
 /// Revocă token-ul OAuth2 la serverul ANAF (best-effort: erorile sunt ignorate).
 /// Trebuie apelată la logout înainte de ștergerea token-ului din keychain.
-pub async fn revoke_token(access_token: &str) {
+///
+/// `client_id` trebuie să corespundă client_id-ului configurat în Setări → ANAF;
+/// un mismatch face ca serverul ANAF să respingă revocarea.
+pub async fn revoke_token(access_token: &str, client_id: &str) {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
@@ -241,7 +244,7 @@ pub async fn revoke_token(access_token: &str) {
         Err(_) => return,
     };
 
-    let params = [("token", access_token), ("client_id", DEFAULT_CLIENT_ID)];
+    let params = [("token", access_token), ("client_id", client_id)];
 
     // Fire-and-forget: dacă ANAF nu suportă revocarea corect, nu e critical.
     let _ = client.post(DEFAULT_REVOKE_URL).form(&params).send().await;
@@ -269,13 +272,16 @@ pub fn is_allowed_anaf_url(url: &str) -> bool {
     host == "anaf.ro" || host.ends_with(".anaf.ro")
 }
 
-/// Reîmprospătează access_token-ul folosind refresh_token-ul existent.
-/// Folosește URL-ul token din configurație (dacă s-a schimbat).
-pub async fn refresh_token_bundle(refresh_tok: &str) -> Result<OAuthResult, String> {
-    // refresh_token_bundle este apelat fără context de config — folosim default prod.
-    // Dacă utilizatorul a configurat un token_url custom, acesta va fi folosit la
-    // autorizare inițială; refresh-ul poate folosi prod în continuare (tokens sunt
-    // emise de același server).
+/// Reîmprospătează access_token-ul folosind refresh_token-ul existent și
+/// `client_id`-ul configurat de utilizator.
+///
+/// Versiune preferată: folosiți aceasta când aveți acces la `OAuthConfig`
+/// (ex. din comenzile Tauri care pot apela `build_oauth_config`).
+pub async fn refresh_token_bundle_with_client_id(
+    refresh_tok: &str,
+    client_id: &str,
+    token_url: &str,
+) -> Result<OAuthResult, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -284,17 +290,32 @@ pub async fn refresh_token_bundle(refresh_tok: &str) -> Result<OAuthResult, Stri
     let params = [
         ("grant_type", "refresh_token"),
         ("refresh_token", refresh_tok),
-        ("client_id", DEFAULT_CLIENT_ID),
+        ("client_id", client_id),
     ];
 
     let resp = client
-        .post(DEFAULT_TOKEN_URL)
+        .post(token_url)
         .form(&params)
         .send()
         .await
         .map_err(|e| format!("Token refresh request eșuat: {e}"))?;
 
     parse_token_response(resp).await
+}
+
+/// Reîmprospătează access_token-ul folosind refresh_token-ul existent.
+///
+/// Variantă de compatibilitate care folosește `DEFAULT_CLIENT_ID` și endpoint-ul
+/// prod implicit. Apelată din task-urile de fundal care nu au acces la DB/config.
+///
+/// NOTĂ: task-urile de fundal (`background/poll.rs`, `background/spv.rs`,
+/// `background/recovery.rs`) apelează această funcție fără context de configurație.
+/// Dacă utilizatorul a setat un `client_id` custom în Setări → ANAF, refresh-ul
+/// din task-urile de fundal va eșua cu mismatch. Coordonare necesară (R13 Wave E
+/// raport): acele fișiere trebuie actualizate să primească `OAuthConfig` pentru a
+/// putea apela `refresh_token_bundle_with_client_id`.
+pub async fn refresh_token_bundle(refresh_tok: &str) -> Result<OAuthResult, String> {
+    refresh_token_bundle_with_client_id(refresh_tok, DEFAULT_CLIENT_ID, DEFAULT_TOKEN_URL).await
 }
 
 // ─── Internals ─────────────────────────────────────────────────────────────
@@ -327,10 +348,48 @@ fn extract_query_param(request_line: &str, param: &str) -> Option<String> {
     let query = path.split('?').nth(1)?;
     for pair in query.split('&') {
         if let Some(val) = pair.strip_prefix(&format!("{param}=")) {
-            return Some(val.split_whitespace().next().unwrap_or(val).to_string());
+            // Strip trailing HTTP version (e.g. " HTTP/1.1") before decoding
+            let raw = val.split_whitespace().next().unwrap_or(val);
+            return Some(percent_decode(raw));
         }
     }
     None
+}
+
+/// Percent-decode un șir application/x-www-form-urlencoded:
+/// `%XX` → byte cu valoarea hexazecimală XX; `+` → spațiu.
+/// Octeții invalizi (secvențe incomplete/non-hex) sunt păstrați ca `?`.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => {
+                out.push(' ');
+                i += 1;
+            }
+            b'%' if i + 2 < bytes.len() => {
+                let hi = (bytes[i + 1] as char).to_digit(16);
+                let lo = (bytes[i + 2] as char).to_digit(16);
+                match (hi, lo) {
+                    (Some(h), Some(l)) => {
+                        out.push((((h << 4) | l) as u8) as char);
+                        i += 3;
+                    }
+                    _ => {
+                        out.push('%');
+                        i += 1;
+                    }
+                }
+            }
+            b => {
+                out.push(b as char);
+                i += 1;
+            }
+        }
+    }
+    out
 }
 
 /// Encodare minimă URI component pentru redirect_uri (spații → %20, etc.).
@@ -458,7 +517,7 @@ async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthResult, St
 
 #[cfg(test)]
 mod tests {
-    use super::is_allowed_anaf_url;
+    use super::{extract_query_param, is_allowed_anaf_url, percent_decode};
 
     #[test]
     fn allowed_anaf_urls() {
@@ -504,5 +563,82 @@ mod tests {
         assert!(!is_allowed_anaf_url(""));
         assert!(!is_allowed_anaf_url("/relative/path"));
         assert!(!is_allowed_anaf_url("https://"));
+    }
+
+    // ─── percent_decode tests ────────────────────────────────────────────────
+
+    #[test]
+    fn percent_decode_plus_to_space() {
+        assert_eq!(percent_decode("hello+world"), "hello world");
+    }
+
+    #[test]
+    fn percent_decode_hex_sequences() {
+        // %2B → '+'
+        assert_eq!(percent_decode("a%2Bb"), "a+b");
+        // %3D → '='
+        assert_eq!(percent_decode("key%3Dvalue"), "key=value");
+        // %20 → ' '
+        assert_eq!(percent_decode("hello%20world"), "hello world");
+    }
+
+    #[test]
+    fn percent_decode_uppercase_hex() {
+        assert_eq!(percent_decode("%2B"), "+");
+        assert_eq!(percent_decode("%3D"), "=");
+    }
+
+    #[test]
+    fn percent_decode_lowercase_hex() {
+        assert_eq!(percent_decode("%2b"), "+");
+        assert_eq!(percent_decode("%3d"), "=");
+    }
+
+    #[test]
+    fn percent_decode_no_encoding() {
+        let plain = "ABCDEFG123";
+        assert_eq!(percent_decode(plain), plain);
+    }
+
+    #[test]
+    fn percent_decode_incomplete_sequence() {
+        // Incomplete %X at end — keep '%' literally
+        assert_eq!(percent_decode("test%2"), "test%2");
+        assert_eq!(percent_decode("test%"), "test%");
+    }
+
+    #[test]
+    fn percent_decode_typical_oauth_code() {
+        // ANAF OAuth code may contain '=' padding characters encoded as %3D
+        let encoded = "4%2FAbCdEfGh%3D%3D";
+        assert_eq!(percent_decode(encoded), "4/AbCdEfGh==");
+    }
+
+    // ─── extract_query_param tests ───────────────────────────────────────────
+
+    #[test]
+    fn extract_query_param_plain() {
+        let line = "GET /callback?code=ABC123&state=XYZ HTTP/1.1";
+        assert_eq!(
+            extract_query_param(line, "code"),
+            Some("ABC123".to_string())
+        );
+        assert_eq!(extract_query_param(line, "state"), Some("XYZ".to_string()));
+    }
+
+    #[test]
+    fn extract_query_param_percent_encoded() {
+        // code containing %3D (=) and %2B (+)
+        let line = "GET /callback?code=abc%3Ddef%2Bghi&state=xyz HTTP/1.1";
+        assert_eq!(
+            extract_query_param(line, "code"),
+            Some("abc=def+ghi".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_query_param_missing() {
+        let line = "GET /callback?state=XYZ HTTP/1.1";
+        assert_eq!(extract_query_param(line, "code"), None);
     }
 }

@@ -300,6 +300,12 @@ impl AnafClient {
         let mut page = 1u32;
 
         loop {
+            // tip=F → facturi primite (received invoices).
+            // NOTĂ: tip=E → erori/mesaje de status pentru trimiteri ANAF. Acestea sunt
+            // urmărite prin polling stareMesaj (check_status), deci adăugarea tip=E ar
+            // crea notificări duplicate și ar risca procesarea incorectă a mesajelor de
+            // tip E ca facturi în parser-ul receive (care presupune structură UBL).
+            // Menținerea tip=F ca filtru este intenționată — R13 Wave E.
             let url = format!(
                 "{}/FCTEL/rest/listaMesajePaginatieFiltrare?zile={}&cif={}&tip=F&pagina={}",
                 self.base_url, days, company_cui, page

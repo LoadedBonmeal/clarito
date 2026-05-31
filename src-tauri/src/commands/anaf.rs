@@ -29,7 +29,11 @@ fn sanitize_path_component(s: &str) -> String {
 
 // ─── Helper: obține token valid, încearcă refresh dacă e expirat ──────────
 
-async fn get_valid_token(company_id: &str) -> AppResult<String> {
+/// Obține un access_token valid pentru `company_id`.
+/// Dacă token-ul e expirat, îl reîmprospătează folosind `client_id`-ul configurat
+/// (citit din DB via `build_oauth_config`) pentru a evita mismatch-ul cu ANAF
+/// la utilizatorii cu client_id custom.
+async fn get_valid_token(company_id: &str, pool: &sqlx::SqlitePool) -> AppResult<String> {
     let bundle = TokenBundle::load(company_id)
         .ok_or_else(|| AppError::Other("Autentificați-vă la ANAF mai întâi.".into()))?;
 
@@ -37,10 +41,17 @@ async fn get_valid_token(company_id: &str) -> AppResult<String> {
         return Ok(bundle.access_token);
     }
 
-    // Încearcă refresh
-    let result = oauth::refresh_token_bundle(&bundle.refresh_token)
-        .await
-        .map_err(AppError::Other)?;
+    // Citim config-ul din DB pentru a folosi client_id-ul configurat de utilizator.
+    let config = build_oauth_config(pool).await;
+
+    // Încearcă refresh cu client_id configurat
+    let result = oauth::refresh_token_bundle_with_client_id(
+        &bundle.refresh_token,
+        &config.client_id,
+        &config.token_url,
+    )
+    .await
+    .map_err(AppError::Other)?;
 
     let new_bundle = TokenBundle {
         access_token: result.access_token.clone(),
@@ -171,10 +182,13 @@ pub async fn anaf_is_authenticated(company_id: String) -> AppResult<bool> {
 
 /// Revocă token-ul la ANAF și îl șterge din keychain (logout).
 #[tauri::command]
-pub async fn anaf_logout(company_id: String) -> AppResult<()> {
+pub async fn anaf_logout(state: tauri::State<'_, AppState>, company_id: String) -> AppResult<()> {
     // Revocă token-ul la ANAF (best-effort) înainte de ștergerea din keychain.
+    // Folosim client_id-ul configurat de utilizator pentru a evita mismatch-ul
+    // la serverul de revocare ANAF.
     if let Some(bundle) = TokenBundle::load(&company_id) {
-        oauth::revoke_token(&bundle.access_token).await;
+        let config = build_oauth_config(&state.db).await;
+        oauth::revoke_token(&bundle.access_token, &config.client_id).await;
     }
     TokenBundle::delete(&company_id);
     Ok(())
@@ -317,7 +331,7 @@ pub(crate) async fn submit_invoice_inner(
     };
 
     // 6. Obține token valid din keychain (înainte de a schimba statusul)
-    let mut token = match get_valid_token(company_id).await {
+    let mut token = match get_valid_token(company_id, pool).await {
         Ok(t) => t,
         Err(e) => {
             revert_to_draft(pool, invoice_id).await;
@@ -337,7 +351,15 @@ pub(crate) async fn submit_invoice_inner(
             tracing::info!(company_id, "ANAF 401 on upload — reîmprospătăm token");
             use crate::anaf::{keychain::TokenBundle, oauth};
             if let Some(bundle) = TokenBundle::load(company_id) {
-                if let Ok(refreshed) = oauth::refresh_token_bundle(&bundle.refresh_token).await {
+                // Folosim client_id configurat (nu DEFAULT_CLIENT_ID) pentru refresh.
+                let cfg = build_oauth_config(pool).await;
+                if let Ok(refreshed) = oauth::refresh_token_bundle_with_client_id(
+                    &bundle.refresh_token,
+                    &cfg.client_id,
+                    &cfg.token_url,
+                )
+                .await
+                {
                     let new_bundle = TokenBundle {
                         access_token: refreshed.access_token.clone(),
                         refresh_token: refreshed.refresh_token,
@@ -437,7 +459,7 @@ pub async fn anaf_check_invoice_status(
         .anaf_upload_id
         .ok_or_else(|| AppError::Validation("Factura nu are un upload ID ANAF.".into()))?;
 
-    let token = get_valid_token(&company_id).await?;
+    let token = get_valid_token(&company_id, pool).await?;
 
     let client = AnafClient::new(test_mode);
     let status_resp = client
