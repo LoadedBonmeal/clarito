@@ -276,6 +276,7 @@ export function InvoiceEditPage() {
                   <ContactCombobox
                     value={selectedContact}
                     onChange={setSelectedContact}
+                    companyId={activeCompanyId ?? ""}
                     disabled={!activeCompanyId}
                     filterType={["CUSTOMER", "BOTH"]}
                     width={320}

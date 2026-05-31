@@ -118,15 +118,16 @@ pub async fn list(
     })
 }
 
-pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<ReceivedInvoice> {
+pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<ReceivedInvoice> {
     sqlx::query_as::<_, ReceivedInvoice>(
         "SELECT id, company_id, anaf_download_id, anaf_index, issuer_cui, \
          issuer_name, series, number, total_amount, net_amount, vat_amount, \
          currency, issue_date, xml_path, pdf_path, \
          status, downloaded_at, created_at \
-         FROM received_invoices WHERE id = ?1",
+         FROM received_invoices WHERE id = ?1 AND company_id = ?2",
     )
     .bind(id)
+    .bind(company_id)
     .fetch_optional(pool)
     .await?
     .ok_or(AppError::NotFound)
@@ -164,15 +165,26 @@ pub async fn vat_lines_for_invoice(
         .collect())
 }
 
-pub async fn set_status(pool: &SqlitePool, id: &str, status: ReceivedStatus) -> AppResult<()> {
+pub async fn set_status(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+    status: ReceivedStatus,
+) -> AppResult<()> {
     let value = serde_json::to_value(status)
         .ok()
         .and_then(|v| v.as_str().map(|s| s.to_string()))
         .unwrap_or_else(|| "NEW".into());
-    sqlx::query("UPDATE received_invoices SET status = ?2 WHERE id = ?1")
-        .bind(id)
-        .bind(&value)
-        .execute(pool)
-        .await?;
+    let rows =
+        sqlx::query("UPDATE received_invoices SET status = ?2 WHERE id = ?1 AND company_id = ?3")
+            .bind(id)
+            .bind(&value)
+            .bind(company_id)
+            .execute(pool)
+            .await?
+            .rows_affected();
+    if rows == 0 {
+        return Err(AppError::NotFound);
+    }
     Ok(())
 }

@@ -389,6 +389,7 @@ export function InvoiceNewPage() {
                     inputId={contactId}
                     value={selectedContact}
                     onChange={setSelectedContact}
+                    companyId={activeCompanyId ?? ""}
                     disabled={!activeCompanyId}
                     filterType={["CUSTOMER", "BOTH"]}
                     width={320}

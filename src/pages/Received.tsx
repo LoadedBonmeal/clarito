@@ -48,7 +48,7 @@ export function ReceivedPage() {
   // Update status mutation
   const { mutate: updateStatus } = useMutation({
     mutationFn: ({ id, status }: { id: string; status: ReceivedStatus }) =>
-      api.received.updateStatus(id, status),
+      api.received.updateStatus(id, activeCompanyId!, status),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.received.list({ companyId: activeCompanyId ?? undefined }),

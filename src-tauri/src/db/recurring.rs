@@ -141,7 +141,12 @@ pub struct UpdateRecurringInput {
     pub notes: Option<String>,
 }
 
-pub async fn update(pool: &SqlitePool, id: &str, input: UpdateRecurringInput) -> AppResult<()> {
+pub async fn update(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+    input: UpdateRecurringInput,
+) -> AppResult<()> {
     let valid_frequencies = ["monthly", "quarterly", "annual"];
     if !valid_frequencies.contains(&input.frequency.as_str()) {
         return Err(AppError::Validation(
@@ -160,7 +165,7 @@ pub async fn update(pool: &SqlitePool, id: &str, input: UpdateRecurringInput) ->
             day_of_month = ?4, auto_submit_anaf = ?5, active = ?6, \
             series = ?7, lines_json = ?8, notes = ?9, \
             updated_at = unixepoch() \
-         WHERE id = ?10",
+         WHERE id = ?10 AND company_id = ?11",
     )
     .bind(&input.template_name)
     .bind(&input.frequency)
@@ -172,6 +177,7 @@ pub async fn update(pool: &SqlitePool, id: &str, input: UpdateRecurringInput) ->
     .bind(&input.lines_json)
     .bind(&input.notes)
     .bind(id)
+    .bind(company_id)
     .execute(pool)
     .await?
     .rows_affected();
@@ -182,12 +188,19 @@ pub async fn update(pool: &SqlitePool, id: &str, input: UpdateRecurringInput) ->
     Ok(())
 }
 
-pub async fn set_active(pool: &SqlitePool, id: &str, active: bool) -> AppResult<()> {
+pub async fn set_active(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+    active: bool,
+) -> AppResult<()> {
     let rows = sqlx::query(
-        "UPDATE recurring_invoices SET active = ?1, updated_at = unixepoch() WHERE id = ?2",
+        "UPDATE recurring_invoices SET active = ?1, updated_at = unixepoch() \
+         WHERE id = ?2 AND company_id = ?3",
     )
     .bind(if active { 1_i64 } else { 0 })
     .bind(id)
+    .bind(company_id)
     .execute(pool)
     .await?
     .rows_affected();
@@ -302,6 +315,7 @@ mod tests {
         update(
             &pool,
             &created.id,
+            "comp-1",
             UpdateRecurringInput {
                 template_name: "Abonament SaaS".into(),
                 frequency: "quarterly".into(),
@@ -332,12 +346,56 @@ mod tests {
         let created = create_sample(&pool).await;
         assert!(created.active, "template should start active by default");
 
-        set_active(&pool, &created.id, false).await.unwrap();
+        set_active(&pool, &created.id, "comp-1", false)
+            .await
+            .unwrap();
         let paused = get_by_id(&pool, &created.id).await.unwrap();
         assert!(!paused.active);
 
-        set_active(&pool, &created.id, true).await.unwrap();
+        set_active(&pool, &created.id, "comp-1", true)
+            .await
+            .unwrap();
         let resumed = get_by_id(&pool, &created.id).await.unwrap();
         assert!(resumed.active);
+    }
+
+    #[tokio::test]
+    async fn update_wrong_company_returns_not_found() {
+        let pool = setup_pool().await;
+        let created = create_sample(&pool).await;
+
+        let result = update(
+            &pool,
+            &created.id,
+            "wrong-company",
+            UpdateRecurringInput {
+                template_name: "Should not change".into(),
+                frequency: "monthly".into(),
+                next_issue_date: "2026-06-01".into(),
+                day_of_month: 1,
+                auto_submit_anaf: false,
+                active: true,
+                series: "FCT".into(),
+                lines_json: "[]".into(),
+                notes: None,
+            },
+        )
+        .await;
+        assert!(
+            matches!(result, Err(crate::error::AppError::NotFound)),
+            "update with wrong company_id should return NotFound"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_active_wrong_company_returns_not_found() {
+        let pool = setup_pool().await;
+        let created = create_sample(&pool).await;
+
+        let result = set_active(&pool, &created.id, "wrong-company", false).await;
+        assert!(
+            matches!(result, Err(crate::error::AppError::NotFound)),
+            "set_active with wrong company_id should return NotFound"
+        );
     }
 }

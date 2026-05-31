@@ -87,7 +87,8 @@ export const contacts = {
   update: (id: string, input: UpdateContactInput) =>
     invoke<Contact>("update_contact", { id, input }),
   delete: (id: string) => invoke<void>("delete_contact", { id }),
-  search: (query: string) => invoke<Contact[]>("search_contacts", { query }),
+  search: (query: string, companyId: string) =>
+    invoke<Contact[]>("search_contacts", { query, companyId }),
 };
 
 // ─── Invoices ─────────────────────────────────────────────────────────────
@@ -119,10 +120,10 @@ export const invoices = {
 export const received = {
   list: (filter?: ReceivedFilter) =>
     invoke<Paginated<ReceivedInvoice>>("list_received_invoices", { filter }),
-  get: (id: string) =>
-    invoke<ReceivedInvoice>("get_received_invoice", { id }),
-  updateStatus: (id: string, status: ReceivedStatus) =>
-    invoke<void>("update_received_status", { id, status }),
+  get: (id: string, companyId: string) =>
+    invoke<ReceivedInvoice>("get_received_invoice", { id, companyId }),
+  updateStatus: (id: string, companyId: string, status: ReceivedStatus) =>
+    invoke<void>("update_received_status", { id, companyId, status }),
   reparseVat: (companyId?: string) =>
     invoke<number>("reparse_received_vat", { companyId: companyId ?? null }),
 };
@@ -400,6 +401,7 @@ export interface CreateRecurringArgs {
 
 export interface UpdateRecurringArgs {
   id: string;
+  companyId: string;
   templateName: string;
   frequency: string;
   nextIssueDate: string;
@@ -420,8 +422,8 @@ export const recurring = {
     invoke<void>("delete_recurring_invoice", { id, companyId }),
   update: (args: UpdateRecurringArgs) =>
     invoke<void>("update_recurring_invoice", { args }),
-  toggleActive: (id: string, active: boolean) =>
-    invoke<void>("toggle_recurring_active", { id, active }),
+  toggleActive: (id: string, companyId: string, active: boolean) =>
+    invoke<void>("toggle_recurring_active", { id, companyId, active }),
 };
 
 // ─── Feedback ─────────────────────────────────────────────────────────────

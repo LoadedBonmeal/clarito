@@ -18,17 +18,19 @@ pub async fn list_received_invoices(
 pub async fn get_received_invoice(
     state: State<'_, AppState>,
     id: String,
+    company_id: String,
 ) -> AppResult<ReceivedInvoice> {
-    received::get(&state.db, &id).await
+    received::get(&state.db, &id, &company_id).await
 }
 
 #[tauri::command]
 pub async fn update_received_status(
     state: State<'_, AppState>,
     id: String,
+    company_id: String,
     status: ReceivedStatus,
 ) -> AppResult<()> {
-    received::set_status(&state.db, &id, status).await
+    received::set_status(&state.db, &id, &company_id, status).await
 }
 
 /// Reparsează XML-ul UBL al facturilor primite pentru a extrage defalcarea net/TVA.

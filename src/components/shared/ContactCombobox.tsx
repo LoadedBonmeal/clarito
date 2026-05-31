@@ -7,6 +7,7 @@ import type { Contact, ContactType } from "@/types";
 interface ContactComboboxProps {
   value: Contact | null;
   onChange: (contact: Contact | null) => void;
+  companyId: string;
   placeholder?: string;
   disabled?: boolean;
   /** Optional client-side filter applied on top of search results (e.g. only CUSTOMER/BOTH). */
@@ -28,6 +29,7 @@ interface ContactComboboxProps {
 export function ContactCombobox({
   value,
   onChange,
+  companyId,
   placeholder = "Caută client (nume sau CUI)…",
   disabled,
   filterType,
@@ -49,9 +51,9 @@ export function ContactCombobox({
 
   // Search query enabled only when typing 2+ chars and dropdown is open
   const { data: rawResults = [], isFetching } = useQuery({
-    queryKey: ["contacts", "search", debouncedQuery],
-    queryFn: () => api.contacts.search(debouncedQuery),
-    enabled: open && debouncedQuery.length >= 2,
+    queryKey: ["contacts", "search", companyId, debouncedQuery],
+    queryFn: () => api.contacts.search(debouncedQuery, companyId),
+    enabled: open && debouncedQuery.length >= 2 && !!companyId,
     staleTime: 30_000,
   });
 

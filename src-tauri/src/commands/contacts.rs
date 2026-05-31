@@ -40,12 +40,16 @@ pub async fn delete_contact(state: State<'_, AppState>, id: String) -> AppResult
 }
 
 #[tauri::command]
-pub async fn search_contacts(state: State<'_, AppState>, query: String) -> AppResult<Vec<Contact>> {
+pub async fn search_contacts(
+    state: State<'_, AppState>,
+    query: String,
+    company_id: String,
+) -> AppResult<Vec<Contact>> {
     contacts::list(
         &state.db,
         ContactFilter {
             query: Some(query),
-            ..Default::default()
+            company_id: Some(company_id),
         },
     )
     .await

@@ -66,6 +66,7 @@ pub async fn delete_recurring_invoice(
 #[serde(rename_all = "camelCase")]
 pub struct UpdateRecurringArgs {
     pub id: String,
+    pub company_id: String,
     pub template_name: String,
     pub frequency: String,
     pub next_issue_date: String,
@@ -85,6 +86,7 @@ pub async fn update_recurring_invoice(
     recurring::update(
         &state.db,
         &args.id,
+        &args.company_id,
         UpdateRecurringInput {
             template_name: args.template_name,
             frequency: args.frequency,
@@ -113,9 +115,10 @@ pub async fn update_recurring_invoice(
 pub async fn toggle_recurring_active(
     state: State<'_, AppState>,
     id: String,
+    company_id: String,
     active: bool,
 ) -> AppResult<()> {
-    recurring::set_active(&state.db, &id, active).await?;
+    recurring::set_active(&state.db, &id, &company_id, active).await?;
     let _ = crate::db::audit::log_user_action(
         &state.db,
         "recurring_updated",

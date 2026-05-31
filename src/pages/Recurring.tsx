@@ -110,7 +110,8 @@ export function RecurringPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (args: Parameters<typeof api.recurring.update>[0]) => api.recurring.update(args),
+    mutationFn: (args: Parameters<typeof api.recurring.update>[0]) =>
+      api.recurring.update(args),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.recurring.list(activeCompanyId!) });
       notify.success("Șablon actualizat cu succes");
@@ -134,7 +135,7 @@ export function RecurringPage() {
 
   const toggleActive = useMutation({
     mutationFn: ({ id, active }: { id: string; active: boolean }) =>
-      api.recurring.toggleActive(id, active),
+      api.recurring.toggleActive(id, activeCompanyId!, active),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.recurring.list(activeCompanyId!) });
       notify.success("Status șablon actualizat.");
@@ -202,6 +203,7 @@ export function RecurringPage() {
       const current = recurringList.find((r) => r.id === editingId);
       updateMutation.mutate({
         id: editingId,
+        companyId: activeCompanyId,
         templateName: form.templateName.trim(),
         frequency: form.frequency,
         nextIssueDate: form.nextIssueDate,

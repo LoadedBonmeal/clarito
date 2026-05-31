@@ -478,11 +478,14 @@ pub async fn storno_invoice(
     // REG-17: claim atomic VALIDATED → STORNED în interiorul TX. Dacă un alt apel
     // concurrent a revendicat deja factura (sau statusul s-a schimbat între timp),
     // rows_affected = 0 și returnăm eroare înainte de orice altă scriere.
+    // company_id scopes the UPDATE to prevent cross-company storno (R13 Wave A).
     let claim = sqlx::query(
-        "UPDATE invoices SET status = 'STORNED', updated_at = ?2 WHERE id = ?1 AND status = 'VALIDATED'",
+        "UPDATE invoices SET status = 'STORNED', updated_at = ?2 \
+         WHERE id = ?1 AND status = 'VALIDATED' AND company_id = ?3",
     )
     .bind(&invoice_id)
     .bind(now)
+    .bind(&orig_inv.company_id)
     .execute(&mut *tx)
     .await
     .map_err(AppError::Database)?;

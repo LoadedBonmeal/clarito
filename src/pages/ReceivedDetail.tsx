@@ -14,6 +14,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { notify } from "@/lib/toasts";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import { useAppStore } from "@/lib/store";
 import { fmtRON } from "@/lib/utils";
 import type { ReceivedStatus } from "@/types";
 
@@ -25,16 +26,26 @@ export function ReceivedDetailPage() {
   const { id } = useParams({ from: "/received/$id" });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const { data: inv, isLoading, isError } = useQuery({
     queryKey: queryKeys.received.detail(id),
-    queryFn: () => api.received.get(id),
+    queryFn: () => {
+      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă selectată."));
+      return api.received.get(id, activeCompanyId);
+    },
+    enabled: !!activeCompanyId,
   });
 
   const { mutate: updateStatus, isPending } = useMutation({
-    mutationFn: (status: ReceivedStatus) =>
-      api.received.updateStatus(id, status),
+    mutationFn: (status: ReceivedStatus) => {
+      if (!activeCompanyId) {
+        notify.warn("Nicio companie activă selectată.");
+        return Promise.reject(new Error("Nicio companie activă selectată."));
+      }
+      return api.received.updateStatus(id, activeCompanyId, status);
+    },
     onSuccess: (_data, status) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.received.detail(id) });
