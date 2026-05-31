@@ -110,8 +110,19 @@ pub(crate) async fn check_certificate_expiry(pool: &sqlx::SqlitePool, app: &AppH
 /// Încearcă să reîmprospăteze silent token-urile OAuth2 care sunt expirate sau aproape
 /// de expirare. Dacă refresh-ul eșuează (ex. certificat expirat), nu face nimic —
 /// utilizatorul va fi notificat de `check_certificate_expiry`.
+///
+/// Refresh-ul este serializat prin lock-ul app-wide din `AppState` cu double-check:
+/// după achiziționarea lock-ului re-citim token-ul din keychain și re-testăm
+/// `is_expired()` — dacă alt task a reîmprospătat între timp, sărim refresh-ul.
 pub(crate) async fn refresh_expiring_certificates(pool: &sqlx::SqlitePool, app: &AppHandle) {
     use crate::anaf::{keychain::TokenBundle, oauth};
+
+    // Reach the app-wide refresh lock (fallback: local no-op lock if state not yet managed).
+    let lock_arc = app
+        .try_state::<crate::state::AppState>()
+        .map(|s| s.token_refresh_lock.clone())
+        .unwrap_or_else(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
+    let lock: &tokio::sync::Mutex<()> = &lock_arc;
 
     let companies = match crate::db::companies::list(pool).await {
         Ok(c) => c,
@@ -122,12 +133,12 @@ pub(crate) async fn refresh_expiring_certificates(pool: &sqlx::SqlitePool, app: 
     };
 
     for company in &companies {
-        let bundle = match TokenBundle::load(&company.id) {
-            Some(b) => b,
+        // Fast-path check without lock.
+        let needs_refresh = match TokenBundle::load(&company.id) {
+            Some(b) => b.is_expired(),
             None => continue,
         };
-
-        if !bundle.is_expired() {
+        if !needs_refresh {
             continue; // token is still valid
         }
 
@@ -135,6 +146,24 @@ pub(crate) async fn refresh_expiring_certificates(pool: &sqlx::SqlitePool, app: 
             company_id = company.id.as_str(),
             "Reîmprospătăm token OAuth2"
         );
+
+        // Acquire the single-flight lock.
+        let _guard = lock.lock().await;
+
+        // Double-check: re-load token after acquiring lock.
+        let bundle = match TokenBundle::load(&company.id) {
+            Some(b) => b,
+            None => continue,
+        };
+        if !bundle.is_expired() {
+            // Another task already refreshed while we waited for the lock.
+            tracing::debug!(
+                company_id = company.id.as_str(),
+                "Token already refreshed by another task — skipping"
+            );
+            continue;
+        }
+
         let config = crate::commands::anaf::build_oauth_config(pool).await;
         match oauth::refresh_token_bundle_with_client_id(
             &bundle.refresh_token,
@@ -185,6 +214,7 @@ pub(crate) async fn refresh_expiring_certificates(pool: &sqlx::SqlitePool, app: 
                 crate::notifications::notify(app, &title, &body).await;
             }
         }
+        // Drop _guard here — released before next company iteration.
     }
 }
 

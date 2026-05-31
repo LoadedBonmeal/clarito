@@ -30,10 +30,22 @@ fn sanitize_path_component(s: &str) -> String {
 // ─── Helper: obține token valid, încearcă refresh dacă e expirat ──────────
 
 /// Obține un access_token valid pentru `company_id`.
+///
 /// Dacă token-ul e expirat, îl reîmprospătează folosind `client_id`-ul configurat
 /// (citit din DB via `build_oauth_config`) pentru a evita mismatch-ul cu ANAF
 /// la utilizatorii cu client_id custom.
-async fn get_valid_token(company_id: &str, pool: &sqlx::SqlitePool) -> AppResult<String> {
+///
+/// Refresh-ul este serializat prin `lock` (app-wide async mutex) cu un double-check:
+/// după achiziționarea lock-ului re-citim token-ul din keychain și re-testăm
+/// `is_expired()` — dacă alt task a reîmprospătat între timp, sărim refresh-ul
+/// și returnăm token-ul proaspăt. Astfel evităm `invalid_grant` de la ANAF când
+/// două task-uri concurrent văd token-ul expirat simultan.
+async fn get_valid_token(
+    company_id: &str,
+    pool: &sqlx::SqlitePool,
+    lock: &tokio::sync::Mutex<()>,
+) -> AppResult<String> {
+    // Fast path: token is still valid — no lock needed.
     let bundle = TokenBundle::load(company_id)
         .ok_or_else(|| AppError::Other("Autentificați-vă la ANAF mai întâi.".into()))?;
 
@@ -41,10 +53,21 @@ async fn get_valid_token(company_id: &str, pool: &sqlx::SqlitePool) -> AppResult
         return Ok(bundle.access_token);
     }
 
-    // Citim config-ul din DB pentru a folosi client_id-ul configurat de utilizator.
-    let config = build_oauth_config(pool).await;
+    // Slow path: token expired — acquire the single-flight lock.
+    let _guard = lock.lock().await;
 
-    // Încearcă refresh cu client_id configurat
+    // Double-check: re-load from keychain; another task may have refreshed while
+    // we were waiting for the lock.
+    let bundle = TokenBundle::load(company_id)
+        .ok_or_else(|| AppError::Other("Autentificați-vă la ANAF mai întâi.".into()))?;
+
+    if !bundle.is_expired() {
+        // Another task already refreshed — use the fresh token.
+        return Ok(bundle.access_token);
+    }
+
+    // Still expired under the lock — we are responsible for refreshing.
+    let config = build_oauth_config(pool).await;
     let result = oauth::refresh_token_bundle_with_client_id(
         &bundle.refresh_token,
         &config.client_id,
@@ -340,7 +363,11 @@ pub(crate) async fn submit_invoice_inner(
     };
 
     // 6. Obține token valid din keychain (înainte de a schimba statusul)
-    let mut token = match get_valid_token(company_id, pool).await {
+    let refresh_lock = app
+        .try_state::<AppState>()
+        .map(|s| s.token_refresh_lock.clone())
+        .unwrap_or_else(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
+    let mut token = match get_valid_token(company_id, pool, &refresh_lock).await {
         Ok(t) => t,
         Err(e) => {
             revert_to_draft(pool, invoice_id).await;
@@ -359,28 +386,40 @@ pub(crate) async fn submit_invoice_inner(
         if e == ERR_UNAUTHORIZED {
             tracing::info!(company_id, "ANAF 401 on upload — reîmprospătăm token");
             use crate::anaf::{keychain::TokenBundle, oauth};
+            // Acquire the same app-wide lock so we don't race with other 401-retry
+            // or proactive-refresh paths.
+            let _guard = refresh_lock.lock().await;
+            // Double-check: re-load from keychain — another task may have refreshed.
             if let Some(bundle) = TokenBundle::load(company_id) {
-                // Folosim client_id configurat (nu DEFAULT_CLIENT_ID) pentru refresh.
-                let cfg = build_oauth_config(pool).await;
-                if let Ok(refreshed) = oauth::refresh_token_bundle_with_client_id(
-                    &bundle.refresh_token,
-                    &cfg.client_id,
-                    &cfg.token_url,
-                )
-                .await
-                {
-                    let new_bundle = TokenBundle {
-                        access_token: refreshed.access_token.clone(),
-                        refresh_token: refreshed.refresh_token,
-                        expires_at: refreshed.expires_at,
-                    };
-                    if let Err(e) = new_bundle.save(company_id) {
-                        tracing::error!(error = ?e, %company_id, "Failed to persist refreshed ANAF token bundle — user will be forced to re-authenticate");
-                    }
-                    token = refreshed.access_token;
+                // Try the fresh bundle first.
+                if !bundle.is_expired() {
+                    token = bundle.access_token;
                     upload_result = client
                         .upload_invoice(&token, &company.cui, xml_bytes.clone())
                         .await;
+                } else {
+                    // Folosim client_id configurat (nu DEFAULT_CLIENT_ID) pentru refresh.
+                    let cfg = build_oauth_config(pool).await;
+                    if let Ok(refreshed) = oauth::refresh_token_bundle_with_client_id(
+                        &bundle.refresh_token,
+                        &cfg.client_id,
+                        &cfg.token_url,
+                    )
+                    .await
+                    {
+                        let new_bundle = TokenBundle {
+                            access_token: refreshed.access_token.clone(),
+                            refresh_token: refreshed.refresh_token,
+                            expires_at: refreshed.expires_at,
+                        };
+                        if let Err(e) = new_bundle.save(company_id) {
+                            tracing::error!(error = ?e, %company_id, "Failed to persist refreshed ANAF token bundle — user will be forced to re-authenticate");
+                        }
+                        token = refreshed.access_token;
+                        upload_result = client
+                            .upload_invoice(&token, &company.cui, xml_bytes.clone())
+                            .await;
+                    }
                 }
             }
         }
@@ -468,7 +507,7 @@ pub async fn anaf_check_invoice_status(
         .anaf_upload_id
         .ok_or_else(|| AppError::Validation("Factura nu are un upload ID ANAF.".into()))?;
 
-    let token = get_valid_token(&company_id, pool).await?;
+    let token = get_valid_token(&company_id, pool, &state.token_refresh_lock).await?;
 
     let client = AnafClient::new(test_mode);
     let status_resp = client

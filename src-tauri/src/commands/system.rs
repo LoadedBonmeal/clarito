@@ -62,9 +62,10 @@ pub async fn manual_sync(
         }
 
         // Poll SUBMITTED invoices for this company
-        status_polls += poll_submitted_for_company(pool, &company.id, None)
-            .await
-            .unwrap_or(0);
+        status_polls +=
+            poll_submitted_for_company(pool, &company.id, None, &state.token_refresh_lock)
+                .await
+                .unwrap_or(0);
 
         // Sync SPV messages for this company (respect USE_ANAF_TEST_ENV setting)
         let test_mode = crate::db::settings::get_bool(

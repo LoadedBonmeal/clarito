@@ -5,13 +5,28 @@ use tauri::{AppHandle, Emitter, Manager};
 /// Reîmprospătează token-ul OAuth2 pentru o companie și îl salvează în keychain.
 /// Returnează noul access_token. Citește config-ul OAuth din DB pentru a folosi
 /// client_id-ul configurat de utilizator (evită mismatch la ANAF cu client_id custom).
+///
+/// Serializat prin `lock` cu double-check: dacă alt task a reîmprospătat token-ul
+/// cât timp așteptam lock-ul, returnăm token-ul proaspăt fără a apela ANAF din nou.
 pub(crate) async fn refresh_token_for(
     company_id: &str,
     pool: &sqlx::SqlitePool,
+    lock: &tokio::sync::Mutex<()>,
 ) -> Result<String, String> {
     use crate::anaf::{keychain::TokenBundle, oauth};
+
+    // Acquire the app-wide refresh lock to serialize concurrent callers.
+    let _guard = lock.lock().await;
+
+    // Double-check: re-load from keychain — another task may have refreshed while
+    // we waited for the lock.
     let bundle = TokenBundle::load(company_id)
         .ok_or_else(|| format!("Nu există token pentru compania {}", company_id))?;
+    if !bundle.is_expired() {
+        // Another task already refreshed — use the fresh token.
+        return Ok(bundle.access_token);
+    }
+
     let config = crate::commands::anaf::build_oauth_config(pool).await;
     let result = oauth::refresh_token_bundle_with_client_id(
         &bundle.refresh_token,
@@ -36,6 +51,7 @@ pub(crate) async fn poll_submitted_invoices(app: &AppHandle) -> crate::error::Ap
         .try_state::<crate::state::AppState>()
         .ok_or_else(|| crate::error::AppError::Other("AppState not available".into()))?;
     let pool = &state.db;
+    let lock = state.token_refresh_lock.clone();
     let companies = crate::db::companies::list(pool).await?;
 
     for company in companies {
@@ -44,7 +60,7 @@ pub(crate) async fn poll_submitted_invoices(app: &AppHandle) -> crate::error::Ap
             continue;
         }
 
-        if let Err(e) = poll_submitted_for_company(pool, &company.id, Some(app)).await {
+        if let Err(e) = poll_submitted_for_company(pool, &company.id, Some(app), &lock).await {
             tracing::warn!(
                 "poll_submitted_for_company error for {}: {:?}",
                 company.id,
@@ -59,10 +75,12 @@ pub(crate) async fn poll_submitted_invoices(app: &AppHandle) -> crate::error::Ap
 /// Polls ANAF status for all SUBMITTED invoices of a single company.
 /// Returns the number of invoices whose status was checked.
 /// Pass `app` to fire native OS notifications on status changes.
+/// `lock` is the app-wide async mutex that serializes token refreshes.
 pub(crate) async fn poll_submitted_for_company(
     pool: &sqlx::SqlitePool,
     company_id: &str,
     app: Option<&AppHandle>,
+    lock: &tokio::sync::Mutex<()>,
 ) -> crate::error::AppResult<u32> {
     use crate::anaf::{
         client::{AnafClient, ERR_UNAUTHORIZED},
@@ -77,26 +95,38 @@ pub(crate) async fn poll_submitted_for_company(
         None => return Ok(0),
     };
 
+    // Proactive-expiry path: refresh token if needed, with single-flight lock.
     let mut access_token = if !bundle.is_expired() {
         bundle.access_token.clone()
     } else {
-        let config = crate::commands::anaf::build_oauth_config(pool).await;
-        let result = oauth::refresh_token_bundle_with_client_id(
-            &bundle.refresh_token,
-            &config.client_id,
-            &config.token_url,
-        )
-        .await
-        .map_err(AppError::Other)?;
-        let new_bundle = TokenBundle {
-            access_token: result.access_token.clone(),
-            refresh_token: result.refresh_token,
-            expires_at: result.expires_at,
+        // Acquire lock; double-check after acquiring.
+        let _guard = lock.lock().await;
+        let bundle = match TokenBundle::load(company_id) {
+            Some(b) => b,
+            None => return Ok(0),
         };
-        new_bundle
-            .save(company_id)
-            .map_err(|e| AppError::Other(e.to_string()))?;
-        result.access_token
+        if !bundle.is_expired() {
+            // Another task already refreshed while we waited.
+            bundle.access_token.clone()
+        } else {
+            let config = crate::commands::anaf::build_oauth_config(pool).await;
+            let result = oauth::refresh_token_bundle_with_client_id(
+                &bundle.refresh_token,
+                &config.client_id,
+                &config.token_url,
+            )
+            .await
+            .map_err(AppError::Other)?;
+            let new_bundle = TokenBundle {
+                access_token: result.access_token.clone(),
+                refresh_token: result.refresh_token,
+                expires_at: result.expires_at,
+            };
+            new_bundle
+                .save(company_id)
+                .map_err(|e| AppError::Other(e.to_string()))?;
+            result.access_token
+        }
     };
 
     // Read test_mode from settings so background poll respects the same environment
@@ -127,7 +157,7 @@ pub(crate) async fn poll_submitted_for_company(
             if let Err(ref e) = result {
                 if e == ERR_UNAUTHORIZED {
                     tracing::info!(company_id, "ANAF 401 — reîmprospătăm token și reîncercăm");
-                    if let Ok(new_tok) = refresh_token_for(company_id, pool).await {
+                    if let Ok(new_tok) = refresh_token_for(company_id, pool, lock).await {
                         access_token = new_tok;
                         result = client.check_status(&access_token, upload_id).await;
                     }

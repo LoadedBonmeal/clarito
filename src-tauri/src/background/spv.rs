@@ -52,28 +52,45 @@ pub(crate) async fn do_sync_spv(
     use crate::db::notifications;
     use crate::error::AppError;
 
+    // Reach the app-wide refresh lock (fallback: local no-op lock if state not yet managed).
+    let lock_arc = app
+        .try_state::<crate::state::AppState>()
+        .map(|s| s.token_refresh_lock.clone())
+        .unwrap_or_else(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
+    let lock: &tokio::sync::Mutex<()> = &lock_arc;
+
     let bundle = TokenBundle::load(company_id).ok_or_else(|| AppError::Other("No token".into()))?;
 
+    // Proactive-expiry path: refresh token if needed, with single-flight lock.
     let mut access_token = if !bundle.is_expired() {
         bundle.access_token.clone()
     } else {
-        let config = crate::commands::anaf::build_oauth_config(pool).await;
-        let result = oauth::refresh_token_bundle_with_client_id(
-            &bundle.refresh_token,
-            &config.client_id,
-            &config.token_url,
-        )
-        .await
-        .map_err(AppError::Other)?;
-        let new_bundle = TokenBundle {
-            access_token: result.access_token.clone(),
-            refresh_token: result.refresh_token,
-            expires_at: result.expires_at,
-        };
-        new_bundle
-            .save(company_id)
-            .map_err(|e| AppError::Other(e.to_string()))?;
-        result.access_token
+        // Acquire lock; double-check after acquiring.
+        let _guard = lock.lock().await;
+        let bundle =
+            TokenBundle::load(company_id).ok_or_else(|| AppError::Other("No token".into()))?;
+        if !bundle.is_expired() {
+            // Another task already refreshed while we waited.
+            bundle.access_token.clone()
+        } else {
+            let config = crate::commands::anaf::build_oauth_config(pool).await;
+            let result = oauth::refresh_token_bundle_with_client_id(
+                &bundle.refresh_token,
+                &config.client_id,
+                &config.token_url,
+            )
+            .await
+            .map_err(AppError::Other)?;
+            let new_bundle = TokenBundle {
+                access_token: result.access_token.clone(),
+                refresh_token: result.refresh_token,
+                expires_at: result.expires_at,
+            };
+            new_bundle
+                .save(company_id)
+                .map_err(|e| AppError::Other(e.to_string()))?;
+            result.access_token
+        }
     };
 
     let company = crate::db::companies::get(pool, company_id).await?;
@@ -87,7 +104,7 @@ pub(crate) async fn do_sync_spv(
                 company_id,
                 "ANAF 401 on list_messages — reîmprospătăm token"
             );
-            if let Ok(new_tok) = super::poll::refresh_token_for(company_id, pool).await {
+            if let Ok(new_tok) = super::poll::refresh_token_for(company_id, pool, lock).await {
                 access_token = new_tok;
                 messages_result = client.list_messages(&access_token, &company.cui, 60).await;
             }
@@ -179,7 +196,7 @@ pub(crate) async fn do_sync_spv(
                     msg_id = msg.id.as_str(),
                     "ANAF 401 on download — reîmprospătăm token"
                 );
-                if let Ok(new_tok) = super::poll::refresh_token_for(company_id, pool).await {
+                if let Ok(new_tok) = super::poll::refresh_token_for(company_id, pool, lock).await {
                     access_token = new_tok;
                     dl_result = client.download_message(&access_token, &msg.id).await;
                 }

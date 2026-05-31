@@ -206,6 +206,7 @@ pub fn run() {
                         tauri::async_runtime::spawn(async move {
                             if let Some(state) = app_for_sync.try_state::<AppState>() {
                                 let pool = &state.db;
+                                let lock = &state.token_refresh_lock;
                                 let all_companies =
                                     crate::db::companies::list(pool).await.unwrap_or_default();
                                 for company in &all_companies {
@@ -218,6 +219,7 @@ pub fn run() {
                                         pool,
                                         &company.id,
                                         Some(&app_for_sync),
+                                        lock,
                                     )
                                     .await;
                                     let test_mode = crate::db::settings::get_bool(
