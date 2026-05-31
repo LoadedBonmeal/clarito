@@ -358,6 +358,9 @@ pub fn run() {
             commands::recurring::delete_recurring_invoice,
             commands::recurring::update_recurring_invoice,
             commands::recurring::toggle_recurring_active,
+            // declarations d300
+            commands::declarations::compute_d300,
+            commands::declarations::export_d300,
             // saft d406
             commands::saft::export_saft_d406,
             // feedback / diagnostic

@@ -439,6 +439,17 @@ export const saft = {
     }),
 };
 
+// ─── Declarations (D300) ──────────────────────────────────────────────────
+
+export const declarations = {
+  /** Calculează decontul D300 — TVA colectat (vânzări) pentru o perioadă. */
+  compute: (companyId: string, periodFrom: string, periodTo: string) =>
+    invoke<import("@/types").D300Report>("compute_d300", { companyId, periodFrom, periodTo }),
+  /** Generează XML D300 și îl salvează la destPath. Returnează calea. */
+  export: (companyId: string, periodFrom: string, periodTo: string, destPath: string) =>
+    invoke<string>("export_d300", { companyId, periodFrom, periodTo, destPath }),
+};
+
 // ─── GDPR / data portability ──────────────────────────────────────────────
 
 export const gdpr = {
@@ -472,4 +483,5 @@ export const api = {
   saft,
   feedback,
   gdpr,
+  declarations,
 };

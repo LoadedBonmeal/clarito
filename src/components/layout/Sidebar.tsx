@@ -12,6 +12,7 @@ import { Icon } from "@/components/shared/Icon";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import { fmtShortcut } from "@/lib/platform";
 
 interface NavItem {
   id: string;
@@ -91,8 +92,8 @@ export function Sidebar() {
     // { id: "banca",     label: "Bancă & Casă",       ico: "bank",   color: "var(--color-banca)",    path: "/contacts",  disabled: true },
     { section: "Raportare" },
     { id: "rapoarte",   label: "Rapoarte",          ico: "reports", color: "var(--color-rapoarte)", path: "/reports" },
-    // Declarații ANAF and Audit have no dedicated page yet — shown disabled (planned feature).
-    { id: "declaratii", label: "Declarații ANAF",   ico: "anaf",    color: "var(--color-rapoarte)", path: "/reports",   disabled: true },
+    // Audit has no dedicated page yet — shown disabled (planned feature).
+    { id: "declaratii", label: "Declarații ANAF",   ico: "anaf",    color: "var(--color-rapoarte)", path: "/declarations" },
     { id: "audit",      label: "Jurnal modificări", ico: "history", color: "#8A857A",               path: "/settings",  disabled: true },
   ];
 
@@ -162,7 +163,7 @@ export function Sidebar() {
         <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {activeCompanyName}
         </span>
-        <span className="kbd">Ctrl K</span>
+        <span className="kbd">{fmtShortcut("Ctrl+K")}</span>
       </button>
     </div>
   );

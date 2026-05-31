@@ -387,6 +387,27 @@ export interface ExportReportParams {
   companyId?: string;
 }
 
+// ─── D300 Decont TVA ─────────────────────────────────────────────────────────
+
+/** Un grup de TVA colectat (cotă + categorie) din D300. */
+export interface D300Group {
+  vatRate: string;
+  vatCategory: string;
+  base: string;
+  vat: string;
+}
+
+/** Raportul D300 — TVA colectat (vânzări), calculat din facturi VALIDATED. */
+export interface D300Report {
+  companyCui: string;
+  periodFrom: string;
+  periodTo: string;
+  groups: D300Group[];
+  totalBase: string;
+  totalVat: string;
+  invoiceCount: number;
+}
+
 // ─── Feedback / Diagnostic ────────────────────────────────────────────────
 
 export interface DiagnosticReport {
