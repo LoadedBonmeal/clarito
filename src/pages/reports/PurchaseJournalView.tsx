@@ -3,7 +3,7 @@
  */
 
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
@@ -24,6 +24,8 @@ interface Props {
 export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [exporting, setExporting] = useState(false);
+  const [reparsing, setReparsing] = useState(false);
+  const queryClient = useQueryClient();
 
   const {
     data: paged,
@@ -50,6 +52,16 @@ export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
     [allReceived, dateFrom, dateTo],
   );
 
+  const hasUnparsed = periodReceived.some((inv) => inv.netAmount == null);
+
+  const totalNet = periodReceived.reduce(
+    (s, i) => s + (i.netAmount != null ? parseDec(i.netAmount) : 0),
+    0,
+  );
+  const totalVat = periodReceived.reduce(
+    (s, i) => s + (i.vatAmount != null ? parseDec(i.vatAmount) : 0),
+    0,
+  );
   const totalAmount = periodReceived.reduce(
     (s, i) => s + parseDec(i.totalAmount),
     0,
@@ -79,25 +91,54 @@ export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
     }
   };
 
+  const handleReparseVat = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    setReparsing(true);
+    try {
+      const n = await api.received.reparseVat(activeCompanyId);
+      notify.success(`${n} facturi actualizate`);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.received.list({ companyId: activeCompanyId }),
+      });
+      void refetch();
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut recalcula TVA din XML."));
+    } finally {
+      setReparsing(false);
+    }
+  };
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <h2 style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", letterSpacing: "0.04em", textTransform: "uppercase", margin: 0 }}>
           Jurnal de cumpărări
         </h2>
-        <button
-          type="button"
-          className="btn"
-          disabled={exporting || !activeCompanyId}
-          onClick={handleExport}
-        >
-          <Icon name="download" size={12} /> {exporting ? "Export…" : "Exportă jurnal cumpărări (CSV)"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className="btn"
+            disabled={reparsing || !activeCompanyId}
+            onClick={() => void handleReparseVat()}
+          >
+            <Icon name="refresh-cw" size={12} /> {reparsing ? "Se recalculează…" : "Recalculează TVA din XML"}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={exporting || !activeCompanyId}
+            onClick={() => void handleExport()}
+          >
+            <Icon name="download" size={12} /> {exporting ? "Export…" : "Exportă jurnal cumpărări (CSV)"}
+          </button>
+        </div>
       </div>
 
-      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10, fontStyle: "italic" }}>
-        Defalcarea TVA pentru achiziții nu este disponibilă până la parsarea XML-ului facturilor primite.
-      </div>
+      {hasUnparsed && (
+        <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10, fontStyle: "italic" }}>
+          Unele facturi nu au încă defalcare TVA — apăsați «Recalculează TVA din XML» pentru a extrage Net/TVA din fișierele XML primite.
+        </div>
+      )}
 
       {isLoading ? (
         <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Se încarcă…</div>
@@ -116,6 +157,8 @@ export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
               <th style={{ width: 80 }}>Serie</th>
               <th style={{ width: 100 }}>Număr</th>
               <th style={{ width: 96 }}>Data</th>
+              <th className="num" style={{ width: 120 }}>Net (RON)</th>
+              <th className="num" style={{ width: 120 }}>TVA (RON)</th>
               <th className="num" style={{ width: 130 }}>Total</th>
             </tr>
           </thead>
@@ -128,6 +171,12 @@ export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
                 <td className="mono">{inv.number ?? "—"}</td>
                 <td className="muted">{inv.issueDate}</td>
                 <td className="num tnum">
+                  {inv.netAmount != null ? fmtRON(inv.netAmount) : <span className="muted">—</span>}
+                </td>
+                <td className="num tnum">
+                  {inv.vatAmount != null ? fmtRON(inv.vatAmount) : <span className="muted">—</span>}
+                </td>
+                <td className="num tnum">
                   <b>{fmtRON(inv.totalAmount)}</b>
                   {inv.currency !== "RON" && (
                     <span className="muted" style={{ marginLeft: 4, fontSize: 10 }}>{inv.currency}</span>
@@ -139,6 +188,8 @@ export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
           <tfoot>
             <tr style={{ background: "var(--bg-hover)", fontWeight: 600 }}>
               <td colSpan={5}>TOTAL perioadă</td>
+              <td className="num tnum">{totalNet > 0 ? <b>{fmtRON(totalNet)}</b> : <span className="muted">—</span>}</td>
+              <td className="num tnum">{totalVat > 0 ? <b>{fmtRON(totalVat)}</b> : <span className="muted">—</span>}</td>
               <td className="num tnum"><b>{fmtRON(totalAmount)}</b></td>
             </tr>
           </tfoot>

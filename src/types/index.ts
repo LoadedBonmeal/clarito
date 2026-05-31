@@ -256,6 +256,8 @@ export interface ReceivedInvoice {
   series: string | null;
   number: string | null;
   totalAmount: string;
+  netAmount?: string | null;
+  vatAmount?: string | null;
   currency: string;
   issueDate: string;
   xmlPath: string;

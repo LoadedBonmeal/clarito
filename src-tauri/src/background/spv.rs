@@ -227,7 +227,7 @@ pub(crate) async fn do_sync_spv(
         let zip_path = archive_path.join("original.zip");
 
         // ── Parse XML for basic info ──────────────────────────────────
-        let (issuer_cui, issuer_name, total_amount, issue_date) = parse_received_xml(&xml_content);
+        let parsed = parse_received_xml(&xml_content);
 
         // ── RUST-07: INSERT received_invoice FIRST, then write files ─
         // The previous flow wrote the XML to disk before the DB insert,
@@ -241,20 +241,23 @@ pub(crate) async fn do_sync_spv(
             "INSERT OR IGNORE INTO received_invoices \
              (id, company_id, anaf_download_id, anaf_index, issuer_cui, issuer_name, \
               series, number, total_amount, currency, issue_date, xml_path, status, \
+              net_amount, vat_amount, \
               downloaded_at, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'RON', ?10, ?11, 'NEW', ?12, ?12)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'RON', ?10, ?11, 'NEW', ?12, ?13, ?14, ?14)",
         )
         .bind(&recv_id)
         .bind(company_id)
         .bind(&msg.id)
         .bind(&msg.id_solicitare)
-        .bind(&issuer_cui)
-        .bind(&issuer_name)
+        .bind(&parsed.issuer_cui)
+        .bind(&parsed.issuer_name)
         .bind(Option::<String>::None) // series — NULL until extracted from XML
         .bind(Option::<String>::None) // number — NULL until extracted from XML
-        .bind(&total_amount)
-        .bind(&issue_date)
+        .bind(&parsed.total_amount)
+        .bind(&parsed.issue_date)
         .bind(xml_path.to_string_lossy().as_ref())
+        .bind(&parsed.net_amount)
+        .bind(&parsed.vat_amount)
         .bind(recv_now)
         .execute(pool)
         .await;
@@ -265,7 +268,7 @@ pub(crate) async fn do_sync_spv(
                 tracing::error!(
                     error = ?e,
                     anaf_download_id = %msg.id,
-                    issuer_cui = %issuer_cui,
+                    issuer_cui = %parsed.issuer_cui,
                     "Failed to insert received_invoice — invoice will be lost unless re-downloaded from SPV"
                 );
                 continue;
@@ -302,10 +305,35 @@ pub(crate) async fn do_sync_spv(
             // ZIP is supplementary; proceed even if it fails.
         }
 
+        // ── Insert VAT breakdown lines ─────────────────────────────
+        for vat_line in &parsed.vat_lines {
+            let line_id = crate::db::models::new_id();
+            if let Err(e) = sqlx::query(
+                "INSERT INTO received_invoice_vat_lines \
+                 (id, received_invoice_id, vat_rate, vat_category, base_amount, vat_amount) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .bind(&line_id)
+            .bind(&recv_id)
+            .bind(&vat_line.vat_rate)
+            .bind(&vat_line.vat_category)
+            .bind(&vat_line.base_amount)
+            .bind(&vat_line.vat_amount)
+            .execute(pool)
+            .await
+            {
+                tracing::warn!(
+                    error = ?e,
+                    received_invoice_id = %recv_id,
+                    "Failed to insert VAT line (continuing)"
+                );
+            }
+        }
+
         // ── Upgrade the tentative notification with the final text ───
         // RUST-08: notification update errors must NOT abort the loop.
-        let final_title = format!("Factură primită de la {}", issuer_name);
-        let final_body = format!("Sumă: {} RON — {}", total_amount, issue_date);
+        let final_title = format!("Factură primită de la {}", parsed.issuer_name);
+        let final_body = format!("Sumă: {} RON — {}", parsed.total_amount, parsed.issue_date);
         if let Err(e) = sqlx::query("UPDATE notifications SET title = ?1, body = ?2 WHERE id = ?3")
             .bind(&final_title)
             .bind(&final_body)
@@ -348,9 +376,35 @@ fn extract_xml_from_zip(zip_bytes: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
+/// Linie de defalcare TVA extrasă dintr-un `cac:TaxSubtotal` UBL.
+#[derive(Debug, Clone)]
+pub(crate) struct ReceivedVatLine {
+    pub vat_rate: String,
+    pub vat_category: String,
+    pub base_amount: String,
+    pub vat_amount: String,
+}
+
+/// Rezultatul parsării XML-ului UBL al unei facturi primite.
+#[derive(Debug)]
+pub(crate) struct ParsedReceived {
+    pub issuer_cui: String,
+    pub issuer_name: String,
+    /// PayableAmount — valoarea totală de plată (comportament existent).
+    pub total_amount: String,
+    pub issue_date: String,
+    /// cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount — net fără TVA.
+    pub net_amount: Option<String>,
+    /// cac:TaxTotal/cbc:TaxAmount (direct, nu din TaxSubtotal) — TVA document.
+    pub vat_amount: Option<String>,
+    /// Câte un ReceivedVatLine pentru fiecare cac:TaxSubtotal.
+    pub vat_lines: Vec<ReceivedVatLine>,
+}
+
 /// Parsează XML-ul UBL primit de la ANAF folosind quick-xml (namespace-aware).
-/// Extrage: CUI emitent, denumire emitent, valoare totală, dată emisie.
-fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
+/// Extrage: CUI emitent, denumire emitent, valoare totală, dată emisie,
+/// plus defalcarea net/TVA și linii per cotă TVA.
+pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
     use quick_xml::events::Event;
     use quick_xml::Reader;
     use rust_decimal::Decimal;
@@ -367,11 +421,25 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
     let mut issuer_name = String::new();
     let mut total_amount_str = "0.00".to_string();
     let mut issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let mut net_amount: Option<String> = None;
+    let mut vat_amount_doc: Option<String> = None;
+    let mut vat_lines: Vec<ReceivedVatLine> = Vec::new();
 
     // State machine pentru navigarea structurii UBL
     let mut depth_supplier = 0i32; // >0 când suntem în AccountingSupplierParty
     let mut depth_party_tax = 0i32; // >0 când suntem în PartyTaxScheme (al supplier)
     let mut depth_party_legal = 0i32; // >0 când suntem în PartyLegalEntity (al supplier)
+    let mut depth_monetary_total = 0i32; // >0 când suntem în LegalMonetaryTotal
+    let mut depth_tax_total = 0i32; // >0 când suntem în TaxTotal
+    let mut depth_tax_subtotal = 0i32; // >0 când suntem în TaxSubtotal (din TaxTotal)
+    let mut depth_tax_category = 0i32; // >0 când suntem în TaxCategory (din TaxSubtotal)
+
+    // Colectare câmpuri pentru subtotalul curent
+    let mut sub_base: Option<String> = None;
+    let mut sub_vat: Option<String> = None;
+    let mut sub_rate: Option<String> = None;
+    let mut sub_category: Option<String> = None;
+
     let mut current_local = String::new();
     let mut buf = Vec::new();
 
@@ -385,6 +453,17 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
                     "AccountingSupplierParty" => depth_supplier += 1,
                     "PartyTaxScheme" if depth_supplier > 0 => depth_party_tax += 1,
                     "PartyLegalEntity" if depth_supplier > 0 => depth_party_legal += 1,
+                    "LegalMonetaryTotal" => depth_monetary_total += 1,
+                    "TaxTotal" => depth_tax_total += 1,
+                    "TaxSubtotal" if depth_tax_total > 0 => {
+                        depth_tax_subtotal += 1;
+                        // Resetăm colectoarele pentru noul subtotal
+                        sub_base = None;
+                        sub_vat = None;
+                        sub_rate = None;
+                        sub_category = None;
+                    }
+                    "TaxCategory" if depth_tax_subtotal > 0 => depth_tax_category += 1,
                     _ => {}
                 }
                 current_local = local;
@@ -392,15 +471,33 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
             Ok(Event::End(ref e)) => {
                 let local = std::str::from_utf8(e.local_name().into_inner()).unwrap_or("");
                 match local {
-                    "AccountingSupplierParty" => {
-                        depth_supplier -= 1;
+                    "AccountingSupplierParty" => depth_supplier -= 1,
+                    "PartyTaxScheme" if depth_supplier > 0 => depth_party_tax -= 1,
+                    "PartyLegalEntity" if depth_supplier > 0 => depth_party_legal -= 1,
+                    "LegalMonetaryTotal" => depth_monetary_total -= 1,
+                    "TaxTotal" => depth_tax_total -= 1,
+                    "TaxSubtotal" if depth_tax_total > 0 && depth_tax_subtotal > 0 => {
+                        // Emitem o linie dacă avem cel puțin baza
+                        if let Some(base) = sub_base.take() {
+                            let line_vat = sub_vat.take().unwrap_or_else(|| "0.00".to_string());
+                            let line_rate = sub_rate.take().unwrap_or_else(|| "0".to_string());
+                            let line_category =
+                                sub_category.take().unwrap_or_else(|| "S".to_string());
+                            vat_lines.push(ReceivedVatLine {
+                                vat_rate: line_rate,
+                                vat_category: line_category,
+                                base_amount: base,
+                                vat_amount: line_vat,
+                            });
+                        } else {
+                            // skip subtotal fără bază
+                            sub_vat = None;
+                            sub_rate = None;
+                            sub_category = None;
+                        }
+                        depth_tax_subtotal -= 1;
                     }
-                    "PartyTaxScheme" if depth_supplier > 0 => {
-                        depth_party_tax -= 1;
-                    }
-                    "PartyLegalEntity" if depth_supplier > 0 => {
-                        depth_party_legal -= 1;
-                    }
+                    "TaxCategory" if depth_tax_subtotal > 0 => depth_tax_category -= 1,
                     _ => {}
                 }
                 current_local.clear();
@@ -438,6 +535,42 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
                     "IssueDate" => {
                         issue_date = text;
                     }
+                    // TaxExclusiveAmount în LegalMonetaryTotal = net fără TVA
+                    "TaxExclusiveAmount" if depth_monetary_total > 0 && net_amount.is_none() => {
+                        if let Ok(d) = Decimal::from_str(text.trim()) {
+                            net_amount = Some(d.round_dp(2).to_string());
+                        }
+                    }
+                    // TaxAmount: distingem doc-level (în TaxTotal dar NU în TaxSubtotal)
+                    // vs subtotal-level (în TaxSubtotal)
+                    "TaxAmount" if depth_tax_total > 0 && depth_tax_subtotal == 0 => {
+                        // Nivel document — TVA total factură
+                        if let Ok(d) = Decimal::from_str(text.trim()) {
+                            vat_amount_doc = Some(d.round_dp(2).to_string());
+                        }
+                    }
+                    "TaxAmount" if depth_tax_subtotal > 0 => {
+                        // Nivel subtotal — TVA aferent liniei
+                        if let Ok(d) = Decimal::from_str(text.trim()) {
+                            sub_vat = Some(d.round_dp(2).to_string());
+                        }
+                    }
+                    // TaxableAmount în TaxSubtotal = baza impozabilă a liniei
+                    "TaxableAmount" if depth_tax_subtotal > 0 => {
+                        if let Ok(d) = Decimal::from_str(text.trim()) {
+                            sub_base = Some(d.round_dp(2).to_string());
+                        }
+                    }
+                    // Percent în TaxCategory = cota TVA (ex. "19")
+                    "Percent" if depth_tax_category > 0 => {
+                        if let Ok(d) = Decimal::from_str(text.trim()) {
+                            sub_rate = Some(d.round_dp(0).to_string());
+                        }
+                    }
+                    // ID în TaxCategory = codul categoriei (S/AE/E/Z/K/G/O)
+                    "ID" if depth_tax_category > 0 && sub_category.is_none() => {
+                        sub_category = Some(text);
+                    }
                     _ => {}
                 }
             }
@@ -447,18 +580,159 @@ fn parse_received_xml(xml_bytes: &[u8]) -> (String, String, String, String) {
         buf.clear();
     }
 
-    (
-        if issuer_cui.is_empty() {
+    ParsedReceived {
+        issuer_cui: if issuer_cui.is_empty() {
             "NECUNOSCUT".to_string()
         } else {
             issuer_cui
         },
-        if issuer_name.is_empty() {
+        issuer_name: if issuer_name.is_empty() {
             "Necunoscut".to_string()
         } else {
             issuer_name
         },
-        total_amount_str,
+        total_amount: total_amount_str,
         issue_date,
-    )
+        net_amount,
+        vat_amount: vat_amount_doc,
+        vat_lines,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// XML UBL minimal cu TaxTotal + TaxSubtotal pentru testarea parser-ului.
+    const SAMPLE_UBL: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:IssueDate>2024-03-15</cbc:IssueDate>
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cac:PartyTaxScheme>
+        <cbc:CompanyID>RO12345678</cbc:CompanyID>
+      </cac:PartyTaxScheme>
+      <cac:PartyLegalEntity>
+        <cbc:RegistrationName>SC TEST SRL</cbc:RegistrationName>
+      </cac:PartyLegalEntity>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="RON">190.00</cbc:TaxAmount>
+    <cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="RON">1000.00</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="RON">190.00</cbc:TaxAmount>
+      <cac:TaxCategory>
+        <cbc:ID>S</cbc:ID>
+        <cbc:Percent>19</cbc:Percent>
+      </cac:TaxCategory>
+    </cac:TaxSubtotal>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:TaxExclusiveAmount currencyID="RON">1000.00</cbc:TaxExclusiveAmount>
+    <cbc:PayableAmount currencyID="RON">1190.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>"#;
+
+    #[test]
+    fn parser_extracts_issuer() {
+        let result = parse_received_xml(SAMPLE_UBL.as_bytes());
+        assert_eq!(result.issuer_cui, "RO12345678");
+        assert_eq!(result.issuer_name, "SC TEST SRL");
+        assert_eq!(result.issue_date, "2024-03-15");
+    }
+
+    #[test]
+    fn parser_extracts_total_amount() {
+        let result = parse_received_xml(SAMPLE_UBL.as_bytes());
+        assert_eq!(result.total_amount, "1190.00");
+    }
+
+    #[test]
+    fn parser_extracts_net_and_vat() {
+        let result = parse_received_xml(SAMPLE_UBL.as_bytes());
+        assert_eq!(result.net_amount, Some("1000.00".to_string()));
+        assert_eq!(result.vat_amount, Some("190.00".to_string()));
+    }
+
+    #[test]
+    fn parser_extracts_vat_lines() {
+        let result = parse_received_xml(SAMPLE_UBL.as_bytes());
+        assert_eq!(result.vat_lines.len(), 1);
+        let line = &result.vat_lines[0];
+        assert_eq!(line.vat_rate, "19");
+        assert_eq!(line.vat_category, "S");
+        assert_eq!(line.base_amount, "1000.00");
+        assert_eq!(line.vat_amount, "190.00");
+    }
+
+    #[test]
+    fn parser_distinguishes_doc_tax_from_subtotal_tax() {
+        // Documentul TVA (190.00) trebuie să fie la nivel document, nu la subtotal
+        let result = parse_received_xml(SAMPLE_UBL.as_bytes());
+        // TaxAmount la nivel document
+        assert_eq!(result.vat_amount, Some("190.00".to_string()));
+        // TaxAmount la nivel subtotal (identic în exemplu, dar câmpuri separate)
+        assert_eq!(result.vat_lines[0].vat_amount, "190.00");
+    }
+
+    #[test]
+    fn parser_returns_none_for_missing_vat_structure() {
+        let minimal = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:IssueDate>2024-01-01</cbc:IssueDate>
+  <cac:LegalMonetaryTotal>
+    <cbc:PayableAmount currencyID="RON">500.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>"#;
+        let result = parse_received_xml(minimal.as_bytes());
+        assert!(result.net_amount.is_none());
+        assert!(result.vat_amount.is_none());
+        assert!(result.vat_lines.is_empty());
+    }
+
+    #[test]
+    fn parser_handles_multiple_tax_subtotals() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:IssueDate>2024-06-01</cbc:IssueDate>
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="RON">199.00</cbc:TaxAmount>
+    <cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="RON">1000.00</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="RON">190.00</cbc:TaxAmount>
+      <cac:TaxCategory>
+        <cbc:ID>S</cbc:ID>
+        <cbc:Percent>19</cbc:Percent>
+      </cac:TaxCategory>
+    </cac:TaxSubtotal>
+    <cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="RON">100.00</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="RON">9.00</cbc:TaxAmount>
+      <cac:TaxCategory>
+        <cbc:ID>S</cbc:ID>
+        <cbc:Percent>9</cbc:Percent>
+      </cac:TaxCategory>
+    </cac:TaxSubtotal>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:TaxExclusiveAmount currencyID="RON">1100.00</cbc:TaxExclusiveAmount>
+    <cbc:PayableAmount currencyID="RON">1299.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>"#;
+        let result = parse_received_xml(xml.as_bytes());
+        assert_eq!(result.vat_lines.len(), 2);
+        assert_eq!(result.vat_lines[0].vat_rate, "19");
+        assert_eq!(result.vat_lines[0].base_amount, "1000.00");
+        assert_eq!(result.vat_lines[1].vat_rate, "9");
+        assert_eq!(result.vat_lines[1].base_amount, "100.00");
+        assert_eq!(result.vat_amount, Some("199.00".to_string()));
+        assert_eq!(result.net_amount, Some("1100.00".to_string()));
+    }
 }

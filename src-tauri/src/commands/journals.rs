@@ -131,7 +131,10 @@ pub async fn export_purchase_journal(
         "SELECT issuer_name, issuer_cui, \
                 COALESCE(series, '') AS series, \
                 COALESCE(number, '') AS number, \
-                issue_date, total_amount, currency \
+                issue_date, total_amount, \
+                COALESCE(net_amount, '') AS net_amount, \
+                COALESCE(vat_amount, '') AS vat_amount, \
+                currency \
          FROM received_invoices \
          WHERE company_id = ?1 \
            AND issue_date >= ?2 \
@@ -150,9 +153,14 @@ pub async fn export_purchase_journal(
     tokio::task::spawn_blocking(move || {
         // Notă de avertizare ca prim comentariu în fișier (rând separat, non-CSV,
         // dar util pentru utilizatorul care deschide fișierul în Excel/calc).
-        let note = "# NOTA: Jurnalul de cumparari contine doar totalul facturilor primite. \
-                    Defalcarea Net/TVA necesita parsarea XML-ului UBL (disponibil in versiune viitoare).";
-        let header = csv_row(&["Furnizor", "CUI", "Serie", "Numar", "Data", "Total", "Moneda"]);
+        // Net/TVA sunt disponibile când XML-ul a fost parsat; rândurile fără defalcare
+        // au coloanele Net/TVA goale.
+        let note = "# NOTA: Jurnalul de cumparari include Net/TVA extrase din XML-ul UBL \
+                    cand sunt disponibile. Randurile fara defalcare nu au fost inca parsate \
+                    (folositi butonul Recalculeaza TVA din XML din aplicatie).";
+        let header = csv_row(&[
+            "Furnizor", "CUI", "Serie", "Numar", "Data", "Net", "TVA", "Total", "Moneda",
+        ]);
         let mut lines = vec![note.to_string(), header];
 
         for row in &rows {
@@ -161,6 +169,8 @@ pub async fn export_purchase_journal(
             let series: String = row.try_get("series").unwrap_or_default();
             let number: String = row.try_get("number").unwrap_or_default();
             let issue_date: String = row.try_get("issue_date").unwrap_or_default();
+            let net: String = row.try_get("net_amount").unwrap_or_default();
+            let vat: String = row.try_get("vat_amount").unwrap_or_default();
             let total: String = row.try_get("total_amount").unwrap_or_default();
             let currency: String = row.try_get("currency").unwrap_or_default();
 
@@ -170,6 +180,8 @@ pub async fn export_purchase_journal(
                 &series,
                 &number,
                 &issue_date,
+                &net,
+                &vat,
                 &total,
                 &currency,
             ]));
@@ -218,6 +230,26 @@ mod tests {
         );
     }
 
+    /// Verifică că csv_row cu 9 câmpuri (jurnal cumpărări nou) funcționează corect.
+    #[test]
+    fn csv_row_nine_fields() {
+        let row = csv_row(&[
+            "SC FURNIZOR SRL",
+            "RO654321",
+            "FCT",
+            "100",
+            "2024-01-10",
+            "5000.00",
+            "950.00",
+            "5950.00",
+            "RON",
+        ]);
+        assert_eq!(
+            row,
+            "SC FURNIZOR SRL,RO654321,FCT,100,2024-01-10,5000.00,950.00,5950.00,RON"
+        );
+    }
+
     /// Verifică că header-ul jurnalului de vânzări are coloanele corecte.
     #[test]
     fn sales_journal_header_columns() {
@@ -227,13 +259,13 @@ mod tests {
         assert_eq!(header, "Numar,Data,Client,CUI,Net,TVA,Total,Status");
     }
 
-    /// Verifică că header-ul jurnalului de cumpărări are coloanele corecte.
+    /// Verifică că header-ul jurnalului de cumpărări are coloanele corecte (cu Net/TVA).
     #[test]
     fn purchase_journal_header_columns() {
         let header = csv_row(&[
-            "Furnizor", "CUI", "Serie", "Numar", "Data", "Total", "Moneda",
+            "Furnizor", "CUI", "Serie", "Numar", "Data", "Net", "TVA", "Total", "Moneda",
         ]);
-        assert_eq!(header, "Furnizor,CUI,Serie,Numar,Data,Total,Moneda");
+        assert_eq!(header, "Furnizor,CUI,Serie,Numar,Data,Net,TVA,Total,Moneda");
     }
 
     /// Verifică că jurnalul de vânzări se scrie corect în fișier.
@@ -267,13 +299,14 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// Verifică că jurnalul de cumpărări include nota de avertizare.
+    /// Verifică că jurnalul de cumpărări include nota de avertizare și noile coloane Net/TVA.
     #[test]
     fn purchase_journal_includes_vat_note() {
-        let note = "# NOTA: Jurnalul de cumparari contine doar totalul facturilor primite. \
-                    Defalcarea Net/TVA necesita parsarea XML-ului UBL (disponibil in versiune viitoare).";
+        let note = "# NOTA: Jurnalul de cumparari include Net/TVA extrase din XML-ul UBL \
+                    cand sunt disponibile. Randurile fara defalcare nu au fost inca parsate \
+                    (folositi butonul Recalculeaza TVA din XML din aplicatie).";
         let header = csv_row(&[
-            "Furnizor", "CUI", "Serie", "Numar", "Data", "Total", "Moneda",
+            "Furnizor", "CUI", "Serie", "Numar", "Data", "Net", "TVA", "Total", "Moneda",
         ]);
         let row = csv_row(&[
             "SC FURNIZOR SRL",
@@ -281,6 +314,8 @@ mod tests {
             "FCT",
             "100",
             "2024-01-10",
+            "5000.00",
+            "950.00",
             "5950.00",
             "RON",
         ]);
@@ -292,7 +327,7 @@ mod tests {
 
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(written.contains("NOTA:"));
-        assert!(written.contains("Furnizor,CUI,Serie,Numar,Data,Total,Moneda"));
+        assert!(written.contains("Furnizor,CUI,Serie,Numar,Data,Net,TVA,Total,Moneda"));
         assert!(written.contains("SC FURNIZOR SRL"));
         assert!(written.contains("RON"));
 

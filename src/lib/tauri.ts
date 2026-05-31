@@ -123,6 +123,8 @@ export const received = {
     invoke<ReceivedInvoice>("get_received_invoice", { id }),
   updateStatus: (id: string, status: ReceivedStatus) =>
     invoke<void>("update_received_status", { id, status }),
+  reparseVat: (companyId?: string) =>
+    invoke<number>("reparse_received_vat", { companyId: companyId ?? null }),
 };
 
 // ─── Notifications ────────────────────────────────────────────────────────

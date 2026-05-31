@@ -280,6 +280,7 @@ pub fn run() {
             commands::received::list_received_invoices,
             commands::received::get_received_invoice,
             commands::received::update_received_status,
+            commands::received::reparse_received_vat,
             // notifications
             commands::notifications::list_notifications,
             commands::notifications::unread_notification_count,

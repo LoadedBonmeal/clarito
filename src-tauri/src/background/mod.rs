@@ -14,6 +14,7 @@ mod spv;
 // Re-export functions used by other modules
 pub(crate) use poll::poll_submitted_for_company;
 pub(crate) use spv::do_sync_spv;
+pub(crate) use spv::parse_received_xml;
 
 const STATUS_POLL_SECS: u64 = 900; // 15 minutes — per plan
 
