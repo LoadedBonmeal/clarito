@@ -140,7 +140,7 @@ export function Ribbon({ onOpenPalette, onOpenShortcuts }: RibbonProps) {
           <BtnBig icon="invoiceIn" label="Primită nouă"         hint={fmtShortcut("Ctrl+Shift+N")} onClick={() => navigate({ to: "/received" })} />
           <BtnBig icon="storno"    label="Storno"               hint={fmtShortcut("Ctrl+F9")}      onClick={() => { setStornoOpen(true); setStornoNumber(""); setStornoReason(""); setStornoError(""); }} />
           <BtnBig icon="receipt"   label="Chitanță"             onClick={() => navigate({ to: "/receipts" })} />
-          <BtnBig icon="bank"      label="Plată"                disabled />
+          <BtnBig icon="bank"      label="Plată"                                    onClick={() => navigate({ to: "/payments" })} />
           <BtnBig icon="users"     label="Contact"                                  onClick={() => navigate({ to: "/contacts" })} />
         </div>
       </div>
