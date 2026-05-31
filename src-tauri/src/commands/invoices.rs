@@ -40,9 +40,21 @@ pub async fn list_invoices(
     invoices::list(&state.db, filter.unwrap_or_default()).await
 }
 
+/// R13 Wave G: `company_id` is required. After fetching via the shared
+/// `get_with_lines` (signature unchanged), we verify ownership and return
+/// `NotFound` for any mismatch — invisible to legitimate callers, opaque to
+/// cross-company probing.
 #[tauri::command]
-pub async fn get_invoice(state: State<'_, AppState>, id: String) -> AppResult<InvoiceWithLines> {
-    invoices::get_with_lines(&state.db, &id).await
+pub async fn get_invoice(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+) -> AppResult<InvoiceWithLines> {
+    let bundle = invoices::get_with_lines(&state.db, &id).await?;
+    if bundle.invoice.company_id != company_id {
+        return Err(AppError::NotFound);
+    }
+    Ok(bundle)
 }
 
 #[tauri::command]
@@ -62,9 +74,15 @@ pub async fn create_invoice_draft(
     Ok(new_invoice)
 }
 
+/// R13 Wave G: `company_id` is required. Deletion is scoped to the owning
+/// company; cross-company attempts receive `NotFound`.
 #[tauri::command]
-pub async fn delete_invoice(state: State<'_, AppState>, id: String) -> AppResult<()> {
-    invoices::delete(&state.db, &id).await?;
+pub async fn delete_invoice(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+) -> AppResult<()> {
+    invoices::delete_scoped(&state.db, &id, &company_id).await?;
     let _ =
         crate::db::audit::log_user_action(&state.db, "invoice_deleted", "invoice", &id, None).await;
     Ok(())
@@ -95,17 +113,26 @@ fn is_allowed_status_transition(current: &str, target: &str) -> bool {
     }
 }
 
+/// R13 Wave G: `company_id` is required. The status UPDATE is scoped to the
+/// owning company via `set_status_scoped`; cross-company attempts receive
+/// `NotFound`. Background ANAF transitions (mark_validated / mark_rejected)
+/// use their own dedicated db fns and are NOT affected.
 #[tauri::command]
 pub async fn set_invoice_status(
     state: State<'_, AppState>,
     id: String,
+    company_id: String,
     status: InvoiceStatus,
     message: Option<String>,
 ) -> AppResult<()> {
     // RUST-02: blocăm tranziții ilegale (ex. VALIDATED → DRAFT) înainte de
     // a executa UPDATE-ul. Statul curent este citit din DB pentru a evita
     // race-uri cu un client care ar trimite un status învechit.
+    // R13 Wave G: verificăm și ownership-ul companiei în același pas.
     let current = invoices::get(&state.db, &id).await?;
+    if current.company_id != company_id {
+        return Err(AppError::NotFound);
+    }
     if !is_allowed_status_transition(current.status.as_str(), status.as_str()) {
         return Err(AppError::Validation(format!(
             "Tranziție de status nepermisă: {} → {}.",
@@ -113,7 +140,7 @@ pub async fn set_invoice_status(
             status.as_str()
         )));
     }
-    invoices::set_status(&state.db, &id, status, message).await
+    invoices::set_status_scoped(&state.db, &id, &company_id, status, message).await
 }
 
 #[tauri::command]
@@ -845,8 +872,9 @@ mod tests {
         assert_eq!(compute_storno_series("A1"), "SA1");
     }
 
-    // ── DB-backed storno tests ─────────────────────────────────────────────
+    // ── R13 Wave G: wrong-company isolation tests ──────────────────────────
 
+    use crate::db::invoices as db_inv_test;
     use sqlx::sqlite::SqlitePoolOptions;
 
     /// Minimal in-memory schema for storno tests (subset of production migrations).
@@ -1082,6 +1110,236 @@ mod tests {
         assert!(
             would_reject,
             "storno-of-storno guard should reject this invoice"
+        );
+    }
+
+    // ── R13 Wave G: cross-company isolation tests ──────────────────────────
+
+    /// Full-schema in-memory pool for Wave G tests (includes every column that
+    /// `db::invoices::get` selects, so `db_inv_test::get` can be used to verify
+    /// state after the scoped operations).
+    async fn setup_wave_g_pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(":memory:")
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE companies (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                cui TEXT NOT NULL DEFAULT '',
+                reg_com TEXT,
+                address TEXT NOT NULL DEFAULT '',
+                city TEXT NOT NULL DEFAULT '',
+                county TEXT,
+                country TEXT NOT NULL DEFAULT 'RO',
+                iban TEXT,
+                bank TEXT,
+                phone TEXT,
+                email TEXT,
+                spv_enabled INTEGER NOT NULL DEFAULT 0,
+                last_invoice_number INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE contacts (
+                id TEXT PRIMARY KEY NOT NULL,
+                company_id TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                cui TEXT,
+                reg_com TEXT,
+                address TEXT,
+                city TEXT,
+                county TEXT,
+                country TEXT,
+                iban TEXT,
+                bank TEXT,
+                email TEXT,
+                phone TEXT,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Full schema matching db::invoices::get SELECT list.
+        sqlx::query(
+            "CREATE TABLE invoices (
+                id TEXT PRIMARY KEY NOT NULL,
+                company_id TEXT NOT NULL,
+                contact_id TEXT NOT NULL,
+                series TEXT NOT NULL DEFAULT '',
+                number INTEGER NOT NULL DEFAULT 0,
+                full_number TEXT NOT NULL DEFAULT '',
+                issue_date TEXT NOT NULL DEFAULT '',
+                due_date TEXT NOT NULL DEFAULT '',
+                currency TEXT NOT NULL DEFAULT 'RON',
+                exchange_rate REAL,
+                subtotal_amount TEXT NOT NULL DEFAULT '0',
+                vat_amount TEXT NOT NULL DEFAULT '0',
+                total_amount TEXT NOT NULL DEFAULT '0',
+                status TEXT NOT NULL DEFAULT 'DRAFT',
+                anaf_upload_id TEXT,
+                anaf_index TEXT,
+                anaf_submitted_at INTEGER,
+                anaf_validated_at INTEGER,
+                anaf_rejected_at INTEGER,
+                xml_path TEXT,
+                pdf_path TEXT,
+                signature_xml_path TEXT,
+                rejection_reason TEXT,
+                rejection_code TEXT,
+                notes TEXT,
+                payment_means_code TEXT NOT NULL DEFAULT '30',
+                storno_of_invoice_id TEXT,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE invoice_events (
+                id TEXT PRIMARY KEY NOT NULL,
+                invoice_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                message TEXT,
+                metadata TEXT,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Seed: two companies + one contact
+        sqlx::query(
+            "INSERT INTO companies (id, name, cui, address, city, last_invoice_number)
+             VALUES ('comp-1', 'Test SRL', 'RO12345', 'Str. Test 1', 'Bucuresti', 0),
+                    ('comp-2', 'Alt SRL',  'RO99999', 'Str. Alt 2',  'Cluj',      0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, name)
+             VALUES ('contact-1', 'comp-1', 'Client Test SRL')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        pool
+    }
+
+    /// Insert a minimal invoice row for Wave G tests (company_id is comp-1).
+    async fn insert_wave_g_invoice(pool: &sqlx::SqlitePool, id: &str, status: &str) {
+        sqlx::query(
+            "INSERT INTO invoices (id, company_id, contact_id, series, number, full_number,
+             issue_date, due_date, status)
+             VALUES (?1, 'comp-1', 'contact-1', 'FCT', 1, 'FCT-0001',
+             '2026-01-01', '2026-01-01', ?2)",
+        )
+        .bind(id)
+        .bind(status)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn wave_g_delete_wrong_company_returns_not_found() {
+        let pool = setup_wave_g_pool().await;
+        insert_wave_g_invoice(&pool, "inv-draft", "DRAFT").await;
+
+        // A different company tries to delete comp-1's invoice.
+        let result = db_inv_test::delete_scoped(&pool, "inv-draft", "comp-2").await;
+        assert!(
+            matches!(result, Err(crate::error::AppError::NotFound)),
+            "delete_scoped with wrong company_id must return NotFound"
+        );
+
+        // The invoice must still exist.
+        let still_there = db_inv_test::get(&pool, "inv-draft").await;
+        assert!(still_there.is_ok(), "invoice must not have been deleted");
+    }
+
+    #[tokio::test]
+    async fn wave_g_delete_correct_company_succeeds() {
+        let pool = setup_wave_g_pool().await;
+        insert_wave_g_invoice(&pool, "inv-draft-ok", "DRAFT").await;
+
+        let result = db_inv_test::delete_scoped(&pool, "inv-draft-ok", "comp-1").await;
+        assert!(
+            result.is_ok(),
+            "delete_scoped with correct company_id must succeed"
+        );
+
+        let gone = db_inv_test::get(&pool, "inv-draft-ok").await;
+        assert!(
+            matches!(gone, Err(crate::error::AppError::NotFound)),
+            "invoice must be gone after correct-company delete"
+        );
+    }
+
+    #[tokio::test]
+    async fn wave_g_set_status_wrong_company_returns_not_found() {
+        let pool = setup_wave_g_pool().await;
+        insert_wave_g_invoice(&pool, "inv-queued", "DRAFT").await;
+
+        let result = db_inv_test::set_status_scoped(
+            &pool,
+            "inv-queued",
+            "comp-2",
+            crate::db::models::InvoiceStatus::Queued,
+            None,
+        )
+        .await;
+        assert!(
+            matches!(result, Err(crate::error::AppError::NotFound)),
+            "set_status_scoped with wrong company_id must return NotFound"
+        );
+
+        // Status must be unchanged.
+        let inv = db_inv_test::get(&pool, "inv-queued").await.unwrap();
+        assert_eq!(inv.status, "DRAFT", "status must not have changed");
+    }
+
+    #[tokio::test]
+    async fn wave_g_set_status_correct_company_succeeds() {
+        let pool = setup_wave_g_pool().await;
+        insert_wave_g_invoice(&pool, "inv-queued-ok", "DRAFT").await;
+
+        let result = db_inv_test::set_status_scoped(
+            &pool,
+            "inv-queued-ok",
+            "comp-1",
+            crate::db::models::InvoiceStatus::Queued,
+            None,
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "set_status_scoped with correct company_id must succeed"
+        );
+
+        let inv = db_inv_test::get(&pool, "inv-queued-ok").await.unwrap();
+        assert_eq!(
+            inv.status, "QUEUED",
+            "status must have been updated to QUEUED"
         );
     }
 }

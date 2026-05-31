@@ -96,7 +96,9 @@ export const contacts = {
 export const invoices = {
   list: (filter?: InvoiceFilter) =>
     invoke<Paginated<Invoice>>("list_invoices", { filter }),
-  get: (id: string) => invoke<InvoiceWithLines>("get_invoice", { id }),
+  /** R13 Wave G: companyId is required — cross-company access returns NotFound. */
+  get: (id: string, companyId: string) =>
+    invoke<InvoiceWithLines>("get_invoice", { id, companyId }),
   createDraft: (input: CreateInvoiceInput) =>
     invoke<Invoice>("create_invoice_draft", { input }),
   updateDraft: (id: string, input: CreateInvoiceInput) =>
@@ -106,9 +108,12 @@ export const invoices = {
       "validate_invoice_draft",
       { id }
     ),
-  delete: (id: string) => invoke<void>("delete_invoice", { id }),
-  setStatus: (id: string, status: InvoiceStatus, message?: string) =>
-    invoke<void>("set_invoice_status", { id, status, message }),
+  /** R13 Wave G: companyId is required — cross-company deletion returns NotFound. */
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_invoice", { id, companyId }),
+  /** R13 Wave G: companyId is required — cross-company mutation returns NotFound. */
+  setStatus: (id: string, companyId: string, status: InvoiceStatus, message?: string) =>
+    invoke<void>("set_invoice_status", { id, companyId, status, message }),
   storno: (invoiceId: string, reason: string) =>
     invoke<Invoice>("storno_invoice", { invoiceId, reason }),
   duplicate: (invoiceId: string) =>

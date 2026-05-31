@@ -608,17 +608,70 @@ pub async fn set_pdf_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<
     Ok(())
 }
 
-pub async fn delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
+/// R13 Wave G: user-facing delete scoped to a specific company.
+/// Returns NotFound (no-op) when no DRAFT row matches both id AND company_id,
+/// preventing cross-company deletion.
+pub async fn delete_scoped(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
     let invoice = get(pool, id).await?;
+    if invoice.company_id != company_id {
+        return Err(AppError::NotFound);
+    }
     if invoice.status != "DRAFT" {
         return Err(AppError::Validation(
             "Se pot șterge doar ciornele. Pentru facturile trimise folosiți Storno.".into(),
         ));
     }
-    sqlx::query("DELETE FROM invoices WHERE id = ?1")
+    let result = sqlx::query("DELETE FROM invoices WHERE id = ?1 AND company_id = ?2")
         .bind(id)
+        .bind(company_id)
         .execute(pool)
         .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(())
+}
+
+/// R13 Wave G: user-facing status update scoped to a specific company.
+/// Background ANAF transitions (mark_validated / mark_rejected / mark_submitted)
+/// continue to use their own dedicated fns — do NOT call this from poll.rs / spv.rs.
+pub async fn set_status_scoped(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+    status: crate::db::models::InvoiceStatus,
+    message: Option<String>,
+) -> AppResult<()> {
+    let now = now_unix();
+    let mut tx = pool.begin().await?;
+
+    let result = sqlx::query(
+        "UPDATE invoices SET status = ?2, updated_at = ?3 WHERE id = ?1 AND company_id = ?4",
+    )
+    .bind(id)
+    .bind(status.as_str())
+    .bind(now)
+    .bind(company_id)
+    .execute(&mut *tx)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+
+    sqlx::query(
+        "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )
+    .bind(new_id())
+    .bind(id)
+    .bind(format!("STATUS_{}", status.as_str()))
+    .bind(message.unwrap_or_else(|| format!("Status schimbat în {}", status.as_str())))
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 

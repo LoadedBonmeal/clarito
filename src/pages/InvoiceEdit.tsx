@@ -38,7 +38,8 @@ export function InvoiceEditPage() {
 
   const { data: invoiceData, isLoading } = useQuery({
     queryKey: queryKeys.invoices.detail(id),
-    queryFn: () => api.invoices.get(id),
+    queryFn: () => api.invoices.get(id, activeCompanyId ?? ""),
+    enabled: !!activeCompanyId,
   });
 
   const { data: company } = useQuery({

@@ -32,6 +32,7 @@ export function InvoiceDetailPage() {
   const queryClient = useQueryClient();
   const { id } = useParams({ from: "/invoices/$id" });
   const setSelectedInvoiceId = useAppStore((s) => s.setSelectedInvoiceId);
+  const activeCompanyId = useAppStore((s) => s.activeCompanyId);
 
   useEffect(() => {
     setSelectedInvoiceId(id);
@@ -51,7 +52,8 @@ export function InvoiceDetailPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.invoices.detail(id),
-    queryFn: () => api.invoices.get(id),
+    queryFn: () => api.invoices.get(id, activeCompanyId ?? ""),
+    enabled: !!activeCompanyId,
   });
 
   const { data: company } = useQuery({
