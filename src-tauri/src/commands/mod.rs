@@ -26,4 +26,5 @@ pub mod saft;
 pub mod settings;
 pub mod system;
 pub mod ubl;
+pub mod vat_rates;
 pub mod xlsx;

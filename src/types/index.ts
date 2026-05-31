@@ -522,6 +522,36 @@ export interface UpdateProductInput {
   active?: boolean;
 }
 
+// ─── VAT Rate (cotă TVA editabilă — catalog global) ───────────────────────
+
+/**
+ * R15 Wave 2: A single entry in the global VAT-rate catalog.
+ * This table is intentionally NOT company-scoped — Romanian VAT rates are
+ * national and shared across all companies in the app.
+ */
+export interface VatRate {
+  id: string;
+  rate: string;
+  label: string;
+  active: boolean;
+  sortOrder: number;
+  createdAt: number;
+}
+
+export interface VatRateInput {
+  rate: string;
+  label: string;
+  active?: boolean;
+  sortOrder?: number;
+}
+
+export interface UpdateVatRateInput {
+  rate?: string;
+  label?: string;
+  active?: boolean;
+  sortOrder?: number;
+}
+
 // ─── Error (din backend) ──────────────────────────────────────────────────
 
 export interface AppErrorPayload {

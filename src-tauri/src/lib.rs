@@ -385,6 +385,13 @@ pub fn run() {
             // gdpr / data portability
             commands::gdpr::export_all_my_data,
             commands::gdpr::wipe_all_data,
+            // vat rates — global editable catalog (R15 Wave 2)
+            commands::vat_rates::list_vat_rates,
+            commands::vat_rates::get_vat_rate,
+            commands::vat_rates::create_vat_rate,
+            commands::vat_rates::update_vat_rate,
+            commands::vat_rates::delete_vat_rate,
+            commands::vat_rates::set_vat_rate_active,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

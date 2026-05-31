@@ -52,6 +52,7 @@ import { SettingsPage } from "@/pages/Settings";
 import { PaymentsPage } from "@/pages/Payments";
 import { RecurringPage } from "@/pages/Recurring";
 import { ProductsPage } from "@/pages/Products";
+import { VatRatesPage } from "@/pages/VatRates";
 import { DeclarationsPage } from "@/pages/Declarations";
 
 // ─── Layout root ──────────────────────────────────────────────────────────
@@ -191,6 +192,12 @@ const declarationsRoute = createRoute({
   component: DeclarationsPage,
 });
 
+const vatRatesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/vat-rates",
+  component: VatRatesPage,
+});
+
 // ─── Build tree + router ──────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -208,6 +215,7 @@ const routeTree = rootRoute.addChildren([
   notificationsRoute,
   contactsRoute,
   productsRoute,
+  vatRatesRoute,
   reportsRoute,
   settingsRoute,
   paymentsRoute,

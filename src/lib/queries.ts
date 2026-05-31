@@ -88,6 +88,13 @@ export const queryKeys = {
       ["vatReport", year, month, companyId] as const,
   },
 
+  vatRates: {
+    all: ["vatRates"] as const,
+    list: (activeOnly?: boolean) =>
+      [...(["vatRates"] as const), "list", activeOnly] as const,
+    detail: (id: string) => [...(["vatRates"] as const), "detail", id] as const,
+  },
+
   appInfo: ["appInfo"] as const,
   settings: {
     get: (key: string) => ["settings", key] as const,

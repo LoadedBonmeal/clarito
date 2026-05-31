@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Icon } from "@/components/shared/Icon";
 import { ProductPickerButton } from "@/components/shared/ProductCombobox";
 import { VAT_RATES, VAT_CATEGORIES, VAT_CATEGORY_LABELS } from "@/lib/constants";
@@ -19,6 +20,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { fmtRON } from "@/lib/utils";
+import { queryKeys } from "@/lib/queries";
+import { api } from "@/lib/tauri";
 import type { CreateLineInput, Product, VatCategory } from "@/types";
 
 /** EU alpha-2 country codes (excluding Romania). Used for auto-deduction of vatCategory. */
@@ -91,6 +94,23 @@ export function LineItemsEditor({
   showTotals = true,
   companyId,
 }: LineItemsEditorProps) {
+  // R15 Wave 2: Fetch active VAT rates from the global DB catalog.
+  // Falls back to the VAT_RATES constant when loading or on error so the
+  // editor always works even during initial load or if the backend is
+  // unavailable. The query is global (not company-scoped) — see db/vat_rates.rs.
+  const { data: dbRates } = useQuery({
+    queryKey: queryKeys.vatRates.list(true),
+    queryFn: () => api.vatRates.list(true),
+    staleTime: 5 * 60_000,
+  });
+
+  // Build the numeric rates array for the dropdown: prefer DB rates (sorted
+  // by sort_order / rate), fall back to the hardcoded constant.
+  const vatRateOptions: number[] =
+    dbRates && dbRates.length > 0
+      ? dbRates.map((r) => parseFloat(r.rate))
+      : (VAT_RATES as readonly number[]).slice();
+
   // Track previous deduce-trigger values so we only auto-deduce on real changes.
   const prevDeduceKey = useRef<string>("");
 
@@ -332,7 +352,7 @@ export function LineItemsEditor({
                       updateLine(i, "vatRate", Number(e.target.value))
                     }
                   >
-                    {VAT_RATES.map((r) => (
+                    {vatRateOptions.map((r) => (
                       <option key={r} value={r}>
                         {r}%
                       </option>

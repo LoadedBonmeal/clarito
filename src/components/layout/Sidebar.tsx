@@ -88,6 +88,7 @@ export function Sidebar() {
     { id: "plati",     label: "Urmărire Plăți",     ico: "receipt",   color: "var(--color-banca)",    path: "/payments" },
     { id: "recurente", label: "Facturi Recurente",  ico: "refresh",   color: "var(--color-facturi)",  path: "/recurring" },
     { id: "stocuri",   label: "Articole & Stocuri", ico: "stock",     color: "var(--color-stocuri)",  path: "/products" },
+    { id: "cote-tva",  label: "Cote TVA",           ico: "tag",       color: "var(--color-rapoarte)", path: "/vat-rates" },
     // Bancă has no page yet — hidden until implemented.
     // { id: "banca",     label: "Bancă & Casă",       ico: "bank",   color: "var(--color-banca)",    path: "/contacts",  disabled: true },
     { section: "Raportare" },

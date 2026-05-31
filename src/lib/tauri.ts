@@ -39,6 +39,9 @@ import type {
   UpdateContactInput,
   UpdateProductInput,
   ValidationResult,
+  VatRate,
+  VatRateInput,
+  UpdateVatRateInput,
 } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -518,6 +521,31 @@ export const products = {
     invoke<Product[]>("search_products", { companyId, query }),
 };
 
+// ─── VAT Rates — global editable catalog (R15 Wave 2) ────────────────────
+
+/**
+ * R15 Wave 2: All vatRates commands operate on the GLOBAL `vat_rates` table.
+ * No company_id is passed — Romanian VAT rates are national (same for all
+ * companies). This is the deliberate exception to the company-scoping rule.
+ */
+export const vatRates = {
+  /** List all (or only active) VAT rates from the global catalog. */
+  list: (activeOnly?: boolean) =>
+    invoke<VatRate[]>("list_vat_rates", { activeOnly: activeOnly ?? null }),
+  /** Get a single VAT rate by id. Returns NotFound if missing. */
+  get: (id: string) => invoke<VatRate>("get_vat_rate", { id }),
+  /** Create a new VAT rate entry. */
+  create: (input: VatRateInput) => invoke<VatRate>("create_vat_rate", { input }),
+  /** Update an existing VAT rate entry. */
+  update: (id: string, input: UpdateVatRateInput) =>
+    invoke<VatRate>("update_vat_rate", { id, input }),
+  /** Delete a VAT rate entry by id. */
+  delete: (id: string) => invoke<void>("delete_vat_rate", { id }),
+  /** Activate or deactivate a VAT rate entry. */
+  setActive: (id: string, active: boolean) =>
+    invoke<VatRate>("set_vat_rate_active", { id, active }),
+};
+
 // ─── GDPR / data portability ──────────────────────────────────────────────
 
 export const gdpr = {
@@ -555,4 +583,5 @@ export const api = {
   declarations,
   d394,
   journals,
+  vatRates,
 };
