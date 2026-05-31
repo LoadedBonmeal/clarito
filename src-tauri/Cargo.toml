@@ -1,6 +1,6 @@
 [package]
 name = "efactura-desktop"
-version = "0.3.0"
+version = "0.3.1"
 description = "RoFactura — Aplicație desktop pentru e-Factura ANAF"
 authors = ["Lucaris"]
 edition = "2021"

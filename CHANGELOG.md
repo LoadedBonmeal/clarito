@@ -2,6 +2,33 @@
 
 Toate modificările notabile ale RoFactura. Format: [Keep a Changelog](https://keepachangelog.com), versionare [SemVer](https://semver.org).
 
+## [0.3.1] - 2026-05-31
+
+### Added
+- Rapoarte ca view-uri distincte (`/reports?view=`): D394, D406 SAF-T, jurnal vânzări, jurnal cumpărări, export contabil + bară de tab-uri
+- Parsare TVA din XML-ul facturilor primite (net/TVA pe cotă) + backfill „Recalculează TVA din XML"
+- D300 + D394 partea de achiziții reală din facturile primite (înlocuiește placeholder-ele)
+- Jurnal cumpărări cu coloane reale Net/TVA
+
+### Security
+- Izolare multi-companie: received/recurring/contacts/storno/invoices — toate interogările scope pe `company_id`
+- GDPR: ștergerea totală șterge acum și token-urile ANAF + SmartBill din keychain
+- SmartBill: token stocat în keychain (nu în DB plaintext) + curățare token vechi
+- Secrete HMAC build.rs din variabile de mediu (fallback identic → licențe valide)
+- Eliminat capability `http:default` nefolosit (reducere suprafață de atac)
+
+### Fixed
+- Export contabil (SAGA/WinMentor) + SAF-T D406: doar facturi VALIDATED (fără DRAFT/REJECTED/STORNED)
+- UBL: categoria `Z` (cotă zero) nu mai emite cod VATEX de export
+- Deducere categorie TVA: rezolvă țara cumpărătorului întâi; neplătitor intern → `O` (nu `AE`)
+- ANAF OAuth: `client_id` configurat folosit la refresh/revoke (inclusiv task-uri background) + callback percent-decode
+- Rapoarte: export permis pentru perioade doar-achiziții (D300/D394)
+- PDF facturi: paginare pentru facturi cu multe linii
+- Erori arhivă/backup mapate cu mesaj RO (`AppErrorPayload` aliniat cu Rust)
+- Stări de eroare (QueryErrorBanner) pe paginile Facturi primite + Plăți
+- Etichete scurtături native macOS/Windows în tooltip-uri (fmtShortcut)
+- Recuperare la mutex de log otrăvit (fără crash); mesaj path log specific platformei
+
 ## [0.3.0] - 2026-05-31
 
 ### Added
