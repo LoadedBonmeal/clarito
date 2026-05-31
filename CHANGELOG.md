@@ -11,22 +11,24 @@ Toate modificările notabile ale RoFactura. Format: [Keep a Changelog](https://k
 - Jurnal cumpărări cu coloane reale Net/TVA
 
 ### Security
-- Izolare multi-companie: received/recurring/contacts/storno/invoices — toate interogările scope pe `company_id`
-- GDPR: ștergerea totală șterge acum și token-urile ANAF + SmartBill din keychain
+- **Izolare multi-companie completă**: TOATE comenzile care citesc/scriu/generează date de companie sunt scope pe `company_id` — facturi (get/update draft/storno/duplicate/delete/status/validate), generare UBL XML/PDF, push SmartBill, submit ANAF (claim DRAFT→QUEUED scope), contacts, recurring, received
+- GDPR: ștergerea totală șterge token-urile ANAF + SmartBill din keychain + `data.db.bak`/backup + log-urile aplicației
 - SmartBill: token stocat în keychain (nu în DB plaintext) + curățare token vechi
-- Secrete HMAC build.rs din variabile de mediu (fallback identic → licențe valide)
-- Eliminat capability `http:default` nefolosit (reducere suprafață de atac)
+- Secrete HMAC build.rs din variabile de mediu (fallback identic → licențe valide); fingerprint licență aplicat la toate tier-urile
+- Eliminat capability `http:default` nefolosit; `redirect_uri` OAuth validat ca loopback; refresh token single-flight (fără race)
 
 ### Fixed
 - Export contabil (SAGA/WinMentor) + SAF-T D406: doar facturi VALIDATED (fără DRAFT/REJECTED/STORNED)
-- UBL: categoria `Z` (cotă zero) nu mai emite cod VATEX de export
+- SAF-T: tip 381 pentru storno (credit note); cotele 9%/11% mapate ca redus (nu standard)
+- UBL: categoria `Z` (cotă zero) nu mai emite cod VATEX de export; BR-RO-017 (prefix RO) se aplică doar cumpărătorilor RO (facturile către clienți UE nu mai sunt blocate)
 - Deducere categorie TVA: rezolvă țara cumpărătorului întâi; neplătitor intern → `O` (nu `AE`)
 - ANAF OAuth: `client_id` configurat folosit la refresh/revoke (inclusiv task-uri background) + callback percent-decode
-- Rapoarte: export permis pentru perioade doar-achiziții (D300/D394)
-- PDF facturi: paginare pentru facturi cu multe linii
-- Erori arhivă/backup mapate cu mesaj RO (`AppErrorPayload` aliniat cu Rust)
+- Arhivă: „mută arhiva" funcțională (cheia de setări corectă); `import_backup` rescrie căile XML la restore cross-machine
+- Rapoarte: export permis pentru perioade doar-achiziții (D300/D394); statistici + guard SAF-T pe VALIDATED; QueryErrorBanner pe erori
+- PDF facturi: paginare pentru facturi cu multe linii (inclusiv footer-ul TVA/totaluri)
+- Erori arhivă/backup cu mesaj RO generic (fără scurgere de căi); `AppErrorPayload` aliniat 1:1 cu Rust
 - Stări de eroare (QueryErrorBanner) pe paginile Facturi primite + Plăți
-- Etichete scurtături native macOS/Windows în tooltip-uri (fmtShortcut)
+- Etichete scurtături native macOS/Windows în tooltip-uri (fmtShortcut); Storno din meniu funcțional; Ctrl+S pe editarea facturii
 - Recuperare la mutex de log otrăvit (fără crash); mesaj path log specific platformei
 
 ## [0.3.0] - 2026-05-31
