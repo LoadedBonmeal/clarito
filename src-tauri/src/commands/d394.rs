@@ -3,9 +3,10 @@
 //!
 //! Implementăm **livrările (vânzări)** din facturi VALIDATED, grupate pe partener
 //! (contact CUI + legal_name), cu baza impozabilă și TVA totale per partener.
-//! Achizițiile sunt un placeholder onest — `received_invoices` stochează doar
-//! totalul, fără defalcare net/TVA (BIZ: se va adăuga după parsarea XML-ului
-//! facturilor primite).
+//! **Achizițiile** (Wave B): received_invoices + received_invoice_vat_lines,
+//! grupate per furnizor (issuer_cui + issuer_name). Facturile fără defalcare
+//! TVA (net_amount IS NULL) sunt contorizate în `purchase_unparsed_count` și
+//! nu contribuie la totaluri.
 
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -19,23 +20,23 @@ use crate::state::AppState;
 
 // ── Structs ───────────────────────────────────────────────────────────────────
 
-/// Un partener din raportul D394 — livrări.
+/// Un partener din raportul D394 — livrări sau achiziții.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct D394Partner {
-    /// CUI-ul partenerului (client). Poate fi "" dacă nu e completat.
+    /// CUI-ul partenerului (client/furnizor). Poate fi "" dacă nu e completat.
     pub partner_cui: String,
     /// Denumirea legală a partenerului.
     pub partner_name: String,
-    /// Numărul de facturi VALIDATED emise către partener în perioadă.
+    /// Numărul de facturi VALIDATED emise/primite în perioadă.
     pub invoice_count: i64,
     /// Baza impozabilă totală (net), 2 zecimale.
     pub base: String,
-    /// TVA colectat total, 2 zecimale.
+    /// TVA colectat/deductibil total, 2 zecimale.
     pub vat: String,
 }
 
-/// Raportul D394 — livrări (vânzări) per partener.
+/// Raportul D394 — livrări (vânzări) + achiziții per partener.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct D394Report {
@@ -45,22 +46,37 @@ pub struct D394Report {
     pub period_from: String,
     /// Data de sfârșit a perioadei (YYYY-MM-DD).
     pub period_to: String,
-    /// Parteneri sortați descrescător după baza impozabilă.
+    /// Parteneri livrări sortați descrescător după baza impozabilă.
     pub partners: Vec<D394Partner>,
-    /// Total baze impozabile (RON), 2 zecimale.
+    /// Total baze impozabile livrări (RON), 2 zecimale.
     pub total_base: String,
-    /// Total TVA colectat (RON), 2 zecimale.
+    /// Total TVA colectat livrări (RON), 2 zecimale.
     pub total_vat: String,
-    /// Numărul total de facturi VALIDATED incluse.
+    /// Numărul total de facturi VALIDATED incluse (livrări).
     pub invoice_count: i64,
+    // ── Wave B: achiziții ────────────────────────────────────────────────────
+    /// Parteneri achiziții (furnizori) sortați descrescător după baza impozabilă.
+    /// Include doar furnizorii cu cel puțin o linie VAT parsată.
+    pub purchase_partners: Vec<D394Partner>,
+    /// Total baze impozabile achiziții (RON), 2 zecimale.
+    pub total_purchase_base: String,
+    /// Total TVA deductibil achiziții (RON), 2 zecimale.
+    pub total_purchase_vat: String,
+    /// Numărul de facturi primite (status != REJECTED) în perioadă.
+    pub purchase_invoice_count: i64,
+    /// Facturi primite fără defalcare TVA (net_amount IS NULL).
+    pub purchase_unparsed_count: i64,
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
-/// Calculează declarația D394 — livrări (vânzări) grupate pe partener,
-/// pentru o companie și o perioadă.
+/// Calculează declarația D394 — livrări (vânzări) grupate pe partener +
+/// achiziții (Wave B) grupate pe furnizor, pentru o companie și o perioadă.
 ///
-/// Sunt incluse DOAR facturile cu status VALIDATED (BIZ-11).
+/// **Livrări**: doar facturile cu status VALIDATED (BIZ-11).
+/// **Achiziții**: received_invoices (status != REJECTED), JOIN cu
+/// received_invoice_vat_lines. Furnizorii fără nicio linie VAT parsată
+/// contribuie la `purchase_unparsed_count` dar NU la `purchase_partners`.
 /// Partenerii sunt sortați descrescător după baza impozabilă.
 #[tauri::command]
 pub async fn compute_d394(
@@ -179,6 +195,132 @@ pub async fn compute_d394(
         ba.cmp(&aa)
     });
 
+    // ── Wave B: achiziții — received_invoices + received_invoice_vat_lines ────
+
+    // Numărul de facturi primite în perioadă (status != REJECTED).
+    let purchase_count_row = sqlx::query(
+        "SELECT COUNT(*) as cnt FROM received_invoices \
+         WHERE company_id = ?1 \
+           AND issue_date >= ?2 \
+           AND issue_date <= ?3 \
+           AND status != 'REJECTED'",
+    )
+    .bind(&company_id)
+    .bind(&period_from)
+    .bind(&period_to)
+    .fetch_one(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    let purchase_invoice_count: i64 = purchase_count_row.try_get("cnt").unwrap_or(0);
+
+    // Numărul de facturi primite fără defalcare TVA (net_amount IS NULL).
+    let unparsed_count_row = sqlx::query(
+        "SELECT COUNT(*) as cnt FROM received_invoices \
+         WHERE company_id = ?1 \
+           AND issue_date >= ?2 \
+           AND issue_date <= ?3 \
+           AND status != 'REJECTED' \
+           AND net_amount IS NULL",
+    )
+    .bind(&company_id)
+    .bind(&period_from)
+    .bind(&period_to)
+    .fetch_one(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    let purchase_unparsed_count: i64 = unparsed_count_row.try_get("cnt").unwrap_or(0);
+
+    // Fetch liniile VAT agregate per furnizor (issuer_cui + issuer_name).
+    // Include doar furnizorii care au cel puțin o linie parsată (INNER JOIN).
+    let purchase_rows = sqlx::query(
+        "SELECT ri.issuer_cui, \
+                ri.issuer_name, \
+                COUNT(DISTINCT ri.id) AS invoice_count, \
+                GROUP_CONCAT(vl.base_amount, '|') AS bases, \
+                GROUP_CONCAT(vl.vat_amount, '|') AS vats \
+         FROM received_invoices ri \
+         JOIN received_invoice_vat_lines vl ON vl.received_invoice_id = ri.id \
+         WHERE ri.company_id = ?1 \
+           AND ri.issue_date >= ?2 \
+           AND ri.issue_date <= ?3 \
+           AND ri.status != 'REJECTED' \
+         GROUP BY ri.issuer_cui, ri.issuer_name",
+    )
+    .bind(&company_id)
+    .bind(&period_from)
+    .bind(&period_to)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    struct SupplierAcc {
+        issuer_cui: String,
+        issuer_name: String,
+        invoice_count: i64,
+        base: Decimal,
+        vat: Decimal,
+    }
+
+    // Keyed by (issuer_cui, issuer_name) pentru a gestiona furnizori cu același CUI.
+    let mut suppliers: BTreeMap<(String, String), SupplierAcc> = BTreeMap::new();
+
+    for row in &purchase_rows {
+        let issuer_cui: String = row.try_get("issuer_cui").unwrap_or_default();
+        let issuer_name: String = row.try_get("issuer_name").unwrap_or_default();
+        let inv_count: i64 = row.try_get("invoice_count").unwrap_or(0);
+        let bases: String = row.try_get("bases").unwrap_or_default();
+        let vats_s: String = row.try_get("vats").unwrap_or_default();
+
+        let base_sum: Decimal = bases
+            .split('|')
+            .map(|s| Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO))
+            .fold(Decimal::ZERO, |acc, v| acc + v);
+
+        let vat_sum: Decimal = vats_s
+            .split('|')
+            .map(|s| Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO))
+            .fold(Decimal::ZERO, |acc, v| acc + v);
+
+        let key = (issuer_cui.clone(), issuer_name.clone());
+        let acc = suppliers.entry(key).or_insert(SupplierAcc {
+            issuer_cui: issuer_cui.clone(),
+            issuer_name: issuer_name.clone(),
+            invoice_count: 0,
+            base: Decimal::ZERO,
+            vat: Decimal::ZERO,
+        });
+        acc.invoice_count += inv_count;
+        acc.base += base_sum;
+        acc.vat += vat_sum;
+    }
+
+    let mut total_purchase_base = Decimal::ZERO;
+    let mut total_purchase_vat = Decimal::ZERO;
+
+    let mut purchase_partners_vec: Vec<D394Partner> = suppliers
+        .into_values()
+        .map(|acc| {
+            total_purchase_base += acc.base;
+            total_purchase_vat += acc.vat;
+            D394Partner {
+                partner_cui: acc.issuer_cui,
+                partner_name: acc.issuer_name,
+                invoice_count: acc.invoice_count,
+                base: acc.base.round_dp(2).to_string(),
+                vat: acc.vat.round_dp(2).to_string(),
+            }
+        })
+        .collect();
+
+    // Sortăm descrescător după baza impozabilă (consistent cu livrările).
+    purchase_partners_vec.sort_by(|a, b| {
+        let ba = Decimal::from_str(&b.base).unwrap_or(Decimal::ZERO);
+        let aa = Decimal::from_str(&a.base).unwrap_or(Decimal::ZERO);
+        ba.cmp(&aa)
+    });
+
     Ok(D394Report {
         company_cui,
         period_from,
@@ -187,14 +329,19 @@ pub async fn compute_d394(
         total_base: total_base.round_dp(2).to_string(),
         total_vat: total_vat.round_dp(2).to_string(),
         invoice_count: total_invoice_count,
+        purchase_partners: purchase_partners_vec,
+        total_purchase_base: total_purchase_base.round_dp(2).to_string(),
+        total_purchase_vat: total_purchase_vat.round_dp(2).to_string(),
+        purchase_invoice_count,
+        purchase_unparsed_count,
     })
 }
 
 /// Generează fișierul XML D394 și îl scrie la calea specificată.
 /// Returnează calea fișierului salvat.
 ///
-/// Formatul XML conține livrările (vânzări) per partener și un bloc
-/// `<Achizitii>` placeholder (received_invoices nu are defalcare TVA).
+/// Formatul XML conține livrările (vânzări) per partener și achizițiile
+/// (furnizori cu linii VAT parsate) + note pentru facturi neparsate.
 #[tauri::command]
 pub async fn export_d394(
     state: State<'_, AppState>,
@@ -220,10 +367,6 @@ fn build_and_write_xml(report: D394Report, dest_path: String) -> AppResult<Strin
 
     xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     xml.push_str("<!-- D394 Declarație informativă livrări/achiziții — generat de RoFactura -->\n");
-    xml.push_str("<!-- ATENȚIE: Livrările (vânzări) sunt calculate din facturi VALIDATED.   -->\n");
-    xml.push_str(
-        "<!-- Achizițiile necesită parsarea XML-ului facturilor primite (placeholder).-->\n",
-    );
     xml.push_str(
         "<!-- Schema oficială ANAF D394 necesită depunere prin e-Formulare.         -->\n",
     );
@@ -290,16 +433,48 @@ fn build_and_write_xml(report: D394Report, dest_path: String) -> AppResult<Strin
     ));
     xml.push_str("  </Livrari>\n");
 
-    // ── Achizitii (placeholder) ───────────────────────────────────────────────
+    // ── Achizitii (Wave B — date reale din received_invoice_vat_lines) ────────
     xml.push_str("  <Achizitii>\n");
     xml.push_str(
-        "    <!-- Neimplementat: received_invoices stochează doar totalul facturilor primite. -->\n",
+        "    <!-- Furnizori cu linii VAT parsate, sortați descrescător după baza impozabilă -->\n",
     );
-    xml.push_str(
-        "    <!-- Defalcarea net/TVA va fi disponibilă după parsarea XML-ului UBL primit.   -->\n",
-    );
-    xml.push_str("    <TotalBazaImpozabila>0.00</TotalBazaImpozabila>\n");
-    xml.push_str("    <TotalTVA>0.00</TotalTVA>\n");
+    if report.purchase_unparsed_count > 0 {
+        xml.push_str(&format!(
+            "    <!-- ATENȚIE: {} facturi primite nu au defalcare TVA — cifrele de mai jos sunt parțiale. -->\n",
+            report.purchase_unparsed_count
+        ));
+    }
+
+    for partner in &report.purchase_partners {
+        xml.push_str("    <Partener>\n");
+        xml.push_str(&format!(
+            "      <CUI>{}</CUI>\n",
+            xml_escape(&partner.partner_cui)
+        ));
+        xml.push_str(&format!(
+            "      <Denumire>{}</Denumire>\n",
+            xml_escape(&partner.partner_name)
+        ));
+        xml.push_str(&format!(
+            "      <NrFacturi>{}</NrFacturi>\n",
+            partner.invoice_count
+        ));
+        xml.push_str(&format!(
+            "      <BazaImpozabila>{}</BazaImpozabila>\n",
+            xml_escape(&partner.base)
+        ));
+        xml.push_str(&format!("      <TVA>{}</TVA>\n", xml_escape(&partner.vat)));
+        xml.push_str("    </Partener>\n");
+    }
+
+    xml.push_str(&format!(
+        "    <TotalBazaImpozabila>{}</TotalBazaImpozabila>\n",
+        xml_escape(&report.total_purchase_base)
+    ));
+    xml.push_str(&format!(
+        "    <TotalTVA>{}</TotalTVA>\n",
+        xml_escape(&report.total_purchase_vat)
+    ));
     xml.push_str("  </Achizitii>\n");
 
     xml.push_str("</D394>\n");
@@ -389,7 +564,8 @@ mod tests {
         assert_eq!(xml_escape(""), "");
     }
 
-    /// Verifică că build_and_write_xml produce un XML valid cu elementele cerute.
+    /// Verifică că build_and_write_xml produce un XML valid cu elementele cerute
+    /// (livrări + achiziții reale).
     #[test]
     fn build_xml_contains_required_elements() {
         let report = D394Report {
@@ -406,6 +582,17 @@ mod tests {
             total_base: "5000.00".to_string(),
             total_vat: "950.00".to_string(),
             invoice_count: 3,
+            purchase_partners: vec![D394Partner {
+                partner_cui: "RO11111111".to_string(),
+                partner_name: "SC FURNIZOR SRL".to_string(),
+                invoice_count: 2,
+                base: "2000.00".to_string(),
+                vat: "380.00".to_string(),
+            }],
+            total_purchase_base: "2000.00".to_string(),
+            total_purchase_vat: "380.00".to_string(),
+            purchase_invoice_count: 2,
+            purchase_unparsed_count: 0,
         };
 
         let dir = std::env::temp_dir();
@@ -425,9 +612,49 @@ mod tests {
         assert!(content.contains("<BazaImpozabila>5000.00</BazaImpozabila>"));
         assert!(content.contains("<TVA>950.00</TVA>"));
         assert!(content.contains("<TotalBazaImpozabila>5000.00</TotalBazaImpozabila>"));
-        // Achizitii placeholder
+        // Achiziții reale (Wave B)
         assert!(content.contains("<Achizitii>"));
-        assert!(content.contains("Neimplementat"));
+        assert!(content.contains("<CUI>RO11111111</CUI>"));
+        assert!(content.contains("<Denumire>SC FURNIZOR SRL</Denumire>"));
+        assert!(content.contains("<BazaImpozabila>2000.00</BazaImpozabila>"));
+        assert!(content.contains("<TVA>380.00</TVA>"));
+        assert!(content.contains("<TotalBazaImpozabila>2000.00</TotalBazaImpozabila>"));
+        assert!(
+            !content.contains("Neimplementat"),
+            "Vechiul placeholder nu mai trebuie să apară"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Verifică că nota de facturi neparsate apare în XML când purchase_unparsed_count > 0.
+    #[test]
+    fn build_xml_includes_unparsed_note_when_needed() {
+        let report = D394Report {
+            company_cui: "RO22222222".to_string(),
+            period_from: "2024-03-01".to_string(),
+            period_to: "2024-03-31".to_string(),
+            partners: vec![],
+            total_base: "0.00".to_string(),
+            total_vat: "0.00".to_string(),
+            invoice_count: 0,
+            purchase_partners: vec![],
+            total_purchase_base: "0.00".to_string(),
+            total_purchase_vat: "0.00".to_string(),
+            purchase_invoice_count: 4,
+            purchase_unparsed_count: 4,
+        };
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_d394_unparsed.xml");
+        let result = build_and_write_xml(report, path.to_string_lossy().to_string());
+        assert!(result.is_ok());
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains("4 facturi primite nu au defalcare TVA"),
+            "XML trebuie să conțină nota pentru facturi neparsate"
+        );
 
         let _ = std::fs::remove_file(&path);
     }
@@ -468,5 +695,44 @@ mod tests {
         assert_eq!(partners[0].partner_name, "A"); // 5000 primul
         assert_eq!(partners[1].partner_name, "C"); // 1000 al doilea
         assert_eq!(partners[2].partner_name, "B"); // 100 ultimul
+    }
+
+    /// Verifică că acumularea per furnizor grupează corect achizițiile.
+    #[test]
+    fn d394_purchase_partner_accumulation_exact() {
+        let mut suppliers: BTreeMap<(String, String), (Decimal, Decimal, i64)> = BTreeMap::new();
+
+        // Furnizor A — 2 facturi cu linii VAT multiple
+        for (base, vat) in [("1000.00", "190.00"), ("500.00", "95.00")] {
+            let key = ("RO11111111".to_string(), "Furnizor A SRL".to_string());
+            let e = suppliers
+                .entry(key)
+                .or_insert((Decimal::ZERO, Decimal::ZERO, 0));
+            e.0 += Decimal::from_str(base).unwrap();
+            e.1 += Decimal::from_str(vat).unwrap();
+            e.2 += 1;
+        }
+
+        // Furnizor B — 1 factură
+        {
+            let key = ("RO22222222".to_string(), "Furnizor B SRL".to_string());
+            let e = suppliers
+                .entry(key)
+                .or_insert((Decimal::ZERO, Decimal::ZERO, 0));
+            e.0 += Decimal::from_str("800.00").unwrap();
+            e.1 += Decimal::from_str("152.00").unwrap();
+            e.2 += 1;
+        }
+
+        assert_eq!(suppliers.len(), 2, "Trebuie 2 furnizori distincți");
+
+        let a = &suppliers[&("RO11111111".to_string(), "Furnizor A SRL".to_string())];
+        assert_eq!(a.0, Decimal::from_str("1500.00").unwrap());
+        assert_eq!(a.1, Decimal::from_str("285.00").unwrap());
+        assert_eq!(a.2, 2);
+
+        let b = &suppliers[&("RO22222222".to_string(), "Furnizor B SRL".to_string())];
+        assert_eq!(b.0, Decimal::from_str("800.00").unwrap());
+        assert_eq!(b.2, 1);
     }
 }

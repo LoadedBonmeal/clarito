@@ -399,7 +399,7 @@ export interface D300Group {
   vat: string;
 }
 
-/** Raportul D300 — TVA colectat (vânzări), calculat din facturi VALIDATED. */
+/** Raportul D300 — TVA colectat (vânzări) + TVA deductibil (achiziții). */
 export interface D300Report {
   companyCui: string;
   periodFrom: string;
@@ -408,6 +408,19 @@ export interface D300Report {
   totalBase: string;
   totalVat: string;
   invoiceCount: number;
+  // Wave B: achiziții
+  /** Grupuri TVA deductibil (achiziții), din received_invoice_vat_lines. */
+  purchaseGroups: D300Group[];
+  /** Total baze impozabile achiziții (RON), 2 zecimale. */
+  totalDeductibleBase: string;
+  /** Total TVA deductibil (RON), 2 zecimale. */
+  totalDeductibleVat: string;
+  /** Numărul de facturi primite (status != REJECTED) în perioadă. */
+  purchaseInvoiceCount: number;
+  /** Facturi primite fără defalcare TVA (net_amount IS NULL). */
+  purchaseUnparsedCount: number;
+  /** TVA netă de plată = TVA colectată − TVA deductibilă (negativă = de recuperat). */
+  netVat: string;
 }
 
 // ─── D394 Declarație informativă livrări/achiziții ───────────────────────────
@@ -426,16 +439,27 @@ export interface D394Partner {
   vat: string;
 }
 
-/** Raportul D394 — livrări (vânzări) per partener, calculat din facturi VALIDATED. */
+/** Raportul D394 — livrări (vânzări) + achiziții per partener. */
 export interface D394Report {
   companyCui: string;
   periodFrom: string;
   periodTo: string;
-  /** Parteneri sortați descrescător după baza impozabilă. */
+  /** Parteneri livrări sortați descrescător după baza impozabilă. */
   partners: D394Partner[];
   totalBase: string;
   totalVat: string;
   invoiceCount: number;
+  // Wave B: achiziții
+  /** Parteneri achiziții (furnizori cu linii VAT parsate), sortați descrescător după baza impozabilă. */
+  purchasePartners: D394Partner[];
+  /** Total baze impozabile achiziții (RON), 2 zecimale. */
+  totalPurchaseBase: string;
+  /** Total TVA deductibil achiziții (RON), 2 zecimale. */
+  totalPurchaseVat: string;
+  /** Numărul de facturi primite (status != REJECTED) în perioadă. */
+  purchaseInvoiceCount: number;
+  /** Facturi primite fără defalcare TVA (net_amount IS NULL). */
+  purchaseUnparsedCount: number;
 }
 
 // ─── Feedback / Diagnostic ────────────────────────────────────────────────

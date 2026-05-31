@@ -1,5 +1,5 @@
 /**
- * D394View — D394 livrări grupate pe partener.
+ * D394View — D394 livrări grupate pe partener + achiziții (Wave B).
  */
 
 import { useState } from "react";
@@ -68,9 +68,12 @@ export function D394View({ dateFrom, dateTo }: Props) {
 
   const totalBase = parseDec(report?.totalBase ?? "0");
   const totalVat = parseDec(report?.totalVat ?? "0");
+  const totalPurchaseBase = parseDec(report?.totalPurchaseBase ?? "0");
+  const totalPurchaseVat = parseDec(report?.totalPurchaseVat ?? "0");
 
   return (
     <div>
+      {/* ── Header cu buton export ─────────────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <h2 style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", letterSpacing: "0.04em", textTransform: "uppercase", margin: 0 }}>
           D394 — Livrări per partener
@@ -85,6 +88,7 @@ export function D394View({ dateFrom, dateTo }: Props) {
         </button>
       </div>
 
+      {/* ── Livrări (vânzări) ─────────────────────────────────────────────── */}
       {isLoading ? (
         <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Se încarcă…</div>
       ) : isError ? (
@@ -124,6 +128,78 @@ export function D394View({ dateFrom, dateTo }: Props) {
             </tr>
           </tfoot>
         </table>
+      )}
+
+      {/* ── Achiziții (Wave B) ────────────────────────────────────────────── */}
+      {report && (
+        <div style={{ marginTop: 28 }}>
+          <h2 style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 10 }}>
+            D394 — Achiziții per furnizor
+          </h2>
+
+          {/* Notă pentru facturi neparsate */}
+          {report.purchaseUnparsedCount > 0 && (
+            <div
+              style={{
+                padding: "8px 12px",
+                background: "rgba(234,179,8,0.08)",
+                border: "1px solid rgba(234,179,8,0.35)",
+                borderRadius: 4,
+                fontSize: 11,
+                color: "var(--text-muted)",
+                lineHeight: 1.6,
+                marginBottom: 10,
+              }}
+            >
+              <b style={{ color: "var(--text)" }}>
+                {report.purchaseUnparsedCount}{" "}
+                {report.purchaseUnparsedCount === 1 ? "factură primită nu are" : "facturi primite nu au"}{" "}
+                încă defalcare TVA
+              </b>{" "}
+              — lista furnizorilor de mai jos este parțială. Folosiți{" "}
+              <b>«Recalculează TVA din XML»</b> în Jurnal cumpărări pentru a completa datele.
+            </div>
+          )}
+
+          {report.purchasePartners.length === 0 ? (
+            <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "8px 0" }}>
+              {report.purchaseInvoiceCount === 0
+                ? "Nicio factură primită în perioada selectată."
+                : "Nicio factură primită cu defalcare TVA parsată. Folosiți «Recalculează TVA din XML» în Jurnal cumpărări."}
+            </div>
+          ) : (
+            <table className="dt">
+              <thead>
+                <tr>
+                  <th>Furnizor</th>
+                  <th style={{ width: 130 }}>CUI</th>
+                  <th className="num" style={{ width: 100 }}>Nr. facturi</th>
+                  <th className="num" style={{ width: 150 }}>Bază (RON)</th>
+                  <th className="num" style={{ width: 130 }}>TVA (RON)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.purchasePartners.map((p, i) => (
+                  <tr key={i}>
+                    <td style={{ fontSize: 11 }}>{p.partnerName}</td>
+                    <td className="mono">{p.partnerCui || <span className="muted">—</span>}</td>
+                    <td className="num tnum">{p.invoiceCount}</td>
+                    <td className="num tnum">{fmtRON(p.base)}</td>
+                    <td className="num tnum muted">{fmtRON(p.vat)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: "var(--bg-hover)", fontWeight: 600 }}>
+                  <td colSpan={2}>TOTAL ACHIZIȚII (parsate)</td>
+                  <td className="num tnum">{report.purchasePartners.reduce((s, p) => s + p.invoiceCount, 0)}</td>
+                  <td className="num tnum">{fmtRON(totalPurchaseBase)}</td>
+                  <td className="num tnum">{fmtRON(totalPurchaseVat)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
       )}
     </div>
   );

@@ -1,10 +1,11 @@
-//! Declarații fiscale — D300 Decont TVA (partea de vânzări/livrări).
+//! Declarații fiscale — D300 Decont TVA (vânzări + achiziții).
 //!
 //! D300 este decontul de TVA lunar/trimestrial depus la ANAF.
-//! Această implementare acoperă **partea de vânzări** (TVA colectată),
-//! calculată din facturile cu status VALIDATED pentru perioada selectată.
-//! Partea de achiziții (TVA deductibilă) necesită date din facturi primite
-//! + ajustări manuale — va fi adăugată ulterior.
+//! Această implementare acoperă:
+//! - **Vânzări** (TVA colectată): din facturile cu status VALIDATED.
+//! - **Achiziții** (TVA deductibilă): din received_invoice_vat_lines (Wave B).
+//!   Facturile primite fără defalcare TVA (net_amount IS NULL) sunt raportate
+//!   separat prin `purchase_unparsed_count`.
 
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -32,7 +33,7 @@ pub struct D300Group {
     pub vat: String,
 }
 
-/// Raportul D300 — TVA colectat (vânzări).
+/// Raportul D300 — TVA colectat (vânzări) + TVA deductibil (achiziții).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct D300Report {
@@ -42,7 +43,7 @@ pub struct D300Report {
     pub period_from: String,
     /// Data de sfârșit a perioadei (YYYY-MM-DD).
     pub period_to: String,
-    /// Grupuri TVA sortate descrescător după cotă.
+    /// Grupuri TVA colectat sortate descrescător după cotă.
     pub groups: Vec<D300Group>,
     /// Total baze impozabile (RON), 2 zecimale.
     pub total_base: String,
@@ -50,16 +51,31 @@ pub struct D300Report {
     pub total_vat: String,
     /// Numărul de facturi VALIDATED incluse.
     pub invoice_count: i64,
+    // ── Wave B: achiziții ────────────────────────────────────────────────────
+    /// Grupuri TVA deductibil (achiziții), din received_invoice_vat_lines.
+    pub purchase_groups: Vec<D300Group>,
+    /// Total baze impozabile achiziții (RON), 2 zecimale.
+    pub total_deductible_base: String,
+    /// Total TVA deductibil (RON), 2 zecimale.
+    pub total_deductible_vat: String,
+    /// Numărul de facturi primite (status != REJECTED) în perioadă.
+    pub purchase_invoice_count: i64,
+    /// Facturi primite fără defalcare TVA (net_amount IS NULL) — date parțiale.
+    pub purchase_unparsed_count: i64,
+    /// TVA netă de plată = TVA colectată − TVA deductibilă (negativă = de recuperat).
+    pub net_vat: String,
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
-/// Calculează decontul D300 (TVA colectat — vânzări) pentru o companie și o perioadă.
+/// Calculează decontul D300 (TVA colectat — vânzări + TVA deductibil — achiziții)
+/// pentru o companie și o perioadă.
 ///
-/// Sunt incluse DOAR facturile cu status VALIDATED (BIZ-11: DRAFT/QUEUED/SUBMITTED
-/// sunt excluse — nu sunt evenimente fiscale definitive).
-/// Gruparea se face după (cotă, categorie) — refolosind logica din `reports.rs`
-/// și conceptul de grupare din `ubl/rocius_rules.rs` BR-RO-043.
+/// **Vânzări**: doar facturile cu status VALIDATED (BIZ-11).
+/// **Achiziții**: facturile primite cu status != REJECTED, defalcate din
+/// `received_invoice_vat_lines`. Facturile fără defalcare sunt contorizate în
+/// `purchase_unparsed_count` și nu contribuie la totaluri.
+/// Gruparea se face după (cotă, categorie) — BIZ-12.
 #[tauri::command]
 pub async fn compute_d300(
     state: State<'_, AppState>,
@@ -161,6 +177,104 @@ pub async fn compute_d300(
         })
         .collect();
 
+    // ── Wave B: achiziții — received_invoice_vat_lines ────────────────────────
+
+    // Numărul de facturi primite în perioadă (status != REJECTED).
+    let purchase_count_row = sqlx::query(
+        "SELECT COUNT(*) as cnt FROM received_invoices \
+         WHERE company_id = ?1 \
+           AND issue_date >= ?2 \
+           AND issue_date <= ?3 \
+           AND status != 'REJECTED'",
+    )
+    .bind(&company_id)
+    .bind(&period_from)
+    .bind(&period_to)
+    .fetch_one(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    let purchase_invoice_count: i64 = purchase_count_row.try_get("cnt").unwrap_or(0);
+
+    // Numărul de facturi primite fără defalcare TVA (net_amount IS NULL).
+    let unparsed_count_row = sqlx::query(
+        "SELECT COUNT(*) as cnt FROM received_invoices \
+         WHERE company_id = ?1 \
+           AND issue_date >= ?2 \
+           AND issue_date <= ?3 \
+           AND status != 'REJECTED' \
+           AND net_amount IS NULL",
+    )
+    .bind(&company_id)
+    .bind(&period_from)
+    .bind(&period_to)
+    .fetch_one(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    let purchase_unparsed_count: i64 = unparsed_count_row.try_get("cnt").unwrap_or(0);
+
+    // Fetch liniile VAT din facturile primite (JOIN pentru filtru perioadă + companie).
+    let purchase_line_rows = sqlx::query(
+        "SELECT vl.vat_rate, vl.vat_category, vl.base_amount, vl.vat_amount \
+         FROM received_invoice_vat_lines vl \
+         JOIN received_invoices ri ON ri.id = vl.received_invoice_id \
+         WHERE ri.company_id = ?1 \
+           AND ri.issue_date >= ?2 \
+           AND ri.issue_date <= ?3 \
+           AND ri.status != 'REJECTED'",
+    )
+    .bind(&company_id)
+    .bind(&period_from)
+    .bind(&period_to)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    // Acumulăm per (rate_key, category) — același pattern ca vânzări.
+    let mut purchase_groups: BTreeMap<(i64, String), (Decimal, Decimal, Decimal)> = BTreeMap::new();
+
+    for row in &purchase_line_rows {
+        let rate_s: String = row.try_get("vat_rate").unwrap_or_default();
+        let category: String = row
+            .try_get("vat_category")
+            .unwrap_or_else(|_| String::from("S"));
+        let base_s: String = row.try_get("base_amount").unwrap_or_default();
+        let vat_s: String = row.try_get("vat_amount").unwrap_or_default();
+
+        let rate = Decimal::from_str(&rate_s).unwrap_or(Decimal::ZERO);
+        let rate_key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
+
+        let e = purchase_groups.entry((rate_key, category)).or_insert((
+            rate,
+            Decimal::ZERO,
+            Decimal::ZERO,
+        ));
+        e.1 += Decimal::from_str(&base_s).unwrap_or(Decimal::ZERO);
+        e.2 += Decimal::from_str(&vat_s).unwrap_or(Decimal::ZERO);
+    }
+
+    let mut total_deductible_base = Decimal::ZERO;
+    let mut total_deductible_vat = Decimal::ZERO;
+
+    let purchase_groups_vec: Vec<D300Group> = purchase_groups
+        .into_iter()
+        .rev()
+        .map(|((_rate_key, category), (rate, base_sum, vat_sum))| {
+            total_deductible_base += base_sum;
+            total_deductible_vat += vat_sum;
+            D300Group {
+                vat_rate: rate.round_dp(2).to_string(),
+                vat_category: category,
+                base: base_sum.round_dp(2).to_string(),
+                vat: vat_sum.round_dp(2).to_string(),
+            }
+        })
+        .collect();
+
+    // TVA netă de plată = colectată − deductibilă (negativă = de recuperat).
+    let net_vat = total_vat - total_deductible_vat;
+
     Ok(D300Report {
         company_cui,
         period_from,
@@ -169,16 +283,21 @@ pub async fn compute_d300(
         total_base: total_base.round_dp(2).to_string(),
         total_vat: total_vat.round_dp(2).to_string(),
         invoice_count,
+        purchase_groups: purchase_groups_vec,
+        total_deductible_base: total_deductible_base.round_dp(2).to_string(),
+        total_deductible_vat: total_deductible_vat.round_dp(2).to_string(),
+        purchase_invoice_count,
+        purchase_unparsed_count,
+        net_vat: net_vat.round_dp(2).to_string(),
     })
 }
 
 /// Generează fișierul XML D300 și îl scrie la calea specificată.
 /// Returnează calea fișierului salvat.
 ///
-/// Formatul XML este un extract structurat al decontului D300 pentru vânzări.
-/// Header: CUI, perioadă, tip declarație. Body: grupuri TVA + totaluri.
-/// NOTE: Acesta este extractul pentru partea de vânzări (TVA colectat).
-/// Nu este formularul complet ANAF D300 cu schema oficială — depunerea
+/// Formatul XML este un extract structurat al decontului D300 pentru vânzări + achiziții.
+/// Header: CUI, perioadă, tip declarație. Body: grupuri TVA colectat + deductibil + TVA netă.
+/// NOTE: Nu este formularul complet ANAF D300 cu schema oficială — depunerea
 /// electronică necesită integrare cu sistemul ANAF e-Formulare.
 #[tauri::command]
 pub async fn export_d300(
@@ -203,13 +322,11 @@ pub async fn export_d300(
 fn build_and_write_xml(report: D300Report, dest_path: String) -> AppResult<String> {
     let generated_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
-    let mut xml = String::with_capacity(4096);
+    let mut xml = String::with_capacity(8192);
 
     xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    xml.push_str("<!-- D300 Decont TVA — Extras vânzări (TVA colectat) generat de RoFactura -->\n");
-    xml.push_str("<!-- ATENȚIE: Acesta este extractul pentru VÂNZĂRI (TVA colectat). -->\n");
-    xml.push_str("<!-- Partea de ACHIZIȚII (TVA deductibil) va fi adăugată ulterior.  -->\n");
-    xml.push_str("<!-- Schema oficială ANAF D300 necesită depunere prin e-Formulare.  -->\n");
+    xml.push_str("<!-- D300 Decont TVA — Extras vânzări + achiziții generat de RoFactura -->\n");
+    xml.push_str("<!-- Schema oficială ANAF D300 necesită depunere prin e-Formulare.      -->\n");
     xml.push_str("<D300>\n");
 
     // ── Header ────────────────────────────────────────────────────────────────
@@ -272,14 +389,52 @@ fn build_and_write_xml(report: D300Report, dest_path: String) -> AppResult<Strin
     ));
     xml.push_str("  </VanzariTVAColectat>\n");
 
-    // ── AchizitiiTVADeductibil (placeholder) ─────────────────────────────────
+    // ── AchizitiiTVADeductibil ────────────────────────────────────────────────
     xml.push_str("  <AchizitiiTVADeductibil>\n");
-    xml.push_str(
-        "    <!-- Neimplementat: necesită date din facturi primite + ajustări manuale. -->\n",
-    );
-    xml.push_str("    <TotalBazaImpozabila>0.00</TotalBazaImpozabila>\n");
-    xml.push_str("    <TotalTVADeductibil>0.00</TotalTVADeductibil>\n");
+    xml.push_str("    <!-- TVA deductibilă din received_invoice_vat_lines (Wave B) -->\n");
+    if report.purchase_unparsed_count > 0 {
+        xml.push_str(&format!(
+            "    <!-- ATENȚIE: {} facturi primite nu au defalcare TVA (net_amount IS NULL) — cifrele de mai jos sunt parțiale. -->\n",
+            report.purchase_unparsed_count
+        ));
+    }
+
+    for group in &report.purchase_groups {
+        xml.push_str("    <Grupa>\n");
+        xml.push_str(&format!(
+            "      <CotaTVA>{}</CotaTVA>\n",
+            xml_escape(&group.vat_rate)
+        ));
+        xml.push_str(&format!(
+            "      <CategorieTVA>{}</CategorieTVA>\n",
+            xml_escape(&group.vat_category)
+        ));
+        xml.push_str(&format!(
+            "      <BazaImpozabila>{}</BazaImpozabila>\n",
+            xml_escape(&group.base)
+        ));
+        xml.push_str(&format!(
+            "      <TVADeductibil>{}</TVADeductibil>\n",
+            xml_escape(&group.vat)
+        ));
+        xml.push_str("    </Grupa>\n");
+    }
+
+    xml.push_str(&format!(
+        "    <TotalBazaImpozabila>{}</TotalBazaImpozabila>\n",
+        xml_escape(&report.total_deductible_base)
+    ));
+    xml.push_str(&format!(
+        "    <TotalTVADeductibil>{}</TotalTVADeductibil>\n",
+        xml_escape(&report.total_deductible_vat)
+    ));
     xml.push_str("  </AchizitiiTVADeductibil>\n");
+
+    // ── TVA netă de plată / de recuperat ─────────────────────────────────────
+    xml.push_str(&format!(
+        "  <!-- TVADePlata = TVA colectată − TVA deductibilă; negativ înseamnă de recuperat -->\n  <TVADePlata>{}</TVADePlata>\n",
+        xml_escape(&report.net_vat)
+    ));
 
     xml.push_str("</D300>\n");
 
@@ -390,6 +545,17 @@ mod tests {
             total_base: "1000.00".to_string(),
             total_vat: "190.00".to_string(),
             invoice_count: 5,
+            purchase_groups: vec![D300Group {
+                vat_rate: "19.00".to_string(),
+                vat_category: "S".to_string(),
+                base: "500.00".to_string(),
+                vat: "95.00".to_string(),
+            }],
+            total_deductible_base: "500.00".to_string(),
+            total_deductible_vat: "95.00".to_string(),
+            purchase_invoice_count: 3,
+            purchase_unparsed_count: 0,
+            net_vat: "95.00".to_string(),
         };
 
         let dir = std::env::temp_dir();
@@ -405,9 +571,101 @@ mod tests {
         assert!(content.contains("<TVAColectat>190.00</TVAColectat>"));
         assert!(content.contains("<TotalTVAColectat>190.00</TotalTVAColectat>"));
         assert!(content.contains("<NrFacturiValidate>5</NrFacturiValidate>"));
-        // Achiziții placeholder
         assert!(content.contains("<AchizitiiTVADeductibil>"));
+        assert!(content.contains("<TVADeductibil>95.00</TVADeductibil>"));
+        assert!(content.contains("<TotalTVADeductibil>95.00</TotalTVADeductibil>"));
+        assert!(content.contains("<TVADePlata>95.00</TVADePlata>"));
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// Verifică că nota de facturi neparsate apare în XML când purchase_unparsed_count > 0.
+    #[test]
+    fn build_xml_includes_unparsed_note_when_needed() {
+        let report = D300Report {
+            company_cui: "RO11111111".to_string(),
+            period_from: "2024-02-01".to_string(),
+            period_to: "2024-02-29".to_string(),
+            groups: vec![],
+            total_base: "0.00".to_string(),
+            total_vat: "0.00".to_string(),
+            invoice_count: 0,
+            purchase_groups: vec![],
+            total_deductible_base: "0.00".to_string(),
+            total_deductible_vat: "0.00".to_string(),
+            purchase_invoice_count: 5,
+            purchase_unparsed_count: 3,
+            net_vat: "0.00".to_string(),
+        };
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_d300_unparsed.xml");
+        let result = build_and_write_xml(report, path.to_string_lossy().to_string());
+        assert!(result.is_ok());
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains("3 facturi primite nu au defalcare TVA"),
+            "XML trebuie să conțină nota pentru facturi neparsate"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Verifică că net_vat = colectată − deductibilă, inclusiv cazul negativ (TVA de recuperat).
+    #[test]
+    fn d300_net_vat_can_be_negative() {
+        let collected = Decimal::from_str("100.00").unwrap();
+        let deductible = Decimal::from_str("150.00").unwrap();
+        let net = collected - deductible;
+        assert_eq!(net, Decimal::from_str("-50.00").unwrap());
+        assert!(
+            net.is_sign_negative(),
+            "TVA de recuperat trebuie să fie negativă"
+        );
+    }
+
+    /// Verifică gruparea achiziții pe (rată, categorie) — același pattern ca vânzări.
+    #[test]
+    fn d300_purchase_groups_split_by_rate_and_category() {
+        use rust_decimal::prelude::ToPrimitive;
+        use std::collections::BTreeMap;
+
+        let mut purchase_groups: BTreeMap<(i64, String), (Decimal, Decimal, Decimal)> =
+            BTreeMap::new();
+
+        // Simulăm 2 linii la 19% S și una la 9% S.
+        for (rate_str, cat, base_str, vat_str) in [
+            ("0.19", "S", "1000.00", "190.00"),
+            ("0.19", "S", "500.00", "95.00"),
+            ("0.09", "S", "200.00", "18.00"),
+        ] {
+            let rate = Decimal::from_str(rate_str).unwrap();
+            let rate_key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
+            let e = purchase_groups
+                .entry((rate_key, cat.to_string()))
+                .or_insert((rate, Decimal::ZERO, Decimal::ZERO));
+            e.1 += Decimal::from_str(base_str).unwrap();
+            e.2 += Decimal::from_str(vat_str).unwrap();
+        }
+
+        assert_eq!(purchase_groups.len(), 2, "Trebuie 2 grupuri: 19%S și 9%S");
+
+        let rate_19_key = (Decimal::from_str("0.19").unwrap() * Decimal::from(100))
+            .round()
+            .to_i64()
+            .unwrap();
+        let rate_9_key = (Decimal::from_str("0.09").unwrap() * Decimal::from(100))
+            .round()
+            .to_i64()
+            .unwrap();
+
+        let g19 = &purchase_groups[&(rate_19_key, "S".to_string())];
+        assert_eq!(g19.1, Decimal::from_str("1500.00").unwrap());
+        assert_eq!(g19.2, Decimal::from_str("285.00").unwrap());
+
+        let g9 = &purchase_groups[&(rate_9_key, "S".to_string())];
+        assert_eq!(g9.1, Decimal::from_str("200.00").unwrap());
+        assert_eq!(g9.2, Decimal::from_str("18.00").unwrap());
     }
 }

@@ -1,18 +1,14 @@
 /**
  * Declarații ANAF — D300 Decont TVA.
  *
- * Această pagină calculează și exportă decontul de TVA (D300) — **partea de
- * vânzări** (TVA colectat), pe baza facturilor cu status VALIDATED din perioada
- * selectată.
+ * Această pagină calculează și exportă decontul de TVA (D300) — **vânzări**
+ * (TVA colectată) + **achiziții** (TVA deductibilă din received_invoice_vat_lines).
  *
- * Partea de achiziții (TVA deductibilă): facturile primite stochează doar
- * total_amount (fără defalcare pe cotă TVA — XMLurile nu sunt parsate în linii).
- * Calculul automat nu este posibil fiabil; utilizatorul poate introduce manual
- * totalul TVA deductibilă, iar aplicația calculează TVA de plată/recuperat.
- * (Path B — schema received_invoices confirmată fără câmp vat_amount.)
+ * TVA deductibilă este auto-completată din datele parsate (Wave B). Câmpul
+ * rămâne editabil manual ca fallback pentru facturile neparsate.
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
@@ -60,11 +56,17 @@ export function DeclarationsPage() {
   const [computing, setComputing] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  // TVA deductibilă introdusă manual (achiziții).
-  // Facturile primite stochează doar total_amount, fără defalcare pe cotă TVA,
-  // deci calculul automat nu este posibil. Utilizatorul introduce totalul din
-  // evidența contabilă sau din facturile primite procesate manual.
+  // TVA deductibilă — pre-completată din date parsate (Wave B), editabilă manual.
+  // Când raportul se încarcă, valoarea este setată din report.totalDeductibleVat.
+  // Utilizatorul poate suprascrie manual (fallback pentru facturi neparsate).
   const [manualDeductible, setManualDeductible] = useState<string>("0.00");
+
+  // Sincronizăm câmpul manual cu valoarea calculată din raport când raportul se încarcă.
+  useEffect(() => {
+    if (report) {
+      setManualDeductible(report.totalDeductibleVat);
+    }
+  }, [report]);
 
   const yearOptions = buildYearOptions();
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
@@ -167,12 +169,10 @@ export function DeclarationsPage() {
           lineHeight: 1.6,
         }}
       >
-        <b style={{ color: "var(--text)" }}>Decont TVA — partea de vânzări (TVA colectată).</b>{" "}
-        Sunt incluse facturile cu status VALIDATED emise în perioada selectată, grupate pe
-        cotă și categorie TVA.{" "}
-        <b style={{ color: "var(--text)" }}>Partea de achiziții (TVA deductibilă)</b>{" "}
-        necesită facturile primite procesate și se va completa manual în formularul ANAF.
-        Introduceți mai jos totalul TVA deductibilă pentru a calcula TVA de plată netă.
+        <b style={{ color: "var(--text)" }}>Decont TVA — vânzări (TVA colectată) + achiziții (TVA deductibilă).</b>{" "}
+        Vânzările sunt calculate din facturile VALIDATED ale perioadei. Achizițiile sunt
+        calculate automat din defalcarea TVA a facturilor primite (dacă XMLurile au fost parsate).
+        Puteți suprascrie manual valoarea TVA deductibilă în câmpul de mai jos.
       </div>
 
       {/* Period selector */}
@@ -303,7 +303,7 @@ export function DeclarationsPage() {
           )}
         </section>
 
-        {/* ── Achiziții — TVA deductibilă (manual) ──────────────────────────── */}
+        {/* ── Achiziții — TVA deductibilă ───────────────────────────────────── */}
         <section style={{ marginBottom: 24 }}>
           <h2
             style={{
@@ -318,23 +318,72 @@ export function DeclarationsPage() {
             D300 — TVA Deductibil (Achiziții) — {MONTHS[selectedMonth - 1]} {selectedYear}
           </h2>
 
-          <div
-            style={{
-              padding: "10px 14px",
-              background: "var(--bg-hover)",
-              border: "1px solid var(--border)",
-              borderRadius: 4,
-              fontSize: 11,
-              color: "var(--text-muted)",
-              lineHeight: 1.6,
-              marginBottom: 12,
-            }}
-          >
-            Facturile primite (SPV) stochează doar totalul — defalcarea pe cotă TVA necesită
-            procesare manuală a XMLurilor sau date contabile. Introduceți totalul TVA deductibilă
-            din evidența contabilă sau din formularul ANAF D300 (secțiunea achiziții).
-          </div>
+          {/* Tabel grupuri TVA deductibil — afișat doar când raportul există */}
+          {report && report.purchaseGroups.length > 0 && (
+            <table className="dt" style={{ marginBottom: 12 }}>
+              <thead>
+                <tr>
+                  <th style={{ width: 100 }}>Cotă TVA</th>
+                  <th style={{ width: 110 }}>Categorie</th>
+                  <th className="num" style={{ width: 180 }}>Bază impozabilă (RON)</th>
+                  <th className="num" style={{ width: 160 }}>TVA Deductibilă (RON)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.purchaseGroups.map((g, i) => (
+                  <tr key={i}>
+                    <td><span className="mono">{g.vatRate}%</span></td>
+                    <td>
+                      <span
+                        className="mono"
+                        title={vatCategoryLabel(g.vatCategory)}
+                        style={{ cursor: "help" }}
+                      >
+                        {g.vatCategory}
+                      </span>
+                      <span style={{ marginLeft: 6, fontSize: 10, color: "var(--text-muted)" }}>
+                        {vatCategoryLabel(g.vatCategory)}
+                      </span>
+                    </td>
+                    <td className="num tnum">{fmtRON(g.base)}</td>
+                    <td className="num tnum muted">{fmtRON(g.vat)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: "var(--bg-hover)", fontWeight: 600 }}>
+                  <td colSpan={2}>TOTAL ACHIZIȚII (parsate)</td>
+                  <td className="num tnum">{fmtRON(report.totalDeductibleBase)}</td>
+                  <td className="num tnum">{fmtRON(report.totalDeductibleVat)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
 
+          {/* Notă pentru facturi neparsate — afișată onest doar când există */}
+          {report && report.purchaseUnparsedCount > 0 && (
+            <div
+              style={{
+                padding: "8px 12px",
+                background: "rgba(234,179,8,0.08)",
+                border: "1px solid rgba(234,179,8,0.35)",
+                borderRadius: 4,
+                fontSize: 11,
+                color: "var(--text-muted)",
+                lineHeight: 1.6,
+                marginBottom: 12,
+              }}
+            >
+              <b style={{ color: "var(--text)" }}>
+                {report.purchaseUnparsedCount} {report.purchaseUnparsedCount === 1 ? "factură primită nu are" : "facturi primite nu au"} încă defalcare TVA
+              </b>{" "}
+              — suma calculată automat poate fi parțială. Folosiți{" "}
+              <b>«Recalculează TVA din XML»</b> în Jurnal cumpărări sau introduceți
+              manual valoarea corectă în câmpul de mai jos.
+            </div>
+          )}
+
+          {/* Câmp manual — pre-completat din totalDeductibleVat, editabil ca override */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
             <label
               htmlFor="manual-deductible"
@@ -357,9 +406,20 @@ export function DeclarationsPage() {
                 textAlign: "right",
               }}
             />
+            {report && parseDec(manualDeductible) !== parseDec(report.totalDeductibleVat) && (
+              <button
+                type="button"
+                className="btn"
+                style={{ fontSize: 11, padding: "3px 8px" }}
+                onClick={() => setManualDeductible(report.totalDeductibleVat)}
+                title="Resetează la valoarea calculată automat"
+              >
+                Resetează
+              </button>
+            )}
           </div>
 
-          {/* Net TVA de plată / recuperat */}
+          {/* Net TVA de plată / recuperat — folosim report.netVat ca referință, dar afișăm valoarea din câmpul manual */}
           <div
             style={{
               display: "flex",
