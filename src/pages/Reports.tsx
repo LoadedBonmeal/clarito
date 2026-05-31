@@ -319,6 +319,7 @@ export function ReportsPage() {
                     <thead>
                       <tr>
                         <th style={{ width: 120 }}>Rată TVA</th>
+                        <th style={{ width: 110 }}>Categorie</th>
                         <th className="num" style={{ width: 160 }}>Bază impozabilă (RON)</th>
                         <th className="num" style={{ width: 130 }}>TVA (RON)</th>
                         <th className="num" style={{ width: 160 }}>Total (RON)</th>
@@ -326,8 +327,20 @@ export function ReportsPage() {
                     </thead>
                     <tbody>
                       {vatGroups.map((g) => (
-                        <tr key={g.rate}>
+                        <tr key={`${g.rate}-${g.vatCategory}`}>
                           <td><span className="mono">{g.rate}%</span></td>
+                          <td>
+                            <span
+                              className="mono"
+                              title={vatCategoryLabel(g.vatCategory)}
+                              style={{ cursor: "help" }}
+                            >
+                              {g.vatCategory}
+                            </span>
+                            <span style={{ marginLeft: 6, fontSize: 10, color: "var(--text-muted)" }}>
+                              {vatCategoryLabel(g.vatCategory)}
+                            </span>
+                          </td>
                           <td className="num tnum">{fmtRON(g.baseAmount)}</td>
                           <td className="num tnum muted">{fmtRON(g.vatAmount)}</td>
                           <td className="num tnum"><b>{fmtRON(parseDec(g.baseAmount) + parseDec(g.vatAmount))}</b></td>
@@ -336,7 +349,7 @@ export function ReportsPage() {
                     </tbody>
                     <tfoot>
                       <tr style={{ background: "var(--bg-hover)", fontWeight: 600 }}>
-                        <td>TOTAL</td>
+                        <td colSpan={2}>TOTAL</td>
                         <td className="num tnum">{fmtRON(vatTotals.base)}</td>
                         <td className="num tnum">{fmtRON(vatTotals.vat)}</td>
                         <td className="num tnum"><b>{fmtRON(vatTotals.total)}</b></td>
@@ -349,7 +362,7 @@ export function ReportsPage() {
                       const gTotal = parseDec(g.baseAmount) + parseDec(g.vatAmount);
                       const pct = vatTotals.total > 0 ? (gTotal / vatTotals.total) * 100 : 0;
                       return (
-                        <div key={g.rate} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                        <div key={`${g.rate}-${g.vatCategory}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
                           <div style={{ fontSize: 9, color: "var(--text-muted)" }}>{fmtRON(gTotal)}</div>
                           <div style={{ width: 32, height: `${Math.max(pct * 0.7, 4)}px`, background: "var(--accent)", borderRadius: 2 }} />
                           <div style={{ fontSize: 9, color: "var(--text-muted)" }}>{g.rate}%</div>
@@ -492,4 +505,17 @@ function InvoiceRow({ invoice, contactMap }: { invoice: Invoice; contactMap: Map
       <td className="num tnum"><b>{fmtRON(invoice.totalAmount)}</b></td>
     </tr>
   );
+}
+
+function vatCategoryLabel(cat: string): string {
+  switch (cat) {
+    case "S":  return "Standard";
+    case "Z":  return "Zero-rated";
+    case "E":  return "Scutit";
+    case "AE": return "Autolichidare";
+    case "K":  return "Intracomunitar";
+    case "G":  return "Guvernamental";
+    case "O":  return "În afara TVA";
+    default:   return cat;
+  }
 }

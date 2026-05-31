@@ -10,10 +10,7 @@ import type { AppErrorPayload } from '../types';
 export function formatError(e: unknown, fallback = 'A apărut o eroare neașteptată.'): string {
   if (e && typeof e === 'object' && 'kind' in e && 'message' in e) {
     const p = e as AppErrorPayload;
-    // Cast kind to string to handle variants not yet in the TS type union
-    // (e.g. Xlsx — present in Rust AppError but not yet in AppErrorPayload).
-    const kind = p.kind as string;
-    switch (kind) {
+    switch (p.kind) {
       // ── User-facing: pass message through ──────────────────────────────
       case 'Validation':
         return p.message || fallback;
@@ -31,6 +28,9 @@ export function formatError(e: unknown, fallback = 'A apărut o eroare neaștept
       case 'Pdf':
         console.error('[app-error:pdf]', p);
         return 'Eroare la generarea PDF.';
+      case 'Archive':
+        console.error('[app-error:archive]', p);
+        return `Eroare la arhivă/backup: ${p.message || 'operațiune eșuată.'}`;
       // ── Internal: log + generic fallback ───────────────────────────────
       case 'Database':
       case 'Migration':
@@ -39,9 +39,6 @@ export function formatError(e: unknown, fallback = 'A apărut o eroare neaștept
       case 'Tauri':
       case 'Other':
         console.error('[app-error]', p);
-        return fallback;
-      default:
-        console.error('[app-error:unknown-kind]', p);
         return fallback;
     }
   }

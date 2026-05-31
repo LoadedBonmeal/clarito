@@ -98,7 +98,7 @@ export function DeclarationsPage() {
       notify.warn("Selectați o companie activă.");
       return;
     }
-    if (!report || report.invoiceCount === 0) {
+    if (!report || (report.invoiceCount === 0 && report.purchaseInvoiceCount === 0)) {
       notify.info("Nu există date de exportat. Calculați mai întâi D300.");
       return;
     }
@@ -146,7 +146,7 @@ export function DeclarationsPage() {
           <button
             type="button"
             className="btn"
-            disabled={exporting || !report || report.invoiceCount === 0}
+            disabled={exporting || !report || (report.invoiceCount === 0 && report.purchaseInvoiceCount === 0)}
             onClick={() => void handleExport()}
             title="Exportă decontul D300 ca fișier XML"
           >

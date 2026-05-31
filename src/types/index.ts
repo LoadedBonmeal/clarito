@@ -365,7 +365,10 @@ export interface AnafStatusResult {
 // ─── Reports ─────────────────────────────────────────────────────────────
 
 export interface VatGroup {
-  rate: number;
+  rate: string;
+  /** VAT category code (e.g. "S", "Z", "E", "AE", "K", "G", "O"). Two groups at the same rate
+   *  but with different categories must be distinct (e.g. 0% Exempt vs 0% Zero-rated). */
+  vatCategory: string;
   baseAmount: string;
   vatAmount: string;
   invoiceCount: number;
@@ -494,7 +497,8 @@ export interface AppErrorPayload {
     | "Conflict"
     | "Xml"
     | "Pdf"
-    | "Http"
+    | "Xlsx"
+    | "Archive"
     | "Other";
   message: string;
 }

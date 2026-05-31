@@ -44,7 +44,7 @@ export function D394View({ dateFrom, dateTo }: Props) {
 
   const handleExport = async () => {
     if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
-    if (!report || report.partners.length === 0) {
+    if (!report || (report.partners.length === 0 && report.purchasePartners.length === 0)) {
       notify.info("Nu există date pentru perioada selectată.");
       return;
     }
