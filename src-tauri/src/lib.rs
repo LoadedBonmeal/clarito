@@ -361,6 +361,12 @@ pub fn run() {
             // declarations d300
             commands::declarations::compute_d300,
             commands::declarations::export_d300,
+            // d394 — livrări/achiziții pe teritoriul național
+            commands::d394::compute_d394,
+            commands::d394::export_d394,
+            // jurnale contabile
+            commands::journals::export_sales_journal,
+            commands::journals::export_purchase_journal,
             // saft d406
             commands::saft::export_saft_d406,
             // feedback / diagnostic

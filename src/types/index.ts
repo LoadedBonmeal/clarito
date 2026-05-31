@@ -408,6 +408,34 @@ export interface D300Report {
   invoiceCount: number;
 }
 
+// ─── D394 Declarație informativă livrări/achiziții ───────────────────────────
+
+/** Un partener (client) din declarația D394 — livrări (vânzări). */
+export interface D394Partner {
+  /** CUI-ul partenerului. Poate fi "" dacă nu a fost completat. */
+  partnerCui: string;
+  /** Denumirea legală a partenerului. */
+  partnerName: string;
+  /** Numărul de facturi VALIDATED emise către partener în perioadă. */
+  invoiceCount: number;
+  /** Baza impozabilă totală (net), 2 zecimale. */
+  base: string;
+  /** TVA colectat total, 2 zecimale. */
+  vat: string;
+}
+
+/** Raportul D394 — livrări (vânzări) per partener, calculat din facturi VALIDATED. */
+export interface D394Report {
+  companyCui: string;
+  periodFrom: string;
+  periodTo: string;
+  /** Parteneri sortați descrescător după baza impozabilă. */
+  partners: D394Partner[];
+  totalBase: string;
+  totalVat: string;
+  invoiceCount: number;
+}
+
 // ─── Feedback / Diagnostic ────────────────────────────────────────────────
 
 export interface DiagnosticReport {

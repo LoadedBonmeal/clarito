@@ -450,6 +450,28 @@ export const declarations = {
     invoke<string>("export_d300", { companyId, periodFrom, periodTo, destPath }),
 };
 
+// ─── D394 — Declarație informativă livrări/achiziții ─────────────────────
+
+export const d394 = {
+  /** Calculează declarația D394 — livrări (vânzări) grupate pe partener. */
+  compute: (companyId: string, periodFrom: string, periodTo: string) =>
+    invoke<import("@/types").D394Report>("compute_d394", { companyId, periodFrom, periodTo }),
+  /** Generează XML D394 și îl salvează la destPath. Returnează calea. */
+  export: (companyId: string, periodFrom: string, periodTo: string, destPath: string) =>
+    invoke<string>("export_d394", { companyId, periodFrom, periodTo, destPath }),
+};
+
+// ─── Jurnale contabile ────────────────────────────────────────────────────
+
+export const journals = {
+  /** Exportă jurnalul de vânzări CSV pentru o perioadă. Returnează calea fișierului. */
+  exportSales: (companyId: string, dateFrom: string, dateTo: string, destPath: string) =>
+    invoke<string>("export_sales_journal", { companyId, dateFrom, dateTo, destPath }),
+  /** Exportă jurnalul de cumpărări CSV pentru o perioadă. Returnează calea fișierului. */
+  exportPurchases: (companyId: string, dateFrom: string, dateTo: string, destPath: string) =>
+    invoke<string>("export_purchase_journal", { companyId, dateFrom, dateTo, destPath }),
+};
+
 // ─── GDPR / data portability ──────────────────────────────────────────────
 
 export const gdpr = {
@@ -484,4 +506,6 @@ export const api = {
   feedback,
   gdpr,
   declarations,
+  d394,
+  journals,
 };
