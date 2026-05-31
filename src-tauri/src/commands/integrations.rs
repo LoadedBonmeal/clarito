@@ -313,12 +313,16 @@ pub async fn export_saga_csv(
     output_path: Option<String>,
 ) -> AppResult<String> {
     use crate::db::invoices::InvoiceFilter;
+    use crate::db::models::InvoiceStatus;
 
     // 1. Query invoices for company_id between date_from and date_to
+    // Only VALIDATED invoices are exported — DRAFT/REJECTED/STORNED must not
+    // reach the accounting system (fiscal pollution).
     let filter = InvoiceFilter {
         company_id: Some(company_id.clone()),
         date_from: Some(date_from.clone()),
         date_to: Some(date_to.clone()),
+        statuses: Some(vec![InvoiceStatus::Validated]),
         page: Some(crate::db::models::Page {
             offset: 0,
             limit: 10_000,
@@ -413,12 +417,16 @@ pub async fn export_winmentor_csv(
     output_path: Option<String>,
 ) -> AppResult<String> {
     use crate::db::invoices::InvoiceFilter;
+    use crate::db::models::InvoiceStatus;
 
     // 1. Query invoices
+    // Only VALIDATED invoices are exported — DRAFT/REJECTED/STORNED must not
+    // reach the accounting system (fiscal pollution).
     let filter = InvoiceFilter {
         company_id: Some(company_id.clone()),
         date_from: Some(date_from.clone()),
         date_to: Some(date_to.clone()),
+        statuses: Some(vec![InvoiceStatus::Validated]),
         page: Some(crate::db::models::Page {
             offset: 0,
             limit: 10_000,

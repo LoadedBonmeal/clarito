@@ -24,18 +24,21 @@ describe("deduceVatCategory (inline — pending alias fix in vitest.config.ts)",
     expect(deduceVatCategory(9, "FR", true)).toBe("S");
   });
 
-  // ── vatRate === 0, seller is NOT vat payer → AE ──────────────────────
+  // ── vatRate === 0, buyer country wins; non-payer domestic → O ───────────
+  // Country is resolved FIRST. A non-VAT-payer selling to an EU buyer still
+  // gets K; to a non-EU buyer still gets G; only domestic (RO/unknown) with
+  // a non-payer seller becomes O (out of scope), NOT AE (reverse charge).
 
-  it("rate 0 RO non-payer → AE (taxare inversă / neplătitor)", () => {
-    expect(deduceVatCategory(0, "RO", false)).toBe("AE");
+  it("rate 0 RO non-payer → O (out of scope — neplătitor TVA, domestic)", () => {
+    expect(deduceVatCategory(0, "RO", false)).toBe("O");
   });
 
-  it("rate 0 DE non-payer → AE (non-payer wins over EU logic)", () => {
-    expect(deduceVatCategory(0, "DE", false)).toBe("AE");
+  it("rate 0 DE non-payer → K (EU country wins over seller-payer status)", () => {
+    expect(deduceVatCategory(0, "DE", false)).toBe("K");
   });
 
-  it("rate 0 US non-payer → AE (non-payer wins over non-EU logic)", () => {
-    expect(deduceVatCategory(0, "US", false)).toBe("AE");
+  it("rate 0 US non-payer → G (non-EU country wins over seller-payer status)", () => {
+    expect(deduceVatCategory(0, "US", false)).toBe("G");
   });
 
   // ── vatRate === 0, seller IS vat payer, EU non-RO buyer → K ─────────
@@ -74,6 +77,11 @@ describe("deduceVatCategory (inline — pending alias fix in vitest.config.ts)",
 
   it("rate 0 empty string buyer vatPayer → E (unknown treated as domestic)", () => {
     expect(deduceVatCategory(0, "", true)).toBe("E");
+  });
+
+  // ── vatRate === 0, domestic, non-payer → O (not AE) ──────────────────
+  it("rate 0 empty string non-payer → O (domestic non-payer = out of scope)", () => {
+    expect(deduceVatCategory(0, "", false)).toBe("O");
   });
 
   // ── Case insensitivity ───────────────────────────────────────────────

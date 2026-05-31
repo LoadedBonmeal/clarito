@@ -600,10 +600,18 @@ fn format_decimal_n(s: &str, n: u32) -> String {
 /// BIZ-05: emite `<cbc:TaxExemptionReasonCode>` + `<cbc:TaxExemptionReason>`
 /// pentru categoriile TVA care nu sunt cota standard ("S"). Codurile urmează
 /// lista VATEX-EU publicată de CEF (EN 16931 / CIUS-RO).
+///
+/// Nota: categoria "Z" (cotă zero domestică) NU emite un cod VATEX-EU-G
+/// (care este rezervat exclusiv exporturilor extra-UE, categoria "G").
+/// Pentru Z, în conformitate cu EN 16931 / CIUS-RO, nu se emite nici un cod
+/// de excepție — cota zero se exprimă prin `<cbc:Percent>0</cbc:Percent>`
+/// în <cac:TaxCategory>, fără TaxExemptionReasonCode.
 fn write_tax_exemption(writer: &mut Writer<Cursor<Vec<u8>>>, category: &str) -> AppResult<()> {
     let (code, reason) = match category {
         "E" => ("VATEX-EU-132", "Scutire fără drept de deducere"),
-        "Z" => ("VATEX-EU-G", "Cota zero"),
+        // "Z" — cotă zero domestică: NU emite cod VATEX-EU-G (care este
+        //        rezervat pentru exporturi extra-UE, categoria "G").
+        "Z" => return Ok(()),
         "AE" => ("VATEX-EU-AE", "Taxare inversă"),
         "K" => ("VATEX-EU-IC", "Livrare intracomunitară"),
         "G" => ("VATEX-EU-G", "Export în afara UE"),
@@ -833,6 +841,25 @@ mod tests {
             occurrences >= 2,
             "expected VATEX-EU-AE in both TaxCategory and ClassifiedTaxCategory, found {}: {}",
             occurrences,
+            body
+        );
+    }
+
+    #[test]
+    fn category_z_does_not_emit_vatex_eu_g() {
+        // Fix #3: category "Z" (domestic zero-rated) must NOT emit VATEX-EU-G.
+        // VATEX-EU-G is reserved exclusively for category "G" (export outside EU).
+        let mut input = sample_input();
+        input.lines[0].vat_category = "Z".to_string();
+        input.lines[0].vat_rate = "0.00".to_string();
+        input.lines[0].vat_amount = "0.00".to_string();
+        input.invoice.vat_amount = "0.00".to_string();
+        input.invoice.total_amount = input.invoice.subtotal_amount.clone();
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+        assert!(
+            !body.contains("VATEX-EU-G"),
+            "category Z must NOT emit VATEX-EU-G (export code); got: {}",
             body
         );
     }

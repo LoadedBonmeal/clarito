@@ -33,11 +33,15 @@ const EU_CODES = new Set([
  *
  * Rules:
  *  - vatRate > 0  → 'S' (standard)
- *  - vatRate === 0:
- *      - seller is NOT vat payer           → 'AE' (taxare inversă / neplătitor TVA)
- *      - buyer is EU (non-RO)              → 'K' (intracomunitar scutit)
+ *  - vatRate === 0 — buyer country is resolved FIRST, seller-payer status second:
+ *      - buyer is EU (non-RO)              → 'K' (livrare intracomunitară scutită)
  *      - buyer is non-EU and non-RO        → 'G' (export scutit)
- *      - buyer is RO (or unknown)          → 'E' (scutit intern)
+ *      - buyer is RO (or unknown):
+ *          - seller is NOT a VAT payer     → 'O' (în afara sferei TVA — neplătitor)
+ *          - seller IS a VAT payer         → 'E' (scutit intern cu drept de deducere)
+ *      NOTE: 'AE' (taxare inversă) is NOT auto-assigned here; it is only correct
+ *      for genuine intra-community or domestic reverse-charge situations and must
+ *      be set explicitly by the user.
  *  - default                               → 'S'
  */
 export function deduceVatCategory(
@@ -47,10 +51,12 @@ export function deduceVatCategory(
 ): VatCategory {
   if (vatRate > 0) return "S";
   if (vatRate === 0) {
-    if (!sellerVatPayer) return "AE";
     const country = (buyerCountry ?? "").toUpperCase().trim();
+    // Country wins — resolve EU/non-EU first.
     if (EU_CODES.has(country)) return "K";
     if (country && country !== "RO") return "G";
+    // Domestic (RO or unknown) — check seller payer status.
+    if (!sellerVatPayer) return "O";
     return "E";
   }
   return "S";

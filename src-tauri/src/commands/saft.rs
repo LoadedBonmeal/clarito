@@ -90,7 +90,7 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
          WHERE i.company_id = ?1 \
            AND i.issue_date >= ?2 \
            AND i.issue_date <= ?3 \
-           AND i.status NOT IN ('DRAFT', 'STORNED') \
+           AND i.status = 'VALIDATED' \
          ORDER BY i.issue_date ASC",
     )
     .bind(&params.company_id)
