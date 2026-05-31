@@ -115,6 +115,22 @@ tempfile = "3"
 [features]
 # Default features
 default = []
+# Gates the license-gen CLI binary so `tauri build` (which doesn't enable it)
+# never builds/bundles it. Without this, the macOS universal bundler tries to
+# copy a license-gen universal binary that was never lipo-merged and fails.
+# Issue keys with: cargo run --bin license-gen --features cli -- ...
+cli = []
+
+# license-gen is a maintenance CLI, NOT part of the shipped app bundle.
+[[bin]]
+name = "license-gen"
+path = "src/bin/license-gen.rs"
+required-features = ["cli"]
+
+# The Tauri app binary (default for cargo run / tauri build).
+[[bin]]
+name = "efactura-desktop"
+path = "src/main.rs"
 
 [profile.release]
 opt-level = 3
