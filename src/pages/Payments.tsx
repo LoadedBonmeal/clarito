@@ -40,7 +40,7 @@ export function PaymentsPage() {
   const [form, setForm] = useState({ amount: "", paidAt: new Date().toISOString().slice(0, 10), method: "transfer", reference: "" });
 
   // Fetch all invoices
-  const { data: paged, isLoading } = useQuery({
+  const { data: paged, isLoading, isError: invoicesError, error: invoicesErr, refetch: refetchInvoices } = useQuery({
     queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 500 } }),
     queryFn: () => api.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 500 } }),
     enabled: !!activeCompanyId,
@@ -181,6 +181,8 @@ export function PaymentsPage() {
       <div className="content-body" style={{ overflowY: "auto", flex: 1 }}>
         {isLoading ? (
           <div style={{ padding: 24, color: "var(--text-muted)" }}>Se încarcă…</div>
+        ) : invoicesError ? (
+          <QueryErrorBanner error={invoicesErr} label="facturile" onRetry={() => void refetchInvoices()} />
         ) : summariesError ? (
           <QueryErrorBanner error={summariesErr} label="plățile" onRetry={() => void refetchSummaries()} />
         ) : list.length === 0 ? (

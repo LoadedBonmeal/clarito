@@ -57,9 +57,14 @@ pub(crate) async fn do_sync_spv(
     let mut access_token = if !bundle.is_expired() {
         bundle.access_token.clone()
     } else {
-        let result = oauth::refresh_token_bundle(&bundle.refresh_token)
-            .await
-            .map_err(AppError::Other)?;
+        let config = crate::commands::anaf::build_oauth_config(pool).await;
+        let result = oauth::refresh_token_bundle_with_client_id(
+            &bundle.refresh_token,
+            &config.client_id,
+            &config.token_url,
+        )
+        .await
+        .map_err(AppError::Other)?;
         let new_bundle = TokenBundle {
             access_token: result.access_token.clone(),
             refresh_token: result.refresh_token,
@@ -82,7 +87,7 @@ pub(crate) async fn do_sync_spv(
                 company_id,
                 "ANAF 401 on list_messages — reîmprospătăm token"
             );
-            if let Ok(new_tok) = super::poll::refresh_token_for(company_id).await {
+            if let Ok(new_tok) = super::poll::refresh_token_for(company_id, pool).await {
                 access_token = new_tok;
                 messages_result = client.list_messages(&access_token, &company.cui, 60).await;
             }
@@ -160,7 +165,7 @@ pub(crate) async fn do_sync_spv(
                     msg_id = msg.id.as_str(),
                     "ANAF 401 on download — reîmprospătăm token"
                 );
-                if let Ok(new_tok) = super::poll::refresh_token_for(company_id).await {
+                if let Ok(new_tok) = super::poll::refresh_token_for(company_id, pool).await {
                     access_token = new_tok;
                     dl_result = client.download_message(&access_token, &msg.id).await;
                 }

@@ -12,6 +12,7 @@ import { useNavigate } from "@tanstack/react-router";
 
 import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -40,7 +41,7 @@ export function ReceivedPage() {
   const [hoverId, setHoverId] = useState<string | null>(null);
 
   // Fetch received invoices
-  const { data: paged, isLoading } = useQuery({
+  const { data: paged, isLoading, isError, error, refetch } = useQuery({
     queryKey: queryKeys.received.list({ companyId: activeCompanyId ?? undefined }),
     queryFn: () => api.received.list({ companyId: activeCompanyId ?? undefined }),
   });
@@ -287,6 +288,8 @@ export function ReceivedPage() {
           <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>
             Se încarcă…
           </div>
+        ) : isError ? (
+          <QueryErrorBanner error={error} label="facturile primite" onRetry={() => void refetch()} />
         ) : list.length === 0 ? (
           <div style={{ padding: 40, textAlign: "center", fontSize: 12, color: "var(--text-muted)" }}>
             {allInvoices.length === 0

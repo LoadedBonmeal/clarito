@@ -128,9 +128,13 @@ pub fn build_feedback_mailto(
     // Windows mailto: limit ≈ 2048 chars. Truncate if needed.
     if body.len() > MAX_BODY_CHARS {
         let mut truncated: String = body.chars().take(MAX_BODY_CHARS).collect();
-        truncated.push_str(
-            "\n[…truncat — trimite logs manual din ~/Library/Logs/com.lucaris.efactura/]",
-        );
+        truncated.push_str(if cfg!(target_os = "macos") {
+            "\n[…truncat — trimite logs manual din ~/Library/Logs/com.lucaris.efactura/]"
+        } else if cfg!(target_os = "windows") {
+            "\n[…truncat — trimite logs manual din %APPDATA%\\com.lucaris.efactura\\logs\\]"
+        } else {
+            "\n[…truncat — trimite manual fișierul de log din directorul de loguri al aplicației]"
+        });
         body = truncated;
     }
 

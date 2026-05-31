@@ -18,6 +18,7 @@ import { fmtRON, parseDec } from "@/lib/utils";
 import { formatError } from "@/lib/error-mapper";
 import type { AppErrorPayload } from "@/types";
 import { useAppStore } from "@/lib/store";
+import { fmtShortcut } from "@/lib/platform";
 import {
   Dialog,
   DialogContent,
@@ -312,7 +313,7 @@ export function InvoiceDetailPage() {
             type="button"
             className="btn"
             onClick={() => window.print()}
-            title="Tipărește factura curentă (Ctrl+P)"
+            title={`Tipărește factura curentă (${fmtShortcut("Ctrl+P")})`}
           >
             <Icon name="printer" size={12} /> Tipărește
           </button>

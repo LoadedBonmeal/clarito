@@ -232,7 +232,7 @@ export function MenuBar({
         type="button"
         className="menubar-company"
         onClick={onOpenCompanySwitcher}
-        title="Schimbă compania activă (Ctrl+K Ctrl+C)"
+        title={`Schimbă compania activă (${fmtShortcut("Ctrl+K Ctrl+C")})`}
       >
         <span className="swatch" style={{ background: "var(--accent)" }} />
         <span style={{ fontWeight: 600 }}>{activeCompanyName}</span>

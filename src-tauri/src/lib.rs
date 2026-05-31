@@ -126,10 +126,10 @@ pub fn run() {
                             struct MutexWriter(Arc<Mutex<std::fs::File>>);
                             impl std::io::Write for MutexWriter {
                                 fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-                                    self.0.lock().unwrap().write(buf)
+                                    self.0.lock().unwrap_or_else(|e| e.into_inner()).write(buf)
                                 }
                                 fn flush(&mut self) -> std::io::Result<()> {
-                                    self.0.lock().unwrap().flush()
+                                    self.0.lock().unwrap_or_else(|e| e.into_inner()).flush()
                                 }
                             }
                             MutexWriter(writer.clone())

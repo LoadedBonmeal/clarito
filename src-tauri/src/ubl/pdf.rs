@@ -120,14 +120,36 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     y -= LINE_H;
     draw_hline(&layer, MARGIN, PAGE_W - MARGIN, y + 1.0);
 
-    // Table rows
+    // Bottom margin below which a new page is needed (leave room for one row + footer)
+    const BOTTOM_MARGIN: f32 = MARGIN + LINE_H + 4.0;
+
+    // Track the active layer across potential page breaks
+    let mut cur_layer = layer.clone();
+
+    // Table rows — add page-break when y approaches the bottom margin
     for line in &input.lines {
         y -= LINE_H;
-        write_line_row(&layer, &font_normal, line, &col_x, y, &inv.currency);
+
+        // Page-break: if y has gone below the bottom margin, open a new page
+        if y < BOTTOM_MARGIN {
+            let (new_page, new_layer_idx) = doc.add_page(Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
+            cur_layer = doc.get_page(new_page).get_layer(new_layer_idx);
+            y = PAGE_H - MARGIN;
+
+            // Re-draw the table header on the new page
+            for (i, h) in headers.iter().enumerate() {
+                cur_layer.use_text(*h, FONT_SMALL, Mm(col_x[i]), Mm(y), &font_bold);
+            }
+            y -= LINE_H;
+            draw_hline(&cur_layer, MARGIN, PAGE_W - MARGIN, y + 1.0);
+            y -= LINE_H;
+        }
+
+        write_line_row(&cur_layer, &font_normal, line, &col_x, y, &inv.currency);
     }
 
     y -= 2.0;
-    draw_hline(&layer, MARGIN, PAGE_W - MARGIN, y);
+    draw_hline(&cur_layer, MARGIN, PAGE_W - MARGIN, y);
     y -= 6.0;
 
     // ── VAT breakdown table (left side) ──────────────────────────────────────
@@ -147,27 +169,27 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
             entry.1 += Decimal::from_str(&line.vat_amount).unwrap_or(Decimal::ZERO);
         }
         if !vat_groups.is_empty() {
-            layer.use_text("Detaliu TVA:", FONT_SMALL, Mm(MARGIN), Mm(y), &font_bold);
+            cur_layer.use_text("Detaliu TVA:", FONT_SMALL, Mm(MARGIN), Mm(y), &font_bold);
             y -= LINE_H - 1.0;
             let hdrs = ["Cotă", "Bază impozabilă", "TVA"];
             let vt_cols = [MARGIN, MARGIN + 22.0, MARGIN + 54.0];
             for (i, h) in hdrs.iter().enumerate() {
-                layer.use_text(*h, FONT_SMALL - 0.5, Mm(vt_cols[i]), Mm(y), &font_bold);
+                cur_layer.use_text(*h, FONT_SMALL - 0.5, Mm(vt_cols[i]), Mm(y), &font_bold);
             }
             y -= LINE_H - 1.0;
-            draw_hline(&layer, MARGIN, MARGIN + 79.0, y + 1.0);
+            draw_hline(&cur_layer, MARGIN, MARGIN + 79.0, y + 1.0);
             for ((rate_key, category), (base, vat)) in &vat_groups {
                 let rate_pct = *rate_key as f64 / 100.0;
                 let label = vat_label(rate_pct, category);
-                layer.use_text(label, FONT_SMALL, Mm(vt_cols[0]), Mm(y), &font_normal);
-                layer.use_text(
+                cur_layer.use_text(label, FONT_SMALL, Mm(vt_cols[0]), Mm(y), &font_normal);
+                cur_layer.use_text(
                     format!("{:.2} {}", base, inv.currency),
                     FONT_SMALL,
                     Mm(vt_cols[1]),
                     Mm(y),
                     &font_normal,
                 );
-                layer.use_text(
+                cur_layer.use_text(
                     format!("{:.2} {}", vat, inv.currency),
                     FONT_SMALL,
                     Mm(vt_cols[2]),
@@ -181,7 +203,7 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
 
     // ── Totals (right side) ───────────────────────────────────────────────────
     let totals_x = PAGE_W - MARGIN - 70.0;
-    layer.use_text(
+    cur_layer.use_text(
         format!("Subtotal: {} {}", inv.subtotal_amount, inv.currency),
         FONT_NORMAL,
         Mm(totals_x),
@@ -189,7 +211,7 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
         &font_normal,
     );
     y -= LINE_H;
-    layer.use_text(
+    cur_layer.use_text(
         format!("TVA: {} {}", inv.vat_amount, inv.currency),
         FONT_NORMAL,
         Mm(totals_x),
@@ -197,7 +219,7 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
         &font_normal,
     );
     y -= LINE_H;
-    layer.use_text(
+    cur_layer.use_text(
         format!("TOTAL: {} {}", inv.total_amount, inv.currency),
         FONT_HEADING,
         Mm(totals_x),
@@ -210,7 +232,7 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     // BIZ-21: pass Decimal directly to preserve exact cents (no f64 round-trip).
     let total_dec = Decimal::from_str(&inv.total_amount).unwrap_or(Decimal::ZERO);
     let words = amount_to_romanian_words(total_dec);
-    layer.use_text(
+    cur_layer.use_text(
         format!("({words})"),
         FONT_SMALL,
         Mm(totals_x),
@@ -228,9 +250,9 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
         };
         if !display_notes.is_empty() {
             y -= 10.0;
-            layer.use_text("Note:", FONT_NORMAL, Mm(MARGIN), Mm(y), &font_bold);
+            cur_layer.use_text("Note:", FONT_NORMAL, Mm(MARGIN), Mm(y), &font_bold);
             y -= LINE_H;
-            layer.use_text(display_notes, FONT_SMALL, Mm(MARGIN), Mm(y), &font_normal);
+            cur_layer.use_text(display_notes, FONT_SMALL, Mm(MARGIN), Mm(y), &font_normal);
         }
     }
 

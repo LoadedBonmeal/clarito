@@ -3,14 +3,23 @@
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Reîmprospătează token-ul OAuth2 pentru o companie și îl salvează în keychain.
-/// Returnează noul access_token.
-pub(crate) async fn refresh_token_for(company_id: &str) -> Result<String, String> {
+/// Returnează noul access_token. Citește config-ul OAuth din DB pentru a folosi
+/// client_id-ul configurat de utilizator (evită mismatch la ANAF cu client_id custom).
+pub(crate) async fn refresh_token_for(
+    company_id: &str,
+    pool: &sqlx::SqlitePool,
+) -> Result<String, String> {
     use crate::anaf::{keychain::TokenBundle, oauth};
     let bundle = TokenBundle::load(company_id)
         .ok_or_else(|| format!("Nu există token pentru compania {}", company_id))?;
-    let result = oauth::refresh_token_bundle(&bundle.refresh_token)
-        .await
-        .map_err(|e| e.to_string())?;
+    let config = crate::commands::anaf::build_oauth_config(pool).await;
+    let result = oauth::refresh_token_bundle_with_client_id(
+        &bundle.refresh_token,
+        &config.client_id,
+        &config.token_url,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     let new_bundle = TokenBundle {
         access_token: result.access_token.clone(),
         refresh_token: result.refresh_token,
@@ -71,9 +80,14 @@ pub(crate) async fn poll_submitted_for_company(
     let mut access_token = if !bundle.is_expired() {
         bundle.access_token.clone()
     } else {
-        let result = oauth::refresh_token_bundle(&bundle.refresh_token)
-            .await
-            .map_err(AppError::Other)?;
+        let config = crate::commands::anaf::build_oauth_config(pool).await;
+        let result = oauth::refresh_token_bundle_with_client_id(
+            &bundle.refresh_token,
+            &config.client_id,
+            &config.token_url,
+        )
+        .await
+        .map_err(AppError::Other)?;
         let new_bundle = TokenBundle {
             access_token: result.access_token.clone(),
             refresh_token: result.refresh_token,
@@ -113,7 +127,7 @@ pub(crate) async fn poll_submitted_for_company(
             if let Err(ref e) = result {
                 if e == ERR_UNAUTHORIZED {
                     tracing::info!(company_id, "ANAF 401 — reîmprospătăm token și reîncercăm");
-                    if let Ok(new_tok) = refresh_token_for(company_id).await {
+                    if let Ok(new_tok) = refresh_token_for(company_id, pool).await {
                         access_token = new_tok;
                         result = client.check_status(&access_token, upload_id).await;
                     }

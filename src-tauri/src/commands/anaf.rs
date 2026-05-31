@@ -76,7 +76,7 @@ async fn get_valid_token(company_id: &str, pool: &sqlx::SqlitePool) -> AppResult
 /// - `anaf_oauth_callback_port`  — port TCP        (implicit: 8787)
 /// - `anaf_oauth_authorize_url`  — URL autorizare  (implicit: prod ANAF)
 /// - `anaf_oauth_token_url`      — URL token       (implicit: prod ANAF)
-async fn build_oauth_config(pool: &sqlx::SqlitePool) -> oauth::OAuthConfig {
+pub(crate) async fn build_oauth_config(pool: &sqlx::SqlitePool) -> oauth::OAuthConfig {
     use crate::db::settings;
 
     let mut cfg = oauth::OAuthConfig::default_prod();

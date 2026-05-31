@@ -135,7 +135,14 @@ pub(crate) async fn refresh_expiring_certificates(pool: &sqlx::SqlitePool, app: 
             company_id = company.id.as_str(),
             "Reîmprospătăm token OAuth2"
         );
-        match oauth::refresh_token_bundle(&bundle.refresh_token).await {
+        let config = crate::commands::anaf::build_oauth_config(pool).await;
+        match oauth::refresh_token_bundle_with_client_id(
+            &bundle.refresh_token,
+            &config.client_id,
+            &config.token_url,
+        )
+        .await
+        {
             Ok(refreshed) => {
                 let new_bundle = TokenBundle {
                     access_token: refreshed.access_token,

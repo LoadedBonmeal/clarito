@@ -303,21 +303,6 @@ pub async fn refresh_token_bundle_with_client_id(
     parse_token_response(resp).await
 }
 
-/// Reîmprospătează access_token-ul folosind refresh_token-ul existent.
-///
-/// Variantă de compatibilitate care folosește `DEFAULT_CLIENT_ID` și endpoint-ul
-/// prod implicit. Apelată din task-urile de fundal care nu au acces la DB/config.
-///
-/// NOTĂ: task-urile de fundal (`background/poll.rs`, `background/spv.rs`,
-/// `background/recovery.rs`) apelează această funcție fără context de configurație.
-/// Dacă utilizatorul a setat un `client_id` custom în Setări → ANAF, refresh-ul
-/// din task-urile de fundal va eșua cu mismatch. Coordonare necesară (R13 Wave E
-/// raport): acele fișiere trebuie actualizate să primească `OAuthConfig` pentru a
-/// putea apela `refresh_token_bundle_with_client_id`.
-pub async fn refresh_token_bundle(refresh_tok: &str) -> Result<OAuthResult, String> {
-    refresh_token_bundle_with_client_id(refresh_tok, DEFAULT_CLIENT_ID, DEFAULT_TOKEN_URL).await
-}
-
 // ─── Internals ─────────────────────────────────────────────────────────────
 
 fn open_browser(url: &str) -> Result<(), String> {
