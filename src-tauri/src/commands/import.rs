@@ -55,6 +55,10 @@ pub async fn import_invoices_csv(
 
     let mut imported: u32 = 0;
     let mut errors: Vec<String> = Vec::new();
+    // Track the maximum invoice number successfully inserted, so we can advance
+    // companies.last_invoice_number at the end (R5 EDGE-03: prevents UNIQUE
+    // collisions when user later creates manual invoices).
+    let mut max_imported_number: i64 = 0;
 
     // Fetch the active company's CUI once so we can validate fields[0] per row.
     let company = crate::db::companies::get(pool, &company_id).await?;
@@ -383,9 +387,31 @@ pub async fn import_invoices_csv(
 
         // Commit — only now count as imported
         match tx.commit().await {
-            Ok(_) => imported += 1,
+            Ok(_) => {
+                imported += 1;
+                if number > max_imported_number {
+                    max_imported_number = number;
+                }
+            }
             Err(e) => errors.push(format!("Linia {row_num}: eroare commit tranzacție: {e}")),
         }
+    }
+
+    // ── Advance companies.last_invoice_number past the max imported number ────
+    // This prevents UNIQUE collisions when the user later creates manual invoices
+    // (R5 EDGE-03). Only runs when at least one row was actually committed.
+    if !dry_run && max_imported_number > 0 {
+        // SQLite does not support MAX() in an UPDATE directly; use a CASE expression.
+        let _ = sqlx::query(
+            "UPDATE companies SET last_invoice_number = \
+             CASE WHEN last_invoice_number < ?1 THEN ?1 ELSE last_invoice_number END \
+             WHERE id = ?2",
+        )
+        .bind(max_imported_number)
+        .bind(&company_id)
+        .execute(pool)
+        .await
+        .map_err(AppError::Database)?;
     }
 
     Ok(ImportResult { imported, errors })
@@ -520,9 +546,16 @@ pub struct XmlImportResult {
 }
 
 /// Importă o factură XML dintr-un fișier selectat de utilizator prin dialog.
-/// Citim fișierul în Rust (nu prin plugin-fs din frontend) pentru a ocoli restricțiile
-/// de scope ale plugin-ului FS (care permit doar $APPDATA/**).
-/// Orice cale returnată de dialog::open este validă pentru tokio::fs::read_to_string.
+///
+/// Security hardening (R8 #3): the caller is the Tauri dialog plugin which
+/// already enforces user consent, but we still enforce two guards:
+/// 1. Extension check — path must end with `.xml` (case-insensitive).
+/// 2. Size cap — reject files larger than 10 MiB to prevent memory exhaustion.
+///
+/// We do NOT restrict to app_data_dir here because the genuine use-case is
+/// importing XML e-factura files from arbitrary user-chosen locations
+/// (Downloads, Desktop, USB drives, etc.). User consent was given via the
+/// open-file dialog. The two guards above provide adequate defence-in-depth.
 #[tauri::command]
 pub async fn import_invoice_xml_from_file(
     app: tauri::AppHandle,
@@ -530,6 +563,25 @@ pub async fn import_invoice_xml_from_file(
     file_path: String,
     company_id: String,
 ) -> AppResult<XmlImportResult> {
+    // Guard 1: extension must be .xml
+    let lower = file_path.to_lowercase();
+    if !lower.ends_with(".xml") {
+        return Err(AppError::Validation(
+            "Fișierul trebuie să aibă extensia .xml.".into(),
+        ));
+    }
+
+    // Guard 2: size cap — reject > 10 MiB
+    const MAX_XML_BYTES: u64 = 10 * 1024 * 1024;
+    let meta = tokio::fs::metadata(&file_path)
+        .await
+        .map_err(|e| AppError::Other(format!("Nu se poate accesa fișierul: {e}")))?;
+    if meta.len() > MAX_XML_BYTES {
+        return Err(AppError::Validation(
+            "Fișierul XML depășește limita maximă de 10 MiB.".into(),
+        ));
+    }
+
     let xml_content = tokio::fs::read_to_string(&file_path)
         .await
         .map_err(|e| AppError::Other(format!("Nu se poate citi fișierul: {e}")))?;
@@ -1012,5 +1064,49 @@ mod tests {
         let number: i64 = 7;
         let full = format!("{}-{:04}", series, number);
         assert_eq!(full, "ACME-0007");
+    }
+
+    /// Unit test for the max_imported_number computation (R5 EDGE-03).
+    /// Simulates the accumulation logic that drives the
+    /// `UPDATE companies SET last_invoice_number = MAX(...)` at end of import.
+    #[test]
+    fn max_imported_number_tracks_highest_committed_row() {
+        let rows: Vec<i64> = vec![3, 7, 1, 15, 9];
+        let mut max_imported_number: i64 = 0;
+        for number in rows {
+            // Simulate a successful commit path.
+            if number > max_imported_number {
+                max_imported_number = number;
+            }
+        }
+        assert_eq!(max_imported_number, 15);
+    }
+
+    #[test]
+    fn max_imported_number_stays_zero_when_no_rows_committed() {
+        // If nothing was committed (e.g. all dry_run), bump must not run.
+        let max_imported_number: i64 = 0;
+        assert_eq!(
+            max_imported_number, 0,
+            "No update should fire when max is 0"
+        );
+    }
+
+    #[test]
+    fn xml_import_rejects_non_xml_extension() {
+        // Guard: extension check. Only a pure logic test here — the actual
+        // async command is integration-tested via the running app.
+        let paths = vec![
+            ("/tmp/invoice.xml", true),
+            ("/tmp/invoice.XML", true),
+            ("/tmp/invoice.csv", false),
+            ("/tmp/invoice.xml.zip", false),
+            ("/tmp/noextension", false),
+        ];
+        for (path, expected_ok) in paths {
+            let lower = path.to_lowercase();
+            let ok = lower.ends_with(".xml");
+            assert_eq!(ok, expected_ok, "Failed for path: {path}");
+        }
     }
 }

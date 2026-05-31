@@ -20,10 +20,13 @@
 //! 4. **Machine ID îmbunătățit** — Combină hostname + username + OS,
 //!    hash-uit cu SHA-256 (primii 24 de caractere hex).
 
+use hmac::{Hmac, Mac};
 use keyring::Entry;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use tauri::State;
+
+type HmacSha256 = Hmac<Sha256>;
 
 use crate::db::license::{self, License};
 use crate::error::{AppError, AppResult};
@@ -116,14 +119,18 @@ pub fn validate_license_key(key: &str) -> bool {
     }
 }
 
-/// SHA-256(KEY_HMAC_SECRET || 0x00 || data) → full hex digest.
+/// RFC 2104 HMAC-SHA256(KEY_HMAC_SECRET, data) → full hex digest (64 chars).
 /// Callers slice the prefix they need (`..4` legacy, `..8` current).
+///
+/// BREAKING (Wave 8): replaced the old SHA-256(secret || 0x00 || data)
+/// construction, which was vulnerable to length-extension attacks. Any keys
+/// issued before this change are now invalid; re-issue via `license-gen`.
 pub fn key_checksum(data: &[u8]) -> String {
-    let mut h = Sha256::new();
-    h.update(key_hmac_secret());
-    h.update(b"\x00");
-    h.update(data);
-    format!("{:x}", h.finalize())
+    let mut mac =
+        HmacSha256::new_from_slice(key_hmac_secret()).expect("HMAC accepts any key length");
+    mac.update(data);
+    let bytes = mac.finalize().into_bytes();
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 // ─── Machine ID ──────────────────────────────────────────────────────────────
@@ -242,20 +249,23 @@ fn read_username_os() -> Option<String> {
 
 // ─── Fingerprint integritate ──────────────────────────────────────────────────
 
-/// SHA-256(secret || fields…) — semnează câmpurile critice ale licenței.
+/// RFC 2104 HMAC-SHA256(integrity_secret, fields…) — semnează câmpurile critice ale licenței.
 /// Modificarea `expires_at` în SQLite fără a cunoaște secretul → fingerprint invalid.
+///
+/// Fields are fed with 0x00 separators to preserve domain separation between them.
+/// BREAKING (Wave 8): previously used SHA-256(secret || 0x00 || fields…); now proper HMAC.
 fn compute_fingerprint(email: &str, mid: &str, expires_at: i64, tier: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(integrity_secret());
-    h.update(b"\x00");
-    h.update(email.as_bytes());
-    h.update(b"\x00");
-    h.update(mid.as_bytes());
-    h.update(b"\x00");
-    h.update(expires_at.to_string().as_bytes());
-    h.update(b"\x00");
-    h.update(tier.as_bytes());
-    format!("{:x}", h.finalize())
+    let mut mac =
+        HmacSha256::new_from_slice(integrity_secret()).expect("HMAC accepts any key length");
+    mac.update(email.as_bytes());
+    mac.update(b"\x00");
+    mac.update(mid.as_bytes());
+    mac.update(b"\x00");
+    mac.update(expires_at.to_string().as_bytes());
+    mac.update(b"\x00");
+    mac.update(tier.as_bytes());
+    let bytes = mac.finalize().into_bytes();
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 // ─── Keychain trial marker ────────────────────────────────────────────────────
@@ -547,5 +557,69 @@ mod sec_tests {
         let ls = now + 31 * 24 * 60 * 60;
         let drift = ls - now;
         assert!(drift > 30 * 24 * 60 * 60);
+    }
+
+    #[test]
+    fn hmac_checksum_is_deterministic() {
+        // Same input must always produce the same 64-char hex digest.
+        let input = b"TEST-ABCD-1234";
+        let a = key_checksum(input);
+        let b = key_checksum(input);
+        assert_eq!(a, b);
+        assert_eq!(a.len(), 64, "HMAC-SHA256 digest must be 64 hex chars");
+        assert!(
+            a.chars().all(|c| c.is_ascii_hexdigit()),
+            "Digest must be hex"
+        );
+    }
+
+    #[test]
+    fn hmac_checksum_differs_for_different_inputs() {
+        // Distinct inputs must not collide (basic sanity check).
+        let a = key_checksum(b"payload-a");
+        let b = key_checksum(b"payload-b");
+        assert_ne!(a, b, "Different inputs must produce different checksums");
+    }
+
+    /// Documents the BREAKING change: the new HMAC output will differ from
+    /// what the old SHA-256(secret||0x00||data) construction produced.
+    /// This test intentionally passes — it merely records that the two schemes
+    /// produce different outputs (no hardcoded expected value needed).
+    #[test]
+    fn hmac_checksum_differs_from_legacy_sha256_construction() {
+        let data = b"ABCD-EFGH-IJKL";
+        let hmac_result = key_checksum(data);
+
+        // Reproduce old construction manually (pure-SHA2, no HMAC).
+        use sha2::{Digest as _, Sha256};
+        let mut h = Sha256::new();
+        h.update(key_hmac_secret());
+        h.update(b"\x00");
+        h.update(data);
+        let legacy: String = format!("{:x}", h.finalize());
+
+        assert_ne!(
+            hmac_result, legacy,
+            "HMAC and legacy SHA-256 construction must differ (BREAKING change confirmed)"
+        );
+    }
+
+    #[test]
+    fn compute_fingerprint_is_deterministic() {
+        let fp1 = compute_fingerprint("user@test.com", "mid123", 1_800_000_000, "SOLO");
+        let fp2 = compute_fingerprint("user@test.com", "mid123", 1_800_000_000, "SOLO");
+        assert_eq!(fp1, fp2);
+        assert_eq!(fp1.len(), 64, "Fingerprint must be 64 hex chars");
+    }
+
+    #[test]
+    fn compute_fingerprint_differs_across_fields() {
+        let base = compute_fingerprint("user@test.com", "mid123", 1_800_000_000, "SOLO");
+        let diff_email = compute_fingerprint("other@test.com", "mid123", 1_800_000_000, "SOLO");
+        let diff_tier = compute_fingerprint("user@test.com", "mid123", 1_800_000_000, "TRIAL");
+        let diff_expires = compute_fingerprint("user@test.com", "mid123", 1_900_000_000, "SOLO");
+        assert_ne!(base, diff_email);
+        assert_ne!(base, diff_tier);
+        assert_ne!(base, diff_expires);
     }
 }

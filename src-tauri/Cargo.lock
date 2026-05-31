@@ -1402,11 +1402,11 @@ name = "efactura-desktop"
 version = "0.2.0"
 dependencies = [
  "aes-gcm",
- "anyhow",
  "chrono",
  "clap",
  "csv",
  "dirs 5.0.1",
+ "hmac",
  "keyring",
  "log",
  "printpdf",
@@ -1437,6 +1437,7 @@ dependencies = [
  "tauri-plugin-store",
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

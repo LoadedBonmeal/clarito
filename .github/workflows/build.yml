@@ -50,10 +50,11 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ""
 
+      # Unsigned dev artifact — NOT for distribution. Signed builds come from release.yml (tag v*).
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: RoFactura-macOS-universal
+          name: RoFactura-macOS-universal-unsigned-dev
           path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
 
   build-windows:
@@ -91,10 +92,11 @@ jobs:
       - name: Build NSIS installer (skip MSI — WiX light.exe flaky on CI)
         run: pnpm tauri build --target x86_64-pc-windows-msvc --bundles nsis
 
+      # Unsigned dev artifact — NOT for distribution. Signed builds come from release.yml (tag v*).
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: RoFactura-Windows-x64
+          name: RoFactura-Windows-x64-unsigned-dev
           path: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
