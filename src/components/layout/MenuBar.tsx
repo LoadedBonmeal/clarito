@@ -28,6 +28,7 @@ function buildMenus(
   theme: string,
   setTheme: (t: "light" | "dark" | "system") => void,
   version: string,
+  purchaseUrl: string,
 ): Record<string, MenuRow[]> {
   return {
     "Fișier": [
@@ -114,6 +115,13 @@ function buildMenus(
       { type: "row", icon: "help",     label: "Documentație e-Factura", kbd: "F1", onClick: () => { void import("@tauri-apps/plugin-opener").then(m => m.openUrl("https://mfinante.gov.ro/ro/web/efactura/informatii-tehnice")); } },
       { type: "row", icon: "keyboard", label: "Scurtături tastatură",   kbd: fmtShortcut("Ctrl+/"), onClick: () => setCommandOpen(true) },
       { type: "sep" },
+      { type: "section", label: "Licență" },
+      { type: "row", icon: "tag",      label: "Cumpără licență…", onClick: () => {
+        void import("@tauri-apps/plugin-opener").then(m => m.openPath(purchaseUrl)).catch(() => {
+          window.open(purchaseUrl, "_blank");
+        });
+      } },
+      { type: "sep" },
       { type: "row", icon: "info",     label: `Despre RoFactura • v${version}`, disabled: true },
     ],
   };
@@ -144,7 +152,14 @@ export function MenuBar({
   });
   const version = appInfo?.version ?? "0.1.0";
 
-  const MENUS = buildMenus(navigate, setCommandOpen, theme, setTheme, version);
+  const { data: purchaseUrlSetting } = useQuery({
+    queryKey: queryKeys.settings.get("purchase_url"),
+    queryFn: () => api.settings.get("purchase_url"),
+    staleTime: Infinity,
+  });
+  const purchaseUrl = purchaseUrlSetting ?? "https://lucaris.ro/rofactura#pret";
+
+  const MENUS = buildMenus(navigate, setCommandOpen, theme, setTheme, version, purchaseUrl);
 
   const [open, setOpen] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);

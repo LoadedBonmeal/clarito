@@ -2,10 +2,11 @@
  * StatusBar — chips informative la baza ferestrei.
  *
  * Design actualizat: pulse-dot ANAF live, sincronizare, mesaje SPV,
- * companie activă cu swatch color.
+ * companie activă cu swatch color, chip licență permanent.
  */
 
 import { useQuery } from "@tanstack/react-query";
+import { openPath } from "@tauri-apps/plugin-opener";
 
 import { Icon } from "@/components/shared/Icon";
 import { queryKeys } from "@/lib/queries";
@@ -57,6 +58,18 @@ export function StatusBar({ activeCompanyName, activeCompanyId, companyCount = 0
   const { data: companies = [] } = useQuery({
     queryKey: queryKeys.companies.list(),
     queryFn: () => api.companies.list(),
+  });
+
+  const { data: license } = useQuery({
+    queryKey: queryKeys.license,
+    queryFn: () => api.license.get(),
+    staleTime: 60_000,
+  });
+
+  const { data: purchaseUrl } = useQuery({
+    queryKey: queryKeys.settings.get("purchase_url"),
+    queryFn: () => api.settings.get("purchase_url"),
+    staleTime: Infinity,
   });
 
   const activeCompany = companies.find((c) => c.id === activeCompanyId);
@@ -127,6 +140,51 @@ export function StatusBar({ activeCompanyName, activeCompanyId, companyCount = 0
           )}
         </span>
       )}
+
+      {/* Chip licență */}
+      {license != null && (() => {
+        const isTrial = license.tier === "TRIAL";
+        const expired = license.isExpired || (license.trialDaysRemaining != null && license.trialDaysRemaining <= 0);
+        const warn = isTrial && !expired && license.trialDaysRemaining != null && license.trialDaysRemaining <= 5;
+
+        let label: string;
+        if (isTrial) {
+          if (expired) {
+            label = "Probă expirată";
+          } else {
+            label = `Probă · ${license.trialDaysRemaining} zile`;
+          }
+        } else {
+          label = `Licență ${license.tier.charAt(0) + license.tier.slice(1).toLowerCase()}`;
+        }
+
+        const handleClick = isTrial
+          ? async () => {
+              try {
+                const url = purchaseUrl || "https://lucaris.ro/rofactura#pret";
+                await openPath(url);
+              } catch {
+                window.open("https://lucaris.ro/rofactura#pret", "_blank");
+              }
+            }
+          : undefined;
+
+        return (
+          <span
+            className="statusbar-chip"
+            onClick={handleClick ?? undefined}
+            style={{
+              cursor: isTrial ? "pointer" : "default",
+              color: (expired || warn) ? "#D97706" : undefined,
+              fontWeight: expired ? 700 : undefined,
+            }}
+            title={isTrial ? "Cumpărați licența" : undefined}
+          >
+            <Icon name="info" size={12} />
+            <span>{label}</span>
+          </span>
+        );
+      })()}
 
       <span className="statusbar-spacer" />
 

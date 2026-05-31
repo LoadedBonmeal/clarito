@@ -11,7 +11,7 @@
  *   └─────────────────────────────────┘
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
@@ -27,6 +27,172 @@ import { useTheme } from "@/hooks/use-theme";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import type { Company } from "@/types";
+
+// ─── Company Switcher ─────────────────────────────────────────────────────
+
+interface CompanySwitcherProps {
+  companies: Company[];
+  activeCompanyId: string | null;
+  onSelect: (id: string) => void;
+  onClose: () => void;
+}
+
+function CompanySwitcher({ companies, activeCompanyId, onSelect, onClose }: CompanySwitcherProps) {
+  const [search, setSearch] = useState("");
+  const [cursor, setCursor] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const filtered = companies.filter((c) => {
+    const q = search.toLowerCase();
+    return (
+      c.legalName.toLowerCase().includes(q) ||
+      (c.cui ?? "").toLowerCase().includes(q)
+    );
+  });
+
+  // Auto-focus search input when opened
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  // Reset cursor when filtered list changes
+  useEffect(() => {
+    setCursor(0);
+  }, [search]);
+
+  // Scroll cursor item into view
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${cursor}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [cursor]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      onClose();
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setCursor((c) => Math.min(c + 1, filtered.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setCursor((c) => Math.max(c - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const selected = filtered[cursor];
+      if (selected) onSelect(selected.id);
+    }
+  };
+
+  return (
+    <div
+      className="palette-scrim"
+      onClick={onClose}
+      style={{ alignItems: "flex-start", paddingTop: 54 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
+        style={{
+          background: "var(--bg-content)",
+          border: "1px solid var(--border)",
+          minWidth: 300,
+          maxWidth: 420,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {/* Header */}
+        <div style={{ padding: "8px 12px", fontSize: 10.5, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.06em", borderBottom: "1px solid var(--border-soft)" }}>
+          COMPANIE ACTIVĂ
+        </div>
+
+        {/* Search input */}
+        <div style={{ padding: "6px 10px", borderBottom: "1px solid var(--border-soft)", display: "flex", alignItems: "center", gap: 6 }}>
+          <Icon name="search" size={12} />
+          <input
+            ref={inputRef}
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Caută companie sau CUI…"
+            style={{
+              flex: 1,
+              border: "none",
+              outline: "none",
+              background: "transparent",
+              fontSize: 11.5,
+              color: "var(--text)",
+            }}
+          />
+        </div>
+
+        {/* Company list with max-height + scroll */}
+        <div
+          ref={listRef}
+          style={{
+            maxHeight: 280,
+            overflowY: "auto",
+            overflowX: "hidden",
+          }}
+        >
+          {filtered.map((c, idx) => (
+            <button
+              key={c.id}
+              type="button"
+              data-idx={idx}
+              onClick={() => onSelect(c.id)}
+              style={{
+                display: "flex",
+                width: "100%",
+                alignItems: "center",
+                gap: 10,
+                padding: "8px 12px",
+                background:
+                  idx === cursor
+                    ? "var(--accent-soft)"
+                    : c.id === activeCompanyId
+                    ? "var(--bg-hover)"
+                    : "none",
+                border: "none",
+                borderBottom: "1px solid var(--border-soft)",
+                cursor: "pointer",
+                textAlign: "left",
+                fontSize: 11.5,
+              }}
+              onMouseEnter={() => setCursor(idx)}
+            >
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, color: "var(--text)" }}>{c.legalName}</div>
+                <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{c.cui}</div>
+              </div>
+              {c.id === activeCompanyId && (
+                <Icon name="check" size={12} style={{ color: "var(--accent)" }} />
+              )}
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <div style={{ padding: "12px", fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>
+              {companies.length === 0 ? "Nicio companie configurată." : "Nicio companie găsită."}
+            </div>
+          )}
+        </div>
+
+        {/* Footer hint */}
+        <div style={{ padding: "5px 12px", fontSize: 10, color: "var(--text-muted)", borderTop: "1px solid var(--border-soft)", display: "flex", gap: 12 }}>
+          <span><kbd style={{ fontFamily: "var(--font-mono)" }}>↑↓</kbd> navighează</span>
+          <span><kbd style={{ fontFamily: "var(--font-mono)" }}>Enter</kbd> selectează</span>
+          <span><kbd style={{ fontFamily: "var(--font-mono)" }}>Esc</kbd> închide</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── AppShell ─────────────────────────────────────────────────────────────
 
 interface AppShellProps {
   children: ReactNode;
@@ -130,63 +296,15 @@ export function AppShell({ children }: AppShellProps) {
         />
         <CommandPalette />
         {switcherOpen && (
-          <div
-            className="palette-scrim"
-            onClick={() => setSwitcherOpen(false)}
-            style={{ alignItems: "flex-start", paddingTop: 54 }}
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                background: "var(--bg-content)",
-                border: "1px solid var(--border)",
-                minWidth: 280,
-                maxHeight: 320,
-                overflow: "auto",
-                boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-              }}
-            >
-              <div style={{ padding: "8px 12px", fontSize: 10.5, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.06em", borderBottom: "1px solid var(--border-soft)" }}>
-                COMPANIE ACTIVĂ
-              </div>
-              {companies.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveCompanyId(c.id);
-                    setSwitcherOpen(false);
-                  }}
-                  style={{
-                    display: "flex",
-                    width: "100%",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "8px 12px",
-                    background: c.id === activeCompanyId ? "var(--accent-soft)" : "none",
-                    border: "none",
-                    borderBottom: "1px solid var(--border-soft)",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    fontSize: 11.5,
-                  }}
-                >
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, color: "var(--text)" }}>{c.legalName}</div>
-                    <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{c.cui}</div>
-                  </div>
-                  {c.id === activeCompanyId && (
-                    <Icon name="check" size={12} style={{ color: "var(--accent)" }} />
-                  )}
-                </button>
-              ))}
-              {companies.length === 0 && (
-                <div style={{ padding: "12px", fontSize: 11, color: "var(--text-muted)" }}>
-                  Nicio companie configurată.
-                </div>
-              )}
-            </div>
-          </div>
+          <CompanySwitcher
+            companies={companies}
+            activeCompanyId={activeCompanyId}
+            onSelect={(id) => {
+              setActiveCompanyId(id);
+              setSwitcherOpen(false);
+            }}
+            onClose={() => setSwitcherOpen(false)}
+          />
         )}
       </div>
     </OnboardingGate>
