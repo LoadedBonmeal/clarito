@@ -362,8 +362,13 @@ pub async fn check_license_validity(state: State<'_, AppState>) -> AppResult<boo
         return Ok(false);
     }
 
-    // ── 2. Fingerprint integritate (TRIAL și SOLO) ───────────────────────
-    if tier == "TRIAL" || tier == "SOLO" {
+    // ── 2. Fingerprint integritate (toate tierele) ──────────────────────
+    // Fingerprint binding is applied unconditionally to ALL tiers, not just
+    // TRIAL/SOLO. This prevents a tampered license record from being upgraded
+    // to a higher tier by directly editing SQLite. Existing SOLO/TRIAL keys
+    // already carry valid fingerprints, so removing the tier gate does not
+    // break deployed installations.
+    {
         let mid = machine_id();
 
         // Dacă machine_id-ul s-a schimbat dramatic față de cel stocat, e suspect
@@ -579,6 +584,19 @@ mod sec_tests {
         let a = key_checksum(b"payload-a");
         let b = key_checksum(b"payload-b");
         assert_ne!(a, b, "Different inputs must produce different checksums");
+    }
+
+    #[test]
+    fn fingerprint_differs_across_tiers_for_all_tier_binding() {
+        // Verify that fingerprints are tier-sensitive: a TEAM license cannot
+        // forge a SOLO fingerprint. This exercises the "all-tier binding" logic
+        // — distinct tier strings must produce distinct fingerprints.
+        let solo_fp = compute_fingerprint("user@test.com", "mid123", 1_800_000_000, "SOLO");
+        let team_fp = compute_fingerprint("user@test.com", "mid123", 1_800_000_000, "TEAM");
+        let pro_fp = compute_fingerprint("user@test.com", "mid123", 1_800_000_000, "PRO");
+        assert_ne!(solo_fp, team_fp, "SOLO and TEAM fingerprints must differ");
+        assert_ne!(solo_fp, pro_fp, "SOLO and PRO fingerprints must differ");
+        assert_ne!(team_fp, pro_fp, "TEAM and PRO fingerprints must differ");
     }
 
     /// Documents the BREAKING change: the new HMAC output will differ from

@@ -73,7 +73,8 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
         .map_err(AppError::Database)?;
     let company_cui: String = company_row.try_get("cui").map_err(AppError::Database)?;
 
-    // Fetch invoices — include id for line-item correlation
+    // Fetch invoices — include id and storno_of_invoice_id for line-item correlation
+    // and credit-note type detection (381 vs 380).
     let invoice_rows = sqlx::query(
         "SELECT \
             i.id, \
@@ -84,7 +85,8 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
             COALESCE(i.subtotal_amount, i.total_amount) AS net_amount, \
             COALESCE(i.vat_amount, '0') AS vat_amount, \
             i.total_amount, \
-            COALESCE(i.currency, 'RON') AS currency \
+            COALESCE(i.currency, 'RON') AS currency, \
+            i.storno_of_invoice_id \
          FROM invoices i \
          LEFT JOIN contacts c ON i.contact_id = c.id \
          WHERE i.company_id = ?1 \
@@ -227,10 +229,14 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
             .try_get("currency")
             .unwrap_or_else(|_| "RON".to_string());
 
+        // InvoiceType: 381 = credit note (storno), 380 = commercial invoice
+        let storno_of: Option<String> = row.try_get("storno_of_invoice_id").unwrap_or(None);
+        let invoice_type = if storno_of.is_some() { "381" } else { "380" };
+
         xml.push_str("      <Invoice>\n");
         xml_elem(&mut xml, 8, "InvoiceNo", &escape_xml(&full_number));
         xml_elem(&mut xml, 8, "InvoiceDate", &issue_date);
-        xml_elem(&mut xml, 8, "InvoiceType", "380"); // Commercial invoice
+        xml_elem(&mut xml, 8, "InvoiceType", invoice_type);
         xml_elem(&mut xml, 8, "CustomerName", &escape_xml(&client_name));
         xml_elem(&mut xml, 8, "CustomerTaxID", &escape_xml(&client_cui));
         xml_elem(&mut xml, 8, "NetTotal", &format_decimal(&net_amount));
@@ -333,14 +339,18 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
 }
 
 // ── SAF-T tax code from VAT rate ────────────────────────────────────────────
-// E = exempt (0%), AA = reduced (5%), S = standard (19% or other non-zero)
+// Per ANAF SAF-T D406 nomenclature:
+//   E  = exempt / scutit (0%)
+//   AA = reduced / cotă redusă (5%, 9%, 11%)
+//   S  = standard / cotă standard (19%, 21%)
+// Rates 9% (≤2025-07-31) and 11% (from 2025-08-01) are reduced, NOT standard.
 fn saft_tax_code(rate: &Decimal) -> &'static str {
     if rate.is_zero() {
         "E"
-    } else if *rate == Decimal::from(5) {
-        "AA"
+    } else if *rate == Decimal::from(5) || *rate == Decimal::from(9) || *rate == Decimal::from(11) {
+        "AA" // reduced rates
     } else {
-        "S"
+        "S" // standard rates (19%, 21%)
     }
 }
 
@@ -383,5 +393,40 @@ fn days_in_month(year: i32, month: u32) -> u32 {
             }
         }
         _ => 30,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Fix #3: saft_tax_code maps rates correctly ───────────────────────────
+
+    #[test]
+    fn saft_tax_code_zero_is_exempt() {
+        assert_eq!(saft_tax_code(&Decimal::ZERO), "E");
+    }
+
+    #[test]
+    fn saft_tax_code_reduced_rates_map_to_aa() {
+        // 5%, 9%, 11% are all reduced rates and must produce "AA"
+        assert_eq!(saft_tax_code(&Decimal::from(5)), "AA", "5% must be AA");
+        assert_eq!(
+            saft_tax_code(&Decimal::from(9)),
+            "AA",
+            "9% must be AA (not S)"
+        );
+        assert_eq!(
+            saft_tax_code(&Decimal::from(11)),
+            "AA",
+            "11% must be AA (not S)"
+        );
+    }
+
+    #[test]
+    fn saft_tax_code_standard_rates_map_to_s() {
+        // 19% and 21% are standard rates
+        assert_eq!(saft_tax_code(&Decimal::from(19)), "S", "19% must be S");
+        assert_eq!(saft_tax_code(&Decimal::from(21)), "S", "21% must be S");
     }
 }

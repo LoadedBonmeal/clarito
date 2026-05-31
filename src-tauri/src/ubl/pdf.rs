@@ -152,6 +152,19 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     draw_hline(&cur_layer, MARGIN, PAGE_W - MARGIN, y);
     y -= 6.0;
 
+    // ── Footer page-break guard ───────────────────────────────────────────────
+    // The footer block (VAT breakdown + totals + notes) needs approximately
+    // FOOTER_MIN_HEIGHT mm. If the remaining space on the current page is less
+    // than this, open a new page before drawing any footer content.
+    // This prevents the footer from being drawn below the page bottom (which
+    // printpdf does not clip — it becomes invisible in the PDF).
+    const FOOTER_MIN_HEIGHT: f32 = 40.0; // conservative estimate: VAT rows + totals
+    if y < MARGIN + FOOTER_MIN_HEIGHT {
+        let (new_page, new_layer_idx) = doc.add_page(Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
+        cur_layer = doc.get_page(new_page).get_layer(new_layer_idx);
+        y = PAGE_H - MARGIN;
+    }
+
     // ── VAT breakdown table (left side) ──────────────────────────────────────
     // BIZ-19: group by (rate, vat_category) so 0% Exempt and 0% Zero-rated
     // surface as separate rows instead of being merged into "0%".
@@ -179,6 +192,12 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
             y -= LINE_H - 1.0;
             draw_hline(&cur_layer, MARGIN, MARGIN + 79.0, y + 1.0);
             for ((rate_key, category), (base, vat)) in &vat_groups {
+                // Guard between VAT rows in case there are many groups
+                if y < MARGIN + LINE_H {
+                    let (new_page, new_layer_idx) = doc.add_page(Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
+                    cur_layer = doc.get_page(new_page).get_layer(new_layer_idx);
+                    y = PAGE_H - MARGIN;
+                }
                 let rate_pct = *rate_key as f64 / 100.0;
                 let label = vat_label(rate_pct, category);
                 cur_layer.use_text(label, FONT_SMALL, Mm(vt_cols[0]), Mm(y), &font_normal);
@@ -199,6 +218,13 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
                 y -= LINE_H - 1.0;
             }
         }
+    }
+
+    // Guard before totals block (subtotal + TVA + TOTAL + words = ~4 lines)
+    if y < MARGIN + 4.0 * LINE_H {
+        let (new_page, new_layer_idx) = doc.add_page(Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
+        cur_layer = doc.get_page(new_page).get_layer(new_layer_idx);
+        y = PAGE_H - MARGIN;
     }
 
     // ── Totals (right side) ───────────────────────────────────────────────────
@@ -250,6 +276,12 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
         };
         if !display_notes.is_empty() {
             y -= 10.0;
+            // Guard before notes block
+            if y < MARGIN + 2.0 * LINE_H {
+                let (new_page, new_layer_idx) = doc.add_page(Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
+                cur_layer = doc.get_page(new_page).get_layer(new_layer_idx);
+                y = PAGE_H - MARGIN;
+            }
             cur_layer.use_text("Note:", FONT_NORMAL, Mm(MARGIN), Mm(y), &font_bold);
             y -= LINE_H;
             cur_layer.use_text(display_notes, FONT_SMALL, Mm(MARGIN), Mm(y), &font_normal);

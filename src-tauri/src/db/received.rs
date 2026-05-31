@@ -133,38 +133,6 @@ pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Rec
     .ok_or(AppError::NotFound)
 }
 
-/// Returnează liniile de defalcare TVA pentru o factură primită.
-/// Fiecare tuplu: (vat_rate, vat_category, base_amount, vat_amount).
-/// Utilizat de Wave B (D300/D394 achiziții) pentru agregare per perioadă.
-#[allow(dead_code)]
-pub async fn vat_lines_for_invoice(
-    pool: &SqlitePool,
-    received_invoice_id: &str,
-) -> AppResult<Vec<(String, String, String, String)>> {
-    use sqlx::Row;
-    let rows = sqlx::query(
-        "SELECT vat_rate, vat_category, base_amount, vat_amount \
-         FROM received_invoice_vat_lines \
-         WHERE received_invoice_id = ?1 \
-         ORDER BY CAST(vat_rate AS REAL) DESC",
-    )
-    .bind(received_invoice_id)
-    .fetch_all(pool)
-    .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|r| {
-            (
-                r.try_get::<String, _>("vat_rate").unwrap_or_default(),
-                r.try_get::<String, _>("vat_category").unwrap_or_default(),
-                r.try_get::<String, _>("base_amount").unwrap_or_default(),
-                r.try_get::<String, _>("vat_amount").unwrap_or_default(),
-            )
-        })
-        .collect())
-}
-
 pub async fn set_status(
     pool: &SqlitePool,
     id: &str,

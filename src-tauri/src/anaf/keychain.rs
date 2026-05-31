@@ -38,7 +38,6 @@ pub fn get_smartbill_token(company_id: &str) -> AppResult<Option<String>> {
 }
 
 /// Șterge token-ul SmartBill al unei companii din OS keychain.
-#[allow(dead_code)]
 pub fn delete_smartbill_token(company_id: &str) -> AppResult<()> {
     let entry =
         Entry::new(SMARTBILL_SERVICE, company_id).map_err(|e| AppError::Other(e.to_string()))?;

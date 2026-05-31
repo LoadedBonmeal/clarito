@@ -170,7 +170,11 @@ fn rule_br_ro_016_buyer_identifier(ctx: &RuleContext<'_>) -> Option<String> {
 }
 
 fn rule_br_ro_017_buyer_vat_prefix(ctx: &RuleContext<'_>) -> Option<String> {
-    if ctx.buyer.vat_payer {
+    // RO-prefix requirement applies ONLY to Romanian buyers (country == "RO").
+    // EU/foreign buyers carry their own country-format VAT IDs (DE…, FR…, etc.)
+    // and must NOT be blocked by this rule.
+    let is_ro_buyer = ctx.buyer.country.trim().eq_ignore_ascii_case("RO");
+    if is_ro_buyer && ctx.buyer.vat_payer {
         let cui = ctx.buyer.cui.as_deref().unwrap_or("").trim();
         if !cui.starts_with("RO") && !cui.starts_with("ro") {
             return Some(format!(
@@ -1206,6 +1210,60 @@ mod tests {
         assert!(
             has_buyer_error,
             "Expected a buyer-related error when buyer country/address is missing, got: {:?}",
+            errors
+        );
+    }
+
+    // ── BR-RO-017: RO-prefix rule scoped to RO-country buyers only ─────────────
+
+    #[test]
+    fn br_ro_017_fires_for_ro_buyer_without_ro_prefix() {
+        // RO buyer, vat_payer, CUI without "RO" prefix → must error
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let mut buyer = sample_buyer();
+        buyer.country = "RO".into();
+        buyer.vat_payer = true;
+        buyer.cui = Some("12345678".into()); // no RO prefix
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_017 = errors.iter().any(|e| e.contains("[BR-RO-017]"));
+        assert!(
+            has_017,
+            "Expected BR-RO-017 error for RO buyer with no RO prefix, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn br_ro_017_does_not_fire_for_eu_buyer() {
+        // DE buyer, vat_payer, "DE123" VAT ID → must NOT error (different country format)
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let mut buyer = sample_buyer();
+        buyer.country = "DE".into();
+        buyer.vat_payer = true;
+        buyer.cui = Some("DE123456789".into()); // German VAT ID, no RO prefix
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_017 = errors.iter().any(|e| e.contains("[BR-RO-017]"));
+        assert!(
+            !has_017,
+            "BR-RO-017 must NOT fire for a non-RO (EU) buyer, got: {:?}",
             errors
         );
     }
