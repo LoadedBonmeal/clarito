@@ -226,7 +226,9 @@ export function InvoiceDetailPage() {
       unit: l.unit ?? "buc",
       unitPrice: typeof l.unitPrice === "string" ? Number(l.unitPrice) : l.unitPrice,
       vatRate: typeof l.vatRate === "string" ? Number(l.vatRate) : l.vatRate,
-      vatCategory: (Number(l.vatRate) === 0 ? "Z" : "S") as string,
+      // Preserve the line's actual VAT category (K/G/AE/E/Z/S/O) — re-inferring
+      // from rate would collapse intra-EU/reverse-charge/exempt lines to Z/S.
+      vatCategory: l.vatCategory,
     }));
     const linesJson = JSON.stringify(recurringLines);
 
