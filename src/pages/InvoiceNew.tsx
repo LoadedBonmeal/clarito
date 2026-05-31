@@ -3,15 +3,19 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Icon } from "@/components/shared/Icon";
 import { ContactCombobox } from "@/components/shared/ContactCombobox";
+import { LineItemsEditor, deduceVatCategory } from "@/components/shared/LineItemsEditor";
+import type { LineRow } from "@/components/shared/LineItemsEditor";
 import { useAppStore } from "@/lib/store";
 import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
-import type { AppErrorPayload, Contact, CreateLineInput, VatCategory } from "@/types";
-import { fmtRON } from "@/lib/utils";
-import { VAT_RATES, CURRENCIES } from "@/lib/constants";
-
-/** Extends CreateLineInput with a stable row key for React list rendering. */
-type LineRow = CreateLineInput & { rowId: string };
+import type { AppErrorPayload, Contact, CreateLineInput } from "@/types";
+import { CURRENCIES } from "@/lib/constants";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 function localDateISO(d: Date): string {
   const y = d.getFullYear();
@@ -35,21 +39,19 @@ function fmtDateRO(iso: string): string {
   return `${d}.${m}.${y}`;
 }
 
-function makeDefaultLine(vatPayer: boolean): CreateLineInput {
+function newLineRow(vatPayer: boolean, base?: Partial<CreateLineInput>): LineRow {
+  const vatRate = vatPayer ? 19 : 0;
   return {
     name: "",
     quantity: 1,
     unit: "buc",
     unitPrice: 0,
-    vatRate: vatPayer ? 19 : 0,
-    vatCategory: (vatPayer ? "S" : "AE") as VatCategory,
+    vatRate,
+    vatCategory: deduceVatCategory(vatRate, "RO", vatPayer),
+    ...base,
+    rowId: crypto.randomUUID(),
   };
 }
-
-function newLineRow(vatPayer: boolean, base?: Partial<CreateLineInput>): LineRow {
-  return { ...makeDefaultLine(vatPayer), ...base, rowId: crypto.randomUUID() };
-}
-
 
 export function InvoiceNewPage() {
   const navigate = useNavigate();
@@ -126,23 +128,6 @@ export function InvoiceNewPage() {
     ? `${activeSeries}-${String(activeNumber).padStart(4, "0")}`
     : "—";
 
-  const net = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
-  const vat = lines.reduce((s, l) => s + l.quantity * l.unitPrice * (l.vatRate / 100), 0);
-  const total = net + vat;
-
-  const addLine = () => setLines((prev) => [...prev, newLineRow(vatPayer)]);
-
-  const removeLine = (idx: number) =>
-    setLines((prev) => prev.filter((_, i) => i !== idx));
-
-  const updateLine = <K extends keyof CreateLineInput>(
-    idx: number,
-    key: K,
-    value: CreateLineInput[K],
-  ) =>
-    setLines((prev) =>
-      prev.map((l, i) => (i === idx ? ({ ...l, [key]: value } as LineRow) : l)),
-    );
 
   const saveDraftMutation = useMutation({
     mutationFn: () => {
@@ -456,159 +441,13 @@ export function InvoiceNewPage() {
                 </span>
               </span>
             </div>
-            <div className="line-items">
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ width: 28 }}>#</th>
-                    <th style={{ width: 110 }}>Cod</th>
-                    <th>Descriere</th>
-                    <th style={{ width: 64 }} className="num">Cant.</th>
-                    <th style={{ width: 56 }}>UM</th>
-                    <th style={{ width: 100 }} className="num">Preț unitar</th>
-                    <th style={{ width: 64 }} className="num">TVA %</th>
-                    <th style={{ width: 110 }} className="num">Valoare net</th>
-                    <th style={{ width: 110 }} className="num">Total cu TVA</th>
-                    <th style={{ width: 28 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((l, i) => {
-                    const lineNet = l.quantity * l.unitPrice;
-                    const lineTotal = lineNet * (1 + l.vatRate / 100);
-                    return (
-                      <tr key={l.rowId}>
-                        <td
-                          style={{
-                            textAlign: "center",
-                            color: "var(--text-dim)",
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          {i + 1}
-                        </td>
-                        <td>
-                          <input
-                            value={l.cpvCode ?? ""}
-                            onChange={(e) => updateLine(i, "cpvCode", e.target.value || undefined)}
-                            className="mono"
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={l.name}
-                            onChange={(e) => updateLine(i, "name", e.target.value)}
-                          />
-                        </td>
-                        <td className="num">
-                          <input
-                            type="number"
-                            value={l.quantity}
-                            onChange={(e) => updateLine(i, "quantity", parseFloat(e.target.value) || 0)}
-                            className="num"
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={l.unit}
-                            onChange={(e) => updateLine(i, "unit", e.target.value)}
-                          />
-                        </td>
-                        <td className="num">
-                          <input
-                            type="number"
-                            value={l.unitPrice}
-                            onChange={(e) => updateLine(i, "unitPrice", parseFloat(e.target.value) || 0)}
-                            className="num"
-                          />
-                        </td>
-                        <td className="num">
-                          <select
-                            className="num"
-                            value={l.vatRate}
-                            onChange={(e) => updateLine(i, "vatRate", Number(e.target.value))}
-                          >
-                            {VAT_RATES.map((r) => (
-                              <option key={r} value={r}>{r}%</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="num">
-                          <input
-                            value={lineNet.toFixed(2)}
-                            className="num"
-                            readOnly
-                            style={{ color: "var(--text-muted)" }}
-                          />
-                        </td>
-                        <td className="num">
-                          <input
-                            value={lineTotal.toFixed(2)}
-                            className="num"
-                            readOnly
-                            style={{ fontWeight: 600 }}
-                          />
-                        </td>
-                        <td>
-                          <button
-                            className="btn-icon"
-                            onClick={() => removeLine(i)}
-                            disabled={lines.length === 1}
-                          >
-                            <Icon name="trash" size={12} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  <tr className="line-add-row" onClick={addLine} style={{ cursor: "pointer" }}>
-                    <td colSpan={10}>
-                      <Icon name="plus" size={12} /> Adaugă linie
-                    </td>
-                  </tr>
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td colSpan={6} style={{ textAlign: "right", color: "var(--text-muted)" }}>
-                      Subtotal net
-                    </td>
-                    <td className="num"></td>
-                    <td className="num tnum">{fmtRON(net)}</td>
-                    <td className="num"></td>
-                    <td></td>
-                  </tr>
-                  <tr>
-                    <td colSpan={6} style={{ textAlign: "right", color: "var(--text-muted)" }}>
-                      TVA
-                    </td>
-                    <td className="num"></td>
-                    <td className="num tnum">{fmtRON(vat)}</td>
-                    <td className="num"></td>
-                    <td></td>
-                  </tr>
-                  <tr>
-                    <td
-                      colSpan={6}
-                      style={{
-                        textAlign: "right",
-                        textTransform: "uppercase",
-                        fontSize: 11,
-                        letterSpacing: 0.04,
-                      }}
-                    >
-                      Total de plată
-                    </td>
-                    <td className="num"></td>
-                    <td className="num"></td>
-                    <td className="num tnum" style={{ fontSize: 14, color: "var(--accent)" }}>
-                      {fmtRON(total)}{" "}
-                      <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>RON</span>
-                    </td>
-                    <td></td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+            <LineItemsEditor
+              lines={lines}
+              onChange={setLines}
+              buyerCountry={selectedContact?.country ?? "RO"}
+              sellerVatPayer={vatPayer}
+              showTotals
+            />
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -677,7 +516,47 @@ export function InvoiceNewPage() {
               </div>
               <div className="panel-body">
                 <div className="form-grid" style={{ gridTemplateColumns: "120px 1fr" }}>
-                  <label htmlFor={paymentMeansCodeId}>Mod plată</label>
+                  <label htmlFor={paymentMeansCodeId} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    Mod plată
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            style={{
+                              cursor: "help",
+                              fontSize: 10,
+                              color: "var(--text-muted)",
+                              border: "1px solid var(--text-dim, #aaa)",
+                              borderRadius: "50%",
+                              width: 13,
+                              height: 13,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              lineHeight: 1,
+                              flexShrink: 0,
+                            }}
+                            aria-label="Explicație coduri UNECE de plată"
+                          >
+                            ?
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" style={{ maxWidth: 260 }}>
+                          <strong>Coduri UNECE de plată:</strong>
+                          <br />
+                          <b>10</b> — Numerar
+                          <br />
+                          <b>30</b> — Transfer bancar (cel mai folosit)
+                          <br />
+                          <b>42</b> — Cont bancar (debit direct)
+                          <br />
+                          <b>48</b> — Card bancar
+                          <br />
+                          <b>58</b> — Transfer SEPA
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </label>
                   <div className="field">
                     <select
                       id={paymentMeansCodeId}

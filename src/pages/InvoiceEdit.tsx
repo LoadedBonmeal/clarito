@@ -3,32 +3,30 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Icon } from "@/components/shared/Icon";
 import { ContactCombobox } from "@/components/shared/ContactCombobox";
+import type { LineRow } from "@/components/shared/LineItemsEditor";
 import { useAppStore } from "@/lib/store";
 import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
 import { notify } from "@/lib/toasts";
-import type { Contact, CreateLineInput, VatCategory } from "@/types";
+import type { Contact, CreateLineInput } from "@/types";
 import { parseDec, fmtRON } from "@/lib/utils";
-
-/** Extends CreateLineInput with a stable row key for React list rendering. */
-type LineRow = CreateLineInput & { rowId: string };
 
 function fmtDateRO(iso: string): string {
   const [y, m, d] = iso.split("-");
   return `${d}.${m}.${y}`;
 }
 
-const DEFAULT_LINE: CreateLineInput = {
-  name: "",
-  quantity: 1,
-  unit: "buc",
-  unitPrice: 0,
-  vatRate: 21,
-  vatCategory: "S" as VatCategory,
-};
-
 function newLineRow(base?: Partial<CreateLineInput>): LineRow {
-  return { ...DEFAULT_LINE, ...base, rowId: crypto.randomUUID() };
+  return {
+    name: "",
+    quantity: 1,
+    unit: "buc",
+    unitPrice: 0,
+    vatRate: 21,
+    vatCategory: "S",
+    ...base,
+    rowId: crypto.randomUUID(),
+  };
 }
 
 export function InvoiceEditPage() {
