@@ -20,6 +20,7 @@ import type {
   CreateCompanyInput,
   CreateContactInput,
   CreateInvoiceInput,
+  DataExportResult,
   DiagnosticReport,
   Invoice,
   InvoiceFilter,
@@ -438,6 +439,16 @@ export const saft = {
     }),
 };
 
+// ─── GDPR / data portability ──────────────────────────────────────────────
+
+export const gdpr = {
+  /** Export all user data (DB + archive) as a ZIP to the chosen path. */
+  exportAll: (destPath: string) =>
+    invoke<DataExportResult>("export_all_my_data", { destPath }),
+  /** Irreversibly wipe all local data. Frontend MUST double-confirm. */
+  wipeAll: () => invoke<void>("wipe_all_data"),
+};
+
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
@@ -460,4 +471,5 @@ export const api = {
   recurring,
   saft,
   feedback,
+  gdpr,
 };

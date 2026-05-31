@@ -4,7 +4,7 @@
 
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect, useId } from "react";
-import { open, confirm } from "@tauri-apps/plugin-dialog";
+import { open, save, confirm } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useTranslation } from "react-i18next";
 
@@ -700,6 +700,105 @@ export function SettingsPage() {
               </FieldGroup>
             </Section>
           )}
+
+          {/* Confidențialitate (GDPR) */}
+          <Section title="Confidențialitate (GDPR)">
+            <FieldGroup>
+              <FieldRow label="Exportați datele dvs.">
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={async () => {
+                      try {
+                        const dest = await save({
+                          defaultPath: `rofactura-date-${new Date().toISOString().slice(0, 10)}.zip`,
+                          filters: [{ name: "ZIP", extensions: ["zip"] }],
+                          title: "Alegeți locul pentru exportul datelor dvs.",
+                        });
+                        if (!dest) return;
+                        const result = await api.gdpr.exportAll(dest);
+                        notify.success(`Date exportate cu succes: ${result.path}`);
+                      } catch (e) {
+                        notify.error(formatError(e, "Exportul datelor a eșuat."));
+                      }
+                    }}
+                  >
+                    <Icon name="download" size={12} /> Exportă toate datele mele (ZIP)
+                  </button>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                    Exportă baza de date și toate fișierele XML + PDF într-un singur arhivă ZIP.
+                  </span>
+                </div>
+              </FieldRow>
+              <FieldRow label="Politică de confidențialitate">
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ fontFamily: "var(--font-ui)" }}
+                  onClick={async () => {
+                    try {
+                      await openPath("https://lucaris.ro/privacy");
+                    } catch {
+                      /* ignore */
+                    }
+                  }}
+                >
+                  lucaris.ro/privacy →
+                </button>
+              </FieldRow>
+              <FieldRow label="Ștergeți toate datele">
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ color: "#DC2626", borderColor: "#DC2626" }}
+                    onClick={async () => {
+                      const step1 = await confirm(
+                        "Această acțiune va șterge ireversibil TOATE datele dvs. din aplicație:\n" +
+                        "• Toate facturile, companiile și contactele\n" +
+                        "• Toate fișierele XML și PDF din arhivă\n" +
+                        "• Toate setările și licența\n\n" +
+                        "Datele NU pot fi recuperate după această operațiune.\n\n" +
+                        "Doriți să continuați?",
+                        {
+                          title: "Atenție: Ștergere toate datele",
+                          kind: "warning",
+                        }
+                      );
+                      if (!step1) return;
+
+                      const step2 = await confirm(
+                        "Confirmare finală: sunteți absolut sigur că doriți să ștergeți TOATE datele dvs.?\n\n" +
+                        "Această operațiune este ireversibilă.",
+                        {
+                          title: "Confirmare finală ștergere date",
+                          kind: "warning",
+                        }
+                      );
+                      if (!step2) return;
+
+                      try {
+                        await api.gdpr.wipeAll();
+                        notify.success("Toate datele dvs. au fost șterse. Aplicația va reporni.");
+                        // Give the toast time to show, then reload
+                        setTimeout(() => {
+                          window.location.reload();
+                        }, 2000);
+                      } catch (e) {
+                        notify.error(formatError(e, "Ștergerea datelor a eșuat."));
+                      }
+                    }}
+                  >
+                    <Icon name="trash" size={12} /> Șterge toate datele (ireversibil)
+                  </button>
+                  <span style={{ fontSize: 11, color: "#DC2626" }}>
+                    ⚠️ Această acțiune este ireversibilă. Exportați datele dvs. înainte de a continua.
+                  </span>
+                </div>
+              </FieldRow>
+            </FieldGroup>
+          </Section>
 
           {/* Sistem */}
           <Section title={t('settings.sections.system')}>

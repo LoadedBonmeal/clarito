@@ -73,13 +73,81 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // Logging structurat (early init).
-            let _ = tracing_subscriber::fmt()
-                .with_env_filter(
-                    tracing_subscriber::EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| "info,sqlx=warn".into()),
-                )
-                .try_init();
+            // ── Logging bridge: tracing → on-disk efactura.log ──────────────
+            //
+            // tauri_plugin_log writes frontend JS logs + `log::` crate records to
+            // LogDir/efactura.log.  `tracing::*!` events (86 call sites in the
+            // backend) previously went only to stderr.  Here we open the same log
+            // file in append mode and add a second `tracing_subscriber::fmt` layer
+            // that writes there, so backend tracing events also reach the file that
+            // the feedback diagnostic reads.
+            //
+            // No new Cargo dependency required: `std::fs::File` as the writer,
+            // wrapped in `Arc<Mutex<…>>` for the `MakeWriter` trait requirement.
+            use std::sync::{Arc, Mutex};
+            use tracing_subscriber::prelude::*;
+
+            let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,sqlx=warn".into());
+
+            // Build a file-appender layer if we can resolve the log directory.
+            // The path mirrors what tauri_plugin_log uses:
+            //   macOS: ~/Library/Logs/<bundle-id>/efactura.log
+            let file_layer = app
+                .path()
+                .app_log_dir()
+                .ok()
+                .and_then(|log_dir| {
+                    std::fs::create_dir_all(&log_dir).ok()?;
+                    let log_path = log_dir.join("efactura.log");
+                    std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&log_path)
+                        .map(|f| {
+                            tracing::subscriber::with_default(
+                                tracing::subscriber::NoSubscriber::new(),
+                                || {
+                                    tracing::info!(
+                                        path = %log_path.display(),
+                                        "Logging bridge: tracing → file active"
+                                    );
+                                },
+                            );
+                            Arc::new(Mutex::new(f))
+                        })
+                        .ok()
+                })
+                .map(|writer| {
+                    tracing_subscriber::fmt::layer()
+                        .with_ansi(false)
+                        .with_writer(move || {
+                            // Clone the Arc so the closure is 'static-compatible.
+                            struct MutexWriter(Arc<Mutex<std::fs::File>>);
+                            impl std::io::Write for MutexWriter {
+                                fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                                    self.0.lock().unwrap().write(buf)
+                                }
+                                fn flush(&mut self) -> std::io::Result<()> {
+                                    self.0.lock().unwrap().flush()
+                                }
+                            }
+                            MutexWriter(writer.clone())
+                        })
+                });
+
+            // Build the subscriber: stderr layer (always) + file layer (when available).
+            let stderr_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
+
+            let subscriber = tracing_subscriber::registry()
+                .with(env_filter)
+                .with(stderr_layer);
+
+            if let Some(fl) = file_layer {
+                let _ = subscriber.with(fl).try_init();
+            } else {
+                let _ = subscriber.try_init();
+            }
 
             let handle = app.handle().clone();
 
@@ -295,6 +363,9 @@ pub fn run() {
             // feedback / diagnostic
             commands::feedback::gather_diagnostic,
             commands::feedback::build_feedback_mailto,
+            // gdpr / data portability
+            commands::gdpr::export_all_my_data,
+            commands::gdpr::wipe_all_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -48,6 +48,9 @@ pub enum AppError {
     #[error("Excel: {0}")]
     Xlsx(String),
 
+    #[error("Arhivă: {0}")]
+    Archive(String),
+
     #[error("{0}")]
     Other(String),
 }
@@ -79,6 +82,7 @@ impl AppError {
             AppError::Xml(_) => "Xml",
             AppError::Pdf(_) => "Pdf",
             AppError::Xlsx(_) => "Xlsx",
+            AppError::Archive(_) => "Archive",
             AppError::Other(_) => "Other",
         }
     }

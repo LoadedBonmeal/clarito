@@ -398,6 +398,13 @@ export interface DiagnosticReport {
   licenseSummary: { tier: string; daysRemaining: number | null };
 }
 
+// ─── GDPR ────────────────────────────────────────────────────────────────────
+
+export interface DataExportResult {
+  path: string;
+  bytes: number;
+}
+
 // ─── Error (din backend) ──────────────────────────────────────────────────
 
 export interface AppErrorPayload {
