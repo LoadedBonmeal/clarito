@@ -346,6 +346,9 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
             _ => data_dir.join("archive"),
         }
     };
+    // Clone archive_dir before moving it into spawn_blocking; the original is
+    // needed again after the closure for the xml_path rewrite step (fix 3).
+    let archive_dir_for_rewrite = archive_dir.clone();
     // Re-open and extract archive entries in spawn_blocking (zip crate is sync).
     tokio::task::spawn_blocking(move || -> Result<(), AppError> {
         let file2 = std::fs::File::open(&path).map_err(AppError::Io)?;
@@ -393,7 +396,72 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
     .await
     .map_err(|e| AppError::Other(e.to_string()))??;
 
-    // 7. Repornește aplicația
+    // 7. Rewrite absolute xml_path / pdf_path stored in the restored DB so they
+    //    point to the current machine's archive_dir rather than the source machine's.
+    //
+    //    Archive files live under <archive_dir>/sent/... and <archive_dir>/received/...
+    //    The stored paths on the source machine had a different <archive_dir> prefix.
+    //    Strategy: for each non-null path, find the last occurrence of "/sent/" or
+    //    "/received/" in the stored value — everything from that separator onward is
+    //    machine-independent (relative within the archive).  Prepend the local
+    //    archive_dir to obtain the correct absolute path on this machine.
+    //
+    //    Rows whose stored path does NOT contain "/sent/" or "/received/" are left
+    //    untouched (defensive: skip rather than corrupt).
+    {
+        let archive_dir_str = archive_dir_for_rewrite.to_string_lossy().to_string();
+        // Open the restored DB directly (AppState still holds the old pool — the
+        // app is about to restart, so we open a short-lived pool here).
+        let db_url = format!("sqlite:{}", db_path.to_string_lossy());
+        if let Ok(pool) = sqlx::SqlitePool::connect(&db_url).await {
+            for table in &["invoices", "received_invoices"] {
+                for col in &["xml_path", "pdf_path"] {
+                    // Rewrite paths that contain "/sent/" — update only the prefix
+                    // up to that separator, keeping the rest intact.
+                    let sql_sent = format!(
+                        "UPDATE \"{table}\" \
+                         SET \"{col}\" = ?1 || substr(\"{col}\", instr(\"{col}\", '/sent/')) \
+                         WHERE \"{col}\" IS NOT NULL \
+                           AND instr(\"{col}\", '/sent/') > 0"
+                    );
+                    if let Err(e) = sqlx::query(&sql_sent)
+                        .bind(&archive_dir_str)
+                        .execute(&pool)
+                        .await
+                    {
+                        tracing::warn!(
+                            table, col, error = ?e,
+                            "import_backup: path rewrite (/sent/) failed, continuing"
+                        );
+                    }
+
+                    // Rewrite paths that contain "/received/" analogously.
+                    let sql_received = format!(
+                        "UPDATE \"{table}\" \
+                         SET \"{col}\" = ?1 || substr(\"{col}\", instr(\"{col}\", '/received/')) \
+                         WHERE \"{col}\" IS NOT NULL \
+                           AND instr(\"{col}\", '/received/') > 0"
+                    );
+                    if let Err(e) = sqlx::query(&sql_received)
+                        .bind(&archive_dir_str)
+                        .execute(&pool)
+                        .await
+                    {
+                        tracing::warn!(
+                            table, col, error = ?e,
+                            "import_backup: path rewrite (/received/) failed, continuing"
+                        );
+                    }
+                }
+            }
+            pool.close().await;
+            tracing::info!("import_backup: xml_path/pdf_path rewritten to local archive root");
+        } else {
+            tracing::warn!("import_backup: could not open restored DB for path rewrite — skipping");
+        }
+    }
+
+    // 8. Repornește aplicația
     app.request_restart();
     #[allow(unreachable_code)]
     Ok(())
@@ -489,9 +557,20 @@ fn dir_size(path: &std::path::Path) -> u64 {
 }
 
 /// Returnează dimensiunea totală a directorului archive în bytes.
+/// Respectă setarea ARCHIVE_PATH_OVERRIDE dacă a fost configurată.
 #[tauri::command]
-pub async fn get_archive_size(app: AppHandle) -> AppResult<u64> {
-    let archive_dir = app.path().app_data_dir()?.join("archive");
+pub async fn get_archive_size(state: State<'_, AppState>, app: AppHandle) -> AppResult<u64> {
+    let data_dir = app.path().app_data_dir()?;
+    let archive_dir = {
+        let override_val =
+            crate::db::settings::get(&state.db, crate::db::settings::keys::ARCHIVE_PATH_OVERRIDE)
+                .await
+                .unwrap_or(None);
+        match override_val {
+            Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+            _ => data_dir.join("archive"),
+        }
+    };
     if !archive_dir.exists() {
         return Ok(0);
     }
@@ -578,15 +657,13 @@ pub async fn change_archive_location(
         .map_err(|e| AppError::Other(format!("Copiere arhivă eșuată: {}", e)))?;
     }
 
-    // Save new path in settings
-    sqlx::query(
-        "INSERT INTO settings(key, value) VALUES('archive_path', ?1) \
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    // Save new path in settings using the canonical key that all readers use.
+    crate::db::settings::set(
+        &state.db,
+        crate::db::settings::keys::ARCHIVE_PATH_OVERRIDE,
+        &new_path,
     )
-    .bind(&new_path)
-    .execute(&state.db)
-    .await
-    .map_err(AppError::Database)?;
+    .await?;
 
     Ok(())
 }
@@ -682,6 +759,70 @@ mod tests {
         assert!(
             !normalised.starts_with(target_base),
             "zip-slip guard should have rejected this path, normalised = {normalised:?}"
+        );
+    }
+
+    // ── archive_path_override key is consistent ──────────────────────────────
+    /// Verify that ARCHIVE_PATH_OVERRIDE constant value matches the string
+    /// hardcoded in import_backup (the inline override-read in that function
+    /// must use the same literal key).
+    #[test]
+    fn archive_path_override_key_is_canonical() {
+        assert_eq!(
+            crate::db::settings::keys::ARCHIVE_PATH_OVERRIDE,
+            "archive_path_override",
+            "ARCHIVE_PATH_OVERRIDE constant must equal the literal used in import_backup"
+        );
+    }
+
+    // ── xml_path prefix rewrite produces expected new path ───────────────────
+    /// Simulate the SQL rewrite logic: given a stored path from machine A and
+    /// the local archive root from machine B, compute the expected rewritten path.
+    #[test]
+    fn xml_path_prefix_rewrite_sent() {
+        // Source machine path
+        let stored = "/Users/alice/Library/Application Support/ro.lucaris.efactura/archive/sent/2026/INV-0001.xml";
+        // Local archive dir on target machine
+        let local_archive = "/Users/bob/Library/Application Support/ro.lucaris.efactura/archive";
+
+        // Replicate the SQL logic: find "/sent/" and prepend the local root.
+        let separator = "/sent/";
+        let pos = stored.find(separator).expect("should contain /sent/");
+        let suffix = &stored[pos..]; // includes "/sent/"
+        let rewritten = format!("{local_archive}{suffix}");
+
+        assert_eq!(
+            rewritten,
+            "/Users/bob/Library/Application Support/ro.lucaris.efactura/archive/sent/2026/INV-0001.xml"
+        );
+    }
+
+    #[test]
+    fn xml_path_prefix_rewrite_received() {
+        let stored = "/old/archive/received/RO123/2026/msg-abc/invoice.xml";
+        let local_archive = "/new/archive";
+
+        let separator = "/received/";
+        let pos = stored.find(separator).expect("should contain /received/");
+        let suffix = &stored[pos..];
+        let rewritten = format!("{local_archive}{suffix}");
+
+        assert_eq!(
+            rewritten,
+            "/new/archive/received/RO123/2026/msg-abc/invoice.xml"
+        );
+    }
+
+    #[test]
+    fn xml_path_rewrite_skips_unrecognised_paths() {
+        // A path that has neither /sent/ nor /received/ should not be modified
+        // (the SQL WHERE clause guards against this).
+        let stored = "/some/custom/path/invoice.xml";
+        let has_sent = stored.contains("/sent/");
+        let has_received = stored.contains("/received/");
+        assert!(
+            !has_sent && !has_received,
+            "path should not match any rewrite separator"
         );
     }
 

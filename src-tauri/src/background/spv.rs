@@ -101,6 +101,20 @@ pub(crate) async fn do_sync_spv(
         .app_data_dir()
         .map_err(|e| AppError::Other(e.to_string()))?;
 
+    // Resolve archive root: prefer user-configured override (ARCHIVE_PATH_OVERRIDE),
+    // fall back to <app_data>/archive.  This matches the logic in export_backup and
+    // gdpr::resolve_archive_dir so all archive reads/writes target the same directory.
+    let archive_root = {
+        let override_val =
+            crate::db::settings::get(pool, crate::db::settings::keys::ARCHIVE_PATH_OVERRIDE)
+                .await
+                .unwrap_or(None);
+        match override_val {
+            Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+            _ => app_data_dir.join("archive"),
+        }
+    };
+
     let mut new_count = 0i32;
     for msg in messages {
         let data_key = format!("spv_msg_{}", msg.id);
@@ -213,14 +227,13 @@ pub(crate) async fn do_sync_spv(
             .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
             .take(64)
             .collect();
-        let archive_path = app_data_dir
-            .join("archive")
+        let archive_path = archive_root
             .join("received")
             .join(&safe_cui)
             .join(&safe_year)
             .join(&safe_msg_id);
-        // Belt-and-suspenders: verify the resolved path stays under app_data_dir.
-        if !archive_path.starts_with(&app_data_dir) {
+        // Belt-and-suspenders: verify the resolved path stays under archive_root.
+        if !archive_path.starts_with(&archive_root) {
             tracing::error!(
                 "Archive path escape attempt for msg {}: {:?}",
                 msg.id,

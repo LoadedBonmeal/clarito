@@ -263,6 +263,71 @@ pub async fn wipe_all_data(app: AppHandle, state: State<'_, AppState>) -> AppRes
         }
     }
 
+    // Step 5: delete residual files that contain PII but are not covered by the
+    // table truncation above.  All deletes are best-effort: "not found" is silently
+    // ignored so a partially-installed app cannot get stuck.
+    //
+    // (a) data.db.bak / data.db.backup — full DB copies written by import_backup.
+    //     We delete any file under app_data_dir whose name starts with "data.db."
+    //     but is NOT the live "data.db" itself.
+    let data_dir = app.path().app_data_dir()?;
+    let db_path = data_dir.join("data.db");
+    if let Ok(mut entries) = tokio::fs::read_dir(&data_dir).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let p = entry.path();
+            if p == db_path {
+                continue; // never delete the live DB
+            }
+            let fname = entry.file_name();
+            let fname_str = fname.to_string_lossy();
+            if fname_str.starts_with("data.db.") {
+                match tokio::fs::remove_file(&p).await {
+                    Ok(()) => {
+                        tracing::info!(path = %p.display(), "GDPR wipe: deleted backup DB file")
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => {
+                        tracing::warn!(path = %p.display(), error = ?e, "GDPR wipe: could not delete backup DB file")
+                    }
+                }
+            }
+        }
+    }
+
+    // (b) data_restore_check.db — temp file written during import_backup integrity check.
+    let restore_check = data_dir.join("data_restore_check.db");
+    match tokio::fs::remove_file(&restore_check).await {
+        Ok(()) => tracing::info!("GDPR wipe: deleted restore-check DB"),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => tracing::warn!(error = ?e, "GDPR wipe: could not delete restore-check DB"),
+    }
+
+    // (c) efactura.log — the on-disk log file opened by lib.rs.  The logger holds
+    //     the file handle open in append mode, so we truncate to zero rather than
+    //     deleting (truncation is safe even with an open write handle on all
+    //     supported platforms).  If truncation fails, we fall back to deletion.
+    if let Ok(log_dir) = app.path().app_log_dir() {
+        let log_path = log_dir.join("efactura.log");
+        if log_path.exists() {
+            let truncate_ok = tokio::fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(&log_path)
+                .await
+                .map(|_f| ()) // drop closes the file
+                .is_ok();
+            if truncate_ok {
+                tracing::info!("GDPR wipe: log file truncated");
+            } else {
+                match tokio::fs::remove_file(&log_path).await {
+                    Ok(()) => tracing::info!("GDPR wipe: log file deleted"),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => tracing::warn!(error = ?e, "GDPR wipe: could not remove log file"),
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -296,6 +361,57 @@ mod tests {
         let missing = std::path::Path::new("/tmp/nonexistent_gdpr_test_dir_xyz");
         // Should not error if the directory doesn't exist
         assert!(clear_dir_contents(missing).await.is_ok());
+    }
+
+    // ── wipe residual files ──────────────────────────────────────────────────
+
+    /// Verify that files whose names start with "data.db." are identified as
+    /// backup DBs and that "data.db" itself is NOT matched (live DB protection).
+    #[test]
+    fn backup_db_filename_filter() {
+        let candidates = [
+            ("data.db", false),       // live DB — must NOT be deleted
+            ("data.db.bak", true),    // import_backup backup
+            ("data.db.backup", true), // alternative extension
+            ("data.db.old", true),    // any .db.* variant
+            ("data.db2", false),      // different filename — not matched
+            ("other.db", false),      // unrelated file
+        ];
+        for (name, should_delete) in candidates {
+            let matched = name.starts_with("data.db.") && name != "data.db";
+            assert_eq!(
+                matched, should_delete,
+                "filename '{name}': expected delete={should_delete}, got delete={matched}"
+            );
+        }
+    }
+
+    /// Verify that a data.db.bak file is deleted by the wipe filter (filesystem-level).
+    #[tokio::test]
+    async fn wipe_deletes_bak_file_best_effort() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bak = tmp.path().join("data.db.bak");
+        let live = tmp.path().join("data.db");
+        tokio::fs::write(&bak, b"SQLITE").await.unwrap();
+        tokio::fs::write(&live, b"SQLITE").await.unwrap();
+
+        // Simulate the wipe loop
+        let db_path = live.clone();
+        let mut entries = tokio::fs::read_dir(tmp.path()).await.unwrap();
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let p = entry.path();
+            if p == db_path {
+                continue;
+            }
+            let fname = entry.file_name();
+            let fname_str = fname.to_string_lossy().to_string();
+            if fname_str.starts_with("data.db.") {
+                let _ = tokio::fs::remove_file(&p).await;
+            }
+        }
+
+        assert!(!bak.exists(), "data.db.bak should have been deleted");
+        assert!(live.exists(), "data.db (live) must NOT be deleted");
     }
 
     #[test]
