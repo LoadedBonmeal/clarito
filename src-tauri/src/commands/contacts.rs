@@ -25,18 +25,25 @@ pub async fn create_contact(
     contacts::create(&state.db, input).await
 }
 
+/// R14 Wave A: `company_id` is required. Cross-company update returns NotFound.
 #[tauri::command]
 pub async fn update_contact(
     state: State<'_, AppState>,
     id: String,
+    company_id: String,
     input: UpdateContactInput,
 ) -> AppResult<Contact> {
-    contacts::update(&state.db, &id, input).await
+    contacts::update(&state.db, &id, &company_id, input).await
 }
 
+/// R14 Wave A: `company_id` is required. Cross-company deletion returns NotFound.
 #[tauri::command]
-pub async fn delete_contact(state: State<'_, AppState>, id: String) -> AppResult<()> {
-    contacts::delete(&state.db, &id).await
+pub async fn delete_contact(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+) -> AppResult<()> {
+    contacts::delete(&state.db, &id, &company_id).await
 }
 
 #[tauri::command]

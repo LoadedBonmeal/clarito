@@ -40,11 +40,17 @@ function buildMenus(
       { type: "row", icon: "save",      label: "Salvează",                      kbd: fmtShortcut("Ctrl+S"), onClick: () => { /* context-sensitive — handled by active page */ } },
       { type: "row", icon: "copy",      label: "Salvează ca…",                  kbd: fmtShortcut("Ctrl+Shift+S"), onClick: () => {
         const selectedId = useAppStore.getState().selectedInvoiceId;
+        const activeCompanyId = useAppStore.getState().activeCompanyId;
         if (!selectedId) {
           notify.error("Selectați o factură mai întâi.");
           return;
         }
-        api.invoices.duplicate(selectedId).then((newId) => {
+        if (!activeCompanyId) {
+          notify.error("Selectați o companie activă.");
+          return;
+        }
+        // R14 Wave A: pass activeCompanyId for ownership verification.
+        api.invoices.duplicate(selectedId, activeCompanyId).then((newId) => {
           notify.success("Factură duplicată.");
           void navigate({ to: "/invoices/$id", params: { id: newId } });
         }).catch((e) => notify.error(`Eroare duplicare: ${e}`));

@@ -59,13 +59,18 @@ export function ContactsPage() {
   const suppliers = contacts.filter((c) => c.contactType === "SUPPLIER" || c.contactType === "BOTH").length;
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.contacts.delete(id),
+    // R14 Wave A: pass activeCompanyId for ownership verification.
+    mutationFn: (id: string) => {
+      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      return api.contacts.delete(id, activeCompanyId);
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.contacts.all });
     },
   });
 
   const handleDelete = async (c: Contact) => {
+    if (!activeCompanyId) return;
     const ok = await confirm(`Șterge contactul "${c.legalName}"? Această acțiune nu poate fi anulată.`, {
       title: "Confirmare ștergere",
       kind: "warning",
@@ -288,7 +293,9 @@ function ContactModal({
     onError: (e) => setError((e as { message?: string }).message ?? "Eroare."),
   });
   const update = useMutation({
-    mutationFn: (input: UpdateContactInput) => api.contacts.update(contact!.id, input),
+    // R14 Wave A: pass companyId for ownership verification.
+    mutationFn: (input: UpdateContactInput) =>
+      api.contacts.update(contact!.id, companyId, input),
     onSuccess: onSaved,
     onError: (e) => setError((e as { message?: string }).message ?? "Eroare."),
   });

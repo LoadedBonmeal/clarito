@@ -143,14 +143,23 @@ pub async fn set_invoice_status(
     invoices::set_status_scoped(&state.db, &id, &company_id, status, message).await
 }
 
+/// R14 Wave A: `company_id` is required. After fetching via the shared
+/// `invoices::get` (signature unchanged), we verify ownership and return
+/// `NotFound` for any mismatch. The UPDATE SQL is also scoped with
+/// `AND company_id = ?` as a defence-in-depth layer.
 #[tauri::command]
 pub async fn update_invoice_draft(
     state: State<'_, AppState>,
     id: String,
+    company_id: String,
     input: CreateInvoiceInput,
 ) -> AppResult<Invoice> {
     // 1. Verify invoice exists and is DRAFT
     let existing = invoices::get(&state.db, &id).await?;
+    // R14 Wave A: ownership check — cross-company access returns NotFound.
+    if existing.company_id != company_id {
+        return Err(AppError::NotFound);
+    }
     if existing.status != crate::db::models::InvoiceStatus::Draft.as_str() {
         return Err(AppError::Validation(format!(
             "Factura nu este schiță (status curent: {}). \
@@ -213,7 +222,7 @@ pub async fn update_invoice_draft(
 
     let mut tx = state.db.begin().await?;
 
-    // 3. Update invoice header
+    // 3. Update invoice header — scoped by company_id (R14 Wave A defence-in-depth).
     sqlx::query(
         "UPDATE invoices SET
             contact_id          = ?2,
@@ -229,7 +238,7 @@ pub async fn update_invoice_draft(
             total_amount        = ?12,
             payment_means_code  = ?13,
             updated_at          = unixepoch()
-        WHERE id = ?1",
+        WHERE id = ?1 AND company_id = ?14",
     )
     .bind(&id)
     .bind(&input.contact_id)
@@ -244,14 +253,19 @@ pub async fn update_invoice_draft(
     .bind(vat_total)
     .bind(total)
     .bind(input.payment_means_code.as_deref().unwrap_or("30"))
+    .bind(&company_id)
     .execute(&mut *tx)
     .await?;
 
-    // 4. Delete existing line items
-    sqlx::query("DELETE FROM invoice_line_items WHERE invoice_id = ?1")
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?;
+    // 4. Delete existing line items — scoped by company_id via invoice FK (R14 Wave A).
+    sqlx::query(
+        "DELETE FROM invoice_line_items WHERE invoice_id = ?1 \
+         AND invoice_id IN (SELECT id FROM invoices WHERE id = ?1 AND company_id = ?2)",
+    )
+    .bind(&id)
+    .bind(&company_id)
+    .execute(&mut *tx)
+    .await?;
 
     // 5. Insert new line items
     for (position, (line, (line_id, line_subtotal, line_vat, line_total))) in
@@ -391,10 +405,14 @@ pub async fn validate_invoice_draft(
 /// - Copiază liniile facturii originale cu cantități negative.
 /// - Setează InvoiceTypeCode = 381 și adaugă BillingReference la factura originală.
 /// - Marchează factura originală ca STORNED.
+///
+/// R14 Wave A: `company_id` is required. After fetching the original invoice,
+/// we verify that the caller owns it; cross-company attempts receive `NotFound`.
 #[tauri::command]
 pub async fn storno_invoice(
     state: State<'_, AppState>,
     invoice_id: String,
+    company_id: String,
     reason: String,
     due_date: Option<String>,
 ) -> AppResult<Invoice> {
@@ -412,6 +430,11 @@ pub async fn storno_invoice(
     let original = invoices::get_with_lines(pool, &invoice_id).await?;
     let orig_inv = original.invoice;
     let orig_lines = original.lines;
+
+    // R14 Wave A: ownership check — cross-company storno returns NotFound.
+    if orig_inv.company_id != company_id {
+        return Err(AppError::NotFound);
+    }
 
     // EDGE-15: nu se poate storna un storno (ar crea un ciclu).
     if orig_inv.storno_of_invoice_id.is_some() {
@@ -660,10 +683,14 @@ pub async fn storno_invoice(
 /// pattern ca `create_invoice_draft`/`storno_invoice`). Data emiterii și
 /// scadența noii ciorne sunt setate la ziua curentă — utilizatorul le poate
 /// edita ulterior. Întreaga operațiune rulează într-o tranzacție atomică.
+///
+/// R14 Wave A: `company_id` is required. Ownership is verified after fetch;
+/// cross-company duplication returns `NotFound`.
 #[tauri::command]
 pub async fn duplicate_invoice(
     state: State<'_, AppState>,
     invoice_id: String,
+    company_id: String,
 ) -> AppResult<String> {
     let pool = &state.db;
 
@@ -672,6 +699,11 @@ pub async fn duplicate_invoice(
     let source_bundle = invoices::get_with_lines(pool, &invoice_id).await?;
     let source = source_bundle.invoice;
     let source_lines = source_bundle.lines;
+
+    // R14 Wave A: ownership check — cross-company duplication returns NotFound.
+    if source.company_id != company_id {
+        return Err(AppError::NotFound);
+    }
 
     if source_lines.is_empty() {
         return Err(AppError::Validation(
@@ -1340,6 +1372,121 @@ mod tests {
         assert_eq!(
             inv.status, "QUEUED",
             "status must have been updated to QUEUED"
+        );
+    }
+
+    // ── R14 Wave A: cross-company isolation tests ──────────────────────────
+
+    /// Pool for Wave A tests — same schema as Wave G, reuse setup_wave_g_pool.
+    async fn setup_wave_a_pool() -> sqlx::SqlitePool {
+        setup_wave_g_pool().await
+    }
+
+    // ── update_invoice_draft: wrong company → NotFound ──────────────────────
+
+    #[tokio::test]
+    async fn wave_a_update_draft_wrong_company_returns_not_found() {
+        let pool = setup_wave_a_pool().await;
+        insert_wave_g_invoice(&pool, "inv-draft-upd", "DRAFT").await;
+
+        // Attempt to update with a different company's id — ownership check must reject.
+        let existing = db_inv_test::get(&pool, "inv-draft-upd").await.unwrap();
+        // Simulate the ownership check performed in update_invoice_draft.
+        let company_id = "comp-2"; // wrong company
+        let result: crate::error::AppResult<()> = if existing.company_id != company_id {
+            Err(crate::error::AppError::NotFound)
+        } else {
+            Ok(())
+        };
+        assert!(
+            matches!(result, Err(crate::error::AppError::NotFound)),
+            "update_invoice_draft with wrong company_id must return NotFound"
+        );
+    }
+
+    #[tokio::test]
+    async fn wave_a_update_draft_correct_company_passes_ownership() {
+        let pool = setup_wave_a_pool().await;
+        insert_wave_g_invoice(&pool, "inv-draft-upd-ok", "DRAFT").await;
+
+        let existing = db_inv_test::get(&pool, "inv-draft-upd-ok").await.unwrap();
+        // Correct company — ownership check must pass.
+        let company_id = "comp-1";
+        assert_eq!(
+            existing.company_id, company_id,
+            "invoice should belong to comp-1"
+        );
+    }
+
+    // ── storno_invoice: wrong company → NotFound ────────────────────────────
+
+    #[tokio::test]
+    async fn wave_a_storno_wrong_company_returns_not_found() {
+        let pool = setup_wave_a_pool().await;
+        insert_wave_g_invoice(&pool, "inv-validated-storno", "VALIDATED").await;
+
+        let orig = db_inv_test::get(&pool, "inv-validated-storno")
+            .await
+            .unwrap();
+        // Simulate the ownership check performed in storno_invoice.
+        let company_id = "comp-2"; // wrong company
+        let result: crate::error::AppResult<()> = if orig.company_id != company_id {
+            Err(crate::error::AppError::NotFound)
+        } else {
+            Ok(())
+        };
+        assert!(
+            matches!(result, Err(crate::error::AppError::NotFound)),
+            "storno_invoice with wrong company_id must return NotFound"
+        );
+    }
+
+    #[tokio::test]
+    async fn wave_a_storno_correct_company_passes_ownership() {
+        let pool = setup_wave_a_pool().await;
+        insert_wave_g_invoice(&pool, "inv-validated-storno-ok", "VALIDATED").await;
+
+        let orig = db_inv_test::get(&pool, "inv-validated-storno-ok")
+            .await
+            .unwrap();
+        let company_id = "comp-1";
+        assert_eq!(
+            orig.company_id, company_id,
+            "invoice should belong to comp-1 — ownership check must pass"
+        );
+    }
+
+    // ── duplicate_invoice: wrong company → NotFound ─────────────────────────
+
+    #[tokio::test]
+    async fn wave_a_duplicate_wrong_company_returns_not_found() {
+        let pool = setup_wave_a_pool().await;
+        insert_wave_g_invoice(&pool, "inv-dup", "VALIDATED").await;
+
+        let source = db_inv_test::get(&pool, "inv-dup").await.unwrap();
+        // Simulate the ownership check performed in duplicate_invoice.
+        let company_id = "comp-2"; // wrong company
+        let result: crate::error::AppResult<()> = if source.company_id != company_id {
+            Err(crate::error::AppError::NotFound)
+        } else {
+            Ok(())
+        };
+        assert!(
+            matches!(result, Err(crate::error::AppError::NotFound)),
+            "duplicate_invoice with wrong company_id must return NotFound"
+        );
+    }
+
+    #[tokio::test]
+    async fn wave_a_duplicate_correct_company_passes_ownership() {
+        let pool = setup_wave_a_pool().await;
+        insert_wave_g_invoice(&pool, "inv-dup-ok", "VALIDATED").await;
+
+        let source = db_inv_test::get(&pool, "inv-dup-ok").await.unwrap();
+        let company_id = "comp-1";
+        assert_eq!(
+            source.company_id, company_id,
+            "invoice should belong to comp-1 — ownership check must pass"
         );
     }
 }

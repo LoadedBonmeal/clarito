@@ -84,9 +84,12 @@ export const contacts = {
   get: (id: string) => invoke<Contact>("get_contact", { id }),
   create: (input: CreateContactInput) =>
     invoke<Contact>("create_contact", { input }),
-  update: (id: string, input: UpdateContactInput) =>
-    invoke<Contact>("update_contact", { id, input }),
-  delete: (id: string) => invoke<void>("delete_contact", { id }),
+  /** R14 Wave A: companyId is required — cross-company update returns NotFound. */
+  update: (id: string, companyId: string, input: UpdateContactInput) =>
+    invoke<Contact>("update_contact", { id, companyId, input }),
+  /** R14 Wave A: companyId is required — cross-company deletion returns NotFound. */
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_contact", { id, companyId }),
   search: (query: string, companyId: string) =>
     invoke<Contact[]>("search_contacts", { query, companyId }),
 };
@@ -101,8 +104,9 @@ export const invoices = {
     invoke<InvoiceWithLines>("get_invoice", { id, companyId }),
   createDraft: (input: CreateInvoiceInput) =>
     invoke<Invoice>("create_invoice_draft", { input }),
-  updateDraft: (id: string, input: CreateInvoiceInput) =>
-    invoke<Invoice>("update_invoice_draft", { id, input }),
+  /** R14 Wave A: companyId is required — cross-company update returns NotFound. */
+  updateDraft: (id: string, companyId: string, input: CreateInvoiceInput) =>
+    invoke<Invoice>("update_invoice_draft", { id, companyId, input }),
   validateDraft: (id: string) =>
     invoke<{ isValid: boolean; errors: string[]; warnings: string[] }>(
       "validate_invoice_draft",
@@ -114,10 +118,12 @@ export const invoices = {
   /** R13 Wave G: companyId is required — cross-company mutation returns NotFound. */
   setStatus: (id: string, companyId: string, status: InvoiceStatus, message?: string) =>
     invoke<void>("set_invoice_status", { id, companyId, status, message }),
-  storno: (invoiceId: string, reason: string) =>
-    invoke<Invoice>("storno_invoice", { invoiceId, reason }),
-  duplicate: (invoiceId: string) =>
-    invoke<string>("duplicate_invoice", { invoiceId }),
+  /** R14 Wave A: companyId is required — cross-company storno returns NotFound. */
+  storno: (invoiceId: string, companyId: string, reason: string) =>
+    invoke<Invoice>("storno_invoice", { invoiceId, companyId, reason }),
+  /** R14 Wave A: companyId is required — cross-company duplication returns NotFound. */
+  duplicate: (invoiceId: string, companyId: string) =>
+    invoke<string>("duplicate_invoice", { invoiceId, companyId }),
 };
 
 // ─── Received ─────────────────────────────────────────────────────────────

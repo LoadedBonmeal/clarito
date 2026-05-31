@@ -158,7 +158,11 @@ export function InvoiceDetailPage() {
 
   // Duplicate invoice — clones header + lines into a new DRAFT
   const duplicateInvoice = useMutation({
-    mutationFn: () => api.invoices.duplicate(id),
+    // R14 Wave A: pass activeCompanyId for ownership verification.
+    mutationFn: () => {
+      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      return api.invoices.duplicate(id, activeCompanyId);
+    },
     onSuccess: (newId) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
       notify.success("Factură duplicată.");
@@ -170,7 +174,11 @@ export function InvoiceDetailPage() {
 
   // Storno invoice — creates a proper 381 credit note
   const stornoInvoice = useMutation({
-    mutationFn: (reason: string) => api.invoices.storno(id, reason),
+    // R14 Wave A: pass activeCompanyId for ownership verification.
+    mutationFn: (reason: string) => {
+      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      return api.invoices.storno(id, activeCompanyId, reason);
+    },
     onSuccess: (stornoInv) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });

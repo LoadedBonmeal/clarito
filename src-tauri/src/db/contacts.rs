@@ -157,8 +157,20 @@ pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<C
     get(pool, &id).await
 }
 
-pub async fn update(pool: &SqlitePool, id: &str, input: UpdateContactInput) -> AppResult<Contact> {
+/// R14 Wave A: `company_id` is required. After fetching the contact, we verify
+/// ownership and return `NotFound` for any mismatch. The UPDATE SQL is also
+/// scoped with `AND company_id = ?` as a defence-in-depth layer.
+pub async fn update(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+    input: UpdateContactInput,
+) -> AppResult<Contact> {
     let current = get(pool, id).await?;
+    // R14 Wave A: ownership check — cross-company access returns NotFound.
+    if current.company_id != company_id {
+        return Err(AppError::NotFound);
+    }
     let now = now_unix();
 
     let contact_type = match input.contact_type {
@@ -182,7 +194,7 @@ pub async fn update(pool: &SqlitePool, id: &str, input: UpdateContactInput) -> A
             phone        = ?11,
             currency     = ?12,
             updated_at   = ?13
-        WHERE id = ?1",
+        WHERE id = ?1 AND company_id = ?14",
     )
     .bind(id)
     .bind(&contact_type)
@@ -197,19 +209,145 @@ pub async fn update(pool: &SqlitePool, id: &str, input: UpdateContactInput) -> A
     .bind(input.phone.or(current.phone))
     .bind(input.currency.or(current.currency))
     .bind(now)
+    .bind(company_id)
     .execute(pool)
     .await?;
 
     get(pool, id).await
 }
 
-pub async fn delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
-    let res = sqlx::query("DELETE FROM contacts WHERE id = ?1")
+/// R14 Wave A: `company_id` is required. Deletion is scoped to the owning
+/// company; cross-company attempts receive `NotFound`.
+pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
+    // Verify ownership first for a clear NotFound on cross-company attempts.
+    let contact = get(pool, id).await?;
+    if contact.company_id != company_id {
+        return Err(AppError::NotFound);
+    }
+    let res = sqlx::query("DELETE FROM contacts WHERE id = ?1 AND company_id = ?2")
         .bind(id)
+        .bind(company_id)
         .execute(pool)
         .await?;
     if res.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    /// Minimal in-memory schema for contacts Wave A tests.
+    async fn setup_contacts_pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(":memory:")
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE contacts (
+                id TEXT PRIMARY KEY NOT NULL,
+                company_id TEXT NOT NULL,
+                contact_type TEXT NOT NULL DEFAULT 'CUSTOMER',
+                cui TEXT,
+                legal_name TEXT NOT NULL DEFAULT '',
+                vat_payer INTEGER NOT NULL DEFAULT 0,
+                address TEXT,
+                city TEXT,
+                county TEXT,
+                country TEXT NOT NULL DEFAULT 'RO',
+                email TEXT,
+                phone TEXT,
+                currency TEXT,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Seed: two companies, two contacts — one per company.
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, legal_name)
+             VALUES ('c1', 'comp-1', 'Client Comp1'),
+                    ('c2', 'comp-2', 'Client Comp2')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        pool
+    }
+
+    // ── update: wrong company → NotFound ────────────────────────────────────
+
+    #[tokio::test]
+    async fn wave_a_contact_update_wrong_company_returns_not_found() {
+        let pool = setup_contacts_pool().await;
+        let input = UpdateContactInput {
+            legal_name: Some("Renamed".to_string()),
+            ..Default::default()
+        };
+        // comp-2 tries to update comp-1's contact.
+        let result = update(&pool, "c1", "comp-2", input).await;
+        assert!(
+            matches!(result, Err(AppError::NotFound)),
+            "update with wrong company_id must return NotFound"
+        );
+        // Name must be unchanged.
+        let contact = get(&pool, "c1").await.unwrap();
+        assert_eq!(contact.legal_name, "Client Comp1", "name must not change");
+    }
+
+    #[tokio::test]
+    async fn wave_a_contact_update_correct_company_succeeds() {
+        let pool = setup_contacts_pool().await;
+        let input = UpdateContactInput {
+            legal_name: Some("Renamed OK".to_string()),
+            ..Default::default()
+        };
+        let result = update(&pool, "c1", "comp-1", input).await;
+        assert!(
+            result.is_ok(),
+            "update with correct company_id must succeed"
+        );
+        let contact = get(&pool, "c1").await.unwrap();
+        assert_eq!(contact.legal_name, "Renamed OK", "name must be updated");
+    }
+
+    // ── delete: wrong company → NotFound ────────────────────────────────────
+
+    #[tokio::test]
+    async fn wave_a_contact_delete_wrong_company_returns_not_found() {
+        let pool = setup_contacts_pool().await;
+        // comp-2 tries to delete comp-1's contact.
+        let result = delete(&pool, "c1", "comp-2").await;
+        assert!(
+            matches!(result, Err(AppError::NotFound)),
+            "delete with wrong company_id must return NotFound"
+        );
+        // Contact must still exist.
+        let still_there = get(&pool, "c1").await;
+        assert!(still_there.is_ok(), "contact must not have been deleted");
+    }
+
+    #[tokio::test]
+    async fn wave_a_contact_delete_correct_company_succeeds() {
+        let pool = setup_contacts_pool().await;
+        let result = delete(&pool, "c1", "comp-1").await;
+        assert!(
+            result.is_ok(),
+            "delete with correct company_id must succeed"
+        );
+        let gone = get(&pool, "c1").await;
+        assert!(
+            matches!(gone, Err(AppError::NotFound)),
+            "contact must be gone after correct-company delete"
+        );
+    }
 }

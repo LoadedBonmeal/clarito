@@ -126,7 +126,8 @@ export function InvoiceEditPage() {
       // Strip internal rowId before sending to backend
       const apiLines: CreateLineInput[] = lines.map(({ rowId: _rowId, ...rest }) => rest);
 
-      return api.invoices.updateDraft(id, {
+      // R14 Wave A: pass activeCompanyId as explicit ownership argument.
+      return api.invoices.updateDraft(id, activeCompanyId, {
         companyId: activeCompanyId,
         contactId: selectedContact.id,
         series,

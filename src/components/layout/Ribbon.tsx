@@ -265,7 +265,8 @@ export function Ribbon({ onOpenPalette, onOpenShortcuts }: RibbonProps) {
                     setStornoError(`Factura "${stornoNumber}" nu a fost găsită.`);
                     return;
                   }
-                  await api.invoices.storno(inv.id, stornoReason.trim() || "Stornare");
+                  // R14 Wave A: pass activeCompanyId for ownership verification.
+                  await api.invoices.storno(inv.id, activeCompanyId, stornoReason.trim() || "Stornare");
                   // TS-12: invalidate the full invoices namespace (including filtered list queries)
                   void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
                   setStornoOpen(false);
