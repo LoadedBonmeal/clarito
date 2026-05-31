@@ -6,6 +6,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 
 import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -97,6 +98,12 @@ export function ReportsPage() {
 
   const handleExportSaft = async () => {
     if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    // Empty-period guard: SAF-T is yearly — warn if no invoices exist at all for that year
+    const yearInvoices = allInvoices.filter((inv) => inv.issueDate.startsWith(String(selectedYear)));
+    if (yearInvoices.length === 0) {
+      notify.info(`Nu există date pentru anul ${selectedYear}.`);
+      return;
+    }
     const savePath = await saveDialog({
       title: "Salvează SAF-T D406",
       defaultPath: `saft-d406-${selectedYear}.xml`,
@@ -109,6 +116,7 @@ export function ReportsPage() {
       const { writeTextFile } = await import("@tauri-apps/plugin-fs");
       await writeTextFile(savePath, xml);
       notify.success(`SAF-T D406 salvat: ${savePath}`);
+      try { await openPath(savePath); } catch { /* reveal best-effort */ }
     } catch (err) {
       notify.error(formatError(err, 'Nu s-a putut exporta SAF-T D406.'));
     } finally {
@@ -118,6 +126,10 @@ export function ReportsPage() {
 
   const handleExportSaga = async () => {
     if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    if (periodInvoices.length === 0) {
+      notify.info("Nu există date pentru perioada selectată.");
+      return;
+    }
     const savePath = await saveDialog({
       title: "Salvează export SAGA",
       defaultPath: `facturi-saga-${dateFrom}-${dateTo}.csv`,
@@ -128,6 +140,7 @@ export function ReportsPage() {
     try {
       await api.integrations.exportSagaCsv(activeCompanyId, dateFrom, dateTo, savePath);
       notify.success(`Export SAGA salvat: ${savePath}`);
+      try { await openPath(savePath); } catch { /* reveal best-effort */ }
     } catch (err) {
       notify.error(formatError(err, 'Nu s-a putut exporta în SAGA.'));
     } finally {
@@ -137,6 +150,10 @@ export function ReportsPage() {
 
   const handleExportWinmentor = async () => {
     if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    if (periodInvoices.length === 0) {
+      notify.info("Nu există date pentru perioada selectată.");
+      return;
+    }
     const savePath = await saveDialog({
       title: "Salvează export WinMentor",
       defaultPath: `facturi-winmentor-${dateFrom}-${dateTo}.csv`,
@@ -147,6 +164,7 @@ export function ReportsPage() {
     try {
       await api.integrations.exportWinmentorCsv(activeCompanyId, dateFrom, dateTo, savePath);
       notify.success(`Export WinMentor salvat: ${savePath}`);
+      try { await openPath(savePath); } catch { /* reveal best-effort */ }
     } catch (err) {
       notify.error(formatError(err, 'Nu s-a putut exporta în WinMentor.'));
     } finally {
@@ -155,14 +173,18 @@ export function ReportsPage() {
   };
 
   const handleExportVatCsv = async () => {
+    if (periodInvoices.length === 0 && vatGroups.length === 0) {
+      notify.info("Nu există date pentru perioada selectată.");
+      return;
+    }
+    const outputPath = await saveDialog({
+      title: "Salvează raport TVA",
+      defaultPath: `raport-tva-${selectedYear}-${String(selectedMonth).padStart(2, "0")}.csv`,
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (!outputPath) return;
     setExportingVat(true);
     try {
-      const outputPath = await saveDialog({
-        title: "Salvează raport TVA",
-        defaultPath: `raport-tva-${selectedYear}-${String(selectedMonth).padStart(2, "0")}.csv`,
-        filters: [{ name: "CSV", extensions: ["csv"] }],
-      });
-      if (!outputPath) return;
       const saved = await api.reports.exportReport(
         "vat",
         { dateFrom, dateTo, companyId: activeCompanyId ?? undefined },
@@ -170,6 +192,7 @@ export function ReportsPage() {
         outputPath
       );
       notify.success(`Raport TVA salvat: ${saved}`);
+      try { await openPath(saved); } catch { /* reveal best-effort */ }
     } catch (err) {
       notify.error(formatError(err, 'Nu s-a putut exporta raportul TVA.'));
     } finally {

@@ -48,6 +48,7 @@ export function DashboardPage() {
   const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [periodMode, setPeriodMode] = useState<'today' | 'week' | 'month' | 'ytd'>('month');
+  const [refreshing, setRefreshing] = useState(false);
 
   const { data: companies = [] } = useQuery({
     queryKey: queryKeys.companies.list(),
@@ -216,9 +217,22 @@ export function DashboardPage() {
           <button type="button" className="btn compact" onClick={() => notify.info('Export disponibil în R8')}>
             <Icon name="download" size={11} /> Export
           </button>
-          <button type="button" className="btn" onClick={() => void queryClient.refetchQueries({ type: "active" })}>
-            <Icon name="refresh" size={12} /> Reîmprospătează{" "}
-            <span className="kbd" style={{ marginLeft: 4 }}>F5</span>
+          <button
+            type="button"
+            className="btn"
+            disabled={refreshing}
+            onClick={async () => {
+              setRefreshing(true);
+              try {
+                await queryClient.refetchQueries({ type: "active" });
+                notify.success("Date actualizate");
+              } finally {
+                setRefreshing(false);
+              }
+            }}
+          >
+            <Icon name="refresh" size={12} /> {refreshing ? "Se actualizează…" : "Reîmprospătează"}{" "}
+            {!refreshing && <span className="kbd" style={{ marginLeft: 4 }}>F5</span>}
           </button>
         </span>
       </div>
