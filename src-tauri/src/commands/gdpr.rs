@@ -3,8 +3,9 @@
 //! Provides two Tauri commands:
 //!  - `export_all_my_data`: produces a ZIP of the entire DB + archive files
 //!    at a user-chosen path.
-//!  - `wipe_all_data`: irreversibly truncates all app tables, clears the
-//!    archive directory, and removes the trial keychain marker.
+//!  - `wipe_all_data`: irreversibly truncates all app tables, deletes ANAF +
+//!    SmartBill keychain tokens per company, clears the archive directory, and
+//!    removes the trial keychain marker.
 //!
 //! Implementation is self-contained (does NOT call into archive.rs internals)
 //! to avoid coupling with the concurrently-edited archive module.
@@ -177,6 +178,8 @@ pub async fn export_all_my_data(
 /// Irreversibly wipe ALL local data.
 ///
 /// Steps:
+/// 0. Enumerate company ids and delete ANAF + SmartBill keychain tokens per company
+///    (GDPR erasure — credentials must not survive a wipe even if DB is cleared).
 /// 1. Truncate every application table (in a transaction) except `_sqlx_migrations`.
 /// 2. Clear the archive directory contents (XML/PDF files).
 /// 3. Remove the trial keychain marker so a fresh trial can be started.
@@ -185,6 +188,29 @@ pub async fn export_all_my_data(
 #[tauri::command]
 pub async fn wipe_all_data(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     let pool = &state.db;
+
+    // Step 0: enumerate company ids BEFORE truncating the companies table, then
+    // delete ANAF OAuth tokens and SmartBill tokens from the OS keychain.
+    // Per-entry errors are ignored (best-effort: the credential may not exist).
+    let company_ids: Vec<String> = sqlx::query_scalar("SELECT id FROM companies")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+    for company_id in &company_ids {
+        // ANAF OAuth token (TokenBundle stored under the "efactura" service).
+        crate::anaf::keychain::TokenBundle::delete(company_id);
+
+        // SmartBill API token.
+        let _ = crate::anaf::keychain::delete_smartbill_token(company_id);
+
+        tracing::debug!(company_id = %company_id, "GDPR wipe: keychain tokens deleted");
+    }
+
+    tracing::info!(
+        count = company_ids.len(),
+        "GDPR wipe: keychain tokens deleted for all companies"
+    );
 
     // Step 1: discover all application tables (exclude SQLx migration tracking).
     let tables: Vec<String> = sqlx::query_scalar(

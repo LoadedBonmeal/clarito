@@ -315,7 +315,37 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
     // 6. Restaurează fișierele archive/* din ZIP (dacă există), cu protecție
     //    zip-slip: orice intrare al cărei path normalizat iese din archive_dir
     //    este respinsă (consistent cu SEC-06 de mai sus).
-    let archive_dir = app.path().app_data_dir()?.join("archive");
+    //    Respectăm ARCHIVE_PATH_OVERRIDE (aceeași logică ca în export_backup),
+    //    astfel restaurarea aterizează în același director ca exportul.
+    let archive_dir = {
+        let data_dir = app.path().app_data_dir()?;
+        // Read ARCHIVE_PATH_OVERRIDE from the backup DB (already written to
+        // db_path at step 5) so restore targets the same directory the user had
+        // configured when the backup was created.  Falls back to
+        // <app_data>/archive if the setting is absent or the pool fails.
+        let override_val: Option<String> = {
+            let db_url = format!("sqlite:{}?mode=ro", db_path.to_string_lossy());
+            if let Ok(pool) = sqlx::SqlitePool::connect(&db_url).await {
+                let val = sqlx::query_scalar::<_, String>(
+                    "SELECT value FROM settings \
+                     WHERE key = 'archive_path_override' LIMIT 1",
+                )
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten();
+                pool.close().await;
+                val
+            } else {
+                None
+            }
+        };
+
+        match override_val {
+            Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+            _ => data_dir.join("archive"),
+        }
+    };
     // Re-open and extract archive entries in spawn_blocking (zip crate is sync).
     tokio::task::spawn_blocking(move || -> Result<(), AppError> {
         let file2 = std::fs::File::open(&path).map_err(AppError::Io)?;
@@ -403,6 +433,8 @@ pub struct ArchiveIntegrityReport {
 }
 
 /// Verifică că toate fișierele XML referențiate în DB există pe disc.
+/// Verifică atât facturile emise (`invoices`) cât și cele primite
+/// (`received_invoices`) pentru o acoperire completă.
 /// Returnează un raport structurat; apelat din frontend ca `verify_archive_integrity`.
 #[tauri::command]
 pub async fn verify_archive_integrity(
@@ -410,14 +442,21 @@ pub async fn verify_archive_integrity(
 ) -> AppResult<ArchiveIntegrityReport> {
     use sqlx::Row;
 
-    let rows = sqlx::query("SELECT xml_path FROM invoices WHERE xml_path IS NOT NULL")
+    // Check sent invoices (xml_path may be NULL for drafts not yet submitted).
+    let sent_rows = sqlx::query("SELECT xml_path FROM invoices WHERE xml_path IS NOT NULL")
         .fetch_all(&state.db)
         .await?;
+
+    // Check received invoices (xml_path is always populated for received invoices).
+    let received_rows =
+        sqlx::query("SELECT xml_path FROM received_invoices WHERE xml_path IS NOT NULL")
+            .fetch_all(&state.db)
+            .await?;
 
     let mut checked: usize = 0;
     let mut missing: Vec<String> = Vec::new();
 
-    for row in &rows {
+    for row in sent_rows.iter().chain(received_rows.iter()) {
         let xml_path: String = row.try_get("xml_path").map_err(AppError::Database)?;
         checked += 1;
         if !std::path::Path::new(&xml_path).exists() {

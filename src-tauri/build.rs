@@ -23,9 +23,36 @@ fn main() {
     let salt_seed = format!("{pkg_name}@{pkg_version}::RoFactura-build-salt-2026");
     let salt: [u8; 32] = Sha256::digest(salt_seed.as_bytes()).into();
 
-    // The original secrets — only present in source, NOT in compiled binary
-    let integrity_secret: &[u8] = b"RoF@ctura#2026!intgr1ty_K3y\xd4\x9a\x7f\x01\xbe\xc3v2";
-    let key_hmac_secret: &[u8] = b"RoF@ctura#Key!HMAC2026\xb2\x7f\xd4\x91\xc3\x0a";
+    // The original secrets — only present in source, NOT in compiled binary.
+    //
+    // Production / release builds SHOULD set the environment variables
+    //   ROFACTURA_INTEGRITY_SECRET
+    //   ROFACTURA_KEY_HMAC_SECRET
+    // (as UTF-8 strings) to override the defaults without changing this source
+    // file.  When the variables are absent the literal bytes below are used,
+    // which is byte-identical to the previous behaviour — so existing licenses
+    // remain valid.  Client-side HMAC is best-effort hardening; these secrets
+    // are not a cryptographic secret against a determined reverse-engineer.
+    let integrity_secret_env: Vec<u8>;
+    let key_hmac_secret_env: Vec<u8>;
+
+    let integrity_secret: &[u8] = if let Some(s) = option_env!("ROFACTURA_INTEGRITY_SECRET") {
+        integrity_secret_env = s.as_bytes().to_vec();
+        &integrity_secret_env
+    } else {
+        b"RoF@ctura#2026!intgr1ty_K3y\xd4\x9a\x7f\x01\xbe\xc3v2"
+    };
+
+    let key_hmac_secret: &[u8] = if let Some(s) = option_env!("ROFACTURA_KEY_HMAC_SECRET") {
+        key_hmac_secret_env = s.as_bytes().to_vec();
+        &key_hmac_secret_env
+    } else {
+        b"RoF@ctura#Key!HMAC2026\xb2\x7f\xd4\x91\xc3\x0a"
+    };
+
+    // Trigger a rebuild when either override env var changes.
+    println!("cargo:rerun-if-env-changed=ROFACTURA_INTEGRITY_SECRET");
+    println!("cargo:rerun-if-env-changed=ROFACTURA_KEY_HMAC_SECRET");
 
     // XOR-cycle each secret against the salt
     let int_obf: Vec<u8> = integrity_secret

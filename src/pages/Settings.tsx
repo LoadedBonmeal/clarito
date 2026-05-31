@@ -7,6 +7,7 @@ import { useState, useEffect, useId } from "react";
 import { open, save, confirm } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { Section, FieldRow, FieldGroup } from "@/components/shared/Section";
@@ -191,10 +192,26 @@ export function SettingsPage() {
     if (!activeCompanyId) return;
     setSavingSmartbill(true);
     try {
-      await api.settings.set(`smartbill_user_${activeCompanyId}`, smartbillUser);
-      if (smartbillToken && !smartbillToken.startsWith("•")) {
-        await api.settings.set(`smartbill_token_${activeCompanyId}`, smartbillToken);
+      // Save username + token via the keychain-backed command (set_smartbill_credentials).
+      // Token is stored in the OS keychain, NOT in the plaintext settings DB.
+      // If the token field still shows the placeholder mask ("••••…"), omit it so
+      // only the username is updated and the existing keychain token is preserved.
+      const tokenToSave =
+        smartbillToken && !smartbillToken.startsWith("•") ? smartbillToken : undefined;
+      await invoke("set_smartbill_credentials", {
+        companyId: activeCompanyId,
+        user: smartbillUser,
+        token: tokenToSave ?? null,
+      });
+
+      // Scrub any legacy plaintext token that may have been written to the settings DB
+      // by an older version of this handler.  Best-effort: ignore errors.
+      try {
+        await api.settings.set(`smartbill_token_${activeCompanyId}`, "");
+      } catch {
+        // ignore — old key may not exist
       }
+
       setSmartbillSaved(true);
       setTimeout(() => setSmartbillSaved(false), 3000);
     } catch {

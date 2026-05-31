@@ -37,7 +37,6 @@
     "process:allow-exit",
     "notification:default",
     "clipboard-manager:default",
-    "http:default",
     "store:default",
     "window-state:default",
     "log:default",
