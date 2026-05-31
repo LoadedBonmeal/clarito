@@ -31,6 +31,8 @@ import type {
   Paginated,
   Product,
   ProductInput,
+  Receipt,
+  ReceiptInput,
   ReceivedFilter,
   ReceivedInvoice,
   ReceivedStatus,
@@ -546,6 +548,27 @@ export const vatRates = {
     invoke<VatRate>("set_vat_rate_active", { id, active }),
 };
 
+// ─── Receipts (chitanțe) — R15 Wave 3 ────────────────────────────────────
+
+/** R15 Wave 3: All receipt commands are company_id-scoped. */
+export const receipts = {
+  /** List all receipts for a company. */
+  list: (companyId: string) =>
+    invoke<Receipt[]>("list_receipts", { companyId }),
+  /** Get a single receipt. Returns NotFound for wrong company. */
+  get: (id: string, companyId: string) =>
+    invoke<Receipt>("get_receipt", { id, companyId }),
+  /** Create a receipt for the given company. */
+  create: (companyId: string, input: ReceiptInput) =>
+    invoke<Receipt>("create_receipt", { companyId, input }),
+  /** Delete a receipt. Cross-company deletion returns NotFound. */
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_receipt", { id, companyId }),
+  /** Generate and save a chitanță PDF. Returns the file path. */
+  generatePdf: (id: string, companyId: string) =>
+    invoke<string>("generate_receipt_pdf", { id, companyId }),
+};
+
 // ─── GDPR / data portability ──────────────────────────────────────────────
 
 export const gdpr = {
@@ -576,6 +599,7 @@ export const api = {
   reports,
   payments,
   products,
+  receipts,
   recurring,
   saft,
   feedback,

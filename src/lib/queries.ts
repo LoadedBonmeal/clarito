@@ -95,6 +95,13 @@ export const queryKeys = {
     detail: (id: string) => [...(["vatRates"] as const), "detail", id] as const,
   },
 
+  receipts: {
+    all: ["receipts"] as const,
+    list: (companyId: string) =>
+      [...(["receipts"] as const), "list", companyId] as const,
+    detail: (id: string) => [...(["receipts"] as const), "detail", id] as const,
+  },
+
   appInfo: ["appInfo"] as const,
   settings: {
     get: (key: string) => ["settings", key] as const,

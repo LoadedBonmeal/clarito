@@ -52,6 +52,7 @@ import { SettingsPage } from "@/pages/Settings";
 import { PaymentsPage } from "@/pages/Payments";
 import { RecurringPage } from "@/pages/Recurring";
 import { ProductsPage } from "@/pages/Products";
+import { ReceiptsPage } from "@/pages/Receipts";
 import { VatRatesPage } from "@/pages/VatRates";
 import { DeclarationsPage } from "@/pages/Declarations";
 
@@ -198,6 +199,12 @@ const vatRatesRoute = createRoute({
   component: VatRatesPage,
 });
 
+const receiptsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/receipts",
+  component: ReceiptsPage,
+});
+
 // ─── Build tree + router ──────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -215,6 +222,7 @@ const routeTree = rootRoute.addChildren([
   notificationsRoute,
   contactsRoute,
   productsRoute,
+  receiptsRoute,
   vatRatesRoute,
   reportsRoute,
   settingsRoute,

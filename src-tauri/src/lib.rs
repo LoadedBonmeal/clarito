@@ -392,6 +392,12 @@ pub fn run() {
             commands::vat_rates::update_vat_rate,
             commands::vat_rates::delete_vat_rate,
             commands::vat_rates::set_vat_rate_active,
+            // receipts — chitanțe (R15 Wave 3)
+            commands::receipts::list_receipts,
+            commands::receipts::get_receipt,
+            commands::receipts::create_receipt,
+            commands::receipts::delete_receipt,
+            commands::receipts::generate_receipt_pdf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

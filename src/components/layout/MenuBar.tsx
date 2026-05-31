@@ -82,7 +82,7 @@ function buildMenus(
       { type: "sep" },
       { type: "section", label: "Bancă & casă" },
       { type: "row", icon: "bank",    label: "Punctare extras bancar",  disabled: true },
-      { type: "row", icon: "receipt", label: "Înregistrare chitanță",   disabled: true },
+      { type: "row", icon: "receipt", label: "Înregistrare chitanță",   onClick: () => { void navigate({ to: "/receipts" }); } },
       { type: "sep" },
       { type: "section", label: "Bulk" },
       { type: "row", icon: "check",   label: "Trimite selecția la ANAF",    onClick: () => { void navigate({ to: "/invoices" }); } },

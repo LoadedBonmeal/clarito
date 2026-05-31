@@ -552,6 +552,35 @@ export interface UpdateVatRateInput {
   sortOrder?: number;
 }
 
+// ─── Receipt (chitanță) ───────────────────────────────────────────────────
+
+export interface Receipt {
+  id: string;
+  companyId: string;
+  series: string;
+  number: number;
+  contactId: string | null;
+  invoiceId: string | null;
+  amount: string;
+  currency: string;
+  issueDate: string;
+  payerName: string | null;
+  notes: string | null;
+  pdfPath: string | null;
+  createdAt: number;
+}
+
+export interface ReceiptInput {
+  series?: string;
+  contactId?: string;
+  invoiceId?: string;
+  amount: string;
+  currency?: string;
+  issueDate: string;
+  payerName?: string;
+  notes?: string;
+}
+
 // ─── Error (din backend) ──────────────────────────────────────────────────
 
 export interface AppErrorPayload {

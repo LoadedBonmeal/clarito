@@ -85,6 +85,7 @@ export function Sidebar() {
     { section: "Operativ" },
     { id: "companii",  label: "Companii",           ico: "buildings", color: "var(--color-companii)", badge: companiesBadge, path: "/companies", matchPrefix: "/companies" },
     { id: "contacte",  label: "Contacte",           ico: "users",     color: "var(--color-contacte)", badge: contactsBadge,  path: "/contacts" },
+    { id: "chitante",  label: "Chitanțe",            ico: "receipt",   color: "var(--color-banca)",    path: "/receipts" },
     { id: "plati",     label: "Urmărire Plăți",     ico: "receipt",   color: "var(--color-banca)",    path: "/payments" },
     { id: "recurente", label: "Facturi Recurente",  ico: "refresh",   color: "var(--color-facturi)",  path: "/recurring" },
     { id: "stocuri",   label: "Articole & Stocuri", ico: "stock",     color: "var(--color-stocuri)",  path: "/products" },

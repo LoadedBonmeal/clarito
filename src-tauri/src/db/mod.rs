@@ -22,6 +22,7 @@ pub mod settings;
 
 pub mod payments;
 pub mod products;
+pub mod receipts;
 pub mod recurring;
 pub mod seed;
 pub mod vat_rates;
