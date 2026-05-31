@@ -10,6 +10,7 @@
 
 import { useEffect, useRef } from "react";
 import { Icon } from "@/components/shared/Icon";
+import { ProductPickerButton } from "@/components/shared/ProductCombobox";
 import { VAT_RATES, VAT_CATEGORIES, VAT_CATEGORY_LABELS } from "@/lib/constants";
 import {
   Tooltip,
@@ -18,7 +19,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { fmtRON } from "@/lib/utils";
-import type { CreateLineInput, VatCategory } from "@/types";
+import type { CreateLineInput, Product, VatCategory } from "@/types";
 
 /** EU alpha-2 country codes (excluding Romania). Used for auto-deduction of vatCategory. */
 const EU_CODES = new Set([
@@ -74,6 +75,12 @@ export interface LineItemsEditorProps {
   sellerVatPayer?: boolean;
   /** When true, shows the totals footer */
   showTotals?: boolean;
+  /**
+   * R15 Wave 1: When provided, a "alege din catalog" picker button appears
+   * in each Descriere cell. On select, the line is filled from the product.
+   * Manual entry always remains fully functional.
+   */
+  companyId?: string;
 }
 
 export function LineItemsEditor({
@@ -82,6 +89,7 @@ export function LineItemsEditor({
   buyerCountry = "RO",
   sellerVatPayer = true,
   showTotals = true,
+  companyId,
 }: LineItemsEditorProps) {
   // Track previous deduce-trigger values so we only auto-deduce on real changes.
   const prevDeduceKey = useRef<string>("");
@@ -148,6 +156,30 @@ export function LineItemsEditor({
 
   const removeLine = (idx: number) =>
     onChange(lines.filter((_, i) => i !== idx));
+
+  /**
+   * R15 Wave 1: Fill a line from a product picked from the catalog.
+   * Overwrites name, unit, unitPrice, vatRate, vatCategory, cpvCode(=code).
+   * quantity is kept (user may have already typed one). Manual entry is
+   * always fully functional — this is a convenience only.
+   * Does NOT link the line to the product id (lines stay free-text as today).
+   */
+  const fillFromProduct = (idx: number, product: Product) => {
+    const updated = lines.map((l, i) => {
+      if (i !== idx) return l;
+      const vatRateNum = parseFloat(product.vatRate) || 0;
+      return {
+        ...l,
+        name: product.name,
+        unit: product.unit,
+        unitPrice: parseFloat(product.unitPrice) || 0,
+        vatRate: vatRateNum,
+        vatCategory: product.vatCategory as VatCategory,
+        cpvCode: product.code ?? l.cpvCode,
+      } as LineRow;
+    });
+    onChange(updated);
+  };
 
   const net = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
   const vat = lines.reduce(
@@ -248,10 +280,19 @@ export function LineItemsEditor({
                   />
                 </td>
                 <td>
-                  <input
-                    value={l.name}
-                    onChange={(e) => updateLine(i, "name", e.target.value)}
-                  />
+                  <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                    <input
+                      value={l.name}
+                      onChange={(e) => updateLine(i, "name", e.target.value)}
+                      style={{ flex: 1, minWidth: 0 }}
+                    />
+                    {companyId && (
+                      <ProductPickerButton
+                        companyId={companyId}
+                        onSelect={(p) => fillFromProduct(i, p)}
+                      />
+                    )}
+                  </div>
                 </td>
                 <td className="num">
                   <input

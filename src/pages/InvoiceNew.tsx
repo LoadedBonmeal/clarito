@@ -451,6 +451,7 @@ export function InvoiceNewPage() {
               buyerCountry={selectedContact?.country ?? "RO"}
               sellerVatPayer={vatPayer}
               showTotals
+              companyId={activeCompanyId ?? undefined}
             />
           </div>
 

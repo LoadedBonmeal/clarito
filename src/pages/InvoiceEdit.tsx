@@ -341,6 +341,7 @@ export function InvoiceEditPage() {
               buyerCountry={selectedContact?.country ?? "RO"}
               sellerVatPayer={company?.vatPayer ?? true}
               showTotals
+              companyId={activeCompanyId ?? undefined}
             />
           </div>
 

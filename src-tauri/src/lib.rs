@@ -268,6 +268,13 @@ pub fn run() {
             commands::contacts::update_contact,
             commands::contacts::delete_contact,
             commands::contacts::search_contacts,
+            // products (articole / catalog)
+            commands::products::list_products,
+            commands::products::get_product,
+            commands::products::create_product,
+            commands::products::update_product,
+            commands::products::delete_product,
+            commands::products::search_products,
             // invoices
             commands::invoices::list_invoices,
             commands::invoices::get_invoice,

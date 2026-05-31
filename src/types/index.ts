@@ -483,6 +483,45 @@ export interface DataExportResult {
   bytes: number;
 }
 
+// ─── Product (articol / catalog) ─────────────────────────────────────────
+
+export interface Product {
+  id: string;
+  companyId: string;
+  name: string;
+  unit: string;
+  unitPrice: string;
+  vatRate: string;
+  vatCategory: string;
+  code: string | null;
+  stockQty: string | null;
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProductInput {
+  name: string;
+  unit?: string;
+  unitPrice?: string;
+  vatRate?: string;
+  vatCategory?: string;
+  code?: string;
+  stockQty?: string;
+  active?: boolean;
+}
+
+export interface UpdateProductInput {
+  name?: string;
+  unit?: string;
+  unitPrice?: string;
+  vatRate?: string;
+  vatCategory?: string;
+  code?: string;
+  stockQty?: string;
+  active?: boolean;
+}
+
 // ─── Error (din backend) ──────────────────────────────────────────────────
 
 export interface AppErrorPayload {

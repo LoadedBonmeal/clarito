@@ -92,7 +92,7 @@ function buildMenus(
       { type: "row", icon: "buildings", label: "Companii administrate", kbd: "G C", onClick: () => { void navigate({ to: "/companies" }); } },
       { type: "row", icon: "users",     label: "Clienți",                           onClick: () => { void navigate({ to: "/contacts" }); } },
       { type: "row", icon: "users",     label: "Furnizori",                         onClick: () => { void navigate({ to: "/contacts" }); } },
-      { type: "row", icon: "stock",     label: "Articole / Stocuri",        disabled: true },
+      { type: "row", icon: "stock",     label: "Articole / Stocuri",        onClick: () => { void navigate({ to: "/products" }); } },
       { type: "sep" },
       { type: "row", icon: "database",  label: "Plan de conturi",            disabled: true },
       { type: "row", icon: "tag",       label: "Cote TVA și taxe",           disabled: true },

@@ -87,8 +87,8 @@ export function Sidebar() {
     { id: "contacte",  label: "Contacte",           ico: "users",     color: "var(--color-contacte)", badge: contactsBadge,  path: "/contacts" },
     { id: "plati",     label: "Urmărire Plăți",     ico: "receipt",   color: "var(--color-banca)",    path: "/payments" },
     { id: "recurente", label: "Facturi Recurente",  ico: "refresh",   color: "var(--color-facturi)",  path: "/recurring" },
-    // Stocuri and Bancă have no page — hidden until implemented.
-    // { id: "stocuri",   label: "Articole & Stocuri", ico: "stock",  color: "var(--color-stocuri)",  path: "/contacts",  disabled: true },
+    { id: "stocuri",   label: "Articole & Stocuri", ico: "stock",     color: "var(--color-stocuri)",  path: "/products" },
+    // Bancă has no page yet — hidden until implemented.
     // { id: "banca",     label: "Bancă & Casă",       ico: "bank",   color: "var(--color-banca)",    path: "/contacts",  disabled: true },
     { section: "Raportare" },
     { id: "rapoarte",   label: "Rapoarte",          ico: "reports", color: "var(--color-rapoarte)", path: "/reports" },

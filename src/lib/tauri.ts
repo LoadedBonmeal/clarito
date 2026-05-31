@@ -29,12 +29,15 @@ import type {
   License,
   Notification,
   Paginated,
+  Product,
+  ProductInput,
   ReceivedFilter,
   ReceivedInvoice,
   ReceivedStatus,
   SyncResult,
   UpdateCompanyInput,
   UpdateContactInput,
+  UpdateProductInput,
   ValidationResult,
 } from "@/types";
 
@@ -491,6 +494,30 @@ export const journals = {
     invoke<string>("export_purchase_journal", { companyId, dateFrom, dateTo, destPath }),
 };
 
+// ─── Products (articole / catalog) ────────────────────────────────────────
+
+/** R15: All product commands are company_id-scoped. */
+export const products = {
+  /** List products for a company, with optional name/code search. */
+  list: (companyId: string, query?: string) =>
+    invoke<Product[]>("list_products", { companyId, query: query ?? null }),
+  /** Get a single product. Returns NotFound for wrong company. */
+  get: (id: string, companyId: string) =>
+    invoke<Product>("get_product", { id, companyId }),
+  /** Create a product for the given company. */
+  create: (companyId: string, input: ProductInput) =>
+    invoke<Product>("create_product", { companyId, input }),
+  /** Update a product. Cross-company update returns NotFound. */
+  update: (id: string, companyId: string, input: UpdateProductInput) =>
+    invoke<Product>("update_product", { id, companyId, input }),
+  /** Delete a product. Cross-company deletion returns NotFound. */
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_product", { id, companyId }),
+  /** Search products by name/code for the picker. Scoped to company. */
+  search: (companyId: string, query: string) =>
+    invoke<Product[]>("search_products", { companyId, query }),
+};
+
 // ─── GDPR / data portability ──────────────────────────────────────────────
 
 export const gdpr = {
@@ -520,6 +547,7 @@ export const api = {
   importData,
   reports,
   payments,
+  products,
   recurring,
   saft,
   feedback,

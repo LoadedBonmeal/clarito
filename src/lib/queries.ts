@@ -72,6 +72,13 @@ export const queryKeys = {
       ["payment_summaries", companyId] as const,
   },
 
+  products: {
+    all: ["products"] as const,
+    list: (companyId: string, query?: string) =>
+      [...(["products"] as const), "list", companyId, query] as const,
+    detail: (id: string) => [...(["products"] as const), "detail", id] as const,
+  },
+
   recurring: {
     list: (companyId: string) => ["recurringInvoices", companyId] as const,
   },

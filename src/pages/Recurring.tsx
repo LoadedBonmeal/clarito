@@ -514,6 +514,7 @@ export function RecurringPage() {
                     lines={lines}
                     onChange={(updated) => { setLines(updated); setLinesError(null); }}
                     showTotals={false}
+                    companyId={activeCompanyId ?? undefined}
                   />
                 </div>
                 {linesError && (

@@ -21,5 +21,6 @@ pub mod received;
 pub mod settings;
 
 pub mod payments;
+pub mod products;
 pub mod recurring;
 pub mod seed;
