@@ -193,12 +193,15 @@ export const system = {
 // ─── UBL ──────────────────────────────────────────────────────────────────
 
 export const ubl = {
-  generateXml: (invoiceId: string) =>
-    invoke<string>("generate_invoice_xml", { invoiceId }),
-  generatePdf: (invoiceId: string) =>
-    invoke<string>("generate_invoice_pdf", { invoiceId }),
-  validateXml: (invoiceId: string) =>
-    invoke<ValidationResult>("validate_invoice_xml", { invoiceId }),
+  /** R14 Wave E: companyId is required — cross-company XML generation returns NotFound. */
+  generateXml: (invoiceId: string, companyId: string) =>
+    invoke<string>("generate_invoice_xml", { invoiceId, companyId }),
+  /** R14 Wave E: companyId is required — cross-company PDF generation returns NotFound. */
+  generatePdf: (invoiceId: string, companyId: string) =>
+    invoke<string>("generate_invoice_pdf", { invoiceId, companyId }),
+  /** R14 Wave E: companyId is required — cross-company XML validation returns NotFound. */
+  validateXml: (invoiceId: string, companyId: string) =>
+    invoke<ValidationResult>("validate_invoice_xml", { invoiceId, companyId }),
 };
 
 // ─── ANAF ─────────────────────────────────────────────────────────────────

@@ -500,6 +500,9 @@ pub async fn activate_license(
     let mid = machine_id();
     let one_year = chrono::Utc::now().timestamp() + 365 * 86_400;
 
+    // Tier is hardcoded to "SOLO" intentionally — multi-tier keys do not exist yet.
+    // Both activate_license (here) and check_license_validity use the stored tier,
+    // so the all-tier fingerprint from Wave C remains consistent across both paths.
     let lic = license::activate(pool, &key_upper, "SOLO", one_year, email.trim(), &mid).await?;
 
     // 3. Apply SHA-256 integrity fingerprint to SOLO license (prevents SQLite tampering)

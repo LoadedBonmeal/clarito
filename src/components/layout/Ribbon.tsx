@@ -44,9 +44,9 @@ export function Ribbon({ onOpenPalette, onOpenShortcuts }: RibbonProps) {
   const [stornoError, setStornoError] = useState("");
 
   const handleDownloadPdf = async () => {
-    if (!selectedInvoiceId) { notify.warn("Selectați o factură din listă."); return; }
+    if (!selectedInvoiceId || !activeCompanyId) { notify.warn("Selectați o factură și o companie activă."); return; }
     try {
-      const pdfPath = await api.ubl.generatePdf(selectedInvoiceId);
+      const pdfPath = await api.ubl.generatePdf(selectedInvoiceId, activeCompanyId);
       const { openPath } = await import("@tauri-apps/plugin-opener");
       await openPath(pdfPath);
       notify.success("PDF deschis");
@@ -54,9 +54,9 @@ export function Ribbon({ onOpenPalette, onOpenShortcuts }: RibbonProps) {
   };
 
   const handleExportXml = async () => {
-    if (!selectedInvoiceId) { notify.warn("Selectați o factură din listă."); return; }
+    if (!selectedInvoiceId || !activeCompanyId) { notify.warn("Selectați o factură și o companie activă."); return; }
     try {
-      const xml = await api.ubl.generateXml(selectedInvoiceId);
+      const xml = await api.ubl.generateXml(selectedInvoiceId, activeCompanyId);
       const { save } = await import("@tauri-apps/plugin-dialog");
       const { writeTextFile } = await import("@tauri-apps/plugin-fs");
       const path = await save({ defaultPath: "factura.xml", filters: [{ name: "XML", extensions: ["xml"] }] });

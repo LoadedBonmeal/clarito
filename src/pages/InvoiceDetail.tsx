@@ -90,7 +90,11 @@ export function InvoiceDetailPage() {
   const testMode = testModeSetting === "1";
 
   const generateXml = useMutation({
-    mutationFn: () => api.ubl.generateXml(id),
+    // R14 Wave E: pass activeCompanyId for ownership verification.
+    mutationFn: () => {
+      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      return api.ubl.generateXml(id, activeCompanyId);
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
       setActionError(null);
@@ -99,7 +103,11 @@ export function InvoiceDetailPage() {
   });
 
   const generatePdf = useMutation({
-    mutationFn: () => api.ubl.generatePdf(id),
+    // R14 Wave E: pass activeCompanyId for ownership verification.
+    mutationFn: () => {
+      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      return api.ubl.generatePdf(id, activeCompanyId);
+    },
     onSuccess: async (pdfPath) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
       setActionError(null);

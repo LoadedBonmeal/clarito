@@ -60,6 +60,16 @@ describe("formatError", () => {
     expect(spy).toHaveBeenCalled();
   });
 
+  it("Archive: returns generic RO archive message (contains 'arhivă/backup'), does not echo p.message, and logs", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = formatError({ kind: "Archive", message: "/secret/path/backup.zip: permission denied" });
+    // Must contain the generic RO phrase — never the internal path/message.
+    expect(result).toContain("arhivă/backup");
+    expect(result).not.toContain("/secret/path");
+    expect(result).not.toContain("permission denied");
+    expect(spy).toHaveBeenCalled();
+  });
+
   // ── Internal kinds (generic fallback) ───────────────────────────────
 
   it("Database: returns custom fallback and logs", () => {
