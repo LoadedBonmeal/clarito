@@ -10,6 +10,7 @@ import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
 import type { AppErrorPayload, Contact, CreateLineInput } from "@/types";
 import { CURRENCIES } from "@/lib/constants";
+import { fmtShortcut } from "@/lib/platform";
 import {
   Tooltip,
   TooltipContent,
@@ -251,11 +252,11 @@ export function InvoiceNewPage() {
             disabled={saveDraftMutation.isPending}
           >
             <Icon name="draft" size={12} /> Salvează ca schiță{" "}
-            <span className="kbd" style={{ marginLeft: 6 }}>Ctrl S</span>
+            <span className="kbd" style={{ marginLeft: 6 }}>{fmtShortcut("Ctrl+S")}</span>
           </button>
           <button className="btn" disabled onClick={() => window.print()}>
             <Icon name="eye" size={12} /> Previzualizare PDF{" "}
-            <span className="kbd" style={{ marginLeft: 6 }}>Ctrl P</span>
+            <span className="kbd" style={{ marginLeft: 6 }}>{fmtShortcut("Ctrl+P")}</span>
           </button>
           <button
             className="btn primary"
@@ -268,7 +269,7 @@ export function InvoiceNewPage() {
             title="Salvează și trimite la ANAF (vei fi redirecționat la pagina detaliu)"
           >
             <Icon name="cloudUp" size={12} /> Trimite la ANAF{" "}
-            <span className="kbd" style={{ marginLeft: 6, opacity: 0.7 }}>Ctrl ↵</span>
+            <span className="kbd" style={{ marginLeft: 6, opacity: 0.7 }}>{fmtShortcut("Ctrl+Enter")}</span>
           </button>
         </span>
       </div>

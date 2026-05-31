@@ -23,6 +23,7 @@ import { StatusBar } from "./StatusBar";
 import { CommandPalette } from "./CommandPalette";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
 import { Icon } from "@/components/shared/Icon";
+import { ShortcutsDialog } from "@/components/shared/ShortcutsDialog";
 import { useTheme } from "@/hooks/use-theme";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
@@ -208,6 +209,7 @@ export function AppShell({ children }: AppShellProps) {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const setActiveCompanyId = useAppStore((s) => s.setActiveCompanyId);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const queryClient = useQueryClient();
 
   // Tray navigation events
@@ -266,6 +268,10 @@ export function AppShell({ children }: AppShellProps) {
         e.preventDefault();
         void queryClient.refetchQueries({ type: "active" });
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        setShortcutsOpen(true);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -286,8 +292,9 @@ export function AppShell({ children }: AppShellProps) {
           activeCompanyName={activeCompanyName}
           activeCompanyCui={activeCompany?.cui}
           onOpenCompanySwitcher={() => setSwitcherOpen(true)}
+          onOpenShortcuts={() => setShortcutsOpen(true)}
         />
-        <Ribbon onOpenPalette={() => setCommandOpen(true)} />
+        <Ribbon onOpenPalette={() => setCommandOpen(true)} onOpenShortcuts={() => setShortcutsOpen(true)} />
         <div className="workspace">
           <Sidebar />
           <div className="content-shell">{children}</div>
@@ -298,6 +305,7 @@ export function AppShell({ children }: AppShellProps) {
           companyCount={companies.length}
         />
         <CommandPalette />
+        <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
         {switcherOpen && (
           <CompanySwitcher
             companies={companies}

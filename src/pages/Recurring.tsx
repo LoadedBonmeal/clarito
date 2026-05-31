@@ -12,7 +12,7 @@ import { LineItemsEditor } from "@/components/shared/LineItemsEditor";
 import type { LineRow } from "@/components/shared/LineItemsEditor";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
-import type { CreateRecurringArgs } from "@/lib/tauri";
+import type { CreateRecurringArgs, RecurringInvoice } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
@@ -71,6 +71,8 @@ export function RecurringPage() {
   const queryClient = useQueryClient();
 
   const [showModal, setShowModal] = useState(false);
+  // null = create mode; string id = edit mode
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [lines, setLines] = useState<LineRow[]>(makeEmptyLines);
   const [linesError, setLinesError] = useState<string | null>(null);
@@ -107,6 +109,19 @@ export function RecurringPage() {
     onError: (e) => notify.error(formatError(e, 'Nu s-a putut crea șablonul recurent.')),
   });
 
+  const updateMutation = useMutation({
+    mutationFn: (args: Parameters<typeof api.recurring.update>[0]) => api.recurring.update(args),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.recurring.list(activeCompanyId!) });
+      notify.success("Șablon actualizat cu succes");
+      setShowModal(false);
+      setEditingId(null);
+      setForm({ ...EMPTY_FORM });
+      setLines(makeEmptyLines());
+    },
+    onError: (e) => notify.error(formatError(e, 'Nu s-a putut actualiza șablonul recurent.')),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.recurring.delete(id, activeCompanyId!),
     onSuccess: () => {
@@ -128,8 +143,32 @@ export function RecurringPage() {
   });
 
   const handleOpenModal = () => {
+    setEditingId(null);
     setForm({ ...EMPTY_FORM });
     setLines(makeEmptyLines());
+    setLinesError(null);
+    setShowModal(true);
+  };
+
+  const handleOpenEditModal = (r: RecurringInvoice) => {
+    setEditingId(r.id);
+    setForm({
+      templateName: r.templateName,
+      clientId: r.clientId,
+      frequency: r.frequency,
+      dayOfMonth: r.dayOfMonth,
+      nextIssueDate: r.nextIssueDate,
+      series: r.series,
+      autoSubmitAnaf: r.autoSubmitAnaf,
+      notes: r.notes ?? "",
+    });
+    // Parse linesJson back into LineRow[] (add rowId for the editor)
+    try {
+      const parsed = JSON.parse(r.linesJson) as Omit<LineRow, "rowId">[];
+      setLines(parsed.map((l) => ({ ...l, rowId: crypto.randomUUID() })));
+    } catch {
+      setLines(makeEmptyLines());
+    }
     setLinesError(null);
     setShowModal(true);
   };
@@ -137,7 +176,7 @@ export function RecurringPage() {
   const handleCreate = () => {
     if (!activeCompanyId) return;
     if (!form.templateName.trim()) { notify.warn("Introduceți un nume pentru șablon."); return; }
-    if (!form.clientId) { notify.warn("Selectați un client."); return; }
+    if (!editingId && !form.clientId) { notify.warn("Selectați un client."); return; }
     if (!form.series.trim()) { notify.warn("Introduceți seria facturii."); return; }
 
     // Validate structured lines
@@ -158,18 +197,35 @@ export function RecurringPage() {
       lines.map(({ rowId: _rowId, ...rest }) => rest)
     );
 
-    createMutation.mutate({
-      companyId: activeCompanyId,
-      templateName: form.templateName.trim(),
-      clientId: form.clientId,
-      frequency: form.frequency,
-      nextIssueDate: form.nextIssueDate,
-      dayOfMonth: form.dayOfMonth,
-      autoSubmitAnaf: form.autoSubmitAnaf,
-      series: form.series.trim(),
-      linesJson,
-      notes: form.notes.trim() || undefined,
-    });
+    if (editingId) {
+      // Edit mode — find the current template to preserve its active status
+      const current = recurringList.find((r) => r.id === editingId);
+      updateMutation.mutate({
+        id: editingId,
+        templateName: form.templateName.trim(),
+        frequency: form.frequency,
+        nextIssueDate: form.nextIssueDate,
+        dayOfMonth: form.dayOfMonth,
+        autoSubmitAnaf: form.autoSubmitAnaf,
+        active: current?.active ?? true,
+        series: form.series.trim(),
+        linesJson,
+        notes: form.notes.trim() || null,
+      });
+    } else {
+      createMutation.mutate({
+        companyId: activeCompanyId,
+        templateName: form.templateName.trim(),
+        clientId: form.clientId,
+        frequency: form.frequency,
+        nextIssueDate: form.nextIssueDate,
+        dayOfMonth: form.dayOfMonth,
+        autoSubmitAnaf: form.autoSubmitAnaf,
+        series: form.series.trim(),
+        linesJson,
+        notes: form.notes.trim() || undefined,
+      });
+    }
   };
 
   if (!activeCompanyId) {
@@ -287,12 +343,11 @@ export function RecurringPage() {
                         >
                           {r.active ? "Pauză" : "Reia"}
                         </button>
-                        {/* TODO MISS-03: full edit modal — for now use delete + create */}
                         <button
                           type="button"
                           className="btn compact"
-                          disabled
-                          title="În curând: editare completă"
+                          onClick={() => handleOpenEditModal(r)}
+                          title="Editează șablon"
                         >
                           Editează
                         </button>
@@ -313,12 +368,12 @@ export function RecurringPage() {
         )}
       </div>
 
-      {/* Create recurring modal */}
+      {/* Create / Edit recurring modal */}
       {showModal && (
         <div
           className="palette-scrim"
           style={{ alignItems: "center", paddingTop: 0 }}
-          onClick={() => setShowModal(false)}
+          onClick={() => { setShowModal(false); setEditingId(null); }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
@@ -334,7 +389,7 @@ export function RecurringPage() {
             }}
           >
             <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 16 }}>
-              Șablon factură recurentă
+              {editingId ? "Editează șablon recurent" : "Șablon factură recurentă nouă"}
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -350,13 +405,14 @@ export function RecurringPage() {
                 />
               </label>
 
-              {/* Client */}
+              {/* Client — read-only in edit mode (backend update doesn't support client change) */}
               <label style={{ fontSize: 11 }}>
                 Client *
                 <select
                   className="field"
                   style={{ display: "block", width: "100%", marginTop: 4 }}
                   value={form.clientId}
+                  disabled={!!editingId}
                   onChange={(e) => setForm((f) => ({ ...f, clientId: e.target.value }))}
                 >
                   <option value="">— Selectați client —</option>
@@ -364,6 +420,11 @@ export function RecurringPage() {
                     <option key={c.id} value={c.id}>{c.legalName}</option>
                   ))}
                 </select>
+                {editingId && (
+                  <span style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2, display: "block" }}>
+                    Clientul nu poate fi modificat după creare.
+                  </span>
+                )}
               </label>
 
               {/* Frequency + Day */}
@@ -472,13 +533,22 @@ export function RecurringPage() {
             </div>
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-              <button className="btn" onClick={() => setShowModal(false)}>Anulează</button>
+              <button
+                className="btn"
+                onClick={() => { setShowModal(false); setEditingId(null); }}
+              >
+                Anulează
+              </button>
               <button
                 className="btn primary"
-                disabled={createMutation.isPending}
+                disabled={createMutation.isPending || updateMutation.isPending}
                 onClick={handleCreate}
               >
-                {createMutation.isPending ? "Se salvează…" : "Creează șablon"}
+                {(createMutation.isPending || updateMutation.isPending)
+                  ? "Se salvează…"
+                  : editingId
+                  ? "Salvează modificările"
+                  : "Creează șablon"}
               </button>
             </div>
           </div>

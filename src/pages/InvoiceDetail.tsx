@@ -15,6 +15,7 @@ import { notify } from "@/lib/toasts";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { fmtRON, parseDec } from "@/lib/utils";
+import { formatError } from "@/lib/error-mapper";
 import type { AppErrorPayload } from "@/types";
 import { useAppStore } from "@/lib/store";
 import {
@@ -41,6 +42,11 @@ export function InvoiceDetailPage() {
   const [showStornoModal, setShowStornoModal] = useState(false);
   const [stornoReason, setStornoReason] = useState("");
   const [xmlCopied, setXmlCopied] = useState(false);
+
+  // Save as recurring template state
+  const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false);
+  const [templateFrequency, setTemplateFrequency] = useState("monthly");
+  const [templateName, setTemplateName] = useState("");
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.invoices.detail(id),
@@ -181,6 +187,63 @@ export function InvoiceDetailPage() {
     onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare trimitere SmartBill."),
   });
 
+  // Save current invoice as a recurring template
+  const saveAsTemplateMutation = useMutation({
+    mutationFn: (args: Parameters<typeof api.recurring.create>[0]) =>
+      api.recurring.create(args),
+    onSuccess: () => {
+      notify.success("Șablon recurent creat din factură.");
+      setShowSaveAsTemplate(false);
+      setTemplateName("");
+      setTemplateFrequency("monthly");
+    },
+    onError: (e) => {
+      setActionError(formatError(e, "Nu s-a putut crea șablonul recurent."));
+    },
+  });
+
+  /** Build next-month date (YYYY-MM-DD) for the template's first issue date */
+  function nextMonthDate(): string {
+    const d = new Date();
+    const next = new Date(d.getFullYear(), d.getMonth() + 1, d.getDate());
+    const y = next.getFullYear();
+    const m = String(next.getMonth() + 1).padStart(2, "0");
+    const day = String(next.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function handleSaveAsTemplate() {
+    if (!data) return;
+    const { invoice, lines: invoiceLines } = data;
+    if (!templateName.trim()) {
+      notify.warn("Introduceți un nume pentru șablon.");
+      return;
+    }
+    // Map invoice lines → recurring line shape (same fields as LineItemsEditor, strip id/description/subtotalAmount)
+    const recurringLines = invoiceLines.map((l) => ({
+      name: l.name,
+      quantity: typeof l.quantity === "string" ? Number(l.quantity) : l.quantity,
+      unit: l.unit ?? "buc",
+      unitPrice: typeof l.unitPrice === "string" ? Number(l.unitPrice) : l.unitPrice,
+      vatRate: typeof l.vatRate === "string" ? Number(l.vatRate) : l.vatRate,
+      vatCategory: (Number(l.vatRate) === 0 ? "Z" : "S") as string,
+    }));
+    const linesJson = JSON.stringify(recurringLines);
+
+    saveAsTemplateMutation.mutate({
+      companyId: invoice.companyId,
+      templateName: templateName.trim(),
+      clientId: invoice.contactId,
+      frequency: templateFrequency,
+      nextIssueDate: nextMonthDate(),
+      dayOfMonth: new Date().getDate(),
+      autoSubmitAnaf: false,
+      series: invoice.series,
+      linesJson,
+      notes: undefined,
+    });
+  }
+
   if (isLoading) {
     return (
       <div className="content">
@@ -250,6 +313,19 @@ export function InvoiceDetailPage() {
             title="Tipărește factura curentă (Ctrl+P)"
           >
             <Icon name="printer" size={12} /> Tipărește
+          </button>
+          <span className="divider-v" style={{ margin: "0 4px" }} />
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setTemplateName(`Șablon din ${invoice.fullNumber}`);
+              setTemplateFrequency("monthly");
+              setShowSaveAsTemplate(true);
+            }}
+            title="Creează un șablon recurent din această factură"
+          >
+            <Icon name="refresh" size={12} /> Șablon recurent
           </button>
         </span>
       </div>
@@ -720,6 +796,71 @@ export function InvoiceDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Save as recurring template modal */}
+      {showSaveAsTemplate && (
+        <div
+          className="palette-scrim"
+          style={{ alignItems: "center", paddingTop: 0 }}
+          onClick={() => setShowSaveAsTemplate(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--bg-content)",
+              border: "1px solid var(--border)",
+              minWidth: 380,
+              maxWidth: "92vw",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+              padding: 20,
+            }}
+          >
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 14 }}>
+              Salvează ca șablon recurent
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <label style={{ fontSize: 11 }}>
+                Nume șablon *
+                <input
+                  className="field"
+                  style={{ display: "block", width: "100%", marginTop: 4 }}
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                  autoFocus
+                />
+              </label>
+              <label style={{ fontSize: 11 }}>
+                Frecvență
+                <select
+                  className="field"
+                  style={{ display: "block", width: "100%", marginTop: 4 }}
+                  value={templateFrequency}
+                  onChange={(e) => setTemplateFrequency(e.target.value)}
+                >
+                  <option value="monthly">Lunar</option>
+                  <option value="quarterly">Trimestrial</option>
+                  <option value="annual">Anual</option>
+                </select>
+              </label>
+              <div style={{ fontSize: 10.5, color: "var(--text-muted)" }}>
+                Prima emitere: luna viitoare · seria: {invoice.series} · {lines.length} articol(e) din factură
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="btn" onClick={() => setShowSaveAsTemplate(false)}>
+                Anulează
+              </button>
+              <button
+                className="btn primary"
+                disabled={saveAsTemplateMutation.isPending}
+                onClick={handleSaveAsTemplate}
+              >
+                {saveAsTemplateMutation.isPending ? "Se salvează…" : "Creează șablon"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Storno confirmation modal — Radix Dialog (focus trap, Esc-close, role=dialog, aria-modal) */}
       <Dialog

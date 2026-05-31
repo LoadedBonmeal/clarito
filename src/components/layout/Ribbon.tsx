@@ -16,12 +16,14 @@ import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
+import { fmtShortcut } from "@/lib/platform";
 
 interface RibbonProps {
   onOpenPalette: () => void;
+  onOpenShortcuts: () => void;
 }
 
-export function Ribbon({ onOpenPalette }: RibbonProps) {
+export function Ribbon({ onOpenPalette, onOpenShortcuts }: RibbonProps) {
   const navigate = useNavigate();
   const ribbonRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
@@ -134,9 +136,9 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       <div className="ribbon-group">
         <div className="ribbon-group-label">Operațiuni</div>
         <div className="ribbon-group-buttons">
-          <BtnBig icon="plus"      label="Factură nouă" primary hint="Ctrl+N"       onClick={() => navigate({ to: "/invoices/new" })} />
-          <BtnBig icon="invoiceIn" label="Primită nouă"         hint="Ctrl+Shift+N" onClick={() => navigate({ to: "/received" })} />
-          <BtnBig icon="storno"    label="Storno"               hint="Ctrl+F9"      onClick={() => { setStornoOpen(true); setStornoNumber(""); setStornoReason(""); setStornoError(""); }} />
+          <BtnBig icon="plus"      label="Factură nouă" primary hint={fmtShortcut("Ctrl+N")}       onClick={() => navigate({ to: "/invoices/new" })} />
+          <BtnBig icon="invoiceIn" label="Primită nouă"         hint={fmtShortcut("Ctrl+Shift+N")} onClick={() => navigate({ to: "/received" })} />
+          <BtnBig icon="storno"    label="Storno"               hint={fmtShortcut("Ctrl+F9")}      onClick={() => { setStornoOpen(true); setStornoNumber(""); setStornoReason(""); setStornoError(""); }} />
           <BtnBig icon="receipt"   label="Chitanță"             disabled />
           <BtnBig icon="bank"      label="Plată"                disabled />
           <BtnBig icon="users"     label="Contact"                                  onClick={() => navigate({ to: "/contacts" })} />
@@ -147,8 +149,8 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       <div className="ribbon-group">
         <div className="ribbon-group-label">Sincronizare ANAF</div>
         <div className="ribbon-group-buttons">
-          <BtnBig icon="cloudUp"  label="Trimite ANAF"    hint="F9"     onClick={handleSubmitAnaf}   title={selectedInvoiceId ? "F9" : "Selectați o factură"} />
-          <BtnBig icon="cloudDn"  label="Descarcă SPV"    hint="Ctrl+D" onClick={handleSyncSpv} />
+          <BtnBig icon="cloudUp"  label="Trimite ANAF"    hint="F9"                         onClick={handleSubmitAnaf}   title={selectedInvoiceId ? "F9" : "Selectați o factură"} />
+          <BtnBig icon="cloudDn"  label="Descarcă SPV"    hint={fmtShortcut("Ctrl+D")}  onClick={handleSyncSpv} />
           <BtnBig icon="refresh"  label="Verifică status" hint="F10"    onClick={handleCheckStatus}  title={selectedInvoiceId ? "F10" : "Selectați o factură"} />
           <BtnBig icon="anaf"     label="Mesaje SPV"                    onClick={() => navigate({ to: "/notifications" })} />
           <BtnBig icon="download" label="Export XML"                    onClick={handleExportXml}    title={selectedInvoiceId ? undefined : "Selectați o factură"} />
@@ -187,8 +189,8 @@ export function Ribbon({ onOpenPalette }: RibbonProps) {
       <div className="ribbon-group">
         <div className="ribbon-group-label">Instrumente</div>
         <div className="ribbon-group-buttons">
-          <BtnBig icon="command"  label="Comenzi"    hint="Ctrl+K" onClick={onOpenPalette} />
-          <BtnBig icon="keyboard" label="Scurtături" hint="Ctrl+/" onClick={() => navigate({ to: "/settings" })} />
+          <BtnBig icon="command"  label="Comenzi"    hint={fmtShortcut("Ctrl+K")} onClick={onOpenPalette} />
+          <BtnBig icon="keyboard" label="Scurtături" hint={fmtShortcut("Ctrl+/")} onClick={onOpenShortcuts} />
           <BtnBig icon="settings" label="Setări"                   onClick={() => navigate({ to: "/settings" })} />
         </div>
       </div>

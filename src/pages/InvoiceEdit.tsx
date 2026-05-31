@@ -11,6 +11,7 @@ import { queryClient, queryKeys } from "@/lib/queries";
 import { notify } from "@/lib/toasts";
 import type { Contact, CreateLineInput } from "@/types";
 import { parseDec } from "@/lib/utils";
+import { fmtShortcut } from "@/lib/platform";
 
 function fmtDateRO(iso: string): string {
   const [y, m, d] = iso.split("-");
@@ -182,7 +183,7 @@ export function InvoiceEditPage() {
             disabled={editMutation.isPending}
           >
             <Icon name="draft" size={12} /> Salvează modificările{" "}
-            <span className="kbd" style={{ marginLeft: 6 }}>Ctrl S</span>
+            <span className="kbd" style={{ marginLeft: 6 }}>{fmtShortcut("Ctrl+S")}</span>
           </button>
         </span>
       </div>

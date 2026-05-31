@@ -29,6 +29,7 @@ function buildMenus(
   setTheme: (t: "light" | "dark" | "system") => void,
   version: string,
   purchaseUrl: string,
+  onOpenShortcuts: () => void,
 ): Record<string, MenuRow[]> {
   return {
     "Fișier": [
@@ -113,7 +114,7 @@ function buildMenus(
     ],
     "Ajutor": [
       { type: "row", icon: "help",     label: "Documentație e-Factura", kbd: "F1", onClick: () => { void import("@tauri-apps/plugin-opener").then(m => m.openUrl("https://mfinante.gov.ro/ro/web/efactura/informatii-tehnice")); } },
-      { type: "row", icon: "keyboard", label: "Scurtături tastatură",   kbd: fmtShortcut("Ctrl+/"), onClick: () => setCommandOpen(true) },
+      { type: "row", icon: "keyboard", label: "Scurtături tastatură",   kbd: fmtShortcut("Ctrl+/"), onClick: () => onOpenShortcuts() },
       { type: "sep" },
       { type: "section", label: "Licență" },
       { type: "row", icon: "tag",      label: "Cumpără licență…", onClick: () => {
@@ -131,6 +132,7 @@ interface MenuBarProps {
   activeCompanyName: string;
   activeCompanyCui?: string;
   onOpenCompanySwitcher: () => void;
+  onOpenShortcuts: () => void;
   anafStatus?: "ok" | "warn" | "err";
 }
 
@@ -138,6 +140,7 @@ export function MenuBar({
   activeCompanyName,
   activeCompanyCui,
   onOpenCompanySwitcher,
+  onOpenShortcuts,
   anafStatus = "ok",
 }: MenuBarProps) {
   const navigate = useNavigate();
@@ -159,7 +162,7 @@ export function MenuBar({
   });
   const purchaseUrl = purchaseUrlSetting ?? "https://lucaris.ro/rofactura#pret";
 
-  const MENUS = buildMenus(navigate, setCommandOpen, theme, setTheme, version, purchaseUrl);
+  const MENUS = buildMenus(navigate, setCommandOpen, theme, setTheme, version, purchaseUrl, onOpenShortcuts);
 
   const [open, setOpen] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
