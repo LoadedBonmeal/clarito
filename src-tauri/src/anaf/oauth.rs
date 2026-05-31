@@ -13,12 +13,53 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::time::Duration;
 
-const CLIENT_ID: &str = "efactura-desktop";
-const REDIRECT_URI: &str = "http://localhost:8787/callback";
-const AUTH_URL: &str = "https://logincert.anaf.ro/anaf-oauth2-server/authorize";
-const TOKEN_URL: &str = "https://logincert.anaf.ro/anaf-oauth2-server/token";
-const REVOKE_URL: &str = "https://logincert.anaf.ro/anaf-oauth2-server/revoke";
-const CALLBACK_PORT: u16 = 8787;
+// ─── Default constants ────────────────────────────────────────────────────────
+
+const DEFAULT_CLIENT_ID: &str = "efactura-desktop";
+const DEFAULT_REDIRECT_URI: &str = "http://localhost:8787/callback";
+/// URL de autorizare ANAF producție.
+const DEFAULT_AUTH_URL: &str = "https://logincert.anaf.ro/anaf-oauth2-server/authorize";
+/// URL token ANAF producție.
+const DEFAULT_TOKEN_URL: &str = "https://logincert.anaf.ro/anaf-oauth2-server/token";
+const DEFAULT_REVOKE_URL: &str = "https://logincert.anaf.ro/anaf-oauth2-server/revoke";
+const DEFAULT_CALLBACK_PORT: u16 = 8787;
+
+// ─── OAuthConfig ─────────────────────────────────────────────────────────────
+
+/// Configurație OAuth2 PKCE, citită din setări la runtime.
+///
+/// Setările suprascriibile (via `api.settings.set`):
+/// - `anaf_oauth_client_id`      — client_id înregistrat la ANAF (implicit: "efactura-desktop")
+/// - `anaf_oauth_redirect_uri`   — redirect URI (implicit: "http://localhost:8787/callback")
+/// - `anaf_oauth_callback_port`  — portul TCP pe care ascultăm (implicit: 8787)
+/// - `anaf_oauth_authorize_url`  — URL autorizare (implicit: prod ANAF)
+/// - `anaf_oauth_token_url`      — URL token (implicit: prod ANAF)
+///
+/// Când `use_anaf_test_env = "1"`: dacă nu există override explicit pentru URL-uri,
+/// se folosesc tot URL-urile prod ANAF (ANAF nu documentează un host OAuth separat
+/// pentru test — sandbox-ul de test se referă la API-ul de facturare, nu la OAuth).
+/// Utilizatorii avansați pot suprascrie URL-urile prin chei de setări.
+#[derive(Clone, Debug)]
+pub struct OAuthConfig {
+    pub client_id: String,
+    pub redirect_uri: String,
+    pub callback_port: u16,
+    pub authorize_url: String,
+    pub token_url: String,
+}
+
+impl OAuthConfig {
+    /// Construiește configurația folosind valori implicite.
+    pub fn default_prod() -> Self {
+        OAuthConfig {
+            client_id: DEFAULT_CLIENT_ID.to_string(),
+            redirect_uri: DEFAULT_REDIRECT_URI.to_string(),
+            callback_port: DEFAULT_CALLBACK_PORT,
+            authorize_url: DEFAULT_AUTH_URL.to_string(),
+            token_url: DEFAULT_TOKEN_URL.to_string(),
+        }
+    }
+}
 
 pub struct OAuthResult {
     pub access_token: String,
@@ -79,29 +120,42 @@ fn sha256_base64url(s: &str) -> String {
 // ─── OAuth flow ────────────────────────────────────────────────────────────
 
 /// Deschide browser-ul pentru autorizare ANAF, captează redirect-ul pe
-/// localhost:8787 și returnează token-urile.
+/// localhost și returnează token-urile.
 /// Blochează până la autorizare sau timeout 120s.
-pub async fn authorize(_company_id: &str) -> Result<OAuthResult, String> {
+///
+/// # Erori
+/// - Port ocupat → mesaj clar cu portul și recomandare.
+/// - Timeout 120s → mesaj RO cu hint certificat digital.
+/// - Token exchange eșuat → include descrierea ANAF dacă există.
+pub async fn authorize(_company_id: &str, config: &OAuthConfig) -> Result<OAuthResult, String> {
     // 1. PKCE
     let code_verifier = random_bytes_hex(32); // 32 bytes = 64 hex chars = 256 bits entropy
     let code_challenge = sha256_base64url(&code_verifier);
     let state = random_bytes_hex(16); // 16 bytes = 32 hex chars = 128 bits entropy
 
     // 2. URL autorizare
+    let redirect_encoded = encode_uri_component(&config.redirect_uri);
     let auth_url = format!(
-        "{AUTH_URL}?response_type=code&client_id={CLIENT_ID}\
-         &redirect_uri={REDIRECT_URI}&scope=\
-         &code_challenge={code_challenge}&code_challenge_method=S256\
-         &state={state}"
+        "{}?response_type=code&client_id={}\
+         &redirect_uri={}&scope=\
+         &code_challenge={}&code_challenge_method=S256\
+         &state={}",
+        config.authorize_url, config.client_id, redirect_encoded, code_challenge, state
     );
 
-    // 3. Deschide browser (cross-platform)
-    open_browser(&auth_url)?;
-
-    // 4. TCP listener pe port 8787 cu timeout 120s
-    let listener = TcpListener::bind(format!("127.0.0.1:{CALLBACK_PORT}"))
-        .map_err(|e| format!("Nu pot asculta pe portul {CALLBACK_PORT}: {e}"))?;
+    // 3. Pre-flight: verificăm că portul este disponibil înainte de a deschide browser-ul.
+    //    Dacă portul e ocupat, returnăm imediat un mesaj clar în loc să blocăm.
+    let port = config.callback_port;
+    let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|_| {
+        format!(
+            "Portul {port} este ocupat. Închideți aplicația care îl folosește \
+             sau schimbați portul în Setări → ANAF (câmpul Configurare avansată)."
+        )
+    })?;
     listener.set_nonblocking(false).map_err(|e| e.to_string())?;
+
+    // 4. Deschide browser (cross-platform)
+    open_browser(&auth_url)?;
 
     // Folosim un thread dedicat pentru accept() cu timeout simulat prin channel
     let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
@@ -155,11 +209,14 @@ pub async fn authorize(_company_id: &str) -> Result<OAuthResult, String> {
 
     // Deblocăm thread-ul de accept() conectându-ne la propriul nostru port, indiferent
     // de rezultat (timeout sau succes). Astfel thread-ul nu rămâne blocat pe accept()
-    // cu portul 8787 ocupat indefinit.
-    let _ = std::net::TcpStream::connect(format!("127.0.0.1:{CALLBACK_PORT}"));
+    // cu portul ocupat indefinit.
+    let _ = std::net::TcpStream::connect(format!("127.0.0.1:{port}"));
 
-    let payload = result
-        .map_err(|_| "Timeout: autorizarea ANAF nu a primit răspuns în 120s.".to_string())??;
+    let payload = result.map_err(|_| {
+        "Autorizarea ANAF a expirat (120s). Verificați că aveți certificatul digital \
+         instalat în browser (token USB conectat sau soft-cert importat) și reîncercați."
+            .to_string()
+    })??;
 
     let mut parts = payload.splitn(2, "|||");
     let code = parts.next().unwrap_or("").to_string();
@@ -170,7 +227,7 @@ pub async fn authorize(_company_id: &str) -> Result<OAuthResult, String> {
     }
 
     // 5. Schimbăm code-ul pe token
-    exchange_code_for_token(&code, &code_verifier).await
+    exchange_code_for_token(&code, &code_verifier, config).await
 }
 
 /// Revocă token-ul OAuth2 la serverul ANAF (best-effort: erorile sunt ignorate).
@@ -184,14 +241,19 @@ pub async fn revoke_token(access_token: &str) {
         Err(_) => return,
     };
 
-    let params = [("token", access_token), ("client_id", CLIENT_ID)];
+    let params = [("token", access_token), ("client_id", DEFAULT_CLIENT_ID)];
 
     // Fire-and-forget: dacă ANAF nu suportă revocarea corect, nu e critical.
-    let _ = client.post(REVOKE_URL).form(&params).send().await;
+    let _ = client.post(DEFAULT_REVOKE_URL).form(&params).send().await;
 }
 
 /// Reîmprospătează access_token-ul folosind refresh_token-ul existent.
+/// Folosește URL-ul token din configurație (dacă s-a schimbat).
 pub async fn refresh_token_bundle(refresh_tok: &str) -> Result<OAuthResult, String> {
+    // refresh_token_bundle este apelat fără context de config — folosim default prod.
+    // Dacă utilizatorul a configurat un token_url custom, acesta va fi folosit la
+    // autorizare inițială; refresh-ul poate folosi prod în continuare (tokens sunt
+    // emise de același server).
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -200,11 +262,11 @@ pub async fn refresh_token_bundle(refresh_tok: &str) -> Result<OAuthResult, Stri
     let params = [
         ("grant_type", "refresh_token"),
         ("refresh_token", refresh_tok),
-        ("client_id", CLIENT_ID),
+        ("client_id", DEFAULT_CLIENT_ID),
     ];
 
     let resp = client
-        .post(TOKEN_URL)
+        .post(DEFAULT_TOKEN_URL)
         .form(&params)
         .send()
         .await
@@ -249,7 +311,50 @@ fn extract_query_param(request_line: &str, param: &str) -> Option<String> {
     None
 }
 
-async fn exchange_code_for_token(code: &str, code_verifier: &str) -> Result<OAuthResult, String> {
+/// Encodare minimă URI component pentru redirect_uri (spații → %20, etc.).
+fn encode_uri_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'!'
+            | b'~'
+            | b'*'
+            | b'\''
+            | b'('
+            | b')'
+            | b':'
+            | b'/' => {
+                out.push(b as char);
+            }
+            _ => {
+                out.push('%');
+                out.push(
+                    char::from_digit((b >> 4) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
+                out.push(
+                    char::from_digit((b & 0xf) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
+            }
+        }
+    }
+    out
+}
+
+async fn exchange_code_for_token(
+    code: &str,
+    code_verifier: &str,
+    config: &OAuthConfig,
+) -> Result<OAuthResult, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -258,13 +363,13 @@ async fn exchange_code_for_token(code: &str, code_verifier: &str) -> Result<OAut
     let params = [
         ("grant_type", "authorization_code"),
         ("code", code),
-        ("redirect_uri", REDIRECT_URI),
-        ("client_id", CLIENT_ID),
+        ("redirect_uri", config.redirect_uri.as_str()),
+        ("client_id", config.client_id.as_str()),
         ("code_verifier", code_verifier),
     ];
 
     let resp = client
-        .post(TOKEN_URL)
+        .post(&config.token_url)
         .form(&params)
         .send()
         .await
@@ -282,9 +387,26 @@ async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthResult, St
 
     if !status.is_success() {
         tracing::warn!(%status, "ANAF token endpoint returned non-success");
-        return Err(format!(
-            "Autentificare ANAF eșuată (HTTP {status}). Verificați conexiunea și reîncercați."
-        ));
+        // Încercăm să extragem error_description din JSON ANAF
+        let description = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|j| {
+                j["error_description"]
+                    .as_str()
+                    .or(j["error"].as_str())
+                    .map(|s| s.to_string())
+            });
+        return Err(if let Some(desc) = description {
+            format!(
+                "Autentificare ANAF eșuată (HTTP {status}): {desc}. \
+                 Verificați că certificatul digital este instalat și activ în browser."
+            )
+        } else {
+            format!(
+                "Autentificare ANAF eșuată (HTTP {status}). \
+                 Verificați că certificatul digital este instalat și activ în browser."
+            )
+        });
     }
 
     let json: serde_json::Value =

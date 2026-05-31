@@ -5,7 +5,7 @@
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect, useId } from "react";
 import { open, save, confirm } from "@tauri-apps/plugin-dialog";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTranslation } from "react-i18next";
 
 import { Skeleton } from "@/components/ui/skeleton";
@@ -79,6 +79,53 @@ export function SettingsPage() {
   });
 
   const anafTestMode = testModeSetting === "1";
+
+  // Advanced ANAF OAuth config
+  const [anafAdvancedOpen, setAnafAdvancedOpen] = useState(false);
+  const [anafClientId, setAnafClientId] = useState("");
+  const [anafRedirectUri, setAnafRedirectUri] = useState("");
+  const [anafCallbackPort, setAnafCallbackPort] = useState("");
+  const [anafAuthorizeUrl, setAnafAuthorizeUrl] = useState("");
+  const [anafTokenUrl, setAnafTokenUrl] = useState("");
+  const [anafAdvancedSaving, setAnafAdvancedSaving] = useState(false);
+  const [anafAdvancedSaved, setAnafAdvancedSaved] = useState(false);
+
+  // Load advanced ANAF settings on mount
+  useEffect(() => {
+    void (async () => {
+      const [cid, ruri, port, aurl, turl] = await Promise.all([
+        api.settings.get("anaf_oauth_client_id"),
+        api.settings.get("anaf_oauth_redirect_uri"),
+        api.settings.get("anaf_oauth_callback_port"),
+        api.settings.get("anaf_oauth_authorize_url"),
+        api.settings.get("anaf_oauth_token_url"),
+      ]);
+      setAnafClientId(cid ?? "");
+      setAnafRedirectUri(ruri ?? "");
+      setAnafCallbackPort(port ?? "");
+      setAnafAuthorizeUrl(aurl ?? "");
+      setAnafTokenUrl(turl ?? "");
+    })();
+  }, []);
+
+  const handleSaveAnafAdvanced = async () => {
+    setAnafAdvancedSaving(true);
+    try {
+      await Promise.all([
+        api.settings.set("anaf_oauth_client_id", anafClientId),
+        api.settings.set("anaf_oauth_redirect_uri", anafRedirectUri),
+        api.settings.set("anaf_oauth_callback_port", anafCallbackPort),
+        api.settings.set("anaf_oauth_authorize_url", anafAuthorizeUrl),
+        api.settings.set("anaf_oauth_token_url", anafTokenUrl),
+      ]);
+      setAnafAdvancedSaved(true);
+      setTimeout(() => setAnafAdvancedSaved(false), 3000);
+    } catch (e) {
+      notify.error(formatError(e, "Eroare la salvarea configurației ANAF avansate."));
+    } finally {
+      setAnafAdvancedSaving(false);
+    }
+  };
 
   // Notification preferences: per-type ("os" | "inapp" | "off") + quiet hours
   const NOTIF_TYPES = [
@@ -160,7 +207,7 @@ export function SettingsPage() {
   const authorizeAnaf = useMutation({
     mutationFn: () => api.anaf.authorize(activeCompanyId!),
     onSuccess: () => { void refetchAnafAuth(); setAnafError(null); },
-    onError: (e) => setAnafError((e as unknown as { message?: string }).message ?? "Eroare autorizare ANAF."),
+    onError: (e) => setAnafError(formatError(e, "Eroare autorizare ANAF.")),
   });
 
   const logoutAnaf = useMutation({
@@ -206,7 +253,7 @@ export function SettingsPage() {
     try {
       const report = await api.feedback.gather();
       const url = await api.feedback.mailto(report, feedbackMsg || undefined);
-      await openPath(url);
+      await openUrl(url);
       notify.success("Email pregătit în clientul dvs. de email");
     } catch (e) {
       notify.error(
@@ -224,7 +271,7 @@ export function SettingsPage() {
     try {
       const purchase = await api.settings.get("purchase_url");
       const url = purchase || "https://lucaris.ro/rofactura#pret";
-      await openPath(url);
+      await openUrl(url);
     } catch (e) {
       notify.error(formatError(e, "Nu pot deschide pagina de cumpărare."));
     }
@@ -295,58 +342,176 @@ export function SettingsPage() {
           {/* ANAF */}
           <Section title="ANAF / SPV">
             <FieldGroup>
-              <FieldRow label="Mod test ANAF">
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <input
-                    id="anaf-test-mode"
-                    type="checkbox"
-                    className="cbx"
-                    checked={anafTestMode}
-                    onChange={handleTestModeToggle}
-                  />
-                  <label htmlFor="anaf-test-mode" style={{ fontSize: 11, cursor: "pointer" }}>
-                    Folosește endpointurile de test (api.anaf.ro/test)
-                  </label>
+              <FieldRow label="Mediu ANAF">
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      padding: "2px 8px",
+                      borderRadius: 3,
+                      background: anafTestMode ? "#FEF3C7" : "#D1FAE5",
+                      color: anafTestMode ? "#92400E" : "#065F46",
+                      border: `1px solid ${anafTestMode ? "#FCD34D" : "#A7F3D0"}`,
+                    }}
+                  >
+                    {anafTestMode ? "Test" : "Producție"}
+                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input
+                      id="anaf-test-mode"
+                      type="checkbox"
+                      className="cbx"
+                      checked={anafTestMode}
+                      onChange={handleTestModeToggle}
+                    />
+                    <label htmlFor="anaf-test-mode" style={{ fontSize: 11, cursor: "pointer" }}>
+                      Mod test ANAF (API facturare test)
+                    </label>
+                  </div>
                 </div>
               </FieldRow>
-              <FieldRow label="URL ANAF prod" mono>
-                <span style={{ fontSize: 10.5 }}>https://api.anaf.ro/prod/FCTEL/rest/</span>
+              <FieldRow label="URL API ANAF" mono>
+                <span style={{ fontSize: 10.5 }}>
+                  {anafTestMode
+                    ? "https://api.anaf.ro/test/FCTEL/rest/"
+                    : "https://api.anaf.ro/prod/FCTEL/rest/"}
+                </span>
               </FieldRow>
               {activeCompanyId && (
-                <FieldRow label="Status OAuth2">
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    {isAnafAuthenticated ? (
-                      <>
-                        <span style={{ fontSize: 11, color: "#16A34A", fontWeight: 600 }}>✓ Autentificat</span>
-                        <button
-                          type="button"
-                          className="btn"
-                          disabled={logoutAnaf.isPending}
-                          onClick={() => logoutAnaf.mutate()}
-                        >
-                          Deconectare
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Neautentificat</span>
-                        <button
-                          type="button"
-                          className="btn primary"
-                          disabled={authorizeAnaf.isPending}
-                          onClick={() => authorizeAnaf.mutate()}
-                        >
-                          {authorizeAnaf.isPending ? "Se autorizează…" : "Autorizează ANAF"}
-                        </button>
-                      </>
-                    )}
+                <FieldRow label="Conectare SPV ANAF">
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                      Pentru conectare aveți nevoie de un <strong>certificat digital calificat</strong> instalat
+                      în browser (token USB sau soft-cert). Clientul OAuth trebuie înregistrat ca SPV la ANAF
+                      (client_id — configurabil în secțiunea avansată de mai jos).
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      {isAnafAuthenticated ? (
+                        <>
+                          <span style={{ fontSize: 11, color: "#16A34A", fontWeight: 600 }}>✓ Conectat la SPV ANAF</span>
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={logoutAnaf.isPending}
+                            onClick={() => logoutAnaf.mutate()}
+                          >
+                            Deconectare
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Neconectat</span>
+                          <button
+                            type="button"
+                            className="btn primary"
+                            disabled={authorizeAnaf.isPending}
+                            onClick={() => authorizeAnaf.mutate()}
+                          >
+                            {authorizeAnaf.isPending ? "Se autorizează…" : "Conectează la SPV ANAF →"}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </FieldRow>
               )}
               {anafError && (
                 <FieldRow label="">
-                  <span style={{ fontSize: 11, color: "#DC2626" }}>{anafError}</span>
+                  <div
+                    style={{
+                      padding: "7px 10px",
+                      background: "#FEE2E2",
+                      border: "1px solid #FECACA",
+                      fontSize: 11,
+                      color: "#991B1B",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {anafError}
+                  </div>
                 </FieldRow>
+              )}
+              {/* Configurare avansată ANAF — collapsible */}
+              <FieldRow label="">
+                <button
+                  type="button"
+                  className="btn compact"
+                  onClick={() => setAnafAdvancedOpen((v) => !v)}
+                  style={{ fontSize: 10.5 }}
+                >
+                  {anafAdvancedOpen ? "▲ Ascunde configurare avansată ANAF" : "▼ Configurare avansată ANAF"}
+                </button>
+              </FieldRow>
+              {anafAdvancedOpen && (
+                <>
+                  <FieldRow label="">
+                    <div style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5, marginBottom: 4 }}>
+                      Lăsați gol pentru valorile implicite. Modificați doar dacă știți ce faceți
+                      (ex. mediu de test OAuth, client_id propriu înregistrat la ANAF).
+                    </div>
+                  </FieldRow>
+                  <FieldRow label="Client ID">
+                    <input
+                      className="field"
+                      style={{ width: 280, fontSize: 10.5, fontFamily: "var(--font-mono)" }}
+                      placeholder="efactura-desktop (implicit)"
+                      value={anafClientId}
+                      onChange={(e) => setAnafClientId(e.target.value)}
+                    />
+                  </FieldRow>
+                  <FieldRow label="Redirect URI">
+                    <input
+                      className="field"
+                      style={{ width: 280, fontSize: 10.5, fontFamily: "var(--font-mono)" }}
+                      placeholder="http://localhost:8787/callback (implicit)"
+                      value={anafRedirectUri}
+                      onChange={(e) => setAnafRedirectUri(e.target.value)}
+                    />
+                  </FieldRow>
+                  <FieldRow label="Port callback">
+                    <input
+                      className="field"
+                      style={{ width: 120, fontSize: 10.5, fontFamily: "var(--font-mono)" }}
+                      placeholder="8787 (implicit)"
+                      value={anafCallbackPort}
+                      onChange={(e) => setAnafCallbackPort(e.target.value)}
+                    />
+                  </FieldRow>
+                  <FieldRow label="URL autorizare">
+                    <input
+                      className="field"
+                      style={{ width: 280, fontSize: 10.5, fontFamily: "var(--font-mono)" }}
+                      placeholder="https://logincert.anaf.ro/anaf-oauth2-server/authorize"
+                      value={anafAuthorizeUrl}
+                      onChange={(e) => setAnafAuthorizeUrl(e.target.value)}
+                    />
+                  </FieldRow>
+                  <FieldRow label="URL token">
+                    <input
+                      className="field"
+                      style={{ width: 280, fontSize: 10.5, fontFamily: "var(--font-mono)" }}
+                      placeholder="https://logincert.anaf.ro/anaf-oauth2-server/token"
+                      value={anafTokenUrl}
+                      onChange={(e) => setAnafTokenUrl(e.target.value)}
+                    />
+                  </FieldRow>
+                  <FieldRow label="">
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <button
+                        type="button"
+                        className="btn primary"
+                        disabled={anafAdvancedSaving}
+                        onClick={() => void handleSaveAnafAdvanced()}
+                      >
+                        {anafAdvancedSaving ? "Se salvează…" : "Salvează configurare avansată"}
+                      </button>
+                      {anafAdvancedSaved && (
+                        <span style={{ fontSize: 11, color: "#16A34A" }}>✓ Salvat</span>
+                      )}
+                    </div>
+                  </FieldRow>
+                </>
               )}
             </FieldGroup>
           </Section>
@@ -738,7 +903,7 @@ export function SettingsPage() {
                   style={{ fontFamily: "var(--font-ui)" }}
                   onClick={async () => {
                     try {
-                      await openPath("https://lucaris.ro/privacy");
+                      await openUrl("https://lucaris.ro/privacy");
                     } catch {
                       /* ignore */
                     }

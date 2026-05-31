@@ -56,20 +56,70 @@ async fn get_valid_token(company_id: &str) -> AppResult<String> {
 
 // ─── Commands ──────────────────────────────────────────────────────────────
 
+/// Construiește `OAuthConfig` citind setările opționale din DB.
+/// Fallback la valorile implicite (prod ANAF) pentru orice cheie lipsă.
+///
+/// Chei suprascriibile:
+/// - `anaf_oauth_client_id`      — client_id OAuth (implicit: "efactura-desktop")
+/// - `anaf_oauth_redirect_uri`   — redirect URI   (implicit: "http://localhost:8787/callback")
+/// - `anaf_oauth_callback_port`  — port TCP        (implicit: 8787)
+/// - `anaf_oauth_authorize_url`  — URL autorizare  (implicit: prod ANAF)
+/// - `anaf_oauth_token_url`      — URL token       (implicit: prod ANAF)
+async fn build_oauth_config(pool: &sqlx::SqlitePool) -> oauth::OAuthConfig {
+    use crate::db::settings;
+
+    let mut cfg = oauth::OAuthConfig::default_prod();
+
+    if let Ok(Some(v)) = settings::get(pool, "anaf_oauth_client_id").await {
+        if !v.trim().is_empty() {
+            cfg.client_id = v.trim().to_string();
+        }
+    }
+    if let Ok(Some(v)) = settings::get(pool, "anaf_oauth_redirect_uri").await {
+        if !v.trim().is_empty() {
+            cfg.redirect_uri = v.trim().to_string();
+        }
+    }
+    if let Ok(Some(v)) = settings::get(pool, "anaf_oauth_callback_port").await {
+        if let Ok(port) = v.trim().parse::<u16>() {
+            if port > 1024 {
+                cfg.callback_port = port;
+                // Actualizăm redirect_uri să reflecte portul dacă nu a fost suprascris explicit
+                if cfg.redirect_uri == oauth::OAuthConfig::default_prod().redirect_uri {
+                    cfg.redirect_uri = format!("http://localhost:{port}/callback");
+                }
+            }
+        }
+    }
+    if let Ok(Some(v)) = settings::get(pool, "anaf_oauth_authorize_url").await {
+        if !v.trim().is_empty() {
+            cfg.authorize_url = v.trim().to_string();
+        }
+    }
+    if let Ok(Some(v)) = settings::get(pool, "anaf_oauth_token_url").await {
+        if !v.trim().is_empty() {
+            cfg.token_url = v.trim().to_string();
+        }
+    }
+
+    cfg
+}
+
 /// Pornește fluxul OAuth2 PKCE — deschide browser-ul, așteaptă callback.
 /// Returnează `true` dacă autentificarea a reușit.
 /// Emite evenimentul `oauth_completed` { companyId, success } pentru frontend.
 #[tauri::command]
 pub async fn anaf_authorize(
     app: tauri::AppHandle,
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     company_id: String,
 ) -> AppResult<bool> {
     use tauri::Emitter;
 
-    let result = oauth::authorize(&company_id)
+    let config = build_oauth_config(&state.db).await;
+    let result = oauth::authorize(&company_id, &config)
         .await
-        .map_err(AppError::Other)?;
+        .map_err(AppError::Validation)?;
 
     let bundle = TokenBundle {
         access_token: result.access_token,
@@ -398,12 +448,13 @@ pub async fn anaf_check_invoice_status(
 /// de `get_valid_token` înaintea fiecărei operații API.
 #[tauri::command]
 pub async fn anaf_refresh_certificate(
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     company_id: String,
 ) -> AppResult<bool> {
-    let result = oauth::authorize(&company_id)
+    let config = build_oauth_config(&state.db).await;
+    let result = oauth::authorize(&company_id, &config)
         .await
-        .map_err(AppError::Other)?;
+        .map_err(AppError::Validation)?;
 
     let bundle = TokenBundle {
         access_token: result.access_token,

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
+import { formatError } from "@/lib/error-mapper";
 import type { AnafCompanyData, AppErrorPayload, CreateCompanyInput } from "@/types";
 
 type Step = 1 | 2 | 3 | 4 | 5 | 6;
@@ -823,8 +824,7 @@ function Step5Anaf({
         setAuthError("Autorizarea nu s-a finalizat. Încercați din nou sau sari peste.");
       }
     } catch (e) {
-      const err = e as unknown as AppErrorPayload;
-      setAuthError(err?.message ?? "Autorizarea a eșuat. Verificați conexiunea și reîncercați.");
+      setAuthError(formatError(e, "Autorizarea a eșuat. Verificați conexiunea și reîncercați."));
     } finally {
       setIsAuthenticating(false);
     }
@@ -859,7 +859,11 @@ function Step5Anaf({
           marginBottom: 14,
         }}
       >
-        <strong style={{ color: "var(--text)" }}>Ce este necesar:</strong> un certificat digital calificat (token fizic sau certificat soft) emis de o autoritate acreditată (ex. certSIGN, DigiSign, Trans Sped). Fără certificat nu se poate autoriza accesul în SPV.
+        <strong style={{ color: "var(--text)" }}>Ce este necesar:</strong>
+        <ul style={{ margin: "4px 0 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
+          <li>Un <strong>certificat digital calificat</strong> (token fizic USB sau certificat soft) emis de o autoritate acreditată (ex. certSIGN, DigiSign, Trans Sped) — instalat și activ în browser.</li>
+          <li>Portul <strong>8787</strong> disponibil pe calculator (nu ocupat de altă aplicație). Dacă primiți eroare de port, configurați un alt port în Setări → ANAF → Configurare avansată.</li>
+        </ul>
       </div>
 
       {isAuthenticated ? (
