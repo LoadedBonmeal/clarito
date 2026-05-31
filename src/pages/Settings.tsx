@@ -207,7 +207,7 @@ export function SettingsPage() {
       const report = await api.feedback.gather();
       const url = await api.feedback.mailto(report, feedbackMsg || undefined);
       await openPath(url);
-      notify.success("Email pregătit în clientul tău de email");
+      notify.success("Email pregătit în clientul dvs. de email");
     } catch (e) {
       notify.error(
         formatError(
@@ -473,7 +473,7 @@ export function SettingsPage() {
             badge="NOU"
           >
             <FieldGroup>
-              <FieldRow label="Mesajul tău (opțional)" htmlFor={feedbackMsgId}>
+              <FieldRow label="Mesajul dvs. (opțional)" htmlFor={feedbackMsgId}>
                 <textarea
                   id={feedbackMsgId}
                   className="input"
@@ -514,7 +514,7 @@ export function SettingsPage() {
                   <strong>Atașăm automat:</strong> versiunea{" "}
                   {appInfo?.version ?? "0.2.0"}, sistemul de operare, machine ID
                   anonimizat, ultimele 50 linii log. La click se deschide clientul
-                  tău de email — nu trimitem nimic fără tine.
+                  dvs. de email — nu trimitem nimic fără dumneavoastră.
                 </div>
               </FieldRow>
             </FieldGroup>

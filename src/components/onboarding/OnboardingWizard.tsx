@@ -748,10 +748,32 @@ function Step4Company({
       <p style={{ fontSize: 13, fontWeight: 600, margin: "0 0 20px", color: "var(--text)" }}>
         {companyName}
       </p>
-      <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 20px", lineHeight: 1.6 }}>
+      <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 16px", lineHeight: 1.6 }}>
         Configurați acum autentificarea <strong>SPV ANAF</strong> pentru a putea
         transmite facturi electronic. Puteți face asta și mai târziu din Setări.
       </p>
+
+      {/* Educational info box */}
+      <div
+        style={{
+          padding: "10px 12px",
+          background: "var(--bg)",
+          border: "1px solid var(--border-soft)",
+          fontSize: 11,
+          color: "var(--text-muted)",
+          lineHeight: 1.6,
+          marginBottom: 16,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+          textAlign: "left",
+        }}
+      >
+        <div><strong style={{ color: "var(--text)" }}>e-Factura</strong> — sistemul ANAF de facturare electronică obligatoriu pentru B2B și B2G în România (CIUS-RO / UBL 2.1).</div>
+        <div><strong style={{ color: "var(--text)" }}>SPV</strong> (Spațiul Privat Virtual) — portalul ANAF prin care se transmit și se recepționează facturile electronice.</div>
+        <div><strong style={{ color: "var(--text)" }}>Certificat digital</strong> — pentru autorizare este necesar un token/certificat calificat emis de o autoritate de certificare.</div>
+      </div>
+
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <button
           type="button"
@@ -820,10 +842,25 @@ function Step5Anaf({
       >
         Conectare SPV ANAF
       </h2>
-      <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 20px", lineHeight: 1.6 }}>
-        Autorizați <strong>{companyName}</strong> pentru autentificare electronică.
-        Veți fi redirecționat în browser pentru a vă loga cu certificatul digital.
+      <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 12px", lineHeight: 1.6 }}>
+        Autorizați <strong>{companyName}</strong> în SPV (Spațiul Privat Virtual ANAF).
+        Veți fi redirecționat în browser — autentificarea se face cu <strong>certificatul digital calificat</strong> (token USB sau soft-cert).
       </p>
+
+      {/* Educational help: what is needed */}
+      <div
+        style={{
+          padding: "8px 12px",
+          background: "var(--bg)",
+          border: "1px solid var(--border-soft)",
+          fontSize: 11,
+          color: "var(--text-muted)",
+          lineHeight: 1.55,
+          marginBottom: 14,
+        }}
+      >
+        <strong style={{ color: "var(--text)" }}>Ce este necesar:</strong> un certificat digital calificat (token fizic sau certificat soft) emis de o autoritate acreditată (ex. certSIGN, DigiSign, Trans Sped). Fără certificat nu se poate autoriza accesul în SPV.
+      </div>
 
       {isAuthenticated ? (
         <div
@@ -873,7 +910,7 @@ function Step5Anaf({
             style={{ width: "100%", justifyContent: "center", height: 30, fontSize: 11 }}
             onClick={onNext}
           >
-            Mai târziu — sari →
+            Nu am certificat încă — configurez mai târziu din Setări
           </button>
         </div>
       )}

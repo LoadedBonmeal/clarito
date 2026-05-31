@@ -290,7 +290,7 @@ export function DashboardPage() {
               </span>{" "}
             </>
           )}
-          În perioada selectată ai emis{" "}
+          În perioada selectată ați emis{" "}
           <span className="b">
             {periodInvoices.length} {periodInvoices.length === 1 ? "factură" : "facturi"}
           </span>{" "}
