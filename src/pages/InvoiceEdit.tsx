@@ -3,13 +3,14 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Icon } from "@/components/shared/Icon";
 import { ContactCombobox } from "@/components/shared/ContactCombobox";
+import { LineItemsEditor } from "@/components/shared/LineItemsEditor";
 import type { LineRow } from "@/components/shared/LineItemsEditor";
 import { useAppStore } from "@/lib/store";
 import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
 import { notify } from "@/lib/toasts";
 import type { Contact, CreateLineInput } from "@/types";
-import { parseDec, fmtRON } from "@/lib/utils";
+import { parseDec } from "@/lib/utils";
 
 function fmtDateRO(iso: string): string {
   const [y, m, d] = iso.split("-");
@@ -90,24 +91,6 @@ export function InvoiceEditPage() {
   const fullNumber = series
     ? `${series}-${String(invoiceNumber).padStart(4, "0")}`
     : "—";
-
-  const net = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
-  const vat = lines.reduce((s, l) => s + l.quantity * l.unitPrice * (l.vatRate / 100), 0);
-  const total = net + vat;
-
-  const addLine = () => setLines((prev) => [...prev, newLineRow()]);
-
-  const removeLine = (idx: number) =>
-    setLines((prev) => prev.filter((_, i) => i !== idx));
-
-  const updateLine = <K extends keyof CreateLineInput>(
-    idx: number,
-    key: K,
-    value: CreateLineInput[K],
-  ) =>
-    setLines((prev) =>
-      prev.map((l, i) => (i === idx ? ({ ...l, [key]: value } as LineRow) : l)),
-    );
 
   const editMutation = useMutation({
     mutationFn: () => {
@@ -332,156 +315,13 @@ export function InvoiceEditPage() {
             <div className="panel-header">
               <span>Linii factură · {lines.length} articole</span>
             </div>
-            <div className="line-items">
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ width: 28 }}>#</th>
-                    <th style={{ width: 110 }}>Cod</th>
-                    <th>Descriere</th>
-                    <th style={{ width: 64 }} className="num">Cant.</th>
-                    <th style={{ width: 56 }}>UM</th>
-                    <th style={{ width: 100 }} className="num">Preț unitar</th>
-                    <th style={{ width: 64 }} className="num">TVA %</th>
-                    <th style={{ width: 110 }} className="num">Valoare net</th>
-                    <th style={{ width: 110 }} className="num">Total cu TVA</th>
-                    <th style={{ width: 28 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((l, i) => {
-                    const lineNet = l.quantity * l.unitPrice;
-                    const lineTotal = lineNet * (1 + l.vatRate / 100);
-                    return (
-                      <tr key={l.rowId}>
-                        <td
-                          style={{
-                            textAlign: "center",
-                            color: "var(--text-dim)",
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          {i + 1}
-                        </td>
-                        <td>
-                          <input
-                            value={l.cpvCode ?? ""}
-                            onChange={(e) => updateLine(i, "cpvCode", e.target.value || undefined)}
-                            className="mono"
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={l.name}
-                            onChange={(e) => updateLine(i, "name", e.target.value)}
-                          />
-                        </td>
-                        <td className="num">
-                          <input
-                            type="number"
-                            value={l.quantity}
-                            onChange={(e) => updateLine(i, "quantity", parseFloat(e.target.value) || 0)}
-                            className="num"
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={l.unit}
-                            onChange={(e) => updateLine(i, "unit", e.target.value)}
-                          />
-                        </td>
-                        <td className="num">
-                          <input
-                            type="number"
-                            value={l.unitPrice}
-                            onChange={(e) => updateLine(i, "unitPrice", parseFloat(e.target.value) || 0)}
-                            className="num"
-                          />
-                        </td>
-                        <td className="num">
-                          <input
-                            type="number"
-                            value={l.vatRate}
-                            onChange={(e) => updateLine(i, "vatRate", parseFloat(e.target.value) || 0)}
-                            className="num"
-                          />
-                        </td>
-                        <td className="num">
-                          <input
-                            value={lineNet.toFixed(2)}
-                            className="num"
-                            readOnly
-                            style={{ color: "var(--text-muted)" }}
-                          />
-                        </td>
-                        <td className="num">
-                          <input
-                            value={lineTotal.toFixed(2)}
-                            className="num"
-                            readOnly
-                            style={{ fontWeight: 600 }}
-                          />
-                        </td>
-                        <td>
-                          <button
-                            className="btn-icon"
-                            onClick={() => removeLine(i)}
-                            disabled={lines.length === 1}
-                          >
-                            <Icon name="trash" size={12} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  <tr className="line-add-row" onClick={addLine} style={{ cursor: "pointer" }}>
-                    <td colSpan={10}>
-                      <Icon name="plus" size={12} /> Adaugă linie
-                    </td>
-                  </tr>
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td colSpan={6} style={{ textAlign: "right", color: "var(--text-muted)" }}>
-                      Subtotal net
-                    </td>
-                    <td className="num"></td>
-                    <td className="num tnum">{fmtRON(net)}</td>
-                    <td className="num"></td>
-                    <td></td>
-                  </tr>
-                  <tr>
-                    <td colSpan={6} style={{ textAlign: "right", color: "var(--text-muted)" }}>
-                      TVA
-                    </td>
-                    <td className="num"></td>
-                    <td className="num tnum">{fmtRON(vat)}</td>
-                    <td className="num"></td>
-                    <td></td>
-                  </tr>
-                  <tr>
-                    <td
-                      colSpan={6}
-                      style={{
-                        textAlign: "right",
-                        textTransform: "uppercase",
-                        fontSize: 11,
-                        letterSpacing: 0.04,
-                      }}
-                    >
-                      Total de plată
-                    </td>
-                    <td className="num"></td>
-                    <td className="num"></td>
-                    <td className="num tnum" style={{ fontSize: 14, color: "var(--accent)" }}>
-                      {fmtRON(total)}{" "}
-                      <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>RON</span>
-                    </td>
-                    <td></td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+            <LineItemsEditor
+              lines={lines}
+              onChange={setLines}
+              buyerCountry={selectedContact?.country ?? "RO"}
+              sellerVatPayer={company?.vatPayer ?? true}
+              showTotals
+            />
           </div>
 
           <div className="panel">

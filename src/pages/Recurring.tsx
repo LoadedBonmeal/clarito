@@ -8,6 +8,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import { LineItemsEditor } from "@/components/shared/LineItemsEditor";
+import type { LineRow } from "@/components/shared/LineItemsEditor";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import type { CreateRecurringArgs } from "@/lib/tauri";
@@ -39,6 +41,20 @@ function nextDatePreview(freq: string, day: number): string {
   return localDateISO(next);
 }
 
+const DEFAULT_LINE: LineRow = {
+  rowId: crypto.randomUUID(),
+  name: "Servicii",
+  quantity: 1,
+  unit: "buc",
+  unitPrice: 0,
+  vatRate: 19,
+  vatCategory: "S",
+};
+
+function makeEmptyLines(): LineRow[] {
+  return [{ ...DEFAULT_LINE, rowId: crypto.randomUUID() }];
+}
+
 const EMPTY_FORM = {
   templateName: "",
   clientId: "",
@@ -47,9 +63,6 @@ const EMPTY_FORM = {
   nextIssueDate: localDateISO(new Date()),
   series: "FCT",
   autoSubmitAnaf: false,
-  linesJson: JSON.stringify([
-    { description: "Servicii", quantity: 1, unitPrice: "0.00", vatRate: 21 }
-  ], null, 2),
   notes: "",
 };
 
@@ -59,6 +72,7 @@ export function RecurringPage() {
 
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [lines, setLines] = useState<LineRow[]>(makeEmptyLines);
   const [linesError, setLinesError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
@@ -88,6 +102,7 @@ export function RecurringPage() {
       notify.success("Factură recurentă creată cu succes");
       setShowModal(false);
       setForm({ ...EMPTY_FORM });
+      setLines(makeEmptyLines());
     },
     onError: (e) => notify.error(formatError(e, 'Nu s-a putut crea șablonul recurent.')),
   });
@@ -114,6 +129,7 @@ export function RecurringPage() {
 
   const handleOpenModal = () => {
     setForm({ ...EMPTY_FORM });
+    setLines(makeEmptyLines());
     setLinesError(null);
     setShowModal(true);
   };
@@ -124,15 +140,23 @@ export function RecurringPage() {
     if (!form.clientId) { notify.warn("Selectați un client."); return; }
     if (!form.series.trim()) { notify.warn("Introduceți seria facturii."); return; }
 
-    // Validate JSON lines
-    try {
-      const parsed = JSON.parse(form.linesJson);
-      if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Cel puțin un articol necesar");
-      setLinesError(null);
-    } catch (e) {
-      setLinesError(e instanceof Error ? `JSON invalid: ${e.message}` : "JSON invalid.");
+    // Validate structured lines
+    if (lines.length === 0) {
+      setLinesError("Adăugați cel puțin un articol.");
       return;
     }
+    for (const [i, line] of lines.entries()) {
+      if (!line.name?.trim()) {
+        setLinesError(`Linia ${i + 1}: denumirea produsului/serviciului este obligatorie.`);
+        return;
+      }
+    }
+    setLinesError(null);
+
+    // Serialize structured lines to JSON for backend (strips rowId)
+    const linesJson = JSON.stringify(
+      lines.map(({ rowId: _rowId, ...rest }) => rest)
+    );
 
     createMutation.mutate({
       companyId: activeCompanyId,
@@ -143,7 +167,7 @@ export function RecurringPage() {
       dayOfMonth: form.dayOfMonth,
       autoSubmitAnaf: form.autoSubmitAnaf,
       series: form.series.trim(),
-      linesJson: form.linesJson,
+      linesJson,
       notes: form.notes.trim() || undefined,
     });
   };
@@ -301,8 +325,8 @@ export function RecurringPage() {
             style={{
               background: "var(--bg-content)",
               border: "1px solid var(--border)",
-              minWidth: 420,
-              maxWidth: 520,
+              minWidth: 900,
+              maxWidth: "96vw",
               maxHeight: "90vh",
               overflowY: "auto",
               boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
@@ -419,33 +443,20 @@ export function RecurringPage() {
                 Trimitere automată la ANAF după emitere
               </label>
 
-              {/* Lines JSON */}
-              <label style={{ fontSize: 11 }}>
-                Articole (JSON) *
-                <textarea
-                  className="field"
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    marginTop: 4,
-                    minHeight: 100,
-                    fontFamily: "monospace",
-                    fontSize: 11,
-                    resize: "vertical",
-                  }}
-                  value={form.linesJson}
-                  onChange={(e) => {
-                    setForm((f) => ({ ...f, linesJson: e.target.value }));
-                    setLinesError(null);
-                  }}
-                />
+              {/* Line items editor */}
+              <div style={{ fontSize: 11 }}>
+                <span style={{ fontWeight: 600 }}>Articole *</span>
+                <div style={{ marginTop: 4 }}>
+                  <LineItemsEditor
+                    lines={lines}
+                    onChange={(updated) => { setLines(updated); setLinesError(null); }}
+                    showTotals={false}
+                  />
+                </div>
                 {linesError && (
                   <span style={{ color: "var(--st-rejected-fg)", fontSize: 10 }}>{linesError}</span>
                 )}
-                <span style={{ color: "var(--text-muted)", fontSize: 10, display: "block", marginTop: 2 }}>
-                  Format: [{"{"}"description":"…","quantity":1,"unitPrice":"100.00","vatRate":19{"}"}]
-                </span>
-              </label>
+              </div>
 
               {/* Notes */}
               <label style={{ fontSize: 11 }}>
