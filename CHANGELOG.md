@@ -1,6 +1,21 @@
 # Changelog
 
-Toate modificările notabile ale RoFactura. Format: [Keep a Changelog](https://keepachangelog.com), versionare [SemVer](https://semver.org).
+Toate modificările notabile ale Clarito (fost RoFactura). Format: [Keep a Changelog](https://keepachangelog.com), versionare [SemVer](https://semver.org).
+
+## [0.4.0] - 2026-06-02
+
+### Changed
+- **Rebranding „Clarito"**: aplicația a fost redenumită din RoFactura în Clarito (nume afișat, titlul ferestrei, installer, marca logo). Identificatorii tehnici (bundle id `com.lucaris.efactura`, folderul de date, cheile de licență, keychain) rămân neschimbați — fără pierdere de date sau licențe la actualizare.
+- **Reproiectare UI completă** — interfață modernă în stil fintech-SaaS (sidebar alb + accent indigo + spațiere aerisită), care înlocuiește shell-ul stil Windows (ribbon + bară de meniu) cu: bară laterală grupată + bară de sus subțire (căutare globală ⌘K, „+ Nou", status ANAF·SPV + Sincronizează, notificări, profil) + paletă de comenzi (⌘K). Set nou de componente („rf"), mod întunecat + densitate reglabilă (Compact/Confortabil/Lejer), animații fluide discrete (cu suport `prefers-reduced-motion`), layout responsiv la redimensionarea ferestrei.
+- Pagini aliniate la designul de referință: **Facturi emise** (toolbar curat — filtru status, perioadă, „Filtre", meniuri Export/Import, acțiuni la hover), **pagină dedicată Stornate**, coloane **Net/TVA** pe Facturi primite, listă curată **Mesaje SPV**, comutator de companie rotunjit, sidebar comprimat centrat.
+- Toate cele 124+ funcționalități backend rămân conectate la noul UI (nicio funcție pierdută — exporturi, filtre, bulk, acțiuni de rând relocate, nu eliminate).
+
+### Fixed
+- Audit complet (securitate/bugs/cod, plan-mode + sub-agenți + QA): curățare listener „click-outside" pe meniul de rând (fără listeneri reziduali), filtru status „În coadă" (QUEUED) adăugat în lista de facturi, gardă „companie activă" pe Facturi primite (updateStatus/reparseVat) și pe importul CSV, encodare `mailto`, eliminare indiciu de tastatură înșelător.
+- Cod curat: eliminare cod mort (icoană/CSS/variabile nefolosite după reproiectare), culori hardcodate înlocuite cu tokeni de temă (light + dark).
+
+### Security
+- Backend Rust neatins funcțional (doar redenumiri de text afișat în tray/email feedback/anteturi export/EULA); **salt-ul de licență + bundle identifier rămân intacte** (licențele și datele existente continuă să funcționeze); CSP strict, fără CDN extern; izolarea pe companie verificată pe toate paginile. Auditul nu a găsit probleme de securitate.
 
 ## [0.3.1] - 2026-05-31
 
