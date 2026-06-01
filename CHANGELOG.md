@@ -12,7 +12,8 @@ Toate modificările notabile ale RoFactura. Format: [Keep a Changelog](https://k
 - Jurnal cumpărări cu coloane reale Net/TVA
 
 ### Security
-- **Izolare multi-companie completă**: TOATE comenzile care citesc/scriu/generează date de companie sunt scope pe `company_id` — facturi (get/update draft/storno/duplicate/delete/status/validate), generare UBL XML/PDF, push SmartBill, submit ANAF (claim DRAFT→QUEUED scope), contacts, recurring, received
+- **Izolare multi-companie completă**: TOATE comenzile care citesc/scriu/generează date de companie sunt scope pe `company_id` — facturi (get/update draft/storno/duplicate/delete/status/validate), generare UBL XML/PDF, push SmartBill, submit ANAF (claim DRAFT→QUEUED scope), contacts (inclusiv get_contact), recurring, received
+- Hardening audit R16: neutralizare CSV formula-injection în export-uri; GDPR șterge și PDF-urile de chitanță; CAS pe schimbarea statusului facturii (anti-TOCTOU); anti-dublă-depunere ANAF la eșec post-upload
 - GDPR: ștergerea totală șterge token-urile ANAF + SmartBill din keychain + `data.db.bak`/backup + log-urile aplicației
 - SmartBill: token stocat în keychain (nu în DB plaintext) + curățare token vechi
 - Secrete HMAC build.rs din variabile de mediu (fallback identic → licențe valide); fingerprint licență aplicat la toate tier-urile
@@ -31,6 +32,9 @@ Toate modificările notabile ale RoFactura. Format: [Keep a Changelog](https://k
 - Stări de eroare (QueryErrorBanner) pe paginile Facturi primite + Plăți
 - Etichete scurtături native macOS/Windows în tooltip-uri (fmtShortcut); Storno din meniu funcțional; Ctrl+S pe editarea facturii
 - Recuperare la mutex de log otrăvit (fără crash); mesaj path log specific platformei
+- Audit R16 (fiscal/UBL): CountrySubentity emis ca cod ISO 3166-2:RO (RO-CJ etc.); validare cod mod de plată (UNCL4461); cantitate stocată la 6 zecimale; jurnal cumpărări exclude facturile RESPINSE; rotunjire per-linie în UI = backend; cotele dezactivate rămân vizibile la editarea facturilor vechi
+- Audit R16 (robustețe): factură primită cu monedă non-RON parsată corect; extragere ZIP rezilientă; cap la paginarea SPV; import CSV nu mai contopește clienții fără CUI; recurring nu mai creează facturi goale; export D300 respectă TVA deductibilă introdusă manual
+- Audit R16 (UX): guard anti-dublu-submit (Enter/Ctrl+S); ecran „factura nu a fost găsită"; tab „Active" funcțional în Articole/Plan conturi; id-uri ARIA unice pe combobox-uri
 
 ## [0.3.0] - 2026-05-31
 
