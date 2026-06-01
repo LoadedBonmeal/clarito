@@ -254,21 +254,6 @@ function Step2({ onStartTrial, onActivate }: Step2Props) {
     staleTime: 0,
   });
 
-  if (!licenseCheckLoading && existingLicense) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <StepTitle icon="shield" title="Licență" sub="Licența dvs. este activă." />
-        <Banner variant="success">
-          Licență activă: <strong>{existingLicense.tier}</strong>
-          {existingLicense.email ? ` — ${existingLicense.email}` : ""}
-        </Banner>
-        <Btn variant="primary" iconRight="chevRight" block onClick={onStartTrial}>
-          Continuă
-        </Btn>
-      </div>
-    );
-  }
-
   const trialMutation = useMutation({
     mutationFn: (trialEmail: string) => api.license.startTrial(trialEmail),
     onSuccess: () => onStartTrial(),
@@ -289,6 +274,21 @@ function Step2({ onStartTrial, onActivate }: Step2Props) {
   });
 
   const isPending = trialMutation.isPending || activateMutation.isPending;
+
+  if (!licenseCheckLoading && existingLicense) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <StepTitle icon="shield" title="Licență" sub="Licența dvs. este activă." />
+        <Banner variant="success">
+          Licență activă: <strong>{existingLicense.tier}</strong>
+          {existingLicense.email ? ` — ${existingLicense.email}` : ""}
+        </Banner>
+        <Btn variant="primary" iconRight="chevRight" block onClick={onStartTrial}>
+          Continuă
+        </Btn>
+      </div>
+    );
+  }
 
   return (
     <div>
