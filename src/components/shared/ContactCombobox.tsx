@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Icon } from "@/components/shared/Icon";
 import { api } from "@/lib/tauri";
@@ -42,6 +42,7 @@ export function ContactCombobox({
   const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listboxId = useId();
 
   // Debounce input → debouncedQuery (250ms)
   useEffect(() => {
@@ -200,13 +201,13 @@ export function ContactCombobox({
         autoComplete="off"
         aria-autocomplete="list"
         aria-expanded={open}
-        aria-controls="contact-combobox-listbox"
+        aria-controls={listboxId}
         role="combobox"
         style={{ width: "100%" }}
       />
       {open && !disabled && (
         <div
-          id="contact-combobox-listbox"
+          id={listboxId}
           role="listbox"
           style={{
             position: "absolute",

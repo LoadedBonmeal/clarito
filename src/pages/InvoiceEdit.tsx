@@ -37,7 +37,7 @@ export function InvoiceEditPage() {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
 
   const { data: invoiceData, isLoading } = useQuery({
-    queryKey: queryKeys.invoices.detail(id),
+    queryKey: [...queryKeys.invoices.detail(id), activeCompanyId],
     queryFn: () => api.invoices.get(id, activeCompanyId ?? ""),
     enabled: !!activeCompanyId,
   });
@@ -152,6 +152,7 @@ export function InvoiceEditPage() {
     (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
+        if (editMutation.isPending) return;
         editMutation.mutate();
       }
     },
@@ -163,7 +164,8 @@ export function InvoiceEditPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
-  if (isLoading || !initialized) {
+  // Still fetching — show spinner
+  if (isLoading) {
     return (
       <div className="content">
         <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>Se încarcă…</div>
@@ -171,12 +173,22 @@ export function InvoiceEditPage() {
     );
   }
 
-  if (!isLoading && !initialized && invoiceData !== undefined) {
+  // Query settled but invoice is null/undefined — 404 / wrong company
+  if (!isLoading && !invoiceData) {
     return (
       <div className="content">
         <div style={{ padding: 24, fontSize: 12, color: "#DC2626" }}>
           Factura nu a fost găsită sau nu poate fi editată.
         </div>
+      </div>
+    );
+  }
+
+  // Query settled with data but form not yet initialized — brief flicker guard
+  if (!initialized) {
+    return (
+      <div className="content">
+        <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>Se încarcă…</div>
       </div>
     );
   }

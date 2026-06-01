@@ -201,10 +201,12 @@ export function InvoiceNewPage() {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
+        if (saveDraftMutation.isPending) return;
         saveDraftMutation.mutate();
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
+        if (saveDraftMutation.isPending) return;
         // Submit to ANAF — save first, then auto-submit in onSuccess
         submitAfterSaveRef.current = true;
         setSubmitError(null);

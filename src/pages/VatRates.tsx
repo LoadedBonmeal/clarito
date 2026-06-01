@@ -271,6 +271,7 @@ function VatRateModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (create.isPending || updateMut.isPending) return;
     setError(null);
     if (!form.rate?.trim()) {
       setError("Cota TVA este obligatorie.");

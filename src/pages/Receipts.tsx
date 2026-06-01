@@ -258,6 +258,7 @@ function ReceiptModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (createMutation.isPending) return;
     setError(null);
     if (!form.amount?.trim() || parseDec(form.amount) <= 0) {
       setError("Suma trebuie să fie pozitivă.");
@@ -382,9 +383,9 @@ function ReceiptModal({
           <MField label="Nr. factură asociată (opțional)">
             <input
               className="field mono"
-              placeholder="ex. FACT-0001"
+              placeholder="ex. FACT-0001 — ID intern, verificat server-side"
               value={form.invoiceId ?? ""}
-              onChange={(e) => setForm((f) => ({ ...f, invoiceId: e.target.value }))}
+              onChange={(e) => setForm((f) => ({ ...f, invoiceId: e.target.value || undefined }))}
             />
           </MField>
 

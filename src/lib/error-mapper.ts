@@ -40,6 +40,14 @@ export function formatError(e: unknown, fallback = 'A apărut o eroare neaștept
       case 'Other':
         console.error('[app-error]', p);
         return fallback;
+      default: {
+        // Exhaustiveness sentinel: if a new AppError variant is added in Rust
+        // without a matching TS case, this line will fail compilation.
+        const _exhaustive: never = p.kind;
+        void _exhaustive;
+        console.error('[app-error:unknown-kind]', p);
+        return fallback;
+      }
     }
   }
   if (typeof e === 'string') return e;

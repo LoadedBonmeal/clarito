@@ -26,6 +26,7 @@ export function ProductsPage() {
   const queryClient = useQueryClient();
 
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "active">("all");
   const [modal, setModal] = useState<"create" | { edit: Product } | null>(null);
 
   const {
@@ -41,14 +42,15 @@ export function ProductsPage() {
   });
 
   const list = useMemo(() => {
+    const base = filter === "active" ? allProducts.filter((p) => p.active) : allProducts;
     const q = query.trim().toLowerCase();
-    if (!q) return allProducts;
-    return allProducts.filter(
+    if (!q) return base;
+    return base.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
         (p.code ?? "").toLowerCase().includes(q),
     );
-  }, [allProducts, query]);
+  }, [allProducts, query, filter]);
 
   const activeCount = allProducts.filter((p) => p.active).length;
 
@@ -112,10 +114,18 @@ export function ProductsPage() {
       </div>
 
       <div className="views-bar">
-        <span className="view-tab active">
+        <span
+          className={`view-tab${filter === "all" ? " active" : ""}`}
+          onClick={() => setFilter("all")}
+          style={{ cursor: "pointer" }}
+        >
           Toate <span className="count">{allProducts.length}</span>
         </span>
-        <span className="view-tab">
+        <span
+          className={`view-tab${filter === "active" ? " active" : ""}`}
+          onClick={() => setFilter("active")}
+          style={{ cursor: "pointer" }}
+        >
           Active <span className="count">{activeCount}</span>
         </span>
       </div>
@@ -332,6 +342,7 @@ function ProductModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (create.isPending || updateMut.isPending) return;
     setError(null);
     if (!form.name?.trim()) {
       setError("Denumirea este obligatorie.");

@@ -10,7 +10,7 @@
  * pentru o versiune viitoare și este în afara scopului acestui modul.
  */
 
-import { useMemo, useState, useId, isValidElement, cloneElement } from "react";
+import { useMemo, useState, useId, isValidElement, cloneElement, Fragment } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm } from "@tauri-apps/plugin-dialog";
 
@@ -44,6 +44,7 @@ export function ChartOfAccountsPage() {
   const queryClient = useQueryClient();
 
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "active">("all");
   const [modal, setModal] = useState<"create" | { edit: Account } | null>(null);
 
   const {
@@ -59,14 +60,15 @@ export function ChartOfAccountsPage() {
   });
 
   const list = useMemo(() => {
+    const base = filter === "active" ? allAccounts.filter((a) => a.active) : allAccounts;
     const q = query.trim().toLowerCase();
-    if (!q) return allAccounts;
-    return allAccounts.filter(
+    if (!q) return base;
+    return base.filter(
       (a) =>
         a.accountCode.toLowerCase().includes(q) ||
         a.accountName.toLowerCase().includes(q),
     );
-  }, [allAccounts, query]);
+  }, [allAccounts, query, filter]);
 
   const activeCount = allAccounts.filter((a) => a.active).length;
 
@@ -160,10 +162,18 @@ export function ChartOfAccountsPage() {
       </div>
 
       <div className="views-bar">
-        <span className="view-tab active">
+        <span
+          className={`view-tab${filter === "all" ? " active" : ""}`}
+          onClick={() => setFilter("all")}
+          style={{ cursor: "pointer" }}
+        >
           Toate <span className="count">{allAccounts.length}</span>
         </span>
-        <span className="view-tab">
+        <span
+          className={`view-tab${filter === "active" ? " active" : ""}`}
+          onClick={() => setFilter("active")}
+          style={{ cursor: "pointer" }}
+        >
           Active <span className="count">{activeCount}</span>
         </span>
       </div>
@@ -250,9 +260,9 @@ export function ChartOfAccountsPage() {
             </thead>
             <tbody>
               {grouped.map(([cls, entries]) => (
-                <>
+                <Fragment key={`cls-${cls ?? "null"}`}>
                   {/* Group header */}
-                  <tr key={`cls-${cls ?? "null"}`}>
+                  <tr>
                     <td
                       colSpan={6}
                       style={{
@@ -315,7 +325,7 @@ export function ChartOfAccountsPage() {
                       </td>
                     </tr>
                   ))}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -400,6 +410,7 @@ function AccountModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (createMut.isPending || updateMut.isPending) return;
     setError(null);
     if (!form.accountCode?.trim()) {
       setError("Codul de cont este obligatoriu.");
