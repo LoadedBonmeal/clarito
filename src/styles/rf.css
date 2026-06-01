@@ -291,7 +291,7 @@ table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
 .rf-sidebar.collapsed .rf-brand-wordmark {
   justify-content: center; padding: 0 8px 4px;
 }
-.rf-nav-badge { font-size: 11px; font-weight: 600; min-width: 20px; height: 19px; padding: 0 6px; border-radius: 999px; display: grid; place-items: center; background: var(--rf-neutral-bg); color: var(--rf-text-muted); font-family: var(--rf-mono); }
+.rf-nav-badge { font-size: 11px; font-weight: 600; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; line-height: 1; font-variant-numeric: tabular-nums; background: var(--rf-neutral-bg); color: var(--rf-text-muted); font-family: var(--rf-mono); }
 .rf-nav-item.active .rf-nav-badge { background: #fff; color: var(--rf-accent); }
 .rf-nav-badge.accent { background: var(--rf-accent); color: #fff; }
 
@@ -554,6 +554,13 @@ table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
 .rf-banner-mt { margin-top: 14px; }
 .rf-field-mt { margin-top: 12px; }
 
+/* ---------- Page transitions ---------- */
+.rf-page { animation: rf-page-in .18s ease-out; }
+@keyframes rf-page-in {
+  from { opacity: 0.4; transform: translateY(5px); }
+  to   { opacity: 1;   transform: none; }
+}
+
 /* ---------- Motion safety (rf-kit supplement — disables all rf animations) ---------- */
 @media (prefers-reduced-motion: reduce) {
   .rf-new-menu,
@@ -564,6 +571,8 @@ table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
   .rf-card,
   .rf-badge,
   .rf-tabs button { animation: none !important; transition: none !important; }
+
+  .rf-page { animation: none !important; }
 
   .rf-sidebar { transition: none !important; }
   .rf-btn, .rf-icon-btn, .rf-nav-item, .rf-topbar-cmd,

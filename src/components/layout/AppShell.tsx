@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useLocation } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 
@@ -173,6 +173,7 @@ interface AppShellProps {
 export function AppShell({ children }: AppShellProps) {
   useTheme();
   const navigate = useNavigate();
+  const location = useLocation();
   const setCommandOpen = useAppStore((s) => s.setCommandOpen);
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const setActiveCompanyId = useAppStore((s) => s.setActiveCompanyId);
@@ -260,7 +261,7 @@ export function AppShell({ children }: AppShellProps) {
         <div className="app-main">
           <TopBar />
           <div className="rf-content">
-            {children}
+            <div className="rf-page" key={location.pathname}>{children}</div>
           </div>
           <StatusBar
             activeCompanyName={activeCompanyName}

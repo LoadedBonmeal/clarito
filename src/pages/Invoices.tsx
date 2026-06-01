@@ -1007,16 +1007,6 @@ export function InvoicesPage() {
         )}
       </div>
 
-      {/* ── Footer status bar ────────────────────────────────────────────── */}
-      <div className="rf-tbl-footer" style={{ padding: "6px 32px" }}>
-        <span>Validate: <b style={{ color: "var(--rf-success)" }}>{counts.VALIDATED}</b></span>
-        <span>Trimise: <b style={{ color: "var(--rf-info)" }}>{counts.SUBMITTED}</b></span>
-        <span>În coadă: <b>{counts.QUEUED}</b></span>
-        <span>Respinse: <b style={{ color: "var(--rf-error)" }}>{counts.REJECTED}</b></span>
-        <span>Schițe: <b>{counts.DRAFT}</b></span>
-        <span>Stornate: <b style={{ color: "var(--rf-warning)" }}>{counts.STORNED}</b></span>
-      </div>
-
       {showImportModal && activeCompanyId && (
         <CsvImportModal
           type="invoices"
