@@ -17,6 +17,7 @@ use tauri::State;
 
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
+use crate::ubl::fx::{amount_to_ron, parse_rate};
 
 // ── Structs ───────────────────────────────────────────────────────────────────
 
@@ -102,13 +103,16 @@ pub async fn compute_d394(
     // Query VALIDATED invoices în perioadă, JOIN contacts pentru CUI + denumire.
     // Agregăm SUM(subtotal_amount), SUM(vat_amount), COUNT(*) per contact.
     // NOTE: subtotal_amount/vat_amount sunt TEXT (migration 006) — parsăm în Rust.
+    // Wave 4: also GROUP_CONCAT currency + exchange_rate for per-invoice RON conversion.
     let rows = sqlx::query(
         "SELECT i.contact_id, \
                 COALESCE(c.cui, '') AS partner_cui, \
                 c.legal_name AS partner_name, \
                 COUNT(*) AS invoice_count, \
                 GROUP_CONCAT(i.subtotal_amount, '|') AS subtotals, \
-                GROUP_CONCAT(i.vat_amount, '|') AS vats \
+                GROUP_CONCAT(i.vat_amount, '|') AS vats, \
+                GROUP_CONCAT(COALESCE(i.currency, 'RON'), '|') AS currencies, \
+                GROUP_CONCAT(COALESCE(CAST(i.exchange_rate AS TEXT), ''), '|') AS rates \
          FROM invoices i \
          JOIN contacts c ON c.id = i.contact_id \
          WHERE i.status = 'VALIDATED' \
@@ -144,16 +148,25 @@ pub async fn compute_d394(
         let invoice_count: i64 = row.try_get("invoice_count").unwrap_or(0);
         let subtotals: String = row.try_get("subtotals").unwrap_or_default();
         let vats: String = row.try_get("vats").unwrap_or_default();
+        let currencies: String = row.try_get("currencies").unwrap_or_default();
+        let rates_s: String = row.try_get("rates").unwrap_or_default();
 
-        let base_sum: Decimal = subtotals
-            .split('|')
-            .map(|s| Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO))
-            .fold(Decimal::ZERO, |acc, v| acc + v);
-
-        let vat_sum: Decimal = vats
-            .split('|')
-            .map(|s| Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO))
-            .fold(Decimal::ZERO, |acc, v| acc + v);
+        // Zip all parallel GROUP_CONCAT arrays for per-invoice RON conversion.
+        let mut base_sum = Decimal::ZERO;
+        let mut vat_sum = Decimal::ZERO;
+        let vat_parts: Vec<&str> = vats.split('|').collect();
+        let currency_parts: Vec<&str> = currencies.split('|').collect();
+        let rate_parts: Vec<&str> = rates_s.split('|').collect();
+        for (idx, sub_s) in subtotals.split('|').enumerate() {
+            let sub = Decimal::from_str(sub_s.trim()).unwrap_or(Decimal::ZERO);
+            let vat = Decimal::from_str(vat_parts.get(idx).copied().unwrap_or("").trim())
+                .unwrap_or(Decimal::ZERO);
+            let currency = currency_parts.get(idx).copied().unwrap_or("RON");
+            let rate_str = rate_parts.get(idx).copied().unwrap_or("").trim();
+            let fx = parse_rate(rate_str.parse::<f64>().ok());
+            base_sum += amount_to_ron(sub, currency, fx);
+            vat_sum += amount_to_ron(vat, currency, fx);
+        }
 
         let acc = partners.entry(contact_id).or_insert(PartnerAcc {
             partner_cui: partner_cui.clone(),
@@ -234,12 +247,17 @@ pub async fn compute_d394(
 
     // Fetch liniile VAT agregate per furnizor (issuer_cui + issuer_name).
     // Include doar furnizorii care au cel puțin o linie parsată (INNER JOIN).
+    // Wave 4: also GROUP_CONCAT currency + exchange_rate per VAT line for RON conversion.
+    // Note: vat_lines are at the line level but the currency/rate lives on the parent invoice.
+    // We join ri to get the rate for each vl row.
     let purchase_rows = sqlx::query(
         "SELECT ri.issuer_cui, \
                 ri.issuer_name, \
                 COUNT(DISTINCT ri.id) AS invoice_count, \
                 GROUP_CONCAT(vl.base_amount, '|') AS bases, \
-                GROUP_CONCAT(vl.vat_amount, '|') AS vats \
+                GROUP_CONCAT(vl.vat_amount, '|') AS vats, \
+                GROUP_CONCAT(COALESCE(ri.currency, 'RON'), '|') AS currencies, \
+                GROUP_CONCAT(COALESCE(CAST(ri.exchange_rate AS TEXT), ''), '|') AS rates \
          FROM received_invoices ri \
          JOIN received_invoice_vat_lines vl ON vl.received_invoice_id = ri.id \
          WHERE ri.company_id = ?1 \
@@ -272,16 +290,24 @@ pub async fn compute_d394(
         let inv_count: i64 = row.try_get("invoice_count").unwrap_or(0);
         let bases: String = row.try_get("bases").unwrap_or_default();
         let vats_s: String = row.try_get("vats").unwrap_or_default();
+        let currencies: String = row.try_get("currencies").unwrap_or_default();
+        let rates_s: String = row.try_get("rates").unwrap_or_default();
 
-        let base_sum: Decimal = bases
-            .split('|')
-            .map(|s| Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO))
-            .fold(Decimal::ZERO, |acc, v| acc + v);
-
-        let vat_sum: Decimal = vats_s
-            .split('|')
-            .map(|s| Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO))
-            .fold(Decimal::ZERO, |acc, v| acc + v);
+        let mut base_sum = Decimal::ZERO;
+        let mut vat_sum = Decimal::ZERO;
+        let vat_parts: Vec<&str> = vats_s.split('|').collect();
+        let currency_parts: Vec<&str> = currencies.split('|').collect();
+        let rate_parts: Vec<&str> = rates_s.split('|').collect();
+        for (idx, base_s) in bases.split('|').enumerate() {
+            let base = Decimal::from_str(base_s.trim()).unwrap_or(Decimal::ZERO);
+            let vat = Decimal::from_str(vat_parts.get(idx).copied().unwrap_or("").trim())
+                .unwrap_or(Decimal::ZERO);
+            let currency = currency_parts.get(idx).copied().unwrap_or("RON");
+            let rate_str = rate_parts.get(idx).copied().unwrap_or("").trim();
+            let fx = parse_rate(rate_str.parse::<f64>().ok());
+            base_sum += amount_to_ron(base, currency, fx);
+            vat_sum += amount_to_ron(vat, currency, fx);
+        }
 
         let key = (issuer_cui.clone(), issuer_name.clone());
         let acc = suppliers.entry(key).or_insert(SupplierAcc {
@@ -695,6 +721,114 @@ mod tests {
         assert_eq!(partners[0].partner_name, "A"); // 5000 primul
         assert_eq!(partners[1].partner_name, "C"); // 1000 al doilea
         assert_eq!(partners[2].partner_name, "B"); // 100 ultimul
+    }
+
+    // ── Wave 4: FX normalisation ──────────────────────────────────────────────
+
+    /// Wave 4: EUR partner invoice (base=1000, vat=190, rate=5.0) → 5000/950 RON.
+    #[test]
+    fn d394_sales_eur_invoice_converted_to_ron() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+
+        let base_ron = amount_to_ron(
+            Decimal::from_str("1000.00").unwrap(),
+            "EUR",
+            parse_rate(Some(5.0)),
+        );
+        let vat_ron = amount_to_ron(
+            Decimal::from_str("190.00").unwrap(),
+            "EUR",
+            parse_rate(Some(5.0)),
+        );
+        assert_eq!(
+            base_ron,
+            Decimal::from_str("5000.00").unwrap(),
+            "EUR 1000 * 5.0 must equal RON 5000"
+        );
+        assert_eq!(
+            vat_ron,
+            Decimal::from_str("950.00").unwrap(),
+            "EUR 190 * 5.0 must equal RON 950"
+        );
+    }
+
+    /// Wave 4: RON partner invoice is unchanged.
+    #[test]
+    fn d394_sales_ron_invoice_unchanged() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+
+        let base = Decimal::from_str("1000.00").unwrap();
+        let vat = Decimal::from_str("190.00").unwrap();
+        assert_eq!(amount_to_ron(base, "RON", parse_rate(Some(5.0))), base);
+        assert_eq!(amount_to_ron(vat, "RON", parse_rate(Some(5.0))), vat);
+    }
+
+    /// Wave 4: GROUP_CONCAT-style per-row zip accumulation correctly converts
+    /// mixed EUR+RON invoices to RON for a single partner.
+    #[test]
+    fn d394_partner_mixed_currency_accumulation() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+
+        // Simulate two invoices for the same partner:
+        // Invoice A: EUR 1000 base, EUR 190 vat, rate 5.0 → 5000/950 RON
+        // Invoice B: RON 1000 base, RON 190 vat, no rate → 1000/190 RON
+        let subtotal_parts = ["1000.00", "1000.00"];
+        let vat_parts = ["190.00", "190.00"];
+        let currency_parts = ["EUR", "RON"];
+        let rate_parts = ["5", ""];
+
+        let mut base_sum = Decimal::ZERO;
+        let mut vat_sum = Decimal::ZERO;
+        for i in 0..subtotal_parts.len() {
+            let base = Decimal::from_str(subtotal_parts[i]).unwrap();
+            let vat = Decimal::from_str(vat_parts[i]).unwrap();
+            let currency = currency_parts[i];
+            let rate_str = rate_parts[i].trim();
+            let fx = parse_rate(rate_str.parse::<f64>().ok());
+            base_sum += amount_to_ron(base, currency, fx);
+            vat_sum += amount_to_ron(vat, currency, fx);
+        }
+
+        assert_eq!(
+            base_sum,
+            Decimal::from_str("6000.00").unwrap(),
+            "5000+1000=6000 RON aggregate base"
+        );
+        assert_eq!(
+            vat_sum,
+            Decimal::from_str("1140.00").unwrap(),
+            "950+190=1140 RON aggregate vat"
+        );
+    }
+
+    /// Wave 4: EUR purchase (received) line (base=1000, vat=190, rate=5.0) → 5000/950 RON.
+    #[test]
+    fn d394_purchase_eur_line_converted_to_ron() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+
+        let base_ron = amount_to_ron(
+            Decimal::from_str("1000.00").unwrap(),
+            "EUR",
+            parse_rate(Some(5.0)),
+        );
+        let vat_ron = amount_to_ron(
+            Decimal::from_str("190.00").unwrap(),
+            "EUR",
+            parse_rate(Some(5.0)),
+        );
+        assert_eq!(base_ron, Decimal::from_str("5000.00").unwrap());
+        assert_eq!(vat_ron, Decimal::from_str("950.00").unwrap());
+    }
+
+    /// Wave 4: RON purchase line is unchanged.
+    #[test]
+    fn d394_purchase_ron_line_unchanged() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+
+        let base = Decimal::from_str("1000.00").unwrap();
+        let vat = Decimal::from_str("190.00").unwrap();
+        assert_eq!(amount_to_ron(base, "RON", parse_rate(Some(5.0))), base);
+        assert_eq!(amount_to_ron(vat, "RON", parse_rate(Some(5.0))), vat);
     }
 
     /// Verifică că acumularea per furnizor grupează corect achizițiile.

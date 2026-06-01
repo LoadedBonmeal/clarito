@@ -16,6 +16,7 @@ use tauri::State;
 
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
+use crate::ubl::fx::{amount_to_ron, parse_rate};
 
 // ── Structs ───────────────────────────────────────────────────────────────────
 
@@ -119,8 +120,10 @@ pub async fn compute_d300(
     // Fetch liniile de factură pentru grupare TVA — refolosind query-ul din reports.rs.
     // BIZ-12: grupăm după (vat_rate, vat_category) — cote identice cu categorii diferite
     // (e.g. 0% Scutit "E" vs. 0% Zero-rated "Z") rămân rânduri separate.
+    // Wave 4: fetch i.currency + i.exchange_rate for RON normalisation.
     let line_rows = sqlx::query(
-        "SELECT l.vat_rate, l.vat_category, l.subtotal_amount, l.vat_amount \
+        "SELECT l.vat_rate, l.vat_category, l.subtotal_amount, l.vat_amount, \
+                COALESCE(i.currency, 'RON') AS currency, i.exchange_rate \
          FROM invoice_line_items l \
          JOIN invoices i ON i.id = l.invoice_id \
          WHERE i.status = 'VALIDATED' \
@@ -146,15 +149,34 @@ pub async fn compute_d300(
             .unwrap_or_else(|_| String::from("S"));
         let base_s: String = row.try_get("subtotal_amount").unwrap_or_default();
         let vat_s: String = row.try_get("vat_amount").unwrap_or_default();
+        let currency: String = row
+            .try_get("currency")
+            .unwrap_or_else(|_| "RON".to_string());
+        let fx = parse_rate(
+            row.try_get::<Option<f64>, _>("exchange_rate")
+                .unwrap_or(None),
+        );
 
         let rate = Decimal::from_str(&rate_s).unwrap_or(Decimal::ZERO);
         let rate_key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
 
+        // Convert per-line amounts to RON before accumulating (RON rows unchanged).
+        let base_ron = amount_to_ron(
+            Decimal::from_str(&base_s).unwrap_or(Decimal::ZERO),
+            &currency,
+            fx,
+        );
+        let vat_ron = amount_to_ron(
+            Decimal::from_str(&vat_s).unwrap_or(Decimal::ZERO),
+            &currency,
+            fx,
+        );
+
         let e = groups
             .entry((rate_key, category))
             .or_insert((rate, Decimal::ZERO, Decimal::ZERO));
-        e.1 += Decimal::from_str(&base_s).unwrap_or(Decimal::ZERO);
-        e.2 += Decimal::from_str(&vat_s).unwrap_or(Decimal::ZERO);
+        e.1 += base_ron;
+        e.2 += vat_ron;
     }
 
     // Calculăm totalurile și construim Vec<D300Group> descrescător după cotă.
@@ -215,8 +237,10 @@ pub async fn compute_d300(
     let purchase_unparsed_count: i64 = unparsed_count_row.try_get("cnt").unwrap_or(0);
 
     // Fetch liniile VAT din facturile primite (JOIN pentru filtru perioadă + companie).
+    // Wave 4: fetch ri.currency + ri.exchange_rate for RON normalisation.
     let purchase_line_rows = sqlx::query(
-        "SELECT vl.vat_rate, vl.vat_category, vl.base_amount, vl.vat_amount \
+        "SELECT vl.vat_rate, vl.vat_category, vl.base_amount, vl.vat_amount, \
+                COALESCE(ri.currency, 'RON') AS currency, ri.exchange_rate \
          FROM received_invoice_vat_lines vl \
          JOIN received_invoices ri ON ri.id = vl.received_invoice_id \
          WHERE ri.company_id = ?1 \
@@ -241,17 +265,36 @@ pub async fn compute_d300(
             .unwrap_or_else(|_| String::from("S"));
         let base_s: String = row.try_get("base_amount").unwrap_or_default();
         let vat_s: String = row.try_get("vat_amount").unwrap_or_default();
+        let currency: String = row
+            .try_get("currency")
+            .unwrap_or_else(|_| "RON".to_string());
+        let fx = parse_rate(
+            row.try_get::<Option<f64>, _>("exchange_rate")
+                .unwrap_or(None),
+        );
 
         let rate = Decimal::from_str(&rate_s).unwrap_or(Decimal::ZERO);
         let rate_key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
+
+        // Convert per-line amounts to RON before accumulating (RON rows unchanged).
+        let base_ron = amount_to_ron(
+            Decimal::from_str(&base_s).unwrap_or(Decimal::ZERO),
+            &currency,
+            fx,
+        );
+        let vat_ron = amount_to_ron(
+            Decimal::from_str(&vat_s).unwrap_or(Decimal::ZERO),
+            &currency,
+            fx,
+        );
 
         let e = purchase_groups.entry((rate_key, category)).or_insert((
             rate,
             Decimal::ZERO,
             Decimal::ZERO,
         ));
-        e.1 += Decimal::from_str(&base_s).unwrap_or(Decimal::ZERO);
-        e.2 += Decimal::from_str(&vat_s).unwrap_or(Decimal::ZERO);
+        e.1 += base_ron;
+        e.2 += vat_ron;
     }
 
     let mut total_deductible_base = Decimal::ZERO;
@@ -730,6 +773,130 @@ mod tests {
             "Without override, computed deductible must be unchanged"
         );
         assert_eq!(report.net_vat, "95.00");
+    }
+
+    // ── Wave 4: FX normalisation ──────────────────────────────────────────────
+
+    /// Wave 4: EUR sales line (base=1000, vat=190, rate=5.0) → 5000/950 RON.
+    #[test]
+    fn d300_sales_eur_line_converted_to_ron() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+
+        let base_ron = amount_to_ron(
+            Decimal::from_str("1000.00").unwrap(),
+            "EUR",
+            parse_rate(Some(5.0)),
+        );
+        let vat_ron = amount_to_ron(
+            Decimal::from_str("190.00").unwrap(),
+            "EUR",
+            parse_rate(Some(5.0)),
+        );
+        assert_eq!(
+            base_ron,
+            Decimal::from_str("5000.00").unwrap(),
+            "EUR 1000 * 5.0 must equal RON 5000"
+        );
+        assert_eq!(
+            vat_ron,
+            Decimal::from_str("950.00").unwrap(),
+            "EUR 190 * 5.0 must equal RON 950"
+        );
+    }
+
+    /// Wave 4: RON sales line is unchanged (amount_to_ron identity for RON).
+    #[test]
+    fn d300_sales_ron_line_unchanged() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+
+        let base = Decimal::from_str("1000.00").unwrap();
+        let vat = Decimal::from_str("190.00").unwrap();
+        assert_eq!(
+            amount_to_ron(base, "RON", parse_rate(Some(5.0))),
+            base,
+            "RON base must be unchanged"
+        );
+        assert_eq!(
+            amount_to_ron(vat, "RON", parse_rate(Some(5.0))),
+            vat,
+            "RON vat must be unchanged"
+        );
+    }
+
+    /// Wave 4: EUR purchase line (base=1000, vat=190, rate=5.0) → 5000/950 RON.
+    #[test]
+    fn d300_purchase_eur_line_converted_to_ron() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+
+        let base_ron = amount_to_ron(
+            Decimal::from_str("1000.00").unwrap(),
+            "EUR",
+            parse_rate(Some(5.0)),
+        );
+        let vat_ron = amount_to_ron(
+            Decimal::from_str("190.00").unwrap(),
+            "EUR",
+            parse_rate(Some(5.0)),
+        );
+        assert_eq!(base_ron, Decimal::from_str("5000.00").unwrap());
+        assert_eq!(vat_ron, Decimal::from_str("950.00").unwrap());
+    }
+
+    /// Wave 4: RON purchase line is unchanged.
+    #[test]
+    fn d300_purchase_ron_line_unchanged() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+
+        let base = Decimal::from_str("1000.00").unwrap();
+        let vat = Decimal::from_str("190.00").unwrap();
+        assert_eq!(amount_to_ron(base, "RON", parse_rate(Some(5.0))), base);
+        assert_eq!(amount_to_ron(vat, "RON", parse_rate(Some(5.0))), vat);
+    }
+
+    /// Wave 4: Mixed EUR+RON accumulation produces correct RON aggregate for D300 sales.
+    #[test]
+    fn d300_sales_mixed_eur_ron_accumulation() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+        use rust_decimal::prelude::ToPrimitive;
+
+        // EUR invoice: base=1000, vat=190, rate=5.0 → 5000/950 RON
+        // RON invoice: base=1000, vat=190 → 1000/190 RON
+        // Total: base=6000, vat=1140
+        let lines = [
+            ("1000.00", "190.00", "EUR", Some(5.0_f64)),
+            ("1000.00", "190.00", "RON", None),
+        ];
+
+        let mut groups: BTreeMap<(i64, String), (Decimal, Decimal, Decimal)> = BTreeMap::new();
+        for (base_s, vat_s, currency, raw_rate) in &lines {
+            let rate_dec = Decimal::from_str("0.19").unwrap();
+            let rate_key = (rate_dec * Decimal::from(100))
+                .round()
+                .to_i64()
+                .unwrap_or(0);
+            let fx = parse_rate(*raw_rate);
+            let base_ron = amount_to_ron(Decimal::from_str(base_s).unwrap(), currency, fx);
+            let vat_ron = amount_to_ron(Decimal::from_str(vat_s).unwrap(), currency, fx);
+            let e = groups.entry((rate_key, "S".to_string())).or_insert((
+                rate_dec,
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ));
+            e.1 += base_ron;
+            e.2 += vat_ron;
+        }
+
+        let g = &groups[&(19, "S".to_string())];
+        assert_eq!(
+            g.1,
+            Decimal::from_str("6000.00").unwrap(),
+            "Total base must be 5000+1000=6000 RON"
+        );
+        assert_eq!(
+            g.2,
+            Decimal::from_str("1140.00").unwrap(),
+            "Total vat must be 950+190=1140 RON"
+        );
     }
 
     /// Verifică că net_vat = colectată − deductibilă, inclusiv cazul negativ (TVA de recuperat).

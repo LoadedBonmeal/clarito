@@ -64,7 +64,10 @@ fn csv_row(fields: &[&str]) -> String {
 /// Exportă jurnalul de vânzări (CSV) pentru o companie și o perioadă.
 ///
 /// Include toate facturile emise (statuses != DRAFT) din perioadă.
-/// Header: `Numar,Data,Client,CUI,Net,TVA,Total,Status`
+/// Header: `Numar,Data,Client,CUI,Net,TVA,Total,Moneda,Status`
+/// Wave 4: added `Moneda` column so foreign-currency invoices are visible as-is.
+/// Amounts are in the ORIGINAL document currency (journals are operational per-document
+/// lists — do NOT convert to RON here; use D300/D394 for RON fiscal aggregates).
 /// Returnează calea fișierului salvat.
 #[tauri::command]
 pub async fn export_sales_journal(
@@ -77,11 +80,14 @@ pub async fn export_sales_journal(
     let pool = &state.db;
 
     // Fetch invoices non-DRAFT pentru companie în perioadă, JOIN contacts.
+    // Wave 4: also fetch currency so the Moneda column is populated.
     let rows = sqlx::query(
         "SELECT i.full_number, i.issue_date, \
                 COALESCE(c.legal_name, '') AS client_name, \
                 COALESCE(c.cui, '') AS client_cui, \
-                i.subtotal_amount, i.vat_amount, i.total_amount, i.status \
+                i.subtotal_amount, i.vat_amount, i.total_amount, \
+                COALESCE(i.currency, 'RON') AS currency, \
+                i.status \
          FROM invoices i \
          LEFT JOIN contacts c ON c.id = i.contact_id \
          WHERE i.company_id = ?1 \
@@ -101,7 +107,7 @@ pub async fn export_sales_journal(
 
     tokio::task::spawn_blocking(move || {
         let header = csv_row(&[
-            "Numar", "Data", "Client", "CUI", "Net", "TVA", "Total", "Status",
+            "Numar", "Data", "Client", "CUI", "Net", "TVA", "Total", "Moneda", "Status",
         ]);
         let mut lines = vec![header];
 
@@ -113,6 +119,7 @@ pub async fn export_sales_journal(
             let subtotal: String = row.try_get("subtotal_amount").unwrap_or_default();
             let vat: String = row.try_get("vat_amount").unwrap_or_default();
             let total: String = row.try_get("total_amount").unwrap_or_default();
+            let currency: String = row.try_get("currency").unwrap_or_default();
             let status: String = row.try_get("status").unwrap_or_default();
 
             // Text fields neutralized (injection vector); amounts via csv_num
@@ -126,6 +133,7 @@ pub async fn export_sales_journal(
                     csv_num(&subtotal),
                     csv_num(&vat),
                     csv_num(&total),
+                    csv_field(&currency),
                     csv_field(&status),
                 ]
                 .join(","),
@@ -249,6 +257,7 @@ mod tests {
     }
 
     /// Verifică că csv_row îmbină câmpurile cu virgulă.
+    /// Wave 4: sales journal now has 9 fields (added Moneda).
     #[test]
     fn csv_row_joins_with_comma() {
         let row = csv_row(&[
@@ -259,11 +268,12 @@ mod tests {
             "1000.00",
             "190.00",
             "1190.00",
+            "RON",
             "VALIDATED",
         ]);
         assert_eq!(
             row,
-            "FA-001,2024-01-15,SC CLIENT SRL,RO123,1000.00,190.00,1190.00,VALIDATED"
+            "FA-001,2024-01-15,SC CLIENT SRL,RO123,1000.00,190.00,1190.00,RON,VALIDATED"
         );
     }
 
@@ -288,12 +298,13 @@ mod tests {
     }
 
     /// Verifică că header-ul jurnalului de vânzări are coloanele corecte.
+    /// Wave 4: added Moneda column between Total and Status.
     #[test]
     fn sales_journal_header_columns() {
         let header = csv_row(&[
-            "Numar", "Data", "Client", "CUI", "Net", "TVA", "Total", "Status",
+            "Numar", "Data", "Client", "CUI", "Net", "TVA", "Total", "Moneda", "Status",
         ]);
-        assert_eq!(header, "Numar,Data,Client,CUI,Net,TVA,Total,Status");
+        assert_eq!(header, "Numar,Data,Client,CUI,Net,TVA,Total,Moneda,Status");
     }
 
     /// Verifică că header-ul jurnalului de cumpărări are coloanele corecte (cu Net/TVA).
@@ -306,12 +317,14 @@ mod tests {
     }
 
     /// Verifică că jurnalul de vânzări se scrie corect în fișier.
+    /// Wave 4: header now includes Moneda column; EUR row is visible with currency.
     #[test]
     fn sales_journal_writes_to_file() {
         let header = csv_row(&[
-            "Numar", "Data", "Client", "CUI", "Net", "TVA", "Total", "Status",
+            "Numar", "Data", "Client", "CUI", "Net", "TVA", "Total", "Moneda", "Status",
         ]);
-        let row = csv_row(&[
+        // RON invoice
+        let row_ron = csv_row(&[
             "FA-001",
             "2024-01-15",
             "SC ALPHA SRL",
@@ -319,18 +332,36 @@ mod tests {
             "1000.00",
             "190.00",
             "1190.00",
+            "RON",
             "VALIDATED",
         ]);
-        let content = [header, row].join("\r\n");
+        // EUR invoice — amounts stay in original currency, Moneda column shows EUR
+        let row_eur = csv_row(&[
+            "FA-002",
+            "2024-01-20",
+            "SC BETA SRL",
+            "RO654321",
+            "1000.00",
+            "190.00",
+            "1190.00",
+            "EUR",
+            "VALIDATED",
+        ]);
+        let content = [header, row_ron, row_eur].join("\r\n");
 
         let dir = std::env::temp_dir();
         let path = dir.join("test_sales_journal.csv");
         std::fs::write(&path, content.as_bytes()).unwrap();
 
         let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("Numar,Data,Client,CUI,Net,TVA,Total,Status"));
+        assert!(
+            written.contains("Numar,Data,Client,CUI,Net,TVA,Total,Moneda,Status"),
+            "Header must include Moneda column"
+        );
         assert!(written.contains("FA-001"));
         assert!(written.contains("SC ALPHA SRL"));
+        assert!(written.contains("RON"), "RON currency must appear");
+        assert!(written.contains("EUR"), "EUR currency must appear");
         assert!(written.contains("VALIDATED"));
 
         let _ = std::fs::remove_file(&path);

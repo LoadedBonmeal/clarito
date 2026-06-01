@@ -13,6 +13,7 @@ use tauri::State;
 
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
+use crate::ubl::fx::{amount_to_ron, parse_rate};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +76,7 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
 
     // Fetch invoices — include id and storno_of_invoice_id for line-item correlation
     // and credit-note type detection (381 vs 380).
+    // Wave 4: also fetch exchange_rate for RON normalisation of fiscal amounts.
     let invoice_rows = sqlx::query(
         "SELECT \
             i.id, \
@@ -86,6 +88,7 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
             COALESCE(i.vat_amount, '0') AS vat_amount, \
             i.total_amount, \
             COALESCE(i.currency, 'RON') AS currency, \
+            i.exchange_rate, \
             i.storno_of_invoice_id \
          FROM invoices i \
          LEFT JOIN contacts c ON i.contact_id = c.id \
@@ -228,10 +231,20 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
         let currency: String = row
             .try_get("currency")
             .unwrap_or_else(|_| "RON".to_string());
+        let fx_rate = parse_rate(
+            row.try_get::<Option<f64>, _>("exchange_rate")
+                .unwrap_or(None),
+        );
 
         // InvoiceType: 381 = credit note (storno), 380 = commercial invoice
         let storno_of: Option<String> = row.try_get("storno_of_invoice_id").unwrap_or(None);
         let invoice_type = if storno_of.is_some() { "381" } else { "380" };
+
+        // Wave 4: convert invoice-level fiscal amounts to RON for SAF-T.
+        let parse_dec = |s: &str| Decimal::from_str(s.trim()).unwrap_or_default();
+        let net_ron = amount_to_ron(parse_dec(&net_amount), &currency, fx_rate);
+        let vat_ron = amount_to_ron(parse_dec(&vat_amount), &currency, fx_rate);
+        let gross_ron = amount_to_ron(parse_dec(&total_amount), &currency, fx_rate);
 
         xml.push_str("      <Invoice>\n");
         xml_elem(&mut xml, 8, "InvoiceNo", &escape_xml(&full_number));
@@ -239,9 +252,9 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
         xml_elem(&mut xml, 8, "InvoiceType", invoice_type);
         xml_elem(&mut xml, 8, "CustomerName", &escape_xml(&client_name));
         xml_elem(&mut xml, 8, "CustomerTaxID", &escape_xml(&client_cui));
-        xml_elem(&mut xml, 8, "NetTotal", &format_decimal(&net_amount));
-        xml_elem(&mut xml, 8, "VatTotal", &format_decimal(&vat_amount));
-        xml_elem(&mut xml, 8, "GrossTotal", &format_decimal(&total_amount));
+        xml_elem(&mut xml, 8, "NetTotal", &dec_str(&net_ron));
+        xml_elem(&mut xml, 8, "VatTotal", &dec_str(&vat_ron));
+        xml_elem(&mut xml, 8, "GrossTotal", &dec_str(&gross_ron));
         xml_elem(&mut xml, 8, "Currency", &escape_xml(&currency));
 
         // ── Lines ─────────────────────────────────────────────────────────────
@@ -252,6 +265,11 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
 
         xml.push_str("        <Lines>\n");
         for line in &lines {
+            // Wave 4: convert line-level amounts to RON for SAF-T fiscal reporting.
+            let line_net_ron = amount_to_ron(line.subtotal_amount, &currency, fx_rate);
+            let line_vat_ron = amount_to_ron(line.vat_amount, &currency, fx_rate);
+            let line_gross_ron = amount_to_ron(line.total_amount, &currency, fx_rate);
+            let unit_price_ron = amount_to_ron(line.unit_price, &currency, fx_rate);
             xml.push_str("          <Line>\n");
             xml.push_str(&format!(
                 "            <LineNumber>{}</LineNumber>\n",
@@ -267,7 +285,7 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
             ));
             xml.push_str(&format!(
                 "            <UnitPrice>{}</UnitPrice>\n",
-                dec_str(&line.unit_price)
+                dec_str(&unit_price_ron)
             ));
             xml.push_str(&format!(
                 "            <TaxCode>{}</TaxCode>\n",
@@ -279,15 +297,15 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
             ));
             xml.push_str(&format!(
                 "            <NetAmount>{}</NetAmount>\n",
-                dec_str(&line.subtotal_amount)
+                dec_str(&line_net_ron)
             ));
             xml.push_str(&format!(
                 "            <TaxAmount>{}</TaxAmount>\n",
-                dec_str(&line.vat_amount)
+                dec_str(&line_vat_ron)
             ));
             xml.push_str(&format!(
                 "            <GrossAmount>{}</GrossAmount>\n",
-                dec_str(&line.total_amount)
+                dec_str(&line_gross_ron)
             ));
             xml.push_str("          </Line>\n");
         }
@@ -302,8 +320,9 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
             let entry = by_rate
                 .entry(rate_key)
                 .or_insert((Decimal::ZERO, Decimal::ZERO, code));
-            entry.0 += line.subtotal_amount;
-            entry.1 += line.vat_amount;
+            // Wave 4: accumulate RON-converted amounts in DocumentTotals.
+            entry.0 += amount_to_ron(line.subtotal_amount, &currency, fx_rate);
+            entry.1 += amount_to_ron(line.vat_amount, &currency, fx_rate);
         }
 
         if !by_rate.is_empty() {
@@ -374,13 +393,6 @@ fn escape_xml(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-fn format_decimal(s: &str) -> String {
-    match Decimal::from_str(s) {
-        Ok(d) => format!("{:.2}", d.round_dp(2)),
-        Err(_) => "0.00".to_string(),
-    }
-}
-
 fn days_in_month(year: i32, month: u32) -> u32 {
     match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
@@ -428,5 +440,99 @@ mod tests {
         // 19% and 21% are standard rates
         assert_eq!(saft_tax_code(&Decimal::from(19)), "S", "19% must be S");
         assert_eq!(saft_tax_code(&Decimal::from(21)), "S", "21% must be S");
+    }
+
+    // ── Wave 4: FX normalisation ──────────────────────────────────────────────
+
+    /// Wave 4: EUR line (base=1000, vat=190, rate=5.0) → 5000/950 RON in SAF-T.
+    #[test]
+    fn saft_eur_line_converted_to_ron() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+
+        let base_ron = amount_to_ron(
+            Decimal::from_str("1000.00").unwrap(),
+            "EUR",
+            parse_rate(Some(5.0)),
+        );
+        let vat_ron = amount_to_ron(
+            Decimal::from_str("190.00").unwrap(),
+            "EUR",
+            parse_rate(Some(5.0)),
+        );
+        assert_eq!(
+            base_ron,
+            Decimal::from_str("5000.00").unwrap(),
+            "EUR 1000 * 5.0 must equal RON 5000"
+        );
+        assert_eq!(
+            vat_ron,
+            Decimal::from_str("950.00").unwrap(),
+            "EUR 190 * 5.0 must equal RON 950"
+        );
+    }
+
+    /// Wave 4: RON line is unchanged in SAF-T (identity path).
+    #[test]
+    fn saft_ron_line_unchanged() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+
+        let base = Decimal::from_str("1000.00").unwrap();
+        let vat = Decimal::from_str("190.00").unwrap();
+        assert_eq!(
+            amount_to_ron(base, "RON", parse_rate(Some(5.0))),
+            base,
+            "RON base must be unchanged"
+        );
+        assert_eq!(
+            amount_to_ron(vat, "RON", parse_rate(Some(5.0))),
+            vat,
+            "RON vat must be unchanged"
+        );
+    }
+
+    /// Wave 4: DocumentTotals accumulation with EUR line → RON aggregate.
+    #[test]
+    fn saft_document_totals_eur_accumulation() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+        use std::collections::BTreeMap;
+
+        // Two lines on a EUR invoice (rate=5.0):
+        // Line 1: base=1000, vat=190 → 5000/950 RON
+        // Line 2: base=500, vat=95 → 2500/475 RON
+        // Aggregate at 19%: base=7500, vat=1425
+        let lines = [
+            (
+                Decimal::from_str("1000.00").unwrap(),
+                Decimal::from_str("190.00").unwrap(),
+                Decimal::from_str("0.19").unwrap(),
+            ),
+            (
+                Decimal::from_str("500.00").unwrap(),
+                Decimal::from_str("95.00").unwrap(),
+                Decimal::from_str("0.19").unwrap(),
+            ),
+        ];
+        let fx_rate = parse_rate(Some(5.0));
+        let currency = "EUR";
+
+        let mut by_rate: BTreeMap<String, (Decimal, Decimal)> = BTreeMap::new();
+        for (sub, vat, rate) in &lines {
+            let key = format!("{:.2}", rate);
+            let entry = by_rate.entry(key).or_insert((Decimal::ZERO, Decimal::ZERO));
+            entry.0 += amount_to_ron(*sub, currency, fx_rate);
+            entry.1 += amount_to_ron(*vat, currency, fx_rate);
+        }
+
+        let totals = &by_rate["0.19"];
+        assert_eq!(
+            totals.0,
+            Decimal::from_str("7500.00").unwrap(),
+            "EUR line aggregate base must be 5000+2500=7500 RON"
+        );
+        assert_eq!(
+            totals.1,
+            Decimal::from_str("1425.00").unwrap(),
+            "EUR line aggregate vat must be 950+475=1425 RON"
+        );
     }
 }
