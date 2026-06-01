@@ -291,6 +291,7 @@ export function TopBar() {
         </button>
         {profileOpen && (
           <div
+            className="rf-profile-menu"
             style={{
               position: "absolute",
               top: "calc(100% + 8px)",

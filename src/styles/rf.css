@@ -12,7 +12,7 @@
   font-size: 13.5px; font-weight: 600; line-height: 1;
   border-radius: var(--rf-radius-sm);
   border: 1px solid transparent; cursor: pointer;
-  white-space: nowrap; transition: background .12s, border-color .12s, color .12s, box-shadow .12s;
+  white-space: nowrap; transition: background .12s ease, border-color .12s ease, color .12s ease, box-shadow .12s ease, transform .06s ease;
   user-select: none; font-family: var(--rf-font);
 }
 .rf-btn:active { transform: translateY(0.5px); }
@@ -100,7 +100,7 @@ table.rf-tbl thead th {
   padding: 0 16px; height: 42px; white-space: nowrap;
   border-bottom: 1px solid var(--rf-border);
 }
-.rf-tbl-wrap { overflow: auto; }
+.rf-tbl-wrap { overflow-x: auto; overflow-y: visible; }
 table.rf-tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
 table.rf-tbl thead th.right { text-align: right; }
 table.rf-tbl thead th.sortable { cursor: pointer; user-select: none; }
@@ -111,6 +111,7 @@ table.rf-tbl tbody td {
   color: var(--rf-text); vertical-align: middle;
 }
 table.rf-tbl tbody tr:last-child td { border-bottom: none; }
+table.rf-tbl tbody tr { transition: background .1s ease; }
 table.rf-tbl tbody tr:hover td { background: var(--rf-hover); }
 table.rf-tbl tbody tr.selected td { background: var(--rf-selected); }
 table.rf-tbl tbody tr.clickable { cursor: pointer; }
@@ -204,6 +205,7 @@ table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
   border: none; background: transparent; color: var(--rf-text-muted);
   font-size: 13px; font-weight: 500; padding: 9px 14px; cursor: pointer; font-family: var(--rf-font);
   border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
+  transition: color .14s ease, border-bottom-color .14s ease;
 }
 .rf-tabs button:hover { color: var(--rf-text); }
 .rf-tabs button.active { color: var(--rf-accent); border-bottom-color: var(--rf-accent); font-weight: 600; }
@@ -239,7 +241,7 @@ table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
   width: 248px; flex-shrink: 0; background: var(--rf-sidebar);
   border-right: 1px solid var(--rf-border); overflow-y: auto;
   display: flex; flex-direction: column; padding: 22px 14px 16px;
-  transition: width .16s;
+  transition: width .22s cubic-bezier(.4,0,.2,1), padding .22s cubic-bezier(.4,0,.2,1);
 }
 .rf-sidebar.collapsed { width: 72px; padding: 22px 12px 16px; }
 
@@ -263,7 +265,7 @@ table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
   display: flex; align-items: center; gap: 11px; height: 38px; padding: 0 12px;
   border-radius: var(--rf-radius-sm); cursor: pointer; color: var(--rf-text-muted); font-size: 13.5px; font-weight: 500;
   border: none; background: transparent; width: 100%; text-align: left; font-family: var(--rf-font);
-  transition: background .1s, color .1s;
+  transition: background .12s ease, color .12s ease;
 }
 .rf-nav-item:hover { background: var(--rf-neutral-bg); color: var(--rf-text); }
 .rf-nav-item.active { background: var(--rf-accent-tint); color: var(--rf-accent); font-weight: 600; }
@@ -285,9 +287,11 @@ table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
 }
 .rf-breadcrumb { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--rf-text-dim); min-width: 0; flex-shrink: 1; overflow: hidden; }
 .rf-breadcrumb .rf-crumb { color: var(--rf-text-muted); white-space: nowrap; }
-.rf-breadcrumb .rf-crumb.current { color: var(--rf-text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rf-topbar-cmd { flex: 1 1 auto; min-width: 0; max-width: 420px; display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px 0 12px; border-radius: var(--rf-radius-sm); border: 1px solid var(--rf-border-strong); background: var(--rf-toolbar-2); color: var(--rf-text-dim); font-size: 13px; cursor: text; font-family: var(--rf-font); transition: border-color .12s; }
+.rf-breadcrumb .rf-crumb.current { color: var(--rf-text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.rf-topbar-cmd { flex: 1 1 auto; min-width: 0; max-width: 420px; display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px 0 12px; border-radius: var(--rf-radius-sm); border: 1px solid var(--rf-border-strong); background: var(--rf-toolbar-2); color: var(--rf-text-dim); font-size: 13px; cursor: text; font-family: var(--rf-font); transition: border-color .12s; overflow: hidden; }
 .rf-topbar-cmd:hover { border-color: var(--rf-accent); }
+/* Search label must stay on one line and truncate gracefully */
+.rf-topbar-cmd > span:first-of-type { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rf-topbar-icon { width: 36px; height: 36px; border-radius: var(--rf-radius-sm); display: grid; place-items: center; border: 1px solid var(--rf-border-strong); background: var(--rf-content); color: var(--rf-text-muted); cursor: pointer; position: relative; flex-shrink: 0; transition: color .12s, border-color .12s; }
 .rf-topbar-icon:hover { color: var(--rf-text); border-color: var(--rf-accent); }
 .rf-topbar-icon .rf-badge-dot { position: absolute; top: 8px; right: 9px; width: 7px; height: 7px; border-radius: 50%; background: var(--rf-error); border: 1.5px solid var(--rf-content); }
@@ -306,14 +310,17 @@ table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
 @keyframes rf-spin { to { transform: rotate(360deg); } }
 
 /* +Nou menu */
-.rf-new-menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; width: 230px; padding: 6px; background: var(--rf-content); border: 1px solid var(--rf-border); border-radius: var(--rf-radius); box-shadow: var(--rf-shadow-md); }
+.rf-new-menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; width: 230px; padding: 6px; background: var(--rf-content); border: 1px solid var(--rf-border); border-radius: var(--rf-radius); box-shadow: var(--rf-shadow-md); animation: rf-pop .14s ease-out both; transform-origin: top right; }
 .rf-new-menu button { display: flex; width: 100%; gap: 11px; align-items: center; border: none; background: transparent; padding: 9px 11px; cursor: pointer; border-radius: var(--rf-radius-sm); font-size: 13.5px; color: var(--rf-text); text-align: left; font-family: var(--rf-font); transition: background .1s, color .1s; }
 .rf-new-menu button:hover { background: var(--rf-accent-tint); color: var(--rf-accent); }
 .rf-new-menu button:hover .rf-menu-ic { color: var(--rf-accent); }
 .rf-new-menu .rf-menu-ic { color: var(--rf-text-muted); }
 
+/* Profile menu (same pop animation, targeting via class we add in TSX) */
+.rf-profile-menu { animation: rf-pop .14s ease-out both; transform-origin: top right; }
+
 /* ---------- Shell: Content area ---------- */
-.rf-content { flex: 1; overflow-y: auto; display: flex; flex-direction: column; background: var(--rf-app-bg); }
+.rf-content { flex: 1; overflow-y: auto; display: flex; flex-direction: column; background: var(--rf-app-bg); min-width: 0; }
 
 /* ---------- Shell: Status bar ---------- */
 .rf-statusbar {
@@ -328,8 +335,8 @@ table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
 .rf-license-chip { background: var(--rf-accent-tint); color: var(--rf-accent); font-weight: 600; padding: 3px 10px; border-radius: 999px; font-size: 11px; }
 
 /* ---------- Command palette ---------- */
-.rf-palette-overlay { position: fixed; inset: 0; background: var(--rf-overlay); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; z-index: 300; animation: rf-fade .12s ease; }
-.rf-palette { width: 600px; max-width: calc(100vw - 40px); background: var(--rf-content); border: 1px solid var(--rf-border); border-radius: var(--rf-radius-lg); box-shadow: var(--rf-shadow-md); overflow: hidden; display: flex; flex-direction: column; max-height: 64vh; animation: rf-pop .14s ease; }
+.rf-palette-overlay { position: fixed; inset: 0; background: var(--rf-overlay); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; z-index: 300; animation: rf-fade .12s ease both; }
+.rf-palette { width: 600px; max-width: calc(100vw - 40px); background: var(--rf-content); border: 1px solid var(--rf-border); border-radius: var(--rf-radius-lg); box-shadow: var(--rf-shadow-md); overflow: hidden; display: flex; flex-direction: column; max-height: 64vh; animation: rf-pop .14s ease both; transform-origin: top center; }
 .rf-palette-search { display: flex; align-items: center; gap: 11px; padding: 15px 18px; border-bottom: 1px solid var(--rf-border); }
 .rf-palette-search input { flex: 1; border: none; outline: none; background: transparent; font-family: var(--rf-font); font-size: 15px; color: var(--rf-text); }
 .rf-palette-search input::placeholder { color: var(--rf-text-dim); }
@@ -352,8 +359,48 @@ table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
 .rf-spacer { flex: 1; }
 
 /* ---------- Animations ---------- */
-@keyframes rf-fade { from { opacity: 0; } }
-@keyframes rf-pop { from { transform: scale(.97); opacity: 0; } }
+@keyframes rf-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rf-pop { from { transform: scale(.97); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes rf-slide-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Stat cards and KPI cards — one-shot gentle mount */
+.rf-stat { animation: rf-slide-in .18s ease-out both; }
+.rf-card { animation: rf-slide-in .16s ease-out both; }
+
+/* Badge mount */
+.rf-badge { animation: rf-pop .12s ease-out both; }
+
+/* ---------- Responsive: TopBar ---------- */
+
+/* Ensure the right-side action cluster never shrinks away */
+.rf-topbar > .rf-btn,
+.rf-topbar > .rf-topbar-icon,
+.rf-topbar > div[style*="position: relative"] { flex-shrink: 0; }
+
+/* At ≤1024px: compress gaps and search max-width */
+@media (max-width: 1024px) {
+  .rf-topbar { gap: 10px; padding: 0 16px; }
+  .rf-topbar-cmd { max-width: 280px; font-size: 12.5px; }
+  .rf-breadcrumb { font-size: 12.5px; flex-shrink: 1; }
+  .rf-breadcrumb .rf-crumb.current { max-width: 160px; }
+  /* Spacer shrinks more aggressively so right cluster can breathe */
+  .rf-spacer { flex: 0 1 24px; min-width: 8px; }
+}
+
+/* At ≤880px: collapse the SPV pill to a compact dot + icon,
+   hide long label; shrink search to icon-only trigger */
+@media (max-width: 880px) {
+  .rf-spv-status { display: none; }
+  .rf-spv-div    { display: none; }
+  .rf-spv-pill   { padding: 0 8px; gap: 0; }
+  /* Collapse sync button text via overflow clipping */
+  .rf-spv-sync   { padding: 4px 6px; max-width: 28px; overflow: hidden; }
+
+  /* Search: icon only */
+  .rf-topbar-cmd { max-width: 36px; min-width: 36px; padding: 0 10px; gap: 0; }
+  .rf-topbar-cmd > span { display: none; }
+  .rf-topbar-cmd > svg { flex-shrink: 0; }
+}
 
 /* ---------- Dark overrides ---------- */
 .dark .rf-modal-foot { background: #1A1D26; }
@@ -420,3 +467,19 @@ table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
 .rf-tint { background: var(--rf-accent-tint); }
 .rf-banner-mt { margin-top: 14px; }
 .rf-field-mt { margin-top: 12px; }
+
+/* ---------- Motion safety (rf-kit supplement — disables all rf animations) ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .rf-new-menu,
+  .rf-profile-menu,
+  .rf-palette-overlay,
+  .rf-palette,
+  .rf-stat,
+  .rf-card,
+  .rf-badge,
+  .rf-tabs button { animation: none !important; transition: none !important; }
+
+  .rf-sidebar { transition: none !important; }
+  .rf-btn, .rf-icon-btn, .rf-nav-item, .rf-topbar-cmd,
+  .rf-topbar-icon, .rf-spv-sync, table.rf-tbl tbody tr { transition: none !important; }
+}
