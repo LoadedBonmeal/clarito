@@ -56,6 +56,7 @@ import { ProductsPage } from "@/pages/Products";
 import { ReceiptsPage } from "@/pages/Receipts";
 import { VatRatesPage } from "@/pages/VatRates";
 import { DeclarationsPage } from "@/pages/Declarations";
+import { BankPage } from "@/pages/Bank";
 
 // ─── Layout root ──────────────────────────────────────────────────────────
 
@@ -217,6 +218,12 @@ const accountsRoute = createRoute({
   component: ChartOfAccountsPage,
 });
 
+const bankRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/bank",
+  component: BankPage,
+});
+
 // ─── Build tree + router ──────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -242,6 +249,7 @@ const routeTree = rootRoute.addChildren([
   paymentsRoute,
   recurringRoute,
   declarationsRoute,
+  bankRoute,
 ]);
 
 export const router = createRouter({

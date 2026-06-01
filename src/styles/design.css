@@ -16,7 +16,6 @@
   --bg-content: #FFFFFF;
   --bg-sidebar: #FFFFFF;          /* white sidebar */
   --bg-toolbar: #FFFFFF;          /* flat toolbar */
-  --bg-menubar: #FFFFFF;
   --bg-statusbar: #FFFFFF;
   --bg-table-header: #F9FAFB;
   --bg-row-zebra: #FFFFFF;
@@ -74,24 +73,8 @@
   --table-cell-px: 16px;
 
   /* chrome heights */
-  --menubar-h: 30px;
   --statusbar-h: 34px;
   --sidebar-w: 248px;
-
-  /* ── Ribbon: height derived from primitives (kept for legacy Wave 7 cleanup) ── */
-  --ribbon-pad-top: 6px;
-  --ribbon-btn-icon: 22px;
-  --ribbon-btn-gap: 5px;
-  --ribbon-label-lines: 26px;
-  --ribbon-btnrow-py: 4px;
-  --ribbon-btnrow-pb: 4px;
-  --ribbon-grouplabel-h: 22px;
-  --ribbon-group-px: 8px;
-  --ribbon-h: calc(
-    var(--ribbon-pad-top) + var(--ribbon-btnrow-py)
-    + var(--ribbon-btn-icon) + var(--ribbon-btn-gap) + var(--ribbon-label-lines)
-    + var(--ribbon-btnrow-pb) + var(--ribbon-grouplabel-h)
-  );
 
   /* fonts */
   --font-ui: "Inter", "Segoe UI", "Tahoma", system-ui, sans-serif;
@@ -183,7 +166,6 @@
   --bg-content: #15171F;
   --bg-sidebar: #101219;
   --bg-toolbar: #15171F;
-  --bg-menubar: #15171F;
   --bg-statusbar: #15171F;
   --bg-table-header: #1A1D26;
   --bg-row-zebra: #15171F;
@@ -319,16 +301,6 @@ input, select, textarea { font: inherit; color: inherit; }
   overflow: hidden;
 }
 
-.workspace {
-  display: grid;
-  grid-template-columns: var(--sidebar-w) 1fr;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-
 .content {
   background: var(--bg-content);
   min-width: 0;
@@ -336,283 +308,6 @@ input, select, textarea { font: inherit; color: inherit; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-/* Slot neutru în workspace — nu animat, nu duplică .content */
-.content-shell {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--bg-content);
-}
-
-/* ------------------------------------------------------------------
-   MenuBar
-   ------------------------------------------------------------------ */
-.menubar {
-  background: var(--bg-menubar);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  padding: 0 8px;
-  font-size: 12.5px;
-  user-select: none;
-  position: relative;
-  z-index: 30;
-}
-.menubar-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  padding: 0 14px 0 6px;
-  margin-right: 6px;
-  color: var(--text);
-  border-right: 1px solid var(--border);
-  height: 100%;
-  letter-spacing: -0.01em;
-}
-.menubar-brand-mark {
-  width: 18px; height: 18px;
-  background: var(--accent);
-  display: inline-flex; align-items: center; justify-content: center;
-  color: var(--on-accent);
-  font-weight: 700;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  border-radius: 4px;
-}
-.menubar-item {
-  padding: 5px 12px;
-  cursor: default;
-  position: relative;
-  height: 100%;
-  display: inline-flex;
-  align-items: center;
-  border-radius: 4px;
-  margin: 0 1px;
-}
-.menubar-item:hover, .menubar-item.open {
-  background: var(--accent-soft);
-  color: var(--text);
-}
-.menubar-item u { text-decoration: none; border-bottom: 1.5px solid currentColor; }
-
-.menu-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  min-width: 240px;
-  background: var(--bg-content);
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-pop);
-  padding: 3px 0;
-  z-index: 100;
-  border-radius: 6px;
-}
-.menu-row {
-  display: grid;
-  grid-template-columns: 22px 1fr auto;
-  align-items: center;
-  padding: 4px 10px 4px 4px;
-  gap: 6px;
-  font-size: 12px;
-  cursor: default;
-  white-space: nowrap;
-}
-.menu-row:hover { background: var(--accent); color: var(--on-accent); }
-.menu-row:hover .menu-kbd { color: var(--on-accent); opacity: 0.85; }
-.menu-row .menu-icon { display: inline-flex; align-items: center; justify-content: center; opacity: 0.7; }
-.menu-kbd {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
-}
-.menu-sep { height: 1px; background: var(--border); margin: 3px 6px; }
-.menu-section {
-  padding: 4px 10px 2px;
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-  color: var(--text-dim);
-  text-transform: uppercase;
-}
-
-/* multi-company pill on right side of menubar */
-.menubar-spacer { flex: 1; }
-.menubar-company {
-  display: flex; align-items: center; gap: 8px;
-  padding: 4px 10px;
-  margin: 3px;
-  border: 1px solid var(--border);
-  background: var(--bg-content);
-  font-size: 12px;
-  cursor: pointer;
-  height: 24px;
-  border-radius: 5px;
-  box-shadow: var(--shadow-card);
-  white-space: nowrap;
-  flex-shrink: 0;
-  max-width: 320px;
-  overflow: hidden;
-}
-.menubar-company > * { flex-shrink: 0; white-space: nowrap; }
-.menubar-company:hover { background: var(--accent-soft); }
-.menubar-company .cui {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.menubar-company .swatch {
-  width: 10px; height: 10px;
-  background: var(--accent);
-  border-radius: 2px;
-}
-.menubar-anaf {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 11.5px;
-  padding: 0 12px;
-  border-left: 1px solid var(--border);
-  height: 100%;
-  color: var(--text-muted);
-}
-.anaf-dot {
-  width: 7px; height: 7px;
-  background: #10B981;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px rgba(16,185,129,0.18);
-}
-.anaf-dot.warn { background: #F59E0B; box-shadow: 0 0 0 2px rgba(245,158,11,0.18); }
-.anaf-dot.err  { background: #EF4444; box-shadow: 0 0 0 2px rgba(239,68,68,0.18); }
-
-/* pulsating dot for live ANAF connection */
-.pulse-dot {
-  position: relative;
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: #10B981;
-  flex-shrink: 0;
-}
-.pulse-dot::before, .pulse-dot::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: #10B981;
-  opacity: 0.5;
-  animation: pulse-ring 2.4s ease-out infinite;
-}
-.pulse-dot::after { animation-delay: 1.2s; }
-@keyframes pulse-ring {
-  0%   { transform: scale(1);   opacity: 0.55; }
-  80%  { transform: scale(2.6); opacity: 0; }
-  100% { transform: scale(2.6); opacity: 0; }
-}
-
-/* ------------------------------------------------------------------
-   Ribbon — spacious, clear labels, visible dividers
-   ------------------------------------------------------------------ */
-.ribbon {
-  background: var(--bg-toolbar);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
-  padding: var(--ribbon-pad-top) 0 0;
-  user-select: none;
-  position: relative;
-  z-index: 20;
-  overflow-x: auto;
-  overflow-y: hidden;
-  flex-wrap: nowrap;
-  min-width: 0;
-  width: 100%;
-  overscroll-behavior-x: contain;
-}
-.ribbon-group {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  flex-shrink: 0;
-  position: relative;
-}
-.ribbon-group-buttons {
-  display: flex;
-  align-items: stretch;
-  justify-content: center;
-  gap: 6px;
-  flex: 1;
-  padding: var(--ribbon-btnrow-py) 10px var(--ribbon-btnrow-pb);
-  border-right: 1px solid var(--border-strong);
-}
-.ribbon-group:last-child .ribbon-group-buttons { border-right: 0; padding-right: 10px; }
-.ribbon::-webkit-scrollbar { height: 4px; }
-.ribbon::-webkit-scrollbar-track { background: transparent; }
-.ribbon::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
-.ribbon-group-label {
-  height: var(--ribbon-grouplabel-h);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  padding: 4px 10px;
-  text-indent: 0.06em;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--border-soft);
-  margin-bottom: 2px;
-}
-.ribbon-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  padding: 6px 4px 8px;
-  width: 76px;
-  gap: var(--ribbon-btn-gap);
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: transparent;
-  cursor: pointer;
-  color: var(--text);
-  text-align: center;
-  position: relative;
-  flex-shrink: 0;
-  transition: background 120ms ease, border-color 120ms ease;
-  box-sizing: border-box;
-}
-.ribbon-btn:hover  { background: var(--accent-soft); border-color: var(--accent-border); }
-.ribbon-btn.active { background: var(--accent-soft); border-color: var(--accent); }
-.ribbon-btn .ico {
-  width: var(--ribbon-btn-icon);
-  height: var(--ribbon-btn-icon);
-  display: inline-flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-  color: var(--text);
-}
-.ribbon-btn.primary .ico { color: var(--accent); }
-.ribbon-btn .lbl {
-  font-size: 10.5px;
-  font-weight: 500;
-  line-height: 1.15;
-  color: var(--text);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  width: 100%;
-  word-break: break-word;
-}
-.ribbon-btn .caret {
-  position: absolute;
-  bottom: 2px; right: 3px;
-  font-size: 8px;
-  color: var(--text-dim);
 }
 
 /* ------------------------------------------------------------------
@@ -1392,132 +1087,6 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 
 /* ------------------------------------------------------------------
-   Invoice detail (60/40)
-   ------------------------------------------------------------------ */
-.split-60-40 {
-  display: grid;
-  grid-template-columns: 1.6fr 1fr;
-  gap: 0;
-  height: 100%;
-  min-height: 0;
-}
-.invoice-preview {
-  background: var(--bg);
-  border-right: 1px solid var(--border);
-  padding: 16px;
-  overflow: auto;
-  display: flex; flex-direction: column; align-items: center;
-}
-.invoice-paper {
-  width: 100%;
-  max-width: 620px;
-  background: #FFFFFF;
-  color: #111;
-  padding: 32px 36px;
-  box-shadow: 0 1px 0 rgba(0,0,0,0.08), 0 6px 20px rgba(0,0,0,0.10);
-  border: 1px solid #DDD;
-  font-size: 11.5px;
-}
-.invoice-paper h1 {
-  font-size: 18px; margin: 0 0 4px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.invoice-paper .seal {
-  display: inline-block;
-  padding: 1px 6px;
-  font-size: 9.5px;
-  letter-spacing: 0.12em;
-  background: #D1FAE5;
-  color: #065F46;
-  border: 1px solid #65A30D;
-  text-transform: uppercase;
-  font-weight: 700;
-}
-
-.invoice-paper .ip-grid {
-  display: grid; grid-template-columns: 1fr 1fr;
-  gap: 20px; margin-top: 18px;
-}
-.invoice-paper .ip-label {
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #777;
-}
-.invoice-paper table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 18px;
-  font-size: 11px;
-}
-.invoice-paper th {
-  background: #F2F0EA;
-  text-align: left;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 4px 6px;
-  border-bottom: 1px solid #BBB;
-  font-weight: 600;
-  color: #444;
-}
-.invoice-paper td {
-  padding: 5px 6px;
-  border-bottom: 1px solid #EEE;
-  font-variant-numeric: tabular-nums;
-  vertical-align: top;
-}
-.invoice-paper .totals {
-  margin-top: 12px;
-  margin-left: auto;
-  width: 250px;
-  font-size: 11.5px;
-}
-.invoice-paper .totals .row {
-  display: flex; justify-content: space-between;
-  padding: 2px 0;
-}
-.invoice-paper .totals .grand {
-  border-top: 2px solid #111;
-  font-weight: 700;
-  padding-top: 6px;
-  margin-top: 4px;
-  font-size: 14px;
-}
-
-.invoice-meta {
-  display: flex; flex-direction: column;
-  background: var(--bg-content);
-  overflow: auto;
-  min-width: 0;
-}
-.invoice-meta-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
-.invoice-meta-section h3 {
-  font-size: 10.5px;
-  margin: 0 0 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text-muted);
-  font-weight: 600;
-}
-.invoice-meta-kv {
-  display: grid; grid-template-columns: 110px 1fr;
-  gap: 4px 12px;
-  font-size: 12px;
-}
-.invoice-meta-kv dt { color: var(--text-muted); }
-.invoice-meta-kv dd { margin: 0; color: var(--text); }
-
-/* primary action bar at top of detail */
-.detail-actions {
-  display: flex; flex-wrap: wrap; gap: 6px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-}
-
-/* ------------------------------------------------------------------
    Invoice editor — live RO_CIUS validation panel
    ------------------------------------------------------------------ */
 .editor-split {
@@ -1761,7 +1330,7 @@ input, select, textarea { font: inherit; color: inherit; }
   background: #B45309;
   border-color: #B45309;
 }
-[data-theme="dark"] .callout.callout-warn {
+.dark .callout.callout-warn {
   background: #422C0E;
   border-color: #B45309;
   color: #FCD34D;
@@ -1815,7 +1384,6 @@ input, select, textarea { font: inherit; color: inherit; }
 .dark .btn:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.28); }
 
 .btn-icon     { transition: background 0.1s, color 0.1s, transform 0.06s; }
-.ribbon-btn   { transition: background 0.08s, border-color 0.08s, transform 0.06s; }
 .seg-item     { transition: background 0.1s, color 0.1s; }
 .view-tab     { transition: background 0.1s, color 0.1s; }
 .cbx          { transition: background 0.1s, border-color 0.1s; }
@@ -1826,11 +1394,6 @@ input, select, textarea { font: inherit; color: inherit; }
 /* 2. Press feedback */
 .btn:active       { transform: translateY(1px); box-shadow: none; }
 .btn-icon:active  { transform: translateY(1px); }
-.ribbon-btn:active {
-  background: var(--accent-soft);
-  border-color: var(--accent-border);
-  transform: translateY(1px);
-}
 
 /* 3. Checkbox hover */
 .cbx:hover:not(:checked) { border-color: var(--accent); }
@@ -1979,80 +1542,37 @@ select:hover:not(:focus) {
 
 /* Touch / coarse pointer: enlarge tap targets, remove hover-only cues */
 @media (pointer: coarse) {
-  .ribbon-btn   { min-height: 56px; padding: 8px 6px 10px; width: 80px; }
   .btn-icon     { min-width: 44px; min-height: 44px; }
   .sidebar-item { min-height: 44px; }
-  .menubar-item { min-height: 44px; padding: 0 14px; }
-  /* Remove hover-only affordances; active state takes over */
-  .ribbon-btn:hover     { background: transparent; border-color: transparent; }
-  .ribbon-btn:active    { background: var(--accent-soft); border-color: var(--accent-border); }
 }
-
-/* Ensure ribbon overscroll is always contained (macOS swipe-back safety) */
-.ribbon { overscroll-behavior-x: contain; }
 
 /* ─── Print styles ──────────────────────────────────────────────────────── */
 @media print {
-  .menubar,
-  .ribbon,
-  .sidebar,
-  .statusbar,
-  .status-bar,
-  .palette-scrim,
-  .content-titlebar,
-  .views-bar,
-  .content-toolbar,
-  .bulk-bar,
-  .detail-actions,
-  .invoice-meta,
-  button {
+  /* Hide all rf chrome so only page content prints */
+  .rf-topbar,
+  .rf-sidebar,
+  .rf-statusbar,
+  .rf-page-head,
+  .palette-scrim {
     display: none !important;
   }
 
-  .app {
+  /* Also hide action buttons inside the content area */
+  .rf-btn,
+  .rf-icon-btn {
+    display: none !important;
+  }
+
+  /* Make the app fill the page */
+  .app,
+  .app-main {
     display: block !important;
   }
 
-  .workspace {
-    display: block !important;
-  }
-
-  .content-shell {
+  .rf-content {
     width: 100% !important;
     height: auto !important;
     overflow: visible !important;
-  }
-
-  .content {
-    display: block !important;
-    height: auto !important;
-    overflow: visible !important;
-  }
-
-  .content-body {
-    overflow: visible !important;
-    height: auto !important;
-  }
-
-  /* Invoice detail: render only the preview pane at full width */
-  .split-60-40 {
-    display: block !important;
-  }
-
-  .invoice-preview {
-    width: 100% !important;
-    max-width: none !important;
-    box-shadow: none !important;
-    border: none !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    overflow: visible !important;
-  }
-
-  .invoice-paper {
-    max-width: none !important;
-    box-shadow: none !important;
-    border: 1px solid #ccc !important;
   }
 
   body, html {
@@ -2064,21 +1584,22 @@ select:hover:not(:focus) {
     margin: 1.5cm;
   }
 
-  .dt {
+  /* Invoice detail: rf-tbl prints cleanly */
+  .rf-tbl {
     width: 100% !important;
     border-collapse: collapse;
     font-size: 10pt;
   }
 
-  .dt th,
-  .dt td {
+  .rf-tbl th,
+  .rf-tbl td {
     border: 1px solid #ccc !important;
     padding: 4px 6px !important;
     background: #fff !important;
     color: #000 !important;
   }
 
-  .dt thead th {
+  .rf-tbl thead th {
     background: #1e3a5f !important;
     color: #fff !important;
     -webkit-print-color-adjust: exact;
