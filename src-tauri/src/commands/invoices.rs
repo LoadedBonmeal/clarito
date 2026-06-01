@@ -277,6 +277,7 @@ pub async fn update_invoice_draft(
             vat_amount          = ?11,
             total_amount        = ?12,
             payment_means_code  = ?13,
+            exchange_rate       = ?15,
             updated_at          = unixepoch()
         WHERE id = ?1 AND company_id = ?14",
     )
@@ -294,6 +295,8 @@ pub async fn update_invoice_draft(
     .bind(total)
     .bind(update_pmc)
     .bind(&company_id)
+    // R17 fix: persist exchange_rate on draft edit (was dropped — non-RON rate lost).
+    .bind(input.exchange_rate)
     .execute(&mut *tx)
     .await?;
 
