@@ -128,6 +128,15 @@ table.rf-tbl tfoot td {
 .rf-cell-actions { display: flex; gap: 2px; justify-content: flex-end; opacity: 0; transition: opacity .1s; }
 table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
 
+/* Hover-reveal row checkbox — hidden by default, shown on hover or when selected */
+.rf-row-check { opacity: 0; transition: opacity .12s; }
+table.rf-tbl tbody tr:hover .rf-row-check { opacity: 1; }
+table.rf-tbl tbody tr.selected .rf-row-check { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rf-row-check { transition: none !important; }
+}
+
 /* ---------- Inputs / Fields ---------- */
 .rf-field { display: flex; flex-direction: column; gap: 5px; }
 .rf-field > label { font-size: 12px; font-weight: 500; color: var(--rf-text-muted); }

@@ -784,7 +784,7 @@ export function InvoicesPage() {
           {/* Refresh */}
           <IconBtn icon="refresh" title="Reîncarcă" onClick={() => void refetchPaged()} />
 
-          {/* Export ▾ */}
+          {/* Export ▾ (Export + Import sections) */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <ToolbarBtn>
@@ -792,7 +792,10 @@ export function InvoicesPage() {
                 <ChevDown />
               </ToolbarBtn>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" style={{ minWidth: 160 }}>
+            <DropdownMenuContent align="end" style={{ minWidth: 180 }}>
+              <DropdownMenuLabel style={{ fontSize: 11, color: "var(--rf-text-dim)", padding: "4px 8px" }}>
+                Export
+              </DropdownMenuLabel>
               <DropdownMenuItem onClick={() => void handleExportSaga()}>
                 <Icon name="download" size={14} />
                 SAGA CSV
@@ -801,18 +804,10 @@ export function InvoicesPage() {
                 <Icon name="table" size={14} />
                 {t("invoices.exportXlsx")}
               </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Import ▾ */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <ToolbarBtn>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel style={{ fontSize: 11, color: "var(--rf-text-dim)", padding: "4px 8px" }}>
                 Import
-                <ChevDown />
-              </ToolbarBtn>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" style={{ minWidth: 160 }}>
+              </DropdownMenuLabel>
               <DropdownMenuItem onClick={() => void handleImportXml()}>
                 <Icon name="upload" size={14} />
                 Import XML
@@ -848,17 +843,19 @@ export function InvoicesPage() {
             <table className="rf-tbl" style={{ width: "100%" }}>
               <thead>
                 <tr>
-                  <th style={{ width: 40, paddingLeft: 16 }}>
-                    <input
-                      type="checkbox"
-                      checked={selected.size === list.length && list.length > 0}
-                      onChange={() =>
-                        setSelected(
-                          selected.size === list.length ? new Set() : new Set(list.map((i) => i.id))
-                        )
-                      }
-                      style={{ accentColor: "var(--rf-accent)", width: 14, height: 14 }}
-                    />
+                  <th style={{ width: 36, paddingLeft: 16 }}>
+                    {selected.size > 0 && (
+                      <input
+                        type="checkbox"
+                        checked={selected.size === list.length && list.length > 0}
+                        onChange={() =>
+                          setSelected(
+                            selected.size === list.length ? new Set() : new Set(list.map((i) => i.id))
+                          )
+                        }
+                        style={{ accentColor: "var(--rf-accent)", width: 14, height: 14 }}
+                      />
+                    )}
                   </th>
                   <th style={{ width: 134 }} className="sortable sorted">
                     {t("invoices.columns.number")}
@@ -903,9 +900,10 @@ export function InvoicesPage() {
                         void navigate({ to: "/invoices/$id", params: { id: inv.id } });
                       }}
                     >
-                      <td style={{ width: 40 }} onClick={(e) => e.stopPropagation()}>
+                      <td style={{ width: 36 }} onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
+                          className="rf-row-check"
                           checked={selected.has(inv.id)}
                           onChange={() => toggleOne(inv.id)}
                           style={{ accentColor: "var(--rf-accent)", width: 14, height: 14 }}
