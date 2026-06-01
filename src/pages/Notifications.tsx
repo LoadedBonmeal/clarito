@@ -186,7 +186,7 @@ export function NotificationsPage() {
       <div className="rf-page-body" style={{ maxWidth: 860, width: "100%" }}>
         <Card>
           {/* Tabs */}
-          <div style={{ padding: "10px 16px 0", borderBottom: "1px solid var(--rf-border)" }}>
+          <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--rf-border)" }}>
             <Segmented options={tabOptions} value={tab} onChange={(v) => setTab(v)} />
           </div>
 
