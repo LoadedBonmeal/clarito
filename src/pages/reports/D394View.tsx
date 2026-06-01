@@ -1,5 +1,6 @@
 /**
- * D394View — D394 livrări grupate pe partener + achiziții (Wave B).
+ * D394View — D394 livrări grupate pe partener + achiziții.
+ * Wave 5 — rf look: SectionCard + rf-tbl + Banner
  */
 
 import { useState } from "react";
@@ -7,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import { Icon } from "@/components/shared/Icon";
+import { SectionCard, Btn, Banner, Badge } from "@/components/rf";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -17,28 +18,26 @@ import { formatError } from "@/lib/error-mapper";
 
 interface Props {
   dateFrom: string;
-  dateTo: string;
+  dateTo:   string;
 }
 
 export function D394View({ dateFrom, dateTo }: Props) {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [exporting, setExporting] = useState(false);
 
-  // periodFrom / periodTo are the first-of-month and last-of-month YYYY-MM-DD strings
   const periodFrom = dateFrom;
-  const periodTo = dateTo;
+  const periodTo   = dateTo;
 
   const {
-    data: report,
+    data:    report,
     isLoading,
     isError,
     error,
     refetch,
   } = useQuery({
     queryKey: ["d394", activeCompanyId ?? "", periodFrom, periodTo],
-    queryFn: () =>
-      api.d394.compute(activeCompanyId!, periodFrom, periodTo),
-    enabled: !!activeCompanyId && !!periodFrom && !!periodTo,
+    queryFn:  () => api.d394.compute(activeCompanyId!, periodFrom, periodTo),
+    enabled:  !!activeCompanyId && !!periodFrom && !!periodTo,
     staleTime: 60_000,
   });
 
@@ -49,9 +48,9 @@ export function D394View({ dateFrom, dateTo }: Props) {
       return;
     }
     const savePath = await saveDialog({
-      title: "Salvează D394 XML",
+      title:       "Salvează D394 XML",
       defaultPath: `d394-${periodFrom}-${periodTo}.xml`,
-      filters: [{ name: "XML", extensions: ["xml"] }],
+      filters:     [{ name: "XML", extensions: ["xml"] }],
     });
     if (!savePath) return;
     setExporting(true);
@@ -66,140 +65,135 @@ export function D394View({ dateFrom, dateTo }: Props) {
     }
   };
 
-  const totalBase = parseDec(report?.totalBase ?? "0");
-  const totalVat = parseDec(report?.totalVat ?? "0");
+  const totalBase         = parseDec(report?.totalBase         ?? "0");
+  const totalVat          = parseDec(report?.totalVat          ?? "0");
   const totalPurchaseBase = parseDec(report?.totalPurchaseBase ?? "0");
-  const totalPurchaseVat = parseDec(report?.totalPurchaseVat ?? "0");
+  const totalPurchaseVat  = parseDec(report?.totalPurchaseVat  ?? "0");
 
   return (
-    <div>
-      {/* ── Header cu buton export ─────────────────────────────────────────── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <h2 style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", letterSpacing: "0.04em", textTransform: "uppercase", margin: 0 }}>
-          D394 — Livrări per partener
-        </h2>
-        <button
-          type="button"
-          className="btn"
-          disabled={exporting || !activeCompanyId}
-          onClick={handleExport}
-        >
-          <Icon name="download" size={12} /> {exporting ? "Export…" : "Exportă D394 (XML)"}
-        </button>
-      </div>
+    <div className="rf-col">
+      {/* ── Livrări (vânzări) ──────────────────────────────────────────── */}
+      <SectionCard
+        icon="declaration"
+        title="D394 — Declarație informativă livrări / achiziții pe partener"
+        actions={
+          <Btn
+            variant="secondary"
+            size="sm"
+            icon="xml"
+            disabled={exporting || !activeCompanyId}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? "Export…" : "Export XML"}
+          </Btn>
+        }
+      >
+        {isLoading ? (
+          <div style={{ padding: "12px 16px", fontSize: 12.5, color: "var(--rf-text-muted)" }}>Se încarcă…</div>
+        ) : isError ? (
+          <div style={{ padding: "0 16px 16px" }}>
+            <QueryErrorBanner error={error} label="raportul D394" onRetry={() => void refetch()} />
+          </div>
+        ) : !report || report.partners.length === 0 ? (
+          <div style={{ padding: "12px 16px", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
+            Nicio livrare validată în perioada selectată.
+          </div>
+        ) : (
+          <div className="rf-tbl-wrap">
+            <table className="rf-tbl">
+              <thead>
+                <tr>
+                  <th>CUI partener</th>
+                  <th>Denumire</th>
+                  <th>Tip</th>
+                  <th className="right">Nr. facturi</th>
+                  <th className="right">Bază impozabilă</th>
+                  <th className="right">TVA</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.partners.map((p, i) => (
+                  <tr key={i}>
+                    <td className="rf-mono">{p.partnerCui || <span style={{ color: "var(--rf-text-dim)" }}>—</span>}</td>
+                    <td style={{ fontWeight: 500 }}>{p.partnerName}</td>
+                    <td><Badge variant="info">Livrări</Badge></td>
+                    <td className="right rf-mono">{p.invoiceCount}</td>
+                    <td className="right rf-mono">{fmtRON(p.base)}</td>
+                    <td className="right rf-mono">{fmtRON(p.vat)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={3}>TOTAL</td>
+                  <td className="right rf-mono">{report.invoiceCount}</td>
+                  <td className="right rf-mono">{fmtRON(totalBase)}</td>
+                  <td className="right rf-mono">{fmtRON(totalVat)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </SectionCard>
 
-      {/* ── Livrări (vânzări) ─────────────────────────────────────────────── */}
-      {isLoading ? (
-        <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Se încarcă…</div>
-      ) : isError ? (
-        <QueryErrorBanner error={error} label="raportul D394" onRetry={() => void refetch()} />
-      ) : !report || report.partners.length === 0 ? (
-        <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>
-          Nicio livrare validată în perioada selectată.
-        </div>
-      ) : (
-        <table className="dt">
-          <thead>
-            <tr>
-              <th>Partener</th>
-              <th style={{ width: 130 }}>CUI</th>
-              <th className="num" style={{ width: 100 }}>Nr. facturi</th>
-              <th className="num" style={{ width: 150 }}>Bază (RON)</th>
-              <th className="num" style={{ width: 130 }}>TVA (RON)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.partners.map((p, i) => (
-              <tr key={i}>
-                <td style={{ fontSize: 11 }}>{p.partnerName}</td>
-                <td className="mono">{p.partnerCui || <span className="muted">—</span>}</td>
-                <td className="num tnum">{p.invoiceCount}</td>
-                <td className="num tnum">{fmtRON(p.base)}</td>
-                <td className="num tnum muted">{fmtRON(p.vat)}</td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr style={{ background: "var(--bg-hover)", fontWeight: 600 }}>
-              <td colSpan={2}>TOTAL</td>
-              <td className="num tnum">{report.invoiceCount}</td>
-              <td className="num tnum">{fmtRON(totalBase)}</td>
-              <td className="num tnum">{fmtRON(totalVat)}</td>
-            </tr>
-          </tfoot>
-        </table>
-      )}
-
-      {/* ── Achiziții (Wave B) ────────────────────────────────────────────── */}
+      {/* ── Achiziții (received invoices) ──────────────────────────────── */}
       {report && (
-        <div style={{ marginTop: 28 }}>
-          <h2 style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 10 }}>
-            D394 — Achiziții per furnizor
-          </h2>
-
-          {/* Notă pentru facturi neparsate */}
+        <SectionCard icon="fileIn" title="D394 — Achiziții per furnizor">
           {report.purchaseUnparsedCount > 0 && (
-            <div
-              style={{
-                padding: "8px 12px",
-                background: "rgba(234,179,8,0.08)",
-                border: "1px solid rgba(234,179,8,0.35)",
-                borderRadius: 4,
-                fontSize: 11,
-                color: "var(--text-muted)",
-                lineHeight: 1.6,
-                marginBottom: 10,
-              }}
-            >
-              <b style={{ color: "var(--text)" }}>
-                {report.purchaseUnparsedCount}{" "}
+            <div style={{ padding: "0 16px 12px" }}>
+              <Banner variant="warning">
+                <b>{report.purchaseUnparsedCount}{" "}
                 {report.purchaseUnparsedCount === 1 ? "factură primită nu are" : "facturi primite nu au"}{" "}
-                încă defalcare TVA
-              </b>{" "}
-              — lista furnizorilor de mai jos este parțială. Folosiți{" "}
-              <b>«Recalculează TVA din XML»</b> în Jurnal cumpărări pentru a completa datele.
+                încă defalcare TVA</b>{" "}
+                — lista furnizorilor este parțială. Folosiți{" "}
+                <b>«Recalculează TVA din XML»</b> în Jurnal cumpărări pentru a completa datele.
+              </Banner>
             </div>
           )}
 
           {report.purchasePartners.length === 0 ? (
-            <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "8px 0" }}>
+            <div style={{ padding: "12px 16px", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
               {report.purchaseInvoiceCount === 0
                 ? "Nicio factură primită în perioada selectată."
                 : "Nicio factură primită cu defalcare TVA parsată. Folosiți «Recalculează TVA din XML» în Jurnal cumpărări."}
             </div>
           ) : (
-            <table className="dt">
-              <thead>
-                <tr>
-                  <th>Furnizor</th>
-                  <th style={{ width: 130 }}>CUI</th>
-                  <th className="num" style={{ width: 100 }}>Nr. facturi</th>
-                  <th className="num" style={{ width: 150 }}>Bază (RON)</th>
-                  <th className="num" style={{ width: 130 }}>TVA (RON)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.purchasePartners.map((p, i) => (
-                  <tr key={i}>
-                    <td style={{ fontSize: 11 }}>{p.partnerName}</td>
-                    <td className="mono">{p.partnerCui || <span className="muted">—</span>}</td>
-                    <td className="num tnum">{p.invoiceCount}</td>
-                    <td className="num tnum">{fmtRON(p.base)}</td>
-                    <td className="num tnum muted">{fmtRON(p.vat)}</td>
+            <div className="rf-tbl-wrap">
+              <table className="rf-tbl">
+                <thead>
+                  <tr>
+                    <th>CUI furnizor</th>
+                    <th>Denumire</th>
+                    <th>Tip</th>
+                    <th className="right">Nr. facturi</th>
+                    <th className="right">Bază impozabilă</th>
+                    <th className="right">TVA</th>
                   </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr style={{ background: "var(--bg-hover)", fontWeight: 600 }}>
-                  <td colSpan={2}>TOTAL ACHIZIȚII (parsate)</td>
-                  <td className="num tnum">{report.purchasePartners.reduce((s, p) => s + p.invoiceCount, 0)}</td>
-                  <td className="num tnum">{fmtRON(totalPurchaseBase)}</td>
-                  <td className="num tnum">{fmtRON(totalPurchaseVat)}</td>
-                </tr>
-              </tfoot>
-            </table>
+                </thead>
+                <tbody>
+                  {report.purchasePartners.map((p, i) => (
+                    <tr key={i}>
+                      <td className="rf-mono">{p.partnerCui || <span style={{ color: "var(--rf-text-dim)" }}>—</span>}</td>
+                      <td style={{ fontWeight: 500 }}>{p.partnerName}</td>
+                      <td><Badge variant="neutral">Achiziții</Badge></td>
+                      <td className="right rf-mono">{p.invoiceCount}</td>
+                      <td className="right rf-mono">{fmtRON(p.base)}</td>
+                      <td className="right rf-mono">{fmtRON(p.vat)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={3}>TOTAL ACHIZIȚII (parsate)</td>
+                    <td className="right rf-mono">{report.purchasePartners.reduce((s, p) => s + p.invoiceCount, 0)}</td>
+                    <td className="right rf-mono">{fmtRON(totalPurchaseBase)}</td>
+                    <td className="right rf-mono">{fmtRON(totalPurchaseVat)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           )}
-        </div>
+        </SectionCard>
       )}
     </div>
   );
