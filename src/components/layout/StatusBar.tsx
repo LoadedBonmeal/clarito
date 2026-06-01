@@ -174,7 +174,7 @@ export function StatusBar({ activeCompanyName, activeCompanyId, companyCount = 0
             onClick={handleClick ?? undefined}
             style={{
               cursor: isTrial ? "pointer" : "default",
-              color: (expired || warn) ? "#D97706" : undefined,
+              color: (expired || warn) ? "var(--rf-warning)" : undefined,
               fontWeight: expired ? 700 : undefined,
             }}
             title={isTrial ? "Cumpărați licența" : undefined}

@@ -43,16 +43,6 @@
   --shadow-card: 0 1px 3px 0 rgba(16,24,40,0.06), 0 1px 2px -1px rgba(16,24,40,0.04);
   --shadow-pop:  0 12px 32px -8px rgba(16,24,40,0.14), 0 4px 10px -4px rgba(16,24,40,0.07);
 
-  /* sidebar accent colors per module (kept for legacy) */
-  --color-facturi: #047857;
-  --color-primite: #B45309;
-  --color-companii: #4F46E5;
-  --color-contacte: #0891B2;
-  --color-rapoarte: #DC2626;
-  --color-banca: #0369A1;
-  --color-stocuri: #65A30D;
-  --color-setari: #51525C;
-
   /* status colors — rf family */
   --st-draft-bg: #F3F4F6;
   --st-draft-fg: #51525C;

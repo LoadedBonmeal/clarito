@@ -68,10 +68,9 @@
 }
 /* Clip overflow only for data-table cards so the table's square corners are
    masked by the card's rounded border. Scoped to cards that actually contain
-   a .rf-tbl (or via the explicit .rf-card--clip modifier) so it never clips
-   absolutely-positioned combobox dropdowns (ContactCombobox / ProductCombobox)
-   that live inside form SectionCards on InvoiceNew/InvoiceEdit. */
-.rf-card--clip,
+   a .rf-tbl so it never clips absolutely-positioned combobox dropdowns
+   (ContactCombobox / ProductCombobox) that live inside form SectionCards
+   on InvoiceNew/InvoiceEdit. */
 .rf-card:has(.rf-tbl) { overflow: hidden; }
 .rf-card-pad { padding: 24px; }
 .rf-card-head {
@@ -253,7 +252,6 @@ table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
 .rf-sidebar.collapsed { width: 72px; padding: 22px 12px 16px; }
 
 .rf-brand-wordmark { display: flex; align-items: center; gap: 9px; padding: 0 8px 4px; }
-.rf-brand-wordmark .rf-logo { width: 30px; height: 30px; border-radius: 8px; background: var(--rf-accent); color: #fff; display: grid; place-items: center; flex-shrink: 0; }
 .rf-brand-wordmark .rf-name { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; color: var(--rf-accent); }
 .rf-sidebar.collapsed .rf-brand-wordmark .rf-name { display: none; }
 
