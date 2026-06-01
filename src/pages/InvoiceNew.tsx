@@ -11,6 +11,9 @@ import { queryClient, queryKeys } from "@/lib/queries";
 import type { AppErrorPayload, Contact, CreateLineInput } from "@/types";
 import { CURRENCIES } from "@/lib/constants";
 import { fmtShortcut } from "@/lib/platform";
+import { notify } from "@/lib/toasts";
+import { fmtRON } from "@/lib/utils";
+import { formatError } from "@/lib/error-mapper";
 import {
   Tooltip,
   TooltipContent,
@@ -75,6 +78,8 @@ export function InvoiceNewPage() {
   const [issueDate, setIssueDate] = useState<string>(todayISO());
   const [dueDate, setDueDate] = useState<string>(plusDaysISO(30));
   const [currency, setCurrency] = useState<string>("RON");
+  const [exchangeRate, setExchangeRate] = useState<string>("");
+  const [bnrLoading, setBnrLoading] = useState(false);
   const [notes, setNotes] = useState<string>("");
   const [paymentMeansCode, setPaymentMeansCode] = useState<string>("30");
   const [paymentMethod, setPaymentMethod] = useState<string>("ot");
@@ -88,6 +93,7 @@ export function InvoiceNewPage() {
   const issueDateId = useId();
   const dueDateId = useId();
   const currencyId = useId();
+  const exchangeRateId = useId();
   const contactId = useId();
   const paymentMethodId = useId();
   const paymentIbanId = useId();
@@ -101,6 +107,35 @@ export function InvoiceNewPage() {
       setCurrency(selectedContact.currency);
     }
   }, [selectedContact]);
+
+  // BNR rate fetch handler
+  async function handleFetchBnrRate() {
+    if (!currency || !issueDate) return;
+    setBnrLoading(true);
+    try {
+      const rate = await api.bnr.fetchRate(currency, issueDate);
+      setExchangeRate(String(rate));
+      notify.success(`Curs BNR preluat: ${rate}`);
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut prelua cursul BNR."));
+    } finally {
+      setBnrLoading(false);
+    }
+  }
+
+  // Compute totals (mirrors LineItemsEditor M2 rounding) for RON-equivalent display
+  const invoiceNet = lines.reduce((s, l) => {
+    const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
+    return s + lineNet;
+  }, 0);
+  const invoiceVat = lines.reduce((s, l) => {
+    const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
+    const lineVat = Math.round(lineNet * (l.vatRate / 100) * 100) / 100;
+    return s + lineVat;
+  }, 0);
+  const invoiceTotal = invoiceNet + invoiceVat;
+  const parsedRate = parseFloat(exchangeRate);
+  const rateValid = currency !== "RON" && Number.isFinite(parsedRate) && parsedRate > 0;
 
   // Track the saved draft ID for live validation
   const [savedId, setSavedId] = useState<string | null>(null);
@@ -146,6 +181,14 @@ export function InvoiceNewPage() {
         if (![0, 5, 9, 11, 19, 21].includes(line.vatRate ?? 21)) lineErrors.push(`Linia ${i + 1}: cota TVA trebuie să fie 0%, 5%, 9%, 11%, 19% sau 21%`);
       });
       if (lineErrors.length > 0) throw new Error(lineErrors.join("\n"));
+      // Validate exchange rate for non-RON invoices (BR-RO-028)
+      if (currency !== "RON") {
+        const rate = parseFloat(exchangeRate);
+        if (!Number.isFinite(rate) || rate <= 0) {
+          notify.warn("Introduceți un curs valutar pozitiv pentru facturi non-RON.");
+          throw new Error("Cursul valutar lipsește sau este invalid.");
+        }
+      }
       // Strip internal rowId before sending to backend
       const apiLines: CreateLineInput[] = lines.map(({ rowId: _rowId, ...rest }) => rest);
       const extraNotes = [
@@ -156,6 +199,7 @@ export function InvoiceNewPage() {
       const finalNotes = extraNotes
         ? (notes ? `${notes}\n${extraNotes}` : extraNotes)
         : notes;
+      const parsedExchangeRate = currency !== "RON" ? parseFloat(exchangeRate) : undefined;
       return api.invoices.createDraft({
         companyId: activeCompanyId,
         contactId: selectedContact.id,
@@ -164,6 +208,7 @@ export function InvoiceNewPage() {
         issueDate,
         dueDate,
         currency,
+        exchangeRate: parsedExchangeRate,
         notes: finalNotes || undefined,
         paymentMeansCode,
         lines: apiLines,
@@ -386,6 +431,41 @@ export function InvoiceNewPage() {
                   </select>
                 </div>
 
+                {currency !== "RON" && (
+                  <>
+                    <label htmlFor={exchangeRateId}>
+                      Curs valutar (RON / 1 {currency})
+                    </label>
+                    <div className="field">
+                      <input
+                        id={exchangeRateId}
+                        className="input mono"
+                        type="number"
+                        min="0.0001"
+                        step="0.0001"
+                        value={exchangeRate}
+                        onChange={(e) => setExchangeRate(e.target.value)}
+                        placeholder="ex: 4.9700"
+                        style={{ width: 120 }}
+                      />
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={handleFetchBnrRate}
+                        disabled={bnrLoading || !issueDate || !currency}
+                        style={{ fontSize: 11 }}
+                      >
+                        {bnrLoading ? "Se preia…" : "Preia curs BNR"}
+                      </button>
+                      {rateValid && (
+                        <span className="muted" style={{ fontSize: 11 }}>
+                          Total RON: {fmtRON(invoiceTotal * parsedRate)}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
+
                 <div className="form-section-title">Cumpărător</div>
                 <label htmlFor={contactId}>Cumpărător</label>
                 <div className="field">
@@ -455,6 +535,30 @@ export function InvoiceNewPage() {
               showTotals
               companyId={activeCompanyId ?? undefined}
             />
+            {rateValid && (
+              <div
+                style={{
+                  padding: "8px 16px",
+                  borderTop: "1px solid var(--border)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2,
+                  fontSize: 12,
+                  color: "var(--text-muted)",
+                }}
+              >
+                <div style={{ fontWeight: 600, color: "var(--text)" }}>
+                  Echivalent RON (curs {parsedRate.toFixed(4)})
+                </div>
+                <div>
+                  Net: <span className="mono">{fmtRON(invoiceNet * parsedRate)} RON</span>
+                  {"  "}·{"  "}
+                  TVA: <span className="mono">{fmtRON(invoiceVat * parsedRate)} RON</span>
+                  {"  "}·{"  "}
+                  Total: <span className="mono" style={{ fontWeight: 600 }}>{fmtRON(invoiceTotal * parsedRate)} RON</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

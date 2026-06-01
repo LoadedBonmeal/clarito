@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useId } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Icon } from "@/components/shared/Icon";
@@ -10,7 +10,9 @@ import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
 import { notify } from "@/lib/toasts";
 import type { Contact, CreateLineInput } from "@/types";
-import { parseDec } from "@/lib/utils";
+import { parseDec, fmtRON } from "@/lib/utils";
+import { formatError } from "@/lib/error-mapper";
+import { CURRENCIES } from "@/lib/constants";
 import { fmtShortcut } from "@/lib/platform";
 
 function fmtDateRO(iso: string): string {
@@ -53,10 +55,16 @@ export function InvoiceEditPage() {
   const [invoiceNumber, setInvoiceNumber] = useState<number>(1);
   const [issueDate, setIssueDate] = useState<string>("");
   const [dueDate, setDueDate] = useState<string>("");
+  const [currency, setCurrency] = useState<string>("RON");
+  const [exchangeRate, setExchangeRate] = useState<string>("");
+  const [bnrLoading, setBnrLoading] = useState(false);
   const [notes, setNotes] = useState<string>("");
   const [paymentMeansCode, setPaymentMeansCode] = useState<string>("30");
   const [lines, setLines] = useState<LineRow[]>([newLineRow()]);
   const [initialized, setInitialized] = useState(false);
+
+  const exchangeRateId = useId();
+  const currencyId = useId();
 
   // Pre-fill form from loaded invoice
   useEffect(() => {
@@ -72,6 +80,8 @@ export function InvoiceEditPage() {
       setInvoiceNumber(inv.number);
       setIssueDate(inv.issueDate);
       setDueDate(inv.dueDate);
+      setCurrency(inv.currency ?? "RON");
+      setExchangeRate(inv.exchangeRate != null ? String(inv.exchangeRate) : "");
       setNotes(inv.notes ?? "");
       setPaymentMeansCode(inv.paymentMeansCode ?? "30");
       setLines(
@@ -90,6 +100,35 @@ export function InvoiceEditPage() {
       setInitialized(true);
     }
   }, [invoiceData, initialized]);
+
+  // BNR rate fetch handler
+  async function handleFetchBnrRate() {
+    if (!currency || !issueDate) return;
+    setBnrLoading(true);
+    try {
+      const rate = await api.bnr.fetchRate(currency, issueDate);
+      setExchangeRate(String(rate));
+      notify.success(`Curs BNR preluat: ${rate}`);
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut prelua cursul BNR."));
+    } finally {
+      setBnrLoading(false);
+    }
+  }
+
+  // Compute totals (mirrors LineItemsEditor M2 rounding) for RON-equivalent display
+  const invoiceNet = lines.reduce((s, l) => {
+    const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
+    return s + lineNet;
+  }, 0);
+  const invoiceVat = lines.reduce((s, l) => {
+    const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
+    const lineVat = Math.round(lineNet * (l.vatRate / 100) * 100) / 100;
+    return s + lineVat;
+  }, 0);
+  const invoiceTotal = invoiceNet + invoiceVat;
+  const parsedRate = parseFloat(exchangeRate);
+  const rateValid = currency !== "RON" && Number.isFinite(parsedRate) && parsedRate > 0;
 
   const fullNumber = series
     ? `${series}-${String(invoiceNumber).padStart(4, "0")}`
@@ -124,8 +163,18 @@ export function InvoiceEditPage() {
         }
       }
 
+      // Validate exchange rate for non-RON invoices (BR-RO-028)
+      if (currency !== "RON") {
+        const rate = parseFloat(exchangeRate);
+        if (!Number.isFinite(rate) || rate <= 0) {
+          notify.warn("Introduceți un curs valutar pozitiv pentru facturi non-RON.");
+          throw new Error("Cursul valutar lipsește sau este invalid.");
+        }
+      }
+
       // Strip internal rowId before sending to backend
       const apiLines: CreateLineInput[] = lines.map(({ rowId: _rowId, ...rest }) => rest);
+      const parsedExchangeRate = currency !== "RON" ? parseFloat(exchangeRate) : undefined;
 
       // R14 Wave A: pass activeCompanyId as explicit ownership argument.
       return api.invoices.updateDraft(id, activeCompanyId, {
@@ -135,7 +184,8 @@ export function InvoiceEditPage() {
         number: invoiceNumber,
         issueDate,
         dueDate,
-        currency: "RON",
+        currency,
+        exchangeRate: parsedExchangeRate,
         notes: notes || undefined,
         paymentMeansCode,
         lines: apiLines,
@@ -301,6 +351,56 @@ export function InvoiceEditPage() {
                   </span>
                 </div>
 
+                <label htmlFor={currencyId}>Monedă</label>
+                <div className="field">
+                  <select
+                    id={currencyId}
+                    className="select"
+                    value={currency}
+                    onChange={(e) => setCurrency(e.target.value)}
+                    style={{ width: 100 }}
+                  >
+                    {CURRENCIES.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {currency !== "RON" && (
+                  <>
+                    <label htmlFor={exchangeRateId}>
+                      Curs valutar (RON / 1 {currency})
+                    </label>
+                    <div className="field">
+                      <input
+                        id={exchangeRateId}
+                        className="input mono"
+                        type="number"
+                        min="0.0001"
+                        step="0.0001"
+                        value={exchangeRate}
+                        onChange={(e) => setExchangeRate(e.target.value)}
+                        placeholder="ex: 4.9700"
+                        style={{ width: 120 }}
+                      />
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={handleFetchBnrRate}
+                        disabled={bnrLoading || !issueDate || !currency}
+                        style={{ fontSize: 11 }}
+                      >
+                        {bnrLoading ? "Se preia…" : "Preia curs BNR"}
+                      </button>
+                      {rateValid && (
+                        <span className="muted" style={{ fontSize: 11 }}>
+                          Total RON: {fmtRON(invoiceTotal * parsedRate)}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
+
                 <div className="form-section-title">Cumpărător</div>
                 <label>Cumpărător</label>
                 <div className="field">
@@ -356,6 +456,30 @@ export function InvoiceEditPage() {
               showTotals
               companyId={activeCompanyId ?? undefined}
             />
+            {rateValid && (
+              <div
+                style={{
+                  padding: "8px 16px",
+                  borderTop: "1px solid var(--border)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2,
+                  fontSize: 12,
+                  color: "var(--text-muted)",
+                }}
+              >
+                <div style={{ fontWeight: 600, color: "var(--text)" }}>
+                  Echivalent RON (curs {parsedRate.toFixed(4)})
+                </div>
+                <div>
+                  Net: <span className="mono">{fmtRON(invoiceNet * parsedRate)} RON</span>
+                  {"  "}·{"  "}
+                  TVA: <span className="mono">{fmtRON(invoiceVat * parsedRate)} RON</span>
+                  {"  "}·{"  "}
+                  Total: <span className="mono" style={{ fontWeight: 600 }}>{fmtRON(invoiceTotal * parsedRate)} RON</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="panel">

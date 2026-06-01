@@ -124,3 +124,44 @@ describe("formatNumber", () => {
     expect(result).not.toContain(".00");
   });
 });
+
+describe("RON-equivalent computation (Wave 5 multi-currency)", () => {
+  /**
+   * Helper that mirrors the LineItemsEditor M2 rounding used in the exchange-rate
+   * RON-equivalent display: round each line to 2dp then sum.
+   */
+  function computeTotal(lines: { quantity: number; unitPrice: number; vatRate: number }[]) {
+    const net = lines.reduce((s, l) => {
+      const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
+      return s + lineNet;
+    }, 0);
+    const vat = lines.reduce((s, l) => {
+      const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
+      const lineVat = Math.round(lineNet * (l.vatRate / 100) * 100) / 100;
+      return s + lineVat;
+    }, 0);
+    return { net, vat, total: net + vat };
+  }
+
+  it("computes 1190 EUR × 4.97 = 5914.30 RON", () => {
+    // Single line: qty=10, unitPrice=100 EUR, vatRate=19% → net=1000 EUR, vat=190 EUR, total=1190 EUR
+    const lines = [{ quantity: 10, unitPrice: 100, vatRate: 19 }];
+    const { total } = computeTotal(lines);
+    expect(total).toBeCloseTo(1190, 2);
+    const ronEquiv = Math.round(total * 4.97 * 100) / 100;
+    expect(ronEquiv).toBeCloseTo(5914.3, 1);
+  });
+
+  it("returns 0 for an empty line list", () => {
+    const { total } = computeTotal([]);
+    expect(total).toBe(0);
+  });
+
+  it("applies M2 rounding: each line net is rounded to 2dp before summing", () => {
+    // line: 3 × 10.005 = 30.015 → Math.round(30.015 * 100)/100 = 30.02
+    const lines = [{ quantity: 3, unitPrice: 10.005, vatRate: 0 }];
+    const { net } = computeTotal(lines);
+    // 3 * 10.005 = 30.015, Math.round(30.015 * 100) = 3002, / 100 = 30.02
+    expect(net).toBeCloseTo(30.02, 2);
+  });
+});

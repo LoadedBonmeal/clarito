@@ -229,7 +229,7 @@ export interface CreateInvoiceInput {
   issueDate: string;
   dueDate: string;
   currency?: string;
-  exchangeRate?: number;
+  exchangeRate?: number | null;
   notes?: string;
   paymentMeansCode?: string;
   lines: CreateLineInput[];
@@ -259,6 +259,7 @@ export interface ReceivedInvoice {
   netAmount?: string | null;
   vatAmount?: string | null;
   currency: string;
+  exchangeRate?: number | null;
   issueDate: string;
   xmlPath: string;
   pdfPath: string | null;
