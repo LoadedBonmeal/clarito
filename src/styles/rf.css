@@ -103,7 +103,7 @@ table.rf-tbl thead th {
   background: var(--rf-table-head);
   text-align: left; font-weight: 600; font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
   color: var(--rf-text-dim);
-  padding: 0 16px; height: 42px; white-space: nowrap;
+  padding: 0 16px; height: var(--rf-header-h, 42px); white-space: nowrap;
   border-bottom: 1px solid var(--rf-border);
 }
 .rf-tbl-wrap { overflow-x: auto; overflow-y: visible; }
@@ -136,6 +136,23 @@ table.rf-tbl tbody tr.selected .rf-row-check { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   .rf-row-check { transition: none !important; }
 }
+
+/* ---------- Key-value list (detail pages: CompanyDetail / CompanyEdit) ---------- */
+.rf-kv-list { display: flex; flex-direction: column; gap: 10px; }
+.rf-kv-row { display: grid; grid-template-columns: 170px 1fr; gap: 16px; align-items: start; }
+.rf-kv-label { font-size: 12.5px; color: var(--rf-text-muted); }
+.rf-kv-value { font-size: 13.5px; color: var(--rf-text); word-break: break-word; }
+
+/* ---------- Section sub-title (detail panes) ---------- */
+.rf-sec-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--rf-text-dim); }
+
+/* ---------- Numeric + checkbox table columns (override th left-align) ---------- */
+table.rf-tbl thead th.rf-num, table.rf-tbl tbody td.rf-num { text-align: right; font-variant-numeric: tabular-nums; }
+table.rf-tbl thead th.rf-ck, table.rf-tbl tbody td.rf-ck { width: 36px; text-align: center; padding-left: 16px; padding-right: 0; }
+
+/* ---------- Inline link-button ---------- */
+.rf-link { background: none; border: none; padding: 0; font: inherit; color: var(--rf-accent); cursor: pointer; text-decoration: none; }
+.rf-link:hover { text-decoration: underline; }
 
 /* ---------- Inputs / Fields ---------- */
 .rf-field { display: flex; flex-direction: column; gap: 5px; }
