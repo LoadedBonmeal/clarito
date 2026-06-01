@@ -277,9 +277,9 @@ pub(crate) async fn do_sync_spv(
             "INSERT OR IGNORE INTO received_invoices \
              (id, company_id, anaf_download_id, anaf_index, issuer_cui, issuer_name, \
               series, number, total_amount, currency, issue_date, xml_path, status, \
-              net_amount, vat_amount, \
+              net_amount, vat_amount, exchange_rate, \
               downloaded_at, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'NEW', ?13, ?14, ?15, ?15)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'NEW', ?13, ?14, ?15, ?16, ?16)",
         )
         .bind(&recv_id)
         .bind(company_id)
@@ -295,6 +295,7 @@ pub(crate) async fn do_sync_spv(
         .bind(xml_path.to_string_lossy().as_ref())
         .bind(&parsed.net_amount)
         .bind(&parsed.vat_amount)
+        .bind(parsed.exchange_rate)
         .bind(recv_now)
         .execute(pool)
         .await;
@@ -461,6 +462,8 @@ pub(crate) struct ParsedReceived {
     pub vat_amount: Option<String>,
     /// Câte un ReceivedVatLine pentru fiecare cac:TaxSubtotal.
     pub vat_lines: Vec<ReceivedVatLine>,
+    /// cac:TaxExchangeRate/cbc:CalculationRate (sau PricingExchangeRate ca fallback).
+    pub exchange_rate: Option<f64>,
 }
 
 /// Parsează XML-ul UBL primit de la ANAF folosind quick-xml (namespace-aware).
@@ -497,6 +500,11 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
     let mut depth_tax_total = 0i32; // >0 când suntem în TaxTotal
     let mut depth_tax_subtotal = 0i32; // >0 când suntem în TaxSubtotal (din TaxTotal)
     let mut depth_tax_category = 0i32; // >0 când suntem în TaxCategory (din TaxSubtotal)
+    let mut depth_tax_exchange_rate = 0i32; // >0 când suntem în TaxExchangeRate
+    let mut depth_pricing_exchange_rate = 0i32; // >0 când suntem în PricingExchangeRate
+
+    // Curs de schimb extras din TaxExchangeRate (preferat) sau PricingExchangeRate (fallback)
+    let mut exchange_rate: Option<f64> = None;
 
     // Colectare câmpuri pentru subtotalul curent
     let mut sub_base: Option<String> = None;
@@ -528,6 +536,8 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
                         sub_category = None;
                     }
                     "TaxCategory" if depth_tax_subtotal > 0 => depth_tax_category += 1,
+                    "TaxExchangeRate" => depth_tax_exchange_rate += 1,
+                    "PricingExchangeRate" => depth_pricing_exchange_rate += 1,
                     _ => {}
                 }
                 current_local = local;
@@ -540,6 +550,8 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
                     "PartyLegalEntity" if depth_supplier > 0 => depth_party_legal -= 1,
                     "LegalMonetaryTotal" => depth_monetary_total -= 1,
                     "TaxTotal" => depth_tax_total -= 1,
+                    "TaxExchangeRate" => depth_tax_exchange_rate -= 1,
+                    "PricingExchangeRate" => depth_pricing_exchange_rate -= 1,
                     "TaxSubtotal" if depth_tax_total > 0 && depth_tax_subtotal > 0 => {
                         // Emitem o linie dacă avem cel puțin baza
                         if let Some(base) = sub_base.take() {
@@ -642,6 +654,20 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
                     "ID" if depth_tax_category > 0 && sub_category.is_none() => {
                         sub_category = Some(text);
                     }
+                    // CalculationRate în TaxExchangeRate = cursul de schimb (preferat)
+                    "CalculationRate" if depth_tax_exchange_rate > 0 => {
+                        if let Ok(rate) = text.trim().parse::<f64>() {
+                            exchange_rate = Some(rate);
+                        }
+                    }
+                    // CalculationRate în PricingExchangeRate = fallback dacă nu avem deja
+                    "CalculationRate"
+                        if depth_pricing_exchange_rate > 0 && exchange_rate.is_none() =>
+                    {
+                        if let Ok(rate) = text.trim().parse::<f64>() {
+                            exchange_rate = Some(rate);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -668,6 +694,7 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
         net_amount,
         vat_amount: vat_amount_doc,
         vat_lines,
+        exchange_rate,
     }
 }
 
@@ -847,6 +874,116 @@ mod tests {
             result.unwrap(),
             expected_content,
             "extracted XML must match the invoice.xml entry content"
+        );
+    }
+
+    // ── R17 Wave 3: TaxExchangeRate / CalculationRate parsing ────────────────
+
+    /// TaxExchangeRate present → exchange_rate == Some(4.95)
+    #[test]
+    fn parser_extracts_tax_exchange_rate() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+  <cbc:IssueDate>2024-07-01</cbc:IssueDate>
+  <cac:TaxExchangeRate>
+    <cbc:SourceCurrencyCode>EUR</cbc:SourceCurrencyCode>
+    <cbc:TargetCurrencyCode>RON</cbc:TargetCurrencyCode>
+    <cbc:CalculationRate>4.9500</cbc:CalculationRate>
+  </cac:TaxExchangeRate>
+  <cac:LegalMonetaryTotal>
+    <cbc:PayableAmount currencyID="EUR">100.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>"#;
+        let result = parse_received_xml(xml.as_bytes());
+        assert_eq!(
+            result.exchange_rate,
+            Some(4.95),
+            "TaxExchangeRate/CalculationRate must be parsed into exchange_rate"
+        );
+    }
+
+    /// No TaxExchangeRate or PricingExchangeRate → exchange_rate == None
+    #[test]
+    fn parser_returns_none_exchange_rate_when_absent() {
+        let result = parse_received_xml(SAMPLE_UBL.as_bytes());
+        assert_eq!(
+            result.exchange_rate, None,
+            "exchange_rate must be None when no exchange-rate element is present"
+        );
+    }
+
+    /// PricingExchangeRate used as fallback when TaxExchangeRate is absent
+    #[test]
+    fn parser_uses_pricing_exchange_rate_as_fallback() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:DocumentCurrencyCode>USD</cbc:DocumentCurrencyCode>
+  <cbc:IssueDate>2024-08-01</cbc:IssueDate>
+  <cac:PricingExchangeRate>
+    <cbc:CalculationRate>4.5200</cbc:CalculationRate>
+  </cac:PricingExchangeRate>
+  <cac:LegalMonetaryTotal>
+    <cbc:PayableAmount currencyID="USD">200.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>"#;
+        let result = parse_received_xml(xml.as_bytes());
+        assert_eq!(
+            result.exchange_rate,
+            Some(4.52),
+            "PricingExchangeRate/CalculationRate must be used as fallback exchange_rate"
+        );
+    }
+
+    /// TaxExchangeRate takes priority over PricingExchangeRate when both present
+    #[test]
+    fn parser_prefers_tax_exchange_rate_over_pricing() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+  <cbc:IssueDate>2024-09-01</cbc:IssueDate>
+  <cac:TaxExchangeRate>
+    <cbc:CalculationRate>4.9800</cbc:CalculationRate>
+  </cac:TaxExchangeRate>
+  <cac:PricingExchangeRate>
+    <cbc:CalculationRate>5.1000</cbc:CalculationRate>
+  </cac:PricingExchangeRate>
+  <cac:LegalMonetaryTotal>
+    <cbc:PayableAmount currencyID="EUR">50.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>"#;
+        let result = parse_received_xml(xml.as_bytes());
+        assert_eq!(
+            result.exchange_rate,
+            Some(4.98),
+            "TaxExchangeRate must be preferred over PricingExchangeRate"
+        );
+    }
+
+    /// Stray CalculationRate outside any exchange-rate block must not be captured
+    #[test]
+    fn parser_ignores_calculation_rate_outside_exchange_rate_block() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:DocumentCurrencyCode>RON</cbc:DocumentCurrencyCode>
+  <cbc:IssueDate>2024-10-01</cbc:IssueDate>
+  <cbc:CalculationRate>99.9999</cbc:CalculationRate>
+  <cac:LegalMonetaryTotal>
+    <cbc:PayableAmount currencyID="RON">300.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>"#;
+        let result = parse_received_xml(xml.as_bytes());
+        assert_eq!(
+            result.exchange_rate, None,
+            "CalculationRate outside TaxExchangeRate/PricingExchangeRate must not be captured"
         );
     }
 

@@ -24,6 +24,7 @@ pub struct ReceivedInvoice {
     pub net_amount: Option<String>,
     pub vat_amount: Option<String>,
     pub currency: String,
+    pub exchange_rate: Option<f64>,
     pub issue_date: String,
 
     pub xml_path: String,
@@ -85,7 +86,7 @@ pub async fn list(
     let data_sql = "\
         SELECT id, company_id, anaf_download_id, anaf_index, issuer_cui, \
                issuer_name, series, number, total_amount, net_amount, vat_amount, \
-               currency, issue_date, xml_path, pdf_path, \
+               currency, exchange_rate, issue_date, xml_path, pdf_path, \
                status, downloaded_at, created_at \
         FROM received_invoices \
         WHERE (?1 IS NULL OR company_id = ?1) \
@@ -122,7 +123,7 @@ pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Rec
     sqlx::query_as::<_, ReceivedInvoice>(
         "SELECT id, company_id, anaf_download_id, anaf_index, issuer_cui, \
          issuer_name, series, number, total_amount, net_amount, vat_amount, \
-         currency, issue_date, xml_path, pdf_path, \
+         currency, exchange_rate, issue_date, xml_path, pdf_path, \
          status, downloaded_at, created_at \
          FROM received_invoices WHERE id = ?1 AND company_id = ?2",
     )
