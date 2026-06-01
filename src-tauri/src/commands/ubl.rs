@@ -32,7 +32,7 @@ pub async fn generate_invoice_xml(
     let seller = companies::get(&state.db, &inv.company_id).await?;
 
     // 3. Încarcă cumpărătorul
-    let buyer = contacts::get(&state.db, &inv.contact_id).await?;
+    let buyer = contacts::get(&state.db, &inv.contact_id, &inv.company_id).await?;
 
     // 4. Determină referința storno (dacă există). Preferă FK-ul (BIZ-13),
     //    cu fallback pe parserul notes pentru rândurile vechi.
@@ -85,7 +85,7 @@ pub async fn generate_invoice_pdf(
     let seller = companies::get(&state.db, &inv.company_id).await?;
 
     // 3. Încarcă cumpărătorul
-    let buyer = contacts::get(&state.db, &inv.contact_id).await?;
+    let buyer = contacts::get(&state.db, &inv.contact_id, &inv.company_id).await?;
 
     // 4. Determină referința storno (dacă există). Preferă FK-ul (BIZ-13),
     //    cu fallback pe parserul notes pentru rândurile vechi.

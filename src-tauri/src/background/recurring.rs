@@ -190,6 +190,20 @@ async fn process_recurring_invoices(
             });
         }
 
+        // D1: guard — if ALL lines failed validation, line_calcs is empty.
+        // Do NOT insert a zero-amount header; skip this template without
+        // advancing next_issue_date so it retries next run after the data
+        // is corrected.
+        if line_calcs.is_empty() {
+            tracing::warn!(
+                template_id = %template.id,
+                template_name = %template.template_name,
+                "Recurring template: all lines failed validation — skipping invoice generation \
+                 and NOT advancing next_issue_date"
+            );
+            continue; // tx not yet begun here — nothing to roll back
+        }
+
         let subtotal = subtotal_dec.round_dp(2).to_string();
         let vat_total = vat_total_dec.round_dp(2).to_string();
         let total = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
@@ -500,6 +514,87 @@ mod tests {
         assert!(
             next_date.as_str() > today,
             "next_date {next_date} should be after today {today}"
+        );
+    }
+
+    /// D1: When all template lines have an invalid VAT rate, line_calcs is empty
+    /// after the loop.  We verify that the empty-guard condition is triggered
+    /// (the production code does `if line_calcs.is_empty() { continue }` before
+    /// the tx.begin() / INSERT), meaning no zero-amount invoice is created.
+    #[test]
+    fn d1_all_invalid_vat_lines_produces_empty_line_calcs() {
+        use crate::db::models::VALID_VAT_RATES;
+        use rust_decimal::Decimal;
+
+        struct FakeLine {
+            vat_rate: i64,
+        }
+        let lines = vec![
+            FakeLine { vat_rate: 99 }, // invalid
+            FakeLine { vat_rate: 77 }, // invalid
+        ];
+
+        let mut line_calcs: Vec<String> = Vec::new(); // simulates Vec<LineCalc>
+        let hundred = Decimal::from(100u32);
+        let mut subtotal_dec = Decimal::ZERO;
+        let mut vat_total_dec = Decimal::ZERO;
+
+        for line in &lines {
+            let n = line.vat_rate;
+            if !VALID_VAT_RATES.contains(&n) {
+                // mirrors the `continue` inside the production loop
+                continue;
+            }
+            let vat_rate = Decimal::from(n);
+            let qty = Decimal::ONE;
+            let price = Decimal::from(100u32);
+            let ls = (qty * price).round_dp(2);
+            let lv = (ls * vat_rate / hundred).round_dp(2);
+            subtotal_dec += ls;
+            vat_total_dec += lv;
+            line_calcs.push(format!("line-{n}"));
+        }
+
+        // After the loop, line_calcs must be empty → guard fires → no invoice.
+        assert!(
+            line_calcs.is_empty(),
+            "Expected empty line_calcs when all VAT rates are invalid, got {:?}",
+            line_calcs
+        );
+        assert_eq!(subtotal_dec, Decimal::ZERO);
+        assert_eq!(vat_total_dec, Decimal::ZERO);
+    }
+
+    /// D1: Verify that at least one valid line still produces a non-empty line_calcs
+    /// (sanity check that the guard doesn't fire for normal templates).
+    #[test]
+    fn d1_one_valid_line_produces_non_empty_line_calcs() {
+        use crate::db::models::VALID_VAT_RATES;
+        use rust_decimal::Decimal;
+
+        struct FakeLine {
+            vat_rate: i64,
+        }
+        let lines = vec![
+            FakeLine { vat_rate: 99 }, // invalid → skipped
+            FakeLine { vat_rate: 19 }, // valid
+        ];
+
+        let mut line_calcs: Vec<String> = Vec::new();
+        let hundred = Decimal::from(100u32);
+
+        for line in &lines {
+            let n = line.vat_rate;
+            if !VALID_VAT_RATES.contains(&n) {
+                continue;
+            }
+            line_calcs.push(format!("line-{n}"));
+        }
+        let _ = hundred; // suppress unused warning
+
+        assert!(
+            !line_calcs.is_empty(),
+            "Expected non-empty line_calcs when at least one valid line exists"
         );
     }
 

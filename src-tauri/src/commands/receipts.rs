@@ -105,7 +105,7 @@ pub async fn generate_receipt_pdf(
 
     // 3. Optionally load contact name.
     let contact_name: Option<String> = if let Some(ref cid) = receipt.contact_id {
-        contacts::get(&state.db, cid)
+        contacts::get(&state.db, cid, &company_id)
             .await
             .ok()
             .map(|c| c.legal_name)

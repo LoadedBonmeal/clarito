@@ -378,7 +378,7 @@ pub async fn validate_invoice_draft(
     let seller = companies::get(&state.db, &inv.company_id).await?;
 
     // 3. Load contact (customer)
-    let buyer = contacts::get(&state.db, &inv.contact_id).await?;
+    let buyer = contacts::get(&state.db, &inv.contact_id, &inv.company_id).await?;
 
     // 4. Determină referința storno.
     //    Preferăm FK-ul explicit `storno_of_invoice_id` (BIZ-13). Dacă lipsește

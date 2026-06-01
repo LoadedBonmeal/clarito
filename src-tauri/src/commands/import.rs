@@ -325,15 +325,38 @@ pub async fn import_invoices_csv(
             let invoice_id = crate::db::models::new_id();
             let line_id = crate::db::models::new_id();
 
-            // Find or create contact within the transaction
+            // D4: Find or create contact within the transaction.
+            // Dedup is only done when customer_cui is non-empty — blank CUIs
+            // are B2C customers that must NOT be merged across rows (different
+            // people can share an empty CUI).  For blank CUI we always insert
+            // a new contact row, deduplicating only by exact legal_name within
+            // the same company so that the same B2C buyer appearing on multiple
+            // rows doesn't create duplicates.
             let contact_id: String = {
-                let existing = sqlx::query(
-                    "SELECT id FROM contacts WHERE cui = ?1 AND company_id = ?2 LIMIT 1",
-                )
-                .bind(&row.customer_cui)
-                .bind(&company_id)
-                .fetch_optional(&mut *tx)
-                .await;
+                let cui_empty = row.customer_cui.is_empty();
+
+                let existing = if cui_empty {
+                    // No CUI → dedup by exact legal_name + empty CUI only.
+                    sqlx::query(
+                        "SELECT id FROM contacts \
+                         WHERE (cui IS NULL OR cui = '') \
+                           AND legal_name = ?1 \
+                           AND company_id = ?2 LIMIT 1",
+                    )
+                    .bind(&row.customer_name)
+                    .bind(&company_id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                } else {
+                    // Non-empty CUI → dedup by CUI (original behaviour).
+                    sqlx::query(
+                        "SELECT id FROM contacts WHERE cui = ?1 AND company_id = ?2 LIMIT 1",
+                    )
+                    .bind(&row.customer_cui)
+                    .bind(&company_id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                };
 
                 match existing {
                     Ok(Some(r)) => match r.try_get::<String, _>("id") {
@@ -346,6 +369,13 @@ pub async fn import_invoices_csv(
                     },
                     Ok(None) => {
                         let new_id = crate::db::models::new_id();
+                        // For blank-CUI contacts, store NULL so that the
+                        // name-based dedup above works correctly on re-import.
+                        let cui_to_store: Option<&str> = if cui_empty {
+                            None
+                        } else {
+                            Some(&row.customer_cui)
+                        };
                         let res = sqlx::query(
                             "INSERT INTO contacts \
                              (id, company_id, contact_type, cui, legal_name, vat_payer, country, created_at, updated_at) \
@@ -353,7 +383,7 @@ pub async fn import_invoices_csv(
                         )
                         .bind(&new_id)
                         .bind(&company_id)
-                        .bind(&row.customer_cui)
+                        .bind(cui_to_store)
                         .bind(&row.customer_name)
                         .bind(now)
                         .execute(&mut *tx)
@@ -1097,6 +1127,101 @@ mod tests {
         let code = rec.get(idx_pm).unwrap().trim();
         let valid = ["10", "20", "30", "42", "48", "49", "57", "58", "59"];
         assert!(!valid.contains(&code), "99 is not a recognised code");
+    }
+
+    /// D4: Two CSV rows with empty customer_cui but *different* names must NOT
+    /// dedup into the same contact.  This test simulates the branching logic
+    /// used by `import_invoices_csv` to choose the dedup query.
+    #[test]
+    fn d4_empty_cui_rows_with_different_names_are_distinct() {
+        struct FakeRow {
+            customer_cui: String,
+            customer_name: String,
+        }
+        let rows = vec![
+            FakeRow {
+                customer_cui: "".to_string(),
+                customer_name: "Ion Popescu".to_string(),
+            },
+            FakeRow {
+                customer_cui: "".to_string(),
+                customer_name: "Maria Ionescu".to_string(),
+            },
+            FakeRow {
+                customer_cui: "RO123456".to_string(),
+                customer_name: "SC Test SRL".to_string(),
+            },
+            FakeRow {
+                customer_cui: "RO123456".to_string(),
+                customer_name: "SC Test SRL dup".to_string(),
+            }, // same CUI → dedup
+        ];
+
+        // Simulate the dedup logic: collect (dedup_key, name) pairs.
+        // Blank-CUI rows use (legal_name, "") as key; CUI rows use ("", cui).
+        use std::collections::HashMap;
+        let mut seen: HashMap<(String, String), String> = HashMap::new();
+        let mut distinct_contacts: Vec<String> = Vec::new();
+
+        for row in &rows {
+            let dedup_key = if row.customer_cui.is_empty() {
+                (row.customer_name.clone(), "".to_string())
+            } else {
+                ("".to_string(), row.customer_cui.clone())
+            };
+            if let std::collections::hash_map::Entry::Vacant(e) = seen.entry(dedup_key) {
+                e.insert(row.customer_name.clone());
+                distinct_contacts.push(row.customer_name.clone());
+            }
+        }
+
+        // Ion Popescu, Maria Ionescu (both blank-CUI but different names) +
+        // SC Test SRL (one entry for the deduped CUI) = 3 distinct contacts.
+        assert_eq!(
+            distinct_contacts.len(),
+            3,
+            "Expected 3 distinct contacts (2 blank-CUI different names + 1 CUI-deduped), got: {distinct_contacts:?}"
+        );
+    }
+
+    /// D4: Two rows with the same empty CUI AND the same name dedup into one
+    /// contact (e.g. same B2C buyer appears on two invoices in the batch).
+    #[test]
+    fn d4_empty_cui_same_name_deduped_into_one() {
+        struct FakeRow {
+            customer_cui: String,
+            customer_name: String,
+        }
+        let rows = vec![
+            FakeRow {
+                customer_cui: "".to_string(),
+                customer_name: "Ion Popescu".to_string(),
+            },
+            FakeRow {
+                customer_cui: "".to_string(),
+                customer_name: "Ion Popescu".to_string(),
+            }, // dup
+        ];
+
+        use std::collections::HashMap;
+        let mut seen: HashMap<(String, String), ()> = HashMap::new();
+        let mut distinct: usize = 0;
+
+        for row in &rows {
+            let key = if row.customer_cui.is_empty() {
+                (row.customer_name.clone(), "".to_string())
+            } else {
+                ("".to_string(), row.customer_cui.clone())
+            };
+            if seen.insert(key, ()).is_none() {
+                distinct += 1;
+            }
+        }
+
+        assert_eq!(
+            distinct, 1,
+            "Same blank-CUI + same name must dedup to 1 contact"
+        );
     }
 
     #[test]

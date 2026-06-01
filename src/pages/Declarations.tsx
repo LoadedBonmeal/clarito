@@ -111,7 +111,15 @@ export function DeclarationsPage() {
 
     setExporting(true);
     try {
-      const saved = await api.declarations.export(activeCompanyId, dateFrom, dateTo, savePath);
+      // R4: pass the current manualDeductible so the exported XML reflects
+      // any manual override the user entered (not just the server-computed value).
+      const saved = await api.declarations.export(
+        activeCompanyId,
+        dateFrom,
+        dateTo,
+        savePath,
+        manualDeductible,
+      );
       notify.success(`D300 salvat: ${saved}`);
       try { await openPath(saved); } catch { /* reveal best-effort */ }
     } catch (err) {

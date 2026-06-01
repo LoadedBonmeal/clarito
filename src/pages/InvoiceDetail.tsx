@@ -64,8 +64,9 @@ export function InvoiceDetailPage() {
 
   const { data: contact } = useQuery({
     queryKey: queryKeys.contacts.detail(data?.invoice.contactId ?? ""),
-    queryFn: () => api.contacts.get(data!.invoice.contactId),
-    enabled: !!data?.invoice.contactId,
+    // S1: pass activeCompanyId to enforce company scoping on the backend.
+    queryFn: () => api.contacts.get(data!.invoice.contactId, activeCompanyId ?? ""),
+    enabled: !!data?.invoice.contactId && !!activeCompanyId,
   });
 
   const { data: paymentSummary } = useQuery({

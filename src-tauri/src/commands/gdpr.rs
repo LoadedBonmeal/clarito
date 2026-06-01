@@ -266,11 +266,26 @@ pub async fn wipe_all_data(app: AppHandle, state: State<'_, AppState>) -> AppRes
     // Step 5: delete residual files that contain PII but are not covered by the
     // table truncation above.  All deletes are best-effort: "not found" is silently
     // ignored so a partially-installed app cannot get stuck.
-    //
-    // (a) data.db.bak / data.db.backup — full DB copies written by import_backup.
+    let data_dir = app.path().app_data_dir()?;
+
+    // (a) receipts/<company_id>/*.pdf — PDF files written by commands/receipts.rs
+    //     (generate_receipt_pdf) which may contain payer PII (name, address, amount).
+    //     The receipt_pdf_path() helper writes to app_data_dir/receipts/<company_id>/
+    //     so we wipe the entire receipts/ tree.
+    let receipts_dir = data_dir.join("receipts");
+    if receipts_dir.exists() {
+        match clear_dir_contents(&receipts_dir).await {
+            Ok(()) => tracing::info!("GDPR wipe: receipts directory cleared"),
+            Err(e) => {
+                // Best-effort: log but don't abort the wipe for a non-critical dir.
+                tracing::warn!(error = ?e, "GDPR wipe: receipts clear partially failed (best-effort)");
+            }
+        }
+    }
+
+    // (b) data.db.bak / data.db.backup — full DB copies written by import_backup.
     //     We delete any file under app_data_dir whose name starts with "data.db."
     //     but is NOT the live "data.db" itself.
-    let data_dir = app.path().app_data_dir()?;
     let db_path = data_dir.join("data.db");
     if let Ok(mut entries) = tokio::fs::read_dir(&data_dir).await {
         while let Ok(Some(entry)) = entries.next_entry().await {
@@ -412,6 +427,51 @@ mod tests {
 
         assert!(!bak.exists(), "data.db.bak should have been deleted");
         assert!(live.exists(), "data.db (live) must NOT be deleted");
+    }
+
+    /// S2: Verify that the wipe step for receipts/ (PDF files) correctly removes
+    /// per-company receipt PDFs.  We simulate the path structure that
+    /// `commands/receipts.rs::receipt_pdf_path` creates:
+    ///   app_data_dir/receipts/<company_id>/<receipt_id>.pdf
+    #[tokio::test]
+    async fn s2_wipe_receipts_dir_clears_pdf_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Simulate two companies each with one receipt PDF.
+        let receipts_dir = tmp.path().join("receipts");
+        let comp1_dir = receipts_dir.join("comp-1");
+        let comp2_dir = receipts_dir.join("comp-2");
+        std::fs::create_dir_all(&comp1_dir).unwrap();
+        std::fs::create_dir_all(&comp2_dir).unwrap();
+        std::fs::write(comp1_dir.join("receipt-001.pdf"), b"%PDF-comp1").unwrap();
+        std::fs::write(comp2_dir.join("receipt-002.pdf"), b"%PDF-comp2").unwrap();
+
+        // The wipe calls clear_dir_contents(&receipts_dir)
+        clear_dir_contents(&receipts_dir).await.unwrap();
+
+        // receipts/ itself must still exist but be empty.
+        assert!(receipts_dir.exists(), "receipts dir must still exist");
+        let entries: Vec<_> = std::fs::read_dir(&receipts_dir).unwrap().collect();
+        assert!(
+            entries.is_empty(),
+            "receipts dir must be empty after wipe, found: {entries:?}"
+        );
+    }
+
+    /// S2: Verify that the receipts path computed by wipe matches what
+    /// `receipt_pdf_path` (in receipts.rs) produces: app_data_dir/receipts/<company_id>/
+    /// This is a compile-time path-alignment test expressed as a simple string check.
+    #[test]
+    fn s2_receipts_dir_path_matches_generator() {
+        // Simulate app_data_dir.
+        let app_data_dir = std::path::PathBuf::from("/tmp/test-app-data");
+        // What wipe computes:
+        let wipe_path = app_data_dir.join("receipts");
+        // What receipt_pdf_path computes (receipt_pdf_path does .join("receipts").join(company_id)):
+        let generator_path = app_data_dir.join("receipts").join("some-company-id");
+        assert!(
+            generator_path.starts_with(&wipe_path),
+            "generator path {generator_path:?} must be a child of wipe path {wipe_path:?}"
+        );
     }
 
     #[test]

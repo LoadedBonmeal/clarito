@@ -12,9 +12,14 @@ pub async fn list_contacts(
     contacts::list(&state.db, filter.unwrap_or_default()).await
 }
 
+/// S1: `company_id` is required — cross-company fetch returns NotFound.
 #[tauri::command]
-pub async fn get_contact(state: State<'_, AppState>, id: String) -> AppResult<Contact> {
-    contacts::get(&state.db, &id).await
+pub async fn get_contact(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+) -> AppResult<Contact> {
+    contacts::get(&state.db, &id, &company_id).await
 }
 
 #[tauri::command]

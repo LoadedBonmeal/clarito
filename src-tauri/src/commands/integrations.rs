@@ -179,7 +179,7 @@ pub async fn smartbill_push_invoice(
     let company = crate::db::companies::get(&state.db, &company_id).await?;
 
     // 4. Load contact
-    let contact = crate::db::contacts::get(&state.db, &invoice.contact_id).await?;
+    let contact = crate::db::contacts::get(&state.db, &invoice.contact_id, &company_id).await?;
 
     // 5. Build products array
     let products: Vec<serde_json::Value> = lines
@@ -344,7 +344,8 @@ pub async fn export_saga_csv(
     let mut rows = vec![header.to_string()];
 
     for invoice in &result.items {
-        let contact = crate::db::contacts::get(&state.db, &invoice.contact_id).await?;
+        let contact =
+            crate::db::contacts::get(&state.db, &invoice.contact_id, &invoice.company_id).await?;
 
         let number_padded = format!("{:07}", invoice.number);
         let data = iso_to_dmy_dot(&invoice.issue_date);
@@ -448,7 +449,8 @@ pub async fn export_winmentor_csv(
     let mut rows = vec![header.to_string()];
 
     for invoice in &result.items {
-        let contact = crate::db::contacts::get(&state.db, &invoice.contact_id).await?;
+        let contact =
+            crate::db::contacts::get(&state.db, &invoice.contact_id, &invoice.company_id).await?;
 
         let data = iso_to_dmy_slash(&invoice.issue_date);
         let scadenta = iso_to_dmy_slash(&invoice.due_date);

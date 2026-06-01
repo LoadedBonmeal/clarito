@@ -299,6 +299,11 @@ pub async fn compute_d300(
 /// Header: CUI, perioadă, tip declarație. Body: grupuri TVA colectat + deductibil + TVA netă.
 /// NOTE: Nu este formularul complet ANAF D300 cu schema oficială — depunerea
 /// electronică necesită integrare cu sistemul ANAF e-Formulare.
+///
+/// R4: `manual_deductible_vat` — when provided, overrides the computed
+/// `total_deductible_vat` and recalculates `net_vat` so the exported XML
+/// matches what the user sees on screen after a manual override.
+/// When `None`, the server-computed value is used (backward-compatible).
 #[tauri::command]
 pub async fn export_d300(
     state: State<'_, AppState>,
@@ -306,9 +311,20 @@ pub async fn export_d300(
     period_from: String,
     period_to: String,
     dest_path: String,
+    manual_deductible_vat: Option<String>,
 ) -> AppResult<String> {
     // Calculăm mai întâi raportul.
-    let report = compute_d300(state, company_id, period_from, period_to).await?;
+    let mut report = compute_d300(state, company_id, period_from, period_to).await?;
+
+    // R4: apply the manual override if provided.
+    if let Some(ref override_str) = manual_deductible_vat {
+        if let Ok(override_dec) = Decimal::from_str(override_str.trim()) {
+            let total_vat = Decimal::from_str(&report.total_vat).unwrap_or(Decimal::ZERO);
+            let net_vat = total_vat - override_dec;
+            report.total_deductible_vat = override_dec.round_dp(2).to_string();
+            report.net_vat = net_vat.round_dp(2).to_string();
+        }
+    }
 
     let dest = dest_path.clone();
     // Construim XML-ul în spawn_blocking (I/O + string building) — pattern din saft.rs.
@@ -610,6 +626,110 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// R4: Verify that a manual deductible override changes total_deductible_vat
+    /// and net_vat in the exported XML.
+    #[test]
+    fn r4_manual_deductible_override_changes_xml() {
+        // Build a base report where computed deductible = 95.00.
+        let mut report = D300Report {
+            company_cui: "RO12345678".to_string(),
+            period_from: "2024-01-01".to_string(),
+            period_to: "2024-01-31".to_string(),
+            groups: vec![D300Group {
+                vat_rate: "19.00".to_string(),
+                vat_category: "S".to_string(),
+                base: "1000.00".to_string(),
+                vat: "190.00".to_string(),
+            }],
+            total_base: "1000.00".to_string(),
+            total_vat: "190.00".to_string(),
+            invoice_count: 5,
+            purchase_groups: vec![],
+            total_deductible_base: "500.00".to_string(),
+            total_deductible_vat: "95.00".to_string(), // computed
+            purchase_invoice_count: 3,
+            purchase_unparsed_count: 2,
+            net_vat: "95.00".to_string(), // 190 − 95
+        };
+
+        // Simulate the R4 override logic from export_d300 with override = 120.00.
+        let override_str = "120.00";
+        if let Ok(override_dec) = Decimal::from_str(override_str.trim()) {
+            let total_vat = Decimal::from_str(&report.total_vat).unwrap_or(Decimal::ZERO);
+            let net_vat = total_vat - override_dec;
+            report.total_deductible_vat = override_dec.round_dp(2).to_string();
+            report.net_vat = net_vat.round_dp(2).to_string();
+        }
+
+        assert_eq!(
+            report.total_deductible_vat, "120.00",
+            "Override must replace computed deductible"
+        );
+        assert_eq!(
+            report.net_vat, "70.00",
+            "net_vat must be 190.00 - 120.00 = 70.00"
+        );
+
+        // Verify the XML contains the overridden values.
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_d300_r4_override.xml");
+        let result = build_and_write_xml(report, path.to_string_lossy().to_string());
+        assert!(
+            result.is_ok(),
+            "build_and_write_xml must succeed: {result:?}"
+        );
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains("<TotalTVADeductibil>120.00</TotalTVADeductibil>"),
+            "XML must contain overridden deductible 120.00, got: {}",
+            &content[content.find("<AchizitiiTVADeductibil>").unwrap_or(0)..]
+        );
+        assert!(
+            content.contains("<TVADePlata>70.00</TVADePlata>"),
+            "XML must contain net_vat 70.00 after override"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// R4: When no override is provided (None), the computed values are used unchanged.
+    #[test]
+    fn r4_no_override_uses_computed_values() {
+        let mut report = D300Report {
+            company_cui: "RO12345678".to_string(),
+            period_from: "2024-01-01".to_string(),
+            period_to: "2024-01-31".to_string(),
+            groups: vec![],
+            total_base: "0.00".to_string(),
+            total_vat: "190.00".to_string(),
+            invoice_count: 0,
+            purchase_groups: vec![],
+            total_deductible_base: "0.00".to_string(),
+            total_deductible_vat: "95.00".to_string(),
+            purchase_invoice_count: 0,
+            purchase_unparsed_count: 0,
+            net_vat: "95.00".to_string(),
+        };
+
+        // Simulate None override — no changes applied.
+        let manual_deductible_vat: Option<String> = None;
+        if let Some(ref override_str) = manual_deductible_vat {
+            if let Ok(override_dec) = Decimal::from_str(override_str.trim()) {
+                let total_vat = Decimal::from_str(&report.total_vat).unwrap_or(Decimal::ZERO);
+                let net_vat = total_vat - override_dec;
+                report.total_deductible_vat = override_dec.round_dp(2).to_string();
+                report.net_vat = net_vat.round_dp(2).to_string();
+            }
+        }
+
+        assert_eq!(
+            report.total_deductible_vat, "95.00",
+            "Without override, computed deductible must be unchanged"
+        );
+        assert_eq!(report.net_vat, "95.00");
     }
 
     /// Verifică că net_vat = colectată − deductibilă, inclusiv cazul negativ (TVA de recuperat).

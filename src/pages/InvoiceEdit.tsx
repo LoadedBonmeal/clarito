@@ -64,7 +64,8 @@ export function InvoiceEditPage() {
       const inv = invoiceData.invoice;
       // Load the attached contact by id (avoids fetching the full list)
       void api.contacts
-        .get(inv.contactId)
+        // S1: pass activeCompanyId for company scoping.
+        .get(inv.contactId, activeCompanyId ?? "")
         .then((c) => setSelectedContact(c))
         .catch(() => setSelectedContact(null));
       setSeries(inv.series);

@@ -92,7 +92,9 @@ export const companies = {
 export const contacts = {
   list: (filter?: ContactFilter) =>
     invoke<Contact[]>("list_contacts", { filter }),
-  get: (id: string) => invoke<Contact>("get_contact", { id }),
+  /** S1: companyId is required — cross-company fetch returns NotFound. */
+  get: (id: string, companyId: string) =>
+    invoke<Contact>("get_contact", { id, companyId }),
   create: (input: CreateContactInput) =>
     invoke<Contact>("create_contact", { input }),
   /** R14 Wave A: companyId is required — cross-company update returns NotFound. */
@@ -475,9 +477,26 @@ export const declarations = {
   /** Calculează decontul D300 — TVA colectat (vânzări) pentru o perioadă. */
   compute: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<import("@/types").D300Report>("compute_d300", { companyId, periodFrom, periodTo }),
-  /** Generează XML D300 și îl salvează la destPath. Returnează calea. */
-  export: (companyId: string, periodFrom: string, periodTo: string, destPath: string) =>
-    invoke<string>("export_d300", { companyId, periodFrom, periodTo, destPath }),
+  /**
+   * Generează XML D300 și îl salvează la destPath. Returnează calea.
+   * R4: `manualDeductibleVat` — when provided, overrides the server-computed
+   * total_deductible_vat so the exported XML matches what the user sees on screen.
+   * When omitted (undefined/null), the server-computed value is used.
+   */
+  export: (
+    companyId: string,
+    periodFrom: string,
+    periodTo: string,
+    destPath: string,
+    manualDeductibleVat?: string | null,
+  ) =>
+    invoke<string>("export_d300", {
+      companyId,
+      periodFrom,
+      periodTo,
+      destPath,
+      manualDeductibleVat: manualDeductibleVat ?? null,
+    }),
 };
 
 // ─── D394 — Declarație informativă livrări/achiziții ─────────────────────

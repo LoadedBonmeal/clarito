@@ -280,7 +280,7 @@ pub(crate) async fn submit_invoice_inner(
 
     // 2. Încarcă compania + contactul din DB
     let company = companies::get(pool, company_id).await?;
-    let buyer = contacts::get(pool, &invoice.contact_id).await?;
+    let buyer = contacts::get(pool, &invoice.contact_id, &invoice.company_id).await?;
 
     // 3. Detectează dacă e factură storno și extrage referința originală.
     //    BIZ-13: sursa autoritativă este `invoices.storno_of_invoice_id`;

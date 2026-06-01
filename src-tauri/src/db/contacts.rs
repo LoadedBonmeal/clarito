@@ -107,16 +107,22 @@ pub async fn list(pool: &SqlitePool, filter: ContactFilter) -> AppResult<Vec<Con
     Ok(items)
 }
 
-pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Contact> {
+/// S1: Fetch a contact by id, scoped to the given company.
+/// Returns NotFound if the id doesn't exist OR belongs to a different company.
+pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Contact> {
     sqlx::query_as::<_, Contact>(
         "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, \
          address, city, county, country, email, phone, currency, created_at, updated_at \
-         FROM contacts WHERE id = ?1",
+         FROM contacts WHERE id = ?1 AND company_id = ?2",
     )
     .bind(id)
+    .bind(company_id)
     .fetch_optional(pool)
     .await?
     .ok_or(AppError::NotFound)
+
+    // Note: this is the only `get` fn; callers that already verified ownership
+    // (update, delete) also get the scoping for free via the company_id they pass.
 }
 
 pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<Contact> {
@@ -154,23 +160,22 @@ pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<C
     .execute(pool)
     .await?;
 
-    get(pool, &id).await
+    // S1: pass the company_id so the scoped get works correctly.
+    get(pool, &id, &input.company_id).await
 }
 
 /// R14 Wave A: `company_id` is required. After fetching the contact, we verify
 /// ownership and return `NotFound` for any mismatch. The UPDATE SQL is also
 /// scoped with `AND company_id = ?` as a defence-in-depth layer.
+/// S1: `get` is now company-scoped so the ownership check is implicit.
 pub async fn update(
     pool: &SqlitePool,
     id: &str,
     company_id: &str,
     input: UpdateContactInput,
 ) -> AppResult<Contact> {
-    let current = get(pool, id).await?;
-    // R14 Wave A: ownership check — cross-company access returns NotFound.
-    if current.company_id != company_id {
-        return Err(AppError::NotFound);
-    }
+    // S1: scoped get returns NotFound if id belongs to a different company.
+    let current = get(pool, id, company_id).await?;
     let now = now_unix();
 
     let contact_type = match input.contact_type {
@@ -213,17 +218,16 @@ pub async fn update(
     .execute(pool)
     .await?;
 
-    get(pool, id).await
+    get(pool, id, company_id).await
 }
 
 /// R14 Wave A: `company_id` is required. Deletion is scoped to the owning
 /// company; cross-company attempts receive `NotFound`.
+/// S1: `get` is now company-scoped so the ownership check is done in the SQL.
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
-    // Verify ownership first for a clear NotFound on cross-company attempts.
-    let contact = get(pool, id).await?;
-    if contact.company_id != company_id {
-        return Err(AppError::NotFound);
-    }
+    // S1: scoped get — returns NotFound if contact doesn't exist OR belongs
+    // to a different company.
+    let _ = get(pool, id, company_id).await?;
     let res = sqlx::query("DELETE FROM contacts WHERE id = ?1 AND company_id = ?2")
         .bind(id)
         .bind(company_id)
@@ -299,8 +303,8 @@ mod tests {
             matches!(result, Err(AppError::NotFound)),
             "update with wrong company_id must return NotFound"
         );
-        // Name must be unchanged.
-        let contact = get(&pool, "c1").await.unwrap();
+        // Name must be unchanged — fetch with correct company.
+        let contact = get(&pool, "c1", "comp-1").await.unwrap();
         assert_eq!(contact.legal_name, "Client Comp1", "name must not change");
     }
 
@@ -316,7 +320,7 @@ mod tests {
             result.is_ok(),
             "update with correct company_id must succeed"
         );
-        let contact = get(&pool, "c1").await.unwrap();
+        let contact = get(&pool, "c1", "comp-1").await.unwrap();
         assert_eq!(contact.legal_name, "Renamed OK", "name must be updated");
     }
 
@@ -331,8 +335,8 @@ mod tests {
             matches!(result, Err(AppError::NotFound)),
             "delete with wrong company_id must return NotFound"
         );
-        // Contact must still exist.
-        let still_there = get(&pool, "c1").await;
+        // Contact must still exist — fetch with correct company.
+        let still_there = get(&pool, "c1", "comp-1").await;
         assert!(still_there.is_ok(), "contact must not have been deleted");
     }
 
@@ -344,10 +348,46 @@ mod tests {
             result.is_ok(),
             "delete with correct company_id must succeed"
         );
-        let gone = get(&pool, "c1").await;
+        let gone = get(&pool, "c1", "comp-1").await;
         assert!(
             matches!(gone, Err(AppError::NotFound)),
             "contact must be gone after correct-company delete"
+        );
+    }
+
+    // ── S1: get is now company-scoped ────────────────────────────────────────
+
+    /// S1: get with correct company_id returns the contact.
+    #[tokio::test]
+    async fn s1_get_contact_correct_company_returns_contact() {
+        let pool = setup_contacts_pool().await;
+        let result = get(&pool, "c1", "comp-1").await;
+        assert!(result.is_ok(), "get with correct company must succeed");
+        let c = result.unwrap();
+        assert_eq!(c.id, "c1");
+        assert_eq!(c.company_id, "comp-1");
+    }
+
+    /// S1: get with wrong company_id returns NotFound (isolation gap closed).
+    #[tokio::test]
+    async fn s1_get_contact_wrong_company_returns_not_found() {
+        let pool = setup_contacts_pool().await;
+        // comp-2 tries to fetch comp-1's contact.
+        let result = get(&pool, "c1", "comp-2").await;
+        assert!(
+            matches!(result, Err(AppError::NotFound)),
+            "get with wrong company_id must return NotFound (S1)"
+        );
+    }
+
+    /// S1: get with unknown id returns NotFound regardless of company.
+    #[tokio::test]
+    async fn s1_get_contact_unknown_id_returns_not_found() {
+        let pool = setup_contacts_pool().await;
+        let result = get(&pool, "nonexistent", "comp-1").await;
+        assert!(
+            matches!(result, Err(AppError::NotFound)),
+            "get with unknown id must return NotFound"
         );
     }
 }
