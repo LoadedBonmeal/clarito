@@ -296,13 +296,21 @@ fn rule_br_ro_027_currency_code(ctx: &RuleContext<'_>) -> Option<String> {
 }
 
 fn rule_br_ro_028_exchange_rate_if_foreign(ctx: &RuleContext<'_>) -> Option<String> {
-    if ctx.invoice.currency != "RON" && ctx.invoice.exchange_rate.is_none() {
-        Some(format!(
-            "[BR-RO-028] Moneda facturii este '{}' (diferită de RON) dar cursul de schimb lipsește.",
+    if ctx.invoice.currency.eq_ignore_ascii_case("RON") {
+        return None;
+    }
+    match ctx.invoice.exchange_rate {
+        None => Some(format!(
+            "[BR-RO-028] Moneda facturii este '{}' (diferită de RON) dar cursul de schimb lipsește. \
+             Introduceți cursul BNR valabil la data emiterii.",
             ctx.invoice.currency
-        ))
-    } else {
-        None
+        )),
+        Some(rate) if rate <= 0.0 => Some(format!(
+            "[BR-RO-028] Cursul de schimb pentru '{}' este invalid ({:.6}). \
+             Cursul trebuie să fie un număr pozitiv (RON per 1 unitate de monedă străină).",
+            ctx.invoice.currency, rate
+        )),
+        Some(_) => None,
     }
 }
 
@@ -1270,6 +1278,132 @@ mod tests {
     }
 
     // ── BIZ-20: BR-RO-043 must group by (category, rate), not category alone ──
+
+    // ── BR-RO-028: exchange rate validation ──────────────────────────────────
+
+    #[test]
+    fn br_ro_028_ron_invoice_no_rate_passes() {
+        // RON invoices must never trigger BR-RO-028 regardless of exchange_rate.
+        let mut invoice = sample_invoice(); // currency = "RON"
+        invoice.exchange_rate = None;
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_028 = errors.iter().any(|e| e.contains("[BR-RO-028]"));
+        assert!(
+            !has_028,
+            "BR-RO-028 must NOT fire for RON invoice, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn br_ro_028_foreign_missing_rate_fails() {
+        // Non-RON invoice with no exchange_rate → must error.
+        let mut invoice = sample_invoice();
+        invoice.currency = "EUR".into();
+        invoice.exchange_rate = None;
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_028 = errors.iter().any(|e| e.contains("[BR-RO-028]"));
+        assert!(
+            has_028,
+            "BR-RO-028 must fire for EUR invoice with no rate, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn br_ro_028_foreign_zero_rate_fails() {
+        // Non-RON invoice with exchange_rate=0 → must error.
+        let mut invoice = sample_invoice();
+        invoice.currency = "USD".into();
+        invoice.exchange_rate = Some(0.0);
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_028 = errors.iter().any(|e| e.contains("[BR-RO-028]"));
+        assert!(
+            has_028,
+            "BR-RO-028 must fire for USD invoice with rate=0, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn br_ro_028_foreign_negative_rate_fails() {
+        // Non-RON invoice with a negative exchange_rate → must error.
+        let mut invoice = sample_invoice();
+        invoice.currency = "GBP".into();
+        invoice.exchange_rate = Some(-5.5);
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_028 = errors.iter().any(|e| e.contains("[BR-RO-028]"));
+        assert!(
+            has_028,
+            "BR-RO-028 must fire for GBP invoice with negative rate, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn br_ro_028_foreign_valid_positive_rate_passes() {
+        // Non-RON invoice with a valid positive exchange_rate → must NOT error on 028.
+        let mut invoice = sample_invoice();
+        invoice.currency = "EUR".into();
+        invoice.exchange_rate = Some(5.0);
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_028 = errors.iter().any(|e| e.contains("[BR-RO-028]"));
+        assert!(
+            !has_028,
+            "BR-RO-028 must NOT fire for EUR invoice with valid rate, got: {:?}",
+            errors
+        );
+    }
 
     #[test]
     fn br_ro_043_handles_multi_rate_same_category() {

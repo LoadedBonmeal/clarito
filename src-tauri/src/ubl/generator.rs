@@ -14,6 +14,7 @@ use crate::db::companies::Company;
 use crate::db::contacts::Contact;
 use crate::db::invoices::{Invoice, LineItem};
 use crate::error::{AppError, AppResult};
+use crate::ubl::fx;
 
 pub struct GeneratorInput {
     pub invoice: Invoice,
@@ -94,6 +95,13 @@ pub fn generate_ubl(input: &GeneratorInput) -> AppResult<String> {
 
     write_text(&mut writer, "cbc:DocumentCurrencyCode", currency)?;
 
+    // BT-6 / EN16931 BR-53: when the invoice currency differs from RON (the
+    // accounting currency for Romanian e-Factura), emit TaxCurrencyCode = "RON"
+    // immediately after DocumentCurrencyCode (UBL element order matters).
+    if !currency.eq_ignore_ascii_case("RON") {
+        write_text(&mut writer, "cbc:TaxCurrencyCode", "RON")?;
+    }
+
     // BillingReference — obligatoriu pentru factura de storno (381)
     if let Some(ref original_number) = input.storno_ref {
         writer
@@ -155,8 +163,23 @@ pub fn generate_ubl(input: &GeneratorInput) -> AppResult<String> {
         .write_event(Event::End(BytesEnd::new("cac:PaymentMeans")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
 
-    // ── TaxTotal ────────────────────────────────────────────────────────────
-    write_tax_total(&mut writer, &input.lines, inv, currency)?;
+    // ── TaxTotal (document currency, with subtotals) ────────────────────────
+    let doc_vat = write_tax_total(&mut writer, &input.lines, inv, currency)?;
+
+    // BT-111 / EN16931 BR-53: for non-RON invoices emit a second TaxTotal
+    // containing ONLY the TaxAmount in RON (no TaxSubtotals — per EN16931 the
+    // accounting-currency TaxTotal carries only the aggregate TaxAmount).
+    if !currency.eq_ignore_ascii_case("RON") {
+        let ron_vat = fx::amount_to_ron(doc_vat, currency, fx::parse_rate(inv.exchange_rate));
+        let ron_vat_str = format!("{:.2}", ron_vat);
+        writer
+            .write_event(Event::Start(BytesStart::new("cac:TaxTotal")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        write_amount(&mut writer, "cbc:TaxAmount", &ron_vat_str, "RON")?;
+        writer
+            .write_event(Event::End(BytesEnd::new("cac:TaxTotal")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+    }
 
     // ── LegalMonetaryTotal ───────────────────────────────────────────────────
     let subtotal = fmt_amount(&inv.subtotal_amount);
@@ -384,12 +407,14 @@ fn write_customer_party(
 // ─── TaxTotal ─────────────────────────────────────────────────────────────────
 
 /// Grupează liniile pe (vat_rate, vat_category) şi emite TaxTotal cu subtotaluri.
+/// Returnează valoarea totală a TVA (în moneda documentului) pentru a fi reutilizată
+/// de apelant (ex. conversie în RON pentru al doilea TaxTotal).
 fn write_tax_total(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     lines: &[LineItem],
     inv: &Invoice,
     currency: &str,
-) -> AppResult<()> {
+) -> AppResult<Decimal> {
     // group by (vat_rate_str, vat_category)
     let mut groups: HashMap<(String, String), (Decimal, Decimal)> = HashMap::new();
     for line in lines {
@@ -400,7 +425,8 @@ fn write_tax_total(
         entry.1 += Decimal::from_str(&fmt_amount(&line.vat_amount)).unwrap_or(Decimal::ZERO);
     }
 
-    let total_vat = fmt_amount(&inv.vat_amount);
+    let total_vat_dec = Decimal::from_str(&fmt_amount(&inv.vat_amount)).unwrap_or(Decimal::ZERO);
+    let total_vat = format!("{:.2}", total_vat_dec);
 
     writer
         .write_event(Event::Start(BytesStart::new("cac:TaxTotal")))
@@ -449,7 +475,7 @@ fn write_tax_total(
     writer
         .write_event(Event::End(BytesEnd::new("cac:TaxTotal")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
-    Ok(())
+    Ok(total_vat_dec)
 }
 
 // ─── InvoiceLine ─────────────────────────────────────────────────────────────
@@ -1053,6 +1079,85 @@ mod tests {
             customer_block.contains("<cbc:CountrySubentity>RO-CJ</cbc:CountrySubentity>"),
             "buyer county 'Cluj' must be emitted as 'RO-CJ', got: {}",
             customer_block
+        );
+    }
+
+    // ── R17 Wave 1: multi-currency / FX ──────────────────────────────────────
+
+    /// R17-W1-EUR: a EUR invoice must emit TaxCurrencyCode=RON, DocumentCurrencyCode=EUR,
+    /// and a second TaxTotal with TaxAmount in RON (190.00 EUR * 5.0 = 950.00 RON).
+    #[test]
+    fn eur_invoice_emits_tax_currency_code_and_ron_tax_total() {
+        let mut input = sample_input();
+        // Override to a EUR invoice: 1000.00 EUR net, 19% VAT = 190.00 EUR, total 1190.00 EUR
+        input.invoice.currency = "EUR".to_string();
+        input.invoice.exchange_rate = Some(5.0);
+        input.invoice.subtotal_amount = "1000.00".to_string();
+        input.invoice.vat_amount = "190.00".to_string();
+        input.invoice.total_amount = "1190.00".to_string();
+        input.lines[0].unit_price = "1000.00".to_string();
+        input.lines[0].subtotal_amount = "1000.00".to_string();
+        input.lines[0].vat_amount = "190.00".to_string();
+        input.lines[0].total_amount = "1190.00".to_string();
+
+        let xml = generate_ubl(&input).expect("should generate EUR XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+
+        // DocumentCurrencyCode must be EUR
+        assert!(
+            body.contains("<cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>"),
+            "EUR invoice must emit DocumentCurrencyCode=EUR, got: {}",
+            body
+        );
+        // TaxCurrencyCode must be RON and must follow DocumentCurrencyCode
+        assert!(
+            body.contains("<cbc:TaxCurrencyCode>RON</cbc:TaxCurrencyCode>"),
+            "EUR invoice must emit TaxCurrencyCode=RON, got: {}",
+            body
+        );
+        let doc_pos = body
+            .find("<cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>")
+            .expect("DocumentCurrencyCode not found");
+        let tax_pos = body
+            .find("<cbc:TaxCurrencyCode>RON</cbc:TaxCurrencyCode>")
+            .expect("TaxCurrencyCode not found");
+        assert!(
+            tax_pos > doc_pos,
+            "TaxCurrencyCode must appear after DocumentCurrencyCode"
+        );
+        // Second TaxTotal must contain RON TaxAmount = 950.00
+        assert!(
+            body.contains("<cbc:TaxAmount currencyID=\"RON\">950.00</cbc:TaxAmount>"),
+            "EUR invoice must emit second TaxTotal with RON TaxAmount=950.00, got: {}",
+            body
+        );
+        // Must have two TaxTotal blocks (first in EUR with subtotals, second in RON only)
+        let tax_total_count = body.matches("<cac:TaxTotal>").count();
+        assert_eq!(
+            tax_total_count, 2,
+            "EUR invoice must have exactly 2 TaxTotal elements, got {}: {}",
+            tax_total_count, body
+        );
+    }
+
+    /// R17-W1-RON: a RON invoice must NOT emit TaxCurrencyCode and must have
+    /// exactly one TaxTotal (behavior identical to before this wave).
+    #[test]
+    fn ron_invoice_has_no_tax_currency_code_and_single_tax_total() {
+        let input = sample_input(); // currency = "RON"
+        let xml = generate_ubl(&input).expect("should generate RON XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+
+        assert!(
+            !body.contains("TaxCurrencyCode"),
+            "RON invoice must NOT emit TaxCurrencyCode, got: {}",
+            body
+        );
+        let tax_total_count = body.matches("<cac:TaxTotal>").count();
+        assert_eq!(
+            tax_total_count, 1,
+            "RON invoice must have exactly 1 TaxTotal, got {}: {}",
+            tax_total_count, body
         );
     }
 }
