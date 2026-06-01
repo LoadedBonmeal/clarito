@@ -272,13 +272,14 @@ pub(crate) async fn do_sync_spv(
         // delete the row we just inserted so state stays consistent.
         let recv_id = crate::db::models::new_id();
         let recv_now = chrono::Utc::now().timestamp();
+        // A3: bind parsed.currency (from DocumentCurrencyCode) instead of hardcoded 'RON'.
         let insert_res = sqlx::query(
             "INSERT OR IGNORE INTO received_invoices \
              (id, company_id, anaf_download_id, anaf_index, issuer_cui, issuer_name, \
               series, number, total_amount, currency, issue_date, xml_path, status, \
               net_amount, vat_amount, \
               downloaded_at, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'RON', ?10, ?11, 'NEW', ?12, ?13, ?14, ?14)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'NEW', ?13, ?14, ?15, ?15)",
         )
         .bind(&recv_id)
         .bind(company_id)
@@ -289,6 +290,7 @@ pub(crate) async fn do_sync_spv(
         .bind(Option::<String>::None) // series — NULL until extracted from XML
         .bind(Option::<String>::None) // number — NULL until extracted from XML
         .bind(&parsed.total_amount)
+        .bind(&parsed.currency) // A3: use parsed currency, not hardcoded 'RON'
         .bind(&parsed.issue_date)
         .bind(xml_path.to_string_lossy().as_ref())
         .bind(&parsed.net_amount)
@@ -368,7 +370,11 @@ pub(crate) async fn do_sync_spv(
         // ── Upgrade the tentative notification with the final text ───
         // RUST-08: notification update errors must NOT abort the loop.
         let final_title = format!("Factură primită de la {}", parsed.issuer_name);
-        let final_body = format!("Sumă: {} RON — {}", parsed.total_amount, parsed.issue_date);
+        // A3: show the actual parsed currency (not hardcoded RON).
+        let final_body = format!(
+            "Sumă: {} {} — {}",
+            parsed.total_amount, parsed.currency, parsed.issue_date
+        );
         if let Err(e) = sqlx::query("UPDATE notifications SET title = ?1, body = ?2 WHERE id = ?3")
             .bind(&final_title)
             .bind(&final_body)
@@ -399,13 +405,31 @@ pub(crate) async fn do_sync_spv(
 fn extract_xml_from_zip(zip_bytes: &[u8]) -> Option<Vec<u8>> {
     use std::io::Read;
     let cursor = std::io::Cursor::new(zip_bytes);
+    // A4 — Resilient ZIP extraction: a single unreadable entry must not abort
+    // the entire scan. We `continue` on per-entry errors so that a legitimate
+    // invoice XML found at a later index is still returned.
     let mut archive = zip::ZipArchive::new(cursor).ok()?;
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).ok()?;
+        // A4: skip entries that cannot be opened (corrupted, encrypted, etc.)
+        // rather than short-circuiting the whole loop with `?`.
+        let mut file = match archive.by_index(i) {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(index = i, error = ?e, "ZIP entry unreadable — skipping");
+                continue;
+            }
+        };
         if file.name().ends_with(".xml") && !file.name().contains("semnatura") {
             let mut contents = Vec::new();
-            file.read_to_end(&mut contents).ok()?;
-            return Some(contents);
+            // A4: if the read fails, skip this entry and keep scanning the rest.
+            match file.read_to_end(&mut contents) {
+                Ok(_) => return Some(contents),
+                Err(e) => {
+                    tracing::warn!(index = i, name = file.name(), error = ?e,
+                        "ZIP XML entry read failed — skipping");
+                    continue;
+                }
+            }
         }
     }
     None
@@ -428,6 +452,9 @@ pub(crate) struct ParsedReceived {
     /// PayableAmount — valoarea totală de plată (comportament existent).
     pub total_amount: String,
     pub issue_date: String,
+    /// cbc:DocumentCurrencyCode — moneda facturii (A3).
+    /// Implicit "RON" dacă lipsește din XML.
+    pub currency: String,
     /// cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount — net fără TVA.
     pub net_amount: Option<String>,
     /// cac:TaxTotal/cbc:TaxAmount (direct, nu din TaxSubtotal) — TVA document.
@@ -456,6 +483,8 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
     let mut issuer_name = String::new();
     let mut total_amount_str = "0.00".to_string();
     let mut issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    // A3: parse DocumentCurrencyCode; default to "RON" when absent.
+    let mut currency = "RON".to_string();
     let mut net_amount: Option<String> = None;
     let mut vat_amount_doc: Option<String> = None;
     let mut vat_lines: Vec<ReceivedVatLine> = Vec::new();
@@ -546,6 +575,13 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
                     continue;
                 }
                 match current_local.as_str() {
+                    // A3: DocumentCurrencyCode = moneda facturii (top-level element)
+                    "DocumentCurrencyCode" => {
+                        let trimmed = text.trim().to_uppercase();
+                        if !trimmed.is_empty() {
+                            currency = trimmed;
+                        }
+                    }
                     // CompanyID în PartyTaxScheme al furnizorului = CUI fiscal
                     "CompanyID"
                         if depth_supplier > 0 && depth_party_tax > 0 && issuer_cui.is_empty() =>
@@ -628,6 +664,7 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
         },
         total_amount: total_amount_str,
         issue_date,
+        currency,
         net_amount,
         vat_amount: vat_amount_doc,
         vat_lines,
@@ -728,6 +765,89 @@ mod tests {
         assert!(result.net_amount.is_none());
         assert!(result.vat_amount.is_none());
         assert!(result.vat_lines.is_empty());
+    }
+
+    // ── A3: DocumentCurrencyCode parsing ──────────────────────────────────────
+
+    /// A3: XML with EUR currency → parsed.currency == "EUR".
+    #[test]
+    fn parser_extracts_document_currency_code_eur() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+  <cbc:IssueDate>2024-05-01</cbc:IssueDate>
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cac:PartyTaxScheme>
+        <cbc:CompanyID>RO11111111</cbc:CompanyID>
+      </cac:PartyTaxScheme>
+      <cac:PartyLegalEntity>
+        <cbc:RegistrationName>SC EUR SRL</cbc:RegistrationName>
+      </cac:PartyLegalEntity>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <cac:LegalMonetaryTotal>
+    <cbc:PayableAmount currencyID="EUR">500.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>"#;
+        let result = parse_received_xml(xml.as_bytes());
+        assert_eq!(
+            result.currency, "EUR",
+            "DocumentCurrencyCode EUR must be parsed into currency field"
+        );
+    }
+
+    /// A3: XML without DocumentCurrencyCode → parsed.currency defaults to "RON".
+    #[test]
+    fn parser_defaults_currency_to_ron_when_absent() {
+        let result = parse_received_xml(SAMPLE_UBL.as_bytes());
+        assert_eq!(
+            result.currency, "RON",
+            "missing DocumentCurrencyCode must default to RON"
+        );
+    }
+
+    // ── A4: resilient ZIP extraction ──────────────────────────────────────────
+
+    /// A4: a ZIP where entry 0 is not a valid XML/file but entry 1 is the invoice
+    /// XML → extract_xml_from_zip must return the entry 1 contents, not None.
+    #[test]
+    fn zip_skips_bad_entry_and_finds_later_xml() {
+        use std::io::Write;
+
+        // Build a ZIP in memory with two entries:
+        //   - entry 0: a non-.xml file (will be skipped by the name filter)
+        //   - entry 1: "invoice.xml" with known content
+        let expected_content = b"<Invoice>test</Invoice>";
+        let mut buf = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+
+            // Entry 0: a README that won't match the .xml+non-semnatura filter.
+            w.start_file("README.txt", zip::write::FileOptions::<()>::default())
+                .unwrap();
+            w.write_all(b"not an invoice").unwrap();
+
+            // Entry 1: the actual invoice XML.
+            w.start_file("invoice.xml", zip::write::FileOptions::<()>::default())
+                .unwrap();
+            w.write_all(expected_content).unwrap();
+
+            w.finish().unwrap();
+        }
+
+        let result = extract_xml_from_zip(&buf);
+        assert!(
+            result.is_some(),
+            "extract_xml_from_zip must find the XML even when a prior entry is skipped"
+        );
+        assert_eq!(
+            result.unwrap(),
+            expected_content,
+            "extracted XML must match the invoice.xml entry content"
+        );
     }
 
     #[test]

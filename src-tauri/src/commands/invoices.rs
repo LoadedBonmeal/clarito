@@ -131,6 +131,7 @@ pub async fn set_invoice_status(
     // a executa UPDATE-ul. Statul curent este citit din DB pentru a evita
     // race-uri cu un client care ar trimite un status învechit.
     // R13 Wave G: verificăm și ownership-ul companiei în același pas.
+    // D2: reținem statusul curent pentru a-l pasa ca expected_status (CAS).
     let current = invoices::get(&state.db, &id).await?;
     if current.company_id != company_id {
         return Err(AppError::NotFound);
@@ -142,7 +143,19 @@ pub async fn set_invoice_status(
             status.as_str()
         )));
     }
-    invoices::set_status_scoped(&state.db, &id, &company_id, status, message).await
+    // D2: pass the read status as expected_status so the UPDATE is a CAS —
+    // if a concurrent writer changed the status between our GET and this UPDATE,
+    // rows_affected == 0 and set_status_scoped returns a Conflict/Validation error.
+    let expected_status = current.status.clone();
+    invoices::set_status_scoped(
+        &state.db,
+        &id,
+        &company_id,
+        status,
+        &expected_status,
+        message,
+    )
+    .await
 }
 
 /// R14 Wave A: `company_id` is required. After fetching via the shared
@@ -1373,11 +1386,14 @@ mod tests {
         let pool = setup_wave_g_pool().await;
         insert_wave_g_invoice(&pool, "inv-queued", "DRAFT").await;
 
+        // D2: pass expected_status matching the current status so the CAS predicate
+        // is satisfied — the wrong company_id alone triggers NotFound.
         let result = db_inv_test::set_status_scoped(
             &pool,
             "inv-queued",
             "comp-2",
             crate::db::models::InvoiceStatus::Queued,
+            "DRAFT", // expected_status (D2)
             None,
         )
         .await;
@@ -1396,11 +1412,13 @@ mod tests {
         let pool = setup_wave_g_pool().await;
         insert_wave_g_invoice(&pool, "inv-queued-ok", "DRAFT").await;
 
+        // D2: pass expected_status matching the current status.
         let result = db_inv_test::set_status_scoped(
             &pool,
             "inv-queued-ok",
             "comp-1",
             crate::db::models::InvoiceStatus::Queued,
+            "DRAFT", // expected_status (D2)
             None,
         )
         .await;
@@ -1785,6 +1803,71 @@ mod tests {
         assert!(
             result.is_ok(),
             "correct company_id must pass smartbill_push_invoice ownership check"
+        );
+    }
+
+    // ── D2: set_status_scoped CAS tests ────────────────────────────────────────
+
+    /// D2: wrong expected_status → rows_affected == 0, status unchanged.
+    /// This test FAILS if the `AND status = ?5` predicate is removed from the UPDATE.
+    #[tokio::test]
+    async fn d2_set_status_scoped_wrong_expected_status_returns_conflict() {
+        let pool = setup_wave_g_pool().await;
+        insert_wave_g_invoice(&pool, "inv-cas-wrong", "DRAFT").await;
+
+        // Pass "QUEUED" as expected_status but the row is "DRAFT" → CAS mismatch.
+        let result = db_inv_test::set_status_scoped(
+            &pool,
+            "inv-cas-wrong",
+            "comp-1",
+            crate::db::models::InvoiceStatus::Queued,
+            "QUEUED", // wrong: row is DRAFT
+            None,
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "set_status_scoped with wrong expected_status must return an error"
+        );
+        // Must be a Validation error (the "status changed" message), not NotFound.
+        assert!(
+            matches!(result, Err(crate::error::AppError::Validation(_))),
+            "CAS mismatch must produce a Validation error, got: {:?}",
+            result
+        );
+
+        // Status must remain DRAFT — no state corruption.
+        let inv = db_inv_test::get(&pool, "inv-cas-wrong").await.unwrap();
+        assert_eq!(
+            inv.status, "DRAFT",
+            "status must remain DRAFT after CAS mismatch (concurrent change detected)"
+        );
+    }
+
+    /// D2: correct expected_status → CAS succeeds and status is updated.
+    #[tokio::test]
+    async fn d2_set_status_scoped_correct_expected_status_succeeds() {
+        let pool = setup_wave_g_pool().await;
+        insert_wave_g_invoice(&pool, "inv-cas-ok", "DRAFT").await;
+
+        let result = db_inv_test::set_status_scoped(
+            &pool,
+            "inv-cas-ok",
+            "comp-1",
+            crate::db::models::InvoiceStatus::Queued,
+            "DRAFT", // correct expected_status
+            None,
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "CAS with correct expected_status must succeed"
+        );
+
+        let inv = db_inv_test::get(&pool, "inv-cas-ok").await.unwrap();
+        assert_eq!(
+            inv.status, "QUEUED",
+            "status must be QUEUED after successful CAS"
         );
     }
 }

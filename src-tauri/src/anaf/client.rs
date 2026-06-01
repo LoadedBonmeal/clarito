@@ -290,16 +290,33 @@ impl AnafClient {
     ///
     /// Paginare completă: iterează toate paginile până la răspuns gol.
     /// Retry policy per pagină: 5xx → backoff; 429 → Retry-After; 401 → ERR_UNAUTHORIZED.
+    ///
+    /// A2 — Pagination cap: breaks after MAX_PAGES pages and logs a warning to
+    /// prevent an infinite loop when a buggy server returns a constant non-empty page.
     pub async fn list_messages(
         &self,
         token: &str,
         company_cui: &str,
         days: u32,
     ) -> Result<Vec<SpvMessage>, String> {
+        /// A2: upper bound on pagination to guard against a misbehaving server
+        /// that never returns an empty page.
+        const MAX_PAGES: u32 = 1000;
+
         let mut all_messages: Vec<SpvMessage> = Vec::new();
         let mut page = 1u32;
 
         loop {
+            // A2: break if we have exceeded the safe pagination cap.
+            if page > MAX_PAGES {
+                tracing::warn!(
+                    page,
+                    company_cui,
+                    "list_messages: exceeded MAX_PAGES ({MAX_PAGES}) — \
+                     terminating pagination loop to prevent infinite loop"
+                );
+                break;
+            }
             // tip=F → facturi primite (received invoices).
             // NOTĂ: tip=E → erori/mesaje de status pentru trimiteri ANAF. Acestea sunt
             // urmărite prin polling stareMesaj (check_status), deci adăugarea tip=E ar

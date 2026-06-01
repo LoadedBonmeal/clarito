@@ -520,19 +520,54 @@ pub async fn set_status(
 
 pub async fn mark_submitted(pool: &SqlitePool, id: &str, upload_id: &str) -> AppResult<()> {
     let now = now_unix();
-    sqlx::query(
+
+    // A1 — Anti-duplicate guard: only transition if the row is still QUEUED.
+    // If the upload already succeeded at ANAF but the DB write fails, the caller
+    // must NOT leave the row resettable-to-DRAFT (recovery.rs resets
+    // QUEUED+NULL-upload_id → DRAFT, which would allow a duplicate ANAF filing).
+    // Strategy: on 0-rows-affected we attempt a minimal fallback that at least
+    // persists the upload_id so the recovery predicate (QUEUED AND upload_id IS NULL)
+    // no longer matches, preventing the duplicate-filing window.
+    let result = sqlx::query(
         "UPDATE invoices SET
             status            = 'SUBMITTED',
             anaf_upload_id    = ?2,
             anaf_submitted_at = ?3,
             updated_at        = ?3
-        WHERE id = ?1",
+        WHERE id = ?1 AND status = 'QUEUED'",
     )
     .bind(id)
     .bind(upload_id)
     .bind(now)
     .execute(pool)
     .await?;
+
+    if result.rows_affected() != 1 {
+        // The upload SUCCEEDED at ANAF but the status transition failed (the row
+        // is no longer QUEUED — it may have been concurrently modified, or the
+        // upload_id was already set by a previous attempt).
+        // Best-effort: persist the upload_id so recovery cannot reset this
+        // invoice to DRAFT and trigger a duplicate filing at ANAF.
+        tracing::warn!(
+            %id,
+            %upload_id,
+            "mark_submitted: 0 rows updated (invoice not QUEUED) — \
+             persisting upload_id to prevent duplicate ANAF filing"
+        );
+        let _ =
+            sqlx::query("UPDATE invoices SET anaf_upload_id = ?2, updated_at = ?3 WHERE id = ?1")
+                .bind(id)
+                .bind(upload_id)
+                .bind(now)
+                .execute(pool)
+                .await;
+        return Err(AppError::Validation(
+            "Factura nu mai este în statusul QUEUED — starea nu a putut fi actualizată la SUBMITTED \
+             (upload_id salvat pentru a preveni o depunere duplicată la ANAF)."
+                .into(),
+        ));
+    }
+
     Ok(())
 }
 
@@ -648,28 +683,55 @@ pub async fn delete_scoped(pool: &SqlitePool, id: &str, company_id: &str) -> App
 /// R13 Wave G: user-facing status update scoped to a specific company.
 /// Background ANAF transitions (mark_validated / mark_rejected / mark_submitted)
 /// continue to use their own dedicated fns — do NOT call this from poll.rs / spv.rs.
+///
+/// D2 — CAS (Compare-And-Swap): `expected_status` adds `AND status = ?expected`
+/// to the UPDATE so a concurrent modification between the caller's read and this
+/// write is detected atomically (rows_affected == 0 → Conflict error).
 pub async fn set_status_scoped(
     pool: &SqlitePool,
     id: &str,
     company_id: &str,
     status: crate::db::models::InvoiceStatus,
+    expected_status: &str,
     message: Option<String>,
 ) -> AppResult<()> {
     let now = now_unix();
     let mut tx = pool.begin().await?;
 
+    // D2: AND status = ?5 makes this a CAS — if another writer changed the status
+    // between the caller's SELECT and this UPDATE, rows_affected == 0.
     let result = sqlx::query(
-        "UPDATE invoices SET status = ?2, updated_at = ?3 WHERE id = ?1 AND company_id = ?4",
+        "UPDATE invoices SET status = ?2, updated_at = ?3 \
+         WHERE id = ?1 AND company_id = ?4 AND status = ?5",
     )
     .bind(id)
     .bind(status.as_str())
     .bind(now)
     .bind(company_id)
+    .bind(expected_status)
     .execute(&mut *tx)
     .await?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound);
+        // Distinguish "not found / wrong company" from "concurrent status change".
+        // Re-read inside the TX to tell them apart cleanly.
+        let current: Option<String> =
+            sqlx::query_scalar("SELECT status FROM invoices WHERE id = ?1 AND company_id = ?2")
+                .bind(id)
+                .bind(company_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        return match current {
+            None => Err(AppError::NotFound),
+            Some(s) if s != expected_status => Err(AppError::Validation(format!(
+                "Statusul facturii s-a schimbat între timp ({} → {}). \
+                 Reîncărcați factura și reîncercați.",
+                expected_status, s
+            ))),
+            // Theoretically unreachable (the UPDATE should have matched), but
+            // return a generic NotFound to be safe.
+            _ => Err(AppError::NotFound),
+        };
     }
 
     sqlx::query(
@@ -691,9 +753,137 @@ pub async fn set_status_scoped(
 #[cfg(test)]
 mod tests {
     use rust_decimal::Decimal;
+    use sqlx::sqlite::SqlitePoolOptions;
     use std::str::FromStr;
 
     use crate::db::models::VALID_PAYMENT_MEANS_CODES;
+
+    // ── A1: mark_submitted guard tests ────────────────────────────────────────
+
+    /// Minimal in-memory schema for mark_submitted tests.
+    async fn setup_mark_submitted_pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(":memory:")
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE invoices (
+                id TEXT PRIMARY KEY NOT NULL,
+                company_id TEXT NOT NULL DEFAULT 'comp-1',
+                contact_id TEXT NOT NULL DEFAULT 'contact-1',
+                series TEXT NOT NULL DEFAULT 'FCT',
+                number INTEGER NOT NULL DEFAULT 1,
+                full_number TEXT NOT NULL DEFAULT 'FCT-0001',
+                issue_date TEXT NOT NULL DEFAULT '2026-01-01',
+                due_date TEXT NOT NULL DEFAULT '2026-01-01',
+                currency TEXT NOT NULL DEFAULT 'RON',
+                exchange_rate REAL,
+                subtotal_amount TEXT NOT NULL DEFAULT '0',
+                vat_amount TEXT NOT NULL DEFAULT '0',
+                total_amount TEXT NOT NULL DEFAULT '0',
+                status TEXT NOT NULL DEFAULT 'DRAFT',
+                anaf_upload_id TEXT,
+                anaf_index TEXT,
+                anaf_submitted_at INTEGER,
+                anaf_validated_at INTEGER,
+                anaf_rejected_at INTEGER,
+                xml_path TEXT,
+                pdf_path TEXT,
+                signature_xml_path TEXT,
+                rejection_reason TEXT,
+                rejection_code TEXT,
+                notes TEXT,
+                payment_means_code TEXT NOT NULL DEFAULT '30',
+                storno_of_invoice_id TEXT,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        pool
+    }
+
+    async fn insert_invoice_with_status(pool: &sqlx::SqlitePool, id: &str, status: &str) {
+        sqlx::query("INSERT INTO invoices (id, status) VALUES (?1, ?2)")
+            .bind(id)
+            .bind(status)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    /// A1: mark_submitted with correct QUEUED status → row transitions to SUBMITTED.
+    #[tokio::test]
+    async fn mark_submitted_queued_invoice_succeeds() {
+        let pool = setup_mark_submitted_pool().await;
+        insert_invoice_with_status(&pool, "inv-queued", "QUEUED").await;
+
+        let result = super::mark_submitted(&pool, "inv-queued", "UPLOAD-001").await;
+        assert!(
+            result.is_ok(),
+            "mark_submitted on QUEUED invoice must succeed"
+        );
+
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM invoices WHERE id = 'inv-queued'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(status, "SUBMITTED");
+
+        let upload_id: Option<String> =
+            sqlx::query_scalar("SELECT anaf_upload_id FROM invoices WHERE id = 'inv-queued'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(upload_id.as_deref(), Some("UPLOAD-001"));
+    }
+
+    /// A1: mark_submitted on a non-QUEUED row → returns error AND persists
+    /// the upload_id (anti-duplicate: row no longer matches the recovery
+    /// predicate `QUEUED AND anaf_upload_id IS NULL`).
+    #[tokio::test]
+    async fn mark_submitted_non_queued_persists_upload_id() {
+        let pool = setup_mark_submitted_pool().await;
+        // Insert as DRAFT (not QUEUED) to simulate a concurrent status change.
+        insert_invoice_with_status(&pool, "inv-draft", "DRAFT").await;
+
+        let result = super::mark_submitted(&pool, "inv-draft", "UPLOAD-002").await;
+        assert!(
+            result.is_err(),
+            "mark_submitted on non-QUEUED invoice must return an error"
+        );
+
+        // Status must NOT have changed to SUBMITTED.
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM invoices WHERE id = 'inv-draft'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_ne!(
+            status, "SUBMITTED",
+            "status must not flip to SUBMITTED on a non-QUEUED row"
+        );
+
+        // CRITICAL: upload_id MUST be persisted despite the error so the
+        // recovery predicate (QUEUED AND anaf_upload_id IS NULL) no longer
+        // matches, preventing a duplicate ANAF filing.
+        let upload_id: Option<String> =
+            sqlx::query_scalar("SELECT anaf_upload_id FROM invoices WHERE id = 'inv-draft'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            upload_id.as_deref(),
+            Some("UPLOAD-002"),
+            "upload_id MUST be persisted even on partial failure to block duplicate filing"
+        );
+    }
 
     #[test]
     fn decimal_avoids_float_drift() {
