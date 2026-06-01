@@ -1,19 +1,28 @@
 /**
- * Contacte (clienți / furnizori) — date reale din backend.
+ * Contacte (clienți / furnizori) — re-skinned to rf kit (Wave 3).
+ * Preserves 100% of wiring: api.contacts.list({companyId}),
+ * type filter Toți/Clienți/Furnizori, search, create/edit modal
+ * → api.contacts.create / api.contacts.update(id, companyId, input),
+ * delete confirm → api.contacts.delete(id, companyId),
+ * Import CSV → CsvImportModal, multi-select.
  */
 
-import { useMemo, useState, useId, isValidElement, cloneElement } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslation } from "react-i18next";
 import { confirm } from "@tauri-apps/plugin-dialog";
 
 import { Icon } from "@/components/shared/Icon";
 import { CsvImportModal } from "@/components/shared/CsvImportModal";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import {
+  PageHeader, Btn, IconBtn, Badge, Card, Field, Input, Select,
+  Segmented, SearchInput, Empty, Modal,
+} from "@/components/rf";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
-import { fmtShortcut } from "@/lib/platform";
+import { formatError } from "@/lib/error-mapper";
+import { notify } from "@/lib/toasts";
 import type { Contact, ContactType, CreateContactInput, UpdateContactInput } from "@/types";
 import { COUNTRIES, CURRENCIES } from "@/lib/constants";
 
@@ -25,11 +34,15 @@ const TYPE_LABELS: Record<ContactType, string> = {
   BOTH: "Client/Furnizor",
 };
 
+const TYPE_VARIANT: Record<ContactType, "info" | "neutral" | "warning"> = {
+  CUSTOMER: "info",
+  SUPPLIER: "neutral",
+  BOTH: "warning",
+};
 
 export function ContactsPage() {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const queryClient = useQueryClient();
-  const { t } = useTranslation();
 
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -37,7 +50,13 @@ export function ContactsPage() {
   const [modal, setModal] = useState<"create" | { edit: Contact } | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
 
-  const { data: contacts = [], isLoading, isError: contactsError, error: contactsErr, refetch: refetchContacts } = useQuery({
+  const {
+    data: contacts = [],
+    isLoading,
+    isError: contactsError,
+    error: contactsErr,
+    refetch: refetchContacts,
+  } = useQuery({
     queryKey: queryKeys.contacts.list({ companyId: activeCompanyId ?? undefined }),
     queryFn: () => api.contacts.list({ companyId: activeCompanyId ?? undefined }),
   });
@@ -55,11 +74,14 @@ export function ContactsPage() {
       .filter((c) => typeFilter === "all" || c.contactType === typeFilter);
   }, [contacts, query, typeFilter]);
 
-  const customers = contacts.filter((c) => c.contactType === "CUSTOMER" || c.contactType === "BOTH").length;
-  const suppliers = contacts.filter((c) => c.contactType === "SUPPLIER" || c.contactType === "BOTH").length;
+  const customers = contacts.filter(
+    (c) => c.contactType === "CUSTOMER" || c.contactType === "BOTH",
+  ).length;
+  const suppliers = contacts.filter(
+    (c) => c.contactType === "SUPPLIER" || c.contactType === "BOTH",
+  ).length;
 
   const deleteMutation = useMutation({
-    // R14 Wave A: pass activeCompanyId for ownership verification.
     mutationFn: (id: string) => {
       if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
       return api.contacts.delete(id, activeCompanyId);
@@ -67,172 +89,209 @@ export function ContactsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.contacts.all });
     },
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge contactul.")),
   });
 
   const handleDelete = async (c: Contact) => {
     if (!activeCompanyId) return;
-    const ok = await confirm(`Șterge contactul "${c.legalName}"? Această acțiune nu poate fi anulată.`, {
-      title: "Confirmare ștergere",
-      kind: "warning",
-    });
+    const ok = await confirm(
+      `Șterge contactul "${c.legalName}"? Această acțiune nu poate fi anulată.`,
+      { title: "Confirmare ștergere", kind: "warning" },
+    );
     if (!ok) return;
     deleteMutation.mutate(c.id);
   };
 
   const toggleAll = () => {
-    setSelected(selected.size === list.length ? new Set() : new Set(list.map((c) => c.id)));
+    setSelected(
+      selected.size === list.length ? new Set() : new Set(list.map((c) => c.id)),
+    );
   };
   const toggleOne = (id: string) => {
     const next = new Set(selected);
-    if (next.has(id)) next.delete(id); else next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     setSelected(next);
   };
 
+  const filterOptions = [
+    { value: "all" as TypeFilter, label: `Toți (${contacts.length})` },
+    { value: "CUSTOMER" as TypeFilter, label: `Clienți (${customers})` },
+    { value: "SUPPLIER" as TypeFilter, label: `Furnizori (${suppliers})` },
+  ];
+
   return (
-    <div className="content">
-      <div className="content-titlebar">
-        <span className="content-title">
-          <span className="crumb">Date</span>
-          {t('contacts.title')}
-        </span>
-        <span className="muted" style={{ fontSize: 11 }}>
-          {list.length} din {contacts.length} contacte
-        </span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button type="button" className="btn" onClick={() => setShowImportModal(true)}>
-            <Icon name="upload" size={12} /> {t('contacts.importCsv')}
-          </button>
-          <button type="button" className="btn primary" onClick={() => setModal("create")}>
-            <Icon name="plus" size={12} /> {t('contacts.newContact')}
-          </button>
-        </span>
-      </div>
+    <div className="rf-page">
+      <PageHeader
+        title="Clienți & Furnizori"
+        sub={<Badge variant="neutral" dot={false}>{contacts.length} contacte</Badge>}
+        actions={
+          <>
+            <Btn
+              variant="secondary"
+              icon="upload"
+              size="sm"
+              onClick={() => setShowImportModal(true)}
+            >
+              Import CSV
+            </Btn>
+            <Btn
+              variant="primary"
+              icon="plus"
+              size="sm"
+              onClick={() => setModal("create")}
+            >
+              Contact nou
+            </Btn>
+          </>
+        }
+      />
 
-      <div className="views-bar">
-        <span className={"view-tab " + (typeFilter === "all" ? "active" : "")} onClick={() => setTypeFilter("all")}>
-          Toate <span className="count">{contacts.length}</span>
-        </span>
-        <span className={"view-tab " + (typeFilter === "CUSTOMER" ? "active" : "")} onClick={() => setTypeFilter("CUSTOMER")}>
-          Clienți <span className="count">{customers}</span>
-        </span>
-        <span className={"view-tab " + (typeFilter === "SUPPLIER" ? "active" : "")} onClick={() => setTypeFilter("SUPPLIER")}>
-          Furnizori <span className="count">{suppliers}</span>
-        </span>
-      </div>
-
-      <div className="content-toolbar">
-        <div className="search">
-          <Icon name="search" size={13} />
-          <input
-            placeholder="Caută după nume, CUI sau localitate…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <span className="kbd-hint">{fmtShortcut("Ctrl F")}</span>
-        </div>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
-          {selected.size > 0 && (
-            <span style={{ fontSize: 11, fontWeight: 600 }}>{selected.size} selectate</span>
-          )}
-          <button
-            type="button"
-            className="btn-icon"
-            title="Reîmprospătează"
-            onClick={() => void queryClient.invalidateQueries({ queryKey: queryKeys.contacts.all })}
-          >
-            <Icon name="refresh" size={14} />
-          </button>
-        </span>
-      </div>
-
-      <div className="content-body">
-        {isLoading ? (
-          <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>Se încarcă…</div>
-        ) : contactsError ? (
-          <QueryErrorBanner error={contactsErr} label="contactele" onRetry={() => void refetchContacts()} />
-        ) : list.length === 0 ? (
-          <div style={{ padding: 40, textAlign: "center", fontSize: 12, color: "var(--text-muted)" }}>
-            {contacts.length === 0
-              ? "Niciun contact. Adaugă primul client sau furnizor."
-              : "Niciun rezultat pentru filtrele aplicate."}
+      <div className="rf-page-body">
+        <Card>
+          {/* Toolbar */}
+          <div className="rf-toolbar-row" style={{ padding: "10px 16px", borderBottom: "1px solid var(--rf-border)" }}>
+            <SearchInput
+              placeholder="Caută după nume, CUI sau localitate…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              style={{ width: 300 }}
+            />
+            <Segmented
+              options={filterOptions}
+              value={typeFilter}
+              onChange={(v) => setTypeFilter(v)}
+            />
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+              {selected.size > 0 && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--rf-text-muted)" }}>
+                  {selected.size} selectate
+                </span>
+              )}
+              <IconBtn
+                icon="refresh"
+                title="Reîmprospătează"
+                onClick={() =>
+                  void queryClient.invalidateQueries({ queryKey: queryKeys.contacts.all })
+                }
+              />
+            </div>
           </div>
-        ) : (
-          <table className="dt">
-            <thead>
-              <tr>
-                <th className="ck">
-                  <input
-                    type="checkbox"
-                    className="cbx"
-                    checked={selected.size === list.length && list.length > 0}
-                    onChange={toggleAll}
-                  />
-                </th>
-                <th style={{ width: 110 }}>CUI</th>
-                <th>Denumire</th>
-                <th style={{ width: 80 }}>Tip</th>
-                <th style={{ width: 130 }}>Localitate</th>
-                <th style={{ width: 60 }}>Județ</th>
-                <th style={{ width: 64 }} className="num">TVA</th>
-                <th style={{ width: 170 }}>Email</th>
-                <th style={{ width: 90 }}>Acțiuni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((c: Contact) => (
-                <tr key={c.id}>
-                  <td className="ck" onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" className="cbx" checked={selected.has(c.id)} onChange={() => toggleOne(c.id)} />
-                  </td>
-                  <td className="mono">{c.cui ?? <span className="dim">—</span>}</td>
-                  <td><b>{c.legalName}</b></td>
-                  <td>
-                    <span className={"badge " + (c.contactType === "CUSTOMER" ? "validated" : c.contactType === "SUPPLIER" ? "pending" : "info")}>
-                      {TYPE_LABELS[c.contactType]}
-                    </span>
-                  </td>
-                  <td>{c.city ?? <span className="dim">—</span>}</td>
-                  <td className="mono">{c.county ?? <span className="dim">—</span>}</td>
-                  <td className="num">
-                    {c.vatPayer ? (
-                      <span style={{ color: "#16A34A", display: "inline-flex" }}><Icon name="check" size={13} /></span>
-                    ) : (
-                      <span className="dim"><Icon name="x" size={13} /></span>
-                    )}
-                  </td>
-                  <td className="muted" style={{ fontSize: 11 }}>{c.email ?? <span className="dim">—</span>}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      title="Editează"
-                      onClick={() => setModal({ edit: c })}
-                    >
-                      <Icon name="pen" size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      title="Șterge"
-                      onClick={() => void handleDelete(c)}
-                    >
-                      <Icon name="x" size={13} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+
+          {/* Table */}
+          <div className="rf-tbl-wrap">
+            {isLoading ? (
+              <Empty icon="users" title="Se încarcă…" />
+            ) : contactsError ? (
+              <QueryErrorBanner
+                error={contactsErr}
+                label="contactele"
+                onRetry={() => void refetchContacts()}
+              />
+            ) : list.length === 0 ? (
+              <Empty
+                icon="users"
+                title={
+                  contacts.length === 0
+                    ? "Niciun contact"
+                    : "Niciun rezultat pentru filtrele aplicate"
+                }
+              >
+                {contacts.length === 0 &&
+                  "Adaugă primul client sau furnizor cu butonul \"Contact nou\"."}
+              </Empty>
+            ) : (
+              <table className="rf-tbl">
+                <thead>
+                  <tr>
+                    <th className="rf-ck">
+                      <input
+                        type="checkbox"
+                        className="rf-cbx"
+                        checked={selected.size === list.length && list.length > 0}
+                        onChange={toggleAll}
+                      />
+                    </th>
+                    <th style={{ width: 120 }}>CUI</th>
+                    <th>Denumire</th>
+                    <th style={{ width: 110 }}>Tip</th>
+                    <th style={{ width: 140 }}>Localitate</th>
+                    <th style={{ width: 50 }}>Județ</th>
+                    <th style={{ width: 60, textAlign: "center" }}>TVA</th>
+                    <th style={{ width: 180 }}>Email</th>
+                    <th style={{ width: 90 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map((c: Contact) => (
+                    <tr key={c.id}>
+                      <td className="rf-ck" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          className="rf-cbx"
+                          checked={selected.has(c.id)}
+                          onChange={() => toggleOne(c.id)}
+                        />
+                      </td>
+                      <td className="mono">{c.cui ?? <span className="rf-dim">—</span>}</td>
+                      <td style={{ fontWeight: 500 }}>{c.legalName}</td>
+                      <td>
+                        <Badge variant={TYPE_VARIANT[c.contactType]} dot={false}>
+                          {TYPE_LABELS[c.contactType]}
+                        </Badge>
+                      </td>
+                      <td style={{ color: "var(--rf-text-muted)" }}>
+                        {c.city ?? <span className="rf-dim">—</span>}
+                      </td>
+                      <td className="mono" style={{ color: "var(--rf-text-muted)" }}>
+                        {c.county ?? <span className="rf-dim">—</span>}
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        {c.vatPayer ? (
+                          <Icon name="check" size={14} style={{ color: "var(--rf-success)" }} />
+                        ) : (
+                          <span className="rf-dim">
+                            <Icon name="x" size={14} />
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
+                        {c.email ?? <span className="rf-dim">—</span>}
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <div className="rf-cell-actions">
+                          <IconBtn
+                            icon="pen"
+                            title="Editează"
+                            size={14}
+                            onClick={() => setModal({ edit: c })}
+                          />
+                          <IconBtn
+                            icon="trash"
+                            title="Șterge"
+                            size={14}
+                            onClick={() => void handleDelete(c)}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="rf-tbl-footer">
+            <span>Total: <b>{list.length}</b> contacte</span>
+            <span>Clienți: <b>{customers}</b></span>
+            <span>Furnizori: <b>{suppliers}</b></span>
+          </div>
+        </Card>
       </div>
 
-      <div style={{ padding: "6px 14px", borderTop: "1px solid var(--border)", background: "var(--bg)", display: "flex", gap: 16, fontSize: 11, color: "var(--text-muted)" }}>
-        <span>Total: <b style={{ color: "var(--text)" }}>{list.length}</b> contacte</span>
-        <span>Clienți: <b style={{ color: "var(--text)" }}>{customers}</b></span>
-        <span>Furnizori: <b style={{ color: "var(--text)" }}>{suppliers}</b></span>
-      </div>
-
-      {modal && (
+      {/* Contact modal */}
+      {modal !== null && (
         <ContactModal
           companyId={activeCompanyId ?? ""}
           contact={modal === "create" ? null : modal.edit}
@@ -244,6 +303,7 @@ export function ContactsPage() {
         />
       )}
 
+      {/* CSV Import */}
       {showImportModal && (
         <CsvImportModal
           type="contacts"
@@ -258,6 +318,8 @@ export function ContactsPage() {
     </div>
   );
 }
+
+// ─── ContactModal ─────────────────────────────────────────────────────────────
 
 function ContactModal({
   companyId,
@@ -290,14 +352,14 @@ function ContactModal({
   const create = useMutation({
     mutationFn: (input: CreateContactInput) => api.contacts.create(input),
     onSuccess: onSaved,
-    onError: (e) => setError((e as { message?: string }).message ?? "Eroare."),
+    onError: (e) => setError(formatError(e, "Eroare la creare.")),
   });
+
   const update = useMutation({
-    // R14 Wave A: pass companyId for ownership verification.
     mutationFn: (input: UpdateContactInput) =>
       api.contacts.update(contact!.id, companyId, input),
     onSuccess: onSaved,
-    onError: (e) => setError((e as { message?: string }).message ?? "Eroare."),
+    onError: (e) => setError(formatError(e, "Eroare la salvare.")),
   });
 
   const isPending = create.isPending || update.isPending;
@@ -311,7 +373,10 @@ function ContactModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!form.legalName.trim()) { setError("Denumirea este obligatorie."); return; }
+    if (!form.legalName.trim()) {
+      setError("Denumirea este obligatorie.");
+      return;
+    }
     if (form.cui?.trim()) {
       const cuiClean = form.cui.trim().toUpperCase().replace(/^RO/, "");
       if (!/^\d{2,10}$/.test(cuiClean)) {
@@ -338,123 +403,145 @@ function ContactModal({
   };
 
   return (
-    <div className="palette-scrim" style={{ alignItems: "center", paddingTop: 0 }} onClick={onClose}>
-      <div
-        style={{ width: 420, background: "var(--bg-content)", border: "1px solid var(--border-strong)", boxShadow: "0 4px 24px rgba(0,0,0,0.12)", padding: "20px 24px 18px", maxHeight: "90vh", overflowY: "auto" }}
-        onClick={(e) => e.stopPropagation()}
+    <Modal
+      open
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={isEdit ? `Editează: ${contact.legalName}` : "Contact nou"}
+      width={560}
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose} disabled={isPending}>
+            Anulează
+          </Btn>
+          <Btn
+            variant="primary"
+            icon="check"
+            disabled={isPending}
+            onClick={(e) => {
+              e.preventDefault();
+              void handleSubmit(e);
+            }}
+          >
+            {isPending ? "Se salvează…" : isEdit ? "Salvează" : "Adaugă"}
+          </Btn>
+        </>
+      }
+    >
+      <form
+        id="contact-form"
+        onSubmit={handleSubmit}
+        style={{ display: "flex", flexDirection: "column", gap: 14 }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>
-            {isEdit ? `Editează: ${contact.legalName}` : "Contact nou"}
-          </h3>
-          <button type="button" className="btn-icon" onClick={onClose}><Icon name="x" size={14} /></button>
+        {/* Tip + CUI */}
+        <div className="rf-grid-2">
+          <Field label="Tip" required>
+            <Select
+              value={form.contactType}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  contactType: e.target.value as ContactType,
+                }))
+              }
+            >
+              <option value="CUSTOMER">Client</option>
+              <option value="SUPPLIER">Furnizor</option>
+              <option value="BOTH">Client/Furnizor</option>
+            </Select>
+          </Field>
+          <Field label="CUI">
+            <Input
+              placeholder="ex. RO12345678"
+              className="mono"
+              {...field("cui")}
+            />
+          </Field>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-          <div style={{ display: "flex", gap: 9 }}>
-            <MField label="Tip *" style={{ flex: 1 }}>
-              <select className="field" value={form.contactType} onChange={(e) => setForm((f) => ({ ...f, contactType: e.target.value as ContactType }))}>
-                <option value="CUSTOMER">Client</option>
-                <option value="SUPPLIER">Furnizor</option>
-                <option value="BOTH">Client/Furnizor</option>
-              </select>
-            </MField>
-            <MField label="CUI" style={{ flex: 1 }}>
-              <input className="field" placeholder="ex. RO12345678" style={{ fontFamily: "var(--font-mono)" }} {...field("cui")} />
-            </MField>
-          </div>
+        {/* Denumire */}
+        <Field label="Denumire legală" required>
+          <Input placeholder="S.C. Exemplu S.R.L." {...field("legalName")} autoFocus />
+        </Field>
 
-          <MField label="Denumire legală *">
-            <input className="field" placeholder="S.C. Exemplu S.R.L." {...field("legalName")} />
-          </MField>
-
-          <div style={{ display: "flex", gap: 9 }}>
-            <MField label="Localitate" style={{ flex: 2 }}>
-              <input className="field" placeholder="Cluj-Napoca" {...field("city")} />
-            </MField>
-            <MField label="Județ" style={{ flex: 1 }}>
-              <input className="field" placeholder="CJ" maxLength={2} style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase" }} {...field("county")} />
-            </MField>
-          </div>
-
-          <MField label="Adresă">
-            <input className="field" placeholder="Str. Exemplu nr. 1" {...field("address")} />
-          </MField>
-
-          <div style={{ display: "flex", gap: 9 }}>
-            <MField label="Țară" style={{ flex: 1 }}>
-              <select className="field" value={form.country ?? "RO"} onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))}>
-                {COUNTRIES.map((c) => (
-                  <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
-                ))}
-              </select>
-            </MField>
-            <MField label="Monedă" style={{ flex: 1 }}>
-              <select className="field" value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                {CURRENCIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </MField>
-          </div>
-
-          <div style={{ display: "flex", gap: 9 }}>
-            <MField label="Email" style={{ flex: 1 }}>
-              <input className="field" type="email" placeholder="office@firma.ro" {...field("email")} />
-            </MField>
-            <MField label="Telefon" style={{ flex: 1 }}>
-              <input className="field" placeholder="+40 722..." {...field("phone")} />
-            </MField>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}>
-            <input
-              id="m-vatPayer"
-              type="checkbox"
-              className="cbx"
-              checked={form.vatPayer as boolean}
-              onChange={(e) => setForm((f) => ({ ...f, vatPayer: e.target.checked }))}
+        {/* Localitate + Județ */}
+        <div className="rf-grid-2">
+          <Field label="Localitate">
+            <Input placeholder="Cluj-Napoca" {...field("city")} />
+          </Field>
+          <Field label="Județ">
+            <Input
+              placeholder="CJ"
+              maxLength={2}
+              className="mono"
+              style={{ textTransform: "uppercase" }}
+              {...field("county")}
             />
-            <label htmlFor="m-vatPayer" style={{ fontSize: 12, cursor: "pointer", userSelect: "none" }}>
-              Plătitor de TVA
-            </label>
+          </Field>
+        </div>
+
+        {/* Adresă */}
+        <Field label="Adresă">
+          <Input placeholder="Str. Exemplu nr. 1" {...field("address")} />
+        </Field>
+
+        {/* Țară + Monedă */}
+        <div className="rf-grid-2">
+          <Field label="Țară">
+            <Select value={form.country ?? "RO"} onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))}>
+              {COUNTRIES.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.name} ({c.code})
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Monedă">
+            <Select value={currency} onChange={(e) => setCurrency(e.target.value)}>
+              {CURRENCIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+
+        {/* Email + Telefon */}
+        <div className="rf-grid-2">
+          <Field label="Email">
+            <Input type="email" placeholder="office@firma.ro" {...field("email")} />
+          </Field>
+          <Field label="Telefon">
+            <Input placeholder="+40 722..." {...field("phone")} />
+          </Field>
+        </div>
+
+        {/* Plătitor TVA */}
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 13,
+            cursor: "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            className="rf-cbx"
+            checked={form.vatPayer as boolean}
+            onChange={(e) => setForm((f) => ({ ...f, vatPayer: e.target.checked }))}
+          />
+          Plătitor de TVA
+        </label>
+
+        {error && (
+          <div className="rf-banner rf-banner--error">
+            <Icon name="xCircle" size={16} />
+            <span>{error}</span>
           </div>
-
-          {error && (
-            <div style={{ padding: "6px 10px", background: "#FEE2E2", border: "1px solid #FECACA", fontSize: 11, color: "#991B1B" }}>
-              {error}
-            </div>
-          )}
-
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
-            <button type="button" className="btn" onClick={onClose}>Anulează</button>
-            <button type="submit" className="btn primary" disabled={isPending}>
-              {isPending ? "Se salvează…" : isEdit ? "Salvează" : "Adaugă"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function MField({
-  label,
-  children,
-  style,
-}: {
-  label: string;
-  children: React.ReactNode;
-  style?: React.CSSProperties;
-}) {
-  const fieldId = useId();
-  const child = isValidElement(children)
-    ? cloneElement(children as React.ReactElement<{ id?: string }>, { id: fieldId })
-    : children;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3, ...style }}>
-      <label htmlFor={fieldId} style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>{label}</label>
-      {child}
-    </div>
+        )}
+      </form>
+    </Modal>
   );
 }

@@ -1,21 +1,22 @@
 /**
- * Plan de conturi — company-scoped chart of accounts catalog.
- *
- * Listează conturile companiei active grupate/sortate după codul de cont,
- * permite adăugare/editare via modal și ștergere cu confirmare.
- * Butonul "Încarcă planul standard" este vizibil când lista e goală.
- *
- * Notă: Aceasta este o pagină de catalog de referință (CRUD + seed).
- * Integrarea cu înregistrările contabile dublu-intrare este planificată
- * pentru o versiune viitoare și este în afara scopului acestui modul.
+ * Plan de conturi — re-skinned to rf kit (Wave 3).
+ * Preserves: api.accounts.list(activeCompanyId) grouped by class, search,
+ * create/edit modal → api.accounts.create / api.accounts.update(id, companyId, input),
+ * delete confirm → api.accounts.delete(id, companyId),
+ * "Încarcă planul standard (PCG)" → api.accounts.seedStandard(activeCompanyId),
+ * "select active company" guard.
  */
 
-import { useMemo, useState, useId, isValidElement, cloneElement, Fragment } from "react";
+import { useMemo, useState, Fragment } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm } from "@tauri-apps/plugin-dialog";
 
 import { Icon } from "@/components/shared/Icon";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import {
+  PageHeader, Btn, IconBtn, Badge, Card, Field, Input, Select,
+  Tabs, Empty, Modal, SearchInput,
+} from "@/components/rf";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -23,7 +24,7 @@ import { formatError } from "@/lib/error-mapper";
 import { notify } from "@/lib/toasts";
 import type { Account, AccountInput, UpdateAccountInput } from "@/types";
 
-// ─── Account classes ────────────────────────────────────────────────────────
+// ─── Account classes ──────────────────────────────────────────────────────────
 
 const CLASS_LABELS: Record<number, string> = {
   1: "Clasa 1 — Capitaluri",
@@ -37,7 +38,7 @@ const CLASS_LABELS: Record<number, string> = {
   9: "Clasa 9 — Interne",
 };
 
-// ─── Page ───────────────────────────────────────────────────────────────────
+// ─── Page ──────────────────────────────────────────────────────────────────────
 
 export function ChartOfAccountsPage() {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
@@ -60,7 +61,10 @@ export function ChartOfAccountsPage() {
   });
 
   const list = useMemo(() => {
-    const base = filter === "active" ? allAccounts.filter((a) => a.active) : allAccounts;
+    const base =
+      filter === "active"
+        ? allAccounts.filter((a) => a.active)
+        : allAccounts;
     const q = query.trim().toLowerCase();
     if (!q) return base;
     return base.filter(
@@ -72,30 +76,34 @@ export function ChartOfAccountsPage() {
 
   const activeCount = allAccounts.filter((a) => a.active).length;
 
-  // ── Seed standard ──────────────────────────────────────────────────────────
+  // ── Seed standard ────────────────────────────────────────────────────────────
   const seedMutation = useMutation({
     mutationFn: () => {
-      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      if (!activeCompanyId)
+        return Promise.reject(new Error("Nicio companie activă."));
       return api.accounts.seedStandard(activeCompanyId);
     },
     onSuccess: (inserted) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.all });
       notify.success(`${inserted} conturi standard încărcate.`);
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la încărcarea planului standard.")),
+    onError: (e) =>
+      notify.error(formatError(e, "Eroare la încărcarea planului standard.")),
   });
 
-  // ── Delete ─────────────────────────────────────────────────────────────────
+  // ── Delete ────────────────────────────────────────────────────────────────────
   const deleteMutation = useMutation({
     mutationFn: (id: string) => {
-      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      if (!activeCompanyId)
+        return Promise.reject(new Error("Nicio companie activă."));
       return api.accounts.delete(id, activeCompanyId);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.all });
       notify.success("Cont șters.");
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge contul.")),
+    onError: (e) =>
+      notify.error(formatError(e, "Nu s-a putut șterge contul.")),
   });
 
   const handleDelete = async (a: Account) => {
@@ -108,7 +116,7 @@ export function ChartOfAccountsPage() {
     deleteMutation.mutate(a.id);
   };
 
-  // ── Group by class ──────────────────────────────────────────────────────────
+  // ── Group by class ────────────────────────────────────────────────────────────
   const grouped = useMemo(() => {
     const map = new Map<number | null, Account[]>();
     for (const a of list) {
@@ -116,7 +124,6 @@ export function ChartOfAccountsPage() {
       if (!map.has(cls)) map.set(cls, []);
       map.get(cls)!.push(a);
     }
-    // Sort class keys numerically; null last.
     return [...map.entries()].sort(([a], [b]) => {
       if (a === null) return 1;
       if (b === null) return -1;
@@ -126,241 +133,236 @@ export function ChartOfAccountsPage() {
 
   if (!activeCompanyId) {
     return (
-      <div className="content">
-        <div className="content-titlebar">
-          <span className="content-title">
-            <span className="crumb">Date</span>
-            Plan de conturi
-          </span>
-        </div>
-        <div style={{ padding: 40, textAlign: "center", fontSize: 12, color: "var(--text-muted)" }}>
-          Selectați o companie activă pentru a vedea planul de conturi.
+      <div className="rf-page">
+        <PageHeader title="Plan de conturi" />
+        <div className="rf-page-body">
+          <Empty icon="book" title="Selectați o companie activă">
+            Selectați o companie din bara laterală pentru a vedea planul de conturi.
+          </Empty>
         </div>
       </div>
     );
   }
 
+  const filterTabs = [
+    { value: "all" as const, label: "Toate", badge: allAccounts.length },
+    { value: "active" as const, label: "Active", badge: activeCount },
+  ];
+
   return (
-    <div className="content">
-      <div className="content-titlebar">
-        <span className="content-title">
-          <span className="crumb">Date</span>
-          Plan de conturi
-        </span>
-        <span className="muted" style={{ fontSize: 11 }}>
-          {list.length} din {allAccounts.length} conturi
-        </span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => setModal("create")}
-          >
-            <Icon name="plus" size={12} /> Cont nou
-          </button>
-        </span>
-      </div>
-
-      <div className="views-bar">
-        <span
-          className={`view-tab${filter === "all" ? " active" : ""}`}
-          onClick={() => setFilter("all")}
-          style={{ cursor: "pointer" }}
-        >
-          Toate <span className="count">{allAccounts.length}</span>
-        </span>
-        <span
-          className={`view-tab${filter === "active" ? " active" : ""}`}
-          onClick={() => setFilter("active")}
-          style={{ cursor: "pointer" }}
-        >
-          Active <span className="count">{activeCount}</span>
-        </span>
-      </div>
-
-      <div className="content-toolbar">
-        <div className="search">
-          <Icon name="search" size={13} />
-          <input
-            placeholder="Caută după cod sau denumire…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-        <span style={{ marginLeft: "auto" }}>
-          <button
-            type="button"
-            className="btn-icon"
-            title="Reîmprospătează"
-            onClick={() =>
-              void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.all })
-            }
-          >
-            <Icon name="refresh" size={14} />
-          </button>
-        </span>
-      </div>
-
-      <div className="content-body">
-        {isLoading ? (
-          <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>
-            Se încarcă…
-          </div>
-        ) : isError ? (
-          <QueryErrorBanner
-            error={error}
-            label="conturile"
-            onRetry={() => void refetch()}
-          />
-        ) : allAccounts.length === 0 ? (
-          <div
-            style={{
-              padding: 48,
-              textAlign: "center",
-              fontSize: 12,
-              color: "var(--text-muted)",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 12,
-            }}
-          >
-            <p>Niciun cont înregistrat. Puteți adăuga manual sau încărca planul standard român (PCG).</p>
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => seedMutation.mutate()}
+    <div className="rf-page">
+      <PageHeader
+        title="Plan de conturi"
+        sub={
+          <Badge variant="neutral" dot={false}>
+            {list.length} conturi
+          </Badge>
+        }
+        actions={
+          <>
+            <Btn
+              variant="secondary"
+              icon="download"
+              size="sm"
               disabled={seedMutation.isPending}
+              onClick={() => seedMutation.mutate()}
             >
-              {seedMutation.isPending ? "Se încarcă…" : "Încarcă planul standard (PCG)"}
-            </button>
-          </div>
-        ) : list.length === 0 ? (
+              {seedMutation.isPending
+                ? "Se încarcă…"
+                : "Încarcă planul standard (PCG)"}
+            </Btn>
+            <Btn
+              variant="primary"
+              icon="plus"
+              size="sm"
+              onClick={() => setModal("create")}
+            >
+              Cont nou
+            </Btn>
+          </>
+        }
+      />
+
+      <div className="rf-page-body">
+        <Card>
+          {/* Tabs */}
           <div
             style={{
-              padding: 40,
-              textAlign: "center",
-              fontSize: 12,
-              color: "var(--text-muted)",
+              padding: "10px 16px 0",
+              borderBottom: "1px solid var(--rf-border)",
             }}
           >
-            Niciun rezultat pentru filtrele aplicate.
+            <Tabs tabs={filterTabs} value={filter} onChange={(v) => setFilter(v)} />
           </div>
-        ) : (
-          <table className="dt">
-            <thead>
-              <tr>
-                <th style={{ width: 100 }}>Cod</th>
-                <th>Denumire</th>
-                <th style={{ width: 180 }}>Clasă</th>
-                <th style={{ width: 110 }}>Cont părinte</th>
-                <th style={{ width: 60 }}>Activ</th>
-                <th style={{ width: 80 }}>Acțiuni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {grouped.map(([cls, entries]) => (
-                <Fragment key={`cls-${cls ?? "null"}`}>
-                  {/* Group header */}
+
+          {/* Toolbar */}
+          <div
+            className="rf-toolbar-row"
+            style={{ padding: "10px 16px", borderBottom: "1px solid var(--rf-border)" }}
+          >
+            <SearchInput
+              placeholder="Caută după cod sau denumire…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              style={{ width: 300 }}
+            />
+            <div style={{ marginLeft: "auto" }}>
+              <IconBtn
+                icon="refresh"
+                title="Reîmprospătează"
+                onClick={() =>
+                  void queryClient.invalidateQueries({
+                    queryKey: queryKeys.accounts.all,
+                  })
+                }
+              />
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="rf-tbl-wrap">
+            {isLoading ? (
+              <Empty icon="book" title="Se încarcă…" />
+            ) : isError ? (
+              <QueryErrorBanner
+                error={error}
+                label="conturile"
+                onRetry={() => void refetch()}
+              />
+            ) : allAccounts.length === 0 ? (
+              <Empty
+                icon="book"
+                title="Niciun cont înregistrat"
+                actions={
+                  <Btn
+                    variant="primary"
+                    icon="download"
+                    disabled={seedMutation.isPending}
+                    onClick={() => seedMutation.mutate()}
+                  >
+                    {seedMutation.isPending
+                      ? "Se încarcă…"
+                      : "Încarcă planul standard (PCG)"}
+                  </Btn>
+                }
+              >
+                Puteți adăuga manual sau încărca planul standard român (PCG).
+              </Empty>
+            ) : list.length === 0 ? (
+              <Empty icon="search" title="Niciun rezultat">
+                Niciun rezultat pentru filtrele aplicate.
+              </Empty>
+            ) : (
+              <table className="rf-tbl">
+                <thead>
                   <tr>
-                    <td
-                      colSpan={6}
-                      style={{
-                        background: "var(--bg-subtle, var(--bg))",
-                        fontWeight: 700,
-                        fontSize: 11,
-                        color: "var(--text-muted)",
-                        padding: "4px 8px",
-                        borderTop: "1px solid var(--border)",
-                        letterSpacing: "0.03em",
-                      }}
-                    >
-                      {cls != null
-                        ? CLASS_LABELS[cls] ?? `Clasa ${cls}`
-                        : "Fără clasă"}
-                    </td>
+                    <th style={{ width: 110 }}>Cod</th>
+                    <th>Denumire</th>
+                    <th style={{ width: 200 }}>Clasă</th>
+                    <th style={{ width: 110 }}>Cont părinte</th>
+                    <th style={{ width: 70, textAlign: "center" }}>Activ</th>
+                    <th style={{ width: 80 }}></th>
                   </tr>
-                  {entries.map((a) => (
-                    <tr key={a.id}>
-                      <td className="mono" style={{ fontWeight: 600 }}>
-                        {a.accountCode}
-                      </td>
-                      <td>{a.accountName}</td>
-                      <td className="muted" style={{ fontSize: 11 }}>
-                        {a.accountClass != null
-                          ? CLASS_LABELS[a.accountClass] ?? String(a.accountClass)
-                          : <span className="dim">—</span>}
-                      </td>
-                      <td className="mono">
-                        {a.parentCode ?? <span className="dim">—</span>}
-                      </td>
-                      <td>
-                        {a.active ? (
-                          <span style={{ color: "#16A34A", display: "inline-flex" }}>
-                            <Icon name="check" size={13} />
-                          </span>
-                        ) : (
-                          <span className="dim">
-                            <Icon name="x" size={13} />
-                          </span>
-                        )}
-                      </td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          className="btn-icon"
-                          title="Editează"
-                          onClick={() => setModal({ edit: a })}
+                </thead>
+                <tbody>
+                  {grouped.map(([cls, entries]) => (
+                    <Fragment key={`cls-${cls ?? "null"}`}>
+                      {/* Group header */}
+                      <tr>
+                        <td
+                          colSpan={6}
+                          style={{
+                            background: "var(--rf-bg, var(--rf-border))",
+                            fontWeight: 700,
+                            fontSize: 11,
+                            color: "var(--rf-text-muted)",
+                            padding: "5px 10px",
+                            borderTop: "1px solid var(--rf-border)",
+                            letterSpacing: "0.04em",
+                            textTransform: "uppercase",
+                          }}
                         >
-                          <Icon name="pen" size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-icon"
-                          title="Șterge"
-                          onClick={() => void handleDelete(a)}
-                        >
-                          <Icon name="x" size={13} />
-                        </button>
-                      </td>
-                    </tr>
+                          {cls != null
+                            ? CLASS_LABELS[cls] ?? `Clasa ${cls}`
+                            : "Fără clasă"}
+                        </td>
+                      </tr>
+                      {entries.map((a) => (
+                        <tr key={a.id}>
+                          <td className="mono" style={{ fontWeight: 600 }}>
+                            {a.accountCode}
+                          </td>
+                          <td style={{ fontWeight: 500 }}>{a.accountName}</td>
+                          <td
+                            style={{ fontSize: 12, color: "var(--rf-text-muted)" }}
+                          >
+                            {a.accountClass != null
+                              ? CLASS_LABELS[a.accountClass] ??
+                                String(a.accountClass)
+                              : <span className="rf-dim">—</span>}
+                          </td>
+                          <td className="mono">
+                            {a.parentCode ?? (
+                              <span className="rf-dim">—</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            {a.active ? (
+                              <Badge variant="success" dot={false}>Activ</Badge>
+                            ) : (
+                              <Badge variant="neutral" dot={false}>Inactiv</Badge>
+                            )}
+                          </td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <div className="rf-cell-actions">
+                              <IconBtn
+                                icon="pen"
+                                title="Editează"
+                                size={14}
+                                onClick={() => setModal({ edit: a })}
+                              />
+                              <IconBtn
+                                icon="trash"
+                                title="Șterge"
+                                size={14}
+                                onClick={() => void handleDelete(a)}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </Fragment>
                   ))}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        )}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="rf-tbl-footer">
+            <span>
+              Total: <b>{list.length}</b> conturi
+            </span>
+            <span>
+              Active: <b>{activeCount}</b>
+            </span>
+            <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--rf-text-dim)" }}>
+              Integrarea cu înregistrările contabile dublu-intrare: planificată v2
+            </span>
+          </div>
+        </Card>
       </div>
 
-      <div
-        style={{
-          padding: "6px 14px",
-          borderTop: "1px solid var(--border)",
-          background: "var(--bg)",
-          display: "flex",
-          gap: 16,
-          fontSize: 11,
-          color: "var(--text-muted)",
-        }}
-      >
-        <span>
-          Total: <b style={{ color: "var(--text)" }}>{list.length}</b> conturi
-        </span>
-        <span>
-          Active: <b style={{ color: "var(--text)" }}>{activeCount}</b>
-        </span>
-        <span style={{ color: "var(--text-dim)", fontSize: 10, marginLeft: "auto" }}>
-          Notă: integrarea cu înregistrările contabile dublu-intrare este planificată pentru o versiune viitoare.
-        </span>
-      </div>
-
-      {modal && (
+      {/* Account modal */}
+      {modal !== null && (
         <AccountModal
           companyId={activeCompanyId}
           account={modal === "create" ? null : modal.edit}
           onClose={() => setModal(null)}
           onSaved={() => {
-            void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.all });
+            void queryClient.invalidateQueries({
+              queryKey: queryKeys.accounts.all,
+            });
             setModal(null);
           }}
         />
@@ -369,7 +371,7 @@ export function ChartOfAccountsPage() {
   );
 }
 
-// ─── Modal ──────────────────────────────────────────────────────────────────
+// ─── AccountModal ─────────────────────────────────────────────────────────────
 
 function AccountModal({
   companyId,
@@ -395,14 +397,20 @@ function AccountModal({
 
   const createMut = useMutation({
     mutationFn: (input: AccountInput) => api.accounts.create(companyId, input),
-    onSuccess: () => { notify.success("Cont adăugat."); onSaved(); },
+    onSuccess: () => {
+      notify.success("Cont adăugat.");
+      onSaved();
+    },
     onError: (e) => setError(formatError(e, "Eroare la adăugare.")),
   });
 
   const updateMut = useMutation({
     mutationFn: (input: UpdateAccountInput) =>
       api.accounts.update(account!.id, companyId, input),
-    onSuccess: () => { notify.success("Cont salvat."); onSaved(); },
+    onSuccess: () => {
+      notify.success("Cont salvat.");
+      onSaved();
+    },
     onError: (e) => setError(formatError(e, "Eroare la salvare.")),
   });
 
@@ -410,7 +418,7 @@ function AccountModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (createMut.isPending || updateMut.isPending) return;
+    if (isPending) return;
     setError(null);
     if (!form.accountCode?.trim()) {
       setError("Codul de cont este obligatoriu.");
@@ -435,169 +443,125 @@ function AccountModal({
   };
 
   return (
-    <div
-      className="palette-scrim"
-      style={{ alignItems: "center", paddingTop: 0 }}
-      onClick={onClose}
+    <Modal
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      title={
+        isEdit
+          ? `Editează: ${account.accountCode} — ${account.accountName}`
+          : "Cont nou"
+      }
+      width={480}
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose} disabled={isPending}>
+            Anulează
+          </Btn>
+          <Btn
+            variant="primary"
+            icon="check"
+            disabled={isPending}
+            onClick={(e) => {
+              e.preventDefault();
+              void handleSubmit(e);
+            }}
+          >
+            {isPending ? "Se salvează…" : isEdit ? "Salvează" : "Adaugă"}
+          </Btn>
+        </>
+      }
     >
-      <div
-        style={{
-          width: 440,
-          background: "var(--bg-content)",
-          border: "1px solid var(--border-strong)",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.12)",
-          padding: "20px 24px 18px",
-          maxHeight: "90vh",
-          overflowY: "auto",
-        }}
-        onClick={(e) => e.stopPropagation()}
+      <form
+        onSubmit={handleSubmit}
+        style={{ display: "flex", flexDirection: "column", gap: 14 }}
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 16,
-          }}
-        >
-          <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>
-            {isEdit
-              ? `Editează: ${account.accountCode} — ${account.accountName}`
-              : "Cont nou"}
-          </h3>
-          <button type="button" className="btn-icon" onClick={onClose}>
-            <Icon name="x" size={14} />
-          </button>
-        </div>
-
-        <form
-          onSubmit={handleSubmit}
-          style={{ display: "flex", flexDirection: "column", gap: 9 }}
-        >
-          <div style={{ display: "flex", gap: 9 }}>
-            <MField label="Cod cont *" style={{ flex: 1 }}>
-              <input
-                className="field mono"
-                placeholder="ex. 4111"
-                value={form.accountCode ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, accountCode: e.target.value }))}
-                autoFocus
-              />
-            </MField>
-            <MField label="Clasă" style={{ flex: 1 }}>
-              <select
-                className="field"
-                value={form.accountClass ?? ""}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    accountClass: e.target.value ? Number(e.target.value) : undefined,
-                  }))
-                }
-              >
-                <option value="">— fără clasă —</option>
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((cls) => (
-                  <option key={cls} value={cls}>
-                    {cls} — {CLASS_LABELS[cls] ?? `Clasa ${cls}`}
-                  </option>
-                ))}
-              </select>
-            </MField>
-          </div>
-
-          <MField label="Denumire *">
-            <input
-              className="field"
-              placeholder="ex. Clienți"
-              value={form.accountName ?? ""}
-              onChange={(e) => setForm((f) => ({ ...f, accountName: e.target.value }))}
+        <div className="rf-grid-2">
+          <Field label="Cod cont" required>
+            <Input
+              className="mono"
+              placeholder="ex. 4111"
+              value={form.accountCode ?? ""}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, accountCode: e.target.value }))
+              }
+              autoFocus
             />
-          </MField>
-
-          <MField label="Cont părinte (cod)">
-            <input
-              className="field mono"
-              placeholder="ex. 411"
-              value={form.parentCode ?? ""}
+          </Field>
+          <Field label="Clasă">
+            <Select
+              value={String(form.accountClass ?? "")}
               onChange={(e) =>
                 setForm((f) => ({
                   ...f,
-                  parentCode: e.target.value || undefined,
+                  accountClass: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
                 }))
               }
-            />
-          </MField>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}>
-            <input
-              id="m-active-account"
-              type="checkbox"
-              className="cbx"
-              checked={form.active as boolean}
-              onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))}
-            />
-            <label
-              htmlFor="m-active-account"
-              style={{ fontSize: 12, cursor: "pointer", userSelect: "none" }}
             >
-              Cont activ
-            </label>
+              <option value="">— fără clasă —</option>
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((cls) => (
+                <option key={cls} value={cls}>
+                  {cls} — {CLASS_LABELS[cls] ?? `Clasa ${cls}`}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+
+        <Field label="Denumire" required>
+          <Input
+            placeholder="ex. Clienți"
+            value={form.accountName ?? ""}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, accountName: e.target.value }))
+            }
+          />
+        </Field>
+
+        <Field label="Cont părinte (cod)">
+          <Input
+            className="mono"
+            placeholder="ex. 411"
+            value={form.parentCode ?? ""}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                parentCode: e.target.value || undefined,
+              }))
+            }
+          />
+        </Field>
+
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 13,
+            cursor: "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            className="rf-cbx"
+            checked={form.active as boolean}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, active: e.target.checked }))
+            }
+          />
+          Cont activ
+        </label>
+
+        {error && (
+          <div className="rf-banner rf-banner--error">
+            <Icon name="xCircle" size={16} />
+            <span>{error}</span>
           </div>
-
-          {error && (
-            <div
-              style={{
-                padding: "6px 10px",
-                background: "#FEE2E2",
-                border: "1px solid #FECACA",
-                fontSize: 11,
-                color: "#991B1B",
-              }}
-            >
-              {error}
-            </div>
-          )}
-
-          <div
-            style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}
-          >
-            <button type="button" className="btn" onClick={onClose}>
-              Anulează
-            </button>
-            <button type="submit" className="btn primary" disabled={isPending}>
-              {isPending ? "Se salvează…" : isEdit ? "Salvează" : "Adaugă"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// ─── MField helper ─────────────────────────────────────────────────────────
-
-function MField({
-  label,
-  children,
-  style,
-}: {
-  label: string;
-  children: React.ReactNode;
-  style?: React.CSSProperties;
-}) {
-  const fieldId = useId();
-  const child = isValidElement(children)
-    ? cloneElement(children as React.ReactElement<{ id?: string }>, { id: fieldId })
-    : children;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3, ...style }}>
-      <label
-        htmlFor={fieldId}
-        style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}
-      >
-        {label}
-      </label>
-      {child}
-    </div>
+        )}
+      </form>
+    </Modal>
   );
 }

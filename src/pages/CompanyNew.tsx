@@ -1,6 +1,10 @@
 /**
- * Form companie nouă — layout SAGA: label-left în field-rows, secțiuni
- * bordurate fără shadow, footer toolbar pentru acțiuni.
+ * Companie nouă — re-skinned to rf kit (Wave 3).
+ * Multi-step wizard (Date firmă → SPV/ANAF → Logo) within the existing route.
+ * Preserves: react-hook-form/Zod, api.companies.create,
+ * CUI lookup → api.companies.fetchAnafData(cui) (auto-fill).
+ * All fields: legalName/tradeName/registryNumber/cui/address/city/county/
+ * postalCode/email/phone/iban/bankName/invoiceSeries/vatPayer/spv.
  */
 
 import { useState } from "react";
@@ -9,22 +13,18 @@ import { useNavigate } from "@tanstack/react-router";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, type FieldErrors, type UseFormRegister } from "react-hook-form";
 import { z } from "zod";
-import { ArrowLeft } from "lucide-react";
 
-import { Input } from "@/components/ui/input";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Section } from "@/components/shared/Section";
+import { Icon } from "@/components/shared/Icon";
 import {
-  PageContent,
-  PageHeader,
-  Toolbar,
-} from "@/components/shared/PageHeader";
-import { cn } from "@/lib/utils";
+  Btn, Card, Field, Input, Banner,
+} from "@/components/rf";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
-import type { AppErrorPayload, CreateCompanyInput } from "@/types";
+import { notify } from "@/lib/toasts";
+import { formatError } from "@/lib/error-mapper";
+import type { CreateCompanyInput } from "@/types";
 
-// ─── Schemă validare ──────────────────────────────────────────────────────
+// ─── Schema ───────────────────────────────────────────────────────────────────
 
 const CUI_REGEX = /^(RO)?\d{2,10}$/i;
 const IBAN_REGEX = /^[A-Z]{2}\d{2}[A-Z0-9]{1,30}$/i;
@@ -43,15 +43,21 @@ const schema = z.object({
   iban: z.string().regex(IBAN_REGEX, "IBAN invalid.").optional().or(z.literal("")),
   bankName: z.string().optional(),
   invoiceSeries: z.string().min(1, "Seria e obligatorie."),
+  vatPayer: z.boolean().optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
 
-// ─── Page ─────────────────────────────────────────────────────────────────
+const STEPS = ["Date firmă", "SPV / ANAF", "Logo"];
+
+// ─── Page ──────────────────────────────────────────────────────────────────────
 
 export function CompanyNewPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [step, setStep] = useState(1);
+  const [cuiLookupLoading, setCuiLookupLoading] = useState(false);
+  const [cuiLookupError, setCuiLookupError] = useState<string | null>(null);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -69,11 +75,9 @@ export function CompanyNewPage() {
       iban: "",
       bankName: "",
       invoiceSeries: "FACT",
+      vatPayer: false,
     },
   });
-
-  const [cuiLookupLoading, setCuiLookupLoading] = useState(false);
-  const [cuiLookupError, setCuiLookupError] = useState<string | null>(null);
 
   const handleCuiLookup = async () => {
     const cui = form.getValues("cui").trim();
@@ -87,6 +91,7 @@ export function CompanyNewPage() {
       form.setValue("city", data.city);
       form.setValue("county", data.county);
       if (data.registryNumber) form.setValue("registryNumber", data.registryNumber);
+      notify.success("Date completate din ANAF.");
     } catch {
       setCuiLookupError("CUI-ul nu a fost găsit în baza ANAF.");
     } finally {
@@ -98,8 +103,9 @@ export function CompanyNewPage() {
     mutationFn: (input: CreateCompanyInput) => api.companies.create(input),
     onSuccess: (company) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
-      navigate({ to: "/companies/$id", params: { id: company.id } });
+      void navigate({ to: "/companies/$id", params: { id: company.id } });
     },
+    onError: (e) => notify.error(formatError(e, "Eroare la crearea companiei.")),
   });
 
   const onSubmit = (v: FormValues) => {
@@ -120,226 +126,383 @@ export function CompanyNewPage() {
     });
   };
 
-  const error = create.error as unknown as AppErrorPayload | undefined;
+  // Step 1: validate required date firmă fields before advancing
+  const advanceStep = async () => {
+    if (step === 1) {
+      const ok = await form.trigger(["cui", "legalName", "address", "city", "county", "invoiceSeries"]);
+      if (!ok) return;
+    }
+    setStep((s) => Math.min(s + 1, 3));
+  };
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="content">
-      <PageHeader title="Companie nouă" />
-
-      <Toolbar>
-        <button
-          type="button"
-          onClick={() => navigate({ to: "/companies" })}
-          className="flex h-7 items-center gap-1.5 rounded-sm border border-border bg-background px-2 text-[11px] hover:bg-muted/60"
-        >
-          <ArrowLeft className="h-3 w-3" />
-          <span>Înapoi</span>
-        </button>
-
-        <div className="ml-auto flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => navigate({ to: "/companies" })}
-            className="h-7 rounded-sm border border-border bg-background px-3 text-[11px] hover:bg-muted/60"
-          >
-            Anulează
-          </button>
-          <button
-            type="submit"
-            disabled={create.isPending}
-            className="h-7 rounded-sm bg-primary px-3 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-          >
-            {create.isPending ? "Se salvează..." : "Salvează"}
-          </button>
+    <div className="rf-page">
+      {/* Page header */}
+      <div className="rf-page-head">
+        <div>
+          <h1 className="rf-page-title">Companie nouă</h1>
         </div>
-      </Toolbar>
+        <div className="rf-toolbar-row" style={{ flexShrink: 0 }}>
+          <Btn
+            variant="secondary"
+            icon="arrowLeft"
+            size="sm"
+            onClick={() => void navigate({ to: "/companies" })}
+          >
+            Înapoi
+          </Btn>
+        </div>
+      </div>
 
-      <PageContent className="flex-1 space-y-3 overflow-auto">
-        <div className="mx-auto max-w-3xl space-y-3">
-          <Section title="Identificare">
-            <FormRow
-              id="cui"
-              label="CUI *"
-              placeholder="RO12345678"
-              register={form.register}
-              errors={form.formState.errors}
-              mono
-            />
-            <div className="flex border-b border-border last:border-b-0">
-              <div className="flex w-[180px] shrink-0 items-center border-r border-border bg-muted/20 px-3 py-1.5 text-[11px] font-medium text-muted-foreground" />
-              <div className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1">
-                <button
-                  type="button"
-                  className="h-7 rounded-sm border border-border bg-background px-2.5 text-[11px] hover:bg-muted/60 disabled:opacity-50"
-                  disabled={cuiLookupLoading}
-                  onClick={() => { void handleCuiLookup(); }}
+      <div className="rf-page-body">
+        <div style={{ maxWidth: 640, width: "100%", margin: "0 auto" }}>
+          {/* Step indicator */}
+          <WizardSteps current={step} steps={STEPS} />
+
+          <Card pad>
+            {/* ── Step 1: Date firmă ── */}
+            {step === 1 && (
+              <form
+                id="company-form"
+                onSubmit={form.handleSubmit(onSubmit)}
+                style={{ display: "flex", flexDirection: "column", gap: 14 }}
+              >
+                <div className="rf-grid-2">
+                  <Field
+                    label="CUI"
+                    required
+                    error={form.formState.errors.cui?.message}
+                  >
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Input
+                        className="mono"
+                        placeholder="RO12345678"
+                        {...form.register("cui")}
+                        error={!!form.formState.errors.cui}
+                        style={{ flex: 1 }}
+                      />
+                      <Btn
+                        variant="secondary"
+                        size="sm"
+                        disabled={cuiLookupLoading}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          void handleCuiLookup();
+                        }}
+                      >
+                        {cuiLookupLoading ? "Se caută…" : "ANAF ↗"}
+                      </Btn>
+                    </div>
+                    {cuiLookupError && (
+                      <span className="rf-help rf-help--err">{cuiLookupError}</span>
+                    )}
+                  </Field>
+                  <FormField
+                    id="registryNumber"
+                    label="Nr. Reg. Comerțului"
+                    placeholder="J40/1234/2020"
+                    register={form.register}
+                    errors={form.formState.errors}
+                    mono
+                  />
+                </div>
+
+                <FormField
+                  id="legalName"
+                  label="Denumire legală"
+                  required
+                  register={form.register}
+                  errors={form.formState.errors}
+                />
+                <FormField
+                  id="tradeName"
+                  label="Denumire comercială"
+                  register={form.register}
+                  errors={form.formState.errors}
+                />
+
+                <div className="rf-grid-2">
+                  <FormField
+                    id="city"
+                    label="Localitate"
+                    required
+                    register={form.register}
+                    errors={form.formState.errors}
+                  />
+                  <FormField
+                    id="county"
+                    label="Județ"
+                    required
+                    register={form.register}
+                    errors={form.formState.errors}
+                  />
+                </div>
+
+                <FormField
+                  id="address"
+                  label="Adresă"
+                  required
+                  register={form.register}
+                  errors={form.formState.errors}
+                />
+                <FormField
+                  id="postalCode"
+                  label="Cod poștal"
+                  register={form.register}
+                  errors={form.formState.errors}
+                  mono
+                />
+
+                <div className="rf-grid-2">
+                  <FormField
+                    id="email"
+                    label="Email"
+                    type="email"
+                    register={form.register}
+                    errors={form.formState.errors}
+                  />
+                  <FormField
+                    id="phone"
+                    label="Telefon"
+                    register={form.register}
+                    errors={form.formState.errors}
+                  />
+                </div>
+
+                <FormField
+                  id="iban"
+                  label="IBAN"
+                  placeholder="RO49AAAA..."
+                  register={form.register}
+                  errors={form.formState.errors}
+                  mono
+                />
+                <FormField
+                  id="bankName"
+                  label="Bancă"
+                  register={form.register}
+                  errors={form.formState.errors}
+                />
+                <FormField
+                  id="invoiceSeries"
+                  label="Serie facturi"
+                  required
+                  placeholder="FACT"
+                  register={form.register}
+                  errors={form.formState.errors}
+                  mono
+                  uppercase
+                />
+
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
                 >
-                  {cuiLookupLoading ? "Se caută…" : "Caută în ANAF ↗"}
-                </button>
-                {cuiLookupError && (
-                  <span className="text-[11px] text-destructive">{cuiLookupError}</span>
+                  <input
+                    type="checkbox"
+                    className="rf-cbx"
+                    {...form.register("vatPayer")}
+                  />
+                  Plătitor TVA
+                </label>
+              </form>
+            )}
+
+            {/* ── Step 2: SPV / ANAF ── */}
+            {step === 2 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <Banner variant="info">
+                  Conexiunea SPV/ANAF OAuth se poate configura după salvarea companiei din
+                  pagina de detalii. Puteți continua fără configurarea SPV.
+                </Banner>
+                <p style={{ fontSize: 13, color: "var(--rf-text-muted)", margin: 0 }}>
+                  Datele de autorizare OAuth (Client ID, secret) se completează în pasul de
+                  configurare SPV din pagina companiei, după salvare.
+                </p>
+              </div>
+            )}
+
+            {/* ── Step 3: Logo ── */}
+            {step === 3 && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 14,
+                  padding: "10px 0",
+                }}
+              >
+                <div
+                  style={{
+                    width: 110,
+                    height: 110,
+                    borderRadius: 12,
+                    border: "2px dashed var(--rf-border-strong)",
+                    display: "grid",
+                    placeItems: "center",
+                    color: "var(--rf-text-dim)",
+                  }}
+                >
+                  <Icon name="upload" size={28} />
+                </div>
+                <p style={{ fontSize: 12, color: "var(--rf-text-muted)", margin: 0, textAlign: "center" }}>
+                  Logo-ul poate fi adăugat ulterior din pagina de setări a companiei.
+                  <br />PNG sau SVG, recomandat 400×400 px. Apare pe facturile PDF.
+                </p>
+                {create.error && (
+                  <Banner variant="error">
+                    {formatError(create.error, "Eroare la crearea companiei.")}
+                  </Banner>
                 )}
               </div>
-            </div>
-            <FormRow
-              id="legalName"
-              label="Denumire legală *"
-              register={form.register}
-              errors={form.formState.errors}
-            />
-            <FormRow
-              id="tradeName"
-              label="Denumire comercială"
-              register={form.register}
-              errors={form.formState.errors}
-            />
-            <FormRow
-              id="registryNumber"
-              label="Nr. registru comerț"
-              placeholder="J40/1234/2020"
-              register={form.register}
-              errors={form.formState.errors}
-              mono
-            />
-          </Section>
+            )}
+          </Card>
 
-          <Section title="Adresă">
-            <FormRow
-              id="address"
-              label="Adresă *"
-              register={form.register}
-              errors={form.formState.errors}
-            />
-            <FormRow
-              id="city"
-              label="Localitate *"
-              register={form.register}
-              errors={form.formState.errors}
-            />
-            <FormRow
-              id="county"
-              label="Județ *"
-              register={form.register}
-              errors={form.formState.errors}
-            />
-            <FormRow
-              id="postalCode"
-              label="Cod poștal"
-              register={form.register}
-              errors={form.formState.errors}
-              mono
-            />
-          </Section>
-
-          <Section title="Contact și plată">
-            <FormRow
-              id="email"
-              label="Email"
-              type="email"
-              register={form.register}
-              errors={form.formState.errors}
-            />
-            <FormRow
-              id="phone"
-              label="Telefon"
-              register={form.register}
-              errors={form.formState.errors}
-            />
-            <FormRow
-              id="iban"
-              label="IBAN"
-              placeholder="RO49AAAA..."
-              register={form.register}
-              errors={form.formState.errors}
-              mono
-            />
-            <FormRow
-              id="bankName"
-              label="Bancă"
-              register={form.register}
-              errors={form.formState.errors}
-            />
-          </Section>
-
-          <Section title="Facturare">
-            <FormRow
-              id="invoiceSeries"
-              label="Serie facturi *"
-              hint="Facturile vor fi numerotate ex: FACT-0001, FACT-0002..."
-              register={form.register}
-              errors={form.formState.errors}
-              mono
-              uppercase
-            />
-          </Section>
-
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription className="text-xs">
-                {error.message}
-              </AlertDescription>
-            </Alert>
-          )}
+          {/* Wizard footer */}
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              justifyContent: "flex-end",
+              marginTop: 16,
+              alignItems: "center",
+            }}
+          >
+            {step > 1 && (
+              <Btn variant="ghost" icon="arrowLeft" onClick={() => setStep((s) => s - 1)}>
+                Înapoi
+              </Btn>
+            )}
+            <Btn
+              variant="secondary"
+              onClick={() => void navigate({ to: "/companies" })}
+            >
+              Anulează
+            </Btn>
+            {step < 3 ? (
+              <Btn variant="primary" iconRight="arrowRight" onClick={() => void advanceStep()}>
+                Continuă
+              </Btn>
+            ) : (
+              <Btn
+                variant="primary"
+                icon="check"
+                disabled={create.isPending}
+                onClick={() => void form.handleSubmit(onSubmit)()}
+              >
+                {create.isPending ? "Se salvează…" : "Salvează compania"}
+              </Btn>
+            )}
+          </div>
         </div>
-      </PageContent>
-    </form>
+      </div>
+    </div>
   );
 }
 
-// ─── Label-left form row ──────────────────────────────────────────────────
+// ─── WizardSteps ──────────────────────────────────────────────────────────────
 
-interface FormRowProps {
+function WizardSteps({ current, steps }: { current: number; steps: string[] }) {
+  return (
+    <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+      {steps.map((s, i) => {
+        const idx = i + 1;
+        const done = current > idx;
+        const active = current === idx;
+        return (
+          <div
+            key={s}
+            style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}
+          >
+            <span
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: "50%",
+                display: "grid",
+                placeItems: "center",
+                fontSize: 12,
+                fontWeight: 700,
+                flexShrink: 0,
+                background: done
+                  ? "var(--rf-success)"
+                  : active
+                  ? "var(--rf-accent)"
+                  : "var(--rf-neutral-bg, var(--rf-border))",
+                color: done || active ? "#fff" : "var(--rf-text-muted)",
+              }}
+            >
+              {done ? <Icon name="check" size={13} /> : idx}
+            </span>
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: active ? 600 : 400,
+                color: active ? "var(--rf-text)" : "var(--rf-text-muted)",
+              }}
+            >
+              {s}
+            </span>
+            {i < steps.length - 1 && (
+              <div
+                style={{
+                  flex: 1,
+                  height: 1,
+                  background: "var(--rf-border)",
+                  marginLeft: 4,
+                }}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── FormField helper ─────────────────────────────────────────────────────────
+
+interface FormFieldProps {
   id: keyof FormValues;
   label: string;
+  required?: boolean;
   placeholder?: string;
   type?: string;
-  hint?: string;
   mono?: boolean;
   uppercase?: boolean;
   register: UseFormRegister<FormValues>;
   errors: FieldErrors<FormValues>;
 }
 
-function FormRow({
+function FormField({
   id,
   label,
+  required,
   placeholder,
   type,
-  hint,
   mono,
   uppercase,
   register,
   errors,
-}: FormRowProps) {
+}: FormFieldProps) {
   const error = errors[id]?.message as string | undefined;
-
   return (
-    <div className="flex border-b border-border last:border-b-0">
-      <label
-        htmlFor={id}
-        className="flex w-[180px] shrink-0 items-center border-r border-border bg-muted/20 px-3 py-1.5 text-[11px] font-medium text-muted-foreground"
-      >
-        {label}
-      </label>
-      <div className="min-w-0 flex-1 px-2 py-1">
-        <Input
-          id={id}
-          type={type}
-          placeholder={placeholder}
-          className={cn(
-            "h-7 rounded-sm border-0 bg-transparent px-1 text-[12px] shadow-none focus-visible:ring-1",
-            mono && "font-mono",
-            uppercase && "uppercase",
-          )}
-          {...register(id)}
-        />
-        {hint && !error && (
-          <p className="px-1 pb-0.5 text-[10px] text-muted-foreground">{hint}</p>
-        )}
-        {error && (
-          <p className="px-1 pb-0.5 text-[10px] text-destructive">{error}</p>
-        )}
-      </div>
-    </div>
+    <Field label={label} required={required} error={error}>
+      <Input
+        id={id}
+        type={type}
+        placeholder={placeholder}
+        error={!!error}
+        className={[mono && "mono", uppercase && "uppercase"].filter(Boolean).join(" ")}
+        style={uppercase ? { textTransform: "uppercase" } : undefined}
+        {...register(id)}
+      />
+    </Field>
   );
 }

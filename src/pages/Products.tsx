@@ -1,17 +1,22 @@
 /**
- * Articole / Catalog de produse — company-scoped, reusable invoice lines.
- *
- * Listează produsele companiei active, permite adăugare/editare via modal
- * și ștergere cu confirmare. Dacă nicio companie nu e activă, afișează
- * mesajul "selectați o companie".
+ * Articole / Catalog de produse — re-skinned to rf kit (Wave 3).
+ * Preserves: api.products.list(activeCompanyId), filter Toate/Active, search,
+ * create/edit modal → api.products.create / api.products.update(id, companyId, input),
+ * delete confirm → api.products.delete(id, companyId),
+ * "select active company" guard.
+ * Modal: cod/denumire/UM/preț/cotă TVA/activ.
  */
 
-import { useMemo, useState, useId, isValidElement, cloneElement } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm } from "@tauri-apps/plugin-dialog";
 
 import { Icon } from "@/components/shared/Icon";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import {
+  PageHeader, Btn, IconBtn, Badge, Card, Field, Input, Select,
+  Tabs, Empty, Modal, SearchInput,
+} from "@/components/rf";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -42,7 +47,8 @@ export function ProductsPage() {
   });
 
   const list = useMemo(() => {
-    const base = filter === "active" ? allProducts.filter((p) => p.active) : allProducts;
+    const base =
+      filter === "active" ? allProducts.filter((p) => p.active) : allProducts;
     const q = query.trim().toLowerCase();
     if (!q) return base;
     return base.filter(
@@ -56,14 +62,16 @@ export function ProductsPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => {
-      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      if (!activeCompanyId)
+        return Promise.reject(new Error("Nicio companie activă."));
       return api.products.delete(id, activeCompanyId);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
       notify.success("Articol șters.");
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge articolul.")),
+    onError: (e) =>
+      notify.error(formatError(e, "Nu s-a putut șterge articolul.")),
   });
 
   const handleDelete = async (p: Product) => {
@@ -78,211 +86,212 @@ export function ProductsPage() {
 
   if (!activeCompanyId) {
     return (
-      <div className="content">
-        <div className="content-titlebar">
-          <span className="content-title">
-            <span className="crumb">Date</span>
-            Articole
-          </span>
-        </div>
-        <div style={{ padding: 40, textAlign: "center", fontSize: 12, color: "var(--text-muted)" }}>
-          Selectați o companie activă pentru a vedea catalogul de articole.
+      <div className="rf-page">
+        <PageHeader title="Articole" />
+        <div className="rf-page-body">
+          <Empty icon="package" title="Selectați o companie activă">
+            Selectați o companie din bara laterală pentru a vedea catalogul de articole.
+          </Empty>
         </div>
       </div>
     );
   }
 
+  const filterTabs = [
+    { value: "all" as const, label: "Toate", badge: allProducts.length },
+    { value: "active" as const, label: "Active", badge: activeCount },
+  ];
+
   return (
-    <div className="content">
-      <div className="content-titlebar">
-        <span className="content-title">
-          <span className="crumb">Date</span>
-          Articole
-        </span>
-        <span className="muted" style={{ fontSize: 11 }}>
-          {list.length} din {allProducts.length} articole
-        </span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button
-            type="button"
-            className="btn primary"
+    <div className="rf-page">
+      <PageHeader
+        title="Articole"
+        sub={
+          <Badge variant="neutral" dot={false}>
+            {list.length} articole
+          </Badge>
+        }
+        actions={
+          <Btn
+            variant="primary"
+            icon="plus"
+            size="sm"
             onClick={() => setModal("create")}
           >
-            <Icon name="plus" size={12} /> Articol nou
-          </button>
-        </span>
-      </div>
+            Articol nou
+          </Btn>
+        }
+      />
 
-      <div className="views-bar">
-        <span
-          className={`view-tab${filter === "all" ? " active" : ""}`}
-          onClick={() => setFilter("all")}
-          style={{ cursor: "pointer" }}
-        >
-          Toate <span className="count">{allProducts.length}</span>
-        </span>
-        <span
-          className={`view-tab${filter === "active" ? " active" : ""}`}
-          onClick={() => setFilter("active")}
-          style={{ cursor: "pointer" }}
-        >
-          Active <span className="count">{activeCount}</span>
-        </span>
-      </div>
-
-      <div className="content-toolbar">
-        <div className="search">
-          <Icon name="search" size={13} />
-          <input
-            placeholder="Caută după denumire sau cod…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-        <span style={{ marginLeft: "auto" }}>
-          <button
-            type="button"
-            className="btn-icon"
-            title="Reîmprospătează"
-            onClick={() =>
-              void queryClient.invalidateQueries({ queryKey: queryKeys.products.all })
-            }
-          >
-            <Icon name="refresh" size={14} />
-          </button>
-        </span>
-      </div>
-
-      <div className="content-body">
-        {isLoading ? (
-          <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>
-            Se încarcă…
-          </div>
-        ) : isError ? (
-          <QueryErrorBanner
-            error={error}
-            label="articolele"
-            onRetry={() => void refetch()}
-          />
-        ) : list.length === 0 ? (
+      <div className="rf-page-body">
+        <Card>
+          {/* Tabs + toolbar */}
           <div
             style={{
-              padding: 40,
-              textAlign: "center",
-              fontSize: 12,
-              color: "var(--text-muted)",
+              padding: "10px 16px 0",
+              borderBottom: "1px solid var(--rf-border)",
             }}
           >
-            {allProducts.length === 0
-              ? "Niciun articol. Adaugă primul produs sau serviciu."
-              : "Niciun rezultat pentru filtrele aplicate."}
+            <Tabs tabs={filterTabs} value={filter} onChange={(v) => setFilter(v)} />
           </div>
-        ) : (
-          <table className="dt">
-            <thead>
-              <tr>
-                <th>Denumire</th>
-                <th style={{ width: 120 }}>Cod</th>
-                <th style={{ width: 64 }}>UM</th>
-                <th style={{ width: 110 }} className="num">
-                  Preț unitar
-                </th>
-                <th style={{ width: 64 }} className="num">
-                  TVA %
-                </th>
-                <th style={{ width: 80 }}>Categorie</th>
-                <th style={{ width: 100 }} className="num">
-                  Stoc
-                </th>
-                <th style={{ width: 60 }}>Activ</th>
-                <th style={{ width: 80 }}>Acțiuni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((p: Product) => (
-                <tr key={p.id}>
-                  <td>
-                    <b>{p.name}</b>
-                  </td>
-                  <td className="mono">{p.code ?? <span className="dim">—</span>}</td>
-                  <td className="mono">{p.unit}</td>
-                  <td className="num tnum">{fmtRON(p.unitPrice)}</td>
-                  <td className="num">{p.vatRate}%</td>
-                  <td className="mono" title={VAT_CATEGORY_LABELS[p.vatCategory as keyof typeof VAT_CATEGORY_LABELS]}>
-                    {p.vatCategory}
-                  </td>
-                  <td className="num">
-                    {p.stockQty != null ? (
-                      <span className="tnum">{p.stockQty}</span>
-                    ) : (
-                      <span className="dim">—</span>
-                    )}
-                  </td>
-                  <td>
-                    {p.active ? (
-                      <span style={{ color: "#16A34A", display: "inline-flex" }}>
-                        <Icon name="check" size={13} />
-                      </span>
-                    ) : (
-                      <span className="dim">
-                        <Icon name="x" size={13} />
-                      </span>
-                    )}
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      title="Editează"
-                      onClick={() => setModal({ edit: p })}
+          <div
+            className="rf-toolbar-row"
+            style={{ padding: "10px 16px", borderBottom: "1px solid var(--rf-border)" }}
+          >
+            <SearchInput
+              placeholder="Caută după denumire sau cod…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              style={{ width: 300 }}
+            />
+            <div style={{ marginLeft: "auto" }}>
+              <IconBtn
+                icon="refresh"
+                title="Reîmprospătează"
+                onClick={() =>
+                  void queryClient.invalidateQueries({
+                    queryKey: queryKeys.products.all,
+                  })
+                }
+              />
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="rf-tbl-wrap">
+            {isLoading ? (
+              <Empty icon="package" title="Se încarcă…" />
+            ) : isError ? (
+              <QueryErrorBanner
+                error={error}
+                label="articolele"
+                onRetry={() => void refetch()}
+              />
+            ) : list.length === 0 ? (
+              <Empty
+                icon="package"
+                title={
+                  allProducts.length === 0
+                    ? "Niciun articol"
+                    : "Niciun rezultat pentru filtrele aplicate"
+                }
+                actions={
+                  allProducts.length === 0 ? (
+                    <Btn
+                      variant="primary"
+                      icon="plus"
+                      onClick={() => setModal("create")}
                     >
-                      <Icon name="pen" size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      title="Șterge"
-                      onClick={() => void handleDelete(p)}
-                    >
-                      <Icon name="x" size={13} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+                      Adaugă primul articol
+                    </Btn>
+                  ) : undefined
+                }
+              >
+                {allProducts.length === 0 &&
+                  "Adaugă produse sau servicii care vor apărea ca linii de factură."}
+              </Empty>
+            ) : (
+              <table className="rf-tbl">
+                <thead>
+                  <tr>
+                    <th>Denumire</th>
+                    <th style={{ width: 120 }}>Cod</th>
+                    <th style={{ width: 60 }}>UM</th>
+                    <th style={{ width: 120, textAlign: "right" }}>Preț unitar</th>
+                    <th style={{ width: 70, textAlign: "right" }}>TVA %</th>
+                    <th style={{ width: 80 }}>Categorie</th>
+                    <th style={{ width: 90, textAlign: "right" }}>Stoc</th>
+                    <th style={{ width: 70, textAlign: "center" }}>Activ</th>
+                    <th style={{ width: 80 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map((p: Product) => (
+                    <tr key={p.id}>
+                      <td style={{ fontWeight: 500 }}>{p.name}</td>
+                      <td className="mono">
+                        {p.code ?? <span className="rf-dim">—</span>}
+                      </td>
+                      <td className="mono">{p.unit}</td>
+                      <td style={{ textAlign: "right" }} className="mono">
+                        {fmtRON(p.unitPrice)}
+                      </td>
+                      <td style={{ textAlign: "right" }} className="mono">
+                        {p.vatRate}%
+                      </td>
+                      <td
+                        className="mono"
+                        style={{ color: "var(--rf-text-muted)" }}
+                        title={
+                          VAT_CATEGORY_LABELS[
+                            p.vatCategory as keyof typeof VAT_CATEGORY_LABELS
+                          ]
+                        }
+                      >
+                        {p.vatCategory}
+                      </td>
+                      <td style={{ textAlign: "right" }} className="mono">
+                        {p.stockQty != null ? (
+                          p.stockQty
+                        ) : (
+                          <span className="rf-dim">—</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        {p.active ? (
+                          <Badge variant="success" dot={false}>Activ</Badge>
+                        ) : (
+                          <Badge variant="neutral" dot={false}>Inactiv</Badge>
+                        )}
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <div className="rf-cell-actions">
+                          <IconBtn
+                            icon="pen"
+                            title="Editează"
+                            size={14}
+                            onClick={() => setModal({ edit: p })}
+                          />
+                          <IconBtn
+                            icon="trash"
+                            title="Șterge"
+                            size={14}
+                            onClick={() => void handleDelete(p)}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="rf-tbl-footer">
+            <span>
+              Total: <b>{list.length}</b> articole
+            </span>
+            <span>
+              Active: <b>{activeCount}</b>
+            </span>
+            <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--rf-text-dim)" }}>
+              Stoc: decrementare automată planificată v2
+            </span>
+          </div>
+        </Card>
       </div>
 
-      <div
-        style={{
-          padding: "6px 14px",
-          borderTop: "1px solid var(--border)",
-          background: "var(--bg)",
-          display: "flex",
-          gap: 16,
-          fontSize: 11,
-          color: "var(--text-muted)",
-        }}
-      >
-        <span>
-          Total: <b style={{ color: "var(--text)" }}>{list.length}</b> articole
-        </span>
-        <span>
-          Active: <b style={{ color: "var(--text)" }}>{activeCount}</b>
-        </span>
-        <span style={{ color: "var(--text-dim)", fontSize: 10, marginLeft: "auto" }}>
-          Notă: decrementarea automată a stocului la facturare nu este implementată (planificat v2).
-        </span>
-      </div>
-
-      {modal && (
+      {/* Product modal */}
+      {modal !== null && (
         <ProductModal
           companyId={activeCompanyId}
           product={modal === "create" ? null : modal.edit}
           onClose={() => setModal(null)}
           onSaved={() => {
-            void queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
+            void queryClient.invalidateQueries({
+              queryKey: queryKeys.products.all,
+            });
             setModal(null);
           }}
         />
@@ -291,7 +300,7 @@ export function ProductsPage() {
   );
 }
 
-// ─── Modal ──────────────────────────────────────────────────────────────────
+// ─── ProductModal ─────────────────────────────────────────────────────────────
 
 function ProductModal({
   companyId,
@@ -320,14 +329,20 @@ function ProductModal({
 
   const create = useMutation({
     mutationFn: (input: ProductInput) => api.products.create(companyId, input),
-    onSuccess: () => { notify.success("Articol adăugat."); onSaved(); },
+    onSuccess: () => {
+      notify.success("Articol adăugat.");
+      onSaved();
+    },
     onError: (e) => setError(formatError(e, "Eroare la adăugare.")),
   });
 
   const updateMut = useMutation({
     mutationFn: (input: UpdateProductInput) =>
       api.products.update(product!.id, companyId, input),
-    onSuccess: () => { notify.success("Articol salvat."); onSaved(); },
+    onSuccess: () => {
+      notify.success("Articol salvat.");
+      onSaved();
+    },
     onError: (e) => setError(formatError(e, "Eroare la salvare.")),
   });
 
@@ -342,7 +357,7 @@ function ProductModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (create.isPending || updateMut.isPending) return;
+    if (isPending) return;
     setError(null);
     if (!form.name?.trim()) {
       setError("Denumirea este obligatorie.");
@@ -352,7 +367,7 @@ function ProductModal({
       ...form,
       name: form.name.trim(),
       code: form.code?.trim() || undefined,
-      stockQty: form.stockQty?.trim() || undefined,
+      stockQty: (form.stockQty as string)?.trim() || undefined,
       unit: form.unit || "buc",
       unitPrice: form.unitPrice || "0.00",
       vatRate: form.vatRate || "19",
@@ -367,183 +382,122 @@ function ProductModal({
   };
 
   return (
-    <div
-      className="palette-scrim"
-      style={{ alignItems: "center", paddingTop: 0 }}
-      onClick={onClose}
+    <Modal
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      title={isEdit ? `Editează: ${product.name}` : "Articol nou"}
+      width={500}
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose} disabled={isPending}>
+            Anulează
+          </Btn>
+          <Btn
+            variant="primary"
+            icon="check"
+            disabled={isPending}
+            onClick={(e) => {
+              e.preventDefault();
+              void handleSubmit(e);
+            }}
+          >
+            {isPending ? "Se salvează…" : isEdit ? "Salvează" : "Adaugă"}
+          </Btn>
+        </>
+      }
     >
-      <div
-        style={{
-          width: 440,
-          background: "var(--bg-content)",
-          border: "1px solid var(--border-strong)",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.12)",
-          padding: "20px 24px 18px",
-          maxHeight: "90vh",
-          overflowY: "auto",
-        }}
-        onClick={(e) => e.stopPropagation()}
+      <form
+        onSubmit={handleSubmit}
+        style={{ display: "flex", flexDirection: "column", gap: 14 }}
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 16,
-          }}
-        >
-          <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>
-            {isEdit ? `Editează: ${product.name}` : "Articol nou"}
-          </h3>
-          <button type="button" className="btn-icon" onClick={onClose}>
-            <Icon name="x" size={14} />
-          </button>
+        <Field label="Denumire" required error={error && !form.name?.trim() ? error : undefined}>
+          <Input
+            placeholder="ex. Servicii consultanță"
+            {...field("name")}
+            autoFocus
+          />
+        </Field>
+
+        <div className="rf-grid-2">
+          <Field label="Cod articol">
+            <Input className="mono" placeholder="ex. SVC-001" {...field("code")} />
+          </Field>
+          <Field label="UM">
+            <Input placeholder="buc / oră / kg…" {...field("unit")} />
+          </Field>
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          style={{ display: "flex", flexDirection: "column", gap: 9 }}
+        <div className="rf-grid-2">
+          <Field label="Preț unitar (fără TVA)">
+            <Input
+              num
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0.00"
+              {...field("unitPrice")}
+            />
+          </Field>
+          <Field label="Cotă TVA %">
+            <Select {...field("vatRate")}>
+              {VAT_RATES.map((r) => (
+                <option key={r} value={String(r)}>
+                  {r}%
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+
+        <div className="rf-grid-2">
+          <Field label="Categorie TVA">
+            <Select {...field("vatCategory")}>
+              {VAT_CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat} — {VAT_CATEGORY_LABELS[cat]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Stoc (qty)">
+            <Input
+              num
+              type="number"
+              step="0.001"
+              min="0"
+              placeholder="—"
+              {...field("stockQty")}
+            />
+          </Field>
+        </div>
+
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 13,
+            cursor: "pointer",
+          }}
         >
-          <MField label="Denumire *">
-            <input
-              className="field"
-              placeholder="ex. Servicii consultanță"
-              {...field("name")}
-              autoFocus
-            />
-          </MField>
+          <input
+            type="checkbox"
+            className="rf-cbx"
+            checked={form.active as boolean}
+            onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))}
+          />
+          Articol activ
+        </label>
 
-          <div style={{ display: "flex", gap: 9 }}>
-            <MField label="Cod articol" style={{ flex: 1 }}>
-              <input
-                className="field mono"
-                placeholder="ex. SVC-001"
-                {...field("code")}
-              />
-            </MField>
-            <MField label="UM" style={{ flex: 1 }}>
-              <input
-                className="field"
-                placeholder="buc / ora / kg…"
-                {...field("unit")}
-              />
-            </MField>
+        {error && (
+          <div className="rf-banner rf-banner--error">
+            <Icon name="xCircle" size={16} />
+            <span>{error}</span>
           </div>
-
-          <div style={{ display: "flex", gap: 9 }}>
-            <MField label="Preț unitar (fără TVA)" style={{ flex: 1 }}>
-              <input
-                className="field num"
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="0.00"
-                {...field("unitPrice")}
-              />
-            </MField>
-            <MField label="Cotă TVA %" style={{ flex: 1 }}>
-              <select className="field num" {...field("vatRate")}>
-                {VAT_RATES.map((r) => (
-                  <option key={r} value={String(r)}>
-                    {r}%
-                  </option>
-                ))}
-              </select>
-            </MField>
-          </div>
-
-          <div style={{ display: "flex", gap: 9 }}>
-            <MField label="Categorie TVA" style={{ flex: 1 }}>
-              <select className="field" {...field("vatCategory")}>
-                {VAT_CATEGORIES.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat} — {VAT_CATEGORY_LABELS[cat]}
-                  </option>
-                ))}
-              </select>
-            </MField>
-            <MField label="Stoc (qty)" style={{ flex: 1 }}>
-              <input
-                className="field num"
-                type="number"
-                step="0.001"
-                min="0"
-                placeholder="—"
-                {...field("stockQty")}
-              />
-            </MField>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}>
-            <input
-              id="m-active"
-              type="checkbox"
-              className="cbx"
-              checked={form.active as boolean}
-              onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))}
-            />
-            <label
-              htmlFor="m-active"
-              style={{ fontSize: 12, cursor: "pointer", userSelect: "none" }}
-            >
-              Articol activ
-            </label>
-          </div>
-
-          {error && (
-            <div
-              style={{
-                padding: "6px 10px",
-                background: "#FEE2E2",
-                border: "1px solid #FECACA",
-                fontSize: 11,
-                color: "#991B1B",
-              }}
-            >
-              {error}
-            </div>
-          )}
-
-          <div
-            style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}
-          >
-            <button type="button" className="btn" onClick={onClose}>
-              Anulează
-            </button>
-            <button type="submit" className="btn primary" disabled={isPending}>
-              {isPending ? "Se salvează…" : isEdit ? "Salvează" : "Adaugă"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// ─── MField helper ─────────────────────────────────────────────────────────
-
-function MField({
-  label,
-  children,
-  style,
-}: {
-  label: string;
-  children: React.ReactNode;
-  style?: React.CSSProperties;
-}) {
-  const fieldId = useId();
-  const child = isValidElement(children)
-    ? cloneElement(children as React.ReactElement<{ id?: string }>, { id: fieldId })
-    : children;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3, ...style }}>
-      <label
-        htmlFor={fieldId}
-        style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}
-      >
-        {label}
-      </label>
-      {child}
-    </div>
+        )}
+      </form>
+    </Modal>
   );
 }

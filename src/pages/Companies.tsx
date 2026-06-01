@@ -1,7 +1,11 @@
 /**
- * Companii administrate — date REALE din backend (api.companies.list),
- * cu vizualul Win32 portat din Claude Design (views-bar, content-toolbar,
- * tabel dens .dt).
+ * Companii administrate — re-skinned to rf kit (Wave 3).
+ * Preserves: api.companies.list(), tabs Toate/Cu SPV/Fără SPV, search,
+ * license-tier limit (api.license.get), row click → navigate /companies/$id,
+ * set active company (useAppStore setActiveCompanyId),
+ * delete confirm → api.companies.delete(id),
+ * "Companie nouă" → /companies/new.
+ * Companies stay as ROUTES (no modal conversion).
  */
 
 import { useMemo, useState } from "react";
@@ -11,10 +15,14 @@ import { confirm } from "@tauri-apps/plugin-dialog";
 
 import { Icon } from "@/components/shared/Icon";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import {
+  PageHeader, Btn, IconBtn, Badge, Card, Segmented, Empty,
+} from "@/components/rf";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
-import { fmtShortcut } from "@/lib/platform";
+import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
+import { formatError } from "@/lib/error-mapper";
 import type { AppErrorPayload, Company } from "@/types";
 
 const TIER_LIMITS: Record<string, number> = {
@@ -24,9 +32,9 @@ const TIER_LIMITS: Record<string, number> = {
   FIRM: Infinity,
 };
 
-/** Culoare deterministă per companie (din CUI) pentru bulina din tabel. */
+/** Deterministic color per company (from CUI) for the dot indicator. */
 const DOT_COLORS = [
-  "#2848A1", "#7C3AED", "#0891B2", "#D97706", "#16A34A",
+  "#4F46E5", "#7C3AED", "#0891B2", "#D97706", "#16A34A",
   "#0369A1", "#E11D48", "#65A30D", "#525252", "#B45309",
 ];
 function dotColor(cui: string): string {
@@ -40,11 +48,18 @@ type SpvFilter = "all" | "yes" | "no";
 export function CompaniesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const setActiveCompanyId = useAppStore((s) => s.setActiveCompanyId);
+  const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [query, setQuery] = useState("");
   const [filterSPV, setFilterSPV] = useState<SpvFilter>("all");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const { data: companies = [], isLoading, isError: companiesError, error: companiesErr, refetch: refetchCompanies } = useQuery({
+  const {
+    data: companies = [],
+    isLoading,
+    isError: companiesError,
+    error: companiesErr,
+    refetch: refetchCompanies,
+  } = useQuery({
     queryKey: queryKeys.companies.list(),
     queryFn: () => api.companies.list(),
   });
@@ -75,319 +90,265 @@ export function CompaniesPage() {
   const withSpv = companies.filter((c) => c.spvEnabled).length;
 
   const handleDelete = async (c: Company) => {
-    const ok = await confirm(`Ștergeți compania "${c.legalName}"? Această acțiune nu poate fi anulată.`, {
-      title: "Confirmare ștergere",
-      kind: "warning",
-    });
+    const ok = await confirm(
+      `Ștergeți compania "${c.legalName}"? Această acțiune nu poate fi anulată.`,
+      { title: "Confirmare ștergere", kind: "warning" },
+    );
     if (!ok) return;
     try {
       await api.companies.delete(c.id);
       void queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
     } catch (err) {
       const payload = err as AppErrorPayload;
-      notify.error(payload?.message ?? "Eroare la ștergerea companiei.");
+      notify.error(formatError(payload, "Eroare la ștergerea companiei."));
     }
   };
 
-  const toggleAll = () => {
-    setSelected(
-      selected.size === list.length ? new Set() : new Set(list.map((c) => c.id)),
-    );
-  };
-  const toggleOne = (id: string) => {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelected(next);
-  };
+  const spvOptions = [
+    { value: "all" as SpvFilter, label: `Toate (${companies.length})` },
+    { value: "yes" as SpvFilter, label: `Cu SPV (${withSpv})` },
+    { value: "no" as SpvFilter, label: `Fără SPV (${companies.length - withSpv})` },
+  ];
 
   return (
-    <div className="content">
-      <div className="content-titlebar">
-        <span className="content-title">
-          <span className="crumb">Date</span>
-          Companii administrate
-        </span>
-        <span className="muted" style={{ fontSize: 11 }}>
-          {list.length} din {companies.length} companii
-        </span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => notify.info("Funcție în curs de implementare")}
-          >
-            <Icon name="upload" size={12} /> Import CSV
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => notify.info("Funcție în curs de implementare")}
-          >
-            <Icon name="download" size={12} /> Export
-          </button>
-          <button
-            type="button"
-            className="btn primary"
+    <div className="rf-page">
+      <PageHeader
+        title="Companii"
+        sub={<Badge variant="neutral" dot={false}>{companies.length} companii</Badge>}
+        actions={
+          <Btn
+            variant="primary"
+            icon="plus"
+            size="sm"
             disabled={atLimit}
             title={atLimit ? "Limita planului tău este atinsă" : undefined}
-            onClick={() => !atLimit && navigate({ to: "/companies/new" })}
+            onClick={() => {
+              if (!atLimit) void navigate({ to: "/companies/new" });
+            }}
           >
-            <Icon name="plus" size={12} /> Adaugă companie
-          </button>
-        </span>
-      </div>
+            Companie nouă
+          </Btn>
+        }
+      />
 
-      {/* Saved views */}
-      <div className="views-bar">
-        <span
-          className={"view-tab " + (filterSPV === "all" ? "active" : "")}
-          onClick={() => setFilterSPV("all")}
-        >
-          Toate <span className="count">{companies.length}</span>
-        </span>
-        <span
-          className={"view-tab " + (filterSPV === "yes" ? "active" : "")}
-          onClick={() => setFilterSPV("yes")}
-        >
-          Cu SPV activ <span className="count">{withSpv}</span>
-        </span>
-        <span
-          className={"view-tab " + (filterSPV === "no" ? "active" : "")}
-          onClick={() => setFilterSPV("no")}
-        >
-          Fără SPV <span className="count">{companies.length - withSpv}</span>
-        </span>
-        <span className="view-tab" style={{ color: "var(--accent)", borderRight: 0 }}>
-          <Icon name="plus" size={11} /> Salvează vizualizarea
-        </span>
-      </div>
-
-      {/* Toolbar */}
-      <div className="content-toolbar">
-        <div className="search">
-          <Icon name="search" size={13} />
-          <input
-            placeholder="Caută după nume, CUI sau localitate…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <span className="kbd-hint">{fmtShortcut("Ctrl F")}</span>
-        </div>
-        <span className="divider-v" style={{ margin: "0 4px" }} />
-        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>SPV:</span>
-        <div className="seg">
-          <span
-            className={"seg-item " + (filterSPV === "all" ? "active" : "")}
-            onClick={() => setFilterSPV("all")}
-          >
-            Toate
-          </span>
-          <span
-            className={"seg-item " + (filterSPV === "yes" ? "active" : "")}
-            onClick={() => setFilterSPV("yes")}
-          >
-            Activ
-          </span>
-          <span
-            className={"seg-item " + (filterSPV === "no" ? "active" : "")}
-            onClick={() => setFilterSPV("no")}
-          >
-            Inactiv
-          </span>
-        </div>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
-          {selected.size > 0 && (
-            <>
-              <span style={{ fontSize: 11, fontWeight: 600 }}>
-                {selected.size} selectate
-              </span>
-              <button
-                type="button"
-                className="btn compact"
-                onClick={() => notify.info("Funcție în curs de implementare")}
-              >
-                <Icon name="cloudUp" size={11} /> Sync SPV
-              </button>
-              <span className="divider-v" style={{ margin: "0 4px" }} />
-            </>
-          )}
-          <button type="button" className="btn-icon" title="Coloane">
-            <Icon name="filter" size={14} />
-          </button>
-          <button type="button" className="btn-icon" title="Reîmprospătează">
-            <Icon name="refresh" size={14} />
-          </button>
-        </span>
-      </div>
-
-      <div className="content-body">
+      <div className="rf-page-body">
         {license && tierLimit < Infinity && (
-          <div style={{ padding: "6px 14px", background: "var(--bg-hover)", borderBottom: "1px solid var(--border)", fontSize: 11, display: "flex", gap: 8, alignItems: "center" }}>
+          <div
+            style={{
+              padding: "8px 16px",
+              marginBottom: 12,
+              background: "var(--rf-info-bg)",
+              border: "1px solid var(--rf-info-bd)",
+              borderRadius: "var(--rf-radius)",
+              fontSize: 12,
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              color: "var(--rf-info)",
+            }}
+          >
+            <Icon name="info" size={15} />
             <span>
               Plan <b>{license.tier}</b>: {companies.length}/{tierLimit} companii.
             </span>
             {atLimit && (
-              <button
-                type="button"
-                className="btn"
-                style={{ fontSize: 10.5 }}
-                onClick={() => notify.info("Contactați-ne pentru upgrade la support@efactura.ro")}
+              <Btn
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  notify.info("Contactați-ne pentru upgrade la support@efactura.ro")
+                }
               >
                 Upgrade
-              </button>
+              </Btn>
             )}
           </div>
         )}
-        {isLoading ? (
-          <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>
-            Se încarcă…
-          </div>
-        ) : companiesError ? (
-          <QueryErrorBanner error={companiesErr} label="companiile" onRetry={() => void refetchCompanies()} />
-        ) : list.length === 0 ? (
-          <div style={{ padding: 40, textAlign: "center", fontSize: 12, color: "var(--text-muted)" }}>
-            {companies.length === 0
-              ? "Nicio companie. Adăugați prima companie cu butonul \"Adaugă companie\"."
-              : "Nicio înregistrare pentru filtrele aplicate."}
-          </div>
-        ) : (
-          <table className="dt">
-            <thead>
-              <tr>
-                <th className="ck">
-                  <input
-                    type="checkbox"
-                    className="cbx"
-                    checked={selected.size === list.length && list.length > 0}
-                    onChange={toggleAll}
-                  />
-                </th>
-                <th style={{ width: 110 }} className="sortable sorted">
-                  CUI <span className="sort">▾</span>
-                </th>
-                <th className="sortable">
-                  Denumire <span className="sort">▴▾</span>
-                </th>
-                <th style={{ width: 140 }}>Localitate</th>
-                <th style={{ width: 60 }}>Județ</th>
-                <th style={{ width: 64 }} className="num">SPV</th>
-                <th style={{ width: 84 }}>Serie</th>
-                <th style={{ width: 80 }} className="num">Nr. ultim</th>
-                <th style={{ width: 140 }}>Reg. Comerțului</th>
-                <th style={{ width: 90 }}>Acțiuni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((c: Company) => (
-                <tr
-                  key={c.id}
-                  onClick={() => navigate({ to: "/companies/$id", params: { id: c.id } })}
-                  style={{ cursor: "pointer" }}
-                >
-                  <td className="ck" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      className="cbx"
-                      checked={selected.has(c.id)}
-                      onChange={() => toggleOne(c.id)}
-                    />
-                  </td>
-                  <td className="mono">{c.cui}</td>
-                  <td>
-                    <span
-                      style={{
-                        display: "inline-block",
-                        width: 6,
-                        height: 6,
-                        background: dotColor(c.cui),
-                        marginRight: 6,
-                        verticalAlign: "middle",
-                      }}
-                    />
-                    <b>{c.legalName}</b>
-                    {c.tradeName && (
-                      <span className="muted" style={{ marginLeft: 6, fontSize: 11 }}>
-                        ({c.tradeName})
-                      </span>
-                    )}
-                  </td>
-                  <td>{c.city}</td>
-                  <td className="mono">{c.county}</td>
-                  <td className="num">
-                    {c.spvEnabled ? (
-                      <span style={{ color: "#16A34A", display: "inline-flex" }}>
-                        <Icon name="check" size={13} />
-                      </span>
-                    ) : (
-                      <span className="dim">
-                        <Icon name="x" size={13} />
-                      </span>
-                    )}
-                  </td>
-                  <td className="mono">{c.invoiceSeries}</td>
-                  <td className="num tnum">
-                    {c.lastInvoiceNumber.toLocaleString("ro-RO")}
-                  </td>
-                  <td className="mono muted">{c.registryNumber ?? "—"}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      title="Deschide"
-                      onClick={() =>
-                        navigate({ to: "/companies/$id", params: { id: c.id } })
-                      }
-                    >
-                      <Icon name="external" size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      title="Editează"
-                      onClick={() =>
-                        navigate({ to: "/companies/$id/edit", params: { id: c.id } })
-                      }
-                    >
-                      <Icon name="pen" size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      title="Șterge"
-                      onClick={() => void handleDelete(c)}
-                    >
-                      <Icon name="x" size={13} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
 
-      <div
-        style={{
-          padding: "6px 14px",
-          borderTop: "1px solid var(--border)",
-          background: "var(--bg)",
-          display: "flex",
-          gap: 16,
-          fontSize: 11,
-          color: "var(--text-muted)",
-        }}
-      >
-        <span>
-          Total: <b style={{ color: "var(--text)" }}>{list.length}</b> companii
-        </span>
-        <span>
-          Cu SPV: <b style={{ color: "var(--text)" }}>{list.filter((c) => c.spvEnabled).length}</b>
-        </span>
-        <span style={{ marginLeft: "auto" }}>
-          Click pe rând pentru detalii ·{" "}
-          <span className="kbd">{fmtShortcut("Ctrl K Ctrl C")}</span> selector rapid companie
-        </span>
+        <Card>
+          {/* Toolbar */}
+          <div
+            className="rf-toolbar-row"
+            style={{ padding: "10px 16px", borderBottom: "1px solid var(--rf-border)" }}
+          >
+            <div className="rf-search" style={{ width: 300 }}>
+              <Icon name="search" size={14} />
+              <input
+                placeholder="Caută după CUI, denumire sau localitate…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            <Segmented
+              options={spvOptions}
+              value={filterSPV}
+              onChange={(v) => setFilterSPV(v)}
+            />
+            <div style={{ marginLeft: "auto" }}>
+              <IconBtn
+                icon="refresh"
+                title="Reîmprospătează"
+                onClick={() =>
+                  void queryClient.invalidateQueries({
+                    queryKey: queryKeys.companies.all,
+                  })
+                }
+              />
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="rf-tbl-wrap">
+            {isLoading ? (
+              <Empty icon="building" title="Se încarcă…" />
+            ) : companiesError ? (
+              <QueryErrorBanner
+                error={companiesErr}
+                label="companiile"
+                onRetry={() => void refetchCompanies()}
+              />
+            ) : list.length === 0 ? (
+              <Empty
+                icon="building"
+                title={
+                  companies.length === 0
+                    ? "Nicio companie"
+                    : "Nicio înregistrare pentru filtrele aplicate"
+                }
+                actions={
+                  companies.length === 0 ? (
+                    <Btn
+                      variant="primary"
+                      icon="plus"
+                      onClick={() => void navigate({ to: "/companies/new" })}
+                    >
+                      Adaugă prima companie
+                    </Btn>
+                  ) : undefined
+                }
+              />
+            ) : (
+              <table className="rf-tbl">
+                <thead>
+                  <tr>
+                    <th style={{ width: 120 }}>CUI</th>
+                    <th>Denumire</th>
+                    <th style={{ width: 140 }}>Localitate</th>
+                    <th style={{ width: 50 }}>Județ</th>
+                    <th style={{ width: 60, textAlign: "center" }}>SPV</th>
+                    <th style={{ width: 80 }}>Serie</th>
+                    <th style={{ width: 80 }}>Reg. Com.</th>
+                    <th style={{ width: 60, textAlign: "center" }}>Activă</th>
+                    <th style={{ width: 110 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map((c: Company) => (
+                    <tr
+                      key={c.id}
+                      className="clickable"
+                      onClick={() =>
+                        void navigate({ to: "/companies/$id", params: { id: c.id } })
+                      }
+                    >
+                      <td className="mono">{c.cui}</td>
+                      <td>
+                        <span
+                          style={{
+                            display: "inline-block",
+                            width: 8,
+                            height: 8,
+                            borderRadius: "50%",
+                            background: dotColor(c.cui),
+                            marginRight: 8,
+                            flexShrink: 0,
+                            verticalAlign: "middle",
+                          }}
+                        />
+                        <span style={{ fontWeight: 500 }}>{c.legalName}</span>
+                        {c.tradeName && (
+                          <span
+                            style={{
+                              marginLeft: 6,
+                              fontSize: 11,
+                              color: "var(--rf-text-muted)",
+                            }}
+                          >
+                            ({c.tradeName})
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ color: "var(--rf-text-muted)" }}>{c.city}</td>
+                      <td className="mono" style={{ color: "var(--rf-text-muted)" }}>
+                        {c.county}
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        {c.spvEnabled ? (
+                          <Icon name="checkCircle" size={15} style={{ color: "var(--rf-success)" }} />
+                        ) : (
+                          <span className="rf-dim">
+                            <Icon name="xCircle" size={15} />
+                          </span>
+                        )}
+                      </td>
+                      <td className="mono">{c.invoiceSeries}</td>
+                      <td className="mono" style={{ fontSize: 11, color: "var(--rf-text-muted)" }}>
+                        {c.registryNumber ?? "—"}
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        {activeCompanyId === c.id ? (
+                          <Badge variant="success" dot={false}>Activă</Badge>
+                        ) : (
+                          <Badge variant="neutral" dot={false}>—</Badge>
+                        )}
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <div className="rf-cell-actions">
+                          <IconBtn
+                            icon="check"
+                            title="Setează ca activă"
+                            size={14}
+                            onClick={() => setActiveCompanyId(c.id)}
+                          />
+                          <IconBtn
+                            icon="pen"
+                            title="Editează"
+                            size={14}
+                            onClick={() =>
+                              void navigate({
+                                to: "/companies/$id/edit",
+                                params: { id: c.id },
+                              })
+                            }
+                          />
+                          <IconBtn
+                            icon="trash"
+                            title="Șterge"
+                            size={14}
+                            onClick={() => void handleDelete(c)}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="rf-tbl-footer">
+            <span>
+              Total: <b>{list.length}</b> companii
+            </span>
+            <span>
+              Cu SPV: <b>{list.filter((c) => c.spvEnabled).length}</b>
+            </span>
+            <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--rf-text-muted)" }}>
+              Click pe rând pentru detalii
+            </span>
+          </div>
+        </Card>
       </div>
     </div>
   );
