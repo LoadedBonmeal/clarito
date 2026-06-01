@@ -219,7 +219,7 @@ table.rf-tbl tbody tr:hover .rf-cell-actions { opacity: 1; }
 
 /* ---------- Empty state ---------- */
 .rf-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 56px 20px; text-align: center; color: var(--rf-text-dim); }
-.rf-empty .rf-e-ic { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; background: var(--rf-neutral-bg); color: var(--rf-text-dim); }
+.rf-empty .rf-e-ic { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; background: var(--rf-neutral-bg); color: var(--rf-text-muted); }
 .rf-empty .rf-e-title { font-size: 14px; font-weight: 600; color: var(--rf-text-muted); }
 
 /* ---------- Skeleton ---------- */

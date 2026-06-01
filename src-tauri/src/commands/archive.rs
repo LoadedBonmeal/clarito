@@ -264,7 +264,7 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
                 check_pool.close().await;
                 let _ = tokio::fs::remove_file(&temp_check_path).await;
                 return Err(AppError::Other(format!(
-                    "Backup invalid: tabelul '{table}' lipsește. Acest fișier nu pare să fie un backup RoFactura valid."
+                    "Backup invalid: tabelul '{table}' lipsește. Acest fișier nu pare să fie un backup Clarito valid."
                 )));
             }
         }

@@ -155,7 +155,7 @@ pub async fn export_all_my_data(
         zip.start_file("README.txt", opts)
             .map_err(|e| AppError::Archive(e.to_string()))?;
         let readme = format!(
-            "Export GDPR — RoFactura\nData: {}\n\nConține:\n- data.db: baza de date SQLite\n- archive/: fișiere XML+PDF facturi\n\nAcest fișier conține toate datele dvs. din aplicație.\n",
+            "Export GDPR — Clarito\nData: {}\n\nConține:\n- data.db: baza de date SQLite\n- archive/: fișiere XML+PDF facturi\n\nAcest fișier conține toate datele dvs. din aplicație.\n",
             chrono::Utc::now().format("%d.%m.%Y %H:%M UTC")
         );
         zip.write_all(readme.as_bytes()).map_err(AppError::Io)?;

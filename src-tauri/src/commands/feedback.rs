@@ -107,7 +107,7 @@ pub fn build_feedback_mailto(
     }
     body.push_str("---\n");
     body.push_str("Diagnostic:\n");
-    body.push_str(&format!("App: RoFactura {}\n", report.app_version));
+    body.push_str(&format!("App: Clarito {}\n", report.app_version));
     body.push_str(&format!("OS: {}/{}\n", report.os, report.arch));
     body.push_str(&format!("Machine: {}\n", report.machine_id_hash));
     body.push_str(&format!(
@@ -138,7 +138,7 @@ pub fn build_feedback_mailto(
         body = truncated;
     }
 
-    let subject = format!("[RoFactura v{}] Feedback", report.app_version);
+    let subject = format!("[Clarito v{}] Feedback", report.app_version);
     Ok(format!(
         "mailto:{}?subject={}&body={}",
         SUPPORT_EMAIL,

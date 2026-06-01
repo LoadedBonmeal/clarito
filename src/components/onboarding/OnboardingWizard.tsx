@@ -937,8 +937,6 @@ export function OnboardingWizard() {
         <Btn variant="ghost" icon="chevLeft" onClick={() => setStep((s) => Math.max(1, s - 1) as Step)}>
           Înapoi
         </Btn>
-      ) : step === 1 ? (
-        <Btn variant="ghost" onClick={handleFinish}>Sari peste</Btn>
       ) : (
         <div />
       )}

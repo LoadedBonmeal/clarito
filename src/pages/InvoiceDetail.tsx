@@ -649,7 +649,7 @@ export function InvoiceDetailPage() {
                     const body = encodeURIComponent(
                       `Bună ziua,\n\nVă transmitem factura ${invoice.fullNumber} din data ${invoice.issueDate}, în valoare de ${fmtRON(invoice.totalAmount)} ${invoice.currency}.\n\nCu stimă`
                     );
-                    void openUrl(`mailto:${contact.email}?subject=${subject}&body=${body}`);
+                    void openUrl(`mailto:${encodeURIComponent(contact.email ?? "")}?subject=${subject}&body=${body}`);
                   }}
                 >
                   Email

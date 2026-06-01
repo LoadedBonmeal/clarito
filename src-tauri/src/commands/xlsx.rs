@@ -283,7 +283,7 @@ pub async fn export_invoices_xlsx(
         ws.merge_range(0, 0, 0, 10, &title, &fmt_title)?;
 
         let generated = chrono::Utc::now().format("%d.%m.%Y %H:%M").to_string();
-        let subtitle = format!("Generat la {} · RoFactura v1 · RO_CIUS 1.0.1", generated);
+        let subtitle = format!("Generat la {} · Clarito v1 · RO_CIUS 1.0.1", generated);
         ws.write_with_format(1, 0, &subtitle, &fmt_subtitle)?;
         ws.merge_range(1, 0, 1, 10, &subtitle, &fmt_subtitle)?;
 

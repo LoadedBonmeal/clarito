@@ -23,7 +23,7 @@ pub fn get_app_info(app: AppHandle) -> AppResult<AppInfo> {
     let app_data_dir = app.path().app_data_dir()?;
 
     Ok(AppInfo {
-        name: "RoFactura".into(),
+        name: "Clarito".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         db_path: db_path.display().to_string(),
         app_data_dir: app_data_dir.display().to_string(),

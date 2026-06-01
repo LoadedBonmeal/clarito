@@ -40,7 +40,8 @@ const LABELS: Record<string, string> = {
 
 type Variant = "success" | "info" | "neutral" | "error" | "warning";
 
-function getVariant(lower: string): Variant {
+/** @internal exported for tests */
+export function getVariant(lower: string): Variant {
   switch (lower) {
     case "validated":
     case "approved":
