@@ -59,8 +59,10 @@ export function ReceivedPage() {
 
   // Update status mutation
   const { mutate: updateStatus } = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: ReceivedStatus }) =>
-      api.received.updateStatus(id, activeCompanyId!, status),
+    mutationFn: ({ id, status }: { id: string; status: ReceivedStatus }) => {
+      if (!activeCompanyId) throw new Error("Nicio companie activă.");
+      return api.received.updateStatus(id, activeCompanyId, status);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.received.list({ companyId: activeCompanyId ?? undefined }),
@@ -93,7 +95,10 @@ export function ReceivedPage() {
 
   // Reparse VAT mutation
   const { mutate: reparseVat, isPending: isReparsing } = useMutation({
-    mutationFn: () => api.received.reparseVat(activeCompanyId ?? undefined),
+    mutationFn: () => {
+      if (!activeCompanyId) throw new Error("Nicio companie activă.");
+      return api.received.reparseVat(activeCompanyId);
+    },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
       notify.success(`TVA recalculat pentru ${count} facturi.`);
@@ -149,7 +154,7 @@ export function ReceivedPage() {
               variant="secondary"
               icon="refresh"
               size="sm"
-              disabled={isReparsing}
+              disabled={isReparsing || !activeCompanyId}
               onClick={() => reparseVat()}
             >
               Recalculează TVA din XML

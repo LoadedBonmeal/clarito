@@ -156,13 +156,16 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps
   });
   const testMode = testModeSetting === "1";
 
-  // Close on outside click
+  // Close on outside click — attach only once, clean up both the timer and the exact handler
   useEffect(() => {
     const h = (e: MouseEvent) => {
       if (!(e.target as HTMLElement).closest(".rf-row-menu")) onClose();
     };
-    setTimeout(() => document.addEventListener("click", h), 0);
-    return () => document.removeEventListener("click", h);
+    const tid = setTimeout(() => document.addEventListener("click", h), 0);
+    return () => {
+      clearTimeout(tid);
+      document.removeEventListener("click", h);
+    };
   }, [onClose]);
 
   async function handleSubmit() {
@@ -518,6 +521,7 @@ export function InvoicesPage() {
     { value: "all",       label: "Toate",    count: totalCount },
     { value: "VALIDATED", label: "Validate", count: counts.VALIDATED },
     { value: "SUBMITTED", label: "Trimise",  count: counts.SUBMITTED },
+    { value: "QUEUED",    label: "În coadă", count: counts.QUEUED },
     { value: "REJECTED",  label: "Respinse", count: counts.REJECTED },
     { value: "DRAFT",     label: "Schițe",   count: counts.DRAFT },
     { value: "STORNED",   label: "Stornate", count: counts.STORNED },
@@ -1007,19 +1011,16 @@ export function InvoicesPage() {
       <div className="rf-tbl-footer" style={{ padding: "6px 32px" }}>
         <span>Validate: <b style={{ color: "var(--rf-success)" }}>{counts.VALIDATED}</b></span>
         <span>Trimise: <b style={{ color: "var(--rf-info)" }}>{counts.SUBMITTED}</b></span>
+        <span>În coadă: <b>{counts.QUEUED}</b></span>
         <span>Respinse: <b style={{ color: "var(--rf-error)" }}>{counts.REJECTED}</b></span>
         <span>Schițe: <b>{counts.DRAFT}</b></span>
         <span>Stornate: <b style={{ color: "var(--rf-warning)" }}>{counts.STORNED}</b></span>
-        <span style={{ marginLeft: "auto", color: "var(--rf-text-dim)", fontSize: 11 }}>
-          <span style={{ border: "1px solid var(--rf-border-strong)", borderRadius: "var(--rf-radius-sm)", padding: "1px 4px", fontSize: 10, marginRight: 2 }}>↑↓</span> selectează ·{" "}
-          <span style={{ border: "1px solid var(--rf-border-strong)", borderRadius: "var(--rf-radius-sm)", padding: "1px 4px", fontSize: 10, marginRight: 2 }}>Enter</span> deschide
-        </span>
       </div>
 
-      {showImportModal && (
+      {showImportModal && activeCompanyId && (
         <CsvImportModal
           type="invoices"
-          companyId={activeCompanyId ?? ""}
+          companyId={activeCompanyId}
           onClose={() => setShowImportModal(false)}
           onSuccess={() => {
             void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
