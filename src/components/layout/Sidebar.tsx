@@ -11,6 +11,7 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 
 import { Icon } from "@/components/shared/Icon";
+import { BrandMark } from "@/components/shared/BrandMark";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
@@ -136,10 +137,7 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
     <nav className={`rf-sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
       {/* Brand wordmark */}
       <div className="rf-brand-wordmark">
-        {/* TODO: replace with Clarito logo asset (pending) */}
-        <span className="rf-logo">
-          <Icon name="logo" size={17} stroke={2} />
-        </span>
+        <BrandMark size={28} className="rf-logo-img" />
         <span className="rf-name">Clarito</span>
       </div>
 

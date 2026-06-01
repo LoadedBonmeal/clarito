@@ -25,6 +25,7 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { formatError } from "@/lib/error-mapper";
 import { Icon } from "@/components/shared/Icon";
+import { BrandMark } from "@/components/shared/BrandMark";
 import { Btn, Banner } from "@/components/rf";
 import type { AnafCompanyData, AppErrorPayload, CreateCompanyInput } from "@/types";
 
@@ -89,20 +90,7 @@ function Rail({ currentStep }: { currentStep: Step }) {
     <div className="onb-rail">
       {/* Brand */}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
-            background: "rgba(255,255,255,0.15)",
-            display: "grid",
-            placeItems: "center",
-            flexShrink: 0,
-          }}
-        >
-          <Icon name="logo" size={18} stroke={1.8} />
-        </span>
-        {/* TODO: replace with Clarito logo asset (pending) */}
+        <BrandMark size={32} />
         <span style={{ color: "#fff", fontWeight: 700, fontSize: 15, letterSpacing: "-0.01em" }}>
           Clarito
         </span>
@@ -206,19 +194,8 @@ function WField({
 function Step1() {
   return (
     <div>
-      <div
-        style={{
-          width: 64,
-          height: 64,
-          borderRadius: 16,
-          background: "var(--rf-accent-tint)",
-          color: "var(--rf-accent)",
-          display: "grid",
-          placeItems: "center",
-          marginBottom: 20,
-        }}
-      >
-        <Icon name="logo" size={30} stroke={1.6} />
+      <div style={{ marginBottom: 20 }}>
+        <BrandMark size={64} />
       </div>
       <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em", margin: "0 0 8px" }}>
         Bun venit în Clarito
