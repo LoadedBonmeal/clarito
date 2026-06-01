@@ -505,7 +505,7 @@ export function InvoicesPage() {
           style={{
             width: 72, height: 32, fontSize: 12, padding: "0 8px",
             border: "1px solid var(--rf-border-strong)", background: "var(--rf-content)",
-            color: "var(--rf-text)", borderRadius: 6, fontFamily: "var(--rf-mono)",
+            color: "var(--rf-text)", borderRadius: "var(--rf-radius-sm)", fontFamily: "var(--rf-mono)",
           }}
         />
         <span style={{ fontSize: 11, color: "var(--rf-text-dim)" }}>–</span>
@@ -517,7 +517,7 @@ export function InvoicesPage() {
           style={{
             width: 72, height: 32, fontSize: 12, padding: "0 8px",
             border: "1px solid var(--rf-border-strong)", background: "var(--rf-content)",
-            color: "var(--rf-text)", borderRadius: 6, fontFamily: "var(--rf-mono)",
+            color: "var(--rf-text)", borderRadius: "var(--rf-radius-sm)", fontFamily: "var(--rf-mono)",
           }}
         />
 
@@ -732,26 +732,15 @@ export function InvoicesPage() {
       </div>
 
       {/* Footer status bar */}
-      <div
-        style={{
-          padding: "6px 32px",
-          borderTop: "1px solid var(--rf-border)",
-          background: "var(--rf-content)",
-          display: "flex",
-          gap: 16,
-          fontSize: 12,
-          color: "var(--rf-text-muted)",
-          flexShrink: 0,
-        }}
-      >
+      <div className="rf-tbl-footer" style={{ padding: "6px 32px" }}>
         <span>Validate: <b style={{ color: "var(--rf-success)" }}>{counts.VALIDATED}</b></span>
         <span>Trimise: <b style={{ color: "var(--rf-info)" }}>{counts.SUBMITTED}</b></span>
         <span>Respinse: <b style={{ color: "var(--rf-error)" }}>{counts.REJECTED}</b></span>
         <span>Schițe: <b>{counts.DRAFT}</b></span>
-        <span>Stornate: <b>{counts.STORNED}</b></span>
+        <span>Stornate: <b style={{ color: "var(--rf-warning)" }}>{counts.STORNED}</b></span>
         <span style={{ marginLeft: "auto", color: "var(--rf-text-dim)", fontSize: 11 }}>
-          <span style={{ border: "1px solid var(--rf-border-strong)", borderRadius: 4, padding: "1px 4px", fontSize: 10, marginRight: 2 }}>↑↓</span> selectează ·{" "}
-          <span style={{ border: "1px solid var(--rf-border-strong)", borderRadius: 4, padding: "1px 4px", fontSize: 10, marginRight: 2 }}>Enter</span> deschide
+          <span style={{ border: "1px solid var(--rf-border-strong)", borderRadius: "var(--rf-radius-sm)", padding: "1px 4px", fontSize: 10, marginRight: 2 }}>↑↓</span> selectează ·{" "}
+          <span style={{ border: "1px solid var(--rf-border-strong)", borderRadius: "var(--rf-radius-sm)", padding: "1px 4px", fontSize: 10, marginRight: 2 }}>Enter</span> deschide
         </span>
       </div>
 

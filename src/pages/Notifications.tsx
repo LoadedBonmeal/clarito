@@ -209,8 +209,8 @@ export function NotificationsPage() {
                     onClick={() => handleRowClick(n)}
                     style={{
                       display: "flex",
-                      gap: 13,
-                      padding: "14px 16px",
+                      gap: 14,
+                      padding: "15px 18px",
                       cursor: "pointer",
                       borderBottom: i < list.length - 1 ? "1px solid var(--rf-border)" : "none",
                       background: !n.isRead ? "var(--rf-accent-bg, var(--rf-success-bg))" : "transparent",
@@ -223,26 +223,36 @@ export function NotificationsPage() {
                       (e.currentTarget as HTMLDivElement).style.background = !n.isRead ? "var(--rf-accent-bg, var(--rf-success-bg))" : "transparent";
                     }}
                   >
-                    {/* Icon */}
+                    {/* Colored icon badge */}
                     <span
                       style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: 8,
+                        width: 36,
+                        height: 36,
+                        borderRadius: "var(--rf-radius-sm)",
                         display: "grid",
                         placeItems: "center",
                         flexShrink: 0,
                         background: `var(--rf-${color}-bg)`,
                         color: `var(--rf-${color})`,
+                        border: `1px solid var(--rf-${color}-bd, var(--rf-border))`,
                       }}
                     >
-                      <Icon name={icon} size={16} />
+                      <Icon name={icon} size={17} />
                     </span>
 
                     {/* Content */}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 13.5, fontWeight: !n.isRead ? 700 : 500 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 2 }}>
+                        <span
+                          style={{
+                            fontSize: 13.5,
+                            fontWeight: !n.isRead ? 700 : 500,
+                            color: "var(--rf-text)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
                           {n.title}
                         </span>
                         {!n.isRead && (
@@ -256,43 +266,52 @@ export function NotificationsPage() {
                             }}
                           />
                         )}
+                      </div>
+                      {n.body && (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "var(--rf-text-muted)",
+                            marginBottom: 3,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {n.body}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 11, color: "var(--rf-text-dim)", display: "flex", alignItems: "center", gap: 5 }}>
                         <span
                           style={{
-                            fontSize: 11,
                             fontWeight: 600,
                             color: `var(--rf-${color})`,
                             textTransform: "uppercase",
-                            marginLeft: 4,
+                            letterSpacing: "0.04em",
                           }}
                         >
                           {n.notificationType}
                         </span>
-                      </div>
-                      {n.body && (
-                        <div style={{ fontSize: 12, color: "var(--rf-text-muted)", marginTop: 2 }}>
-                          {n.body}
-                        </div>
-                      )}
-                      <div style={{ fontSize: 11, color: "var(--rf-text-dim)", marginTop: 3 }}>
-                        {fmtTime(n.createdAt)}
+                        <span style={{ opacity: 0.5 }}>·</span>
+                        <span>{fmtTime(n.createdAt)}</span>
                       </div>
                     </div>
 
-                    {/* Actions */}
+                    {/* Actions — chevron always visible, trash on hover */}
                     <div
-                      style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}
+                      style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <IconBtn
-                        icon="chevRight"
-                        title="Deschide"
-                        onClick={() => handleRowClick(n)}
-                      />
                       <IconBtn
                         icon="trash"
                         title="Șterge notificare"
                         disabled={deletingOne}
                         onClick={() => deleteOne(n.id)}
+                      />
+                      <IconBtn
+                        icon="chevRight"
+                        title="Deschide"
+                        onClick={() => handleRowClick(n)}
                       />
                     </div>
                   </div>

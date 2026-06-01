@@ -118,7 +118,9 @@ export function ReceivedPage() {
       );
   }, [allInvoices, filter, query]);
 
-  const totalSum = list.reduce((s, i) => s + parseDec(i.totalAmount), 0);
+  const totalSum    = list.reduce((s, i) => s + parseDec(i.totalAmount), 0);
+  const totalNet    = list.reduce((s, i) => s + parseDec(i.netAmount), 0);
+  const totalVat    = list.reduce((s, i) => s + parseDec(i.vatAmount), 0);
 
   // Status counts (from loaded page)
   const counts = {
@@ -338,15 +340,16 @@ export function ReceivedPage() {
                         }
                       />
                     </th>
-                    <th>Nr. document</th>
+                    <th>Furnizor</th>
+                    <th>CUI</th>
+                    <th>Serie-Număr</th>
                     <th>Data</th>
-                    <th>CUI emitent</th>
-                    <th>Emitent</th>
-                    <th>Monedă</th>
+                    <th className="rf-num">Net</th>
+                    <th className="rf-num">TVA</th>
                     <th className="rf-num">Total</th>
+                    <th>Monedă</th>
                     <th>Status</th>
-                    <th>Index ANAF</th>
-                    <th style={{ width: 150 }}></th>
+                    <th style={{ width: 120 }}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -367,14 +370,19 @@ export function ReceivedPage() {
                             onChange={() => toggleOne(inv.id)}
                           />
                         </td>
-                        <td style={{ fontWeight: 600 }} className="mono">{docNo}</td>
-                        <td style={{ color: "var(--rf-text-muted)" }}>{inv.issueDate}</td>
-                        <td className="mono">{inv.issuerCui}</td>
                         <td style={{ fontWeight: 500 }}>{inv.issuerName}</td>
-                        <td className="mono" style={{ color: "var(--rf-text-muted)" }}>{inv.currency}</td>
-                        <td className="rf-num mono" style={{ fontWeight: 600 }}>{fmtRON(inv.totalAmount)}</td>
+                        <td style={{ fontFamily: "var(--rf-mono)", color: "var(--rf-text-muted)" }}>{inv.issuerCui}</td>
+                        <td style={{ fontWeight: 600, fontFamily: "var(--rf-mono)" }}>{docNo}</td>
+                        <td style={{ color: "var(--rf-text-muted)" }}>{inv.issueDate}</td>
+                        <td className="rf-num" style={{ fontFamily: "var(--rf-mono)", color: "var(--rf-text-muted)", fontVariantNumeric: "tabular-nums" }}>
+                          {inv.netAmount != null ? fmtRON(inv.netAmount) : "—"}
+                        </td>
+                        <td className="rf-num" style={{ fontFamily: "var(--rf-mono)", color: "var(--rf-text-muted)", fontVariantNumeric: "tabular-nums" }}>
+                          {inv.vatAmount != null ? fmtRON(inv.vatAmount) : "—"}
+                        </td>
+                        <td className="rf-num" style={{ fontFamily: "var(--rf-mono)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtRON(inv.totalAmount)}</td>
+                        <td style={{ fontFamily: "var(--rf-mono)", color: "var(--rf-text-muted)" }}>{inv.currency}</td>
                         <td><StatusBadge status={inv.status} /></td>
-                        <td className="mono" style={{ color: "var(--rf-text-dim)", fontSize: 11 }}>{inv.anafIndex || "—"}</td>
                         <td onClick={(e) => e.stopPropagation()}>
                           <div className="rf-cell-actions">
                             {(inv.status === "NEW" || inv.status === "REVIEWED") && (
@@ -422,9 +430,11 @@ export function ReceivedPage() {
 
           {/* Footer */}
           <div className="rf-tbl-footer">
-            <span>Total: <b>{list.length}</b> facturi</span>
-            <span>Sumă: <b className="mono">{fmtRON(totalSum)} RON</b></span>
-            <span>De aprobat: <b style={{ color: "var(--rf-accent)" }}>{counts.NEW + counts.REVIEWED}</b></span>
+            <span><b>{list.length}</b> facturi</span>
+            <span>Net: <b style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(totalNet)} RON</b></span>
+            <span>TVA: <b style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(totalVat)} RON</b></span>
+            <span>Total: <b style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(totalSum)} RON</b></span>
+            <span style={{ marginLeft: "auto" }}>De aprobat: <b style={{ color: "var(--rf-accent)" }}>{counts.NEW + counts.REVIEWED}</b></span>
           </div>
         </Card>
       </div>
