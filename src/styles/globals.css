@@ -2,10 +2,11 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* Design system Win32 business — portat din Claude Design.
+/* Design system — portat din Claude Design.
    Conține design tokens, variabile, CSS pentru chrome (MenuBar, Ribbon,
    Sidebar, StatusBar), tabele, butoane, badges, panels, paletă comenzi. */
 @import "./design.css";
+@import "./rf.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -41,8 +42,8 @@
   --font-sans: var(--font-ui);
   --font-mono: var(--font-mono);
 
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-xl: 0px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
 }

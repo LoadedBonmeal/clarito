@@ -245,7 +245,7 @@ export function CsvImportModal({
               Previzualizare: {previewResult.imported} înregistrări valide
             </div>
             {previewResult.errors.length > 0 && (
-              <div style={{ color: "#DC2626", marginTop: 4 }}>
+              <div style={{ color: "var(--rf-error)", marginTop: 4 }}>
                 {previewResult.errors.slice(0, 5).map((e, i) => (
                   <div key={i}>• {e}</div>
                 ))}

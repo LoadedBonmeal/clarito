@@ -153,7 +153,7 @@ pub fn spawn_background_tasks(app: AppHandle) {
                         .await
                         .unwrap_or(0);
                         let _ = tray.set_tooltip(Some(&format!(
-                            "RoFactura — {} în așteptare",
+                            "Clarito — {} în așteptare",
                             pending_count
                         )));
                     }

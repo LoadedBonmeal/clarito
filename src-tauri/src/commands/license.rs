@@ -439,7 +439,7 @@ pub async fn start_trial(state: State<'_, AppState>, email: String) -> AppResult
     if trial_already_used_in_keychain() {
         return Err(AppError::Validation(
             "Perioada de probă gratuită a fost deja folosită pe această mașină. \
-             Achiziționați o licență pentru a continua să utilizați RoFactura."
+             Achiziționați o licență pentru a continua să utilizați Clarito."
                 .into(),
         ));
     }

@@ -5,6 +5,8 @@
  * fmtShortcut() at display time so macOS gets ⌘/⇧/⌥ symbols.
  */
 
+import { isMac } from "@/lib/platform";
+
 export interface ShortcutDef {
   keys: string;
   description: string;
@@ -40,7 +42,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "Ctrl+Shift+N", description: "Înregistrare factură primită" },
       { keys: "Ctrl+Alt+C",   description: "Contact nou (client/furnizor)" },
       { keys: "Ctrl+Shift+S", description: "Salvează ca… (duplică factura)" },
-      { keys: "Alt+F4",       description: "Ieșire din aplicație" },
+      { keys: isMac ? "Cmd+Q" : "Alt+F4", description: "Ieșire din aplicație" },
     ],
   },
   {

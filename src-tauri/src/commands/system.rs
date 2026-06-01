@@ -23,7 +23,7 @@ pub fn get_app_info(app: AppHandle) -> AppResult<AppInfo> {
     let app_data_dir = app.path().app_data_dir()?;
 
     Ok(AppInfo {
-        name: "RoFactura".into(),
+        name: "Clarito".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         db_path: db_path.display().to_string(),
         app_data_dir: app_data_dir.display().to_string(),
@@ -167,7 +167,7 @@ pub async fn export_activity_log_csv(state: State<'_, AppState>) -> AppResult<St
     .await
     .map_err(crate::error::AppError::Database)?;
 
-    let mut csv = String::from("ID,Task,Rezultat,Timp\n");
+    let mut csv = String::from("ID,Task,Rezultat,Timp\r\n");
     for r in &rows {
         let id = r.try_get::<String, _>("id").unwrap_or_default();
         let entity_id = r.try_get::<String, _>("entity_id").unwrap_or_default();
@@ -178,7 +178,10 @@ pub async fn export_activity_log_csv(state: State<'_, AppState>) -> AppResult<St
             .unwrap_or_else(|| created_at.to_string());
         // Proper CSV escaping: wrap fields with commas/quotes in double-quotes
         let meta_safe = metadata.replace('"', "\"\"");
-        csv.push_str(&format!("{},{},\"{}\",{}\n", id, entity_id, meta_safe, ts));
+        csv.push_str(&format!(
+            "{},{},\"{}\",{}\r\n",
+            id, entity_id, meta_safe, ts
+        ));
     }
     Ok(csv)
 }

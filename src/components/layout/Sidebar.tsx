@@ -1,51 +1,64 @@
 /**
- * Sidebar — listă plată de module cu color-bar pe item-ul activ.
+ * Sidebar — white grouped navigation (rf- prefixed classes).
  *
- * Portat din Claude Design (chrome.jsx). Folosește clase din design.css
- * (.sidebar, .sidebar-section, .sidebar-item.active, .bar, .badge, etc.).
+ * Groups: TABLOU DE BORD / E-FACTURA / OPERATIV / RAPORTARE.
+ * Top: logo + company-card → opens CompanySwitcher in AppShell.
+ * Footer: Setări link, Ajutor (openUrl), collapse toggle.
+ * Preserves badge queries from original Sidebar.tsx.
  */
 
 import { Link, useLocation } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 
 import { Icon } from "@/components/shared/Icon";
+import { BrandMark } from "@/components/shared/BrandMark";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
-import { fmtShortcut } from "@/lib/platform";
+
+// ── Nav data ──────────────────────────────────────────────────────────────────
 
 interface NavItem {
   id: string;
   label: string;
-  ico: string;
-  color: string;
-  badge?: number;
+  icon: string;
   path: string;
   matchPrefix?: string;
-  /** Pagina nu este implementată încă — dezactivează click-ul și estompează itemul */
+  badgeAccent?: boolean;
   disabled?: boolean;
+  badge?: number;
 }
 
-interface NavSection {
-  section: string;
+interface NavGroup {
+  group: string;
+  items: NavItem[];
 }
 
-type Item = NavItem | NavSection;
+// ── Sidebar ───────────────────────────────────────────────────────────────────
 
-export function Sidebar() {
+interface SidebarProps {
+  onOpenCompanySwitcher: () => void;
+}
+
+export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
   const location = useLocation();
-  const openPalette = useAppStore((s) => s.setCommandOpen);
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
+
+  // ── Badge queries (same as original) ──────────────────────────────────────
 
   const { data: invoicesPaged } = useQuery({
     queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined }),
-    queryFn: () => api.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 1 } }),
+    queryFn: () =>
+      api.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 1 } }),
     enabled: !!activeCompanyId,
   });
 
   const { data: receivedPaged } = useQuery({
     queryKey: queryKeys.received.list({ companyId: activeCompanyId ?? undefined }),
-    queryFn: () => api.received.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 1 } }),
+    queryFn: () =>
+      api.received.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 1 } }),
     enabled: !!activeCompanyId,
   });
 
@@ -71,103 +84,180 @@ export function Sidebar() {
   const companiesBadge = companies.length > 0 ? companies.length : undefined;
   const contactsBadge = contacts.length > 0 ? contacts.length : undefined;
 
-  const MODULES: Item[] = [
-    { section: "Tablou de bord" },
-    { id: "dashboard", label: "Privire generală", ico: "data", color: "#2848A1", path: "/" },
-    { section: "e-Factura" },
-    { id: "facturi-emise",   label: "Facturi emise",   ico: "invoice",   color: "var(--color-facturi)", badge: invoicesBadge, path: "/invoices",    matchPrefix: "/invoices" },
-    { id: "facturi-primite", label: "Facturi primite", ico: "invoiceIn", color: "var(--color-primite)", badge: receivedBadge, path: "/received",    matchPrefix: "/received" },
-    { id: "spv",             label: "Mesaje SPV",      ico: "anaf",      color: "var(--color-primite)", badge: spvBadge,      path: "/notifications" },
-    // "Stornate" navigates to /invoices — the correct route for storned invoices.
-    // The Invoices page manages tab state internally; clicking here lands on the
-    // full invoice list from which the Stornate tab is one click away.
-    { id: "stornate",        label: "Stornate",        ico: "storno",    color: "var(--color-rapoarte)", path: "/invoices" },
-    { section: "Operativ" },
-    { id: "companii",  label: "Companii",           ico: "buildings", color: "var(--color-companii)", badge: companiesBadge, path: "/companies", matchPrefix: "/companies" },
-    { id: "contacte",  label: "Contacte",           ico: "users",     color: "var(--color-contacte)", badge: contactsBadge,  path: "/contacts" },
-    { id: "chitante",  label: "Chitanțe",            ico: "receipt",   color: "var(--color-banca)",    path: "/receipts" },
-    { id: "plati",     label: "Urmărire Plăți",     ico: "receipt",   color: "var(--color-banca)",    path: "/payments" },
-    { id: "recurente", label: "Facturi Recurente",  ico: "refresh",   color: "var(--color-facturi)",  path: "/recurring" },
-    { id: "stocuri",        label: "Articole & Stocuri", ico: "stock",     color: "var(--color-stocuri)",  path: "/products" },
-    { id: "plan-conturi",  label: "Plan de conturi",    ico: "database",  color: "var(--color-rapoarte)", path: "/accounts" },
-    { id: "cote-tva",      label: "Cote TVA",           ico: "tag",       color: "var(--color-rapoarte)", path: "/vat-rates" },
-    // Bancă has no page yet — hidden until implemented.
-    // { id: "banca",     label: "Bancă & Casă",       ico: "bank",   color: "var(--color-banca)",    path: "/contacts",  disabled: true },
-    { section: "Raportare" },
-    { id: "rapoarte",   label: "Rapoarte",          ico: "reports", color: "var(--color-rapoarte)", path: "/reports" },
-    // Audit has no dedicated page yet — shown disabled (planned feature).
-    { id: "declaratii", label: "Declarații ANAF",   ico: "anaf",    color: "var(--color-rapoarte)", path: "/declarations" },
-    { id: "audit",      label: "Jurnal modificări", ico: "history", color: "#8A857A",               path: "/settings",  disabled: true },
+  // ── Nav groups ─────────────────────────────────────────────────────────────
+
+  const NAV_GROUPS: NavGroup[] = [
+    {
+      group: "TABLOU DE BORD",
+      items: [
+        { id: "dashboard", label: "Privire generală", icon: "data", path: "/" },
+      ],
+    },
+    {
+      group: "E-FACTURA",
+      items: [
+        { id: "facturi-emise",   label: "Facturi emise",   icon: "invoice",   path: "/invoices",      matchPrefix: "/invoices",      badge: invoicesBadge },
+        { id: "facturi-primite", label: "Facturi primite", icon: "invoiceIn", path: "/received",      matchPrefix: "/received",      badge: receivedBadge },
+        { id: "mesaje-spv",      label: "Mesaje SPV",      icon: "anaf",      path: "/notifications", badge: spvBadge, badgeAccent: true },
+        { id: "stornate",        label: "Stornate",        icon: "storno",    path: "/stornate" },
+      ],
+    },
+    {
+      group: "OPERATIV",
+      items: [
+        { id: "companii",        label: "Companii",            icon: "buildings", path: "/companies",  matchPrefix: "/companies", badge: companiesBadge },
+        { id: "contacte",        label: "Clienți & Furnizori", icon: "users",     path: "/contacts",   badge: contactsBadge },
+        { id: "banca",           label: "Bancă & Casă",         icon: "bank",      path: "/bank" },
+        { id: "chitante",        label: "Chitanțe",             icon: "receipt",   path: "/receipts" },
+        { id: "plati",           label: "Urmărire Plăți",       icon: "bank",      path: "/payments" },
+        { id: "recurente",       label: "Facturi Recurente",    icon: "refresh",   path: "/recurring" },
+        { id: "stocuri",         label: "Articole & Stocuri",  icon: "stock",     path: "/products" },
+        { id: "plan-conturi",    label: "Plan de conturi",      icon: "database",  path: "/accounts" },
+        { id: "cote-tva",        label: "Cote TVA",             icon: "tag",       path: "/vat-rates" },
+      ],
+    },
+    {
+      group: "RAPORTARE",
+      items: [
+        { id: "rapoarte",    label: "Rapoarte",         icon: "reports", path: "/reports" },
+        { id: "declaratii",  label: "Declarații ANAF",  icon: "anaf",    path: "/declarations" },
+      ],
+    },
   ];
 
-  const activeCompanyName =
-    companies.find((c) => c.id === activeCompanyId)?.legalName ?? "RoFactura";
+  // ── Active company display ─────────────────────────────────────────────────
+
+  const activeCompany = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
+  const companyInitials = (activeCompany?.legalName ?? "RF").slice(0, 2).toUpperCase();
 
   return (
-    <div className="sidebar">
-      {MODULES.map((m, i) => {
-        if ("section" in m) {
-          return (
-            <div key={"s" + i} className="sidebar-section">
-              {m.section}
-            </div>
-          );
-        }
+    <nav className={`rf-sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
+      {/* Brand wordmark */}
+      <div className="rf-brand-wordmark">
+        <BrandMark size={28} className="rf-logo-img" />
+        <span className="rf-name">Clarito</span>
+      </div>
 
-        if (m.disabled) {
-          return (
-            <div
-              key={m.id}
-              className="sidebar-item"
-              style={{
-                ["--module-color" as string]: m.color,
-                opacity: 0.4,
-                cursor: "not-allowed",
-                pointerEvents: "none",
-              }}
-              title="În curând"
-            >
-              <span className="bar" />
-              <span className="ico">
-                <Icon name={m.ico} size={15} />
-              </span>
-              <span>{m.label}</span>
-            </div>
-          );
-        }
-
-        const isActive = m.matchPrefix
-          ? location.pathname === m.matchPrefix ||
-            location.pathname.startsWith(`${m.matchPrefix}/`)
-          : location.pathname === m.path;
-
-        return (
-          <Link
-            key={m.id}
-            to={m.path}
-            className={"sidebar-item" + (isActive ? " active" : "")}
-            style={{ ["--module-color" as string]: m.color }}
-          >
-            <span className="bar" />
-            <span className="ico">
-              <Icon name={m.ico} size={15} />
-            </span>
-            <span>{m.label}</span>
-            {m.badge != null && <span className="badge">{m.badge}</span>}
-          </Link>
-        );
-      })}
+      {/* Company card — opens switcher modal in AppShell */}
       <button
         type="button"
-        className="sidebar-footer"
-        onClick={() => openPalette(true)}
+        className="rf-company-card"
+        onClick={onOpenCompanySwitcher}
+        title="Schimbă compania activă"
       >
-        <Icon name="user" size={14} />
-        <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {activeCompanyName}
+        {/* Avatar (shown when collapsed) */}
+        <span
+          style={{
+            display: sidebarCollapsed ? "grid" : "none",
+            width: 32, height: 32, borderRadius: 8,
+            background: "var(--rf-accent-tint)", color: "var(--rf-accent)",
+            placeItems: "center", fontSize: 12, fontWeight: 700, flexShrink: 0,
+          }}
+        >
+          {companyInitials}
         </span>
-        <span className="kbd">{fmtShortcut("Ctrl+K")}</span>
+        {/* Full card (shown when expanded) */}
+        {!sidebarCollapsed && (
+          <>
+            <div className="rf-cc-label">Companie</div>
+            <div className="rf-cc-name">
+              <span>{activeCompany?.legalName ?? "Nicio companie"}</span>
+              <Icon name="chevDown" size={13} style={{ color: "var(--rf-text-muted)", flexShrink: 0 }} />
+            </div>
+            {activeCompany?.cui && (
+              <div className="rf-cc-cui">{activeCompany.cui}</div>
+            )}
+          </>
+        )}
       </button>
-    </div>
+
+      {/* Nav scroll area */}
+      <div className="rf-nav-scroll">
+        {NAV_GROUPS.map((grp) => (
+          <div key={grp.group}>
+            <div className="rf-nav-group-label">{grp.group}</div>
+            {grp.items.map((item) => {
+              // Active when the path matches exactly, or (for prefix items like
+              // /invoices) when the current path is a child route (e.g.
+              // /invoices/$id). Stornate lives at its own /stornate route, so
+              // there is no longer any search-param disambiguation to do.
+              const isActive = item.matchPrefix
+                ? location.pathname === item.matchPrefix ||
+                  location.pathname.startsWith(`${item.matchPrefix}/`)
+                : location.pathname === item.path;
+
+              if (item.disabled) {
+                return (
+                  <div
+                    key={item.id}
+                    className="rf-nav-item"
+                    style={{ opacity: 0.4, cursor: "not-allowed", pointerEvents: "none" }}
+                    title="În curând"
+                  >
+                    <span className="rf-nav-ic"><Icon name={item.icon} size={18} /></span>
+                    <span className="rf-nav-label">{item.label}</span>
+                  </div>
+                );
+              }
+
+              return (
+                <Link
+                  key={item.id}
+                  to={item.path as "/"}
+                  className={`rf-nav-item${isActive ? " active" : ""}`}
+                  title={sidebarCollapsed ? item.label : undefined}
+                >
+                  <span className="rf-nav-ic"><Icon name={item.icon} size={18} /></span>
+                  <span className="rf-nav-label">{item.label}</span>
+                  {item.badge != null && (
+                    <span className={`rf-nav-badge${item.badgeAccent ? " accent" : ""}`}>
+                      {item.badge}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* Footer */}
+      <div className="rf-sidebar-foot">
+        <Link
+          to="/settings"
+          className={`rf-nav-item${location.pathname === "/settings" ? " active" : ""}`}
+          title={sidebarCollapsed ? "Setări" : undefined}
+        >
+          <span className="rf-nav-ic"><Icon name="settings" size={18} /></span>
+          <span className="rf-nav-label">Setări</span>
+        </Link>
+
+        <button
+          type="button"
+          className="rf-nav-item"
+          title="Documentație e-Factura"
+          onClick={() => {
+            void import("@tauri-apps/plugin-opener").then((m) =>
+              m.openUrl("https://mfinante.gov.ro/ro/web/efactura/informatii-tehnice")
+            );
+          }}
+        >
+          <span className="rf-nav-ic"><Icon name="help" size={18} /></span>
+          <span className="rf-nav-label">Ajutor</span>
+        </button>
+
+        <button
+          type="button"
+          className="rf-nav-item"
+          onClick={toggleSidebar}
+          title={sidebarCollapsed ? "Extinde" : "Restrânge"}
+        >
+          <span className="rf-nav-ic">
+            <Icon name={sidebarCollapsed ? "chevRight" : "chevLeft"} size={18} />
+          </span>
+          <span className="rf-nav-label">Restrânge</span>
+        </button>
+      </div>
+    </nav>
   );
 }

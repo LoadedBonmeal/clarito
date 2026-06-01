@@ -1,12 +1,13 @@
 /**
  * SalesJournalView — Jurnal de vânzări pentru perioadă.
+ * Wave 5 — rf look: SectionCard + rf-tbl + Btn
  */
 
 import { useState } from "react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import { Icon } from "@/components/shared/Icon";
+import { SectionCard, Btn } from "@/components/rf";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -17,18 +18,18 @@ import type { Invoice } from "@/types";
 
 interface Props {
   periodInvoices: Invoice[];
-  contactMap: Map<string, string>;
-  dateFrom: string;
-  dateTo: string;
-  isLoading: boolean;
+  contactMap:     Map<string, string>;
+  dateFrom:       string;
+  dateTo:         string;
+  isLoading:      boolean;
 }
 
 export function SalesJournalView({ periodInvoices, contactMap, dateFrom, dateTo, isLoading }: Props) {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [exporting, setExporting] = useState(false);
 
-  const totalNet = periodInvoices.reduce((s, i) => s + parseDec(i.subtotalAmount), 0);
-  const totalVat = periodInvoices.reduce((s, i) => s + parseDec(i.vatAmount), 0);
+  const totalNet   = periodInvoices.reduce((s, i) => s + parseDec(i.subtotalAmount), 0);
+  const totalVat   = periodInvoices.reduce((s, i) => s + parseDec(i.vatAmount), 0);
   const totalGross = periodInvoices.reduce((s, i) => s + parseDec(i.totalAmount), 0);
 
   const handleExport = async () => {
@@ -38,9 +39,9 @@ export function SalesJournalView({ periodInvoices, contactMap, dateFrom, dateTo,
       return;
     }
     const savePath = await saveDialog({
-      title: "Salvează jurnal vânzări",
+      title:       "Salvează jurnal vânzări",
       defaultPath: `jurnal-vanzari-${dateFrom}-${dateTo}.csv`,
-      filters: [{ name: "CSV", extensions: ["csv"] }],
+      filters:     [{ name: "CSV", extensions: ["csv"] }],
     });
     if (!savePath) return;
     setExporting(true);
@@ -56,63 +57,66 @@ export function SalesJournalView({ periodInvoices, contactMap, dateFrom, dateTo,
   };
 
   return (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <h2 style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", letterSpacing: "0.04em", textTransform: "uppercase", margin: 0 }}>
-          Jurnal de vânzări
-        </h2>
-        <button
-          type="button"
-          className="btn"
+    <SectionCard
+      icon="fileOut"
+      title="Jurnal de vânzări"
+      subtitle={dateFrom !== dateTo ? `${dateFrom} — ${dateTo}` : dateFrom}
+      actions={
+        <Btn
+          variant="secondary"
+          size="sm"
+          icon="download"
           disabled={exporting || !activeCompanyId}
-          onClick={handleExport}
+          onClick={() => void handleExport()}
         >
-          <Icon name="download" size={12} /> {exporting ? "Export…" : "Exportă jurnal vânzări (CSV)"}
-        </button>
-      </div>
-
+          {exporting ? "Export…" : "Export CSV"}
+        </Btn>
+      }
+    >
       {isLoading ? (
-        <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>Se încarcă…</div>
+        <div style={{ padding: "12px 16px", fontSize: 12.5, color: "var(--rf-text-muted)" }}>Se încarcă…</div>
       ) : periodInvoices.length === 0 ? (
-        <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>
+        <div style={{ padding: "12px 16px", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
           Nicio factură emisă în perioada selectată.
         </div>
       ) : (
-        <table className="dt">
-          <thead>
-            <tr>
-              <th style={{ width: 130 }}>Număr</th>
-              <th>Client</th>
-              <th style={{ width: 96 }}>Data</th>
-              <th style={{ width: 120 }}>Status</th>
-              <th className="num" style={{ width: 130 }}>Net (RON)</th>
-              <th className="num" style={{ width: 110 }}>TVA (RON)</th>
-              <th className="num" style={{ width: 130 }}>Total (RON)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {periodInvoices.map((inv) => (
-              <tr key={inv.id}>
-                <td className="mono"><b>{inv.fullNumber}</b></td>
-                <td style={{ fontSize: 11 }}>{contactMap.get(inv.contactId) ?? inv.contactId}</td>
-                <td className="muted">{inv.issueDate}</td>
-                <td><StatusBadge status={inv.status} /></td>
-                <td className="num tnum muted">{fmtRON(inv.subtotalAmount)}</td>
-                <td className="num tnum dim">{fmtRON(inv.vatAmount)}</td>
-                <td className="num tnum"><b>{fmtRON(inv.totalAmount)}</b></td>
+        <div className="rf-tbl-wrap">
+          <table className="rf-tbl">
+            <thead>
+              <tr>
+                <th>Număr</th>
+                <th>Client</th>
+                <th>Data</th>
+                <th>Status</th>
+                <th className="right">Net (RON)</th>
+                <th className="right">TVA (RON)</th>
+                <th className="right">Total (RON)</th>
               </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr style={{ background: "var(--bg-hover)", fontWeight: 600 }}>
-              <td colSpan={4}>TOTAL perioadă</td>
-              <td className="num tnum">{fmtRON(totalNet)}</td>
-              <td className="num tnum">{fmtRON(totalVat)}</td>
-              <td className="num tnum"><b>{fmtRON(totalGross)}</b></td>
-            </tr>
-          </tfoot>
-        </table>
+            </thead>
+            <tbody>
+              {periodInvoices.map((inv) => (
+                <tr key={inv.id}>
+                  <td className="rf-mono" style={{ fontWeight: 600 }}>{inv.fullNumber}</td>
+                  <td style={{ fontSize: 12.5 }}>{contactMap.get(inv.contactId) ?? inv.contactId}</td>
+                  <td style={{ color: "var(--rf-text-muted)" }}>{inv.issueDate}</td>
+                  <td><StatusBadge status={inv.status} /></td>
+                  <td className="right rf-mono" style={{ color: "var(--rf-text-muted)" }}>{fmtRON(inv.subtotalAmount)}</td>
+                  <td className="right rf-mono" style={{ color: "var(--rf-text-dim)" }}>{fmtRON(inv.vatAmount)}</td>
+                  <td className="right rf-mono" style={{ fontWeight: 600 }}>{fmtRON(inv.totalAmount)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={4}>TOTAL perioadă</td>
+                <td className="right rf-mono">{fmtRON(totalNet)}</td>
+                <td className="right rf-mono">{fmtRON(totalVat)}</td>
+                <td className="right rf-mono">{fmtRON(totalGross)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
       )}
-    </div>
+    </SectionCard>
   );
 }

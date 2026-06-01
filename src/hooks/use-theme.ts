@@ -1,9 +1,18 @@
 import { useEffect } from "react";
-import { useAppStore } from "@/lib/store";
+import { useAppStore, type DensityMode } from "@/lib/store";
+
+function applyDensityClass(density: DensityMode) {
+  const root = document.documentElement;
+  root.classList.remove("density-compact", "density-comfy", "density-relaxed");
+  if (density === "compact") root.classList.add("density-compact");
+  if (density === "comfortable") root.classList.add("density-comfy");
+  // "relaxed" uses default row heights — no extra class
+}
 
 export function useTheme() {
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
+  const density = useAppStore((s) => s.density);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -21,6 +30,11 @@ export function useTheme() {
     }
     apply(theme);
   }, [theme]);
+
+  // Sync density class on mount + whenever density changes
+  useEffect(() => {
+    applyDensityClass(density ?? "comfortable");
+  }, [density]);
 
   return { theme, setTheme };
 }

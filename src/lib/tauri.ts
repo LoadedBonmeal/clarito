@@ -65,7 +65,7 @@ export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<
     return Promise.reject({
       message:
         "Aplicația trebuie deschisă ca aplicație nativă (nu din browser). " +
-        "Porniți RoFactura din Finder, Dock sau meniu Start.",
+        "Porniți Clarito din Finder, Dock sau meniu Start.",
     });
   }
   return rawInvoke<T>(cmd, args);

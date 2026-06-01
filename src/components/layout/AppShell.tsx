@@ -1,14 +1,23 @@
 /**
- * AppShell — layout principal Win32:
- *   ┌─────────────────────────────────┐
- *   │ MenuBar (26px)                  │
- *   │ Ribbon (86px)                   │
- *   ├──────┬──────────────────────────┤
- *   │ Side │  Content (Outlet)        │
- *   │ bar  │                          │
- *   ├──────┴──────────────────────────┤
- *   │ Status bar (22px)               │
- *   └─────────────────────────────────┘
+ * AppShell — layout principal modern:
+ *   ┌──────────────────────────────────────┐
+ *   │ Sidebar (white, grouped)             │
+ *   ├──────────────────────────────────────┤
+ *   │ TopBar (breadcrumb + actions)        │
+ *   │ Content (Outlet)                     │
+ *   │ StatusBar                            │
+ *   └──────────────────────────────────────┘
+ *
+ * PRESERVED verbatim:
+ *  - CompanySwitcher modal (inline)
+ *  - CommandPalette
+ *  - ShortcutsDialog
+ *  - OnboardingGate
+ *  - 4 Tauri event listeners (new_notification, invoice_status_changed,
+ *    sync_completed, oauth_completed) + tray_navigate
+ *  - Global keyboard shortcuts (Ctrl+K, Ctrl+N, F5, Ctrl+/)
+ *  - companies query + activeCompany resolution
+ *  - useTheme()
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -16,8 +25,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 
-import { MenuBar } from "./MenuBar";
-import { Ribbon } from "./Ribbon";
+import { TopBar } from "./TopBar";
 import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
 import { CommandPalette } from "./CommandPalette";
@@ -97,106 +105,66 @@ function CompanySwitcher({ companies, activeCompanyId, onSelect, onClose }: Comp
         role="dialog"
         aria-modal="true"
         aria-label="Selectare companie activă"
+        className="rf-switcher"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
-        style={{
-          background: "var(--bg-content)",
-          border: "1px solid var(--border)",
-          minWidth: 300,
-          maxWidth: 420,
-          boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-          display: "flex",
-          flexDirection: "column",
-        }}
       >
         {/* Header */}
-        <div style={{ padding: "8px 12px", fontSize: 10.5, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.06em", borderBottom: "1px solid var(--border-soft)" }}>
+        <div className="rf-switcher-head">
           COMPANIE ACTIVĂ
         </div>
 
         {/* Search input */}
-        <div style={{ padding: "6px 10px", borderBottom: "1px solid var(--border-soft)", display: "flex", alignItems: "center", gap: 6 }}>
-          <Icon name="search" size={12} />
+        <div className="rf-switcher-search">
+          <Icon name="search" size={13} style={{ color: "var(--rf-text-dim)", flexShrink: 0 }} />
           <input
             ref={inputRef}
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Caută companie sau CUI…"
-            style={{
-              flex: 1,
-              border: "none",
-              outline: "none",
-              background: "transparent",
-              fontSize: 11.5,
-              color: "var(--text)",
-            }}
           />
         </div>
 
         {/* Company list with max-height + scroll */}
-        <div
-          ref={listRef}
-          style={{
-            maxHeight: 280,
-            overflowY: "auto",
-            overflowX: "hidden",
-          }}
-        >
+        <div ref={listRef} className="rf-switcher-list">
           {filtered.map((c, idx) => (
             <button
               key={c.id}
               type="button"
               data-idx={idx}
               onClick={() => onSelect(c.id)}
-              style={{
-                display: "flex",
-                width: "100%",
-                alignItems: "center",
-                gap: 10,
-                padding: "8px 12px",
-                background:
-                  idx === cursor
-                    ? "var(--accent-soft)"
-                    : c.id === activeCompanyId
-                    ? "var(--bg-hover)"
-                    : "none",
-                border: "none",
-                borderBottom: "1px solid var(--border-soft)",
-                cursor: "pointer",
-                textAlign: "left",
-                fontSize: 11.5,
-              }}
+              className={`rf-switcher-item${idx === cursor ? " highlighted" : ""}`}
               onMouseEnter={() => setCursor(idx)}
             >
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600, color: "var(--text)" }}>{c.legalName}</div>
-                <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{c.cui}</div>
+              <div className="rf-switcher-item-body">
+                <div className="rf-switcher-item-name">{c.legalName}</div>
+                <div className="rf-switcher-item-cui">{c.cui}</div>
               </div>
               {c.id === activeCompanyId && (
-                <Icon name="check" size={12} style={{ color: "var(--accent)" }} />
+                <Icon name="check" size={13} className="rf-switcher-check" />
               )}
             </button>
           ))}
           {filtered.length === 0 && (
-            <div style={{ padding: "12px", fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>
+            <div className="rf-switcher-empty">
               {companies.length === 0 ? "Nicio companie configurată." : "Nicio companie găsită."}
             </div>
           )}
         </div>
 
         {/* Footer hint */}
-        <div style={{ padding: "5px 12px", fontSize: 10, color: "var(--text-muted)", borderTop: "1px solid var(--border-soft)", display: "flex", gap: 12 }}>
-          <span><kbd style={{ fontFamily: "var(--font-mono)" }}>↑↓</kbd> navighează</span>
-          <span><kbd style={{ fontFamily: "var(--font-mono)" }}>Enter</kbd> selectează</span>
-          <span><kbd style={{ fontFamily: "var(--font-mono)" }}>Esc</kbd> închide</span>
+        <div className="rf-switcher-foot">
+          <span><kbd>↑↓</kbd> navighează</span>
+          <span><kbd>Enter</kbd> selectează</span>
+          <span><kbd>Esc</kbd> închide</span>
         </div>
       </div>
     </div>
   );
 }
 
-// ─── AppShell ─────────────────────────────────────────────────────────────
+// ─── AppShell ─────────────────────────────────────────────────────────────────
 
 interface AppShellProps {
   children: ReactNode;
@@ -288,22 +256,18 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <OnboardingGate>
       <div className="app">
-        <MenuBar
-          activeCompanyName={activeCompanyName}
-          activeCompanyCui={activeCompany?.cui}
-          onOpenCompanySwitcher={() => setSwitcherOpen(true)}
-          onOpenShortcuts={() => setShortcutsOpen(true)}
-        />
-        <Ribbon onOpenPalette={() => setCommandOpen(true)} onOpenShortcuts={() => setShortcutsOpen(true)} />
-        <div className="workspace">
-          <Sidebar />
-          <div className="content-shell">{children}</div>
+        <Sidebar onOpenCompanySwitcher={() => setSwitcherOpen(true)} />
+        <div className="app-main">
+          <TopBar />
+          <div className="rf-content">
+            {children}
+          </div>
+          <StatusBar
+            activeCompanyName={activeCompanyName}
+            activeCompanyId={activeCompanyId ?? undefined}
+            companyCount={companies.length}
+          />
         </div>
-        <StatusBar
-          activeCompanyName={activeCompanyName}
-          activeCompanyId={activeCompanyId ?? undefined}
-          companyCount={companies.length}
-        />
         <CommandPalette />
         <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
         {switcherOpen && (

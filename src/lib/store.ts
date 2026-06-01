@@ -2,11 +2,25 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
 export type ThemeMode = "light" | "dark" | "system";
+export type DensityMode = "compact" | "comfortable" | "relaxed";
+
+/** Apply density class to documentElement — called on every density change */
+function applyDensity(density: DensityMode) {
+  const root = document.documentElement;
+  root.classList.remove("density-compact", "density-comfy", "density-relaxed");
+  if (density === "compact") root.classList.add("density-compact");
+  if (density === "comfortable") root.classList.add("density-comfy");
+  // "relaxed" = no extra class (default row heights)
+}
 
 interface AppState {
   // Theme
   theme: ThemeMode;
   setTheme: (theme: ThemeMode) => void;
+
+  // Row density
+  density: DensityMode;
+  setDensity: (density: DensityMode) => void;
 
   // Sidebar
   sidebarCollapsed: boolean;
@@ -32,6 +46,12 @@ export const useAppStore = create<AppState>()(
       theme: "system",
       setTheme: (theme) => set({ theme }),
 
+      density: "comfortable",
+      setDensity: (density) => {
+        applyDensity(density);
+        set({ density });
+      },
+
       sidebarCollapsed: false,
       toggleSidebar: () =>
         set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
@@ -51,6 +71,7 @@ export const useAppStore = create<AppState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         theme: state.theme,
+        density: state.density,
         sidebarCollapsed: state.sidebarCollapsed,
         activeCompanyId: state.activeCompanyId,
       }),

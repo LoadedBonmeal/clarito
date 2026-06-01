@@ -384,7 +384,7 @@ fn build_and_write_xml(report: D300Report, dest_path: String) -> AppResult<Strin
     let mut xml = String::with_capacity(8192);
 
     xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    xml.push_str("<!-- D300 Decont TVA — Extras vânzări + achiziții generat de RoFactura -->\n");
+    xml.push_str("<!-- D300 Decont TVA — Extras vânzări + achiziții generat de Clarito -->\n");
     xml.push_str("<!-- Schema oficială ANAF D300 necesită depunere prin e-Formulare.      -->\n");
     xml.push_str("<D300>\n");
 

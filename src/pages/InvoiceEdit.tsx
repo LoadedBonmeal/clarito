@@ -1,10 +1,21 @@
+/**
+ * Editare factură — re-skinned to rf kit (Wave 2).
+ * Preserves ALL wiring: api.invoices.get prefill, api.invoices.updateDraft,
+ * api.companies.get, api.bnr.fetchRate (multi-currency), LineItemsEditor,
+ * Ctrl+S shortcut, navigate-back on save.
+ */
+
 import { useState, useEffect, useCallback, useId } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useQuery, useMutation } from "@tanstack/react-query";
+
 import { Icon } from "@/components/shared/Icon";
 import { ContactCombobox } from "@/components/shared/ContactCombobox";
 import { LineItemsEditor } from "@/components/shared/LineItemsEditor";
 import type { LineRow } from "@/components/shared/LineItemsEditor";
+import {
+  PageHeader, Btn, SectionCard, Field, Input, Select, Textarea,
+} from "@/components/rf";
 import { useAppStore } from "@/lib/store";
 import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
@@ -70,9 +81,7 @@ export function InvoiceEditPage() {
   useEffect(() => {
     if (invoiceData?.invoice && !initialized) {
       const inv = invoiceData.invoice;
-      // Load the attached contact by id (avoids fetching the full list)
       void api.contacts
-        // S1: pass activeCompanyId for company scoping.
         .get(inv.contactId, activeCompanyId ?? "")
         .then((c) => setSelectedContact(c))
         .catch(() => setSelectedContact(null));
@@ -101,7 +110,6 @@ export function InvoiceEditPage() {
     }
   }, [invoiceData, initialized]);
 
-  // BNR rate fetch handler
   async function handleFetchBnrRate() {
     if (!currency || !issueDate) return;
     setBnrLoading(true);
@@ -116,15 +124,11 @@ export function InvoiceEditPage() {
     }
   }
 
-  // Compute totals (mirrors LineItemsEditor M2 rounding) for RON-equivalent display
-  const invoiceNet = lines.reduce((s, l) => {
-    const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
-    return s + lineNet;
-  }, 0);
+  // Totals for RON-equivalent display
+  const invoiceNet = lines.reduce((s, l) => s + Math.round(l.quantity * l.unitPrice * 100) / 100, 0);
   const invoiceVat = lines.reduce((s, l) => {
     const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
-    const lineVat = Math.round(lineNet * (l.vatRate / 100) * 100) / 100;
-    return s + lineVat;
+    return s + Math.round(lineNet * (l.vatRate / 100) * 100) / 100;
   }, 0);
   const invoiceTotal = invoiceNet + invoiceVat;
   const parsedRate = parseFloat(exchangeRate);
@@ -140,7 +144,6 @@ export function InvoiceEditPage() {
       if (!selectedContact) throw new Error("Selectați un client.");
       if (lines.length === 0) throw new Error("Adăugați cel puțin o linie.");
 
-      // Per-line validation (mirrors InvoiceNew validation)
       const validVatRates = [0, 5, 9, 11, 19, 21];
       for (const [i, line] of lines.entries()) {
         if (!line.name?.trim()) {
@@ -158,12 +161,10 @@ export function InvoiceEditPage() {
           throw new Error(`Linia ${i + 1}: prețul unitar nu poate fi negativ.`);
         }
         if (!validVatRates.includes(Number(line.vatRate))) {
-          notify.warn(`Linia ${i + 1}: cotă TVA invalidă (${line.vatRate}). Valori permise: ${validVatRates.join(", ")}%.`);
+          notify.warn(`Linia ${i + 1}: cotă TVA invalidă (${line.vatRate}).`);
           throw new Error(`Linia ${i + 1}: cotă TVA invalidă.`);
         }
       }
-
-      // Validate exchange rate for non-RON invoices (BR-RO-028)
       if (currency !== "RON") {
         const rate = parseFloat(exchangeRate);
         if (!Number.isFinite(rate) || rate <= 0) {
@@ -172,11 +173,9 @@ export function InvoiceEditPage() {
         }
       }
 
-      // Strip internal rowId before sending to backend
       const apiLines: CreateLineInput[] = lines.map(({ rowId: _rowId, ...rest }) => rest);
       const parsedExchangeRate = currency !== "RON" ? parseFloat(exchangeRate) : undefined;
 
-      // R14 Wave A: pass activeCompanyId as explicit ownership argument.
       return api.invoices.updateDraft(id, activeCompanyId, {
         companyId: activeCompanyId,
         contactId: selectedContact.id,
@@ -197,10 +196,9 @@ export function InvoiceEditPage() {
     },
   });
 
-  // Ctrl+S / Cmd+S — save the draft (mirrors InvoiceNew.tsx)
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
         if (editMutation.isPending) return;
         editMutation.mutate();
@@ -210,244 +208,225 @@ export function InvoiceEditPage() {
   );
 
   useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  // Still fetching — show spinner
   if (isLoading) {
-    return (
-      <div className="content">
-        <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>Se încarcă…</div>
-      </div>
-    );
+    return <div style={{ padding: 32, fontSize: 13, color: "var(--rf-text-muted)" }}>Se încarcă…</div>;
   }
 
-  // Query settled but invoice is null/undefined — 404 / wrong company
   if (!isLoading && !invoiceData) {
     return (
-      <div className="content">
-        <div style={{ padding: 24, fontSize: 12, color: "#DC2626" }}>
-          Factura nu a fost găsită sau nu poate fi editată.
-        </div>
+      <div style={{ padding: 32, fontSize: 13, color: "var(--rf-error)" }}>
+        Factura nu a fost găsită sau nu poate fi editată.
       </div>
     );
   }
 
-  // Query settled with data but form not yet initialized — brief flicker guard
   if (!initialized) {
-    return (
-      <div className="content">
-        <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>Se încarcă…</div>
-      </div>
-    );
+    return <div style={{ padding: 32, fontSize: 13, color: "var(--rf-text-muted)" }}>Se încarcă…</div>;
   }
 
   return (
-    <div className="content">
-      <div className="content-titlebar">
-        <span className="content-title">
-          <span className="crumb">e-Factura</span>
-          <span className="crumb" onClick={() => navigate({ to: "/invoices" })} style={{ cursor: "pointer" }}>Facturi emise</span>
-          Editare factură ·{" "}
-          <span className="mono" style={{ fontWeight: 400, color: "var(--text-muted)" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--rf-app-bg)" }}>
+      <PageHeader
+        title={`Editare factură`}
+        sub={
+          <span style={{ fontFamily: "var(--rf-mono)", fontSize: 13, color: "var(--rf-text-muted)" }}>
             {fullNumber}
           </span>
-        </span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button className="btn" onClick={() => navigate({ to: "/invoices/$id", params: { id } })}>
-            <Icon name="x" size={12} /> Renunță <span className="kbd" style={{ marginLeft: 6 }}>Esc</span>
-          </button>
-          <button
-            className="btn primary"
-            onClick={() => editMutation.mutate()}
-            disabled={editMutation.isPending}
-          >
-            <Icon name="draft" size={12} /> Salvează modificările{" "}
-            <span className="kbd" style={{ marginLeft: 6 }}>{fmtShortcut("Ctrl+S")}</span>
-          </button>
-        </span>
-      </div>
+        }
+        actions={
+          <>
+            <Btn
+              variant="ghost"
+              icon="x"
+              onClick={() => navigate({ to: "/invoices/$id", params: { id } })}
+            >
+              Înapoi <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.6 }}>Esc</span>
+            </Btn>
+            <Btn
+              variant="primary"
+              icon="draft"
+              disabled={editMutation.isPending}
+              onClick={() => editMutation.mutate()}
+            >
+              Salvează modificările{" "}
+              <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.7 }}>{fmtShortcut("Ctrl+S")}</span>
+            </Btn>
+          </>
+        }
+      />
 
       {editMutation.isError && (
-        <div style={{ padding: "8px 16px", background: "#FEE2E2", color: "#DC2626", fontSize: 12 }}>
-          <Icon name="alert" size={12} />{" "}
+        <div
+          style={{
+            margin: "0 32px 8px",
+            padding: "10px 14px",
+            background: "var(--rf-error-bg)",
+            border: "1px solid var(--rf-error-bd)",
+            borderRadius: 8,
+            color: "var(--rf-error)",
+            fontSize: 13,
+          }}
+        >
+          <Icon name="alert" size={14} style={{ marginRight: 6 }} />
           {editMutation.error instanceof Error
             ? editMutation.error.message
             : "Eroare la salvare."}
         </div>
       )}
 
-      <div className="editor-split">
-        <div className="editor-main">
+      <div
+        style={{
+          flex: 1,
+          overflow: "auto",
+          padding: "0 32px 32px",
+          display: "grid",
+          gridTemplateColumns: "1fr 340px",
+          gap: 20,
+          alignItems: "start",
+        }}
+      >
+        {/* LEFT column */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
-          <div className="panel" style={{ marginBottom: 12 }}>
-            <div className="panel-header">
-              <span>Antet factură · date generale</span>
-              <span style={{ display: "flex", gap: 6 }}>
-                <span className="kbd">Tab</span>
-                <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400, fontSize: 10.5 }}>
-                  pentru câmpul următor
-                </span>
-              </span>
-            </div>
-            <div className="panel-body">
-              <div className="form-grid">
-                <div className="form-section-title">Emitent</div>
-                <label>Companie emitentă</label>
-                <div className="field">
+          {/* Parties & header */}
+          <SectionCard icon="users" title="Antet factură · date generale">
+            <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <Field label="Companie emitentă">
                   <input
-                    className="input"
+                    className="rf-input"
                     value={company?.legalName ?? ""}
                     readOnly
-                    style={{ width: 320, background: "var(--bg)" }}
+                    style={{ background: "var(--rf-toolbar-2)" }}
                   />
                   {company && (
-                    <span className="mono muted" style={{ fontSize: 11 }}>
-                      CUI {company.cui}
-                      {company.registryNumber ? ` · ${company.registryNumber}` : ""}
+                    <span style={{ fontSize: 11, color: "var(--rf-text-muted)", fontFamily: "var(--rf-mono)", marginTop: 2 }}>
+                      CUI {company.cui}{company.registryNumber ? ` · ${company.registryNumber}` : ""}
                     </span>
                   )}
-                </div>
-                <label>Serie / Număr</label>
-                <div className="field">
-                  <input
-                    className="input mono"
-                    value={series}
-                    readOnly
-                    style={{ width: 90, background: "var(--bg-subtle, var(--bg))", cursor: "default" }}
-                  />
-                  <input
-                    className="input mono"
-                    value={String(invoiceNumber).padStart(4, "0")}
-                    readOnly
-                    style={{ width: 120 }}
-                  />
-                </div>
-                <label>Data emiterii</label>
-                <div className="field">
-                  <input
-                    className="input"
-                    type="date"
-                    value={issueDate}
-                    onChange={(e) => setIssueDate(e.target.value)}
-                    style={{ width: 130 }}
-                  />
-                  <Icon name="calendar" size={14} style={{ color: "var(--text-muted)" }} />
-                </div>
-                <label>Data scadenței</label>
-                <div className="field">
-                  <input
-                    className="input"
-                    type="date"
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    style={{ width: 130 }}
-                  />
-                  <span className="muted" style={{ fontSize: 11 }}>
-                    {issueDate && dueDate
-                      ? `${fmtDateRO(issueDate)} → ${fmtDateRO(dueDate)}`
-                      : "30 zile · termen standard"}
-                  </span>
-                </div>
-
-                <label htmlFor={currencyId}>Monedă</label>
-                <div className="field">
-                  <select
-                    id={currencyId}
-                    className="select"
-                    value={currency}
-                    onChange={(e) => setCurrency(e.target.value)}
-                    style={{ width: 100 }}
-                  >
-                    {CURRENCIES.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {currency !== "RON" && (
-                  <>
-                    <label htmlFor={exchangeRateId}>
-                      Curs valutar (RON / 1 {currency})
-                    </label>
-                    <div className="field">
-                      <input
-                        id={exchangeRateId}
-                        className="input mono"
-                        type="number"
-                        min="0.0001"
-                        step="0.0001"
-                        value={exchangeRate}
-                        onChange={(e) => setExchangeRate(e.target.value)}
-                        placeholder="ex: 4.9700"
-                        style={{ width: 120 }}
-                      />
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={handleFetchBnrRate}
-                        disabled={bnrLoading || !issueDate || !currency}
-                        style={{ fontSize: 11 }}
-                      >
-                        {bnrLoading ? "Se preia…" : "Preia curs BNR"}
-                      </button>
-                      {rateValid && (
-                        <span className="muted" style={{ fontSize: 11 }}>
-                          Total RON: {fmtRON(invoiceTotal * parsedRate)}
-                        </span>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                <div className="form-section-title">Cumpărător</div>
-                <label>Cumpărător</label>
-                <div className="field">
+                </Field>
+                <Field label="Cumpărător">
                   <ContactCombobox
                     value={selectedContact}
                     onChange={setSelectedContact}
                     companyId={activeCompanyId ?? ""}
                     disabled={!activeCompanyId}
                     filterType={["CUSTOMER", "BOTH"]}
-                    width={320}
+                    width={280}
                   />
-                </div>
-                {selectedContact && (
-                  <>
-                    <label>CUI</label>
-                    <div className="field">
-                      <span className="mono muted" style={{ fontSize: 12 }}>
-                        {selectedContact.cui ?? "—"}
-                      </span>
-                      {selectedContact.vatPayer ? (
-                        <span style={{ fontSize: 11, color: "#16A34A" }}>
-                          <Icon name="check" size={12} /> plătitor TVA
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                          neplătitor TVA
-                        </span>
-                      )}
-                    </div>
-                    <label>Adresă</label>
-                    <div className="field">
-                      <span className="muted" style={{ fontSize: 12 }}>
-                        {[selectedContact.address, selectedContact.city, selectedContact.county, selectedContact.country]
-                          .filter(Boolean)
-                          .join(", ")}
-                      </span>
-                    </div>
-                  </>
-                )}
+                  {selectedContact && (
+                    <span style={{ fontSize: 11, color: "var(--rf-text-muted)", fontFamily: "var(--rf-mono)", marginTop: 2 }}>
+                      {selectedContact.cui ?? "—"}
+                      {selectedContact.vatPayer
+                        ? <span style={{ color: "var(--rf-success)", marginLeft: 8 }}>✓ plătitor TVA</span>
+                        : <span style={{ color: "var(--rf-text-dim)", marginLeft: 8 }}>neplătitor TVA</span>
+                      }
+                    </span>
+                  )}
+                </Field>
               </div>
-            </div>
-          </div>
 
-          <div className="panel" style={{ marginBottom: 12 }}>
-            <div className="panel-header">
-              <span>Linii factură · {lines.length} articole</span>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+                <Field label="Serie">
+                  <input
+                    className="rf-input"
+                    value={series}
+                    readOnly
+                    style={{ fontFamily: "var(--rf-mono)", background: "var(--rf-toolbar-2)" }}
+                  />
+                </Field>
+                <Field label="Număr">
+                  <input
+                    className="rf-input"
+                    value={String(invoiceNumber).padStart(4, "0")}
+                    readOnly
+                    style={{ fontFamily: "var(--rf-mono)", background: "var(--rf-toolbar-2)" }}
+                  />
+                </Field>
+                <Field label="Monedă">
+                  <Select
+                    id={currencyId}
+                    value={currency}
+                    onChange={(e) => setCurrency(e.target.value)}
+                  >
+                    {CURRENCIES.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Data emiterii">
+                  <Input
+                    type="date"
+                    value={issueDate}
+                    onChange={(e) => setIssueDate(e.target.value)}
+                  />
+                </Field>
+                <Field label="Data scadenței">
+                  <Input
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                  />
+                  {issueDate && dueDate && (
+                    <span style={{ fontSize: 11, color: "var(--rf-text-muted)", marginTop: 2 }}>
+                      {fmtDateRO(issueDate)} → {fmtDateRO(dueDate)}
+                    </span>
+                  )}
+                </Field>
+              </div>
+
+              {/* Multi-currency BNR panel */}
+              {currency !== "RON" && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 14,
+                    alignItems: "flex-end",
+                    background: "var(--rf-info-bg)",
+                    border: "1px solid var(--rf-info-bd)",
+                    borderRadius: 8,
+                    padding: 12,
+                  }}
+                >
+                  <div style={{ width: 180 }}>
+                    <Field label={`Curs valutar (RON / 1 ${currency})`}>
+                      <Input
+                        id={exchangeRateId}
+                        type="number"
+                        min="0.0001"
+                        step="0.0001"
+                        value={exchangeRate}
+                        onChange={(e) => setExchangeRate(e.target.value)}
+                        placeholder="ex: 4.9700"
+                        num
+                      />
+                    </Field>
+                  </div>
+                  <Btn
+                    variant="secondary"
+                    size="sm"
+                    icon="refresh"
+                    disabled={bnrLoading || !issueDate || !currency}
+                    onClick={handleFetchBnrRate}
+                  >
+                    {bnrLoading ? "Se preia…" : "Preia curs BNR"}
+                  </Btn>
+                  {rateValid && (
+                    <span style={{ fontSize: 12, color: "var(--rf-info)", marginBottom: 6 }}>
+                      Total RON: <b style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(invoiceTotal * parsedRate)}</b>
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
+          </SectionCard>
+
+          {/* Line items */}
+          <SectionCard icon="list" title="Linii factură" subtitle={`${lines.length} articole`}>
             <LineItemsEditor
               lines={lines}
               onChange={setLines}
@@ -459,73 +438,108 @@ export function InvoiceEditPage() {
             {rateValid && (
               <div
                 style={{
-                  padding: "8px 16px",
-                  borderTop: "1px solid var(--border)",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 2,
+                  padding: "10px 20px",
+                  borderTop: "1px solid var(--rf-border)",
                   fontSize: 12,
-                  color: "var(--text-muted)",
+                  color: "var(--rf-text-muted)",
                 }}
               >
-                <div style={{ fontWeight: 600, color: "var(--text)" }}>
-                  Echivalent RON (curs {parsedRate.toFixed(4)})
-                </div>
-                <div>
-                  Net: <span className="mono">{fmtRON(invoiceNet * parsedRate)} RON</span>
-                  {"  "}·{"  "}
-                  TVA: <span className="mono">{fmtRON(invoiceVat * parsedRate)} RON</span>
-                  {"  "}·{"  "}
-                  Total: <span className="mono" style={{ fontWeight: 600 }}>{fmtRON(invoiceTotal * parsedRate)} RON</span>
-                </div>
+                <span style={{ fontWeight: 600, color: "var(--rf-text)" }}>
+                  Echivalent RON (curs {parsedRate.toFixed(4)}):
+                </span>{" "}
+                Net: <span style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(invoiceNet * parsedRate)}</span>
+                {" · "}
+                TVA: <span style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(invoiceVat * parsedRate)}</span>
+                {" · "}
+                Total: <span style={{ fontFamily: "var(--rf-mono)", fontWeight: 700 }}>{fmtRON(invoiceTotal * parsedRate)} RON</span>
               </div>
             )}
-          </div>
+          </SectionCard>
 
-          <div className="panel">
-            <div className="panel-header">
-              <span>Note · clauze · referințe</span>
-              <span />
+          {/* Notes & payment */}
+          <SectionCard icon="file" title="Note · clauze · referințe">
+            <div style={{ padding: "12px 20px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+              <Field label="Modalitate plată">
+                <Select
+                  value={paymentMeansCode}
+                  onChange={(e) => setPaymentMeansCode(e.target.value)}
+                >
+                  <option value="30">Transfer bancar (30)</option>
+                  <option value="10">Numerar (10)</option>
+                  <option value="48">Card (48)</option>
+                  <option value="42">Cont bancar (42)</option>
+                  <option value="58">SEPA (58)</option>
+                </Select>
+              </Field>
+              <Field label="Observații">
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  style={{ height: 80 }}
+                />
+              </Field>
             </div>
-            <div className="panel-body">
-              <div className="form-grid" style={{ gridTemplateColumns: "120px 1fr" }}>
-                <label>Modalitate plată</label>
-                <div className="field">
-                  <select
-                    className="input"
-                    style={{ width: "100%" }}
-                    value={paymentMeansCode}
-                    onChange={(e) => setPaymentMeansCode(e.target.value)}
-                  >
-                    <option value="30">Transfer bancar (30)</option>
-                    <option value="10">Numerar (10)</option>
-                    <option value="48">Card (48)</option>
-                    <option value="42">Cont bancar (42)</option>
-                    <option value="58">SEPA (58)</option>
-                  </select>
-                </div>
-                <label>Observații</label>
-                <div className="field" style={{ alignItems: "flex-start" }}>
-                  <textarea
-                    className="input"
-                    style={{ width: "100%", height: 64, padding: 6, resize: "vertical" }}
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
+          </SectionCard>
         </div>
 
-        <aside className="editor-validation">
-          <div className="validation-summary">
-            <h3>Editare schiță</h3>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
-              Modificați datele facturii și apăsați „Salvează modificările".
+        {/* RIGHT column — info/edit aside */}
+        <div style={{ position: "sticky", top: 0, display: "flex", flexDirection: "column", gap: 16 }}>
+
+          {/* Totals */}
+          <SectionCard icon="chart" title="Totaluri">
+            <div style={{ padding: "12px 20px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                <span style={{ color: "var(--rf-text-muted)" }}>Total net</span>
+                <span style={{ fontFamily: "var(--rf-mono)", fontWeight: 600 }}>{fmtRON(invoiceNet)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                <span style={{ color: "var(--rf-text-muted)" }}>Total TVA</span>
+                <span style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(invoiceVat)}</span>
+              </div>
+              <div style={{ borderTop: "1px solid var(--rf-border)", margin: "4px 0" }} />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontWeight: 700 }}>Total de plată</span>
+                <span style={{ fontFamily: "var(--rf-mono)", fontSize: 22, fontWeight: 700, color: "var(--rf-accent)" }}>
+                  {fmtRON(invoiceTotal)}{" "}
+                  <span style={{ fontSize: 13, color: "var(--rf-text-muted)", fontWeight: 400 }}>{currency}</span>
+                </span>
+              </div>
+              {rateValid && (
+                <div
+                  style={{
+                    display: "flex", justifyContent: "space-between",
+                    background: "var(--rf-info-bg)", border: "1px solid var(--rf-info-bd)",
+                    borderRadius: 8, padding: "8px 12px", marginTop: 4,
+                  }}
+                >
+                  <span style={{ fontSize: 12.5, color: "var(--rf-info)", fontWeight: 600 }}>Echivalent RON</span>
+                  <span style={{ fontFamily: "var(--rf-mono)", fontSize: 14, fontWeight: 700, color: "var(--rf-info)" }}>
+                    {fmtRON(invoiceTotal * parsedRate)}
+                  </span>
+                </div>
+              )}
             </div>
-          </div>
-        </aside>
+          </SectionCard>
+
+          <SectionCard icon="pen" title="Editare schiță">
+            <div style={{ padding: "12px 20px 16px" }}>
+              <p style={{ fontSize: 13, color: "var(--rf-text-muted)", margin: 0 }}>
+                Modificați datele facturii și apăsați „Salvează modificările".
+              </p>
+              <Btn
+                variant="primary"
+                block
+                icon="draft"
+                disabled={editMutation.isPending}
+                onClick={() => editMutation.mutate()}
+                style={{ marginTop: 12 }}
+              >
+                {editMutation.isPending ? "Se salvează…" : "Salvează modificările"}
+              </Btn>
+            </div>
+          </SectionCard>
+
+        </div>
       </div>
     </div>
   );

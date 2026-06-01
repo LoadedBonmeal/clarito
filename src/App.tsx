@@ -6,6 +6,7 @@ import { queryClient } from "@/lib/queries";
 import { router } from "@/router";
 import { isTauriContext } from "@/lib/tauri";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { isMac } from "@/lib/platform";
 
 /** Afișat când utilizatorul deschide URL-ul în browser în loc de aplicația nativă. */
 function NotTauriScreen() {
@@ -44,11 +45,13 @@ function NotTauriScreen() {
           Deschideți aplicația nativă
         </h1>
         <p style={{ color: "#888", fontSize: 13, lineHeight: 1.7, margin: "0 0 6px" }}>
-          RoFactura este o aplicație desktop și nu poate rula în browser.
+          Clarito este o aplicație desktop și nu poate rula în browser.
         </p>
         <p style={{ color: "#666", fontSize: 12, lineHeight: 1.6, margin: 0 }}>
-          Porniți aplicația din <strong style={{ color: "#888" }}>Finder / Dock</strong> (macOS)
-          sau din <strong style={{ color: "#888" }}>meniu Start</strong> (Windows).
+          Porniți aplicația din{" "}
+          <strong style={{ color: "#888" }}>
+            {isMac ? "Finder / Dock" : "meniul Start / Desktop"}
+          </strong>
         </p>
       </div>
     </div>

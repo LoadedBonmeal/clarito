@@ -26,11 +26,11 @@ export class ErrorBoundary extends React.Component<
           display: "flex", flexDirection: "column", alignItems: "center",
           justifyContent: "center", height: "100vh", gap: 12,
           fontFamily: "var(--font-sans, system-ui)", color: "#991B1B",
-          background: "#FEF2F2"
+          background: "var(--rf-error-bg)"
         }}>
           <span style={{ fontSize: 32 }}>⚠️</span>
           <strong style={{ fontSize: 14 }}>A apărut o eroare neașteptată</strong>
-          <span style={{ fontSize: 12, color: "#6B7280" }}>
+          <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
             {this.state.error?.message ?? "Eroare necunoscută"}
           </span>
           <button

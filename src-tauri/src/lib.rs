@@ -171,8 +171,7 @@ pub fn run() {
             });
 
             // System tray
-            let show_item =
-                MenuItem::with_id(app, "show", "Deschide RoFactura", true, None::<&str>)?;
+            let show_item = MenuItem::with_id(app, "show", "Deschide Clarito", true, None::<&str>)?;
             let new_invoice_item =
                 MenuItem::with_id(app, "new_invoice", "Factură nouă", true, None::<&str>)?;
             let sync_item =

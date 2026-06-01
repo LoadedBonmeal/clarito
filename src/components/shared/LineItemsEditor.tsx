@@ -1,5 +1,9 @@
 /**
  * LineItemsEditor — reusable line-items table for invoices and recurring templates.
+ * Re-skinned to rf kit look (Wave 2) — uses .rf-tbl classes and rf editor styles.
+ *
+ * Public API (props, types, exports) is UNCHANGED — LineItemsEditor.test.tsx
+ * imports only deduceVatCategory and LineRow, which are preserved exactly.
  *
  * Includes:
  *  - vatCategory column with auto-deduction (deduceVatCategory)
@@ -79,7 +83,7 @@ export interface LineItemsEditorProps {
   /** When true, shows the totals footer */
   showTotals?: boolean;
   /**
-   * R15 Wave 1: When provided, a "alege din catalog" picker button appears
+   * When provided, a "alege din catalog" picker button appears
    * in each Descriere cell. On select, the line is filled from the product.
    * Manual entry always remains fully functional.
    */
@@ -94,20 +98,14 @@ export function LineItemsEditor({
   showTotals = true,
   companyId,
 }: LineItemsEditorProps) {
-  // R15 Wave 2: Fetch active VAT rates from the global DB catalog.
-  // Falls back to the VAT_RATES constant when loading or on error so the
-  // editor always works even during initial load or if the backend is
-  // unavailable. The query is global (not company-scoped) — see db/vat_rates.rs.
+  // Fetch active VAT rates from the global DB catalog.
   const { data: dbRates } = useQuery({
     queryKey: queryKeys.vatRates.list(true),
     queryFn: () => api.vatRates.list(true),
     staleTime: 5 * 60_000,
   });
 
-  // Build the numeric rates array for the dropdown: prefer DB rates (sorted
-  // by sort_order / rate), fall back to the hardcoded constant.
-  // F3: union the current line's vatRate into the options so that deactivated
-  // rates don't cause a blank <select> when editing old invoices.
+  // Build the numeric rates array for the dropdown
   const buildVatRateOptions = (currentRate: number): number[] => {
     const base: number[] =
       dbRates && dbRates.length > 0
@@ -125,12 +123,7 @@ export function LineItemsEditor({
 
   // Auto-deduce vatCategory for each line when vatRate, buyerCountry, or
   // sellerVatPayer changes. Manual changes to vatCategory made by the user
-  // are NOT clobbered because: after manual change the user's value is stored
-  // in lines[i].vatCategory, and auto-deduction only fires when the
-  // deduceKey (buyerCountry+sellerVatPayer) changes — at that point we
-  // re-compute from the rate. If the user just edited the select directly,
-  // that line's onChange already called onChange(updatedLines) with the new
-  // vatCategory, so this effect does nothing (key hasn't changed).
+  // are NOT clobbered because the deduceKey only changes for buyerCountry+sellerVatPayer.
   useEffect(() => {
     const key = `${buyerCountry}|${sellerVatPayer}`;
     if (key === prevDeduceKey.current) return;
@@ -152,8 +145,6 @@ export function LineItemsEditor({
     const updated = lines.map((l, i) => {
       if (i !== idx) return l;
       const next = { ...l, [key]: value } as LineRow;
-      // When vatRate changes, auto-deduce category unless user is explicitly
-      // changing vatCategory directly (key === "vatCategory").
       if (key === "vatRate") {
         next.vatCategory = deduceVatCategory(
           value as number,
@@ -187,11 +178,9 @@ export function LineItemsEditor({
     onChange(lines.filter((_, i) => i !== idx));
 
   /**
-   * R15 Wave 1: Fill a line from a product picked from the catalog.
-   * Overwrites name, unit, unitPrice, vatRate, vatCategory, cpvCode(=code).
-   * quantity is kept (user may have already typed one). Manual entry is
-   * always fully functional — this is a convenience only.
-   * Does NOT link the line to the product id (lines stay free-text as today).
+   * Fill a line from a product picked from the catalog.
+   * Overwrites name, unit, unitPrice, vatRate, vatCategory, cpvCode.
+   * quantity is kept. Manual entry is always fully functional.
    */
   const fillFromProduct = (idx: number, product: Product) => {
     const updated = lines.map((l, i) => {
@@ -210,8 +199,7 @@ export function LineItemsEditor({
     onChange(updated);
   };
 
-  // M2: round each line to 2dp before summing to match the backend's
-  // round-then-sum approach, so the displayed totals match stored values.
+  // M2: round each line to 2dp before summing to match backend.
   const net = lines.reduce((s, l) => {
     const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
     return s + lineNet;
@@ -226,19 +214,89 @@ export function LineItemsEditor({
   // Column count: # + Cod + Descriere + Cant + UM + Preț + TVA% + Categorie + Net + Total + del = 11
   const COL_SPAN = 11;
 
+  // Cell input style — thin, borderless inline inputs for editor rows
+  const cellInput: React.CSSProperties = {
+    width: "100%",
+    border: "none",
+    background: "transparent",
+    padding: "0 4px",
+    fontSize: 13,
+    fontFamily: "inherit",
+    color: "var(--rf-text)",
+    outline: "none",
+    height: "100%",
+  };
+
+  const cellInputNum: React.CSSProperties = {
+    ...cellInput,
+    textAlign: "right",
+    fontFamily: "var(--rf-mono)",
+    fontVariantNumeric: "tabular-nums",
+  };
+
+  const cellSelect: React.CSSProperties = {
+    width: "100%",
+    border: "none",
+    background: "transparent",
+    padding: "0 2px",
+    fontSize: 12,
+    fontFamily: "inherit",
+    color: "var(--rf-text)",
+    outline: "none",
+    cursor: "pointer",
+  };
+
   return (
-    <div className="line-items">
-      <table>
+    <div
+      style={{
+        overflowX: "auto",
+        borderTop: "1px solid var(--rf-border)",
+      }}
+    >
+      <table
+        style={{
+          width: "100%",
+          borderCollapse: "separate",
+          borderSpacing: 0,
+          fontSize: 13,
+          tableLayout: "auto",
+        }}
+      >
         <thead>
-          <tr>
-            <th style={{ width: 28 }}>#</th>
-            <th style={{ width: 110 }}>Cod</th>
-            <th>Descriere</th>
-            <th style={{ width: 64 }} className="num">Cant.</th>
-            <th style={{ width: 56 }}>UM</th>
-            <th style={{ width: 100 }} className="num">Preț unitar</th>
-            <th style={{ width: 64 }} className="num">TVA %</th>
-            <th style={{ width: 110 }}>
+          <tr
+            style={{
+              background: "var(--rf-table-head)",
+            }}
+          >
+            {/* # */}
+            <th
+              style={{
+                width: 32, padding: "0 8px", height: 38, textAlign: "center",
+                fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase",
+                color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)",
+                whiteSpace: "nowrap",
+              }}
+            >#</th>
+            {/* Cod */}
+            <th style={{ width: 110, padding: "0 8px", height: 38, textAlign: "left", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)", whiteSpace: "nowrap" }}>Cod</th>
+            {/* Descriere */}
+            <th style={{ padding: "0 8px", height: 38, textAlign: "left", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)" }}>Descriere</th>
+            {/* Cant */}
+            <th style={{ width: 64, padding: "0 8px", height: 38, textAlign: "right", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)", whiteSpace: "nowrap" }}>Cant.</th>
+            {/* UM */}
+            <th style={{ width: 56, padding: "0 8px", height: 38, textAlign: "left", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)" }}>UM</th>
+            {/* Preț */}
+            <th style={{ width: 100, padding: "0 8px", height: 38, textAlign: "right", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)", whiteSpace: "nowrap" }}>Preț unitar</th>
+            {/* TVA % */}
+            <th style={{ width: 64, padding: "0 8px", height: 38, textAlign: "right", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)", whiteSpace: "nowrap" }}>TVA %</th>
+            {/* Categorie */}
+            <th
+              style={{
+                width: 110, padding: "0 8px", height: 38, textAlign: "left", fontSize: 11,
+                fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase",
+                color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)",
+              }}
+            >
               <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
                 Categorie
                 <TooltipProvider>
@@ -246,48 +304,34 @@ export function LineItemsEditor({
                     <TooltipTrigger asChild>
                       <span
                         style={{
-                          cursor: "help",
-                          fontSize: 10,
-                          color: "var(--text-muted)",
-                          border: "1px solid var(--text-dim, #aaa)",
-                          borderRadius: "50%",
-                          width: 13,
-                          height: 13,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          lineHeight: 1,
-                          flexShrink: 0,
+                          cursor: "help", fontSize: 10, color: "var(--rf-text-muted)",
+                          border: "1px solid var(--rf-border-strong)", borderRadius: "50%",
+                          width: 13, height: 13, display: "inline-flex", alignItems: "center",
+                          justifyContent: "center", lineHeight: 1, flexShrink: 0,
                         }}
                         aria-label="Explicație categorii TVA"
-                      >
-                        ?
-                      </span>
+                      >?</span>
                     </TooltipTrigger>
                     <TooltipContent side="top" style={{ maxWidth: 280 }}>
-                      <strong>Categorii TVA (CIUS-RO):</strong>
-                      <br />
-                      <b>S</b> — Standard (TVA aplicată normal)
-                      <br />
-                      <b>AE</b> — Taxare inversă (reverse-charge B2B intracomunitar sau intern, TVA 0%)
-                      <br />
-                      <b>E</b> — Scutit fără drept de deducere (intern)
-                      <br />
-                      <b>Z</b> — Cotă zero
-                      <br />
-                      <b>K</b> — Intracomunitar scutit (livrare UE, 0% + VAT ID)
-                      <br />
-                      <b>G</b> — Export scutit (livrare extra-UE)
-                      <br />
+                      <strong>Categorii TVA (CIUS-RO):</strong><br />
+                      <b>S</b> — Standard (TVA aplicată normal)<br />
+                      <b>AE</b> — Taxare inversă (reverse-charge B2B intracomunitar sau intern, TVA 0%)<br />
+                      <b>E</b> — Scutit fără drept de deducere (intern)<br />
+                      <b>Z</b> — Cotă zero<br />
+                      <b>K</b> — Intracomunitar scutit (livrare UE, 0% + VAT ID)<br />
+                      <b>G</b> — Export scutit (livrare extra-UE)<br />
                       <b>O</b> — În afara sferei TVA
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </span>
             </th>
-            <th style={{ width: 110 }} className="num">Valoare net</th>
-            <th style={{ width: 110 }} className="num">Total cu TVA</th>
-            <th style={{ width: 28 }}></th>
+            {/* Valoare net */}
+            <th style={{ width: 110, padding: "0 8px", height: 38, textAlign: "right", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)", whiteSpace: "nowrap" }}>Valoare net</th>
+            {/* Total cu TVA */}
+            <th style={{ width: 110, padding: "0 8px", height: 38, textAlign: "right", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)", whiteSpace: "nowrap" }}>Total cu TVA</th>
+            {/* del */}
+            <th style={{ width: 36, borderBottom: "1px solid var(--rf-border)" }}></th>
           </tr>
         </thead>
         <tbody>
@@ -295,31 +339,39 @@ export function LineItemsEditor({
             const lineNet = l.quantity * l.unitPrice;
             const lineTotal = lineNet * (1 + l.vatRate / 100);
             return (
-              <tr key={l.rowId}>
+              <tr
+                key={l.rowId}
+                style={{ borderBottom: "1px solid var(--rf-border)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--rf-hover)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                {/* # */}
                 <td
                   style={{
-                    textAlign: "center",
-                    color: "var(--text-dim)",
-                    fontFamily: "var(--font-mono)",
+                    textAlign: "center", color: "var(--rf-text-dim)",
+                    fontFamily: "var(--rf-mono)", padding: "0 8px",
+                    height: 46, verticalAlign: "middle",
                   }}
                 >
                   {i + 1}
                 </td>
-                <td>
+                {/* Cod */}
+                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
                   <input
                     value={l.cpvCode ?? ""}
-                    onChange={(e) =>
-                      updateLine(i, "cpvCode", e.target.value || undefined)
-                    }
-                    className="mono"
+                    onChange={(e) => updateLine(i, "cpvCode", e.target.value || undefined)}
+                    style={{ ...cellInput, fontFamily: "var(--rf-mono)" }}
+                    placeholder="cod"
                   />
                 </td>
-                <td>
+                {/* Descriere */}
+                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
                     <input
                       value={l.name}
                       onChange={(e) => updateLine(i, "name", e.target.value)}
-                      style={{ flex: 1, minWidth: 0 }}
+                      style={{ ...cellInput, flex: 1, minWidth: 0 }}
+                      placeholder="Descriere articol"
                     />
                     {companyId && (
                       <ProductPickerButton
@@ -329,157 +381,184 @@ export function LineItemsEditor({
                     )}
                   </div>
                 </td>
-                <td className="num">
+                {/* Cant */}
+                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
                   <input
                     type="number"
                     value={l.quantity}
-                    onChange={(e) =>
-                      updateLine(i, "quantity", parseFloat(e.target.value) || 0)
-                    }
-                    className="num"
+                    onChange={(e) => updateLine(i, "quantity", parseFloat(e.target.value) || 0)}
+                    style={cellInputNum}
                   />
                 </td>
-                <td>
+                {/* UM */}
+                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
                   <input
                     value={l.unit}
                     onChange={(e) => updateLine(i, "unit", e.target.value)}
+                    style={cellInput}
                   />
                 </td>
-                <td className="num">
+                {/* Preț */}
+                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
                   <input
                     type="number"
                     value={l.unitPrice}
-                    onChange={(e) =>
-                      updateLine(
-                        i,
-                        "unitPrice",
-                        parseFloat(e.target.value) || 0,
-                      )
-                    }
-                    className="num"
+                    onChange={(e) => updateLine(i, "unitPrice", parseFloat(e.target.value) || 0)}
+                    style={cellInputNum}
                   />
                 </td>
-                <td className="num">
+                {/* TVA % */}
+                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
                   <select
-                    className="num"
+                    style={{ ...cellSelect, textAlign: "right" }}
                     value={l.vatRate}
-                    onChange={(e) =>
-                      updateLine(i, "vatRate", Number(e.target.value))
-                    }
+                    onChange={(e) => updateLine(i, "vatRate", Number(e.target.value))}
                   >
                     {buildVatRateOptions(l.vatRate).map((r) => (
-                      <option key={r} value={r}>
-                        {r}%
-                      </option>
+                      <option key={r} value={r}>{r}%</option>
                     ))}
                   </select>
                 </td>
-                <td>
+                {/* Categorie */}
+                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
                   <select
+                    style={{ ...cellSelect, fontSize: 11 }}
                     value={l.vatCategory}
-                    onChange={(e) =>
-                      updateLine(
-                        i,
-                        "vatCategory",
-                        e.target.value as VatCategory,
-                      )
-                    }
-                    style={{ width: "100%", fontSize: 11 }}
+                    onChange={(e) => updateLine(i, "vatCategory", e.target.value as VatCategory)}
                     title={VAT_CATEGORY_LABELS[l.vatCategory]}
                   >
                     {VAT_CATEGORIES.map((cat) => (
-                      <option key={cat} value={cat}>
-                        {cat} — {VAT_CATEGORY_LABELS[cat]}
-                      </option>
+                      <option key={cat} value={cat}>{cat} — {VAT_CATEGORY_LABELS[cat]}</option>
                     ))}
                   </select>
                 </td>
-                <td className="num">
-                  <input
-                    value={lineNet.toFixed(2)}
-                    className="num"
-                    readOnly
-                    style={{ color: "var(--text-muted)" }}
-                  />
+                {/* Valoare net */}
+                <td
+                  style={{
+                    textAlign: "right", padding: "0 8px", height: 46, verticalAlign: "middle",
+                    fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums",
+                    color: "var(--rf-text-muted)", fontSize: 13,
+                  }}
+                >
+                  {lineNet.toFixed(2)}
                 </td>
-                <td className="num">
-                  <input
-                    value={lineTotal.toFixed(2)}
-                    className="num"
-                    readOnly
-                    style={{ fontWeight: 600 }}
-                  />
+                {/* Total cu TVA */}
+                <td
+                  style={{
+                    textAlign: "right", padding: "0 8px", height: 46, verticalAlign: "middle",
+                    fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums",
+                    fontWeight: 700, fontSize: 13,
+                  }}
+                >
+                  {lineTotal.toFixed(2)}
                 </td>
-                <td>
+                {/* Delete */}
+                <td style={{ textAlign: "center", padding: "0 4px", height: 46, verticalAlign: "middle" }}>
                   <button
-                    className="btn-icon"
+                    className="rf-icon-btn rf-icon-btn--ghost"
+                    style={{ width: 28, height: 28 }}
                     onClick={() => removeLine(i)}
                     disabled={lines.length === 1}
+                    title="Șterge linia"
                   >
-                    <Icon name="trash" size={12} />
+                    <Icon name="trash" size={13} />
                   </button>
                 </td>
               </tr>
             );
           })}
+          {/* Add-line row */}
           <tr
-            className="line-add-row"
-            onClick={addLine}
             style={{ cursor: "pointer" }}
+            onClick={addLine}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--rf-hover)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
-            <td colSpan={COL_SPAN}>
-              <Icon name="plus" size={12} /> Adaugă linie
+            <td
+              colSpan={COL_SPAN}
+              style={{
+                padding: "10px 16px",
+                color: "var(--rf-accent)",
+                fontSize: 13,
+                fontWeight: 500,
+              }}
+            >
+              <Icon name="plus" size={13} style={{ marginRight: 6 }} /> Adaugă linie
             </td>
           </tr>
         </tbody>
         {showTotals && (
           <tfoot>
-            <tr>
-              <td
-                colSpan={7}
-                style={{ textAlign: "right", color: "var(--text-muted)" }}
-              >
-                Subtotal net
-              </td>
-              <td className="num"></td>
-              <td className="num tnum">{fmtRON(net)}</td>
-              <td className="num"></td>
-              <td></td>
-            </tr>
-            <tr>
-              <td
-                colSpan={7}
-                style={{ textAlign: "right", color: "var(--text-muted)" }}
-              >
-                TVA
-              </td>
-              <td className="num"></td>
-              <td className="num tnum">{fmtRON(vat)}</td>
-              <td className="num"></td>
-              <td></td>
-            </tr>
-            <tr>
+            <tr
+              style={{ background: "var(--rf-table-head)", borderTop: "1px solid var(--rf-border-strong)" }}
+            >
               <td
                 colSpan={7}
                 style={{
-                  textAlign: "right",
-                  textTransform: "uppercase",
-                  fontSize: 11,
-                  letterSpacing: 0.04,
+                  textAlign: "right", padding: "0 8px", height: 40,
+                  color: "var(--rf-text-muted)", fontSize: 12,
+                }}
+              >
+                Subtotal net
+              </td>
+              <td></td>
+              <td
+                style={{
+                  textAlign: "right", padding: "0 8px",
+                  fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums",
+                  fontWeight: 600, fontSize: 13,
+                }}
+              >
+                {fmtRON(net)}
+              </td>
+              <td></td>
+              <td></td>
+            </tr>
+            <tr style={{ background: "var(--rf-table-head)" }}>
+              <td
+                colSpan={7}
+                style={{
+                  textAlign: "right", padding: "0 8px", height: 36,
+                  color: "var(--rf-text-muted)", fontSize: 12,
+                }}
+              >
+                TVA
+              </td>
+              <td></td>
+              <td
+                style={{
+                  textAlign: "right", padding: "0 8px",
+                  fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums",
+                  fontSize: 13,
+                }}
+              >
+                {fmtRON(vat)}
+              </td>
+              <td></td>
+              <td></td>
+            </tr>
+            <tr style={{ background: "var(--rf-table-head)" }}>
+              <td
+                colSpan={7}
+                style={{
+                  textAlign: "right", padding: "0 8px", height: 40,
+                  fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em",
+                  fontWeight: 700, color: "var(--rf-text)",
                 }}
               >
                 Total de plată
               </td>
-              <td className="num"></td>
-              <td className="num"></td>
+              <td></td>
+              <td></td>
               <td
-                className="num tnum"
-                style={{ fontSize: 14, color: "var(--accent)" }}
+                style={{
+                  textAlign: "right", padding: "0 8px",
+                  fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums",
+                  fontSize: 15, fontWeight: 700, color: "var(--rf-accent)",
+                }}
               >
                 {fmtRON(total)}{" "}
-                <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>
-                  RON
-                </span>
+                <span style={{ fontSize: 10.5, color: "var(--rf-text-muted)", fontWeight: 400 }}>RON</span>
               </td>
               <td></td>
             </tr>

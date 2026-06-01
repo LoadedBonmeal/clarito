@@ -1,21 +1,27 @@
 /**
- * Cote TVA — catalog global editabil al cotelor TVA românești.
+ * Cote TVA — catalog GLOBAL editabil al cotelor TVA românești.
+ * Re-skinned to rf kit (Wave 3).
  *
- * Tabel GLOBAL: cotele TVA nu sunt scoped pe companie — sunt reglementate
- * la nivel național și se aplică tuturor companiilor din aplicație.
- * Nu există nicio gardă de "companie activă" pe această pagină (spre
- * deosebire de Articole sau Contacte).
+ * GLOBAL: cotele TVA nu sunt scoped pe companie — sunt reglementate la nivel național.
+ * Nu există gardă de "companie activă" pe această pagină.
  *
- * Nota fiscală: cotele legale din România sunt 0/5/9/11/19/21%.
- * Cotele non-standard pot fi respinse la validarea ANAF.
+ * Preserves: api.vatRates.list(false), create/edit modal → api.vatRates.create/update,
+ * delete confirm → api.vatRates.delete(id),
+ * active toggle → api.vatRates.setActive(id, active).
+ *
+ * Nota legală: cotele legale RO sunt 0/5/9/11/19/21%.
  */
 
-import { useMemo, useState, useId, isValidElement, cloneElement } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm } from "@tauri-apps/plugin-dialog";
 
 import { Icon } from "@/components/shared/Icon";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import {
+  PageHeader, Btn, IconBtn, Badge, Card, Field, Input,
+  Toggle, Banner, Empty, Modal,
+} from "@/components/rf";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { formatError } from "@/lib/error-mapper";
@@ -38,7 +44,11 @@ export function VatRatesPage() {
   });
 
   const sortedRates = useMemo(
-    () => [...allRates].sort((a, b) => a.sortOrder - b.sortOrder || parseFloat(a.rate) - parseFloat(b.rate)),
+    () =>
+      [...allRates].sort(
+        (a, b) =>
+          a.sortOrder - b.sortOrder || parseFloat(a.rate) - parseFloat(b.rate),
+      ),
     [allRates],
   );
 
@@ -50,7 +60,8 @@ export function VatRatesPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.vatRates.all });
       notify.success("Cotă TVA ștearsă.");
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge cota TVA.")),
+    onError: (e) =>
+      notify.error(formatError(e, "Nu s-a putut șterge cota TVA.")),
   });
 
   const toggleActiveMutation = useMutation({
@@ -59,7 +70,8 @@ export function VatRatesPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.vatRates.all });
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut modifica starea cotei.")),
+    onError: (e) =>
+      notify.error(formatError(e, "Nu s-a putut modifica starea cotei.")),
   });
 
   const handleDelete = async (r: VatRate) => {
@@ -76,155 +88,151 @@ export function VatRatesPage() {
   };
 
   return (
-    <div className="content">
-      <div className="content-titlebar">
-        <span className="content-title">
-          <span className="crumb">Date</span>
-          Cote TVA
-        </span>
-        <span className="muted" style={{ fontSize: 11 }}>
-          {sortedRates.length} cote · {activeCount} active
-        </span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button
-            type="button"
-            className="btn primary"
+    <div className="rf-page">
+      <PageHeader
+        title="Cote TVA"
+        sub={
+          <Badge variant="neutral" dot={false}>
+            {sortedRates.length} cote · {activeCount} active
+          </Badge>
+        }
+        actions={
+          <Btn
+            variant="primary"
+            icon="plus"
+            size="sm"
             onClick={() => setModal("create")}
           >
-            <Icon name="plus" size={12} /> Cotă nouă
-          </button>
-        </span>
-      </div>
+            Cotă nouă
+          </Btn>
+        }
+      />
 
-      <div className="content-toolbar">
-        <span style={{ marginLeft: "auto" }}>
-          <button
-            type="button"
-            className="btn-icon"
-            title="Reîmprospătează"
-            onClick={() =>
-              void queryClient.invalidateQueries({ queryKey: queryKeys.vatRates.all })
-            }
-          >
-            <Icon name="refresh" size={14} />
-          </button>
-        </span>
-      </div>
-
-      <div className="content-body">
-        {isLoading ? (
-          <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>
-            Se încarcă…
+      <div className="rf-page-body">
+        <div style={{ maxWidth: 760, width: "100%", margin: "0 auto" }}>
+          <div style={{ marginBottom: 12 }}>
+            <Banner variant="info">
+              Cotele legale de TVA în România sunt{" "}
+              <b>0% / 5% / 9% / 11% / 19% / 21%</b>. Cotele active aici alimentează lista din editorul de factură.
+              Cotele non-standard pot fi respinse la validarea ANAF.
+            </Banner>
           </div>
-        ) : isError ? (
-          <QueryErrorBanner
-            error={error}
-            label="cotele TVA"
-            onRetry={() => void refetch()}
-          />
-        ) : sortedRates.length === 0 ? (
-          <div
-            style={{
-              padding: 40,
-              textAlign: "center",
-              fontSize: 12,
-              color: "var(--text-muted)",
-            }}
-          >
-            Nicio cotă TVA. Adaugă prima cotă sau rulează migrarea din nou.
-          </div>
-        ) : (
-          <table className="dt">
-            <thead>
-              <tr>
-                <th style={{ width: 48 }} className="num">Ordine</th>
-                <th style={{ width: 80 }} className="num">Cotă %</th>
-                <th>Etichetă</th>
-                <th style={{ width: 80 }}>Activ</th>
-                <th style={{ width: 120 }}>Acțiuni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedRates.map((r: VatRate) => (
-                <tr key={r.id} style={r.active ? undefined : { opacity: 0.5 }}>
-                  <td className="num tnum" style={{ color: "var(--text-muted)" }}>
-                    {r.sortOrder}
-                  </td>
-                  <td className="num">
-                    <b>{r.rate}%</b>
-                  </td>
-                  <td>{r.label}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      title={r.active ? "Dezactivează" : "Activează"}
-                      onClick={() => handleToggleActive(r)}
-                    >
-                      {r.active ? (
-                        <span style={{ color: "#16A34A", display: "inline-flex" }}>
-                          <Icon name="check" size={13} />
-                        </span>
-                      ) : (
-                        <span className="dim">
-                          <Icon name="x" size={13} />
-                        </span>
-                      )}
-                    </button>
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      title="Editează"
-                      onClick={() => setModal({ edit: r })}
-                    >
-                      <Icon name="pen" size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      title="Șterge"
-                      onClick={() => void handleDelete(r)}
-                    >
-                      <Icon name="x" size={13} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+
+          <Card>
+            {/* Toolbar */}
+            <div
+              className="rf-toolbar-row"
+              style={{ padding: "10px 16px", borderBottom: "1px solid var(--rf-border)" }}
+            >
+              <span style={{ fontSize: 13, color: "var(--rf-text-muted)" }}>
+                Catalog global — se aplică tuturor companiilor
+              </span>
+              <div style={{ marginLeft: "auto" }}>
+                <IconBtn
+                  icon="refresh"
+                  title="Reîmprospătează"
+                  onClick={() =>
+                    void queryClient.invalidateQueries({
+                      queryKey: queryKeys.vatRates.all,
+                    })
+                  }
+                />
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="rf-tbl-wrap">
+              {isLoading ? (
+                <Empty icon="percent" title="Se încarcă…" />
+              ) : isError ? (
+                <QueryErrorBanner
+                  error={error}
+                  label="cotele TVA"
+                  onRetry={() => void refetch()}
+                />
+              ) : sortedRates.length === 0 ? (
+                <Empty icon="percent" title="Nicio cotă TVA">
+                  Adaugă prima cotă sau rulează migrarea din nou.
+                </Empty>
+              ) : (
+                <table className="rf-tbl">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 60, textAlign: "right" }}>Ordine</th>
+                      <th style={{ width: 90, textAlign: "right" }}>Cotă %</th>
+                      <th>Etichetă</th>
+                      <th style={{ width: 90, textAlign: "center" }}>Activ</th>
+                      <th style={{ width: 80 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedRates.map((r: VatRate) => (
+                      <tr key={r.id} style={r.active ? undefined : { opacity: 0.55 }}>
+                        <td
+                          style={{ textAlign: "right", color: "var(--rf-text-muted)" }}
+                          className="mono"
+                        >
+                          {r.sortOrder}
+                        </td>
+                        <td style={{ textAlign: "right" }} className="mono">
+                          <b>{r.rate}%</b>
+                        </td>
+                        <td>{r.label}</td>
+                        <td style={{ textAlign: "center" }}>
+                          <Toggle
+                            checked={r.active}
+                            onChange={() => handleToggleActive(r)}
+                            aria-label={r.active ? "Dezactivează" : "Activează"}
+                            disabled={
+                              toggleActiveMutation.isPending
+                            }
+                          />
+                        </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <div className="rf-cell-actions">
+                            <IconBtn
+                              icon="pen"
+                              title="Editează"
+                              size={14}
+                              onClick={() => setModal({ edit: r })}
+                            />
+                            <IconBtn
+                              icon="trash"
+                              title="Șterge"
+                              size={14}
+                              onClick={() => void handleDelete(r)}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="rf-tbl-footer">
+              <span>
+                Total: <b>{sortedRates.length}</b> cote
+              </span>
+              <span>
+                Active: <b>{activeCount}</b>
+              </span>
+            </div>
+          </Card>
+        </div>
       </div>
 
-      <div
-        style={{
-          padding: "6px 14px",
-          borderTop: "1px solid var(--border)",
-          background: "var(--bg)",
-          display: "flex",
-          gap: 16,
-          fontSize: 11,
-          color: "var(--text-muted)",
-        }}
-      >
-        <span>
-          Total: <b style={{ color: "var(--text)" }}>{sortedRates.length}</b> cote
-        </span>
-        <span>
-          Active: <b style={{ color: "var(--text)" }}>{activeCount}</b>
-        </span>
-        <span style={{ color: "var(--text-dim)", fontSize: 10, marginLeft: "auto" }}>
-          Cotele legale din România sunt fixe (0/5/9/11/19/21%). Cotele non-standard pot fi respinse la validarea ANAF.
-        </span>
-      </div>
-
-      {modal && (
+      {/* Vat rate modal */}
+      {modal !== null && (
         <VatRateModal
           rate={modal === "create" ? null : modal.edit}
           onClose={() => setModal(null)}
           onSaved={() => {
-            void queryClient.invalidateQueries({ queryKey: queryKeys.vatRates.all });
+            void queryClient.invalidateQueries({
+              queryKey: queryKeys.vatRates.all,
+            });
             setModal(null);
           }}
         />
@@ -233,7 +241,7 @@ export function VatRatesPage() {
   );
 }
 
-// ─── Modal ──────────────────────────────────────────────────────────────────
+// ─── VatRateModal ─────────────────────────────────────────────────────────────
 
 function VatRateModal({
   rate,
@@ -256,14 +264,20 @@ function VatRateModal({
 
   const create = useMutation({
     mutationFn: (input: VatRateInput) => api.vatRates.create(input),
-    onSuccess: () => { notify.success("Cotă TVA adăugată."); onSaved(); },
+    onSuccess: () => {
+      notify.success("Cotă TVA adăugată.");
+      onSaved();
+    },
     onError: (e) => setError(formatError(e, "Eroare la adăugare.")),
   });
 
   const updateMut = useMutation({
     mutationFn: (input: UpdateVatRateInput) =>
       api.vatRates.update(rate!.id, input),
-    onSuccess: () => { notify.success("Cotă TVA salvată."); onSaved(); },
+    onSuccess: () => {
+      notify.success("Cotă TVA salvată.");
+      onSaved();
+    },
     onError: (e) => setError(formatError(e, "Eroare la salvare.")),
   });
 
@@ -271,7 +285,7 @@ function VatRateModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (create.isPending || updateMut.isPending) return;
+    if (isPending) return;
     setError(null);
     if (!form.rate?.trim()) {
       setError("Cota TVA este obligatorie.");
@@ -304,149 +318,103 @@ function VatRateModal({
   };
 
   return (
-    <div
-      className="palette-scrim"
-      style={{ alignItems: "center", paddingTop: 0 }}
-      onClick={onClose}
+    <Modal
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      title={isEdit ? `Editează: ${rate.label}` : "Cotă TVA nouă"}
+      width={420}
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose} disabled={isPending}>
+            Anulează
+          </Btn>
+          <Btn
+            variant="primary"
+            icon="check"
+            disabled={isPending}
+            onClick={(e) => {
+              e.preventDefault();
+              void handleSubmit(e);
+            }}
+          >
+            {isPending ? "Se salvează…" : isEdit ? "Salvează" : "Adaugă"}
+          </Btn>
+        </>
+      }
     >
-      <div
-        style={{
-          width: 380,
-          background: "var(--bg-content)",
-          border: "1px solid var(--border-strong)",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.12)",
-          padding: "20px 24px 18px",
-        }}
-        onClick={(e) => e.stopPropagation()}
+      <form
+        onSubmit={handleSubmit}
+        style={{ display: "flex", flexDirection: "column", gap: 14 }}
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 16,
-          }}
-        >
-          <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>
-            {isEdit ? `Editează: ${rate.label}` : "Cotă TVA nouă"}
-          </h3>
-          <button type="button" className="btn-icon" onClick={onClose}>
-            <Icon name="x" size={14} />
-          </button>
+        <div className="rf-grid-2">
+          <Field label="Cotă TVA %" required>
+            <Input
+              num
+              type="number"
+              step="0.01"
+              min="0"
+              max="100"
+              placeholder="ex. 19"
+              value={form.rate}
+              onChange={(e) => setForm((f) => ({ ...f, rate: e.target.value }))}
+              autoFocus
+            />
+          </Field>
+          <Field label="Ordine afișare">
+            <Input
+              num
+              type="number"
+              step="1"
+              min="0"
+              placeholder="0"
+              value={String(form.sortOrder ?? 0)}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  sortOrder: parseInt(e.target.value) || 0,
+                }))
+              }
+            />
+          </Field>
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          style={{ display: "flex", flexDirection: "column", gap: 9 }}
+        <Field label="Etichetă" required>
+          <Input
+            placeholder="ex. Standard 19%"
+            value={form.label}
+            onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+          />
+        </Field>
+
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 13,
+            cursor: "pointer",
+          }}
         >
-          <div style={{ display: "flex", gap: 9 }}>
-            <MField label="Cotă TVA % *" style={{ width: 100 }}>
-              <input
-                className="field num"
-                type="number"
-                step="0.01"
-                min="0"
-                max="100"
-                placeholder="ex. 19"
-                value={form.rate}
-                onChange={(e) => setForm((f) => ({ ...f, rate: e.target.value }))}
-                autoFocus
-              />
-            </MField>
-            <MField label="Ordine afișare" style={{ width: 100 }}>
-              <input
-                className="field num"
-                type="number"
-                step="1"
-                min="0"
-                placeholder="0"
-                value={form.sortOrder ?? 0}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, sortOrder: parseInt(e.target.value) || 0 }))
-                }
-              />
-            </MField>
+          <input
+            type="checkbox"
+            className="rf-cbx"
+            checked={form.active ?? true}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, active: e.target.checked }))
+            }
+          />
+          Cotă activă (vizibilă în dropdown-ul liniilor de factură)
+        </label>
+
+        {error && (
+          <div className="rf-banner rf-banner--error">
+            <Icon name="xCircle" size={16} />
+            <span>{error}</span>
           </div>
-
-          <MField label="Etichetă *">
-            <input
-              className="field"
-              placeholder="ex. Standard 19%"
-              value={form.label}
-              onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
-            />
-          </MField>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}>
-            <input
-              id="vr-active"
-              type="checkbox"
-              className="cbx"
-              checked={form.active ?? true}
-              onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))}
-            />
-            <label
-              htmlFor="vr-active"
-              style={{ fontSize: 12, cursor: "pointer", userSelect: "none" }}
-            >
-              Cotă activă (vizibilă în dropdown-ul liniilor de factură)
-            </label>
-          </div>
-
-          {error && (
-            <div
-              style={{
-                padding: "6px 10px",
-                background: "#FEE2E2",
-                border: "1px solid #FECACA",
-                fontSize: 11,
-                color: "#991B1B",
-              }}
-            >
-              {error}
-            </div>
-          )}
-
-          <div
-            style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}
-          >
-            <button type="button" className="btn" onClick={onClose}>
-              Anulează
-            </button>
-            <button type="submit" className="btn primary" disabled={isPending}>
-              {isPending ? "Se salvează…" : isEdit ? "Salvează" : "Adaugă"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// ─── MField helper ──────────────────────────────────────────────────────────
-
-function MField({
-  label,
-  children,
-  style,
-}: {
-  label: string;
-  children: React.ReactNode;
-  style?: React.CSSProperties;
-}) {
-  const fieldId = useId();
-  const child = isValidElement(children)
-    ? cloneElement(children as React.ReactElement<{ id?: string }>, { id: fieldId })
-    : children;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1, ...style }}>
-      <label
-        htmlFor={fieldId}
-        style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}
-      >
-        {label}
-      </label>
-      {child}
-    </div>
+        )}
+      </form>
+    </Modal>
   );
 }

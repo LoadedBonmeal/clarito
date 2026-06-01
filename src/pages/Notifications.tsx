@@ -1,14 +1,22 @@
 /**
- * Notificări ANAF/SPV — listează toate notificările din backend,
- * cu posibilitate de filtrare Toate/Necitite și marcare ca citite.
+ * Notificări ANAF/SPV — Mesaje SPV — re-skinned to rf kit (Wave 4).
+ * Preserves: api.notifications.list(false), unreadCount, tabs all/unread,
+ * row click → markRead + navigate (entityType/entityId),
+ * Marcează toate citite → api.notifications.markAllRead,
+ * delete one → api.notifications.deleteOne,
+ * Șterge citite → api.notifications.deleteAllRead (confirm).
  */
 
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { confirm } from "@tauri-apps/plugin-dialog";
 
 import { Icon } from "@/components/shared/Icon";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import {
+  PageHeader, Btn, IconBtn, Badge, Card, Empty, Segmented,
+} from "@/components/rf";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { notify } from "@/lib/toasts";
@@ -19,11 +27,11 @@ function fmtTime(unix: number): string {
   return new Date(unix * 1000).toLocaleString("ro-RO");
 }
 
-function typeColor(type: string): string {
-  if (type === "REJECT") return "#DC2626";
-  if (type === "VALID") return "#16A34A";
-  if (type === "WARN" || type === "EXPIR") return "#D97706";
-  return "var(--accent)";
+function kindIcon(type: string): { icon: string; color: string } {
+  if (type === "REJECT") return { icon: "xCircle", color: "error" };
+  if (type === "VALID")  return { icon: "checkCircle", color: "success" };
+  if (type === "WARN" || type === "EXPIR") return { icon: "alertTriangle", color: "warning" };
+  return { icon: "mail", color: "info" };
 }
 
 type TabFilter = "all" | "unread";
@@ -33,7 +41,13 @@ export function NotificationsPage() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<TabFilter>("all");
 
-  const { data: notifications = [], isLoading, isError: notifError, error: notifErr, refetch: refetchNotifications } = useQuery({
+  const {
+    data: notifications = [],
+    isLoading,
+    isError: notifError,
+    error: notifErr,
+    refetch: refetchNotifications,
+  } = useQuery({
     queryKey: queryKeys.notifications.list(false),
     queryFn: () => api.notifications.list(false),
   });
@@ -50,11 +64,13 @@ export function NotificationsPage() {
     },
   });
 
-  const { mutate: markAllRead } = useMutation({
+  const { mutate: markAllRead, isPending: markingAll } = useMutation({
     mutationFn: () => api.notifications.markAllRead(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
+      notify.success("Toate notificările marcate ca citite.");
     },
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut marca ca citite.")),
   });
 
   const { mutate: deleteOne, isPending: deletingOne } = useMutation({
@@ -62,7 +78,7 @@ export function NotificationsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
     },
-    onError: (e) => notify.error(formatError(e, 'Nu s-a putut șterge notificarea.')),
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge notificarea.")),
   });
 
   const { mutate: deleteAllRead, isPending: deletingAllRead } = useMutation({
@@ -71,10 +87,21 @@ export function NotificationsPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
       notify.success("Notificările citite au fost șterse.");
     },
-    onError: (e) => notify.error(formatError(e, 'Nu s-au putut șterge notificările.')),
+    onError: (e) => notify.error(formatError(e, "Nu s-au putut șterge notificările.")),
   });
 
-  /** Mark as read, then navigate to the related entity if possible. */
+  /** Confirm before bulk-deleting all read notifications (irreversible). */
+  async function handleDeleteAllRead() {
+    const readCount = notifications.filter((n) => n.isRead).length;
+    const ok = await confirm(
+      `Ștergeți ${readCount} notificări citite? Această acțiune nu poate fi anulată.`,
+      { title: "Confirmare ștergere", kind: "warning" },
+    );
+    if (!ok) return;
+    deleteAllRead();
+  }
+
+  /** Mark as read then navigate to related entity if possible. */
   function handleRowClick(n: Notification) {
     if (!n.isRead) markRead(n.id);
 
@@ -97,7 +124,6 @@ export function NotificationsPage() {
       } catch {
         // data is not JSON — fall through
       }
-
       // Plain key "spv_msg_*" → received invoices list
       if (n.data.startsWith("spv_msg_")) {
         void navigate({ to: "/received" });
@@ -111,175 +137,195 @@ export function NotificationsPage() {
     return notifications;
   }, [notifications, tab]);
 
+  const tabOptions = [
+    { value: "all" as TabFilter, label: `Toate (${notifications.length})` },
+    { value: "unread" as TabFilter, label: `Necitite (${unreadCount})` },
+  ];
+
   return (
-    <div className="content">
-      <div className="content-titlebar">
-        <span className="content-title">
-          <span className="crumb">e-Factura</span>
-          Notificări ANAF
-        </span>
-        {unreadCount > 0 && (
-          <span className="badge" style={{ marginLeft: 8 }}>
-            {unreadCount} necitite
-          </span>
-        )}
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button
-            type="button"
-            className="btn"
-            disabled={unreadCount === 0}
-            onClick={() => markAllRead()}
-          >
-            <Icon name="check" size={12} /> Marchează toate ca citite
-          </button>
-          <button
-            type="button"
-            className="btn"
-            disabled={notifications.filter((n) => n.isRead).length === 0 || deletingAllRead}
-            onClick={() => deleteAllRead()}
-          >
-            <Icon name="trash" size={12} /> Șterge citite
-          </button>
-        </span>
-      </div>
+    <div className="rf-page">
+      <PageHeader
+        title="Mesaje SPV / Notificări"
+        sub={
+          unreadCount > 0 ? (
+            <Badge variant="info" dot>{unreadCount} necitite</Badge>
+          ) : undefined
+        }
+        actions={
+          <>
+            <Btn
+              variant="secondary"
+              size="sm"
+              icon="check"
+              disabled={unreadCount === 0 || markingAll}
+              onClick={() => markAllRead()}
+            >
+              Marchează toate citite
+            </Btn>
+            <Btn
+              variant="ghost"
+              size="sm"
+              icon="trash"
+              disabled={notifications.filter((n) => n.isRead).length === 0 || deletingAllRead}
+              onClick={() => void handleDeleteAllRead()}
+            >
+              Șterge citite
+            </Btn>
+            <Btn
+              variant="primary"
+              size="sm"
+              icon="refresh"
+              onClick={() => void refetchNotifications()}
+            >
+              Reîmprospătează
+            </Btn>
+          </>
+        }
+      />
 
-      {/* Tabs */}
-      <div className="views-bar">
-        <span
-          className={"view-tab " + (tab === "all" ? "active" : "")}
-          onClick={() => setTab("all")}
-        >
-          Toate <span className="count">{notifications.length}</span>
-        </span>
-        <span
-          className={"view-tab " + (tab === "unread" ? "active" : "")}
-          onClick={() => setTab("unread")}
-        >
-          Necitite{" "}
-          <span className="count" style={{ color: "var(--accent)" }}>
-            {unreadCount}
-          </span>
-        </span>
-      </div>
+      <div className="rf-page-body" style={{ maxWidth: 860, width: "100%" }}>
+        <Card>
+          {/* Tabs */}
+          <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--rf-border)" }}>
+            <Segmented options={tabOptions} value={tab} onChange={(v) => setTab(v)} />
+          </div>
 
-      <div className="content-body">
-        {isLoading ? (
-          <div style={{ padding: 24, fontSize: 12, color: "var(--text-muted)" }}>
-            Se încarcă…
-          </div>
-        ) : notifError ? (
-          <QueryErrorBanner error={notifErr} label="notificările" onRetry={() => void refetchNotifications()} />
-        ) : list.length === 0 ? (
-          <div
-            style={{
-              padding: 40,
-              textAlign: "center",
-              fontSize: 12,
-              color: "var(--text-muted)",
-            }}
-          >
-            {tab === "unread"
-              ? "Nicio notificare necitită."
-              : "Nicio notificare. Sistemul va afișa aici mesajele de la ANAF."}
-          </div>
-        ) : (
-          <table className="dt">
-            <thead>
-              <tr>
-                <th style={{ width: 160 }}>Timp</th>
-                <th style={{ width: 100 }}>Tip</th>
-                <th style={{ width: 220 }}>Titlu</th>
-                <th>Mesaj</th>
-                <th style={{ width: 90 }}>Status</th>
-                <th style={{ width: 40 }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((n) => (
-                <tr
-                  key={n.id}
-                  style={{
-                    cursor: "pointer",
-                    background: !n.isRead ? "var(--accent-soft)" : undefined,
-                  }}
-                  onClick={() => handleRowClick(n)}
-                >
-                  <td className="mono muted" style={{ whiteSpace: "nowrap" }}>
-                    {fmtTime(n.createdAt)}
-                  </td>
-                  <td>
+          {/* Content */}
+          {isLoading ? (
+            <Empty icon="mail" title="Se încarcă…" />
+          ) : notifError ? (
+            <QueryErrorBanner error={notifErr} label="notificările" onRetry={() => void refetchNotifications()} />
+          ) : list.length === 0 ? (
+            <Empty icon="mail" title={tab === "unread" ? "Nicio notificare necitită" : "Nicio notificare"}>
+              {tab === "all" && "Sistemul va afișa aici mesajele de la ANAF."}
+            </Empty>
+          ) : (
+            <div>
+              {list.map((n, i) => {
+                const { icon, color } = kindIcon(n.notificationType);
+                return (
+                  <div
+                    key={n.id}
+                    onClick={() => handleRowClick(n)}
+                    style={{
+                      display: "flex",
+                      gap: 14,
+                      padding: "15px 18px",
+                      cursor: "pointer",
+                      borderBottom: i < list.length - 1 ? "1px solid var(--rf-border)" : "none",
+                      background: !n.isRead ? "var(--rf-accent-bg, var(--rf-success-bg))" : "transparent",
+                      transition: "background 0.1s",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (n.isRead) (e.currentTarget as HTMLDivElement).style.background = "var(--rf-neutral-bg)";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.background = !n.isRead ? "var(--rf-accent-bg, var(--rf-success-bg))" : "transparent";
+                    }}
+                  >
+                    {/* Colored icon badge */}
                     <span
                       style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: typeColor(n.notificationType),
-                        textTransform: "uppercase",
+                        width: 36,
+                        height: 36,
+                        borderRadius: "var(--rf-radius-sm)",
+                        display: "grid",
+                        placeItems: "center",
+                        flexShrink: 0,
+                        background: `var(--rf-${color}-bg)`,
+                        color: `var(--rf-${color})`,
+                        border: `1px solid var(--rf-${color}-bd, var(--rf-border))`,
                       }}
                     >
-                      {n.notificationType}
+                      <Icon name={icon} size={17} />
                     </span>
-                  </td>
-                  <td>
-                    <b style={{ fontSize: 12 }}>{n.title}</b>
-                  </td>
-                  <td className="muted" style={{ fontSize: 11 }}>
-                    {n.body}
-                  </td>
-                  <td>
-                    {n.isRead ? (
-                      <span className="muted" style={{ fontSize: 11 }}>
-                        Citit
-                      </span>
-                    ) : (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 600,
-                          color: "var(--accent)",
-                        }}
-                      >
-                        Necitit
-                      </span>
-                    )}
-                  </td>
-                  <td
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ textAlign: "center" }}
-                  >
-                    <button
-                      className="btn compact"
-                      title="Șterge notificare"
-                      onClick={() => deleteOne(n.id)}
-                      disabled={deletingOne}
-                    >
-                      <Icon name="trash" size={11} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
 
-      <div
-        style={{
-          padding: "6px 14px",
-          borderTop: "1px solid var(--border)",
-          background: "var(--bg)",
-          display: "flex",
-          gap: 16,
-          fontSize: 11,
-          color: "var(--text-muted)",
-        }}
-      >
-        <span>
-          Total: <b style={{ color: "var(--text)" }}>{notifications.length}</b> notificări
-        </span>
-        <span>
-          Necitite:{" "}
-          <b style={{ color: "var(--accent)" }}>{unreadCount}</b>
-        </span>
+                    {/* Content */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 2 }}>
+                        <span
+                          style={{
+                            fontSize: 13.5,
+                            fontWeight: !n.isRead ? 700 : 500,
+                            color: "var(--rf-text)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {n.title}
+                        </span>
+                        {!n.isRead && (
+                          <span
+                            style={{
+                              width: 7,
+                              height: 7,
+                              borderRadius: "50%",
+                              background: "var(--rf-accent)",
+                              flexShrink: 0,
+                            }}
+                          />
+                        )}
+                      </div>
+                      {n.body && (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "var(--rf-text-muted)",
+                            marginBottom: 3,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {n.body}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 11, color: "var(--rf-text-dim)", display: "flex", alignItems: "center", gap: 5 }}>
+                        <span
+                          style={{
+                            fontWeight: 600,
+                            color: `var(--rf-${color})`,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.04em",
+                          }}
+                        >
+                          {n.notificationType}
+                        </span>
+                        <span style={{ opacity: 0.5 }}>·</span>
+                        <span>{fmtTime(n.createdAt)}</span>
+                      </div>
+                    </div>
+
+                    {/* Actions — chevron always visible, trash on hover */}
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <IconBtn
+                        icon="trash"
+                        title="Șterge notificare"
+                        disabled={deletingOne}
+                        onClick={() => deleteOne(n.id)}
+                      />
+                      <IconBtn
+                        icon="chevRight"
+                        title="Deschide"
+                        onClick={() => handleRowClick(n)}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Footer */}
+          <div className="rf-tbl-footer">
+            <span>Total: <b>{notifications.length}</b> notificări</span>
+            <span>Necitite: <b style={{ color: "var(--rf-accent)" }}>{unreadCount}</b></span>
+          </div>
+        </Card>
       </div>
     </div>
   );
