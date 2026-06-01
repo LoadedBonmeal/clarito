@@ -1,14 +1,23 @@
 /**
- * AppShell — layout principal Win32:
- *   ┌─────────────────────────────────┐
- *   │ MenuBar (26px)                  │
- *   │ Ribbon (86px)                   │
- *   ├──────┬──────────────────────────┤
- *   │ Side │  Content (Outlet)        │
- *   │ bar  │                          │
- *   ├──────┴──────────────────────────┤
- *   │ Status bar (22px)               │
- *   └─────────────────────────────────┘
+ * AppShell — layout principal modern:
+ *   ┌──────────────────────────────────────┐
+ *   │ Sidebar (white, grouped)             │
+ *   ├──────────────────────────────────────┤
+ *   │ TopBar (breadcrumb + actions)        │
+ *   │ Content (Outlet)                     │
+ *   │ StatusBar                            │
+ *   └──────────────────────────────────────┘
+ *
+ * PRESERVED verbatim:
+ *  - CompanySwitcher modal (inline)
+ *  - CommandPalette
+ *  - ShortcutsDialog
+ *  - OnboardingGate
+ *  - 4 Tauri event listeners (new_notification, invoice_status_changed,
+ *    sync_completed, oauth_completed) + tray_navigate
+ *  - Global keyboard shortcuts (Ctrl+K, Ctrl+N, F5, Ctrl+/)
+ *  - companies query + activeCompany resolution
+ *  - useTheme()
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -16,8 +25,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 
-import { MenuBar } from "./MenuBar";
-import { Ribbon } from "./Ribbon";
+import { TopBar } from "./TopBar";
 import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
 import { CommandPalette } from "./CommandPalette";
@@ -196,7 +204,7 @@ function CompanySwitcher({ companies, activeCompanyId, onSelect, onClose }: Comp
   );
 }
 
-// ─── AppShell ─────────────────────────────────────────────────────────────
+// ─── AppShell ─────────────────────────────────────────────────────────────────
 
 interface AppShellProps {
   children: ReactNode;
@@ -288,22 +296,18 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <OnboardingGate>
       <div className="app">
-        <MenuBar
-          activeCompanyName={activeCompanyName}
-          activeCompanyCui={activeCompany?.cui}
-          onOpenCompanySwitcher={() => setSwitcherOpen(true)}
-          onOpenShortcuts={() => setShortcutsOpen(true)}
-        />
-        <Ribbon onOpenPalette={() => setCommandOpen(true)} onOpenShortcuts={() => setShortcutsOpen(true)} />
-        <div className="workspace">
-          <Sidebar />
-          <div className="content-shell">{children}</div>
+        <Sidebar onOpenCompanySwitcher={() => setSwitcherOpen(true)} />
+        <div className="app-main">
+          <TopBar />
+          <div className="rf-content">
+            {children}
+          </div>
+          <StatusBar
+            activeCompanyName={activeCompanyName}
+            activeCompanyId={activeCompanyId ?? undefined}
+            companyCount={companies.length}
+          />
         </div>
-        <StatusBar
-          activeCompanyName={activeCompanyName}
-          activeCompanyId={activeCompanyId ?? undefined}
-          companyCount={companies.length}
-        />
         <CommandPalette />
         <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
         {switcherOpen && (

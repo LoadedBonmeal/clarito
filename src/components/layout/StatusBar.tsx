@@ -1,8 +1,7 @@
 /**
- * StatusBar — chips informative la baza ferestrei.
- *
- * Design actualizat: pulse-dot ANAF live, sincronizare, mesaje SPV,
- * companie activă cu swatch color, chip licență permanent.
+ * StatusBar — visual restyle to .rf-statusbar / .rf-status-item.
+ * All queries and wiring preserved verbatim from original StatusBar.tsx.
+ * No logic changes — pure CSS class substitution.
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -88,13 +87,13 @@ export function StatusBar({ activeCompanyName, activeCompanyId, companyCount = 0
   const anafOk = !activeCompanyId || isAnafAuth;
 
   return (
-    <div className="statusbar">
+    <div className="rf-statusbar">
       {/* ANAF status */}
-      <span className="statusbar-chip">
-        <span className={anafOk ? "anaf-dot" : "anaf-dot err"} />
+      <span className="rf-status-item">
+        <span className={`rf-status-dot${anafOk ? " ok" : ""}`} />
         <span>
           <b>ANAF · SPV</b>{" "}
-          <span className="label-dim">
+          <span style={{ color: "var(--rf-text-dim)" }}>
             {anafOk ? "conectat" : "neautentificat"}
           </span>
         </span>
@@ -102,25 +101,25 @@ export function StatusBar({ activeCompanyName, activeCompanyId, companyCount = 0
 
       {/* Ultima sincronizare */}
       {lastSyncLabel && (
-        <span className="statusbar-chip">
+        <span className="rf-status-item">
           <Icon name="refresh" size={12} />
-          <span className="label-dim">Ultima sincronizare</span>
+          <span style={{ color: "var(--rf-text-dim)" }}>Ultima sincronizare</span>
           <b>{lastSyncLabel}</b>
         </span>
       )}
 
       {/* Mesaje SPV noi */}
       {unreadCount != null && unreadCount > 0 && (
-        <span className="statusbar-chip">
+        <span className="rf-status-item">
           <Icon name="anaf" size={12} />
-          <span className="label-dim">Mesaje SPV</span>
+          <span style={{ color: "var(--rf-text-dim)" }}>Mesaje SPV</span>
           <b>{unreadCount} noi</b>
         </span>
       )}
 
       {/* Companie activă cu swatch color */}
       {activeCompanyId && (
-        <span className="statusbar-chip">
+        <span className="rf-status-item">
           <span
             style={{
               width: 8,
@@ -131,10 +130,10 @@ export function StatusBar({ activeCompanyName, activeCompanyId, companyCount = 0
               flexShrink: 0,
             }}
           />
-          <span className="label-dim">Companie activă</span>
+          <span style={{ color: "var(--rf-text-dim)" }}>Companie activă</span>
           <b>{activeCompanyName}</b>
           {activeCui && (
-            <span className="mono label-dim" style={{ fontSize: 10.5 }}>
+            <span className="mono" style={{ fontSize: 10.5, color: "var(--rf-text-dim)" }}>
               · {activeCui}
             </span>
           )}
@@ -171,7 +170,7 @@ export function StatusBar({ activeCompanyName, activeCompanyId, companyCount = 0
 
         return (
           <span
-            className="statusbar-chip"
+            className="rf-status-item"
             onClick={handleClick ?? undefined}
             style={{
               cursor: isTrial ? "pointer" : "default",
@@ -181,22 +180,19 @@ export function StatusBar({ activeCompanyName, activeCompanyId, companyCount = 0
             title={isTrial ? "Cumpărați licența" : undefined}
           >
             <Icon name="info" size={12} />
-            <span>{label}</span>
+            <span className="rf-license-chip">{label}</span>
           </span>
         );
       })()}
 
-      <span className="statusbar-spacer" />
-
-      {/* Info dreapta */}
-      <span className="statusbar-chip">
-        <span className="label-dim">{companyCount} companii administrate</span>
+      <span className="rf-status-item push">
+        <span style={{ color: "var(--rf-text-dim)" }}>{companyCount} companii administrate</span>
       </span>
-      <span className="statusbar-chip">
-        <span className="label-dim">RO_CIUS 1.0.1 · RON · ro-RO</span>
+      <span className="rf-status-item">
+        <span style={{ color: "var(--rf-text-dim)" }}>RO_CIUS 1.0.1 · RON · ro-RO</span>
       </span>
-      <span className="statusbar-chip">
-        <span className="label-dim">v{version}</span>
+      <span className="rf-status-item">
+        <span style={{ color: "var(--rf-text-dim)" }}>v{version}</span>
       </span>
     </div>
   );

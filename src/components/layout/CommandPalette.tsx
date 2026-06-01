@@ -1,9 +1,11 @@
 /**
- * CommandPalette — Ctrl+K overlay cu căutare comenzi, navigare și facturi recente.
+ * CommandPalette — Ctrl+K overlay.
  *
- * Folosește clasele din design.css:
- * .palette-scrim, .palette, .palette-input, .palette-list,
- * .palette-section, .palette-row, .palette-footer
+ * Restyle: rf-palette-overlay / rf-palette / rf-palette-search / rf-palette-list /
+ *          rf-palette-group / rf-palette-item / rf-palette-foot.
+ *
+ * All existing commands preserved verbatim.
+ * ADDED: "Comută tema" command (setTheme toggle).
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -29,6 +31,8 @@ export function CommandPalette() {
   const commandOpen = useAppStore((s) => s.commandOpen);
   const setCommandOpen = useAppStore((s) => s.setCommandOpen);
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
@@ -60,7 +64,7 @@ export function CommandPalette() {
     }
   }, [commandOpen]);
 
-  // Build commands list
+  // Build commands list (all original commands + new "Comută tema")
   const COMMANDS: Command[] = [
     // Navigare
     {
@@ -69,10 +73,7 @@ export function CommandPalette() {
       hint: "G D",
       icon: "data",
       section: "Navigare",
-      action: () => {
-        navigate({ to: "/" });
-        close();
-      },
+      action: () => { navigate({ to: "/" }); close(); },
     },
     {
       id: "nav-invoices",
@@ -80,10 +81,7 @@ export function CommandPalette() {
       hint: "G F",
       icon: "invoice",
       section: "Navigare",
-      action: () => {
-        navigate({ to: "/invoices" });
-        close();
-      },
+      action: () => { navigate({ to: "/invoices" }); close(); },
     },
     {
       id: "nav-received",
@@ -91,10 +89,7 @@ export function CommandPalette() {
       hint: "G R",
       icon: "invoiceIn",
       section: "Navigare",
-      action: () => {
-        navigate({ to: "/received" });
-        close();
-      },
+      action: () => { navigate({ to: "/received" }); close(); },
     },
     {
       id: "nav-contacts",
@@ -102,50 +97,35 @@ export function CommandPalette() {
       hint: "G C",
       icon: "users",
       section: "Navigare",
-      action: () => {
-        navigate({ to: "/contacts" });
-        close();
-      },
+      action: () => { navigate({ to: "/contacts" }); close(); },
     },
     {
       id: "nav-companies",
       label: "Companii",
       icon: "buildings",
       section: "Navigare",
-      action: () => {
-        navigate({ to: "/companies" });
-        close();
-      },
+      action: () => { navigate({ to: "/companies" }); close(); },
     },
     {
       id: "nav-reports",
       label: "Rapoarte",
       icon: "reports",
       section: "Navigare",
-      action: () => {
-        navigate({ to: "/reports" });
-        close();
-      },
+      action: () => { navigate({ to: "/reports" }); close(); },
     },
     {
       id: "nav-notifications",
       label: "Notificări ANAF",
       icon: "bell",
       section: "Navigare",
-      action: () => {
-        navigate({ to: "/notifications" });
-        close();
-      },
+      action: () => { navigate({ to: "/notifications" }); close(); },
     },
     {
       id: "nav-settings",
       label: "Setări",
       icon: "settings",
       section: "Navigare",
-      action: () => {
-        navigate({ to: "/settings" });
-        close();
-      },
+      action: () => { navigate({ to: "/settings" }); close(); },
     },
     // Acțiuni
     {
@@ -154,28 +134,30 @@ export function CommandPalette() {
       hint: fmtShortcut("Ctrl+N"),
       icon: "plus",
       section: "Acțiuni",
-      action: () => {
-        navigate({ to: "/invoices/new" });
-        close();
-      },
+      action: () => { navigate({ to: "/invoices/new" }); close(); },
     },
     {
       id: "act-new-contact",
       label: "Deschide lista contacte",
       icon: "users",
       section: "Acțiuni",
-      action: () => {
-        navigate({ to: "/contacts" });
-        close();
-      },
+      action: () => { navigate({ to: "/contacts" }); close(); },
     },
     {
       id: "act-new-company",
       label: "Companie nouă",
       icon: "buildings",
       section: "Acțiuni",
+      action: () => { navigate({ to: "/companies/new" }); close(); },
+    },
+    // NEW: Comută tema
+    {
+      id: "act-toggle-theme",
+      label: `Comută tema (${theme === "dark" ? "luminoasă" : "întunecată"})`,
+      icon: "view",
+      section: "Acțiuni",
       action: () => {
-        navigate({ to: "/companies/new" });
+        setTheme(theme === "dark" ? "light" : "dark");
         close();
       },
     },
@@ -236,14 +218,14 @@ export function CommandPalette() {
   let globalIdx = 0;
 
   return (
-    <div className="palette-scrim" onClick={close}>
+    <div className="rf-palette-overlay" onClick={close}>
       <div
-        className="palette"
+        className="rf-palette"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        <div className="palette-input">
-          <Icon name="search" size={15} style={{ color: "var(--text-muted)" }} />
+        <div className="rf-palette-search">
+          <Icon name="search" size={17} style={{ color: "var(--rf-text-dim)", flexShrink: 0 }} />
           <input
             ref={inputRef}
             value={query}
@@ -261,7 +243,7 @@ export function CommandPalette() {
                 background: "none",
                 border: "none",
                 cursor: "pointer",
-                color: "var(--text-muted)",
+                color: "var(--rf-text-muted)",
                 fontSize: 13,
               }}
               onClick={() => setQuery("")}
@@ -270,14 +252,15 @@ export function CommandPalette() {
             </button>
           )}
         </div>
-        <div className="palette-list">
+
+        <div className="rf-palette-list">
           {filtered.length === 0 ? (
             <div
               style={{
                 padding: "24px 14px",
                 textAlign: "center",
                 fontSize: 12,
-                color: "var(--text-muted)",
+                color: "var(--rf-text-muted)",
               }}
             >
               Niciun rezultat pentru „{query}"
@@ -287,30 +270,37 @@ export function CommandPalette() {
               const cmds = filtered.filter((c) => c.section === section);
               return (
                 <div key={section}>
-                  <div className="palette-section">{section}</div>
+                  <div className="rf-palette-group">{section}</div>
                   {cmds.map((cmd) => {
                     const idx = globalIdx++;
                     return (
-                      <div
+                      <button
                         key={cmd.id}
-                        role="button"
-                        tabIndex={0}
-                        className={"palette-row" + (idx === activeIdx ? " active" : "")}
+                        type="button"
+                        className={`rf-palette-item${idx === activeIdx ? " active" : ""}`}
                         onMouseEnter={() => setActiveIdx(idx)}
                         onClick={cmd.action}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            cmd.action();
-                          }
-                        }}
                       >
-                        <span className="ico">
-                          <Icon name={cmd.icon} size={14} />
+                        <span className="rf-pi-ic">
+                          <Icon name={cmd.icon} size={15} />
                         </span>
-                        <span>{cmd.label}</span>
-                        {cmd.hint && <span className="kbd">{cmd.hint}</span>}
-                      </div>
+                        <span style={{ flex: 1, textAlign: "left" }}>{cmd.label}</span>
+                        {cmd.hint && (
+                          <kbd
+                            style={{
+                              fontFamily: "var(--rf-mono)",
+                              fontSize: 11,
+                              background: "var(--rf-content)",
+                              border: "1px solid var(--rf-border)",
+                              borderRadius: 4,
+                              padding: "1px 6px",
+                              color: "var(--rf-text-muted)",
+                            }}
+                          >
+                            {cmd.hint}
+                          </kbd>
+                        )}
+                      </button>
                     );
                   })}
                 </div>
@@ -318,10 +308,11 @@ export function CommandPalette() {
             })
           )}
         </div>
-        <div className="palette-footer">
-          <span>↑↓ navigare</span>
-          <span>↵ execută</span>
-          <span>Esc închide</span>
+
+        <div className="rf-palette-foot">
+          <span><kbd>↑↓</kbd> navigare</span>
+          <span><kbd>↵</kbd> execută</span>
+          <span><kbd>Esc</kbd> închide</span>
         </div>
       </div>
     </div>
