@@ -85,7 +85,7 @@ export function CompanyNewPage() {
       form.setValue("legalName", data.legalName);
       form.setValue("address", data.address);
       form.setValue("city", data.city);
-      form.setValue("county", data.county.slice(0, 2).toUpperCase());
+      form.setValue("county", data.county);
       if (data.registryNumber) form.setValue("registryNumber", data.registryNumber);
     } catch {
       setCuiLookupError("CUI-ul nu a fost găsit în baza ANAF.");

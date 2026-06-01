@@ -215,7 +215,11 @@ fn write_supplier_party(writer: &mut Writer<Cursor<Vec<u8>>>, seller: &Company) 
         .map_err(|e| AppError::Xml(e.to_string()))?;
     write_text(writer, "cbc:StreetName", &seller.address)?;
     write_text(writer, "cbc:CityName", &seller.city)?;
-    write_text(writer, "cbc:CountrySubentity", &seller.county)?;
+    write_text(
+        writer,
+        "cbc:CountrySubentity",
+        &county_to_nuts(&seller.county),
+    )?;
     writer
         .write_event(Event::Start(BytesStart::new("cac:Country")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
@@ -307,7 +311,7 @@ fn write_customer_party(
         write_text(writer, "cbc:CityName", city)?;
     }
     if let Some(county) = &buyer.county {
-        write_text(writer, "cbc:CountrySubentity", county)?;
+        write_text(writer, "cbc:CountrySubentity", &county_to_nuts(county))?;
     }
     writer
         .write_event(Event::Start(BytesStart::new("cac:Country")))
@@ -623,6 +627,106 @@ fn write_tax_exemption(writer: &mut Writer<Cursor<Vec<u8>>>, category: &str) -> 
     Ok(())
 }
 
+// ─── County name → ISO 3166-2:RO code ────────────────────────────────────────
+
+/// Converts a free-text Romanian county name (or abbreviation) to the ISO
+/// 3166-2:RO subdivision code required by CIUS-RO for `cbc:CountrySubentity`.
+///
+/// Rules (in priority order):
+/// 1. If `raw` already matches `^RO-[A-Z]{1,2}$` → return as-is.
+/// 2. Try a case-insensitive name lookup (handles diacritic and plain spellings).
+/// 3. Fallback → return `raw` unchanged so unknown values don't break generation.
+pub(crate) fn county_to_nuts(raw: &str) -> String {
+    let trimmed = raw.trim();
+
+    // Rule 1: already a valid ISO 3166-2:RO code.
+    let upper = trimmed.to_ascii_uppercase();
+    if let Some(rest) = upper.strip_prefix("RO-") {
+        if !rest.is_empty() && rest.len() <= 2 && rest.chars().all(|c| c.is_ascii_alphabetic()) {
+            return upper;
+        }
+    }
+
+    // Rule 2: name lookup (normalise by lowercasing; diacritics stripped below).
+    let lower = trimmed.to_lowercase();
+    // Normalise by stripping common Romanian diacritics so both "Cluj" and
+    // "Ilfov" match regardless of whether the caller used ș/ț or s/t.
+    let norm = lower
+        .replace(['ș', 'ş'], "s")
+        .replace(['ț', 'ţ'], "t")
+        .replace(['ă'], "a")
+        .replace(['â', 'î'], "i");
+
+    // Static map: (lowercase normalised name or abbreviation) → ISO code.
+    // 41 județe + București (B).
+    let code: Option<&'static str> = match norm.as_str() {
+        // By ISO code (short form users sometimes type)
+        "ab" | "alba" => Some("RO-AB"),
+        "ar" | "arad" => Some("RO-AR"),
+        "ag" | "arges" | "argeș" | "argeş" => Some("RO-AG"),
+        "bc" | "bacau" | "bacău" => Some("RO-BC"),
+        "bh" | "bihor" => Some("RO-BH"),
+        "bn" | "bistrita-nasaud" | "bistrita nasaud" | "bistrița-năsăud" | "bistrita" => {
+            Some("RO-BN")
+        }
+        "bt" | "botosani" | "botoșani" | "botoşani" => Some("RO-BT"),
+        "bv" | "brasov" | "brașov" | "braşov" => Some("RO-BV"),
+        "br" | "braila" | "brăila" | "brăilа" => Some("RO-BR"),
+        // București — code is "B" (not "BU")
+        "b"
+        | "bucuresti"
+        | "bucurești"
+        | "municipiul bucuresti"
+        | "municipiul bucurești"
+        | "sector 1"
+        | "sector 2"
+        | "sector 3"
+        | "sector 4"
+        | "sector 5"
+        | "sector 6"
+        | "ilfov-bucuresti" => Some("RO-B"),
+        "bz" | "buzau" | "buzău" => Some("RO-BZ"),
+        "cs" | "caras-severin" | "caraș-severin" | "caras severin" => Some("RO-CS"),
+        "cl" | "calarasi" | "călărași" | "calarași" => Some("RO-CL"),
+        "cj" | "cluj" => Some("RO-CJ"),
+        "ct" | "constanta" | "constanța" | "constanţa" => Some("RO-CT"),
+        "cv" | "covasna" => Some("RO-CV"),
+        "db" | "dambovita" | "dâmbovița" | "damboviţa" | "dambovița" => Some("RO-DB"),
+        "dj" | "dolj" => Some("RO-DJ"),
+        "gl" | "galati" | "galați" | "galaţi" => Some("RO-GL"),
+        "gr" | "giurgiu" => Some("RO-GR"),
+        "gj" | "gorj" => Some("RO-GJ"),
+        "hr" | "harghita" => Some("RO-HR"),
+        "hd" | "hunedoara" => Some("RO-HD"),
+        "il" | "ialomita" | "ialomița" | "ialomiţa" => Some("RO-IL"),
+        "is" | "iasi" | "iași" | "iaşi" => Some("RO-IS"),
+        "if" | "ilfov" => Some("RO-IF"),
+        "mm" | "maramures" | "maramureș" | "maramureş" => Some("RO-MM"),
+        "mh" | "mehedinti" | "mehedinți" | "mehedinţi" => Some("RO-MH"),
+        "ms" | "mures" | "mureș" | "mureş" => Some("RO-MS"),
+        "nt" | "neamt" | "neamț" | "neamţ" => Some("RO-NT"),
+        "ot" | "olt" => Some("RO-OT"),
+        "ph" | "prahova" => Some("RO-PH"),
+        "sm" | "satu mare" | "satu-mare" => Some("RO-SM"),
+        "sj" | "salaj" | "sălaj" | "sălаj" => Some("RO-SJ"),
+        "sb" | "sibiu" => Some("RO-SB"),
+        "sv" | "suceava" => Some("RO-SV"),
+        "tr" | "teleorman" => Some("RO-TR"),
+        "tm" | "timis" | "timiș" | "timiş" => Some("RO-TM"),
+        "tl" | "tulcea" => Some("RO-TL"),
+        "vs" | "vaslui" => Some("RO-VS"),
+        "vl" | "valcea" | "vâlcea" | "vâlcеa" => Some("RO-VL"),
+        "vn" | "vrancea" => Some("RO-VN"),
+        _ => None,
+    };
+
+    match code {
+        Some(c) => c.to_string(),
+        // Rule 3: unknown value — return unchanged.
+        None => trimmed.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -875,6 +979,80 @@ mod tests {
             body.contains(">1.234567<"),
             "expected 6-decimal quantity in XML, got: {}",
             body
+        );
+    }
+
+    // ── U5: county_to_nuts ────────────────────────────────────────────────────
+
+    #[test]
+    fn county_to_nuts_maps_cluj_to_ro_cj() {
+        assert_eq!(county_to_nuts("Cluj"), "RO-CJ");
+    }
+
+    #[test]
+    fn county_to_nuts_passthrough_existing_code() {
+        // "RO-B" is already a valid ISO code — must be returned as-is.
+        assert_eq!(county_to_nuts("RO-B"), "RO-B");
+    }
+
+    #[test]
+    fn county_to_nuts_unknown_unchanged() {
+        // Unknown values must not be altered.
+        assert_eq!(county_to_nuts("Sector 7"), "Sector 7");
+        assert_eq!(county_to_nuts("UNKNOWN"), "UNKNOWN");
+    }
+
+    #[test]
+    fn county_to_nuts_bucuresti_to_ro_b() {
+        assert_eq!(county_to_nuts("București"), "RO-B");
+        assert_eq!(county_to_nuts("Bucuresti"), "RO-B");
+        // Sector names map to RO-B
+        assert_eq!(county_to_nuts("Sector 1"), "RO-B");
+    }
+
+    #[test]
+    fn county_to_nuts_timis_to_ro_tm() {
+        assert_eq!(county_to_nuts("Timiș"), "RO-TM");
+        assert_eq!(county_to_nuts("Timis"), "RO-TM");
+    }
+
+    #[test]
+    fn county_to_nuts_seller_county_emitted_as_iso_code() {
+        // U5: seller county "Cluj" must appear as RO-CJ in XML, not "Cluj".
+        let mut input = sample_input();
+        input.seller.county = "Cluj".to_string();
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+        // Find the supplier block and check the CountrySubentity value.
+        let supplier_block = body
+            .split("</cac:AccountingSupplierParty>")
+            .next()
+            .unwrap_or(body);
+        assert!(
+            supplier_block.contains("<cbc:CountrySubentity>RO-CJ</cbc:CountrySubentity>"),
+            "seller county 'Cluj' must be emitted as 'RO-CJ', got: {}",
+            supplier_block
+        );
+        assert!(
+            !supplier_block.contains("<cbc:CountrySubentity>Cluj</cbc:CountrySubentity>"),
+            "seller county must NOT be emitted as raw name 'Cluj'"
+        );
+    }
+
+    #[test]
+    fn county_to_nuts_buyer_county_emitted_as_iso_code() {
+        // U5: buyer county "Cluj" (from sample_input) must appear as RO-CJ in XML.
+        let input = sample_input(); // buyer.county = Some("Cluj")
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+        let customer_block = body
+            .split("</cac:AccountingCustomerParty>")
+            .next()
+            .unwrap_or(body);
+        assert!(
+            customer_block.contains("<cbc:CountrySubentity>RO-CJ</cbc:CountrySubentity>"),
+            "buyer county 'Cluj' must be emitted as 'RO-CJ', got: {}",
+            customer_block
         );
     }
 }

@@ -42,7 +42,7 @@ const EU_CODES = new Set([
  *      - buyer is non-EU and non-RO        → 'G' (export scutit)
  *      - buyer is RO (or unknown):
  *          - seller is NOT a VAT payer     → 'O' (în afara sferei TVA — neplătitor)
- *          - seller IS a VAT payer         → 'E' (scutit intern cu drept de deducere)
+ *          - seller IS a VAT payer         → 'E' (scutit intern fără drept de deducere)
  *      NOTE: 'AE' (taxare inversă) is NOT auto-assigned here; it is only correct
  *      for genuine intra-community or domestic reverse-charge situations and must
  *      be set explicitly by the user.
@@ -106,10 +106,19 @@ export function LineItemsEditor({
 
   // Build the numeric rates array for the dropdown: prefer DB rates (sorted
   // by sort_order / rate), fall back to the hardcoded constant.
-  const vatRateOptions: number[] =
-    dbRates && dbRates.length > 0
-      ? dbRates.map((r) => parseFloat(r.rate))
-      : (VAT_RATES as readonly number[]).slice();
+  // F3: union the current line's vatRate into the options so that deactivated
+  // rates don't cause a blank <select> when editing old invoices.
+  const buildVatRateOptions = (currentRate: number): number[] => {
+    const base: number[] =
+      dbRates && dbRates.length > 0
+        ? dbRates.map((r) => parseFloat(r.rate))
+        : (VAT_RATES as readonly number[]).slice();
+    if (!base.includes(currentRate)) {
+      const merged = [...base, currentRate].sort((a, b) => a - b);
+      return merged;
+    }
+    return base;
+  };
 
   // Track previous deduce-trigger values so we only auto-deduce on real changes.
   const prevDeduceKey = useRef<string>("");
@@ -201,11 +210,17 @@ export function LineItemsEditor({
     onChange(updated);
   };
 
-  const net = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
-  const vat = lines.reduce(
-    (s, l) => s + l.quantity * l.unitPrice * (l.vatRate / 100),
-    0,
-  );
+  // M2: round each line to 2dp before summing to match the backend's
+  // round-then-sum approach, so the displayed totals match stored values.
+  const net = lines.reduce((s, l) => {
+    const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
+    return s + lineNet;
+  }, 0);
+  const vat = lines.reduce((s, l) => {
+    const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
+    const lineVat = Math.round(lineNet * (l.vatRate / 100) * 100) / 100;
+    return s + lineVat;
+  }, 0);
   const total = net + vat;
 
   // Column count: # + Cod + Descriere + Cant + UM + Preț + TVA% + Categorie + Net + Total + del = 11
@@ -256,7 +271,7 @@ export function LineItemsEditor({
                       <br />
                       <b>AE</b> — Taxare inversă (reverse-charge B2B intracomunitar sau intern, TVA 0%)
                       <br />
-                      <b>E</b> — Scutit cu drept de deducere (intern)
+                      <b>E</b> — Scutit fără drept de deducere (intern)
                       <br />
                       <b>Z</b> — Cotă zero
                       <br />
@@ -352,7 +367,7 @@ export function LineItemsEditor({
                       updateLine(i, "vatRate", Number(e.target.value))
                     }
                   >
-                    {vatRateOptions.map((r) => (
+                    {buildVatRateOptions(l.vatRate).map((r) => (
                       <option key={r} value={r}>
                         {r}%
                       </option>

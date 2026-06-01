@@ -2,7 +2,9 @@ use sqlx::SqlitePool;
 use tauri::State;
 
 use crate::db::invoices::{self, CreateInvoiceInput, Invoice, InvoiceFilter, InvoiceWithLines};
-use crate::db::models::{new_id, InvoiceStatus, Paginated, VALID_VAT_RATES};
+use crate::db::models::{
+    new_id, InvoiceStatus, Paginated, VALID_PAYMENT_MEANS_CODES, VALID_VAT_RATES,
+};
 use crate::db::{companies, contacts};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -188,6 +190,14 @@ pub async fn update_invoice_draft(
         }
     }
 
+    // U3: validate payment_means_code against the UNCL4461 allow-list.
+    let update_pmc = input.payment_means_code.as_deref().unwrap_or("30");
+    if !VALID_PAYMENT_MEANS_CODES.contains(&update_pmc) {
+        return Err(AppError::Validation(format!(
+            "Cod mod de plată invalid: {update_pmc}"
+        )));
+    }
+
     // Use rust_decimal for exact monetary math (plan rule: never f64 for money)
     use rust_decimal::Decimal;
     let hundred = Decimal::from(100u32);
@@ -252,7 +262,7 @@ pub async fn update_invoice_draft(
     .bind(subtotal)
     .bind(vat_total)
     .bind(total)
-    .bind(input.payment_means_code.as_deref().unwrap_or("30"))
+    .bind(update_pmc)
     .bind(&company_id)
     .execute(&mut *tx)
     .await?;
@@ -287,10 +297,11 @@ pub async fn update_invoice_draft(
         .bind((position as i64) + 1)
         .bind(&line.name)
         .bind(&line.description)
+        // U4: store quantity at 6dp precision.
         .bind(
             Decimal::try_from(line.quantity)
                 .unwrap_or(Decimal::ZERO)
-                .round_dp(2)
+                .round_dp(6)
                 .to_string(),
         )
         .bind(&line.unit)

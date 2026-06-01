@@ -11,7 +11,9 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
-use crate::db::models::{new_id, now_unix, InvoiceStatus, Page, Paginated, VALID_VAT_RATES};
+use crate::db::models::{
+    new_id, now_unix, InvoiceStatus, Page, Paginated, VALID_PAYMENT_MEANS_CODES, VALID_VAT_RATES,
+};
 use crate::error::{AppError, AppResult};
 
 // ─── Models ────────────────────────────────────────────────────────────────
@@ -325,6 +327,14 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         }
     }
 
+    // U3: validate payment_means_code against the UNCL4461 allow-list.
+    let pmc = input.payment_means_code.as_deref().unwrap_or("30");
+    if !VALID_PAYMENT_MEANS_CODES.contains(&pmc) {
+        return Err(AppError::Validation(format!(
+            "Cod mod de plată invalid: {pmc}"
+        )));
+    }
+
     let invoice_id = new_id();
     let now = now_unix();
 
@@ -337,6 +347,8 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         .lines
         .iter()
         .map(|l| {
+            // U4: use 6dp-precise quantity for monetary computation so the
+            // stored subtotal reflects the precise quantity (no truncation).
             let qty = Decimal::try_from(l.quantity).unwrap_or(Decimal::ZERO);
             let price = Decimal::try_from(l.unit_price).unwrap_or(Decimal::ZERO);
             let rate = Decimal::try_from(l.vat_rate).unwrap_or(Decimal::ZERO);
@@ -404,7 +416,7 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
     .bind(vat_total)
     .bind(total)
     .bind(&input.notes)
-    .bind(input.payment_means_code.as_deref().unwrap_or("30"))
+    .bind(pmc)
     .bind(now)
     .execute(&mut *tx)
     .await?;
@@ -428,10 +440,11 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         .bind((position as i64) + 1)
         .bind(&line.name)
         .bind(&line.description)
+        // U4: store quantity at 6dp (CIUS-RO allows 6dp; generator emits 6dp).
         .bind(
             Decimal::try_from(line.quantity)
                 .unwrap_or(Decimal::ZERO)
-                .round_dp(2)
+                .round_dp(6)
                 .to_string(),
         )
         .bind(&line.unit)
@@ -680,6 +693,8 @@ mod tests {
     use rust_decimal::Decimal;
     use std::str::FromStr;
 
+    use crate::db::models::VALID_PAYMENT_MEANS_CODES;
+
     #[test]
     fn decimal_avoids_float_drift() {
         // Classic 0.1 + 0.2 issue
@@ -701,5 +716,69 @@ mod tests {
         let val = Decimal::from_str("-150.00").unwrap();
         assert!(val.is_sign_negative());
         assert_eq!(val.to_string(), "-150.00");
+    }
+
+    // ── U3: payment_means_code validation ────────────────────────────────────
+
+    #[test]
+    fn valid_payment_means_code_accepted() {
+        // "30" (transfer bancar) is the most common code — must be in the list.
+        assert!(
+            VALID_PAYMENT_MEANS_CODES.contains(&"30"),
+            "code '30' must be accepted"
+        );
+        // All nine allowed codes must be present.
+        for code in &["10", "20", "30", "42", "48", "49", "57", "58", "59"] {
+            assert!(
+                VALID_PAYMENT_MEANS_CODES.contains(code),
+                "code '{}' must be accepted",
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_payment_means_code_rejected() {
+        // Codes not in UNCL4461 allow-list must NOT be present.
+        for bad in &["0", "1", "99", "100", "cash", "card", ""] {
+            assert!(
+                !VALID_PAYMENT_MEANS_CODES.contains(bad),
+                "code '{}' must NOT be accepted",
+                bad
+            );
+        }
+    }
+
+    // ── U4: quantity precision ────────────────────────────────────────────────
+
+    #[test]
+    fn quantity_six_dp_round_trip() {
+        // The stored quantity must preserve 6dp, not truncate to 2dp.
+        let qty_input = 1.234567_f64;
+        let stored = Decimal::try_from(qty_input)
+            .unwrap_or(Decimal::ZERO)
+            .round_dp(6)
+            .to_string();
+        // Should round-trip to at most 6 decimals and NOT lose precision.
+        assert!(
+            stored.starts_with("1.234567"),
+            "qty 1.234567 must be stored as '1.234567', got '{}'",
+            stored
+        );
+    }
+
+    #[test]
+    fn quantity_subtotal_uses_precise_qty() {
+        // Subtotal is computed from the precise (6dp) quantity, then rounded to 2dp.
+        // 1.234567 * 100.00 = 123.4567 → rounds to 123.46 (not 123.00 from 2dp qty).
+        let qty = Decimal::from_str("1.234567").unwrap();
+        let price = Decimal::from_str("100.00").unwrap();
+        let subtotal = (qty * price).round_dp(2);
+        assert_eq!(
+            subtotal.to_string(),
+            "123.46",
+            "subtotal must be computed from 6dp qty; got '{}'",
+            subtotal
+        );
     }
 }

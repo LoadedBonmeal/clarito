@@ -77,6 +77,11 @@ pub struct Paginated<T> {
 /// Cotele TVA valide conform legislației RO (2025+)
 pub const VALID_VAT_RATES: &[i64] = &[0, 5, 9, 11, 19, 21];
 
+/// Coduri UNCL4461 acceptate de ANAF pentru `PaymentMeansCode`.
+/// Sursa: CIUS-RO / EN 16931 lista de coduri UNCL4461 permise.
+pub const VALID_PAYMENT_MEANS_CODES: &[&str] =
+    &["10", "20", "30", "42", "48", "49", "57", "58", "59"];
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /// Generează un UUID v7 (time-ordered, mai bun pentru index decât v4).

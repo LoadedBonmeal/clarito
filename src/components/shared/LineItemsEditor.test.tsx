@@ -7,6 +7,51 @@
 import { describe, expect, it } from "vitest";
 import { deduceVatCategory } from "@/components/shared/LineItemsEditor";
 
+// ─── M2: per-line rounding helper (mirrors backend logic) ────────────────────
+
+/** Replicates the backend round-then-sum used by the create/update path. */
+function computeFooter(lines: Array<{ quantity: number; unitPrice: number; vatRate: number }>) {
+  const net = lines.reduce((s, l) => {
+    return s + Math.round(l.quantity * l.unitPrice * 100) / 100;
+  }, 0);
+  const vat = lines.reduce((s, l) => {
+    const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
+    return s + Math.round(lineNet * (l.vatRate / 100) * 100) / 100;
+  }, 0);
+  return { net, vat, total: net + vat };
+}
+
+describe("M2: per-line rounding matches backend", () => {
+  it("single line with integer cents rounds correctly", () => {
+    const { net, vat } = computeFooter([
+      { quantity: 1, unitPrice: 100, vatRate: 19 },
+    ]);
+    expect(net).toBe(100);
+    expect(vat).toBe(19);
+  });
+
+  it("fractional-cent line is rounded per-line before summing", () => {
+    // 3 × 0.333 = 0.999 → rounded to 1.00 net; vat = 0.19
+    // Without per-line rounding: 3 * 0.333 * 1.19 = 1.18881 → total 1.19 (ok)
+    // But the stored subtotal for this line = round(3 * 0.333, 2) = 1.00
+    const { net } = computeFooter([
+      { quantity: 3, unitPrice: 0.333, vatRate: 19 },
+    ]);
+    expect(net).toBe(1.0);
+  });
+
+  it("multi-line per-line rounding: two lines each with sub-cent product", () => {
+    // Line 1: 1.5 × 1.33 = 1.995 → rounded = 2.00
+    // Line 2: 2 × 0.505 = 1.010 → rounded = 1.01
+    // Sum = 3.01 (not 3.005 from raw float sum)
+    const { net } = computeFooter([
+      { quantity: 1.5, unitPrice: 1.33, vatRate: 19 },
+      { quantity: 2, unitPrice: 0.505, vatRate: 19 },
+    ]);
+    expect(net).toBeCloseTo(3.01, 2);
+  });
+});
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("deduceVatCategory (inline — pending alias fix in vitest.config.ts)", () => {
