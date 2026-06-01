@@ -52,7 +52,7 @@ function routeTrail(pathname: string): string[] {
   if (pathname.startsWith("/companies/")) return ["Operativ", "Companii", "Detaliu companie"];
   if (pathname.startsWith("/contacts/")) return ["Operativ", "Clienți & Furnizori", "Detaliu contact"];
   if (pathname.startsWith("/received/")) return ["e-Factura", "Facturi primite", "Detaliu"];
-  return ["RoFactura"];
+  return ["Clarito"];
 }
 
 // ── +Nou menu items ───────────────────────────────────────────────────────────
@@ -188,7 +188,7 @@ export function TopBar() {
 
       {/* Breadcrumb */}
       <div className="rf-breadcrumb">
-        <span className="rf-crumb">RoFactura</span>
+        <span className="rf-crumb">Clarito</span>
         {crumbs.map((c, i) => (
           <span key={i} style={{ display: "contents" }}>
             <Icon name="chevRight" size={13} style={{ flexShrink: 0 }} />

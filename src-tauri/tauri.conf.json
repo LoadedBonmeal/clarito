@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "RoFactura",
+  "productName": "Clarito",
   "version": "0.3.1",
   "identifier": "com.lucaris.efactura",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "RoFactura",
+        "title": "Clarito",
         "width": 1280,
         "height": 800,
         "minWidth": 1024,
@@ -50,7 +50,7 @@
     ],
     "category": "Business",
     "shortDescription": "Aplicație desktop pentru e-Factura ANAF",
-    "longDescription": "RoFactura — Aplicație desktop pentru gestionarea facturilor electronice prin sistemul ANAF SPV. Multi-companie, validare RO_CIUS, arhivare locală.",
+    "longDescription": "Clarito — Aplicație desktop pentru gestionarea facturilor electronice prin sistemul ANAF SPV. Multi-companie, validare RO_CIUS, arhivare locală.",
     "macOS": {
       "entitlements": "entitlements.plist",
       "minimumSystemVersion": "12.0",

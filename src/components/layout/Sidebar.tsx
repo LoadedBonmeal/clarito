@@ -136,10 +136,11 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
     <nav className={`rf-sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
       {/* Brand wordmark */}
       <div className="rf-brand-wordmark">
+        {/* TODO: replace with Clarito logo asset (pending) */}
         <span className="rf-logo">
           <Icon name="logo" size={17} stroke={2} />
         </span>
-        <span className="rf-name">RoFactura</span>
+        <span className="rf-name">Clarito</span>
       </div>
 
       {/* Company card — opens switcher modal in AppShell */}

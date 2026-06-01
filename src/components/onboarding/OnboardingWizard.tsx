@@ -102,8 +102,9 @@ function Rail({ currentStep }: { currentStep: Step }) {
         >
           <Icon name="logo" size={18} stroke={1.8} />
         </span>
+        {/* TODO: replace with Clarito logo asset (pending) */}
         <span style={{ color: "#fff", fontWeight: 700, fontSize: 15, letterSpacing: "-0.01em" }}>
-          RoFactura
+          Clarito
         </span>
       </div>
 
@@ -220,7 +221,7 @@ function Step1() {
         <Icon name="logo" size={30} stroke={1.6} />
       </div>
       <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em", margin: "0 0 8px" }}>
-        Bun venit în RoFactura
+        Bun venit în Clarito
       </h1>
       <p className="rf-text-muted" style={{ fontSize: 15, lineHeight: 1.6, margin: "0 0 28px" }}>
         Soluția completă de e-Factura și contabilitate pentru firmele din România. Hai să configurăm aplicația în câțiva pași.

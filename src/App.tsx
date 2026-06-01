@@ -44,7 +44,7 @@ function NotTauriScreen() {
           Deschideți aplicația nativă
         </h1>
         <p style={{ color: "#888", fontSize: 13, lineHeight: 1.7, margin: "0 0 6px" }}>
-          RoFactura este o aplicație desktop și nu poate rula în browser.
+          Clarito este o aplicație desktop și nu poate rula în browser.
         </p>
         <p style={{ color: "#666", fontSize: 12, lineHeight: 1.6, margin: 0 }}>
           Porniți aplicația din <strong style={{ color: "#888" }}>Finder / Dock</strong> (macOS)
