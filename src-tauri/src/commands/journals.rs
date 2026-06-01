@@ -37,6 +37,19 @@ fn csv_field(s: &str) -> String {
     }
 }
 
+/// Numeric/amount CSV cell: RFC-4180 quoting WITHOUT formula-injection
+/// neutralization. Amounts can legitimately start with `-` (storno negatives);
+/// prefixing them with `'` would turn the numeric cell into text and break
+/// SUM formulas in accounting software. Amounts never contain user-controlled
+/// text, so there is no injection vector to neutralize here.
+fn csv_num(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
 /// Construiește un rând CSV din câmpuri.
 fn csv_row(fields: &[&str]) -> String {
     fields
@@ -102,16 +115,21 @@ pub async fn export_sales_journal(
             let total: String = row.try_get("total_amount").unwrap_or_default();
             let status: String = row.try_get("status").unwrap_or_default();
 
-            lines.push(csv_row(&[
-                &full_number,
-                &issue_date,
-                &client_name,
-                &client_cui,
-                &subtotal,
-                &vat,
-                &total,
-                &status,
-            ]));
+            // Text fields neutralized (injection vector); amounts via csv_num
+            // so negative storno totals stay numeric cells, not text.
+            lines.push(
+                [
+                    csv_field(&full_number),
+                    csv_field(&issue_date),
+                    csv_field(&client_name),
+                    csv_field(&client_cui),
+                    csv_num(&subtotal),
+                    csv_num(&vat),
+                    csv_num(&total),
+                    csv_field(&status),
+                ]
+                .join(","),
+            );
         }
 
         let content = lines.join("\r\n");
@@ -188,17 +206,22 @@ pub async fn export_purchase_journal(
             let total: String = row.try_get("total_amount").unwrap_or_default();
             let currency: String = row.try_get("currency").unwrap_or_default();
 
-            lines.push(csv_row(&[
-                &issuer_name,
-                &issuer_cui,
-                &series,
-                &number,
-                &issue_date,
-                &net,
-                &vat,
-                &total,
-                &currency,
-            ]));
+            // Text fields neutralized (issuer_name is the SPV-sourced injection
+            // vector); amounts via csv_num to keep negative cells numeric.
+            lines.push(
+                [
+                    csv_field(&issuer_name),
+                    csv_field(&issuer_cui),
+                    csv_field(&series),
+                    csv_field(&number),
+                    csv_field(&issue_date),
+                    csv_num(&net),
+                    csv_num(&vat),
+                    csv_num(&total),
+                    csv_field(&currency),
+                ]
+                .join(","),
+            );
         }
 
         let content = lines.join("\r\n");
@@ -372,6 +395,18 @@ mod tests {
         // TAB and CR also neutralized
         assert_eq!(csv_neutralize("\t"), "'\t");
         assert_eq!(csv_neutralize("\r"), "'\r");
+    }
+
+    /// R16 W6-followup: amount cells (csv_num) keep negative storno values
+    /// numeric — NOT prefixed with a quote (which would break Excel SUM).
+    #[test]
+    fn csv_num_does_not_neutralize_negative_amounts() {
+        assert_eq!(csv_num("-150.00"), "-150.00");
+        assert_eq!(csv_num("1000.00"), "1000.00");
+        assert_eq!(csv_num("0.00"), "0.00");
+        assert_eq!(csv_num(""), "");
+        // contrast: csv_field WOULD prefix a leading '-'
+        assert_eq!(csv_field("-150.00"), "'-150.00");
     }
 
     /// R2: textul normal nu este modificat de neutralizator.
