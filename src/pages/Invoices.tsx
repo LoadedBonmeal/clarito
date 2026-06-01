@@ -19,6 +19,7 @@
  */
 
 import { useMemo, useRef, useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -143,9 +144,10 @@ interface RowMenuProps {
   status: InvoiceStatus;
   hasXml: boolean;
   onClose: () => void;
+  anchor: DOMRect | null;
 }
 
-function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps) {
+function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowMenuProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [stornoOpen, setStornoOpen] = useState(false);
@@ -162,11 +164,31 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps
       if (!(e.target as HTMLElement).closest(".rf-row-menu")) onClose();
     };
     const tid = setTimeout(() => document.addEventListener("click", h), 0);
+    window.addEventListener("scroll", onClose, true);
     return () => {
       clearTimeout(tid);
       document.removeEventListener("click", h);
+      window.removeEventListener("scroll", onClose, true);
     };
   }, [onClose]);
+
+  const portalPos = (width: number): React.CSSProperties => {
+    const GAP = 4;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (!anchor) return { position: "fixed", top: 64, right: 16, zIndex: 100, width };
+    const left = Math.min(Math.max(8, anchor.right - width), vw - width - 8);
+    const openUp = anchor.bottom > vh - 340;
+    return {
+      position: "fixed",
+      left,
+      ...(openUp ? { bottom: vh - anchor.top + GAP } : { top: anchor.bottom + GAP }),
+      zIndex: 100,
+      width,
+      maxHeight: "min(360px, calc(100vh - 24px))",
+      overflowY: "auto",
+    };
+  };
 
   async function handleSubmit() {
     try {
@@ -243,10 +265,10 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps
   }
 
   if (stornoOpen) {
-    return (
+    return createPortal(
       <div
         className="rf-row-menu rf-card"
-        style={{ position: "absolute", right: 8, top: 32, zIndex: 50, width: 280, padding: 12, boxShadow: "var(--rf-shadow-md)" }}
+        style={{ ...portalPos(280), padding: 12, boxShadow: "var(--rf-shadow-md)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--rf-error)" }}>
@@ -275,7 +297,8 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps
             Stornează
           </button>
         </div>
-      </div>
+      </div>,
+      document.body,
     );
   }
 
@@ -292,10 +315,10 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps
 
   const visible = items.filter((i) => i.show);
 
-  return (
+  return createPortal(
     <div
       className="rf-row-menu rf-card"
-      style={{ position: "absolute", right: 8, top: 32, zIndex: 50, width: 210, padding: 4, boxShadow: "var(--rf-shadow-md)" }}
+      style={{ ...portalPos(210), padding: 4, boxShadow: "var(--rf-shadow-md)" }}
       onClick={(e) => e.stopPropagation()}
     >
       {visible.map((item) => (
@@ -316,7 +339,8 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps
           {item.label}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -344,6 +368,7 @@ export function InvoicesPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showImportModal, setShowImportModal] = useState(false);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   // Fetch invoices
@@ -966,7 +991,10 @@ export function InvoicesPage() {
                             icon="more"
                             ghost
                             title="Mai multe"
-                            onClick={() => setMenuFor(menuFor === inv.id ? null : inv.id)}
+                            onClick={(e) => {
+                              if (menuFor === inv.id) { setMenuFor(null); setMenuAnchor(null); }
+                              else { setMenuAnchor(e.currentTarget.getBoundingClientRect()); setMenuFor(inv.id); }
+                            }}
                           />
                         </div>
                         {menuFor === inv.id && activeCompanyId && (
@@ -975,7 +1003,8 @@ export function InvoicesPage() {
                             companyId={activeCompanyId}
                             status={inv.status}
                             hasXml={!!inv.xmlPath}
-                            onClose={() => setMenuFor(null)}
+                            anchor={menuAnchor}
+                            onClose={() => { setMenuFor(null); setMenuAnchor(null); }}
                           />
                         )}
                       </td>
