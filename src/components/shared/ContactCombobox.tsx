@@ -131,12 +131,11 @@ export function ContactCombobox({
           alignItems: "center",
           gap: 8,
           width: widthStyle,
-          minHeight: 32,
-          padding: "4px 8px 4px 10px",
-          border: "1px solid var(--input-border)",
-          background: "var(--input-bg)",
-          borderRadius: 5,
-          boxShadow: "var(--input-shadow-inset)",
+          minHeight: 40,
+          padding: "4px 8px 4px 12px",
+          border: "1px solid var(--rf-border-strong)",
+          background: "var(--rf-content)",
+          borderRadius: "var(--rf-radius-sm)",
         }}
       >
         <div style={{ flex: 1, minWidth: 0, lineHeight: 1.25 }}>
@@ -144,7 +143,7 @@ export function ContactCombobox({
             style={{
               fontSize: 13,
               fontWeight: 500,
-              color: "var(--text)",
+              color: "var(--rf-text)",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -154,10 +153,7 @@ export function ContactCombobox({
           </div>
           <div
             className="mono"
-            style={{
-              fontSize: 11,
-              color: "var(--text-muted)",
-            }}
+            style={{ fontSize: 11, color: "var(--rf-text-muted)" }}
           >
             {value.cui ?? "—"}
             {value.country && value.country !== "RO" ? ` · ${value.country}` : ""}
@@ -167,7 +163,8 @@ export function ContactCombobox({
           <button
             type="button"
             onClick={handleClear}
-            className="btn-icon"
+            className="rf-icon-btn rf-icon-btn--ghost"
+            style={{ width: 26, height: 26 }}
             aria-label="Șterge selecția"
             title="Schimbă cumpărătorul"
           >
@@ -187,7 +184,7 @@ export function ContactCombobox({
       <input
         ref={inputRef}
         id={inputId}
-        className="input"
+        className="rf-input"
         type="text"
         value={query}
         onChange={(e) => {
@@ -215,42 +212,24 @@ export function ContactCombobox({
             left: 0,
             right: 0,
             zIndex: 50,
-            background: "var(--input-bg, white)",
-            border: "1px solid var(--input-border)",
-            borderRadius: 5,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
+            background: "var(--rf-content)",
+            border: "1px solid var(--rf-border-strong)",
+            borderRadius: "var(--rf-radius-sm)",
+            boxShadow: "var(--rf-shadow-md)",
             maxHeight: 260,
             overflowY: "auto",
           }}
         >
           {debouncedQuery.length < 2 ? (
-            <div
-              style={{
-                padding: "10px 12px",
-                fontSize: 12,
-                color: "var(--text-muted)",
-              }}
-            >
+            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
               Tastați cel puțin 2 caractere…
             </div>
           ) : isFetching ? (
-            <div
-              style={{
-                padding: "10px 12px",
-                fontSize: 12,
-                color: "var(--text-muted)",
-              }}
-            >
+            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
               Se caută…
             </div>
           ) : results.length === 0 ? (
-            <div
-              style={{
-                padding: "10px 12px",
-                fontSize: 12,
-                color: "var(--text-muted)",
-              }}
-            >
+            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
               Niciun rezultat pentru „{debouncedQuery}".
             </div>
           ) : (
@@ -263,7 +242,6 @@ export function ContactCombobox({
                   role="option"
                   aria-selected={active}
                   onMouseDown={(e) => {
-                    // Prevent input blur before click fires
                     e.preventDefault();
                   }}
                   onClick={() => handleSelect(c)}
@@ -272,20 +250,17 @@ export function ContactCombobox({
                     display: "block",
                     width: "100%",
                     textAlign: "left",
-                    padding: "8px 12px",
+                    padding: "9px 12px",
                     border: "none",
-                    borderBottom: "1px solid var(--border, transparent)",
-                    background: active ? "var(--accent-soft, #F0F1F4)" : "transparent",
+                    borderBottom: "1px solid var(--rf-border)",
+                    background: active ? "var(--rf-accent-tint)" : "transparent",
                     cursor: "pointer",
-                    color: "var(--text)",
+                    color: active ? "var(--rf-accent)" : "var(--rf-text)",
                     font: "inherit",
                   }}
                 >
                   <div style={{ fontSize: 13, fontWeight: 500 }}>{c.legalName}</div>
-                  <div
-                    className="mono"
-                    style={{ fontSize: 11, color: "var(--text-muted)" }}
-                  >
+                  <div className="mono" style={{ fontSize: 11, color: "var(--rf-text-muted)" }}>
                     {c.cui ?? "—"}
                     {c.country && c.country !== "RO" ? ` · ${c.country}` : ""}
                   </div>

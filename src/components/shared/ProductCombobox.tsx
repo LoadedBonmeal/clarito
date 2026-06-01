@@ -109,7 +109,7 @@ export function ProductCombobox({
     >
       <input
         ref={inputRef}
-        className="input"
+        className="rf-input"
         type="text"
         value={query}
         onChange={(e) => {
@@ -137,30 +137,24 @@ export function ProductCombobox({
             left: 0,
             right: 0,
             zIndex: 50,
-            background: "var(--input-bg, white)",
-            border: "1px solid var(--input-border)",
-            borderRadius: 5,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
+            background: "var(--rf-content)",
+            border: "1px solid var(--rf-border-strong)",
+            borderRadius: "var(--rf-radius-sm)",
+            boxShadow: "var(--rf-shadow-md)",
             maxHeight: 260,
             overflowY: "auto",
           }}
         >
           {debouncedQuery.length < 2 ? (
-            <div
-              style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-muted)" }}
-            >
+            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
               Tastați cel puțin 2 caractere…
             </div>
           ) : isFetching ? (
-            <div
-              style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-muted)" }}
-            >
+            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
               Se caută…
             </div>
           ) : results.length === 0 ? (
-            <div
-              style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-muted)" }}
-            >
+            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
               Niciun articol găsit pentru „{debouncedQuery}".
             </div>
           ) : (
@@ -173,7 +167,6 @@ export function ProductCombobox({
                   role="option"
                   aria-selected={active}
                   onMouseDown={(e) => {
-                    // Prevent input blur before click fires
                     e.preventDefault();
                   }}
                   onClick={() => handleSelect(p)}
@@ -182,40 +175,25 @@ export function ProductCombobox({
                     display: "block",
                     width: "100%",
                     textAlign: "left",
-                    padding: "8px 12px",
+                    padding: "9px 12px",
                     border: "none",
-                    borderBottom: "1px solid var(--border, transparent)",
-                    background: active ? "var(--accent-soft, #F0F1F4)" : "transparent",
+                    borderBottom: "1px solid var(--rf-border)",
+                    background: active ? "var(--rf-accent-tint)" : "transparent",
                     cursor: "pointer",
-                    color: "var(--text)",
+                    color: active ? "var(--rf-accent)" : "var(--rf-text)",
                     font: "inherit",
                   }}
                 >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "baseline",
-                      gap: 8,
-                    }}
-                  >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
                     <span style={{ fontSize: 13, fontWeight: 500 }}>{p.name}</span>
-                    <span
-                      className="tnum"
-                      style={{ fontSize: 12, color: "var(--text-muted)", flexShrink: 0 }}
-                    >
+                    <span className="tnum" style={{ fontSize: 12, color: "var(--rf-text-muted)", flexShrink: 0 }}>
                       {fmtRON(p.unitPrice)} RON
                     </span>
                   </div>
-                  <div
-                    className="mono"
-                    style={{ fontSize: 11, color: "var(--text-muted)" }}
-                  >
+                  <div className="mono" style={{ fontSize: 11, color: "var(--rf-text-muted)" }}>
                     {p.code ? `${p.code} · ` : ""}
                     {p.unit} · TVA {p.vatRate}%
-                    {p.stockQty != null ? (
-                      <span> · stoc {p.stockQty}</span>
-                    ) : null}
+                    {p.stockQty != null ? <span> · stoc {p.stockQty}</span> : null}
                   </div>
                 </button>
               );
@@ -243,13 +221,13 @@ export function ProductPickerButton({
     return (
       <button
         type="button"
-        className="btn-icon"
+        className="rf-icon-btn rf-icon-btn--ghost"
+        style={{ width: 28, height: 28 }}
         title="Alege din catalog"
         disabled={disabled}
         onClick={() => setOpen(true)}
-        style={{ fontSize: 10, padding: "1px 4px" }}
       >
-        <Icon name="stock" size={11} />
+        <Icon name="stock" size={13} />
       </button>
     );
   }
@@ -267,15 +245,10 @@ export function ProductPickerButton({
       />
       <button
         type="button"
-        className="btn-icon"
+        className="rf-icon-btn rf-icon-btn--ghost"
+        style={{ width: 26, height: 26, position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}
         title="Închide"
         onClick={() => setOpen(false)}
-        style={{
-          position: "absolute",
-          right: 2,
-          top: "50%",
-          transform: "translateY(-50%)",
-        }}
       >
         <Icon name="x" size={10} />
       </button>
