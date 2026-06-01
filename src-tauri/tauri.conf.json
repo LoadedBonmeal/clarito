@@ -38,6 +38,7 @@
   },
   "bundle": {
     "active": true,
+    "licenseFile": "resources/license.rtf",
     "publisher": "Lucaris SRL",
     "copyright": "© 2025 Lucaris. Toate drepturile rezervate.",
     "targets": ["dmg", "msi", "nsis"],

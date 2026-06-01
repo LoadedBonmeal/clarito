@@ -234,15 +234,15 @@ pub async fn export_report(
                     .map_err(|e| AppError::Other(e.to_string()))?,
                 _ => {
                     // CSV format
-                    let mut csv = String::from("Cotă TVA,Bază impozabilă,TVA,Nr. Facturi\n");
+                    let mut csv = String::from("Cotă TVA,Bază impozabilă,TVA,Nr. Facturi\r\n");
                     for g in &report.vat_groups {
                         csv.push_str(&format!(
-                            "{}%,{},{},{}\n",
+                            "{}%,{},{},{}\r\n",
                             g.rate, g.base_amount, g.vat_amount, g.invoice_count
                         ));
                     }
                     csv.push_str(&format!(
-                        "TOTAL,{},{},{}\n",
+                        "TOTAL,{},{},{}\r\n",
                         report.total_base, report.total_vat, report.invoice_count
                     ));
                     csv

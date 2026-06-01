@@ -127,7 +127,7 @@ pub async fn export_backup(state: State<'_, AppState>, app: AppHandle) -> AppRes
         zip.start_file("README.txt", opts)
             .map_err(|e| AppError::Other(e.to_string()))?;
         let readme = format!(
-            "Backup eFactura Desktop\nData: {}\n\nConține:\n- data.db: baza de date SQLite\n- archive/: fișiere XML+PDF facturi\n\nRestaurare: folosiți funcția Import Backup din aplicație.\n",
+            "Backup eFactura Desktop\r\nData: {}\r\n\r\nConține:\r\n- data.db: baza de date SQLite\r\n- archive/: fișiere XML+PDF facturi\r\n\r\nRestaurare: folosiți funcția Import Backup din aplicație.\r\n",
             chrono::Utc::now().format("%d.%m.%Y %H:%M UTC")
         );
         zip.write_all(readme.as_bytes()).map_err(AppError::Io)?;
