@@ -57,6 +57,7 @@ import { ReceiptsPage } from "@/pages/Receipts";
 import { VatRatesPage } from "@/pages/VatRates";
 import { DeclarationsPage } from "@/pages/Declarations";
 import { BankPage } from "@/pages/Bank";
+import { StornatePage } from "@/pages/Stornate";
 
 // ─── Layout root ──────────────────────────────────────────────────────────
 
@@ -224,6 +225,12 @@ const bankRoute = createRoute({
   component: BankPage,
 });
 
+const stornateRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/stornate",
+  component: StornatePage,
+});
+
 // ─── Build tree + router ──────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -250,6 +257,7 @@ const routeTree = rootRoute.addChildren([
   recurringRoute,
   declarationsRoute,
   bankRoute,
+  stornateRoute,
 ]);
 
 export const router = createRouter({
