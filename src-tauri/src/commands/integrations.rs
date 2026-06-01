@@ -350,16 +350,17 @@ pub async fn export_saga_csv(
         let data = iso_to_dmy_dot(&invoice.issue_date);
         let scadenta = iso_to_dmy_dot(&invoice.due_date);
 
-        let cui = contact.cui.as_deref().unwrap_or("").to_string();
-        let denumire = contact.legal_name.replace('"', "\"\"");
-        let adresa = contact
-            .address
-            .as_deref()
-            .unwrap_or("")
-            .replace('"', "\"\"");
-        let localitate = contact.city.as_deref().unwrap_or("").replace('"', "\"\"");
-        let judet = contact.county.as_deref().unwrap_or("").replace('"', "\"\"");
-        let observatii = invoice.notes.as_deref().unwrap_or("").replace('"', "\"\"");
+        // R3: cui și series sunt acum și ele escaped (double-quote) și neutralizate
+        // R2: câmpurile text utilizator trec prin csv_neutralize înainte de quoting
+        use crate::commands::journals::csv_neutralize;
+        let cui = csv_neutralize(contact.cui.as_deref().unwrap_or("")).replace('"', "\"\"");
+        let series_escaped = csv_neutralize(&invoice.series).replace('"', "\"\"");
+        let denumire = csv_neutralize(&contact.legal_name).replace('"', "\"\"");
+        let adresa = csv_neutralize(contact.address.as_deref().unwrap_or("")).replace('"', "\"\"");
+        let localitate = csv_neutralize(contact.city.as_deref().unwrap_or("")).replace('"', "\"\"");
+        let judet = csv_neutralize(contact.county.as_deref().unwrap_or("")).replace('"', "\"\"");
+        let observatii =
+            csv_neutralize(invoice.notes.as_deref().unwrap_or("")).replace('"', "\"\"");
 
         use rust_decimal::Decimal;
         use std::str::FromStr;
@@ -380,7 +381,7 @@ pub async fn export_saga_csv(
             "\"FC\";\"{serie}\";\"{numar}\";\"{data}\";\"{cui}\";\"{denumire}\";\
             \"{adresa}\";\"{localitate}\";\"{judet}\";\"RO\";1;{net};{tva};{total};\
             \"RON\";1;\"{scadenta}\";\"{observatii}\"",
-            serie = invoice.series,
+            serie = series_escaped,
             numar = number_padded,
             data = data,
             cui = cui,
@@ -452,9 +453,13 @@ pub async fn export_winmentor_csv(
         let data = iso_to_dmy_slash(&invoice.issue_date);
         let scadenta = iso_to_dmy_slash(&invoice.due_date);
 
-        let cui = contact.cui.as_deref().unwrap_or("").to_string();
-        let denumire = contact.legal_name.replace(';', " ");
-        let observatii = invoice.notes.as_deref().unwrap_or("").replace(';', " ");
+        // R2: câmpurile text utilizator trec prin csv_neutralize pentru a preveni
+        // formula injection — WinMentor CSV folosește `;` ca separator, fără quoting,
+        // deci neutralizarea cu `'` prefix este suficientă.
+        use crate::commands::journals::csv_neutralize;
+        let cui = csv_neutralize(contact.cui.as_deref().unwrap_or("")).replace(';', " ");
+        let denumire = csv_neutralize(&contact.legal_name).replace(';', " ");
+        let observatii = csv_neutralize(invoice.notes.as_deref().unwrap_or("")).replace(';', " ");
 
         // Fetch line items to group by VAT rate — avoids blended rate on mixed-VAT invoices.
         use rust_decimal::prelude::ToPrimitive;

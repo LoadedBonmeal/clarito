@@ -113,18 +113,41 @@ pub async fn export_invoices_xlsx(
                 .unwrap_or_else(|_| "RON".to_string()),
             status: row.try_get::<String, _>("status").unwrap_or_default(),
             net: {
+                // M5: parse via Decimal for 2dp precision, then convert to f64 for the cell.
+                // Avoids raw f64 noise (e.g. 1000.1000000000001) from TEXT storage.
+                use rust_decimal::prelude::ToPrimitive as XlsxParseToPrimitive;
+                use rust_decimal::Decimal as XlsxParseDecimal;
+                use std::str::FromStr as XlsxParseFromStr;
                 let s = row
                     .try_get::<String, _>("subtotal_amount")
                     .unwrap_or_default();
-                s.parse::<f64>().unwrap_or(0.0)
+                XlsxParseDecimal::from_str(&s)
+                    .unwrap_or(XlsxParseDecimal::ZERO)
+                    .round_dp(2)
+                    .to_f64()
+                    .unwrap_or(0.0)
             },
             vat: {
+                use rust_decimal::prelude::ToPrimitive as XlsxParseToPrimitive;
+                use rust_decimal::Decimal as XlsxParseDecimal;
+                use std::str::FromStr as XlsxParseFromStr;
                 let s = row.try_get::<String, _>("vat_amount").unwrap_or_default();
-                s.parse::<f64>().unwrap_or(0.0)
+                XlsxParseDecimal::from_str(&s)
+                    .unwrap_or(XlsxParseDecimal::ZERO)
+                    .round_dp(2)
+                    .to_f64()
+                    .unwrap_or(0.0)
             },
             total: {
+                use rust_decimal::prelude::ToPrimitive as XlsxParseToPrimitive;
+                use rust_decimal::Decimal as XlsxParseDecimal;
+                use std::str::FromStr as XlsxParseFromStr;
                 let s = row.try_get::<String, _>("total_amount").unwrap_or_default();
-                s.parse::<f64>().unwrap_or(0.0)
+                XlsxParseDecimal::from_str(&s)
+                    .unwrap_or(XlsxParseDecimal::ZERO)
+                    .round_dp(2)
+                    .to_f64()
+                    .unwrap_or(0.0)
             },
         })
         .collect();

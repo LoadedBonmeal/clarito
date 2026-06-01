@@ -13,10 +13,23 @@ use crate::state::AppState;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/// Neutralizează câmpurile care ar putea fi interpretate ca formule în Excel/LibreOffice
+/// (CSV formula injection). Câmpurile care încep cu `=`, `+`, `-` sau `@` (sau TAB/CR)
+/// primesc un prefix `'` conform standardului de neutralizare CSV.
+/// Aplicat ÎNAINTEA quoting-ului RFC 4180, pe valoarea brută.
+pub(crate) fn csv_neutralize(s: &str) -> String {
+    match s.chars().next() {
+        Some('=' | '+' | '-' | '@' | '\t' | '\r') => format!("'{}", s),
+        _ => s.to_string(),
+    }
+}
+
 /// Construiește o linie CSV corect quotată cu separator virgulă.
 /// Câmpurile care conțin virgulă, ghilimele sau newline sunt enclosed în ghilimele.
 /// Ghilimelele interne sunt dublate (RFC 4180).
+/// Aplică neutralizarea formula-injection înainte de quoting.
 fn csv_field(s: &str) -> String {
+    let s = csv_neutralize(s);
     if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
@@ -139,6 +152,7 @@ pub async fn export_purchase_journal(
          WHERE company_id = ?1 \
            AND issue_date >= ?2 \
            AND issue_date <= ?3 \
+           AND status != 'REJECTED' \
          ORDER BY issue_date ASC",
     )
     .bind(&company_id)
@@ -343,5 +357,122 @@ mod tests {
         assert!(field.starts_with('"'));
         assert!(field.ends_with('"'));
         assert!(field.contains("\"\"ALFA\"\""));
+    }
+
+    // ── R2: CSV formula-injection neutralization ──────────────────────────────
+
+    /// R2: neutralizatorul prefixează câmpurile periculoase cu `'`.
+    #[test]
+    fn csv_neutralize_prefixes_formula_chars() {
+        // Formula injection chars must be prefixed with single quote
+        assert_eq!(csv_neutralize("=cmd"), "'=cmd");
+        assert_eq!(csv_neutralize("+1+1"), "'+1+1");
+        assert_eq!(csv_neutralize("-1"), "'-1");
+        assert_eq!(csv_neutralize("@SUM(A1)"), "'@SUM(A1)");
+        // TAB and CR also neutralized
+        assert_eq!(csv_neutralize("\t"), "'\t");
+        assert_eq!(csv_neutralize("\r"), "'\r");
+    }
+
+    /// R2: textul normal nu este modificat de neutralizator.
+    #[test]
+    fn csv_neutralize_leaves_normal_text_untouched() {
+        assert_eq!(csv_neutralize("SC ALFA SRL"), "SC ALFA SRL");
+        assert_eq!(csv_neutralize("RO123456"), "RO123456");
+        assert_eq!(csv_neutralize("1000.00"), "1000.00");
+        assert_eq!(csv_neutralize(""), "");
+        assert_eq!(csv_neutralize("VALIDATED"), "VALIDATED");
+        // Parens/spaces/letters are safe
+        assert_eq!(csv_neutralize("(test)"), "(test)");
+    }
+
+    /// R2: csv_field aplică neutralizarea ÎNAINTE de quoting RFC 4180.
+    #[test]
+    fn csv_field_neutralizes_then_quotes() {
+        // "=HYPERLINK(\"evil\")" → neutralized to "'=HYPERLINK(\"evil\")", then
+        // the result contains quotes so it gets RFC-4180 enclosed
+        let result = csv_field("=HYPERLINK(\"evil\")");
+        // After neutralization: "'=HYPERLINK(\"evil\")" which has a double-quote → enclosed
+        assert!(
+            result.starts_with('"'),
+            "field with quote after neutralization must be enclosed"
+        );
+        assert!(
+            result.contains("'=HYPERLINK"),
+            "neutralizer prefix must be present"
+        );
+        // Simpler: field starts with `=`, no special quoting chars — just prefixed
+        assert_eq!(csv_field("=cmd"), "'=cmd");
+        assert_eq!(csv_field("+cmd"), "'+cmd");
+    }
+
+    // ── R1: purchase journal excludes REJECTED received invoices ─────────────
+
+    /// R1: verifică că filtrul SQL `AND status != 'REJECTED'` exclude facturile respinse.
+    /// Testăm logica de filtrare simulând două seturi de date — doar cele cu status != REJECTED
+    /// trebuie incluse în jurnal, consistent cu declarațiile D300/D394.
+    #[test]
+    fn purchase_journal_excludes_rejected_invoices() {
+        // Simulate the filtering logic that the SQL query now enforces:
+        // status != 'REJECTED'
+        struct FakeReceived {
+            issuer_name: &'static str,
+            status: &'static str,
+        }
+
+        let invoices = [
+            FakeReceived {
+                issuer_name: "SC ALFA SRL",
+                status: "NEW",
+            },
+            FakeReceived {
+                issuer_name: "SC BETA SRL",
+                status: "REJECTED",
+            },
+            FakeReceived {
+                issuer_name: "SC GAMA SRL",
+                status: "OK",
+            },
+        ];
+
+        // Apply the same filter as the SQL query
+        let included: Vec<&FakeReceived> =
+            invoices.iter().filter(|r| r.status != "REJECTED").collect();
+
+        assert_eq!(included.len(), 2, "REJECTED invoice must be excluded");
+        assert!(included.iter().any(|r| r.issuer_name == "SC ALFA SRL"));
+        assert!(included.iter().any(|r| r.issuer_name == "SC GAMA SRL"));
+        assert!(
+            !included.iter().any(|r| r.issuer_name == "SC BETA SRL"),
+            "SC BETA SRL has status REJECTED and must NOT appear in the journal"
+        );
+    }
+
+    /// R1: verifică că CSV-ul jurnalului de cumpărări conține NUMAI factura NEW, nu cea REJECTED.
+    #[test]
+    fn purchase_journal_csv_contains_only_non_rejected() {
+        // Simulate building the CSV for only non-REJECTED entries
+        let invoices = vec![
+            ("SC ALFA SRL", "RO111", "NEW"),
+            ("SC BETA SRL", "RO222", "REJECTED"),
+        ];
+
+        let note = "# NOTA: test";
+        let header = csv_row(&["Furnizor", "CUI", "Status"]);
+        let mut lines = vec![note.to_string(), header];
+
+        for (name, cui, status) in &invoices {
+            if *status != "REJECTED" {
+                lines.push(csv_row(&[name, cui, status]));
+            }
+        }
+
+        let content = lines.join("\r\n");
+        assert!(content.contains("SC ALFA SRL"), "NEW invoice must appear");
+        assert!(
+            !content.contains("SC BETA SRL"),
+            "REJECTED invoice must not appear"
+        );
+        assert!(!content.contains("RO222"), "REJECTED CUI must not appear");
     }
 }

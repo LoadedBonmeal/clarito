@@ -617,7 +617,8 @@ fn rule_br_ro_043_vat_breakdown_by_category(ctx: &RuleContext<'_>) -> Option<Str
         if let (Some(&rate), Some(&vat)) = (group_rate.get(key), group_vat.get(key)) {
             let expected_vat = (net * rate / hundred).round_dp(2);
             let diff = (expected_vat - vat.round_dp(2)).abs();
-            if diff > Decimal::new(2, 2) {
+            // Toleranță 0.01 RON — consistent cu BR-RO-040/041/042 (Decimal::new(1, 2)).
+            if diff > Decimal::new(1, 2) {
                 errs.push(format!(
                     "categoria {} @ {}%: TVA calculat {:.2} ≠ TVA sumă linii {:.2}",
                     key.0, key.1, expected_vat, vat
