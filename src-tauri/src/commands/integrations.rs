@@ -169,9 +169,7 @@ pub async fn smartbill_push_invoice(
     let invoice_bundle = crate::db::invoices::get_with_lines(&state.db, &invoice_id).await?;
     // G1: verify the invoice belongs to the requested company — prevents pushing a
     // foreign company's invoice to a different company's SmartBill account.
-    if invoice_bundle.invoice.company_id != company_id {
-        return Err(AppError::NotFound);
-    }
+    crate::commands::invoices::check_invoice_ownership(&invoice_bundle.invoice, &company_id)?;
     let invoice = &invoice_bundle.invoice;
     let lines = &invoice_bundle.lines;
 

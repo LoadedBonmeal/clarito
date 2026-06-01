@@ -25,9 +25,8 @@ const FONT_NORMAL: f32 = 9.5;
 const FONT_SMALL: f32 = 8.5;
 const LINE_H: f32 = 5.5;
 
-static FONT_REGULAR_BYTES: &[u8] =
-    include_bytes!("../../resources/fonts/LiberationSans-Regular.ttf");
-static FONT_BOLD_BYTES: &[u8] = include_bytes!("../../resources/fonts/LiberationSans-Bold.ttf");
+// Liberation Sans — sourced from the shared fonts module (single binary copy).
+use crate::ubl::fonts::{FONT_BOLD_BYTES, FONT_REGULAR_BYTES};
 
 // ─── PDF path helper ───────────────────────────────────────────────────────
 

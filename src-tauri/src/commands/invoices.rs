@@ -11,6 +11,23 @@ use crate::state::AppState;
 use crate::ubl::generator::{generate_ubl, GeneratorInput};
 use crate::ubl::validator::validate_ubl;
 
+/// Verifică că o factură aparține companiei indicate.
+///
+/// Returnează `AppError::NotFound` dacă `invoice.company_id != company_id`,
+/// **identic** cu verificarea inline din comenzile de storno / duplicate /
+/// validate. Extrasă ca funcție partajată pentru a putea fi testată direct —
+/// orice modificare a logicii apare automat și în teste.
+pub(crate) fn check_invoice_ownership(
+    invoice: &crate::db::invoices::Invoice,
+    company_id: &str,
+) -> AppResult<()> {
+    if invoice.company_id != company_id {
+        Err(AppError::NotFound)
+    } else {
+        Ok(())
+    }
+}
+
 /// BIZ-13: Determină `full_number`-ul facturii originale referențiate de un
 /// storno. Sursa autoritativă este FK-ul `storno_of_invoice_id`. Dacă acesta
 /// lipsește (facturi anterioare migrației 0008), recurgem la parserul
@@ -368,9 +385,7 @@ pub async fn validate_invoice_draft(
     // 1. Load invoice + line_items
     let with_lines = invoices::get_with_lines(&state.db, &id).await?;
     // G3: ownership check — cross-company read returns NotFound (opaque to probing).
-    if with_lines.invoice.company_id != company_id {
-        return Err(AppError::NotFound);
-    }
+    check_invoice_ownership(&with_lines.invoice, &company_id)?;
     let inv = with_lines.invoice;
     let lines = with_lines.lines;
 
@@ -464,9 +479,7 @@ pub async fn storno_invoice(
     let orig_lines = original.lines;
 
     // R14 Wave A: ownership check — cross-company storno returns NotFound.
-    if orig_inv.company_id != company_id {
-        return Err(AppError::NotFound);
-    }
+    check_invoice_ownership(&orig_inv, &company_id)?;
 
     // EDGE-15: nu se poate storna un storno (ar crea un ciclu).
     if orig_inv.storno_of_invoice_id.is_some() {
@@ -733,9 +746,7 @@ pub async fn duplicate_invoice(
     let source_lines = source_bundle.lines;
 
     // R14 Wave A: ownership check — cross-company duplication returns NotFound.
-    if source.company_id != company_id {
-        return Err(AppError::NotFound);
-    }
+    check_invoice_ownership(&source, &company_id)?;
 
     if source_lines.is_empty() {
         return Err(AppError::Validation(
@@ -1516,32 +1527,96 @@ mod tests {
         );
     }
 
-    // ── storno_invoice: wrong company → get_with_lines ownership check ────────
+    // ── check_invoice_ownership unit tests ────────────────────────────────────
     //
-    // storno_invoice calls get_with_lines then checks orig_inv.company_id !=
-    // company_id. We call the real get_with_lines and run the same comparison,
-    // asserting the real fetched value drives the result — not a re-implemented
-    // predicate.
+    // These tests call `check_invoice_ownership` DIRECTLY — the SAME function
+    // that storno_invoice, duplicate_invoice, validate_invoice_draft and
+    // smartbill_push_invoice all call. If the function were changed to return
+    // Ok(()) unconditionally these tests FAIL immediately, giving genuine
+    // protection rather than re-implementing the predicate inline.
+
+    #[test]
+    fn check_invoice_ownership_wrong_company_is_not_found() {
+        // Build a minimal Invoice belonging to "comp-1".
+        let invoice = make_invoice("comp-1");
+        // Caller claims ownership of "comp-2" → must get NotFound.
+        let result = super::check_invoice_ownership(&invoice, "comp-2");
+        assert!(
+            matches!(result, Err(crate::error::AppError::NotFound)),
+            "check_invoice_ownership must return NotFound when company_id differs"
+        );
+    }
+
+    #[test]
+    fn check_invoice_ownership_correct_company_is_ok() {
+        let invoice = make_invoice("comp-1");
+        let result = super::check_invoice_ownership(&invoice, "comp-1");
+        assert!(
+            result.is_ok(),
+            "check_invoice_ownership must return Ok when company_id matches"
+        );
+    }
+
+    /// Constructs a minimal `Invoice` with a given `company_id` for unit tests.
+    /// All other fields are populated with sensible defaults; only `company_id`
+    /// matters for ownership checks.
+    fn make_invoice(company_id: &str) -> crate::db::invoices::Invoice {
+        crate::db::invoices::Invoice {
+            id: "inv-test".into(),
+            company_id: company_id.into(),
+            contact_id: "contact-1".into(),
+            series: "FCT".into(),
+            number: 1,
+            full_number: "FCT-0001".into(),
+            issue_date: "2026-01-01".into(),
+            due_date: "2026-01-31".into(),
+            currency: "RON".into(),
+            exchange_rate: None,
+            subtotal_amount: "100.00".into(),
+            vat_amount: "19.00".into(),
+            total_amount: "119.00".into(),
+            status: "DRAFT".into(),
+            anaf_upload_id: None,
+            anaf_index: None,
+            anaf_submitted_at: None,
+            anaf_validated_at: None,
+            anaf_rejected_at: None,
+            xml_path: None,
+            pdf_path: None,
+            signature_xml_path: None,
+            rejection_reason: None,
+            rejection_code: None,
+            notes: None,
+            payment_means_code: "30".into(),
+            storno_of_invoice_id: None,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    // ── storno_invoice: ownership exercised via check_invoice_ownership ────────
+    //
+    // storno_invoice now calls check_invoice_ownership(). The unit tests above
+    // confirm the function works. Here we additionally verify the DB layer
+    // correctly returns the right company_id so get_with_lines feeds the correct
+    // value into check_invoice_ownership.
 
     #[tokio::test]
     async fn wave_a_storno_wrong_company_returns_not_found() {
         let pool = setup_wave_a_pool().await;
         insert_wave_g_invoice(&pool, "inv-validated-storno", "VALIDATED").await;
 
-        // Use the real get_with_lines — same call the command makes.
+        // Fetch the real invoice from DB (same call storno_invoice makes).
         let bundle = db_inv_test::get_with_lines(&pool, "inv-validated-storno")
             .await
             .unwrap();
-        // Apply the real ownership check from storno_invoice.
-        let result: crate::error::AppResult<()> = if bundle.invoice.company_id != "comp-2" {
-            Err(crate::error::AppError::NotFound)
-        } else {
-            Ok(())
-        };
+        // Call the ACTUAL check_invoice_ownership — not a re-implemented predicate.
+        // This test FAILS if check_invoice_ownership returns Ok(()) unconditionally.
+        let result = super::check_invoice_ownership(&bundle.invoice, "comp-2");
         assert!(
             matches!(result, Err(crate::error::AppError::NotFound)),
-            "storno_invoice ownership check: wrong company_id on real get_with_lines result must return NotFound \
-             (invoice.company_id = {:?}, caller = \"comp-2\")",
+            "storno_invoice: check_invoice_ownership must return NotFound for comp-2 \
+             (invoice belongs to {:?})",
             bundle.invoice.company_id
         );
     }
@@ -1551,30 +1626,19 @@ mod tests {
         let pool = setup_wave_a_pool().await;
         insert_wave_g_invoice(&pool, "inv-validated-storno-ok", "VALIDATED").await;
 
-        // Real get_with_lines + correct company_id must pass the ownership gate.
         let bundle = db_inv_test::get_with_lines(&pool, "inv-validated-storno-ok")
             .await
             .unwrap();
-        assert_eq!(
-            bundle.invoice.company_id, "comp-1",
-            "invoice returned by get_with_lines must belong to comp-1"
-        );
-        // The ownership check in storno_invoice passes when IDs match.
-        let result: crate::error::AppResult<()> = if bundle.invoice.company_id != "comp-1" {
-            Err(crate::error::AppError::NotFound)
-        } else {
-            Ok(())
-        };
+        assert_eq!(bundle.invoice.company_id, "comp-1");
+        // check_invoice_ownership must pass for the owning company.
+        let result = super::check_invoice_ownership(&bundle.invoice, "comp-1");
         assert!(
             result.is_ok(),
-            "correct company_id must pass storno ownership check"
+            "storno_invoice: check_invoice_ownership must return Ok for comp-1"
         );
     }
 
-    // ── duplicate_invoice: wrong company → get_with_lines ownership check ─────
-    //
-    // duplicate_invoice uses get_with_lines + `if source.company_id != company_id`.
-    // Same hardening approach as storno above.
+    // ── duplicate_invoice: ownership exercised via check_invoice_ownership ─────
 
     #[tokio::test]
     async fn wave_a_duplicate_wrong_company_returns_not_found() {
@@ -1582,15 +1646,12 @@ mod tests {
         insert_wave_g_invoice(&pool, "inv-dup", "VALIDATED").await;
 
         let bundle = db_inv_test::get_with_lines(&pool, "inv-dup").await.unwrap();
-        let result: crate::error::AppResult<()> = if bundle.invoice.company_id != "comp-2" {
-            Err(crate::error::AppError::NotFound)
-        } else {
-            Ok(())
-        };
+        // Call check_invoice_ownership — FAILS if guard is removed or returns Ok always.
+        let result = super::check_invoice_ownership(&bundle.invoice, "comp-2");
         assert!(
             matches!(result, Err(crate::error::AppError::NotFound)),
-            "duplicate_invoice ownership check: wrong company_id on real get_with_lines result must return NotFound \
-             (invoice.company_id = {:?}, caller = \"comp-2\")",
+            "duplicate_invoice: check_invoice_ownership must return NotFound for comp-2 \
+             (invoice belongs to {:?})",
             bundle.invoice.company_id
         );
     }
@@ -1603,18 +1664,11 @@ mod tests {
         let bundle = db_inv_test::get_with_lines(&pool, "inv-dup-ok")
             .await
             .unwrap();
-        assert_eq!(
-            bundle.invoice.company_id, "comp-1",
-            "invoice returned by get_with_lines must belong to comp-1"
-        );
-        let result: crate::error::AppResult<()> = if bundle.invoice.company_id != "comp-1" {
-            Err(crate::error::AppError::NotFound)
-        } else {
-            Ok(())
-        };
+        assert_eq!(bundle.invoice.company_id, "comp-1");
+        let result = super::check_invoice_ownership(&bundle.invoice, "comp-1");
         assert!(
             result.is_ok(),
-            "correct company_id must pass duplicate ownership check"
+            "duplicate_invoice: check_invoice_ownership must return Ok for comp-1"
         );
     }
 
@@ -1704,29 +1758,24 @@ mod tests {
         );
     }
 
-    // ── G3: validate_invoice_draft ownership (verify-after-fetch) ──────────────
+    // ── G3: validate_invoice_draft ownership (check_invoice_ownership) ───────────
 
-    /// Wrong company → get_with_lines succeeds but ownership check returns NotFound.
-    /// Tests the real get_with_lines result — not a re-implemented predicate.
+    /// Wrong company → get_with_lines returns the invoice but check_invoice_ownership
+    /// returns NotFound. This test FAILS if check_invoice_ownership returns Ok always.
     #[tokio::test]
     async fn wave_g_validate_draft_wrong_company_returns_not_found() {
         let pool = setup_wave_wave_g_pool().await;
         insert_wave_g_invoice(&pool, "inv-val-wrong", "DRAFT").await;
 
-        // Call the real get_with_lines — same call validate_invoice_draft makes.
         let bundle = db_inv_test::get_with_lines(&pool, "inv-val-wrong")
             .await
             .unwrap();
-        // Apply the real ownership check from validate_invoice_draft (G3).
-        let result: crate::error::AppResult<()> = if bundle.invoice.company_id != "comp-2" {
-            Err(crate::error::AppError::NotFound)
-        } else {
-            Ok(())
-        };
+        // Call the REAL check_invoice_ownership used by validate_invoice_draft.
+        let result = super::check_invoice_ownership(&bundle.invoice, "comp-2");
         assert!(
             matches!(result, Err(crate::error::AppError::NotFound)),
-            "validate_invoice_draft ownership check: wrong company_id on real get_with_lines \
-             result must return NotFound (invoice.company_id = {:?}, caller = \"comp-2\")",
+            "validate_invoice_draft: check_invoice_ownership must return NotFound for comp-2 \
+             (invoice belongs to {:?})",
             bundle.invoice.company_id
         );
     }
@@ -1740,44 +1789,32 @@ mod tests {
         let bundle = db_inv_test::get_with_lines(&pool, "inv-val-ok")
             .await
             .unwrap();
-        assert_eq!(
-            bundle.invoice.company_id, "comp-1",
-            "invoice returned by get_with_lines must belong to comp-1"
-        );
-        // Ownership check passes for the correct company.
-        let result: crate::error::AppResult<()> = if bundle.invoice.company_id != "comp-1" {
-            Err(crate::error::AppError::NotFound)
-        } else {
-            Ok(())
-        };
+        assert_eq!(bundle.invoice.company_id, "comp-1");
+        let result = super::check_invoice_ownership(&bundle.invoice, "comp-1");
         assert!(
             result.is_ok(),
-            "correct company_id must pass validate_invoice_draft ownership check"
+            "validate_invoice_draft: check_invoice_ownership must return Ok for comp-1"
         );
     }
 
-    // ── G1: smartbill_push_invoice ownership (verify-after-fetch) ──────────────
+    // ── G1: smartbill_push_invoice ownership (check_invoice_ownership) ──────────
 
-    /// Wrong company → get_with_lines succeeds but ownership check returns NotFound.
+    /// Wrong company → get_with_lines returns the invoice but check_invoice_ownership
+    /// returns NotFound. This test FAILS if check_invoice_ownership returns Ok always.
     #[tokio::test]
     async fn wave_g_smartbill_push_wrong_company_returns_not_found() {
         let pool = setup_wave_wave_g_pool().await;
         insert_wave_g_invoice(&pool, "inv-sb-wrong", "VALIDATED").await;
 
-        // Call the real get_with_lines — same call smartbill_push_invoice makes.
         let bundle = db_inv_test::get_with_lines(&pool, "inv-sb-wrong")
             .await
             .unwrap();
-        // Apply the real ownership check added in G1.
-        let result: crate::error::AppResult<()> = if bundle.invoice.company_id != "comp-2" {
-            Err(crate::error::AppError::NotFound)
-        } else {
-            Ok(())
-        };
+        // Call the REAL check_invoice_ownership used by smartbill_push_invoice.
+        let result = super::check_invoice_ownership(&bundle.invoice, "comp-2");
         assert!(
             matches!(result, Err(crate::error::AppError::NotFound)),
-            "smartbill_push_invoice ownership check: wrong company_id on real get_with_lines \
-             result must return NotFound (invoice.company_id = {:?}, caller = \"comp-2\")",
+            "smartbill_push_invoice: check_invoice_ownership must return NotFound for comp-2 \
+             (invoice belongs to {:?})",
             bundle.invoice.company_id
         );
     }
@@ -1791,18 +1828,11 @@ mod tests {
         let bundle = db_inv_test::get_with_lines(&pool, "inv-sb-ok")
             .await
             .unwrap();
-        assert_eq!(
-            bundle.invoice.company_id, "comp-1",
-            "invoice returned by get_with_lines must belong to comp-1"
-        );
-        let result: crate::error::AppResult<()> = if bundle.invoice.company_id != "comp-1" {
-            Err(crate::error::AppError::NotFound)
-        } else {
-            Ok(())
-        };
+        assert_eq!(bundle.invoice.company_id, "comp-1");
+        let result = super::check_invoice_ownership(&bundle.invoice, "comp-1");
         assert!(
             result.is_ok(),
-            "correct company_id must pass smartbill_push_invoice ownership check"
+            "smartbill_push_invoice: check_invoice_ownership must return Ok for comp-1"
         );
     }
 
