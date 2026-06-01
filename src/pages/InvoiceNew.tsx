@@ -1,10 +1,29 @@
+/**
+ * Factură nouă — re-skinned to rf kit (Wave 2).
+ * Preserves 100% of wiring: api.companies.get + getNextInvoiceNumber,
+ * api.contacts.list (via ContactCombobox), LineItemsEditor,
+ * api.bnr.fetchRate (multi-currency), api.invoices.createDraft,
+ * api.invoices.validateDraft (live validation panel), api.anaf.*,
+ * api.settings.get("use_anaf_test_env"). Payment panel preserved.
+ */
+
 import { useState, useEffect, useRef, useId } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation } from "@tanstack/react-query";
+
 import { Icon } from "@/components/shared/Icon";
 import { ContactCombobox } from "@/components/shared/ContactCombobox";
 import { LineItemsEditor, deduceVatCategory } from "@/components/shared/LineItemsEditor";
 import type { LineRow } from "@/components/shared/LineItemsEditor";
+import {
+  PageHeader, Btn, Badge, SectionCard, Field, Input, Select, Textarea,
+} from "@/components/rf";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useAppStore } from "@/lib/store";
 import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
@@ -14,12 +33,6 @@ import { fmtShortcut } from "@/lib/platform";
 import { notify } from "@/lib/toasts";
 import { fmtRON } from "@/lib/utils";
 import { formatError } from "@/lib/error-mapper";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 
 function localDateISO(d: Date): string {
   const y = d.getFullYear();
@@ -87,7 +100,7 @@ export function InvoiceNewPage() {
   const [paymentReference, setPaymentReference] = useState<string>("");
   const vatPayer = company?.vatPayer ?? true;
   const [lines, setLines] = useState<LineRow[]>([newLineRow(vatPayer)]);
-  // IDs for label↔input association (A11Y-06)
+
   const companyEmitentId = useId();
   const seriesId = useId();
   const issueDateId = useId();
@@ -101,14 +114,11 @@ export function InvoiceNewPage() {
   const paymentMeansCodeId = useId();
   const notesId = useId();
 
-  // Auto-prefill currency from the selected contact's preferred currency (Fix 4 polish).
+  // Auto-prefill currency from contact
   useEffect(() => {
-    if (selectedContact?.currency) {
-      setCurrency(selectedContact.currency);
-    }
+    if (selectedContact?.currency) setCurrency(selectedContact.currency);
   }, [selectedContact]);
 
-  // BNR rate fetch handler
   async function handleFetchBnrRate() {
     if (!currency || !issueDate) return;
     setBnrLoading(true);
@@ -123,29 +133,27 @@ export function InvoiceNewPage() {
     }
   }
 
-  // Compute totals (mirrors LineItemsEditor M2 rounding) for RON-equivalent display
-  const invoiceNet = lines.reduce((s, l) => {
-    const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
-    return s + lineNet;
-  }, 0);
+  // Totals for RON-equivalent display
+  const invoiceNet = lines.reduce((s, l) => s + Math.round(l.quantity * l.unitPrice * 100) / 100, 0);
   const invoiceVat = lines.reduce((s, l) => {
     const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
-    const lineVat = Math.round(lineNet * (l.vatRate / 100) * 100) / 100;
-    return s + lineVat;
+    return s + Math.round(lineNet * (l.vatRate / 100) * 100) / 100;
   }, 0);
   const invoiceTotal = invoiceNet + invoiceVat;
   const parsedRate = parseFloat(exchangeRate);
   const rateValid = currency !== "RON" && Number.isFinite(parsedRate) && parsedRate > 0;
 
-  // Track the saved draft ID for live validation
   const [savedId, setSavedId] = useState<string | null>(null);
-  // True when "Trimite la ANAF" was clicked — navigate to detail to trigger submit there
   const submitAfterSaveRef = useRef(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Live validation — runs after draft is saved.
-  // G3: companyId is required; also gate on activeCompanyId so we never call
-  // validateDraft with an empty company string.
+  const { data: testModeSetting } = useQuery({
+    queryKey: queryKeys.anaf.testMode,
+    queryFn: () => api.settings.get("use_anaf_test_env"),
+  });
+  const testMode = testModeSetting === "1";
+
+  // Live validation
   const { data: validation, isFetching: validating } = useQuery({
     queryKey: queryKeys.invoiceValidation.get(savedId ?? ""),
     queryFn: () => api.invoices.validateDraft(savedId!, activeCompanyId!),
@@ -153,19 +161,11 @@ export function InvoiceNewPage() {
     staleTime: 30_000,
   });
 
-  // ANAF test mode setting — key must match backend: settings::keys::USE_ANAF_TEST_ENV
-  const { data: testModeSetting } = useQuery({
-    queryKey: queryKeys.anaf.testMode,
-    queryFn: () => api.settings.get("use_anaf_test_env"),
-  });
-  const testMode = testModeSetting === "1";
-
   const activeSeries = series || company?.invoiceSeries || "";
   const activeNumber = nextNumber ?? (company ? company.lastInvoiceNumber + 1 : 1);
   const fullNumber = activeSeries
     ? `${activeSeries}-${String(activeNumber).padStart(4, "0")}`
     : "—";
-
 
   const saveDraftMutation = useMutation({
     mutationFn: () => {
@@ -174,14 +174,13 @@ export function InvoiceNewPage() {
       if (lines.length === 0) throw new Error("Adăugați cel puțin o linie.");
       const lineErrors: string[] = [];
       lines.forEach((line, i) => {
-        if (!line.name?.trim()) lineErrors.push(`Linia ${i + 1}: denumirea produsului/serviciului este obligatorie`);
-        if ((line.quantity ?? 0) <= 0) lineErrors.push(`Linia ${i + 1}: cantitatea trebuie să fie mai mare decât 0`);
-        if ((line.unitPrice ?? 0) < 0) lineErrors.push(`Linia ${i + 1}: prețul unitar nu poate fi negativ`);
-        // Valid RO VAT rates: 0%, 5%, 9% (≤2025-07-31), 11% (≥2025-08-01), 19% (≤2025-07-31), 21% (≥2025-08-01)
-        if (![0, 5, 9, 11, 19, 21].includes(line.vatRate ?? 21)) lineErrors.push(`Linia ${i + 1}: cota TVA trebuie să fie 0%, 5%, 9%, 11%, 19% sau 21%`);
+        if (!line.name?.trim()) lineErrors.push(`Linia ${i + 1}: denumirea este obligatorie`);
+        if ((line.quantity ?? 0) <= 0) lineErrors.push(`Linia ${i + 1}: cantitatea trebuie > 0`);
+        if ((line.unitPrice ?? 0) < 0) lineErrors.push(`Linia ${i + 1}: prețul nu poate fi negativ`);
+        if (![0, 5, 9, 11, 19, 21].includes(line.vatRate ?? 21))
+          lineErrors.push(`Linia ${i + 1}: cotă TVA invalidă`);
       });
       if (lineErrors.length > 0) throw new Error(lineErrors.join("\n"));
-      // Validate exchange rate for non-RON invoices (BR-RO-028)
       if (currency !== "RON") {
         const rate = parseFloat(exchangeRate);
         if (!Number.isFinite(rate) || rate <= 0) {
@@ -189,7 +188,6 @@ export function InvoiceNewPage() {
           throw new Error("Cursul valutar lipsește sau este invalid.");
         }
       }
-      // Strip internal rowId before sending to backend
       const apiLines: CreateLineInput[] = lines.map(({ rowId: _rowId, ...rest }) => rest);
       const extraNotes = [
         paymentMethod !== "ot" && `Metodă plată: ${paymentMethod}`,
@@ -221,15 +219,11 @@ export function InvoiceNewPage() {
       submitAfterSaveRef.current = false;
       if (shouldSubmit) {
         try {
-          // Ensure we are authenticated before submitting
           const authenticated = await api.anaf.isAuthenticated(created.companyId);
-          if (!authenticated) {
-            await api.anaf.authorize(created.companyId);
-          }
+          if (!authenticated) await api.anaf.authorize(created.companyId);
           await api.anaf.submitInvoice(created.companyId, created.id, testMode);
         } catch (e) {
           setSubmitError((e as unknown as AppErrorPayload).message ?? "Eroare la trimitere ANAF.");
-          // Still navigate to detail so the user can see the invoice and retry
           navigate({ to: "/invoices/$id", params: { id: created.id } });
           return;
         }
@@ -244,88 +238,104 @@ export function InvoiceNewPage() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
         if (saveDraftMutation.isPending) return;
         saveDraftMutation.mutate();
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
         if (saveDraftMutation.isPending) return;
-        // Submit to ANAF — save first, then auto-submit in onSuccess
         submitAfterSaveRef.current = true;
         setSubmitError(null);
         saveDraftMutation.mutate();
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+      if ((e.ctrlKey || e.metaKey) && e.key === "p") {
         e.preventDefault();
         window.print();
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
   }, [saveDraftMutation]);
 
-  // TS-07: Guard against rendering the editor without an active company.
-  // Must be placed after all hook calls to respect rules-of-hooks.
   if (!activeCompanyId) {
     return (
-      <div className="content">
-        <div style={{ padding: 40, textAlign: "center" }}>
-          <p style={{ fontSize: 14, color: "var(--muted-color, #888)", marginBottom: 16 }}>
-            Selectați o companie activă din bara laterală pentru a emite o factură.
-          </p>
-        </div>
+      <div style={{ padding: 40, textAlign: "center" }}>
+        <p style={{ fontSize: 14, color: "var(--rf-text-muted)", marginBottom: 16 }}>
+          Selectați o companie activă din bara laterală pentru a emite o factură.
+        </p>
       </div>
     );
   }
 
+  const validationScore = validation
+    ? validation.isValid ? 100 : Math.max(0, 100 - validation.errors.length * 20)
+    : 0;
+
   return (
-    <div className="content">
-      <div className="content-titlebar">
-        <span className="content-title">
-          <span className="crumb">e-Factura</span>
-          <span className="crumb">Facturi emise</span>
-          Factură nouă ·{" "}
-          <span className="mono" style={{ fontWeight: 400, color: "var(--text-muted)" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--rf-app-bg)" }}>
+      <PageHeader
+        title={
+          <span>
+            Factură nouă{" "}
+            <Badge variant="neutral">Ciornă</Badge>
+          </span>
+        }
+        sub={
+          <span style={{ fontFamily: "var(--rf-mono)", fontSize: 13, color: "var(--rf-text-muted)" }}>
             {fullNumber}
           </span>
-        </span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button className="btn" onClick={() => navigate({ to: "/invoices" })}>
-            <Icon name="x" size={12} /> Renunță <span className="kbd" style={{ marginLeft: 6 }}>Esc</span>
-          </button>
-          <button
-            className="btn"
-            onClick={() => saveDraftMutation.mutate()}
-            disabled={saveDraftMutation.isPending}
-          >
-            <Icon name="draft" size={12} /> Salvează ca schiță{" "}
-            <span className="kbd" style={{ marginLeft: 6 }}>{fmtShortcut("Ctrl+S")}</span>
-          </button>
-          <button className="btn" disabled onClick={() => window.print()}>
-            <Icon name="eye" size={12} /> Previzualizare PDF{" "}
-            <span className="kbd" style={{ marginLeft: 6 }}>{fmtShortcut("Ctrl+P")}</span>
-          </button>
-          <button
-            className="btn primary"
-            onClick={() => {
-              submitAfterSaveRef.current = true;
-              setSubmitError(null);
-              saveDraftMutation.mutate();
-            }}
-            disabled={saveDraftMutation.isPending}
-            title="Salvează și trimite la ANAF (vei fi redirecționat la pagina detaliu)"
-          >
-            <Icon name="cloudUp" size={12} /> Trimite la ANAF{" "}
-            <span className="kbd" style={{ marginLeft: 6, opacity: 0.7 }}>{fmtShortcut("Ctrl+Enter")}</span>
-          </button>
-        </span>
-      </div>
+        }
+        actions={
+          <>
+            <Btn variant="ghost" icon="x" onClick={() => navigate({ to: "/invoices" })}>
+              Renunță <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.6 }}>Esc</span>
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon="draft"
+              disabled={saveDraftMutation.isPending}
+              onClick={() => saveDraftMutation.mutate()}
+            >
+              Salvează ca schiță{" "}
+              <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.6 }}>{fmtShortcut("Ctrl+S")}</span>
+            </Btn>
+            <Btn variant="secondary" icon="eye" disabled onClick={() => window.print()}>
+              Previzualizare PDF{" "}
+              <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.6 }}>{fmtShortcut("Ctrl+P")}</span>
+            </Btn>
+            <Btn
+              variant="primary"
+              icon="cloudUp"
+              disabled={saveDraftMutation.isPending}
+              onClick={() => {
+                submitAfterSaveRef.current = true;
+                setSubmitError(null);
+                saveDraftMutation.mutate();
+              }}
+              title="Salvează și trimite la ANAF"
+            >
+              Trimite la ANAF{" "}
+              <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.7 }}>{fmtShortcut("Ctrl+Enter")}</span>
+            </Btn>
+          </>
+        }
+      />
 
       {(saveDraftMutation.isError || submitError) && (
-        <div style={{ padding: "8px 16px", background: "#FEE2E2", color: "#DC2626", fontSize: 12 }}>
-          <Icon name="alert" size={12} />{" "}
+        <div
+          style={{
+            margin: "0 32px 8px",
+            padding: "10px 14px",
+            background: "var(--rf-error-bg)",
+            border: "1px solid var(--rf-error-bd)",
+            borderRadius: 8,
+            color: "var(--rf-error)",
+            fontSize: 13,
+          }}
+        >
+          <Icon name="alert" size={14} style={{ marginRight: 6 }} />
           {submitError ??
             (saveDraftMutation.error instanceof Error
               ? saveDraftMutation.error.message
@@ -333,200 +343,162 @@ export function InvoiceNewPage() {
         </div>
       )}
 
-      <div className="editor-split">
-        <div className="editor-main">
+      <div
+        style={{
+          flex: 1,
+          overflow: "auto",
+          padding: "0 32px 32px",
+          display: "grid",
+          gridTemplateColumns: "1fr 360px",
+          gap: 20,
+          alignItems: "start",
+        }}
+      >
+        {/* LEFT column */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
-          <div className="panel" style={{ marginBottom: 12 }}>
-            <div className="panel-header">
-              <span>Antet factură · date generale</span>
-              <span style={{ display: "flex", gap: 6 }}>
-                <span className="kbd">Tab</span>
-                <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400, fontSize: 10.5 }}>
-                  pentru câmpul următor
-                </span>
-              </span>
-            </div>
-            <div className="panel-body">
-              <div className="form-grid">
-                <div className="form-section-title">Emitent</div>
-                <label htmlFor={companyEmitentId}>Companie emitentă</label>
-                <div className="field">
+          {/* Parties & header fields */}
+          <SectionCard icon="users" title="Părți & detalii factură">
+            <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* 2-col: emitent + cumpărător */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <Field label="Companie emitentă">
                   <input
                     id={companyEmitentId}
-                    className="input"
+                    className="rf-input"
                     value={company?.legalName ?? ""}
                     readOnly
-                    style={{ width: 320, background: "var(--bg)" }}
+                    style={{ background: "var(--rf-toolbar-2)" }}
                   />
                   {company && (
-                    <span className="mono muted" style={{ fontSize: 11 }}>
-                      CUI {company.cui}
-                      {company.registryNumber ? ` · ${company.registryNumber}` : ""}
+                    <span style={{ fontSize: 11, color: "var(--rf-text-muted)", fontFamily: "var(--rf-mono)", marginTop: 2 }}>
+                      CUI {company.cui}{company.registryNumber ? ` · ${company.registryNumber}` : ""}
                     </span>
                   )}
-                </div>
-                <label htmlFor={seriesId}>Serie / Număr</label>
-                <div className="field">
-                  <input
-                    id={seriesId}
-                    className="input mono"
-                    value={activeSeries}
-                    onChange={(e) => setSeries(e.target.value)}
-                    style={{ width: 90 }}
-                  />
-                  <input
-                    className="input mono"
-                    value={String(activeNumber).padStart(4, "0")}
-                    readOnly
-                    style={{ width: 120 }}
-                  />
-                  {company && (
-                    <span className="dim" style={{ fontSize: 11 }}>
-                      auto-incrementat · ultima emisă: {company.invoiceSeries}-
-                      {String(company.lastInvoiceNumber).padStart(4, "0")}
-                    </span>
-                  )}
-                </div>
-                <label htmlFor={issueDateId}>Data emiterii</label>
-                <div className="field">
-                  <input
-                    id={issueDateId}
-                    className="input"
-                    type="date"
-                    value={issueDate}
-                    onChange={(e) => setIssueDate(e.target.value)}
-                    style={{ width: 130 }}
-                  />
-                  <Icon name="calendar" size={14} style={{ color: "var(--text-muted)" }} />
-                </div>
-                <label htmlFor={dueDateId}>Data scadenței</label>
-                <div className="field">
-                  <input
-                    id={dueDateId}
-                    className="input"
-                    type="date"
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    style={{ width: 130 }}
-                  />
-                  <span className="muted" style={{ fontSize: 11 }}>
-                    {issueDate && dueDate
-                      ? `${fmtDateRO(issueDate)} → ${fmtDateRO(dueDate)}`
-                      : "30 zile · termen standard"}
-                  </span>
-                </div>
-
-                <label htmlFor={currencyId}>Monedă</label>
-                <div className="field">
-                  <select
-                    id={currencyId}
-                    className="select"
-                    value={currency}
-                    onChange={(e) => setCurrency(e.target.value)}
-                    style={{ width: 100 }}
-                  >
-                    {CURRENCIES.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {currency !== "RON" && (
-                  <>
-                    <label htmlFor={exchangeRateId}>
-                      Curs valutar (RON / 1 {currency})
-                    </label>
-                    <div className="field">
-                      <input
-                        id={exchangeRateId}
-                        className="input mono"
-                        type="number"
-                        min="0.0001"
-                        step="0.0001"
-                        value={exchangeRate}
-                        onChange={(e) => setExchangeRate(e.target.value)}
-                        placeholder="ex: 4.9700"
-                        style={{ width: 120 }}
-                      />
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={handleFetchBnrRate}
-                        disabled={bnrLoading || !issueDate || !currency}
-                        style={{ fontSize: 11 }}
-                      >
-                        {bnrLoading ? "Se preia…" : "Preia curs BNR"}
-                      </button>
-                      {rateValid && (
-                        <span className="muted" style={{ fontSize: 11 }}>
-                          Total RON: {fmtRON(invoiceTotal * parsedRate)}
-                        </span>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                <div className="form-section-title">Cumpărător</div>
-                <label htmlFor={contactId}>Cumpărător</label>
-                <div className="field">
+                </Field>
+                <Field label="Cumpărător" required>
                   <ContactCombobox
                     inputId={contactId}
                     value={selectedContact}
                     onChange={setSelectedContact}
-                    companyId={activeCompanyId ?? ""}
+                    companyId={activeCompanyId}
                     disabled={!activeCompanyId}
                     filterType={["CUSTOMER", "BOTH"]}
-                    width={320}
+                    width={280}
                   />
-                </div>
-                {selectedContact && (
-                  <>
-                    <div className="form-grid-label">CUI</div>
-                    <div className="field">
-                      <span className="mono muted" style={{ fontSize: 12 }}>
-                        {selectedContact.cui ?? "—"}
-                      </span>
-                      {selectedContact.vatPayer ? (
-                        <span style={{ fontSize: 11, color: "#16A34A" }}>
-                          <Icon name="check" size={12} /> plătitor TVA
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                          neplătitor TVA
-                        </span>
-                      )}
-                    </div>
-                    <div className="form-grid-label">Adresă</div>
-                    <div className="field">
-                      <span className="muted" style={{ fontSize: 12 }}>
-                        {[selectedContact.address, selectedContact.city, selectedContact.county, selectedContact.country]
-                          .filter(Boolean)
-                          .join(", ")}
-                      </span>
-                    </div>
-                  </>
-                )}
+                  {selectedContact && (
+                    <span style={{ fontSize: 11, color: "var(--rf-text-muted)", fontFamily: "var(--rf-mono)", marginTop: 2 }}>
+                      {selectedContact.cui ?? "—"}
+                      {selectedContact.vatPayer
+                        ? <span style={{ color: "var(--rf-success)", marginLeft: 8 }}>✓ plătitor TVA</span>
+                        : <span style={{ color: "var(--rf-text-dim)", marginLeft: 8 }}>neplătitor TVA</span>
+                      }
+                    </span>
+                  )}
+                </Field>
               </div>
-            </div>
-          </div>
 
-          <div className="panel" style={{ marginBottom: 12 }}>
-            <div className="panel-header">
-              <span>Linii factură · {lines.length} articole</span>
-              <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <span
+              {/* 3-col meta fields */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+                <Field label="Serie">
+                  <input
+                    id={seriesId}
+                    className="rf-input"
+                    style={{ fontFamily: "var(--rf-mono)" }}
+                    value={activeSeries}
+                    onChange={(e) => setSeries(e.target.value)}
+                  />
+                </Field>
+                <Field label="Număr" help="Generat automat">
+                  <input
+                    className="rf-input"
+                    style={{ fontFamily: "var(--rf-mono)", background: "var(--rf-toolbar-2)" }}
+                    value={String(activeNumber).padStart(4, "0")}
+                    readOnly
+                  />
+                </Field>
+                <Field label="Monedă">
+                  <Select
+                    id={currencyId}
+                    value={currency}
+                    onChange={(e) => setCurrency(e.target.value)}
+                  >
+                    {CURRENCIES.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Data emiterii">
+                  <Input
+                    id={issueDateId}
+                    type="date"
+                    value={issueDate}
+                    onChange={(e) => setIssueDate(e.target.value)}
+                  />
+                </Field>
+                <Field label="Data scadenței">
+                  <Input
+                    id={dueDateId}
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                  />
+                  {issueDate && dueDate && (
+                    <span style={{ fontSize: 11, color: "var(--rf-text-muted)", marginTop: 2 }}>
+                      {fmtDateRO(issueDate)} → {fmtDateRO(dueDate)}
+                    </span>
+                  )}
+                </Field>
+              </div>
+
+              {/* Multi-currency BNR panel */}
+              {currency !== "RON" && (
+                <div
                   style={{
-                    fontSize: 10.5,
-                    fontWeight: 400,
-                    textTransform: "none",
-                    letterSpacing: 0,
-                    color: "var(--text-muted)",
+                    display: "flex",
+                    gap: 14,
+                    alignItems: "flex-end",
+                    background: "var(--rf-info-bg)",
+                    border: "1px solid var(--rf-info-bd)",
+                    borderRadius: 8,
+                    padding: 12,
                   }}
                 >
-                  Tasta <span className="kbd">↓</span> pe ultima linie creează una nouă
-                </span>
-              </span>
+                  <div style={{ width: 160 }}>
+                <Field label={`Curs valutar ${currency}/RON`}>
+                    <Input
+                      id={exchangeRateId}
+                      type="number"
+                      min="0.0001"
+                      step="0.0001"
+                      value={exchangeRate}
+                      onChange={(e) => setExchangeRate(e.target.value)}
+                      placeholder="ex: 4.9700"
+                      num
+                    />
+                  </Field>
+                  </div>
+                  <Btn
+                    variant="secondary"
+                    size="sm"
+                    icon="refresh"
+                    disabled={bnrLoading || !issueDate || !currency}
+                    onClick={handleFetchBnrRate}
+                  >
+                    {bnrLoading ? "Se preia…" : "Preia curs BNR"}
+                  </Btn>
+                  {rateValid && (
+                    <span style={{ fontSize: 12, color: "var(--rf-info)", marginBottom: 6 }}>
+                      Total RON: <b style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(invoiceTotal * parsedRate)}</b>
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
+          </SectionCard>
+
+          {/* Line items */}
+          <SectionCard icon="list" title="Linii factură" subtitle={`${lines.length} articole`}>
             <LineItemsEditor
               lines={lines}
               onChange={setLines}
@@ -538,269 +510,336 @@ export function InvoiceNewPage() {
             {rateValid && (
               <div
                 style={{
-                  padding: "8px 16px",
-                  borderTop: "1px solid var(--border)",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 2,
+                  padding: "10px 20px",
+                  borderTop: "1px solid var(--rf-border)",
                   fontSize: 12,
-                  color: "var(--text-muted)",
+                  color: "var(--rf-text-muted)",
                 }}
               >
-                <div style={{ fontWeight: 600, color: "var(--text)" }}>
-                  Echivalent RON (curs {parsedRate.toFixed(4)})
-                </div>
-                <div>
-                  Net: <span className="mono">{fmtRON(invoiceNet * parsedRate)} RON</span>
-                  {"  "}·{"  "}
-                  TVA: <span className="mono">{fmtRON(invoiceVat * parsedRate)} RON</span>
-                  {"  "}·{"  "}
-                  Total: <span className="mono" style={{ fontWeight: 600 }}>{fmtRON(invoiceTotal * parsedRate)} RON</span>
-                </div>
+                <span style={{ fontWeight: 600, color: "var(--rf-text)" }}>
+                  Echivalent RON (curs {parsedRate.toFixed(4)}):
+                </span>{" "}
+                Net: <span style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(invoiceNet * parsedRate)}</span>
+                {" · "}
+                TVA: <span style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(invoiceVat * parsedRate)}</span>
+                {" · "}
+                Total: <span style={{ fontFamily: "var(--rf-mono)", fontWeight: 700 }}>{fmtRON(invoiceTotal * parsedRate)} RON</span>
               </div>
             )}
-          </div>
+          </SectionCard>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div className="panel">
-              <div className="panel-header">
-                <span>Modalitate de plată</span>
-                <span />
+          {/* Payment + Notes row */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+            {/* Payment panel */}
+            <SectionCard icon="bank" title="Modalitate de plată">
+              <div style={{ padding: "12px 20px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+                <Field label="Metodă">
+                  <Select
+                    id={paymentMethodId}
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                  >
+                    <option value="ot">Ordin de plată (OP)</option>
+                    <option value="cash">Numerar</option>
+                    <option value="card">Card bancar</option>
+                    <option value="comp">Compensare</option>
+                  </Select>
+                </Field>
+                <Field label="Cont bancar (IBAN)">
+                  <Input
+                    id={paymentIbanId}
+                    value={paymentIban || company?.iban || ""}
+                    onChange={(e) => setPaymentIban(e.target.value)}
+                    style={{ fontFamily: "var(--rf-mono)" }}
+                  />
+                  {company?.bankName && (
+                    <span style={{ fontSize: 11, color: "var(--rf-text-muted)", marginTop: 2 }}>
+                      {company.bankName}
+                    </span>
+                  )}
+                </Field>
+                <Field label="Referință">
+                  <Input
+                    id={paymentReferenceId}
+                    value={paymentReference}
+                    onChange={(e) => setPaymentReference(e.target.value)}
+                    placeholder="Plătiți în 30 zile de la data emiterii"
+                  />
+                </Field>
+                <Field
+                  label={
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                      Mod plată
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span
+                              style={{
+                                cursor: "help", fontSize: 10, color: "var(--rf-text-muted)",
+                                border: "1px solid var(--rf-border-strong)", borderRadius: "50%",
+                                width: 13, height: 13, display: "inline-flex", alignItems: "center",
+                                justifyContent: "center", lineHeight: 1, flexShrink: 0,
+                              }}
+                            >?</span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" style={{ maxWidth: 260 }}>
+                            <strong>Coduri UNECE:</strong><br />
+                            <b>10</b> — Numerar<br />
+                            <b>30</b> — Transfer bancar<br />
+                            <b>42</b> — Debit direct<br />
+                            <b>48</b> — Card bancar<br />
+                            <b>58</b> — Transfer SEPA
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </span>
+                  }
+                >
+                  <Select
+                    id={paymentMeansCodeId}
+                    value={paymentMeansCode}
+                    onChange={(e) => setPaymentMeansCode(e.target.value)}
+                  >
+                    <option value="30">Transfer bancar (30)</option>
+                    <option value="10">Numerar (10)</option>
+                    <option value="48">Card (48)</option>
+                    <option value="42">Cont bancar (42)</option>
+                    <option value="58">SEPA (58)</option>
+                  </Select>
+                </Field>
               </div>
-              <div className="panel-body">
-                <div className="form-grid" style={{ gridTemplateColumns: "120px 1fr" }}>
-                  <label htmlFor={paymentMethodId}>Metodă</label>
-                  <div className="field">
-                    <select
-                      id={paymentMethodId}
-                      className="select"
-                      value={paymentMethod}
-                      onChange={(e) => setPaymentMethod(e.target.value)}
-                    >
-                      <option value="ot">Ordin de plată (OP)</option>
-                      <option value="cash">Numerar</option>
-                      <option value="card">Card bancar</option>
-                      <option value="comp">Compensare</option>
-                    </select>
-                  </div>
-                  <label htmlFor={paymentIbanId}>Cont bancar</label>
-                  <div className="field">
-                    <input
-                      id={paymentIbanId}
-                      className="input mono"
-                      value={paymentIban || company?.iban || ""}
-                      onChange={(e) => setPaymentIban(e.target.value)}
-                      style={{ width: 250 }}
-                    />
-                    {company?.bankName && (
-                      <span className="muted" style={{ fontSize: 11 }}>
-                        {company.bankName}
-                      </span>
-                    )}
-                  </div>
-                  <label htmlFor={paymentReferenceId}>Referință</label>
-                  <div className="field">
-                    <input
-                      id={paymentReferenceId}
-                      className="input"
-                      value={paymentReference}
-                      onChange={(e) => setPaymentReference(e.target.value)}
-                      placeholder="Plătiți în 30 zile de la data emiterii"
-                    />
-                  </div>
-                  <div className="form-grid-label">Tip fiscal</div>
-                  <div className="field">
-                    <div className="seg">
-                      <span className="seg-item active">Standard</span>
-                      <span className="seg-item">TVA la încasare</span>
-                      <span className="seg-item">Intracom.</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            </SectionCard>
 
-            <div className="panel">
-              <div className="panel-header">
-                <span>Note · clauze · referințe</span>
-                <span />
+            {/* Notes panel */}
+            <SectionCard icon="file" title="Note · clauze · referințe">
+              <div style={{ padding: "12px 20px 16px" }}>
+                <Field label="Observații">
+                  <Textarea
+                    id={notesId}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    style={{ height: 100 }}
+                  />
+                </Field>
               </div>
-              <div className="panel-body">
-                <div className="form-grid" style={{ gridTemplateColumns: "120px 1fr" }}>
-                  <label htmlFor={paymentMeansCodeId} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                    Mod plată
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span
-                            style={{
-                              cursor: "help",
-                              fontSize: 10,
-                              color: "var(--text-muted)",
-                              border: "1px solid var(--text-dim, #aaa)",
-                              borderRadius: "50%",
-                              width: 13,
-                              height: 13,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              lineHeight: 1,
-                              flexShrink: 0,
-                            }}
-                            aria-label="Explicație coduri UNECE de plată"
-                          >
-                            ?
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" style={{ maxWidth: 260 }}>
-                          <strong>Coduri UNECE de plată:</strong>
-                          <br />
-                          <b>10</b> — Numerar
-                          <br />
-                          <b>30</b> — Transfer bancar (cel mai folosit)
-                          <br />
-                          <b>42</b> — Cont bancar (debit direct)
-                          <br />
-                          <b>48</b> — Card bancar
-                          <br />
-                          <b>58</b> — Transfer SEPA
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </label>
-                  <div className="field">
-                    <select
-                      id={paymentMeansCodeId}
-                      className="input"
-                      value={paymentMeansCode}
-                      onChange={(e) => setPaymentMeansCode(e.target.value)}
-                    >
-                      <option value="30">Transfer bancar (30)</option>
-                      <option value="10">Numerar (10)</option>
-                      <option value="48">Card (48)</option>
-                      <option value="42">Cont bancar (42)</option>
-                      <option value="58">SEPA (58)</option>
-                    </select>
-                  </div>
-                  <label htmlFor={notesId}>Observații</label>
-                  <div className="field" style={{ alignItems: "flex-start" }}>
-                    <textarea
-                      id={notesId}
-                      className="input"
-                      style={{ width: "100%", height: 64, padding: 6, resize: "vertical" }}
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
+            </SectionCard>
           </div>
         </div>
 
-        <aside className="editor-validation">
-          <div className="validation-summary">
-            <h3>Validare RO_CIUS · live</h3>
-            {savedId && validation ? (
-              <>
-                <div className="score">
-                  <span className="pct">{validation.isValid ? "100" : Math.max(0, 100 - validation.errors.length * 20)}%</span>
-                  <div className="validation-bar">
-                    <div
-                      className="fill"
-                      style={{
-                        width: (validation.isValid ? 100 : Math.max(0, 100 - validation.errors.length * 20)) + "%",
-                        background: validation.isValid ? "var(--accent)" : validation.errors.length > 0 ? "#DC2626" : "#F59E0B",
-                      }}
-                    />
-                  </div>
-                </div>
-                <div style={{ fontSize: 11, color: validation.isValid ? "#16A34A" : "var(--text-muted)", marginTop: 4 }}>
-                  {validation.isValid
-                    ? "✓ Validă — se poate trimite la ANAF"
-                    : `${validation.errors.length} erori · ${validation.warnings.length} avertismente`}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="score">
-                  <span className="pct">{validating ? "…" : "—"}</span>
-                  <div className="validation-bar">
-                    <div className="fill" style={{ width: "0%" }} />
-                  </div>
-                </div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                  {validating ? "Se validează…" : "Salvați schiță pentru a valida"}
-                </div>
-              </>
-            )}
-          </div>
-          <div className="validation-items">
-            {savedId && validation ? (
-              <>
-                {validation.errors.map((msg, i) => (
-                  <div key={`e${i}`} className="validation-item err">
-                    <span className="ico"><Icon name="cancel" size={13} /></span>
-                    <span>
-                      <div className="title">Eroare</div>
-                      <div className="desc">{msg}</div>
-                    </span>
-                  </div>
-                ))}
-                {validation.warnings.map((msg, i) => (
-                  <div key={`w${i}`} className="validation-item warn">
-                    <span className="ico"><Icon name="warning" size={13} /></span>
-                    <span>
-                      <div className="title">Avertisment</div>
-                      <div className="desc">{msg}</div>
-                    </span>
-                  </div>
-                ))}
-                {validation.isValid && validation.errors.length === 0 && (
-                  <div className="validation-item ok">
-                    <span className="ico"><Icon name="check" size={13} /></span>
-                    <span>
-                      <div className="title">Factură validă</div>
-                      <div className="desc">Toate regulile CIUS-RO sunt respectate.</div>
-                    </span>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="validation-item warn">
-                <span className="ico"><Icon name="warning" size={13} /></span>
-                <span>
-                  <div className="title">Validare indisponibilă</div>
-                  <div className="desc">Completați formularul și salvați ca schiță pentru a valida.</div>
+        {/* RIGHT column — totals + validation panel */}
+        <div style={{ position: "sticky", top: 0, display: "flex", flexDirection: "column", gap: 16 }}>
+
+          {/* Totals */}
+          <SectionCard icon="chart" title="Totaluri">
+            <div style={{ padding: "12px 20px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                <span style={{ color: "var(--rf-text-muted)" }}>Total net</span>
+                <span style={{ fontFamily: "var(--rf-mono)", fontWeight: 600 }}>{fmtRON(invoiceNet)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                <span style={{ color: "var(--rf-text-muted)" }}>Total TVA</span>
+                <span style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(invoiceVat)}</span>
+              </div>
+              <div style={{ borderTop: "1px solid var(--rf-border)", margin: "4px 0" }} />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontWeight: 700 }}>Total de plată</span>
+                <span style={{ fontFamily: "var(--rf-mono)", fontSize: 22, fontWeight: 700, color: "var(--rf-accent)" }}>
+                  {fmtRON(invoiceTotal)}{" "}
+                  <span style={{ fontSize: 13, color: "var(--rf-text-muted)", fontWeight: 400 }}>{currency}</span>
                 </span>
               </div>
-            )}
-          </div>
+              {rateValid && (
+                <div
+                  style={{
+                    display: "flex", justifyContent: "space-between",
+                    background: "var(--rf-info-bg)", border: "1px solid var(--rf-info-bd)",
+                    borderRadius: 8, padding: "8px 12px", marginTop: 4,
+                  }}
+                >
+                  <span style={{ fontSize: 12.5, color: "var(--rf-info)", fontWeight: 600 }}>Echivalent RON</span>
+                  <span style={{ fontFamily: "var(--rf-mono)", fontSize: 14, fontWeight: 700, color: "var(--rf-info)" }}>
+                    {fmtRON(invoiceTotal * parsedRate)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </SectionCard>
 
+          {/* Live validation panel */}
           <div
             style={{
-              marginTop: "auto",
-              borderTop: "1px solid var(--border)",
-              padding: "10px 12px",
-              background: "var(--bg)",
-              fontSize: 11,
-              color: "var(--text-muted)",
+              background: "var(--rf-content)",
+              border: "1px solid var(--rf-border)",
+              borderRadius: "var(--rf-radius)",
+              overflow: "hidden",
+              boxShadow: "var(--rf-shadow-sm)",
             }}
           >
+            {/* Summary */}
+            <div style={{ padding: "14px 18px 10px", borderBottom: "1px solid var(--rf-border)" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--rf-text-dim)", marginBottom: 8 }}>
+                Validare RO_CIUS · live
+              </div>
+              {savedId && validation ? (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <span style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--rf-mono)", color: validation.isValid ? "var(--rf-success)" : "var(--rf-error)" }}>
+                      {validationScore}%
+                    </span>
+                    <div style={{ flex: 1, height: 6, background: "var(--rf-neutral-bg)", borderRadius: 999 }}>
+                      <div
+                        style={{
+                          width: `${validationScore}%`, height: "100%",
+                          background: validation.isValid ? "var(--rf-success)" : validation.errors.length > 0 ? "var(--rf-error)" : "var(--rf-warning)",
+                          borderRadius: 999, transition: "width .3s",
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: validation.isValid ? "var(--rf-success)" : "var(--rf-text-muted)" }}>
+                    {validation.isValid
+                      ? "✓ Validă — se poate trimite la ANAF"
+                      : `${validation.errors.length} erori · ${validation.warnings.length} avertismente`}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <span style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--rf-mono)", color: "var(--rf-text-dim)" }}>
+                      {validating ? "…" : "—"}
+                    </span>
+                    <div style={{ flex: 1, height: 6, background: "var(--rf-neutral-bg)", borderRadius: 999 }}>
+                      <div style={{ width: "0%", height: "100%", background: "var(--rf-text-dim)", borderRadius: 999 }} />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
+                    {validating ? "Se validează…" : "Salvați schiță pentru a valida"}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Validation items */}
+            <div style={{ maxHeight: 260, overflowY: "auto" }}>
+              {savedId && validation ? (
+                <>
+                  {validation.errors.map((msg, i) => (
+                    <div
+                      key={`e${i}`}
+                      style={{
+                        display: "flex", gap: 10, padding: "10px 18px",
+                        borderBottom: "1px solid var(--rf-border)",
+                        background: "var(--rf-error-bg)",
+                      }}
+                    >
+                      <Icon name="cancel" size={14} style={{ color: "var(--rf-error)", flexShrink: 0, marginTop: 1 }} />
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--rf-error)" }}>Eroare</div>
+                        <div style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>{msg}</div>
+                      </div>
+                    </div>
+                  ))}
+                  {validation.warnings.map((msg, i) => (
+                    <div
+                      key={`w${i}`}
+                      style={{
+                        display: "flex", gap: 10, padding: "10px 18px",
+                        borderBottom: "1px solid var(--rf-border)",
+                        background: "var(--rf-warning-bg)",
+                      }}
+                    >
+                      <Icon name="warning" size={14} style={{ color: "var(--rf-warning)", flexShrink: 0, marginTop: 1 }} />
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--rf-warning)" }}>Avertisment</div>
+                        <div style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>{msg}</div>
+                      </div>
+                    </div>
+                  ))}
+                  {validation.isValid && validation.errors.length === 0 && (
+                    <div
+                      style={{
+                        display: "flex", gap: 10, padding: "10px 18px",
+                        background: "var(--rf-success-bg)",
+                      }}
+                    >
+                      <Icon name="check" size={14} style={{ color: "var(--rf-success)", flexShrink: 0, marginTop: 1 }} />
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--rf-success)" }}>Factură validă</div>
+                        <div style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
+                          Toate regulile CIUS-RO sunt respectate.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div
+                  style={{
+                    display: "flex", gap: 10, padding: "10px 18px",
+                    background: "var(--rf-warning-bg)",
+                  }}
+                >
+                  <Icon name="warning" size={14} style={{ color: "var(--rf-warning)", flexShrink: 0, marginTop: 1 }} />
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--rf-warning)" }}>Validare indisponibilă</div>
+                    <div style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
+                      Completați formularul și salvați ca schiță pentru a valida.
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Schema footer */}
             <div
               style={{
-                fontSize: 10,
-                textTransform: "uppercase",
-                letterSpacing: 0.1,
-                color: "var(--text-dim)",
-                marginBottom: 4,
+                padding: "8px 18px",
+                borderTop: "1px solid var(--rf-border)",
+                background: "var(--rf-toolbar-2)",
+                fontSize: 11,
+                color: "var(--rf-text-dim)",
               }}
             >
-              Validare automată
+              Schema: <b style={{ color: "var(--rf-text-muted)" }}>CIUS-RO 1.0.1</b>
             </div>
-            Schema: <b>CIUS-RO 1.0.1</b>
           </div>
-        </aside>
+
+          {/* Generate & Send card */}
+          <SectionCard icon="fileOut" title="Generează & trimite">
+            <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <Btn
+                variant="secondary"
+                icon="file"
+                block
+                disabled={saveDraftMutation.isPending}
+                onClick={() => saveDraftMutation.mutate()}
+              >
+                Salvează ca schiță
+              </Btn>
+              <Btn
+                variant="primary"
+                icon="cloudUp"
+                block
+                disabled={saveDraftMutation.isPending}
+                onClick={() => {
+                  submitAfterSaveRef.current = true;
+                  setSubmitError(null);
+                  saveDraftMutation.mutate();
+                }}
+              >
+                Trimite la ANAF
+              </Btn>
+              <div
+                style={{
+                  display: "flex", gap: 6, fontSize: 12, color: "var(--rf-text-muted)", marginTop: 4,
+                }}
+              >
+                <Icon name="info" size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                Validarea verifică structura conform schemei CIUS-RO înainte de trimitere.
+              </div>
+            </div>
+          </SectionCard>
+        </div>
       </div>
     </div>
   );

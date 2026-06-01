@@ -103,10 +103,15 @@ const companyEditRoute = createRoute({
 
 // ─── Restul paginilor (placeholders încă) ─────────────────────────────────
 
+type InvoiceView = "storned";
+
 const invoicesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/invoices",
   component: InvoicesPage,
+  validateSearch: (search: Record<string, unknown>): { view?: InvoiceView } => ({
+    view: search.view === "storned" ? "storned" : undefined,
+  }),
 });
 
 const invoiceDetailRoute = createRoute({

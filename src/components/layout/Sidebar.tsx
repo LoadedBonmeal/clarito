@@ -7,7 +7,7 @@
  * Preserves badge queries from original Sidebar.tsx.
  */
 
-import { Link, useLocation } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 
 import { Icon } from "@/components/shared/Icon";
@@ -23,6 +23,8 @@ interface NavItem {
   icon: string;
   path: string;
   matchPrefix?: string;
+  /** TanStack search params to append when navigating */
+  searchParams?: Record<string, string>;
   badgeAccent?: boolean;
   disabled?: boolean;
   badge?: number;
@@ -41,6 +43,7 @@ interface SidebarProps {
 
 export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
   const location = useLocation();
+  const navigate = useNavigate();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
@@ -98,7 +101,7 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
         { id: "facturi-emise",   label: "Facturi emise",   icon: "invoice",   path: "/invoices",      matchPrefix: "/invoices",      badge: invoicesBadge },
         { id: "facturi-primite", label: "Facturi primite", icon: "invoiceIn", path: "/received",      matchPrefix: "/received",      badge: receivedBadge },
         { id: "mesaje-spv",      label: "Mesaje SPV",      icon: "anaf",      path: "/notifications", badge: spvBadge, badgeAccent: true },
-        { id: "stornate",        label: "Stornate",        icon: "storno",    path: "/invoices" },
+        { id: "stornate",        label: "Stornate",        icon: "storno",    path: "/invoices", searchParams: { view: "storned" } },
       ],
     },
     {
@@ -177,9 +180,20 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
           <div key={grp.group}>
             <div className="rf-nav-group-label">{grp.group}</div>
             {grp.items.map((item) => {
-              const isActive = item.matchPrefix
-                ? location.pathname === item.matchPrefix ||
-                  location.pathname.startsWith(`${item.matchPrefix}/`)
+              // `view=storned` distinguishes the "Stornate" deep-link from
+              // "Facturi emise": both point at /invoices, so the active state
+              // must also consider the search param (else both highlight).
+              const stornedView = (location.search as { view?: string }).view === "storned";
+              const isActive = item.searchParams
+                ? location.pathname === item.path &&
+                  (location.search as Record<string, string>).view === item.searchParams.view
+                : item.matchPrefix
+                ? (location.pathname === item.matchPrefix ||
+                    location.pathname.startsWith(`${item.matchPrefix}/`)) &&
+                  // a plain /invoices item yields to the storned deep-link
+                  !(item.matchPrefix === "/invoices" &&
+                    location.pathname === "/invoices" &&
+                    stornedView)
                 : location.pathname === item.path;
 
               if (item.disabled) {
@@ -193,6 +207,28 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
                     <span className="rf-nav-ic"><Icon name={item.icon} size={18} /></span>
                     <span className="rf-nav-label">{item.label}</span>
                   </div>
+                );
+              }
+
+              // Items with searchParams use a button+navigate to avoid TanStack
+              // router type issues with dynamic to+search combos.
+              if (item.searchParams) {
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`rf-nav-item${isActive ? " active" : ""}`}
+                    title={sidebarCollapsed ? item.label : undefined}
+                    onClick={() => void navigate({ to: item.path as "/invoices", search: item.searchParams as { view?: "storned" } })}
+                  >
+                    <span className="rf-nav-ic"><Icon name={item.icon} size={18} /></span>
+                    <span className="rf-nav-label">{item.label}</span>
+                    {item.badge != null && (
+                      <span className={`rf-nav-badge${item.badgeAccent ? " accent" : ""}`}>
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
                 );
               }
 
