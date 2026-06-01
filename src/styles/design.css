@@ -795,7 +795,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .panel {
   background: var(--bg-content);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--rf-radius);
   box-shadow: var(--shadow-card);
   overflow: hidden;
 }
@@ -891,7 +891,7 @@ input, select, textarea { font: inherit; color: inherit; }
   box-shadow: var(--shadow-pop);
   display: flex; flex-direction: column;
   max-height: 560px;
-  border-radius: 8px;
+  border-radius: var(--rf-radius);
   overflow: hidden;
 }
 .palette-input {
@@ -997,7 +997,7 @@ input, select, textarea { font: inherit; color: inherit; }
   padding: 20px 24px 18px;
   display: flex; flex-direction: column; gap: 6px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--rf-radius);
   box-shadow: var(--shadow-card);
   border-bottom: 3px solid var(--kpi-accent, var(--accent));
   position: relative;
@@ -1170,7 +1170,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .line-items {
   border: 1px solid var(--border-strong);
   margin-top: 8px;
-  border-radius: 6px;
+  border-radius: var(--rf-radius-sm);
   overflow: hidden;
 }
 .line-items table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -1294,7 +1294,7 @@ input, select, textarea { font: inherit; color: inherit; }
   border-left: 4px solid #EF4444;
   color: #7F1D1D;
   font-size: 13px;
-  border-radius: 6px;
+  border-radius: var(--rf-radius-sm);
   box-shadow: var(--shadow-card);
 }
 .dark .callout { background: oklch(0.20 0.07 25); color: #FDA4AF; border-color: oklch(0.40 0.12 25); }
@@ -1348,7 +1348,7 @@ input, select, textarea { font: inherit; color: inherit; }
   max-height: 440px;
   overflow: auto;
   z-index: 60;
-  border-radius: 8px;
+  border-radius: var(--rf-radius);
 }
 .popover-search {
   border-bottom: 1px solid var(--border);
