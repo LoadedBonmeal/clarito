@@ -5,6 +5,7 @@ Toate modificările notabile ale RoFactura. Format: [Keep a Changelog](https://k
 ## [0.3.1] - 2026-05-31
 
 ### Added
+- **Multi-monedă (FX)**: facturi non-RON funcționale — câmp curs valutar + buton „Preia curs BNR" (curs oficial BNR), UBL compliant EN16931 (emite `TaxCurrencyCode` + TVA în RON), normalizare RON în D300/D394/SAF-T/raport TVA, parsare curs din facturile primite, coloană Moneda în jurnalul de vânzări
 - **Module noi**: Articole/Stocuri (catalog produse + selector în liniile de factură pentru facturare rapidă/reutilizabilă), Cote TVA editabile (catalog din DB ce alimentează dropdown-ul TVA), Chitanțe (document încasare numerar + PDF cu suma în litere, numerotare per-companie), Plan de conturi (catalog conturi + seed plan RO standard); butonul „Plată" conectat la pagina de plăți — toate cele 5 item-uri de meniu moarte sunt acum funcționale
 - Rapoarte ca view-uri distincte (`/reports?view=`): D394, D406 SAF-T, jurnal vânzări, jurnal cumpărări, export contabil + bară de tab-uri
 - Parsare TVA din XML-ul facturilor primite (net/TVA pe cotă) + backfill „Recalculează TVA din XML"
