@@ -615,6 +615,14 @@ export const accounts = {
     invoke<number>("seed_standard_accounts", { companyId }),
 };
 
+// ─── BNR — curs valutar oficial (R17 Wave 2) ──────────────────────────────
+
+/** Returnează cursul oficial BNR (RON per 1 unitate valutară) la data cerută. */
+export const bnr = {
+  fetchRate: (currency: string, date: string) =>
+    invoke<number>("fetch_bnr_rate", { currency, date }),
+};
+
 // ─── GDPR / data portability ──────────────────────────────────────────────
 
 export const gdpr = {
@@ -629,30 +637,31 @@ export const gdpr = {
 
 export const api = {
   accounts,
-  companies,
-  contacts,
-  invoices,
-  received,
-  notifications,
-  settings,
-  license,
-  system,
-  ubl,
   anaf,
   archive,
+  bnr,
   certificates,
-  integrations,
+  companies,
+  contacts,
+  d394,
+  declarations,
+  feedback,
+  gdpr,
   importData,
-  reports,
+  integrations,
+  invoices,
+  journals,
+  license,
+  notifications,
   payments,
   products,
   receipts,
+  received,
   recurring,
+  reports,
   saft,
-  feedback,
-  gdpr,
-  declarations,
-  d394,
-  journals,
+  settings,
+  system,
+  ubl,
   vatRates,
 };

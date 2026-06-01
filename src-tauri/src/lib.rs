@@ -385,6 +385,8 @@ pub fn run() {
             // gdpr / data portability
             commands::gdpr::export_all_my_data,
             commands::gdpr::wipe_all_data,
+            // bnr — curs valutar oficial (R17 Wave 2)
+            commands::bnr::fetch_bnr_rate,
             // vat rates — global editable catalog (R15 Wave 2)
             commands::vat_rates::list_vat_rates,
             commands::vat_rates::get_vat_rate,

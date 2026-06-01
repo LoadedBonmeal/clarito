@@ -6,6 +6,7 @@
 pub mod accounts;
 pub mod anaf;
 pub mod archive;
+pub mod bnr;
 pub mod companies;
 pub mod contacts;
 pub mod d394;
