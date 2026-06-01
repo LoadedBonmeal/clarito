@@ -1,3 +1,15 @@
+/**
+ * OnboardingGate — Wave 6 re-skin.
+ *
+ * Gate logic: 100% preserved.
+ *  - Loading → LoadingScreen (rf spinner)
+ *  - No companies → OnboardingWizard (first run)
+ *  - Companies + invalid license → LicenseExpiredScreen (rf card)
+ *  - Companies + valid license → render children
+ *
+ * LicenseExpiredScreen: rf card, purchase url → openUrl, activate form → api.license.activate.
+ */
+
 import { useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -6,6 +18,10 @@ import { OnboardingWizard } from "./OnboardingWizard";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { formatError } from "@/lib/error-mapper";
+import { Icon } from "@/components/shared/Icon";
+import { Btn, Field, Input, Banner } from "@/components/rf";
+
+// ─── Loading screen ───────────────────────────────────────────────────────────
 
 function LoadingScreen() {
   return (
@@ -20,12 +36,28 @@ function LoadingScreen() {
         zIndex: 9999,
       }}
     >
-      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Se încarcă…</div>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+        {/* Animated spinner using rf accent */}
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: "50%",
+            border: "3px solid var(--rf-border)",
+            borderTopColor: "var(--rf-accent)",
+            animation: "spin 0.8s linear infinite",
+          }}
+        />
+        <span className="rf-text-muted" style={{ fontSize: 13.5 }}>Se încarcă…</span>
+      </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
 
-/** Shown when the trial has expired or the license record was tampered with. */
+// ─── License expired screen ────────────────────────────────────────────────────
+
 function LicenseExpiredScreen() {
   const queryClient = useQueryClient();
   const [showActivate, setShowActivate] = useState(false);
@@ -58,55 +90,54 @@ function LicenseExpiredScreen() {
     >
       <div
         style={{
-          width: 440,
-          background: "var(--bg-content)",
-          border: "1px solid var(--border-strong)",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.12)",
-          padding: "32px 36px 28px",
+          width: 460,
+          background: "var(--rf-content)",
+          border: "1px solid var(--rf-border)",
+          borderRadius: "var(--rf-radius)",
+          boxShadow: "var(--rf-shadow-md)",
+          padding: "40px 40px 32px",
           textAlign: "center",
         }}
       >
+        {/* Icon */}
         <div
           style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 52,
-            height: 52,
-            background: "#FEE2E2",
-            color: "#DC2626",
-            fontSize: 24,
-            fontWeight: 700,
-            marginBottom: 20,
+            width: 60,
+            height: 60,
+            borderRadius: "50%",
+            background: "var(--rf-error-bg)",
+            color: "var(--rf-error)",
+            display: "grid",
+            placeItems: "center",
+            margin: "0 auto 20px",
           }}
         >
-          !
+          <Icon name="alert" size={28} />
         </div>
 
         {!showActivate ? (
           <>
             <h2
               style={{
-                fontSize: 17,
+                fontSize: 20,
                 fontWeight: 700,
                 margin: "0 0 10px",
-                fontFamily: "var(--font-ui)",
+                letterSpacing: "-0.01em",
               }}
             >
               Licența a expirat
             </h2>
-            <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 8px", lineHeight: 1.7 }}>
+            <p className="rf-text-muted" style={{ fontSize: 13.5, margin: "0 0 8px", lineHeight: 1.7 }}>
               Perioada de probă de <strong>14 zile</strong> s-a încheiat sau
               licența nu mai este validă pe această mașină.
             </p>
-            <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 24px", lineHeight: 1.7 }}>
+            <p className="rf-text-muted" style={{ fontSize: 13.5, margin: "0 0 28px", lineHeight: 1.7 }}>
               Datele dvs. sunt păstrate local și nu vor fi șterse.
             </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button
-                type="button"
-                className="btn primary"
-                style={{ width: "100%", justifyContent: "center", height: 36, fontSize: 12 }}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <Btn
+                variant="primary"
+                block
                 onClick={async () => {
                   try {
                     const purchase = await api.settings.get("purchase_url");
@@ -117,26 +148,25 @@ function LicenseExpiredScreen() {
                 }}
               >
                 Cumpărați licența →
-              </button>
-              <button
-                type="button"
-                className="btn"
-                style={{ width: "100%", justifyContent: "center", height: 32, fontSize: 12, fontWeight: 600 }}
-                onClick={() => setShowActivate(true)}
+              </Btn>
+              <Btn
+                variant="secondary"
+                block
+                onClick={() => { setShowActivate(true); setActivateError(null); }}
               >
                 Am deja o licență — Introduceți cheia →
-              </button>
+              </Btn>
             </div>
           </>
         ) : (
           <>
             <h2
               style={{
-                fontSize: 15,
+                fontSize: 18,
                 fontWeight: 700,
                 margin: "0 0 20px",
-                fontFamily: "var(--font-ui)",
                 textAlign: "left",
+                letterSpacing: "-0.01em",
               }}
             >
               Activare licență
@@ -149,58 +179,47 @@ function LicenseExpiredScreen() {
                 if (!actEmail.trim()) { setActivateError("Introduceți emailul de achiziție."); return; }
                 activateMutation.mutate();
               }}
-              style={{ display: "flex", flexDirection: "column", gap: 10, textAlign: "left" }}
+              style={{ display: "flex", flexDirection: "column", gap: 12, textAlign: "left" }}
             >
-              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>
-                  Cheie licență *
-                </label>
-                <input
-                  className="field"
+              <Field label="Cheie licență" required>
+                <Input
+                  className="rf-mono"
                   placeholder="XXXX-XXXX-XXXX-XXXX"
-                  style={{ fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.05em" }}
+                  style={{ textTransform: "uppercase", letterSpacing: "0.05em" }}
                   value={key}
                   onChange={(e) => setKey(e.target.value.toUpperCase())}
                   autoComplete="off"
                   spellCheck={false}
                 />
-                <span style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", lineHeight: 1.5 }}>
                   Introduceți cheia primită prin email după achiziție (format XXXX-XXXX-XXXX-XXXX).
                 </span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>
-                  Email achiziție *
-                </label>
-                <input
-                  className="field"
+              </Field>
+              <Field label="Email achiziție" required>
+                <Input
                   type="email"
                   placeholder="office@firma.ro"
                   value={actEmail}
                   onChange={(e) => setActEmail(e.target.value)}
                 />
-              </div>
-              {activateError && (
-                <div style={{ padding: "7px 10px", background: "#FEE2E2", border: "1px solid #FECACA", fontSize: 11, color: "#991B1B" }}>
-                  {activateError}
-                </div>
-              )}
-              <button
+              </Field>
+              {activateError && <Banner variant="error">{activateError}</Banner>}
+              <Btn
                 type="submit"
+                variant="primary"
                 disabled={activateMutation.isPending}
-                className="btn primary"
-                style={{ width: "100%", justifyContent: "center", height: 34, fontSize: 12 }}
+                block
               >
                 {activateMutation.isPending ? "Se activează…" : "Activează →"}
-              </button>
-              <button
+              </Btn>
+              <Btn
                 type="button"
-                className="btn"
-                style={{ width: "100%", justifyContent: "center", height: 28, fontSize: 11 }}
+                variant="ghost"
+                block
                 onClick={() => { setShowActivate(false); setActivateError(null); }}
               >
                 ← Înapoi
-              </button>
+              </Btn>
             </form>
           </>
         )}
@@ -208,6 +227,8 @@ function LicenseExpiredScreen() {
     </div>
   );
 }
+
+// ─── Gate ─────────────────────────────────────────────────────────────────────
 
 interface OnboardingGateProps {
   children: ReactNode;
