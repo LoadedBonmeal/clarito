@@ -131,6 +131,8 @@ pub async fn export_all_my_data(
     let dest_clone = dest.clone();
     let db_path_clone = db_path.clone();
     let archive_dir_clone = archive_dir.clone();
+    let invoices_dir = data_dir.join("invoices");
+    let receipts_dir = data_dir.join("receipts");
 
     let zip_bytes_written = tauri::async_runtime::spawn_blocking(move || -> Result<u64, AppError> {
         let file = std::fs::File::create(&dest_clone).map_err(AppError::Io)?;
@@ -146,16 +148,28 @@ pub async fn export_all_my_data(
             zip.write_all(&db_bytes).map_err(AppError::Io)?;
         }
 
-        // Add archive/** preserving relative paths
+        // Add archive/** preserving relative paths (ANAF received invoices).
         if archive_dir_clone.exists() {
             zip_dir_recursive(&archive_dir_clone, &archive_dir_clone, &mut zip, opts)?;
+        }
+
+        // Add invoices/** — manually-generated invoice XML+PDF
+        // (ubl/paths.rs → {app_data}/invoices/{company_id}/{id}.{xml,pdf}).
+        if invoices_dir.exists() {
+            zip_dir_recursive(&invoices_dir, &invoices_dir, &mut zip, opts)?;
+        }
+
+        // Add receipts/** — receipt PDFs
+        // (commands/receipts.rs → {app_data}/receipts/{company_id}/{id}.pdf).
+        if receipts_dir.exists() {
+            zip_dir_recursive(&receipts_dir, &receipts_dir, &mut zip, opts)?;
         }
 
         // README
         zip.start_file("README.txt", opts)
             .map_err(|e| AppError::Archive(e.to_string()))?;
         let readme = format!(
-            "Export GDPR — Clarito\r\nData: {}\r\n\r\nConține:\r\n- data.db: baza de date SQLite\r\n- archive/: fișiere XML+PDF facturi\r\n\r\nAcest fișier conține toate datele dvs. din aplicație.\r\n",
+            "Export GDPR — Clarito\r\nData: {}\r\n\r\nConține:\r\n- data.db: baza de date SQLite\r\n- archive/: fișiere XML+PDF facturi (recepționate ANAF)\r\n- invoices/: fișiere XML+PDF facturi emise manual\r\n- receipts/: chitanțe PDF\r\n\r\nAcest fișier conține toate datele dvs. din aplicație.\r\n",
             chrono::Utc::now().format("%d.%m.%Y %H:%M UTC")
         );
         zip.write_all(readme.as_bytes()).map_err(AppError::Io)?;
@@ -499,6 +513,49 @@ mod tests {
         assert!(
             names.iter().any(|n| n == "archive/sent/INV-001.xml"),
             "Expected 'archive/sent/INV-001.xml', got: {names:?}"
+        );
+    }
+
+    /// Verify that GDPR export includes invoices/ and receipts/ directories.
+    #[test]
+    fn gdpr_export_includes_invoices_and_receipts() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Simulate app_data/invoices/comp-1/INV-001.xml
+        let inv_dir = tmp.path().join("invoices").join("comp-1");
+        std::fs::create_dir_all(&inv_dir).unwrap();
+        std::fs::write(inv_dir.join("INV-001.xml"), b"<Invoice/>").unwrap();
+
+        // Simulate app_data/receipts/comp-1/REC-001.pdf
+        let rec_dir = tmp.path().join("receipts").join("comp-1");
+        std::fs::create_dir_all(&rec_dir).unwrap();
+        std::fs::write(rec_dir.join("REC-001.pdf"), b"%PDF").unwrap();
+
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zw = zip::ZipWriter::new(buf);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+
+        // Mirror what export_all_my_data does for invoices/ and receipts/.
+        let invoices_dir = tmp.path().join("invoices");
+        let receipts_dir = tmp.path().join("receipts");
+        zip_dir_recursive(&invoices_dir, &invoices_dir, &mut zw, opts).unwrap();
+        zip_dir_recursive(&receipts_dir, &receipts_dir, &mut zw, opts).unwrap();
+
+        let inner = zw.finish().unwrap().into_inner();
+        let cursor = std::io::Cursor::new(inner);
+        let mut za = zip::ZipArchive::new(cursor).unwrap();
+        let names: Vec<_> = (0..za.len())
+            .map(|i| za.by_index(i).unwrap().name().to_string())
+            .collect();
+
+        assert!(
+            names.iter().any(|n| n == "invoices/comp-1/INV-001.xml"),
+            "GDPR export must contain 'invoices/comp-1/INV-001.xml', got: {names:?}"
+        );
+        assert!(
+            names.iter().any(|n| n == "receipts/comp-1/REC-001.pdf"),
+            "GDPR export must contain 'receipts/comp-1/REC-001.pdf', got: {names:?}"
         );
     }
 }

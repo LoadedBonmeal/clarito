@@ -506,6 +506,16 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
     // Curs de schimb extras din TaxExchangeRate (preferat) sau PricingExchangeRate (fallback)
     let mut exchange_rate: Option<f64> = None;
 
+    // FX derivation: ANAF non-RON invoices often have two TaxTotal blocks —
+    // the first in the document currency, the second in RON — but omit
+    // TaxExchangeRate.  Track the ordinal of the current TaxTotal (1-based)
+    // and the first-block TaxAmount (document-currency TVA) so we can derive
+    // the implied rate = RON_vat / doc_currency_vat if the rate is still absent
+    // after parsing.
+    let mut tax_total_count = 0u32; // how many TaxTotal blocks we have entered
+    let mut first_tax_total_vat: Option<Decimal> = None; // TaxAmount from TaxTotal #1 (doc currency)
+    let mut second_tax_total_vat: Option<Decimal> = None; // TaxAmount from TaxTotal #2 (RON)
+
     // Colectare câmpuri pentru subtotalul curent
     let mut sub_base: Option<String> = None;
     let mut sub_vat: Option<String> = None;
@@ -526,7 +536,10 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
                     "PartyTaxScheme" if depth_supplier > 0 => depth_party_tax += 1,
                     "PartyLegalEntity" if depth_supplier > 0 => depth_party_legal += 1,
                     "LegalMonetaryTotal" => depth_monetary_total += 1,
-                    "TaxTotal" => depth_tax_total += 1,
+                    "TaxTotal" => {
+                        depth_tax_total += 1;
+                        tax_total_count += 1;
+                    }
                     "TaxSubtotal" if depth_tax_total > 0 => {
                         depth_tax_subtotal += 1;
                         // Resetăm colectoarele pentru noul subtotal
@@ -625,11 +638,24 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
                         }
                     }
                     // TaxAmount: distingem doc-level (în TaxTotal dar NU în TaxSubtotal)
-                    // vs subtotal-level (în TaxSubtotal)
+                    // vs subtotal-level (în TaxSubtotal).
+                    //
+                    // For non-RON invoices ANAF often emits two TaxTotal blocks:
+                    //   TaxTotal #1 — TVA în moneda documentului (ex. EUR)
+                    //   TaxTotal #2 — TVA în RON (pentru reconciliere fiscală)
+                    // We capture each block's doc-level TaxAmount separately so we
+                    // can derive the implied exchange rate when no explicit rate is
+                    // present (= RON_vat / doc_currency_vat).
                     "TaxAmount" if depth_tax_total > 0 && depth_tax_subtotal == 0 => {
                         // Nivel document — TVA total factură
                         if let Ok(d) = Decimal::from_str(text.trim()) {
                             vat_amount_doc = Some(d.round_dp(2).to_string());
+                            // Track first vs second TaxTotal for implied-rate derivation.
+                            if tax_total_count == 1 && first_tax_total_vat.is_none() {
+                                first_tax_total_vat = Some(d);
+                            } else if tax_total_count == 2 && second_tax_total_vat.is_none() {
+                                second_tax_total_vat = Some(d);
+                            }
                         }
                     }
                     "TaxAmount" if depth_tax_subtotal > 0 => {
@@ -675,6 +701,22 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
             _ => {}
         }
         buf.clear();
+    }
+
+    // FX implied-rate derivation:
+    // When exchange_rate is still None after parsing AND the document currency
+    // is not RON AND there are two TaxTotal blocks (doc-currency + RON), derive
+    // the implied rate = RON_vat / doc_currency_vat.
+    // Guard: doc_currency_vat must be non-zero to avoid divide-by-zero.
+    if exchange_rate.is_none() && currency != "RON" {
+        if let (Some(doc_vat), Some(ron_vat)) = (first_tax_total_vat, second_tax_total_vat) {
+            if doc_vat != Decimal::ZERO {
+                // Convert Decimal → f64 for storage (same type as explicit rates).
+                use rust_decimal::prelude::ToPrimitive;
+                let implied = ron_vat / doc_vat;
+                exchange_rate = implied.to_f64();
+            }
+        }
     }
 
     ParsedReceived {
@@ -963,6 +1005,130 @@ mod tests {
             result.exchange_rate,
             Some(4.98),
             "TaxExchangeRate must be preferred over PricingExchangeRate"
+        );
+    }
+
+    /// FX implied-rate derivation: EUR invoice with RON second TaxTotal, no explicit rate.
+    /// ANAF real invoices often omit TaxExchangeRate but include a second TaxTotal in RON.
+    /// The parser must derive the implied rate = RON_vat / EUR_vat.
+    ///
+    /// Example: TaxTotal #1 → EUR 190.00, TaxTotal #2 → RON 950.00
+    /// Implied rate = 950.00 / 190.00 = 5.0
+    #[test]
+    fn parser_derives_implied_rate_from_ron_second_tax_total() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+  <cbc:IssueDate>2024-11-01</cbc:IssueDate>
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cac:PartyTaxScheme>
+        <cbc:CompanyID>RO99999999</cbc:CompanyID>
+      </cac:PartyTaxScheme>
+      <cac:PartyLegalEntity>
+        <cbc:RegistrationName>SC EUR TEST SRL</cbc:RegistrationName>
+      </cac:PartyLegalEntity>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <!-- TaxTotal #1 in EUR (document currency) -->
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="EUR">190.00</cbc:TaxAmount>
+    <cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="EUR">1000.00</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="EUR">190.00</cbc:TaxAmount>
+      <cac:TaxCategory>
+        <cbc:ID>S</cbc:ID>
+        <cbc:Percent>19</cbc:Percent>
+      </cac:TaxCategory>
+    </cac:TaxSubtotal>
+  </cac:TaxTotal>
+  <!-- TaxTotal #2 in RON (for Romanian fiscal reconciliation) — no TaxExchangeRate element -->
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="RON">950.00</cbc:TaxAmount>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:TaxExclusiveAmount currencyID="EUR">1000.00</cbc:TaxExclusiveAmount>
+    <cbc:PayableAmount currencyID="EUR">1190.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>"#;
+        let result = parse_received_xml(xml.as_bytes());
+        assert_eq!(result.currency, "EUR");
+        // No explicit TaxExchangeRate or PricingExchangeRate in the XML.
+        // Implied rate = RON_vat / EUR_vat = 950.00 / 190.00 = 5.0
+        let rate = result
+            .exchange_rate
+            .expect("exchange_rate must be derived from RON second TaxTotal");
+        let diff = (rate - 5.0_f64).abs();
+        assert!(
+            diff < 1e-9,
+            "Implied rate must be 950/190 = 5.0, got {rate}"
+        );
+    }
+
+    /// FX implied-rate derivation: when an explicit TaxExchangeRate IS present,
+    /// the derivation must NOT overwrite it.
+    #[test]
+    fn parser_explicit_rate_takes_priority_over_implied() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+  <cbc:IssueDate>2024-11-02</cbc:IssueDate>
+  <cac:TaxExchangeRate>
+    <cbc:CalculationRate>4.9500</cbc:CalculationRate>
+  </cac:TaxExchangeRate>
+  <!-- TaxTotal #1 EUR -->
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="EUR">100.00</cbc:TaxAmount>
+  </cac:TaxTotal>
+  <!-- TaxTotal #2 RON — would yield implied rate 5.0, but explicit rate is 4.95 -->
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="RON">500.00</cbc:TaxAmount>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:PayableAmount currencyID="EUR">590.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>"#;
+        let result = parse_received_xml(xml.as_bytes());
+        // Explicit rate 4.95 must win over implied 500/100 = 5.0.
+        let rate = result.exchange_rate.expect("exchange_rate must be present");
+        let diff = (rate - 4.95_f64).abs();
+        assert!(
+            diff < 1e-9,
+            "Explicit TaxExchangeRate 4.95 must not be overwritten by implied rate, got {rate}"
+        );
+    }
+
+    /// FX implied-rate derivation: guard against divide-by-zero when the
+    /// first TaxTotal has TaxAmount = 0.00.
+    #[test]
+    fn parser_implied_rate_zero_divisor_guard() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+  <cbc:IssueDate>2024-11-03</cbc:IssueDate>
+  <!-- TaxTotal #1 with zero EUR VAT (e.g. zero-rated invoice) -->
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="EUR">0.00</cbc:TaxAmount>
+  </cac:TaxTotal>
+  <!-- TaxTotal #2 RON -->
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="RON">0.00</cbc:TaxAmount>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:PayableAmount currencyID="EUR">1000.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>"#;
+        let result = parse_received_xml(xml.as_bytes());
+        // With zero-divisor the derivation must be skipped — rate stays None.
+        assert_eq!(
+            result.exchange_rate, None,
+            "exchange_rate must remain None when doc-currency VAT is zero (div-by-zero guard)"
         );
     }
 

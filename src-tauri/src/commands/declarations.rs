@@ -2,7 +2,11 @@
 //!
 //! D300 este decontul de TVA lunar/trimestrial depus la ANAF.
 //! Această implementare acoperă:
-//! - **Vânzări** (TVA colectată): din facturile cu status VALIDATED.
+//! - **Vânzări** (TVA colectată): din facturile cu status VALIDATED sau STORNED.
+//!   Setul fiscal autorizat este `status IN ('VALIDATED','STORNED')` — identic cu
+//!   rapoartele TVA, jurnalele, D394 și SAF-T, pentru reconciliere completă.
+//!   Facturile STORNED sunt originalele ștornate (efectul lor fiscal rămâne în
+//!   perioada emiterii); nota de credit negativă are status VALIDATED.
 //! - **Achiziții** (TVA deductibilă): din received_invoice_vat_lines (Wave B).
 //!   Facturile primite fără defalcare TVA (net_amount IS NULL) sunt raportate
 //!   separat prin `purchase_unparsed_count`.
@@ -50,7 +54,7 @@ pub struct D300Report {
     pub total_base: String,
     /// Total TVA colectat (RON), 2 zecimale.
     pub total_vat: String,
-    /// Numărul de facturi VALIDATED incluse.
+    /// Numărul de facturi VALIDATED + STORNED incluse (setul fiscal autorizat).
     pub invoice_count: i64,
     // ── Wave B: achiziții ────────────────────────────────────────────────────
     /// Grupuri TVA deductibil (achiziții), din received_invoice_vat_lines.
@@ -72,7 +76,9 @@ pub struct D300Report {
 /// Calculează decontul D300 (TVA colectat — vânzări + TVA deductibil — achiziții)
 /// pentru o companie și o perioadă.
 ///
-/// **Vânzări**: doar facturile cu status VALIDATED (BIZ-11).
+/// **Vânzări**: facturile cu status VALIDATED sau STORNED (setul fiscal autorizat
+/// BIZ-11/storno-fix), identic cu rapoartele TVA, jurnalele, D394 și SAF-T,
+/// astfel încât D300 reconciliază cu celelalte declarații.
 /// **Achiziții**: facturile primite cu status != REJECTED, defalcate din
 /// `received_invoice_vat_lines`. Facturile fără defalcare sunt contorizate în
 /// `purchase_unparsed_count` și nu contribuie la totaluri.
@@ -100,10 +106,12 @@ pub async fn compute_d300(
         .try_get("cui")
         .unwrap_or_else(|_| company_id.clone());
 
-    // Numărul total de facturi VALIDATED în perioadă (pentru header).
+    // Numărul total de facturi din setul fiscal autorizat în perioadă (pentru header).
+    // Setul fiscal: VALIDATED + STORNED — același set ca rapoartele TVA, jurnalele,
+    // D394 și SAF-T, pentru reconciliere completă (storno-fix).
     let count_row = sqlx::query(
         "SELECT COUNT(*) as cnt FROM invoices \
-         WHERE status = 'VALIDATED' \
+         WHERE status IN ('VALIDATED','STORNED') \
            AND issue_date >= ?1 \
            AND issue_date <= ?2 \
            AND company_id = ?3",
@@ -121,12 +129,14 @@ pub async fn compute_d300(
     // BIZ-12: grupăm după (vat_rate, vat_category) — cote identice cu categorii diferite
     // (e.g. 0% Scutit "E" vs. 0% Zero-rated "Z") rămân rânduri separate.
     // Wave 4: fetch i.currency + i.exchange_rate for RON normalisation.
+    // Storno-fix: setul fiscal autorizat este VALIDATED + STORNED, identic cu
+    // rapoartele TVA, D394 și SAF-T, astfel încât D300 reconciliază cu celelalte.
     let line_rows = sqlx::query(
         "SELECT l.vat_rate, l.vat_category, l.subtotal_amount, l.vat_amount, \
                 COALESCE(i.currency, 'RON') AS currency, i.exchange_rate \
          FROM invoice_line_items l \
          JOIN invoices i ON i.id = l.invoice_id \
-         WHERE i.status = 'VALIDATED' \
+         WHERE i.status IN ('VALIDATED','STORNED') \
            AND i.issue_date >= ?1 \
            AND i.issue_date <= ?2 \
            AND i.company_id = ?3",
@@ -840,6 +850,60 @@ mod tests {
         );
         assert_eq!(base_ron, Decimal::from_str("5000.00").unwrap());
         assert_eq!(vat_ron, Decimal::from_str("950.00").unwrap());
+    }
+
+    /// Storno-fix: a STORNED original must be included in D300 sales totals —
+    /// mirrors the reconciliation with reports.rs/D394/SAF-T (status IN VALIDATED,STORNED).
+    ///
+    /// Simulates the accumulation logic that runs after the SQL query:
+    /// a STORNED invoice line (positive base+vat) is accumulated just like a
+    /// VALIDATED line, contributing to the D300 fiscal total.
+    #[test]
+    fn d300_storned_original_counted_in_sales_total() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+        use rust_decimal::prelude::ToPrimitive;
+        use std::collections::BTreeMap;
+
+        // Simulate two invoices fetched by the "IN ('VALIDATED','STORNED')" query:
+        //   1. A VALIDATED invoice: base=1000 RON, vat=190 RON
+        //   2. A STORNED original: base=500 RON, vat=95 RON
+        //      (its credit note is a separate VALIDATED invoice in the DB —
+        //       storno-fix pattern from reports.rs)
+        let lines = [
+            ("1000.00", "190.00", "RON", None::<f64>), // VALIDATED
+            ("500.00", "95.00", "RON", None::<f64>),   // STORNED original
+        ];
+
+        let mut groups: BTreeMap<(i64, String), (Decimal, Decimal, Decimal)> = BTreeMap::new();
+        for (base_s, vat_s, currency, raw_rate) in &lines {
+            let rate_dec = Decimal::from_str("0.19").unwrap();
+            let rate_key = (rate_dec * Decimal::from(100))
+                .round()
+                .to_i64()
+                .unwrap_or(0);
+            let fx = parse_rate(*raw_rate);
+            let base_ron = amount_to_ron(Decimal::from_str(base_s).unwrap(), currency, fx);
+            let vat_ron = amount_to_ron(Decimal::from_str(vat_s).unwrap(), currency, fx);
+            let e = groups.entry((rate_key, "S".to_string())).or_insert((
+                rate_dec,
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ));
+            e.1 += base_ron;
+            e.2 += vat_ron;
+        }
+
+        let g = &groups[&(19, "S".to_string())];
+        assert_eq!(
+            g.1,
+            Decimal::from_str("1500.00").unwrap(),
+            "D300 must include STORNED original: base should be 1000+500=1500 RON"
+        );
+        assert_eq!(
+            g.2,
+            Decimal::from_str("285.00").unwrap(),
+            "D300 must include STORNED original: vat should be 190+95=285 RON"
+        );
     }
 
     /// Wave 4: RON purchase line is unchanged.

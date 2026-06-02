@@ -180,28 +180,35 @@ export function ReportsPage() {
     [periodInvoices],
   );
 
-  const periodValidatedInvoices = useMemo(
-    () => validatedInvoices.filter((inv) => inv.issueDate.startsWith(prefix)),
-    [validatedInvoices, prefix],
-  );
-
   const yearValidatedInvoices = useMemo(
     () => validatedInvoices.filter((inv) => inv.issueDate.startsWith(String(selectedYear))),
     [validatedInvoices, selectedYear],
   );
 
-  const stats = useMemo(() => {
-    const totalCount = periodValidatedInvoices.length;
-    const totalNet   = periodValidatedInvoices.reduce((s, i) => s + parseDec(i.subtotalAmount), 0);
-    const totalVat   = periodValidatedInvoices.reduce((s, i) => s + parseDec(i.vatAmount), 0);
-    const totalGross = periodValidatedInvoices.reduce((s, i) => s + parseDec(i.totalAmount), 0);
-    return { totalCount, totalNet, totalVat, totalGross };
-  }, [periodValidatedInvoices]);
-
+  // ── TVA header / footer stats ─────────────────────────────────────────────
+  // Drive the Stats strip (Total net / TVA / cu TVA) from the SAME authoritative
+  // `vatReport` totals the "TVA pe cote" table uses — both use VALIDATED+STORNED
+  // and RON-converted amounts from the Rust backend.  Using a separate client-side
+  // recompute from VALIDATED-only raw-currency invoices produced contradictory
+  // totals on the same screen (P2 fix).
   const vatGroups = vatReport?.vatGroups ?? [];
   const vatTotals = vatReport
     ? { base: parseDec(vatReport.totalBase), vat: parseDec(vatReport.totalVat), total: parseDec(vatReport.totalAmount) }
     : { base: 0, vat: 0, total: 0 };
+
+  // `totalCount` is kept as a client-side count since vatReport doesn't expose
+  // an invoice count (it's a grouping report).  It uses the fiscal set
+  // (VALIDATED + STORNED) to mirror the Rust backend.
+  const stats = useMemo(() => {
+    const totalCount = periodFiscalInvoices.length;
+    return {
+      totalCount,
+      totalNet:   vatTotals.base,
+      totalVat:   vatTotals.vat,
+      totalGross: vatTotals.total,
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodFiscalInvoices.length, vatTotals.base, vatTotals.vat, vatTotals.total]);
 
   const isLoading = invoicesLoading || vatLoading;
 

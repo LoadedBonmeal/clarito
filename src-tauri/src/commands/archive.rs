@@ -151,11 +151,25 @@ pub async fn export_backup(
             zip_dir_recursive(&archive_dir, &archive_dir, &mut zip, opts)?;
         }
 
+        // Add invoices/**  (manually-generated XML+PDF under app_data/invoices/).
+        // ubl/paths.rs writes to {app_data}/invoices/{company_id}/{invoice_id}.{xml,pdf}.
+        let invoices_dir = data_dir.join("invoices");
+        if invoices_dir.exists() {
+            zip_dir_recursive(&invoices_dir, &invoices_dir, &mut zip, opts)?;
+        }
+
+        // Add receipts/**  (receipt PDFs under app_data/receipts/).
+        // commands/receipts.rs writes to {app_data}/receipts/{company_id}/{receipt_id}.pdf.
+        let receipts_dir = data_dir.join("receipts");
+        if receipts_dir.exists() {
+            zip_dir_recursive(&receipts_dir, &receipts_dir, &mut zip, opts)?;
+        }
+
         // Add README
         zip.start_file("README.txt", opts)
             .map_err(|e| AppError::Other(e.to_string()))?;
         let readme = format!(
-            "Backup eFactura Desktop\r\nData: {}\r\n\r\nConține:\r\n- data.db: baza de date SQLite\r\n- archive/: fișiere XML+PDF facturi\r\n\r\nRestaurare: folosiți funcția Import Backup din aplicație.\r\n",
+            "Backup eFactura Desktop\r\nData: {}\r\n\r\nConține:\r\n- data.db: baza de date SQLite\r\n- archive/: fișiere XML+PDF facturi (recepționate ANAF)\r\n- invoices/: fișiere XML+PDF facturi emise manual\r\n- receipts/: chitanțe PDF\r\n\r\nRestaurare: folosiți funcția Import Backup din aplicație.\r\n",
             chrono::Utc::now().format("%d.%m.%Y %H:%M UTC")
         );
         zip.write_all(readme.as_bytes()).map_err(AppError::Io)?;
@@ -391,6 +405,9 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
     // Clone archive_dir before moving it into spawn_blocking; the original is
     // needed again after the closure for the xml_path rewrite step (fix 3).
     let archive_dir_for_rewrite = archive_dir.clone();
+    // app_data_dir for restoring invoices/ and receipts/ entries.
+    let data_dir_for_restore = app.path().app_data_dir()?;
+    let data_dir_for_rewrite = data_dir_for_restore.clone();
     // Re-open and extract archive entries in spawn_blocking (zip crate is sync).
     tokio::task::spawn_blocking(move || -> Result<(), AppError> {
         let file2 = std::fs::File::open(&path).map_err(AppError::Io)?;
@@ -404,22 +421,42 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
 
             let raw_name = entry.name().to_string();
 
-            // Only process entries that start with "archive/" (skip data.db / README).
-            if !raw_name.starts_with("archive/") {
-                continue;
+            // Determine which top-level prefix this entry belongs to.
+            // We handle: archive/, invoices/, receipts/
+            // All other entries (data.db, README.txt, …) are skipped.
+            enum EntryKind<'a> {
+                Archive(&'a std::path::Path), // target root = archive_dir
+                AppData(&'a std::path::Path), // target root = data_dir_for_restore
             }
+            let kind = if raw_name.starts_with("archive/") {
+                EntryKind::Archive(&archive_dir)
+            } else if raw_name.starts_with("invoices/") || raw_name.starts_with("receipts/") {
+                EntryKind::AppData(&data_dir_for_restore)
+            } else {
+                continue;
+            };
+
+            let (guard_root, suffix) = match kind {
+                EntryKind::Archive(root) => (root, &raw_name["archive/".len()..]),
+                EntryKind::AppData(root) => {
+                    // For invoices/ and receipts/ the ZIP prefix IS the subdir name,
+                    // so we strip nothing — the full raw_name is the relative path
+                    // under data_dir (e.g. "invoices/comp-id/INV.xml").
+                    (root, raw_name.as_str())
+                }
+            };
 
             // SEC-ZIP-01: zip-slip guard — build absolute target path and verify it
-            // stays inside archive_dir after normalisation.
-            let target = archive_dir.join(&raw_name["archive/".len()..]);
-            let canonical_archive = archive_dir
+            // stays inside the expected root after normalisation.
+            let target = guard_root.join(suffix);
+            let canonical_root = guard_root
                 .canonicalize()
-                .unwrap_or_else(|_| archive_dir.clone());
+                .unwrap_or_else(|_| guard_root.to_path_buf());
             // Use clean path normalisation without requiring the file to exist yet.
             let normalised = normalise_path(&target);
-            if !normalised.starts_with(&canonical_archive) {
+            if !normalised.starts_with(&canonical_root) {
                 return Err(AppError::Other(format!(
-                    "Backup invalid: intrarea '{raw_name}' iese din directorul arhivă (zip-slip)."
+                    "Backup invalid: intrarea '{raw_name}' iese din directorul destinație (zip-slip)."
                 )));
             }
 
@@ -439,19 +476,29 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
     .map_err(|e| AppError::Other(e.to_string()))??;
 
     // 7. Rewrite absolute xml_path / pdf_path stored in the restored DB so they
-    //    point to the current machine's archive_dir rather than the source machine's.
+    //    point to the current machine's paths rather than the source machine's.
     //
-    //    Archive files live under <archive_dir>/sent/... and <archive_dir>/received/...
-    //    The stored paths on the source machine had a different <archive_dir> prefix.
-    //    Strategy: for each non-null path, find the last occurrence of "/sent/" or
-    //    "/received/" in the stored value — everything from that separator onward is
-    //    machine-independent (relative within the archive).  Prepend the local
-    //    archive_dir to obtain the correct absolute path on this machine.
+    //    Three classes of stored paths, each identified by a marker segment:
     //
-    //    Rows whose stored path does NOT contain "/sent/" or "/received/" are left
-    //    untouched (defensive: skip rather than corrupt).
+    //    a) Archive files (ANAF received): …/<archive_dir>/sent/…  or  …/received/…
+    //       Marker: "/sent/" or "/received/".  New root = local archive_dir.
+    //
+    //    b) Manually-generated invoices: …/invoices/<company_id>/<id>.{xml,pdf}
+    //       Marker: "/invoices/".  New root = local app_data_dir (data_dir_for_rewrite).
+    //       (ubl/paths.rs writes {app_data}/invoices/{company_id}/{invoice_id}.ext)
+    //
+    //    c) Receipt PDFs: …/receipts/<company_id>/<id>.pdf
+    //       Marker: "/receipts/".  New root = local app_data_dir.
+    //       (commands/receipts.rs writes {app_data}/receipts/{company_id}/{receipt_id}.pdf)
+    //
+    //    Rows whose stored path matches none of the markers are left untouched
+    //    (defensive: skip rather than corrupt).
+    //
+    //    All rewrites are separator-agnostic (replace('\','/')+instr) — same
+    //    XW-1 pattern used for /sent/ and /received/.
     {
         let archive_dir_str = archive_dir_for_rewrite.to_string_lossy().to_string();
+        let data_dir_str = data_dir_for_rewrite.to_string_lossy().to_string();
         // Open the restored DB directly (AppState still holds the old pool — the
         // app is about to restart, so we open a short-lived pool here).
         // Use SqliteConnectOptions to avoid URL injection via path characters.
@@ -461,9 +508,7 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
         if let Ok(pool) = sqlx::SqlitePool::connect_with(db_opts).await {
             for table in &["invoices", "received_invoices"] {
                 for col in &["xml_path", "pdf_path"] {
-                    // Rewrite paths that contain "/sent/" — update only the prefix
-                    // up to that separator, keeping the rest intact.
-                    //
+                    // (a) Rewrite paths that contain "/sent/" — archive files (ANAF received).
                     // Separator-agnostic: normalise the stored column to forward
                     // slashes before locating the marker so that paths stored with
                     // Windows backslashes (e.g. C:\...\sent\INV.xml) are matched
@@ -488,7 +533,7 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
                         );
                     }
 
-                    // Rewrite paths that contain "/received/" analogously.
+                    // (a) Rewrite paths that contain "/received/" analogously.
                     let sql_received = format!(
                         "UPDATE \"{table}\" \
                          SET \"{col}\" = ?1 || substr(replace(\"{col}\", '\\', '/'), \
@@ -506,10 +551,52 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
                             "import_backup: path rewrite (/received/) failed, continuing"
                         );
                     }
+
+                    // (b) Rewrite paths that contain "/invoices/" — manually-generated
+                    // invoice XML/PDF (ubl/paths.rs → {app_data}/invoices/…).
+                    // New root = data_dir (app_data on this machine).
+                    let sql_invoices = format!(
+                        "UPDATE \"{table}\" \
+                         SET \"{col}\" = ?1 || substr(replace(\"{col}\", '\\', '/'), \
+                                                       instr(replace(\"{col}\", '\\', '/'), '/invoices/')) \
+                         WHERE \"{col}\" IS NOT NULL \
+                           AND instr(replace(\"{col}\", '\\', '/'), '/invoices/') > 0"
+                    );
+                    if let Err(e) = sqlx::query(&sql_invoices)
+                        .bind(&data_dir_str)
+                        .execute(&pool)
+                        .await
+                    {
+                        tracing::warn!(
+                            table, col, error = ?e,
+                            "import_backup: path rewrite (/invoices/) failed, continuing"
+                        );
+                    }
+
+                    // (c) Rewrite paths that contain "/receipts/" — receipt PDFs
+                    // (commands/receipts.rs → {app_data}/receipts/…).
+                    // New root = data_dir (app_data on this machine).
+                    let sql_receipts = format!(
+                        "UPDATE \"{table}\" \
+                         SET \"{col}\" = ?1 || substr(replace(\"{col}\", '\\', '/'), \
+                                                       instr(replace(\"{col}\", '\\', '/'), '/receipts/')) \
+                         WHERE \"{col}\" IS NOT NULL \
+                           AND instr(replace(\"{col}\", '\\', '/'), '/receipts/') > 0"
+                    );
+                    if let Err(e) = sqlx::query(&sql_receipts)
+                        .bind(&data_dir_str)
+                        .execute(&pool)
+                        .await
+                    {
+                        tracing::warn!(
+                            table, col, error = ?e,
+                            "import_backup: path rewrite (/receipts/) failed, continuing"
+                        );
+                    }
                 }
             }
             pool.close().await;
-            tracing::info!("import_backup: xml_path/pdf_path rewritten to local archive root");
+            tracing::info!("import_backup: xml_path/pdf_path rewritten to local roots (archive+invoices+receipts)");
         } else {
             tracing::warn!("import_backup: could not open restored DB for path rewrite — skipping");
         }
@@ -996,6 +1083,108 @@ mod tests {
         assert!(
             !has_sent && !has_received,
             "path should not match any rewrite separator after normalization"
+        );
+    }
+
+    // ── /invoices/ and /receipts/ path rewrites ──────────────────────────────
+
+    /// Simulate the SQL rewrite for /invoices/ marker — manually-generated
+    /// invoice XML/PDF stored under {app_data}/invoices/{company_id}/{id}.xml.
+    #[test]
+    fn xml_path_rewrite_invoices_marker() {
+        let stored = "/Users/alice/Library/Application Support/ro.lucaris.efactura/invoices/comp-1/INV-001.xml";
+        let local_data_dir = "/Users/bob/Library/Application Support/ro.lucaris.efactura";
+
+        let separator = "/invoices/";
+        let pos = stored.find(separator).expect("should contain /invoices/");
+        let suffix = &stored[pos..]; // includes "/invoices/"
+        let rewritten = format!("{local_data_dir}{suffix}");
+
+        assert_eq!(
+            rewritten,
+            "/Users/bob/Library/Application Support/ro.lucaris.efactura/invoices/comp-1/INV-001.xml"
+        );
+    }
+
+    /// Simulate the SQL rewrite for /receipts/ marker — receipt PDFs stored
+    /// under {app_data}/receipts/{company_id}/{receipt_id}.pdf.
+    #[test]
+    fn xml_path_rewrite_receipts_marker() {
+        let stored = "/Users/alice/Library/Application Support/ro.lucaris.efactura/receipts/comp-2/REC-007.pdf";
+        let local_data_dir = "/Users/bob/Library/Application Support/ro.lucaris.efactura";
+
+        let separator = "/receipts/";
+        let pos = stored.find(separator).expect("should contain /receipts/");
+        let suffix = &stored[pos..];
+        let rewritten = format!("{local_data_dir}{suffix}");
+
+        assert_eq!(
+            rewritten,
+            "/Users/bob/Library/Application Support/ro.lucaris.efactura/receipts/comp-2/REC-007.pdf"
+        );
+    }
+
+    /// Backslash-stored /invoices/ path is normalized then rewritten correctly.
+    #[test]
+    fn xml_path_backslash_rewrite_invoices() {
+        let stored =
+            r"C:\Users\alice\AppData\Roaming\com.lucaris.efactura\invoices\comp-1\INV-001.xml";
+        let normalized = stored.replace('\\', "/");
+        let local_data_dir = "/Users/bob/Library/Application Support/ro.lucaris.efactura";
+
+        let separator = "/invoices/";
+        let pos = normalized
+            .find(separator)
+            .expect("should contain /invoices/ after normalization");
+        let rewritten = format!("{local_data_dir}{}", &normalized[pos..]);
+
+        assert_eq!(
+            rewritten,
+            "/Users/bob/Library/Application Support/ro.lucaris.efactura/invoices/comp-1/INV-001.xml"
+        );
+    }
+
+    /// backup_includes_invoices_and_receipts: verifies that zip_dir_recursive
+    /// correctly packages invoices/ and receipts/ entries with the right prefix.
+    #[test]
+    fn backup_includes_invoices_and_receipts() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Simulate app_data/invoices/comp-1/INV-001.xml
+        let inv_dir = tmp.path().join("invoices").join("comp-1");
+        std::fs::create_dir_all(&inv_dir).unwrap();
+        std::fs::write(inv_dir.join("INV-001.xml"), b"<Invoice/>").unwrap();
+
+        // Simulate app_data/receipts/comp-1/REC-001.pdf
+        let rec_dir = tmp.path().join("receipts").join("comp-1");
+        std::fs::create_dir_all(&rec_dir).unwrap();
+        std::fs::write(rec_dir.join("REC-001.pdf"), b"%PDF").unwrap();
+
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zw = zip::ZipWriter::new(buf);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+
+        // Add both dirs using zip_dir_recursive (same as export_backup does).
+        let invoices_dir = tmp.path().join("invoices");
+        zip_dir_recursive(&invoices_dir, &invoices_dir, &mut zw, opts).unwrap();
+        let receipts_dir = tmp.path().join("receipts");
+        zip_dir_recursive(&receipts_dir, &receipts_dir, &mut zw, opts).unwrap();
+
+        let inner = zw.finish().unwrap().into_inner();
+        let cursor = std::io::Cursor::new(inner);
+        let mut za = zip::ZipArchive::new(cursor).unwrap();
+        let names: Vec<_> = (0..za.len())
+            .map(|i| za.by_index(i).unwrap().name().to_string())
+            .collect();
+
+        assert!(
+            names.iter().any(|n| n == "invoices/comp-1/INV-001.xml"),
+            "expected 'invoices/comp-1/INV-001.xml', got: {names:?}"
+        );
+        assert!(
+            names.iter().any(|n| n == "receipts/comp-1/REC-001.pdf"),
+            "expected 'receipts/comp-1/REC-001.pdf', got: {names:?}"
         );
     }
 
