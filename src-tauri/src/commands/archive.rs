@@ -463,11 +463,19 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
                 for col in &["xml_path", "pdf_path"] {
                     // Rewrite paths that contain "/sent/" — update only the prefix
                     // up to that separator, keeping the rest intact.
+                    //
+                    // Separator-agnostic: normalise the stored column to forward
+                    // slashes before locating the marker so that paths stored with
+                    // Windows backslashes (e.g. C:\...\sent\INV.xml) are matched
+                    // correctly.  The rewritten path uses forward slashes
+                    // throughout — these are valid path separators on Windows for
+                    // Rust/Tauri file I/O (P0 Windows fix).
                     let sql_sent = format!(
                         "UPDATE \"{table}\" \
-                         SET \"{col}\" = ?1 || substr(\"{col}\", instr(\"{col}\", '/sent/')) \
+                         SET \"{col}\" = ?1 || substr(replace(\"{col}\", '\\', '/'), \
+                                                       instr(replace(\"{col}\", '\\', '/'), '/sent/')) \
                          WHERE \"{col}\" IS NOT NULL \
-                           AND instr(\"{col}\", '/sent/') > 0"
+                           AND instr(replace(\"{col}\", '\\', '/'), '/sent/') > 0"
                     );
                     if let Err(e) = sqlx::query(&sql_sent)
                         .bind(&archive_dir_str)
@@ -483,9 +491,10 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
                     // Rewrite paths that contain "/received/" analogously.
                     let sql_received = format!(
                         "UPDATE \"{table}\" \
-                         SET \"{col}\" = ?1 || substr(\"{col}\", instr(\"{col}\", '/received/')) \
+                         SET \"{col}\" = ?1 || substr(replace(\"{col}\", '\\', '/'), \
+                                                       instr(replace(\"{col}\", '\\', '/'), '/received/')) \
                          WHERE \"{col}\" IS NOT NULL \
-                           AND instr(\"{col}\", '/received/') > 0"
+                           AND instr(replace(\"{col}\", '\\', '/'), '/received/') > 0"
                     );
                     if let Err(e) = sqlx::query(&sql_received)
                         .bind(&archive_dir_str)
@@ -717,14 +726,20 @@ pub async fn change_archive_location(
     // the last occurrence of "/sent/" or "/received/" in each stored path and
     // replace the prefix up to (but not including) that separator with new_path.
     // Rows whose path does not contain either separator are left untouched.
+    // Separator-agnostic rewrites: normalise the stored column to forward
+    // slashes before locating the marker so that paths stored with Windows
+    // backslashes (e.g. C:\...\sent\INV.xml) are matched correctly.
+    // The rewritten path uses forward slashes — valid on Windows for Rust/Tauri
+    // file I/O (P0 Windows fix, mirrors the same logic in import_backup).
     let new_path_ref = &new_path;
     for table in &["invoices", "received_invoices"] {
         for col in &["xml_path", "pdf_path"] {
             let sql_sent = format!(
                 "UPDATE \"{table}\" \
-                 SET \"{col}\" = ?1 || substr(\"{col}\", instr(\"{col}\", '/sent/')) \
+                 SET \"{col}\" = ?1 || substr(replace(\"{col}\", '\\', '/'), \
+                                               instr(replace(\"{col}\", '\\', '/'), '/sent/')) \
                  WHERE \"{col}\" IS NOT NULL \
-                   AND instr(\"{col}\", '/sent/') > 0"
+                   AND instr(replace(\"{col}\", '\\', '/'), '/sent/') > 0"
             );
             if let Err(e) = sqlx::query(&sql_sent)
                 .bind(new_path_ref)
@@ -739,9 +754,10 @@ pub async fn change_archive_location(
 
             let sql_received = format!(
                 "UPDATE \"{table}\" \
-                 SET \"{col}\" = ?1 || substr(\"{col}\", instr(\"{col}\", '/received/')) \
+                 SET \"{col}\" = ?1 || substr(replace(\"{col}\", '\\', '/'), \
+                                               instr(replace(\"{col}\", '\\', '/'), '/received/')) \
                  WHERE \"{col}\" IS NOT NULL \
-                   AND instr(\"{col}\", '/received/') > 0"
+                   AND instr(replace(\"{col}\", '\\', '/'), '/received/') > 0"
             );
             if let Err(e) = sqlx::query(&sql_received)
                 .bind(new_path_ref)
@@ -918,6 +934,68 @@ mod tests {
         assert!(
             !has_sent && !has_received,
             "path should not match any rewrite separator"
+        );
+    }
+
+    // ── backslash-stored paths are rewritten correctly ───────────────────────
+    /// Prove that a Windows-style path stored with backslashes (e.g.
+    /// `C:\Users\...\sent\INV.xml`) is correctly rewritten to a forward-slash
+    /// path under the new root.
+    ///
+    /// This mirrors the separator-agnostic SQL logic:
+    ///   normalize = replace(col, '\', '/')
+    ///   pos       = instr(normalize, '/sent/')
+    ///   result    = new_root || substr(normalize, pos)
+    #[test]
+    fn xml_path_backslash_rewrite_sent() {
+        // Path as stored on Windows
+        let stored =
+            r"C:\Users\alice\AppData\Roaming\com.lucaris.efactura\archive\sent\INV-0001.xml";
+        // Normalize backslashes → forward slashes (what the SQL replace does)
+        let normalized = stored.replace('\\', "/");
+        let local_archive = "/Users/bob/Library/Application Support/ro.lucaris.efactura/archive";
+
+        let separator = "/sent/";
+        let pos = normalized
+            .find(separator)
+            .expect("should contain /sent/ after normalization");
+        let suffix = &normalized[pos..]; // includes "/sent/"
+        let rewritten = format!("{local_archive}{suffix}");
+
+        assert_eq!(
+            rewritten,
+            "/Users/bob/Library/Application Support/ro.lucaris.efactura/archive/sent/INV-0001.xml"
+        );
+    }
+
+    #[test]
+    fn xml_path_backslash_rewrite_received() {
+        // Path as stored on Windows for a received invoice
+        let stored = r"C:\Users\alice\AppData\Roaming\com.lucaris.efactura\archive\received\RO123\msg-abc\invoice.xml";
+        let normalized = stored.replace('\\', "/");
+        let local_archive = "/new/archive";
+
+        let separator = "/received/";
+        let pos = normalized
+            .find(separator)
+            .expect("should contain /received/ after normalization");
+        let suffix = &normalized[pos..];
+        let rewritten = format!("{local_archive}{suffix}");
+
+        assert_eq!(rewritten, "/new/archive/received/RO123/msg-abc/invoice.xml");
+    }
+
+    #[test]
+    fn xml_path_backslash_no_match_skipped() {
+        // A backslash path with neither /sent/ nor /received/ must NOT be
+        // rewritten (the WHERE clause would exclude it).
+        let stored = r"C:\Users\alice\Documents\invoice.xml";
+        let normalized = stored.replace('\\', "/");
+        let has_sent = normalized.contains("/sent/");
+        let has_received = normalized.contains("/received/");
+        assert!(
+            !has_sent && !has_received,
+            "path should not match any rewrite separator after normalization"
         );
     }
 

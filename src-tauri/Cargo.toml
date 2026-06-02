@@ -69,7 +69,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 log = "0.4"
 
-# OS Keychain access
+# OS Keychain access — cross-platform base dep (no backend feature here;
+# platform backends are enabled via target-conditional tables below so that
+# each OS only links its own native keystore).
 keyring = "3"
 
 # Encryption (AES-GCM)
@@ -105,10 +107,16 @@ rust_xlsxwriter = "0.80"
 csv = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# macOS-specific (placeholders for future use)
+# Enable macOS Keychain backend for keyring v3.
+# Without this feature keyring falls back to an in-memory mock store and all
+# credentials (ANAF OAuth tokens, SmartBill, trial lock) are lost on restart.
+keyring = { version = "3", features = ["apple-native"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# Windows-specific (placeholders for future use)
+# Enable Windows Credential Manager backend for keyring v3 (same P0 fix as
+# above but for Windows).  Gated here so the macOS build never touches
+# windows-sys / byteorder.
+keyring = { version = "3", features = ["windows-native"] }
 
 [dev-dependencies]
 tempfile = "3"

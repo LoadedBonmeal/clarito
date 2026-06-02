@@ -7,10 +7,9 @@
 //!
 //! Migrațiile sunt embeddate la compile time prin `sqlx::migrate!`.
 
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use std::path::PathBuf;
-use std::str::FromStr;
 use tauri::{AppHandle, Manager};
 
 #[cfg(unix)]
@@ -31,12 +30,16 @@ pub fn resolve_db_path(app: &AppHandle) -> AppResult<PathBuf> {
 /// Inițializează pool-ul și rulează migrațiile pending.
 pub async fn init(app: &AppHandle) -> AppResult<SqlitePool> {
     let db_path = resolve_db_path(app)?;
-    let db_url = format!("sqlite://{}", db_path.display());
 
-    let options = SqliteConnectOptions::from_str(&db_url)?
+    // Build options directly from the PathBuf instead of formatting a
+    // "sqlite://<path>" URL string.  On Windows the path contains backslashes
+    // (e.g. C:\Users\...\data.db) which are not valid inside a sqlite:// URL
+    // and caused the DB to never open (P0 Windows fix).
+    let options = SqliteConnectOptions::new()
+        .filename(&db_path)
         .create_if_missing(true)
         .foreign_keys(true)
-        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
+        .journal_mode(SqliteJournalMode::Wal);
 
     let pool = SqlitePoolOptions::new()
         .max_connections(MAX_CONNECTIONS)
