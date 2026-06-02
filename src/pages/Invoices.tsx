@@ -19,6 +19,7 @@
  */
 
 import { useMemo, useRef, useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -143,9 +144,10 @@ interface RowMenuProps {
   status: InvoiceStatus;
   hasXml: boolean;
   onClose: () => void;
+  anchor: DOMRect | null;
 }
 
-function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps) {
+function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowMenuProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [stornoOpen, setStornoOpen] = useState(false);
@@ -162,11 +164,31 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps
       if (!(e.target as HTMLElement).closest(".rf-row-menu")) onClose();
     };
     const tid = setTimeout(() => document.addEventListener("click", h), 0);
+    window.addEventListener("scroll", onClose, true);
     return () => {
       clearTimeout(tid);
       document.removeEventListener("click", h);
+      window.removeEventListener("scroll", onClose, true);
     };
   }, [onClose]);
+
+  const portalPos = (width: number): React.CSSProperties => {
+    const GAP = 4;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (!anchor) return { position: "fixed", top: 64, right: 16, zIndex: 100, width };
+    const left = Math.min(Math.max(8, anchor.right - width), vw - width - 8);
+    const openUp = anchor.bottom > vh - 340;
+    return {
+      position: "fixed",
+      left,
+      ...(openUp ? { bottom: vh - anchor.top + GAP } : { top: anchor.bottom + GAP }),
+      zIndex: 100,
+      width,
+      maxHeight: "min(360px, calc(100vh - 24px))",
+      overflowY: "auto",
+    };
+  };
 
   async function handleSubmit() {
     try {
@@ -235,6 +257,8 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps
       const stornoInv = await api.invoices.storno(invoiceId, companyId, stornoReason.trim());
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
       notify.success(`Factură storno creată: ${stornoInv.fullNumber}`);
+      // Navigate to the new credit note so the accountant can generate XML and submit.
+      void navigate({ to: "/invoices/$id", params: { id: stornoInv.id } });
     } catch (e) {
       notify.error(formatError(e, "Eroare stornare."));
     }
@@ -243,10 +267,10 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps
   }
 
   if (stornoOpen) {
-    return (
+    return createPortal(
       <div
         className="rf-row-menu rf-card"
-        style={{ position: "absolute", right: 8, top: 32, zIndex: 50, width: 280, padding: 12, boxShadow: "var(--rf-shadow-md)" }}
+        style={{ ...portalPos(280), padding: 12, boxShadow: "var(--rf-shadow-md)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--rf-error)" }}>
@@ -275,7 +299,8 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps
             Stornează
           </button>
         </div>
-      </div>
+      </div>,
+      document.body,
     );
   }
 
@@ -292,10 +317,10 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps
 
   const visible = items.filter((i) => i.show);
 
-  return (
+  return createPortal(
     <div
       className="rf-row-menu rf-card"
-      style={{ position: "absolute", right: 8, top: 32, zIndex: 50, width: 210, padding: 4, boxShadow: "var(--rf-shadow-md)" }}
+      style={{ ...portalPos(210), padding: 4, boxShadow: "var(--rf-shadow-md)" }}
       onClick={(e) => e.stopPropagation()}
     >
       {visible.map((item) => (
@@ -316,7 +341,8 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose }: RowMenuProps
           {item.label}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -327,6 +353,11 @@ export function InvoicesPage() {
   const queryClient = useQueryClient();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const setSelectedInvoiceId = useAppStore((s) => s.setSelectedInvoiceId);
+  const density = useAppStore((s) => s.density);
+
+  // Keep row height in sync with the CSS density values defined in design.css:
+  // comfortable (default) = 42px, compact = 34px, relaxed = 48px.
+  const rowHeight = density === "compact" ? 34 : density === "relaxed" ? 48 : 42;
   const { t } = useTranslation();
 
   // ?view=storned deep-link
@@ -344,12 +375,15 @@ export function InvoicesPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showImportModal, setShowImportModal] = useState(false);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  // Fetch invoices
+  // Fetch invoices — guarded: do not fetch when no company is active.
+  // Pass an explicit large limit so realistic single-company data loads fully.
   const { data: paged, isLoading, isError: pagedError, error: pagedErr, refetch: refetchPaged } = useQuery({
-    queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined }),
-    queryFn: () => api.invoices.list({ companyId: activeCompanyId ?? undefined }),
+    queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
+    queryFn: () => api.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
+    enabled: !!activeCompanyId,
   });
 
   // Fetch contacts for client name
@@ -412,10 +446,12 @@ export function InvoicesPage() {
     STORNED:   allInvoices.filter((i) => i.status === "STORNED").length,
   };
 
-  // Totals of filtered list
-  const totNet   = list.reduce((s, i) => s + parseDec(i.subtotalAmount), 0);
-  const totVat   = list.reduce((s, i) => s + parseDec(i.vatAmount), 0);
-  const totTotal = list.reduce((s, i) => s + parseDec(i.totalAmount), 0);
+  // Totals of filtered list — RON only to avoid mixing currencies.
+  const ronList = list.filter((i) => i.currency === "RON");
+  const nonRonCount = list.length - ronList.length;
+  const totNet   = ronList.reduce((s, i) => s + parseDec(i.subtotalAmount), 0);
+  const totVat   = ronList.reduce((s, i) => s + parseDec(i.vatAmount), 0);
+  const totTotal = ronList.reduce((s, i) => s + parseDec(i.totalAmount), 0);
 
   // Active filters count (for Filtre dot)
   const activeFilterCount = (errorsOnly ? 1 : 0) + (amountMin ? 1 : 0) + (amountMax ? 1 : 0);
@@ -426,14 +462,19 @@ export function InvoicesPage() {
     setSelected(next);
   };
 
-  // Virtual scrolling (generous 52px row height)
+  // Virtual scrolling — row height tracks density.
   const tableBodyRef = useRef<HTMLDivElement>(null);
   const rowVirtualizer = useVirtualizer({
     count: list.length,
     getScrollElement: () => tableBodyRef.current,
-    estimateSize: () => 52,
+    estimateSize: () => rowHeight,
     overscan: 10,
   });
+
+  // Re-measure all rows when density changes so the virtualizer re-lays-out.
+  useEffect(() => {
+    rowVirtualizer.measure();
+  }, [rowHeight]);
 
   // Bulk submit
   async function handleBulkSubmit() {
@@ -528,6 +569,15 @@ export function InvoicesPage() {
   ];
   const currentStatusLabel = statusOptions.find((o) => o.value === filter)?.label ?? "Toate";
 
+  if (!activeCompanyId) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--rf-app-bg)" }}>
+        <PageHeader title={t("invoices.title")} />
+        <Empty icon="fileOut" title="Selectați o companie activă pentru a vedea facturile emise." />
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--rf-app-bg)" }}>
 
@@ -570,7 +620,6 @@ export function InvoicesPage() {
           background: "var(--rf-content)",
           flexWrap: "nowrap",
           overflowX: "auto",
-          gap: 8,
         }}
       >
         {/* Search */}
@@ -821,6 +870,21 @@ export function InvoicesPage() {
         </span>
       </div>
 
+      {/* ── Truncation warning ───────────────────────────────────────────── */}
+      {paged && paged.total > paged.items.length && (
+        <div
+          style={{
+            padding: "6px 32px",
+            background: "var(--rf-warning-bg, #fffbeb)",
+            borderBottom: "1px solid var(--rf-border)",
+            fontSize: 12,
+            color: "var(--rf-warning, #92400e)",
+          }}
+        >
+          Afișate primele {paged.items.length.toLocaleString("ro-RO")} din {paged.total.toLocaleString("ro-RO")} facturi — restrânge filtrele pentru a vedea toate înregistrările.
+        </div>
+      )}
+
       {/* ── Table container ──────────────────────────────────────────────── */}
       <div ref={tableBodyRef} style={{ flex: 1, overflowY: "auto" }}>
         {isLoading ? (
@@ -893,7 +957,7 @@ export function InvoicesPage() {
                         left: 0,
                         width: "100%",
                         transform: `translateY(${virtualRow.start}px)`,
-                        height: 52,
+                        height: rowHeight,
                       }}
                       onClick={() => {
                         setSelectedInvoiceId(inv.id);
@@ -966,7 +1030,10 @@ export function InvoicesPage() {
                             icon="more"
                             ghost
                             title="Mai multe"
-                            onClick={() => setMenuFor(menuFor === inv.id ? null : inv.id)}
+                            onClick={(e) => {
+                              if (menuFor === inv.id) { setMenuFor(null); setMenuAnchor(null); }
+                              else { setMenuAnchor(e.currentTarget.getBoundingClientRect()); setMenuFor(inv.id); }
+                            }}
                           />
                         </div>
                         {menuFor === inv.id && activeCompanyId && (
@@ -975,7 +1042,8 @@ export function InvoicesPage() {
                             companyId={activeCompanyId}
                             status={inv.status}
                             hasXml={!!inv.xmlPath}
-                            onClose={() => setMenuFor(null)}
+                            anchor={menuAnchor}
+                            onClose={() => { setMenuFor(null); setMenuAnchor(null); }}
                           />
                         )}
                       </td>
@@ -987,6 +1055,11 @@ export function InvoicesPage() {
                 <tr>
                   <td colSpan={4}>
                     {list.length} facturi
+                    {nonRonCount > 0 && (
+                      <span style={{ marginLeft: 6, fontSize: 11, color: "var(--rf-text-dim)", fontWeight: 400 }}>
+                        (+{nonRonCount} în altă monedă, neincluse în total)
+                      </span>
+                    )}
                   </td>
                   <td className="right" style={{ fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums" }}>
                     {fmtRON(totNet)}

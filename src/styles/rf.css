@@ -46,6 +46,10 @@
 .rf-icon-btn--ghost:hover { background: var(--rf-neutral-bg); border-color: transparent; }
 .rf-icon-btn:disabled { opacity: .5; cursor: not-allowed; }
 
+/* Icon press animations moved to use-icon-press.ts (WAAPI hook).
+   The CSS .rf-pressing rules are intentionally removed — they are dead code.
+   @keyframes rf-spin is kept below for the SPV sync spinner. */
+
 /* ---------- Badges / pills ---------- */
 .rf-badge {
   display: inline-flex; align-items: center; gap: 6px;
@@ -103,7 +107,7 @@ table.rf-tbl thead th {
   background: var(--rf-table-head);
   text-align: left; font-weight: 600; font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
   color: var(--rf-text-dim);
-  padding: 0 16px; height: 42px; white-space: nowrap;
+  padding: 0 16px; height: var(--rf-header-h, 42px); white-space: nowrap;
   border-bottom: 1px solid var(--rf-border);
 }
 .rf-tbl-wrap { overflow-x: auto; overflow-y: visible; }
@@ -136,6 +140,23 @@ table.rf-tbl tbody tr.selected .rf-row-check { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   .rf-row-check { transition: none !important; }
 }
+
+/* ---------- Key-value list (detail pages: CompanyDetail / CompanyEdit) ---------- */
+.rf-kv-list { display: flex; flex-direction: column; gap: 10px; }
+.rf-kv-row { display: grid; grid-template-columns: 170px 1fr; gap: 16px; align-items: start; }
+.rf-kv-label { font-size: 12.5px; color: var(--rf-text-muted); }
+.rf-kv-value { font-size: 13.5px; color: var(--rf-text); word-break: break-word; }
+
+/* ---------- Section sub-title (detail panes) ---------- */
+.rf-sec-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--rf-text-dim); }
+
+/* ---------- Numeric + checkbox table columns (override th left-align) ---------- */
+table.rf-tbl thead th.rf-num, table.rf-tbl tbody td.rf-num { text-align: right; font-variant-numeric: tabular-nums; }
+table.rf-tbl thead th.rf-ck, table.rf-tbl tbody td.rf-ck { width: 36px; text-align: center; padding-left: 16px; padding-right: 0; }
+
+/* ---------- Inline link-button ---------- */
+.rf-link { background: none; border: none; padding: 0; font: inherit; color: var(--rf-accent); cursor: pointer; text-decoration: none; }
+.rf-link:hover { text-decoration: underline; }
 
 /* ---------- Inputs / Fields ---------- */
 .rf-field { display: flex; flex-direction: column; gap: 5px; }
@@ -332,7 +353,7 @@ table.rf-tbl tbody tr.selected .rf-row-check { opacity: 1; }
 .rf-spv-sync { display: flex; align-items: center; gap: 6px; border: none; background: transparent; color: inherit; font-weight: 600; font-size: 12.5px; cursor: pointer; padding: 5px 10px; border-radius: 999px; font-family: var(--rf-font); }
 .rf-spv-sync:hover { background: rgba(0,0,0,.06); }
 .dark .rf-spv-sync:hover { background: rgba(255,255,255,.08); }
-.rf-spv-sync.is-syncing svg { animation: rf-spin .9s linear infinite; }
+.rf-spv-sync.is-syncing svg { animation: rf-spin 1.5s linear infinite; }
 @keyframes rf-spin { to { transform: rotate(360deg); } }
 
 /* +Nou menu */
@@ -586,4 +607,6 @@ table.rf-tbl tbody tr.selected .rf-row-check { opacity: 1; }
   .rf-sidebar { transition: none !important; }
   .rf-btn, .rf-icon-btn, .rf-nav-item, .rf-topbar-cmd,
   .rf-topbar-icon, .rf-spv-sync, table.rf-tbl tbody tr { transition: none !important; }
+
+  /* No one-shot icon press animations — handled by use-icon-press.ts (WAAPI) */
 }

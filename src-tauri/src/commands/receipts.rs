@@ -9,7 +9,7 @@ use std::str::FromStr;
 use tauri::{AppHandle, Manager, State};
 
 use crate::db::receipts::{self, Receipt, ReceiptInput};
-use crate::db::{companies, contacts};
+use crate::db::{companies, contacts, invoices};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::ubl::pdf::amount_to_romanian_words;
@@ -63,7 +63,7 @@ pub async fn get_receipt(
 }
 
 /// R15 Wave 3: Create a receipt for the given company.
-/// Allocates the next receipt number atomically (bumps `companies.last_receipt_number`).
+/// Allocates the next receipt number atomically using per-(company, series) MAX+1 logic.
 #[tauri::command]
 pub async fn create_receipt(
     state: State<'_, AppState>,
@@ -112,17 +112,32 @@ pub async fn generate_receipt_pdf(
         None
     };
 
-    // 4. Build PDF bytes (CPU-bound — run in spawn_blocking).
+    // 4. Optionally resolve linked invoice → human full_number.
+    let invoice_full_number: Option<String> = if let Some(ref inv_id) = receipt.invoice_id {
+        invoices::get(&state.db, inv_id)
+            .await
+            .ok()
+            .map(|inv| inv.full_number)
+    } else {
+        None
+    };
+
+    // 5. Build PDF bytes (CPU-bound — run in spawn_blocking).
     let path = receipt_pdf_path(&app, &company_id, &id);
     let path_clone = path.clone();
 
     let pdf_bytes = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<u8>> {
-        build_receipt_pdf(&receipt, &company, contact_name.as_deref())
+        build_receipt_pdf(
+            &receipt,
+            &company,
+            contact_name.as_deref(),
+            invoice_full_number.as_deref(),
+        )
     })
     .await
     .map_err(|e| AppError::Pdf(e.to_string()))??;
 
-    // 5. Write to disk.
+    // 6. Write to disk.
     std::fs::write(&path_clone, &pdf_bytes).map_err(AppError::Io)?;
 
     let path_str = path_clone
@@ -130,7 +145,7 @@ pub async fn generate_receipt_pdf(
         .ok_or_else(|| AppError::Pdf("Cale fișier invalidă UTF-8".to_string()))?
         .to_string();
 
-    // 6. Persist pdf_path in DB.
+    // 7. Persist pdf_path in DB.
     receipts::set_pdf_path(&state.db, &id, &path_str).await?;
 
     Ok(path_str)
@@ -138,10 +153,43 @@ pub async fn generate_receipt_pdf(
 
 // ─── PDF builder ──────────────────────────────────────────────────────────
 
+/// Format a Decimal amount with the ro-RO convention: comma decimal separator.
+/// e.g. `1234.56` → `"1.234,56"`, `100` → `"100,00"`.
+fn fmt_amount_ro(amount: Decimal) -> String {
+    // Decimal::to_string uses "." separator; replace for ro-RO display.
+    // We always want 2 decimal places.
+    let rounded = amount.round_dp(2);
+    let s = format!("{:.2}", rounded);
+    // s is like "1234.56" — split on '.'
+    if let Some((int_part, dec_part)) = s.split_once('.') {
+        // Insert thousands separators in the integer part.
+        let int_str: String = int_part
+            .chars()
+            .rev()
+            .enumerate()
+            .flat_map(|(i, c)| {
+                if i > 0 && i % 3 == 0 {
+                    vec!['.', c]
+                } else {
+                    vec![c]
+                }
+            })
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        format!("{},{}", int_str, dec_part)
+    } else {
+        s
+    }
+}
+
 fn build_receipt_pdf(
     receipt: &Receipt,
     company: &crate::db::companies::Company,
     contact_name: Option<&str>,
+    // Human-readable invoice number (e.g. "FACT-0001"), NOT the UUID.
+    invoice_full_number: Option<&str>,
 ) -> AppResult<Vec<u8>> {
     let (doc, page1, layer1) = PdfDocument::new("Chitanta", Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
     let layer = doc.get_page(page1).get_layer(layer1);
@@ -211,7 +259,7 @@ fn build_receipt_pdf(
         .payer_name
         .as_deref()
         .or(contact_name)
-        .unwrap_or("—");
+        .unwrap_or("\u{2014}"); // em-dash — diacritic-safe
     layer.use_text(
         format!("Am primit de la: {}", payer),
         FONT_NORMAL,
@@ -221,12 +269,13 @@ fn build_receipt_pdf(
     );
     y -= LINE_H + 1.0;
 
-    // ── Amount ────────────────────────────────────────────────────────────
+    // ── Amount — ro-RO decimal separator (comma) ──────────────────────────
     let amount_dec = Decimal::from_str(&receipt.amount).unwrap_or(Decimal::ZERO);
+    let amount_ro = fmt_amount_ro(amount_dec);
     layer.use_text(
         format!(
             "Suma: {} {} ({}).",
-            receipt.amount,
+            amount_ro,
             receipt.currency,
             amount_to_romanian_words(amount_dec)
         ),
@@ -237,10 +286,10 @@ fn build_receipt_pdf(
     );
     y -= LINE_H + 1.0;
 
-    // ── Optional invoice reference ────────────────────────────────────────
-    if let Some(ref inv_id) = receipt.invoice_id {
+    // ── Optional invoice reference — human number, not UUID ───────────────
+    if let Some(inv_num) = invoice_full_number {
         layer.use_text(
-            format!("Contravaloare factura: {}", inv_id),
+            format!("Contravaloare factura: {}", inv_num),
             FONT_NORMAL,
             Mm(MARGIN),
             Mm(y),

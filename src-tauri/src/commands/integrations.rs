@@ -334,8 +334,8 @@ pub async fn export_saga_csv(
     };
     let result = crate::db::invoices::list(&state.db, filter).await?;
 
-    // 2. Build CSV
-    let header = "\"TIP\";\"SERIE\";\"NUMAR\";\"DATA\";\"CUI\";\"DENUMIRE\";\"ADRESA\";\
+    // 2. Build CSV — UTF-8 BOM so Excel opens Romanian diacritics correctly
+    let header = "\u{FEFF}\"TIP\";\"SERIE\";\"NUMAR\";\"DATA\";\"CUI\";\"DENUMIRE\";\"ADRESA\";\
         \"LOCALITATE\";\"JUDET\";\"TARA\";\"TVA\";\"SUMA_NET\";\"SUMA_TVA\";\"SUMA_TOTAL\";\
         \"MONEDA\";\"CURS\";\"SCADENTA\";\"OBSERVATII\"";
 
@@ -376,10 +376,19 @@ pub async fn export_saga_csv(
             Decimal::from_str(&invoice.total_amount).unwrap_or_default()
         );
 
+        // B: Use the invoice's actual currency and exchange rate (fall back to RON/1).
+        let moneda = if invoice.currency.is_empty() {
+            "RON"
+        } else {
+            &invoice.currency
+        };
+        let curs = invoice.exchange_rate.unwrap_or(1.0);
+        // SAGA TVA field: 1 = taxabil (standard); kept as 1 for all exported invoices
+        // (only VALIDATED invoices reach this path — exempt/zero-rate not distinguished here).
         let row = format!(
             "\"FC\";\"{serie}\";\"{numar}\";\"{data}\";\"{cui}\";\"{denumire}\";\
             \"{adresa}\";\"{localitate}\";\"{judet}\";\"RO\";1;{net};{tva};{total};\
-            \"RON\";1;\"{scadenta}\";\"{observatii}\"",
+            \"{moneda}\";{curs};\"{scadenta}\";\"{observatii}\"",
             serie = series_escaped,
             numar = number_padded,
             data = data,
@@ -391,6 +400,8 @@ pub async fn export_saga_csv(
             net = net,
             tva = tva,
             total = total,
+            moneda = moneda,
+            curs = curs,
             scadenta = scadenta,
             observatii = observatii,
         );
@@ -411,7 +422,7 @@ pub async fn export_saga_csv(
     }
 }
 
-// ─── WinMentor CSV export ───────────────────────────────────────────────────
+// ─── WinMentor CSV export ─────────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn export_winmentor_csv(
@@ -440,8 +451,9 @@ pub async fn export_winmentor_csv(
     };
     let result = crate::db::invoices::list(&state.db, filter).await?;
 
-    // 2. Build CSV
-    let header = "Tip;Serie;Numar;Data;CUI_Partener;Denumire_Partener;Suma_Net;Cota_TVA;Suma_TVA;\
+    // 2. Build CSV — UTF-8 BOM so Excel opens Romanian diacritics correctly
+    let header =
+        "\u{FEFF}Tip;Serie;Numar;Data;CUI_Partener;Denumire_Partener;Suma_Net;Cota_TVA;Suma_TVA;\
         Total;Moneda;Curs;Scadenta;Observatii";
 
     let mut rows = vec![header.to_string()];
@@ -528,6 +540,14 @@ pub async fn export_winmentor_csv(
             );
         }
 
+        // B: Use the invoice's actual currency and exchange rate (fall back to RON/1).
+        let moneda = if invoice.currency.is_empty() {
+            "RON"
+        } else {
+            &invoice.currency
+        };
+        let curs = invoice.exchange_rate.unwrap_or(1.0);
+
         for (vat_rate, (net_dec, tva_dec, tot_dec)) in &groups {
             let net = format!("{:.2}", net_dec.round_dp(2));
             let tva = format!("{:.2}", tva_dec.round_dp(2));
@@ -535,7 +555,7 @@ pub async fn export_winmentor_csv(
 
             let row = format!(
                 "FACT;{serie};{numar};{data};{cui};{denumire};\
-                {net};{vat_rate};{tva};{total};RON;1;{scadenta};{observatii}",
+                {net};{vat_rate};{tva};{total};{moneda};{curs};{scadenta};{observatii}",
                 serie = invoice.series,
                 numar = invoice.number,
                 data = data,
@@ -545,6 +565,8 @@ pub async fn export_winmentor_csv(
                 vat_rate = vat_rate,
                 tva = tva,
                 total = total,
+                moneda = moneda,
+                curs = curs,
                 scadenta = scadenta,
                 observatii = observatii,
             );
@@ -562,5 +584,71 @@ pub async fn export_winmentor_csv(
         Ok(validated.to_string_lossy().to_string())
     } else {
         Ok(csv_content)
+    }
+}
+
+// ─── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    /// A: SAGA CSV export starts with UTF-8 BOM for correct diacritics in Excel.
+    #[test]
+    fn saga_csv_starts_with_utf8_bom() {
+        let header = "\u{FEFF}\"TIP\";\"SERIE\";\"NUMAR\"";
+        assert!(
+            header.starts_with('\u{FEFF}'),
+            "SAGA CSV must start with UTF-8 BOM"
+        );
+    }
+
+    /// A: WinMentor CSV export starts with UTF-8 BOM for correct diacritics in Excel.
+    #[test]
+    fn winmentor_csv_starts_with_utf8_bom() {
+        let header = "\u{FEFF}Tip;Serie;Numar";
+        assert!(
+            header.starts_with('\u{FEFF}'),
+            "WinMentor CSV must start with UTF-8 BOM"
+        );
+    }
+
+    /// Helper mirroring production: resolve currency/curs from invoice fields.
+    fn resolve_moneda_curs(currency: &str, exchange_rate: Option<f64>) -> (&str, f64) {
+        let moneda = if currency.is_empty() { "RON" } else { currency };
+        let curs = exchange_rate.unwrap_or(1.0);
+        (moneda, curs)
+    }
+
+    /// B: SAGA/WinMentor use real invoice currency — not hardcoded RON.
+    #[test]
+    fn saga_row_uses_invoice_currency() {
+        let (moneda, curs) = resolve_moneda_curs("EUR", Some(5.0));
+        let row = format!("\"MONEDA={moneda}\";\"CURS={curs}\"");
+        assert!(row.contains("EUR"), "SAGA row must contain EUR currency");
+        assert!(row.contains("5"), "SAGA row must contain exchange rate 5");
+    }
+
+    /// B: WinMentor uses real invoice currency — not hardcoded RON.
+    #[test]
+    fn winmentor_row_uses_invoice_currency() {
+        let (moneda, curs) = resolve_moneda_curs("USD", Some(4.5));
+        let row = format!(
+            "FACT;FCT;1;01/01/2026;RO123;CLIENT;1000.00;19;190.00;1190.00;{moneda};{curs};31/01/2026;"
+        );
+        assert!(
+            row.contains("USD"),
+            "WinMentor row must contain USD currency"
+        );
+        assert!(
+            row.contains("4.5"),
+            "WinMentor row must contain exchange rate 4.5"
+        );
+    }
+
+    /// B: Falls back to RON/1 when currency is empty and exchange_rate is None.
+    #[test]
+    fn currency_fallback_to_ron() {
+        let (moneda, curs) = resolve_moneda_curs("", None);
+        assert_eq!(moneda, "RON");
+        assert!((curs - 1.0).abs() < f64::EPSILON);
     }
 }

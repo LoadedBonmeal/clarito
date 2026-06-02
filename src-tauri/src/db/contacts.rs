@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
+use crate::db::companies;
 use crate::db::models::{new_id, now_unix, ContactType};
 use crate::error::{AppError, AppResult};
 
@@ -126,11 +127,69 @@ pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Con
 }
 
 pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<Contact> {
+    // Task 6: reject self-invoicing — contact CUI must not match the company's own CUI.
+    if let Some(ref contact_cui) = input.cui {
+        let contact_cui_norm = contact_cui.trim().to_uppercase();
+        let contact_digits = contact_cui_norm
+            .strip_prefix("RO")
+            .unwrap_or(&contact_cui_norm)
+            .trim();
+        if !contact_digits.is_empty() {
+            let company = companies::get(pool, &input.company_id).await?;
+            let company_cui_norm = company.cui.trim().to_uppercase();
+            let company_digits = company_cui_norm
+                .strip_prefix("RO")
+                .unwrap_or(&company_cui_norm)
+                .trim();
+            if contact_digits == company_digits {
+                return Err(AppError::Validation(
+                    "Nu puteți adăuga propria companie ca și contact.".to_string(),
+                ));
+            }
+        }
+    }
+
+    // Task 2: prevent duplicate (company_id, cui) per company.
+    // Normalize the same way the self-CUI check does (trim + uppercase + strip RO prefix)
+    // so "RO111" and "111" are treated as the same CUI (consistent de-duplication).
+    let normalized_cui: Option<String> = input.cui.as_ref().and_then(|c| {
+        let norm = c.trim().to_uppercase();
+        let digits = norm.strip_prefix("RO").unwrap_or(&norm).trim().to_string();
+        if digits.is_empty() {
+            None
+        } else {
+            Some(digits)
+        }
+    });
+
+    if let Some(ref norm_cui) = normalized_cui {
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM contacts WHERE company_id = ?1 AND \
+             (cui = ?2 OR cui = 'RO' || ?2) LIMIT 1",
+        )
+        .bind(&input.company_id)
+        .bind(norm_cui)
+        .fetch_optional(pool)
+        .await?;
+        if existing.is_some() {
+            return Err(AppError::Validation(
+                "Există deja un contact cu acest CUI pentru această companie.".to_string(),
+            ));
+        }
+    }
+
     let id = new_id();
     let now = now_unix();
     let contact_type = serde_json::to_value(input.contact_type)
         .map(|v| v.as_str().unwrap_or("CUSTOMER").to_string())
         .unwrap_or_else(|_| "CUSTOMER".to_string());
+
+    // Bind the trimmed CUI (consistent with the dup check above).
+    let cui_to_store: Option<String> = input
+        .cui
+        .as_ref()
+        .map(|c| c.trim().to_string())
+        .filter(|s| !s.is_empty());
 
     sqlx::query(
         "INSERT INTO contacts (
@@ -146,7 +205,7 @@ pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<C
     .bind(&id)
     .bind(&input.company_id)
     .bind(&contact_type)
-    .bind(&input.cui)
+    .bind(&cui_to_store)
     .bind(&input.legal_name)
     .bind(input.vat_payer.unwrap_or(false))
     .bind(&input.address)
@@ -252,6 +311,37 @@ mod tests {
             .await
             .unwrap();
 
+        // companies table is needed because contacts::create now looks up the company.
+        sqlx::query(
+            "CREATE TABLE companies (
+                id TEXT PRIMARY KEY NOT NULL,
+                cui TEXT NOT NULL,
+                legal_name TEXT NOT NULL DEFAULT '',
+                trade_name TEXT,
+                registry_number TEXT,
+                vat_payer INTEGER NOT NULL DEFAULT 1,
+                address TEXT NOT NULL DEFAULT '',
+                city TEXT NOT NULL DEFAULT '',
+                county TEXT NOT NULL DEFAULT '',
+                postal_code TEXT,
+                country TEXT NOT NULL DEFAULT 'RO',
+                email TEXT,
+                phone TEXT,
+                iban TEXT,
+                bank_name TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                spv_enabled INTEGER NOT NULL DEFAULT 0,
+                invoice_series TEXT NOT NULL DEFAULT 'FACT',
+                last_invoice_number INTEGER NOT NULL DEFAULT 0,
+                logo_path TEXT,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
         sqlx::query(
             "CREATE TABLE contacts (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -275,7 +365,17 @@ mod tests {
         .await
         .unwrap();
 
-        // Seed: two companies, two contacts — one per company.
+        // Seed: two companies.
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name) \
+             VALUES ('comp-1', 'RO12345674', 'Firma Unu SRL'), \
+                    ('comp-2', 'RO98765438', 'Firma Doi SRL')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Seed: two contacts — one per company.
         sqlx::query(
             "INSERT INTO contacts (id, company_id, legal_name)
              VALUES ('c1', 'comp-1', 'Client Comp1'),
@@ -389,5 +489,120 @@ mod tests {
             matches!(result, Err(AppError::NotFound)),
             "get with unknown id must return NotFound"
         );
+    }
+
+    // ── Task 2: duplicate (company_id, cui) rejected ─────────────────────────
+
+    #[tokio::test]
+    async fn task2_duplicate_contact_cui_per_company_rejected() {
+        let pool = setup_contacts_pool().await;
+
+        // First contact with CUI RO11111110 for comp-1 — should succeed.
+        let input1 = CreateContactInput {
+            company_id: "comp-1".to_string(),
+            contact_type: ContactType::Customer,
+            cui: Some("RO11111110".to_string()),
+            legal_name: "Primul Client SRL".to_string(),
+            vat_payer: Some(false),
+            address: None,
+            city: None,
+            county: None,
+            country: None,
+            email: None,
+            phone: None,
+            currency: None,
+        };
+        let r1 = create(&pool, input1).await;
+        assert!(r1.is_ok(), "first contact with this CUI must succeed");
+
+        // Second contact with same CUI for same company — must fail.
+        let input2 = CreateContactInput {
+            company_id: "comp-1".to_string(),
+            contact_type: ContactType::Customer,
+            cui: Some("RO11111110".to_string()),
+            legal_name: "Al Doilea Client SRL".to_string(),
+            vat_payer: Some(false),
+            address: None,
+            city: None,
+            county: None,
+            country: None,
+            email: None,
+            phone: None,
+            currency: None,
+        };
+        let r2 = create(&pool, input2).await;
+        assert!(
+            matches!(r2, Err(AppError::Validation(_))),
+            "duplicate CUI for same company must return Validation error"
+        );
+
+        // Same CUI for a different company — must succeed.
+        let input3 = CreateContactInput {
+            company_id: "comp-2".to_string(),
+            contact_type: ContactType::Customer,
+            cui: Some("RO11111110".to_string()),
+            legal_name: "Client Comp2 SRL".to_string(),
+            vat_payer: Some(false),
+            address: None,
+            city: None,
+            county: None,
+            country: None,
+            email: None,
+            phone: None,
+            currency: None,
+        };
+        let r3 = create(&pool, input3).await;
+        assert!(r3.is_ok(), "same CUI for a different company must succeed");
+    }
+
+    // ── Task 6: self-invoicing rejected (contact CUI == company CUI) ─────────
+
+    #[tokio::test]
+    async fn task6_self_cui_contact_rejected() {
+        let pool = setup_contacts_pool().await;
+
+        // comp-1 has CUI RO12345674 — trying to add a contact with the same CUI must fail.
+        let input = CreateContactInput {
+            company_id: "comp-1".to_string(),
+            contact_type: ContactType::Customer,
+            cui: Some("RO12345674".to_string()),
+            legal_name: "Propria Firma SRL".to_string(),
+            vat_payer: Some(true),
+            address: None,
+            city: None,
+            county: None,
+            country: None,
+            email: None,
+            phone: None,
+            currency: None,
+        };
+        let result = create(&pool, input).await;
+        assert!(
+            matches!(result, Err(AppError::Validation(_))),
+            "contact with company's own CUI must return Validation error"
+        );
+    }
+
+    #[tokio::test]
+    async fn task6_different_cui_contact_allowed() {
+        let pool = setup_contacts_pool().await;
+
+        // Different CUI — should be fine.
+        let input = CreateContactInput {
+            company_id: "comp-1".to_string(),
+            contact_type: ContactType::Customer,
+            cui: Some("RO22222229".to_string()),
+            legal_name: "Alt Client SRL".to_string(),
+            vat_payer: Some(false),
+            address: None,
+            city: None,
+            county: None,
+            country: None,
+            email: None,
+            phone: None,
+            currency: None,
+        };
+        let result = create(&pool, input).await;
+        assert!(result.is_ok(), "contact with different CUI must be allowed");
     }
 }

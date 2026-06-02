@@ -31,6 +31,7 @@ export function Icon({ name, size = 16, className = "", style, stroke = 1.6 }: I
       strokeLinejoin="round"
       className={className}
       style={style}
+      data-icon={name}
     >
       {path}
     </svg>

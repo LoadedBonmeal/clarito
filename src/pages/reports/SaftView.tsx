@@ -13,14 +13,22 @@ import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 
+const MONTHS = [
+  "Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
+  "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie",
+];
+
 interface Props {
-  selectedYear:      number;
+  selectedYear:       number;
+  selectedMonth:      number;
   allInvoicesForYear: { issueDate: string }[];
 }
 
-export function SaftView({ selectedYear, allInvoicesForYear }: Props) {
+export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Props) {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [exporting, setExporting] = useState(false);
+
+  const monthName = MONTHS[selectedMonth - 1] ?? String(selectedMonth);
 
   const handleExport = async () => {
     if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
@@ -28,15 +36,17 @@ export function SaftView({ selectedYear, allInvoicesForYear }: Props) {
       notify.info(`Nu există date pentru anul ${selectedYear}.`);
       return;
     }
+    const mm = String(selectedMonth).padStart(2, "0");
     const savePath = await saveDialog({
       title:       "Salvează SAF-T D406",
-      defaultPath: `saft-d406-${selectedYear}.xml`,
+      defaultPath: `saft-d406-${selectedYear}-${mm}.xml`,
       filters:     [{ name: "XML", extensions: ["xml"] }],
     });
     if (!savePath) return;
     setExporting(true);
     try {
-      const xml = await api.saft.exportD406(activeCompanyId, selectedYear, undefined);
+      // D406 is a monthly declaration — always pass the selected month.
+      const xml = await api.saft.exportD406(activeCompanyId, selectedYear, selectedMonth);
       const { writeTextFile } = await import("@tauri-apps/plugin-fs");
       await writeTextFile(savePath, xml);
       notify.success(`SAF-T D406 salvat: ${savePath}`);
@@ -63,10 +73,10 @@ export function SaftView({ selectedYear, allInvoicesForYear }: Props) {
             specifică firmei dvs.
           </Banner>
           <div style={{ marginTop: 16, fontSize: 12.5, color: "var(--rf-text-muted)" }}>
-            An curent selectat: <b style={{ color: "var(--rf-text)" }}>{selectedYear}</b>
+            Perioadă selectată: <b style={{ color: "var(--rf-text)" }}>{monthName} {selectedYear}</b>
             {allInvoicesForYear.length > 0
-              ? ` · ${allInvoicesForYear.length} facturi disponibile`
-              : " · nicio factură disponibilă pentru acest an"}
+              ? ` · ${allInvoicesForYear.length} facturi disponibile pentru ${selectedYear}`
+              : ` · nicio factură disponibilă pentru ${selectedYear}`}
           </div>
         </div>
       </SectionCard>
@@ -75,7 +85,7 @@ export function SaftView({ selectedYear, allInvoicesForYear }: Props) {
       <SectionCard icon="download" title="Generează SAF-T">
         <div style={{ padding: "4px 16px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ fontSize: 13, color: "var(--rf-text-muted)", lineHeight: 1.5 }}>
-            Exportă SAF-T D406 XML pentru <b>anul {selectedYear}</b>.
+            Exportă SAF-T D406 XML pentru <b>{monthName} {selectedYear}</b>.
             Această versiune acoperă jurnalul de vânzări (facturi emise).
           </div>
           <Btn
@@ -84,9 +94,9 @@ export function SaftView({ selectedYear, allInvoicesForYear }: Props) {
             block
             disabled={exporting || !activeCompanyId}
             onClick={() => void handleExport()}
-            title={`SAF-T D406 — standard ANAF de audit fiscal pentru ${selectedYear}`}
+            title={`SAF-T D406 — standard ANAF de audit fiscal pentru ${monthName} ${selectedYear}`}
           >
-            {exporting ? "Export în curs…" : `Export SAF-T D406 (XML) ${selectedYear}`}
+            {exporting ? "Export în curs…" : `Export SAF-T D406 (XML) ${monthName} ${selectedYear}`}
           </Btn>
         </div>
       </SectionCard>

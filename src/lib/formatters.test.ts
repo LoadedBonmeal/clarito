@@ -109,6 +109,22 @@ describe("formatDate", () => {
     // Should contain hour:minute pattern
     expect(result).toMatch(/\d{2}:\d{2}/);
   });
+
+  // C: YYYY-MM-DD strings must parse as LOCAL dates so the displayed day matches
+  // the stored date even in EET (UTC+2/+3). new Date("2026-01-15") would parse
+  // as UTC midnight → render as "14 ianuarie" in EET.
+  it("C: YYYY-MM-DD string renders the correct local day (not UTC-shifted)", () => {
+    const result = formatDate("2026-01-15");
+    // Must contain 15 (not 14 due to UTC shift)
+    expect(result).toContain("15");
+    expect(result).toContain("2026");
+  });
+
+  it("C: YYYY-MM-DD '2026-12-31' renders 31 not 30", () => {
+    const result = formatDate("2026-12-31");
+    expect(result).toContain("31");
+    expect(result).toContain("2026");
+  });
 });
 
 describe("formatNumber", () => {

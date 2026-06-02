@@ -59,6 +59,7 @@ export function ContactsPage() {
   } = useQuery({
     queryKey: queryKeys.contacts.list({ companyId: activeCompanyId ?? undefined }),
     queryFn: () => api.contacts.list({ companyId: activeCompanyId ?? undefined }),
+    enabled: !!activeCompanyId,
   });
 
   const list = useMemo(() => {
@@ -119,6 +120,19 @@ export function ContactsPage() {
     { value: "CUSTOMER" as TypeFilter, label: `Clienți (${customers})` },
     { value: "SUPPLIER" as TypeFilter, label: `Furnizori (${suppliers})` },
   ];
+
+  if (!activeCompanyId) {
+    return (
+      <div className="rf-page">
+        <PageHeader title="Clienți & Furnizori" />
+        <div className="rf-page-body">
+          <Card pad>
+            <Empty icon="users" title="Selectați o companie activă pentru a vedea contactele." />
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rf-page">

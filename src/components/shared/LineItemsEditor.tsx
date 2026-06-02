@@ -152,6 +152,11 @@ export function LineItemsEditor({
           sellerVatPayer,
         );
       }
+      // VAT1: when category changes to non-S, force vatRate to 0 so the
+      // on-screen totals match the backend category-authoritative rule.
+      if (key === "vatCategory" && value !== "S") {
+        next.vatRate = 0;
+      }
       return next;
     });
     onChange(updated);
@@ -206,10 +211,18 @@ export function LineItemsEditor({
   }, 0);
   const vat = lines.reduce((s, l) => {
     const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
-    const lineVat = Math.round(lineNet * (l.vatRate / 100) * 100) / 100;
+    // VAT1: only category 'S' charges VAT; all others → 0.
+    const effRate = l.vatCategory === "S" ? l.vatRate : 0;
+    const lineVat = Math.round(lineNet * (effRate / 100) * 100) / 100;
     return s + lineVat;
   }, 0);
   const total = net + vat;
+
+  // Short labels for the Categorie <select> options (full text is in title tooltip).
+  const CAT_SHORT: Record<VatCategory, string> = {
+    S: "Standard", AE: "Taxare inversă", E: "Scutit", Z: "Cotă zero",
+    O: "Afara sferei TVA", K: "Intracom. scutit", G: "Export scutit",
+  };
 
   // Column count: # + Cod + Descriere + Cant + UM + Preț + TVA% + Categorie + Net + Total + del = 11
   const COL_SPAN = 11;
@@ -292,7 +305,7 @@ export function LineItemsEditor({
             {/* Categorie */}
             <th
               style={{
-                width: 110, padding: "0 8px", height: 38, textAlign: "left", fontSize: 11,
+                width: 150, padding: "0 8px", height: 38, textAlign: "left", fontSize: 11,
                 fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase",
                 color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)",
               }}
@@ -337,7 +350,9 @@ export function LineItemsEditor({
         <tbody>
           {lines.map((l, i) => {
             const lineNet = l.quantity * l.unitPrice;
-            const lineTotal = lineNet * (1 + l.vatRate / 100);
+            // VAT1: only category 'S' charges VAT; all others display 0 VAT.
+            const effectiveVatRate = l.vatCategory === "S" ? l.vatRate : 0;
+            const lineTotal = lineNet * (1 + effectiveVatRate / 100);
             return (
               <tr
                 key={l.rowId}
@@ -428,7 +443,7 @@ export function LineItemsEditor({
                     title={VAT_CATEGORY_LABELS[l.vatCategory]}
                   >
                     {VAT_CATEGORIES.map((cat) => (
-                      <option key={cat} value={cat}>{cat} — {VAT_CATEGORY_LABELS[cat]}</option>
+                      <option key={cat} value={cat}>{cat} — {CAT_SHORT[cat]}</option>
                     ))}
                   </select>
                 </td>

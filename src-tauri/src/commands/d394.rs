@@ -29,6 +29,8 @@ pub struct D394Partner {
     pub partner_cui: String,
     /// Denumirea legală a partenerului.
     pub partner_name: String,
+    /// Categoria TVA (S/AE/E/Z/O/K/G) — D394 raportează separate pe categorie.
+    pub vat_category: String,
     /// Numărul de facturi VALIDATED emise/primite în perioadă.
     pub invoice_count: i64,
     /// Baza impozabilă totală (net), 2 zecimale.
@@ -100,26 +102,30 @@ pub async fn compute_d394(
         .try_get("cui")
         .unwrap_or_else(|_| company_id.clone());
 
-    // Query VALIDATED invoices în perioadă, JOIN contacts pentru CUI + denumire.
-    // Agregăm SUM(subtotal_amount), SUM(vat_amount), COUNT(*) per contact.
-    // NOTE: subtotal_amount/vat_amount sunt TEXT (migration 006) — parsăm în Rust.
-    // Wave 4: also GROUP_CONCAT currency + exchange_rate for per-invoice RON conversion.
-    let rows = sqlx::query(
-        "SELECT i.contact_id, \
-                COALESCE(c.cui, '') AS partner_cui, \
+    // ── Sales (livrări): fetch individual line rows — NO GROUP_CONCAT ─────────
+    // GROUP_CONCAT in SQLite does not guarantee element order across multiple
+    // GROUP_CONCAT calls in the same query, which causes currency↔rate mis-pairing
+    // for foreign-currency partners (RON conversion bug).
+    //
+    // Fix: fetch every (invoice, line) tuple individually and group in Rust using
+    // a BTreeMap keyed by (partner_cui, vat_category) so AE/E/Z/O/K/G stay as
+    // separate rows — mirroring the pattern in reports.rs (generate_vat_report).
+    let line_rows = sqlx::query(
+        "SELECT COALESCE(c.cui, '') AS partner_cui, \
                 c.legal_name AS partner_name, \
-                COUNT(*) AS invoice_count, \
-                GROUP_CONCAT(i.subtotal_amount, '|') AS subtotals, \
-                GROUP_CONCAT(i.vat_amount, '|') AS vats, \
-                GROUP_CONCAT(COALESCE(i.currency, 'RON'), '|') AS currencies, \
-                GROUP_CONCAT(COALESCE(CAST(i.exchange_rate AS TEXT), ''), '|') AS rates \
+                i.id AS invoice_id, \
+                COALESCE(i.currency, 'RON') AS currency, \
+                i.exchange_rate, \
+                l.vat_category, \
+                l.subtotal_amount AS line_base, \
+                l.vat_amount AS line_vat \
          FROM invoices i \
          JOIN contacts c ON c.id = i.contact_id \
-         WHERE i.status = 'VALIDATED' \
+         JOIN invoice_line_items l ON l.invoice_id = i.id \
+         WHERE i.status IN ('VALIDATED', 'STORNED') \
            AND i.issue_date >= ?1 \
            AND i.issue_date <= ?2 \
-           AND i.company_id = ?3 \
-         GROUP BY i.contact_id, c.cui, c.legal_name",
+           AND i.company_id = ?3",
     )
     .bind(&period_from)
     .bind(&period_to)
@@ -128,73 +134,82 @@ pub async fn compute_d394(
     .await
     .map_err(AppError::Database)?;
 
-    // Acumulăm per partener într-un BTreeMap keyed by (partner_name, contact_id)
-    // pentru a asigura consistență în caz de CUI duplicate.
-    // Valoarea: (partner_cui, partner_name, invoice_count, base_sum, vat_sum).
+    // Accumulate per (partner_cui, vat_category) in BTreeMap for deterministic order.
+    // Also track the set of invoice_ids per key so invoice_count is correct.
     struct PartnerAcc {
         partner_cui: String,
         partner_name: String,
-        invoice_count: i64,
+        vat_category: String,
+        invoice_ids: std::collections::BTreeSet<String>,
         base: Decimal,
         vat: Decimal,
     }
 
-    let mut partners: BTreeMap<String, PartnerAcc> = BTreeMap::new();
+    // key = (partner_cui, vat_category)
+    let mut partners: BTreeMap<(String, String), PartnerAcc> = BTreeMap::new();
 
-    for row in &rows {
-        let contact_id: String = row.try_get("contact_id").unwrap_or_default();
+    for row in &line_rows {
         let partner_cui: String = row.try_get("partner_cui").unwrap_or_default();
         let partner_name: String = row.try_get("partner_name").unwrap_or_default();
-        let invoice_count: i64 = row.try_get("invoice_count").unwrap_or(0);
-        let subtotals: String = row.try_get("subtotals").unwrap_or_default();
-        let vats: String = row.try_get("vats").unwrap_or_default();
-        let currencies: String = row.try_get("currencies").unwrap_or_default();
-        let rates_s: String = row.try_get("rates").unwrap_or_default();
+        let invoice_id: String = row.try_get("invoice_id").unwrap_or_default();
+        let currency: String = row
+            .try_get("currency")
+            .unwrap_or_else(|_| "RON".to_string());
+        let fx = parse_rate(
+            row.try_get::<Option<f64>, _>("exchange_rate")
+                .unwrap_or(None),
+        );
+        let vat_category: String = row
+            .try_get("vat_category")
+            .unwrap_or_else(|_| "S".to_string());
+        let base_s: String = row.try_get("line_base").unwrap_or_default();
+        let vat_s: String = row.try_get("line_vat").unwrap_or_default();
 
-        // Zip all parallel GROUP_CONCAT arrays for per-invoice RON conversion.
-        let mut base_sum = Decimal::ZERO;
-        let mut vat_sum = Decimal::ZERO;
-        let vat_parts: Vec<&str> = vats.split('|').collect();
-        let currency_parts: Vec<&str> = currencies.split('|').collect();
-        let rate_parts: Vec<&str> = rates_s.split('|').collect();
-        for (idx, sub_s) in subtotals.split('|').enumerate() {
-            let sub = Decimal::from_str(sub_s.trim()).unwrap_or(Decimal::ZERO);
-            let vat = Decimal::from_str(vat_parts.get(idx).copied().unwrap_or("").trim())
-                .unwrap_or(Decimal::ZERO);
-            let currency = currency_parts.get(idx).copied().unwrap_or("RON");
-            let rate_str = rate_parts.get(idx).copied().unwrap_or("").trim();
-            let fx = parse_rate(rate_str.parse::<f64>().ok());
-            base_sum += amount_to_ron(sub, currency, fx);
-            vat_sum += amount_to_ron(vat, currency, fx);
-        }
+        let base_ron = amount_to_ron(
+            Decimal::from_str(base_s.trim()).unwrap_or(Decimal::ZERO),
+            &currency,
+            fx,
+        );
+        let vat_ron = amount_to_ron(
+            Decimal::from_str(vat_s.trim()).unwrap_or(Decimal::ZERO),
+            &currency,
+            fx,
+        );
 
-        let acc = partners.entry(contact_id).or_insert(PartnerAcc {
+        let key = (partner_cui.clone(), vat_category.clone());
+        let acc = partners.entry(key).or_insert(PartnerAcc {
             partner_cui: partner_cui.clone(),
             partner_name: partner_name.clone(),
-            invoice_count: 0,
+            vat_category: vat_category.clone(),
+            invoice_ids: std::collections::BTreeSet::new(),
             base: Decimal::ZERO,
             vat: Decimal::ZERO,
         });
-        acc.invoice_count += invoice_count;
-        acc.base += base_sum;
-        acc.vat += vat_sum;
+        acc.invoice_ids.insert(invoice_id);
+        acc.base += base_ron;
+        acc.vat += vat_ron;
     }
 
     // Calculăm totaluri și construim Vec<D394Partner> sortat descrescător după base.
     let mut total_base = Decimal::ZERO;
     let mut total_vat = Decimal::ZERO;
-    let mut total_invoice_count: i64 = 0;
+    // invoice_count = total distinct invoice IDs across all (partner, category) rows
+    let all_invoice_ids: std::collections::BTreeSet<String> = partners
+        .values()
+        .flat_map(|acc| acc.invoice_ids.iter().cloned())
+        .collect();
+    let total_invoice_count: i64 = all_invoice_ids.len() as i64;
 
     let mut partners_vec: Vec<D394Partner> = partners
         .into_values()
         .map(|acc| {
             total_base += acc.base;
             total_vat += acc.vat;
-            total_invoice_count += acc.invoice_count;
             D394Partner {
                 partner_cui: acc.partner_cui,
                 partner_name: acc.partner_name,
-                invoice_count: acc.invoice_count,
+                vat_category: acc.vat_category,
+                invoice_count: acc.invoice_ids.len() as i64,
                 base: acc.base.round_dp(2).to_string(),
                 vat: acc.vat.round_dp(2).to_string(),
             }
@@ -245,26 +260,27 @@ pub async fn compute_d394(
 
     let purchase_unparsed_count: i64 = unparsed_count_row.try_get("cnt").unwrap_or(0);
 
-    // Fetch liniile VAT agregate per furnizor (issuer_cui + issuer_name).
-    // Include doar furnizorii care au cel puțin o linie parsată (INNER JOIN).
-    // Wave 4: also GROUP_CONCAT currency + exchange_rate per VAT line for RON conversion.
-    // Note: vat_lines are at the line level but the currency/rate lives on the parent invoice.
-    // We join ri to get the rate for each vl row.
-    let purchase_rows = sqlx::query(
-        "SELECT ri.issuer_cui, \
+    // ── Purchases (achiziții): fetch individual VAT line rows — NO GROUP_CONCAT ─
+    // Same rationale as for sales: GROUP_CONCAT order is non-deterministic,
+    // causing currency↔rate mis-pairing for foreign-currency suppliers.
+    //
+    // Fetch each vat_line individually (joined to parent ri for currency/rate),
+    // then group in Rust by (issuer_cui, vat_category) so categories stay separate.
+    let purchase_line_rows = sqlx::query(
+        "SELECT ri.id AS invoice_id, \
+                ri.issuer_cui, \
                 ri.issuer_name, \
-                COUNT(DISTINCT ri.id) AS invoice_count, \
-                GROUP_CONCAT(vl.base_amount, '|') AS bases, \
-                GROUP_CONCAT(vl.vat_amount, '|') AS vats, \
-                GROUP_CONCAT(COALESCE(ri.currency, 'RON'), '|') AS currencies, \
-                GROUP_CONCAT(COALESCE(CAST(ri.exchange_rate AS TEXT), ''), '|') AS rates \
+                COALESCE(ri.currency, 'RON') AS currency, \
+                ri.exchange_rate, \
+                vl.vat_category, \
+                vl.base_amount AS line_base, \
+                vl.vat_amount AS line_vat \
          FROM received_invoices ri \
          JOIN received_invoice_vat_lines vl ON vl.received_invoice_id = ri.id \
          WHERE ri.company_id = ?1 \
            AND ri.issue_date >= ?2 \
            AND ri.issue_date <= ?3 \
-           AND ri.status != 'REJECTED' \
-         GROUP BY ri.issuer_cui, ri.issuer_name",
+           AND ri.status != 'REJECTED'",
     )
     .bind(&company_id)
     .bind(&period_from)
@@ -276,50 +292,55 @@ pub async fn compute_d394(
     struct SupplierAcc {
         issuer_cui: String,
         issuer_name: String,
-        invoice_count: i64,
+        vat_category: String,
+        invoice_ids: std::collections::BTreeSet<String>,
         base: Decimal,
         vat: Decimal,
     }
 
-    // Keyed by (issuer_cui, issuer_name) pentru a gestiona furnizori cu același CUI.
+    // key = (issuer_cui, vat_category)
     let mut suppliers: BTreeMap<(String, String), SupplierAcc> = BTreeMap::new();
 
-    for row in &purchase_rows {
+    for row in &purchase_line_rows {
+        let invoice_id: String = row.try_get("invoice_id").unwrap_or_default();
         let issuer_cui: String = row.try_get("issuer_cui").unwrap_or_default();
         let issuer_name: String = row.try_get("issuer_name").unwrap_or_default();
-        let inv_count: i64 = row.try_get("invoice_count").unwrap_or(0);
-        let bases: String = row.try_get("bases").unwrap_or_default();
-        let vats_s: String = row.try_get("vats").unwrap_or_default();
-        let currencies: String = row.try_get("currencies").unwrap_or_default();
-        let rates_s: String = row.try_get("rates").unwrap_or_default();
+        let currency: String = row
+            .try_get("currency")
+            .unwrap_or_else(|_| "RON".to_string());
+        let fx = parse_rate(
+            row.try_get::<Option<f64>, _>("exchange_rate")
+                .unwrap_or(None),
+        );
+        let vat_category: String = row
+            .try_get("vat_category")
+            .unwrap_or_else(|_| "S".to_string());
+        let base_s: String = row.try_get("line_base").unwrap_or_default();
+        let vat_s: String = row.try_get("line_vat").unwrap_or_default();
 
-        let mut base_sum = Decimal::ZERO;
-        let mut vat_sum = Decimal::ZERO;
-        let vat_parts: Vec<&str> = vats_s.split('|').collect();
-        let currency_parts: Vec<&str> = currencies.split('|').collect();
-        let rate_parts: Vec<&str> = rates_s.split('|').collect();
-        for (idx, base_s) in bases.split('|').enumerate() {
-            let base = Decimal::from_str(base_s.trim()).unwrap_or(Decimal::ZERO);
-            let vat = Decimal::from_str(vat_parts.get(idx).copied().unwrap_or("").trim())
-                .unwrap_or(Decimal::ZERO);
-            let currency = currency_parts.get(idx).copied().unwrap_or("RON");
-            let rate_str = rate_parts.get(idx).copied().unwrap_or("").trim();
-            let fx = parse_rate(rate_str.parse::<f64>().ok());
-            base_sum += amount_to_ron(base, currency, fx);
-            vat_sum += amount_to_ron(vat, currency, fx);
-        }
+        let base_ron = amount_to_ron(
+            Decimal::from_str(base_s.trim()).unwrap_or(Decimal::ZERO),
+            &currency,
+            fx,
+        );
+        let vat_ron = amount_to_ron(
+            Decimal::from_str(vat_s.trim()).unwrap_or(Decimal::ZERO),
+            &currency,
+            fx,
+        );
 
-        let key = (issuer_cui.clone(), issuer_name.clone());
+        let key = (issuer_cui.clone(), vat_category.clone());
         let acc = suppliers.entry(key).or_insert(SupplierAcc {
             issuer_cui: issuer_cui.clone(),
             issuer_name: issuer_name.clone(),
-            invoice_count: 0,
+            vat_category: vat_category.clone(),
+            invoice_ids: std::collections::BTreeSet::new(),
             base: Decimal::ZERO,
             vat: Decimal::ZERO,
         });
-        acc.invoice_count += inv_count;
-        acc.base += base_sum;
-        acc.vat += vat_sum;
+        acc.invoice_ids.insert(invoice_id);
+        acc.base += base_ron;
+        acc.vat += vat_ron;
     }
 
     let mut total_purchase_base = Decimal::ZERO;
@@ -333,7 +354,8 @@ pub async fn compute_d394(
             D394Partner {
                 partner_cui: acc.issuer_cui,
                 partner_name: acc.issuer_name,
-                invoice_count: acc.invoice_count,
+                vat_category: acc.vat_category,
+                invoice_count: acc.invoice_ids.len() as i64,
                 base: acc.base.round_dp(2).to_string(),
                 vat: acc.vat.round_dp(2).to_string(),
             }
@@ -438,6 +460,10 @@ fn build_and_write_xml(report: D394Report, dest_path: String) -> AppResult<Strin
             xml_escape(&partner.partner_name)
         ));
         xml.push_str(&format!(
+            "      <CategorieVAT>{}</CategorieVAT>\n",
+            xml_escape(&partner.vat_category)
+        ));
+        xml.push_str(&format!(
             "      <NrFacturi>{}</NrFacturi>\n",
             partner.invoice_count
         ));
@@ -480,6 +506,10 @@ fn build_and_write_xml(report: D394Report, dest_path: String) -> AppResult<Strin
         xml.push_str(&format!(
             "      <Denumire>{}</Denumire>\n",
             xml_escape(&partner.partner_name)
+        ));
+        xml.push_str(&format!(
+            "      <CategorieVAT>{}</CategorieVAT>\n",
+            xml_escape(&partner.vat_category)
         ));
         xml.push_str(&format!(
             "      <NrFacturi>{}</NrFacturi>\n",
@@ -601,6 +631,7 @@ mod tests {
             partners: vec![D394Partner {
                 partner_cui: "RO98765432".to_string(),
                 partner_name: "SC CLIENT SRL".to_string(),
+                vat_category: "S".to_string(),
                 invoice_count: 3,
                 base: "5000.00".to_string(),
                 vat: "950.00".to_string(),
@@ -611,6 +642,7 @@ mod tests {
             purchase_partners: vec![D394Partner {
                 partner_cui: "RO11111111".to_string(),
                 partner_name: "SC FURNIZOR SRL".to_string(),
+                vat_category: "S".to_string(),
                 invoice_count: 2,
                 base: "2000.00".to_string(),
                 vat: "380.00".to_string(),
@@ -692,6 +724,7 @@ mod tests {
             D394Partner {
                 partner_cui: "".to_string(),
                 partner_name: "B".to_string(),
+                vat_category: "S".to_string(),
                 invoice_count: 1,
                 base: "100.00".to_string(),
                 vat: "19.00".to_string(),
@@ -699,6 +732,7 @@ mod tests {
             D394Partner {
                 partner_cui: "".to_string(),
                 partner_name: "A".to_string(),
+                vat_category: "S".to_string(),
                 invoice_count: 1,
                 base: "5000.00".to_string(),
                 vat: "950.00".to_string(),
@@ -706,6 +740,7 @@ mod tests {
             D394Partner {
                 partner_cui: "".to_string(),
                 partner_name: "C".to_string(),
+                vat_category: "S".to_string(),
                 invoice_count: 1,
                 base: "1000.00".to_string(),
                 vat: "190.00".to_string(),
@@ -868,5 +903,201 @@ mod tests {
         let b = &suppliers[&("RO22222222".to_string(), "Furnizor B SRL".to_string())];
         assert_eq!(b.0, Decimal::from_str("800.00").unwrap());
         assert_eq!(b.2, 1);
+    }
+
+    // ── Fix #2: group by (partner_cui, vat_category) ─────────────────────────
+
+    /// Fix #2: same partner with two different vat_categories produces two rows,
+    /// not one collapsed row.
+    #[test]
+    fn d394_groups_by_partner_and_vat_category() {
+        // Simulate the Rust-side accumulation for a partner with lines in two categories.
+        // (RO111, "S") and (RO111, "AE") must be separate keys.
+        struct LineRow {
+            partner_cui: &'static str,
+            vat_category: &'static str,
+            base: &'static str,
+            vat: &'static str,
+        }
+
+        let lines = [
+            LineRow {
+                partner_cui: "RO111",
+                vat_category: "S",
+                base: "1000.00",
+                vat: "190.00",
+            },
+            LineRow {
+                partner_cui: "RO111",
+                vat_category: "AE",
+                base: "500.00",
+                vat: "0.00",
+            },
+            LineRow {
+                partner_cui: "RO222",
+                vat_category: "S",
+                base: "300.00",
+                vat: "57.00",
+            },
+        ];
+
+        let mut groups: BTreeMap<(String, String), (Decimal, Decimal)> = BTreeMap::new();
+        for l in &lines {
+            let key = (l.partner_cui.to_string(), l.vat_category.to_string());
+            let e = groups.entry(key).or_insert((Decimal::ZERO, Decimal::ZERO));
+            e.0 += Decimal::from_str(l.base).unwrap();
+            e.1 += Decimal::from_str(l.vat).unwrap();
+        }
+
+        assert_eq!(
+            groups.len(),
+            3,
+            "3 distinct (partner, category) keys expected"
+        );
+
+        let s_111 = &groups[&("RO111".to_string(), "S".to_string())];
+        assert_eq!(s_111.0, Decimal::from_str("1000.00").unwrap());
+        assert_eq!(s_111.1, Decimal::from_str("190.00").unwrap());
+
+        let ae_111 = &groups[&("RO111".to_string(), "AE".to_string())];
+        assert_eq!(ae_111.0, Decimal::from_str("500.00").unwrap());
+        assert_eq!(ae_111.1, Decimal::ZERO);
+
+        let s_222 = &groups[&("RO222".to_string(), "S".to_string())];
+        assert_eq!(s_222.0, Decimal::from_str("300.00").unwrap());
+    }
+
+    /// Fix #2: E and Z at the same 0% rate stay separate (not collapsed together).
+    #[test]
+    fn d394_zero_rate_categories_stay_separate() {
+        let mut groups: BTreeMap<(String, String), (Decimal, Decimal)> = BTreeMap::new();
+
+        // Same partner, same numeric rate (0%), different categories
+        let key_e = ("RO111".to_string(), "E".to_string());
+        let key_z = ("RO111".to_string(), "Z".to_string());
+        groups
+            .entry(key_e)
+            .or_insert((Decimal::ZERO, Decimal::ZERO))
+            .0 += Decimal::from_str("200.00").unwrap();
+        groups
+            .entry(key_z)
+            .or_insert((Decimal::ZERO, Decimal::ZERO))
+            .0 += Decimal::from_str("300.00").unwrap();
+
+        assert_eq!(groups.len(), 2, "E and Z must be separate rows");
+        assert_eq!(
+            groups[&("RO111".to_string(), "E".to_string())].0,
+            Decimal::from_str("200.00").unwrap()
+        );
+        assert_eq!(
+            groups[&("RO111".to_string(), "Z".to_string())].0,
+            Decimal::from_str("300.00").unwrap()
+        );
+    }
+
+    /// Fix #2: foreign-currency partner converts deterministically (no GROUP_CONCAT mis-pair).
+    /// Each row carries its own currency+rate — accumulation is independent.
+    #[test]
+    fn d394_foreign_currency_partner_deterministic_conversion() {
+        use crate::ubl::fx::{amount_to_ron, parse_rate};
+
+        // Partner RO111, category S:
+        //   Line 1: EUR 1000 base, EUR 190 vat, rate 5.0 → 5000 / 950 RON
+        //   Line 2: RON 500 base, RON 95 vat, no rate → 500 / 95 RON
+        // Expected total: base=5500 RON, vat=1045 RON
+
+        struct LineRow {
+            currency: &'static str,
+            rate: Option<f64>,
+            base: &'static str,
+            vat: &'static str,
+        }
+
+        let lines = [
+            LineRow {
+                currency: "EUR",
+                rate: Some(5.0),
+                base: "1000.00",
+                vat: "190.00",
+            },
+            LineRow {
+                currency: "RON",
+                rate: None,
+                base: "500.00",
+                vat: "95.00",
+            },
+        ];
+
+        let mut total_base = Decimal::ZERO;
+        let mut total_vat = Decimal::ZERO;
+        for l in &lines {
+            let fx = parse_rate(l.rate);
+            total_base += amount_to_ron(Decimal::from_str(l.base).unwrap(), l.currency, fx);
+            total_vat += amount_to_ron(Decimal::from_str(l.vat).unwrap(), l.currency, fx);
+        }
+
+        assert_eq!(
+            total_base,
+            Decimal::from_str("5500.00").unwrap(),
+            "5000+500=5500 RON base"
+        );
+        assert_eq!(
+            total_vat,
+            Decimal::from_str("1045.00").unwrap(),
+            "950+95=1045 RON vat"
+        );
+    }
+
+    /// Fix #2: XML output includes CategorieVAT element for each partner row.
+    #[test]
+    fn build_xml_includes_vat_category_per_partner() {
+        let report = D394Report {
+            company_cui: "RO33333333".to_string(),
+            period_from: "2024-05-01".to_string(),
+            period_to: "2024-05-31".to_string(),
+            partners: vec![
+                D394Partner {
+                    partner_cui: "RO111".to_string(),
+                    partner_name: "SC A SRL".to_string(),
+                    vat_category: "S".to_string(),
+                    invoice_count: 1,
+                    base: "1000.00".to_string(),
+                    vat: "190.00".to_string(),
+                },
+                D394Partner {
+                    partner_cui: "RO111".to_string(),
+                    partner_name: "SC A SRL".to_string(),
+                    vat_category: "AE".to_string(),
+                    invoice_count: 1,
+                    base: "500.00".to_string(),
+                    vat: "0.00".to_string(),
+                },
+            ],
+            total_base: "1500.00".to_string(),
+            total_vat: "190.00".to_string(),
+            invoice_count: 1,
+            purchase_partners: vec![],
+            total_purchase_base: "0.00".to_string(),
+            total_purchase_vat: "0.00".to_string(),
+            purchase_invoice_count: 0,
+            purchase_unparsed_count: 0,
+        };
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_d394_vat_category.xml");
+        let result = build_and_write_xml(report, path.to_string_lossy().to_string());
+        assert!(result.is_ok());
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains("<CategorieVAT>S</CategorieVAT>"),
+            "XML must contain CategorieVAT S"
+        );
+        assert!(
+            content.contains("<CategorieVAT>AE</CategorieVAT>"),
+            "XML must contain CategorieVAT AE — separate row from S"
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 }

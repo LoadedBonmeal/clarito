@@ -24,6 +24,7 @@ import {
   SectionCard,
   Card,
   Btn,
+  Empty,
 } from "@/components/rf";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -130,7 +131,7 @@ export function ReportsPage() {
     queryKey: queryKeys.vatReport.get(selectedYear, selectedMonth, activeCompanyId ?? ""),
     queryFn:  () =>
       api.reports.generateVatReport(dateFrom, dateTo, activeCompanyId ?? undefined),
-    enabled:   true,
+    enabled:   !!activeCompanyId,
     staleTime: 60_000,
   });
 
@@ -141,13 +142,13 @@ export function ReportsPage() {
     error:   invoicesErr,
     refetch: refetchInvoices,
   } = useQuery({
-    queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 500 } }),
+    queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
     queryFn:  () =>
       api.invoices.list({
         companyId: activeCompanyId ?? undefined,
-        page: { offset: 0, limit: 500 },
+        page: { offset: 0, limit: 10000 },
       }),
-    enabled: true,
+    enabled: !!activeCompanyId,
   });
 
   const allInvoices       = paged?.items ?? [];
@@ -168,6 +169,15 @@ export function ReportsPage() {
   const periodInvoices = useMemo(
     () => allInvoices.filter((inv) => inv.issueDate.startsWith(prefix)),
     [allInvoices, prefix],
+  );
+
+  // REG-STORNO: fiscal set for the Sales Journal = VALIDATED + STORNED.
+  // STORNED originals are positive fiscal events in the period they were issued.
+  // The negative credit note (VALIDATED) offsets them in its own period.
+  // DRAFT / SUBMITTED / QUEUED / REJECTED are not fiscal events yet.
+  const periodFiscalInvoices = useMemo(
+    () => periodInvoices.filter((inv) => inv.status === "VALIDATED" || inv.status === "STORNED"),
+    [periodInvoices],
   );
 
   const periodValidatedInvoices = useMemo(
@@ -236,19 +246,30 @@ export function ReportsPage() {
   const monthSegOptions = monthOptions.map((m) => ({ value: m.value, label: m.label.slice(0, 3) }));
   const yearSegOptions  = yearOptions.map((y) => ({ value: String(y), label: String(y) }));
 
+  if (!activeCompanyId) {
+    return (
+      <div className="rf-content">
+        <PageHeader title="Rapoarte" />
+        <div className="rf-page-body">
+          <Card pad>
+            <Empty icon="chart" title="Selectați o companie activă pentru a vedea rapoartele." />
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="rf-content">
       <PageHeader
         title="Rapoarte"
         actions={
           <>
-            {view !== "saft" && (
-              <Segmented
-                options={monthSegOptions}
-                value={String(selectedMonth)}
-                onChange={(v) => setSelectedMonth(Number(v))}
-              />
-            )}
+            <Segmented
+              options={monthSegOptions}
+              value={String(selectedMonth)}
+              onChange={(v) => setSelectedMonth(Number(v))}
+            />
             <Segmented
               options={yearSegOptions}
               value={String(selectedYear)}
@@ -264,9 +285,22 @@ export function ReportsPage() {
       </div>
 
       {/* ── Period info line ─────────────────────────────────────────────── */}
-      {view !== "saft" && (
-        <div style={{ padding: "10px 32px 0", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
-          {MONTHS[selectedMonth - 1]} {selectedYear} · {periodInvoices.length} facturi emise în perioadă
+      <div style={{ padding: "10px 32px 0", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
+        {MONTHS[selectedMonth - 1]} {selectedYear} · {periodInvoices.length} facturi emise în perioadă
+      </div>
+
+      {/* ── Truncation warning ───────────────────────────────────────────── */}
+      {paged && paged.total > paged.items.length && (
+        <div
+          style={{
+            padding: "6px 32px",
+            background: "var(--rf-warning-bg, #fffbeb)",
+            borderBottom: "1px solid var(--rf-border)",
+            fontSize: 12,
+            color: "var(--rf-warning, #92400e)",
+          }}
+        >
+          Afișate primele {paged.items.length.toLocaleString("ro-RO")} din {paged.total.toLocaleString("ro-RO")} facturi — restrânge filtrele pentru a vedea toate înregistrările.
         </div>
       )}
 
@@ -354,7 +388,7 @@ export function ReportsPage() {
               {/* TVA bar chart (CSS-only) */}
               {vatGroups.length > 0 && (
                 <SectionCard icon="chart" title="TVA pe cote">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingTop: 4 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, padding: "4px 16px 16px" }}>
                     {(() => {
                       const maxVat = Math.max(...vatGroups.map((g) => parseDec(g.vatAmount)));
                       return vatGroups.map((g) => {
@@ -457,6 +491,7 @@ export function ReportsPage() {
             )}
             <SaftView
               selectedYear={selectedYear}
+              selectedMonth={selectedMonth}
               allInvoicesForYear={yearValidatedInvoices}
             />
           </>
@@ -473,7 +508,7 @@ export function ReportsPage() {
               />
             )}
             <SalesJournalView
-              periodInvoices={periodInvoices}
+              periodInvoices={periodFiscalInvoices}
               contactMap={contactMap}
               dateFrom={dateFrom}
               dateTo={dateTo}

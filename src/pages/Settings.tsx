@@ -401,7 +401,7 @@ export function SettingsPage() {
       >
         {/* ── Temă și afișare ── */}
         <SectionCard icon="settings" title="Temă și afișare" subtitle="Personalizați aspectul aplicației">
-          <div style={{ padding: "0 24px 8px" }}>
+          <div style={{ padding: "0 24px 16px" }}>
             <SettingRow label="Densitate rânduri" desc="Înălțimea rândurilor în tabele și liste.">
               <Segmented
                 value={density ?? "comfortable"}
@@ -707,7 +707,7 @@ export function SettingsPage() {
                     <span className="rf-text-muted">zile rămase</span>
                   </div>
                   <div className="rf-text-muted" style={{ fontSize: 12.5, marginTop: 4 }}>
-                    {license.email ?? ""} · expiră {new Date(license.expiresAt * 1000).toLocaleDateString("ro-RO")}
+                    {license.email ?? ""} · expiră {license.expiresAt ? new Date(license.expiresAt * 1000).toLocaleDateString("ro-RO") : "—"}
                   </div>
                   {license.licenseKey && (
                     <div className="rf-mono rf-text-muted" style={{ fontSize: 11.5, marginTop: 4 }}>
@@ -934,7 +934,13 @@ export function SettingsPage() {
                   icon="download"
                   onClick={async () => {
                     try {
-                      const path = await api.system.exportBackup();
+                      const defaultName = `efactura_backup_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.zip`;
+                      const destPath = await save({
+                        filters: [{ name: "ZIP", extensions: ["zip"] }],
+                        defaultPath: defaultName,
+                      });
+                      if (!destPath) return;
+                      const path = await api.system.exportBackup(destPath as string);
                       notify.success(`Backup salvat: ${path}`);
                     } catch (e) {
                       notify.error(formatError(e, "Exportul backup-ului a eșuat."));
@@ -954,12 +960,12 @@ export function SettingsPage() {
                     try {
                       const result = await api.archive.verifyIntegrity();
                       if (result.ok) {
-                        notify.success(`Arhiva este integră. ${result.totalChecked} fișiere verificate.`);
+                        notify.success(`Arhiva este integră. ${result.checked} fișiere verificate.`);
                       } else {
                         notify.error(
-                          `Fișiere lipsă (${result.missingFiles.length} din ${result.totalChecked}): ` +
-                          result.missingFiles.slice(0, 5).join(", ") +
-                          (result.missingFiles.length > 5 ? " …" : "")
+                          `Fișiere lipsă (${result.missing.length} din ${result.checked}): ` +
+                          result.missing.slice(0, 5).join(", ") +
+                          (result.missing.length > 5 ? " …" : "")
                         );
                       }
                     } catch (e) {

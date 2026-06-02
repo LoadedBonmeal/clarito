@@ -359,7 +359,7 @@ export function InvoiceNewPage() {
 
           {/* Parties & header fields */}
           <SectionCard icon="users" title="Părți & detalii factură">
-            <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ padding: "12px 20px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
               {/* 2-col: emitent + cumpărător */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                 <Field label="Companie emitentă">
@@ -806,7 +806,7 @@ export function InvoiceNewPage() {
 
           {/* Generate & Send card */}
           <SectionCard icon="fileOut" title="Generează & trimite">
-            <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ padding: "12px 20px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
               <Btn
                 variant="secondary"
                 icon="file"

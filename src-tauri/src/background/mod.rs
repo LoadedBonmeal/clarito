@@ -13,6 +13,7 @@ mod spv;
 
 // Re-export functions used by other modules
 pub(crate) use poll::poll_submitted_for_company;
+pub(crate) use poll::refresh_token_for;
 pub(crate) use spv::do_sync_spv;
 pub(crate) use spv::parse_received_xml;
 

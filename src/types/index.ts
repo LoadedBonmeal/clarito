@@ -174,6 +174,9 @@ export interface Invoice {
   rejectionCode: string | null;
   notes: string | null;
   paymentMeansCode: string;
+  /// BIZ-13: FK to the original invoice this credit note reverses. Set only on
+  /// storno credit notes; null for regular invoices and STORNED originals.
+  stornoOfInvoiceId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -435,6 +438,8 @@ export interface D394Partner {
   partnerCui: string;
   /** Denumirea legală a partenerului. */
   partnerName: string;
+  /** Categoria TVA (S/AE/E/Z/O/K/G) — D394 raportează separate pe categorie. */
+  vatCategory: string;
   /** Numărul de facturi VALIDATED emise către partener în perioadă. */
   invoiceCount: number;
   /** Baza impozabilă totală (net), 2 zecimale. */

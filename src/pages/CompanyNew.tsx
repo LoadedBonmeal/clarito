@@ -27,7 +27,30 @@ import type { CreateCompanyInput } from "@/types";
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
 const CUI_REGEX = /^(RO)?\d{2,10}$/i;
-const IBAN_REGEX = /^[A-Z]{2}\d{2}[A-Z0-9]{1,30}$/i;
+
+/**
+ * IBAN mod-97 validation (ISO 13616).
+ * Strips spaces, uppercases, checks format and the mod-97 checksum.
+ * Empty string is accepted (field is optional).
+ */
+function validateIban(raw: string): boolean {
+  const s = raw.replace(/\s+/g, "").toUpperCase();
+  if (s.length === 0) return true; // optional field
+  if (s.length < 15 || s.length > 34) return false;
+  if (!/^[A-Z]{2}[0-9]{2}[A-Z0-9]+$/.test(s)) return false;
+  // Move first 4 chars to end, convert letters A-Z → 10-35, compute mod 97.
+  const rearranged = s.slice(4) + s.slice(0, 4);
+  const numeric = rearranged
+    .split("")
+    .map((c) => (c >= "A" && c <= "Z" ? String(c.charCodeAt(0) - 55) : c))
+    .join("");
+  // BigInt mod-97 for large numbers.
+  let remainder = BigInt(0);
+  for (const ch of numeric) {
+    remainder = (remainder * BigInt(10) + BigInt(ch)) % BigInt(97);
+  }
+  return remainder === BigInt(1);
+}
 
 const schema = z.object({
   cui: z.string().regex(CUI_REGEX, "Format: 2-10 cifre, opțional cu RO."),
@@ -40,7 +63,11 @@ const schema = z.object({
   postalCode: z.string().optional(),
   email: z.email("Email invalid.").optional().or(z.literal("")),
   phone: z.string().optional(),
-  iban: z.string().regex(IBAN_REGEX, "IBAN invalid.").optional().or(z.literal("")),
+  iban: z
+    .string()
+    .refine((v) => validateIban(v), "IBAN invalid (checksum incorect sau format greșit).")
+    .optional()
+    .or(z.literal("")),
   bankName: z.string().optional(),
   invoiceSeries: z.string().min(1, "Seria e obligatorie."),
   vatPayer: z.boolean().optional(),

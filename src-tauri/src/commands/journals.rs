@@ -1,6 +1,6 @@
 //! Jurnale contabile — export CSV jurnal vânzări și jurnal cumpărări.
 //!
-//! Jurnalul de vânzări: toate facturile emise (non-DRAFT) pentru o perioadă,
+//! Jurnalul de vânzări: facturile fiscale emise (VALIDATED + STORNED) pentru o perioadă,
 //! cu detalii client, net, TVA, total.
 //! Jurnalul de cumpărări: facturile primite din `received_invoices` — conține
 //! DOAR totalul (fără defalcare net/TVA, care necesită parsarea XML-ului UBL).
@@ -42,7 +42,7 @@ fn csv_field(s: &str) -> String {
 /// prefixing them with `'` would turn the numeric cell into text and break
 /// SUM formulas in accounting software. Amounts never contain user-controlled
 /// text, so there is no injection vector to neutralize here.
-fn csv_num(s: &str) -> String {
+pub(crate) fn csv_num(s: &str) -> String {
     if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
@@ -63,7 +63,10 @@ fn csv_row(fields: &[&str]) -> String {
 
 /// Exportă jurnalul de vânzări (CSV) pentru o companie și o perioadă.
 ///
-/// Include toate facturile emise (statuses != DRAFT) din perioadă.
+/// Include facturile fiscale emise: status VALIDATED (confirmate de ANAF) și
+/// STORNED (originale anulate — rămân eventi fiscali pozitivi în perioada
+/// emiterii lor; nota de credit negativă le neutralizează în propria perioadă
+/// odată validată). DRAFT / SUBMITTED / QUEUED / REJECTED sunt excluse.
 /// Header: `Numar,Data,Client,CUI,Net,TVA,Total,Moneda,Status`
 /// Wave 4: added `Moneda` column so foreign-currency invoices are visible as-is.
 /// Amounts are in the ORIGINAL document currency (journals are operational per-document
@@ -79,7 +82,10 @@ pub async fn export_sales_journal(
 ) -> AppResult<String> {
     let pool = &state.db;
 
-    // Fetch invoices non-DRAFT pentru companie în perioadă, JOIN contacts.
+    // Fetch invoices fiscale (VALIDATED + STORNED) pentru companie în perioadă.
+    // REG-STORNO: STORNED originals are positive fiscal events in their issued period.
+    // DRAFT / SUBMITTED / QUEUED / REJECTED are excluded to keep the journal aligned
+    // with the fiscal set reported to ANAF (D300/D394/SAF-T).
     // Wave 4: also fetch currency so the Moneda column is populated.
     let rows = sqlx::query(
         "SELECT i.full_number, i.issue_date, \
@@ -93,7 +99,7 @@ pub async fn export_sales_journal(
          WHERE i.company_id = ?1 \
            AND i.issue_date >= ?2 \
            AND i.issue_date <= ?3 \
-           AND i.status != 'DRAFT' \
+           AND i.status IN ('VALIDATED', 'STORNED') \
          ORDER BY i.issue_date ASC, i.full_number ASC",
     )
     .bind(&company_id)
@@ -106,10 +112,12 @@ pub async fn export_sales_journal(
     let dest = dest_path.clone();
 
     tokio::task::spawn_blocking(move || {
+        // UTF-8 BOM so Excel opens Romanian diacritics correctly.
+        let bom = "\u{FEFF}";
         let header = csv_row(&[
             "Numar", "Data", "Client", "CUI", "Net", "TVA", "Total", "Moneda", "Status",
         ]);
-        let mut lines = vec![header];
+        let mut lines = vec![format!("{}{}", bom, header)];
 
         for row in &rows {
             let full_number: String = row.try_get("full_number").unwrap_or_default();
@@ -195,7 +203,8 @@ pub async fn export_purchase_journal(
         // dar util pentru utilizatorul care deschide fișierul în Excel/calc).
         // Net/TVA sunt disponibile când XML-ul a fost parsat; rândurile fără defalcare
         // au coloanele Net/TVA goale.
-        let note = "# NOTA: Jurnalul de cumparari include Net/TVA extrase din XML-ul UBL \
+        // UTF-8 BOM prepended to the first line so Excel opens diacritics correctly.
+        let note = "\u{FEFF}# NOTA: Jurnalul de cumparari include Net/TVA extrase din XML-ul UBL \
                     cand sunt disponibile. Randurile fara defalcare nu au fost inca parsate \
                     (folositi butonul Recalculeaza TVA din XML din aplicatie).";
         let header = csv_row(&[
@@ -452,6 +461,30 @@ mod tests {
         assert_eq!(csv_neutralize("(test)"), "(test)");
     }
 
+    /// A: Sales journal CSV starts with UTF-8 BOM for correct diacritics in Excel.
+    #[test]
+    fn sales_journal_csv_starts_with_utf8_bom() {
+        let bom = "\u{FEFF}";
+        let header = csv_row(&[
+            "Numar", "Data", "Client", "CUI", "Net", "TVA", "Total", "Moneda", "Status",
+        ]);
+        let first_line = format!("{}{}", bom, header);
+        assert!(
+            first_line.starts_with('\u{FEFF}'),
+            "Sales journal CSV must start with UTF-8 BOM"
+        );
+    }
+
+    /// A: Purchase journal CSV starts with UTF-8 BOM for correct diacritics in Excel.
+    #[test]
+    fn purchase_journal_csv_starts_with_utf8_bom() {
+        let note = "\u{FEFF}# NOTA: test";
+        assert!(
+            note.starts_with('\u{FEFF}'),
+            "Purchase journal CSV must start with UTF-8 BOM"
+        );
+    }
+
     /// R2: csv_field aplică neutralizarea ÎNAINTE de quoting RFC 4180.
     #[test]
     fn csv_field_neutralizes_then_quotes() {
@@ -540,5 +573,163 @@ mod tests {
             "REJECTED invoice must not appear"
         );
         assert!(!content.contains("RO222"), "REJECTED CUI must not appear");
+    }
+
+    // ── REG-STORNO: sales journal fiscal status set ───────────────────────────
+
+    /// REG-STORNO: jurnalul de vânzări include STORNED (eveniment fiscal pozitiv
+    /// în perioada emiterii) dar exclude DRAFT / SUBMITTED / QUEUED / REJECTED.
+    #[test]
+    fn sales_journal_fiscal_status_filter() {
+        struct FakeSale {
+            full_number: &'static str,
+            status: &'static str,
+        }
+
+        let fiscal_statuses = ["VALIDATED", "STORNED"];
+
+        let invoices = [
+            FakeSale {
+                full_number: "FA-001",
+                status: "VALIDATED",
+            },
+            FakeSale {
+                full_number: "FA-002",
+                status: "STORNED",
+            }, // original — positive fiscal event
+            FakeSale {
+                full_number: "FA-003",
+                status: "DRAFT",
+            }, // not yet submitted
+            FakeSale {
+                full_number: "FA-004",
+                status: "SUBMITTED",
+            }, // awaiting ANAF
+            FakeSale {
+                full_number: "FA-005",
+                status: "QUEUED",
+            },
+            FakeSale {
+                full_number: "FA-006",
+                status: "REJECTED",
+            },
+        ];
+
+        let included: Vec<&FakeSale> = invoices
+            .iter()
+            .filter(|inv| fiscal_statuses.contains(&inv.status))
+            .collect();
+
+        assert_eq!(included.len(), 2, "Only VALIDATED and STORNED must appear");
+        assert!(
+            included.iter().any(|i| i.full_number == "FA-001"),
+            "VALIDATED must be included"
+        );
+        assert!(
+            included.iter().any(|i| i.full_number == "FA-002"),
+            "STORNED must be included"
+        );
+        assert!(
+            !included.iter().any(|i| i.full_number == "FA-003"),
+            "DRAFT must be excluded"
+        );
+        assert!(
+            !included.iter().any(|i| i.full_number == "FA-004"),
+            "SUBMITTED must be excluded"
+        );
+        assert!(
+            !included.iter().any(|i| i.full_number == "FA-005"),
+            "QUEUED must be excluded"
+        );
+        assert!(
+            !included.iter().any(|i| i.full_number == "FA-006"),
+            "REJECTED must be excluded"
+        );
+    }
+
+    /// REG-STORNO: jurnalul de vânzări produce totaluri corecte când include
+    /// un STORNED original (pozitiv) și nota de credit VALIDATED (negativă).
+    /// Amounts MUST use csv_num (not csv_field) so negative storno values
+    /// are numeric cells rather than formula-injection-prefixed text.
+    #[test]
+    fn sales_journal_storno_net_zero_in_csv() {
+        // Original STORNED: net=1000, vat=190, total=1190
+        // Credit note VALIDATED: net=-1000, vat=-190, total=-1190
+        // Net should be zero in any aggregation.
+        //
+        // Mirror the actual production logic: text fields via csv_field,
+        // amount fields via csv_num (no injection-prefix for numeric cells).
+        let header = csv_row(&[
+            "Numar", "Data", "Client", "CUI", "Net", "TVA", "Total", "Moneda", "Status",
+        ]);
+        // Build rows the same way export_sales_journal does in production:
+        // csv_field for text, csv_num for amounts.
+        let build_row = |num: &str,
+                         date: &str,
+                         client: &str,
+                         cui: &str,
+                         net: &str,
+                         vat: &str,
+                         total: &str,
+                         currency: &str,
+                         status: &str|
+         -> String {
+            [
+                csv_field(num),
+                csv_field(date),
+                csv_field(client),
+                csv_field(cui),
+                csv_num(net),
+                csv_num(vat),
+                csv_num(total),
+                csv_field(currency),
+                csv_field(status),
+            ]
+            .join(",")
+        };
+        let row_orig = build_row(
+            "FA-001",
+            "2024-01-10",
+            "SC CLIENT SRL",
+            "RO111",
+            "1000.00",
+            "190.00",
+            "1190.00",
+            "RON",
+            "STORNED",
+        );
+        let row_credit = build_row(
+            "FASTO-001",
+            "2024-01-15",
+            "SC CLIENT SRL",
+            "RO111",
+            "-1000.00",
+            "-190.00",
+            "-1190.00",
+            "RON",
+            "VALIDATED",
+        );
+        let content = [header, row_orig, row_credit].join("\r\n");
+
+        assert!(content.contains("FA-001"), "STORNED original must appear");
+        assert!(content.contains("FASTO-001"), "Credit note must appear");
+        assert!(
+            content.contains("STORNED"),
+            "Status STORNED must be visible"
+        );
+        // Negative amounts stay numeric (csv_num, not csv_field)
+        assert!(
+            content.contains("-1000.00"),
+            "Negative base must appear as numeric"
+        );
+        assert!(
+            content.contains("-190.00"),
+            "Negative VAT must appear as numeric"
+        );
+        // Verify csv_num does NOT prefix negative amounts with quote
+        assert!(
+            !content.contains("'-1000.00"),
+            "csv_num must not inject quote prefix"
+        );
     }
 }

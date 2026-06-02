@@ -151,6 +151,9 @@ export const received = {
     invoke<void>("update_received_status", { id, companyId, status }),
   reparseVat: (companyId?: string) =>
     invoke<number>("reparse_received_vat", { companyId: companyId ?? null }),
+  /** Export a selection of received invoices as CSV text. Returns the CSV string. */
+  exportCsv: (companyId: string, ids: string[]) =>
+    invoke<string>("export_received_csv", { companyId, ids }),
 };
 
 // ─── Notifications ────────────────────────────────────────────────────────
@@ -193,7 +196,7 @@ export const system = {
   manualSync: () => invoke<SyncResult>("manual_sync"),
   devSeed: () => invoke<void>("dev_seed"),
   openArchiveFolder: () => invoke<void>("open_archive_folder"),
-  exportBackup: () => invoke<string>("export_backup"),
+  exportBackup: (destPath?: string) => invoke<string>("export_backup", { destPath: destPath ?? null }),
   setAutostart: (enabled: boolean) =>
     invoke<void>("set_autostart", { enabled }),
   getAutostart: () => invoke<boolean>("get_autostart"),
@@ -249,7 +252,7 @@ export const archive = {
   exportZip: (companyId: string) =>
     invoke<string>("export_invoices_zip", { companyId }),
   verifyIntegrity: () =>
-    invoke<{ totalChecked: number; missingFiles: string[]; ok: boolean }>(
+    invoke<{ checked: number; missing: string[]; ok: boolean }>(
       "verify_archive_integrity"
     ),
   getSize: () => invoke<number>("get_archive_size"),

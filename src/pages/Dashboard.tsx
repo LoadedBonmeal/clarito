@@ -14,6 +14,7 @@ import {
   Btn,
   StatCard,
   SectionCard,
+  Empty,
 } from "@/components/rf";
 import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -71,7 +72,7 @@ export function DashboardPage() {
   });
 
   const invoiceFilter = useMemo(
-    () => ({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 200 } }),
+    () => ({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
     [activeCompanyId],
   );
   const {
@@ -82,6 +83,7 @@ export function DashboardPage() {
   } = useQuery({
     queryKey: queryKeys.invoices.list(invoiceFilter),
     queryFn:  () => api.invoices.list(invoiceFilter),
+    enabled:  !!activeCompanyId,
   });
 
   const { data: notifications = [] } = useQuery({
@@ -191,6 +193,19 @@ export function DashboardPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  if (!activeCompanyId) {
+    return (
+      <div className="rf-content">
+        <PageHeader title="Privire generală" />
+        <div className="rf-page-body">
+          <Empty icon="buildings" title="Selectați o companie activă pentru a vedea datele din tabloul de bord.">
+            Alegeți o companie din setări pentru a continua.
+          </Empty>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="rf-content">
       <PageHeader
@@ -231,6 +246,19 @@ export function DashboardPage() {
       />
 
       <div className="rf-page-body">
+        {/* ── Truncation warning ─────────────────────────────────────────── */}
+        {invoicesPage && invoicesPage.total > invoicesPage.items.length && (
+          <div
+            style={{
+              padding: "6px 0 10px",
+              fontSize: 12,
+              color: "var(--rf-warning, #92400e)",
+            }}
+          >
+            Afișate primele {invoicesPage.items.length.toLocaleString("ro-RO")} din {invoicesPage.total.toLocaleString("ro-RO")} facturi — restrânge filtrele pentru a vedea toate înregistrările.
+          </div>
+        )}
+
         {/* ── Error banner ───────────────────────────────────────────────── */}
         {invoicesError && (
           <QueryErrorBanner

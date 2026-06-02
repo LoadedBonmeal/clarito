@@ -5,9 +5,11 @@
  * (serie/data/sumă/monedă/plătitor contact|text/factură asociată/observații),
  * Generează/Vizualizare PDF → api.receipts.generatePdf(id, companyId) + openPath,
  * delete → api.receipts.delete(id, companyId) with confirm.
+ *
+ * Fix R3: invoice picker replaces free-text UUID field (issue #4).
  */
 
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -24,7 +26,7 @@ import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { formatError } from "@/lib/error-mapper";
 import { notify } from "@/lib/toasts";
-import type { Contact, Receipt, ReceiptInput } from "@/types";
+import type { Contact, Invoice, Receipt, ReceiptInput } from "@/types";
 
 export function ReceiptsPage() {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
@@ -227,6 +229,7 @@ function ReceiptModal({
     invoiceId: undefined,
   });
   const [contact, setContact] = useState<Contact | null>(null);
+  const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   const createMutation = useMutation({
@@ -257,7 +260,8 @@ function ReceiptModal({
       series: form.series?.trim() || "CH",
       currency: form.currency || "RON",
       contactId: contact?.id ?? undefined,
-      invoiceId: form.invoiceId?.trim() || undefined,
+      // Use the UUID from the picked invoice, not a free-text value.
+      invoiceId: invoice?.id ?? undefined,
     };
     createMutation.mutate(input);
   };
@@ -349,13 +353,12 @@ function ReceiptModal({
           />
         </Field>
 
-        {/* Factură asociată */}
-        <Field label="Nr. factură asociată (opțional)">
-          <Input
-            className="mono"
-            placeholder="ex. FACT-0001 — ID intern, verificat server-side"
-            value={form.invoiceId ?? ""}
-            onChange={(e) => setForm((f) => ({ ...f, invoiceId: e.target.value || undefined }))}
+        {/* Factură asociată — picker, not free-text UUID */}
+        <Field label="Factură asociată (opțional)">
+          <InvoiceCombobox
+            companyId={companyId}
+            value={invoice}
+            onChange={setInvoice}
           />
         </Field>
 
@@ -376,5 +379,245 @@ function ReceiptModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+// ─── InvoiceCombobox ────────────────────────────────────────────────────────
+// Inline combobox for picking an invoice by fullNumber + client name.
+// Mirrors ContactCombobox / ProductCombobox conventions.
+
+function InvoiceCombobox({
+  companyId,
+  value,
+  onChange,
+}: {
+  companyId: string;
+  value: Invoice | null;
+  onChange: (inv: Invoice | null) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listboxId = useId();
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const { data: page, isFetching } = useQuery({
+    queryKey: ["invoices", "picker", companyId, debouncedQuery],
+    queryFn: () =>
+      api.invoices.list({
+        companyId,
+        query: debouncedQuery || undefined,
+        page: { offset: 0, limit: 30 },
+      }),
+    enabled: open && !!companyId,
+    staleTime: 30_000,
+  });
+
+  const results: Invoice[] = page?.items ?? [];
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  useEffect(() => {
+    setHighlight(0);
+  }, [results.length]);
+
+  const handleSelect = (inv: Invoice) => {
+    onChange(inv);
+    setQuery("");
+    setOpen(false);
+    inputRef.current?.blur();
+  };
+
+  const handleClear = () => {
+    onChange(null);
+    setQuery("");
+    setDebouncedQuery("");
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!open) {
+      if (e.key === "ArrowDown" || e.key === "Enter") {
+        e.preventDefault();
+        setOpen(true);
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlight((h) => Math.min(h + 1, Math.max(results.length - 1, 0)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlight((h) => Math.max(h - 1, 0));
+    } else if (e.key === "Enter") {
+      if (results[highlight]) {
+        e.preventDefault();
+        handleSelect(results[highlight]);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+
+  // Selected state — compact pill
+  if (value) {
+    return (
+      <div
+        ref={containerRef}
+        style={{
+          position: "relative",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          width: "100%",
+          minHeight: 40,
+          padding: "4px 8px 4px 12px",
+          border: "1px solid var(--rf-border-strong)",
+          background: "var(--rf-content)",
+          borderRadius: "var(--rf-radius-sm)",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0, lineHeight: 1.25 }}>
+          <div
+            className="mono"
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--rf-accent)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {value.fullNumber}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--rf-text-muted)" }}>
+            {value.issueDate}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleClear}
+          className="rf-icon-btn rf-icon-btn--ghost"
+          style={{ width: 26, height: 26 }}
+          aria-label="Elimină factura asociată"
+          title="Elimină factura asociată"
+        >
+          <Icon name="x" size={12} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ position: "relative", display: "inline-block", width: "100%" }}
+    >
+      <input
+        ref={inputRef}
+        id={listboxId + "-input"}
+        className="rf-input"
+        type="text"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={onKeyDown}
+        placeholder="Caută factură (număr sau client)…"
+        autoComplete="off"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        role="combobox"
+        style={{ width: "100%" }}
+      />
+      {open && (
+        <div
+          id={listboxId}
+          role="listbox"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            right: 0,
+            zIndex: 50,
+            background: "var(--rf-content)",
+            border: "1px solid var(--rf-border-strong)",
+            borderRadius: "var(--rf-radius-sm)",
+            boxShadow: "var(--rf-shadow-md)",
+            maxHeight: 240,
+            overflowY: "auto",
+          }}
+        >
+          {isFetching ? (
+            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
+              Se caută…
+            </div>
+          ) : results.length === 0 ? (
+            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
+              {debouncedQuery ? `Nicio factură pentru „${debouncedQuery}".` : "Nicio factură găsită."}
+            </div>
+          ) : (
+            results.map((inv, idx) => {
+              const active = idx === highlight;
+              return (
+                <button
+                  key={inv.id}
+                  type="button"
+                  role="option"
+                  aria-selected={active}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => handleSelect(inv)}
+                  onMouseEnter={() => setHighlight(idx)}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "9px 12px",
+                    border: "none",
+                    borderBottom: "1px solid var(--rf-border)",
+                    background: active ? "var(--rf-accent-tint)" : "transparent",
+                    cursor: "pointer",
+                    color: active ? "var(--rf-accent)" : "var(--rf-text)",
+                    font: "inherit",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                    <span className="mono" style={{ fontSize: 13, fontWeight: 600 }}>
+                      {inv.fullNumber}
+                    </span>
+                    <span className="tnum" style={{ fontSize: 12, color: "var(--rf-text-muted)", flexShrink: 0 }}>
+                      {fmtRON(parseDec(inv.totalAmount))} {inv.currency}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--rf-text-muted)" }}>
+                    {inv.issueDate} · {inv.status}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
   );
 }

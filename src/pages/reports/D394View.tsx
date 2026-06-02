@@ -116,7 +116,7 @@ export function D394View({ dateFrom, dateTo }: Props) {
                   <tr key={i}>
                     <td className="rf-mono">{p.partnerCui || <span style={{ color: "var(--rf-text-dim)" }}>—</span>}</td>
                     <td style={{ fontWeight: 500 }}>{p.partnerName}</td>
-                    <td><Badge variant="info">Livrări</Badge></td>
+                    <td><Badge variant="info">{p.vatCategory}</Badge></td>
                     <td className="right rf-mono">{p.invoiceCount}</td>
                     <td className="right rf-mono">{fmtRON(p.base)}</td>
                     <td className="right rf-mono">{fmtRON(p.vat)}</td>
@@ -175,7 +175,7 @@ export function D394View({ dateFrom, dateTo }: Props) {
                     <tr key={i}>
                       <td className="rf-mono">{p.partnerCui || <span style={{ color: "var(--rf-text-dim)" }}>—</span>}</td>
                       <td style={{ fontWeight: 500 }}>{p.partnerName}</td>
-                      <td><Badge variant="neutral">Achiziții</Badge></td>
+                      <td><Badge variant="neutral">{p.vatCategory}</Badge></td>
                       <td className="right rf-mono">{p.invoiceCount}</td>
                       <td className="right rf-mono">{fmtRON(p.base)}</td>
                       <td className="right rf-mono">{fmtRON(p.vat)}</td>

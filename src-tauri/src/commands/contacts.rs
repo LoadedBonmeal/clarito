@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::db::contacts::{self, Contact, ContactFilter, CreateContactInput, UpdateContactInput};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -9,7 +9,15 @@ pub async fn list_contacts(
     state: State<'_, AppState>,
     filter: Option<ContactFilter>,
 ) -> AppResult<Vec<Contact>> {
-    contacts::list(&state.db, filter.unwrap_or_default()).await
+    let f = filter.unwrap_or_default();
+    // Defence-in-depth: reject a null/empty company_id so a missing active
+    // company never leaks cross-company data via the IS-NULL SQL shortcut.
+    if f.company_id.as_ref().is_none_or(|s| s.is_empty()) {
+        return Err(AppError::Validation(
+            "Selectați o companie activă.".to_string(),
+        ));
+    }
+    contacts::list(&state.db, f).await
 }
 
 /// S1: `company_id` is required — cross-company fetch returns NotFound.

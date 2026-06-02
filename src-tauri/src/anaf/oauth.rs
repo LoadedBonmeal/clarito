@@ -61,6 +61,7 @@ impl OAuthConfig {
     }
 }
 
+#[derive(Debug)]
 pub struct OAuthResult {
     pub access_token: String,
     pub refresh_token: String,
@@ -128,6 +129,17 @@ fn sha256_base64url(s: &str) -> String {
 /// - Timeout 120s → mesaj RO cu hint certificat digital.
 /// - Token exchange eșuat → include descrierea ANAF dacă există.
 pub async fn authorize(_company_id: &str, config: &OAuthConfig) -> Result<OAuthResult, String> {
+    // Guard: dacă client_id-ul este gol sau conține placeholder-ul implicit,
+    // ANAF va respinge cererea cu propria pagină de eroare în browser.
+    // Returnăm imediat un mesaj clar în loc să deschidem un URL rupt.
+    if config.client_id.trim().is_empty() || config.client_id == DEFAULT_CLIENT_ID {
+        return Err(
+            "Conexiunea SPV nu este configurată: completați «client_id»-ul OAuth propriu \
+             (înregistrat la ANAF) în Setări → ANAF → Configurare avansată, apoi reîncercați."
+                .to_string(),
+        );
+    }
+
     // 1. PKCE
     let code_verifier = random_bytes_hex(32); // 32 bytes = 64 hex chars = 256 bits entropy
     let code_challenge = sha256_base64url(&code_verifier);
@@ -160,46 +172,110 @@ pub async fn authorize(_company_id: &str, config: &OAuthConfig) -> Result<OAuthR
     // Folosim un thread dedicat pentru accept() cu timeout simulat prin channel
     let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
 
+    // Clone state so we can keep a copy outside the thread for the final check.
+    let state_for_thread = state.clone();
     std::thread::spawn(move || {
-        // Setăm read_timeout pe socketul acceptat, nu pe listener
-        match listener.accept() {
-            Ok((mut stream, _)) => {
-                stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
+        let state = state_for_thread;
+        // We loop on accept() so we can reject requests to wrong paths without
+        // treating them as auth responses.  A single successful /callback
+        // request (or a fatal error) exits the loop.
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
 
-                let mut reader = BufReader::new(&stream);
-                let mut request_line = String::new();
-                if reader.read_line(&mut request_line).is_err() {
-                    let _ = tx.send(Err("Eroare citire request HTTP".into()));
+                    let mut reader = BufReader::new(&stream);
+                    let mut request_line = String::new();
+                    if reader.read_line(&mut request_line).is_err() {
+                        let _ = tx.send(Err("Eroare citire request HTTP".into()));
+                        return;
+                    }
+
+                    // An empty request line = a connection that sent no data: this is the
+                    // timeout "unblock" dummy connection (or a bare port probe). Exit the
+                    // accept loop so the thread ends and the port is released — otherwise we
+                    // would loop forever and leak port 8787 until app restart.
+                    if request_line.trim().is_empty() {
+                        return;
+                    }
+
+                    // Validate the request path: MUST be /callback (or /callback?…).
+                    // Reject — and keep listening — for any other path (assets, favicons, etc.).
+                    match parse_callback_request_line(&request_line) {
+                        CallbackParseResult::WrongPath => {
+                            let body =
+                                "<!DOCTYPE html><html><body><h2>404 Not Found</h2></body></html>";
+                            let resp = format!(
+                                "HTTP/1.1 404 Not Found\r\nContent-Type: text/html; charset=utf-8\r\n\
+                                 Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                body.len(),
+                                body
+                            );
+                            let _ = stream.write_all(resp.as_bytes());
+                            // Keep looping — don't treat this as the auth code.
+                            continue;
+                        }
+                        CallbackParseResult::BadRequest => {
+                            let body =
+                                "<!DOCTYPE html><html><body><h2>400 Bad Request</h2></body></html>";
+                            let resp = format!(
+                                "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\n\
+                                 Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                body.len(),
+                                body
+                            );
+                            let _ = stream.write_all(resp.as_bytes());
+                            continue;
+                        }
+                        CallbackParseResult::Callback => {}
+                    }
+
+                    // "GET /callback?code=...&state=... HTTP/1.1"
+                    let code = extract_query_param(&request_line, "code");
+                    let recv_state = extract_query_param(&request_line, "state");
+
+                    // CSRF state check: reject (400) and keep waiting if state mismatches.
+                    let recv_state_str = recv_state.unwrap_or_default();
+                    if recv_state_str != state {
+                        let body = "<!DOCTYPE html><html><body><h2>400 State mismatch — retrying\
+                            </h2></body></html>";
+                        let resp = format!(
+                            "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\n\
+                             Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            body.len(),
+                            body
+                        );
+                        let _ = stream.write_all(resp.as_bytes());
+                        continue;
+                    }
+
+                    // Path and state are valid — send the success page.
+                    let body = "<!DOCTYPE html><html><body><h2>\
+                        Autentificare reușită. Puteți închide această fereastră.\
+                        </h2></body></html>";
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
+                         Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    let _ = stream.write_all(resp.as_bytes());
+
+                    match code {
+                        Some(c) => {
+                            tx.send(Ok(format!("{c}|||{recv_state_str}"))).ok();
+                        }
+                        None => {
+                            tx.send(Err("Parametrul 'code' lipsește din callback".into()))
+                                .ok();
+                        }
+                    };
                     return;
                 }
-
-                // "GET /callback?code=...&state=... HTTP/1.1"
-                let code = extract_query_param(&request_line, "code");
-                let recv_state = extract_query_param(&request_line, "state");
-
-                // Trimite răspuns HTML
-                let body = "<!DOCTYPE html><html><body><h2>\
-                    Autentificare reușită. Puteți închide această fereastră.\
-                    </h2></body></html>";
-                let resp = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
-                     Content-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body.len(),
-                    body
-                );
-                let _ = stream.write_all(resp.as_bytes());
-
-                match code {
-                    Some(c) => tx
-                        .send(Ok(format!("{c}|||{}", recv_state.unwrap_or_default())))
-                        .ok(),
-                    None => tx
-                        .send(Err("Parametrul 'code' lipsește din callback".into()))
-                        .ok(),
-                };
-            }
-            Err(e) => {
-                let _ = tx.send(Err(format!("Conexiune eșuată: {e}")));
+                Err(e) => {
+                    let _ = tx.send(Err(format!("Conexiune eșuată: {e}")));
+                    return;
+                }
             }
         }
     });
@@ -378,6 +454,42 @@ fn extract_query_param(request_line: &str, param: &str) -> Option<String> {
     None
 }
 
+/// Result of validating an incoming HTTP request line against the expected
+/// callback path `/callback`.
+#[derive(Debug, PartialEq)]
+enum CallbackParseResult {
+    /// The path is `/callback` (with or without a query string). Accepted.
+    Callback,
+    /// The request line is syntactically invalid (missing method or path). Rejected.
+    BadRequest,
+    /// The path is something other than `/callback`. Rejected; keep waiting.
+    WrongPath,
+}
+
+/// Parse the first HTTP request line and decide whether it targets `/callback`.
+///
+/// Accepted forms: `GET /callback HTTP/1.1`, `GET /callback?code=..&state=.. HTTP/1.1`.
+/// Anything else — wrong path, missing tokens — is rejected.
+fn parse_callback_request_line(request_line: &str) -> CallbackParseResult {
+    // "METHOD /path[?query] HTTP/version"
+    let mut parts = request_line.split_whitespace();
+    // Skip method
+    if parts.next().is_none() {
+        return CallbackParseResult::BadRequest;
+    }
+    let raw_path = match parts.next() {
+        Some(p) => p,
+        None => return CallbackParseResult::BadRequest,
+    };
+    // Path is everything before the first '?'
+    let path = raw_path.split('?').next().unwrap_or(raw_path);
+    if path == "/callback" {
+        CallbackParseResult::Callback
+    } else {
+        CallbackParseResult::WrongPath
+    }
+}
+
 /// Percent-decode un șir application/x-www-form-urlencoded:
 /// `%XX` → byte cu valoarea hexazecimală XX; `+` → spațiu.
 /// Octeții invalizi (secvențe incomplete/non-hex) sunt păstrați ca `%` literal.
@@ -540,8 +652,91 @@ async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthResult, St
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_query_param, is_allowed_anaf_url, is_allowed_redirect_uri, percent_decode,
+        extract_query_param, is_allowed_anaf_url, is_allowed_redirect_uri,
+        parse_callback_request_line, percent_decode, CallbackParseResult, OAuthConfig,
+        DEFAULT_CLIENT_ID,
     };
+
+    // ─── parse_callback_request_line tests ──────────────────────────────────
+
+    #[test]
+    fn callback_path_accepted() {
+        // Plain callback, no query string
+        assert_eq!(
+            parse_callback_request_line("GET /callback HTTP/1.1"),
+            CallbackParseResult::Callback
+        );
+    }
+
+    #[test]
+    fn callback_path_with_query_accepted() {
+        let line = "GET /callback?code=ABC123&state=XYZ HTTP/1.1";
+        assert_eq!(
+            parse_callback_request_line(line),
+            CallbackParseResult::Callback
+        );
+    }
+
+    #[test]
+    fn wrong_path_rejected() {
+        assert_eq!(
+            parse_callback_request_line("GET /favicon.ico HTTP/1.1"),
+            CallbackParseResult::WrongPath
+        );
+        assert_eq!(
+            parse_callback_request_line("GET / HTTP/1.1"),
+            CallbackParseResult::WrongPath
+        );
+        assert_eq!(
+            parse_callback_request_line("GET /callbackEvil HTTP/1.1"),
+            CallbackParseResult::WrongPath
+        );
+    }
+
+    #[test]
+    fn bad_request_line_rejected() {
+        assert_eq!(
+            parse_callback_request_line(""),
+            CallbackParseResult::BadRequest
+        );
+        assert_eq!(
+            parse_callback_request_line("GET"),
+            CallbackParseResult::BadRequest
+        );
+    }
+
+    // ─── authorize guard tests ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn authorize_rejects_default_client_id() {
+        let config = OAuthConfig::default_prod(); // client_id == DEFAULT_CLIENT_ID
+        let err = super::authorize("company-1", &config).await.unwrap_err();
+        assert!(
+            err.contains("client_id"),
+            "expected client_id mention in error, got: {err}"
+        );
+        assert!(
+            err.contains("Setări"),
+            "expected settings hint in error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn authorize_rejects_empty_client_id() {
+        let mut config = OAuthConfig::default_prod();
+        config.client_id = "   ".to_string();
+        let err = super::authorize("company-1", &config).await.unwrap_err();
+        assert!(
+            err.contains("client_id"),
+            "expected client_id mention in error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn default_client_id_constant_matches() {
+        // Ensures the constant value we guard against is "efactura-desktop".
+        assert_eq!(DEFAULT_CLIENT_ID, "efactura-desktop");
+    }
 
     // ─── is_allowed_redirect_uri tests ──────────────────────────────────────
 

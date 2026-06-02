@@ -14,7 +14,6 @@ import { api } from "@/lib/tauri";
 interface StatusBarProps {
   activeCompanyName: string;
   activeCompanyId?: string;
-  companyCount?: number;
 }
 
 const DOT_COLORS = [
@@ -28,7 +27,7 @@ function companyColor(cui: string | undefined): string {
   return DOT_COLORS[h % DOT_COLORS.length];
 }
 
-export function StatusBar({ activeCompanyName, activeCompanyId, companyCount = 0 }: StatusBarProps) {
+export function StatusBar({ activeCompanyName, activeCompanyId }: StatusBarProps) {
   const { data: appInfo } = useQuery({
     queryKey: queryKeys.appInfo,
     queryFn: () => api.system.appInfo(),
@@ -186,12 +185,6 @@ export function StatusBar({ activeCompanyName, activeCompanyId, companyCount = 0
       })()}
 
       <span className="rf-status-item push">
-        <span style={{ color: "var(--rf-text-dim)" }}>{companyCount} companii administrate</span>
-      </span>
-      <span className="rf-status-item">
-        <span style={{ color: "var(--rf-text-dim)" }}>RO_CIUS 1.0.1 · RON · ro-RO</span>
-      </span>
-      <span className="rf-status-item">
         <span style={{ color: "var(--rf-text-dim)" }}>v{version}</span>
       </span>
     </div>

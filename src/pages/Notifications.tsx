@@ -183,7 +183,7 @@ export function NotificationsPage() {
         }
       />
 
-      <div className="rf-page-body" style={{ maxWidth: 860, width: "100%" }}>
+      <div className="rf-page-body" style={{ maxWidth: 860, width: "100%", margin: "0 auto" }}>
         <Card>
           {/* Tabs */}
           <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--rf-border)" }}>

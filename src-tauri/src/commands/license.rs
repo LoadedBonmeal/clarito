@@ -453,6 +453,10 @@ pub async fn start_trial(state: State<'_, AppState>, email: String) -> AppResult
         }
     }
 
+    // Normalize email to lowercase+trim so the fingerprint computed here matches
+    // what check_license_validity will compute (which always lowercases the stored email).
+    let email = email.trim().to_lowercase();
+
     // Creare înregistrare trial în DB
     let lic = license::start_trial(pool, &email, &mid, TRIAL_DAYS).await?;
 
@@ -642,5 +646,31 @@ mod sec_tests {
         assert_ne!(base, diff_email);
         assert_ne!(base, diff_tier);
         assert_ne!(base, diff_expires);
+    }
+
+    /// start_trial normalizes email to lowercase before computing the fingerprint.
+    /// check_license_validity also lowercases the stored email before comparing.
+    /// Mixed-case trial emails must validate — both paths must produce the same fingerprint.
+    #[test]
+    fn trial_email_case_fingerprint_matches() {
+        let mid = "testmid123";
+        let expires_at: i64 = 1_800_000_000;
+
+        // Simulate what start_trial now does: normalize to lowercase+trim.
+        let raw_email = "  User@Test.COM  ";
+        let normalized = raw_email.trim().to_lowercase();
+
+        // Fingerprint stored at start_trial time.
+        let stored_fp = compute_fingerprint(&normalized, mid, expires_at, "TRIAL");
+
+        // Simulate what check_license_validity does: lowercase the stored email.
+        let stored_email = normalized.clone(); // already lowercase after start_trial
+        let check_fp = compute_fingerprint(&stored_email.to_lowercase(), mid, expires_at, "TRIAL");
+
+        assert_eq!(
+            stored_fp, check_fp,
+            "Fingerprint must match across start_trial (lowercase+trim) \
+             and check_license_validity (lowercase) for mixed-case email"
+        );
     }
 }

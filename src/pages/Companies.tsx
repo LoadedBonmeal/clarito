@@ -97,6 +97,7 @@ export function CompaniesPage() {
     if (!ok) return;
     try {
       await api.companies.delete(c.id);
+      if (activeCompanyId === c.id) setActiveCompanyId(null);
       void queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
     } catch (err) {
       const payload = err as AppErrorPayload;

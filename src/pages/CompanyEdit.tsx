@@ -11,6 +11,7 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, type FieldErrors, type UseFormRegister } from "react-hook-form";
 import { z } from "zod";
+import { confirm } from "@tauri-apps/plugin-dialog";
 
 import { Icon } from "@/components/shared/Icon";
 import {
@@ -24,7 +25,26 @@ import type { UpdateCompanyInput } from "@/types";
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
-const IBAN_REGEX = /^[A-Z]{2}\d{2}[A-Z0-9]{1,30}$/i;
+/**
+ * IBAN mod-97 validation (ISO 13616) — shared helper, same logic as CompanyNew.
+ * Empty string is accepted (IBAN is optional).
+ */
+function validateIban(raw: string): boolean {
+  const s = raw.replace(/\s+/g, "").toUpperCase();
+  if (s.length === 0) return true;
+  if (s.length < 15 || s.length > 34) return false;
+  if (!/^[A-Z]{2}[0-9]{2}[A-Z0-9]+$/.test(s)) return false;
+  const rearranged = s.slice(4) + s.slice(0, 4);
+  const numeric = rearranged
+    .split("")
+    .map((c) => (c >= "A" && c <= "Z" ? String(c.charCodeAt(0) - 55) : c))
+    .join("");
+  let remainder = BigInt(0);
+  for (const ch of numeric) {
+    remainder = (remainder * BigInt(10) + BigInt(ch)) % BigInt(97);
+  }
+  return remainder === BigInt(1);
+}
 
 const schema = z.object({
   legalName: z.string().min(2, "Introduceți numele complet."),
@@ -36,7 +56,11 @@ const schema = z.object({
   postalCode: z.string().optional(),
   email: z.email("Email invalid.").optional().or(z.literal("")),
   phone: z.string().optional(),
-  iban: z.string().regex(IBAN_REGEX, "IBAN invalid.").optional().or(z.literal("")),
+  iban: z
+    .string()
+    .refine((v) => validateIban(v), "IBAN invalid (checksum incorect sau format greșit).")
+    .optional()
+    .or(z.literal("")),
   bankName: z.string().optional(),
   invoiceSeries: z.string().min(1, "Seria e obligatorie."),
   vatPayer: z.boolean(),
@@ -90,7 +114,20 @@ export function CompanyEditPage() {
     onError: (e) => notify.error(formatError(e, "Eroare la salvarea companiei.")),
   });
 
-  const onSubmit = (v: FormValues) => {
+  const onSubmit = async (v: FormValues) => {
+    // Task 7: warn before changing invoice series if invoices have already been issued.
+    const seriesChanged = data && v.invoiceSeries.trim() !== data.invoiceSeries.trim();
+    const hasIssuedInvoices = data && data.lastInvoiceNumber > 0;
+    if (seriesChanged && hasIssuedInvoices) {
+      const ok = await confirm(
+        `Compania a emis deja ${data.lastInvoiceNumber} factur${data.lastInvoiceNumber === 1 ? "ă" : "i"} cu seria "${data.invoiceSeries}". ` +
+          `Schimbarea seriei la "${v.invoiceSeries}" poate întrerupe continuitatea numerotării. ` +
+          "Doriți să continuați?",
+        { title: "Schimbare serie facturi", kind: "warning" },
+      );
+      if (!ok) return;
+    }
+
     update.mutate({
       legalName: v.legalName,
       tradeName: v.tradeName || undefined,

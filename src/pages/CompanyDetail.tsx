@@ -98,7 +98,7 @@ export function CompanyDetailPage() {
       />
 
       <div className="rf-page-body">
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           {/* Identificare */}
           <SectionCard icon="building" title="Identificare">
             <div className="rf-kv-list">
@@ -214,7 +214,7 @@ function CompanySpvSection({ company }: { company: Company }) {
         )
       }
     >
-      <div style={{ padding: "12px 16px" }}>
+      <div style={{ padding: "4px 16px 16px" }}>
         {company.spvEnabled ? (
           <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
             <Icon name="checkCircle" size={18} style={{ color: "var(--rf-success)", flexShrink: 0, marginTop: 1 }} />
@@ -293,7 +293,7 @@ function CertificatesSection({ companyId }: { companyId: string }) {
         </Btn>
       }
     >
-      <div style={{ padding: "8px 16px" }}>
+      <div className="rf-tbl-wrap">
         {isLoading ? (
           <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>Se încarcă…</span>
         ) : certs.length === 0 ? (

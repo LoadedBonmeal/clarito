@@ -23,7 +23,7 @@ pub async fn run_if_empty(pool: &SqlitePool) -> AppResult<()> {
     let acme = companies::create(
         pool,
         CreateCompanyInput {
-            cui: "RO12345678".into(),
+            cui: "RO12345674".into(),
             legal_name: "ACME România SRL".into(),
             trade_name: Some("ACME".into()),
             registry_number: Some("J40/1234/2020".into()),
@@ -45,7 +45,7 @@ pub async fn run_if_empty(pool: &SqlitePool) -> AppResult<()> {
     let cluj = companies::create(
         pool,
         CreateCompanyInput {
-            cui: "RO98765432".into(),
+            cui: "RO98765438".into(),
             legal_name: "Cluj Tech SRL".into(),
             trade_name: None,
             registry_number: Some("J12/567/2018".into()),

@@ -266,7 +266,6 @@ export function AppShell({ children }: AppShellProps) {
           <StatusBar
             activeCompanyName={activeCompanyName}
             activeCompanyId={activeCompanyId ?? undefined}
-            companyCount={companies.length}
           />
         </div>
         <CommandPalette />

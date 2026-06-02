@@ -129,8 +129,8 @@ export function BankPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r, i) => (
-                    <tr key={i}>
+                  {rows.map((r) => (
+                    <tr key={r.doc}>
                       <td style={{ color: "var(--rf-text-dim)", whiteSpace: "nowrap" }}>{r.date}</td>
                       <td style={{ fontWeight: 500 }}>{r.desc}</td>
                       <td style={{ fontFamily: "var(--rf-mono)", color: "var(--rf-text-muted)" }}>{r.doc}</td>

@@ -109,7 +109,6 @@ export function VatRatesPage() {
       />
 
       <div className="rf-page-body">
-        <div style={{ maxWidth: 760, width: "100%", margin: "0 auto" }}>
           <div style={{ marginBottom: 12 }}>
             <Banner variant="info">
               Cotele legale de TVA în România sunt{" "}
@@ -221,7 +220,6 @@ export function VatRatesPage() {
               </span>
             </div>
           </Card>
-        </div>
       </div>
 
       {/* Vat rate modal */}
