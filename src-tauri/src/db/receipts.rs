@@ -4,13 +4,16 @@
 //! operațiunile sunt scoped pe `company_id` — cross-company access returnează
 //! `NotFound`.
 //!
-//! Numerotarea este atomică: `UPDATE companies SET last_receipt_number = last_receipt_number + 1`
-//! + `SELECT` în aceeași tranzacție (identic cu pattern-ul de la facturi).
+//! Numerotarea este atomică per (company_id, series): în cadrul tranzacției
+//! de creare se calculează `MAX(number)+1` pentru seria respectivă, eliminând
+//! goluri ilegale între serii diferite (ex. CH + BON).
 //!
 //! Suma este stocată ca TEXT (convenția Decimal-as-TEXT a aplicației).
 
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
+use std::str::FromStr;
 
 use crate::db::models::{new_id, now_unix};
 use crate::error::{AppError, AppResult};
@@ -96,21 +99,47 @@ pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Rec
 }
 
 /// Create a new receipt for the given company.
-/// Allocates the next receipt number atomically in a transaction (mirrors
-/// invoice numbering: bumps `companies.last_receipt_number`).
+///
+/// # Numbering
+/// Allocates the next receipt number atomically **per (company_id, series)**
+/// inside the same transaction:
+/// `next = COALESCE(MAX(number), 0) + 1 WHERE company_id=? AND series=?`
+/// Single-user desktop — no race condition within the TX.
+///
+/// # Validation
+/// * `amount` must be a valid positive Decimal.
+/// * Either `contact_id` or `payer_name` must be provided (payer required by law).
+/// * `issue_date` must not be empty.
 pub async fn create(
     pool: &SqlitePool,
     company_id: &str,
     input: ReceiptInput,
 ) -> AppResult<Receipt> {
-    if input.amount.trim().is_empty() {
-        return Err(AppError::Validation(
-            "Suma chitanței este obligatorie.".into(),
-        ));
+    // ── Validate amount ───────────────────────────────────────────────────
+    let amount_dec = Decimal::from_str(input.amount.trim())
+        .map_err(|_| AppError::Validation("Sumă invalidă — folosiți formatul 1234.56".into()))?;
+    if amount_dec <= Decimal::ZERO {
+        return Err(AppError::Validation("Suma trebuie să fie pozitivă.".into()));
     }
+    // Normalize: store canonical decimal string (trims trailing zeros etc.)
+    let amount_str = amount_dec.to_string();
+
+    // ── Validate issue_date ────────────────────────────────────────────────
     if input.issue_date.trim().is_empty() {
         return Err(AppError::Validation(
             "Data emiterii este obligatorie.".into(),
+        ));
+    }
+
+    // ── Require payer ──────────────────────────────────────────────────────
+    let has_contact = input.contact_id.as_ref().is_some_and(|s| !s.is_empty());
+    let has_name = input
+        .payer_name
+        .as_ref()
+        .is_some_and(|s| !s.trim().is_empty());
+    if !has_contact && !has_name {
+        return Err(AppError::Validation(
+            "Specificați plătitorul (contact sau nume).".into(),
         ));
     }
 
@@ -120,17 +149,15 @@ pub async fn create(
 
     let mut tx = pool.begin().await?;
 
-    // Alocăm numărul atomic în aceeași tranzacție.
-    sqlx::query("UPDATE companies SET last_receipt_number = last_receipt_number + 1 WHERE id = ?1")
-        .bind(company_id)
-        .execute(&mut *tx)
-        .await?;
-
-    let allocated_number: i64 =
-        sqlx::query_scalar("SELECT last_receipt_number FROM companies WHERE id = ?1")
-            .bind(company_id)
-            .fetch_one(&mut *tx)
-            .await?;
+    // ── Allocate next number per (company_id, series) ─────────────────────
+    let allocated_number: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(number), 0) + 1 FROM receipts \
+         WHERE company_id = ?1 AND series = ?2",
+    )
+    .bind(company_id)
+    .bind(&series)
+    .fetch_one(&mut *tx)
+    .await?;
 
     sqlx::query(
         "INSERT INTO receipts (
@@ -147,7 +174,7 @@ pub async fn create(
     .bind(allocated_number)
     .bind(&input.contact_id)
     .bind(&input.invoice_id)
-    .bind(&input.amount)
+    .bind(&amount_str)
     .bind(input.currency.as_deref().unwrap_or("RON"))
     .bind(&input.issue_date)
     .bind(&input.payer_name)
@@ -292,6 +319,13 @@ mod tests {
         }
     }
 
+    fn sample_input_series(series: &str) -> ReceiptInput {
+        ReceiptInput {
+            series: Some(series.to_string()),
+            ..sample_input()
+        }
+    }
+
     // ── get: wrong company → NotFound ────────────────────────────────────────
 
     #[tokio::test]
@@ -347,11 +381,139 @@ mod tests {
     #[tokio::test]
     async fn wave3_receipt_create_allocates_sequential_numbers() {
         let pool = setup_pool().await;
-        // comp-2 starts at 0 — first two creates should get numbers 1 and 2.
+        // comp-2 starts empty — first two creates should get numbers 1 and 2.
         let r1 = create(&pool, "comp-2", sample_input()).await.unwrap();
         let r2 = create(&pool, "comp-2", sample_input()).await.unwrap();
         assert_eq!(r1.number, 1, "first receipt must get number 1");
         assert_eq!(r2.number, 2, "second receipt must get number 2");
+    }
+
+    // ── per-series numbering: two series don't share a counter ────────────────
+
+    #[tokio::test]
+    async fn r3_per_series_numbering_two_series_independent() {
+        let pool = setup_pool().await;
+        // Both series start at 0 for comp-2 (no prior receipts).
+        let ch1 = create(&pool, "comp-2", sample_input_series("CH"))
+            .await
+            .unwrap();
+        let bon1 = create(&pool, "comp-2", sample_input_series("BON"))
+            .await
+            .unwrap();
+        let ch2 = create(&pool, "comp-2", sample_input_series("CH"))
+            .await
+            .unwrap();
+        let bon2 = create(&pool, "comp-2", sample_input_series("BON"))
+            .await
+            .unwrap();
+
+        assert_eq!(ch1.number, 1, "CH first must be 1");
+        assert_eq!(ch2.number, 2, "CH second must be 2 (no gap from BON)");
+        assert_eq!(bon1.number, 1, "BON first must be 1 (independent of CH)");
+        assert_eq!(bon2.number, 2, "BON second must be 2");
+    }
+
+    // ── amount validation ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn r3_amount_rejects_non_numeric() {
+        let pool = setup_pool().await;
+        let mut input = sample_input();
+        input.amount = "abc".to_string();
+        let err = create(&pool, "comp-2", input).await.unwrap_err();
+        assert!(
+            matches!(err, AppError::Validation(_)),
+            "non-numeric amount must fail with Validation"
+        );
+    }
+
+    #[tokio::test]
+    async fn r3_amount_rejects_zero() {
+        let pool = setup_pool().await;
+        let mut input = sample_input();
+        input.amount = "0".to_string();
+        let err = create(&pool, "comp-2", input).await.unwrap_err();
+        assert!(
+            matches!(err, AppError::Validation(_)),
+            "zero amount must fail with Validation"
+        );
+    }
+
+    #[tokio::test]
+    async fn r3_amount_rejects_negative() {
+        let pool = setup_pool().await;
+        let mut input = sample_input();
+        input.amount = "-5.00".to_string();
+        let err = create(&pool, "comp-2", input).await.unwrap_err();
+        assert!(
+            matches!(err, AppError::Validation(_)),
+            "negative amount must fail with Validation"
+        );
+    }
+
+    #[tokio::test]
+    async fn r3_amount_accepts_valid_decimal() {
+        let pool = setup_pool().await;
+        let mut input = sample_input();
+        input.amount = "1234.56".to_string();
+        let r = create(&pool, "comp-2", input).await.unwrap();
+        // Stored as normalized decimal string.
+        assert_eq!(r.amount, "1234.56");
+    }
+
+    // ── payer required ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn r3_payer_required_both_empty_fails() {
+        let pool = setup_pool().await;
+        let input = ReceiptInput {
+            series: None,
+            contact_id: None,
+            invoice_id: None,
+            amount: "100.00".to_string(),
+            currency: None,
+            issue_date: "2026-06-01".to_string(),
+            payer_name: None,
+            notes: None,
+        };
+        let err = create(&pool, "comp-2", input).await.unwrap_err();
+        assert!(
+            matches!(err, AppError::Validation(_)),
+            "missing payer must fail with Validation"
+        );
+    }
+
+    #[tokio::test]
+    async fn r3_payer_required_contact_id_satisfies() {
+        let pool = setup_pool().await;
+        let input = ReceiptInput {
+            contact_id: Some("some-contact-id".to_string()),
+            payer_name: None,
+            ..sample_input()
+        };
+        // contact FK is not enforced in test schema (no contacts table) but
+        // the payer-presence check itself must pass.
+        // The INSERT may fail on FK; we only check that the validation error
+        // is NOT the "payer" error.
+        let result = create(&pool, "comp-2", input).await;
+        if let Err(AppError::Validation(msg)) = &result {
+            assert!(
+                !msg.contains("plătitor"),
+                "should not get payer-validation error when contact_id is set"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn r3_payer_required_payer_name_satisfies() {
+        let pool = setup_pool().await;
+        let input = ReceiptInput {
+            contact_id: None,
+            payer_name: Some("Firma X SRL".to_string()),
+            ..sample_input()
+        };
+        let r = create(&pool, "comp-2", input).await.unwrap();
+        assert_eq!(r.payer_name.as_deref(), Some("Firma X SRL"));
     }
 
     // ── cross-company isolation: list ─────────────────────────────────────────
