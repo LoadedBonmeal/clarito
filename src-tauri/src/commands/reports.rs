@@ -245,8 +245,9 @@ pub async fn export_report(
                 "json" => serde_json::to_string_pretty(&report)
                     .map_err(|e| AppError::Other(e.to_string()))?,
                 _ => {
-                    // CSV format
-                    let mut csv = String::from("Cotă TVA,Bază impozabilă,TVA,Nr. Facturi\r\n");
+                    // CSV format — UTF-8 BOM so Excel opens Romanian diacritics correctly
+                    let mut csv =
+                        String::from("\u{FEFF}Cotă TVA,Bază impozabilă,TVA,Nr. Facturi\r\n");
                     for g in &report.vat_groups {
                         csv.push_str(&format!(
                             "{}%,{},{},{}\r\n",
@@ -407,6 +408,16 @@ mod tests {
         assert_eq!(
             groups[&(0, "Z".to_string())].0,
             Decimal::from_str("50.00").unwrap()
+        );
+    }
+
+    /// A: CSV export starts with UTF-8 BOM so Excel opens Romanian diacritics correctly.
+    #[test]
+    fn vat_report_csv_starts_with_utf8_bom() {
+        let csv = "\u{FEFF}Cotă TVA,Bază impozabilă,TVA,Nr. Facturi\r\n";
+        assert!(
+            csv.starts_with('\u{FEFF}'),
+            "VAT report CSV must start with UTF-8 BOM (\\u{{FEFF}})"
         );
     }
 

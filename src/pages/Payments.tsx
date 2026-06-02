@@ -31,7 +31,11 @@ type PayFilter = "all" | "UNPAID" | "PARTIAL" | "PAID" | "OVERDUE";
 
 function isOverdue(dueDate: string | null | undefined, status: string): boolean {
   if (!dueDate || status === "PAID") return false;
-  return new Date(dueDate) < new Date();
+  // Compare DATE-ONLY in local time to avoid UTC-midnight mis-flagging in EET
+  // (e.g. 2026-06-15 parsed as UTC becomes 2026-06-14T22:00 EET → wrongly overdue).
+  const today = new Date();
+  const todayISO = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  return dueDate < todayISO;
 }
 
 const METHOD_LABELS: Record<string, string> = {

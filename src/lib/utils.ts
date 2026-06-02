@@ -37,8 +37,24 @@ export function formatNumber(value: number, decimals = 2): string {
   }).format(value);
 }
 
+/**
+ * Parse a YYYY-MM-DD string into a local-time Date (avoiding the UTC-midnight
+ * shift that `new Date("2026-01-15")` produces, which renders as Jan 14 in
+ * EET/UTC+2). For Date objects or strings that include time info the behaviour
+ * is unchanged.
+ */
+function parseDateLocal(date: Date | string): Date {
+  if (typeof date !== "string") return date;
+  // ISO date-only strings are exactly 10 chars: YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const [y, m, d] = date.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+  return new Date(date);
+}
+
 export function formatDate(date: Date | string, withTime = false): string {
-  const d = typeof date === "string" ? new Date(date) : date;
+  const d = parseDateLocal(date);
   if (withTime) {
     return new Intl.DateTimeFormat("ro-RO", {
       day: "numeric",

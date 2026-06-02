@@ -492,6 +492,11 @@ export function RecurringPage() {
                     }));
                   }}
                 />
+                {form.frequency === "monthly" && form.dayOfMonth > 28 && (
+                  <span style={{ fontSize: 11, color: "var(--rf-warning)", marginTop: 3, display: "block" }}>
+                    Lunile cu mai puține zile (feb., etc.) pot decala sau sări emiterea.
+                  </span>
+                )}
               </Field>
             </div>
 

@@ -167,7 +167,8 @@ pub async fn export_activity_log_csv(state: State<'_, AppState>) -> AppResult<St
     .await
     .map_err(crate::error::AppError::Database)?;
 
-    let mut csv = String::from("ID,Task,Rezultat,Timp\r\n");
+    // UTF-8 BOM so Excel opens Romanian diacritics correctly
+    let mut csv = String::from("\u{FEFF}ID,Task,Rezultat,Timp\r\n");
     for r in &rows {
         let id = r.try_get::<String, _>("id").unwrap_or_default();
         let entity_id = r.try_get::<String, _>("entity_id").unwrap_or_default();

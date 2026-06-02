@@ -112,10 +112,12 @@ pub async fn export_sales_journal(
     let dest = dest_path.clone();
 
     tokio::task::spawn_blocking(move || {
+        // UTF-8 BOM so Excel opens Romanian diacritics correctly.
+        let bom = "\u{FEFF}";
         let header = csv_row(&[
             "Numar", "Data", "Client", "CUI", "Net", "TVA", "Total", "Moneda", "Status",
         ]);
-        let mut lines = vec![header];
+        let mut lines = vec![format!("{}{}", bom, header)];
 
         for row in &rows {
             let full_number: String = row.try_get("full_number").unwrap_or_default();
@@ -201,7 +203,8 @@ pub async fn export_purchase_journal(
         // dar util pentru utilizatorul care deschide fișierul în Excel/calc).
         // Net/TVA sunt disponibile când XML-ul a fost parsat; rândurile fără defalcare
         // au coloanele Net/TVA goale.
-        let note = "# NOTA: Jurnalul de cumparari include Net/TVA extrase din XML-ul UBL \
+        // UTF-8 BOM prepended to the first line so Excel opens diacritics correctly.
+        let note = "\u{FEFF}# NOTA: Jurnalul de cumparari include Net/TVA extrase din XML-ul UBL \
                     cand sunt disponibile. Randurile fara defalcare nu au fost inca parsate \
                     (folositi butonul Recalculeaza TVA din XML din aplicatie).";
         let header = csv_row(&[
@@ -456,6 +459,30 @@ mod tests {
         assert_eq!(csv_neutralize("VALIDATED"), "VALIDATED");
         // Parens/spaces/letters are safe
         assert_eq!(csv_neutralize("(test)"), "(test)");
+    }
+
+    /// A: Sales journal CSV starts with UTF-8 BOM for correct diacritics in Excel.
+    #[test]
+    fn sales_journal_csv_starts_with_utf8_bom() {
+        let bom = "\u{FEFF}";
+        let header = csv_row(&[
+            "Numar", "Data", "Client", "CUI", "Net", "TVA", "Total", "Moneda", "Status",
+        ]);
+        let first_line = format!("{}{}", bom, header);
+        assert!(
+            first_line.starts_with('\u{FEFF}'),
+            "Sales journal CSV must start with UTF-8 BOM"
+        );
+    }
+
+    /// A: Purchase journal CSV starts with UTF-8 BOM for correct diacritics in Excel.
+    #[test]
+    fn purchase_journal_csv_starts_with_utf8_bom() {
+        let note = "\u{FEFF}# NOTA: test";
+        assert!(
+            note.starts_with('\u{FEFF}'),
+            "Purchase journal CSV must start with UTF-8 BOM"
+        );
     }
 
     /// R2: csv_field aplică neutralizarea ÎNAINTE de quoting RFC 4180.

@@ -46,130 +46,9 @@
 .rf-icon-btn--ghost:hover { background: var(--rf-neutral-bg); border-color: transparent; }
 .rf-icon-btn:disabled { opacity: .5; cursor: not-allowed; }
 
-/* ---------- One-shot icon press animations (micro-interaction) ----------
-   When a pressable control is clicked it gets `.rf-pressing` (added in JS,
-   removed on animationend). The <svg> carries data-icon, so each icon plays
-   a fitting one-shot motion. Default = a soft pop; expressive icons spin,
-   swing, bounce, fly, wiggle, nudge, blink, pulse, tick or twinkle.
-   Transform-only (GPU); disabled under prefers-reduced-motion (below). */
-.rf-pressing svg { animation: rf-ico-pop .55s cubic-bezier(.23, 1, .32, 1); transform-origin: 50% 50%; }
-
-/* Spin CW — rotation / process / gears / rays / planet */
-.rf-pressing svg[data-icon="refresh"],
-.rf-pressing svg[data-icon="repeat"],
-.rf-pressing svg[data-icon="settings"],
-.rf-pressing svg[data-icon="sun"],
-.rf-pressing svg[data-icon="globe"] { animation: rf-ico-spin .9s cubic-bezier(.23, 1, .32, 1); }
-
-/* Spin CCW — undo / reversal goes backwards */
-.rf-pressing svg[data-icon="reverse"],
-.rf-pressing svg[data-icon="storno"] { animation: rf-ico-spin-ccw .9s cubic-bezier(.23, 1, .32, 1); }
-
-/* Swing — things that hang or ring (pivot from the top) */
-.rf-pressing svg[data-icon="bell"],
-.rf-pressing svg[data-icon="anaf"],
-.rf-pressing svg[data-icon="tag"],
-.rf-pressing svg[data-icon="bookmark"] { animation: rf-ico-swing .85s ease; transform-origin: 50% 18%; }
-
-/* Bounce down — content coming in / saved / archived */
-.rf-pressing svg[data-icon="download"],
-.rf-pressing svg[data-icon="cloudDn"],
-.rf-pressing svg[data-icon="save"],
-.rf-pressing svg[data-icon="archive"],
-.rf-pressing svg[data-icon="fileIn"],
-.rf-pressing svg[data-icon="invoiceIn"] { animation: rf-ico-down .7s cubic-bezier(.34, 1.56, .64, 1); }
-
-/* Bounce up — content going out */
-.rf-pressing svg[data-icon="upload"],
-.rf-pressing svg[data-icon="cloudUp"],
-.rf-pressing svg[data-icon="fileOut"] { animation: rf-ico-up .7s cubic-bezier(.34, 1.56, .64, 1); }
-
-/* Fly ↗ — send / open elsewhere */
-.rf-pressing svg[data-icon="send"],
-.rf-pressing svg[data-icon="external"],
-.rf-pressing svg[data-icon="link"] { animation: rf-ico-fly .7s cubic-bezier(.34, 1.56, .64, 1); }
-
-/* Wiggle — writing / shaking / attention / danger / balance */
-.rf-pressing svg[data-icon="pen"],
-.rf-pressing svg[data-icon="edit"],
-.rf-pressing svg[data-icon="trash"],
-.rf-pressing svg[data-icon="filter"],
-.rf-pressing svg[data-icon="scale"],
-.rf-pressing svg[data-icon="alert"],
-.rf-pressing svg[data-icon="alertTriangle"],
-.rf-pressing svg[data-icon="warning"] { animation: rf-ico-wiggle .6s ease; }
-
-/* Directional nudge — slide the way the icon points */
-.rf-pressing svg[data-icon="chevRight"],
-.rf-pressing svg[data-icon="chevronRight"],
-.rf-pressing svg[data-icon="arrowRight"] { animation: rf-ico-nudge-r .55s ease; }
-.rf-pressing svg[data-icon="chevLeft"],
-.rf-pressing svg[data-icon="chevronLeft"],
-.rf-pressing svg[data-icon="arrowLeft"] { animation: rf-ico-nudge-l .55s ease; }
-.rf-pressing svg[data-icon="chevDown"],
-.rf-pressing svg[data-icon="chevronDown"],
-.rf-pressing svg[data-icon="caret"],
-.rf-pressing svg[data-icon="arrowDown"],
-.rf-pressing svg[data-icon="sortDsc"] { animation: rf-ico-down .55s ease; }
-.rf-pressing svg[data-icon="arrowUp"],
-.rf-pressing svg[data-icon="sortAsc"] { animation: rf-ico-up .55s ease; }
-
-/* Rotate-pop — add / close (the cross turns) */
-.rf-pressing svg[data-icon="plus"],
-.rf-pressing svg[data-icon="x"],
-.rf-pressing svg[data-icon="xCircle"],
-.rf-pressing svg[data-icon="cancel"],
-.rf-pressing svg[data-icon="command"] { animation: rf-ico-rotate .6s cubic-bezier(.23, 1, .32, 1); }
-
-/* Blink — an eye blinks */
-.rf-pressing svg[data-icon="eye"],
-.rf-pressing svg[data-icon="view"] { animation: rf-ico-blink .5s ease; }
-
-/* Pulse — scanning / protective / attention */
-.rf-pressing svg[data-icon="search"],
-.rf-pressing svg[data-icon="shield"],
-.rf-pressing svg[data-icon="info"],
-.rf-pressing svg[data-icon="help"],
-.rf-pressing svg[data-icon="dot"] { animation: rf-ico-pulse .55s cubic-bezier(.34, 1.56, .64, 1); }
-
-/* Tick / turn — a clock ticks, a key turns */
-.rf-pressing svg[data-icon="clock"],
-.rf-pressing svg[data-icon="history"],
-.rf-pressing svg[data-icon="key"] { animation: rf-ico-tick .5s ease; }
-
-/* Twinkle — a star sparkles */
-.rf-pressing svg[data-icon="star"] { animation: rf-ico-twinkle .55s cubic-bezier(.34, 1.56, .64, 1); }
-
-/* Check-pop — satisfying confirmation */
-.rf-pressing svg[data-icon="check"],
-.rf-pressing svg[data-icon="checkCircle"] { animation: rf-ico-check .6s cubic-bezier(.34, 1.56, .64, 1); }
-
-@keyframes rf-ico-pop      { 0% { transform: scale(1); } 35% { transform: scale(.8); } 100% { transform: scale(1); } }
-@keyframes rf-ico-spin     { from { transform: rotate(0); } to { transform: rotate(360deg); } }
-@keyframes rf-ico-spin-ccw { from { transform: rotate(0); } to { transform: rotate(-360deg); } }
-@keyframes rf-ico-swing    { 0%,100% { transform: rotate(0); } 20% { transform: rotate(14deg); } 40% { transform: rotate(-10deg); } 60% { transform: rotate(6deg); } 80% { transform: rotate(-3deg); } }
-@keyframes rf-ico-down     { 0% { transform: translateY(0); } 45% { transform: translateY(3px); } 100% { transform: translateY(0); } }
-@keyframes rf-ico-up       { 0% { transform: translateY(0); } 45% { transform: translateY(-3px); } 100% { transform: translateY(0); } }
-@keyframes rf-ico-fly      { 0% { transform: translate(0, 0); } 45% { transform: translate(3px, -3px); } 100% { transform: translate(0, 0); } }
-@keyframes rf-ico-wiggle   { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-9deg); } 50% { transform: rotate(7deg); } 75% { transform: rotate(-4deg); } }
-@keyframes rf-ico-nudge-r  { 0% { transform: translateX(0); } 45% { transform: translateX(3px); } 100% { transform: translateX(0); } }
-@keyframes rf-ico-nudge-l  { 0% { transform: translateX(0); } 45% { transform: translateX(-3px); } 100% { transform: translateX(0); } }
-@keyframes rf-ico-rotate   { 0% { transform: rotate(0) scale(1); } 40% { transform: rotate(90deg) scale(.85); } 100% { transform: rotate(0) scale(1); } }
-@keyframes rf-ico-blink    { 0%,100% { transform: scaleY(1); } 45% { transform: scaleY(.12); } }
-@keyframes rf-ico-pulse    { 0% { transform: scale(1); } 40% { transform: scale(1.18); } 100% { transform: scale(1); } }
-@keyframes rf-ico-tick     { 0% { transform: rotate(0); } 30% { transform: rotate(-18deg); } 65% { transform: rotate(10deg); } 100% { transform: rotate(0); } }
-@keyframes rf-ico-twinkle  { 0% { transform: scale(1) rotate(0); } 40% { transform: scale(1.15) rotate(18deg); } 100% { transform: scale(1) rotate(0); } }
-@keyframes rf-ico-check    { 0% { transform: scale(1); } 30% { transform: scale(.7); } 100% { transform: scale(1); } }
-
-/* Calmer, slower icon press in the sidebar nav + the ANAF·SPV sync pill (scoped) */
-.rf-sidebar .rf-pressing svg { animation-duration: .9s; }
-.rf-sidebar .rf-pressing svg[data-icon="repeat"],
-.rf-sidebar .rf-pressing svg[data-icon="storno"] { animation-duration: 1.4s; }
-.rf-sidebar .rf-pressing svg[data-icon="anaf"],
-.rf-sidebar .rf-pressing svg[data-icon="bell"],
-.rf-sidebar .rf-pressing svg[data-icon="tag"],
-.rf-sidebar .rf-pressing svg[data-icon="bookmark"] { animation-duration: 1.3s; }
-.rf-topbar .rf-spv-sync.rf-pressing svg { animation-duration: 1.5s; }
+/* Icon press animations moved to use-icon-press.ts (WAAPI hook).
+   The CSS .rf-pressing rules are intentionally removed — they are dead code.
+   @keyframes rf-spin is kept below for the SPV sync spinner. */
 
 /* ---------- Badges / pills ---------- */
 .rf-badge {
@@ -729,6 +608,5 @@ table.rf-tbl thead th.rf-ck, table.rf-tbl tbody td.rf-ck { width: 36px; text-ali
   .rf-btn, .rf-icon-btn, .rf-nav-item, .rf-topbar-cmd,
   .rf-topbar-icon, .rf-spv-sync, table.rf-tbl tbody tr { transition: none !important; }
 
-  /* No one-shot icon press animations when reduced motion is requested */
-  .rf-pressing svg { animation: none !important; }
+  /* No one-shot icon press animations — handled by use-icon-press.ts (WAAPI) */
 }

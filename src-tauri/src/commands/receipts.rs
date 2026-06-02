@@ -63,7 +63,7 @@ pub async fn get_receipt(
 }
 
 /// R15 Wave 3: Create a receipt for the given company.
-/// Allocates the next receipt number atomically (bumps `companies.last_receipt_number`).
+/// Allocates the next receipt number atomically using per-(company, series) MAX+1 logic.
 #[tauri::command]
 pub async fn create_receipt(
     state: State<'_, AppState>,

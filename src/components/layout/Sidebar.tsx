@@ -106,7 +106,7 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
       items: [
         { id: "companii",        label: "Companii",            icon: "buildings", path: "/companies",  matchPrefix: "/companies", badge: companiesBadge },
         { id: "contacte",        label: "Clienți & Furnizori", icon: "users",     path: "/contacts",   badge: contactsBadge },
-        { id: "banca",           label: "Bancă & Casă",         icon: "bank",      path: "/bank" },
+        { id: "banca",           label: "Bancă & Casă",         icon: "bank",      path: "/bank",      disabled: true },
         { id: "chitante",        label: "Chitanțe",             icon: "receipt",   path: "/receipts" },
         { id: "plati",           label: "Urmărire Plăți",       icon: "bank",      path: "/payments" },
         { id: "recurente",       label: "Facturi Recurente",    icon: "refresh",   path: "/recurring" },

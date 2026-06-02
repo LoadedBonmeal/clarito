@@ -186,7 +186,9 @@ pub async fn export_received_csv(
     // Filter to only the requested ids (set lookup).
     let id_set: std::collections::HashSet<&str> = ids.iter().map(|s| s.as_str()).collect();
 
-    let header = "Furnizor,CUI,Serie-Număr,Dată,Net,TVA,Total,Monedă,Status\r\n".to_string();
+    // UTF-8 BOM so Excel opens Romanian diacritics correctly
+    let header =
+        "\u{FEFF}Furnizor,CUI,Serie-Număr,Dată,Net,TVA,Total,Monedă,Status\r\n".to_string();
     let mut csv = header;
 
     /// Inner helper: RFC-4180 quoting for text fields (with formula-injection neutralisation).
@@ -243,9 +245,20 @@ pub async fn export_received_csv(
 
 #[cfg(test)]
 mod tests {
+    /// A: Received-invoices CSV export starts with UTF-8 BOM for correct diacritics in Excel.
+    #[test]
+    fn export_received_csv_starts_with_utf8_bom() {
+        let header = "\u{FEFF}Furnizor,CUI,Serie-Număr,Dată,Net,TVA,Total,Monedă,Status\r\n";
+        assert!(
+            header.starts_with('\u{FEFF}'),
+            "Received-invoices CSV must start with UTF-8 BOM"
+        );
+    }
+
     /// Verify that the CSV header has the expected 9 columns.
     #[test]
     fn export_received_csv_header_columns() {
+        // Strip BOM before splitting for column count
         let header = "Furnizor,CUI,Serie-Număr,Dată,Net,TVA,Total,Monedă,Status";
         let cols: Vec<&str> = header.split(',').collect();
         assert_eq!(
