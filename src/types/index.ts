@@ -174,6 +174,9 @@ export interface Invoice {
   rejectionCode: string | null;
   notes: string | null;
   paymentMeansCode: string;
+  /// BIZ-13: FK to the original invoice this credit note reverses. Set only on
+  /// storno credit notes; null for regular invoices and STORNED originals.
+  stornoOfInvoiceId: string | null;
   createdAt: number;
   updatedAt: number;
 }

@@ -115,7 +115,7 @@ pub async fn compute_d394(
                 GROUP_CONCAT(COALESCE(CAST(i.exchange_rate AS TEXT), ''), '|') AS rates \
          FROM invoices i \
          JOIN contacts c ON c.id = i.contact_id \
-         WHERE i.status = 'VALIDATED' \
+         WHERE i.status IN ('VALIDATED', 'STORNED') \
            AND i.issue_date >= ?1 \
            AND i.issue_date <= ?2 \
            AND i.company_id = ?3 \

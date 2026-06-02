@@ -171,6 +171,15 @@ export function ReportsPage() {
     [allInvoices, prefix],
   );
 
+  // REG-STORNO: fiscal set for the Sales Journal = VALIDATED + STORNED.
+  // STORNED originals are positive fiscal events in the period they were issued.
+  // The negative credit note (VALIDATED) offsets them in its own period.
+  // DRAFT / SUBMITTED / QUEUED / REJECTED are not fiscal events yet.
+  const periodFiscalInvoices = useMemo(
+    () => periodInvoices.filter((inv) => inv.status === "VALIDATED" || inv.status === "STORNED"),
+    [periodInvoices],
+  );
+
   const periodValidatedInvoices = useMemo(
     () => validatedInvoices.filter((inv) => inv.issueDate.startsWith(prefix)),
     [validatedInvoices, prefix],
@@ -487,7 +496,7 @@ export function ReportsPage() {
               />
             )}
             <SalesJournalView
-              periodInvoices={periodInvoices}
+              periodInvoices={periodFiscalInvoices}
               contactMap={contactMap}
               dateFrom={dateFrom}
               dateTo={dateTo}

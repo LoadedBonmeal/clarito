@@ -257,6 +257,8 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
       const stornoInv = await api.invoices.storno(invoiceId, companyId, stornoReason.trim());
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
       notify.success(`Factură storno creată: ${stornoInv.fullNumber}`);
+      // Navigate to the new credit note so the accountant can generate XML and submit.
+      void navigate({ to: "/invoices/$id", params: { id: stornoInv.id } });
     } catch (e) {
       notify.error(formatError(e, "Eroare stornare."));
     }

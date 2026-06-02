@@ -24,7 +24,7 @@ import type { AppErrorPayload } from "@/types";
 import { useAppStore } from "@/lib/store";
 import { fmtShortcut } from "@/lib/platform";
 import {
-  PageHeader, Btn, SectionCard, Card, Modal,
+  PageHeader, Btn, SectionCard, Card, Modal, Banner,
 } from "@/components/rf";
 
 export function InvoiceDetailPage() {
@@ -176,6 +176,9 @@ export function InvoiceDetailPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
       setStatusMessage(`Factură storno creată: ${stornoInv.fullNumber}`);
       setActionError(null);
+      // Navigate to the new credit note so the accountant sees the guidance banner
+      // and can immediately generate XML + submit to ANAF to complete the cancellation.
+      void navigate({ to: "/invoices/$id", params: { id: stornoInv.id } });
     },
     onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare stornare."),
   });
@@ -363,6 +366,21 @@ export function InvoiceDetailPage() {
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {/* REG-STORNO: sticky guidance banner for DRAFT credit notes.
+          A storno credit note that is still DRAFT has NOT been sent to ANAF yet
+          and therefore has NOT fiscally cancelled the original invoice. The accountant
+          must generate the XML and submit it to complete the cancellation. */}
+      {invoice.status === "DRAFT" && invoice.stornoOfInvoiceId !== null && (
+        <div style={{ margin: "0 32px 8px" }}>
+          <Banner variant="warning" title="Factură storno — acțiune necesară">
+            Această factură storno trebuie generată (XML) și trimisă la ANAF pentru a
+            anula fiscal factura originală. Până la validarea de către ANAF, anularea
+            fiscală <strong>nu este efectivă</strong> și factura originală continuă să
+            apară în declarații.
+          </Banner>
         </div>
       )}
 

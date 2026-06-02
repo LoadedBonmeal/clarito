@@ -66,12 +66,16 @@ pub async fn generate_vat_report(
     // Summary totals — fetch all matching rows and accumulate in Rust using Decimal.
     // BIZ-11: SUBMITTED invoices are still pending ANAF validation and must NOT be
     // counted as fiscal events — only VALIDATED ones land in TVA reports.
+    // REG-STORNO: STORNED originals were real fiscal events in the period they were
+    // issued (positive amounts); they must still appear here. The corresponding
+    // negative credit note counts when it is itself VALIDATED. Including both is
+    // the correct Romanian treatment — net-zero across the two periods.
     // Wave 4: fetch currency + exchange_rate so each amount can be normalised to RON.
     let summary_rows = sqlx::query(
         "SELECT subtotal_amount, vat_amount, total_amount, \
                 COALESCE(currency, 'RON') AS currency, exchange_rate \
          FROM invoices \
-         WHERE status = 'VALIDATED' \
+         WHERE status IN ('VALIDATED', 'STORNED') \
            AND issue_date >= ?1 \
            AND issue_date <= ?2 \
            AND (?3 IS NULL OR company_id = ?3)",
@@ -126,7 +130,7 @@ pub async fn generate_vat_report(
                 COALESCE(i.currency, 'RON') AS currency, i.exchange_rate \
          FROM invoice_line_items l \
          JOIN invoices i ON i.id = l.invoice_id \
-         WHERE i.status = 'VALIDATED' \
+         WHERE i.status IN ('VALIDATED', 'STORNED') \
            AND i.issue_date >= ?1 \
            AND i.issue_date <= ?2 \
            AND (?3 IS NULL OR i.company_id = ?3)",
@@ -276,14 +280,108 @@ mod tests {
 
     #[test]
     fn draft_excluded_from_fiscal_statuses() {
-        // BIZ-11: only VALIDATED counts as a fiscal event. DRAFT, QUEUED, and
-        // SUBMITTED (awaiting ANAF outcome) must all be excluded from VAT
-        // reports.
-        let fiscal = ["VALIDATED"];
+        // BIZ-11: DRAFT, QUEUED, and SUBMITTED (awaiting ANAF outcome) must be
+        // excluded from VAT reports.
+        // REG-STORNO: STORNED originals ARE fiscal events (positive amounts, already
+        // declared in the period they were issued). Credit notes (status VALIDATED,
+        // negative amounts) offset them when VALIDATED.
+        let fiscal = ["VALIDATED", "STORNED"];
         assert!(!fiscal.contains(&"DRAFT"));
         assert!(!fiscal.contains(&"QUEUED"));
         assert!(!fiscal.contains(&"SUBMITTED"));
         assert!(fiscal.contains(&"VALIDATED"));
+        assert!(
+            fiscal.contains(&"STORNED"),
+            "STORNED originals must be counted"
+        );
+    }
+
+    #[test]
+    fn storned_original_and_validated_credit_note_net_to_zero() {
+        // REG-STORNO correctness proof:
+        //   Original invoice (status=STORNED, base=1000, vat=190) → COUNTS (+)
+        //   Credit note    (status=VALIDATED, base=-1000, vat=-190) → COUNTS (−)
+        //   Net: base=0, vat=0
+        //
+        // No double-counting because:
+        //  - The STORNED original contributes its POSITIVE amounts (as a past fiscal event).
+        //  - The credit note contributes its NEGATIVE amounts (as the reversal).
+        //  - A DRAFT credit note does NOT count yet — accountant must first submit it.
+        use std::str::FromStr;
+        struct FakeInvoice {
+            status: &'static str,
+            base: &'static str,
+            vat: &'static str,
+        }
+        let fiscal_statuses = ["VALIDATED", "STORNED"];
+        let invoices = [
+            FakeInvoice {
+                status: "STORNED",
+                base: "1000.00",
+                vat: "190.00",
+            },
+            FakeInvoice {
+                status: "VALIDATED",
+                base: "-1000.00",
+                vat: "-190.00",
+            },
+        ];
+        let (total_base, total_vat) = invoices
+            .iter()
+            .filter(|inv| fiscal_statuses.contains(&inv.status))
+            .fold((Decimal::ZERO, Decimal::ZERO), |(b, v), inv| {
+                (
+                    b + Decimal::from_str(inv.base).unwrap(),
+                    v + Decimal::from_str(inv.vat).unwrap(),
+                )
+            });
+        assert_eq!(total_base, Decimal::ZERO, "Net base must be zero");
+        assert_eq!(total_vat, Decimal::ZERO, "Net VAT must be zero");
+    }
+
+    #[test]
+    fn storned_original_counted_while_credit_note_still_draft() {
+        // REG-STORNO: when the credit note is still DRAFT (not yet submitted),
+        // the STORNED original must still appear in the fiscal totals (its positive
+        // amounts remain in the declared period). The draft offset does NOT count.
+        use std::str::FromStr;
+        struct FakeInvoice {
+            status: &'static str,
+            base: &'static str,
+            vat: &'static str,
+        }
+        let fiscal_statuses = ["VALIDATED", "STORNED"];
+        let invoices = [
+            FakeInvoice {
+                status: "STORNED",
+                base: "1000.00",
+                vat: "190.00",
+            },
+            FakeInvoice {
+                status: "DRAFT",
+                base: "-1000.00",
+                vat: "-190.00",
+            }, // not yet fiscal
+        ];
+        let (total_base, total_vat) = invoices
+            .iter()
+            .filter(|inv| fiscal_statuses.contains(&inv.status))
+            .fold((Decimal::ZERO, Decimal::ZERO), |(b, v), inv| {
+                (
+                    b + Decimal::from_str(inv.base).unwrap(),
+                    v + Decimal::from_str(inv.vat).unwrap(),
+                )
+            });
+        assert_eq!(
+            total_base,
+            Decimal::from_str("1000.00").unwrap(),
+            "STORNED original contributes positive base; DRAFT credit note is excluded"
+        );
+        assert_eq!(
+            total_vat,
+            Decimal::from_str("190.00").unwrap(),
+            "STORNED original contributes positive VAT; DRAFT credit note is excluded"
+        );
     }
 
     #[test]

@@ -21,7 +21,7 @@ import { PageHeader, Empty } from "@/components/rf";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
-import { fmtRON, parseDec, formatDate } from "@/lib/utils";
+import { fmtRON, formatDate } from "@/lib/utils";
 
 // ── StornatePage ──────────────────────────────────────────────────────────────
 
@@ -120,11 +120,10 @@ function StornatPageInner({ activeCompanyId, setSelectedInvoiceId }: InnerProps)
                 <tbody>
                   {storned.map((inv) => {
                     const clientName = contactMap.get(inv.contactId);
-                    const total = parseDec(inv.totalAmount);
-                    // Render as negative — prefix minus if stored total is positive
-                    const displayTotal = total > 0
-                      ? `-${fmtRON(total)}`
-                      : fmtRON(total);
+                    // REG-STORNO: the STORNED invoice holds its ORIGINAL (positive)
+                    // amount — the fiscal reversal is carried by the negative credit note,
+                    // not by this row. Display the real amount so accountants are not misled.
+                    const displayTotal = fmtRON(inv.totalAmount);
 
                     return (
                       <tr
@@ -157,9 +156,24 @@ function StornatPageInner({ activeCompanyId, setSelectedInvoiceId }: InnerProps)
                           style={{
                             fontFamily: "var(--rf-mono)",
                             fontVariantNumeric: "tabular-nums",
+                            color: "var(--rf-text-muted)",
                           }}
                         >
                           {displayTotal}
+                          <span
+                            style={{
+                              marginLeft: 8,
+                              fontSize: 10,
+                              fontFamily: "var(--rf-sans)",
+                              fontWeight: 600,
+                              letterSpacing: "0.06em",
+                              textTransform: "uppercase",
+                              color: "var(--rf-warning, #b45309)",
+                              verticalAlign: "middle",
+                            }}
+                          >
+                            anulată
+                          </span>
                         </td>
                         <td>
                           <StatusBadge status={inv.status} />
