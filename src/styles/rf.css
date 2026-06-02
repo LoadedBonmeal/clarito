@@ -161,6 +161,16 @@
 @keyframes rf-ico-twinkle  { 0% { transform: scale(1) rotate(0); } 40% { transform: scale(1.15) rotate(18deg); } 100% { transform: scale(1) rotate(0); } }
 @keyframes rf-ico-check    { 0% { transform: scale(1); } 30% { transform: scale(.7); } 100% { transform: scale(1); } }
 
+/* Calmer, slower icon press in the sidebar nav + the ANAF·SPV sync pill (scoped) */
+.rf-sidebar .rf-pressing svg { animation-duration: .9s; }
+.rf-sidebar .rf-pressing svg[data-icon="repeat"],
+.rf-sidebar .rf-pressing svg[data-icon="storno"] { animation-duration: 1.4s; }
+.rf-sidebar .rf-pressing svg[data-icon="anaf"],
+.rf-sidebar .rf-pressing svg[data-icon="bell"],
+.rf-sidebar .rf-pressing svg[data-icon="tag"],
+.rf-sidebar .rf-pressing svg[data-icon="bookmark"] { animation-duration: 1.3s; }
+.rf-topbar .rf-spv-sync.rf-pressing svg { animation-duration: 1.5s; }
+
 /* ---------- Badges / pills ---------- */
 .rf-badge {
   display: inline-flex; align-items: center; gap: 6px;
@@ -464,7 +474,7 @@ table.rf-tbl thead th.rf-ck, table.rf-tbl tbody td.rf-ck { width: 36px; text-ali
 .rf-spv-sync { display: flex; align-items: center; gap: 6px; border: none; background: transparent; color: inherit; font-weight: 600; font-size: 12.5px; cursor: pointer; padding: 5px 10px; border-radius: 999px; font-family: var(--rf-font); }
 .rf-spv-sync:hover { background: rgba(0,0,0,.06); }
 .dark .rf-spv-sync:hover { background: rgba(255,255,255,.08); }
-.rf-spv-sync.is-syncing svg { animation: rf-spin .9s linear infinite; }
+.rf-spv-sync.is-syncing svg { animation: rf-spin 1.5s linear infinite; }
 @keyframes rf-spin { to { transform: rotate(360deg); } }
 
 /* +Nou menu */
