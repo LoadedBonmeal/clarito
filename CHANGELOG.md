@@ -2,6 +2,28 @@
 
 Toate modificările notabile ale Clarito (fost RoFactura). Format: [Keep a Changelog](https://keepachangelog.com), versionare [SemVer](https://semver.org).
 
+## [0.5.0] - 2026-06-02
+
+Audit complet pe funcționalități contabile + remediere bug-uri raportate (plan-mode + sub-agenți + QA + verificare adversarială; gate verde: 338 teste cargo + 129 teste vitest + clippy `-D warnings`).
+
+### Fixed
+- **Izolare date multi-companie (P0)**: când nicio companie nu e activă, paginile Facturi emise/primite, Contacte, Rapoarte și Dashboard nu mai afișează datele tuturor firmelor amestecate (gardă în UI + backend respinge `company_id` nul).
+- **Reconciliere stornare (P0)**: o factură stornată nu mai dispare din D300/D394/SAF-T — originalul rămâne contabilizat în perioada lui, iar nota de credit (negativă) compensează în perioada ei; jurnalul de vânzări nu mai dublează; după stornare ești dus la nota de credit cu banner „trimite la ANAF".
+- **TVA pe categorie autoritar (P0)**: liniile cu taxare inversă/scutit (AE/E/Z/O/K/G) au acum TVA 0 și cotă 0 (e-factură validă) — înainte aplicau 19/21% cu cod de scutire contradictoriu.
+- **Trunchiere liste (P0)**: listele se încarcă complet (nu doar 50 de rânduri), cu avertisment când sunt mai multe; totalurile din subsol nu mai adună RON+EUR la un loc.
+- **Chitanțe**: numerotare per-serie (fără goluri ilegale), validare sumă pozitivă + plătitor obligatoriu, selector de factură (nu UUID), PDF cu numărul real al facturii + separator zecimal ro-RO + diacritice.
+- **Declarații ANAF**: SAF-T D406 exportă luna selectată; D394 grupează pe (partener, categorie TVA) cu conversie valutară deterministă; codurile TVA derivă din categorie, nu din cotă (cota redusă 5/9/11% → „AA").
+- **Validare catalog**: cifră de control CUI (mod-11), prevenire duplicate CUI contact/cod produs, validare IBAN (mod-97); o companie ștearsă (soft-delete) poate fi re-adăugată (reactivare).
+- **e-Factura/backup/licență**: crash la verificarea integrității arhivei remediat; „Export selecție" (facturi primite) și butonul „Adaugă plată" sunt acum funcționale; reîncercare la token expirat (401) pe verificarea stării; backup consistent (VACUUM INTO) + alegere locație; email-ul de probă normalizat (case).
+- **Densitate rânduri** funcțională în toată aplicația, inclusiv tabelele virtualizate (Facturi emise) și Stornate.
+- Bug-uri raportate: crash „Rendered fewer hooks" la ștergerea ultimei companii pe plan Solo; clase CSS nedefinite (spațierea din detaliile companiei); meniul de rând tăiat pe rândurile de jos; spațiere consistentă între pagini; animații one-shot pe iconițe la apăsare (afișate din prima apăsare).
+
+### Security
+- Întărire flux OAuth pe callback-ul loopback (validare cale `/callback` + `state` CSRF; portul se eliberează la timeout); închidere injecție în URL-ul SQLite la import backup; encodare procentuală a parametrilor ANAF; permisiuni `0600` pe baza de date (PII).
+
+### Changed
+- Exporturile CSV au BOM UTF-8 (diacritice corecte în Excel); exportul SAGA/WinMentor folosește moneda + cursul real al facturii; datele folosesc fusul local (EET) pentru scadență/perioadă/recurente; cod mort eliminat (animații icon mutate pe Web Animations API).
+
 ## [0.4.0] - 2026-06-02
 
 ### Changed
