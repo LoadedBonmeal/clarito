@@ -434,6 +434,7 @@ export function InvoiceEditPage() {
               sellerVatPayer={company?.vatPayer ?? true}
               showTotals
               companyId={activeCompanyId ?? undefined}
+              currency={currency}
             />
             {rateValid && (
               <div

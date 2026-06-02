@@ -172,6 +172,32 @@ pub async fn update(
     input: UpdateProductInput,
 ) -> AppResult<Product> {
     let current = get(pool, id, company_id).await?;
+
+    // Validation parity with create(): the new effective code must not duplicate
+    // another product in the same company (excluding this product's own row).
+    let effective_code: Option<String> = input
+        .code
+        .clone()
+        .or_else(|| current.code.clone())
+        .map(|c| c.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let Some(ref code) = effective_code {
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM products WHERE company_id = ?1 AND code = ?2 AND id != ?3 LIMIT 1",
+        )
+        .bind(company_id)
+        .bind(code)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+        if existing.is_some() {
+            return Err(AppError::Validation(format!(
+                "Există deja un produs cu codul '{}' pentru această companie.",
+                code
+            )));
+        }
+    }
+
     let now = now_unix();
 
     sqlx::query(

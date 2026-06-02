@@ -233,11 +233,20 @@ pub async fn get_autostart(app: AppHandle) -> AppResult<bool> {
 
 /// Deschide folderul de arhivă în file manager.
 #[tauri::command]
-pub async fn open_archive_folder(app: AppHandle) -> AppResult<()> {
+pub async fn open_archive_folder(state: State<'_, AppState>, app: AppHandle) -> AppResult<()> {
     use tauri_plugin_opener::OpenerExt;
 
     let data_dir = app.path().app_data_dir()?;
-    let archive_dir = data_dir.join("archive");
+    // Honor the user-configured archive location (ARCHIVE_PATH_OVERRIDE), falling
+    // back to the default <app_data>/archive. Same resolution as gdpr::resolve_archive_dir.
+    let override_val =
+        crate::db::settings::get(&state.db, crate::db::settings::keys::ARCHIVE_PATH_OVERRIDE)
+            .await
+            .unwrap_or(None);
+    let archive_dir = match override_val {
+        Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => data_dir.join("archive"),
+    };
     tokio::fs::create_dir_all(&archive_dir)
         .await
         .map_err(crate::error::AppError::Io)?;

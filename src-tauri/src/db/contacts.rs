@@ -235,6 +235,46 @@ pub async fn update(
 ) -> AppResult<Contact> {
     // S1: scoped get returns NotFound if id belongs to a different company.
     let current = get(pool, id, company_id).await?;
+
+    // Validation parity with create(): the new effective CUI must not match the
+    // company's own CUI (self-invoicing) and must not duplicate another contact
+    // in the same company.
+    let effective_cui: Option<String> = input.cui.clone().or_else(|| current.cui.clone());
+    if let Some(ref contact_cui) = effective_cui {
+        let contact_cui_norm = contact_cui.trim().to_uppercase();
+        let contact_digits = contact_cui_norm
+            .strip_prefix("RO")
+            .unwrap_or(&contact_cui_norm)
+            .trim();
+        if !contact_digits.is_empty() {
+            let company = companies::get(pool, company_id).await?;
+            let company_cui_norm = company.cui.trim().to_uppercase();
+            let company_digits = company_cui_norm
+                .strip_prefix("RO")
+                .unwrap_or(&company_cui_norm)
+                .trim();
+            if contact_digits == company_digits {
+                return Err(AppError::Validation(
+                    "Nu puteți adăuga propria companie ca și contact.".to_string(),
+                ));
+            }
+            let existing: Option<String> = sqlx::query_scalar(
+                "SELECT id FROM contacts WHERE company_id = ?1 AND \
+                 (cui = ?2 OR cui = 'RO' || ?2) AND id != ?3 LIMIT 1",
+            )
+            .bind(company_id)
+            .bind(contact_digits)
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+            if existing.is_some() {
+                return Err(AppError::Validation(
+                    "Există deja un contact cu acest CUI pentru această companie.".to_string(),
+                ));
+            }
+        }
+    }
+
     let now = now_unix();
 
     let contact_type = match input.contact_type {

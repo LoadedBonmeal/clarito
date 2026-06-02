@@ -170,8 +170,17 @@ async fn process_recurring_invoices(
                 continue;
             };
 
+            // VAT1: only category 'S' (Standard) charges VAT; all other categories
+            // (AE/E/Z/O reverse-charge/exempt/zero/out-of-scope) store rate 0 and
+            // VAT 0 — same category-authoritative rule as commands/invoices.rs.
+            let eff_rate = if vat_category == "S" {
+                vat_rate
+            } else {
+                Decimal::ZERO
+            };
+
             let ls = (qty * price).round_dp(2);
-            let lv = (ls * vat_rate / hundred).round_dp(2);
+            let lv = (ls * eff_rate / hundred).round_dp(2);
             let lt = ls + lv;
             subtotal_dec += ls;
             vat_total_dec += lv;
@@ -182,7 +191,7 @@ async fn process_recurring_invoices(
                 quantity: qty.round_dp(2).to_string(),
                 unit,
                 unit_price: price.round_dp(2).to_string(),
-                vat_rate: vat_rate.round_dp(2).to_string(),
+                vat_rate: eff_rate.round_dp(2).to_string(),
                 vat_category,
                 subtotal: ls.round_dp(2).to_string(),
                 vat_amount: lv.round_dp(2).to_string(),

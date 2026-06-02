@@ -121,6 +121,7 @@ export function PaymentsPage() {
     mutationFn: (args: AddPaymentArgs) => api.payments.add(args),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.payments.summaries(activeCompanyId!) });
+      void queryClient.invalidateQueries({ queryKey: ["payments", "summary"] });
       notify.success("Plată adăugată cu succes");
       setAddModal(null);
       setForm({ amount: "", paidAt: new Date().toISOString().slice(0, 10), method: "transfer", reference: "" });
@@ -133,6 +134,7 @@ export function PaymentsPage() {
       api.payments.delete(paymentId, activeCompanyId!),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.payments.summaries(activeCompanyId!) });
+      void queryClient.invalidateQueries({ queryKey: ["payments", "summary"] });
       notify.success("Plată ștearsă");
     },
     onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge plata.")),

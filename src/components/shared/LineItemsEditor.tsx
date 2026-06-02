@@ -88,6 +88,8 @@ export interface LineItemsEditorProps {
    * Manual entry always remains fully functional.
    */
   companyId?: string;
+  /** Invoice currency code shown in the totals footer (default "RON"). */
+  currency?: string;
 }
 
 export function LineItemsEditor({
@@ -97,6 +99,7 @@ export function LineItemsEditor({
   sellerVatPayer = true,
   showTotals = true,
   companyId,
+  currency = "RON",
 }: LineItemsEditorProps) {
   // Fetch active VAT rates from the global DB catalog.
   const { data: dbRates } = useQuery({
@@ -573,7 +576,7 @@ export function LineItemsEditor({
                 }}
               >
                 {fmtRON(total)}{" "}
-                <span style={{ fontSize: 10.5, color: "var(--rf-text-muted)", fontWeight: 400 }}>RON</span>
+                <span style={{ fontSize: 10.5, color: "var(--rf-text-muted)", fontWeight: 400 }}>{currency}</span>
               </td>
               <td></td>
             </tr>

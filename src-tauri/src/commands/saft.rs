@@ -44,13 +44,10 @@ struct SaftLineItem {
 pub async fn export_saft_d406(state: State<'_, AppState>, params: SaftParams) -> AppResult<String> {
     // NOTE: This is a simplified SAF-T export covering SalesInvoices only.
     // It is NOT a complete ANAF D406 submission. Label the UI accordingly.
-    let pool = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(generate_saft(&pool, params))
-    })
-    .await
-    .map_err(|e| AppError::Other(e.to_string()))?
+    // generate_saft is fully async (it awaits sqlx queries), so call it directly.
+    // The previous spawn_blocking + Handle::block_on nested an async future inside a
+    // blocking-pool thread, which can deadlock or panic on a single-threaded runtime.
+    generate_saft(&state.db, params).await
 }
 
 async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult<String> {

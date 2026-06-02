@@ -6,6 +6,27 @@ use tauri::{AppHandle, Manager, State};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
+/// Sanitize a string for safe use as a ZIP entry filename (defense-in-depth
+/// against zip-slip via a crafted invoice series). Allows only `[A-Za-z0-9._-]`;
+/// every other character (path separators, `..` etc.) becomes `_`.
+fn sanitize_zip_name(s: &str) -> String {
+    let cleaned: String = s
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if cleaned.trim_matches('.').is_empty() {
+        "file".to_string()
+    } else {
+        cleaned
+    }
+}
+
 /// Export toate facturile cu XML+PDF pentru o companie într-un ZIP.
 /// Returnează path-ul ZIP generat.
 #[tauri::command]
@@ -34,7 +55,7 @@ pub async fn export_invoices_zip(
         if let Some(xml_path) = &invoice.xml_path {
             if let Ok(bytes) = tokio::fs::read(xml_path).await {
                 entries.push(FileEntry {
-                    name: format!("{}.xml", invoice.full_number.replace('/', "_")),
+                    name: format!("{}.xml", sanitize_zip_name(&invoice.full_number)),
                     bytes,
                 });
             }
@@ -42,7 +63,7 @@ pub async fn export_invoices_zip(
         if let Some(pdf_path) = &invoice.pdf_path {
             if let Ok(bytes) = tokio::fs::read(pdf_path).await {
                 entries.push(FileEntry {
-                    name: format!("{}.pdf", invoice.full_number.replace('/', "_")),
+                    name: format!("{}.pdf", sanitize_zip_name(&invoice.full_number)),
                     bytes,
                 });
             }
