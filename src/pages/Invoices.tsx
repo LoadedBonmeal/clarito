@@ -353,6 +353,11 @@ export function InvoicesPage() {
   const queryClient = useQueryClient();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const setSelectedInvoiceId = useAppStore((s) => s.setSelectedInvoiceId);
+  const density = useAppStore((s) => s.density);
+
+  // Keep row height in sync with the CSS density values defined in design.css:
+  // comfortable (default) = 42px, compact = 34px, relaxed = 48px.
+  const rowHeight = density === "compact" ? 34 : density === "relaxed" ? 48 : 42;
   const { t } = useTranslation();
 
   // ?view=storned deep-link
@@ -457,14 +462,19 @@ export function InvoicesPage() {
     setSelected(next);
   };
 
-  // Virtual scrolling (generous 52px row height)
+  // Virtual scrolling — row height tracks density.
   const tableBodyRef = useRef<HTMLDivElement>(null);
   const rowVirtualizer = useVirtualizer({
     count: list.length,
     getScrollElement: () => tableBodyRef.current,
-    estimateSize: () => 52,
+    estimateSize: () => rowHeight,
     overscan: 10,
   });
+
+  // Re-measure all rows when density changes so the virtualizer re-lays-out.
+  useEffect(() => {
+    rowVirtualizer.measure();
+  }, [rowHeight]);
 
   // Bulk submit
   async function handleBulkSubmit() {
@@ -947,7 +957,7 @@ export function InvoicesPage() {
                         left: 0,
                         width: "100%",
                         transform: `translateY(${virtualRow.start}px)`,
-                        height: 52,
+                        height: rowHeight,
                       }}
                       onClick={() => {
                         setSelectedInvoiceId(inv.id);

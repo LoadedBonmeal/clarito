@@ -129,7 +129,7 @@ function StornatPageInner({ activeCompanyId, setSelectedInvoiceId }: InnerProps)
                       <tr
                         key={inv.id}
                         className="clickable"
-                        style={{ cursor: "pointer", height: 52 }}
+                        style={{ cursor: "pointer" }}
                         onClick={() => {
                           setSelectedInvoiceId(inv.id);
                           void navigate({ to: "/invoices/$id", params: { id: inv.id } });
@@ -218,7 +218,7 @@ function SkeletonRows() {
           </thead>
           <tbody>
             {Array.from({ length: 5 }).map((_, i) => (
-              <tr key={i} style={{ height: 52 }}>
+              <tr key={i} style={{ height: "var(--rf-row-h)" }}>
                 {Array.from({ length: 5 }).map((__, j) => (
                   <td key={j}>
                     <span
