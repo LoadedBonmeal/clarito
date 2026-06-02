@@ -610,7 +610,6 @@ export function InvoicesPage() {
           background: "var(--rf-content)",
           flexWrap: "nowrap",
           overflowX: "auto",
-          gap: 8,
         }}
       >
         {/* Search */}

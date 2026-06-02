@@ -388,7 +388,7 @@ export function ReportsPage() {
               {/* TVA bar chart (CSS-only) */}
               {vatGroups.length > 0 && (
                 <SectionCard icon="chart" title="TVA pe cote">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingTop: 4 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, padding: "4px 16px 16px" }}>
                     {(() => {
                       const maxVat = Math.max(...vatGroups.map((g) => parseDec(g.vatAmount)));
                       return vatGroups.map((g) => {

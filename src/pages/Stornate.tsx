@@ -186,7 +186,7 @@ function StornatPageInner({ activeCompanyId, setSelectedInvoiceId }: InnerProps)
             </div>
 
             {/* Footer with count */}
-            <div className="rf-tbl-footer" style={{ padding: "6px 16px" }}>
+            <div className="rf-tbl-footer">
               <span>
                 Total:{" "}
                 <b>{storned.length}</b>{" "}

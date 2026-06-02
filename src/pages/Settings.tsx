@@ -401,7 +401,7 @@ export function SettingsPage() {
       >
         {/* ── Temă și afișare ── */}
         <SectionCard icon="settings" title="Temă și afișare" subtitle="Personalizați aspectul aplicației">
-          <div style={{ padding: "0 24px 8px" }}>
+          <div style={{ padding: "0 24px 16px" }}>
             <SettingRow label="Densitate rânduri" desc="Înălțimea rândurilor în tabele și liste.">
               <Segmented
                 value={density ?? "comfortable"}

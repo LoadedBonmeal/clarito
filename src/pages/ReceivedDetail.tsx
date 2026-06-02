@@ -126,7 +126,7 @@ export function ReceivedDetailPage() {
               </div>
             )}
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 16, alignItems: "start" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 20, alignItems: "start" }}>
               {/* Left column */}
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 {/* Invoice info */}
@@ -158,7 +158,7 @@ export function ReceivedDetailPage() {
 
                 {/* ANAF/SPV info */}
                 <SectionCard icon="cloud" title="Informații ANAF/SPV">
-                  <div style={{ padding: "12px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 24px" }}>
+                  <div style={{ padding: "0 16px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 24px" }}>
                     <div>
                       <div className="rf-sec-title">Index ANAF</div>
                       <div className="mono" style={{ marginTop: 4 }}>{inv.anafIndex || "—"}</div>
@@ -180,7 +180,7 @@ export function ReceivedDetailPage() {
 
                 {/* Files */}
                 <SectionCard icon="file" title="Fișiere">
-                  <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <Icon name="file" size={16} style={{ color: "var(--rf-text-muted)" }} />
                       <span style={{ fontWeight: 600, fontSize: 13 }}>XML</span>
@@ -231,9 +231,9 @@ export function ReceivedDetailPage() {
               </div>
 
               {/* Right column — status & actions */}
-              <div style={{ position: "sticky", top: 16 }}>
+              <div style={{ position: "sticky", top: 0 }}>
                 <SectionCard icon="check" title="Status & Acțiuni">
-                  <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
                     <div style={{ marginBottom: 8 }}>
                       <StatusBadge status={inv.status} />
                     </div>

@@ -258,7 +258,7 @@ export function PaymentsPage() {
 
       <div className="rf-page-body">
         {/* Stat cards */}
-        <div className="rf-grid-3" style={{ marginBottom: 16 }}>
+        <div className="rf-grid-3">
           <StatCard
             icon="wallet"
             label="De încasat"
