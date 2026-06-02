@@ -514,10 +514,23 @@ pub async fn anaf_check_invoice_status(
     let token = get_valid_token(&company_id, pool, &state.token_refresh_lock).await?;
 
     let client = AnafClient::new(test_mode);
-    let status_resp = client
-        .check_status(&token, &upload_id)
-        .await
-        .map_err(AppError::Other)?;
+
+    // Mirror the retry pattern from poll.rs: on ERR_UNAUTHORIZED refresh token once
+    // and retry the status check to avoid leaving invoices stuck as SUBMITTED.
+    let mut check_result = client.check_status(&token, &upload_id).await;
+    if let Err(ref e) = check_result {
+        use crate::anaf::client::ERR_UNAUTHORIZED;
+        if e == ERR_UNAUTHORIZED {
+            tracing::info!(company_id, "ANAF 401 on check_status — reîmprospătăm token");
+            if let Ok(new_tok) =
+                crate::background::refresh_token_for(&company_id, pool, &state.token_refresh_lock)
+                    .await
+            {
+                check_result = client.check_status(&new_tok, &upload_id).await;
+            }
+        }
+    }
+    let status_resp = check_result.map_err(AppError::Other)?;
 
     let stare = status_resp.stare.clone();
 

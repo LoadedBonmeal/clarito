@@ -210,10 +210,18 @@ export function ReceivedPage() {
               disabled={selected.size === 0}
               onClick={async () => {
                 if (selected.size === 0) { notify.warn("Selectați facturi pentru export."); return; }
+                if (!activeCompanyId) { notify.warn("Selectați o companie."); return; }
                 const { save } = await import("@tauri-apps/plugin-dialog");
                 const path = await save({ filters: [{ name: "CSV", extensions: ["csv"] }], defaultPath: "facturi-primite-selectie.csv" });
                 if (!path) return;
-                notify.info(`Export ${selected.size} facturi în curs…`);
+                try {
+                  const csvText = await api.received.exportCsv(activeCompanyId, Array.from(selected));
+                  const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+                  await writeTextFile(path, csvText);
+                  notify.success(`${selected.size} facturi exportate: ${path}`);
+                } catch (e) {
+                  notify.error(formatError(e, "Exportul CSV a eșuat."));
+                }
               }}
             >
               Export selecție

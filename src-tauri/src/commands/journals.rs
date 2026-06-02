@@ -42,7 +42,7 @@ fn csv_field(s: &str) -> String {
 /// prefixing them with `'` would turn the numeric cell into text and break
 /// SUM formulas in accounting software. Amounts never contain user-controlled
 /// text, so there is no injection vector to neutralize here.
-fn csv_num(s: &str) -> String {
+pub(crate) fn csv_num(s: &str) -> String {
     if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {

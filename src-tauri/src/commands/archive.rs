@@ -81,10 +81,18 @@ pub async fn export_invoices_zip(
 
 /// Exportă un backup complet (DB + archive/**) într-un fișier ZIP.
 /// Returnează path-ul fișierului ZIP generat.
+///
+/// Backup consistency: instead of reading `data.db` directly via `std::fs::read`
+/// (which may capture a torn WAL), we use SQLite's `VACUUM INTO` command to produce
+/// a clean, WAL-consolidated single-file snapshot at a temporary path, then include
+/// that snapshot in the ZIP. The temp file is removed after the ZIP is written.
 #[tauri::command]
-pub async fn export_backup(state: State<'_, AppState>, app: AppHandle) -> AppResult<String> {
+pub async fn export_backup(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    dest_path: Option<String>,
+) -> AppResult<String> {
     let data_dir = app.path().app_data_dir()?;
-    let db_path = data_dir.join("data.db");
 
     // Resolve archive directory: prefer user-configured override, fall back to
     // <app_data>/archive.
@@ -99,9 +107,29 @@ pub async fn export_backup(state: State<'_, AppState>, app: AppHandle) -> AppRes
         }
     };
 
+    // Step 1: produce a consistent DB snapshot via VACUUM INTO.
+    // VACUUM INTO writes a single-file SQLite copy with WAL fully applied,
+    // safe to read without the pool's WAL being active.
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    let out_path = data_dir.join(format!("efactura_backup_{timestamp}.zip"));
+    let snapshot_path = data_dir.join(format!("efactura_snapshot_{timestamp}.db"));
+    let snapshot_path_str = snapshot_path.to_string_lossy().to_string();
+
+    sqlx::query(&format!(
+        "VACUUM INTO '{}'",
+        snapshot_path_str.replace('\'', "''")
+    ))
+    .execute(&state.db)
+    .await
+    .map_err(|e| AppError::Other(format!("VACUUM INTO failed: {e}")))?;
+
+    // Use caller-supplied path when provided; otherwise fall back to app_data_dir.
+    let out_path = if let Some(ref p) = dest_path {
+        std::path::PathBuf::from(p)
+    } else {
+        data_dir.join(format!("efactura_backup_{timestamp}.zip"))
+    };
     let out_path_clone = out_path.clone();
+    let snapshot_path_clone = snapshot_path.clone();
 
     let result = tauri::async_runtime::spawn_blocking(move || -> Result<String, AppError> {
         let file = std::fs::File::create(&out_path_clone).map_err(AppError::Io)?;
@@ -109,11 +137,11 @@ pub async fn export_backup(state: State<'_, AppState>, app: AppHandle) -> AppRes
         let opts = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated);
 
-        // Add data.db
-        if db_path.exists() {
+        // Add data.db from the consistent VACUUM INTO snapshot.
+        if snapshot_path_clone.exists() {
             zip.start_file("data.db", opts)
                 .map_err(|e| AppError::Other(e.to_string()))?;
-            let db_bytes = std::fs::read(&db_path).map_err(AppError::Io)?;
+            let db_bytes = std::fs::read(&snapshot_path_clone).map_err(AppError::Io)?;
             zip.write_all(&db_bytes).map_err(AppError::Io)?;
         }
 
@@ -136,10 +164,14 @@ pub async fn export_backup(state: State<'_, AppState>, app: AppHandle) -> AppRes
 
         Ok(out_path_clone.to_string_lossy().to_string())
     })
-    .await
-    .map_err(|e| AppError::Other(e.to_string()))??;
+    .await;
 
-    Ok(result)
+    // Clean up the temporary VACUUM INTO snapshot UNCONDITIONALLY (best-effort),
+    // even on the error path, so timestamped temp snapshots don't accumulate.
+    let _ = tokio::fs::remove_file(&snapshot_path).await;
+
+    let out_path = result.map_err(|e| AppError::Other(e.to_string()))??;
+    Ok(out_path)
 }
 
 /// Recursively add all files under `dir` into the ZIP archive, using paths
@@ -664,6 +696,56 @@ pub async fn change_archive_location(
         &new_path,
     )
     .await?;
+
+    // Update xml_path / pdf_path in both invoices and received_invoices so
+    // existing rows point to the new archive location rather than the old one.
+    //
+    // Strategy: the same separator-based rewrite used in import_backup — find
+    // the last occurrence of "/sent/" or "/received/" in each stored path and
+    // replace the prefix up to (but not including) that separator with new_path.
+    // Rows whose path does not contain either separator are left untouched.
+    let new_path_ref = &new_path;
+    for table in &["invoices", "received_invoices"] {
+        for col in &["xml_path", "pdf_path"] {
+            let sql_sent = format!(
+                "UPDATE \"{table}\" \
+                 SET \"{col}\" = ?1 || substr(\"{col}\", instr(\"{col}\", '/sent/')) \
+                 WHERE \"{col}\" IS NOT NULL \
+                   AND instr(\"{col}\", '/sent/') > 0"
+            );
+            if let Err(e) = sqlx::query(&sql_sent)
+                .bind(new_path_ref)
+                .execute(&state.db)
+                .await
+            {
+                tracing::warn!(
+                    table, col, error = ?e,
+                    "change_archive_location: path rewrite (/sent/) failed, continuing"
+                );
+            }
+
+            let sql_received = format!(
+                "UPDATE \"{table}\" \
+                 SET \"{col}\" = ?1 || substr(\"{col}\", instr(\"{col}\", '/received/')) \
+                 WHERE \"{col}\" IS NOT NULL \
+                   AND instr(\"{col}\", '/received/') > 0"
+            );
+            if let Err(e) = sqlx::query(&sql_received)
+                .bind(new_path_ref)
+                .execute(&state.db)
+                .await
+            {
+                tracing::warn!(
+                    table, col, error = ?e,
+                    "change_archive_location: path rewrite (/received/) failed, continuing"
+                );
+            }
+        }
+    }
+    tracing::info!(
+        new_path,
+        "change_archive_location: xml_path/pdf_path rewritten to new archive root"
+    );
 
     Ok(())
 }

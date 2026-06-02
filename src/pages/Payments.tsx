@@ -8,7 +8,7 @@
  * delete payment → api.payments.delete(paymentId, companyId).
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -17,6 +17,7 @@ import {
   PageHeader, Btn, IconBtn, Badge, Card, SectionCard, StatCard,
   Field, Input, Select, SearchInput, Segmented, Empty, Modal,
 } from "@/components/rf";
+import { Icon } from "@/components/shared/Icon";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import type { AddPaymentArgs, Payment } from "@/lib/tauri";
@@ -24,6 +25,7 @@ import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
+import type { Invoice } from "@/types";
 
 type PayFilter = "all" | "UNPAID" | "PARTIAL" | "PAID" | "OVERDUE";
 
@@ -53,7 +55,10 @@ export function PaymentsPage() {
 
   const [filter, setFilter] = useState<PayFilter>("all");
   const [query, setQuery] = useState("");
+  // addModal.invoiceId === "" means opened from header — user must pick an invoice first.
   const [addModal, setAddModal] = useState<{ invoiceId: string; totalAmount: string } | null>(null);
+  // Invoice picked via the header-triggered combobox (only used when addModal.invoiceId is "").
+  const [pickedInvoice, setPickedInvoice] = useState<Invoice | null>(null);
   const [form, setForm] = useState({
     amount: "",
     paidAt: new Date().toISOString().slice(0, 10),
@@ -222,7 +227,9 @@ export function PaymentsPage() {
             icon="plus"
             size="sm"
             onClick={() => {
-              notify.info("Selectați o factură din tabel pentru a adăuga o plată.");
+              setPickedInvoice(null);
+              setAddModal({ invoiceId: "", totalAmount: "" });
+              setForm({ amount: "", paidAt: new Date().toISOString().slice(0, 10), method: "transfer", reference: "" });
             }}
           >
             Adaugă plată
@@ -384,20 +391,29 @@ export function PaymentsPage() {
       {addModal && (
         <Modal
           open
-          onOpenChange={(open) => { if (!open) setAddModal(null); }}
+          onOpenChange={(open) => { if (!open) { setAddModal(null); setPickedInvoice(null); } }}
           title="Plăți factură"
           width={460}
           footer={
             <>
-              <Btn variant="secondary" onClick={() => setAddModal(null)}>Anulează</Btn>
+              <Btn variant="secondary" onClick={() => { setAddModal(null); setPickedInvoice(null); }}>Anulează</Btn>
               <Btn
                 variant="primary"
                 icon="check"
-                disabled={addMutation.isPending || !form.amount || !form.paidAt}
+                disabled={
+                  addMutation.isPending ||
+                  !form.amount ||
+                  !form.paidAt ||
+                  // When opened from header, an invoice must be picked first.
+                  (addModal.invoiceId === "" && pickedInvoice === null)
+                }
                 onClick={() => {
                   if (!activeCompanyId) return;
+                  // Resolve the invoiceId: row-level sets it directly; header flow uses pickedInvoice.
+                  const resolvedInvoiceId = addModal.invoiceId || pickedInvoice?.id;
+                  if (!resolvedInvoiceId) return;
                   addMutation.mutate({
-                    invoiceId: addModal.invoiceId,
+                    invoiceId: resolvedInvoiceId,
                     companyId: activeCompanyId,
                     amount: form.amount,
                     paidAt: form.paidAt,
@@ -411,9 +427,43 @@ export function PaymentsPage() {
             </>
           }
         >
+          {/* Invoice picker — only shown when modal was opened from the header button */}
+          {addModal.invoiceId === "" && activeCompanyId && (
+            <div style={{ marginBottom: 16 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "var(--rf-text-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  marginBottom: 8,
+                }}
+              >
+                Selectează factura
+              </div>
+              <InvoicePickerCombobox
+                companyId={activeCompanyId}
+                value={pickedInvoice}
+                onChange={(inv) => {
+                  setPickedInvoice(inv);
+                  if (inv) {
+                    const s = summaryMap.get(inv.id);
+                    const paid = parseDec(s?.paidAmount ?? "0");
+                    const rest = Math.max(0, parseDec(inv.totalAmount) - paid);
+                    setForm((f) => ({ ...f, amount: rest > 0 ? rest.toFixed(2) : "" }));
+                  } else {
+                    setForm((f) => ({ ...f, amount: "" }));
+                  }
+                }}
+              />
+            </div>
+          )}
+
           {/* Existing payments */}
           {(() => {
-            const existing = summaryMap.get(addModal.invoiceId)?.payments ?? [];
+            const invoiceIdForPayments = addModal.invoiceId || pickedInvoice?.id || "";
+            const existing = summaryMap.get(invoiceIdForPayments)?.payments ?? [];
             if (existing.length === 0) return null;
             return (
               <div style={{ marginBottom: 16 }}>
@@ -511,6 +561,232 @@ export function PaymentsPage() {
             </Field>
           </div>
         </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── InvoicePickerCombobox ─────────────────────────────────────────────────
+// Inline combobox for picking an invoice from the active company.
+// Used by the header-level "Adaugă plată" button so users can select which
+// invoice to record a payment against. Mirrors the InvoiceCombobox in Receipts.tsx.
+
+function InvoicePickerCombobox({
+  companyId,
+  value,
+  onChange,
+}: {
+  companyId: string;
+  value: Invoice | null;
+  onChange: (inv: Invoice | null) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listboxId = useId();
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const { data: page, isFetching } = useQuery({
+    queryKey: ["invoices", "payments-picker", companyId, debouncedQuery],
+    queryFn: () =>
+      api.invoices.list({
+        companyId,
+        query: debouncedQuery || undefined,
+        page: { offset: 0, limit: 30 },
+      }),
+    enabled: open && !!companyId,
+    staleTime: 30_000,
+  });
+
+  const results: Invoice[] = page?.items ?? [];
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  useEffect(() => {
+    setHighlight(0);
+  }, [results.length]);
+
+  const handleSelect = (inv: Invoice) => {
+    onChange(inv);
+    setQuery("");
+    setOpen(false);
+    inputRef.current?.blur();
+  };
+
+  const handleClear = () => {
+    onChange(null);
+    setQuery("");
+    setDebouncedQuery("");
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!open) {
+      if (e.key === "ArrowDown" || e.key === "Enter") {
+        e.preventDefault();
+        setOpen(true);
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlight((h) => Math.min(h + 1, Math.max(results.length - 1, 0)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlight((h) => Math.max(h - 1, 0));
+    } else if (e.key === "Enter") {
+      if (results[highlight]) {
+        e.preventDefault();
+        handleSelect(results[highlight]);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+
+  if (value) {
+    return (
+      <div
+        ref={containerRef}
+        style={{
+          position: "relative",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          width: "100%",
+          minHeight: 40,
+          padding: "4px 8px 4px 12px",
+          border: "1px solid var(--rf-border-strong)",
+          background: "var(--rf-content)",
+          borderRadius: "var(--rf-radius-sm)",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0, lineHeight: 1.25 }}>
+          <div
+            className="mono"
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--rf-accent)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {value.fullNumber}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--rf-text-muted)" }}>
+            {value.issueDate} · {value.totalAmount} {value.currency ?? "RON"}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleClear}
+          className="rf-icon-btn rf-icon-btn--ghost"
+          style={{ width: 26, height: 26 }}
+          aria-label="Elimină factura selectată"
+          title="Elimină factura selectată"
+        >
+          <Icon name="x" size={12} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ position: "relative", display: "inline-block", width: "100%" }}
+    >
+      <input
+        ref={inputRef}
+        id={listboxId + "-input"}
+        className="rf-input"
+        type="text"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={onKeyDown}
+        placeholder="Caută factură (număr sau client)…"
+        autoComplete="off"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        role="combobox"
+        style={{ width: "100%" }}
+      />
+      {open && (
+        <div
+          id={listboxId}
+          role="listbox"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            right: 0,
+            zIndex: 50,
+            background: "var(--rf-content)",
+            border: "1px solid var(--rf-border-strong)",
+            borderRadius: "var(--rf-radius-sm)",
+            boxShadow: "var(--rf-shadow-md)",
+            maxHeight: 240,
+            overflowY: "auto",
+          }}
+        >
+          {isFetching ? (
+            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
+              Se caută…
+            </div>
+          ) : results.length === 0 ? (
+            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
+              {debouncedQuery ? `Nicio factură pentru „${debouncedQuery}".` : "Nicio factură găsită."}
+            </div>
+          ) : (
+            results.map((inv, idx) => (
+              <div
+                key={inv.id}
+                role="option"
+                aria-selected={idx === highlight}
+                onMouseDown={(e) => { e.preventDefault(); handleSelect(inv); }}
+                onMouseEnter={() => setHighlight(idx)}
+                style={{
+                  padding: "8px 12px",
+                  cursor: "pointer",
+                  background: idx === highlight ? "var(--rf-accent-tint)" : "transparent",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2,
+                }}
+              >
+                <span className="mono" style={{ fontSize: 13, fontWeight: 600, color: "var(--rf-accent)" }}>
+                  {inv.fullNumber}
+                </span>
+                <span style={{ fontSize: 11, color: "var(--rf-text-muted)" }}>
+                  {inv.issueDate} · {inv.totalAmount} {inv.currency ?? "RON"}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
       )}
     </div>
   );
