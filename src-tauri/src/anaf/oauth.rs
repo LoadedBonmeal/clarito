@@ -61,6 +61,7 @@ impl OAuthConfig {
     }
 }
 
+#[derive(Debug)]
 pub struct OAuthResult {
     pub access_token: String,
     pub refresh_token: String,
@@ -128,6 +129,17 @@ fn sha256_base64url(s: &str) -> String {
 /// - Timeout 120s → mesaj RO cu hint certificat digital.
 /// - Token exchange eșuat → include descrierea ANAF dacă există.
 pub async fn authorize(_company_id: &str, config: &OAuthConfig) -> Result<OAuthResult, String> {
+    // Guard: dacă client_id-ul este gol sau conține placeholder-ul implicit,
+    // ANAF va respinge cererea cu propria pagină de eroare în browser.
+    // Returnăm imediat un mesaj clar în loc să deschidem un URL rupt.
+    if config.client_id.trim().is_empty() || config.client_id == DEFAULT_CLIENT_ID {
+        return Err(
+            "Conexiunea SPV nu este configurată: completați «client_id»-ul OAuth propriu \
+             (înregistrat la ANAF) în Setări → ANAF → Configurare avansată, apoi reîncercați."
+                .to_string(),
+        );
+    }
+
     // 1. PKCE
     let code_verifier = random_bytes_hex(32); // 32 bytes = 64 hex chars = 256 bits entropy
     let code_challenge = sha256_base64url(&code_verifier);
@@ -541,7 +553,41 @@ async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthResult, St
 mod tests {
     use super::{
         extract_query_param, is_allowed_anaf_url, is_allowed_redirect_uri, percent_decode,
+        OAuthConfig, DEFAULT_CLIENT_ID,
     };
+
+    // ─── authorize guard tests ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn authorize_rejects_default_client_id() {
+        let config = OAuthConfig::default_prod(); // client_id == DEFAULT_CLIENT_ID
+        let err = super::authorize("company-1", &config).await.unwrap_err();
+        assert!(
+            err.contains("client_id"),
+            "expected client_id mention in error, got: {err}"
+        );
+        assert!(
+            err.contains("Setări"),
+            "expected settings hint in error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn authorize_rejects_empty_client_id() {
+        let mut config = OAuthConfig::default_prod();
+        config.client_id = "   ".to_string();
+        let err = super::authorize("company-1", &config).await.unwrap_err();
+        assert!(
+            err.contains("client_id"),
+            "expected client_id mention in error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn default_client_id_constant_matches() {
+        // Ensures the constant value we guard against is "efactura-desktop".
+        assert_eq!(DEFAULT_CLIENT_ID, "efactura-desktop");
+    }
 
     // ─── is_allowed_redirect_uri tests ──────────────────────────────────────
 
