@@ -46,6 +46,26 @@
 .rf-icon-btn--ghost:hover { background: var(--rf-neutral-bg); border-color: transparent; }
 .rf-icon-btn:disabled { opacity: .5; cursor: not-allowed; }
 
+/* ---------- Tactile icon press (micro-interaction) ----------
+   SVG icons inside pressable controls scale down quickly while held,
+   then spring back with a slight overshoot on release. */
+.rf-icon-btn svg,
+.rf-btn svg,
+.rf-nav-item .rf-nav-ic svg,
+.rf-topbar-cmd svg,
+.rf-topbar-icon svg {
+  transition: transform .22s cubic-bezier(.34, 1.56, .64, 1);
+}
+.rf-icon-btn:not(:disabled):active svg,
+.rf-btn:not(:disabled):active svg,
+.rf-nav-item:active .rf-nav-ic svg,
+.rf-topbar-cmd:active svg,
+.rf-topbar-icon:active svg {
+  transform: scale(.8);
+  transition-duration: .05s;
+  transition-timing-function: ease-out;
+}
+
 /* ---------- Badges / pills ---------- */
 .rf-badge {
   display: inline-flex; align-items: center; gap: 6px;
@@ -603,4 +623,8 @@ table.rf-tbl thead th.rf-ck, table.rf-tbl tbody td.rf-ck { width: 36px; text-ali
   .rf-sidebar { transition: none !important; }
   .rf-btn, .rf-icon-btn, .rf-nav-item, .rf-topbar-cmd,
   .rf-topbar-icon, .rf-spv-sync, table.rf-tbl tbody tr { transition: none !important; }
+
+  /* No tactile icon press animation when reduced motion is requested */
+  .rf-icon-btn svg, .rf-btn svg, .rf-nav-item .rf-nav-ic svg,
+  .rf-topbar-cmd svg, .rf-topbar-icon svg { transition: none !important; transform: none !important; }
 }
