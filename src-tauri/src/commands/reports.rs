@@ -234,6 +234,9 @@ pub async fn export_report(
     format: String,
     output_path: String,
 ) -> AppResult<String> {
+    let output_path = crate::commands::integrations::validate_export_path(&output_path)?
+        .to_string_lossy()
+        .to_string();
     let date_from = params.date_from.unwrap_or_else(|| "2000-01-01".to_string());
     let date_to = params.date_to.unwrap_or_else(|| "2099-12-31".to_string());
 

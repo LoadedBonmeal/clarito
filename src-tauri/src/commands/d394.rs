@@ -398,6 +398,9 @@ pub async fn export_d394(
     period_to: String,
     dest_path: String,
 ) -> AppResult<String> {
+    let dest_path = crate::commands::integrations::validate_export_path(&dest_path)?
+        .to_string_lossy()
+        .to_string();
     let report = compute_d394(state, company_id, period_from, period_to).await?;
 
     let dest = dest_path.clone();

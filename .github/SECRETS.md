@@ -15,7 +15,7 @@ Generate with: `npx tauri signer generate -w ~/.tauri/rofactura.key`
 
 | Secret | Description |
 |--------|-------------|
-| `TAURI_UPDATER_PRIVATE_KEY` | Private key content |
-| `TAURI_UPDATER_PRIVATE_KEY_PASSWORD` | Private key password |
+| `TAURI_SIGNING_PRIVATE_KEY` | Private key content (used by release.yml) |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Private key password (used by release.yml) |
 
 Put the **public key** in `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`.

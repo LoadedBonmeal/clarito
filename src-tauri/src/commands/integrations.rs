@@ -13,7 +13,11 @@ use crate::state::AppState;
 // - fără UNC / SMB (`\\server\share`)
 // - fără componente `..`
 // - extensie permisă (csv, xlsx, xml, txt)
-// - părintele trebuie să fie în $HOME al utilizatorului
+// - directorul țintă trebuie să existe (canonicalizabil)
+//
+// Note: the previous `starts_with($HOME)` restriction is intentionally removed
+// so users can save exports to any local drive (e.g. D:\ on Windows) without
+// receiving a spurious "must be in home directory" error.
 
 pub(crate) fn validate_export_path(path: &str) -> AppResult<std::path::PathBuf> {
     use std::path::PathBuf;
@@ -48,25 +52,13 @@ pub(crate) fn validate_export_path(path: &str) -> AppResult<std::path::PathBuf> 
         )));
     }
 
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map_err(|_| AppError::Other("Nu pot determina directorul home.".into()))?;
-
     let parent = p
         .parent()
         .ok_or_else(|| AppError::Validation("Cale invalidă.".into()))?;
-    let parent_canon = parent
+    // Verify the parent directory exists and is accessible.
+    parent
         .canonicalize()
         .map_err(|_| AppError::Validation("Directorul țintă nu există.".into()))?;
-    let home_canon = std::path::PathBuf::from(&home)
-        .canonicalize()
-        .map_err(AppError::Io)?;
-
-    if !parent_canon.starts_with(&home_canon) {
-        return Err(AppError::Validation(
-            "Fișierul trebuie să fie în directorul home al utilizatorului.".into(),
-        ));
-    }
 
     Ok(p)
 }

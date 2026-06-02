@@ -20,7 +20,7 @@ import { api } from "@/lib/tauri";
 import { queryKeys } from "@/lib/queries";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
-import { fmtShortcut } from "@/lib/platform";
+import { fmtShortcut, isMac } from "@/lib/platform";
 
 // ── Breadcrumb route map ──────────────────────────────────────────────────────
 
@@ -341,7 +341,7 @@ export function TopBar() {
               <Icon name="x" size={15} />
               <span>Ieșire</span>
               <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--rf-text-dim)" }}>
-                {fmtShortcut("Alt+F4")}
+                {isMac ? '⌘Q' : 'Alt+F4'}
               </span>
             </button>
           </div>

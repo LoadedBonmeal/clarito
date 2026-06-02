@@ -7,9 +7,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+
 import { Icon } from "@/components/shared/Icon";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import { notify } from "@/lib/toasts";
 
 interface StatusBarProps {
   activeCompanyName: string;
@@ -158,11 +161,18 @@ export function StatusBar({ activeCompanyName, activeCompanyId }: StatusBarProps
 
         const handleClick = isTrial
           ? async () => {
+              const url = purchaseUrl || "https://lucaris.ro/rofactura#pret";
               try {
-                const url = purchaseUrl || "https://lucaris.ro/rofactura#pret";
                 await openUrl(url);
               } catch {
-                window.open("https://lucaris.ro/rofactura#pret", "_blank");
+                // openUrl failed (e.g. WebView2 restriction) — copy URL to clipboard
+                // so the user can paste it in their browser.
+                try {
+                  await writeText(url);
+                  notify.info(`Link copiat: ${url}`);
+                } catch {
+                  notify.info(`Deschideți în browser: ${url}`);
+                }
               }
             }
           : undefined;

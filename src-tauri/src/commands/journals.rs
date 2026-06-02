@@ -80,6 +80,9 @@ pub async fn export_sales_journal(
     date_to: String,
     dest_path: String,
 ) -> AppResult<String> {
+    let dest_path = crate::commands::integrations::validate_export_path(&dest_path)?
+        .to_string_lossy()
+        .to_string();
     let pool = &state.db;
 
     // Fetch invoices fiscale (VALIDATED + STORNED) pentru companie în perioadă.
@@ -172,6 +175,9 @@ pub async fn export_purchase_journal(
     date_to: String,
     dest_path: String,
 ) -> AppResult<String> {
+    let dest_path = crate::commands::integrations::validate_export_path(&dest_path)?
+        .to_string_lossy()
+        .to_string();
     let pool = &state.db;
 
     let rows = sqlx::query(

@@ -161,8 +161,8 @@ jobs:
           cargo clippy --all-targets --all-features -- -D warnings
           cargo test --lib
 
-      - name: Build and sign Windows
-        run: pnpm build:win-x64
+      - name: Build and sign Windows (NSIS)
+        run: pnpm build:win-nsis
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -173,9 +173,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: RoFactura-Windows-${{ github.ref_name }}
-          path: |
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
 
   create-release:
     name: Create GitHub Release
@@ -190,7 +188,6 @@ jobs:
         with:
           files: |
             RoFactura-macOS-${{ github.ref_name }}/*.dmg
-            RoFactura-Windows-${{ github.ref_name }}/*.msi
             RoFactura-Windows-${{ github.ref_name }}/*.exe
           generate_release_notes: true
           draft: true

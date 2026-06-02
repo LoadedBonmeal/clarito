@@ -366,6 +366,12 @@ pub async fn export_d300(
     dest_path: String,
     manual_deductible_vat: Option<String>,
 ) -> AppResult<String> {
+    // Validate the user-chosen destination path (same guard as every other export
+    // command: absolute, no UNC, no `..` traversal, allowed extension).
+    let dest_path = crate::commands::integrations::validate_export_path(&dest_path)?
+        .to_string_lossy()
+        .to_string();
+
     // Calculăm mai întâi raportul.
     let mut report = compute_d300(state, company_id, period_from, period_to).await?;
 
