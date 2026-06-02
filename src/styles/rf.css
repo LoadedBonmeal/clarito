@@ -46,25 +46,65 @@
 .rf-icon-btn--ghost:hover { background: var(--rf-neutral-bg); border-color: transparent; }
 .rf-icon-btn:disabled { opacity: .5; cursor: not-allowed; }
 
-/* ---------- Tactile icon press (micro-interaction) ----------
-   SVG icons inside pressable controls scale down quickly while held,
-   then spring back with a slight overshoot on release. */
-.rf-icon-btn svg,
-.rf-btn svg,
-.rf-nav-item .rf-nav-ic svg,
-.rf-topbar-cmd svg,
-.rf-topbar-icon svg {
-  transition: transform .22s cubic-bezier(.34, 1.56, .64, 1);
-}
-.rf-icon-btn:not(:disabled):active svg,
-.rf-btn:not(:disabled):active svg,
-.rf-nav-item:active .rf-nav-ic svg,
-.rf-topbar-cmd:active svg,
-.rf-topbar-icon:active svg {
-  transform: scale(.8);
-  transition-duration: .05s;
-  transition-timing-function: ease-out;
-}
+/* ---------- One-shot icon press animations (micro-interaction) ----------
+   When a pressable control is clicked it gets `.rf-pressing` (added in JS,
+   removed on animationend). The <svg> carries data-icon, so each icon plays
+   a fitting one-shot motion. Default = a quick pop; expressive icons spin,
+   swing, bounce, wiggle or nudge. Transform/opacity only (GPU). */
+.rf-pressing svg { animation: rf-ico-pop .42s cubic-bezier(.23, 1, .32, 1); transform-origin: 50% 50%; }
+
+/* Spin — refresh / gear / repeat / reverse / storno */
+.rf-pressing svg[data-icon="refresh"],
+.rf-pressing svg[data-icon="settings"],
+.rf-pressing svg[data-icon="repeat"],
+.rf-pressing svg[data-icon="reverse"],
+.rf-pressing svg[data-icon="storno"] { animation: rf-ico-spin .6s cubic-bezier(.23, 1, .32, 1); }
+
+/* Swing — bell / SPV (pivot from the top, like a ringing bell) */
+.rf-pressing svg[data-icon="bell"],
+.rf-pressing svg[data-icon="anaf"] { animation: rf-ico-swing .6s ease; transform-origin: 50% 18%; }
+
+/* Vertical bounce — download / upload / cloud / send / save */
+.rf-pressing svg[data-icon="download"],
+.rf-pressing svg[data-icon="cloudDn"] { animation: rf-ico-down .5s cubic-bezier(.34, 1.56, .64, 1); }
+.rf-pressing svg[data-icon="upload"],
+.rf-pressing svg[data-icon="cloudUp"],
+.rf-pressing svg[data-icon="send"],
+.rf-pressing svg[data-icon="save"] { animation: rf-ico-up .5s cubic-bezier(.34, 1.56, .64, 1); }
+
+/* Wiggle — trash / pen / edit / filter */
+.rf-pressing svg[data-icon="trash"],
+.rf-pressing svg[data-icon="pen"],
+.rf-pressing svg[data-icon="edit"],
+.rf-pressing svg[data-icon="filter"] { animation: rf-ico-wiggle .45s ease; }
+
+/* Horizontal nudge — chevrons / arrows */
+.rf-pressing svg[data-icon="chevRight"],
+.rf-pressing svg[data-icon="chevronRight"],
+.rf-pressing svg[data-icon="arrowRight"] { animation: rf-ico-nudge-r .4s ease; }
+.rf-pressing svg[data-icon="chevLeft"],
+.rf-pressing svg[data-icon="chevronLeft"],
+.rf-pressing svg[data-icon="arrowLeft"] { animation: rf-ico-nudge-l .4s ease; }
+
+/* Rotate-pop — plus / x / cancel */
+.rf-pressing svg[data-icon="plus"],
+.rf-pressing svg[data-icon="x"],
+.rf-pressing svg[data-icon="cancel"] { animation: rf-ico-rotate .45s cubic-bezier(.23, 1, .32, 1); }
+
+/* Check pop — confirm icons */
+.rf-pressing svg[data-icon="check"],
+.rf-pressing svg[data-icon="checkCircle"] { animation: rf-ico-check .45s cubic-bezier(.34, 1.56, .64, 1); }
+
+@keyframes rf-ico-pop    { 0% { transform: scale(1); } 35% { transform: scale(.8); } 100% { transform: scale(1); } }
+@keyframes rf-ico-spin   { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+@keyframes rf-ico-swing  { 0%,100% { transform: rotate(0); } 20% { transform: rotate(14deg); } 40% { transform: rotate(-10deg); } 60% { transform: rotate(6deg); } 80% { transform: rotate(-3deg); } }
+@keyframes rf-ico-down   { 0% { transform: translateY(0); } 45% { transform: translateY(3px); } 100% { transform: translateY(0); } }
+@keyframes rf-ico-up     { 0% { transform: translateY(0); } 45% { transform: translateY(-3px); } 100% { transform: translateY(0); } }
+@keyframes rf-ico-wiggle { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-9deg); } 50% { transform: rotate(7deg); } 75% { transform: rotate(-4deg); } }
+@keyframes rf-ico-nudge-r{ 0% { transform: translateX(0); } 45% { transform: translateX(3px); } 100% { transform: translateX(0); } }
+@keyframes rf-ico-nudge-l{ 0% { transform: translateX(0); } 45% { transform: translateX(-3px); } 100% { transform: translateX(0); } }
+@keyframes rf-ico-rotate { 0% { transform: rotate(0) scale(1); } 40% { transform: rotate(90deg) scale(.85); } 100% { transform: rotate(0) scale(1); } }
+@keyframes rf-ico-check  { 0% { transform: scale(1); } 30% { transform: scale(.7); } 100% { transform: scale(1); } }
 
 /* ---------- Badges / pills ---------- */
 .rf-badge {
@@ -624,7 +664,6 @@ table.rf-tbl thead th.rf-ck, table.rf-tbl tbody td.rf-ck { width: 36px; text-ali
   .rf-btn, .rf-icon-btn, .rf-nav-item, .rf-topbar-cmd,
   .rf-topbar-icon, .rf-spv-sync, table.rf-tbl tbody tr { transition: none !important; }
 
-  /* No tactile icon press animation when reduced motion is requested */
-  .rf-icon-btn svg, .rf-btn svg, .rf-nav-item .rf-nav-ic svg,
-  .rf-topbar-cmd svg, .rf-topbar-icon svg { transition: none !important; transform: none !important; }
+  /* No one-shot icon press animations when reduced motion is requested */
+  .rf-pressing svg { animation: none !important; }
 }
