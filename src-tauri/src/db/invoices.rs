@@ -351,7 +351,13 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
             // stored subtotal reflects the precise quantity (no truncation).
             let qty = Decimal::try_from(l.quantity).unwrap_or(Decimal::ZERO);
             let price = Decimal::try_from(l.unit_price).unwrap_or(Decimal::ZERO);
-            let rate = Decimal::try_from(l.vat_rate).unwrap_or(Decimal::ZERO);
+            let raw = Decimal::try_from(l.vat_rate).unwrap_or(Decimal::ZERO);
+            // VAT1: only category 'S' (Standard) charges VAT; all others → 0.
+            let rate = if l.vat_category == "S" {
+                raw
+            } else {
+                Decimal::ZERO
+            };
             let ls = (qty * price).round_dp(2);
             let lv = (ls * rate / hundred).round_dp(2);
             let lt = ls + lv;
@@ -454,12 +460,17 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
                 .round_dp(2)
                 .to_string(),
         )
-        .bind(
-            Decimal::try_from(line.vat_rate)
-                .unwrap_or(Decimal::ZERO)
-                .round_dp(2)
-                .to_string(),
-        )
+        .bind({
+            // VAT1: store effective rate — 0 for non-S categories so UBL emits
+            // rate 0 + the correct exemption category code consistently.
+            let raw = Decimal::try_from(line.vat_rate).unwrap_or(Decimal::ZERO);
+            let eff = if line.vat_category == "S" {
+                raw
+            } else {
+                Decimal::ZERO
+            };
+            eff.round_dp(2).to_string()
+        })
         .bind(&line.vat_category)
         .bind(line_subtotal)
         .bind(line_vat)
@@ -969,6 +980,168 @@ mod tests {
             "123.46",
             "subtotal must be computed from 6dp qty; got '{}'",
             subtotal
+        );
+    }
+
+    // ── VAT1: category-authoritative VAT computation ──────────────────────────
+
+    /// Helper: compute (vat_amount, effective_vat_rate) for a line using the
+    /// same logic as `create` and `update_invoice_draft`.
+    fn compute_line_vat(
+        qty: f64,
+        unit_price: f64,
+        vat_rate: f64,
+        vat_category: &str,
+    ) -> (String, String) {
+        let hundred = Decimal::from(100u32);
+        let q = Decimal::try_from(qty).unwrap_or(Decimal::ZERO);
+        let p = Decimal::try_from(unit_price).unwrap_or(Decimal::ZERO);
+        let raw = Decimal::try_from(vat_rate).unwrap_or(Decimal::ZERO);
+        // Category-authoritative rule (mirrors create + update).
+        let rate = if vat_category == "S" {
+            raw
+        } else {
+            Decimal::ZERO
+        };
+        let ls = (q * p).round_dp(2);
+        let lv = (ls * rate / hundred).round_dp(2);
+
+        // Effective stored rate:
+        let stored_rate = if vat_category == "S" {
+            raw
+        } else {
+            Decimal::ZERO
+        };
+
+        (lv.to_string(), stored_rate.round_dp(2).to_string())
+    }
+
+    /// VAT1: a line with category 'AE' (taxare inversă) and nominal rate 19
+    /// must store vat_amount = 0 and effective vat_rate = 0.
+    #[test]
+    fn vat1_non_s_category_ae_rate_19_stores_zero_vat() {
+        let (vat_amount, stored_rate) = compute_line_vat(1.0, 100.0, 19.0, "AE");
+        assert_eq!(
+            vat_amount, "0",
+            "AE category must have vat_amount 0 (got '{}')",
+            vat_amount
+        );
+        assert_eq!(
+            stored_rate, "0",
+            "AE category must store effective vat_rate 0 (got '{}')",
+            stored_rate
+        );
+    }
+
+    /// VAT1: a line with category 'E' (scutit) and nominal rate 19 must store
+    /// vat_amount = 0 and effective vat_rate = 0.
+    #[test]
+    fn vat1_non_s_category_e_rate_19_stores_zero_vat() {
+        let (vat_amount, stored_rate) = compute_line_vat(2.0, 50.0, 19.0, "E");
+        assert_eq!(
+            vat_amount, "0",
+            "E category must have vat_amount 0 (got '{}')",
+            vat_amount
+        );
+        assert_eq!(
+            stored_rate, "0",
+            "E category must store effective vat_rate 0 (got '{}')",
+            stored_rate
+        );
+    }
+
+    /// VAT1: a line with category 'Z' (cotă zero) and rate 0 must store
+    /// vat_amount = 0 and effective vat_rate = 0.
+    #[test]
+    fn vat1_category_z_rate_0_stores_zero_vat() {
+        let (vat_amount, stored_rate) = compute_line_vat(1.0, 100.0, 0.0, "Z");
+        assert_eq!(vat_amount, "0", "Z category must have vat_amount 0");
+        assert_eq!(
+            stored_rate, "0",
+            "Z category must store effective vat_rate 0"
+        );
+    }
+
+    /// VAT1: a line with category 'O' (afara sferei) and any rate must store 0.
+    #[test]
+    fn vat1_category_o_any_rate_stores_zero_vat() {
+        let (vat_amount, stored_rate) = compute_line_vat(3.0, 200.0, 19.0, "O");
+        assert_eq!(
+            vat_amount, "0",
+            "O category must have vat_amount 0 (got '{}')",
+            vat_amount
+        );
+        assert_eq!(
+            stored_rate, "0",
+            "O category must store effective vat_rate 0 (got '{}')",
+            stored_rate
+        );
+    }
+
+    /// VAT1: a line with category 'K' (intracom. scutit) and rate 0 must store 0.
+    #[test]
+    fn vat1_category_k_stores_zero_vat() {
+        let (vat_amount, stored_rate) = compute_line_vat(1.0, 500.0, 0.0, "K");
+        assert_eq!(vat_amount, "0", "K category must have vat_amount 0");
+        assert_eq!(
+            stored_rate, "0",
+            "K category must store effective vat_rate 0"
+        );
+    }
+
+    /// VAT1: a line with category 'G' (export scutit) and rate 0 must store 0.
+    #[test]
+    fn vat1_category_g_stores_zero_vat() {
+        let (vat_amount, stored_rate) = compute_line_vat(1.0, 800.0, 0.0, "G");
+        assert_eq!(vat_amount, "0", "G category must have vat_amount 0");
+        assert_eq!(
+            stored_rate, "0",
+            "G category must store effective vat_rate 0"
+        );
+    }
+
+    /// VAT1: a line with category 'S' (Standard) at rate 19 must store the
+    /// normal VAT amount (100 * 19 / 100 = 19).
+    /// Note: Decimal::round_dp(2).to_string() produces "19" for integers,
+    /// so we compare the parsed value rather than the exact string format.
+    #[test]
+    fn vat1_category_s_rate_19_stores_normal_vat() {
+        let (vat_amount, stored_rate) = compute_line_vat(1.0, 100.0, 19.0, "S");
+        // Parse to Decimal for a format-independent comparison.
+        let vat_dec = Decimal::from_str(&vat_amount).unwrap();
+        let rate_dec = Decimal::from_str(&stored_rate).unwrap();
+        assert_eq!(
+            vat_dec,
+            Decimal::from(19),
+            "S category at rate 19 must have vat_amount 19 (got '{}')",
+            vat_amount
+        );
+        assert_eq!(
+            rate_dec,
+            Decimal::from(19),
+            "S category at rate 19 must store effective vat_rate 19 (got '{}')",
+            stored_rate
+        );
+    }
+
+    /// VAT1: a line with category 'S' at rate 9 must store correct VAT.
+    /// 2 * 100 = 200 net; 200 * 9/100 = 18 VAT.
+    #[test]
+    fn vat1_category_s_rate_9_stores_normal_vat() {
+        let (vat_amount, stored_rate) = compute_line_vat(2.0, 100.0, 9.0, "S");
+        let vat_dec = Decimal::from_str(&vat_amount).unwrap();
+        let rate_dec = Decimal::from_str(&stored_rate).unwrap();
+        assert_eq!(
+            vat_dec,
+            Decimal::from(18),
+            "S category at rate 9 must have vat_amount 18 (got '{}')",
+            vat_amount
+        );
+        assert_eq!(
+            rate_dec,
+            Decimal::from(9),
+            "S category at rate 9 must store effective vat_rate 9 (got '{}')",
+            stored_rate
         );
     }
 }

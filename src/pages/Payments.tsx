@@ -69,8 +69,8 @@ export function PaymentsPage() {
     error: invoicesErr,
     refetch: refetchInvoices,
   } = useQuery({
-    queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 500 } }),
-    queryFn: () => api.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 500 } }),
+    queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
+    queryFn: () => api.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
     enabled: !!activeCompanyId,
   });
 
@@ -229,6 +229,21 @@ export function PaymentsPage() {
           </Btn>
         }
       />
+
+      {/* Truncation warning */}
+      {paged && paged.total > paged.items.length && (
+        <div
+          style={{
+            padding: "6px 32px",
+            background: "var(--rf-warning-bg, #fffbeb)",
+            borderBottom: "1px solid var(--rf-border)",
+            fontSize: 12,
+            color: "var(--rf-warning, #92400e)",
+          }}
+        >
+          Afișate primele {paged.items.length.toLocaleString("ro-RO")} din {paged.total.toLocaleString("ro-RO")} facturi — restrânge filtrele pentru a vedea toate înregistrările.
+        </div>
+      )}
 
       <div className="rf-page-body">
         {/* Stat cards */}

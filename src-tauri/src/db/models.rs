@@ -59,7 +59,7 @@ impl Default for Page {
     fn default() -> Self {
         Self {
             offset: 0,
-            limit: 50,
+            limit: 500,
         }
     }
 }

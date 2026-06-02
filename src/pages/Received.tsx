@@ -51,10 +51,11 @@ export function ReceivedPage() {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Fetch received invoices — guarded: do not fetch when no company is active
+  // Fetch received invoices — guarded: do not fetch when no company is active.
+  // Pass an explicit large limit so realistic single-company data loads fully.
   const { data: paged, isLoading, isError, error, refetch } = useQuery({
-    queryKey: queryKeys.received.list({ companyId: activeCompanyId ?? undefined }),
-    queryFn: () => api.received.list({ companyId: activeCompanyId ?? undefined }),
+    queryKey: queryKeys.received.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
+    queryFn: () => api.received.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
     enabled: !!activeCompanyId,
   });
 
@@ -124,9 +125,12 @@ export function ReceivedPage() {
       );
   }, [allInvoices, filter, query]);
 
-  const totalSum    = list.reduce((s, i) => s + parseDec(i.totalAmount), 0);
-  const totalNet    = list.reduce((s, i) => s + parseDec(i.netAmount), 0);
-  const totalVat    = list.reduce((s, i) => s + parseDec(i.vatAmount), 0);
+  // Footer totals — RON only to avoid mixing currencies.
+  const ronListReceived = list.filter((i) => i.currency === "RON");
+  const nonRonCountReceived = list.length - ronListReceived.length;
+  const totalSum    = ronListReceived.reduce((s, i) => s + parseDec(i.totalAmount), 0);
+  const totalNet    = ronListReceived.reduce((s, i) => s + parseDec(i.netAmount), 0);
+  const totalVat    = ronListReceived.reduce((s, i) => s + parseDec(i.vatAmount), 0);
 
   // Status counts (from loaded page)
   const counts = {
@@ -331,6 +335,21 @@ export function ReceivedPage() {
             </div>
           </div>
 
+          {/* Truncation warning */}
+          {paged && paged.total > paged.items.length && (
+            <div
+              style={{
+                padding: "6px 16px",
+                background: "var(--rf-warning-bg, #fffbeb)",
+                borderBottom: "1px solid var(--rf-border)",
+                fontSize: 12,
+                color: "var(--rf-warning, #92400e)",
+              }}
+            >
+              Afișate primele {paged.items.length.toLocaleString("ro-RO")} din {paged.total.toLocaleString("ro-RO")} facturi — restrânge filtrele pentru a vedea toate înregistrările.
+            </div>
+          )}
+
           {/* Table */}
           <div className="rf-tbl-wrap">
             {isLoading ? (
@@ -449,7 +468,14 @@ export function ReceivedPage() {
 
           {/* Footer */}
           <div className="rf-tbl-footer">
-            <span><b>{list.length}</b> facturi</span>
+            <span>
+              <b>{list.length}</b> facturi
+              {nonRonCountReceived > 0 && (
+                <span style={{ marginLeft: 6, fontSize: 11, color: "var(--rf-text-dim)", fontWeight: 400 }}>
+                  (+{nonRonCountReceived} în altă monedă, neincluse în total)
+                </span>
+              )}
+            </span>
             <span>Net: <b style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(totalNet)} RON</b></span>
             <span>TVA: <b style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(totalVat)} RON</b></span>
             <span>Total: <b style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(totalSum)} RON</b></span>

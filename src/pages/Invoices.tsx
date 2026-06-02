@@ -373,10 +373,11 @@ export function InvoicesPage() {
   const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  // Fetch invoices — guarded: do not fetch when no company is active
+  // Fetch invoices — guarded: do not fetch when no company is active.
+  // Pass an explicit large limit so realistic single-company data loads fully.
   const { data: paged, isLoading, isError: pagedError, error: pagedErr, refetch: refetchPaged } = useQuery({
-    queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined }),
-    queryFn: () => api.invoices.list({ companyId: activeCompanyId ?? undefined }),
+    queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
+    queryFn: () => api.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
     enabled: !!activeCompanyId,
   });
 
@@ -440,10 +441,12 @@ export function InvoicesPage() {
     STORNED:   allInvoices.filter((i) => i.status === "STORNED").length,
   };
 
-  // Totals of filtered list
-  const totNet   = list.reduce((s, i) => s + parseDec(i.subtotalAmount), 0);
-  const totVat   = list.reduce((s, i) => s + parseDec(i.vatAmount), 0);
-  const totTotal = list.reduce((s, i) => s + parseDec(i.totalAmount), 0);
+  // Totals of filtered list — RON only to avoid mixing currencies.
+  const ronList = list.filter((i) => i.currency === "RON");
+  const nonRonCount = list.length - ronList.length;
+  const totNet   = ronList.reduce((s, i) => s + parseDec(i.subtotalAmount), 0);
+  const totVat   = ronList.reduce((s, i) => s + parseDec(i.vatAmount), 0);
+  const totTotal = ronList.reduce((s, i) => s + parseDec(i.totalAmount), 0);
 
   // Active filters count (for Filtre dot)
   const activeFilterCount = (errorsOnly ? 1 : 0) + (amountMin ? 1 : 0) + (amountMax ? 1 : 0);
@@ -858,6 +861,21 @@ export function InvoicesPage() {
         </span>
       </div>
 
+      {/* ── Truncation warning ───────────────────────────────────────────── */}
+      {paged && paged.total > paged.items.length && (
+        <div
+          style={{
+            padding: "6px 32px",
+            background: "var(--rf-warning-bg, #fffbeb)",
+            borderBottom: "1px solid var(--rf-border)",
+            fontSize: 12,
+            color: "var(--rf-warning, #92400e)",
+          }}
+        >
+          Afișate primele {paged.items.length.toLocaleString("ro-RO")} din {paged.total.toLocaleString("ro-RO")} facturi — restrânge filtrele pentru a vedea toate înregistrările.
+        </div>
+      )}
+
       {/* ── Table container ──────────────────────────────────────────────── */}
       <div ref={tableBodyRef} style={{ flex: 1, overflowY: "auto" }}>
         {isLoading ? (
@@ -1028,6 +1046,11 @@ export function InvoicesPage() {
                 <tr>
                   <td colSpan={4}>
                     {list.length} facturi
+                    {nonRonCount > 0 && (
+                      <span style={{ marginLeft: 6, fontSize: 11, color: "var(--rf-text-dim)", fontWeight: 400 }}>
+                        (+{nonRonCount} în altă monedă, neincluse în total)
+                      </span>
+                    )}
                   </td>
                   <td className="right" style={{ fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums" }}>
                     {fmtRON(totNet)}

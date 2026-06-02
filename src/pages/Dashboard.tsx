@@ -72,7 +72,7 @@ export function DashboardPage() {
   });
 
   const invoiceFilter = useMemo(
-    () => ({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 200 } }),
+    () => ({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
     [activeCompanyId],
   );
   const {
@@ -246,6 +246,19 @@ export function DashboardPage() {
       />
 
       <div className="rf-page-body">
+        {/* ── Truncation warning ─────────────────────────────────────────── */}
+        {invoicesPage && invoicesPage.total > invoicesPage.items.length && (
+          <div
+            style={{
+              padding: "6px 0 10px",
+              fontSize: 12,
+              color: "var(--rf-warning, #92400e)",
+            }}
+          >
+            Afișate primele {invoicesPage.items.length.toLocaleString("ro-RO")} din {invoicesPage.total.toLocaleString("ro-RO")} facturi — restrânge filtrele pentru a vedea toate înregistrările.
+          </div>
+        )}
+
         {/* ── Error banner ───────────────────────────────────────────────── */}
         {invoicesError && (
           <QueryErrorBanner

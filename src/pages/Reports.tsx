@@ -142,11 +142,11 @@ export function ReportsPage() {
     error:   invoicesErr,
     refetch: refetchInvoices,
   } = useQuery({
-    queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 500 } }),
+    queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
     queryFn:  () =>
       api.invoices.list({
         companyId: activeCompanyId ?? undefined,
-        page: { offset: 0, limit: 500 },
+        page: { offset: 0, limit: 10000 },
       }),
     enabled: !!activeCompanyId,
   });
@@ -290,6 +290,21 @@ export function ReportsPage() {
       {view !== "saft" && (
         <div style={{ padding: "10px 32px 0", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
           {MONTHS[selectedMonth - 1]} {selectedYear} · {periodInvoices.length} facturi emise în perioadă
+        </div>
+      )}
+
+      {/* ── Truncation warning ───────────────────────────────────────────── */}
+      {paged && paged.total > paged.items.length && (
+        <div
+          style={{
+            padding: "6px 32px",
+            background: "var(--rf-warning-bg, #fffbeb)",
+            borderBottom: "1px solid var(--rf-border)",
+            fontSize: 12,
+            color: "var(--rf-warning, #92400e)",
+          }}
+        >
+          Afișate primele {paged.items.length.toLocaleString("ro-RO")} din {paged.total.toLocaleString("ro-RO")} facturi — restrânge filtrele pentru a vedea toate înregistrările.
         </div>
       )}
 

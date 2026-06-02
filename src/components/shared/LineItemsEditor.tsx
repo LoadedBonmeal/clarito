@@ -152,6 +152,11 @@ export function LineItemsEditor({
           sellerVatPayer,
         );
       }
+      // VAT1: when category changes to non-S, force vatRate to 0 so the
+      // on-screen totals match the backend category-authoritative rule.
+      if (key === "vatCategory" && value !== "S") {
+        next.vatRate = 0;
+      }
       return next;
     });
     onChange(updated);
@@ -206,7 +211,9 @@ export function LineItemsEditor({
   }, 0);
   const vat = lines.reduce((s, l) => {
     const lineNet = Math.round(l.quantity * l.unitPrice * 100) / 100;
-    const lineVat = Math.round(lineNet * (l.vatRate / 100) * 100) / 100;
+    // VAT1: only category 'S' charges VAT; all others → 0.
+    const effRate = l.vatCategory === "S" ? l.vatRate : 0;
+    const lineVat = Math.round(lineNet * (effRate / 100) * 100) / 100;
     return s + lineVat;
   }, 0);
   const total = net + vat;
@@ -343,7 +350,9 @@ export function LineItemsEditor({
         <tbody>
           {lines.map((l, i) => {
             const lineNet = l.quantity * l.unitPrice;
-            const lineTotal = lineNet * (1 + l.vatRate / 100);
+            // VAT1: only category 'S' charges VAT; all others display 0 VAT.
+            const effectiveVatRate = l.vatCategory === "S" ? l.vatRate : 0;
+            const lineTotal = lineNet * (1 + effectiveVatRate / 100);
             return (
               <tr
                 key={l.rowId}

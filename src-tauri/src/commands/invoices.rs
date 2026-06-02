@@ -248,7 +248,13 @@ pub async fn update_invoice_draft(
         .map(|l| {
             let qty = Decimal::try_from(l.quantity).unwrap_or(Decimal::ZERO);
             let price = Decimal::try_from(l.unit_price).unwrap_or(Decimal::ZERO);
-            let rate = Decimal::try_from(l.vat_rate).unwrap_or(Decimal::ZERO);
+            let raw = Decimal::try_from(l.vat_rate).unwrap_or(Decimal::ZERO);
+            // VAT1: only category 'S' (Standard) charges VAT; all others → 0.
+            let rate = if l.vat_category == "S" {
+                raw
+            } else {
+                Decimal::ZERO
+            };
             let ls = (qty * price).round_dp(2);
             let lv = (ls * rate / hundred).round_dp(2);
             let lt = ls + lv;
@@ -352,12 +358,16 @@ pub async fn update_invoice_draft(
                 .round_dp(2)
                 .to_string(),
         )
-        .bind(
-            Decimal::try_from(line.vat_rate)
-                .unwrap_or(Decimal::ZERO)
-                .round_dp(2)
-                .to_string(),
-        )
+        .bind({
+            // VAT1: store effective rate — 0 for non-S categories.
+            let raw = Decimal::try_from(line.vat_rate).unwrap_or(Decimal::ZERO);
+            let eff = if line.vat_category == "S" {
+                raw
+            } else {
+                Decimal::ZERO
+            };
+            eff.round_dp(2).to_string()
+        })
         .bind(&line.vat_category)
         .bind(line_subtotal)
         .bind(line_vat)
