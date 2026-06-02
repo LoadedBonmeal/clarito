@@ -118,10 +118,8 @@ impl AnafClient {
         company_cui: &str,
         xml_bytes: Vec<u8>,
     ) -> Result<UploadResponse, String> {
-        let url = format!(
-            "{}/FCTEL/rest/upload?standard=UBL&cif={}",
-            self.base_url, company_cui
-        );
+        // Build URL with query params via reqwest so values are percent-encoded.
+        let url = format!("{}/FCTEL/rest/upload", self.base_url);
 
         let mut retry_5xx = 0usize;
         let mut retry_429 = 0usize;
@@ -136,6 +134,7 @@ impl AnafClient {
             let resp = self
                 .client
                 .post(&url)
+                .query(&[("standard", "UBL"), ("cif", company_cui)])
                 .bearer_auth(token)
                 .multipart(form)
                 .send()
@@ -217,10 +216,8 @@ impl AnafClient {
         token: &str,
         upload_id: &str,
     ) -> Result<StatusResponse, String> {
-        let url = format!(
-            "{}/FCTEL/rest/stareMesaj?id_incarcare={}",
-            self.base_url, upload_id
-        );
+        // Base URL; query params added via .query() for proper percent-encoding.
+        let url = format!("{}/FCTEL/rest/stareMesaj", self.base_url);
 
         let mut retry_5xx = 0usize;
         let mut retry_429 = 0usize;
@@ -229,6 +226,7 @@ impl AnafClient {
             let resp = self
                 .client
                 .get(&url)
+                .query(&[("id_incarcare", upload_id)])
                 .bearer_auth(token)
                 .send()
                 .await
@@ -323,10 +321,11 @@ impl AnafClient {
             // crea notificări duplicate și ar risca procesarea incorectă a mesajelor de
             // tip E ca facturi în parser-ul receive (care presupune structură UBL).
             // Menținerea tip=F ca filtru este intenționată — R13 Wave E.
-            let url = format!(
-                "{}/FCTEL/rest/listaMesajePaginatieFiltrare?zile={}&cif={}&tip=F&pagina={}",
-                self.base_url, days, company_cui, page
-            );
+            // Query params are added via .query() for proper percent-encoding of
+            // company_cui and other dynamic values.
+            let url = format!("{}/FCTEL/rest/listaMesajePaginatieFiltrare", self.base_url);
+            let days_str = days.to_string();
+            let page_str = page.to_string();
 
             let mut retry_5xx = 0usize;
             let mut retry_429 = 0usize;
@@ -336,6 +335,12 @@ impl AnafClient {
                 let resp = self
                     .client
                     .get(&url)
+                    .query(&[
+                        ("zile", days_str.as_str()),
+                        ("cif", company_cui),
+                        ("tip", "F"),
+                        ("pagina", page_str.as_str()),
+                    ])
                     .bearer_auth(token)
                     .send()
                     .await
@@ -420,7 +425,18 @@ impl AnafClient {
     ///
     /// Retry policy: 5xx → backoff; 429 → Retry-After; 401 → ERR_UNAUTHORIZED.
     pub async fn download_message(&self, token: &str, message_id: &str) -> Result<Vec<u8>, String> {
-        let url = format!("{}/FCTEL/rest/descarca/{}", self.base_url, message_id);
+        // Percent-encode the message_id path segment to prevent path traversal
+        // (e.g. a message_id of "../other" must not resolve to a different endpoint).
+        let encoded_id: String = message_id
+            .bytes()
+            .flat_map(|b| match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    vec![b as char]
+                }
+                _ => format!("%{b:02X}").chars().collect(),
+            })
+            .collect();
+        let url = format!("{}/FCTEL/rest/descarca/{}", self.base_url, encoded_id);
 
         let mut retry_5xx = 0usize;
         let mut retry_429 = 0usize;

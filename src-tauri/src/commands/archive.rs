@@ -254,10 +254,17 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
         .map_err(AppError::Io)?;
 
     {
-        let check_url = format!("sqlite:{}?mode=ro", temp_check_path.to_string_lossy());
-        let check_pool = sqlx::SqlitePool::connect(&check_url).await.map_err(|_| {
-            AppError::Other("Backup invalid: DB-ul nu poate fi deschis.".to_string())
-        })?;
+        // Use SqliteConnectOptions::new().filename() so the path is never
+        // parsed as a URL — prevents query-param injection via a crafted path
+        // containing '?' (e.g. `?mode=...`).
+        let check_opts = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&temp_check_path)
+            .read_only(true);
+        let check_pool = sqlx::SqlitePool::connect_with(check_opts)
+            .await
+            .map_err(|_| {
+                AppError::Other("Backup invalid: DB-ul nu poate fi deschis.".to_string())
+            })?;
 
         let integrity: String = sqlx::query_scalar("PRAGMA integrity_check")
             .fetch_one(&check_pool)
@@ -356,8 +363,11 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
         // configured when the backup was created.  Falls back to
         // <app_data>/archive if the setting is absent or the pool fails.
         let override_val: Option<String> = {
-            let db_url = format!("sqlite:{}?mode=ro", db_path.to_string_lossy());
-            if let Ok(pool) = sqlx::SqlitePool::connect(&db_url).await {
+            // Use SqliteConnectOptions to avoid URL injection via path characters.
+            let db_opts = sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&db_path)
+                .read_only(true);
+            if let Ok(pool) = sqlx::SqlitePool::connect_with(db_opts).await {
                 let val = sqlx::query_scalar::<_, String>(
                     "SELECT value FROM settings \
                      WHERE key = 'archive_path_override' LIMIT 1",
@@ -444,8 +454,11 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
         let archive_dir_str = archive_dir_for_rewrite.to_string_lossy().to_string();
         // Open the restored DB directly (AppState still holds the old pool — the
         // app is about to restart, so we open a short-lived pool here).
-        let db_url = format!("sqlite:{}", db_path.to_string_lossy());
-        if let Ok(pool) = sqlx::SqlitePool::connect(&db_url).await {
+        // Use SqliteConnectOptions to avoid URL injection via path characters.
+        let db_opts = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(false);
+        if let Ok(pool) = sqlx::SqlitePool::connect_with(db_opts).await {
             for table in &["invoices", "received_invoices"] {
                 for col in &["xml_path", "pdf_path"] {
                     // Rewrite paths that contain "/sent/" — update only the prefix

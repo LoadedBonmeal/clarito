@@ -13,6 +13,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use tauri::{AppHandle, Manager};
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use crate::error::AppResult;
 
 pub const MAX_CONNECTIONS: u32 = 5;
@@ -41,6 +44,34 @@ pub async fn init(app: &AppHandle) -> AppResult<SqlitePool> {
         .await?;
 
     sqlx::migrate!("./migrations").run(&pool).await?;
+
+    // Restrict DB file permissions to owner read/write only (0o600) to protect
+    // PII stored in plaintext.  Also applied to WAL/SHM sidecars if present.
+    // Best-effort: log on failure but never crash.
+    #[cfg(unix)]
+    {
+        let mode_600 = std::fs::Permissions::from_mode(0o600);
+        if let Err(e) = std::fs::set_permissions(&db_path, mode_600) {
+            tracing::warn!(path = %db_path.display(), error = %e, "Failed to set 0o600 on DB file");
+        }
+        for suffix in &["-wal", "-shm"] {
+            // SQLite WAL sidecars are named <db_path>-wal and <db_path>-shm,
+            // i.e. the suffix is appended to the full filename (including .db).
+            let sidecar_path = {
+                let mut p = db_path.as_os_str().to_owned();
+                p.push(suffix);
+                PathBuf::from(p)
+            };
+            let sidecar = suffix; // keep binding for the warning message
+            if sidecar_path.exists() {
+                if let Err(e) =
+                    std::fs::set_permissions(&sidecar_path, std::fs::Permissions::from_mode(0o600))
+                {
+                    tracing::warn!(path = %sidecar_path.display(), sidecar, error = %e, "Failed to set 0o600 on DB sidecar");
+                }
+            }
+        }
+    }
 
     tracing::info!(path = %db_path.display(), "SQLite pool ready");
     Ok(pool)
