@@ -51,10 +51,11 @@ export function ReceivedPage() {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Fetch received invoices
+  // Fetch received invoices — guarded: do not fetch when no company is active
   const { data: paged, isLoading, isError, error, refetch } = useQuery({
     queryKey: queryKeys.received.list({ companyId: activeCompanyId ?? undefined }),
     queryFn: () => api.received.list({ companyId: activeCompanyId ?? undefined }),
+    enabled: !!activeCompanyId,
   });
 
   // Update status mutation
@@ -142,6 +143,19 @@ export function ReceivedPage() {
     next.has(id) ? next.delete(id) : next.add(id);
     setSelected(next);
   };
+
+  if (!activeCompanyId) {
+    return (
+      <div className="rf-page">
+        <PageHeader title="Facturi primite" />
+        <div className="rf-page-body">
+          <Card pad>
+            <Empty icon="fileIn" title="Selectați o companie activă pentru a vedea facturile primite." />
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rf-page">

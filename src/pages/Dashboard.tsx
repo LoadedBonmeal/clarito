@@ -14,6 +14,7 @@ import {
   Btn,
   StatCard,
   SectionCard,
+  Empty,
 } from "@/components/rf";
 import { Icon } from "@/components/shared/Icon";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -82,6 +83,7 @@ export function DashboardPage() {
   } = useQuery({
     queryKey: queryKeys.invoices.list(invoiceFilter),
     queryFn:  () => api.invoices.list(invoiceFilter),
+    enabled:  !!activeCompanyId,
   });
 
   const { data: notifications = [] } = useQuery({
@@ -190,6 +192,19 @@ export function DashboardPage() {
   const greeting = hour < 12 ? "Bună dimineața" : hour < 17 ? "Bună ziua" : "Bună seara";
 
   // ── Render ────────────────────────────────────────────────────────────────
+
+  if (!activeCompanyId) {
+    return (
+      <div className="rf-content">
+        <PageHeader title="Privire generală" />
+        <div className="rf-page-body">
+          <Empty icon="buildings" title="Selectați o companie activă pentru a vedea datele din tabloul de bord.">
+            Alegeți o companie din setări pentru a continua.
+          </Empty>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rf-content">

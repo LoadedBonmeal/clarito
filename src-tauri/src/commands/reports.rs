@@ -50,6 +50,14 @@ pub async fn generate_vat_report(
     use std::collections::BTreeMap;
     use std::str::FromStr;
 
+    // Defence-in-depth: reject a null/empty company_id so a missing active
+    // company never leaks cross-company data via the IS-NULL SQL shortcut.
+    if company_id.as_ref().is_none_or(|s| s.is_empty()) {
+        return Err(AppError::Validation(
+            "Selectați o companie activă.".to_string(),
+        ));
+    }
+
     let pool = &state.db;
 
     // ?1 date_from, ?2 date_to, ?3 company_id (Option<String> — None → NULL → filter skipped)

@@ -24,6 +24,7 @@ import {
   SectionCard,
   Card,
   Btn,
+  Empty,
 } from "@/components/rf";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -130,7 +131,7 @@ export function ReportsPage() {
     queryKey: queryKeys.vatReport.get(selectedYear, selectedMonth, activeCompanyId ?? ""),
     queryFn:  () =>
       api.reports.generateVatReport(dateFrom, dateTo, activeCompanyId ?? undefined),
-    enabled:   true,
+    enabled:   !!activeCompanyId,
     staleTime: 60_000,
   });
 
@@ -147,7 +148,7 @@ export function ReportsPage() {
         companyId: activeCompanyId ?? undefined,
         page: { offset: 0, limit: 500 },
       }),
-    enabled: true,
+    enabled: !!activeCompanyId,
   });
 
   const allInvoices       = paged?.items ?? [];
@@ -235,6 +236,19 @@ export function ReportsPage() {
 
   const monthSegOptions = monthOptions.map((m) => ({ value: m.value, label: m.label.slice(0, 3) }));
   const yearSegOptions  = yearOptions.map((y) => ({ value: String(y), label: String(y) }));
+
+  if (!activeCompanyId) {
+    return (
+      <div className="rf-content">
+        <PageHeader title="Rapoarte" />
+        <div className="rf-page-body">
+          <Card pad>
+            <Empty icon="chart" title="Selectați o companie activă pentru a vedea rapoartele." />
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rf-content">

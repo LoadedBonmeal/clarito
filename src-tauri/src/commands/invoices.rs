@@ -56,7 +56,15 @@ pub async fn list_invoices(
     state: State<'_, AppState>,
     filter: Option<InvoiceFilter>,
 ) -> AppResult<Paginated<Invoice>> {
-    invoices::list(&state.db, filter.unwrap_or_default()).await
+    let f = filter.unwrap_or_default();
+    // Defence-in-depth: reject a null/empty company_id so a missing active
+    // company never leaks cross-company data via the IS-NULL SQL shortcut.
+    if f.company_id.as_ref().is_none_or(|s| s.is_empty()) {
+        return Err(AppError::Validation(
+            "Selectați o companie activă.".to_string(),
+        ));
+    }
+    invoices::list(&state.db, f).await
 }
 
 /// R13 Wave G: `company_id` is required. After fetching via the shared

@@ -371,10 +371,11 @@ export function InvoicesPage() {
   const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  // Fetch invoices
+  // Fetch invoices — guarded: do not fetch when no company is active
   const { data: paged, isLoading, isError: pagedError, error: pagedErr, refetch: refetchPaged } = useQuery({
     queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined }),
     queryFn: () => api.invoices.list({ companyId: activeCompanyId ?? undefined }),
+    enabled: !!activeCompanyId,
   });
 
   // Fetch contacts for client name
@@ -552,6 +553,15 @@ export function InvoicesPage() {
     { value: "STORNED",   label: "Stornate", count: counts.STORNED },
   ];
   const currentStatusLabel = statusOptions.find((o) => o.value === filter)?.label ?? "Toate";
+
+  if (!activeCompanyId) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--rf-app-bg)" }}>
+        <PageHeader title={t("invoices.title")} />
+        <Empty icon="fileOut" title="Selectați o companie activă pentru a vedea facturile emise." />
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--rf-app-bg)" }}>
