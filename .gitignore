@@ -36,3 +36,6 @@ dist-ssr
 # Local-only: audit docs, design references, plans
 docs/
 .design-ref/
+
+# Local-only: vendored ANAF validators (DUKIntegrator jar + XSD schema bundles)
+src-tauri/tools/

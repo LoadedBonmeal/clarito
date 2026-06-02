@@ -8,6 +8,7 @@
 //! Logica de business e în submodule (`db`, `commands`, etc.).
 
 mod anaf;
+pub mod anaf_decl;
 mod background;
 mod commands;
 mod db;
