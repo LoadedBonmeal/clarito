@@ -30,6 +30,11 @@ struct SaftLineItem {
     quantity: Decimal,
     unit_price: Decimal,
     vat_rate: Decimal,
+    /// CIUS VAT category code stored on the line (S/AE/E/Z/O/K/G).
+    /// Used to derive the SAF-T TaxCode directly — more reliable than
+    /// inferring from the numeric rate, which cannot distinguish E from Z
+    /// or AE/O/K/G at 0%.
+    vat_category: String,
     subtotal_amount: Decimal,
     vat_amount: Decimal,
     total_amount: Decimal,
@@ -118,7 +123,7 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
         let in_clause = placeholders.join(",");
         let sql = format!(
             "SELECT invoice_id, position, name, description, quantity, unit_price, \
-                    vat_rate, subtotal_amount, vat_amount, total_amount \
+                    vat_rate, vat_category, subtotal_amount, vat_amount, total_amount \
              FROM invoice_line_items \
              WHERE invoice_id IN ({in_clause}) \
              ORDER BY invoice_id, position"
@@ -163,6 +168,9 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
                         &row.try_get::<String, _>("vat_rate")
                             .unwrap_or_else(|_| "0".to_string()),
                     ),
+                    vat_category: row
+                        .try_get::<String, _>("vat_category")
+                        .unwrap_or_else(|_| "S".to_string()),
                     subtotal_amount: to_dec(
                         &row.try_get::<String, _>("subtotal_amount")
                             .unwrap_or_else(|_| "0".to_string()),
@@ -289,7 +297,7 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
             ));
             xml.push_str(&format!(
                 "            <TaxCode>{}</TaxCode>\n",
-                saft_tax_code(&line.vat_rate)
+                saft_tax_code_from_category(&line.vat_category, &line.vat_rate)
             ));
             xml.push_str(&format!(
                 "            <TaxPercentage>{}</TaxPercentage>\n",
@@ -311,15 +319,16 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
         }
         xml.push_str("        </Lines>\n");
 
-        // ── DocumentTotals — per-VAT-rate tax breakdown ───────────────────────
-        // BTreeMap keeps rates in ascending order for deterministic output
-        let mut by_rate: BTreeMap<String, (Decimal, Decimal, &'static str)> = BTreeMap::new();
+        // ── DocumentTotals — per-(VAT-rate, category) tax breakdown ─────────
+        // BTreeMap keeps entries in deterministic ascending order.
+        // Key = (rate_str, vat_category) so AE/E/Z/O/K/G stay separate rows
+        // even when their numeric rate collides (e.g. multiple 0% categories).
+        let mut by_rate: BTreeMap<(String, String), (Decimal, Decimal)> = BTreeMap::new();
         for line in &lines {
             let rate_key = dec_str(&line.vat_rate);
-            let code = saft_tax_code(&line.vat_rate);
             let entry = by_rate
-                .entry(rate_key)
-                .or_insert((Decimal::ZERO, Decimal::ZERO, code));
+                .entry((rate_key, line.vat_category.clone()))
+                .or_insert((Decimal::ZERO, Decimal::ZERO));
             // Wave 4: accumulate RON-converted amounts in DocumentTotals.
             entry.0 += amount_to_ron(line.subtotal_amount, &currency, fx_rate);
             entry.1 += amount_to_ron(line.vat_amount, &currency, fx_rate);
@@ -327,7 +336,9 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
 
         if !by_rate.is_empty() {
             xml.push_str("        <DocumentTotals>\n");
-            for (rate_str, (base, tax, code)) in &by_rate {
+            for ((rate_str, category), (base, tax)) in &by_rate {
+                let rate_dec = Decimal::from_str(rate_str).unwrap_or(Decimal::ZERO);
+                let code = saft_tax_code_from_category(category, &rate_dec);
                 xml.push_str("          <TaxInformation>\n");
                 xml.push_str(&format!("            <TaxCode>{}</TaxCode>\n", code));
                 xml.push_str(&format!(
@@ -357,12 +368,52 @@ async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult
     Ok(xml)
 }
 
-// ── SAF-T tax code from VAT rate ────────────────────────────────────────────
+// ── SAF-T tax code from CIUS VAT category ───────────────────────────────────
+// Maps the stored vat_category (S/AE/E/Z/O/K/G) to the SAF-T D406 TaxCode.
+// Per ANAF SAF-T D406 nomenclature, the category IS the CIUS code with one
+// exception: "S" lines with a reduced rate (5%, 9%, 11%) map to "AA".
+// For all other categories the code is the category itself.
+//
+// vat_category values stored in invoice_line_items:
+//   S  — standard rate (19%, 21%)           → S
+//   AE — autolichidare / reverse charge      → AE
+//   E  — scutit / exempt                     → E
+//   Z  — zero-rated (intra-EU / export)      → Z
+//   O  — în afara TVA / outside scope        → O
+//   K  — livrare intracomunitară scutită     → K
+//   G  — livrare stat / governmental         → G
+//
+// NOTE: lines with vat_category="S" but a reduced rate (5%, 9%, 11%) were
+// stored before the vat_category field was differentiated — map them to "AA".
+fn saft_tax_code_from_category(category: &str, rate: &Decimal) -> &'static str {
+    match category {
+        // Reduced rates (5%, 9%, 11%) must map to "AA" per ANAF D406.
+        "S" if *rate == Decimal::from(5)
+            || *rate == Decimal::from(9)
+            || *rate == Decimal::from(11) =>
+        {
+            "AA"
+        }
+        // Standard rates (19%, 21%) — and 0% for legacy S lines — map to "S".
+        "S" => "S",
+        "AE" => "AE",
+        "E" => "E",
+        "Z" => "Z",
+        "O" => "O",
+        "K" => "K",
+        "G" => "G",
+        _ => "S", // fallback for unknown / legacy values
+    }
+}
+
+// ── SAF-T tax code from VAT rate (legacy, kept for tests) ───────────────────
 // Per ANAF SAF-T D406 nomenclature:
 //   E  = exempt / scutit (0%)
 //   AA = reduced / cotă redusă (5%, 9%, 11%)
 //   S  = standard / cotă standard (19%, 21%)
 // Rates 9% (≤2025-07-31) and 11% (from 2025-08-01) are reduced, NOT standard.
+// This function is retained only for the existing rate-based unit tests.
+#[cfg(test)]
 fn saft_tax_code(rate: &Decimal) -> &'static str {
     if rate.is_zero() {
         "E"
@@ -533,6 +584,121 @@ mod tests {
             totals.1,
             Decimal::from_str("1425.00").unwrap(),
             "EUR line aggregate vat must be 950+475=1425 RON"
+        );
+    }
+
+    // ── Fix #3 (category-based): saft_tax_code_from_category ────────────────
+
+    /// Fix #3: every CIUS category maps to itself (or "S" fallback).
+    /// "S" at standard rate 19% must produce "S".
+    #[test]
+    fn saft_tax_code_from_category_all_categories() {
+        assert_eq!(saft_tax_code_from_category("S", &Decimal::from(19)), "S");
+        assert_eq!(saft_tax_code_from_category("AE", &Decimal::ZERO), "AE");
+        assert_eq!(saft_tax_code_from_category("E", &Decimal::ZERO), "E");
+        assert_eq!(saft_tax_code_from_category("Z", &Decimal::ZERO), "Z");
+        assert_eq!(saft_tax_code_from_category("O", &Decimal::ZERO), "O");
+        assert_eq!(saft_tax_code_from_category("K", &Decimal::ZERO), "K");
+        assert_eq!(saft_tax_code_from_category("G", &Decimal::ZERO), "G");
+    }
+
+    /// Fix #3: unknown / legacy category falls back to "S" (safe default).
+    #[test]
+    fn saft_tax_code_from_category_unknown_fallback() {
+        assert_eq!(saft_tax_code_from_category("", &Decimal::from(19)), "S");
+        assert_eq!(
+            saft_tax_code_from_category("UNKNOWN", &Decimal::from(19)),
+            "S"
+        );
+    }
+
+    /// Fix #3: AE/K/G/O/Z at 0% do NOT collapse to "E" (the rate-based bug).
+    #[test]
+    fn saft_tax_code_category_preserves_zero_rate_distinctions() {
+        // All these categories may have 0% rate, but they must NOT all become "E"
+        assert_ne!(
+            saft_tax_code_from_category("AE", &Decimal::ZERO),
+            "E",
+            "AE must not be E"
+        );
+        assert_ne!(
+            saft_tax_code_from_category("K", &Decimal::ZERO),
+            "E",
+            "K must not be E"
+        );
+        assert_ne!(
+            saft_tax_code_from_category("G", &Decimal::ZERO),
+            "E",
+            "G must not be E"
+        );
+        assert_ne!(
+            saft_tax_code_from_category("O", &Decimal::ZERO),
+            "E",
+            "O must not be E"
+        );
+        assert_ne!(
+            saft_tax_code_from_category("Z", &Decimal::ZERO),
+            "E",
+            "Z must not be E"
+        );
+    }
+
+    /// Regression fix: S + reduced rate must map to "AA"; S + standard rate must map to "S".
+    /// AE/K/G/O/Z + 0% must still return their own code (NOT "E").
+    #[test]
+    fn saft_tax_code_from_category_s_reduced_rate_maps_to_aa() {
+        // Reduced S rates → "AA"
+        assert_eq!(
+            saft_tax_code_from_category("S", &Decimal::from(9)),
+            "AA",
+            "S + 9% must be AA (reduced rate)"
+        );
+        assert_eq!(
+            saft_tax_code_from_category("S", &Decimal::from(5)),
+            "AA",
+            "S + 5% must be AA (reduced rate)"
+        );
+        assert_eq!(
+            saft_tax_code_from_category("S", &Decimal::from(11)),
+            "AA",
+            "S + 11% must be AA (reduced rate)"
+        );
+        // Standard S rates → "S"
+        assert_eq!(
+            saft_tax_code_from_category("S", &Decimal::from(19)),
+            "S",
+            "S + 19% must be S (standard rate)"
+        );
+        assert_eq!(
+            saft_tax_code_from_category("S", &Decimal::from(21)),
+            "S",
+            "S + 21% must be S (standard rate)"
+        );
+        // Non-S categories at 0% return their own code, not "E"
+        assert_eq!(
+            saft_tax_code_from_category("AE", &Decimal::ZERO),
+            "AE",
+            "AE + 0% must be AE"
+        );
+        assert_eq!(
+            saft_tax_code_from_category("K", &Decimal::ZERO),
+            "K",
+            "K + 0% must be K"
+        );
+        assert_eq!(
+            saft_tax_code_from_category("G", &Decimal::ZERO),
+            "G",
+            "G + 0% must be G"
+        );
+        assert_eq!(
+            saft_tax_code_from_category("O", &Decimal::ZERO),
+            "O",
+            "O + 0% must be O"
+        );
+        assert_eq!(
+            saft_tax_code_from_category("Z", &Decimal::ZERO),
+            "Z",
+            "Z + 0% must be Z"
         );
     }
 }

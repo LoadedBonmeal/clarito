@@ -438,6 +438,8 @@ export interface D394Partner {
   partnerCui: string;
   /** Denumirea legală a partenerului. */
   partnerName: string;
+  /** Categoria TVA (S/AE/E/Z/O/K/G) — D394 raportează separate pe categorie. */
+  vatCategory: string;
   /** Numărul de facturi VALIDATED emise către partener în perioadă. */
   invoiceCount: number;
   /** Baza impozabilă totală (net), 2 zecimale. */

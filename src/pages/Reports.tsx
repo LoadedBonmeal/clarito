@@ -265,13 +265,11 @@ export function ReportsPage() {
         title="Rapoarte"
         actions={
           <>
-            {view !== "saft" && (
-              <Segmented
-                options={monthSegOptions}
-                value={String(selectedMonth)}
-                onChange={(v) => setSelectedMonth(Number(v))}
-              />
-            )}
+            <Segmented
+              options={monthSegOptions}
+              value={String(selectedMonth)}
+              onChange={(v) => setSelectedMonth(Number(v))}
+            />
             <Segmented
               options={yearSegOptions}
               value={String(selectedYear)}
@@ -287,11 +285,9 @@ export function ReportsPage() {
       </div>
 
       {/* ── Period info line ─────────────────────────────────────────────── */}
-      {view !== "saft" && (
-        <div style={{ padding: "10px 32px 0", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
-          {MONTHS[selectedMonth - 1]} {selectedYear} · {periodInvoices.length} facturi emise în perioadă
-        </div>
-      )}
+      <div style={{ padding: "10px 32px 0", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
+        {MONTHS[selectedMonth - 1]} {selectedYear} · {periodInvoices.length} facturi emise în perioadă
+      </div>
 
       {/* ── Truncation warning ───────────────────────────────────────────── */}
       {paged && paged.total > paged.items.length && (
@@ -495,6 +491,7 @@ export function ReportsPage() {
             )}
             <SaftView
               selectedYear={selectedYear}
+              selectedMonth={selectedMonth}
               allInvoicesForYear={yearValidatedInvoices}
             />
           </>
