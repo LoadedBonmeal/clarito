@@ -211,6 +211,12 @@ export function LineItemsEditor({
   }, 0);
   const total = net + vat;
 
+  // Short labels for the Categorie <select> options (full text is in title tooltip).
+  const CAT_SHORT: Record<VatCategory, string> = {
+    S: "Standard", AE: "Taxare inversă", E: "Scutit", Z: "Cotă zero",
+    O: "Afara sferei TVA", K: "Intracom. scutit", G: "Export scutit",
+  };
+
   // Column count: # + Cod + Descriere + Cant + UM + Preț + TVA% + Categorie + Net + Total + del = 11
   const COL_SPAN = 11;
 
@@ -292,7 +298,7 @@ export function LineItemsEditor({
             {/* Categorie */}
             <th
               style={{
-                width: 110, padding: "0 8px", height: 38, textAlign: "left", fontSize: 11,
+                width: 150, padding: "0 8px", height: 38, textAlign: "left", fontSize: 11,
                 fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase",
                 color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)",
               }}
@@ -428,7 +434,7 @@ export function LineItemsEditor({
                     title={VAT_CATEGORY_LABELS[l.vatCategory]}
                   >
                     {VAT_CATEGORIES.map((cat) => (
-                      <option key={cat} value={cat}>{cat} — {VAT_CATEGORY_LABELS[cat]}</option>
+                      <option key={cat} value={cat}>{cat} — {CAT_SHORT[cat]}</option>
                     ))}
                   </select>
                 </td>

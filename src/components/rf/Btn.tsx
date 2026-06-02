@@ -1,4 +1,4 @@
-import { type ButtonHTMLAttributes, type ReactNode, useState } from "react";
+import { type ButtonHTMLAttributes, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/shared/Icon";
 
@@ -24,32 +24,19 @@ export function Btn({
   block,
   children,
   className,
-  onClick,
   ...rest
 }: BtnProps) {
-  // One-shot press animation: add `rf-pressing` on click, remove when the
-  // icon's keyframe finishes (animationend bubbles up from the <svg>).
-  const [pressing, setPressing] = useState(false);
   const cls = cn(
     "rf-btn",
     `rf-btn--${variant}`,
     size === "sm" && "rf-btn--sm",
     size === "lg" && "rf-btn--lg",
     block && "rf-btn--block",
-    pressing && "rf-pressing",
     className,
   );
   const icoSize = ICON_SIZE[size];
   return (
-    <button
-      className={cls}
-      {...rest}
-      onClick={(e) => {
-        setPressing(true);
-        onClick?.(e);
-      }}
-      onAnimationEnd={() => setPressing(false)}
-    >
+    <button className={cls} {...rest}>
       {icon && <Icon name={icon} size={icoSize} />}
       {children}
       {iconRight && <Icon name={iconRight} size={icoSize} />}

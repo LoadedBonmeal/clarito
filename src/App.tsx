@@ -7,6 +7,7 @@ import { router } from "@/router";
 import { isTauriContext } from "@/lib/tauri";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { isMac } from "@/lib/platform";
+import { useIconPressAnimation } from "@/hooks/use-icon-press";
 
 /** Afișat când utilizatorul deschide URL-ul în browser în loc de aplicația nativă. */
 function NotTauriScreen() {
@@ -59,6 +60,7 @@ function NotTauriScreen() {
 }
 
 function App() {
+  useIconPressAnimation();
   // Guard: dacă rulăm în browser (dev server deschis direct), afișăm un mesaj clar.
   if (!isTauriContext()) {
     return <NotTauriScreen />;

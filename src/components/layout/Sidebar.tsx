@@ -3,7 +3,7 @@
  *
  * Groups: TABLOU DE BORD / E-FACTURA / OPERATIV / RAPORTARE.
  * Top: logo + company-card → opens CompanySwitcher in AppShell.
- * Footer: Setări link, Ajutor (openUrl), collapse toggle.
+ * Footer: Setări link, Ajutor (openUrl).
  * Preserves badge queries from original Sidebar.tsx.
  */
 
@@ -44,7 +44,6 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
   const location = useLocation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
-  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
 
   // ── Badge queries (same as original) ──────────────────────────────────────
 
@@ -246,17 +245,6 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
           <span className="rf-nav-label">Ajutor</span>
         </button>
 
-        <button
-          type="button"
-          className="rf-nav-item"
-          onClick={toggleSidebar}
-          title={sidebarCollapsed ? "Extinde" : "Restrânge"}
-        >
-          <span className="rf-nav-ic">
-            <Icon name={sidebarCollapsed ? "chevRight" : "chevLeft"} size={18} />
-          </span>
-          <span className="rf-nav-label">Restrânge</span>
-        </button>
       </div>
     </nav>
   );
