@@ -38,6 +38,9 @@
   --color-muted-foreground: var(--text-muted);
   --color-accent: var(--accent-soft);
   --color-accent-foreground: var(--text);
+  /* Hex fallback first so Windows WebView2 < v111 (can't parse oklch) still
+     renders the destructive red; modern engines override with the oklch below. */
+  --color-destructive: #d01d21;
   --color-destructive: oklch(0.55 0.21 27);
   --color-destructive-foreground: #fff;
   --color-border: var(--border);

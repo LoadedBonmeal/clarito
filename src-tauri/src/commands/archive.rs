@@ -778,24 +778,16 @@ pub async fn change_archive_location(
         ));
     }
 
-    // 4. Părintele trebuie să existe și să fie în $HOME.
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map_err(|_| AppError::Other("Nu pot determina directorul home.".into()))?;
-    let home_canon = PathBuf::from(&home).canonicalize().map_err(AppError::Io)?;
-
+    // 4. Părintele trebuie să existe (accesibil). Nu mai restrângem la $HOME:
+    //    la fel ca `validate_export_path` (XW-3), permitem orice unitate locală
+    //    (ex. D:\ pe Windows) atâta timp cât calea e absolută, fără UNC și fără
+    //    componente `..`. Astfel mutarea arhivei pe alt disc funcționează pe Windows.
     let parent = new_path_buf
         .parent()
         .ok_or_else(|| AppError::Validation("Cale invalidă.".into()))?;
-    let parent_canon = parent
+    parent
         .canonicalize()
         .map_err(|_| AppError::Validation("Calea părinte nu există.".into()))?;
-
-    if !parent_canon.starts_with(&home_canon) {
-        return Err(AppError::Validation(
-            "Calea trebuie să fie în directorul home al utilizatorului.".into(),
-        ));
-    }
 
     tokio::fs::create_dir_all(&new_path_buf)
         .await
