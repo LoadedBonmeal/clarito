@@ -109,6 +109,31 @@ pub async fn create(
     company_id: &str,
     input: ProductInput,
 ) -> AppResult<Product> {
+    // Task 3: prevent duplicate (company_id, code) per company.
+    // Skip if code is empty/None.
+    // Bind the trimmed code so a whitespace-padded value can't slip past the dup check.
+    let code_trimmed: Option<String> = input
+        .code
+        .as_ref()
+        .map(|c| c.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    if let Some(ref code) = code_trimmed {
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM products WHERE company_id = ?1 AND code = ?2 LIMIT 1",
+        )
+        .bind(company_id)
+        .bind(code)
+        .fetch_optional(pool)
+        .await?;
+        if existing.is_some() {
+            return Err(AppError::Validation(format!(
+                "Există deja un produs cu codul '{}' pentru această companie.",
+                code
+            )));
+        }
+    }
+
     let id = new_id();
     let now = now_unix();
 
@@ -128,7 +153,7 @@ pub async fn create(
     .bind(input.unit_price.as_deref().unwrap_or("0.00"))
     .bind(input.vat_rate.as_deref().unwrap_or("19"))
     .bind(input.vat_category.as_deref().unwrap_or("S"))
-    .bind(&input.code)
+    .bind(&code_trimmed)
     .bind(&input.stock_qty)
     .bind(input.active.unwrap_or(true))
     .bind(now)
@@ -380,5 +405,88 @@ mod tests {
 
         let empty = list(&pool, "comp-1", Some("xyznotexists")).await.unwrap();
         assert!(empty.is_empty());
+    }
+
+    // ── Task 3: duplicate (company_id, code) rejected ────────────────────────
+
+    #[tokio::test]
+    async fn task3_duplicate_product_code_per_company_rejected() {
+        let pool = setup_products_pool().await;
+
+        // First product with code SVC-001 for comp-1 — should succeed.
+        let input1 = ProductInput {
+            name: "Serviciu A".to_string(),
+            unit: Some("ora".to_string()),
+            unit_price: Some("100.00".to_string()),
+            vat_rate: Some("19".to_string()),
+            vat_category: Some("S".to_string()),
+            code: Some("SVC-001".to_string()),
+            stock_qty: None,
+            active: Some(true),
+        };
+        let r1 = create(&pool, "comp-1", input1).await;
+        assert!(r1.is_ok(), "first product with code SVC-001 must succeed");
+
+        // Second product with same code for same company — must fail.
+        let input2 = ProductInput {
+            name: "Serviciu B".to_string(),
+            unit: Some("ora".to_string()),
+            unit_price: Some("200.00".to_string()),
+            vat_rate: Some("19".to_string()),
+            vat_category: Some("S".to_string()),
+            code: Some("SVC-001".to_string()),
+            stock_qty: None,
+            active: Some(true),
+        };
+        let r2 = create(&pool, "comp-1", input2).await;
+        assert!(
+            matches!(r2, Err(AppError::Validation(_))),
+            "duplicate code for same company must return Validation error"
+        );
+
+        // Same code for a different company — must succeed.
+        let input3 = ProductInput {
+            name: "Serviciu C".to_string(),
+            unit: Some("ora".to_string()),
+            unit_price: Some("300.00".to_string()),
+            vat_rate: Some("19".to_string()),
+            vat_category: Some("S".to_string()),
+            code: Some("SVC-001".to_string()),
+            stock_qty: None,
+            active: Some(true),
+        };
+        let r3 = create(&pool, "comp-2", input3).await;
+        assert!(r3.is_ok(), "same code for a different company must succeed");
+    }
+
+    #[tokio::test]
+    async fn task3_empty_code_allows_duplicates() {
+        let pool = setup_products_pool().await;
+
+        // Products with no code (None) are always allowed, even with same name.
+        let input1 = ProductInput {
+            name: "Fara Cod 1".to_string(),
+            unit: None,
+            unit_price: None,
+            vat_rate: None,
+            vat_category: None,
+            code: None,
+            stock_qty: None,
+            active: None,
+        };
+        let input2 = ProductInput {
+            name: "Fara Cod 2".to_string(),
+            unit: None,
+            unit_price: None,
+            vat_rate: None,
+            vat_category: None,
+            code: None,
+            stock_qty: None,
+            active: None,
+        };
+        let r1 = create(&pool, "comp-1", input1).await;
+        let r2 = create(&pool, "comp-1", input2).await;
+        assert!(r1.is_ok(), "product without code must be allowed");
+        assert!(r2.is_ok(), "second product without code must be allowed");
     }
 }
