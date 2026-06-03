@@ -4,7 +4,7 @@
 //!   SalesInvoices    — from invoices + invoice_line_items (company_id, period)
 //!   PurchaseInvoices — from received_invoices (company_id, period)
 //!   Payments         — from payments (company_id, period)
-//!   MovementOfGoods  — empty mandatory wrapper
+//!   MovementOfGoods  — from stock_movements + stock_movement_lines (company_id, period)
 
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
@@ -791,14 +791,231 @@ pub async fn write_payments(
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// MovementOfGoods — empty mandatory wrapper
+// MovementOfGoods — populated from stock_movements + stock_movement_lines
 // ────────────────────────────────────────────────────────────────────────────────
 
-pub fn write_movement_of_goods(w: &mut XmlWriter) -> AppResult<()> {
-    // DUK rule: when there are no movements, emit an empty wrapper with no children.
-    // Emitting NumberOfMovementLines=0/TotalQuantityReceived/TotalQuantityIssued on an
-    // empty section triggers a "maxOccurs exceeded" error from the DUK validator.
+pub async fn write_movement_of_goods(
+    w: &mut XmlWriter,
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    date_from: &str,
+    date_to: &str,
+    is_annual: bool,
+) -> AppResult<()> {
+    // DUK production validator (L-type): treats all MovementOfGoods sub-elements as max:0.
+    // Only populate for annual (D406A) declarations; periodic must emit the empty wrapper.
+    if !is_annual {
+        start_elem(w, "MovementOfGoods")?;
+        end_elem(w, "MovementOfGoods")?;
+        return Ok(());
+    }
+
+    // Query stock movements in the period.
+    let movement_rows = sqlx::query(
+        "SELECT id, movement_ref, movement_date, posting_date, movement_type, \
+                direction, document_type, document_number \
+         FROM stock_movements \
+         WHERE company_id = ?1 \
+           AND movement_date >= ?2 \
+           AND movement_date <= ?3 \
+         ORDER BY movement_date ASC, movement_ref ASC",
+    )
+    .bind(company_id)
+    .bind(date_from)
+    .bind(date_to)
+    .fetch_all(pool)
+    .await?;
+
+    // When there are no movements, emit the empty mandatory wrapper (no children).
+    // DUK rule: NumberOfMovementLines=0 on an empty section triggers an error.
+    if movement_rows.is_empty() {
+        start_elem(w, "MovementOfGoods")?;
+        end_elem(w, "MovementOfGoods")?;
+        return Ok(());
+    }
+
+    // Collect movement PKs for batch line fetch.
+    use sqlx::Row;
+    let movement_ids: Vec<String> = movement_rows
+        .iter()
+        .map(|r| r.try_get::<String, _>("id").unwrap_or_default())
+        .collect();
+
+    // Batch-fetch all lines for these movements.
+    let placeholders: String = (1..=movement_ids.len())
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let line_sql = format!(
+        "SELECT movement_id, line_number, product_code, account_id, \
+                customer_id, supplier_id, quantity, unit_of_measure, \
+                uom_conv_factor, book_value, movement_subtype, comments \
+         FROM stock_movement_lines \
+         WHERE movement_id IN ({placeholders}) \
+         ORDER BY movement_id, line_number"
+    );
+    let mut q = sqlx::query(&line_sql);
+    for id in &movement_ids {
+        q = q.bind(id);
+    }
+    let line_rows = q.fetch_all(pool).await.map_err(AppError::Database)?;
+
+    use std::collections::HashMap;
+    // Group lines by movement_id.
+    struct LineData {
+        line_number: i64,
+        product_code: String,
+        account_id: String,
+        customer_id: String,
+        supplier_id: String,
+        quantity: Decimal,
+        unit_of_measure: String,
+        uom_conv_factor: String,
+        book_value: Decimal,
+        movement_subtype: String,
+        comments: Option<String>,
+    }
+
+    let mut lines_by_movement: HashMap<String, Vec<LineData>> = HashMap::new();
+    let mut total_received = Decimal::ZERO;
+    let mut total_issued = Decimal::ZERO;
+    let mut total_line_count: u64 = 0;
+
+    for lr in &line_rows {
+        let mid: String = lr.try_get("movement_id").unwrap_or_default();
+        let qty = dec(&lr
+            .try_get::<String, _>("quantity")
+            .unwrap_or_else(|_| "0".to_string()));
+        let line_number: i64 = lr.try_get("line_number").unwrap_or(1);
+        let product_code: String = lr.try_get("product_code").unwrap_or_default();
+        let account_id: String = lr
+            .try_get("account_id")
+            .unwrap_or_else(|_| "371".to_string());
+        let customer_id: String = lr
+            .try_get("customer_id")
+            .unwrap_or_else(|_| "0".to_string());
+        let supplier_id: String = lr
+            .try_get("supplier_id")
+            .unwrap_or_else(|_| "0".to_string());
+        let uom: String = lr
+            .try_get("unit_of_measure")
+            .unwrap_or_else(|_| "H87".to_string());
+        let uom_cf: String = lr
+            .try_get("uom_conv_factor")
+            .unwrap_or_else(|_| "1".to_string());
+        let bv = dec(&lr
+            .try_get::<String, _>("book_value")
+            .unwrap_or_else(|_| "0".to_string()));
+        let subtype: String = lr
+            .try_get("movement_subtype")
+            .unwrap_or_else(|_| "10".to_string());
+        let comments: Option<String> = lr.try_get("comments").unwrap_or(None);
+
+        total_line_count += 1;
+        lines_by_movement.entry(mid).or_default().push(LineData {
+            line_number,
+            product_code,
+            account_id,
+            customer_id,
+            supplier_id,
+            quantity: qty,
+            unit_of_measure: uom,
+            uom_conv_factor: uom_cf,
+            book_value: bv,
+            movement_subtype: subtype,
+            comments,
+        });
+    }
+
+    // Compute received / issued totals by scanning movement direction.
+    for mr in &movement_rows {
+        let mid: String = mr.try_get("id").unwrap_or_default();
+        let direction: String = mr.try_get("direction").unwrap_or_else(|_| "IN".to_string());
+        if let Some(lines) = lines_by_movement.get(&mid) {
+            let qty_sum: Decimal = lines.iter().map(|l| l.quantity).sum();
+            if direction.eq_ignore_ascii_case("IN") {
+                total_received += qty_sum;
+            } else {
+                total_issued += qty_sum;
+            }
+        }
+    }
+
     start_elem(w, "MovementOfGoods")?;
+    write_text_elem(w, "NumberOfMovementLines", &total_line_count.to_string())?;
+    write_text_elem(w, "TotalQuantityReceived", &dec6(total_received))?;
+    write_text_elem(w, "TotalQuantityIssued", &dec6(total_issued))?;
+
+    for mr in &movement_rows {
+        let mid: String = mr.try_get("id").map_err(AppError::Database)?;
+        let movement_ref: String = mr.try_get("movement_ref").map_err(AppError::Database)?;
+        let movement_date: String = mr.try_get("movement_date").map_err(AppError::Database)?;
+        let posting_date: Option<String> = mr.try_get("posting_date").unwrap_or(None);
+        let movement_type: String = mr
+            .try_get("movement_type")
+            .unwrap_or_else(|_| "10".to_string());
+        let doc_type: Option<String> = mr.try_get("document_type").unwrap_or(None);
+        let doc_number: Option<String> = mr.try_get("document_number").unwrap_or(None);
+
+        let lines = lines_by_movement.get(&mid);
+        if lines.is_none() {
+            continue; // skip movements without lines (shouldn't happen, but be defensive)
+        }
+        let lines = lines.unwrap();
+
+        start_elem(w, "StockMovement")?;
+        write_text_elem(w, "MovementReference", &esc(&trunc(&movement_ref, 35)))?;
+        write_text_elem(w, "MovementDate", &movement_date)?;
+        if let Some(ref pd) = posting_date {
+            if !pd.is_empty() && pd != &movement_date {
+                write_text_elem(w, "MovementPostingDate", pd)?;
+            }
+        }
+        write_text_elem(w, "MovementType", &movement_type)?;
+        if let (Some(dt), Some(dn)) = (doc_type.as_deref(), doc_number.as_deref()) {
+            if !dt.is_empty() || !dn.is_empty() {
+                start_elem(w, "DocumentReference")?;
+                write_text_elem(w, "DocumentType", &esc(&trunc(dt, 9)))?;
+                write_text_elem(w, "DocumentNumber", &esc(&trunc(dn, 35)))?;
+                end_elem(w, "DocumentReference")?;
+            }
+        }
+
+        for line in lines {
+            start_elem(w, "StockMovementLine")?;
+            write_text_elem(w, "LineNumber", &line.line_number.to_string())?;
+            write_text_elem(w, "AccountID", &esc(&trunc(&line.account_id, 35)))?;
+            // CustomerID + SupplierID are required in StockMovementLine — canonicalize
+            // the stored value to the DUK ID format ("00"+CUI / "0"), like every other
+            // SAF-T section, treating the stored id as the partner CUI.
+            let cid = canonical_partner_id("", &line.customer_id);
+            let sid = canonical_partner_id("", &line.supplier_id);
+            write_text_elem(w, "CustomerID", &esc(&trunc(&cid, 35)))?;
+            write_text_elem(w, "SupplierID", &esc(&trunc(&sid, 35)))?;
+            write_text_elem(w, "ProductCode", &esc(&trunc(&line.product_code, 70)))?;
+            write_text_elem(w, "Quantity", &dec6(line.quantity))?;
+            // UnitOfMeasure + UOMToUOMPhysicalStockConversionFactor (xs:sequence, both required)
+            write_text_elem(w, "UnitOfMeasure", &trunc(&line.unit_of_measure, 9))?;
+            write_text_elem(
+                w,
+                "UOMToUOMPhysicalStockConversionFactor",
+                &line.uom_conv_factor,
+            )?;
+            if line.book_value != Decimal::ZERO {
+                write_text_elem(w, "BookValue", &dec2(line.book_value))?;
+            }
+            write_text_elem(w, "MovementSubType", &line.movement_subtype)?;
+            if let Some(ref c) = line.comments {
+                if !c.is_empty() {
+                    write_text_elem(w, "MovementComments", &esc(&trunc(c, 256)))?;
+                }
+            }
+            end_elem(w, "StockMovementLine")?;
+        }
+
+        end_elem(w, "StockMovement")?;
+    }
+
     end_elem(w, "MovementOfGoods")?;
     Ok(())
 }
@@ -813,12 +1030,13 @@ pub async fn write_source_documents(
     company_id: &str,
     date_from: &str,
     date_to: &str,
+    is_annual: bool,
 ) -> AppResult<()> {
     start_elem(w, "SourceDocuments")?;
     write_sales_invoices(w, pool, company_id, date_from, date_to).await?;
     write_purchase_invoices(w, pool, company_id, date_from, date_to).await?;
     write_payments(w, pool, company_id, date_from, date_to).await?;
-    write_movement_of_goods(w)?;
+    write_movement_of_goods(w, pool, company_id, date_from, date_to, is_annual).await?;
     end_elem(w, "SourceDocuments")?;
     Ok(())
 }

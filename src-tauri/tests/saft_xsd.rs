@@ -9,7 +9,9 @@
 
 use std::path::Path;
 
-use efactura_desktop_lib::anaf_decl::saft::generator::generate_saft_xml;
+use efactura_desktop_lib::anaf_decl::saft::generator::{
+    generate_saft_xml, generate_saft_xml_annual,
+};
 use efactura_desktop_lib::anaf_decl::validation::{validate_with_xsd, xmllint_available};
 use efactura_desktop_lib::db::companies::Company;
 use efactura_desktop_lib::db::gl::generate_gl_entries;
@@ -53,6 +55,8 @@ fn test_company() -> Company {
 ///   - Two sales invoices with line items
 ///   - One received (purchase) invoice
 ///   - One payment
+///   - One stock movement with one line (Phase 6a)
+///   - One fixed asset (Phase 6b)
 async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::Executor;
@@ -168,6 +172,94 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
             vat_rate TEXT,
             base_amount TEXT,
             vat_amount TEXT
+        )",
+    ))
+    .await
+    .unwrap();
+
+    pool.execute(sqlx::query(
+        "CREATE TABLE stock_movements (
+            id TEXT NOT NULL PRIMARY KEY,
+            company_id TEXT NOT NULL,
+            movement_ref TEXT NOT NULL,
+            movement_date TEXT NOT NULL,
+            posting_date TEXT NOT NULL,
+            movement_type TEXT NOT NULL DEFAULT '10',
+            direction TEXT NOT NULL DEFAULT 'IN',
+            document_type TEXT,
+            document_number TEXT,
+            source_type TEXT,
+            source_id TEXT,
+            notes TEXT,
+            created_at INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(company_id, movement_ref)
+        )",
+    ))
+    .await
+    .unwrap();
+
+    pool.execute(sqlx::query(
+        "CREATE TABLE stock_movement_lines (
+            id TEXT NOT NULL PRIMARY KEY,
+            movement_id TEXT NOT NULL,
+            line_number INTEGER NOT NULL DEFAULT 1,
+            product_id TEXT,
+            product_code TEXT NOT NULL,
+            account_id TEXT NOT NULL DEFAULT '371',
+            customer_id TEXT NOT NULL DEFAULT '0',
+            supplier_id TEXT NOT NULL DEFAULT '0',
+            quantity TEXT NOT NULL DEFAULT '1',
+            unit_of_measure TEXT NOT NULL DEFAULT 'H87',
+            uom_conv_factor TEXT NOT NULL DEFAULT '1',
+            book_value TEXT NOT NULL DEFAULT '0.00',
+            movement_subtype TEXT NOT NULL DEFAULT '10',
+            comments TEXT
+        )",
+    ))
+    .await
+    .unwrap();
+
+    pool.execute(sqlx::query(
+        "CREATE TABLE fixed_assets (
+            id TEXT NOT NULL PRIMARY KEY,
+            company_id TEXT NOT NULL,
+            asset_code TEXT NOT NULL,
+            account_id TEXT NOT NULL DEFAULT '213',
+            description TEXT NOT NULL,
+            valuation_class TEXT NOT NULL DEFAULT 'Corporala',
+            supplier_id TEXT NOT NULL DEFAULT '0',
+            supplier_name TEXT NOT NULL DEFAULT '',
+            date_of_acquisition TEXT NOT NULL,
+            start_up_date TEXT NOT NULL,
+            acquisition_cost TEXT NOT NULL DEFAULT '0.00',
+            life_months INTEGER NOT NULL DEFAULT 60,
+            depreciation_method TEXT NOT NULL DEFAULT 'liniara',
+            depreciation_pct TEXT NOT NULL DEFAULT '0.00',
+            disposal_date TEXT,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(company_id, asset_code)
+        )",
+    ))
+    .await
+    .unwrap();
+
+    pool.execute(sqlx::query(
+        "CREATE TABLE asset_transactions (
+            id TEXT NOT NULL PRIMARY KEY,
+            company_id TEXT NOT NULL,
+            asset_id TEXT NOT NULL,
+            transaction_code TEXT NOT NULL,
+            transaction_type TEXT NOT NULL DEFAULT '10',
+            transaction_date TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            gl_transaction_id TEXT,
+            acq_prod_cost TEXT NOT NULL DEFAULT '0.00',
+            book_value TEXT NOT NULL DEFAULT '0.00',
+            amount TEXT NOT NULL DEFAULT '0.00',
+            created_at INTEGER NOT NULL DEFAULT 0
         )",
     ))
     .await
@@ -338,6 +430,47 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .await
     .unwrap();
 
+    // ── Seed stock movements (Phase 6a) ───────────────────────────────────────
+    // One NIR (intrare) with one line — tests MovementOfGoods population
+    sqlx::query(
+        "INSERT INTO stock_movements \
+         (id, company_id, movement_ref, movement_date, posting_date, \
+          movement_type, direction, document_type, document_number, created_at, updated_at) \
+         VALUES ('sm-1',?,'NIR-001','2025-01-12','2025-01-12','10','IN','NIR','001',0,0)",
+    )
+    .bind(&company.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO stock_movement_lines \
+         (id, movement_id, line_number, product_code, account_id, customer_id, supplier_id, \
+          quantity, unit_of_measure, uom_conv_factor, book_value, movement_subtype) \
+         VALUES ('sml-1','sm-1',1,'PRODUS-01','371','0','0011223344','10.000000','H87','1','500.00','10')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // ── Seed fixed asset (Phase 6b) ───────────────────────────────────────────
+    // One active asset — tests Assets section population
+    sqlx::query(
+        "INSERT INTO fixed_assets \
+         (id, company_id, asset_code, account_id, description, valuation_class, \
+          supplier_id, supplier_name, date_of_acquisition, start_up_date, \
+          acquisition_cost, life_months, depreciation_method, depreciation_pct, \
+          active, created_at, updated_at) \
+         VALUES ('fa-1',?,'MF-001','213','Laptop Test','Corporala',\
+                 '0','',\
+                 '2024-01-01','2024-01-01',\
+                 '3000.00',36,'liniara','0.00',1,0,0)",
+    )
+    .bind(&company.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
     pool
 }
 
@@ -400,6 +533,50 @@ async fn saft_d406_validates_against_official_xsd() {
     assert!(
         result.passed,
         "SAF-T D406 XML failed XSD validation. Errors:\n{}",
+        result.errors.join("\n")
+    );
+}
+
+// ── Phase 6 annual XSD test ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn saft_d406_annual_validates_against_official_xsd() {
+    let xsd_path = Path::new("tools/anaf/Ro_SAFT_Schema_v249_prod.xsd");
+    if !xsd_path.exists() || !xmllint_available() {
+        eprintln!("SKIP saft_d406_annual_xsd: XSD or xmllint not available");
+        return;
+    }
+
+    let company = test_company();
+    let pool = setup_test_pool(&company).await;
+
+    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31")
+        .await
+        .expect("generate_gl_entries must not fail");
+
+    let xml = generate_saft_xml_annual(&pool, &company, "2025-01-01", "2025-01-31")
+        .await
+        .expect("generate_saft_xml_annual must not fail");
+
+    let tmp = std::env::temp_dir().join("saft_d406_annual_xsd_test.xml");
+    std::fs::write(&tmp, xml.as_bytes()).expect("write temp XML");
+
+    let result = validate_with_xsd(xsd_path, &tmp).expect("validate_with_xsd must not fail");
+
+    if !result.passed {
+        eprintln!("ANNUAL XSD VALIDATION FAILED:");
+        for e in &result.errors {
+            eprintln!("  {e}");
+        }
+    } else {
+        eprintln!("ANNUAL XSD VALIDATION PASSED");
+    }
+
+    let _ = std::fs::remove_file(&tmp);
+
+    assert!(
+        result.passed,
+        "Annual SAF-T D406 XML failed XSD validation. Errors:\n{}",
         result.errors.join("\n")
     );
 }
@@ -688,5 +865,107 @@ async fn saft_d406_account_assignments() {
     assert!(
         xml.contains("<AccountID>5121</AccountID>"),
         "Bank account 5121: {xml}"
+    );
+}
+
+// ── Phase 6a: MovementOfGoods populated (annual declaration) ──────────────────
+
+#[tokio::test]
+async fn saft_p6a_movement_of_goods_populated_with_seeded_data() {
+    let company = test_company();
+    let pool = setup_test_pool(&company).await;
+
+    // Use annual variant — periodic L keeps MovementOfGoods empty to satisfy DUK
+    let xml = generate_saft_xml_annual(&pool, &company, "2025-01-01", "2025-01-31")
+        .await
+        .expect("generate_saft_xml_annual must not fail");
+
+    // MovementOfGoods must be present and non-empty when stock data exists
+    assert!(
+        xml.contains("<MovementOfGoods>"),
+        "MovementOfGoods missing: {xml}"
+    );
+    assert!(
+        xml.contains("<StockMovement>"),
+        "StockMovement element missing — seeded data must produce at least one: {xml}"
+    );
+    assert!(
+        xml.contains("<MovementReference>NIR-001</MovementReference>"),
+        "NIR-001 reference missing: {xml}"
+    );
+    assert!(
+        xml.contains("<NumberOfMovementLines>1</NumberOfMovementLines>"),
+        "NumberOfMovementLines must be 1: {xml}"
+    );
+    // Required StockMovementLine fields
+    assert!(
+        xml.contains("<ProductCode>PRODUS-01</ProductCode>"),
+        "ProductCode missing: {xml}"
+    );
+    assert!(
+        xml.contains("<UnitOfMeasure>H87</UnitOfMeasure>"),
+        "UnitOfMeasure missing: {xml}"
+    );
+    assert!(
+        xml.contains("<UOMToUOMPhysicalStockConversionFactor>"),
+        "UOMToUOMPhysicalStockConversionFactor missing: {xml}"
+    );
+    assert!(
+        xml.contains("<MovementSubType>10</MovementSubType>"),
+        "MovementSubType missing: {xml}"
+    );
+}
+
+// ── Phase 6b: Assets populated (annual declaration) ───────────────────────────
+
+#[tokio::test]
+async fn saft_p6b_assets_populated_with_seeded_data() {
+    let company = test_company();
+    let pool = setup_test_pool(&company).await;
+
+    // Use annual variant — periodic L keeps Assets empty to satisfy DUK
+    let xml = generate_saft_xml_annual(&pool, &company, "2025-01-01", "2025-01-31")
+        .await
+        .expect("generate_saft_xml_annual must not fail");
+
+    // Assets must be present and contain the seeded fixed asset
+    assert!(xml.contains("<Assets>"), "Assets missing: {xml}");
+    assert!(
+        xml.contains("<Asset>"),
+        "Asset element missing — seeded data must produce at least one: {xml}"
+    );
+    assert!(
+        xml.contains("<AssetID>MF-001</AssetID>"),
+        "AssetID MF-001 missing: {xml}"
+    );
+    assert!(
+        xml.contains("<AccountID>213</AccountID>"),
+        "Asset AccountID 213 missing: {xml}"
+    );
+    assert!(
+        xml.contains("<DateOfAcquisition>2024-01-01</DateOfAcquisition>"),
+        "DateOfAcquisition missing: {xml}"
+    );
+    assert!(
+        xml.contains("<Valuations>"),
+        "Valuations wrapper missing: {xml}"
+    );
+    assert!(
+        xml.contains("<AssetValuationType>fiscal</AssetValuationType>"),
+        "AssetValuationType missing: {xml}"
+    );
+    assert!(
+        xml.contains("<ExtraordinaryDepreciationsForPeriod>"),
+        "ExtraordinaryDepreciationsForPeriod wrapper missing (required by XSD): {xml}"
+    );
+    // Accumulated depreciation: 3000/36 per month * 12 months elapsed (Jan 2024 → Jan 2025)
+    // = 83.33 * 12 = 999.96 (rounded)
+    assert!(
+        xml.contains("<AccumulatedDepreciation>"),
+        "AccumulatedDepreciation missing: {xml}"
+    );
+    assert!(
+        xml.contains("<BookValueEnd>"),
+        "BookValueEnd missing: {xml}"
     );
 }

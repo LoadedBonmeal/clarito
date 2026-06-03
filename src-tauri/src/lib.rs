@@ -428,6 +428,14 @@ pub fn run() {
             // GL auto-posting engine (Phase 5a)
             commands::gl::generate_gl_entries,
             commands::gl::reconcile_gl,
+            // stock movements — Phase 6a (SAF-T MovementOfGoods)
+            commands::stock::create_stock_movement,
+            commands::stock::list_stock_movements,
+            commands::stock::delete_stock_movement,
+            // fixed assets — Phase 6b (SAF-T Assets)
+            commands::assets::create_fixed_asset,
+            commands::assets::list_fixed_assets,
+            commands::assets::delete_fixed_asset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

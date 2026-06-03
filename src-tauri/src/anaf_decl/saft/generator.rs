@@ -48,6 +48,7 @@ fn write_header(
     company: &Company,
     date_from: &str,
     date_to: &str,
+    is_annual: bool,
 ) -> AppResult<()> {
     let today = Local::now().format("%Y-%m-%d").to_string();
     let version = env!("CARGO_PKG_VERSION");
@@ -75,8 +76,11 @@ fn write_header(
     write_text_elem(w, "SelectionEndDate", date_to)?;
     end_elem(w, "SelectionCriteria")?;
 
-    // HeaderComment: DUK treats this as _tipDeclaratie — "L" = lunară (monthly).
-    write_text_elem(w, "HeaderComment", "L")?;
+    // HeaderComment: DUK treats this as _tipDeclaratie — "L" = lunară (monthly),
+    // "A" = anuală (D406A, Assets). NOTE: a fully DUK-submittable D406A also needs a
+    // full-year SelectionCriteria + the A-profile MasterFiles structure (follow-up);
+    // here we at least self-identify the declaration type correctly.
+    write_text_elem(w, "HeaderComment", if is_annual { "A" } else { "L" })?;
 
     write_text_elem(w, "SegmentIndex", "1")?;
     write_text_elem(w, "TotalSegmentsInsequence", "1")?;
@@ -482,11 +486,32 @@ fn trunc_esc(s: &str, max_chars: usize) -> String {
 /// * `company`   — the reporting company record
 /// * `date_from` — selection start date, `YYYY-MM-DD`
 /// * `date_to`   — selection end date, `YYYY-MM-DD`
+/// * `is_annual` — `true` for annual D406A (populates Assets); `false` for periodic L (Assets empty)
 pub async fn generate_saft_xml(
     pool: &sqlx::SqlitePool,
     company: &Company,
     date_from: &str,
     date_to: &str,
+) -> AppResult<String> {
+    generate_saft_xml_inner(pool, company, date_from, date_to, false).await
+}
+
+/// Annual variant — populates Assets section from fixed_assets table.
+pub async fn generate_saft_xml_annual(
+    pool: &sqlx::SqlitePool,
+    company: &Company,
+    date_from: &str,
+    date_to: &str,
+) -> AppResult<String> {
+    generate_saft_xml_inner(pool, company, date_from, date_to, true).await
+}
+
+async fn generate_saft_xml_inner(
+    pool: &sqlx::SqlitePool,
+    company: &Company,
+    date_from: &str,
+    date_to: &str,
+    is_annual: bool,
 ) -> AppResult<String> {
     // Use new_with_indent for human-readable output (2-space indent)
     let mut w = Writer::new_with_indent(Cursor::new(Vec::<u8>::new()), b' ', 2);
@@ -503,10 +528,10 @@ pub async fn generate_saft_xml(
     // We need a XmlWriter (Writer<Cursor<Vec<u8>>>) from this point.
     // We've built the root start tag directly on `w` which IS a XmlWriter.
     // Continue using `w` via the xml helper functions by wrapping:
-    write_header(&mut w, company, date_from, date_to)?;
-    write_master_files(&mut w, pool, company, date_from, date_to).await?;
+    write_header(&mut w, company, date_from, date_to, is_annual)?;
+    write_master_files(&mut w, pool, company, date_from, date_to, is_annual).await?;
     write_general_ledger_entries(&mut w, pool, &company.id, date_from, date_to).await?;
-    write_source_documents(&mut w, pool, &company.id, date_from, date_to).await?;
+    write_source_documents(&mut w, pool, &company.id, date_from, date_to, is_annual).await?;
 
     // </AuditFile>
     end_elem(&mut w, "AuditFile")?;
@@ -557,7 +582,7 @@ mod tests {
         let company = test_company();
         let mut w = new_writer().unwrap();
         start_elem(&mut w, "AuditFile").unwrap();
-        write_header(&mut w, &company, "2025-01-01", "2025-01-31").unwrap();
+        write_header(&mut w, &company, "2025-01-01", "2025-01-31", false).unwrap();
         end_elem(&mut w, "AuditFile").unwrap();
         let xml = crate::anaf_decl::xml::finish(w).unwrap();
 

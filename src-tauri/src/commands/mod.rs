@@ -6,6 +6,7 @@
 pub mod accounts;
 pub mod anaf;
 pub mod archive;
+pub mod assets;
 pub mod bnr;
 pub mod companies;
 pub mod contacts;
@@ -28,6 +29,7 @@ pub mod recurring;
 pub mod reports;
 pub mod saft;
 pub mod settings;
+pub mod stock;
 pub mod system;
 pub mod ubl;
 pub mod vat_rates;

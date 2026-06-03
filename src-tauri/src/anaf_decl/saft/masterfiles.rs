@@ -810,8 +810,217 @@ pub fn write_empty_owners(w: &mut XmlWriter) -> AppResult<()> {
     Ok(())
 }
 
-pub fn write_empty_assets(w: &mut XmlWriter) -> AppResult<()> {
+/// Write the Assets section from fixed_assets table.
+///
+/// # Periodic vs Annual
+/// The DUK production validator for declaration type L (periodic) treats Asset as max:0
+/// children and rejects populated content. For type A (annual D406A), full content is emitted.
+/// Pass `is_annual = true` to populate; for periodic (default), the empty wrapper is emitted.
+///
+/// XSD element order per Valuation:
+///   AssetValuationType, ValuationClass,
+///   AcquisitionAndProductionCostsBegin, AcquisitionAndProductionCostsEnd,
+///   InvestmentSupport,
+///   xs:choice(AssetLifeYear | AssetLifeMonth),
+///   AssetAddition, Transfers, AssetDisposal,
+///   BookValueBegin, DepreciationMethod, DepreciationPercentage,
+///   DepreciationForPeriod, AppreciationForPeriod,
+///   ExtraordinaryDepreciationsForPeriod, AccumulatedDepreciation, BookValueEnd
+pub async fn write_assets(
+    w: &mut XmlWriter,
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    date_from: &str,
+    date_to: &str,
+    is_annual: bool,
+) -> AppResult<()> {
+    // For periodic L declarations, DUK enforces max:0 on Asset children.
+    // Only populate for annual (D406A) declarations.
+    if !is_annual {
+        start_elem(w, "Assets")?;
+        end_elem(w, "Assets")?;
+        return Ok(());
+    }
+
+    let asset_rows = sqlx::query(
+        "SELECT id, asset_code, account_id, description, valuation_class, \
+                supplier_id, supplier_name, date_of_acquisition, start_up_date, \
+                acquisition_cost, life_months, depreciation_method, depreciation_pct \
+         FROM fixed_assets \
+         WHERE company_id = ?1 AND active = 1 \
+         ORDER BY asset_code ASC",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?;
+
     start_elem(w, "Assets")?;
+
+    for row in &asset_rows {
+        use sqlx::Row;
+        let asset_code: String = row.try_get("asset_code").unwrap_or_default();
+        let account_id: String = row
+            .try_get("account_id")
+            .unwrap_or_else(|_| "213".to_string());
+        let description: String = row.try_get("description").unwrap_or_default();
+        let valuation_class: String = row
+            .try_get("valuation_class")
+            .unwrap_or_else(|_| "Corporala".to_string());
+        let supplier_id: String = row
+            .try_get("supplier_id")
+            .unwrap_or_else(|_| "0".to_string());
+        let supplier_name: String = row.try_get("supplier_name").unwrap_or_default();
+        let date_of_acquisition: String = row.try_get("date_of_acquisition").unwrap_or_default();
+        let start_up_date: String = row
+            .try_get("start_up_date")
+            .unwrap_or_else(|_| date_of_acquisition.clone());
+        let acquisition_cost_raw: String = row
+            .try_get("acquisition_cost")
+            .unwrap_or_else(|_| "0.00".to_string());
+        let life_months_raw: i64 = row.try_get("life_months").unwrap_or(60);
+        let depreciation_method: String = row
+            .try_get("depreciation_method")
+            .unwrap_or_else(|_| "liniara".to_string());
+        let depreciation_pct_raw: String = row
+            .try_get("depreciation_pct")
+            .unwrap_or_else(|_| "0.00".to_string());
+
+        use rust_decimal::Decimal;
+        use std::str::FromStr;
+        let cost = Decimal::from_str(acquisition_cost_raw.trim()).unwrap_or(Decimal::ZERO);
+
+        // Build a minimal FixedAsset to reuse the depreciation calculator.
+        let fake_asset = crate::db::assets::FixedAsset {
+            id: String::new(),
+            company_id: company_id.to_string(),
+            asset_code: asset_code.clone(),
+            account_id: account_id.clone(),
+            description: description.clone(),
+            valuation_class: valuation_class.clone(),
+            supplier_id: supplier_id.clone(),
+            supplier_name: supplier_name.clone(),
+            date_of_acquisition: date_of_acquisition.clone(),
+            start_up_date: start_up_date.clone(),
+            acquisition_cost: acquisition_cost_raw.clone(),
+            life_months: life_months_raw,
+            depreciation_method: depreciation_method.clone(),
+            depreciation_pct: depreciation_pct_raw.clone(),
+            disposal_date: None,
+            active: true,
+            created_at: 0,
+            updated_at: 0,
+        };
+        let depr = crate::db::assets::compute_depreciation(&fake_asset, date_from, date_to);
+
+        // Compute depreciation_pct: if stored as non-zero use it; otherwise compute
+        // from life_months (annual straight-line rate = 1/life_months * 12 * 100).
+        let depr_pct = {
+            let stored_pct =
+                Decimal::from_str(depreciation_pct_raw.trim()).unwrap_or(Decimal::ZERO);
+            if stored_pct > Decimal::ZERO {
+                stored_pct
+            } else if life_months_raw > 0 {
+                // Annual rate % = 100 / (life_months / 12) = 1200 / life_months
+                (Decimal::from(1200) / Decimal::from(life_months_raw)).round_dp(4)
+            } else {
+                Decimal::ZERO
+            }
+        };
+
+        start_elem(w, "Asset")?;
+        write_text_elem(w, "AssetID", &esc(&trunc(&asset_code, 35)))?;
+        write_text_elem(w, "AccountID", &esc(&trunc(&account_id, 35)))?;
+        write_text_elem(w, "Description", &esc(&trunc(&description, 256)))?;
+
+        // AssetSupplier (minOccurs=0) — emit only if we have a non-sentinel supplier
+        if !supplier_id.is_empty() && supplier_id != "0" {
+            start_elem(w, "AssetSupplier")?;
+            write_text_elem(
+                w,
+                "SupplierName",
+                &esc(&trunc(
+                    if supplier_name.is_empty() {
+                        "N/A"
+                    } else {
+                        &supplier_name
+                    },
+                    70,
+                )),
+            )?;
+            write_text_elem(w, "SupplierID", &esc(&trunc(&supplier_id, 35)))?;
+            // PostalAddress is required inside AssetSupplier
+            start_elem(w, "PostalAddress")?;
+            write_text_elem(w, "City", "N/A")?;
+            write_text_elem(w, "Country", "RO")?;
+            write_text_elem(w, "AddressType", "StreetAddress")?;
+            end_elem(w, "PostalAddress")?;
+            end_elem(w, "AssetSupplier")?;
+        }
+
+        write_text_elem(w, "DateOfAcquisition", &date_of_acquisition)?;
+        write_text_elem(w, "StartUpDate", &start_up_date)?;
+
+        // Valuations (required, minOccurs=1 child Valuation)
+        start_elem(w, "Valuations")?;
+        start_elem(w, "Valuation")?;
+        // AssetValuationType: "fiscal" = Romanian fiscal (tax) valuation basis
+        write_text_elem(w, "AssetValuationType", "fiscal")?;
+        write_text_elem(w, "ValuationClass", &esc(&trunc(&valuation_class, 9)))?;
+        write_text_elem(
+            w,
+            "AcquisitionAndProductionCostsBegin",
+            &format!("{:.2}", cost),
+        )?;
+        write_text_elem(
+            w,
+            "AcquisitionAndProductionCostsEnd",
+            &format!("{:.2}", cost),
+        )?;
+        // InvestmentSupport: always 0 (we don't track grants)
+        write_text_elem(w, "InvestmentSupport", "0.00")?;
+        // xs:choice: AssetLifeYear | AssetLifeMonth — use months
+        write_text_elem(w, "AssetLifeMonth", &life_months_raw.to_string())?;
+        // AssetAddition: cost added during the period (0 for existing assets)
+        write_text_elem(w, "AssetAddition", "0.00")?;
+        write_text_elem(w, "Transfers", "0.00")?;
+        write_text_elem(w, "AssetDisposal", "0.00")?;
+        write_text_elem(
+            w,
+            "BookValueBegin",
+            &format!("{:.2}", depr.book_value_begin),
+        )?;
+        write_text_elem(
+            w,
+            "DepreciationMethod",
+            &esc(&trunc(&depreciation_method, 35)),
+        )?;
+        write_text_elem(w, "DepreciationPercentage", &format!("{:.4}", depr_pct))?;
+        write_text_elem(
+            w,
+            "DepreciationForPeriod",
+            &format!("{:.2}", depr.for_period),
+        )?;
+        // AppreciationForPeriod: always 0 for straight-line
+        write_text_elem(w, "AppreciationForPeriod", "0.00")?;
+        // ExtraordinaryDepreciationsForPeriod: required wrapper, emit one zero row
+        start_elem(w, "ExtraordinaryDepreciationsForPeriod")?;
+        start_elem(w, "ExtraordinaryDepreciationForPeriod")?;
+        write_text_elem(w, "ExtraordinaryDepreciationMethod", "none")?;
+        write_text_elem(w, "ExtraordinaryDepreciationAmountForPeriod", "0.00")?;
+        end_elem(w, "ExtraordinaryDepreciationForPeriod")?;
+        end_elem(w, "ExtraordinaryDepreciationsForPeriod")?;
+        write_text_elem(
+            w,
+            "AccumulatedDepreciation",
+            &format!("{:.2}", depr.accumulated_end),
+        )?;
+        write_text_elem(w, "BookValueEnd", &format!("{:.2}", depr.book_value_end))?;
+        end_elem(w, "Valuation")?;
+        end_elem(w, "Valuations")?;
+
+        end_elem(w, "Asset")?;
+    }
+
     end_elem(w, "Assets")?;
     Ok(())
 }
@@ -824,6 +1033,7 @@ pub async fn write_master_files(
     company: &Company,
     date_from: &str,
     date_to: &str,
+    is_annual: bool,
 ) -> AppResult<()> {
     start_elem(w, "MasterFiles")?;
 
@@ -836,7 +1046,7 @@ pub async fn write_master_files(
     write_empty_movement_type_table(w)?;
     write_products(w, pool, &company.id).await?;
     write_empty_owners(w)?;
-    write_empty_assets(w)?;
+    write_assets(w, pool, &company.id, date_from, date_to, is_annual).await?;
 
     end_elem(w, "MasterFiles")?;
     Ok(())

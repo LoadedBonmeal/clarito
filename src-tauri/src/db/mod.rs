@@ -21,10 +21,12 @@ pub mod received;
 pub mod settings;
 
 pub mod accounts;
+pub mod assets;
 pub mod gl;
 pub mod payments;
 pub mod products;
 pub mod receipts;
 pub mod recurring;
 pub mod seed;
+pub mod stock;
 pub mod vat_rates;
