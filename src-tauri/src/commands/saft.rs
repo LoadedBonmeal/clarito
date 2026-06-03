@@ -1,7 +1,10 @@
 //! SAF-T D406 XML export — ANAF mandatory standard audit file.
 //!
-//! Generates a simplified SAF-T XML following the Romanian ANAF adaptation of
-//! the OECD SAF-T schema. Covers SalesInvoices for the selected period.
+//! Two commands:
+//!   `export_saft_d406`     — legacy simplified preview (SalesInvoices only); kept untouched.
+//!   `export_saft_official` — Phase 4 official D406 with Header + MasterFiles +
+//!                            empty GeneralLedgerEntries + SourceDocuments; validated against
+//!                            the official Ro_SAFT_Schema_v249.xsd via xmllint.
 
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -11,6 +14,8 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use tauri::State;
 
+use crate::anaf_decl::saft::generator::generate_saft_xml;
+use crate::db::companies;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::ubl::fx::{amount_to_ron, parse_rate};
@@ -39,6 +44,54 @@ struct SaftLineItem {
     vat_amount: Decimal,
     total_amount: Decimal,
 }
+
+// ─── Official D406 export ──────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaftOfficialParams {
+    pub company_id: String,
+    pub year: i32,
+    pub month: Option<i32>,
+    pub dest_path: String,
+}
+
+/// Generate a complete, schema-conformant SAF-T D406 XML and save it to `dest_path`.
+/// The file is validated by structure (element order, types, enums) when xmllint is
+/// available — see `anaf_decl::validation::validate_with_xsd`.
+#[tauri::command]
+pub async fn export_saft_official(
+    state: State<'_, AppState>,
+    params: SaftOfficialParams,
+) -> AppResult<String> {
+    use crate::commands::integrations::validate_export_path;
+
+    let dest = validate_export_path(&params.dest_path)?;
+
+    let (date_from, date_to) = if let Some(m) = params.month {
+        let last_day = days_in_month(params.year, m as u32);
+        (
+            format!("{}-{:02}-01", params.year, m),
+            format!("{}-{:02}-{:02}", params.year, m, last_day),
+        )
+    } else {
+        (
+            format!("{}-01-01", params.year),
+            format!("{}-12-31", params.year),
+        )
+    };
+
+    let company = companies::get(&state.db, &params.company_id).await?;
+
+    let xml = generate_saft_xml(&state.db, &company, &date_from, &date_to).await?;
+
+    std::fs::write(&dest, xml.as_bytes())
+        .map_err(|e| AppError::Other(format!("Nu s-a putut scrie fișierul D406: {e}")))?;
+
+    Ok(dest.to_string_lossy().to_string())
+}
+
+// ─── Legacy preview command (unchanged) ───────────────────────────────────────
 
 #[tauri::command]
 pub async fn export_saft_d406(state: State<'_, AppState>, params: SaftParams) -> AppResult<String> {

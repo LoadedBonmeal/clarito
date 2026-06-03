@@ -1,0 +1,660 @@
+//! SAF-T D406 MasterFiles section builder.
+//!
+//! Populates:
+//!   GeneralLedgerAccounts — one Account per chart_of_accounts row
+//!   Customers             — one Customer per CUSTOMER/BOTH contact
+//!   Suppliers             — one Supplier per SUPPLIER/BOTH contact
+//!   TaxTable              — one TaxTableEntry per distinct (vat_category, rate) in the period
+//!   UOMTable              — one UOMTableEntry per distinct unit used
+//!   Products              — one Product per products row
+//!   AnalysisTypeTable     — empty mandatory wrapper
+//!   MovementTypeTable     — empty mandatory wrapper
+//!   Owners                — empty mandatory wrapper
+//!   Assets                — empty mandatory wrapper
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use rust_decimal::Decimal;
+use sqlx::Row;
+
+use crate::anaf_decl::xml::{end_elem, start_elem, write_text_elem, XmlWriter};
+use crate::db::companies::Company;
+use crate::error::AppResult;
+
+// ── AccountType mapping ────────────────────────────────────────────────────────
+// XSD enum: Activ | Pasiv | Bifunctional
+// Romanian PCG class → nature:
+//   1 — Pasiv   (capital / equity accounts — normally credit balance)
+//   2 — Activ   (assets / fixed assets — debit balance)
+//   3 — Activ   (stock accounts — debit balance)
+//   4 — Bifunctional (third-party accounts — either side)
+//   5 — Activ   (treasury — debit balance)
+//   6 — Activ   (expense accounts — debit balance)
+//   7 — Pasiv   (revenue accounts — credit balance)
+pub fn account_type_for_class(class: i64) -> &'static str {
+    match class {
+        1 => "Pasiv",
+        2 => "Activ",
+        3 => "Activ",
+        4 => "Bifunctional",
+        5 => "Activ",
+        6 => "Activ",
+        7 => "Pasiv",
+        _ => "Bifunctional",
+    }
+}
+
+// ── Tax code from category ─────────────────────────────────────────────────────
+// Replicates the logic from commands::saft::saft_tax_code_from_category
+// (kept here to avoid cross-module dependency on a private function).
+pub fn saft_tax_code(category: &str, rate: Decimal) -> &'static str {
+    match category {
+        "S" if rate == Decimal::from(5)
+            || rate == Decimal::from(9)
+            || rate == Decimal::from(11) =>
+        {
+            "AA"
+        }
+        "S" => "S",
+        "AE" => "AE",
+        "E" => "E",
+        "Z" => "Z",
+        "O" => "O",
+        "K" => "K",
+        "G" => "G",
+        _ => "S",
+    }
+}
+
+// ── Tax description from category ─────────────────────────────────────────────
+pub fn tax_description(category: &str, rate: Decimal) -> String {
+    let code = saft_tax_code(category, rate);
+    match code {
+        "S" => format!("TVA cotă standard {rate}%"),
+        "AA" => format!("TVA cotă redusă {rate}%"),
+        "AE" => "TVA autolichidare".to_string(),
+        "E" => "Scutit de TVA".to_string(),
+        "Z" => "Zero-rated (export/intracomunitar)".to_string(),
+        "O" => "În afara sferei TVA".to_string(),
+        "K" => "Livrare intracomunitară scutită".to_string(),
+        "G" => "Livrare guvernamentală".to_string(),
+        _ => format!("TVA {rate}%"),
+    }
+}
+
+// ── Escape for XML text content ────────────────────────────────────────────────
+fn esc(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+// ── Truncate a string to n bytes (UTF-8-safe) ─────────────────────────────────
+fn trunc(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
+// ── AmountStructure helper (RON-only; CurrencyCode=RON, CurrencyAmount=Amount) ─
+pub fn write_amount_structure(w: &mut XmlWriter, elem: &str, amount: Decimal) -> AppResult<()> {
+    start_elem(w, elem)?;
+    write_text_elem(w, "Amount", &format!("{:.2}", amount))?;
+    write_text_elem(w, "CurrencyCode", "RON")?;
+    write_text_elem(w, "CurrencyAmount", &format!("{:.2}", amount))?;
+    end_elem(w, elem)?;
+    Ok(())
+}
+
+// ── AddressStructure helper ────────────────────────────────────────────────────
+pub fn write_address(
+    w: &mut XmlWriter,
+    street: &str,
+    city: &str,
+    region: Option<&str>,
+    postal: Option<&str>,
+    country: &str,
+    addr_type: Option<&str>,
+) -> AppResult<()> {
+    start_elem(w, "Address")?;
+    if !street.is_empty() {
+        write_text_elem(w, "StreetName", &esc(&trunc(street, 70)))?;
+    }
+    // City is required in AddressStructure
+    let city_val = if city.is_empty() { "N/A" } else { city };
+    write_text_elem(w, "City", &esc(&trunc(city_val, 35)))?;
+    if let Some(pc) = postal {
+        if !pc.is_empty() {
+            write_text_elem(w, "PostalCode", &esc(&trunc(pc, 18)))?;
+        }
+    }
+    if let Some(reg) = region {
+        if !reg.is_empty() {
+            write_text_elem(w, "Region", &esc(&trunc(reg, 35)))?;
+        }
+    }
+    // Country must be exactly 2 chars
+    let country_2 = if country.len() >= 2 {
+        &country[..2]
+    } else {
+        "RO"
+    };
+    write_text_elem(w, "Country", country_2)?;
+    if let Some(at) = addr_type {
+        write_text_elem(w, "AddressType", at)?;
+    }
+    end_elem(w, "Address")?;
+    Ok(())
+}
+
+// ── ContactHeaderStructure — ContactPerson + Telephone (both required) ─────────
+// XSD: ContactHeaderStructure has ContactPerson (required) + Telephone (required)
+pub fn write_contact_header(
+    w: &mut XmlWriter,
+    first_name: &str,
+    last_name: &str,
+    telephone: &str,
+) -> AppResult<()> {
+    start_elem(w, "Contact")?;
+    start_elem(w, "ContactPerson")?;
+    write_text_elem(w, "FirstName", &esc(&trunc(first_name, 35)))?;
+    write_text_elem(w, "LastName", &esc(&trunc(last_name, 70)))?;
+    end_elem(w, "ContactPerson")?;
+    // Telephone is required in ContactHeaderStructure (max 18 chars)
+    write_text_elem(w, "Telephone", &trunc(telephone, 18))?;
+    end_elem(w, "Contact")?;
+    Ok(())
+}
+
+// ── GeneralLedgerAccounts ─────────────────────────────────────────────────────
+
+pub async fn write_general_ledger_accounts(
+    w: &mut XmlWriter,
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+) -> AppResult<()> {
+    start_elem(w, "GeneralLedgerAccounts")?;
+
+    let rows = sqlx::query(
+        "SELECT account_code, account_name, account_class \
+         FROM chart_of_accounts \
+         WHERE company_id = ?1 AND active = 1 \
+         ORDER BY account_code",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?;
+
+    for row in &rows {
+        let code: String = row.try_get("account_code").unwrap_or_default();
+        let name: String = row.try_get("account_name").unwrap_or_default();
+        let class: Option<i64> = row.try_get("account_class").unwrap_or(None);
+        let acct_type = account_type_for_class(class.unwrap_or(4));
+
+        start_elem(w, "Account")?;
+        write_text_elem(w, "AccountID", &esc(&trunc(&code, 70)))?;
+        write_text_elem(w, "AccountDescription", &esc(&trunc(&name, 256)))?;
+        write_text_elem(w, "AccountType", acct_type)?;
+        // xs:choice: emit Debit variant = 0.00
+        write_text_elem(w, "OpeningDebitBalance", "0.00")?;
+        write_text_elem(w, "ClosingDebitBalance", "0.00")?;
+        end_elem(w, "Account")?;
+    }
+
+    end_elem(w, "GeneralLedgerAccounts")?;
+    Ok(())
+}
+
+// ── Customers ─────────────────────────────────────────────────────────────────
+
+pub async fn write_customers(
+    w: &mut XmlWriter,
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+) -> AppResult<()> {
+    start_elem(w, "Customers")?;
+
+    let rows = sqlx::query(
+        "SELECT id, contact_type, cui, legal_name, address, city, county, country \
+         FROM contacts \
+         WHERE company_id = ?1 \
+           AND (contact_type = '\"CUSTOMER\"' OR contact_type = '\"BOTH\"' \
+                OR contact_type = 'CUSTOMER' OR contact_type = 'BOTH') \
+         ORDER BY legal_name",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?;
+
+    for row in &rows {
+        let id: String = row.try_get("id").unwrap_or_default();
+        let cui: String = row.try_get("cui").unwrap_or_default();
+        let name: String = row.try_get("legal_name").unwrap_or_default();
+        let addr: String = row.try_get("address").unwrap_or_default();
+        let city: String = row.try_get("city").unwrap_or_default();
+        let county: String = row.try_get("county").unwrap_or_default();
+        let country: String = row.try_get("country").unwrap_or_else(|_| "RO".to_string());
+        let country_2 = if country.len() >= 2 {
+            &country[..2]
+        } else {
+            "RO"
+        };
+
+        start_elem(w, "Customer")?;
+        // CompanyStructure (optional per XSD on Customer)
+        start_elem(w, "CompanyStructure")?;
+        let reg_number = if cui.is_empty() {
+            id.as_str()
+        } else {
+            cui.as_str()
+        };
+        write_text_elem(w, "RegistrationNumber", &esc(&trunc(reg_number, 35)))?;
+        write_text_elem(w, "Name", &esc(&trunc(&name, 256)))?;
+        // Address (required inside CompanyStructure)
+        write_address(
+            w,
+            &addr,
+            &city,
+            Some(&county),
+            None,
+            country_2,
+            Some("StreetAddress"),
+        )?;
+        end_elem(w, "CompanyStructure")?;
+        write_text_elem(w, "CustomerID", &esc(&trunc(&id, 35)))?;
+        write_text_elem(w, "AccountID", "4111")?;
+        // xs:choice opening balance
+        write_text_elem(w, "OpeningDebitBalance", "0.00")?;
+        write_text_elem(w, "ClosingDebitBalance", "0.00")?;
+        end_elem(w, "Customer")?;
+    }
+
+    end_elem(w, "Customers")?;
+    Ok(())
+}
+
+// ── Suppliers ─────────────────────────────────────────────────────────────────
+
+pub async fn write_suppliers(
+    w: &mut XmlWriter,
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+) -> AppResult<()> {
+    start_elem(w, "Suppliers")?;
+
+    // Contacts that are SUPPLIER or BOTH
+    let rows = sqlx::query(
+        "SELECT id, contact_type, cui, legal_name, address, city, county, country \
+         FROM contacts \
+         WHERE company_id = ?1 \
+           AND (contact_type = '\"SUPPLIER\"' OR contact_type = '\"BOTH\"' \
+                OR contact_type = 'SUPPLIER' OR contact_type = 'BOTH') \
+         ORDER BY legal_name",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut emitted_cuis: BTreeSet<String> = BTreeSet::new();
+
+    for row in &rows {
+        let id: String = row.try_get("id").unwrap_or_default();
+        let cui: String = row.try_get("cui").unwrap_or_default();
+        let name: String = row.try_get("legal_name").unwrap_or_default();
+        let addr: String = row.try_get("address").unwrap_or_default();
+        let city: String = row.try_get("city").unwrap_or_default();
+        let county: String = row.try_get("county").unwrap_or_default();
+        let country: String = row.try_get("country").unwrap_or_else(|_| "RO".to_string());
+        let country_2 = if country.len() >= 2 {
+            &country[..2]
+        } else {
+            "RO"
+        };
+
+        let dedup_key = if cui.is_empty() {
+            id.clone()
+        } else {
+            cui.clone()
+        };
+        if !emitted_cuis.insert(dedup_key) {
+            continue;
+        }
+
+        start_elem(w, "Supplier")?;
+        start_elem(w, "CompanyStructure")?;
+        let reg_number = if cui.is_empty() {
+            id.as_str()
+        } else {
+            cui.as_str()
+        };
+        write_text_elem(w, "RegistrationNumber", &esc(&trunc(reg_number, 35)))?;
+        write_text_elem(w, "Name", &esc(&trunc(&name, 256)))?;
+        write_address(
+            w,
+            &addr,
+            &city,
+            Some(&county),
+            None,
+            country_2,
+            Some("StreetAddress"),
+        )?;
+        end_elem(w, "CompanyStructure")?;
+        write_text_elem(w, "SupplierID", &esc(&trunc(&id, 35)))?;
+        write_text_elem(w, "AccountID", "401")?;
+        write_text_elem(w, "OpeningCreditBalance", "0.00")?;
+        write_text_elem(w, "ClosingCreditBalance", "0.00")?;
+        end_elem(w, "Supplier")?;
+    }
+
+    // Also include distinct issuers from received_invoices not already covered
+    let recv_rows = sqlx::query(
+        "SELECT DISTINCT ri.issuer_cui, ri.issuer_name \
+         FROM received_invoices ri \
+         WHERE ri.company_id = ?1 \
+           AND ri.issuer_cui != '' \
+         ORDER BY ri.issuer_name",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?;
+
+    for row in &recv_rows {
+        let issuer_cui: String = row.try_get("issuer_cui").unwrap_or_default();
+        let issuer_name: String = row.try_get("issuer_name").unwrap_or_default();
+        // Use CUI as dedup key
+        if issuer_cui.is_empty() || !emitted_cuis.insert(issuer_cui.clone()) {
+            continue;
+        }
+        start_elem(w, "Supplier")?;
+        start_elem(w, "CompanyStructure")?;
+        write_text_elem(w, "RegistrationNumber", &esc(&trunc(&issuer_cui, 35)))?;
+        write_text_elem(w, "Name", &esc(&trunc(&issuer_name, 256)))?;
+        // Minimal address (city required)
+        start_elem(w, "Address")?;
+        write_text_elem(w, "City", "N/A")?;
+        write_text_elem(w, "Country", "RO")?;
+        write_text_elem(w, "AddressType", "StreetAddress")?;
+        end_elem(w, "Address")?;
+        end_elem(w, "CompanyStructure")?;
+        write_text_elem(w, "SupplierID", &esc(&trunc(&issuer_cui, 35)))?;
+        write_text_elem(w, "AccountID", "401")?;
+        write_text_elem(w, "OpeningCreditBalance", "0.00")?;
+        write_text_elem(w, "ClosingCreditBalance", "0.00")?;
+        end_elem(w, "Supplier")?;
+    }
+
+    end_elem(w, "Suppliers")?;
+    Ok(())
+}
+
+// ── TaxTable ──────────────────────────────────────────────────────────────────
+
+/// Collect distinct (vat_category, vat_rate) pairs used in the period across
+/// both sales invoices (invoice_line_items) and received invoices.
+pub async fn write_tax_table(
+    w: &mut XmlWriter,
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    date_from: &str,
+    date_to: &str,
+) -> AppResult<()> {
+    start_elem(w, "TaxTable")?;
+
+    // Sales invoice lines
+    let sales_rows = sqlx::query(
+        "SELECT DISTINCT ili.vat_category, ili.vat_rate \
+         FROM invoice_line_items ili \
+         JOIN invoices i ON ili.invoice_id = i.id \
+         WHERE i.company_id = ?1 \
+           AND i.issue_date >= ?2 AND i.issue_date <= ?3 \
+           AND i.status IN ('VALIDATED','STORNED')",
+    )
+    .bind(company_id)
+    .bind(date_from)
+    .bind(date_to)
+    .fetch_all(pool)
+    .await?;
+
+    let mut tax_keys: BTreeMap<(String, String), ()> = BTreeMap::new();
+    for row in &sales_rows {
+        let cat: String = row
+            .try_get("vat_category")
+            .unwrap_or_else(|_| "S".to_string());
+        let rate: String = row.try_get("vat_rate").unwrap_or_else(|_| "0".to_string());
+        tax_keys.insert((cat, rate), ());
+    }
+
+    // Default: always include standard TVA S/19% even if no invoices
+    if tax_keys.is_empty() {
+        tax_keys.insert(("S".to_string(), "19".to_string()), ());
+    }
+
+    for (category, rate_str) in tax_keys.keys() {
+        let rate_dec = rate_str.parse::<Decimal>().unwrap_or(Decimal::ZERO);
+        let tax_code = saft_tax_code(category, rate_dec);
+        let description = tax_description(category, rate_dec);
+
+        start_elem(w, "TaxTableEntry")?;
+        write_text_elem(w, "TaxType", "TVA")?;
+        write_text_elem(w, "Description", &esc(&trunc(&description, 256)))?;
+        start_elem(w, "TaxCodeDetails")?;
+        write_text_elem(w, "TaxCode", tax_code)?;
+        write_text_elem(w, "TaxPercentage", rate_str)?;
+        write_text_elem(w, "BaseRate", "1.0000")?;
+        write_text_elem(w, "Country", "RO")?;
+        end_elem(w, "TaxCodeDetails")?;
+        end_elem(w, "TaxTableEntry")?;
+    }
+
+    end_elem(w, "TaxTable")?;
+    Ok(())
+}
+
+// ── UOMTable ──────────────────────────────────────────────────────────────────
+
+pub async fn write_uom_table(
+    w: &mut XmlWriter,
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+) -> AppResult<()> {
+    start_elem(w, "UOMTable")?;
+
+    // Distinct units from products
+    let rows = sqlx::query(
+        "SELECT DISTINCT unit FROM products WHERE company_id = ?1 AND unit != '' ORDER BY unit",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut emitted: BTreeSet<String> = BTreeSet::new();
+
+    // Always emit the canonical "buc" (piece) unit
+    emitted.insert("buc".to_string());
+    write_uom_entry(w, "buc", "Bucată (piesă)")?;
+
+    for row in &rows {
+        let unit: String = row.try_get("unit").unwrap_or_default();
+        let unit_trimmed = unit.trim().to_string();
+        if unit_trimmed.is_empty() || !emitted.insert(unit_trimmed.clone()) {
+            continue;
+        }
+        let desc = uom_description(&unit_trimmed);
+        write_uom_entry(w, &unit_trimmed, desc)?;
+    }
+
+    end_elem(w, "UOMTable")?;
+    Ok(())
+}
+
+fn write_uom_entry(w: &mut XmlWriter, uom: &str, desc: &str) -> AppResult<()> {
+    start_elem(w, "UOMTableEntry")?;
+    write_text_elem(w, "UnitOfMeasure", &trunc(uom, 9))?;
+    write_text_elem(w, "Description", &esc(&trunc(desc, 256)))?;
+    end_elem(w, "UOMTableEntry")?;
+    Ok(())
+}
+
+fn uom_description(unit: &str) -> &'static str {
+    match unit.to_lowercase().as_str() {
+        "buc" | "pcs" | "pc" | "pce" => "Bucată (piesă)",
+        "kg" => "Kilogram",
+        "g" => "Gram",
+        "l" | "lt" | "ltr" => "Litru",
+        "m" => "Metru",
+        "m2" | "mp" => "Metru pătrat",
+        "m3" | "mc" => "Metru cub",
+        "h" | "hr" | "ore" => "Oră",
+        "zi" | "zile" | "day" => "Zi",
+        "luna" | "month" => "Lună",
+        "set" => "Set",
+        "pach" | "pack" => "Pachet",
+        "serv" | "service" => "Serviciu",
+        _ => "Unitate de măsură",
+    }
+}
+
+// ── Products ──────────────────────────────────────────────────────────────────
+
+pub async fn write_products(
+    w: &mut XmlWriter,
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+) -> AppResult<()> {
+    start_elem(w, "Products")?;
+
+    let rows = sqlx::query(
+        "SELECT id, name, unit, code FROM products WHERE company_id = ?1 ORDER BY name",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?;
+
+    for row in &rows {
+        let id: String = row.try_get("id").unwrap_or_default();
+        let name: String = row.try_get("name").unwrap_or_default();
+        let unit: String = row.try_get("unit").unwrap_or_else(|_| "buc".to_string());
+        let code: Option<String> = row.try_get("code").unwrap_or(None);
+
+        // ProductCode: use product code if available, else id (max 70 chars)
+        let product_code = code.as_deref().filter(|c| !c.is_empty()).unwrap_or(&id);
+
+        // ProductCommodityCode: required (max 35 chars) — use product code or "0000"
+        let commodity_code = code.as_deref().filter(|c| !c.is_empty()).unwrap_or("0000");
+
+        let uom = if unit.is_empty() {
+            "buc"
+        } else {
+            unit.as_str()
+        };
+
+        start_elem(w, "Product")?;
+        write_text_elem(w, "ProductCode", &esc(&trunc(product_code, 70)))?;
+        write_text_elem(w, "Description", &esc(&trunc(&name, 256)))?;
+        write_text_elem(w, "ProductCommodityCode", &esc(&trunc(commodity_code, 35)))?;
+        // UOMBase (required)
+        write_text_elem(w, "UOMBase", &trunc(uom, 9))?;
+        // UOMStandard + UOMToUOMBaseConversionFactor (both required in the inner sequence)
+        write_text_elem(w, "UOMStandard", &trunc(uom, 9))?;
+        write_text_elem(w, "UOMToUOMBaseConversionFactor", "1")?;
+        end_elem(w, "Product")?;
+    }
+
+    end_elem(w, "Products")?;
+    Ok(())
+}
+
+// ── Empty mandatory wrappers ───────────────────────────────────────────────────
+
+pub fn write_empty_analysis_type_table(w: &mut XmlWriter) -> AppResult<()> {
+    // <AnalysisTypeTable/> — mandatory wrapper, zero entries
+    start_elem(w, "AnalysisTypeTable")?;
+    end_elem(w, "AnalysisTypeTable")?;
+    Ok(())
+}
+
+pub fn write_empty_movement_type_table(w: &mut XmlWriter) -> AppResult<()> {
+    start_elem(w, "MovementTypeTable")?;
+    end_elem(w, "MovementTypeTable")?;
+    Ok(())
+}
+
+pub fn write_empty_owners(w: &mut XmlWriter) -> AppResult<()> {
+    start_elem(w, "Owners")?;
+    end_elem(w, "Owners")?;
+    Ok(())
+}
+
+pub fn write_empty_assets(w: &mut XmlWriter) -> AppResult<()> {
+    start_elem(w, "Assets")?;
+    end_elem(w, "Assets")?;
+    Ok(())
+}
+
+// ── MasterFiles top-level ─────────────────────────────────────────────────────
+
+pub async fn write_master_files(
+    w: &mut XmlWriter,
+    pool: &sqlx::SqlitePool,
+    company: &Company,
+    date_from: &str,
+    date_to: &str,
+) -> AppResult<()> {
+    start_elem(w, "MasterFiles")?;
+
+    write_general_ledger_accounts(w, pool, &company.id).await?;
+    write_customers(w, pool, &company.id).await?;
+    write_suppliers(w, pool, &company.id).await?;
+    write_tax_table(w, pool, &company.id, date_from, date_to).await?;
+    write_uom_table(w, pool, &company.id).await?;
+    write_empty_analysis_type_table(w)?;
+    write_empty_movement_type_table(w)?;
+    write_products(w, pool, &company.id).await?;
+    write_empty_owners(w)?;
+    write_empty_assets(w)?;
+
+    end_elem(w, "MasterFiles")?;
+    Ok(())
+}
+
+// ── Unit tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal::Decimal;
+
+    #[test]
+    fn account_type_class_mapping() {
+        assert_eq!(account_type_for_class(1), "Pasiv");
+        assert_eq!(account_type_for_class(2), "Activ");
+        assert_eq!(account_type_for_class(3), "Activ");
+        assert_eq!(account_type_for_class(4), "Bifunctional");
+        assert_eq!(account_type_for_class(5), "Activ");
+        assert_eq!(account_type_for_class(6), "Activ");
+        assert_eq!(account_type_for_class(7), "Pasiv");
+        assert_eq!(account_type_for_class(0), "Bifunctional"); // fallback
+    }
+
+    #[test]
+    fn saft_tax_code_mapping() {
+        assert_eq!(saft_tax_code("S", Decimal::from(19)), "S");
+        assert_eq!(saft_tax_code("S", Decimal::from(21)), "S");
+        assert_eq!(saft_tax_code("S", Decimal::from(9)), "AA");
+        assert_eq!(saft_tax_code("S", Decimal::from(5)), "AA");
+        assert_eq!(saft_tax_code("S", Decimal::from(11)), "AA");
+        assert_eq!(saft_tax_code("AE", Decimal::ZERO), "AE");
+        assert_eq!(saft_tax_code("E", Decimal::ZERO), "E");
+        assert_eq!(saft_tax_code("Z", Decimal::ZERO), "Z");
+        assert_eq!(saft_tax_code("O", Decimal::ZERO), "O");
+        assert_eq!(saft_tax_code("K", Decimal::ZERO), "K");
+        assert_eq!(saft_tax_code("G", Decimal::ZERO), "G");
+        assert_eq!(saft_tax_code("UNKNOWN", Decimal::from(19)), "S"); // fallback
+    }
+
+    #[test]
+    fn uom_description_known_units() {
+        assert_eq!(uom_description("buc"), "Bucată (piesă)");
+        assert_eq!(uom_description("kg"), "Kilogram");
+        assert_eq!(uom_description("h"), "Oră");
+        assert_eq!(uom_description("UNKNOWN_UOM"), "Unitate de măsură");
+    }
+}

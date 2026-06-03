@@ -396,6 +396,7 @@ pub fn run() {
             commands::journals::export_purchase_journal,
             // saft d406
             commands::saft::export_saft_d406,
+            commands::saft::export_saft_official,
             // feedback / diagnostic
             commands::feedback::gather_diagnostic,
             commands::feedback::build_feedback_mailto,
