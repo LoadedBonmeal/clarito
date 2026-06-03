@@ -41,7 +41,7 @@
 //!   R37_2 = R34_2, R40_2 = R33_2
 //!   R41_2 = MAX(R37_2 - R40_2, 0)  [sold de plată final]
 //!   R42_2 = MAX(R40_2 - R37_2, 0)  [sold de recuperat final]
-//!   totalPlata_A = R41_2
+//!   totalPlata_A = CONTROL SUM of all populated R-row fields (NOT the payable amount)
 
 use chrono::{Datelike, NaiveDate};
 use rust_decimal::prelude::ToPrimitive;
@@ -167,6 +167,60 @@ fn round_to_lei(d: Decimal) -> i64 {
 /// Parse a monetary string (as produced by `D300Report`) to `Decimal`.
 fn parse_dec(s: &str) -> Decimal {
     Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO)
+}
+
+/// Generate a valid 23-character Număr de Evidență a Plății (NDP / nr_evid).
+///
+/// Structure (0-indexed positions, 1-based in spec):
+/// - pos  0-1  : "10"
+/// - pos  2-4  : obligation code — tip_decont L→"301", T→"302", S→"303", A→"304"
+/// - pos  5-6  : "01"
+/// - pos  7-8  : zero-padded luna (reporting month, 2 digits)
+/// - pos  9-10 : last 2 digits of an (reporting year)
+/// - pos 11-12 : "25" (day of payment)
+/// - pos 13-14 : zero-padded luna+1 (month of due-date; rolls over to 01 if luna==12)
+/// - pos 15-16 : last 2 digits of due-year (an+1 if luna==12, else an)
+/// - pos 17-20 : "0000"
+/// - pos 21-22 : check digits = zero-padded sum of digit-values of positions 0-20 mod 100
+///
+/// Validator composite check: chars[0..2] + chars[5..7] + chars[17..21] == "10010000"
+pub fn generate_ndp(tip_decont: &str, luna: i32, an: i32) -> String {
+    let obligation_code = match tip_decont {
+        "T" => "302",
+        "S" => "303",
+        "A" => "304",
+        _ => "301", // "L" and any unknown → monthly
+    };
+
+    let ll = luna % 100; // reporting month (1–12)
+    let aa = an % 100; // last 2 digits of reporting year
+
+    // Payment due date: 25th of the month following the reporting month
+    let (due_month, due_year_2d) = if luna == 12 {
+        (1i32, (an + 1) % 100)
+    } else {
+        (luna + 1, an % 100)
+    };
+
+    // Build positions 0-20 (21 chars) before the check digit
+    let body = format!(
+        "10{}01{:02}{:02}25{:02}{:02}0000",
+        obligation_code, ll, aa, due_month, due_year_2d
+    );
+    // body is: "10" + obligation_code(3) + "01" + LL + AA + "25" + DM + DY + "0000"
+    // = 2+3+2+2+2+2+2+2+4 = 21 chars
+    debug_assert_eq!(
+        body.len(),
+        21,
+        "NDP body must be 21 chars, got {}",
+        body.len()
+    );
+
+    // Check digit = sum of all digit values in body, formatted as 2 digits (mod 100)
+    let digit_sum: u32 = body.chars().map(|c| c.to_digit(10).unwrap_or(0)).sum();
+    let check = digit_sum % 100;
+
+    format!("{}{:02}", body, check)
 }
 
 /// Accumulate base+vat from matching `D300Group` entries into mutable Decimals.
@@ -437,12 +491,67 @@ pub fn map_to_rows(
         Decimal::ZERO
     };
 
-    // totalPlata_A = R41_2
-    let total_plata_a = round_to_lei(r41_vat);
-
-    // ── Assemble D300Rows ─────────────────────────────────────────────────────
+    // ── Assemble row i64 values first so we can compute the control sum ─────────
 
     let opt_nonzero = |v: i64| if v != 0 { Some(v) } else { None };
+
+    let r1_1_v = opt_nonzero(round_to_lei(r1_1_base));
+    let r5_1_v = opt_nonzero(round_to_lei(r5_base));
+    let r5_2_v = opt_nonzero(round_to_lei(r5_vat));
+    let r9_1_v = opt_nonzero(round_to_lei(r9_base));
+    let r9_2_v = opt_nonzero(round_to_lei(r9_vat));
+    let r10_1_v = opt_nonzero(round_to_lei(r10_base));
+    let r10_2_v = opt_nonzero(round_to_lei(r10_vat));
+    let r11_1_v = opt_nonzero(round_to_lei(r11_base));
+    let r11_2_v = opt_nonzero(round_to_lei(r11_vat));
+    let r13_1_v = opt_nonzero(round_to_lei(r13_base));
+    let r17_1_v = opt_nonzero(round_to_lei(r17_base));
+    let r17_2_v = opt_nonzero(round_to_lei(r17_vat));
+    let r22_1_v = opt_nonzero(round_to_lei(r22_base));
+    let r22_2_v = opt_nonzero(round_to_lei(r22_vat));
+    let r23_1_v = opt_nonzero(round_to_lei(r23_base));
+    let r23_2_v = opt_nonzero(round_to_lei(r23_vat));
+    let r25_1_v = opt_nonzero(round_to_lei(r25_base));
+    let r25_2_v = opt_nonzero(round_to_lei(r25_vat));
+    let r27_1_v = opt_nonzero(round_to_lei(r27_base));
+    let r27_2_v = opt_nonzero(round_to_lei(r27_vat));
+    let r28_2_v = opt_nonzero(round_to_lei(r28_vat));
+    let r32_2_v = opt_nonzero(round_to_lei(r32_vat));
+    let r33_2_v = opt_nonzero(round_to_lei(r33_vat));
+    let r34_2_v = opt_nonzero(round_to_lei(r34_vat));
+    let r37_2_v = opt_nonzero(round_to_lei(r37_vat));
+    let r40_2_v = opt_nonzero(round_to_lei(r40_vat));
+    let r41_2_v = opt_nonzero(round_to_lei(r41_vat));
+    let r42_2_v = opt_nonzero(round_to_lei(r42_vat));
+
+    // totalPlata_A = CONTROL SUM of all populated R-row field values (DUK R26).
+    // This is NOT the payable amount — it is a checksum that DUKIntegrator verifies
+    // by independently summing every R-row attribute in the XML and comparing.
+    // Absent (None) fields contribute 0.  Header-summary fields (nr_facturi, baza,
+    // tva, nr_facturi_primite, baza_primite, tva_primite) are not present in
+    // D300Rows so they contribute 0 as well.
+    let total_plata_a: i64 = [
+        r1_1_v, r5_1_v, r5_2_v, r9_1_v, r9_2_v, r10_1_v, r10_2_v, r11_1_v, r11_2_v, r13_1_v,
+        r17_1_v, r17_2_v, r22_1_v, r22_2_v, r23_1_v, r23_2_v, r25_1_v, r25_2_v, r27_1_v, r27_2_v,
+        r28_2_v, r32_2_v, r33_2_v, r34_2_v, r37_2_v, r40_2_v, r41_2_v, r42_2_v,
+    ]
+    .iter()
+    .map(|o| o.unwrap_or(0))
+    .sum();
+
+    // ── Generate NDP (nr_evid) ────────────────────────────────────────────────
+    // If the submission supplies a valid 23-char NDP, keep it; otherwise generate
+    // the correct one from tip_decont + period.
+    let nr_evid = {
+        let s = submission.nr_evid.trim();
+        if s.len() == 23 && s.chars().all(|c| c.is_ascii_digit()) {
+            s.to_string()
+        } else {
+            generate_ndp(&submission.tip_decont, luna, an)
+        }
+    };
+
+    // ── Assemble D300Rows ─────────────────────────────────────────────────────
 
     Ok(D300Rows {
         // required header
@@ -467,42 +576,42 @@ pub fn map_to_rows(
         bifa_disp: da_nu(submission.bifa_disp),
         bifa_cons: da_nu(submission.bifa_cons),
         solicit_ramb: da_nu(submission.solicit_ramb),
-        nr_evid: submission.nr_evid.clone(),
+        nr_evid,
         total_plata_a,
 
         // sales
-        r1_1: opt_nonzero(round_to_lei(r1_1_base)),
-        r9_1: opt_nonzero(round_to_lei(r9_base)),
-        r9_2: opt_nonzero(round_to_lei(r9_vat)),
-        r10_1: opt_nonzero(round_to_lei(r10_base)),
-        r10_2: opt_nonzero(round_to_lei(r10_vat)),
-        r11_1: opt_nonzero(round_to_lei(r11_base)),
-        r11_2: opt_nonzero(round_to_lei(r11_vat)),
-        r13_1: opt_nonzero(round_to_lei(r13_base)),
+        r1_1: r1_1_v,
+        r9_1: r9_1_v,
+        r9_2: r9_2_v,
+        r10_1: r10_1_v,
+        r10_2: r10_2_v,
+        r11_1: r11_1_v,
+        r11_2: r11_2_v,
+        r13_1: r13_1_v,
 
         // purchases
-        r5_1: opt_nonzero(round_to_lei(r5_base)),
-        r5_2: opt_nonzero(round_to_lei(r5_vat)),
-        r22_1: opt_nonzero(round_to_lei(r22_base)),
-        r22_2: opt_nonzero(round_to_lei(r22_vat)),
-        r23_1: opt_nonzero(round_to_lei(r23_base)),
-        r23_2: opt_nonzero(round_to_lei(r23_vat)),
-        r25_1: opt_nonzero(round_to_lei(r25_base)),
-        r25_2: opt_nonzero(round_to_lei(r25_vat)),
+        r5_1: r5_1_v,
+        r5_2: r5_2_v,
+        r22_1: r22_1_v,
+        r22_2: r22_2_v,
+        r23_1: r23_1_v,
+        r23_2: r23_2_v,
+        r25_1: r25_1_v,
+        r25_2: r25_2_v,
 
         // totals
-        r17_1: opt_nonzero(round_to_lei(r17_base)),
-        r17_2: opt_nonzero(round_to_lei(r17_vat)),
-        r27_1: opt_nonzero(round_to_lei(r27_base)),
-        r27_2: opt_nonzero(round_to_lei(r27_vat)),
-        r28_2: opt_nonzero(round_to_lei(r28_vat)),
-        r32_2: opt_nonzero(round_to_lei(r32_vat)),
-        r33_2: opt_nonzero(round_to_lei(r33_vat)),
-        r34_2: opt_nonzero(round_to_lei(r34_vat)),
-        r37_2: opt_nonzero(round_to_lei(r37_vat)),
-        r40_2: opt_nonzero(round_to_lei(r40_vat)),
-        r41_2: opt_nonzero(round_to_lei(r41_vat)),
-        r42_2: opt_nonzero(round_to_lei(r42_vat)),
+        r17_1: r17_1_v,
+        r17_2: r17_2_v,
+        r27_1: r27_1_v,
+        r27_2: r27_2_v,
+        r28_2: r28_2_v,
+        r32_2: r32_2_v,
+        r33_2: r33_2_v,
+        r34_2: r34_2_v,
+        r37_2: r37_2_v,
+        r40_2: r40_2_v,
+        r41_2: r41_2_v,
+        r42_2: r42_2_v,
     })
 }
 
@@ -607,7 +716,8 @@ mod tests {
         // R27_2 = 168
         // R34_2 = 265 - 168 = 97  (plată)
         // R33_2 = 0
-        // R41_2 = totalPlata_A = 97
+        // R41_2 = 97 (sold de plată final)
+        // totalPlata_A = control sum of all populated R-rows (DUK R26)
         let report = make_report(
             vec![
                 ("0.21", "S", "1000.00", "210.00"),
@@ -646,10 +756,17 @@ mod tests {
         // R33_2 = 0 (no refund)
         assert_eq!(rows.r33_2, None, "R33_2 should be None (zero → omitted)");
 
-        // R41_2 = totalPlata_A = 97
+        // R41_2 = 97 (sold de plată final)
         assert_eq!(rows.r41_2, Some(97), "R41_2 = 97");
-        assert_eq!(rows.total_plata_a, 97, "totalPlata_A = 97");
         assert_eq!(rows.r42_2, None, "R42_2 = None (no refund)");
+
+        // totalPlata_A = control sum of all populated R-rows (NOT R41_2 alone)
+        // Populated rows: r9_1=1000, r9_2=210, r10_1=500, r10_2=55,
+        //   r17_1=1500, r17_2=265, r22_1=800, r22_2=168,
+        //   r27_1=800, r27_2=168, r28_2=168, r32_2=168,
+        //   r34_2=97, r37_2=97, r41_2=97
+        // sum = 1000+210+500+55+1500+265+800+168+800+168+168+168+97+97+97 = 6093
+        assert_eq!(rows.total_plata_a, 6093, "totalPlata_A = control sum 6093");
     }
 
     #[test]
@@ -659,7 +776,8 @@ mod tests {
         // Purchases: 1000 at 21% (210 VAT)
         // R17_2 = 105, R27_2 = 210
         // R33_2 = 210 - 105 = 105 (de recuperat)
-        // R34_2 = 0, R41_2 = 0, R42_2 = 105, totalPlata_A = 0
+        // R34_2 = 0, R41_2 = 0, R42_2 = 105
+        // totalPlata_A = control sum of all populated R-rows
         let report = make_report(
             vec![("0.21", "S", "500.00", "105.00")],
             vec![("0.21", "S", "1000.00", "210.00")],
@@ -676,7 +794,15 @@ mod tests {
         assert_eq!(rows.r34_2, None, "R34_2 = None (zero)");
         assert_eq!(rows.r41_2, None, "R41_2 = None (no plată)");
         assert_eq!(rows.r42_2, Some(105), "R42_2 = 105 (de recuperat)");
-        assert_eq!(rows.total_plata_a, 0, "totalPlata_A = 0 when refund");
+
+        // totalPlata_A = control sum of all populated R-rows:
+        // r9_1=500, r9_2=105, r17_1=500, r17_2=105, r22_1=1000, r22_2=210,
+        // r27_1=1000, r27_2=210, r28_2=210, r32_2=210, r33_2=105, r40_2=105, r42_2=105
+        // sum = 500+105+500+105+1000+210+1000+210+210+210+105+105+105 = 4365
+        assert_eq!(
+            rows.total_plata_a, 4365,
+            "totalPlata_A = control sum 4365 when refund"
+        );
     }
 
     #[test]
@@ -763,5 +889,127 @@ mod tests {
         assert!(rate_matches(&g_frac, 21), "fractional 0.21 should match 21");
         assert!(rate_matches(&g_pct, 21), "percent 21.00 should match 21");
         assert!(!rate_matches(&g_frac, 19), "0.21 should not match 19");
+    }
+
+    // ── NDP (generate_ndp) tests ─────────────────────────────────────────────
+
+    /// Validate the structural rules for a generated NDP:
+    /// - exactly 23 ASCII digits
+    /// - chars[0..2] + chars[5..7] + chars[17..21] == "10010000"
+    /// - Σ(digit_values[0..21]) == integer formed by last 2 digits (check digits)
+    fn ndp_is_valid(ndp: &str) -> bool {
+        if ndp.len() != 23 || !ndp.chars().all(|c| c.is_ascii_digit()) {
+            return false;
+        }
+        // Composite literal check
+        let composite = format!("{}{}{}", &ndp[0..2], &ndp[5..7], &ndp[17..21]);
+        if composite != "10010000" {
+            return false;
+        }
+        // Check digit: sum of first 21 digits == last 2 digits as integer
+        let digit_sum: u32 = ndp[..21].chars().map(|c| c.to_digit(10).unwrap()).sum();
+        let check_val = digit_sum % 100;
+        let check_digits: u32 = ndp[21..23].parse().unwrap_or(999);
+        check_val == check_digits
+    }
+
+    #[test]
+    fn generate_ndp_is_23_chars_and_passes_structure_check() {
+        // Test all tip_decont codes and various periods
+        for (tip, _code) in &[("L", "301"), ("T", "302"), ("S", "303"), ("A", "304")] {
+            for (luna, an) in &[(1, 2026), (6, 2025), (12, 2025), (3, 2024)] {
+                let ndp = generate_ndp(tip, *luna, *an);
+                assert_eq!(
+                    ndp.len(),
+                    23,
+                    "NDP must be 23 chars: tip={tip} luna={luna} an={an} → {ndp}"
+                );
+                assert!(
+                    ndp.chars().all(|c| c.is_ascii_digit()),
+                    "NDP must be all digits: {ndp}"
+                );
+                assert!(
+                    ndp_is_valid(&ndp),
+                    "NDP failed structural validation: tip={tip} luna={luna} an={an} → {ndp}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn generate_ndp_check_digit_correct() {
+        // For tip_decont=L, luna=1, an=2026:
+        // body = "10301" + "01" + "01" + "26" + "25" + "02" + "26" + "0000"
+        //       = "103010101262502260000"  (21 chars)
+        // digit_sum = 1+0+3+0+1+0+1+0+1+2+6+2+5+0+2+2+6+0+0+0+0 = 32
+        // check = 32 % 100 = 32 → "32"
+        // expected = "10301010126250226000032"
+        let ndp = generate_ndp("L", 1, 2026);
+        assert_eq!(ndp, "10301010126250226000032", "NDP for L/2026-01");
+        assert!(ndp_is_valid(&ndp), "must pass structural check");
+    }
+
+    #[test]
+    fn generate_ndp_december_rolls_over_to_next_year() {
+        // luna=12, an=2025: due_month=1, due_year=2026
+        // body = "10301" + "01" + "12" + "25" + "25" + "01" + "26" + "0000"
+        //       = "103010112252501260000"  (21 chars)
+        // digit_sum = 1+0+3+0+1+0+1+1+2+2+5+2+5+0+1+2+6+0+0+0+0 = 32
+        // check = 32 % 100 = 32 → "32"
+        // expected = "10301011225250126000032"
+        let ndp = generate_ndp("L", 12, 2025);
+        assert_eq!(ndp.len(), 23, "December rollover NDP must be 23 chars");
+        assert!(ndp_is_valid(&ndp), "December rollover NDP must be valid");
+        // Verify the due-month/year part (positions 11-16) shows 01 and 26
+        assert_eq!(&ndp[11..13], "25", "due-day must be 25");
+        assert_eq!(&ndp[13..15], "01", "due-month must be 01 (rollover)");
+        assert_eq!(&ndp[15..17], "26", "due-year must be 26 (2026)");
+    }
+
+    #[test]
+    fn generate_ndp_tip_t_uses_code_302() {
+        let ndp = generate_ndp("T", 3, 2025);
+        assert_eq!(&ndp[2..5], "302", "T tip_decont → obligation code 302");
+        assert!(ndp_is_valid(&ndp), "T-type NDP must be valid");
+    }
+
+    #[test]
+    fn map_to_rows_generates_ndp_when_submission_has_placeholder() {
+        // When submission.nr_evid is "0" (default placeholder), map_to_rows
+        // should generate a valid 23-char NDP.
+        let report = make_report(vec![], vec![]);
+        let sub = make_submission(); // nr_evid = default_nr_evid() = "0"
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+
+        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        assert_eq!(
+            rows.nr_evid.len(),
+            23,
+            "nr_evid should be a generated 23-char NDP, got: {}",
+            rows.nr_evid
+        );
+        assert!(
+            ndp_is_valid(&rows.nr_evid),
+            "generated nr_evid must pass NDP structural validation: {}",
+            rows.nr_evid
+        );
+    }
+
+    #[test]
+    fn map_to_rows_keeps_valid_23_char_nr_evid() {
+        // When submission.nr_evid is already a valid 23-char digit string,
+        // map_to_rows should keep it verbatim.
+        let report = make_report(vec![], vec![]);
+        let mut sub = make_submission();
+        sub.nr_evid = "10301010126250226000032".to_string(); // valid NDP
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+
+        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        assert_eq!(
+            rows.nr_evid, "10301010126250226000032",
+            "valid 23-char nr_evid should be kept verbatim"
+        );
     }
 }

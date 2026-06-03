@@ -59,9 +59,9 @@ fn test_submission() -> D300Submission {
         banca: "Banca Transilvania".to_string(),
         cont: "RO49AAAA1B31007593840000".to_string(),
         tip_decont: "L".to_string(),
-        // nr_evid must be a 23-digit integer (XSD IntStr23SType: 0..10^23-1).
-        // DUK R25 fires when the value is "0" (non-23-digit); provide a valid 23-char number.
-        nr_evid: "00000000000000000000001".to_string(),
+        // nr_evid = "0" → map_to_rows will generate a valid 23-char NDP automatically
+        // (DUK R25 requires a structurally valid NDP, not just any 23-char string).
+        nr_evid: "0".to_string(),
         ..Default::default()
     }
 }
@@ -245,11 +245,19 @@ fn d300_totals_reconciliation() {
     assert_eq!(rows.r37_2, Some(970), "R37_2 = R34_2");
     assert_eq!(rows.r41_2, Some(970), "R41_2 = sold de plată");
     assert_eq!(rows.r42_2, None, "R42_2 = None (no refund)");
-    assert_eq!(rows.total_plata_a, 970, "totalPlata_A = R41_2");
+    // totalPlata_A = control sum of all populated R-rows (DUK R26 — NOT R41_2 alone)
+    // Populated: r9_1=10000, r9_2=2100, r10_1=5000, r10_2=550,
+    //   r17_1=15000, r17_2=2650, r22_1=8000, r22_2=1680,
+    //   r27_1=8000, r27_2=1680, r28_2=1680, r32_2=1680, r34_2=970, r37_2=970, r41_2=970
+    // sum = 60930
+    assert_eq!(
+        rows.total_plata_a, 60930,
+        "totalPlata_A = control sum 60930"
+    );
 
     // Also verify the XML string contains key computed values
     let xml = generate_d300_xml(&rows, &ver).expect("generate");
     assert!(xml.contains("R17_2=\"2650\""), "XML R17_2");
     assert!(xml.contains("R34_2=\"970\""), "XML R34_2");
-    assert!(xml.contains("totalPlata_A=\"970\""), "XML totalPlata_A");
+    assert!(xml.contains("totalPlata_A=\"60930\""), "XML totalPlata_A");
 }
