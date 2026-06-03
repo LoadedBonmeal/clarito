@@ -82,6 +82,17 @@ pub fn tax_description(category: &str, rate: Decimal) -> String {
     }
 }
 
+// ── Strip "RO" prefix from CUI/registration number ────────────────────────────
+fn strip_ro(cui: &str) -> String {
+    let s = cui.trim();
+    let s = if s.to_uppercase().starts_with("RO") {
+        &s[2..]
+    } else {
+        s
+    };
+    s.trim().to_string()
+}
+
 // ── Escape for XML text content ────────────────────────────────────────────────
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -128,7 +139,14 @@ pub fn write_address(
     }
     if let Some(reg) = region {
         if !reg.is_empty() {
-            write_text_elem(w, "Region", &esc(&trunc(reg, 35)))?;
+            // DUK rule: Region must be ISO-3166-2 "RO-CJ"/"RO-IF" — prefix with "RO-" unless already prefixed
+            let reg_upper = reg.to_uppercase();
+            let region_val = if reg_upper.starts_with("RO-") {
+                reg_upper
+            } else {
+                format!("RO-{reg_upper}")
+            };
+            write_text_elem(w, "Region", &esc(&trunc(&region_val, 35)))?;
         }
     }
     // Country must be exactly 2 chars
@@ -241,12 +259,13 @@ pub async fn write_customers(
         start_elem(w, "Customer")?;
         // CompanyStructure (optional per XSD on Customer)
         start_elem(w, "CompanyStructure")?;
+        // DUK rule: RegistrationNumber must be bare digits — strip "RO" prefix
         let reg_number = if cui.is_empty() {
-            id.as_str()
+            id.clone()
         } else {
-            cui.as_str()
+            strip_ro(&cui)
         };
-        write_text_elem(w, "RegistrationNumber", &esc(&trunc(reg_number, 35)))?;
+        write_text_elem(w, "RegistrationNumber", &esc(&trunc(&reg_number, 35)))?;
         write_text_elem(w, "Name", &esc(&trunc(&name, 256)))?;
         // Address (required inside CompanyStructure)
         write_address(
@@ -258,6 +277,12 @@ pub async fn write_customers(
             country_2,
             Some("StreetAddress"),
         )?;
+        // DUK rule: BankAccount (minOccurs=1 in CompanyHeaderStructure restriction):
+        // CompanyStructure itself has minOccurs=0, but when present it needs a BankAccount.
+        // ANAF DUK requires at least one BankAccount — emit placeholder.
+        start_elem(w, "BankAccount")?;
+        write_text_elem(w, "BankAccountNumber", "N/A")?;
+        end_elem(w, "BankAccount")?;
         end_elem(w, "CompanyStructure")?;
         write_text_elem(w, "CustomerID", &esc(&trunc(&id, 35)))?;
         write_text_elem(w, "AccountID", "4111")?;
@@ -320,12 +345,13 @@ pub async fn write_suppliers(
 
         start_elem(w, "Supplier")?;
         start_elem(w, "CompanyStructure")?;
+        // DUK rule: RegistrationNumber must be bare digits — strip "RO" prefix
         let reg_number = if cui.is_empty() {
-            id.as_str()
+            id.clone()
         } else {
-            cui.as_str()
+            strip_ro(&cui)
         };
-        write_text_elem(w, "RegistrationNumber", &esc(&trunc(reg_number, 35)))?;
+        write_text_elem(w, "RegistrationNumber", &esc(&trunc(&reg_number, 35)))?;
         write_text_elem(w, "Name", &esc(&trunc(&name, 256)))?;
         write_address(
             w,
@@ -336,6 +362,10 @@ pub async fn write_suppliers(
             country_2,
             Some("StreetAddress"),
         )?;
+        // DUK rule: BankAccount required per ANAF business rules — emit placeholder
+        start_elem(w, "BankAccount")?;
+        write_text_elem(w, "BankAccountNumber", "N/A")?;
+        end_elem(w, "BankAccount")?;
         end_elem(w, "CompanyStructure")?;
         write_text_elem(w, "SupplierID", &esc(&trunc(&id, 35)))?;
         write_text_elem(w, "AccountID", "401")?;
@@ -365,7 +395,12 @@ pub async fn write_suppliers(
         }
         start_elem(w, "Supplier")?;
         start_elem(w, "CompanyStructure")?;
-        write_text_elem(w, "RegistrationNumber", &esc(&trunc(&issuer_cui, 35)))?;
+        // DUK rule: RegistrationNumber must be bare digits — strip "RO" prefix
+        write_text_elem(
+            w,
+            "RegistrationNumber",
+            &esc(&trunc(&strip_ro(&issuer_cui), 35)),
+        )?;
         write_text_elem(w, "Name", &esc(&trunc(&issuer_name, 256)))?;
         // Minimal address (city required)
         start_elem(w, "Address")?;
@@ -373,6 +408,10 @@ pub async fn write_suppliers(
         write_text_elem(w, "Country", "RO")?;
         write_text_elem(w, "AddressType", "StreetAddress")?;
         end_elem(w, "Address")?;
+        // DUK rule: BankAccount required per ANAF business rules — emit placeholder
+        start_elem(w, "BankAccount")?;
+        write_text_elem(w, "BankAccountNumber", "N/A")?;
+        end_elem(w, "BankAccount")?;
         end_elem(w, "CompanyStructure")?;
         write_text_elem(w, "SupplierID", &esc(&trunc(&issuer_cui, 35)))?;
         write_text_elem(w, "AccountID", "401")?;
@@ -433,7 +472,9 @@ pub async fn write_tax_table(
         let description = tax_description(category, rate_dec);
 
         start_elem(w, "TaxTableEntry")?;
-        write_text_elem(w, "TaxType", "TVA")?;
+        // SAF-T TaxType code for VAT is "300" (consistent with Header + GL entries),
+        // not the literal "TVA".
+        write_text_elem(w, "TaxType", "300")?;
         write_text_elem(w, "Description", &esc(&trunc(&description, 256)))?;
         start_elem(w, "TaxCodeDetails")?;
         write_text_elem(w, "TaxCode", tax_code)?;

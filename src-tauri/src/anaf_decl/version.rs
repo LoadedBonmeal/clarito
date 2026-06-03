@@ -39,19 +39,21 @@ pub fn schema_versions() -> Vec<SchemaVersion> {
         SchemaVersion {
             decl: DeclKind::D300,
             valid_from: d(2023, 1, 1),
-            valid_to: Some(d(2025, 7, 31)),
+            // DUK _dateVersionTable: v11 covers periods 2025-08…2025-12
+            valid_to: Some(d(2025, 12, 31)),
             namespace: "mfp:anaf:dgti:d300:declaratie:v11",
             root_element: "declaratie300",
-            schema_label: "D300 v11 (≤2025-07)",
+            schema_label: "D300 v11 (≤2025-12)",
             duk_type: "D300",
         },
         SchemaVersion {
             decl: DeclKind::D300,
-            valid_from: d(2025, 8, 1),
+            // DUK _dateVersionTable: v12 starts 2026-01-01
+            valid_from: d(2026, 1, 1),
             valid_to: None,
             namespace: "mfp:anaf:dgti:d300:declaratie:v12",
             root_element: "declaratie300",
-            schema_label: "D300 v12 (≥2025-08, rate 21%/11%)",
+            schema_label: "D300 v12 (≥2026-01)",
             duk_type: "D300",
         },
         // ── D394 (declarație informativă) ──────────────────────────────────
@@ -108,15 +110,18 @@ mod tests {
     }
 
     #[test]
-    fn d300_v12_for_post_aug_2025() {
-        let sv = resolve(DeclKind::D300, date(2025, 9, 15)).expect("should resolve");
+    fn d300_v12_for_2026_onward() {
+        let sv = resolve(DeclKind::D300, date(2026, 1, 1)).expect("should resolve");
         assert_eq!(sv.namespace, "mfp:anaf:dgti:d300:declaratie:v12");
     }
 
     #[test]
-    fn d300_v11_for_pre_aug_2025() {
-        let sv = resolve(DeclKind::D300, date(2025, 3, 15)).expect("should resolve");
+    fn d300_v11_for_2025() {
+        // v11 now covers all of 2025 (including Aug-Dec per DUK _dateVersionTable)
+        let sv = resolve(DeclKind::D300, date(2025, 9, 15)).expect("should resolve");
         assert_eq!(sv.namespace, "mfp:anaf:dgti:d300:declaratie:v11");
+        let sv2 = resolve(DeclKind::D300, date(2025, 12, 31)).expect("should resolve");
+        assert_eq!(sv2.namespace, "mfp:anaf:dgti:d300:declaratie:v11");
     }
 
     #[test]

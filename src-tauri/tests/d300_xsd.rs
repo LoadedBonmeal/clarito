@@ -59,6 +59,9 @@ fn test_submission() -> D300Submission {
         banca: "Banca Transilvania".to_string(),
         cont: "RO49AAAA1B31007593840000".to_string(),
         tip_decont: "L".to_string(),
+        // nr_evid must be a 23-digit integer (XSD IntStr23SType: 0..10^23-1).
+        // DUK R25 fires when the value is "0" (non-23-digit); provide a valid 23-char number.
+        nr_evid: "00000000000000000000001".to_string(),
         ..Default::default()
     }
 }
@@ -125,7 +128,8 @@ fn d300_validates_against_official_xsd() {
     }
 
     // Build a fully-valid D300 from synthetic data.
-    let period = chrono::NaiveDate::from_ymd_opt(2025, 9, 1).expect("test date");
+    // Use a 2026 period so version.rs resolves v12 (matching the vendored sample_d300_v12.xml XSD).
+    let period = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("test date");
     let ver = resolve(DeclKind::D300, period).expect("schema version");
 
     let report = test_report();
@@ -188,7 +192,8 @@ fn d300_empty_period_generates_valid_xml() {
         net_vat: "0.00".to_string(),
     };
 
-    let period = chrono::NaiveDate::from_ymd_opt(2025, 9, 1).expect("test date");
+    // Use 2026 period to resolve v12 (vendored XSD)
+    let period = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("test date");
     let ver = resolve(DeclKind::D300, period).expect("schema version");
     let sub = test_submission();
     let co = test_company();
@@ -215,7 +220,8 @@ fn d300_totals_reconciliation() {
     // R34_2 = 2650 - 1680 = 970 (TVA de plată)
     // R33_2 = 0
     // R41_2 = 970, totalPlata_A = 970
-    let period = chrono::NaiveDate::from_ymd_opt(2025, 9, 1).expect("test date");
+    // Use 2026 period so version.rs resolves v12 (matching the vendored XSD)
+    let period = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("test date");
     let ver = resolve(DeclKind::D300, period).expect("schema version");
     let report = test_report();
     let sub = test_submission();

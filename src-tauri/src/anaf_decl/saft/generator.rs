@@ -94,8 +94,15 @@ fn write_header_company(
 ) -> AppResult<()> {
     start_elem(w, "Company")?;
 
-    // RegistrationNumber (required, SAFmiddle1textType max 35)
-    let cui_clean = company.cui.trim();
+    // RegistrationNumber (required, SAFmiddle1textType max 35) — bare CUI digits,
+    // no "RO" prefix (DUK rejects "RO12345678" as an invalid RegistrationNumber).
+    let cui_clean = {
+        let t = company.cui.trim();
+        t.strip_prefix("RO")
+            .or_else(|| t.strip_prefix("ro"))
+            .unwrap_or(t)
+            .trim()
+    };
     write_text_elem(w, "RegistrationNumber", &trunc_esc(cui_clean, 35))?;
     write_text_elem(w, "Name", &trunc_esc(&company.legal_name, 256))?;
 
@@ -122,7 +129,14 @@ fn write_header_company(
         }
     }
     if !company.county.is_empty() {
-        write_text_elem(w, "Region", &trunc_esc(&company.county, 35))?;
+        // DUK rule: Region must be ISO-3166-2 "RO-CJ"/"RO-IF" — prefix with "RO-" unless already prefixed
+        let county_upper = company.county.to_uppercase();
+        let region = if county_upper.starts_with("RO-") {
+            county_upper
+        } else {
+            format!("RO-{county_upper}")
+        };
+        write_text_elem(w, "Region", &trunc_esc(&region, 35))?;
     }
     write_text_elem(w, "Country", country_2)?;
     write_text_elem(w, "AddressType", "StreetAddress")?;
@@ -150,7 +164,8 @@ fn write_header_company(
     if company.vat_payer {
         start_elem(w, "TaxRegistration")?;
         write_text_elem(w, "TaxRegistrationNumber", &trunc_esc(cui_clean, 35))?;
-        write_text_elem(w, "TaxType", "TVA")?;
+        // DUK rule: Header TaxRegistration/TaxType must be the SAF-T code "300" (not "TVA")
+        write_text_elem(w, "TaxType", "300")?;
         write_text_elem(w, "TaxAuthority", "ANAF")?;
         end_elem(w, "TaxRegistration")?;
     }

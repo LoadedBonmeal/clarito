@@ -80,9 +80,13 @@ pub fn generate_d394_xml(
     root.push_attribute(("an", doc.an.to_string().as_str()));
     root.push_attribute(("tip_D394", submission.tip_d394.as_str()));
     root.push_attribute(("sistemTVA", if submission.sistem_tva { "1" } else { "0" }));
+    // DUK rule R214.1/R35.1: op_efectuate must be 1 when op1 sections are present.
+    // Derive op_efectuate from whether the document actually contains op1 data,
+    // overriding the submission flag when needed to keep the declaration consistent.
+    let effective_op_efectuate = submission.op_efectuate || !doc.op1_list.is_empty();
     root.push_attribute((
         "op_efectuate",
-        if submission.op_efectuate { "1" } else { "0" },
+        if effective_op_efectuate { "1" } else { "0" },
     ));
 
     // cui: CuiSType pattern [1-9]\d{1,9}
@@ -452,7 +456,8 @@ mod tests {
             "an=\"2025\"",
             "tip_D394=\"L\"",
             "sistemTVA=\"0\"",
-            "op_efectuate=\"0\"",
+            // op_efectuate is derived: test_report has partners → op1 list is non-empty → "1"
+            "op_efectuate=\"1\"",
             "cui=\"12345678\"",
             "caen=\"6201\"",
             "telefon=\"0721000000\"",

@@ -534,6 +534,37 @@ pub fn build_sections(
     // We compute nr_cui* here directly (they are also stored in informatii below).
     let total_plata_a = nr_cui1 + nr_cui2 + nr_cui3 + nr_cui4;
 
+    // DUK rule R135A.1/R143A.1: tvaCol*/tvaDed* attributes belong to the sistemTVA
+    // (real-time VAT) regime. Emit them only when sistemTVA=true; omit entirely otherwise.
+    let (tva_col24_v, tva_col21_v, tva_col11_v, tva_col20_v, tva_col19_v, tva_col9_v, tva_col5_v) =
+        if submission.sistem_tva {
+            (
+                opt_nonzero(*tva_col.get(&24).unwrap_or(&0)),
+                opt_nonzero(*tva_col.get(&21).unwrap_or(&0)),
+                opt_nonzero(*tva_col.get(&11).unwrap_or(&0)),
+                opt_nonzero(*tva_col.get(&20).unwrap_or(&0)),
+                opt_nonzero(*tva_col.get(&19).unwrap_or(&0)),
+                opt_nonzero(*tva_col.get(&9).unwrap_or(&0)),
+                opt_nonzero(*tva_col.get(&5).unwrap_or(&0)),
+            )
+        } else {
+            (None, None, None, None, None, None, None)
+        };
+    let (tva_ded24_v, tva_ded21_v, tva_ded11_v, tva_ded20_v, tva_ded19_v, tva_ded9_v, tva_ded5_v) =
+        if submission.sistem_tva {
+            (
+                opt_nonzero(*tva_ded.get(&24).unwrap_or(&0)),
+                opt_nonzero(*tva_ded.get(&21).unwrap_or(&0)),
+                opt_nonzero(*tva_ded.get(&11).unwrap_or(&0)),
+                opt_nonzero(*tva_ded.get(&20).unwrap_or(&0)),
+                opt_nonzero(*tva_ded.get(&19).unwrap_or(&0)),
+                opt_nonzero(*tva_ded.get(&9).unwrap_or(&0)),
+                opt_nonzero(*tva_ded.get(&5).unwrap_or(&0)),
+            )
+        } else {
+            (None, None, None, None, None, None, None)
+        };
+
     let informatii = Informatii {
         nr_cui1,
         nr_cui2,
@@ -548,20 +579,20 @@ pub fn build_sections(
         nr_facturi_l_pf: 0,
         nr_facturi_ls_pf: 0,
         val_ls_pf: 0,
-        tva_col24: opt_nonzero(*tva_col.get(&24).unwrap_or(&0)),
-        tva_col21: opt_nonzero(*tva_col.get(&21).unwrap_or(&0)),
-        tva_col11: opt_nonzero(*tva_col.get(&11).unwrap_or(&0)),
-        tva_col20: opt_nonzero(*tva_col.get(&20).unwrap_or(&0)),
-        tva_col19: opt_nonzero(*tva_col.get(&19).unwrap_or(&0)),
-        tva_col9: opt_nonzero(*tva_col.get(&9).unwrap_or(&0)),
-        tva_col5: opt_nonzero(*tva_col.get(&5).unwrap_or(&0)),
-        tva_ded24: opt_nonzero(*tva_ded.get(&24).unwrap_or(&0)),
-        tva_ded21: opt_nonzero(*tva_ded.get(&21).unwrap_or(&0)),
-        tva_ded11: opt_nonzero(*tva_ded.get(&11).unwrap_or(&0)),
-        tva_ded20: opt_nonzero(*tva_ded.get(&20).unwrap_or(&0)),
-        tva_ded19: opt_nonzero(*tva_ded.get(&19).unwrap_or(&0)),
-        tva_ded9: opt_nonzero(*tva_ded.get(&9).unwrap_or(&0)),
-        tva_ded5: opt_nonzero(*tva_ded.get(&5).unwrap_or(&0)),
+        tva_col24: tva_col24_v,
+        tva_col21: tva_col21_v,
+        tva_col11: tva_col11_v,
+        tva_col20: tva_col20_v,
+        tva_col19: tva_col19_v,
+        tva_col9: tva_col9_v,
+        tva_col5: tva_col5_v,
+        tva_ded24: tva_ded24_v,
+        tva_ded21: tva_ded21_v,
+        tva_ded11: tva_ded11_v,
+        tva_ded20: tva_ded20_v,
+        tva_ded19: tva_ded19_v,
+        tva_ded9: tva_ded9_v,
+        tva_ded5: tva_ded5_v,
         // ALL tvaDedAI* are REQUIRED → must be present, default 0
         tva_ded_ai24: *tva_ded_ai.get(&24).unwrap_or(&0),
         tva_ded_ai21: *tva_ded_ai.get(&21).unwrap_or(&0),
@@ -571,7 +602,13 @@ pub fn build_sections(
         tva_ded_ai9: *tva_ded_ai.get(&9).unwrap_or(&0),
         tva_ded_ai5: *tva_ded_ai.get(&5).unwrap_or(&0),
         solicit: if submission.solicit { 1 } else { 0 },
-        efectuat: opt_nonzero(if submission.op_efectuate { 1 } else { 0 }),
+        // DUK rule R191.1: efectuat must only be present when solicit=1.
+        // Only emit efectuat when the submission is requesting a refund (solicit=true).
+        efectuat: if submission.solicit {
+            opt_nonzero(if submission.op_efectuate { 1 } else { 0 })
+        } else {
+            None
+        },
     };
 
     Ok(D394Doc {
@@ -822,7 +859,9 @@ mod tests {
             ],
             vec![],
         );
-        let sub = make_submission();
+        // sistemTVA=true so tvaCol*/tvaDed* are populated
+        let mut sub = make_submission();
+        sub.sistem_tva = true;
         let company = make_company();
         let period = NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
 

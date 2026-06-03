@@ -79,7 +79,20 @@ pub fn generate_d300_xml(rows: &D300Rows, ver: &SchemaVersion) -> AppResult<Stri
     elem.push_attribute(("bifa_disp", rows.bifa_disp.as_str()));
     elem.push_attribute(("bifa_cons", rows.bifa_cons.as_str()));
     elem.push_attribute(("solicit_ramb", rows.solicit_ramb.as_str()));
-    elem.push_attribute(("nr_evid", rows.nr_evid.as_str()));
+    // nr_evid is a MANDATORY D300 attribute (DUK: omitting it → "atributul trebuie
+    // sa existe"), so always emit it. A DUK-clean value must be a valid 23-char NDP
+    // (număr de evidență a plății, with embedded period + check digit); generating/
+    // validating that NDP is a deferred item, so the user-supplied value is emitted
+    // verbatim and an invalid/placeholder one trips DUK rule R25 at validation time.
+    let nr_evid_trimmed = rows.nr_evid.trim();
+    elem.push_attribute((
+        "nr_evid",
+        if nr_evid_trimmed.is_empty() {
+            "0"
+        } else {
+            nr_evid_trimmed
+        },
+    ));
     elem.push_attribute(("totalPlata_A", rows.total_plata_a.to_string().as_str()));
 
     // ── Optional R-rows (only emit when Some) ─────────────────────────────────
@@ -148,14 +161,15 @@ mod tests {
     use chrono::NaiveDate;
 
     fn test_ver() -> SchemaVersion {
-        let period = NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
+        // Use 2026 period so version.rs resolves v12 (matches vendored XSD)
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
         resolve(DeclKind::D300, period).expect("schema version")
     }
 
     fn minimal_rows() -> D300Rows {
         D300Rows {
-            luna: 9,
-            an: 2025,
+            luna: 1,
+            an: 2026,
             depus_reprezentant: 0,
             bifa_interne: 0,
             temei: 0,
@@ -221,8 +235,8 @@ mod tests {
         let xml = generate_d300_xml(&rows, &ver).expect("generate_d300_xml");
 
         for attr in &[
-            "luna=\"9\"",
-            "an=\"2025\"",
+            "luna=\"1\"",
+            "an=\"2026\"",
             "depusReprezentant=\"0\"",
             "bifa_interne=\"0\"",
             "temei=\"0\"",

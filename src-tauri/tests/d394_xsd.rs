@@ -54,7 +54,9 @@ fn test_submission() -> D394Submission {
     D394Submission {
         tip_d394: "L".to_string(),
         sistem_tva: false,
-        op_efectuate: false,
+        // op_efectuate=true: the test report has partners so op1 sections are emitted;
+        // DUK rule R214.1 requires op_efectuate=1 whenever op1 data is present.
+        op_efectuate: true,
         caen: "6201".to_string(),
         telefon: "0721000000".to_string(),
         den_r: "POPESCU ION".to_string(),
