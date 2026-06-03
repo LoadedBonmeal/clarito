@@ -56,6 +56,7 @@ import { ProductsPage } from "@/pages/Products";
 import { ReceiptsPage } from "@/pages/Receipts";
 import { VatRatesPage } from "@/pages/VatRates";
 import { DeclarationsPage } from "@/pages/Declarations";
+import { GlLedgerPage } from "@/pages/GlLedger";
 import { BankPage } from "@/pages/Bank";
 import { StornatePage } from "@/pages/Stornate";
 
@@ -231,6 +232,12 @@ const stornateRoute = createRoute({
   component: StornatePage,
 });
 
+const glLedgerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/ledger",
+  component: GlLedgerPage,
+});
+
 // ─── Build tree + router ──────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -256,6 +263,7 @@ const routeTree = rootRoute.addChildren([
   paymentsRoute,
   recurringRoute,
   declarationsRoute,
+  glLedgerRoute,
   bankRoute,
   stornateRoute,
 ]);

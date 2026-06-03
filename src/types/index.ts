@@ -624,6 +624,93 @@ export interface UpdateAccountInput {
   active?: boolean;
 }
 
+// ─── D300Submission — câmpuri suplimentare pentru exportul oficial ANAF ────
+
+/**
+ * Mirrors Rust `D300Submission` (src-tauri/src/anaf_decl/d300/mod.rs).
+ * `#[serde(rename_all = "camelCase")]` + `#[serde(default)]` on several fields.
+ */
+export interface D300Submission {
+  // Declarant
+  numeDeclar: string;
+  prenumeDeclar: string;
+  functieDeclar: string;
+  // Companie / bancă
+  caen: string;
+  banca: string;
+  cont: string;
+  // Tip decont / temei legal
+  tipDecont: string;           // "L" | "T" | "S" | "A"
+  temei?: number;              // default 0
+  depusReprezentant?: boolean; // default false
+  // Flags regim special
+  bifaInterne?: boolean;
+  bifaCereale?: boolean;
+  bifaMob?: boolean;
+  bifaDisp?: boolean;
+  bifaCons?: boolean;
+  // Rambursare / pro-rata
+  solicitRamb?: boolean;
+  nrEvid?: string;   // default "0"
+  proRata?: number;  // default 100.0
+}
+
+// ─── D394Submission — câmpuri suplimentare pentru exportul oficial D394 ────
+
+/**
+ * Mirrors Rust `D394Submission` (src-tauri/src/anaf_decl/d394/mod.rs).
+ * `#[serde(rename_all = "camelCase")]` + `#[serde(default)]` on several fields.
+ */
+export interface D394Submission {
+  tipD394: string;           // "L" | "T" | "S" | "A"
+  sistemTva?: boolean;       // default false
+  opEfectuate?: boolean;     // default false
+  caen: string;
+  telefon: string;
+  // Reprezentant
+  denR: string;
+  functieReprez: string;
+  adresaR: string;
+  // Întocmit
+  tipIntocmit?: number;       // default 0
+  denIntocmit: string;
+  cifIntocmit?: number;       // default 0 (i64 in Rust)
+  calitateIntocmit?: string | null; // optional
+  // Alte flag-uri
+  optiune?: boolean;
+  prsAfiliat?: boolean;
+  solicit?: boolean;
+}
+
+// ─── GL — rezultat generare note contabile ────────────────────────────────
+
+/**
+ * Mirrors Rust `GlPostResult` (src-tauri/src/db/gl.rs).
+ * `#[serde(rename_all = "camelCase")]`
+ */
+export interface GlPostResult {
+  journalsInserted: number;
+  entriesInserted: number;
+  journalsReplaced: number;
+  skippedReceived: number;
+}
+
+/**
+ * Mirrors Rust `ReconcileReport` (src-tauri/src/db/gl.rs).
+ * `#[serde(rename_all = "camelCase")]`
+ * All monetary fields are RON strings with 2 decimal places.
+ */
+export interface ReconcileReport {
+  balanced: boolean;
+  totalDebit: string;
+  totalCredit: string;
+  vatCollectedGl: string;
+  vatCollectedD300: string;
+  vatDeductibleGl: string;
+  vatDeductibleD300: string;
+  discrepancies: string[];
+}
+
 // ─── Error (din backend) ──────────────────────────────────────────────────
 
 export interface AppErrorPayload {

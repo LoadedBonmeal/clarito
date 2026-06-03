@@ -118,8 +118,9 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
     {
       group: "RAPORTARE",
       items: [
-        { id: "rapoarte",    label: "Rapoarte",         icon: "reports", path: "/reports" },
-        { id: "declaratii",  label: "Declarații ANAF",  icon: "anaf",    path: "/declarations" },
+        { id: "rapoarte",       label: "Rapoarte",          icon: "reports", path: "/reports" },
+        { id: "declaratii",     label: "Declarații ANAF",   icon: "anaf",    path: "/declarations" },
+        { id: "jurnal-contabil", label: "Jurnal contabil",  icon: "ledger",  path: "/ledger" },
       ],
     },
   ];

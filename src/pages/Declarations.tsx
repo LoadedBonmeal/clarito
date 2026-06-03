@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
@@ -22,12 +23,14 @@ import {
   Input,
 } from "@/components/rf";
 import { Icon } from "@/components/shared/Icon";
+import { D300SubmissionModal } from "@/components/modals/D300SubmissionModal";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
-import type { D300Report } from "@/types";
+import { queryKeys } from "@/lib/queries";
+import type { D300Report, D300Submission } from "@/types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -77,9 +80,18 @@ export function DeclarationsPage() {
   const [report,    setReport]    = useState<D300Report | null>(null);
   const [computing, setComputing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingOfficial, setExportingOfficial] = useState(false);
+  const [showD300Modal,     setShowD300Modal]     = useState(false);
 
   // TVA deductibilă — pre-completată din totalDeductibleVat; editabilă manual ca override.
   const [manualDeductible, setManualDeductible] = useState<string>("0.00");
+
+  // Fetch active company for pre-filling submission modal (bank/IBAN).
+  const { data: activeCompany } = useQuery({
+    queryKey: queryKeys.companies.detail(activeCompanyId ?? ""),
+    queryFn: () => api.companies.get(activeCompanyId!),
+    enabled: !!activeCompanyId,
+  });
 
   useEffect(() => {
     if (report) {
@@ -151,6 +163,33 @@ export function DeclarationsPage() {
     }
   };
 
+  // ── Exportă D300 oficial ANAF (schema v12) ────────────────────────────────
+  const handleExportOfficial = async (submission: D300Submission) => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    const savePath = await saveDialog({
+      title:       "Salvează D300 oficial ANAF (XML)",
+      defaultPath: `d300-${selectedYear}-${String(selectedMonth).padStart(2, "0")}.xml`,
+      filters:     [{ name: "XML", extensions: ["xml"] }],
+    });
+    if (!savePath) return;
+    setExportingOfficial(true);
+    try {
+      const saved = await api.declarations.exportD300Official(
+        activeCompanyId,
+        dateFrom,
+        dateTo,
+        savePath,
+        submission,
+      );
+      notify.success(`D300 oficial salvat: ${saved}`);
+      try { await openPath(saved); } catch { /* reveal best-effort */ }
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut exporta D300 oficial."));
+    } finally {
+      setExportingOfficial(false);
+    }
+  };
+
   const totalBase        = report ? parseDec(report.totalBase) : 0;
   const totalVat         = report ? parseDec(report.totalVat) : 0;
   const deductibleVat    = parseDec(manualDeductible) || 0;
@@ -185,9 +224,18 @@ export function DeclarationsPage() {
               icon="xml"
               disabled={exporting || !report || (report.invoiceCount === 0 && report.purchaseInvoiceCount === 0)}
               onClick={() => void handleExport()}
-              title="Exportă decontul D300 ca fișier XML"
+              title="Exportă extras D300 ca fișier XML (document de lucru, nu schema ANAF)"
             >
-              {exporting ? "Export…" : "Exportă D300 (XML)"}
+              {exporting ? "Export…" : "Extract D300 (XML)"}
+            </Btn>
+            <Btn
+              variant="primary"
+              icon="anaf"
+              disabled={exportingOfficial || !report || (report.invoiceCount === 0 && report.purchaseInvoiceCount === 0) || !activeCompany}
+              onClick={() => setShowD300Modal(true)}
+              title="Exportă D300 conform schemei oficiale ANAF v12"
+            >
+              {exportingOfficial ? "Export…" : "Export oficial ANAF"}
             </Btn>
           </>
         }
@@ -396,6 +444,16 @@ export function DeclarationsPage() {
           </div>
         </Card>
       </div>
+
+      {/* D300 Submission Modal (export oficial) */}
+      {activeCompany && (
+        <D300SubmissionModal
+          open={showD300Modal}
+          onOpenChange={setShowD300Modal}
+          company={activeCompany}
+          onSubmit={(sub) => void handleExportOfficial(sub)}
+        />
+      )}
     </div>
   );
 }

@@ -22,8 +22,11 @@ import type {
   CreateCompanyInput,
   CreateContactInput,
   CreateInvoiceInput,
+  D300Submission,
+  D394Submission,
   DataExportResult,
   DiagnosticReport,
+  GlPostResult,
   Invoice,
   InvoiceFilter,
   InvoiceStatus,
@@ -38,6 +41,7 @@ import type {
   ReceivedFilter,
   ReceivedInvoice,
   ReceivedStatus,
+  ReconcileReport,
   SyncResult,
   UpdateAccountInput,
   UpdateCompanyInput,
@@ -472,6 +476,34 @@ export const saft = {
     invoke<string>("export_saft_d406", {
       params: { companyId, year, month: month ?? null },
     }),
+  /**
+   * Exportă D406 oficial (complet, schema-conformant) la destPath.
+   * Auto-postează GL înainte de generare (idempotent).
+   * Rust command `export_saft_official` preia un struct `SaftOfficialParams`
+   * ca argument `params` (nu flat args):
+   *   params: { companyId, year, month?, destPath }
+   */
+  exportSaftOfficial: (companyId: string, year: number, month: number, destPath: string) =>
+    invoke<string>("export_saft_official", {
+      params: { companyId, year, month, destPath },
+    }),
+};
+
+// ─── GL — Jurnal contabil ──────────────────────────────────────────────────
+
+export const gl = {
+  /**
+   * Generează (sau re-generează idempotent) notele contabile GL pentru o perioadă.
+   * Rust command `generate_gl_entries` (flat args): company_id, period_from, period_to
+   */
+  generateEntries: (companyId: string, periodFrom: string, periodTo: string) =>
+    invoke<GlPostResult>("generate_gl_entries", { companyId, periodFrom, periodTo }),
+  /**
+   * Reconciliază GL cu D300 pentru o perioadă.
+   * Rust command `reconcile_gl` (flat args): company_id, period_from, period_to
+   */
+  reconcile: (companyId: string, periodFrom: string, periodTo: string) =>
+    invoke<ReconcileReport>("reconcile_gl", { companyId, periodFrom, periodTo }),
 };
 
 // ─── Declarations (D300) ──────────────────────────────────────────────────
@@ -500,6 +532,26 @@ export const declarations = {
       destPath,
       manualDeductibleVat: manualDeductibleVat ?? null,
     }),
+  /**
+   * Exportă XML D300 oficial ANAF (schema v12) la destPath.
+   * `submission` conține câmpurile completate de utilizator (declarant, CAEN, bancă etc.).
+   * Parametrii Rust (snake_case → camelCase Tauri):
+   *   company_id, period_from, period_to, submission (D300Submission), dest_path
+   */
+  exportD300Official: (
+    companyId: string,
+    periodFrom: string,
+    periodTo: string,
+    destPath: string,
+    submission: D300Submission,
+  ) =>
+    invoke<string>("export_d300_official", {
+      companyId,
+      periodFrom,
+      periodTo,
+      submission,
+      destPath,
+    }),
 };
 
 // ─── D394 — Declarație informativă livrări/achiziții ─────────────────────
@@ -511,6 +563,26 @@ export const d394 = {
   /** Generează XML D394 și îl salvează la destPath. Returnează calea. */
   export: (companyId: string, periodFrom: string, periodTo: string, destPath: string) =>
     invoke<string>("export_d394", { companyId, periodFrom, periodTo, destPath }),
+  /**
+   * Exportă XML D394 oficial ANAF (schema v5) la destPath.
+   * `submission` conține câmpurile completate de utilizator (CAEN, reprezentant etc.).
+   * Parametrii Rust (snake_case → camelCase Tauri):
+   *   company_id, period_from, period_to, submission (D394Submission), dest_path
+   */
+  exportD394Official: (
+    companyId: string,
+    periodFrom: string,
+    periodTo: string,
+    destPath: string,
+    submission: D394Submission,
+  ) =>
+    invoke<string>("export_d394_official", {
+      companyId,
+      periodFrom,
+      periodTo,
+      submission,
+      destPath,
+    }),
 };
 
 // ─── Jurnale contabile ────────────────────────────────────────────────────
@@ -650,6 +722,7 @@ export const api = {
   declarations,
   feedback,
   gdpr,
+  gl,
   importData,
   integrations,
   invoices,

@@ -13,6 +13,8 @@ import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 
+// SaftView uses legacy export_saft_d406 (returns XML string) + new export_saft_official (writes file, returns path).
+
 const MONTHS = [
   "Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
   "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie",
@@ -26,7 +28,8 @@ interface Props {
 
 export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Props) {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
-  const [exporting, setExporting] = useState(false);
+  const [exporting,         setExporting]         = useState(false);
+  const [exportingOfficial, setExportingOfficial] = useState(false);
 
   const monthName = MONTHS[selectedMonth - 1] ?? String(selectedMonth);
 
@@ -58,6 +61,33 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
     }
   };
 
+  const handleExportOfficial = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    const mm = String(selectedMonth).padStart(2, "0");
+    const savePath = await saveDialog({
+      title:       "Salvează D406 oficial ANAF",
+      defaultPath: `d406-oficial-${selectedYear}-${mm}.xml`,
+      filters:     [{ name: "XML", extensions: ["xml"] }],
+    });
+    if (!savePath) return;
+    setExportingOfficial(true);
+    try {
+      // export_saft_official takes params wrapper: { companyId, year, month, destPath }
+      const saved = await api.saft.exportSaftOfficial(
+        activeCompanyId,
+        selectedYear,
+        selectedMonth,
+        savePath,
+      );
+      notify.success(`D406 oficial salvat: ${saved}`);
+      try { await openPath(saved); } catch { /* reveal best-effort */ }
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut exporta D406 oficial."));
+    } finally {
+      setExportingOfficial(false);
+    }
+  };
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20, alignItems: "start" }}>
       {/* Info card */}
@@ -85,18 +115,29 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
       <SectionCard icon="download" title="Generează SAF-T">
         <div style={{ padding: "4px 16px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ fontSize: 13, color: "var(--rf-text-muted)", lineHeight: 1.5 }}>
-            Exportă SAF-T D406 XML pentru <b>{monthName} {selectedYear}</b>.
-            Această versiune acoperă jurnalul de vânzări (facturi emise).
+            Exportă SAF-T D406 pentru <b>{monthName} {selectedYear}</b>.
           </div>
+          {/* Legacy preview */}
           <Btn
-            variant="primary"
+            variant="secondary"
             icon="xml"
             block
             disabled={exporting || !activeCompanyId}
             onClick={() => void handleExport()}
-            title={`SAF-T D406 — standard ANAF de audit fiscal pentru ${monthName} ${selectedYear}`}
+            title={`SAF-T D406 preview (facturi emise) pentru ${monthName} ${selectedYear}`}
           >
-            {exporting ? "Export în curs…" : `Export SAF-T D406 (XML) ${monthName} ${selectedYear}`}
+            {exporting ? "Export în curs…" : `Extract SAF-T (preview) ${monthName} ${selectedYear}`}
+          </Btn>
+          {/* Official D406 */}
+          <Btn
+            variant="primary"
+            icon="anaf"
+            block
+            disabled={exportingOfficial || !activeCompanyId}
+            onClick={() => void handleExportOfficial()}
+            title={`Export D406 oficial ANAF (schema completă + GL) pentru ${monthName} ${selectedYear}`}
+          >
+            {exportingOfficial ? "Export D406 în curs…" : `Export oficial D406 ${monthName} ${selectedYear}`}
           </Btn>
         </div>
       </SectionCard>

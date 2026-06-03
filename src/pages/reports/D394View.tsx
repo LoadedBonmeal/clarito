@@ -10,11 +10,14 @@ import { openPath } from "@tauri-apps/plugin-opener";
 
 import { SectionCard, Btn, Banner, Badge } from "@/components/rf";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import { D394SubmissionModal } from "@/components/modals/D394SubmissionModal";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
+import { queryKeys } from "@/lib/queries";
+import type { D394Submission } from "@/types";
 
 interface Props {
   dateFrom: string;
@@ -23,10 +26,19 @@ interface Props {
 
 export function D394View({ dateFrom, dateTo }: Props) {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
-  const [exporting, setExporting] = useState(false);
+  const [exporting,         setExporting]         = useState(false);
+  const [exportingOfficial, setExportingOfficial] = useState(false);
+  const [showD394Modal,     setShowD394Modal]     = useState(false);
 
   const periodFrom = dateFrom;
   const periodTo   = dateTo;
+
+  // Fetch active company for pre-filling submission modal.
+  const { data: activeCompany } = useQuery({
+    queryKey: queryKeys.companies.detail(activeCompanyId ?? ""),
+    queryFn: () => api.companies.get(activeCompanyId!),
+    enabled: !!activeCompanyId,
+  });
 
   const {
     data:    report,
@@ -48,7 +60,7 @@ export function D394View({ dateFrom, dateTo }: Props) {
       return;
     }
     const savePath = await saveDialog({
-      title:       "Salvează D394 XML",
+      title:       "Salvează D394 XML (extract)",
       defaultPath: `d394-${periodFrom}-${periodTo}.xml`,
       filters:     [{ name: "XML", extensions: ["xml"] }],
     });
@@ -56,12 +68,38 @@ export function D394View({ dateFrom, dateTo }: Props) {
     setExporting(true);
     try {
       const saved = await api.d394.export(activeCompanyId, periodFrom, periodTo, savePath);
-      notify.success(`D394 XML salvat: ${saved}`);
+      notify.success(`D394 extract salvat: ${saved}`);
       try { await openPath(saved); } catch { /* reveal best-effort */ }
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut exporta D394."));
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handleExportOfficial = async (submission: D394Submission) => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    const savePath = await saveDialog({
+      title:       "Salvează D394 oficial ANAF (XML)",
+      defaultPath: `d394-oficial-${periodFrom}-${periodTo}.xml`,
+      filters:     [{ name: "XML", extensions: ["xml"] }],
+    });
+    if (!savePath) return;
+    setExportingOfficial(true);
+    try {
+      const saved = await api.d394.exportD394Official(
+        activeCompanyId,
+        periodFrom,
+        periodTo,
+        savePath,
+        submission,
+      );
+      notify.success(`D394 oficial salvat: ${saved}`);
+      try { await openPath(saved); } catch { /* reveal best-effort */ }
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut exporta D394 oficial."));
+    } finally {
+      setExportingOfficial(false);
     }
   };
 
@@ -77,15 +115,28 @@ export function D394View({ dateFrom, dateTo }: Props) {
         icon="declaration"
         title="D394 — Declarație informativă livrări / achiziții pe partener"
         actions={
-          <Btn
-            variant="secondary"
-            size="sm"
-            icon="xml"
-            disabled={exporting || !activeCompanyId}
-            onClick={() => void handleExport()}
-          >
-            {exporting ? "Export…" : "Export XML"}
-          </Btn>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn
+              variant="secondary"
+              size="sm"
+              icon="xml"
+              disabled={exporting || !activeCompanyId}
+              onClick={() => void handleExport()}
+              title="Export extract D394 (document de lucru)"
+            >
+              {exporting ? "Export…" : "Extract XML"}
+            </Btn>
+            <Btn
+              variant="primary"
+              size="sm"
+              icon="anaf"
+              disabled={exportingOfficial || !activeCompanyId || !activeCompany}
+              onClick={() => setShowD394Modal(true)}
+              title="Export D394 conform schemei oficiale ANAF v5"
+            >
+              {exportingOfficial ? "Export…" : "Export oficial ANAF"}
+            </Btn>
+          </div>
         }
       >
         {isLoading ? (
@@ -194,6 +245,15 @@ export function D394View({ dateFrom, dateTo }: Props) {
             </div>
           )}
         </SectionCard>
+      )}
+      {/* D394 Submission Modal (export oficial) */}
+      {activeCompany && (
+        <D394SubmissionModal
+          open={showD394Modal}
+          onOpenChange={setShowD394Modal}
+          company={activeCompany}
+          onSubmit={(sub) => void handleExportOfficial(sub)}
+        />
       )}
     </div>
   );
