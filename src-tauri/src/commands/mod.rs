@@ -13,6 +13,7 @@ pub mod d394;
 pub mod declarations;
 pub mod feedback;
 pub mod gdpr;
+pub mod gl;
 pub mod import;
 pub mod integrations;
 pub mod invoices;

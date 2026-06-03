@@ -425,6 +425,9 @@ pub fn run() {
             commands::accounts::update_account,
             commands::accounts::delete_account,
             commands::accounts::seed_standard_accounts,
+            // GL auto-posting engine (Phase 5a)
+            commands::gl::generate_gl_entries,
+            commands::gl::reconcile_gl,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

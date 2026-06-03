@@ -78,6 +78,90 @@ pub struct D300Report {
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
+// ── Shared D300 VAT core (used by compute_d300 + gl::reconcile) ──────────────
+
+/// Computează totalul TVA colectat + deductibil din sursele primare pentru o
+/// perioadă, fără niciun override.  Aceasta este sursa unică de adevăr la care
+/// trebuie să se raporteze atât `compute_d300` cât și `reconcile` din GL.
+///
+/// Returnează `(collected_ron, deductible_ron)` rotunjite la 2 zecimale.
+pub(crate) async fn d300_vat_totals(
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> crate::error::AppResult<(Decimal, Decimal)> {
+    // ── TVA colectată: Σvat_amount din liniile facturilor emise (VALIDATED+STORNED) ──
+    let sales_rows = sqlx::query(
+        "SELECT l.vat_amount, COALESCE(i.currency,'RON') as currency, i.exchange_rate \
+         FROM invoice_line_items l \
+         JOIN invoices i ON i.id = l.invoice_id \
+         WHERE i.company_id = ?1 \
+           AND i.status IN ('VALIDATED','STORNED') \
+           AND i.issue_date >= ?2 \
+           AND i.issue_date <= ?3",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_all(pool)
+    .await
+    .map_err(crate::error::AppError::Database)?;
+
+    let mut collected = Decimal::ZERO;
+    for row in &sales_rows {
+        let vat_s: String = row.try_get("vat_amount").unwrap_or_default();
+        let currency: String = row
+            .try_get("currency")
+            .unwrap_or_else(|_| "RON".to_string());
+        let fx = parse_rate(
+            row.try_get::<Option<f64>, _>("exchange_rate")
+                .unwrap_or(None),
+        );
+        collected += amount_to_ron(
+            Decimal::from_str(&vat_s).unwrap_or(Decimal::ZERO),
+            &currency,
+            fx,
+        );
+    }
+
+    // ── TVA deductibilă: Σvat_amount din received_invoice_vat_lines ──
+    let purch_rows = sqlx::query(
+        "SELECT vl.vat_amount, COALESCE(ri.currency,'RON') as currency, ri.exchange_rate \
+         FROM received_invoice_vat_lines vl \
+         JOIN received_invoices ri ON ri.id = vl.received_invoice_id \
+         WHERE ri.company_id = ?1 \
+           AND ri.issue_date >= ?2 \
+           AND ri.issue_date <= ?3 \
+           AND ri.status != 'REJECTED'",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_all(pool)
+    .await
+    .map_err(crate::error::AppError::Database)?;
+
+    let mut deductible = Decimal::ZERO;
+    for row in &purch_rows {
+        let vat_s: String = row.try_get("vat_amount").unwrap_or_default();
+        let currency: String = row
+            .try_get("currency")
+            .unwrap_or_else(|_| "RON".to_string());
+        let fx = parse_rate(
+            row.try_get::<Option<f64>, _>("exchange_rate")
+                .unwrap_or(None),
+        );
+        deductible += amount_to_ron(
+            Decimal::from_str(&vat_s).unwrap_or(Decimal::ZERO),
+            &currency,
+            fx,
+        );
+    }
+
+    Ok((collected.round_dp(2), deductible.round_dp(2)))
+}
+
 /// Calculează decontul D300 (TVA colectat — vânzări + TVA deductibil — achiziții)
 /// pentru o companie și o perioadă.
 ///
