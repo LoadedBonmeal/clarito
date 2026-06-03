@@ -92,7 +92,7 @@ rust_decimal_macros = "1"
 rand = "0.8"
 
 # PDF generation
-printpdf = "0.7"
+printpdf = { version = "0.7", features = ["embedded_images"] }
 
 # Error handling
 thiserror = "2"

@@ -199,6 +199,12 @@ export function SettingsPage() {
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
 
+  // Invoice template
+  const [templatePreset, setTemplatePreset] = useState("clasic");
+  const [templateAccent, setTemplateAccent] = useState("#000000");
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateSaved, setTemplateSaved] = useState(false);
+
   // SmartBill
   const [smartbillUser, setSmartbillUser] = useState("");
   const [smartbillToken, setSmartbillToken] = useState("");
@@ -238,6 +244,18 @@ export function SettingsPage() {
       } catch {
         setAnafHasSecret(false);
       }
+    })();
+  }, []);
+
+  // Load invoice template settings on mount
+  useEffect(() => {
+    void (async () => {
+      const [preset, accent] = await Promise.all([
+        api.settings.get("invoice_template_preset"),
+        api.settings.get("invoice_template_accent"),
+      ]);
+      if (preset) setTemplatePreset(preset);
+      if (accent) setTemplateAccent(accent);
     })();
   }, []);
 
@@ -333,6 +351,22 @@ export function SettingsPage() {
       notify.error("Eroare la salvare credențiale SmartBill.");
     } finally {
       setSavingSmartbill(false);
+    }
+  };
+
+  const handleSaveTemplate = async () => {
+    setSavingTemplate(true);
+    try {
+      await Promise.all([
+        api.settings.set("invoice_template_preset", templatePreset),
+        api.settings.set("invoice_template_accent", templateAccent),
+      ]);
+      setTemplateSaved(true);
+      setTimeout(() => setTemplateSaved(false), 3000);
+    } catch (e) {
+      notify.error(formatError(e, "Eroare la salvarea șablonului de factură."));
+    } finally {
+      setSavingTemplate(false);
     }
   };
 
@@ -469,6 +503,56 @@ export function SettingsPage() {
                 </SettingRow>
               </>
             )}
+          </div>
+        </SectionCard>
+
+        {/* ── Șablon factură (PDF) ── */}
+        <SectionCard icon="file" title="Șablon factură (PDF)" subtitle="Aspectul vizual al PDF-ului generat">
+          <div style={{ padding: "0 24px 16px" }}>
+            <SettingRow label="Preset" desc="Definește elementele colorate în PDF.">
+              <Select
+                value={templatePreset}
+                onChange={(e) => setTemplatePreset(e.target.value)}
+                style={{ minWidth: 180 }}
+              >
+                <option value="clasic">Clasic (negru, implicit)</option>
+                <option value="modern">Modern (accent pe titlu, secțiuni, linii)</option>
+                <option value="minimal">Minimal (accent doar pe titlu)</option>
+              </Select>
+            </SettingRow>
+            <SettingRow label="Culoare accent" desc="Aplicată conform preset-ului ales (#RRGGBB)." last>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <input
+                  type="color"
+                  value={templateAccent}
+                  onChange={(e) => setTemplateAccent(e.target.value)}
+                  style={{ width: 48, height: 32, padding: 2, border: "1px solid var(--rf-border)", borderRadius: 6, cursor: "pointer" }}
+                  title="Selectați culoarea accent"
+                />
+                <Input
+                  className="rf-mono"
+                  value={templateAccent}
+                  onChange={(e) => setTemplateAccent(e.target.value)}
+                  style={{ width: 110 }}
+                  placeholder="#000000"
+                />
+              </div>
+            </SettingRow>
+            <div style={{ paddingTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
+              <Btn
+                variant="primary"
+                size="sm"
+                disabled={savingTemplate}
+                onClick={() => void handleSaveTemplate()}
+              >
+                {savingTemplate ? "Se salvează…" : "Salvează"}
+              </Btn>
+              {templateSaved && (
+                <span style={{ fontSize: 12, color: "var(--rf-success)" }}>
+                  <Icon name="checkCircle" size={14} /> Salvat
+                </span>
+              )}
+            </div>
           </div>
         </SectionCard>
 
