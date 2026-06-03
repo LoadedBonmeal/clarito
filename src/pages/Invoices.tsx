@@ -399,6 +399,20 @@ export function InvoicesPage() {
     return m;
   }, [contacts]);
 
+  // Fetch payment status (PAID/PARTIAL/UNPAID) for the period-close view.
+  // Backend list_payment_summaries computes this in 2 queries (no N+1).
+  const { data: paymentSummaries = [] } = useQuery({
+    queryKey: ["payments", "summaries", activeCompanyId ?? ""],
+    queryFn: () => api.payments.listSummaries(activeCompanyId!),
+    enabled: !!activeCompanyId,
+  });
+
+  const paymentStatusMap = useMemo(() => {
+    const m = new Map<string, "UNPAID" | "PARTIAL" | "PAID">();
+    for (const s of paymentSummaries) m.set(s.invoiceId, s.paymentStatus);
+    return m;
+  }, [paymentSummaries]);
+
   const allInvoices = paged?.items ?? [];
   const totalCount = paged?.total ?? 0;
 
@@ -931,6 +945,7 @@ export function InvoicesPage() {
                   <th className="right" style={{ width: 130 }}>{t("invoices.columns.total")}</th>
                   <th style={{ width: 80 }}>Monedă</th>
                   <th style={{ width: 130 }}>{t("invoices.columns.status")}</th>
+                  <th style={{ width: 120 }}>Plată</th>
                   <th style={{ width: 90 }}></th>
                 </tr>
               </thead>
@@ -944,6 +959,13 @@ export function InvoicesPage() {
                 {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                   const inv = list[virtualRow.index];
                   const client = contactMap.get(inv.contactId);
+                  const payApplicable = inv.status !== "DRAFT" && inv.status !== "STORNED";
+                  const payStatus = paymentStatusMap.get(inv.id) ?? "UNPAID";
+                  const payCfg = payStatus === "PAID"
+                    ? { v: "success" as const, l: "Încasată" }
+                    : payStatus === "PARTIAL"
+                      ? { v: "warning" as const, l: "Parțial" }
+                      : { v: "neutral" as const, l: "Neîncasată" };
                   return (
                     <tr
                       key={inv.id}
@@ -1003,6 +1025,11 @@ export function InvoicesPage() {
                       </td>
                       <td>
                         <StatusBadge status={inv.status} />
+                      </td>
+                      <td>
+                        {payApplicable
+                          ? <Badge variant={payCfg.v}>{payCfg.l}</Badge>
+                          : <span style={{ color: "var(--rf-text-dim)" }}>—</span>}
                       </td>
                       <td
                         style={{ position: "relative" }}
@@ -1070,7 +1097,7 @@ export function InvoicesPage() {
                   <td className="right" style={{ fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums" }}>
                     {fmtRON(totTotal)}
                   </td>
-                  <td colSpan={3} style={{ color: "var(--rf-text-dim)", fontSize: 12, fontWeight: 400 }}>RON</td>
+                  <td colSpan={4} style={{ color: "var(--rf-text-dim)", fontSize: 12, fontWeight: 400 }}>RON</td>
                 </tr>
               </tfoot>
             </table>
