@@ -669,6 +669,34 @@ pub async fn export_d300_official(
     Ok(dest)
 }
 
+/// Pre-export validation — runs pure-Rust checks and returns friendly Romanian
+/// messages for the most common DUKIntegrator-fatal issues.
+///
+/// `kind` is one of: `"D300"`, `"D394"`, `"D406"` (or `"SAFT"` as alias).
+/// Anything unrecognised defaults to `D300`.
+#[tauri::command]
+pub async fn preflight_declaration(
+    state: State<'_, AppState>,
+    company_id: String,
+    kind: String,
+    period_from: String,
+    period_to: String,
+) -> AppResult<Vec<crate::anaf_decl::preflight::PreflightIssue>> {
+    let decl_kind = match kind.to_uppercase().as_str() {
+        "D394" => DeclKind::D394,
+        "D406" | "SAFT" => DeclKind::D406,
+        _ => DeclKind::D300, // "D300" or anything unrecognised
+    };
+    crate::anaf_decl::preflight::preflight(
+        &state.db,
+        &company_id,
+        decl_kind,
+        &period_from,
+        &period_to,
+    )
+    .await
+}
+
 /// Escapes XML special characters in a string value.
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")

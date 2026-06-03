@@ -389,6 +389,7 @@ pub fn run() {
             commands::declarations::compute_d300,
             commands::declarations::export_d300,
             commands::declarations::export_d300_official,
+            commands::declarations::preflight_declaration,
             // d394 — livrări/achiziții pe teritoriul național
             commands::d394::compute_d394,
             commands::d394::export_d394,

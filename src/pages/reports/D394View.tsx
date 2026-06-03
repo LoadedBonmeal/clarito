@@ -10,6 +10,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 
 import { SectionCard, Btn, Banner, Badge } from "@/components/rf";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { D394SubmissionModal } from "@/components/modals/D394SubmissionModal";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -51,6 +52,14 @@ export function D394View({ dateFrom, dateTo }: Props) {
     queryFn:  () => api.d394.compute(activeCompanyId!, periodFrom, periodTo),
     enabled:  !!activeCompanyId && !!periodFrom && !!periodTo,
     staleTime: 60_000,
+  });
+
+  // ── Pre-export validation (preflight) ──────────────────────────────────────
+  const { data: preflightIssues = [] } = useQuery({
+    queryKey: ["preflight", "d394", activeCompanyId ?? "", periodFrom, periodTo],
+    queryFn: () => api.declarations.preflight(activeCompanyId!, "D394", periodFrom, periodTo),
+    enabled: !!activeCompanyId && !!periodFrom && !!periodTo,
+    staleTime: 30_000,
   });
 
   const handleExport = async () => {
@@ -110,6 +119,9 @@ export function D394View({ dateFrom, dateTo }: Props) {
 
   return (
     <div className="rf-col">
+      {/* ── Preflight validation panel ────────────────────────────────── */}
+      <PreflightPanel issues={preflightIssues} />
+
       {/* ── Livrări (vânzări) ──────────────────────────────────────────── */}
       <SectionCard
         icon="declaration"

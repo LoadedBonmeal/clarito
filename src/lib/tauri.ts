@@ -514,6 +514,14 @@ export const gl = {
 
 // ─── Declarations (D300) ──────────────────────────────────────────────────
 
+/** A single pre-export validation finding from the Rust preflight engine. */
+export interface PreflightIssue {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  hint: string;
+}
+
 export const declarations = {
   /** Calculează decontul D300 — TVA colectat (vânzări) pentru o perioadă. */
   compute: (companyId: string, periodFrom: string, periodTo: string) =>
@@ -557,6 +565,23 @@ export const declarations = {
       periodTo,
       submission,
       destPath,
+    }),
+  /**
+   * Pre-export validation — runs pure-Rust checks and returns friendly Romanian
+   * messages for common DUKIntegrator-fatal issues.
+   * `kind` is one of: "D300", "D394", "D406".
+   */
+  preflight: (
+    companyId: string,
+    kind: string,
+    periodFrom: string,
+    periodTo: string,
+  ) =>
+    invoke<PreflightIssue[]>("preflight_declaration", {
+      companyId,
+      kind,
+      periodFrom,
+      periodTo,
     }),
 };
 
