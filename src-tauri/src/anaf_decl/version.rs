@@ -59,19 +59,23 @@ pub fn schema_versions() -> Vec<SchemaVersion> {
             decl: DeclKind::D394,
             valid_from: d(2022, 1, 1),
             valid_to: None,
-            namespace: "mfp:anaf:dgti:d394:declaratie:v4",
+            // Verified against the official XSD (sample_d394.xml targetNamespace):
+            // the current schema is v5, not v4.
+            namespace: "mfp:anaf:dgti:d394:declaratie:v5",
             root_element: "declaratie394",
-            schema_label: "D394 v4 (OPANAF 77/2022)",
+            schema_label: "D394 v5 (informatii/rezumat1/rezumat2/op1/op2/op11)",
             duk_type: "D394",
         },
-        // ── SAF-T D406 (OECD-derived) ──────────────────────────────────────
+        // ── SAF-T D406 ─────────────────────────────────────────────────────
         SchemaVersion {
             decl: DeclKind::D406,
             valid_from: d(2022, 1, 1),
             valid_to: None,
-            namespace: "urn:StandardAuditFile-Taxation-Financial:RO",
+            // Verified against Ro_SAFT_Schema_v249 targetNamespace — the ANAF
+            // wrapper namespace, NOT the bare OECD urn. Root element is AuditFile.
+            namespace: "mfp:anaf:dgti:d406t:declaratie:v1",
             root_element: "AuditFile",
-            schema_label: "SAF-T RO v2.4.9 (2025)",
+            schema_label: "SAF-T RO v2.4.9 (d406t:v1)",
             duk_type: "D406",
         },
     ]

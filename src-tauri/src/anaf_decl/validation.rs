@@ -96,6 +96,52 @@ pub fn validate_with_duk(decl: DeclKind, xml_path: &Path) -> AppResult<DukResult
     Ok(DukResult { passed, errors })
 }
 
+/// True if the libxml2 `xmllint` CLI is available (ships with macOS/most Linux;
+/// no Java needed). This is the PRIMARY automatable structural-conformance gate:
+/// D300/D394/SAF-T all publish a real XSD, so `xmllint --schema` enforces the
+/// namespace, required attributes, enums, and type patterns. DUKIntegrator adds
+/// ANAF business rules on top but is harder to drive headlessly.
+pub fn xmllint_available() -> bool {
+    Command::new("xmllint")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Validate `xml_path` against the XSD at `xsd_path` via `xmllint --schema`.
+/// `passed` is true iff xmllint exits 0 (schema-valid); libxml validity/parser
+/// error lines are collected into `errors`.
+pub fn validate_with_xsd(xsd_path: &Path, xml_path: &Path) -> AppResult<DukResult> {
+    let output = Command::new("xmllint")
+        .arg("--noout")
+        .arg("--schema")
+        .arg(xsd_path)
+        .arg(xml_path)
+        .output()
+        .map_err(|e| AppError::Other(format!("Failed to launch xmllint: {e}")))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let errors: Vec<String> = stderr
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| {
+            let lower = l.to_lowercase();
+            !l.is_empty()
+                && (lower.contains("validity error")
+                    || lower.contains("schemas validity")
+                    || lower.contains("parser error")
+                    || lower.contains("fails to validate"))
+        })
+        .map(|l| l.to_string())
+        .collect();
+
+    Ok(DukResult {
+        passed: output.status.success() && errors.is_empty(),
+        errors,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +151,10 @@ mod tests {
         // We do not assert the value — a dev may or may not have the jar configured.
         // This test just ensures the function compiles and runs without panicking.
         let _ = duk_available();
+    }
+
+    #[test]
+    fn xmllint_available_does_not_panic() {
+        let _ = xmllint_available();
     }
 }
