@@ -9,6 +9,17 @@
 //!
 //! On a machine/CI that has both, this is the proof that the generated XML is
 //! structurally conformant with the official ANAF D394 v5 schema.
+//!
+//! All partner CUIs use valid checksums (CUI mod-11):
+//!   12345674 — company / cif_intocmit
+//!   98765438 — sales partner 1
+//!   87654329 — sales partner 2
+//!   76543210 — sales reverse-charge partner (AE → V)
+//!   11111110 — purchase standard partner
+//!   22222229 — purchase reverse-charge partner (AE → C, cota=19)
+//! Foreign partners use EU VAT prefix (→ tip_partener=4):
+//!   DE123456789 — intra-EU sale (K → LS, tp=4)
+//!   FR55512345  — intra-EU purchase (K → C, tp=4)
 
 use std::path::Path;
 
@@ -26,7 +37,8 @@ use efactura_desktop_lib::db::companies::Company;
 fn test_company() -> Company {
     Company {
         id: "test-co-id".to_string(),
-        cui: "RO12345678".to_string(),
+        // Valid CUI checksum: 12345674
+        cui: "RO12345674".to_string(),
         legal_name: "CLARITO TEST SRL".to_string(),
         trade_name: None,
         registry_number: Some("J40/1234/2020".to_string()),
@@ -54,8 +66,7 @@ fn test_submission() -> D394Submission {
     D394Submission {
         tip_d394: "L".to_string(),
         sistem_tva: false,
-        // op_efectuate=true: the test report has partners so op1 sections are emitted;
-        // DUK rule R214.1 requires op_efectuate=1 whenever op1 data is present.
+        // op_efectuate=true: test report has partners
         op_efectuate: true,
         caen: "6201".to_string(),
         telefon: "0721000000".to_string(),
@@ -64,7 +75,8 @@ fn test_submission() -> D394Submission {
         adresa_r: "Calea Victoriei 155, Bucuresti, IF".to_string(),
         tip_intocmit: 0,
         den_intocmit: "POPESCU ION".to_string(),
-        cif_intocmit: 12345678,
+        // Valid CUI checksum: 12345674
+        cif_intocmit: 12345674,
         calitate_intocmit: Some("Reprezentant".to_string()),
         optiune: false,
         prs_afiliat: false,
@@ -73,15 +85,16 @@ fn test_submission() -> D394Submission {
 }
 
 /// A realistic D394Report with multiple partner categories.
+/// All RO CUIs use valid mod-11 checksums.
 fn test_report() -> D394Report {
     D394Report {
-        company_cui: "RO12345678".to_string(),
+        company_cui: "RO12345674".to_string(),
         period_from: "2025-09-01".to_string(),
         period_to: "2025-09-30".to_string(),
         partners: vec![
-            // Standard 19% sales to a VAT-registered RO company
+            // Standard 19% sales to a VAT-registered RO company (valid CUI: 98765438)
             D394Partner {
-                partner_cui: "RO98765432".to_string(),
+                partner_cui: "RO98765438".to_string(),
                 partner_name: "SC CLIENT MARE SRL".to_string(),
                 vat_category: "S".to_string(),
                 vat_rate: "19".to_string(),
@@ -89,9 +102,9 @@ fn test_report() -> D394Report {
                 base: "10000.00".to_string(),
                 vat: "1900.00".to_string(),
             },
-            // Standard 21% sales (pre-2025 rate) to another company
+            // Standard 21% sales (valid CUI: 87654329)
             D394Partner {
-                partner_cui: "RO87654321".to_string(),
+                partner_cui: "RO87654329".to_string(),
                 partner_name: "SC CLIENT MIC SRL".to_string(),
                 vat_category: "S".to_string(),
                 vat_rate: "21".to_string(),
@@ -99,17 +112,17 @@ fn test_report() -> D394Report {
                 base: "5000.00".to_string(),
                 vat: "1050.00".to_string(),
             },
-            // Reverse-charge domestic (AE) delivery → tip=V
+            // Reverse-charge domestic (AE) delivery → tip=V (valid CUI: 76543210)
             D394Partner {
                 partner_cui: "RO76543210".to_string(),
-                partner_name: "SC CONSTRUCȚII SRL".to_string(),
+                partner_name: "SC CONSTRUCTII SRL".to_string(),
                 vat_category: "AE".to_string(),
                 vat_rate: "0".to_string(),
                 invoice_count: 1,
                 base: "3000.00".to_string(),
                 vat: "0.00".to_string(),
             },
-            // Intra-EU delivery (K) → tip=LS
+            // Intra-EU delivery (K) → tip=LS, tp=4 (foreign DE partner)
             D394Partner {
                 partner_cui: "DE123456789".to_string(),
                 partner_name: "GERMAN GMBH".to_string(),
@@ -122,11 +135,12 @@ fn test_report() -> D394Report {
         ],
         total_base: "20000.00".to_string(),
         total_vat: "2950.00".to_string(),
+        // invoice_count = total sales invoices reported in informatii.nrFacturi
         invoice_count: 9,
         purchase_partners: vec![
-            // Standard 19% purchases
+            // Standard 19% purchases (valid CUI: 11111110)
             D394Partner {
-                partner_cui: "RO11111111".to_string(),
+                partner_cui: "RO11111110".to_string(),
                 partner_name: "SC FURNIZOR MARE SRL".to_string(),
                 vat_category: "S".to_string(),
                 vat_rate: "19".to_string(),
@@ -134,17 +148,17 @@ fn test_report() -> D394Report {
                 base: "8000.00".to_string(),
                 vat: "1520.00".to_string(),
             },
-            // Reverse-charge domestic purchase (AE) → tip=C
+            // Reverse-charge domestic purchase (AE) → tip=C cota=19 (valid CUI: 22222229)
             D394Partner {
-                partner_cui: "RO22222222".to_string(),
+                partner_cui: "RO22222229".to_string(),
                 partner_name: "SC CONSTRUCTORI SRL".to_string(),
                 vat_category: "AE".to_string(),
-                vat_rate: "0".to_string(),
+                vat_rate: "19".to_string(),
                 invoice_count: 1,
                 base: "2000.00".to_string(),
-                vat: "0.00".to_string(),
+                vat: "380.00".to_string(),
             },
-            // Intra-EU acquisition (K) → tip=AI
+            // Intra-EU acquisition (K) from foreign EU partner → tp=4 → tip=C cota=19
             D394Partner {
                 partner_cui: "FR55512345".to_string(),
                 partner_name: "FRANCE SARL".to_string(),
@@ -156,7 +170,7 @@ fn test_report() -> D394Report {
             },
         ],
         total_purchase_base: "11000.00".to_string(),
-        total_purchase_vat: "1710.00".to_string(),
+        total_purchase_vat: "2090.00".to_string(),
         purchase_invoice_count: 5,
         purchase_unparsed_count: 0,
     }
@@ -166,8 +180,6 @@ fn test_report() -> D394Report {
 
 #[test]
 fn d394_validates_against_official_xsd() {
-    // Locate the vendored XSD (relative to `src-tauri/` crate root).
-    // `cargo test --test d394_xsd` runs with cwd = src-tauri/.
     let xsd_path = Path::new("tools/anaf/sample_d394.xml");
 
     if !xsd_path.exists() {
@@ -216,7 +228,6 @@ fn d394_validates_against_official_xsd() {
     let result = validate_with_xsd(xsd_path, &tmp)
         .expect("validate_with_xsd must not fail (xmllint must be available)");
 
-    // Print all errors for diagnosis
     if !result.passed {
         eprintln!("XSD VALIDATION FAILED:");
         for e in &result.errors {
@@ -241,7 +252,7 @@ fn d394_validates_against_official_xsd() {
 #[test]
 fn d394_empty_period_generates_valid_xml() {
     let empty_report = D394Report {
-        company_cui: "RO12345678".to_string(),
+        company_cui: "RO12345674".to_string(),
         period_from: "2025-09-01".to_string(),
         period_to: "2025-09-30".to_string(),
         partners: vec![],
@@ -264,6 +275,7 @@ fn d394_empty_period_generates_valid_xml() {
     assert_eq!(doc.total_plata_a, 0, "empty period: totalPlata_A = 0");
     assert!(doc.op1_list.is_empty(), "empty period: no op1");
     assert!(doc.rezumat1_list.is_empty(), "empty period: no rezumat1");
+    assert!(doc.rezumat2_list.is_empty(), "empty period: no rezumat2");
 
     let xml = generate_d394_xml(&doc, &sub, &co, &ver).expect("generate empty");
     assert!(xml.contains("declaratie394"), "must contain root element");
@@ -272,7 +284,10 @@ fn d394_empty_period_generates_valid_xml() {
         "must have totalPlata_A=0"
     );
     assert!(xml.contains("<informatii "), "must have informatii");
-    assert!(!xml.contains("<op1 "), "empty: no op1");
+    assert!(
+        !xml.contains("<op1 ") && !xml.contains("<op1\n"),
+        "empty: no op1"
+    );
 }
 
 /// Validate that the empty-period XML also passes the XSD (if available).
@@ -280,11 +295,11 @@ fn d394_empty_period_generates_valid_xml() {
 fn d394_empty_period_xsd_valid() {
     let xsd_path = Path::new("tools/anaf/sample_d394.xml");
     if !xsd_path.exists() || !xmllint_available() {
-        return; // skip gracefully
+        return;
     }
 
     let empty_report = D394Report {
-        company_cui: "RO12345678".to_string(),
+        company_cui: "RO12345674".to_string(),
         period_from: "2025-09-01".to_string(),
         period_to: "2025-09-30".to_string(),
         partners: vec![],
@@ -324,22 +339,19 @@ fn d394_empty_period_xsd_valid() {
     );
 }
 
-/// Totals reconciliation: totalPlata_A = nrCui1 + nrCui2 + nrCui3 + nrCui4 (control sum per spec).
+/// Totals reconciliation: totalPlata_A = nrCui1+nrCui2+nrCui3+nrCui4 + Σrezumat2.bases
 #[test]
 fn d394_totals_reconciliation() {
-    // Sales partner: RO98765432 (8 digits → tip_partener=1)
-    // Purchase partner: RO11111111 (8 digits → tip_partener=1)
-    // nrCui1 = 2 (two distinct CUIs, both tip_partener=1), nrCui2/3/4 = 0
-    // totalPlata_A = 2
     let period = chrono::NaiveDate::from_ymd_opt(2025, 9, 1).expect("test date");
     let ver = resolve(DeclKind::D394, period).expect("schema version");
 
     let report = D394Report {
-        company_cui: "RO12345678".to_string(),
+        company_cui: "RO12345674".to_string(),
         period_from: "2025-09-01".to_string(),
         period_to: "2025-09-30".to_string(),
         partners: vec![D394Partner {
-            partner_cui: "RO98765432".to_string(),
+            // Valid CUI: 98765438
+            partner_cui: "RO98765438".to_string(),
             partner_name: "SC CLIENT SRL".to_string(),
             vat_category: "S".to_string(),
             vat_rate: "19".to_string(),
@@ -351,7 +363,8 @@ fn d394_totals_reconciliation() {
         total_vat: "1900.00".to_string(),
         invoice_count: 3,
         purchase_partners: vec![D394Partner {
-            partner_cui: "RO11111111".to_string(),
+            // Valid CUI: 11111110
+            partner_cui: "RO11111110".to_string(),
             partner_name: "SC FURNIZOR SRL".to_string(),
             vat_category: "S".to_string(),
             vat_rate: "19".to_string(),
@@ -369,19 +382,29 @@ fn d394_totals_reconciliation() {
     let co = test_company();
     let doc = build_sections(&report, &sub, &co, period).unwrap();
 
-    // totalPlata_A = nrCui1(2) + nrCui2(0) + nrCui3(0) + nrCui4(0) = 2
+    // nrCui1 = 2 (98765438 + 11111110)
     assert_eq!(
         doc.informatii.nr_cui1, 2,
         "nrCui1 = 2 distinct VAT-registered CUIs"
     );
-    assert_eq!(
-        doc.total_plata_a, 2,
-        "totalPlata_A = nrCui1+nrCui2+nrCui3+nrCui4 = 2"
-    );
+
+    // totalPlata_A = nrCui1+nrCui2+nrCui3+nrCui4 + Σrezumat2(bazaL+bazaA+bazaAI)
+    let rezumat2_sum: i64 = doc
+        .rezumat2_list
+        .iter()
+        .map(|r| r.baza_l + r.baza_a + r.baza_ai)
+        .sum();
+    let expected = doc.informatii.nr_cui1
+        + doc.informatii.nr_cui2
+        + doc.informatii.nr_cui3
+        + doc.informatii.nr_cui4
+        + rezumat2_sum;
+    assert_eq!(doc.total_plata_a, expected, "totalPlata_A formula");
 
     let xml = generate_d394_xml(&doc, &sub, &co, &ver).unwrap();
+    let tp_str = format!("totalPlata_A=\"{}\"", doc.total_plata_a);
     assert!(
-        xml.contains("totalPlata_A=\"2\""),
-        "XML must reflect totalPlata_A=2"
+        xml.contains(&tp_str),
+        "XML must reflect correct totalPlata_A"
     );
 }
