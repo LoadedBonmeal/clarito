@@ -83,6 +83,10 @@ pub async fn export_saft_official(
 
     let company = companies::get(&state.db, &params.company_id).await?;
 
+    // Auto-post GL entries (idempotent) before generating the XML so that
+    // GeneralLedgerEntries is populated with the current period's data.
+    crate::db::gl::generate_gl_entries(&state.db, &params.company_id, &date_from, &date_to).await?;
+
     let xml = generate_saft_xml(&state.db, &company, &date_from, &date_to).await?;
 
     std::fs::write(&dest, xml.as_bytes())

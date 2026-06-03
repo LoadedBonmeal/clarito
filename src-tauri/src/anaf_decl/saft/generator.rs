@@ -19,8 +19,10 @@ use std::io::Cursor;
 use chrono::Local;
 use quick_xml::events::{BytesDecl, BytesStart, Event};
 use quick_xml::Writer;
+use rust_decimal::Decimal;
+use sqlx::Row;
 
-use crate::anaf_decl::saft::masterfiles::write_master_files;
+use crate::anaf_decl::saft::masterfiles::{write_amount_structure, write_master_files};
 use crate::anaf_decl::saft::source_docs::write_source_documents;
 use crate::anaf_decl::xml::{end_elem, start_elem, write_text_elem};
 use crate::db::companies::Company;
@@ -171,15 +173,254 @@ fn write_header_company(
     Ok(())
 }
 
-/// Write the empty GeneralLedgerEntries mandatory wrapper (Phase 4).
-/// All children (NumberOfEntries, TotalDebit, TotalCredit, Journal) are minOccurs=0.
-fn write_general_ledger_entries(w: &mut crate::anaf_decl::xml::XmlWriter) -> AppResult<()> {
+/// Write a fully populated GeneralLedgerEntries section from gl_journal / gl_entry.
+///
+/// XSD element order (all minOccurs=0 at the top level):
+///   NumberOfEntries, TotalDebit, TotalCredit, Journal*
+///
+/// Journal:  JournalID, Description, Type, Transaction+
+/// Transaction (xs:sequence, required unless noted):
+///   TransactionID, Period, PeriodYear, TransactionDate,
+///   [SourceID min=0], [TransactionType min=0], Description,
+///   [BatchID min=0], SystemEntryDate, GLPostingDate,
+///   CustomerID (required), SupplierID (required), [SystemID min=0], TransactionLine+
+///
+/// TransactionLine (xs:sequence, required unless noted):
+///   RecordID, AccountID, [Analysis min=0], [ValueDate min=0],
+///   [SourceDocumentID min=0], CustomerID (required), SupplierID (required),
+///   Description, DebitAmount|CreditAmount, TaxInformation+
+async fn write_general_ledger_entries(
+    w: &mut crate::anaf_decl::xml::XmlWriter,
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    date_from: &str,
+    date_to: &str,
+) -> AppResult<()> {
+    // ── 1. Fetch all journals in period ────────────────────────────────────────
+    let journal_rows = sqlx::query(
+        "SELECT id, journal_id, journal_type, transaction_id, transaction_date, \
+                COALESCE(description, '') AS description, \
+                COALESCE(customer_id, '') AS customer_id, \
+                COALESCE(supplier_id, '') AS supplier_id \
+         FROM gl_journal \
+         WHERE company_id = ?1 \
+           AND transaction_date >= ?2 \
+           AND transaction_date <= ?3 \
+         ORDER BY journal_id, transaction_date, transaction_id",
+    )
+    .bind(company_id)
+    .bind(date_from)
+    .bind(date_to)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    if journal_rows.is_empty() {
+        // No GL data — emit empty GLE (minOccurs=0 for all children)
+        start_elem(w, "GeneralLedgerEntries")?;
+        write_text_elem(w, "NumberOfEntries", "0")?;
+        write_text_elem(w, "TotalDebit", "0.00")?;
+        write_text_elem(w, "TotalCredit", "0.00")?;
+        end_elem(w, "GeneralLedgerEntries")?;
+        return Ok(());
+    }
+
+    // ── 2. Fetch all entries for those journals ───────────────────────────────
+    // Collect PKs from the fetched journals to do a targeted query
+    let journal_pks: Vec<String> = journal_rows
+        .iter()
+        .map(|r| r.try_get::<String, _>("id").unwrap_or_default())
+        .collect();
+
+    let placeholders: String = (1..=journal_pks.len())
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let entry_sql = format!(
+        "SELECT journal_pk, record_id, account_code, \
+                COALESCE(debit, '0') AS debit, COALESCE(credit, '0') AS credit, \
+                COALESCE(customer_id, '') AS customer_id, \
+                COALESCE(supplier_id, '') AS supplier_id, \
+                tax_type, tax_code, \
+                tax_percentage, tax_base, tax_amount \
+         FROM gl_entry \
+         WHERE journal_pk IN ({placeholders}) \
+         ORDER BY journal_pk, record_id"
+    );
+    let mut q = sqlx::query(&entry_sql);
+    for pk in &journal_pks {
+        q = q.bind(pk);
+    }
+    let entry_rows = q.fetch_all(pool).await.map_err(AppError::Database)?;
+
+    // ── 3. Compute totals ─────────────────────────────────────────────────────
+    let mut total_debit = Decimal::ZERO;
+    let mut total_credit = Decimal::ZERO;
+    let mut num_entries: u64 = 0;
+
+    for er in &entry_rows {
+        let d: String = er.try_get("debit").unwrap_or_else(|_| "0".to_string());
+        let c: String = er.try_get("credit").unwrap_or_else(|_| "0".to_string());
+        let dv = d.trim().parse::<Decimal>().unwrap_or(Decimal::ZERO);
+        let cv = c.trim().parse::<Decimal>().unwrap_or(Decimal::ZERO);
+        total_debit += dv;
+        total_credit += cv;
+        num_entries += 1;
+    }
+
+    // Group entries by journal_pk for fast lookup
+    use std::collections::HashMap;
+    let mut entries_by_journal: HashMap<String, Vec<&sqlx::sqlite::SqliteRow>> = HashMap::new();
+    for er in &entry_rows {
+        let jpk: String = er.try_get("journal_pk").unwrap_or_default();
+        entries_by_journal.entry(jpk).or_default().push(er);
+    }
+
+    // ── 4. Group journals by journal_id ───────────────────────────────────────
+    // journal_id = "VANZARI" / "CUMPARARI" / "BANCA" — one Journal element per
+    // unique journal_id, containing all transactions for that journal.
+    use std::collections::BTreeMap;
+    // BTreeMap preserves insertion-sorted order by journal_id
+    let mut journals_map: BTreeMap<String, Vec<&sqlx::sqlite::SqliteRow>> = BTreeMap::new();
+    for jr in &journal_rows {
+        let jid: String = jr.try_get("journal_id").unwrap_or_default();
+        journals_map.entry(jid).or_default().push(jr);
+    }
+
+    // ── 5. Emit XML ───────────────────────────────────────────────────────────
     start_elem(w, "GeneralLedgerEntries")?;
-    write_text_elem(w, "NumberOfEntries", "0")?;
-    write_text_elem(w, "TotalDebit", "0.00")?;
-    write_text_elem(w, "TotalCredit", "0.00")?;
+    write_text_elem(w, "NumberOfEntries", &num_entries.to_string())?;
+    write_text_elem(w, "TotalDebit", &format!("{:.2}", total_debit))?;
+    write_text_elem(w, "TotalCredit", &format!("{:.2}", total_credit))?;
+
+    for (journal_id, txn_rows) in &journals_map {
+        // Journal label from journal_type of first transaction
+        let journal_type: String = txn_rows
+            .first()
+            .and_then(|r| r.try_get("journal_type").ok())
+            .unwrap_or_else(|| journal_id.clone());
+
+        let journal_label = match journal_id.as_str() {
+            "VANZARI" => "Jurnal vanzari",
+            "CUMPARARI" => "Jurnal cumparari",
+            "BANCA" => "Jurnal banca",
+            other => other,
+        };
+
+        start_elem(w, "Journal")?;
+        write_text_elem(w, "JournalID", &trunc_esc(journal_id, 9))?;
+        write_text_elem(w, "Description", &trunc_esc(journal_label, 256))?;
+        write_text_elem(w, "Type", &trunc_esc(&journal_type, 9))?;
+
+        for jr in txn_rows {
+            let jpk: String = jr.try_get("id").unwrap_or_default();
+            let txn_id: String = jr.try_get("transaction_id").unwrap_or_default();
+            let txn_date: String = jr.try_get("transaction_date").unwrap_or_default();
+            let txn_desc: String = jr.try_get("description").unwrap_or_default();
+            let cust_id: String = jr.try_get("customer_id").unwrap_or_default();
+            let supp_id: String = jr.try_get("supplier_id").unwrap_or_default();
+
+            // Parse month/year from transaction_date (YYYY-MM-DD)
+            let (period, period_year) = parse_period(&txn_date);
+
+            start_elem(w, "Transaction")?;
+            write_text_elem(w, "TransactionID", &trunc_esc(&txn_id, 255))?;
+            write_text_elem(w, "Period", &period.to_string())?;
+            write_text_elem(w, "PeriodYear", &period_year.to_string())?;
+            write_text_elem(w, "TransactionDate", &txn_date)?;
+            write_text_elem(w, "Description", &trunc_esc(&txn_desc, 256))?;
+            write_text_elem(w, "SystemEntryDate", &txn_date)?;
+            write_text_elem(w, "GLPostingDate", &txn_date)?;
+            // CustomerID and SupplierID are REQUIRED in the XSD (no minOccurs=0)
+            write_text_elem(w, "CustomerID", &trunc_esc(&cust_id, 35))?;
+            write_text_elem(w, "SupplierID", &trunc_esc(&supp_id, 35))?;
+
+            // TransactionLines
+            let empty_vec: Vec<&sqlx::sqlite::SqliteRow> = Vec::new();
+            let lines = entries_by_journal.get(&jpk).unwrap_or(&empty_vec);
+
+            for er in lines {
+                let record_id: i64 = er.try_get("record_id").unwrap_or(0);
+                let account_code: String = er.try_get("account_code").unwrap_or_default();
+                let debit_s: String = er.try_get("debit").unwrap_or_else(|_| "0".to_string());
+                let credit_s: String = er.try_get("credit").unwrap_or_else(|_| "0".to_string());
+                let entry_cust: String = er.try_get("customer_id").unwrap_or_default();
+                let entry_supp: String = er.try_get("supplier_id").unwrap_or_default();
+                let tax_type: String = er.try_get("tax_type").unwrap_or_else(|_| "000".to_string());
+                let tax_code: String = er
+                    .try_get("tax_code")
+                    .unwrap_or_else(|_| "000000".to_string());
+                let tax_pct: Option<String> = er.try_get("tax_percentage").unwrap_or(None);
+                let tax_base: Option<String> = er.try_get("tax_base").unwrap_or(None);
+                let tax_amount: Option<String> = er.try_get("tax_amount").unwrap_or(None);
+
+                let dv = debit_s.trim().parse::<Decimal>().unwrap_or(Decimal::ZERO);
+                let cv = credit_s.trim().parse::<Decimal>().unwrap_or(Decimal::ZERO);
+
+                // Build line description: "account_code (debit|credit)"
+                let line_desc = format!("Cont {account_code}");
+
+                start_elem(w, "TransactionLine")?;
+                write_text_elem(w, "RecordID", &record_id.to_string())?;
+                write_text_elem(w, "AccountID", &trunc_esc(&account_code, 255))?;
+                // CustomerID / SupplierID are REQUIRED in the XSD sequence
+                write_text_elem(w, "CustomerID", &trunc_esc(&entry_cust, 35))?;
+                write_text_elem(w, "SupplierID", &trunc_esc(&entry_supp, 35))?;
+                write_text_elem(w, "Description", &trunc_esc(&line_desc, 256))?;
+
+                // xs:choice — DebitAmount | CreditAmount
+                // Emit DebitAmount when debit > 0, otherwise CreditAmount.
+                // When both are zero (shouldn't happen in balanced GL) emit CreditAmount(0).
+                if dv > Decimal::ZERO {
+                    write_amount_structure(w, "DebitAmount", dv)?;
+                } else {
+                    write_amount_structure(w, "CreditAmount", cv)?;
+                }
+
+                // TaxInformation is REQUIRED (minOccurs defaults to 1, maxOccurs=unbounded)
+                start_elem(w, "TaxInformation")?;
+                write_text_elem(w, "TaxType", &tax_type)?;
+                write_text_elem(w, "TaxCode", &tax_code)?;
+                if let Some(ref pct) = tax_pct {
+                    let pv = pct.trim().parse::<Decimal>().unwrap_or(Decimal::ZERO);
+                    write_text_elem(w, "TaxPercentage", &format!("{:.2}", pv))?;
+                }
+                if let Some(ref base) = tax_base {
+                    let bv = base.trim().parse::<Decimal>().unwrap_or(Decimal::ZERO);
+                    write_text_elem(w, "TaxBase", &format!("{:.2}", bv))?;
+                }
+                // TaxAmount is REQUIRED in TaxInformationStructure (no minOccurs=0)
+                let tax_amt_val = tax_amount
+                    .as_deref()
+                    .and_then(|s| s.trim().parse::<Decimal>().ok())
+                    .unwrap_or(Decimal::ZERO);
+                write_amount_structure(w, "TaxAmount", tax_amt_val)?;
+                end_elem(w, "TaxInformation")?;
+
+                end_elem(w, "TransactionLine")?;
+            }
+
+            end_elem(w, "Transaction")?;
+        }
+
+        end_elem(w, "Journal")?;
+    }
+
     end_elem(w, "GeneralLedgerEntries")?;
     Ok(())
+}
+
+/// Parse "YYYY-MM-DD" → (month_u32, year_i32).  Returns (1, 1970) on parse failure.
+fn parse_period(date: &str) -> (u32, i32) {
+    let parts: Vec<&str> = date.splitn(3, '-').collect();
+    if parts.len() == 3 {
+        let year = parts[0].parse::<i32>().unwrap_or(1970);
+        let month = parts[1].parse::<u32>().unwrap_or(1);
+        (month, year)
+    } else {
+        (1, 1970)
+    }
 }
 
 // ── String helpers ─────────────────────────────────────────────────────────────
@@ -222,7 +463,7 @@ pub async fn generate_saft_xml(
     // Continue using `w` via the xml helper functions by wrapping:
     write_header(&mut w, company, date_from, date_to)?;
     write_master_files(&mut w, pool, company, date_from, date_to).await?;
-    write_general_ledger_entries(&mut w)?;
+    write_general_ledger_entries(&mut w, pool, &company.id, date_from, date_to).await?;
     write_source_documents(&mut w, pool, &company.id, date_from, date_to).await?;
 
     // </AuditFile>
@@ -348,26 +589,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn empty_gl_entries_has_zero_totals() {
-        let mut w = new_writer().unwrap();
-        write_general_ledger_entries(&mut w).unwrap();
-        let xml = crate::anaf_decl::xml::finish(w).unwrap();
-        assert!(
-            xml.contains("<NumberOfEntries>0</NumberOfEntries>"),
-            "NumberOfEntries: {xml}"
-        );
-        assert!(
-            xml.contains("<TotalDebit>0.00</TotalDebit>"),
-            "TotalDebit: {xml}"
-        );
-        assert!(
-            xml.contains("<TotalCredit>0.00</TotalCredit>"),
-            "TotalCredit: {xml}"
-        );
-        assert!(
-            !xml.contains("<Journal>"),
-            "must have no Journal children: {xml}"
-        );
-    }
+    // NOTE: write_general_ledger_entries is now async and requires a pool; unit-level
+    // testing of the GLE emission is covered by the integration test in tests/saft_xsd.rs.
 }

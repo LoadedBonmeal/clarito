@@ -12,6 +12,7 @@ use std::path::Path;
 use efactura_desktop_lib::anaf_decl::saft::generator::generate_saft_xml;
 use efactura_desktop_lib::anaf_decl::validation::{validate_with_xsd, xmllint_available};
 use efactura_desktop_lib::db::companies::Company;
+use efactura_desktop_lib::db::gl::generate_gl_entries;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -111,10 +112,12 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     pool.execute(sqlx::query(
         "CREATE TABLE invoices (
             id TEXT PRIMARY KEY, company_id TEXT, contact_id TEXT,
-            series TEXT, number INTEGER, issue_date TEXT,
+            series TEXT, number INTEGER, full_number TEXT,
+            issue_date TEXT, due_date TEXT,
             subtotal_amount TEXT, vat_amount TEXT, total_amount TEXT,
             currency TEXT, exchange_rate REAL, storno_of_invoice_id TEXT,
-            status TEXT, created_at INTEGER, updated_at INTEGER
+            status TEXT, payment_means_code TEXT,
+            created_at INTEGER, updated_at INTEGER
         )",
     ))
     .await
@@ -164,6 +167,38 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
             vat_rate TEXT,
             base_amount TEXT,
             vat_amount TEXT
+        )",
+    ))
+    .await
+    .unwrap();
+
+    pool.execute(sqlx::query(
+        "CREATE TABLE gl_journal (
+            id TEXT PRIMARY KEY, company_id TEXT NOT NULL,
+            journal_id TEXT NOT NULL, journal_type TEXT NOT NULL,
+            transaction_id TEXT NOT NULL, transaction_date TEXT NOT NULL,
+            description TEXT, source_type TEXT NOT NULL, source_id TEXT NOT NULL,
+            customer_id TEXT, supplier_id TEXT,
+            created_at INTEGER NOT NULL DEFAULT 0
+        )",
+    ))
+    .await
+    .unwrap();
+
+    pool.execute(sqlx::query(
+        "CREATE UNIQUE INDEX idx_gl_journal_source ON gl_journal(company_id, source_type, source_id)",
+    ))
+    .await
+    .unwrap();
+
+    pool.execute(sqlx::query(
+        "CREATE TABLE gl_entry (
+            id TEXT PRIMARY KEY, journal_pk TEXT NOT NULL,
+            record_id INTEGER NOT NULL, account_code TEXT NOT NULL,
+            debit TEXT NOT NULL DEFAULT '0.00', credit TEXT NOT NULL DEFAULT '0.00',
+            partner_cui TEXT, customer_id TEXT, supplier_id TEXT,
+            tax_type TEXT, tax_code TEXT,
+            tax_percentage TEXT, tax_base TEXT, tax_amount TEXT
         )",
     ))
     .await
@@ -242,8 +277,12 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .unwrap();
 
     // ── Seed invoices ──────────────────────────────────────────────────────────
+    // Columns: id, company_id, contact_id, series, number, full_number,
+    //          issue_date, due_date, subtotal_amount, vat_amount, total_amount,
+    //          currency, exchange_rate, storno_of_invoice_id, status,
+    //          payment_means_code, created_at, updated_at
     sqlx::query(
-        "INSERT INTO invoices VALUES ('inv-1',?,'cust-1','F',1,'2025-01-15','1000.00','190.00','1190.00','RON',NULL,NULL,'VALIDATED',0,0)",
+        "INSERT INTO invoices VALUES ('inv-1',?,'cust-1','F',1,'F-0001','2025-01-15','2025-02-15','1000.00','190.00','1190.00','RON',NULL,NULL,'VALIDATED','42',0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -258,7 +297,7 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO invoices VALUES ('inv-2',?,'cust-1','F',2,'2025-01-20','500.00','0.00','500.00','RON',NULL,NULL,'VALIDATED',0,0)",
+        "INSERT INTO invoices VALUES ('inv-2',?,'cust-1','F',2,'F-0002','2025-01-20','2025-02-20','500.00','0.00','500.00','RON',NULL,NULL,'VALIDATED','42',0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -272,11 +311,19 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .await
     .unwrap();
 
-    // ── Seed received invoices ─────────────────────────────────────────────────
+    // ── Seed received invoices + VAT lines ────────────────────────────────────
     sqlx::query(
         "INSERT INTO received_invoices VALUES ('recv-1',?,'DL-1',NULL,'RO11223344','FIRMA FURNIZOR SRL','FACT','001','595.00','500.00','95.00','RON',NULL,'2025-01-10','','NULL','APPROVED',0,0)",
     )
     .bind(&company.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // VAT line for the purchase invoice so GL posting works
+    sqlx::query(
+        "INSERT INTO received_invoice_vat_lines VALUES ('rvl-1','recv-1','S','19','500.00','95.00')",
+    )
     .execute(&pool)
     .await
     .unwrap();
@@ -318,6 +365,11 @@ async fn saft_d406_validates_against_official_xsd() {
 
     let company = test_company();
     let pool = setup_test_pool(&company).await;
+
+    // Auto-post GL entries (idempotent) — populates gl_journal / gl_entry
+    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31")
+        .await
+        .expect("generate_gl_entries must not fail");
 
     let xml = generate_saft_xml(&pool, &company, "2025-01-01", "2025-01-31")
         .await
@@ -519,22 +571,86 @@ async fn saft_d406_source_documents_have_invoices() {
 }
 
 #[tokio::test]
-async fn saft_d406_gl_entries_empty() {
+async fn saft_d406_gl_entries_populated_and_balanced() {
+    let xsd_path = Path::new("tools/anaf/Ro_SAFT_Schema_v249.xsd");
+
     let company = test_company();
     let pool = setup_test_pool(&company).await;
+
+    // Post GL entries for the seeded data
+    let gl_result = generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31")
+        .await
+        .expect("generate_gl_entries must succeed");
+
+    eprintln!("GL post result: {gl_result:?}");
+    assert!(
+        gl_result.journals_inserted > 0,
+        "Expected at least one GL journal inserted, got 0"
+    );
 
     let xml = generate_saft_xml(&pool, &company, "2025-01-01", "2025-01-31")
         .await
         .unwrap();
 
+    // GLE must have journals
     assert!(
-        xml.contains("<NumberOfEntries>0</NumberOfEntries>"),
-        "GL NumberOfEntries=0: {xml}"
+        xml.contains("<Journal>"),
+        "GL must have at least one journal: {xml}"
     );
     assert!(
-        !xml.contains("<Journal>"),
-        "GL must have no journals: {xml}"
+        !xml.contains("<NumberOfEntries>0</NumberOfEntries>"),
+        "GL NumberOfEntries must be > 0 when GL is posted: {xml}"
     );
+
+    // TotalDebit must equal TotalCredit (double-entry balance invariant)
+    // Extract the values from the XML
+    let total_debit = extract_gle_field(&xml, "TotalDebit");
+    let total_credit = extract_gle_field(&xml, "TotalCredit");
+    eprintln!("GLE TotalDebit={total_debit} TotalCredit={total_credit}");
+    assert_eq!(
+        total_debit, total_credit,
+        "GL TotalDebit must equal TotalCredit (double-entry balance). TotalDebit={total_debit} TotalCredit={total_credit}"
+    );
+
+    // TaxType in GLE must be "300" (not "TVA") for VAT lines
+    // Check for "300" appearing in the GL section
+    assert!(
+        xml.contains("<TaxType>300</TaxType>") || xml.contains("<TaxType>000</TaxType>"),
+        "GL TaxType must use DUK codes (300/000), not 'TVA': {xml}"
+    );
+
+    // XSD validation if available
+    if xsd_path.exists() && xmllint_available() {
+        let tmp = std::env::temp_dir().join("saft_gle_test.xml");
+        std::fs::write(&tmp, xml.as_bytes()).expect("write temp XML");
+        let result = validate_with_xsd(xsd_path, &tmp).expect("validate_with_xsd must not fail");
+        if !result.passed {
+            eprintln!("GLE XSD VALIDATION FAILED:");
+            for e in &result.errors {
+                eprintln!("  {e}");
+            }
+        }
+        let _ = std::fs::remove_file(&tmp);
+        assert!(
+            result.passed,
+            "SAF-T with populated GLE failed XSD validation. Errors:\n{}",
+            result.errors.join("\n")
+        );
+    }
+}
+
+/// Extract the text content of a top-level GLE field (TotalDebit/TotalCredit/NumberOfEntries).
+/// Simple string search — finds the first occurrence after <GeneralLedgerEntries>.
+fn extract_gle_field(xml: &str, field: &str) -> String {
+    let open_tag = format!("<{field}>");
+    let close_tag = format!("</{field}>");
+    if let Some(start) = xml.find(&open_tag) {
+        let after = &xml[start + open_tag.len()..];
+        if let Some(end) = after.find(&close_tag) {
+            return after[..end].trim().to_string();
+        }
+    }
+    String::new()
 }
 
 #[tokio::test]

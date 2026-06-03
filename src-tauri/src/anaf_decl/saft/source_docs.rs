@@ -404,7 +404,7 @@ fn write_invoice_line(
     write_text_elem(w, "Description", &esc(&trunc(description, 256)))?;
     write_amount_structure(w, "InvoiceLineAmount", line_amount)?;
     write_text_elem(w, "DebitCreditIndicator", dci)?;
-    write_tax_information(w, "TVA", tax_code, tax_pct, tax_base, tax_amount)?;
+    write_tax_information(w, "300", tax_code, tax_pct, tax_base, tax_amount)?;
     end_elem(w, "InvoiceLine")?;
     Ok(())
 }
@@ -638,7 +638,7 @@ pub async fn write_purchase_invoices(
                 write_text_elem(w, "Description", &esc(&trunc("Achiziție", 256)))?;
                 write_amount_structure(w, "InvoiceLineAmount", base_ron)?;
                 write_text_elem(w, "DebitCreditIndicator", "D")?;
-                write_tax_information(w, "TVA", tax_code, vl.vat_rate, base_ron, vat_ron_line)?;
+                write_tax_information(w, "300", tax_code, vl.vat_rate, base_ron, vat_ron_line)?;
                 end_elem(w, "InvoiceLine")?;
             }
         } else {
@@ -658,7 +658,7 @@ pub async fn write_purchase_invoices(
             write_text_elem(w, "Description", &esc(&trunc("Achiziție", 256)))?;
             write_amount_structure(w, "InvoiceLineAmount", net_ron)?;
             write_text_elem(w, "DebitCreditIndicator", "D")?;
-            write_tax_information(w, "TVA", "S", tax_pct, net_ron, vat_ron)?;
+            write_tax_information(w, "300", "S", tax_pct, net_ron, vat_ron)?;
             end_elem(w, "InvoiceLine")?;
         }
 
@@ -765,7 +765,7 @@ pub async fn write_payments(
         write_text_elem(w, "DebitCreditIndicator", "D")?; // bank = debit (money in)
         write_amount_structure(w, "PaymentLineAmount", amount_ron)?;
         // TaxInformation required (maxOccurs=unbounded)
-        write_tax_information(w, "TVA", "S", Decimal::ZERO, amount_ron, Decimal::ZERO)?;
+        write_tax_information(w, "000", "000000", Decimal::ZERO, amount_ron, Decimal::ZERO)?;
         end_elem(w, "PaymentLine")?;
 
         end_elem(w, "Payment")?;
