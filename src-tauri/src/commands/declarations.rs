@@ -11,6 +11,7 @@
 //!   Facturile primite fără defalcare TVA (net_amount IS NULL) sunt raportate
 //!   separat prin `purchase_unparsed_count`.
 
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde::Serialize;
 use sqlx::Row;
@@ -18,6 +19,10 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 use tauri::State;
 
+use crate::anaf_decl::d300::D300Submission;
+use crate::anaf_decl::version::resolve;
+use crate::anaf_decl::DeclKind;
+use crate::db::companies;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::ubl::fx::{amount_to_ron, parse_rate};
@@ -516,6 +521,59 @@ fn build_and_write_xml(report: D300Report, dest_path: String) -> AppResult<Strin
     std::fs::write(&dest_path, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
 
     Ok(dest_path)
+}
+
+/// Generează fișierul XML D300 oficial ANAF (schema v12) și îl scrie la calea specificată.
+///
+/// Aceasta este comanda de export **oficial** (schema-conformant, validat cu XSD).
+/// Diferă de `export_d300` (working-paper preview) prin:
+/// - Emite un `<declaratie300>` cu namespace-ul ANAF exact (`mfp:anaf:dgti:d300:declaratie:v12`)
+/// - Toate datele sunt atribute, sumele sunt rotunjite la lei întregi
+/// - Maparea rândurilor respectă structura_D300_v12 oficială
+///
+/// Parametrul `submission` conține câmpurile completate de utilizator (declarant, CAEN, bancă etc.)
+/// care nu sunt derivabile din datele fiscale.
+#[tauri::command]
+pub async fn export_d300_official(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+    submission: D300Submission,
+    dest_path: String,
+) -> AppResult<String> {
+    use crate::anaf_decl::d300::generator::generate_d300_xml;
+    use crate::anaf_decl::d300::rows::map_to_rows;
+
+    // Validate destination path (.xml whitelisted by validate_export_path)
+    let dest = crate::commands::integrations::validate_export_path(&dest_path)?
+        .to_string_lossy()
+        .to_string();
+
+    // Parse period_from to resolve the schema version and extract luna/an.
+    let period = NaiveDate::parse_from_str(&period_from, "%Y-%m-%d").map_err(|_| {
+        AppError::Validation(format!(
+            "period_from '{period_from}' nu este în formatul YYYY-MM-DD."
+        ))
+    })?;
+
+    // Resolve schema version for the reported period.
+    let ver = resolve(DeclKind::D300, period)?;
+
+    // Fetch the company record (needed for cui/den/adresa).
+    let company = companies::get(&state.db, &company_id).await?;
+
+    // Compute the fiscal aggregates.
+    let report = compute_d300(state, company_id, period_from, period_to).await?;
+
+    // Map to D300Rows (all amounts rounded to lei, totals computed).
+    let rows = map_to_rows(&report, &submission, &company, period)?;
+
+    // Generate XML and write to disk.
+    let xml = generate_d300_xml(&rows, &ver)?;
+    std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+
+    Ok(dest)
 }
 
 /// Escapes XML special characters in a string value.

@@ -10,8 +10,8 @@
 mod anaf;
 pub mod anaf_decl;
 mod background;
-mod commands;
-mod db;
+pub mod commands;
+pub mod db;
 mod error;
 pub mod notifications;
 mod state;
@@ -386,6 +386,7 @@ pub fn run() {
             // declarations d300
             commands::declarations::compute_d300,
             commands::declarations::export_d300,
+            commands::declarations::export_d300_official,
             // d394 — livrări/achiziții pe teritoriul național
             commands::d394::compute_d394,
             commands::d394::export_d394,

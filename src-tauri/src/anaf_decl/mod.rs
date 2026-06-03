@@ -5,6 +5,7 @@
 //! pattern (see `ubl/generator.rs`), NOT the legacy hand-rolled string builders
 //! in `commands/{declarations,d394,saft}.rs`.
 
+pub mod d300;
 pub mod validation;
 pub mod version;
 pub mod xml;
