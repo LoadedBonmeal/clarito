@@ -73,11 +73,12 @@ pub fn schema_versions() -> Vec<SchemaVersion> {
             decl: DeclKind::D406,
             valid_from: d(2022, 1, 1),
             valid_to: None,
-            // Verified against Ro_SAFT_Schema_v249 targetNamespace — the ANAF
-            // wrapper namespace, NOT the bare OECD urn. Root element is AuditFile.
-            namespace: "mfp:anaf:dgti:d406t:declaratie:v1",
+            // Production DUK namespace is d406 (no trailing 't').
+            // The vendored XSD uses d406t as targetNamespace — use the
+            // _prod copy (Ro_SAFT_Schema_v249_prod.xsd) for xmllint tests.
+            namespace: "mfp:anaf:dgti:d406:declaratie:v1",
             root_element: "AuditFile",
-            schema_label: "SAF-T RO v2.4.9 (d406t:v1)",
+            schema_label: "SAF-T RO v2.4.9 (d406:v1)",
             duk_type: "D406",
         },
     ]

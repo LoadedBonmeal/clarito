@@ -12,7 +12,9 @@ use std::str::FromStr;
 use rust_decimal::Decimal;
 use sqlx::Row;
 
-use crate::anaf_decl::saft::masterfiles::{saft_tax_code, write_amount_structure};
+use crate::anaf_decl::saft::masterfiles::{
+    canonical_partner_id, saft_tax_code_dir, write_amount_structure, TaxDirection,
+};
 use crate::anaf_decl::xml::{end_elem, start_elem, write_text_elem, XmlWriter};
 use crate::error::{AppError, AppResult};
 use crate::ubl::fx::{amount_to_ron, parse_rate};
@@ -71,14 +73,16 @@ fn write_tax_information(
 }
 
 // ── Payment method mapping ────────────────────────────────────────────────────
+// Nom_Mecanisme_plati (PaymentMethod column): 01=Cash, 02=Compensare, 03=Fără numerar,
+// 98=Definit de comun acord, 99=Instrument nedefinit.
 fn map_payment_method(method: &str) -> &'static str {
     match method.to_lowercase().as_str() {
-        "cash" | "numerar" => "Cash",
-        "transfer" | "bank" | "virament" | "op" => "Transfer",
-        "card" => "Card",
-        "cec" | "check" | "cheque" => "Cheque",
-        "bilet" | "biletordin" => "Other",
-        _ => "Transfer", // safe default
+        "cash" | "numerar" => "01",
+        "transfer" | "bank" | "virament" | "op" | "bancar" => "03",
+        "card" => "03",
+        "offset" | "compensare" | "netting" | "comp" => "02",
+        "cec" | "check" | "cheque" => "03", // non-cash instrument
+        _ => "99",                          // undefined instrument
     }
 }
 
@@ -107,12 +111,13 @@ pub async fn write_sales_invoices(
     date_from: &str,
     date_to: &str,
 ) -> AppResult<()> {
-    // Fetch sales invoices
+    // Fetch sales invoices (also fetch contact CUI for canonical ID derivation)
     let inv_rows = sqlx::query(
         "SELECT i.id, \
                 i.series || '-' || printf('%04d', i.number) AS full_number, \
                 i.issue_date, \
                 COALESCE(c.id, '') AS contact_id, \
+                COALESCE(c.cui, '') AS contact_cui, \
                 COALESCE(c.legal_name, '') AS client_name, \
                 COALESCE(c.city, '') AS client_city, \
                 COALESCE(c.country, 'RO') AS client_country, \
@@ -247,7 +252,10 @@ pub async fn write_sales_invoices(
         let inv_id: String = row.try_get("id").map_err(AppError::Database)?;
         let full_number: String = row.try_get("full_number").map_err(AppError::Database)?;
         let issue_date: String = row.try_get("issue_date").map_err(AppError::Database)?;
-        let contact_id: String = row.try_get("contact_id").unwrap_or_default();
+        let contact_id_raw: String = row.try_get("contact_id").unwrap_or_default();
+        // Derive canonical ID from contact; we need the CUI for this — fetch from query result
+        let contact_cui: String = row.try_get("contact_cui").unwrap_or_default();
+        let contact_id = canonical_partner_id(&contact_id_raw, &contact_cui);
         let client_city: String = row.try_get("client_city").unwrap_or_default();
         let client_country: String = row
             .try_get("client_country")
@@ -314,7 +322,8 @@ pub async fn write_sales_invoices(
         write_text_elem(w, "AccountID", "4111")?;
         write_text_elem(w, "InvoiceDate", &issue_date)?;
         write_text_elem(w, "InvoiceType", invoice_type)?;
-        write_text_elem(w, "SelfBillingIndicator", "false")?;
+        // SelfBillingIndicator: "0" = not self-billed, "389" = self-billed
+        write_text_elem(w, "SelfBillingIndicator", "0")?;
 
         // InvoiceLine — at least one required
         if lines_ron.is_empty() {
@@ -326,6 +335,7 @@ pub async fn write_sales_invoices(
                 &currency,
                 fx_rate,
             );
+            let fallback_code = saft_tax_code_dir("S", Decimal::ZERO, TaxDirection::Sales);
             write_invoice_line(
                 w,
                 1,
@@ -336,15 +346,16 @@ pub async fn write_sales_invoices(
                 &issue_date,
                 "Servicii",
                 Decimal::ZERO,
-                "S",
+                fallback_code,
                 inv_net_ron, // DEFECT 3 FIX: TaxBase = net (not 0)
                 inv_vat_ron,
                 "C",
-                "buc",
+                "H87",
             )?;
         } else {
             for line in &lines_ron {
-                let code = saft_tax_code(&line.vat_category, line.vat_rate);
+                let code =
+                    saft_tax_code_dir(&line.vat_category, line.vat_rate, TaxDirection::Sales);
                 write_invoice_line(
                     w,
                     line.position,
@@ -570,12 +581,9 @@ pub async fn write_purchase_invoices(
             _ => id.clone(),
         };
 
-        // Supplier ID = issuer_cui (or id if no CUI)
-        let supplier_id = if issuer_cui.is_empty() {
-            &id
-        } else {
-            &issuer_cui
-        };
+        // Supplier ID = canonical CUI-based ID (RO-stripped), or sanitized uuid
+        let supplier_canon_id = canonical_partner_id(&id, &issuer_cui);
+        let supplier_id = &supplier_canon_id;
 
         let net_ron = amount_to_ron(
             dec(&row
@@ -616,7 +624,8 @@ pub async fn write_purchase_invoices(
         write_text_elem(w, "AccountID", "401")?;
         write_text_elem(w, "InvoiceDate", &issue_date)?;
         write_text_elem(w, "InvoiceType", "380")?;
-        write_text_elem(w, "SelfBillingIndicator", "false")?;
+        // SelfBillingIndicator: "0" = not self-billed
+        write_text_elem(w, "SelfBillingIndicator", "0")?;
 
         // DEFECT 1 FIX: emit one InvoiceLine per VAT breakdown line.
         // If no vat_lines exist (unparsed invoice), emit a single fallback line
@@ -628,7 +637,8 @@ pub async fn write_purchase_invoices(
             for (line_no, vl) in vl_vec.iter().enumerate() {
                 let base_ron = amount_to_ron(vl.base_amount, &currency, fx_rate);
                 let vat_ron_line = amount_to_ron(vl.vat_amount, &currency, fx_rate);
-                let tax_code = saft_tax_code(&vl.vat_category, vl.vat_rate);
+                let tax_code =
+                    saft_tax_code_dir(&vl.vat_category, vl.vat_rate, TaxDirection::Purchase);
                 start_elem(w, "InvoiceLine")?;
                 write_text_elem(w, "LineNumber", &(line_no as i64 + 1).to_string())?;
                 write_text_elem(w, "AccountID", "607")?;
@@ -658,7 +668,8 @@ pub async fn write_purchase_invoices(
             write_text_elem(w, "Description", &esc(&trunc("Achiziție", 256)))?;
             write_amount_structure(w, "InvoiceLineAmount", net_ron)?;
             write_text_elem(w, "DebitCreditIndicator", "D")?;
-            write_tax_information(w, "300", "S", tax_pct, net_ron, vat_ron)?;
+            let fallback_code = saft_tax_code_dir("S", tax_pct, TaxDirection::Purchase);
+            write_tax_information(w, "300", fallback_code, tax_pct, net_ron, vat_ron)?;
             end_elem(w, "InvoiceLine")?;
         }
 
@@ -689,6 +700,7 @@ pub async fn write_payments(
     let pay_rows = sqlx::query(
         "SELECT p.id, p.invoice_id, p.amount, p.currency, p.paid_at, p.method, p.reference, \
                 COALESCE(c.id, '') AS contact_id, \
+                COALESCE(c.cui, '') AS contact_cui, \
                 COALESCE(c.city, '') AS contact_city, \
                 COALESCE(c.country, 'RO') AS contact_country \
          FROM payments p \
@@ -740,7 +752,10 @@ pub async fn write_payments(
             .try_get("method")
             .unwrap_or_else(|_| "transfer".to_string());
         let reference: Option<String> = row.try_get("reference").unwrap_or(None);
-        let contact_id: String = row.try_get("contact_id").unwrap_or_default();
+        let contact_id_raw: String = row.try_get("contact_id").unwrap_or_default();
+        let contact_cui: String = row.try_get("contact_cui").unwrap_or_default();
+        // Use canonical partner ID so it matches MasterFiles and GL
+        let contact_canon_id = canonical_partner_id(&contact_id_raw, &contact_cui);
 
         let pay_method = map_payment_method(&method);
         let pay_ref = reference.as_deref().unwrap_or(&id);
@@ -760,8 +775,8 @@ pub async fn write_payments(
         // PaymentLine (required, maxOccurs=unbounded)
         start_elem(w, "PaymentLine")?;
         write_text_elem(w, "AccountID", "5121")?; // bank account
-        write_text_elem(w, "CustomerID", &esc(&trunc(&contact_id, 35)))?;
-        write_text_elem(w, "SupplierID", &esc(&trunc(&contact_id, 35)))?;
+        write_text_elem(w, "CustomerID", &esc(&trunc(&contact_canon_id, 35)))?;
+        write_text_elem(w, "SupplierID", &esc(&trunc(&contact_canon_id, 35)))?;
         write_text_elem(w, "DebitCreditIndicator", "D")?; // bank = debit (money in)
         write_amount_structure(w, "PaymentLineAmount", amount_ron)?;
         // TaxInformation required (maxOccurs=unbounded)
@@ -780,10 +795,10 @@ pub async fn write_payments(
 // ────────────────────────────────────────────────────────────────────────────────
 
 pub fn write_movement_of_goods(w: &mut XmlWriter) -> AppResult<()> {
+    // DUK rule: when there are no movements, emit an empty wrapper with no children.
+    // Emitting NumberOfMovementLines=0/TotalQuantityReceived/TotalQuantityIssued on an
+    // empty section triggers a "maxOccurs exceeded" error from the DUK validator.
     start_elem(w, "MovementOfGoods")?;
-    write_text_elem(w, "NumberOfMovementLines", "0")?;
-    write_text_elem(w, "TotalQuantityReceived", "0.000000")?;
-    write_text_elem(w, "TotalQuantityIssued", "0.000000")?;
     end_elem(w, "MovementOfGoods")?;
     Ok(())
 }
@@ -816,12 +831,16 @@ mod tests {
 
     #[test]
     fn payment_method_mapping() {
-        assert_eq!(map_payment_method("transfer"), "Transfer");
-        assert_eq!(map_payment_method("cash"), "Cash");
-        assert_eq!(map_payment_method("card"), "Card");
-        assert_eq!(map_payment_method("cec"), "Cheque");
-        assert_eq!(map_payment_method("TRANSFER"), "Transfer");
-        assert_eq!(map_payment_method("unknown_xyz"), "Transfer"); // safe default
+        // Nom_Mecanisme_plati codes: 01=Cash, 02=Compensare, 03=Fără numerar, 99=nedefinit
+        assert_eq!(map_payment_method("transfer"), "03");
+        assert_eq!(map_payment_method("cash"), "01");
+        assert_eq!(map_payment_method("numerar"), "01");
+        assert_eq!(map_payment_method("card"), "03");
+        assert_eq!(map_payment_method("cec"), "03");
+        assert_eq!(map_payment_method("offset"), "02");
+        assert_eq!(map_payment_method("compensare"), "02");
+        assert_eq!(map_payment_method("TRANSFER"), "03");
+        assert_eq!(map_payment_method("unknown_xyz"), "99"); // undefined instrument
     }
 
     #[test]
@@ -918,19 +937,19 @@ mod tests {
             "Expected 2 InvoiceLines for multi-rate purchase; got {line_count}. XML:\n{xml}"
         );
 
-        // First line: 21% → TaxCode "S", TaxPercentage "21.00"
+        // First line: 21% → TaxCode "301104", TaxPercentage "21.00"
         assert!(
             xml.contains("<TaxPercentage>21.00</TaxPercentage>"),
             "Expected TaxPercentage 21.00 for 21% VAT line. XML:\n{xml}"
         );
-        // Second line: 11% → TaxCode "AA" (reduced rate S+11)
+        // Second line: 11% → TaxCode "301105" (domestic purchase 11%)
         assert!(
             xml.contains("<TaxPercentage>11.00</TaxPercentage>"),
             "Expected TaxPercentage 11.00 for 11% VAT line. XML:\n{xml}"
         );
         assert!(
-            xml.contains("<TaxCode>AA</TaxCode>"),
-            "Expected TaxCode AA for 11% reduced rate. XML:\n{xml}"
+            xml.contains("<TaxCode>301105</TaxCode>"),
+            "Expected TaxCode 301105 for 11% domestic purchase rate. XML:\n{xml}"
         );
 
         // TaxBase must equal the per-line base (1000 and 100), NOT 0

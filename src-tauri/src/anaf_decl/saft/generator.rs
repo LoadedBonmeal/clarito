@@ -3,7 +3,7 @@
 //! Output structure:
 //! ```xml
 //! <?xml version="1.0" encoding="UTF-8"?>
-//! <AuditFile xmlns="mfp:anaf:dgti:d406t:declaratie:v1">
+//! <AuditFile xmlns="mfp:anaf:dgti:d406:declaratie:v1">
 //!   <Header> … </Header>
 //!   <MasterFiles> … </MasterFiles>
 //!   <GeneralLedgerEntries> NumberOfEntries/TotalDebit/TotalCredit </GeneralLedgerEntries>
@@ -28,7 +28,7 @@ use crate::anaf_decl::xml::{end_elem, start_elem, write_text_elem};
 use crate::db::companies::Company;
 use crate::error::{AppError, AppResult};
 
-const NAMESPACE: &str = "mfp:anaf:dgti:d406t:declaratie:v1";
+const NAMESPACE: &str = "mfp:anaf:dgti:d406:declaratie:v1";
 const AUDIT_FILE_VERSION: &str = "2.4.9";
 
 fn map_qx(e: quick_xml::Error) -> AppError {
@@ -75,8 +75,8 @@ fn write_header(
     write_text_elem(w, "SelectionEndDate", date_to)?;
     end_elem(w, "SelectionCriteria")?;
 
-    // HeaderComment (required in HeaderStructure per XSD)
-    write_text_elem(w, "HeaderComment", "Generat de efactura-desktop")?;
+    // HeaderComment: DUK treats this as _tipDeclaratie — "L" = lunară (monthly).
+    write_text_elem(w, "HeaderComment", "L")?;
 
     write_text_elem(w, "SegmentIndex", "1")?;
     write_text_elem(w, "TotalSegmentsInsequence", "1")?;
@@ -164,8 +164,9 @@ fn write_header_company(
     if company.vat_payer {
         start_elem(w, "TaxRegistration")?;
         write_text_elem(w, "TaxRegistrationNumber", &trunc_esc(cui_clean, 35))?;
-        // DUK rule: Header TaxRegistration/TaxType must be the SAF-T code "300" (not "TVA")
-        write_text_elem(w, "TaxType", "300")?;
+        // Nomenclator_Regim_fiscal: "100010" = Persoană impozabilă înregistrată în
+        // scopuri de TVA (VAT-registered taxable person).
+        write_text_elem(w, "TaxType", "100010")?;
         write_text_elem(w, "TaxAuthority", "ANAF")?;
         end_elem(w, "TaxRegistration")?;
     }
@@ -347,9 +348,13 @@ async fn write_general_ledger_entries(
             write_text_elem(w, "Description", &trunc_esc(&txn_desc, 256))?;
             write_text_elem(w, "SystemEntryDate", &txn_date)?;
             write_text_elem(w, "GLPostingDate", &txn_date)?;
-            // CustomerID and SupplierID are REQUIRED in the XSD (no minOccurs=0)
-            write_text_elem(w, "CustomerID", &trunc_esc(&cust_id, 35))?;
-            write_text_elem(w, "SupplierID", &trunc_esc(&supp_id, 35))?;
+            // CustomerID and SupplierID are REQUIRED in the XSD (no minOccurs=0),
+            // and the DUK rejects empty strings — use "0" as the "no partner" sentinel
+            // (the DUK validator explicitly accepts the bare string "0" as a valid ID).
+            let cust_id_emit = if cust_id.is_empty() { "0" } else { &cust_id };
+            let supp_id_emit = if supp_id.is_empty() { "0" } else { &supp_id };
+            write_text_elem(w, "CustomerID", &trunc_esc(cust_id_emit, 35))?;
+            write_text_elem(w, "SupplierID", &trunc_esc(supp_id_emit, 35))?;
 
             // TransactionLines
             let empty_vec: Vec<&sqlx::sqlite::SqliteRow> = Vec::new();
@@ -379,9 +384,31 @@ async fn write_general_ledger_entries(
                 start_elem(w, "TransactionLine")?;
                 write_text_elem(w, "RecordID", &record_id.to_string())?;
                 write_text_elem(w, "AccountID", &trunc_esc(&account_code, 255))?;
-                // CustomerID / SupplierID are REQUIRED in the XSD sequence
-                write_text_elem(w, "CustomerID", &trunc_esc(&entry_cust, 35))?;
-                write_text_elem(w, "SupplierID", &trunc_esc(&entry_supp, 35))?;
+                // CustomerID / SupplierID are REQUIRED.
+                // DUK rule: CustomerID and SupplierID cannot BOTH be "0" simultaneously.
+                // If neither is set on the line, inherit the transaction-level partner.
+                let effective_cust = if !entry_cust.is_empty() {
+                    entry_cust.clone()
+                } else if !cust_id.is_empty() {
+                    cust_id.clone()
+                } else {
+                    "0".to_string()
+                };
+                let effective_supp = if !entry_supp.is_empty() {
+                    entry_supp.clone()
+                } else if !supp_id.is_empty() {
+                    supp_id.clone()
+                } else {
+                    "0".to_string()
+                };
+                // If still both "0", use transaction customer as fallback for both
+                let (line_cust, line_supp) = if effective_cust == "0" && effective_supp == "0" {
+                    (cust_id_emit.to_string(), supp_id_emit.to_string())
+                } else {
+                    (effective_cust, effective_supp)
+                };
+                write_text_elem(w, "CustomerID", &trunc_esc(&line_cust, 35))?;
+                write_text_elem(w, "SupplierID", &trunc_esc(&line_supp, 35))?;
                 write_text_elem(w, "Description", &trunc_esc(&line_desc, 256))?;
 
                 // xs:choice — DebitAmount | CreditAmount
@@ -468,7 +495,7 @@ pub async fn generate_saft_xml(
     w.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))
         .map_err(map_qx)?;
 
-    // <AuditFile xmlns="mfp:anaf:dgti:d406t:declaratie:v1">
+    // <AuditFile xmlns="mfp:anaf:dgti:d406:declaratie:v1">
     let mut root = BytesStart::new("AuditFile");
     root.push_attribute(("xmlns", NAMESPACE));
     w.write_event(Event::Start(root)).map_err(map_qx)?;
@@ -500,7 +527,8 @@ mod tests {
     fn test_company() -> Company {
         Company {
             id: "test-co-id".to_string(),
-            cui: "RO12345678".to_string(),
+            // Valid Romanian CUI (checksum verified)
+            cui: "RO123456789".to_string(),
             legal_name: "CLARITO TEST SRL".to_string(),
             trade_name: None,
             registry_number: Some("J40/1234/2020".to_string()),

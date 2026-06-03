@@ -37,7 +37,7 @@ use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
 
-use crate::anaf_decl::saft::masterfiles::saft_tax_code;
+use crate::anaf_decl::saft::masterfiles::{canonical_partner_id, saft_tax_code_dir, TaxDirection};
 use crate::db::models::new_id;
 use crate::error::AppResult;
 use crate::ubl::fx::{amount_to_ron, parse_rate};
@@ -120,8 +120,12 @@ fn fmt_dec(d: Decimal) -> String {
 
 // ─── Tax code helpers ─────────────────────────────────────────────────────────
 
-fn tax_code_str(category: &str, rate: Decimal) -> String {
-    saft_tax_code(category, rate).to_string()
+fn sales_tax_code_str(category: &str, rate: Decimal) -> String {
+    saft_tax_code_dir(category, rate, TaxDirection::Sales).to_string()
+}
+
+fn purchase_tax_code_str(category: &str, rate: Decimal) -> String {
+    saft_tax_code_dir(category, rate, TaxDirection::Purchase).to_string()
 }
 
 // ─── Posting templates (pure functions) ──────────────────────────────────────
@@ -140,11 +144,13 @@ fn post_sales_invoice(
     invoice_id: &str,
     full_number: &str,
     issue_date: &str,
-    contact_id: &str,
+    contact_id_raw: &str,
     partner_cui: Option<&str>,
     vat_groups: &[(Decimal, Decimal, String, Decimal)], // (net, vat, category, rate)
     is_storno: bool,
 ) -> (GlJournal, Vec<GlEntry>) {
+    // Use canonical partner ID (CUI-based) so it matches MasterFiles and SourceDocuments
+    let contact_id = canonical_partner_id(contact_id_raw, partner_cui.unwrap_or(""));
     // Storno: negăm toate sumele (stornare în roșu conform OMFP 1802/2014).
     let sign = if is_storno {
         Decimal::NEGATIVE_ONE
@@ -175,7 +181,7 @@ fn post_sales_invoice(
         )),
         source_type: "INVOICE".to_string(),
         source_id: invoice_id.to_string(),
-        customer_id: Some(contact_id.to_string()),
+        customer_id: Some(contact_id.clone()),
         supplier_id: None,
     };
 
@@ -198,7 +204,7 @@ fn post_sales_invoice(
             Decimal::ZERO
         },
         partner_cui: partner_cui.map(|s| s.to_string()),
-        customer_id: Some(contact_id.to_string()),
+        customer_id: Some(contact_id.clone()),
         supplier_id: None,
         tax_type: "000".to_string(),
         tax_code: "000000".to_string(),
@@ -212,7 +218,7 @@ fn post_sales_invoice(
     for (net_ron, vat_ron, category, rate) in vat_groups {
         let net = *net_ron * sign;
         let vat = *vat_ron * sign;
-        let tc = tax_code_str(category, *rate);
+        let tc = sales_tax_code_str(category, *rate);
         let rate_str = fmt_dec(*rate);
 
         // C 707 Venituri mărfuri = net (poartă info TVA per cotă)
@@ -286,6 +292,8 @@ fn post_purchase_invoice(
     gross_ron: Decimal,
     vat_lines: &[(Decimal, Decimal, String, Decimal)], // (net, vat, category, rate)
 ) -> (GlJournal, Vec<GlEntry>) {
+    // Canonical supplier ID = RO-stripped CUI digits
+    let supplier_canon = canonical_partner_id(received_invoice_id, issuer_cui);
     let journal = GlJournal {
         id: new_id(),
         company_id: company_id.to_string(),
@@ -297,7 +305,7 @@ fn post_purchase_invoice(
         source_type: "RECEIVED_INVOICE".to_string(),
         source_id: received_invoice_id.to_string(),
         customer_id: None,
-        supplier_id: None,
+        supplier_id: Some(supplier_canon.clone()),
     };
 
     let mut entries: Vec<GlEntry> = Vec::new();
@@ -305,7 +313,7 @@ fn post_purchase_invoice(
 
     // Per-linie TVA: D 607 + D 4426
     for (net, vat, category, rate) in vat_lines {
-        let tc = tax_code_str(category, *rate);
+        let tc = purchase_tax_code_str(category, *rate);
         let rate_str = fmt_dec(*rate);
         let is_reverse_charge = category == "AE" || category == "K";
 
@@ -375,7 +383,7 @@ fn post_purchase_invoice(
         credit: gross_ron,
         partner_cui: Some(issuer_cui.to_string()),
         customer_id: None,
-        supplier_id: None,
+        supplier_id: Some(supplier_canon),
         tax_type: "000".to_string(),
         tax_code: "000000".to_string(),
         tax_percentage: None,
@@ -392,10 +400,12 @@ fn post_payment(
     payment_id: &str,
     invoice_id: &str,
     paid_at: &str,
-    contact_id: &str,
+    contact_id_raw: &str,
     partner_cui: Option<&str>,
     amount_ron: Decimal,
 ) -> (GlJournal, Vec<GlEntry>) {
+    // Use canonical partner ID so it matches MasterFiles and SourceDocuments
+    let contact_id = canonical_partner_id(contact_id_raw, partner_cui.unwrap_or(""));
     let journal = GlJournal {
         id: new_id(),
         company_id: company_id.to_string(),
@@ -406,7 +416,7 @@ fn post_payment(
         description: Some(format!("Incasare factura {invoice_id}")),
         source_type: "PAYMENT".to_string(),
         source_id: payment_id.to_string(),
-        customer_id: Some(contact_id.to_string()),
+        customer_id: Some(contact_id.clone()),
         supplier_id: None,
     };
 
@@ -435,7 +445,7 @@ fn post_payment(
             debit: Decimal::ZERO,
             credit: amount_ron,
             partner_cui: partner_cui.map(|s| s.to_string()),
-            customer_id: Some(contact_id.to_string()),
+            customer_id: Some(contact_id.clone()),
             supplier_id: None,
             tax_type: "000".to_string(),
             tax_code: "000000".to_string(),

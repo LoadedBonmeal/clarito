@@ -19,7 +19,8 @@ use efactura_desktop_lib::db::gl::generate_gl_entries;
 fn test_company() -> Company {
     Company {
         id: "test-saft-co".to_string(),
-        cui: "RO12345678".to_string(),
+        // Valid Romanian CUI (checksum verified): 12345678 → control digit 9
+        cui: "RO123456789".to_string(),
         legal_name: "CLARITO TEST SRL".to_string(),
         trade_name: None,
         registry_number: Some("J40/1234/2020".to_string()),
@@ -345,7 +346,8 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
 #[tokio::test]
 async fn saft_d406_validates_against_official_xsd() {
     // XSD path (relative to src-tauri/ crate root — cwd for `cargo test`)
-    let xsd_path = Path::new("tools/anaf/Ro_SAFT_Schema_v249.xsd");
+    // Use the _prod copy whose targetNamespace matches the production d406 namespace.
+    let xsd_path = Path::new("tools/anaf/Ro_SAFT_Schema_v249_prod.xsd");
 
     if !xsd_path.exists() {
         eprintln!(
@@ -418,7 +420,7 @@ async fn saft_d406_has_all_four_mandatory_sections() {
         "must have AuditFile root: {xml}"
     );
     assert!(
-        xml.contains("xmlns=\"mfp:anaf:dgti:d406t:declaratie:v1\""),
+        xml.contains("xmlns=\"mfp:anaf:dgti:d406:declaratie:v1\""),
         "must have correct namespace: {xml}"
     );
     assert!(xml.contains("<Header>"), "must have Header: {xml}");
@@ -572,7 +574,7 @@ async fn saft_d406_source_documents_have_invoices() {
 
 #[tokio::test]
 async fn saft_d406_gl_entries_populated_and_balanced() {
-    let xsd_path = Path::new("tools/anaf/Ro_SAFT_Schema_v249.xsd");
+    let xsd_path = Path::new("tools/anaf/Ro_SAFT_Schema_v249_prod.xsd");
 
     let company = test_company();
     let pool = setup_test_pool(&company).await;

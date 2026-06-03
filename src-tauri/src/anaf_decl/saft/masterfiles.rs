@@ -44,41 +44,171 @@ pub fn account_type_for_class(class: i64) -> &'static str {
     }
 }
 
-// ── Tax code from category ─────────────────────────────────────────────────────
-// Replicates the logic from commands::saft::saft_tax_code_from_category
-// (kept here to avoid cross-module dependency on a private function).
-pub fn saft_tax_code(category: &str, rate: Decimal) -> &'static str {
-    match category {
-        "S" if rate == Decimal::from(5)
-            || rate == Decimal::from(9)
-            || rate == Decimal::from(11) =>
-        {
-            "AA"
-        }
-        "S" => "S",
-        "AE" => "AE",
-        "E" => "E",
-        "Z" => "Z",
-        "O" => "O",
-        "K" => "K",
-        "G" => "G",
-        _ => "S",
+// ── Direction for tax-code lookup ─────────────────────────────────────────────
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TaxDirection {
+    Sales,
+    Purchase,
+}
+
+// ── 6-digit SAF-T tax code mapping ────────────────────────────────────────────
+//
+// Codes extracted from Ro_SAFT_SchemaDefCod_16.02.2026.xlsx:
+//
+// LIVRĂRI (Sales) sheet — primary codes for regular taxable supplies:
+//   19%  → 310309  (L9)
+//   21%  → 310344  (L9, active from 01.08.2025)
+//   9%   → 310310  (L10)
+//   5%   → 310311  (L11)
+//   11%  → 310351  (L, dedicated 11% sales code, Activ 01.08.2025)
+//   AE (reverse-charge) → 310312  (L12)
+//   K (intra-comm exempt) → 310301  (L1)
+//   Z (export/zero) → 310313  (L13 — export VAT exempt with deduction)
+//   E (exempt without ded) → 310326  (L26)
+//   O (out-of-scope) → 310324  (L24)
+//   0% fallback → 310324
+//
+// ACHIZITII DED 100% sheet — domestic purchases (not import, not simplification):
+//   19%  → 301101  (A26_100)
+//   21%  → 301104  (A26_100, active from 01.08.2025)
+//   9%   → 301102  (A27_100)
+//   5%   → 301103  (A28_100)
+//   11%  → 301105  (A27_100, active from 01.08.2025)
+//   AE (reverse-charge/simplification, generic) → 300901  (A22_100 @ 19%)
+//   K (intra-comm) → 300201  (A4_100 @ 19%)
+//   Z / E / O (exempt/out-of-scope) → 308302  (exempt or non-taxable)
+//   0% → 308302
+//
+// When a code cannot be determined precisely, the closest code is used and
+// the behaviour is documented here.
+pub fn saft_tax_code_dir(category: &str, rate: Decimal, dir: TaxDirection) -> &'static str {
+    match dir {
+        TaxDirection::Sales => match category {
+            "S" | "AA" => {
+                let r = rate.to_i64();
+                match r {
+                    Some(21) => "310344",
+                    Some(19) => "310309",
+                    Some(9) => "310310",
+                    Some(5) => "310311",
+                    // 11% standard sales — dedicated code 310351 (Activ 01.08.2025);
+                    // NOT 310310 (that is the 9% code) — would misreport the rate.
+                    Some(11) => "310351",
+                    _ if rate > Decimal::ZERO => "310309", // fallback to standard
+                    _ => "310324",                         // 0% → out of scope
+                }
+            }
+            "AE" => "310312", // reverse-charge
+            "K" => "310301",  // intra-comm exempt (L1)
+            "Z" => "310313",  // export/zero-rated with deduction right
+            "E" => "310326",  // exempt without deduction
+            "O" => "310324",  // out of scope
+            "G" => "310324",  // governmental — map to out of scope
+            _ => {
+                // Unknown category — try by rate
+                let r = rate.to_i64();
+                match r {
+                    Some(21) => "310344",
+                    Some(19) => "310309",
+                    Some(9) => "310310",
+                    Some(5) => "310311",
+                    _ => "310309",
+                }
+            }
+        },
+        TaxDirection::Purchase => match category {
+            "S" | "AA" => {
+                let r = rate.to_i64();
+                match r {
+                    Some(21) => "301104",
+                    Some(19) => "301101",
+                    Some(9) => "301102",
+                    Some(5) => "301103",
+                    Some(11) => "301105",
+                    _ if rate > Decimal::ZERO => "301101", // fallback to 19% code
+                    _ => "308302",                         // 0% → exempt/non-taxable
+                }
+            }
+            "AE" => "300901", // simplification measures @ 19% (closest for generic reverse-charge)
+            "K" => "300201",  // intra-comm acquisition @ 19%
+            "Z" | "E" | "O" | "G" => "308302", // exempt or non-taxable acquisitions
+            _ => {
+                let r = rate.to_i64();
+                match r {
+                    Some(21) => "301104",
+                    Some(19) => "301101",
+                    Some(9) => "301102",
+                    Some(5) => "301103",
+                    _ => "301101",
+                }
+            }
+        },
     }
+}
+
+// ── Decimal to i64 helper (for integer VAT rates) ─────────────────────────────
+trait DecimalToI64 {
+    fn to_i64(self) -> Option<i64>;
+}
+impl DecimalToI64 for Decimal {
+    fn to_i64(self) -> Option<i64> {
+        if self.fract() == Decimal::ZERO {
+            self.to_string().parse::<i64>().ok()
+        } else {
+            None
+        }
+    }
+}
+
+// ── Legacy wrapper (sales direction, for backward compat with TaxTable) ────────
+pub fn saft_tax_code(category: &str, rate: Decimal) -> &'static str {
+    saft_tax_code_dir(category, rate, TaxDirection::Sales)
 }
 
 // ── Tax description from category ─────────────────────────────────────────────
 pub fn tax_description(category: &str, rate: Decimal) -> String {
-    let code = saft_tax_code(category, rate);
-    match code {
-        "S" => format!("TVA cotă standard {rate}%"),
-        "AA" => format!("TVA cotă redusă {rate}%"),
-        "AE" => "TVA autolichidare".to_string(),
+    match category {
+        "S" | "AA" if rate > Decimal::ZERO => format!("TVA cotă {rate}%"),
+        "AE" => "TVA autolichidare (taxare inversă)".to_string(),
         "E" => "Scutit de TVA".to_string(),
         "Z" => "Zero-rated (export/intracomunitar)".to_string(),
         "O" => "În afara sferei TVA".to_string(),
         "K" => "Livrare intracomunitară scutită".to_string(),
-        "G" => "Livrare guvernamentală".to_string(),
+        "G" => "Livrare scutită (guvernamentală)".to_string(),
         _ => format!("TVA {rate}%"),
+    }
+}
+
+// ── Canonical partner ID (CUI-based, DUK-format) ──────────────────────────────
+//
+// The DUK validator cross-checks CustomerID/SupplierID between MasterFiles,
+// SourceDocuments, and GL. Decompiled from D406TValidator.jar (ValidatorExtension1Impl
+// + DECValidatorRoot.checkCUI), the accepted format is:
+//
+//   ID = "00" + CUI-digits   (IDType prefix "00" + Romanian CUI without "RO" prefix)
+//
+// Verified empirically:
+//   "00" + 8-digit-valid-CUI  → valid only if checkCUI passes
+//   "00" + 9-digit-valid-CUI  → valid
+//   "0"  (bare zero string)   → always valid (DUK sentinel for "no partner")
+//
+// Use "0" as the no-partner sentinel (the DUK explicitly accepts the bare "0").
+pub fn canonical_partner_id(id: &str, cui: &str) -> String {
+    if !cui.is_empty() {
+        let stripped = strip_ro(cui);
+        if !stripped.is_empty() && stripped.chars().all(|c| c.is_ascii_digit()) {
+            // Romanian CUI: prefix with IDType "00"
+            return format!("00{}", stripped);
+        }
+    }
+    // No CUI: distinguish a real-but-unidentified partner (has an internal id) —
+    // emit the DUK-accepted anonymized ID — from a genuinely absent partner ("0").
+    // (Multiple unidentified partners share the anonymized id; acceptable since they
+    // are, by definition, anonymized.)
+    if id.trim().is_empty() {
+        "0".to_string()
+    } else {
+        "080000000000000".to_string()
     }
 }
 
@@ -256,15 +386,15 @@ pub async fn write_customers(
             "RO"
         };
 
+        // Canonical ID = "00" + CUI digits (RO-stripped), or "0" fallback.
+        // MUST match the ID used in SourceDocuments/CustomerInfo and GL/CustomerID.
+        let canon_id = canonical_partner_id(&id, &cui);
+
         start_elem(w, "Customer")?;
         // CompanyStructure (optional per XSD on Customer)
         start_elem(w, "CompanyStructure")?;
-        // DUK rule: RegistrationNumber must be bare digits — strip "RO" prefix
-        let reg_number = if cui.is_empty() {
-            id.clone()
-        } else {
-            strip_ro(&cui)
-        };
+        // DUK rule: RegistrationNumber uses the same "00"+CUI format as CustomerID
+        let reg_number = canon_id.clone();
         write_text_elem(w, "RegistrationNumber", &esc(&trunc(&reg_number, 35)))?;
         write_text_elem(w, "Name", &esc(&trunc(&name, 256)))?;
         // Address (required inside CompanyStructure)
@@ -284,7 +414,7 @@ pub async fn write_customers(
         write_text_elem(w, "BankAccountNumber", "N/A")?;
         end_elem(w, "BankAccount")?;
         end_elem(w, "CompanyStructure")?;
-        write_text_elem(w, "CustomerID", &esc(&trunc(&id, 35)))?;
+        write_text_elem(w, "CustomerID", &esc(&trunc(&canon_id, 35)))?;
         write_text_elem(w, "AccountID", "4111")?;
         // xs:choice opening balance
         write_text_elem(w, "OpeningDebitBalance", "0.00")?;
@@ -334,23 +464,18 @@ pub async fn write_suppliers(
             "RO"
         };
 
-        let dedup_key = if cui.is_empty() {
-            id.clone()
-        } else {
-            cui.clone()
-        };
+        // Canonical ID = "00" + CUI digits (RO-stripped), or "0" fallback.
+        let canon_id = canonical_partner_id(&id, &cui);
+
+        let dedup_key = canon_id.clone();
         if !emitted_cuis.insert(dedup_key) {
             continue;
         }
 
         start_elem(w, "Supplier")?;
         start_elem(w, "CompanyStructure")?;
-        // DUK rule: RegistrationNumber must be bare digits — strip "RO" prefix
-        let reg_number = if cui.is_empty() {
-            id.clone()
-        } else {
-            strip_ro(&cui)
-        };
+        // DUK rule: RegistrationNumber uses the same "00"+CUI format as SupplierID
+        let reg_number = canon_id.clone();
         write_text_elem(w, "RegistrationNumber", &esc(&trunc(&reg_number, 35)))?;
         write_text_elem(w, "Name", &esc(&trunc(&name, 256)))?;
         write_address(
@@ -367,7 +492,7 @@ pub async fn write_suppliers(
         write_text_elem(w, "BankAccountNumber", "N/A")?;
         end_elem(w, "BankAccount")?;
         end_elem(w, "CompanyStructure")?;
-        write_text_elem(w, "SupplierID", &esc(&trunc(&id, 35)))?;
+        write_text_elem(w, "SupplierID", &esc(&trunc(&canon_id, 35)))?;
         write_text_elem(w, "AccountID", "401")?;
         write_text_elem(w, "OpeningCreditBalance", "0.00")?;
         write_text_elem(w, "ClosingCreditBalance", "0.00")?;
@@ -390,17 +515,18 @@ pub async fn write_suppliers(
         let issuer_cui: String = row.try_get("issuer_cui").unwrap_or_default();
         let issuer_name: String = row.try_get("issuer_name").unwrap_or_default();
         // Use CUI as dedup key
-        if issuer_cui.is_empty() || !emitted_cuis.insert(issuer_cui.clone()) {
+        // Canonical ID for received invoice issuers = "00" + RO-stripped CUI digits
+        let issuer_canon_id = canonical_partner_id("", &issuer_cui);
+        if issuer_cui.is_empty()
+            || issuer_canon_id == "0"
+            || !emitted_cuis.insert(issuer_canon_id.clone())
+        {
             continue;
         }
         start_elem(w, "Supplier")?;
         start_elem(w, "CompanyStructure")?;
-        // DUK rule: RegistrationNumber must be bare digits — strip "RO" prefix
-        write_text_elem(
-            w,
-            "RegistrationNumber",
-            &esc(&trunc(&strip_ro(&issuer_cui), 35)),
-        )?;
+        // DUK rule: RegistrationNumber uses the same "00"+CUI format
+        write_text_elem(w, "RegistrationNumber", &esc(&trunc(&issuer_canon_id, 35)))?;
         write_text_elem(w, "Name", &esc(&trunc(&issuer_name, 256)))?;
         // Minimal address (city required)
         start_elem(w, "Address")?;
@@ -413,7 +539,8 @@ pub async fn write_suppliers(
         write_text_elem(w, "BankAccountNumber", "N/A")?;
         end_elem(w, "BankAccount")?;
         end_elem(w, "CompanyStructure")?;
-        write_text_elem(w, "SupplierID", &esc(&trunc(&issuer_cui, 35)))?;
+        // SupplierID and RegistrationNumber use the same canonical "00"+CUI format
+        write_text_elem(w, "SupplierID", &esc(&trunc(&issuer_canon_id, 35)))?;
         write_text_elem(w, "AccountID", "401")?;
         write_text_elem(w, "OpeningCreditBalance", "0.00")?;
         write_text_elem(w, "ClosingCreditBalance", "0.00")?;
@@ -506,50 +633,104 @@ pub async fn write_uom_table(
     .fetch_all(pool)
     .await?;
 
-    let mut emitted: BTreeSet<String> = BTreeSet::new();
+    let mut emitted_codes: BTreeSet<String> = BTreeSet::new();
 
-    // Always emit the canonical "buc" (piece) unit
-    emitted.insert("buc".to_string());
-    write_uom_entry(w, "buc", "Bucată (piesă)")?;
+    // Always emit the canonical piece unit (H87)
+    emitted_codes.insert("H87".to_string());
+    write_uom_entry(w, "H87", "piece (bucată)")?;
 
     for row in &rows {
         let unit: String = row.try_get("unit").unwrap_or_default();
         let unit_trimmed = unit.trim().to_string();
-        if unit_trimmed.is_empty() || !emitted.insert(unit_trimmed.clone()) {
+        if unit_trimmed.is_empty() {
             continue;
         }
+        let code = uom_to_rec20(&unit_trimmed);
+        if !emitted_codes.insert(code.to_string()) {
+            continue; // already emitted this Rec-20 code
+        }
         let desc = uom_description(&unit_trimmed);
-        write_uom_entry(w, &unit_trimmed, desc)?;
+        write_uom_entry(w, code, desc)?;
     }
 
     end_elem(w, "UOMTable")?;
     Ok(())
 }
 
-fn write_uom_entry(w: &mut XmlWriter, uom: &str, desc: &str) -> AppResult<()> {
+fn write_uom_entry(w: &mut XmlWriter, uom_code: &str, desc: &str) -> AppResult<()> {
     start_elem(w, "UOMTableEntry")?;
-    write_text_elem(w, "UnitOfMeasure", &trunc(uom, 9))?;
+    write_text_elem(w, "UnitOfMeasure", &trunc(uom_code, 9))?;
     write_text_elem(w, "Description", &esc(&trunc(desc, 256)))?;
     end_elem(w, "UOMTableEntry")?;
     Ok(())
 }
 
-fn uom_description(unit: &str) -> &'static str {
+// ── UN/ECE Rec-20 code lookup ──────────────────────────────────────────────────
+//
+// Extracted from Ro_SAFT_SchemaDefCod_16.02.2026.xlsx sheet "Unitati_masura".
+// Maps common Romanian unit strings → UN/ECE Rec-20 codes.
+// Unknown units default to "H87" (piece) per the ANAF recommendation.
+pub fn uom_to_rec20(unit: &str) -> &'static str {
     match unit.to_lowercase().as_str() {
-        "buc" | "pcs" | "pc" | "pce" => "Bucată (piesă)",
-        "kg" => "Kilogram",
-        "g" => "Gram",
-        "l" | "lt" | "ltr" => "Litru",
-        "m" => "Metru",
-        "m2" | "mp" => "Metru pătrat",
-        "m3" | "mc" => "Metru cub",
-        "h" | "hr" | "ore" => "Oră",
-        "zi" | "zile" | "day" => "Zi",
-        "luna" | "month" => "Lună",
-        "set" => "Set",
-        "pach" | "pack" => "Pachet",
-        "serv" | "service" => "Serviciu",
-        _ => "Unitate de măsură",
+        // Piece / bucată
+        "buc" | "bucata" | "bucată" | "buc." | "pcs" | "pc" | "pce" | "piece" | "pcs." => "H87",
+        // Hour / oră
+        "ora" | "ore" | "h" | "hr" | "hour" | "oră" => "HUR",
+        // Kilogram
+        "kg" | "kilogram" | "kilograme" => "KGM",
+        // Gram
+        "g" | "gram" | "grame" => "GRM",
+        // Litre / litru
+        "l" | "lt" | "ltr" | "litru" | "litre" | "liter" | "litri" => "LTR",
+        // Millilitre
+        "ml" | "millilitre" | "mililitru" => "MLT",
+        // Metre / metru
+        "m" | "metru" | "metre" | "meter" | "metri" => "MTR",
+        // Square metre / metru pătrat
+        "m2" | "mp" | "sqm" | "metru patrat" | "metru pătrat" => "MTK",
+        // Cubic metre / metru cub
+        "m3" | "mc" | "cbm" | "metru cub" => "MTQ",
+        // Kilometre
+        "km" | "kilometru" | "kilometre" => "KMT",
+        // Tonne
+        "t" | "tona" | "tonă" | "tonne" | "ton" => "TNE",
+        // Set
+        "set" => "SET",
+        // Pair / pereche
+        "pereche" | "pair" | "pr" => "PR",
+        // Month / lună
+        "luna" | "lună" | "month" | "luni" => "MON",
+        // Day / zi
+        "zi" | "zile" | "day" | "days" => "DAY",
+        // Box / cutie — no perfect equivalent; use H87 (piece) as closest
+        "cutie" | "box" | "bx" => "H87",
+        // Package / pachet
+        "pachet" | "pack" | "pach" => "H87",
+        // Service unit
+        "serviciu" | "serv" | "service" => "H87",
+        // Default: piece
+        _ => "H87",
+    }
+}
+
+fn uom_description(unit: &str) -> &'static str {
+    match uom_to_rec20(unit) {
+        "H87" => "piece (bucată)",
+        "HUR" => "hour (oră)",
+        "KGM" => "kilogram",
+        "GRM" => "gram",
+        "LTR" => "litre (litru)",
+        "MLT" => "millilitre (mililitru)",
+        "MTR" => "metre (metru)",
+        "MTK" => "square metre (metru pătrat)",
+        "MTQ" => "cubic metre (metru cub)",
+        "KMT" => "kilometre (kilometru)",
+        "TNE" => "tonne (tonă)",
+        "SET" => "set",
+        "PR" => "pair (pereche)",
+        "MON" => "month (lună)",
+        "DAY" => "day (zi)",
+        _ => "unit (unitate)",
     }
 }
 
@@ -578,23 +759,28 @@ pub async fn write_products(
         // ProductCode: use product code if available, else id (max 70 chars)
         let product_code = code.as_deref().filter(|c| !c.is_empty()).unwrap_or(&id);
 
-        // ProductCommodityCode: required (max 35 chars) — use product code or "0000"
-        let commodity_code = code.as_deref().filter(|c| !c.is_empty()).unwrap_or("0000");
+        // ProductCommodityCode: ANAF accepts "00000000" (8 zeros) for services /
+        // when no NC8 code is stored. Goods without a known NC8 → "99999999" catch-all.
+        // Since the app cannot reliably distinguish goods from services, default to
+        // "00000000" (services) for all products.
+        let commodity_code = "00000000";
 
-        let uom = if unit.is_empty() {
+        let uom_raw = if unit.is_empty() {
             "buc"
         } else {
             unit.as_str()
         };
+        // Map to UN/ECE Rec-20 code for UOMBase/UOMStandard
+        let uom_code = uom_to_rec20(uom_raw);
 
         start_elem(w, "Product")?;
         write_text_elem(w, "ProductCode", &esc(&trunc(product_code, 70)))?;
         write_text_elem(w, "Description", &esc(&trunc(&name, 256)))?;
-        write_text_elem(w, "ProductCommodityCode", &esc(&trunc(commodity_code, 35)))?;
+        write_text_elem(w, "ProductCommodityCode", commodity_code)?;
         // UOMBase (required)
-        write_text_elem(w, "UOMBase", &trunc(uom, 9))?;
+        write_text_elem(w, "UOMBase", uom_code)?;
         // UOMStandard + UOMToUOMBaseConversionFactor (both required in the inner sequence)
-        write_text_elem(w, "UOMStandard", &trunc(uom, 9))?;
+        write_text_elem(w, "UOMStandard", uom_code)?;
         write_text_elem(w, "UOMToUOMBaseConversionFactor", "1")?;
         end_elem(w, "Product")?;
     }
@@ -676,26 +862,76 @@ mod tests {
     }
 
     #[test]
-    fn saft_tax_code_mapping() {
-        assert_eq!(saft_tax_code("S", Decimal::from(19)), "S");
-        assert_eq!(saft_tax_code("S", Decimal::from(21)), "S");
-        assert_eq!(saft_tax_code("S", Decimal::from(9)), "AA");
-        assert_eq!(saft_tax_code("S", Decimal::from(5)), "AA");
-        assert_eq!(saft_tax_code("S", Decimal::from(11)), "AA");
-        assert_eq!(saft_tax_code("AE", Decimal::ZERO), "AE");
-        assert_eq!(saft_tax_code("E", Decimal::ZERO), "E");
-        assert_eq!(saft_tax_code("Z", Decimal::ZERO), "Z");
-        assert_eq!(saft_tax_code("O", Decimal::ZERO), "O");
-        assert_eq!(saft_tax_code("K", Decimal::ZERO), "K");
-        assert_eq!(saft_tax_code("G", Decimal::ZERO), "G");
-        assert_eq!(saft_tax_code("UNKNOWN", Decimal::from(19)), "S"); // fallback
+    fn saft_tax_code_mapping_sales() {
+        // Sales codes — from Livrari sheet
+        assert_eq!(saft_tax_code("S", Decimal::from(19)), "310309");
+        assert_eq!(saft_tax_code("S", Decimal::from(21)), "310344");
+        assert_eq!(saft_tax_code("S", Decimal::from(9)), "310310");
+        assert_eq!(saft_tax_code("S", Decimal::from(5)), "310311");
+        // 11% sales has its own code (310351) — must NOT collapse to the 9% code.
+        assert_eq!(saft_tax_code("S", Decimal::from(11)), "310351");
+        assert_ne!(saft_tax_code("S", Decimal::from(11)), "310310");
+        assert_eq!(saft_tax_code("AE", Decimal::ZERO), "310312");
+        assert_eq!(saft_tax_code("E", Decimal::ZERO), "310326");
+        assert_eq!(saft_tax_code("Z", Decimal::ZERO), "310313");
+        assert_eq!(saft_tax_code("O", Decimal::ZERO), "310324");
+        assert_eq!(saft_tax_code("K", Decimal::ZERO), "310301");
+        assert_eq!(saft_tax_code("G", Decimal::ZERO), "310324");
+        assert_eq!(saft_tax_code("UNKNOWN", Decimal::from(19)), "310309"); // fallback
     }
 
     #[test]
-    fn uom_description_known_units() {
-        assert_eq!(uom_description("buc"), "Bucată (piesă)");
-        assert_eq!(uom_description("kg"), "Kilogram");
-        assert_eq!(uom_description("h"), "Oră");
-        assert_eq!(uom_description("UNKNOWN_UOM"), "Unitate de măsură");
+    fn saft_tax_code_mapping_purchase() {
+        // Purchase codes — from Achizitii ded 100% sheet (domestic, not import)
+        assert_eq!(
+            saft_tax_code_dir("S", Decimal::from(19), TaxDirection::Purchase),
+            "301101"
+        );
+        assert_eq!(
+            saft_tax_code_dir("S", Decimal::from(21), TaxDirection::Purchase),
+            "301104"
+        );
+        assert_eq!(
+            saft_tax_code_dir("S", Decimal::from(9), TaxDirection::Purchase),
+            "301102"
+        );
+        assert_eq!(
+            saft_tax_code_dir("S", Decimal::from(5), TaxDirection::Purchase),
+            "301103"
+        );
+        assert_eq!(
+            saft_tax_code_dir("S", Decimal::from(11), TaxDirection::Purchase),
+            "301105"
+        );
+        assert_eq!(
+            saft_tax_code_dir("AE", Decimal::ZERO, TaxDirection::Purchase),
+            "300901"
+        );
+        assert_eq!(
+            saft_tax_code_dir("E", Decimal::ZERO, TaxDirection::Purchase),
+            "308302"
+        );
+        assert_eq!(
+            saft_tax_code_dir("Z", Decimal::ZERO, TaxDirection::Purchase),
+            "308302"
+        );
+    }
+
+    #[test]
+    fn uom_rec20_known_units() {
+        assert_eq!(uom_to_rec20("buc"), "H87");
+        assert_eq!(uom_to_rec20("ora"), "HUR");
+        assert_eq!(uom_to_rec20("kg"), "KGM");
+        assert_eq!(uom_to_rec20("l"), "LTR");
+        assert_eq!(uom_to_rec20("m"), "MTR");
+        assert_eq!(uom_to_rec20("mp"), "MTK");
+        assert_eq!(uom_to_rec20("mc"), "MTQ");
+        assert_eq!(uom_to_rec20("t"), "TNE");
+        assert_eq!(uom_to_rec20("km"), "KMT");
+        assert_eq!(uom_to_rec20("set"), "SET");
+        assert_eq!(uom_to_rec20("pereche"), "PR");
+        assert_eq!(uom_to_rec20("luna"), "MON");
+        assert_eq!(uom_to_rec20("zi"), "DAY");
+        assert_eq!(uom_to_rec20("UNKNOWN_UOM"), "H87"); // default to piece
     }
 }
