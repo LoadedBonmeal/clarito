@@ -6,6 +6,7 @@
 //! in `commands/{declarations,d394,saft}.rs`.
 
 pub mod d300;
+pub mod d394;
 pub mod validation;
 pub mod version;
 pub mod xml;

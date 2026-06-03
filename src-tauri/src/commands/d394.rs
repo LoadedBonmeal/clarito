@@ -31,6 +31,9 @@ pub struct D394Partner {
     pub partner_name: String,
     /// Categoria TVA (S/AE/E/Z/O/K/G) — D394 raportează separate pe categorie.
     pub vat_category: String,
+    /// Cota TVA normalizată la procent întreg (e.g. "19", "9", "5", "0").
+    /// Corespunde enum-ului D394 `cota` {0,5,9,11,19,20,21,24}.
+    pub vat_rate: String,
     /// Numărul de facturi VALIDATED emise/primite în perioadă.
     pub invoice_count: i64,
     /// Baza impozabilă totală (net), 2 zecimale.
@@ -69,6 +72,37 @@ pub struct D394Report {
     pub purchase_invoice_count: i64,
     /// Facturi primite fără defalcare TVA (net_amount IS NULL).
     pub purchase_unparsed_count: i64,
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Normalize a raw VAT rate string (from the DB) to a canonical integer-percent
+/// string matching the D394 `cota` enum {0, 5, 9, 11, 19, 20, 21, 24}.
+///
+/// The DB may store rates in various formats:
+///   "0.19" (decimal fraction), "19.00" (padded percent), "19" (plain percent).
+/// We parse to Decimal, multiply by 100 if < 1, round to integer, then return
+/// as a string. Unknown/invalid input normalizes to "0".
+pub fn normalize_vat_rate(raw: &str) -> String {
+    use rust_decimal::prelude::ToPrimitive;
+    let s = raw.trim();
+    if s.is_empty() {
+        return "0".to_string();
+    }
+    let d = match rust_decimal::Decimal::from_str(s) {
+        Ok(v) => v,
+        Err(_) => return "0".to_string(),
+    };
+    // If the value is < 1, it's stored as a fraction (e.g. 0.19 → 19%).
+    let pct = if d < rust_decimal::Decimal::ONE && d > rust_decimal::Decimal::ZERO {
+        (d * rust_decimal::Decimal::from(100))
+            .round_dp(0)
+            .to_i64()
+            .unwrap_or(0)
+    } else {
+        d.round_dp(0).to_i64().unwrap_or(0)
+    };
+    pct.to_string()
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -117,6 +151,7 @@ pub async fn compute_d394(
                 COALESCE(i.currency, 'RON') AS currency, \
                 i.exchange_rate, \
                 l.vat_category, \
+                l.vat_rate, \
                 l.subtotal_amount AS line_base, \
                 l.vat_amount AS line_vat \
          FROM invoices i \
@@ -134,19 +169,22 @@ pub async fn compute_d394(
     .await
     .map_err(AppError::Database)?;
 
-    // Accumulate per (partner_cui, vat_category) in BTreeMap for deterministic order.
+    // Accumulate per (partner_cui, vat_category, vat_rate) in BTreeMap for
+    // deterministic order. Including vat_rate in the key ensures a partner with
+    // sales at 19% AND 21% produces two separate D394 rows (legally required).
     // Also track the set of invoice_ids per key so invoice_count is correct.
     struct PartnerAcc {
         partner_cui: String,
         partner_name: String,
         vat_category: String,
+        vat_rate: String,
         invoice_ids: std::collections::BTreeSet<String>,
         base: Decimal,
         vat: Decimal,
     }
 
-    // key = (partner_cui, vat_category)
-    let mut partners: BTreeMap<(String, String), PartnerAcc> = BTreeMap::new();
+    // key = (partner_cui, vat_category, vat_rate_normalized)
+    let mut partners: BTreeMap<(String, String, String), PartnerAcc> = BTreeMap::new();
 
     for row in &line_rows {
         let partner_cui: String = row.try_get("partner_cui").unwrap_or_default();
@@ -162,6 +200,8 @@ pub async fn compute_d394(
         let vat_category: String = row
             .try_get("vat_category")
             .unwrap_or_else(|_| "S".to_string());
+        let raw_vat_rate: String = row.try_get("vat_rate").unwrap_or_else(|_| "0".to_string());
+        let vat_rate = normalize_vat_rate(&raw_vat_rate);
         let base_s: String = row.try_get("line_base").unwrap_or_default();
         let vat_s: String = row.try_get("line_vat").unwrap_or_default();
 
@@ -176,11 +216,12 @@ pub async fn compute_d394(
             fx,
         );
 
-        let key = (partner_cui.clone(), vat_category.clone());
+        let key = (partner_cui.clone(), vat_category.clone(), vat_rate.clone());
         let acc = partners.entry(key).or_insert(PartnerAcc {
             partner_cui: partner_cui.clone(),
             partner_name: partner_name.clone(),
             vat_category: vat_category.clone(),
+            vat_rate: vat_rate.clone(),
             invoice_ids: std::collections::BTreeSet::new(),
             base: Decimal::ZERO,
             vat: Decimal::ZERO,
@@ -209,6 +250,7 @@ pub async fn compute_d394(
                 partner_cui: acc.partner_cui,
                 partner_name: acc.partner_name,
                 vat_category: acc.vat_category,
+                vat_rate: acc.vat_rate,
                 invoice_count: acc.invoice_ids.len() as i64,
                 base: acc.base.round_dp(2).to_string(),
                 vat: acc.vat.round_dp(2).to_string(),
@@ -273,6 +315,7 @@ pub async fn compute_d394(
                 COALESCE(ri.currency, 'RON') AS currency, \
                 ri.exchange_rate, \
                 vl.vat_category, \
+                vl.vat_rate, \
                 vl.base_amount AS line_base, \
                 vl.vat_amount AS line_vat \
          FROM received_invoices ri \
@@ -293,13 +336,14 @@ pub async fn compute_d394(
         issuer_cui: String,
         issuer_name: String,
         vat_category: String,
+        vat_rate: String,
         invoice_ids: std::collections::BTreeSet<String>,
         base: Decimal,
         vat: Decimal,
     }
 
-    // key = (issuer_cui, vat_category)
-    let mut suppliers: BTreeMap<(String, String), SupplierAcc> = BTreeMap::new();
+    // key = (issuer_cui, vat_category, vat_rate_normalized)
+    let mut suppliers: BTreeMap<(String, String, String), SupplierAcc> = BTreeMap::new();
 
     for row in &purchase_line_rows {
         let invoice_id: String = row.try_get("invoice_id").unwrap_or_default();
@@ -315,6 +359,8 @@ pub async fn compute_d394(
         let vat_category: String = row
             .try_get("vat_category")
             .unwrap_or_else(|_| "S".to_string());
+        let raw_vat_rate: String = row.try_get("vat_rate").unwrap_or_else(|_| "0".to_string());
+        let vat_rate = normalize_vat_rate(&raw_vat_rate);
         let base_s: String = row.try_get("line_base").unwrap_or_default();
         let vat_s: String = row.try_get("line_vat").unwrap_or_default();
 
@@ -329,11 +375,12 @@ pub async fn compute_d394(
             fx,
         );
 
-        let key = (issuer_cui.clone(), vat_category.clone());
+        let key = (issuer_cui.clone(), vat_category.clone(), vat_rate.clone());
         let acc = suppliers.entry(key).or_insert(SupplierAcc {
             issuer_cui: issuer_cui.clone(),
             issuer_name: issuer_name.clone(),
             vat_category: vat_category.clone(),
+            vat_rate: vat_rate.clone(),
             invoice_ids: std::collections::BTreeSet::new(),
             base: Decimal::ZERO,
             vat: Decimal::ZERO,
@@ -355,6 +402,7 @@ pub async fn compute_d394(
                 partner_cui: acc.issuer_cui,
                 partner_name: acc.issuer_name,
                 vat_category: acc.vat_category,
+                vat_rate: acc.vat_rate,
                 invoice_count: acc.invoice_ids.len() as i64,
                 base: acc.base.round_dp(2).to_string(),
                 vat: acc.vat.round_dp(2).to_string(),
@@ -407,6 +455,59 @@ pub async fn export_d394(
     tokio::task::spawn_blocking(move || build_and_write_xml(report, dest))
         .await
         .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Generează fișierul XML D394 oficial (schema ANAF v5) și îl scrie la calea
+/// specificată. Aceasta este comanda de export pentru depunere la ANAF.
+///
+/// Spre deosebire de `export_d394` (preview JSON-like), aceasta produce un XML
+/// strict conform cu schema oficială XSD (`sample_d394.xml`).
+#[tauri::command]
+pub async fn export_d394_official(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+    submission: crate::anaf_decl::d394::D394Submission,
+    dest_path: String,
+) -> AppResult<String> {
+    use crate::anaf_decl::d394::generator::generate_d394_xml;
+    use crate::anaf_decl::d394::sections::build_sections;
+    use crate::anaf_decl::version::resolve;
+    use crate::anaf_decl::DeclKind;
+    use crate::db::companies;
+    use chrono::NaiveDate;
+
+    // Validate destination path
+    let dest = crate::commands::integrations::validate_export_path(&dest_path)?
+        .to_string_lossy()
+        .to_string();
+
+    // Parse period_from to extract luna/an and resolve schema version
+    let period = NaiveDate::parse_from_str(&period_from, "%Y-%m-%d").map_err(|_| {
+        AppError::Validation(format!(
+            "period_from '{period_from}' nu este în formatul YYYY-MM-DD."
+        ))
+    })?;
+
+    let ver = resolve(DeclKind::D394, period)?;
+
+    // Fetch company record (cui, legal_name, adresa)
+    let company = companies::get(&state.db, &company_id).await?;
+
+    // Compute aggregates via existing compute_d394
+    let report = compute_d394(state, company_id, period_from, period_to).await?;
+
+    // Build the structural D394Doc
+    let doc = build_sections(&report, &submission, &company, period)?;
+
+    // Generate schema-conformant XML
+    let xml = generate_d394_xml(&doc, &submission, &company, &ver)?;
+
+    // Write to disk
+    std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+
+    Ok(dest)
 }
 
 // ── XML builder ───────────────────────────────────────────────────────────────
@@ -635,6 +736,7 @@ mod tests {
                 partner_cui: "RO98765432".to_string(),
                 partner_name: "SC CLIENT SRL".to_string(),
                 vat_category: "S".to_string(),
+                vat_rate: "19".to_string(),
                 invoice_count: 3,
                 base: "5000.00".to_string(),
                 vat: "950.00".to_string(),
@@ -646,6 +748,7 @@ mod tests {
                 partner_cui: "RO11111111".to_string(),
                 partner_name: "SC FURNIZOR SRL".to_string(),
                 vat_category: "S".to_string(),
+                vat_rate: "19".to_string(),
                 invoice_count: 2,
                 base: "2000.00".to_string(),
                 vat: "380.00".to_string(),
@@ -728,6 +831,7 @@ mod tests {
                 partner_cui: "".to_string(),
                 partner_name: "B".to_string(),
                 vat_category: "S".to_string(),
+                vat_rate: "19".to_string(),
                 invoice_count: 1,
                 base: "100.00".to_string(),
                 vat: "19.00".to_string(),
@@ -736,6 +840,7 @@ mod tests {
                 partner_cui: "".to_string(),
                 partner_name: "A".to_string(),
                 vat_category: "S".to_string(),
+                vat_rate: "19".to_string(),
                 invoice_count: 1,
                 base: "5000.00".to_string(),
                 vat: "950.00".to_string(),
@@ -744,6 +849,7 @@ mod tests {
                 partner_cui: "".to_string(),
                 partner_name: "C".to_string(),
                 vat_category: "S".to_string(),
+                vat_rate: "19".to_string(),
                 invoice_count: 1,
                 base: "1000.00".to_string(),
                 vat: "190.00".to_string(),
@@ -1063,6 +1169,7 @@ mod tests {
                     partner_cui: "RO111".to_string(),
                     partner_name: "SC A SRL".to_string(),
                     vat_category: "S".to_string(),
+                    vat_rate: "19".to_string(),
                     invoice_count: 1,
                     base: "1000.00".to_string(),
                     vat: "190.00".to_string(),
@@ -1071,6 +1178,7 @@ mod tests {
                     partner_cui: "RO111".to_string(),
                     partner_name: "SC A SRL".to_string(),
                     vat_category: "AE".to_string(),
+                    vat_rate: "0".to_string(),
                     invoice_count: 1,
                     base: "500.00".to_string(),
                     vat: "0.00".to_string(),
@@ -1102,5 +1210,96 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    // ── Defect-1 fix: normalize_vat_rate ──────────────────────────────────────
+
+    /// normalize_vat_rate converts DB-stored rate strings to canonical int-percent.
+    #[test]
+    fn normalize_vat_rate_handles_all_formats() {
+        // Decimal fraction form (e.g. 0.19 from legacy REAL column)
+        assert_eq!(normalize_vat_rate("0.19"), "19");
+        assert_eq!(normalize_vat_rate("0.09"), "9");
+        assert_eq!(normalize_vat_rate("0.05"), "5");
+        assert_eq!(normalize_vat_rate("0.00"), "0");
+        // Padded percent form (from printf('%.2f'))
+        assert_eq!(normalize_vat_rate("19.00"), "19");
+        assert_eq!(normalize_vat_rate("21.00"), "21");
+        // Plain integer string (from TEXT column storing "19")
+        assert_eq!(normalize_vat_rate("19"), "19");
+        assert_eq!(normalize_vat_rate("9"), "9");
+        assert_eq!(normalize_vat_rate("0"), "0");
+        // Edge cases
+        assert_eq!(normalize_vat_rate(""), "0");
+        assert_eq!(normalize_vat_rate("  19  "), "19");
+        assert_eq!(normalize_vat_rate("garbage"), "0");
+    }
+
+    /// Defect-1: a partner with 19% and 21% category-S sales must produce TWO
+    /// D394 rows (separate keys), NOT one blended row with an inferred cota=20.
+    #[test]
+    fn d394_mixed_rate_partner_produces_two_rows() {
+        // Simulate the Rust-side grouping for a partner with two different rates.
+        // (RO111, "S", "19") and (RO111, "S", "21") must be separate keys.
+        struct LineRow {
+            partner_cui: &'static str,
+            vat_category: &'static str,
+            raw_vat_rate: &'static str, // DB form
+            base: &'static str,
+            vat: &'static str,
+        }
+
+        let lines = [
+            LineRow {
+                partner_cui: "RO111",
+                vat_category: "S",
+                raw_vat_rate: "19.00",
+                base: "1000.00",
+                vat: "190.00",
+            },
+            LineRow {
+                partner_cui: "RO111",
+                vat_category: "S",
+                raw_vat_rate: "21.00",
+                base: "500.00",
+                vat: "105.00",
+            },
+            LineRow {
+                partner_cui: "RO222",
+                vat_category: "S",
+                raw_vat_rate: "19.00",
+                base: "300.00",
+                vat: "57.00",
+            },
+        ];
+
+        let mut groups: BTreeMap<(String, String, String), (Decimal, Decimal)> = BTreeMap::new();
+        for l in &lines {
+            let rate = normalize_vat_rate(l.raw_vat_rate);
+            let key = (l.partner_cui.to_string(), l.vat_category.to_string(), rate);
+            let e = groups.entry(key).or_insert((Decimal::ZERO, Decimal::ZERO));
+            e.0 += Decimal::from_str(l.base).unwrap();
+            e.1 += Decimal::from_str(l.vat).unwrap();
+        }
+
+        assert_eq!(
+            groups.len(),
+            3,
+            "RO111@19%, RO111@21%, RO222@19% → 3 distinct keys (not 2 collapsed)"
+        );
+
+        let row_19 = &groups[&("RO111".to_string(), "S".to_string(), "19".to_string())];
+        assert_eq!(row_19.0, Decimal::from_str("1000.00").unwrap());
+        assert_eq!(row_19.1, Decimal::from_str("190.00").unwrap());
+
+        let row_21 = &groups[&("RO111".to_string(), "S".to_string(), "21".to_string())];
+        assert_eq!(row_21.0, Decimal::from_str("500.00").unwrap());
+        assert_eq!(row_21.1, Decimal::from_str("105.00").unwrap());
+
+        // Verify there is NO blended row — cota "20" must not exist
+        assert!(
+            !groups.contains_key(&("RO111".to_string(), "S".to_string(), "20".to_string())),
+            "Must NOT produce a blended cota=20 row"
+        );
     }
 }

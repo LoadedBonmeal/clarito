@@ -390,6 +390,7 @@ pub fn run() {
             // d394 — livrări/achiziții pe teritoriul național
             commands::d394::compute_d394,
             commands::d394::export_d394,
+            commands::d394::export_d394_official,
             // jurnale contabile
             commands::journals::export_sales_journal,
             commands::journals::export_purchase_journal,

@@ -440,6 +440,9 @@ export interface D394Partner {
   partnerName: string;
   /** Categoria TVA (S/AE/E/Z/O/K/G) — D394 raportează separate pe categorie. */
   vatCategory: string;
+  /** Cota TVA normalizată la procent întreg (ex. "19", "9", "5", "0").
+   *  Corespunde enum-ului D394 cota {0,5,9,11,19,20,21,24}. */
+  vatRate: string;
   /** Numărul de facturi VALIDATED emise către partener în perioadă. */
   invoiceCount: number;
   /** Baza impozabilă totală (net), 2 zecimale. */
