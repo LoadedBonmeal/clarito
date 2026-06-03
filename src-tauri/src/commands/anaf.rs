@@ -71,6 +71,7 @@ async fn get_valid_token(
     let result = oauth::refresh_token_bundle_with_client_id(
         &bundle.refresh_token,
         &config.client_id,
+        &config.client_secret,
         &config.token_url,
     )
     .await
@@ -163,6 +164,12 @@ pub(crate) async fn build_oauth_config(pool: &sqlx::SqlitePool) -> oauth::OAuthC
         }
     }
 
+    // client_secret-ul OAuth (client confidențial ANAF) — citit din OS keychain,
+    // nu din tabela settings (este o credențială sensibilă).
+    if let Ok(Some(secret)) = crate::anaf::keychain::get_oauth_client_secret() {
+        cfg.client_secret = secret;
+    }
+
     cfg
 }
 
@@ -220,10 +227,34 @@ pub async fn anaf_logout(state: tauri::State<'_, AppState>, company_id: String) 
     // la serverul de revocare ANAF.
     if let Some(bundle) = TokenBundle::load(&company_id) {
         let config = build_oauth_config(&state.db).await;
-        oauth::revoke_token(&bundle.access_token, &config.client_id).await;
+        oauth::revoke_token(
+            &bundle.access_token,
+            &config.client_id,
+            &config.client_secret,
+        )
+        .await;
     }
     TokenBundle::delete(&company_id);
     Ok(())
+}
+
+/// Salvează (sau șterge, dacă e gol) client_secret-ul OAuth ANAF în OS keychain.
+/// Secret-ul NU este niciodată citit înapoi în frontend — doar setat/șters.
+#[tauri::command]
+pub async fn anaf_set_oauth_client_secret(secret: String) -> AppResult<()> {
+    let trimmed = secret.trim();
+    if trimmed.is_empty() {
+        crate::anaf::keychain::delete_oauth_client_secret()
+    } else {
+        crate::anaf::keychain::store_oauth_client_secret(trimmed)
+    }
+}
+
+/// `true` dacă există un client_secret OAuth salvat în keychain (pentru a afișa
+/// starea „configurat" în Setări, fără a expune valoarea).
+#[tauri::command]
+pub async fn anaf_has_oauth_client_secret() -> AppResult<bool> {
+    Ok(crate::anaf::keychain::get_oauth_client_secret()?.is_some())
 }
 
 /// Trimite XML-ul facturii la ANAF. Returnează `index_incarcare` (upload ID).
@@ -407,6 +438,7 @@ pub(crate) async fn submit_invoice_inner(
                     if let Ok(refreshed) = oauth::refresh_token_bundle_with_client_id(
                         &bundle.refresh_token,
                         &cfg.client_id,
+                        &cfg.client_secret,
                         &cfg.token_url,
                     )
                     .await

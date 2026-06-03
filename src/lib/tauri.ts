@@ -234,6 +234,12 @@ export const anaf = {
     invoke<boolean>("anaf_is_authenticated", { companyId }),
   logout: (companyId: string) =>
     invoke<void>("anaf_logout", { companyId }),
+  /** Save (or clear, if empty) the OAuth client_secret in the OS keychain. */
+  setOauthClientSecret: (secret: string) =>
+    invoke<void>("anaf_set_oauth_client_secret", { secret }),
+  /** True if an OAuth client_secret is stored (value never returned to JS). */
+  hasOauthClientSecret: () =>
+    invoke<boolean>("anaf_has_oauth_client_secret"),
   submitInvoice: (companyId: string, invoiceId: string, testMode = false) =>
     invoke<string>("anaf_submit_invoice", { companyId, invoiceId, testMode }),
   checkStatus: (companyId: string, invoiceId: string, testMode = false) =>

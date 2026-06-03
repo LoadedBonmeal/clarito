@@ -17,11 +17,11 @@ use std::time::Duration;
 
 const DEFAULT_CLIENT_ID: &str = "efactura-desktop";
 const DEFAULT_REDIRECT_URI: &str = "http://localhost:8787/callback";
-/// URL de autorizare ANAF producție.
-const DEFAULT_AUTH_URL: &str = "https://logincert.anaf.ro/anaf-oauth2-server/authorize";
+/// URL de autorizare ANAF producție (calea corectă este `/anaf-oauth2/v1/`).
+const DEFAULT_AUTH_URL: &str = "https://logincert.anaf.ro/anaf-oauth2/v1/authorize";
 /// URL token ANAF producție.
-const DEFAULT_TOKEN_URL: &str = "https://logincert.anaf.ro/anaf-oauth2-server/token";
-const DEFAULT_REVOKE_URL: &str = "https://logincert.anaf.ro/anaf-oauth2-server/revoke";
+const DEFAULT_TOKEN_URL: &str = "https://logincert.anaf.ro/anaf-oauth2/v1/token";
+const DEFAULT_REVOKE_URL: &str = "https://logincert.anaf.ro/anaf-oauth2/v1/revoke";
 const DEFAULT_CALLBACK_PORT: u16 = 8787;
 
 // ─── OAuthConfig ─────────────────────────────────────────────────────────────
@@ -42,6 +42,10 @@ const DEFAULT_CALLBACK_PORT: u16 = 8787;
 #[derive(Clone, Debug)]
 pub struct OAuthConfig {
     pub client_id: String,
+    /// client_secret al aplicației OAuth înregistrate la ANAF. ANAF este un
+    /// client *confidențial*: tokenul se obține cu HTTP Basic Auth
+    /// (client_id:client_secret), nu doar cu PKCE. Citit din OS keychain.
+    pub client_secret: String,
     pub redirect_uri: String,
     pub callback_port: u16,
     pub authorize_url: String,
@@ -53,6 +57,7 @@ impl OAuthConfig {
     pub fn default_prod() -> Self {
         OAuthConfig {
             client_id: DEFAULT_CLIENT_ID.to_string(),
+            client_secret: String::new(),
             redirect_uri: DEFAULT_REDIRECT_URI.to_string(),
             callback_port: DEFAULT_CALLBACK_PORT,
             authorize_url: DEFAULT_AUTH_URL.to_string(),
@@ -136,6 +141,16 @@ pub async fn authorize(_company_id: &str, config: &OAuthConfig) -> Result<OAuthR
         return Err(
             "Conexiunea SPV nu este configurată: completați «client_id»-ul OAuth propriu \
              (înregistrat la ANAF) în Setări → ANAF → Configurare avansată, apoi reîncercați."
+                .to_string(),
+        );
+    }
+
+    // ANAF este client confidențial — fără client_secret tokenul este respins.
+    if config.client_secret.trim().is_empty() {
+        return Err(
+            "Conexiunea SPV nu este configurată: completați «client_secret»-ul OAuth \
+             (generat la înregistrarea aplicației în SPV) în Setări → ANAF → Configurare \
+             avansată, apoi reîncercați."
                 .to_string(),
         );
     }
@@ -311,7 +326,7 @@ pub async fn authorize(_company_id: &str, config: &OAuthConfig) -> Result<OAuthR
 ///
 /// `client_id` trebuie să corespundă client_id-ului configurat în Setări → ANAF;
 /// un mismatch face ca serverul ANAF să respingă revocarea.
-pub async fn revoke_token(access_token: &str, client_id: &str) {
+pub async fn revoke_token(access_token: &str, client_id: &str, client_secret: &str) {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
@@ -320,10 +335,16 @@ pub async fn revoke_token(access_token: &str, client_id: &str) {
         Err(_) => return,
     };
 
-    let params = [("token", access_token), ("client_id", client_id)];
+    let params = [("token", access_token)];
 
     // Fire-and-forget: dacă ANAF nu suportă revocarea corect, nu e critical.
-    let _ = client.post(DEFAULT_REVOKE_URL).form(&params).send().await;
+    // Basic Auth (client_id:client_secret) — client confidențial.
+    let _ = client
+        .post(DEFAULT_REVOKE_URL)
+        .basic_auth(client_id, Some(client_secret))
+        .form(&params)
+        .send()
+        .await;
 }
 
 /// Verifică dacă un URL este permis ca redirect_uri OAuth.
@@ -393,6 +414,7 @@ pub fn is_allowed_anaf_url(url: &str) -> bool {
 pub async fn refresh_token_bundle_with_client_id(
     refresh_tok: &str,
     client_id: &str,
+    client_secret: &str,
     token_url: &str,
 ) -> Result<OAuthResult, String> {
     let client = reqwest::Client::builder()
@@ -400,14 +422,15 @@ pub async fn refresh_token_bundle_with_client_id(
         .build()
         .map_err(|e| e.to_string())?;
 
+    // Basic Auth (client_id:client_secret) — confidential client; client_id not in body.
     let params = [
         ("grant_type", "refresh_token"),
         ("refresh_token", refresh_tok),
-        ("client_id", client_id),
     ];
 
     let resp = client
         .post(token_url)
+        .basic_auth(client_id, Some(client_secret))
         .form(&params)
         .send()
         .await
@@ -575,16 +598,18 @@ async fn exchange_code_for_token(
         .build()
         .map_err(|e| e.to_string())?;
 
+    // ANAF folosește autentificare client prin HTTP Basic Auth (client_id:client_secret)
+    // — stil „AuthStyleInHeader". client_id NU se mai trimite și în body.
     let params = [
         ("grant_type", "authorization_code"),
         ("code", code),
         ("redirect_uri", config.redirect_uri.as_str()),
-        ("client_id", config.client_id.as_str()),
         ("code_verifier", code_verifier),
     ];
 
     let resp = client
         .post(&config.token_url)
+        .basic_auth(&config.client_id, Some(&config.client_secret))
         .form(&params)
         .send()
         .await

@@ -186,6 +186,8 @@ export function SettingsPage() {
   // ANAF advanced OAuth config
   const [anafAdvancedOpen, setAnafAdvancedOpen] = useState(false);
   const [anafClientId, setAnafClientId] = useState("");
+  const [anafClientSecret, setAnafClientSecret] = useState("");
+  const [anafHasSecret, setAnafHasSecret] = useState(false);
   const [anafRedirectUri, setAnafRedirectUri] = useState("");
   const [anafCallbackPort, setAnafCallbackPort] = useState("");
   const [anafAuthorizeUrl, setAnafAuthorizeUrl] = useState("");
@@ -231,6 +233,11 @@ export function SettingsPage() {
       setAnafCallbackPort(port ?? "");
       setAnafAuthorizeUrl(aurl ?? "");
       setAnafTokenUrl(turl ?? "");
+      try {
+        setAnafHasSecret(await api.anaf.hasOauthClientSecret());
+      } catch {
+        setAnafHasSecret(false);
+      }
     })();
   }, []);
 
@@ -283,6 +290,12 @@ export function SettingsPage() {
         api.settings.set("anaf_oauth_authorize_url", anafAuthorizeUrl),
         api.settings.set("anaf_oauth_token_url", anafTokenUrl),
       ]);
+      // client_secret-ul merge în keychain, doar dacă utilizatorul a introdus o valoare nouă.
+      if (anafClientSecret.trim() !== "") {
+        await api.anaf.setOauthClientSecret(anafClientSecret.trim());
+        setAnafClientSecret("");
+        setAnafHasSecret(true);
+      }
       setAnafAdvancedSaved(true);
       setTimeout(() => setAnafAdvancedSaved(false), 3000);
     } catch (e) {
@@ -540,15 +553,30 @@ export function SettingsPage() {
             {anafAdvancedOpen && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingTop: 14 }}>
                 <Banner variant="info">
-                  Lăsați gol pentru valorile implicite. Modificați doar dacă știți ce faceți (ex. mediu de test OAuth, client_id propriu înregistrat la ANAF).
+                  Pentru conectarea la SPV, ANAF cere o aplicație OAuth proprie: în SPV → „Gestionare
+                  profil OAuth" înregistrați aplicația (cu Redirect URI-ul de mai jos) și veți primi un
+                  <b> Client ID</b> și un <b>Client Secret</b>. Completați-le aici. Restul câmpurilor pot
+                  rămâne goale (valori implicite).
                 </Banner>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <Field label="Client ID" help="Furnizat de ANAF la înregistrarea aplicației">
+                  <Field label="Client ID" help="Generat de ANAF la înregistrarea aplicației OAuth">
                     <Input
                       className="rf-mono"
-                      placeholder="efactura-desktop (implicit)"
+                      placeholder="client_id de la ANAF"
                       value={anafClientId}
                       onChange={(e) => setAnafClientId(e.target.value)}
+                    />
+                  </Field>
+                  <Field
+                    label="Client Secret"
+                    help={anafHasSecret ? "Salvat în keychain — lăsați gol pentru a-l păstra" : "Generat de ANAF; stocat securizat în keychain"}
+                  >
+                    <Input
+                      type="password"
+                      className="rf-mono"
+                      placeholder={anafHasSecret ? "•••••••• (configurat)" : "client_secret de la ANAF"}
+                      value={anafClientSecret}
+                      onChange={(e) => setAnafClientSecret(e.target.value)}
                     />
                   </Field>
                   <Field label="Redirect URI">
@@ -570,7 +598,7 @@ export function SettingsPage() {
                   <Field label="URL autorizare">
                     <Input
                       className="rf-mono"
-                      placeholder="https://logincert.anaf.ro/anaf-oauth2-server/authorize"
+                      placeholder="https://logincert.anaf.ro/anaf-oauth2/v1/authorize"
                       value={anafAuthorizeUrl}
                       onChange={(e) => setAnafAuthorizeUrl(e.target.value)}
                     />
@@ -579,7 +607,7 @@ export function SettingsPage() {
                     <Field label="URL token">
                       <Input
                         className="rf-mono"
-                        placeholder="https://logincert.anaf.ro/anaf-oauth2-server/token"
+                        placeholder="https://logincert.anaf.ro/anaf-oauth2/v1/token"
                         value={anafTokenUrl}
                         onChange={(e) => setAnafTokenUrl(e.target.value)}
                       />

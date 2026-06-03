@@ -340,6 +340,8 @@ pub fn run() {
             commands::anaf::anaf_authorize,
             commands::anaf::anaf_is_authenticated,
             commands::anaf::anaf_logout,
+            commands::anaf::anaf_set_oauth_client_secret,
+            commands::anaf::anaf_has_oauth_client_secret,
             commands::anaf::anaf_submit_invoice,
             commands::anaf::anaf_check_invoice_status,
             commands::anaf::anaf_sync_spv,

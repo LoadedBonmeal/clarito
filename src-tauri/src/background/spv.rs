@@ -77,6 +77,7 @@ pub(crate) async fn do_sync_spv(
             let result = oauth::refresh_token_bundle_with_client_id(
                 &bundle.refresh_token,
                 &config.client_id,
+                &config.client_secret,
                 &config.token_url,
             )
             .await
