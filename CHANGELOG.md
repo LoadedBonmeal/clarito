@@ -2,6 +2,26 @@
 
 Toate modificările notabile ale Clarito (fost RoFactura). Format: [Keep a Changelog](https://keepachangelog.com), versionare [SemVer](https://semver.org).
 
+## [0.6.0] - 2026-06-03
+
+Declarații ANAF conforme oficial: **D300, D394 și SAF-T D406 trec validatorul oficial ANAF (DUKIntegrator) cu 0 erori** — nu doar XSD, ci și regulile de business. Regulile au fost extrase prin decompilarea validatoarelor ANAF; fiecare etapă construită cu sub-agenți + QA adversarial (re-rulare a validatorului real) + gate verde.
+
+### Added
+- **Generatoare XML oficiale** pentru D300 (decont TVA, v12), D394 (declarație informativă, v5) și SAF-T D406 (v2.4.9) — XML conform schemei ANAF, validat cu `xmllint` pe XSD-ul oficial **și** cu DUKIntegrator pe regulile de business. Strat de versionare per-perioadă (alege automat schema/namespace corect pentru perioada raportată).
+- **Motor de contabilitate în partidă dublă (GL)**: note contabile auto-generate din facturi/încasări/plăți pe planul de conturi RO (OMFP 1802/2014) — D 4111 / C 707 + 4427 (vânzări), D 6xx + 4426 / C 401 (achiziții), taxare inversă (4426=4427), stornare; reconciliere care leagă Σ4427 ↔ TVA colectată D300 și Σ4426 ↔ TVA deductibilă. Ecran „Jurnal contabil & reconciliere".
+- **SAF-T MasterFiles + SourceDocuments + GeneralLedgerEntries** complete (conturi, clienți, furnizori, taxe, UoM, produse, facturi vânzare/cumpărare, plăți, note contabile).
+- **Inventar + imobilizări**: tabele stocuri (`stock_movements`) + mijloace fixe (`fixed_assets`/`asset_transactions`) cu calcul de amortizare liniară; secțiunile SAF-T MovementOfGoods + Assets; varianta **anuală D406A** (HeaderComment=A, perioadă pe an, AssetTransactions) — trece DUKIntegrator cu 0 erori.
+- **UI**: butoane „Export oficial ANAF" lângă extrasele de lucru pe D300/D394/SAF-T, formulare de depunere (declarant/CAEN/bancă/reprezentant), cod art. 331 pe produse, ecran GL/reconciliere.
+- Validare cifră de control CUI (mod-11) și generare automată a NDP (număr de evidență a plății, 23 caractere) pentru D300.
+
+### Fixed
+- Nomenclatoare DUK pentru SAF-T: TaxCode pe 6 cifre (310309/310344/…), UoM UN/ECE (H87/HUR), PaymentMethod, SelfBillingIndicator, regim fiscal — în loc de literali respinși de ANAF.
+- D300 R26 (sumă de control `totalPlata_A`) și D394 (matrice tip↔cotă↔partener, op11 cu cod art. 331 real, reconciliere rezumat1/rezumat2) — corectate la formulele exacte ale validatorului.
+
+### Notes
+- Validatoarele DUKIntegrator + schemele ANAF sunt vendate local (gitignored, via `scripts/fetch-validators.sh`); ANAF re-versionează nomenclatoarele de ~2 ori/an.
+- Depunerea efectivă necesită semnarea PDF cu certificat (smart-card) — în afara automatizării. Cross-platform macOS/Windows validat în CI.
+
 ## [0.5.0] - 2026-06-02
 
 Audit complet pe funcționalități contabile + remediere bug-uri raportate (plan-mode + sub-agenți + QA + verificare adversarială; gate verde: 338 teste cargo + 129 teste vitest + clippy `-D warnings`).
