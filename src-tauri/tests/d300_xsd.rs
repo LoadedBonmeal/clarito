@@ -26,7 +26,7 @@ use efactura_desktop_lib::db::companies::Company;
 fn test_company() -> Company {
     Company {
         id: "test-co-id".to_string(),
-        cui: "RO12345678".to_string(),
+        cui: "RO12345674".to_string(), // valid CUI: base=1234567, check=4
         legal_name: "CLARITO TEST SRL".to_string(),
         trade_name: None,
         registry_number: Some("J40/1234/2020".to_string()),
@@ -69,7 +69,7 @@ fn test_submission() -> D300Submission {
 fn test_report() -> D300Report {
     // Synthetic fiscal data: sales at 21% + 11%, purchases at 21%
     D300Report {
-        company_cui: "RO12345678".to_string(),
+        company_cui: "RO12345674".to_string(),
         period_from: "2025-09-01".to_string(),
         period_to: "2025-09-30".to_string(),
         groups: vec![
@@ -144,6 +144,13 @@ fn d300_validates_against_official_xsd() {
     eprintln!("Generated D300 XML ({} bytes):", xml.len());
     eprintln!("{xml}");
 
+    // TEMPORARY: dump XML for DUK validation if EFACTURA_DUMP_DIR is set
+    if let Ok(dump_dir) = std::env::var("EFACTURA_DUMP_DIR") {
+        let dump_path = std::path::Path::new(&dump_dir).join("d300.xml");
+        std::fs::write(&dump_path, xml.as_bytes()).expect("write dump XML");
+        eprintln!("DUMP: wrote D300 XML to {:?}", dump_path);
+    }
+
     // Write to temp file for xmllint.
     let tmp = std::env::temp_dir().join("d300_xsd_test.xml");
     std::fs::write(&tmp, xml.as_bytes()).expect("write temp XML");
@@ -177,7 +184,7 @@ fn d300_validates_against_official_xsd() {
 #[test]
 fn d300_empty_period_generates_valid_xml() {
     let empty_report = D300Report {
-        company_cui: "RO12345678".to_string(),
+        company_cui: "RO12345674".to_string(),
         period_from: "2025-09-01".to_string(),
         period_to: "2025-09-30".to_string(),
         groups: vec![],

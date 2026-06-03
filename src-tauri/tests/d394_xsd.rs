@@ -202,6 +202,13 @@ fn d394_validates_against_official_xsd() {
     eprintln!("Generated D394 XML ({} bytes):", xml.len());
     eprintln!("{xml}");
 
+    // TEMPORARY: dump XML for DUK validation if EFACTURA_DUMP_DIR is set
+    if let Ok(dump_dir) = std::env::var("EFACTURA_DUMP_DIR") {
+        let dump_path = std::path::Path::new(&dump_dir).join("d394.xml");
+        std::fs::write(&dump_path, xml.as_bytes()).expect("write dump XML");
+        eprintln!("DUMP: wrote D394 XML to {:?}", dump_path);
+    }
+
     // Write to temp file for xmllint
     let tmp = std::env::temp_dir().join("d394_xsd_test.xml");
     std::fs::write(&tmp, xml.as_bytes()).expect("write temp XML");

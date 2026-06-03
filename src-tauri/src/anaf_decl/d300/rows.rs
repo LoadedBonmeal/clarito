@@ -517,7 +517,7 @@ mod tests {
     fn make_company() -> Company {
         Company {
             id: "test-id".to_string(),
-            cui: "RO12345678".to_string(),
+            cui: "RO12345674".to_string(), // valid CUI: base=1234567, check=4
             legal_name: "Test SRL".to_string(),
             trade_name: None,
             registry_number: None,
@@ -583,7 +583,7 @@ mod tests {
         let total_ded_base: Decimal = purchase_groups.iter().map(|g| parse_dec(&g.base)).sum();
 
         D300Report {
-            company_cui: "RO12345678".to_string(),
+            company_cui: "RO12345674".to_string(),
             period_from: "2025-09-01".to_string(),
             period_to: "2025-09-30".to_string(),
             groups,
