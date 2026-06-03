@@ -111,7 +111,17 @@ struct GlEntry {
 // ─── Decimal helpers ──────────────────────────────────────────────────────────
 
 fn dec(s: &str) -> Decimal {
-    Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO)
+    match Decimal::from_str(s.trim()) {
+        Ok(d) => d,
+        Err(_) => {
+            // Don't silently zero a corrupted amount without a trace — a malformed
+            // value would otherwise produce a zero-valued GL entry with no signal.
+            if !s.trim().is_empty() {
+                tracing::warn!(value = %s, "GL: valoare monetară invalidă — se folosește 0");
+            }
+            Decimal::ZERO
+        }
+    }
 }
 
 fn fmt_dec(d: Decimal) -> String {
@@ -827,7 +837,7 @@ pub async fn generate_gl_entries(
 
     let payment_rows = sqlx::query(
         "SELECT p.id, p.invoice_id, p.paid_at, p.amount, p.currency, \
-                i.contact_id, c.cui as contact_cui \
+                i.contact_id, c.cui as contact_cui, i.exchange_rate \
          FROM payments p \
          JOIN invoices i ON i.id = p.invoice_id \
          LEFT JOIN contacts c ON c.id = i.contact_id \
@@ -852,13 +862,17 @@ pub async fn generate_gl_entries(
         let contact_id: String = row.try_get("contact_id").unwrap_or_default();
         let contact_cui: Option<String> = row.try_get("contact_cui").unwrap_or(None);
 
-        // NOTE: FX rate la data plății nu e stocat în payments — skip FX leg (v1 simplification).
-        let amount_ron = if currency.eq_ignore_ascii_case("RON") {
-            dec(&amount_s)
-        } else {
-            // FX leg (665/765) omis în v1 — postăm suma ca atare
-            dec(&amount_s)
-        };
+        // Convert a foreign-currency payment to RON using the invoice's exchange
+        // rate (the rate the receivable in 4111 was booked at). This makes the
+        // bank/receivable legs balance in RON instead of posting the raw foreign
+        // amount as if it were RON. The FX gain/loss leg (665/765) — the delta
+        // between invoice-date and payment-date rates — remains deferred in v1
+        // because the payment-date rate is not stored.
+        let inv_fx = parse_rate(
+            row.try_get::<Option<f64>, _>("exchange_rate")
+                .unwrap_or(None),
+        );
+        let amount_ron = amount_to_ron(dec(&amount_s), &currency, inv_fx);
 
         let (journal, entries) = post_payment(
             company_id,
@@ -1415,6 +1429,53 @@ mod tests {
         assert_eq!(td, tc, "Plata: dezechilibru GL");
     }
 
+    // ── Test 3b: Plată în valută — conversie la cursul facturii ───────────────
+    /// O plată în EUR trebuie convertită în RON la cursul facturii (nu postată ca
+    /// sumă brută în EUR, ca și cum ar fi RON). 119 EUR × 5.0 = 595 RON.
+    #[tokio::test]
+    async fn test3b_fx_payment_converts_at_invoice_rate() {
+        let pool = setup_pool().await;
+        let cid = "co3b";
+        insert_company(&pool, cid).await;
+        insert_contact(&pool, cid, "ct3b", "CUI3B").await;
+        // Factură EUR, curs 5.0 (1 EUR = 5 RON): net=100, VAT=19, gross=119 (EUR).
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, currency, exchange_rate, subtotal_amount, vat_amount, \
+              total_amount, status, payment_means_code, storno_of_invoice_id, created_at, updated_at) \
+             VALUES ('inv3b',?1,'ct3b','F3B',1,'F3B','2025-01-15','2025-02-15','EUR',5.0,\
+                     '100','19','119','VALIDATED','42',NULL,1,1)",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .expect("insert EUR invoice");
+        // Plată de 119 EUR.
+        sqlx::query(
+            "INSERT INTO payments (id, invoice_id, company_id, amount, currency, paid_at, method) \
+             VALUES ('pay3b','inv3b',?1,'119','EUR','2025-01-20','transfer')",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .expect("insert EUR payment");
+
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+            .await
+            .expect("generate");
+
+        let jpk = get_journal_pk(&pool, "pay3b").await;
+        let d5121 = get_entry_amount(&pool, &jpk, "5121", "debit").await;
+        let c4111 = get_entry_amount(&pool, &jpk, "4111", "credit").await;
+        // 119 EUR × 5.0 = 595 RON (nu 119 ca și cum ar fi RON).
+        assert_eq!(d5121, rdec!(595), "D 5121 = 119 EUR × 5.0 = 595 RON");
+        assert_eq!(c4111, rdec!(595), "C 4111 = 595 RON");
+
+        let (td, tc) = sum_entries(&pool, &jpk).await;
+        assert_eq!(td, tc, "Plata FX: dezechilibru GL");
+    }
+
     // ── Test 4: Taxare inversă (reverse charge AE) ────────────────────────────
     #[tokio::test]
     async fn test4_reverse_charge() {
@@ -1635,6 +1696,44 @@ mod tests {
         assert!(
             report.discrepancies.is_empty(),
             "Discrepante: {:?}",
+            report.discrepancies
+        );
+    }
+
+    // ── Test 7b: Reconciliere cu taxare inversă (AE) — fără discrepanțe ───────
+    /// Achiziție cu taxare inversă: GL înregistrează D 4426 = C 4427 (autolichidare).
+    /// `d300_vat_totals` trebuie să includă TVA-ul autolichidat și pe latura
+    /// COLECTATĂ, altfel reconcilierea raporta o discrepanță falsă pentru orice
+    /// cumpărător art.331 / intracomunitar (GL 4427 ≠ D300 colectată).
+    #[tokio::test]
+    async fn test7b_reconcile_reverse_charge_ties_out() {
+        let pool = setup_pool().await;
+        let cid = "co7b";
+        insert_company(&pool, cid).await;
+        // Doar o achiziție cu taxare inversă (AE), net=1000, VAT autolichidat=190.
+        insert_received(&pool, cid, "ri7b", "AE", "19", "1000", "190").await;
+
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+            .await
+            .expect("generate");
+
+        let report = reconcile(&pool, cid, "2025-01-01", "2025-01-31")
+            .await
+            .expect("reconcile");
+
+        assert!(
+            report.balanced,
+            "GL dezechilibrat: debit={} credit={}",
+            report.total_debit, report.total_credit
+        );
+        // TVA autolichidat apare pe AMBELE laturi: GL 4427 == D300 colectată == 190.
+        assert_eq!(report.vat_collected_gl, "190.00");
+        assert_eq!(report.vat_collected_gl, report.vat_collected_d300);
+        assert_eq!(report.vat_deductible_gl, "190.00");
+        assert_eq!(report.vat_deductible_gl, report.vat_deductible_d300);
+        assert!(
+            report.discrepancies.is_empty(),
+            "Reverse-charge ar trebui să reconcilieze fără discrepanțe: {:?}",
             report.discrepancies
         );
     }
