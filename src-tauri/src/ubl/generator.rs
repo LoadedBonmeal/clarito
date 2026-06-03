@@ -852,6 +852,7 @@ mod tests {
             vat_amount: "19.00".to_string(),
             total_amount: "119.00".to_string(),
             cpv_code: None,
+            art331_code: None,
         };
 
         GeneratorInput {

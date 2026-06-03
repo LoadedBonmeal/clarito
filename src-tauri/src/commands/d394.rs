@@ -40,6 +40,11 @@ pub struct D394Partner {
     pub base: String,
     /// TVA colectat/deductibil total, 2 zecimale.
     pub vat: String,
+    /// Art. 331 product category code (from invoice_line_items.art331_code snapshot).
+    /// Used by D394 op11 codPR. None = use default 22.
+    /// For AE lines only — the BTreeMap key includes this so two AE lines with
+    /// different art.331 codes produce separate op1 rows.
+    pub art331_code: Option<String>,
 }
 
 /// Raportul D394 — livrări (vânzări) + achiziții per partener.
@@ -153,7 +158,8 @@ pub async fn compute_d394(
                 l.vat_category, \
                 l.vat_rate, \
                 l.subtotal_amount AS line_base, \
-                l.vat_amount AS line_vat \
+                l.vat_amount AS line_vat, \
+                l.art331_code \
          FROM invoices i \
          JOIN contacts c ON c.id = i.contact_id \
          JOIN invoice_line_items l ON l.invoice_id = i.id \
@@ -181,10 +187,14 @@ pub async fn compute_d394(
         invoice_ids: std::collections::BTreeSet<String>,
         base: Decimal,
         vat: Decimal,
+        /// For AE lines: the art331_code from the line snapshot (if present).
+        art331_code: Option<String>,
     }
 
-    // key = (partner_cui, vat_category, vat_rate_normalized)
-    let mut partners: BTreeMap<(String, String, String), PartnerAcc> = BTreeMap::new();
+    // key = (partner_cui, vat_category, vat_rate_normalized, art331_code_for_ae)
+    // art331_code is included in the key only for AE lines so that two AE lines
+    // with different art.331 codes produce separate D394 op1 rows.
+    let mut partners: BTreeMap<(String, String, String, String), PartnerAcc> = BTreeMap::new();
 
     for row in &line_rows {
         let partner_cui: String = row.try_get("partner_cui").unwrap_or_default();
@@ -204,6 +214,16 @@ pub async fn compute_d394(
         let vat_rate = normalize_vat_rate(&raw_vat_rate);
         let base_s: String = row.try_get("line_base").unwrap_or_default();
         let vat_s: String = row.try_get("line_vat").unwrap_or_default();
+        // art331_code is included in the key for AE lines so two AE lines with
+        // different art.331 categories produce separate D394 op1 rows.
+        let art331_code: Option<String> = row
+            .try_get::<Option<String>, _>("art331_code")
+            .unwrap_or(None);
+        let art331_key = if vat_category == "AE" {
+            art331_code.clone().unwrap_or_default()
+        } else {
+            String::new()
+        };
 
         let base_ron = amount_to_ron(
             Decimal::from_str(base_s.trim()).unwrap_or(Decimal::ZERO),
@@ -216,7 +236,12 @@ pub async fn compute_d394(
             fx,
         );
 
-        let key = (partner_cui.clone(), vat_category.clone(), vat_rate.clone());
+        let key = (
+            partner_cui.clone(),
+            vat_category.clone(),
+            vat_rate.clone(),
+            art331_key,
+        );
         let acc = partners.entry(key).or_insert(PartnerAcc {
             partner_cui: partner_cui.clone(),
             partner_name: partner_name.clone(),
@@ -225,6 +250,7 @@ pub async fn compute_d394(
             invoice_ids: std::collections::BTreeSet::new(),
             base: Decimal::ZERO,
             vat: Decimal::ZERO,
+            art331_code: art331_code.clone(),
         });
         acc.invoice_ids.insert(invoice_id);
         acc.base += base_ron;
@@ -254,6 +280,7 @@ pub async fn compute_d394(
                 invoice_count: acc.invoice_ids.len() as i64,
                 base: acc.base.round_dp(2).to_string(),
                 vat: acc.vat.round_dp(2).to_string(),
+                art331_code: acc.art331_code,
             }
         })
         .collect();
@@ -340,6 +367,8 @@ pub async fn compute_d394(
         invoice_ids: std::collections::BTreeSet<String>,
         base: Decimal,
         vat: Decimal,
+        // Purchase lines have no art331_code snapshot — always None (default 22).
+        art331_code: Option<String>,
     }
 
     // key = (issuer_cui, vat_category, vat_rate_normalized)
@@ -384,6 +413,7 @@ pub async fn compute_d394(
             invoice_ids: std::collections::BTreeSet::new(),
             base: Decimal::ZERO,
             vat: Decimal::ZERO,
+            art331_code: None, // purchase lines have no art331_code snapshot
         });
         acc.invoice_ids.insert(invoice_id);
         acc.base += base_ron;
@@ -406,6 +436,7 @@ pub async fn compute_d394(
                 invoice_count: acc.invoice_ids.len() as i64,
                 base: acc.base.round_dp(2).to_string(),
                 vat: acc.vat.round_dp(2).to_string(),
+                art331_code: acc.art331_code,
             }
         })
         .collect();
@@ -740,6 +771,7 @@ mod tests {
                 invoice_count: 3,
                 base: "5000.00".to_string(),
                 vat: "950.00".to_string(),
+                art331_code: None,
             }],
             total_base: "5000.00".to_string(),
             total_vat: "950.00".to_string(),
@@ -752,6 +784,7 @@ mod tests {
                 invoice_count: 2,
                 base: "2000.00".to_string(),
                 vat: "380.00".to_string(),
+                art331_code: None,
             }],
             total_purchase_base: "2000.00".to_string(),
             total_purchase_vat: "380.00".to_string(),
@@ -835,6 +868,7 @@ mod tests {
                 invoice_count: 1,
                 base: "100.00".to_string(),
                 vat: "19.00".to_string(),
+                art331_code: None,
             },
             D394Partner {
                 partner_cui: "".to_string(),
@@ -844,6 +878,7 @@ mod tests {
                 invoice_count: 1,
                 base: "5000.00".to_string(),
                 vat: "950.00".to_string(),
+                art331_code: None,
             },
             D394Partner {
                 partner_cui: "".to_string(),
@@ -853,6 +888,7 @@ mod tests {
                 invoice_count: 1,
                 base: "1000.00".to_string(),
                 vat: "190.00".to_string(),
+                art331_code: None,
             },
         ];
 
@@ -1173,6 +1209,7 @@ mod tests {
                     invoice_count: 1,
                     base: "1000.00".to_string(),
                     vat: "190.00".to_string(),
+                    art331_code: None,
                 },
                 D394Partner {
                     partner_cui: "RO111".to_string(),
@@ -1182,6 +1219,7 @@ mod tests {
                     invoice_count: 1,
                     base: "500.00".to_string(),
                     vat: "0.00".to_string(),
+                    art331_code: None,
                 },
             ],
             total_base: "1500.00".to_string(),

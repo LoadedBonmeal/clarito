@@ -26,6 +26,33 @@ import { notify } from "@/lib/toasts";
 import type { Product, ProductInput, UpdateProductInput } from "@/types";
 import { VAT_RATES, VAT_CATEGORIES, VAT_CATEGORY_LABELS } from "@/lib/constants";
 
+// Art. 331 product categories (codPR) — Parameters_v7._listaCodPR
+// Shown only when vatCategory="AE". For tip_partener=1 (default use-case).
+const ART331_CODES: { value: string; label: string }[] = [
+  { value: "22", label: "22 — Deșeuri feroase/neferoase" },
+  { value: "23", label: "23 — Masă lemnoasă și materiale lemnoase" },
+  { value: "24", label: "24 — Certificate CO₂/gaze cu efect de seră" },
+  { value: "25", label: "25 — Energie electrică" },
+  { value: "26", label: "26 — Certificate verzi" },
+  { value: "27", label: "27 — Construcții/terenuri" },
+  { value: "28", label: "28 — Aur de investiții" },
+  { value: "29", label: "29 — Telefoane mobile" },
+  { value: "30", label: "30 — Microprocesoare (circuite integrate)" },
+  { value: "31", label: "31 — Console/tablete/laptopuri" },
+  { value: "36", label: "36 — Gaze naturale" },
+  { value: "1001", label: "1001 — Grâu comun/alac" },
+  { value: "1002", label: "1002 — Secară" },
+  { value: "1003", label: "1003 — Orz" },
+  { value: "1004", label: "1004 — Ovăz" },
+  { value: "1005", label: "1005 — Porumb" },
+  { value: "1201", label: "1201 — Soia" },
+  { value: "1205", label: "1205 — Rapiță" },
+  { value: "120600", label: "120600 — Floarea-soarelui" },
+  { value: "121291", label: "121291 — Sfeclă de zahăr" },
+  { value: "10086000", label: "10086000 — Orez" },
+  { value: "120400", label: "120400 — Semințe de in" },
+];
+
 export function ProductsPage() {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const queryClient = useQueryClient();
@@ -323,6 +350,7 @@ function ProductModal({
     vatCategory: product?.vatCategory ?? "S",
     code: product?.code ?? "",
     stockQty: product?.stockQty ?? "",
+    art331Code: product?.art331Code ?? "",
     active: product?.active ?? true,
   });
   const [error, setError] = useState<string | null>(null);
@@ -368,6 +396,7 @@ function ProductModal({
       name: form.name.trim(),
       code: form.code?.trim() || undefined,
       stockQty: (form.stockQty as string)?.trim() || undefined,
+      art331Code: (form.art331Code as string)?.trim() || undefined,
       unit: form.unit || "buc",
       unitPrice: form.unitPrice || "0.00",
       vatRate: form.vatRate || "19",
@@ -472,6 +501,24 @@ function ProductModal({
             />
           </Field>
         </div>
+
+        {form.vatCategory === "AE" && (
+          <Field label="Cod art. 331 (taxare inversă — D394 codPR)">
+            <Select
+              value={(form.art331Code as string) ?? ""}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, art331Code: e.target.value || undefined }))
+              }
+            >
+              <option value="">— implicit 22 (Deșeuri feroase/neferoase) —</option>
+              {ART331_CODES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
 
         <label
           style={{

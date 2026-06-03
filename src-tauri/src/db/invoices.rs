@@ -88,6 +88,9 @@ pub struct LineItem {
     pub total_amount: String,
 
     pub cpv_code: Option<String>,
+    /// Art. 331 reverse-charge product category code — snapshot from product at creation.
+    /// Used by D394 op11 codPR. NULL = use default 22.
+    pub art331_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -123,6 +126,8 @@ pub struct CreateLineInput {
     pub vat_rate: f64,
     pub vat_category: String,
     pub cpv_code: Option<String>,
+    /// Art. 331 reverse-charge product category code (snapshot from product).
+    pub art331_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -285,7 +290,8 @@ pub async fn get_with_lines(pool: &SqlitePool, id: &str) -> AppResult<InvoiceWit
 async fn list_lines(pool: &SqlitePool, invoice_id: &str) -> AppResult<Vec<LineItem>> {
     Ok(sqlx::query_as::<_, LineItem>(
         "SELECT id, invoice_id, position, name, description, quantity, unit, \
-         unit_price, vat_rate, vat_category, subtotal_amount, vat_amount, total_amount, cpv_code \
+         unit_price, vat_rate, vat_category, subtotal_amount, vat_amount, total_amount, \
+         cpv_code, art331_code \
          FROM invoice_line_items WHERE invoice_id = ?1 ORDER BY position",
     )
     .bind(invoice_id)
@@ -434,11 +440,11 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
             "INSERT INTO invoice_line_items (
                 id, invoice_id, position, name, description,
                 quantity, unit, unit_price, vat_rate, vat_category,
-                subtotal_amount, vat_amount, total_amount, cpv_code
+                subtotal_amount, vat_amount, total_amount, cpv_code, art331_code
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7, ?8, ?9, ?10,
-                ?11, ?12, ?13, ?14
+                ?11, ?12, ?13, ?14, ?15
             )",
         )
         .bind(line_id)
@@ -476,6 +482,7 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         .bind(line_vat)
         .bind(line_total)
         .bind(&line.cpv_code)
+        .bind(&line.art331_code)
         .execute(&mut *tx)
         .await?;
     }

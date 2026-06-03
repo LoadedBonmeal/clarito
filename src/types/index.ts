@@ -196,6 +196,8 @@ export interface LineItem {
   vatAmount: string;
   totalAmount: string;
   cpvCode: string | null;
+  /** Art. 331 product category snapshot (from product at creation). */
+  art331Code: string | null;
 }
 
 export interface InvoiceEvent {
@@ -222,6 +224,8 @@ export interface CreateLineInput {
   vatRate: number;
   vatCategory: VatCategory;
   cpvCode?: string;
+  /** Art. 331 product category snapshot (from product). Used for D394 codPR. */
+  art331Code?: string;
 }
 
 export interface CreateInvoiceInput {
@@ -504,6 +508,8 @@ export interface Product {
   vatCategory: string;
   code: string | null;
   stockQty: string | null;
+  /** Art. 331 reverse-charge product category code for D394 op11 codPR. Null = use default 22. */
+  art331Code: string | null;
   active: boolean;
   createdAt: number;
   updatedAt: number;
@@ -517,6 +523,8 @@ export interface ProductInput {
   vatCategory?: string;
   code?: string;
   stockQty?: string;
+  /** Art. 331 product category code. Set only when vatCategory="AE". */
+  art331Code?: string;
   active?: boolean;
 }
 
@@ -528,6 +536,8 @@ export interface UpdateProductInput {
   vatCategory?: string;
   code?: string;
   stockQty?: string;
+  /** Art. 331 product category code. Set only when vatCategory="AE". */
+  art331Code?: string;
   active?: boolean;
 }
 

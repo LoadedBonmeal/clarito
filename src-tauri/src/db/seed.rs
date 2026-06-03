@@ -125,6 +125,7 @@ pub async fn run_if_empty(pool: &SqlitePool) -> AppResult<()> {
                 vat_rate: 19.0,
                 vat_category: "S".into(),
                 cpv_code: None,
+                art331_code: None,
             }],
         },
     )
@@ -153,6 +154,7 @@ pub async fn run_if_empty(pool: &SqlitePool) -> AppResult<()> {
                     vat_rate: 19.0,
                     vat_category: "S".into(),
                     cpv_code: None,
+                    art331_code: None,
                 },
                 CreateLineInput {
                     name: "Suport prioritar".into(),
@@ -163,6 +165,7 @@ pub async fn run_if_empty(pool: &SqlitePool) -> AppResult<()> {
                     vat_rate: 19.0,
                     vat_category: "S".into(),
                     cpv_code: None,
+                    art331_code: None,
                 },
             ],
         },

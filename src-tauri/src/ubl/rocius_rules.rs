@@ -848,6 +848,7 @@ mod tests {
             vat_amount: "19.00".into(),
             total_amount: "119.00".into(),
             cpv_code: None,
+            art331_code: None,
         }
     }
 

@@ -1072,7 +1072,8 @@ mod tests {
                 subtotal_amount TEXT NOT NULL DEFAULT '0',
                 vat_amount TEXT NOT NULL DEFAULT '0',
                 total_amount TEXT NOT NULL DEFAULT '0',
-                cpv_code TEXT
+                cpv_code TEXT,
+                art331_code TEXT
             )",
         )
         .execute(&pool)
@@ -1321,7 +1322,8 @@ mod tests {
                 subtotal_amount TEXT NOT NULL DEFAULT '0',
                 vat_amount TEXT NOT NULL DEFAULT '0',
                 total_amount TEXT NOT NULL DEFAULT '0',
-                cpv_code TEXT
+                cpv_code TEXT,
+                art331_code TEXT
             )",
         )
         .execute(&pool)

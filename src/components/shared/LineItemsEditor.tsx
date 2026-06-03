@@ -202,6 +202,8 @@ export function LineItemsEditor({
         vatRate: vatRateNum,
         vatCategory: product.vatCategory as VatCategory,
         cpvCode: product.code ?? l.cpvCode,
+        // Snapshot the art.331 code from the product for D394 codPR tracking.
+        art331Code: product.art331Code ?? undefined,
       } as LineRow;
     });
     onChange(updated);

@@ -101,6 +101,7 @@ fn test_report() -> D394Report {
                 invoice_count: 5,
                 base: "10000.00".to_string(),
                 vat: "1900.00".to_string(),
+                art331_code: None,
             },
             // Standard 21% sales (valid CUI: 87654329)
             D394Partner {
@@ -111,6 +112,7 @@ fn test_report() -> D394Report {
                 invoice_count: 2,
                 base: "5000.00".to_string(),
                 vat: "1050.00".to_string(),
+                art331_code: None,
             },
             // Reverse-charge domestic (AE) delivery → tip=V (valid CUI: 76543210)
             D394Partner {
@@ -121,6 +123,7 @@ fn test_report() -> D394Report {
                 invoice_count: 1,
                 base: "3000.00".to_string(),
                 vat: "0.00".to_string(),
+                art331_code: None, // default → codPR=22 (deșeuri/scrap)
             },
             // Intra-EU delivery (K) → tip=LS, tp=4 (foreign DE partner)
             D394Partner {
@@ -131,6 +134,7 @@ fn test_report() -> D394Report {
                 invoice_count: 1,
                 base: "2000.00".to_string(),
                 vat: "0.00".to_string(),
+                art331_code: None,
             },
         ],
         total_base: "20000.00".to_string(),
@@ -147,6 +151,7 @@ fn test_report() -> D394Report {
                 invoice_count: 3,
                 base: "8000.00".to_string(),
                 vat: "1520.00".to_string(),
+                art331_code: None,
             },
             // Reverse-charge domestic purchase (AE) → tip=C cota=19 (valid CUI: 22222229)
             D394Partner {
@@ -157,6 +162,7 @@ fn test_report() -> D394Report {
                 invoice_count: 1,
                 base: "2000.00".to_string(),
                 vat: "380.00".to_string(),
+                art331_code: None, // default → codPR=22
             },
             // Intra-EU acquisition (K) from foreign EU partner → tp=4 → tip=C cota=19
             D394Partner {
@@ -167,6 +173,7 @@ fn test_report() -> D394Report {
                 invoice_count: 1,
                 base: "1000.00".to_string(),
                 vat: "190.00".to_string(),
+                art331_code: None,
             },
         ],
         total_purchase_base: "11000.00".to_string(),
@@ -358,6 +365,7 @@ fn d394_totals_reconciliation() {
             invoice_count: 3,
             base: "10000.00".to_string(),
             vat: "1900.00".to_string(),
+            art331_code: None,
         }],
         total_base: "10000.00".to_string(),
         total_vat: "1900.00".to_string(),
@@ -371,6 +379,7 @@ fn d394_totals_reconciliation() {
             invoice_count: 2,
             base: "8000.00".to_string(),
             vat: "1520.00".to_string(),
+            art331_code: None,
         }],
         total_purchase_base: "8000.00".to_string(),
         total_purchase_vat: "1520.00".to_string(),
@@ -406,5 +415,113 @@ fn d394_totals_reconciliation() {
     assert!(
         xml.contains(&tp_str),
         "XML must reflect correct totalPlata_A"
+    );
+}
+
+// ── Art. 331 codPR=29 fixture — XSD + DUK gate ────────────────────────────────
+
+/// Generate a D394 with an AE sale using art331_code="29" (telefoane).
+/// The XML must contain codPR=29 (not 22) AND must pass the official XSD.
+/// When EFACTURA_DUMP_DIR is set, also dumps for external DUK validation.
+///
+/// This test is the primary acceptance gate for the art331_code feature.
+#[test]
+fn d394_codpr29_validates_against_xsd() {
+    let xsd_path = std::path::Path::new("tools/anaf/sample_d394.xml");
+
+    let period = chrono::NaiveDate::from_ymd_opt(2025, 9, 1).expect("test date");
+    let ver = resolve(DeclKind::D394, period).expect("schema version");
+    let sub = test_submission();
+    let co = test_company();
+
+    // Report with AE sale coded as telefoane (29), valid CUI: 76543210
+    let report = D394Report {
+        company_cui: "RO12345674".to_string(),
+        period_from: "2025-09-01".to_string(),
+        period_to: "2025-09-30".to_string(),
+        partners: vec![
+            // Normal 19% sale
+            D394Partner {
+                partner_cui: "RO98765438".to_string(),
+                partner_name: "SC CLIENT MARE SRL".to_string(),
+                vat_category: "S".to_string(),
+                vat_rate: "19".to_string(),
+                invoice_count: 3,
+                base: "5000.00".to_string(),
+                vat: "950.00".to_string(),
+                art331_code: None,
+            },
+            // AE reverse-charge with art331_code=29 (telefoane)
+            D394Partner {
+                partner_cui: "RO76543210".to_string(),
+                partner_name: "SC TELEFONIE SRL".to_string(),
+                vat_category: "AE".to_string(),
+                vat_rate: "0".to_string(),
+                invoice_count: 2,
+                base: "3000.00".to_string(),
+                vat: "0.00".to_string(),
+                art331_code: Some("29".to_string()),
+            },
+        ],
+        total_base: "8000.00".to_string(),
+        total_vat: "950.00".to_string(),
+        invoice_count: 5,
+        purchase_partners: vec![],
+        total_purchase_base: "0.00".to_string(),
+        total_purchase_vat: "0.00".to_string(),
+        purchase_invoice_count: 0,
+        purchase_unparsed_count: 0,
+    };
+
+    let doc = build_sections(&report, &sub, &co, period).expect("build_sections");
+    let xml = generate_d394_xml(&doc, &sub, &co, &ver).expect("generate_d394_xml");
+
+    // Verify codPR=29 appears in the XML (not 22)
+    assert!(
+        xml.contains("codPR=\"29\""),
+        "D394 XML must contain codPR=\"29\" for the telefoane AE partner\n\nXML:\n{xml}"
+    );
+
+    eprintln!("Generated D394 (codPR=29) XML ({} bytes):", xml.len());
+    eprintln!("{xml}");
+
+    // Dump for external DUK validation when EFACTURA_DUMP_DIR is set
+    if let Ok(dump_dir) = std::env::var("EFACTURA_DUMP_DIR") {
+        let dump_path = std::path::Path::new(&dump_dir).join("d394_codpr29.xml");
+        std::fs::write(&dump_path, xml.as_bytes()).expect("write dump XML");
+        eprintln!("DUMP: wrote D394 (codPR=29) XML to {:?}", dump_path);
+    }
+
+    // XSD validation (skip gracefully when XSD absent)
+    if !xsd_path.exists() {
+        eprintln!("SKIP XSD gate: XSD not found");
+        return;
+    }
+    if !efactura_desktop_lib::anaf_decl::validation::xmllint_available() {
+        eprintln!("SKIP XSD gate: xmllint not available");
+        return;
+    }
+
+    let tmp = std::env::temp_dir().join("d394_codpr29_xsd_test.xml");
+    std::fs::write(&tmp, xml.as_bytes()).expect("write temp XML");
+
+    let result = efactura_desktop_lib::anaf_decl::validation::validate_with_xsd(xsd_path, &tmp)
+        .expect("validate_with_xsd");
+
+    if !result.passed {
+        eprintln!("XSD VALIDATION FAILED (codPR=29):");
+        for e in &result.errors {
+            eprintln!("  {e}");
+        }
+    } else {
+        eprintln!("XSD VALIDATION PASSED (codPR=29)");
+    }
+
+    let _ = std::fs::remove_file(&tmp);
+
+    assert!(
+        result.passed,
+        "D394 with codPR=29 failed XSD validation. Errors:\n{}",
+        result.errors.join("\n")
     );
 }

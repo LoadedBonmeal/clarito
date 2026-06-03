@@ -339,6 +339,69 @@ fn opt_nonzero(v: i64) -> Option<i64> {
     }
 }
 
+/// Resolve the D394 op11 `codPR` (art. 331 product category) for a partner.
+///
+/// Rules (Parameters_v7._listaCodPR + R235):
+///   tip_partener=1: allowed = NC cereal codes ∪ {22..31, 36} — NOT in {32,33,34,35,37}
+///   tip_partener=2: allowed = {22,23,32,33,34,35}
+///
+/// If the partner has an explicit `art331_code` that is valid for the resolved
+/// `tip_partener`, use it. Otherwise fall back to 22 (deșeuri/scrap), which is
+/// valid for both tp=1 and tp=2.
+///
+/// A warning is emitted when an explicit code is invalid so the user can see it
+/// in the app logs.
+fn resolve_cod_pr(art331_code: &Option<String>, tip_partener: i64) -> i64 {
+    // NC cereal codes valid for tp=1 (from Parameters_v7)
+    const CEREAL_NC: &[i64] = &[
+        1001, 1002, 1003, 1004, 1005, 1201, 1205, 120600, 121291, 10086000, 120400,
+    ];
+
+    // R235.1: codPR values FORBIDDEN for tip_partener=1
+    const FORBIDDEN_TP1: &[i64] = &[32, 33, 34, 35, 37];
+    // R235.3: codPR values FORBIDDEN for tip_partener=2
+    const ALLOWED_TP2: &[i64] = &[22, 23, 32, 33, 34, 35];
+
+    if let Some(code_str) = art331_code {
+        let code_str = code_str.trim();
+        if !code_str.is_empty() {
+            if let Ok(code) = code_str.parse::<i64>() {
+                let valid = match tip_partener {
+                    1 => {
+                        // tp=1: valid if in cereal NC set OR in 22..31 or 36, AND not in forbidden list
+                        let in_cereal = CEREAL_NC.contains(&code);
+                        let in_cat_range = matches!(code, 22..=31 | 36);
+                        let forbidden = FORBIDDEN_TP1.contains(&code);
+                        (in_cereal || in_cat_range) && !forbidden
+                    }
+                    2 => ALLOWED_TP2.contains(&code),
+                    _ => {
+                        // tp=3/4: no op11 required — caller should not call this for those
+                        false
+                    }
+                };
+                if valid {
+                    return code;
+                } else {
+                    tracing::warn!(
+                        "D394 op11: art331_code '{}' is not valid for tip_partener={} \
+                         (R235); falling back to codPR=22",
+                        code,
+                        tip_partener
+                    );
+                }
+            } else {
+                tracing::warn!(
+                    "D394 op11: art331_code '{}' is not a valid integer; falling back to codPR=22",
+                    code_str
+                );
+            }
+        }
+    }
+    // Default: 22 = deșeuri/scrap (valid for both tp=1 and tp=2)
+    22
+}
+
 /// Determine the `tip_partener` code from a partner CUI string.
 ///
 /// Rules (from DUK validator source):
@@ -525,7 +588,8 @@ pub fn build_sections(
 
         // Build op11 for tp=1 & tip∈{C,V} (R233.5)
         let op11_list = if tip_p == 1 && (tip == "C" || tip == "V") {
-            // Emit one op11 with codPR=22 (valid for tp=1, not in 32-35 list)
+            // R235: use art331_code from partner if valid, else default 22.
+            let cod_pr = resolve_cod_pr(&partner.art331_code, tip_p);
             let tva_pr = if tip == "C" {
                 // C: tvaPR required (R237.1)
                 Some(tva.unwrap_or(0))
@@ -535,7 +599,7 @@ pub fn build_sections(
             };
             vec![Op11 {
                 nr_fact_pr: partner.invoice_count,
-                cod_pr: 22,
+                cod_pr,
                 baza_pr: baza,
                 tva_pr,
             }]
@@ -573,6 +637,8 @@ pub fn build_sections(
 
         // Build op11 for tp=1 & tip∈{C,V} (R233.5)
         let op11_list = if tip_p == 1 && (tip == "C" || tip == "V") {
+            // R235: use art331_code from partner if valid, else default 22.
+            let cod_pr = resolve_cod_pr(&partner.art331_code, tip_p);
             let tva_pr = if tip == "C" {
                 Some(tva.unwrap_or(0))
             } else {
@@ -580,7 +646,7 @@ pub fn build_sections(
             };
             vec![Op11 {
                 nr_fact_pr: partner.invoice_count,
-                cod_pr: 22,
+                cod_pr,
                 baza_pr: baza,
                 tva_pr,
             }]
@@ -1131,6 +1197,7 @@ mod tests {
                 invoice_count: count,
                 base: base.to_string(),
                 vat: vat.to_string(),
+                art331_code: None,
             })
             .collect();
 
@@ -1144,6 +1211,7 @@ mod tests {
                 invoice_count: count,
                 base: base.to_string(),
                 vat: vat.to_string(),
+                art331_code: None,
             })
             .collect();
 
@@ -1505,5 +1573,101 @@ mod tests {
         let op21 = doc.op1_list.iter().find(|op| op.cota == 21).unwrap();
         assert_eq!(op21.baza, 500);
         assert_eq!(op21.tva, Some(105));
+    }
+
+    // ── Art. 331 codPR tests ──────────────────────────────────────────────────
+
+    /// resolve_cod_pr: art331_code="29" for tp=1 → codPR=29 (telefoane)
+    #[test]
+    fn resolve_cod_pr_uses_explicit_code_for_tp1() {
+        let code = resolve_cod_pr(&Some("29".to_string()), 1);
+        assert_eq!(code, 29, "valid art331_code=29 for tp=1 must be used as-is");
+    }
+
+    /// resolve_cod_pr: None → 22 (default)
+    #[test]
+    fn resolve_cod_pr_defaults_to_22_when_none() {
+        let code = resolve_cod_pr(&None, 1);
+        assert_eq!(code, 22, "missing art331_code must default to 22");
+    }
+
+    /// resolve_cod_pr: tp=1, code=32 (FORBIDDEN for tp=1) → fallback 22
+    #[test]
+    fn resolve_cod_pr_rejects_forbidden_tp1_code() {
+        let code = resolve_cod_pr(&Some("32".to_string()), 1);
+        assert_eq!(
+            code, 22,
+            "code 32 is forbidden for tp=1 (R235.1); must fall back to 22"
+        );
+    }
+
+    /// resolve_cod_pr: tp=2, code=22 → 22 (allowed for tp=2)
+    #[test]
+    fn resolve_cod_pr_tp2_allows_22() {
+        let code = resolve_cod_pr(&Some("22".to_string()), 2);
+        assert_eq!(code, 22);
+    }
+
+    /// resolve_cod_pr: tp=2, code=29 (NOT in allowed tp=2 set) → fallback 22
+    #[test]
+    fn resolve_cod_pr_tp2_rejects_tp1_only_code() {
+        let code = resolve_cod_pr(&Some("29".to_string()), 2);
+        assert_eq!(
+            code, 22,
+            "code 29 is not in the tp=2 allowed set; must fall back to 22"
+        );
+    }
+
+    /// resolve_cod_pr: cereal NC code 1001 valid for tp=1
+    #[test]
+    fn resolve_cod_pr_cereal_nc_code_valid_for_tp1() {
+        let code = resolve_cod_pr(&Some("1001".to_string()), 1);
+        assert_eq!(code, 1001, "NC cereal code 1001 must be accepted for tp=1");
+    }
+
+    /// AE sale with art331_code="29" → op11.cod_pr=29 (not 22)
+    #[test]
+    fn ae_sale_with_art331_code_emits_correct_cod_pr() {
+        // Valid CUI: 76543210
+        let mut report = make_report(vec![("76543210", "AE", "0", 1, "500.00", "0.00")], vec![]);
+        // Set art331_code on the AE partner
+        if let Some(p) = report.partners.first_mut() {
+            p.art331_code = Some("29".to_string());
+        }
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
+
+        let doc = build_sections(&report, &sub, &company, period).unwrap();
+        let ae_op = doc.op1_list.iter().find(|op| op.tip == "V").unwrap();
+        assert!(
+            !ae_op.op11_list.is_empty(),
+            "AE sale (tp=1, V) must have op11"
+        );
+        assert_eq!(
+            ae_op.op11_list[0].cod_pr, 29,
+            "op11.codPR must be 29 (telefoane) when art331_code=29"
+        );
+    }
+
+    /// AE sale without art331_code → op11.cod_pr=22 (default)
+    #[test]
+    fn ae_sale_without_art331_code_defaults_to_22() {
+        // Valid CUI: 76543210
+        let report = make_report(vec![("76543210", "AE", "0", 1, "500.00", "0.00")], vec![]);
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
+
+        let doc = build_sections(&report, &sub, &company, period).unwrap();
+        let ae_op = doc.op1_list.iter().find(|op| op.tip == "V").unwrap();
+        assert!(
+            !ae_op.op11_list.is_empty(),
+            "AE sale (tp=1, V) must have op11"
+        );
+        assert_eq!(
+            ae_op.op11_list[0].cod_pr, 22,
+            "op11.codPR must default to 22 when art331_code is absent"
+        );
     }
 }
