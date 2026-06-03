@@ -345,7 +345,7 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
 
     // ── Seed contacts ──────────────────────────────────────────────────────────
     sqlx::query(
-        "INSERT INTO contacts VALUES ('cust-1',?,'CUSTOMER','RO99887766','FIRMA CLIENT SRL',1,'Str. Test 1','Cluj','CJ','RO',NULL,NULL,'RON',0,0)",
+        "INSERT INTO contacts VALUES ('cust-1',?,'CUSTOMER','RO99887760','FIRMA CLIENT SRL',1,'Str. Test 1','Cluj','CJ','RO',NULL,NULL,'RON',0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -353,7 +353,7 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO contacts VALUES ('supp-1',?,'SUPPLIER','RO11223344','FIRMA FURNIZOR SRL',1,'Str. Furnizor 2','Timisoara','TM','RO',NULL,NULL,'RON',0,0)",
+        "INSERT INTO contacts VALUES ('supp-1',?,'SUPPLIER','RO11223342','FIRMA FURNIZOR SRL',1,'Str. Furnizor 2','Timisoara','TM','RO',NULL,NULL,'RON',0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -406,7 +406,7 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
 
     // ── Seed received invoices + VAT lines ────────────────────────────────────
     sqlx::query(
-        "INSERT INTO received_invoices VALUES ('recv-1',?,'DL-1',NULL,'RO11223344','FIRMA FURNIZOR SRL','FACT','001','595.00','500.00','95.00','RON',NULL,'2025-01-10','','NULL','APPROVED',0,0)",
+        "INSERT INTO received_invoices VALUES ('recv-1',?,'DL-1',NULL,'RO11223342','FIRMA FURNIZOR SRL','FACT','001','595.00','500.00','95.00','RON',NULL,'2025-01-10','','NULL','APPROVED',0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -465,6 +465,21 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
                  '0','',\
                  '2024-01-01','2024-01-01',\
                  '3000.00',36,'liniara','0.00',1,0,0)",
+    )
+    .bind(&company.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // ── Seed asset transaction (A-profile) ────────────────────────────────────
+    // One depreciation transaction in 2025 — tests AssetTransactions section
+    sqlx::query(
+        "INSERT INTO asset_transactions \
+         (id, company_id, asset_id, transaction_code, transaction_type, transaction_date, \
+          description, gl_transaction_id, acq_prod_cost, book_value, amount, created_at) \
+         VALUES ('at-1',?,'fa-1','AT-2025-001','30','2025-12-31',\
+                 'Amortizare anuala MF-001','GL-2025-001',\
+                 '3000.00','1000.00','83.33',0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -550,11 +565,9 @@ async fn saft_d406_annual_validates_against_official_xsd() {
     let company = test_company();
     let pool = setup_test_pool(&company).await;
 
-    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31")
-        .await
-        .expect("generate_gl_entries must not fail");
+    // Annual A-profile: use full-year period; skip GL auto-post (GLE is empty in A)
 
-    let xml = generate_saft_xml_annual(&pool, &company, "2025-01-01", "2025-01-31")
+    let xml = generate_saft_xml_annual(&pool, &company, "2025-01-01", "2025-12-31")
         .await
         .expect("generate_saft_xml_annual must not fail");
 
@@ -868,51 +881,50 @@ async fn saft_d406_account_assignments() {
     );
 }
 
-// ── Phase 6a: MovementOfGoods populated (annual declaration) ──────────────────
+// ── Phase 6a: MovementOfGoods section present in both L and A declarations ────
+// Per DUK production validator rules:
+//   L-profile: MovementOfGoods children (StockMovement) are max:0 — empty wrapper.
+//   A-profile: MovementOfGoods children are also max:0 — empty wrapper.
+//
+// The stock_movements table stores movements for future use when DUK lifts this
+// restriction; both profiles emit the mandatory empty wrapper for now.
 
 #[tokio::test]
 async fn saft_p6a_movement_of_goods_populated_with_seeded_data() {
     let company = test_company();
     let pool = setup_test_pool(&company).await;
 
-    // Use annual variant — periodic L keeps MovementOfGoods empty to satisfy DUK
-    let xml = generate_saft_xml_annual(&pool, &company, "2025-01-01", "2025-01-31")
+    // L-path: MovementOfGoods wrapper must be present (empty) in periodic XML
+    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31")
         .await
-        .expect("generate_saft_xml_annual must not fail");
+        .expect("generate_gl_entries must not fail");
 
-    // MovementOfGoods must be present and non-empty when stock data exists
+    let xml = generate_saft_xml(&pool, &company, "2025-01-01", "2025-01-31")
+        .await
+        .expect("generate_saft_xml (periodic) must not fail");
+
+    // MovementOfGoods wrapper must be present in periodic L XML
     assert!(
         xml.contains("<MovementOfGoods>"),
-        "MovementOfGoods missing: {xml}"
+        "MovementOfGoods wrapper missing in periodic XML: {xml}"
+    );
+    // DUK L-type rejects StockMovement children — must be empty wrapper
+    assert!(
+        !xml.contains("<StockMovement>"),
+        "DUK L-type rejects StockMovement children — periodic XML must NOT have them: {xml}"
+    );
+
+    // A-path: MovementOfGoods must also be an empty wrapper
+    let xml_annual = generate_saft_xml_annual(&pool, &company, "2025-01-01", "2025-12-31")
+        .await
+        .expect("generate_saft_xml_annual must not fail");
+    assert!(
+        xml_annual.contains("<MovementOfGoods>"),
+        "MovementOfGoods wrapper missing in annual XML: {xml_annual}"
     );
     assert!(
-        xml.contains("<StockMovement>"),
-        "StockMovement element missing — seeded data must produce at least one: {xml}"
-    );
-    assert!(
-        xml.contains("<MovementReference>NIR-001</MovementReference>"),
-        "NIR-001 reference missing: {xml}"
-    );
-    assert!(
-        xml.contains("<NumberOfMovementLines>1</NumberOfMovementLines>"),
-        "NumberOfMovementLines must be 1: {xml}"
-    );
-    // Required StockMovementLine fields
-    assert!(
-        xml.contains("<ProductCode>PRODUS-01</ProductCode>"),
-        "ProductCode missing: {xml}"
-    );
-    assert!(
-        xml.contains("<UnitOfMeasure>H87</UnitOfMeasure>"),
-        "UnitOfMeasure missing: {xml}"
-    );
-    assert!(
-        xml.contains("<UOMToUOMPhysicalStockConversionFactor>"),
-        "UOMToUOMPhysicalStockConversionFactor missing: {xml}"
-    );
-    assert!(
-        xml.contains("<MovementSubType>10</MovementSubType>"),
-        "MovementSubType missing: {xml}"
+        !xml_annual.contains("<StockMovement>"),
+        "Annual A-path must NOT have StockMovement children: {xml_annual}"
     );
 }
 
@@ -967,5 +979,201 @@ async fn saft_p6b_assets_populated_with_seeded_data() {
     assert!(
         xml.contains("<BookValueEnd>"),
         "BookValueEnd missing: {xml}"
+    );
+}
+
+// ── A-profile section gating ──────────────────────────────────────────────────
+// Confirms that for an annual declaration:
+//   - MasterFiles: Customers/Suppliers/TaxTable/UOMTable/Products are EMPTY wrappers
+//   - MasterFiles: Assets is POPULATED
+//   - GeneralLedgerEntries is the EMPTY wrapper (no NumberOfEntries children)
+//   - SourceDocuments: SalesInvoices/PurchaseInvoices/Payments/MovementOfGoods are EMPTY
+//   - SourceDocuments: AssetTransactions is POPULATED with NumberOfAssetTransactions
+
+#[tokio::test]
+async fn saft_annual_a_profile_section_gating() {
+    let company = test_company();
+    let pool = setup_test_pool(&company).await;
+
+    let xml = generate_saft_xml_annual(&pool, &company, "2025-01-01", "2025-12-31")
+        .await
+        .expect("generate_saft_xml_annual must not fail");
+
+    // HeaderComment must be "A"
+    assert!(
+        xml.contains("<HeaderComment>A</HeaderComment>"),
+        "HeaderComment must be A: {xml}"
+    );
+
+    // MasterFiles: Customers/Suppliers/TaxTable/UOMTable/Products must be EMPTY wrappers
+    // (no child elements — just the open/close tag pair)
+    assert!(
+        !xml.contains("<Customer>"),
+        "Annual: must NOT have Customer entries: {xml}"
+    );
+    assert!(
+        !xml.contains("<Supplier>"),
+        "Annual: must NOT have Supplier entries: {xml}"
+    );
+    assert!(
+        !xml.contains("<TaxTableEntry>"),
+        "Annual: must NOT have TaxTableEntry entries: {xml}"
+    );
+    assert!(
+        !xml.contains("<UOMTableEntry>"),
+        "Annual: must NOT have UOMTableEntry entries: {xml}"
+    );
+    assert!(
+        !xml.contains("<Product>"),
+        "Annual: must NOT have Product entries: {xml}"
+    );
+
+    // MasterFiles: Assets must be POPULATED
+    assert!(
+        xml.contains("<Asset>"),
+        "Annual: Assets must be populated: {xml}"
+    );
+    assert!(
+        xml.contains("<AssetID>MF-001</AssetID>"),
+        "Annual: AssetID MF-001 must be present: {xml}"
+    );
+
+    // GeneralLedgerEntries must be the empty wrapper (no NumberOfEntries / Journal children)
+    assert!(
+        xml.contains("<GeneralLedgerEntries>"),
+        "Annual: GeneralLedgerEntries wrapper must be present: {xml}"
+    );
+    assert!(
+        !xml.contains("<NumberOfEntries>"),
+        "Annual: GeneralLedgerEntries must NOT have NumberOfEntries child: {xml}"
+    );
+    assert!(
+        !xml.contains("<Journal>"),
+        "Annual: GeneralLedgerEntries must NOT have Journal child: {xml}"
+    );
+
+    // SourceDocuments: SalesInvoices/PurchaseInvoices/Payments/MovementOfGoods must be EMPTY
+    assert!(
+        !xml.contains("<Invoice>"),
+        "Annual: must NOT have Invoice entries: {xml}"
+    );
+    assert!(
+        !xml.contains("<Payment>"),
+        "Annual: must NOT have Payment entries: {xml}"
+    );
+    assert!(
+        !xml.contains("<StockMovement>"),
+        "Annual: must NOT have StockMovement entries: {xml}"
+    );
+
+    // SourceDocuments: AssetTransactions must be POPULATED
+    assert!(
+        xml.contains("<AssetTransactions>"),
+        "Annual: AssetTransactions wrapper must be present: {xml}"
+    );
+    assert!(
+        xml.contains("<NumberOfAssetTransactions>1</NumberOfAssetTransactions>"),
+        "Annual: NumberOfAssetTransactions must be 1 (one seeded transaction): {xml}"
+    );
+    assert!(
+        xml.contains("<AssetTransaction>"),
+        "Annual: AssetTransaction element must be present: {xml}"
+    );
+    assert!(
+        xml.contains("<AssetTransactionID>AT-2025-001</AssetTransactionID>"),
+        "Annual: AssetTransactionID must match seeded value: {xml}"
+    );
+    assert!(
+        xml.contains("<AssetTransactionType>30</AssetTransactionType>"),
+        "Annual: AssetTransactionType 30 (depreciation) must be present: {xml}"
+    );
+    assert!(
+        xml.contains("<AssetTransactionDate>2025-12-31</AssetTransactionDate>"),
+        "Annual: AssetTransactionDate must be present: {xml}"
+    );
+    assert!(
+        xml.contains("<TransactionID>GL-2025-001</TransactionID>"),
+        "Annual: TransactionID (GL cross-ref) must be present: {xml}"
+    );
+}
+
+// ── DUK dump: annual A-profile for live validation ────────────────────────────
+// Writes the annual XML to /tmp/decl/d406_annual.xml for DUK gate.
+// Also confirms monthly still generates without error (regression guard).
+
+#[tokio::test]
+async fn saft_annual_duk_dump() {
+    let company = test_company();
+    let pool = setup_test_pool(&company).await;
+
+    // Build annual XML (full-year period for A-profile)
+    let xml_annual = generate_saft_xml_annual(&pool, &company, "2025-01-01", "2025-12-31")
+        .await
+        .expect("generate_saft_xml_annual must not fail");
+
+    let out_dir = "/tmp/decl";
+    let _ = std::fs::create_dir_all(out_dir);
+    let annual_path = format!("{out_dir}/d406_annual.xml");
+    std::fs::write(&annual_path, xml_annual.as_bytes()).expect("write d406_annual.xml");
+    eprintln!(
+        "Annual A-profile XML written to {annual_path} ({} bytes)",
+        xml_annual.len()
+    );
+
+    // XSD validation if available
+    let xsd_path = std::path::Path::new("tools/anaf/Ro_SAFT_Schema_v249_prod.xsd");
+    if xsd_path.exists() && efactura_desktop_lib::anaf_decl::validation::xmllint_available() {
+        let tmp = std::env::temp_dir().join("saft_d406_annual_duk_dump_xsd.xml");
+        std::fs::write(&tmp, xml_annual.as_bytes()).expect("write temp XML");
+        let result = efactura_desktop_lib::anaf_decl::validation::validate_with_xsd(xsd_path, &tmp)
+            .expect("validate_with_xsd must not fail");
+        let _ = std::fs::remove_file(&tmp);
+        if !result.passed {
+            eprintln!("ANNUAL DUK DUMP XSD VALIDATION FAILED:");
+            for e in &result.errors {
+                eprintln!("  {e}");
+            }
+        } else {
+            eprintln!("ANNUAL DUK DUMP XSD VALIDATION PASSED");
+        }
+        assert!(
+            result.passed,
+            "Annual A-profile SAF-T failed XSD validation. Errors:\n{}",
+            result.errors.join("\n")
+        );
+    }
+
+    // Monthly regression: confirm periodic L generator still produces valid XML
+    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31")
+        .await
+        .expect("generate_gl_entries must not fail");
+    let xml_monthly = generate_saft_xml(&pool, &company, "2025-01-01", "2025-01-31")
+        .await
+        .expect("generate_saft_xml (monthly) must not fail");
+
+    let monthly_path = format!("{out_dir}/d406_monthly_regression.xml");
+    std::fs::write(&monthly_path, xml_monthly.as_bytes())
+        .expect("write d406_monthly_regression.xml");
+    eprintln!(
+        "Monthly L-profile XML written to {monthly_path} ({} bytes)",
+        xml_monthly.len()
+    );
+
+    // Monthly must still have populated sections
+    assert!(
+        xml_monthly.contains("<Invoice>"),
+        "Monthly regression: must still have Invoice entries: {xml_monthly}"
+    );
+    assert!(
+        xml_monthly.contains("<Journal>"),
+        "Monthly regression: must still have Journal entries: {xml_monthly}"
+    );
+    assert!(
+        !xml_monthly.contains("<AssetTransaction>"),
+        "Monthly regression: must NOT have AssetTransaction entries: {xml_monthly}"
+    );
+    assert!(
+        xml_monthly.contains("<HeaderComment>L</HeaderComment>"),
+        "Monthly regression: HeaderComment must be L: {xml_monthly}"
     );
 }

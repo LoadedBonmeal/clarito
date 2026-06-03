@@ -193,9 +193,16 @@ fn write_header_company(
     Ok(())
 }
 
-/// Write a fully populated GeneralLedgerEntries section from gl_journal / gl_entry.
+/// Write GeneralLedgerEntries section.
 ///
-/// XSD element order (all minOccurs=0 at the top level):
+/// For annual (A-profile) declarations, the XSD forbids all children
+/// (NumberOfEntries/TotalDebit/TotalCredit/Journal are max:0 in A).
+/// In that case an empty `<GeneralLedgerEntries/>` wrapper is emitted.
+///
+/// For periodic (L-profile) declarations, the section is fully populated
+/// from gl_journal / gl_entry.
+///
+/// XSD element order for L (all minOccurs=0 at the top level):
 ///   NumberOfEntries, TotalDebit, TotalCredit, Journal*
 ///
 /// Journal:  JournalID, Description, Type, Transaction+
@@ -215,7 +222,14 @@ async fn write_general_ledger_entries(
     company_id: &str,
     date_from: &str,
     date_to: &str,
+    is_annual: bool,
 ) -> AppResult<()> {
+    // A-profile: GeneralLedgerEntries children are max:0 — emit empty wrapper.
+    if is_annual {
+        start_elem(w, "GeneralLedgerEntries")?;
+        end_elem(w, "GeneralLedgerEntries")?;
+        return Ok(());
+    }
     // ── 1. Fetch all journals in period ────────────────────────────────────────
     let journal_rows = sqlx::query(
         "SELECT id, journal_id, journal_type, transaction_id, transaction_date, \
@@ -530,7 +544,7 @@ async fn generate_saft_xml_inner(
     // Continue using `w` via the xml helper functions by wrapping:
     write_header(&mut w, company, date_from, date_to, is_annual)?;
     write_master_files(&mut w, pool, company, date_from, date_to, is_annual).await?;
-    write_general_ledger_entries(&mut w, pool, &company.id, date_from, date_to).await?;
+    write_general_ledger_entries(&mut w, pool, &company.id, date_from, date_to, is_annual).await?;
     write_source_documents(&mut w, pool, &company.id, date_from, date_to, is_annual).await?;
 
     // </AuditFile>

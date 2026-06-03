@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use tauri::State;
 
-use crate::anaf_decl::saft::generator::generate_saft_xml;
+use crate::anaf_decl::saft::generator::{generate_saft_xml, generate_saft_xml_annual};
 use crate::db::companies;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -83,11 +83,21 @@ pub async fn export_saft_official(
 
     let company = companies::get(&state.db, &params.company_id).await?;
 
-    // Auto-post GL entries (idempotent) before generating the XML so that
-    // GeneralLedgerEntries is populated with the current period's data.
-    crate::db::gl::generate_gl_entries(&state.db, &params.company_id, &date_from, &date_to).await?;
+    // Determine if this is an annual (A-profile) declaration.
+    // Annual = month is None (full-year range was already set above).
+    let is_annual = params.month.is_none();
 
-    let xml = generate_saft_xml(&state.db, &company, &date_from, &date_to).await?;
+    let xml = if is_annual {
+        // Annual A-profile: skip GL auto-post (GLE is empty in A),
+        // call the annual generator which applies A-profile section rules.
+        generate_saft_xml_annual(&state.db, &company, &date_from, &date_to).await?
+    } else {
+        // Periodic L-profile: auto-post GL entries (idempotent) before generating
+        // so that GeneralLedgerEntries is populated with current period data.
+        crate::db::gl::generate_gl_entries(&state.db, &params.company_id, &date_from, &date_to)
+            .await?;
+        generate_saft_xml(&state.db, &company, &date_from, &date_to).await?
+    };
 
     std::fs::write(&dest, xml.as_bytes())
         .map_err(|e| AppError::Other(format!("Nu s-a putut scrie fișierul D406: {e}")))?;

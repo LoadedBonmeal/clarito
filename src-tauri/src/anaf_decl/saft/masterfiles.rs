@@ -1037,15 +1037,41 @@ pub async fn write_master_files(
 ) -> AppResult<()> {
     start_elem(w, "MasterFiles")?;
 
+    // GeneralLedgerAccounts and Assets are POPULATED in both L and A profiles.
     write_general_ledger_accounts(w, pool, &company.id).await?;
-    write_customers(w, pool, &company.id).await?;
-    write_suppliers(w, pool, &company.id).await?;
-    write_tax_table(w, pool, &company.id, date_from, date_to).await?;
-    write_uom_table(w, pool, &company.id).await?;
-    write_empty_analysis_type_table(w)?;
-    write_empty_movement_type_table(w)?;
-    write_products(w, pool, &company.id).await?;
-    write_empty_owners(w)?;
+
+    if is_annual {
+        // A-profile: Customers, Suppliers, TaxTable, UOMTable, Products are
+        // forbidden (max:0 children in A) — emit empty wrappers only.
+        start_elem(w, "Customers")?;
+        end_elem(w, "Customers")?;
+        start_elem(w, "Suppliers")?;
+        end_elem(w, "Suppliers")?;
+        start_elem(w, "TaxTable")?;
+        end_elem(w, "TaxTable")?;
+        start_elem(w, "UOMTable")?;
+        end_elem(w, "UOMTable")?;
+        // AnalysisTypeTable — empty (omit or empty; A allows omitting)
+        write_empty_analysis_type_table(w)?;
+        start_elem(w, "MovementTypeTable")?;
+        end_elem(w, "MovementTypeTable")?;
+        start_elem(w, "Products")?;
+        end_elem(w, "Products")?;
+        start_elem(w, "Owners")?;
+        end_elem(w, "Owners")?;
+    } else {
+        // L-profile: all MasterFiles sections populated normally.
+        write_customers(w, pool, &company.id).await?;
+        write_suppliers(w, pool, &company.id).await?;
+        write_tax_table(w, pool, &company.id, date_from, date_to).await?;
+        write_uom_table(w, pool, &company.id).await?;
+        write_empty_analysis_type_table(w)?;
+        write_empty_movement_type_table(w)?;
+        write_products(w, pool, &company.id).await?;
+        write_empty_owners(w)?;
+    }
+
+    // Assets: populated for A, empty wrapper for L.
     write_assets(w, pool, &company.id, date_from, date_to, is_annual).await?;
 
     end_elem(w, "MasterFiles")?;

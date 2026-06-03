@@ -1021,6 +1021,131 @@ pub async fn write_movement_of_goods(
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
+// AssetTransactions (SourceDocuments sub-section; A-profile only)
+// ────────────────────────────────────────────────────────────────────────────────
+
+/// Map the stored transaction_type string to the DUK AssetTransactionType numeric code.
+/// Valid DUK codes: {10,20,30,40,50,60,70,80,90,100,110,120,130}
+fn map_asset_txn_type(raw: &str) -> &'static str {
+    // Raw may already be a numeric string (stored as "10","30",...) or a keyword.
+    match raw.trim() {
+        // Already-numeric codes — pass through if valid
+        "10" => "10",
+        "20" => "20",
+        "30" => "30",
+        "40" => "40",
+        "50" => "50",
+        "60" => "60",
+        "70" => "70",
+        "80" => "80",
+        "90" => "90",
+        "100" => "100",
+        "110" => "110",
+        "120" => "120",
+        "130" => "130",
+        // Keyword aliases
+        "acquisition" | "achizitie" | "achizitii" => "10",
+        "sale" | "vanzare" | "vânzare" => "20",
+        "depreciation" | "amortizare" | "amortissement" => "30",
+        "transfer" => "40",
+        "scrap" | "casare" => "50",
+        // Anything else → 130 (other)
+        _ => "130",
+    }
+}
+
+pub async fn write_asset_transactions(
+    w: &mut XmlWriter,
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    date_from: &str,
+    date_to: &str,
+) -> AppResult<()> {
+    let txn_rows = sqlx::query(
+        "SELECT id, asset_id, transaction_code, transaction_type, transaction_date, \
+                description, gl_transaction_id, acq_prod_cost, book_value, amount \
+         FROM asset_transactions \
+         WHERE company_id = ?1 \
+           AND transaction_date >= ?2 \
+           AND transaction_date <= ?3 \
+         ORDER BY transaction_date ASC, transaction_code ASC",
+    )
+    .bind(company_id)
+    .bind(date_from)
+    .bind(date_to)
+    .fetch_all(pool)
+    .await?;
+
+    let count = txn_rows.len();
+
+    start_elem(w, "AssetTransactions")?;
+    write_text_elem(w, "NumberOfAssetTransactions", &count.to_string())?;
+
+    for row in &txn_rows {
+        let txn_id: String = row.try_get("transaction_code").unwrap_or_default();
+        let asset_id: String = row.try_get("asset_id").unwrap_or_default();
+        let txn_type_raw: String = row
+            .try_get("transaction_type")
+            .unwrap_or_else(|_| "130".to_string());
+        let txn_type = map_asset_txn_type(&txn_type_raw);
+        let description: String = row.try_get("description").unwrap_or_default();
+        let txn_date: String = row.try_get("transaction_date").unwrap_or_default();
+        let gl_txn_id: Option<String> = row.try_get("gl_transaction_id").unwrap_or(None);
+        let acq_cost_raw: String = row
+            .try_get("acq_prod_cost")
+            .unwrap_or_else(|_| "0.00".to_string());
+        let book_val_raw: String = row
+            .try_get("book_value")
+            .unwrap_or_else(|_| "0.00".to_string());
+        let amount_raw: String = row.try_get("amount").unwrap_or_else(|_| "0.00".to_string());
+
+        let acq_cost = dec(&acq_cost_raw);
+        let book_val = dec(&book_val_raw);
+        let amount = dec(&amount_raw);
+
+        // TransactionID: use gl_transaction_id if present, otherwise synthesize
+        let gl_ref = gl_txn_id
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&txn_id);
+
+        start_elem(w, "AssetTransaction")?;
+        write_text_elem(w, "AssetTransactionID", &esc(&trunc(&txn_id, 35)))?;
+        write_text_elem(w, "AssetID", &esc(&trunc(&asset_id, 35)))?;
+        write_text_elem(w, "AssetTransactionType", txn_type)?;
+        if !description.is_empty() {
+            write_text_elem(w, "Description", &esc(&trunc(&description, 256)))?;
+        }
+        write_text_elem(
+            w,
+            "AssetTransactionDate",
+            &txn_date[..txn_date.len().min(10)],
+        )?;
+        write_text_elem(w, "TransactionID", &esc(&trunc(gl_ref, 255)))?;
+
+        // AssetTransactionValuations → AssetTransactionValuation (1..N)
+        start_elem(w, "AssetTransactionValuations")?;
+        start_elem(w, "AssetTransactionValuation")?;
+        // AssetValuationType is optional — emit "fiscal"
+        write_text_elem(w, "AssetValuationType", "fiscal")?;
+        write_text_elem(
+            w,
+            "AcquisitionAndProductionCostsOnTransaction",
+            &dec2(acq_cost),
+        )?;
+        write_text_elem(w, "BookValueOnTransaction", &dec2(book_val))?;
+        write_text_elem(w, "AssetTransactionAmount", &dec2(amount))?;
+        end_elem(w, "AssetTransactionValuation")?;
+        end_elem(w, "AssetTransactionValuations")?;
+
+        end_elem(w, "AssetTransaction")?;
+    }
+
+    end_elem(w, "AssetTransactions")?;
+    Ok(())
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
 // SourceDocuments top-level
 // ────────────────────────────────────────────────────────────────────────────────
 
@@ -1033,10 +1158,29 @@ pub async fn write_source_documents(
     is_annual: bool,
 ) -> AppResult<()> {
     start_elem(w, "SourceDocuments")?;
-    write_sales_invoices(w, pool, company_id, date_from, date_to).await?;
-    write_purchase_invoices(w, pool, company_id, date_from, date_to).await?;
-    write_payments(w, pool, company_id, date_from, date_to).await?;
-    write_movement_of_goods(w, pool, company_id, date_from, date_to, is_annual).await?;
+
+    if is_annual {
+        // A-profile: SalesInvoices/PurchaseInvoices/Payments/MovementOfGoods are
+        // forbidden (max:0 children) — emit empty wrappers only.
+        // AssetTransactions is REQUIRED and POPULATED.
+        start_elem(w, "SalesInvoices")?;
+        end_elem(w, "SalesInvoices")?;
+        start_elem(w, "PurchaseInvoices")?;
+        end_elem(w, "PurchaseInvoices")?;
+        start_elem(w, "Payments")?;
+        end_elem(w, "Payments")?;
+        start_elem(w, "MovementOfGoods")?;
+        end_elem(w, "MovementOfGoods")?;
+        write_asset_transactions(w, pool, company_id, date_from, date_to).await?;
+    } else {
+        // L-profile: SalesInvoices/PurchaseInvoices/Payments/MovementOfGoods are
+        // populated; AssetTransactions is forbidden — do NOT emit it.
+        write_sales_invoices(w, pool, company_id, date_from, date_to).await?;
+        write_purchase_invoices(w, pool, company_id, date_from, date_to).await?;
+        write_payments(w, pool, company_id, date_from, date_to).await?;
+        write_movement_of_goods(w, pool, company_id, date_from, date_to, false).await?;
+    }
+
     end_elem(w, "SourceDocuments")?;
     Ok(())
 }
