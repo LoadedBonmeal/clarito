@@ -132,13 +132,23 @@ export function DeclarationsPage() {
   const yearSegOptions = yearOptions.map((y) => ({ value: String(y), label: String(y) }));
 
   // ── Calculează D300 ────────────────────────────────────────────────────────
+  // Invalidate the computed report together with any DUK block + the cached
+  // submission. A DUK block belongs to one computed period; if the report is
+  // reset (recompute, month/year change) the stale block must go too, otherwise
+  // its "Exportă oricum" button would export the previous period's submission.
+  const clearReportState = () => {
+    setReport(null);
+    setDukBlock(null);
+    setLastSubmission(null);
+  };
+
   const handleCompute = async () => {
     if (!activeCompanyId) {
       notify.warn("Selectați o companie activă.");
       return;
     }
     setComputing(true);
-    setReport(null);
+    clearReportState();
     try {
       const result = await api.declarations.compute(activeCompanyId, dateFrom, dateTo);
       if (result.invoiceCount === 0) {
@@ -252,12 +262,12 @@ export function DeclarationsPage() {
             <Segmented
               options={monthSegOptions}
               value={String(selectedMonth)}
-              onChange={(v) => { setSelectedMonth(Number(v)); setReport(null); }}
+              onChange={(v) => { setSelectedMonth(Number(v)); clearReportState(); }}
             />
             <Segmented
               options={yearSegOptions}
               value={String(selectedYear)}
-              onChange={(v) => { setSelectedYear(Number(v)); setReport(null); }}
+              onChange={(v) => { setSelectedYear(Number(v)); clearReportState(); }}
             />
             <Btn
               variant="primary"

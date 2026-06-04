@@ -196,7 +196,8 @@ pub struct D300Rows {
     pub r25_2_2: Option<i64>,
     /// R30_1 / R30_2 — regularizări taxă dedusă (Rd.32/Rd.33 in printed form).
     ///   Populated from old-rate S purchases (19%/9%/5%) — auto-computed or overridden.
-    ///   Type IntNeg15SType (signed, no rate-margin DUK rule). Included in R27.
+    ///   Type IntNeg15SType (signed, no rate-margin DUK rule). R30_2 feeds R32
+    ///   (DUK R108), NOT R27 — see the TOTALS block above.
     pub r30_1: Option<i64>,
     pub r30_2: Option<i64>,
 
@@ -355,7 +356,8 @@ fn rate_matches(group: &D300Group, pct: i64) -> bool {
 /// * Old rates (S sales 19%/5%, S purchases 19%/9%/5%): auto-included in
 ///   regularizări rows R16 (collected) and R30 (deductible). Values may be
 ///   overridden via `submission.reg_colectata_*` / `submission.reg_dedusa_*`.
-/// * R16_1/R16_2 added to R17 totals; R30_1/R30_2 added to R27 totals.
+/// * R16_1/R16_2 added to R17 totals; R30_2 added to R32 (DUK R108), NOT R27
+///   (R30_1 base feeds the control sum only).
 pub fn map_to_rows(
     report: &D300Report,
     submission: &D300Submission,
