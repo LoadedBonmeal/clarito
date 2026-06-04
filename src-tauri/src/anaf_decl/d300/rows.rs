@@ -16,27 +16,29 @@
 //!
 //! ## SALES (TVA colectată)
 //!
-//! | Category | Rate  | Base row   | VAT row    | Notes                                   |
-//! |----------|-------|------------|------------|-----------------------------------------|
-//! | S        | 21%   | R9_1       | R9_2       | Cota standard, DUK margin 20–22%        |
-//! | S        | 11%   | R10_1      | R10_2      | Cotă redusă 11%, DUK margin 8–10%      |
-//! | S        | 9%    | R11_1      | R11_2      | Cotă redusă 9% (from 2026), DUK 8–10%  |
-//! | Z/K/E    | 0%    | R1_1       | —          | Scutite art.294 (intra-EU / export)     |
-//! | AE       | 21%   | R12_1_1    | R12_1_2    | Beneficiar taxare inversă 21%           |
-//! | AE       | 11%   | R12_2_1    | R12_2_2    | Beneficiar taxare inversă 11%           |
-//! | AE (Σ)   | —     | R12_1      | R12_2      | Sum of all AE sub-rows (parents)        |
+//! | Category | Rate     | Base row   | VAT row    | Notes                                      |
+//! |----------|----------|------------|------------|--------------------------------------------|
+//! | S        | 21%      | R9_1       | R9_2       | Cota standard, DUK margin 20–22%           |
+//! | S        | 11%      | R10_1      | R10_2      | Cotă redusă 11%, DUK margin 8–10%         |
+//! | S        | 9%       | R11_1      | R11_2      | Cotă redusă 9% (from 2026), DUK 8–10%     |
+//! | S        | 19%/5%   | R16_1      | R16_2      | Regularizări cote vechi (Wave 8)           |
+//! | Z/K/E    | 0%       | R1_1       | —          | Scutite art.294 (intra-EU / export)        |
+//! | AE       | 21%      | R12_1_1    | R12_1_2    | Beneficiar taxare inversă 21%              |
+//! | AE       | 11%      | R12_2_1    | R12_2_2    | Beneficiar taxare inversă 11%              |
+//! | AE (Σ)   | —        | R12_1      | R12_2      | Sum of all AE sub-rows (parents)           |
 //!
 //! ## PURCHASES (TVA deductibilă)
 //!
-//! | Category | Kind     | Rate  | Base row   | VAT row    | Notes                               |
-//! |----------|----------|-------|------------|------------|-------------------------------------|
-//! | K        | goods    | 21%   | R5_1 / R18_1 | R5_2 / R18_2 | Intra-EU bunuri; R18=R5        |
-//! | K        | services | 21%   | R7_1 / R20_1 | R7_2 / R20_2 | Intra-EU servicii; R20=R7     |
-//! | S        | —        | 21%   | R22_1      | R22_2      | Deductibil intern cotă standard     |
-//! | S        | —        | 11%   | R23_1      | R23_2      | Deductibil intern cotă redusă 11%   |
-//! | AE       | —        | 21%   | R25_1_1    | R25_1_2    | Mirror R12_1_1/R12_1_2              |
-//! | AE       | —        | 11%   | R25_2_1    | R25_2_2    | Mirror R12_2_1/R12_2_2              |
-//! | AE (Σ)   | —        | —     | R25_1      | R25_2      | = R12_1 / R12_2 (DUK enforced)     |
+//! | Category | Kind     | Rate          | Base row   | VAT row    | Notes                               |
+//! |----------|----------|---------------|------------|------------|-------------------------------------|
+//! | K        | goods    | 21%           | R5_1 / R18_1 | R5_2 / R18_2 | Intra-EU bunuri; R18=R5        |
+//! | K        | services | 21%           | R7_1 / R20_1 | R7_2 / R20_2 | Intra-EU servicii; R20=R7     |
+//! | S        | —        | 21%           | R22_1      | R22_2      | Deductibil intern cotă standard     |
+//! | S        | —        | 11%           | R23_1      | R23_2      | Deductibil intern cotă redusă 11%   |
+//! | S        | —        | 19%/9%/5%     | R30_1      | R30_2      | Regularizări cote vechi (Wave 8)    |
+//! | AE       | —        | 21%           | R25_1_1    | R25_1_2    | Mirror R12_1_1/R12_1_2              |
+//! | AE       | —        | 11%           | R25_2_1    | R25_2_2    | Mirror R12_2_1/R12_2_2              |
+//! | AE (Σ)   | —        | —             | R25_1      | R25_2      | = R12_1 / R12_2 (DUK enforced)     |
 //!
 //! ## DUK EQUALITY CONSTRAINTS (schema enforced, violations = E: errors)
 //!
@@ -55,17 +57,28 @@
 //! ## TOTALS
 //!
 //! R17_2 = R5_2 + R7_2 + R9_2 + R10_2 + R11_2 + R12_2 + R16_2 + R64_2 + R65_2
-//!   (R6/R8/R16/R64/R65 absent in this implementation; R7 added Wave 7)
+//!   (R6/R8/R64/R65 absent; R7 added Wave 7; R16 added Wave 8)
 //! R27_2 = R18_2 + R20_2 + R22_2 + R23_2 + R25_2 + R43_2 + R44_2
-//!   (R19/R21/R43/R44 absent in this implementation; R20 added Wave 7)
+//!   (R19/R21/R43/R44 absent; R20 added Wave 7; R30 does NOT feed R27)
+//! R28_2 = R27_2 (no pro-rata)
+//! R32_2 = R28_2 + R30_2   (regularizări dedusă feeds R32 directly — DUK R108)
 //!
-//! ## RESIDUALS (known unresolved — flagged, not mapped)
+//! ## REGULARIZĂRI (Wave 8 — OPANAF 174/2026)
 //!
-//! * Old rates 19%/9%/5% (category S): rows R69/R70/R71 are in the structura
-//!   PDF but NOT in XSD v1.02. R16_2 (regularizări) is in the XSD but its
-//!   DUK margin cannot be confirmed without a real ANAF audit scenario.
-//!   Operations at old rates are excluded from auto-mapping; a `tracing::warn!`
-//!   is emitted at generation time. Accountant must declare them manually.
+//! Per OPANAF 174/2026 the 2026 D300 has NO dedicated rows for old VAT rates.
+//! Old-rate operations (sales 19%/5%, purchases 19%/9%/5%, category S) are
+//! auto-included in the regularizări rows:
+//!
+//! - R16_1/R16_2 — regularizări taxă colectată (Rd.16 in printed form)
+//! - R30_1/R30_2 — regularizări taxă dedusă (Rd.32/Rd.33 in printed form)
+//!
+//! Both rows are type IntNeg15SType (signed; no rate-margin DUK rule applies).
+//! The values are auto-computed from the `D300Report.reg_*` fields and can be
+//! overridden via `D300Submission.reg_*` (optional i64). The accountant is
+//! advised to verify via the preflight warning `D300_COTE_VECHI`.
+//!
+//! NOTE: 9% purchases still do NOT go into R23 (the 11% row; DUK corridor 10–12%
+//! rejects a 9% ratio). They flow into R30 as regularizări instead.
 //!
 //! * Intra-EU acquisitions of SERVICES (category K, intra_eu_kind="services"):
 //!   Wave 7: mapped to R7/R20 (services rows). DUK V_13/V_14: R20=R7.
@@ -138,6 +151,11 @@ pub struct D300Rows {
     /// R13_1 — livrări taxare inversă outbound (vânzător); XSD v12 has no R13_2.
     ///   SELLER side of domestic reverse charge (art.331); base only, no VAT column.
     pub r13_1: Option<i64>,
+    /// R16_1 / R16_2 — regularizări taxă colectată (Rd.16 in printed form).
+    ///   Populated from old-rate S sales (19%/5%) — auto-computed or overridden.
+    ///   Type IntNeg15SType (signed, no rate-margin DUK rule). Included in R17.
+    pub r16_1: Option<i64>,
+    pub r16_2: Option<i64>,
 
     // ── Purchase rows (TVA deductibilă) ─────────────────────────────────────
     /// R5_1 / R5_2 — achiziții intracomunitare de BUNURI (category K, intra_eu_kind=goods)
@@ -176,6 +194,11 @@ pub struct D300Rows {
     /// R25_2_1 / R25_2_2 — mirror of R12_2_1/R12_2_2 (DUK V_23/V_24)
     pub r25_2_1: Option<i64>,
     pub r25_2_2: Option<i64>,
+    /// R30_1 / R30_2 — regularizări taxă dedusă (Rd.32/Rd.33 in printed form).
+    ///   Populated from old-rate S purchases (19%/9%/5%) — auto-computed or overridden.
+    ///   Type IntNeg15SType (signed, no rate-margin DUK rule). Included in R27.
+    pub r30_1: Option<i64>,
+    pub r30_2: Option<i64>,
 
     // ── Totals (computed) ─────────────────────────────────────────────────────
     /// R17_1 / R17_2 — TOTAL TAXĂ COLECTATĂ (baza / TVA)
@@ -326,8 +349,13 @@ fn rate_matches(group: &D300Group, pct: i64) -> bool {
 /// * Reverse charge AE: collected R12 (sub-rows R12_1_1/R12_1_2 for 21%,
 ///   R12_2_1/R12_2_2 for 11%) + deductible mirror R25 (equal by DUK V_19–V_24).
 /// * Intra-EU K purchases: R5 collected + R18 deductible (goods, equal by DUK V_7/V_8).
-/// * Old rates (19%/9%/5%): excluded — R69/R70/R71 absent from XSD v1.02;
-///   tracing::warn! is emitted; residual for Wave 5a preflight.
+///
+/// # Wave 8 changes (OPANAF 174/2026 regularizări)
+///
+/// * Old rates (S sales 19%/5%, S purchases 19%/9%/5%): auto-included in
+///   regularizări rows R16 (collected) and R30 (deductible). Values may be
+///   overridden via `submission.reg_colectata_*` / `submission.reg_dedusa_*`.
+/// * R16_1/R16_2 added to R17 totals; R30_1/R30_2 added to R27 totals.
 pub fn map_to_rows(
     report: &D300Report,
     submission: &D300Submission,
@@ -373,34 +401,6 @@ pub fn map_to_rows(
         .collect();
         parts.join(", ").chars().take(1000).collect::<String>()
     };
-
-    // ── RESIDUAL: warn about operations with no valid v12 row ────────────────
-    // SALES at old rates 19%/5%: R69/R70/R71 (the structura-PDF rows for old rates)
-    //   are absent from XSD v1.02, and 19%/5% amounts cannot go in R9/R10/R11 (the
-    //   DUK margin checks would fail "Validare fara erori").
-    // PURCHASES at old rates 19%/5% AND at 9%: there is no deductible row whose DUK
-    //   corridor accepts them — R22=21% [20–22%], R23=11% [10–12% per rule R86].
-    //   A 9% purchase (vat=9%) is BELOW R23's 10% floor, so 9% purchases are
-    //   excluded here too (9% SALES are fine — they have their own row R11).
-    // Excluded operations are surfaced to the accountant by the pre-export
-    // validation (anaf_decl::preflight, code D300_COTE_VECHI).
-    let has_old_rate_sales = report
-        .groups
-        .iter()
-        .any(|g| g.vat_category == "S" && (rate_matches(g, 19) || rate_matches(g, 5)));
-    let has_old_rate_purchases = report.purchase_groups.iter().any(|g| {
-        g.vat_category == "S" && (rate_matches(g, 19) || rate_matches(g, 9) || rate_matches(g, 5))
-    });
-    if has_old_rate_sales || has_old_rate_purchases {
-        tracing::warn!(
-            luna,
-            an,
-            has_old_rate_sales,
-            has_old_rate_purchases,
-            "D300 Wave4: operațiuni fără rând valid în XSD v1.02 (vânzări 19%/5% sau \
-             achiziții 19%/9%/5%) excluse din XML; necesită corecție manuală (preflight)."
-        );
-    }
 
     // ── Sales row accumulation ────────────────────────────────────────────────
 
@@ -559,10 +559,8 @@ pub fn map_to_rows(
 
     // R23_1 / R23_2 — achiziții interne cotă 11% ONLY.
     // R23's DUK corridor is 10–12% (rule R86: 10% ≤ R23_2/R23_1 ≤ 12%), so a 9%
-    // purchase (vat = 9% of base) does NOT fit R23 — it triggers an "Atentionare"
-    // AND misclassifies a 9% operation as 11%. There is no dedicated 9%-deductible
-    // row in XSD v1.02, so a 9% purchase is excluded + warned (see the residual
-    // block above), exactly like the old 19%/5% rates. Do NOT fold 9% into R23.
+    // purchase (vat = 9% of base) does NOT fit R23. Wave 8: 9% purchases flow into
+    // R30 (regularizări) instead. Do NOT fold 9% into R23.
     let mut r23_base = Decimal::ZERO;
     let mut r23_vat = Decimal::ZERO;
     accumulate(
@@ -571,6 +569,44 @@ pub fn map_to_rows(
         &mut r23_base,
         &mut r23_vat,
     );
+
+    // ── Wave 8: R16 regularizări colectată + R30 regularizări dedusă ──────────
+    // Override from submission if provided; otherwise use auto-computed prefill
+    // values from `report.reg_colectata_*` / `report.reg_dedusa_*`.
+    // Both rows are IntNeg15SType — no rate-margin DUK corridor applies.
+
+    let r16_1_val: i64 = if let Some(ov) = submission.reg_colectata_baza {
+        ov
+    } else {
+        parse_dec(&report.reg_colectata_baza)
+            .round_dp(0)
+            .to_i64()
+            .unwrap_or(0)
+    };
+    let r16_2_val: i64 = if let Some(ov) = submission.reg_colectata_tva {
+        ov
+    } else {
+        parse_dec(&report.reg_colectata_tva)
+            .round_dp(0)
+            .to_i64()
+            .unwrap_or(0)
+    };
+    let r30_1_val: i64 = if let Some(ov) = submission.reg_dedusa_baza {
+        ov
+    } else {
+        parse_dec(&report.reg_dedusa_baza)
+            .round_dp(0)
+            .to_i64()
+            .unwrap_or(0)
+    };
+    let r30_2_val: i64 = if let Some(ov) = submission.reg_dedusa_tva {
+        ov
+    } else {
+        parse_dec(&report.reg_dedusa_tva)
+            .round_dp(0)
+            .to_i64()
+            .unwrap_or(0)
+    };
 
     // ── Margin checks (logged, non-fatal) ─────────────────────────────────────
     // The collected VAT on each rate row should fall within the rate's corridor.
@@ -602,12 +638,16 @@ pub fn map_to_rows(
     let r12_1_total = ae21_base + ae11_base;
     let r12_2_total = ae21_vat + ae11_vat;
 
-    // R17_2 = R5_2 + R7_2 + R9_2 + R10_2 + R11_2 + R12_2 + [R6_2 + R8_2 + R16_2 + R64_2 + R65_2]
-    // (R6/R8/R16/R64/R65 are zero/absent in this implementation)
+    // R16 as Decimal (for totals arithmetic)
+    let r16_1_dec = Decimal::from(r16_1_val);
+    let r16_2_dec = Decimal::from(r16_2_val);
+
+    // R17_2 = R5_2 + R7_2 + R9_2 + R10_2 + R11_2 + R12_2 + R16_2 + [R6_2 + R8_2 + R64_2 + R65_2]
+    // R16_2 is the regularizări colectată for old rates (Wave 8).
     // R7_2 is the collected leg of intra-EU SERVICES (Wave 7)
-    let r17_vat = r5_vat + r7_vat + r9_vat + r10_vat + r11_vat + r12_2_total;
-    // R17_1 = R5_1 + R7_1 + R9_1 + R10_1 + R11_1 + R12_1 + ...
-    let r17_base = r5_base + r7_base + r9_base + r10_base + r11_base + r12_1_total;
+    let r17_vat = r5_vat + r7_vat + r9_vat + r10_vat + r11_vat + r12_2_total + r16_2_dec;
+    // R17_1 = R5_1 + R7_1 + R9_1 + R10_1 + R11_1 + R12_1 + R16_1 + ...
+    let r17_base = r5_base + r7_base + r9_base + r10_base + r11_base + r12_1_total + r16_1_dec;
 
     // R25 = R12 (DUK V_19/V_20 enforced equality)
     let r25_1_total = r12_1_total;
@@ -621,8 +661,13 @@ pub fn map_to_rows(
     let r20_base = r7_base;
     let r20_vat = r7_vat;
 
+    // R30 as Decimal (for totals arithmetic)
+    // r30_1 (base) feeds the control sum only; does not feed R27 or R32.
+    let _r30_1_dec = Decimal::from(r30_1_val);
+    let r30_2_dec = Decimal::from(r30_2_val);
+
     // R27_2 = R18_2 + R20_2 + R22_2 + R23_2 + R25_2 + [R19_2 + R21_2 + R43_2 + R44_2]
-    // (R19/R21/R43/R44 are zero/absent)
+    // NOTE: R30 does NOT add into R27 — DUK rules R99/R100 verify R27 without R30.
     // R20_2 is the deductible leg of intra-EU SERVICES (Wave 7)
     let r27_vat = r18_vat + r20_vat + r22_vat + r23_vat + r25_2_total;
     let r27_base = r18_base + r20_base + r22_base + r23_base + r25_1_total;
@@ -630,8 +675,9 @@ pub fn map_to_rows(
     // R28_2 (sub-total dedusă) = R27_2 (no pro-rata adjustment)
     let r28_vat = r27_vat;
 
-    // R32_2 = R28_2 + R29_2 + R30_2 + R31_2 (= R27_2 with no carryover)
-    let r32_vat = r28_vat;
+    // R32_2 = R28_2 + R29_2 + R30_2 + R31_2
+    // DUK rule R108: R32_2 = R28_2 + R30_2 (regularizări dedusă flows here, not into R27)
+    let r32_vat = r28_vat + r30_2_dec;
 
     // R33_2 = MAX(R32_2 - R17_2, 0)  [TVA de recuperat]
     let r33_vat = if r32_vat > r17_vat {
@@ -696,6 +742,8 @@ pub fn map_to_rows(
     let r12_2_1_v = opt_nonzero(round_to_lei(ae11_base));
     let r12_2_2_v = opt_nonzero(round_to_lei(ae11_vat));
     let r13_1_v = opt_nonzero(round_to_lei(r13_base));
+    let r16_1_v = opt_nonzero(r16_1_val);
+    let r16_2_v = opt_nonzero(r16_2_val);
     let r18_1_v = opt_nonzero(round_to_lei(r18_base));
     let r18_2_v = opt_nonzero(round_to_lei(r18_vat));
     let r17_1_v = opt_nonzero(round_to_lei(r17_base));
@@ -716,6 +764,8 @@ pub fn map_to_rows(
     let r25_1_2_v = opt_nonzero(round_to_lei(ae21_vat)); // = R12_1_2 (DUK V_22)
     let r25_2_1_v = opt_nonzero(round_to_lei(ae11_base)); // = R12_2_1 (DUK V_23)
     let r25_2_2_v = opt_nonzero(round_to_lei(ae11_vat)); // = R12_2_2 (DUK V_24)
+    let r30_1_v = opt_nonzero(r30_1_val);
+    let r30_2_v = opt_nonzero(r30_2_val);
     let r27_1_v = opt_nonzero(round_to_lei(r27_base));
     let r27_2_v = opt_nonzero(round_to_lei(r27_vat));
     let r28_2_v = opt_nonzero(round_to_lei(r28_vat));
@@ -734,13 +784,14 @@ pub fn map_to_rows(
     // tva, nr_facturi_primite, baza_primite, tva_primite) are not present in
     // D300Rows so they contribute 0 as well.
     // Wave 7: include R7_* and R20_* in the control sum.
+    // Wave 8: include R16_* and R30_* in the control sum.
     let total_plata_a: i64 = [
         r1_1_v, r5_1_v, r5_2_v, r7_1_v, r7_2_v, r7_1_1_v, r7_1_2_v, r9_1_v, r9_2_v, r10_1_v,
         r10_2_v, r11_1_v, r11_2_v, r12_1_v, r12_2_v, r12_1_1_v, r12_1_2_v, r12_2_1_v, r12_2_2_v,
-        r13_1_v, r18_1_v, r18_2_v, r17_1_v, r17_2_v, r20_1_v, r20_2_v, r20_1_1_v, r20_1_2_v,
-        r22_1_v, r22_2_v, r23_1_v, r23_2_v, r25_1_v, r25_2_v, r25_1_1_v, r25_1_2_v, r25_2_1_v,
-        r25_2_2_v, r27_1_v, r27_2_v, r28_2_v, r32_2_v, r33_2_v, r34_2_v, r37_2_v, r40_2_v, r41_2_v,
-        r42_2_v,
+        r13_1_v, r16_1_v, r16_2_v, r18_1_v, r18_2_v, r17_1_v, r17_2_v, r20_1_v, r20_2_v, r20_1_1_v,
+        r20_1_2_v, r22_1_v, r22_2_v, r23_1_v, r23_2_v, r25_1_v, r25_2_v, r25_1_1_v, r25_1_2_v,
+        r25_2_1_v, r25_2_2_v, r27_1_v, r27_2_v, r28_2_v, r30_1_v, r30_2_v, r32_2_v, r33_2_v,
+        r34_2_v, r37_2_v, r40_2_v, r41_2_v, r42_2_v,
     ]
     .iter()
     .map(|o| o.unwrap_or(0))
@@ -801,6 +852,9 @@ pub fn map_to_rows(
         r12_2_1: r12_2_1_v,
         r12_2_2: r12_2_2_v,
         r13_1: r13_1_v,
+        // R16 — regularizări colectată cote vechi (Wave 8)
+        r16_1: r16_1_v,
+        r16_2: r16_2_v,
 
         // purchases
         r5_1: r5_1_v,
@@ -826,6 +880,9 @@ pub fn map_to_rows(
         r25_1_2: r25_1_2_v,
         r25_2_1: r25_2_1_v,
         r25_2_2: r25_2_2_v,
+        // R30 — regularizări dedusă cote vechi (Wave 8)
+        r30_1: r30_1_v,
+        r30_2: r30_2_v,
 
         // totals
         r17_1: r17_1_v,
@@ -940,6 +997,11 @@ mod tests {
             purchase_invoice_count: 3,
             purchase_unparsed_count: 0,
             net_vat: (total_vat - total_ded_vat).round_dp(2).to_string(),
+            // Wave 8: regularizări — tests override these explicitly when needed.
+            reg_colectata_baza: "0.00".to_string(),
+            reg_colectata_tva: "0.00".to_string(),
+            reg_dedusa_baza: "0.00".to_string(),
+            reg_dedusa_tva: "0.00".to_string(),
         }
     }
 

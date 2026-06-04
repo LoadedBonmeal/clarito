@@ -77,6 +77,16 @@ pub struct D300Report {
     pub purchase_unparsed_count: i64,
     /// TVA netă de plată = TVA colectată − TVA deductibilă (negativă = de recuperat).
     pub net_vat: String,
+
+    // ── Wave 8: regularizări cote vechi ──────────────────────────────────────
+    /// Auto-computed Σ baza din vânzările S la cote vechi 19%/5% → R16_1.
+    pub reg_colectata_baza: String,
+    /// Auto-computed Σ TVA din vânzările S la cote vechi 19%/5% → R16_2.
+    pub reg_colectata_tva: String,
+    /// Auto-computed Σ baza din achizițiile S la cote vechi 19%/9%/5% → R30_1.
+    pub reg_dedusa_baza: String,
+    /// Auto-computed Σ TVA din achizițiile S la cote vechi 19%/9%/5% → R30_2.
+    pub reg_dedusa_tva: String,
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -456,6 +466,48 @@ pub async fn compute_d300(
     // TVA netă de plată = colectată − deductibilă (negativă = de recuperat).
     let net_vat = total_vat - total_deductible_vat;
 
+    // ── Wave 8: regularizări cote vechi ──────────────────────────────────────
+    // Σ vânzări S la cote 19%/5% → auto-prefill R16 (regularizări colectată)
+    let mut reg_coll_base = Decimal::ZERO;
+    let mut reg_coll_tva = Decimal::ZERO;
+    for g in &groups_vec {
+        if g.vat_category == "S" {
+            let rate_d = Decimal::from_str(&g.vat_rate).unwrap_or(Decimal::ZERO);
+            let rate_pct = if rate_d > Decimal::ONE {
+                rate_d.round_dp(0).to_i64().unwrap_or(-1)
+            } else {
+                (rate_d * Decimal::from(100))
+                    .round_dp(0)
+                    .to_i64()
+                    .unwrap_or(-1)
+            };
+            if matches!(rate_pct, 19 | 5) {
+                reg_coll_base += Decimal::from_str(&g.base).unwrap_or(Decimal::ZERO);
+                reg_coll_tva += Decimal::from_str(&g.vat).unwrap_or(Decimal::ZERO);
+            }
+        }
+    }
+    // Σ achiziții S la cote 19%/9%/5% → auto-prefill R30 (regularizări dedusă)
+    let mut reg_ded_base = Decimal::ZERO;
+    let mut reg_ded_tva = Decimal::ZERO;
+    for g in &purchase_groups_vec {
+        if g.vat_category == "S" {
+            let rate_d = Decimal::from_str(&g.vat_rate).unwrap_or(Decimal::ZERO);
+            let rate_pct = if rate_d > Decimal::ONE {
+                rate_d.round_dp(0).to_i64().unwrap_or(-1)
+            } else {
+                (rate_d * Decimal::from(100))
+                    .round_dp(0)
+                    .to_i64()
+                    .unwrap_or(-1)
+            };
+            if matches!(rate_pct, 19 | 9 | 5) {
+                reg_ded_base += Decimal::from_str(&g.base).unwrap_or(Decimal::ZERO);
+                reg_ded_tva += Decimal::from_str(&g.vat).unwrap_or(Decimal::ZERO);
+            }
+        }
+    }
+
     Ok(D300Report {
         company_cui,
         period_from,
@@ -470,6 +522,10 @@ pub async fn compute_d300(
         purchase_invoice_count,
         purchase_unparsed_count,
         net_vat: net_vat.round_dp(2).to_string(),
+        reg_colectata_baza: reg_coll_base.round_dp(2).to_string(),
+        reg_colectata_tva: reg_coll_tva.round_dp(2).to_string(),
+        reg_dedusa_baza: reg_ded_base.round_dp(2).to_string(),
+        reg_dedusa_tva: reg_ded_tva.round_dp(2).to_string(),
     })
 }
 
@@ -842,6 +898,10 @@ mod tests {
             purchase_invoice_count: 3,
             purchase_unparsed_count: 0,
             net_vat: "95.00".to_string(),
+            reg_colectata_baza: "0.00".to_string(),
+            reg_colectata_tva: "0.00".to_string(),
+            reg_dedusa_baza: "0.00".to_string(),
+            reg_dedusa_tva: "0.00".to_string(),
         };
 
         let dir = std::env::temp_dir();
@@ -882,6 +942,10 @@ mod tests {
             purchase_invoice_count: 5,
             purchase_unparsed_count: 3,
             net_vat: "0.00".to_string(),
+            reg_colectata_baza: "0.00".to_string(),
+            reg_colectata_tva: "0.00".to_string(),
+            reg_dedusa_baza: "0.00".to_string(),
+            reg_dedusa_tva: "0.00".to_string(),
         };
 
         let dir = std::env::temp_dir();
@@ -923,6 +987,10 @@ mod tests {
             purchase_invoice_count: 3,
             purchase_unparsed_count: 2,
             net_vat: "95.00".to_string(), // 190 − 95
+            reg_colectata_baza: "0.00".to_string(),
+            reg_colectata_tva: "0.00".to_string(),
+            reg_dedusa_baza: "0.00".to_string(),
+            reg_dedusa_tva: "0.00".to_string(),
         };
 
         // Simulate the R4 override logic from export_d300 with override = 120.00.
@@ -983,6 +1051,10 @@ mod tests {
             purchase_invoice_count: 0,
             purchase_unparsed_count: 0,
             net_vat: "95.00".to_string(),
+            reg_colectata_baza: "0.00".to_string(),
+            reg_colectata_tva: "0.00".to_string(),
+            reg_dedusa_baza: "0.00".to_string(),
+            reg_dedusa_tva: "0.00".to_string(),
         };
 
         // Simulate None override — no changes applied.

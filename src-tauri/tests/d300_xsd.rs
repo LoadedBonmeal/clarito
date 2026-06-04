@@ -106,6 +106,10 @@ fn test_report() -> D300Report {
         purchase_invoice_count: 7,
         purchase_unparsed_count: 0,
         net_vat: "970.00".to_string(),
+        reg_colectata_baza: "0.00".to_string(),
+        reg_colectata_tva: "0.00".to_string(),
+        reg_dedusa_baza: "0.00".to_string(),
+        reg_dedusa_tva: "0.00".to_string(),
     }
 }
 
@@ -203,6 +207,10 @@ fn d300_empty_period_generates_valid_xml() {
         purchase_invoice_count: 0,
         purchase_unparsed_count: 0,
         net_vat: "0.00".to_string(),
+        reg_colectata_baza: "0.00".to_string(),
+        reg_colectata_tva: "0.00".to_string(),
+        reg_dedusa_baza: "0.00".to_string(),
+        reg_dedusa_tva: "0.00".to_string(),
     };
 
     // Use 2026 period to resolve v12 (vendored XSD)
@@ -308,6 +316,10 @@ fn d300_wave4_scenario_a_reverse_charge_ae() {
         purchase_invoice_count: 1,
         purchase_unparsed_count: 0,
         net_vat: "0.00".to_string(),
+        reg_colectata_baza: "0.00".to_string(),
+        reg_colectata_tva: "0.00".to_string(),
+        reg_dedusa_baza: "0.00".to_string(),
+        reg_dedusa_tva: "0.00".to_string(),
     };
 
     let rows =
@@ -411,6 +423,10 @@ fn d300_wave4_scenario_b_intra_eu_k_purchase() {
         purchase_invoice_count: 1,
         purchase_unparsed_count: 0,
         net_vat: "0.00".to_string(),
+        reg_colectata_baza: "0.00".to_string(),
+        reg_colectata_tva: "0.00".to_string(),
+        reg_dedusa_baza: "0.00".to_string(),
+        reg_dedusa_tva: "0.00".to_string(),
     };
 
     let rows =
@@ -507,6 +523,10 @@ fn d300_wave4_scenario_c_multirate_sales() {
         purchase_invoice_count: 0,
         purchase_unparsed_count: 0,
         net_vat: "283.00".to_string(),
+        reg_colectata_baza: "0.00".to_string(),
+        reg_colectata_tva: "0.00".to_string(),
+        reg_dedusa_baza: "0.00".to_string(),
+        reg_dedusa_tva: "0.00".to_string(),
     };
 
     let rows =
@@ -595,12 +615,17 @@ fn d300_wave4_scenario_d_9pct_purchase_excluded() {
         purchase_invoice_count: 1,
         purchase_unparsed_count: 0,
         net_vat: "120.00".to_string(),
+        // Wave 8: 9% S purchase auto-included in regularizări R30.
+        reg_colectata_baza: "0.00".to_string(),
+        reg_colectata_tva: "0.00".to_string(),
+        reg_dedusa_baza: "1000.00".to_string(),
+        reg_dedusa_tva: "90.00".to_string(),
     };
 
     let rows =
         map_to_rows(&report, &test_submission(), &test_company(), period).expect("map_to_rows");
 
-    // The 9% purchase must NOT land in R23 (the 11% row) — it is excluded.
+    // The 9% purchase must NOT land in R23 (the 11% row) — it goes to R30 instead (Wave 8).
     assert_eq!(
         rows.r23_1, None,
         "Scenario D: 9% purchase must NOT populate R23_1"
@@ -608,6 +633,17 @@ fn d300_wave4_scenario_d_9pct_purchase_excluded() {
     assert_eq!(
         rows.r23_2, None,
         "Scenario D: 9% purchase must NOT populate R23_2"
+    );
+    // Wave 8: 9% purchase flows into R30 (regularizări dedusă) instead.
+    assert_eq!(
+        rows.r30_1,
+        Some(1000),
+        "Scenario D (Wave 8): 9% purchase must populate R30_1=1000"
+    );
+    assert_eq!(
+        rows.r30_2,
+        Some(90),
+        "Scenario D (Wave 8): 9% purchase must populate R30_2=90"
     );
 
     let xml = generate_d300_xml(&rows, &ver).expect("generate");
@@ -622,11 +658,11 @@ fn d300_wave4_scenario_d_9pct_purchase_excluded() {
     );
     let _ = std::fs::remove_file(&tmp);
 
-    // DUK must stay clean precisely because the 9% purchase was excluded (not in R23).
+    // DUK must stay clean: 9% purchase is in R30 (regularizări, no margin corridor).
     match run_duk(&xml, "scenario_d") {
         Ok(passed) => assert!(
             passed,
-            "Scenario D: DUK must say 'Validare fara erori' (9% purchase excluded, not in R23)"
+            "Scenario D: DUK must say 'Validare fara erori' (9% purchase in R30, not R23)"
         ),
         Err(e) => eprintln!("SKIP DUK Scenario D: {e}"),
     }
@@ -724,6 +760,10 @@ fn d300_wave7_intra_eu_services() {
         purchase_invoice_count: 1,
         purchase_unparsed_count: 0,
         net_vat: "0.00".to_string(),
+        reg_colectata_baza: "0.00".to_string(),
+        reg_colectata_tva: "0.00".to_string(),
+        reg_dedusa_baza: "0.00".to_string(),
+        reg_dedusa_tva: "0.00".to_string(),
     };
 
     let rows =
@@ -808,5 +848,349 @@ fn d300_wave7_intra_eu_services() {
     match run_duk(&xml, "wave7_services") {
         Ok(passed) => assert!(passed, "Wave7 Services: DUK must say 'Validare fara erori'"),
         Err(e) => eprintln!("SKIP DUK Wave7 Services: {e}"),
+    }
+}
+
+// ── Wave 8 scenarios — old-rate regularizări (R16/R30) ─────────────────────────
+
+/// WAVE 8 SCENARIO: 19% S SALE → R16_1/R16_2 (regularizări colectată).
+///
+/// A sale at 19% (old rate) base=1000, VAT=190.
+/// Expected: R16_1=1000, R16_2=190; R9/R10/R11 empty; R17_2=190.
+/// Must pass XSD AND DUK ("Validare fara erori").
+#[test]
+fn d300_wave8_old_rate_sales_to_r16() {
+    let xsd_path = std::path::Path::new("tools/anaf/sample_d300_v12.xml");
+    if !xsd_path.exists() {
+        eprintln!("SKIP: XSD not found");
+        return;
+    }
+    if !efactura_desktop_lib::anaf_decl::validation::xmllint_available() {
+        eprintln!("SKIP: xmllint not available");
+        return;
+    }
+
+    let period = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("date");
+    let ver = resolve(DeclKind::D300, period).expect("version");
+
+    // Old-rate 19% sale — reg_colectata_* pre-computed as if by compute_d300
+    let report = D300Report {
+        company_cui: "RO12345674".to_string(),
+        period_from: "2026-01-01".to_string(),
+        period_to: "2026-01-31".to_string(),
+        groups: vec![D300Group {
+            vat_rate: "0.19".to_string(),
+            vat_category: "S".to_string(),
+            base: "1000.00".to_string(),
+            vat: "190.00".to_string(),
+            intra_eu_kind: None,
+        }],
+        total_base: "1000.00".to_string(),
+        total_vat: "190.00".to_string(),
+        invoice_count: 1,
+        purchase_groups: vec![],
+        total_deductible_base: "0.00".to_string(),
+        total_deductible_vat: "0.00".to_string(),
+        purchase_invoice_count: 0,
+        purchase_unparsed_count: 0,
+        net_vat: "190.00".to_string(),
+        // Wave 8: auto-computed by compute_d300 from old-rate groups
+        reg_colectata_baza: "1000.00".to_string(),
+        reg_colectata_tva: "190.00".to_string(),
+        reg_dedusa_baza: "0.00".to_string(),
+        reg_dedusa_tva: "0.00".to_string(),
+    };
+
+    let rows =
+        map_to_rows(&report, &test_submission(), &test_company(), period).expect("map_to_rows");
+
+    // R16 populated for old-rate sales
+    assert_eq!(
+        rows.r16_1,
+        Some(1000),
+        "Wave8 sales R16_1=1000 (old 19% base)"
+    );
+    assert_eq!(rows.r16_2, Some(190), "Wave8 sales R16_2=190 (old 19% VAT)");
+
+    // Current-rate rows must be empty (no 21%/11%/9% sales)
+    assert_eq!(rows.r9_1, None, "Wave8: R9_1 must be None (no 21% sales)");
+    assert_eq!(rows.r10_1, None, "Wave8: R10_1 must be None (no 11% sales)");
+    assert_eq!(rows.r11_1, None, "Wave8: R11_1 must be None (no 9% sales)");
+
+    // R17_2 must include R16_2
+    assert_eq!(rows.r17_2, Some(190), "Wave8: R17_2 includes R16_2=190");
+    assert_eq!(
+        rows.r34_2,
+        Some(190),
+        "Wave8: R34_2=190 (TVA de plată = R17_2)"
+    );
+
+    let xml = generate_d300_xml(&rows, &ver).expect("generate");
+    eprintln!("Wave8 old-rate sales XML:\n{xml}");
+
+    if let Ok(dump_dir) = std::env::var("EFACTURA_DUMP_DIR") {
+        let path = std::path::Path::new(&dump_dir).join("d300_wave8_old_rate_sales.xml");
+        std::fs::write(&path, xml.as_bytes()).expect("write dump");
+        eprintln!("DUMP: wave8 old rate sales → {:?}", path);
+    }
+
+    assert!(xml.contains("R16_1=\"1000\""), "XML must have R16_1=1000");
+    assert!(xml.contains("R16_2=\"190\""), "XML must have R16_2=190");
+    assert!(
+        !xml.contains("R9_1="),
+        "XML must NOT have R9_1 (no 21% sales)"
+    );
+
+    let tmp = std::env::temp_dir().join("d300_wave8_old_sales.xml");
+    std::fs::write(&tmp, xml.as_bytes()).expect("write tmp");
+    let xsd_result = efactura_desktop_lib::anaf_decl::validation::validate_with_xsd(xsd_path, &tmp)
+        .expect("xmllint");
+    if !xsd_result.passed {
+        for e in &xsd_result.errors {
+            eprintln!("XSD error: {e}");
+        }
+    }
+    assert!(
+        xsd_result.passed,
+        "Wave8 old-rate sales must pass XSD: {:?}",
+        xsd_result.errors
+    );
+    let _ = std::fs::remove_file(&tmp);
+
+    match run_duk(&xml, "wave8_old_rate_sales") {
+        Ok(passed) => assert!(
+            passed,
+            "Wave8 old-rate sales: DUK must say 'Validare fara erori'"
+        ),
+        Err(e) => eprintln!("SKIP DUK Wave8 old-rate sales: {e}"),
+    }
+}
+
+/// WAVE 8 SCENARIO: 9% S PURCHASE → R30_1/R30_2 (regularizări dedusă).
+///
+/// A purchase at 9% (old rate) base=1000, VAT=90.
+/// Expected: R30_1=1000, R30_2=90; R23 empty; R27_2=90.
+/// Must pass XSD AND DUK ("Validare fara erori").
+#[test]
+fn d300_wave8_old_rate_purchase_to_r30() {
+    let xsd_path = std::path::Path::new("tools/anaf/sample_d300_v12.xml");
+    if !xsd_path.exists() {
+        eprintln!("SKIP: XSD not found");
+        return;
+    }
+    if !efactura_desktop_lib::anaf_decl::validation::xmllint_available() {
+        eprintln!("SKIP: xmllint not available");
+        return;
+    }
+
+    let period = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("date");
+    let ver = resolve(DeclKind::D300, period).expect("version");
+
+    // A 21% sale to give some collected VAT; and a 9% purchase for R30.
+    let report = D300Report {
+        company_cui: "RO12345674".to_string(),
+        period_from: "2026-01-01".to_string(),
+        period_to: "2026-01-31".to_string(),
+        groups: vec![D300Group {
+            vat_rate: "0.21".to_string(),
+            vat_category: "S".to_string(),
+            base: "1000.00".to_string(),
+            vat: "210.00".to_string(),
+            intra_eu_kind: None,
+        }],
+        total_base: "1000.00".to_string(),
+        total_vat: "210.00".to_string(),
+        invoice_count: 1,
+        purchase_groups: vec![D300Group {
+            vat_rate: "0.09".to_string(),
+            vat_category: "S".to_string(),
+            base: "1000.00".to_string(),
+            vat: "90.00".to_string(),
+            intra_eu_kind: None,
+        }],
+        total_deductible_base: "1000.00".to_string(),
+        total_deductible_vat: "90.00".to_string(),
+        purchase_invoice_count: 1,
+        purchase_unparsed_count: 0,
+        net_vat: "120.00".to_string(),
+        // Wave 8: 9% S purchase → R30
+        reg_colectata_baza: "0.00".to_string(),
+        reg_colectata_tva: "0.00".to_string(),
+        reg_dedusa_baza: "1000.00".to_string(),
+        reg_dedusa_tva: "90.00".to_string(),
+    };
+
+    let rows =
+        map_to_rows(&report, &test_submission(), &test_company(), period).expect("map_to_rows");
+
+    // R30 populated for 9% purchases
+    assert_eq!(
+        rows.r30_1,
+        Some(1000),
+        "Wave8 purchase R30_1=1000 (9% base)"
+    );
+    assert_eq!(rows.r30_2, Some(90), "Wave8 purchase R30_2=90 (9% VAT)");
+
+    // R23 must be empty (9% purchase must NOT go into R23 — DUK corridor 10–12%)
+    assert_eq!(
+        rows.r23_1, None,
+        "Wave8: R23_1 must be None (9% must not go in R23)"
+    );
+    assert_eq!(rows.r23_2, None, "Wave8: R23_2 must be None");
+
+    // R27_2 does NOT include R30_2 (DUK rule R99/R100 verifies R27 without R30).
+    // R30_2 flows directly into R32_2 (DUK rule R108: R32_2 = R28_2 + R30_2).
+    assert_eq!(
+        rows.r27_2, None,
+        "Wave8: R27_2=None (R30 does not feed R27)"
+    );
+    assert_eq!(
+        rows.r32_2,
+        Some(90),
+        "Wave8: R32_2=R28_2(0)+R30_2(90)=90 (DUK R108)"
+    );
+    // R17_2 = R9_2 = 210
+    assert_eq!(rows.r17_2, Some(210), "Wave8: R17_2=210");
+    // R34_2 = MAX(R17_2 - R32_2, 0) = MAX(210 - 90, 0) = 120
+    assert_eq!(rows.r34_2, Some(120), "Wave8: R34_2=120 (TVA de plată)");
+
+    let xml = generate_d300_xml(&rows, &ver).expect("generate");
+    eprintln!("Wave8 old-rate purchase XML:\n{xml}");
+
+    if let Ok(dump_dir) = std::env::var("EFACTURA_DUMP_DIR") {
+        let path = std::path::Path::new(&dump_dir).join("d300_wave8_old_rate_purchase.xml");
+        std::fs::write(&path, xml.as_bytes()).expect("write dump");
+        eprintln!("DUMP: wave8 old rate purchase → {:?}", path);
+    }
+
+    assert!(xml.contains("R30_1=\"1000\""), "XML must have R30_1=1000");
+    assert!(xml.contains("R30_2=\"90\""), "XML must have R30_2=90");
+    assert!(
+        !xml.contains("R23_1="),
+        "XML must NOT have R23_1 (9% not in R23)"
+    );
+
+    let tmp = std::env::temp_dir().join("d300_wave8_old_purchase.xml");
+    std::fs::write(&tmp, xml.as_bytes()).expect("write tmp");
+    let xsd_result = efactura_desktop_lib::anaf_decl::validation::validate_with_xsd(xsd_path, &tmp)
+        .expect("xmllint");
+    if !xsd_result.passed {
+        for e in &xsd_result.errors {
+            eprintln!("XSD error: {e}");
+        }
+    }
+    assert!(
+        xsd_result.passed,
+        "Wave8 old-rate purchase must pass XSD: {:?}",
+        xsd_result.errors
+    );
+    let _ = std::fs::remove_file(&tmp);
+
+    match run_duk(&xml, "wave8_old_rate_purchase") {
+        Ok(passed) => assert!(
+            passed,
+            "Wave8 old-rate purchase: DUK must say 'Validare fara erori'"
+        ),
+        Err(e) => eprintln!("SKIP DUK Wave8 old-rate purchase: {e}"),
+    }
+}
+
+/// WAVE 8 SCENARIO: submission override for reg_colectata_tva → R16_2.
+///
+/// Auto-computed = 190; user overrides reg_colectata_tva = Some(180).
+/// Expected: R16_2 = 180 (not 190); DUK clean.
+#[test]
+fn d300_wave8_override() {
+    let xsd_path = std::path::Path::new("tools/anaf/sample_d300_v12.xml");
+    if !xsd_path.exists() {
+        eprintln!("SKIP: XSD not found");
+        return;
+    }
+    if !efactura_desktop_lib::anaf_decl::validation::xmllint_available() {
+        eprintln!("SKIP: xmllint not available");
+        return;
+    }
+
+    let period = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("date");
+    let ver = resolve(DeclKind::D300, period).expect("version");
+
+    let report = D300Report {
+        company_cui: "RO12345674".to_string(),
+        period_from: "2026-01-01".to_string(),
+        period_to: "2026-01-31".to_string(),
+        groups: vec![D300Group {
+            vat_rate: "0.19".to_string(),
+            vat_category: "S".to_string(),
+            base: "1000.00".to_string(),
+            vat: "190.00".to_string(),
+            intra_eu_kind: None,
+        }],
+        total_base: "1000.00".to_string(),
+        total_vat: "190.00".to_string(),
+        invoice_count: 1,
+        purchase_groups: vec![],
+        total_deductible_base: "0.00".to_string(),
+        total_deductible_vat: "0.00".to_string(),
+        purchase_invoice_count: 0,
+        purchase_unparsed_count: 0,
+        net_vat: "190.00".to_string(),
+        reg_colectata_baza: "1000.00".to_string(),
+        reg_colectata_tva: "190.00".to_string(), // auto-computed
+        reg_dedusa_baza: "0.00".to_string(),
+        reg_dedusa_tva: "0.00".to_string(),
+    };
+
+    // User overrides reg_colectata_tva to 180 (e.g. after reviewing rounding).
+    let mut submission = test_submission();
+    submission.reg_colectata_tva = Some(180);
+
+    let rows = map_to_rows(&report, &submission, &test_company(), period).expect("map_to_rows");
+
+    // Override must take effect: R16_2 = 180, not 190
+    assert_eq!(
+        rows.r16_2,
+        Some(180),
+        "Wave8 override: R16_2 must be 180 (not 190)"
+    );
+    // Base was not overridden, so auto-computed value used: R16_1 = 1000
+    assert_eq!(rows.r16_1, Some(1000), "Wave8 override: R16_1=1000 (auto)");
+
+    let xml = generate_d300_xml(&rows, &ver).expect("generate");
+    eprintln!("Wave8 override XML:\n{xml}");
+
+    if let Ok(dump_dir) = std::env::var("EFACTURA_DUMP_DIR") {
+        let path = std::path::Path::new(&dump_dir).join("d300_wave8_override.xml");
+        std::fs::write(&path, xml.as_bytes()).expect("write dump");
+        eprintln!("DUMP: wave8 override → {:?}", path);
+    }
+
+    assert!(
+        xml.contains("R16_2=\"180\""),
+        "XML must have overridden R16_2=180"
+    );
+    assert!(
+        !xml.contains("R16_2=\"190\""),
+        "XML must NOT have auto-computed R16_2=190"
+    );
+
+    let tmp = std::env::temp_dir().join("d300_wave8_override.xml");
+    std::fs::write(&tmp, xml.as_bytes()).expect("write tmp");
+    let xsd_result = efactura_desktop_lib::anaf_decl::validation::validate_with_xsd(xsd_path, &tmp)
+        .expect("xmllint");
+    if !xsd_result.passed {
+        for e in &xsd_result.errors {
+            eprintln!("XSD error: {e}");
+        }
+    }
+    assert!(
+        xsd_result.passed,
+        "Wave8 override must pass XSD: {:?}",
+        xsd_result.errors
+    );
+    let _ = std::fs::remove_file(&tmp);
+
+    match run_duk(&xml, "wave8_override") {
+        Ok(passed) => assert!(passed, "Wave8 override: DUK must say 'Validare fara erori'"),
+        Err(e) => eprintln!("SKIP DUK Wave8 override: {e}"),
     }
 }

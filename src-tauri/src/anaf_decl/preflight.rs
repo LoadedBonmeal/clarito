@@ -236,11 +236,10 @@ pub async fn preflight(
         }
     }
 
-    // ── Check 5b: operations at rates with no D300 v12 row (excluded from XML) ─
-    // Sales at old 19%/5% and purchases at 19%/9%/5% have no valid row in the v12
-    // schema (R69/R70/R71 absent; R23 corridor 10–12% rejects 9% purchases), so the
-    // generator EXCLUDES them. Surface that to the accountant so the exclusion is
-    // never silent — they must regulariza manually.
+    // ── Check 5b: operations at old VAT rates → auto-included in regularizări ──
+    // Sales at old 19%/5% and purchases at 19%/9%/5% (category S) are auto-included
+    // in the regularizări rows R16/R30 by the generator (Wave 8). The accountant must
+    // verify the auto-computed amounts before submitting the declaration.
     if matches!(kind, DeclKind::D300) {
         let bad_sales: i64 = sqlx::query_scalar(
             "SELECT COUNT(DISTINCT i.id) FROM invoice_line_items l \
@@ -273,9 +272,10 @@ pub async fn preflight(
                 "D300_COTE_VECHI",
                 format!(
                     "{bad_sales} vânzări (cote 19%/5%) și {bad_purch} achiziții (cote 19%/9%/5%) \
-                     nu au rând în D300 v12 și au fost excluse din calcul."
+                     au fost incluse automat în regularizări (rd. 16 / rd. 32-33)."
                 ),
-                "Aceste operațiuni necesită regularizare manuală în decont (rd. 16 / rd. 33).",
+                "Verificați sumele din secțiunea «Regularizări cote vechi» înainte de a depune \
+                 decontul. Puteți corecta manual valorile R16/R30 dacă este necesar.",
             ));
         }
     }
