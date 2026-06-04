@@ -1,0 +1,2 @@
+Placeholder so tauri-build's bundle.resources glob always matches on a fresh checkout.
+The real jlink JRE is layered in at bundle time (scripts/jlink-jre.sh / CI). Not the runtime.

@@ -40,6 +40,10 @@ docs/
 # Local-only: vendored ANAF validators (DUKIntegrator jar + XSD schema bundles)
 src-tauri/tools/
 
-# DUK runtime resources (jlink JRE + vendored ANAF validator jars) — produced in CI, not committed
-src-tauri/resources/jre-min/
-src-tauri/resources/duk/
+# DUK runtime resources (jlink JRE + vendored ANAF validator jars) — produced in CI, not committed.
+# A committed .keep is kept so tauri-build's bundle.resources glob always matches ≥1 file on a
+# fresh checkout / clippy / unbundled build; the real JRE + jars are layered in at bundle time.
+src-tauri/resources/jre-min/*
+!src-tauri/resources/jre-min/.keep
+src-tauri/resources/duk/*
+!src-tauri/resources/duk/.keep
