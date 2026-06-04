@@ -390,6 +390,10 @@ fn write_customer_party(
     write_text(writer, "cbc:RegistrationName", &buyer.legal_name)?;
     if let Some(cui) = &buyer.cui {
         write_text(writer, "cbc:CompanyID", cui)?;
+    } else if buyer.is_individual {
+        // B2C: unidentified consumer (persoană fizică) — ANAF convention is the
+        // placeholder buyer CompanyID "0000000000000" (13 zeros).
+        write_text(writer, "cbc:CompanyID", "0000000000000")?;
     }
     writer
         .write_event(Event::End(BytesEnd::new("cac:PartyLegalEntity")))
@@ -794,6 +798,7 @@ mod tests {
             cui: Some("RO87654321".to_string()),
             legal_name: "Client SRL".to_string(),
             vat_payer: true,
+            is_individual: false,
             address: Some("Str. Client nr. 2".to_string()),
             city: Some("Cluj-Napoca".to_string()),
             county: Some("Cluj".to_string()),

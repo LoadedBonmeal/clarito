@@ -23,6 +23,9 @@ pub struct Contact {
     pub cui: Option<String>,
     pub legal_name: String,
     pub vat_payer: bool,
+    /// True for an individual/consumer (persoană fizică) — B2C. No CUI required;
+    /// the UBL generator emits the ANAF placeholder "0000000000000".
+    pub is_individual: bool,
 
     pub address: Option<String>,
     pub city: Option<String>,
@@ -48,6 +51,7 @@ pub struct CreateContactInput {
     pub cui: Option<String>,
     pub legal_name: String,
     pub vat_payer: Option<bool>,
+    pub is_individual: Option<bool>,
 
     pub address: Option<String>,
     pub city: Option<String>,
@@ -67,6 +71,7 @@ pub struct UpdateContactInput {
     pub cui: Option<String>,
     pub legal_name: Option<String>,
     pub vat_payer: Option<bool>,
+    pub is_individual: Option<bool>,
 
     pub address: Option<String>,
     pub city: Option<String>,
@@ -94,7 +99,7 @@ pub async fn list(pool: &SqlitePool, filter: ContactFilter) -> AppResult<Vec<Con
 
     // ?1 company_id (Option<&str>), ?2 query_term (Option<&str>)
     let items = sqlx::query_as::<_, Contact>(
-        "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, \
+        "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, is_individual, \
          address, city, county, country, email, phone, currency, created_at, updated_at \
          FROM contacts \
          WHERE (?1 IS NULL OR company_id = ?1) \
@@ -112,7 +117,7 @@ pub async fn list(pool: &SqlitePool, filter: ContactFilter) -> AppResult<Vec<Con
 /// Returns NotFound if the id doesn't exist OR belongs to a different company.
 pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Contact> {
     sqlx::query_as::<_, Contact>(
-        "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, \
+        "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, is_individual, \
          address, city, county, country, email, phone, currency, created_at, updated_at \
          FROM contacts WHERE id = ?1 AND company_id = ?2",
     )
@@ -195,11 +200,11 @@ pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<C
         "INSERT INTO contacts (
             id, company_id, contact_type, cui, legal_name, vat_payer,
             address, city, county, country, email, phone, currency,
-            created_at, updated_at
+            is_individual, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-            ?14, ?14
+            ?14, ?15, ?15
         )",
     )
     .bind(&id)
@@ -215,6 +220,7 @@ pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<C
     .bind(&input.email)
     .bind(&input.phone)
     .bind(&input.currency)
+    .bind(input.is_individual.unwrap_or(false))
     .bind(now)
     .execute(pool)
     .await?;
@@ -297,8 +303,9 @@ pub async fn update(
             email        = ?10,
             phone        = ?11,
             currency     = ?12,
-            updated_at   = ?13
-        WHERE id = ?1 AND company_id = ?14",
+            is_individual = ?13,
+            updated_at   = ?14
+        WHERE id = ?1 AND company_id = ?15",
     )
     .bind(id)
     .bind(&contact_type)
@@ -312,6 +319,7 @@ pub async fn update(
     .bind(input.email.or(current.email))
     .bind(input.phone.or(current.phone))
     .bind(input.currency.or(current.currency))
+    .bind(input.is_individual.unwrap_or(current.is_individual))
     .bind(now)
     .bind(company_id)
     .execute(pool)
@@ -390,6 +398,7 @@ mod tests {
                 cui TEXT,
                 legal_name TEXT NOT NULL DEFAULT '',
                 vat_payer INTEGER NOT NULL DEFAULT 0,
+                is_individual INTEGER NOT NULL DEFAULT 0,
                 address TEXT,
                 city TEXT,
                 county TEXT,
@@ -544,6 +553,7 @@ mod tests {
             cui: Some("RO11111110".to_string()),
             legal_name: "Primul Client SRL".to_string(),
             vat_payer: Some(false),
+            is_individual: None,
             address: None,
             city: None,
             county: None,
@@ -562,6 +572,7 @@ mod tests {
             cui: Some("RO11111110".to_string()),
             legal_name: "Al Doilea Client SRL".to_string(),
             vat_payer: Some(false),
+            is_individual: None,
             address: None,
             city: None,
             county: None,
@@ -583,6 +594,7 @@ mod tests {
             cui: Some("RO11111110".to_string()),
             legal_name: "Client Comp2 SRL".to_string(),
             vat_payer: Some(false),
+            is_individual: None,
             address: None,
             city: None,
             county: None,
@@ -608,6 +620,7 @@ mod tests {
             cui: Some("RO12345674".to_string()),
             legal_name: "Propria Firma SRL".to_string(),
             vat_payer: Some(true),
+            is_individual: None,
             address: None,
             city: None,
             county: None,
@@ -634,6 +647,7 @@ mod tests {
             cui: Some("RO22222229".to_string()),
             legal_name: "Alt Client SRL".to_string(),
             vat_payer: Some(false),
+            is_individual: None,
             address: None,
             city: None,
             county: None,

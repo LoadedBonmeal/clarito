@@ -794,6 +794,7 @@ mod tests {
             cui: Some("RO87654321".to_string()),
             legal_name: "Client SRL".to_string(),
             vat_payer: true,
+            is_individual: false,
             address: Some("Str. Client nr. 2".to_string()),
             city: Some("Cluj-Napoca".to_string()),
             county: Some("Cluj".to_string()),

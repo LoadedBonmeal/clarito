@@ -354,6 +354,7 @@ function ContactModal({
     cui: contact?.cui ?? "",
     legalName: contact?.legalName ?? "",
     vatPayer: contact?.vatPayer ?? false,
+    isIndividual: contact?.isIndividual ?? false,
     address: contact?.address ?? "",
     city: contact?.city ?? "",
     county: contact?.county ?? "",
@@ -547,6 +548,18 @@ function ContactModal({
             onChange={(e) => setForm((f) => ({ ...f, vatPayer: e.target.checked }))}
           />
           Plătitor de TVA
+        </label>
+
+        <label
+          style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}
+        >
+          <input
+            type="checkbox"
+            className="rf-cbx"
+            checked={form.isIndividual as boolean}
+            onChange={(e) => setForm((f) => ({ ...f, isIndividual: e.target.checked }))}
+          />
+          Persoană fizică (consumator) — B2C, fără CUI
         </label>
 
         {error && (

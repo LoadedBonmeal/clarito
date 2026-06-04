@@ -112,6 +112,8 @@ export interface Contact {
   cui: string | null;
   legalName: string;
   vatPayer: boolean;
+  /** True for an individual/consumer (persoană fizică) — B2C; no CUI required. */
+  isIndividual: boolean;
   address: string | null;
   city: string | null;
   county: string | null;
@@ -129,6 +131,7 @@ export interface CreateContactInput {
   cui?: string;
   legalName: string;
   vatPayer?: boolean;
+  isIndividual?: boolean;
   address?: string;
   city?: string;
   county?: string;

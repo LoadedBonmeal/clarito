@@ -154,6 +154,12 @@ fn rule_br_ro_015_buyer_name(ctx: &RuleContext<'_>) -> Option<String> {
 }
 
 fn rule_br_ro_016_buyer_identifier(ctx: &RuleContext<'_>) -> Option<String> {
+    // B2C: an individual/consumer (persoană fizică) has no CUI — allowed for 2026
+    // B2C e-Factura; the generator emits the ANAF placeholder "0000000000000".
+    // B2B (company) buyers must still provide a CUI (the safety net stays).
+    if ctx.buyer.is_individual {
+        return None;
+    }
     let has_cui = ctx
         .buyer
         .cui
@@ -788,6 +794,7 @@ mod tests {
             cui: Some("RO87654321".into()),
             legal_name: "Client SA".into(),
             vat_payer: true,
+            is_individual: false,
             address: Some("Bd. Unirii 10".into()),
             city: Some("Cluj-Napoca".into()),
             county: Some("Cluj".into()),
