@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Produce a minimal JRE for DUKIntegrator into ./src-tauri/resources/jre-min
+# Usage: JAVA_HOME=<jdk> scripts/jlink-jre.sh
+#
+# Module set derived via:
+#   jdeps --multi-release 17 --ignore-missing-deps --list-deps \
+#         DUKIntegrator.jar lib/*.jar
+# Result: java.base, java.datatransfer (via java.desktop), java.desktop,
+#         java.logging, java.naming, java.sql, java.xml
+# Added: java.management (logging infra), jdk.crypto.ec (ECDSA/TLS for ANAF endpoints)
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OUT="$ROOT/src-tauri/resources/jre-min"
+MODULES="java.base,java.desktop,java.logging,java.xml,java.naming,java.management,java.sql,jdk.crypto.ec"
+rm -rf "$OUT"
+"${JAVA_HOME}/bin/jlink" --add-modules "$MODULES" \
+  --strip-debug --no-man-pages --no-header-files --compress=2 --output "$OUT"
+"$OUT/bin/java" -version

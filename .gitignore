@@ -39,3 +39,7 @@ docs/
 
 # Local-only: vendored ANAF validators (DUKIntegrator jar + XSD schema bundles)
 src-tauri/tools/
+
+# DUK runtime resources (jlink JRE + vendored ANAF validator jars) — produced in CI, not committed
+src-tauri/resources/jre-min/
+src-tauri/resources/duk/
