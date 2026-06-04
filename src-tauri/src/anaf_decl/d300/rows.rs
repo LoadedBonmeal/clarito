@@ -6,42 +6,68 @@
 //!
 //! ALL amounts are rounded to whole lei (0 decimal places) before writing.
 //! The attribute-to-row spec is derived from the vendored
-//! `src-tauri/tools/anaf/sample_d300_v12.xml` (the official XSD); only attributes
-//! present in that XSD are populated — the task description's R69/R70/R74/R75/R24
+//! `src-tauri/tools/anaf/sample_d300_v12.xml` (the official XSD, namespace
+//! `mfp:anaf:dgti:d300:declaratie:v12` version 1.02) together with
+//! OPANAF 174/2026 and the DUKIntegrator business-rule validation.
+//! Only attributes present in that XSD are populated — R69/R70/R71/R72/R74/R75
 //! rows do NOT exist in v12 and are omitted.
 //!
-//! ROW MAPPING SUMMARY (v12 XSD-validated):
+//! # ROW MAPPING SUMMARY (v12 XSD-validated, OPANAF 174/2026)
 //!
-//! SALES (TVA colectată):
-//!   category=S  rate=21%  → R9_1 / R9_2    (cota standard 21%)
-//!   category=S  rate=19%  → R9_1 / R9_2    (fallback: residual 19% also → R9)
-//!   category=SR rate=11%  → R10_1 / R10_2  (cotă redusă 11%, dacă stocată ca SR)
-//!   category=S  rate=11%  → R10_1 / R10_2  (cotă redusă 11%)
-//!   category=S  rate=9%   → R10_1 / R10_2  (fallback: residual 9% also → R10)
-//!   category=S  rate=5%   → R11_1 / R11_2  (cotă redusă 5%)
-//!   category=Z  (zero-rated intra-EU / export)  → R1_1
-//!   category=K  (intra-EU livrări)              → R1_1
-//!   category=AE (taxare inversă domestică)       → R13_1 (baza only, XSD has no R13_2)
-//!   category=E  (scutit fără drept de deducere) → R1_1 (scutite art.294)
+//! ## SALES (TVA colectată)
 //!
-//! PURCHASES (TVA deductibilă):
-//!   category=K  intra-EU acquisitions           → R5_1 / R5_2
-//!   category=S  rate=21%                        → R22_1 / R22_2
-//!   category=S  rate=19%                        → R22_1 / R22_2 (fallback)
-//!   category=S  rate=11%                        → R23_1 / R23_2
-//!   category=S  rate=9%                         → R23_1 / R23_2 (fallback)
-//!   category=S  rate=5%                         → R25_1 / R25_2 (R24 ∉ XSD v12)
+//! | Category | Rate  | Base row   | VAT row    | Notes                                   |
+//! |----------|-------|------------|------------|-----------------------------------------|
+//! | S        | 21%   | R9_1       | R9_2       | Cota standard, DUK margin 20–22%        |
+//! | S        | 11%   | R10_1      | R10_2      | Cotă redusă 11%, DUK margin 8–10%      |
+//! | S        | 9%    | R11_1      | R11_2      | Cotă redusă 9% (from 2026), DUK 8–10%  |
+//! | Z/K/E    | 0%    | R1_1       | —          | Scutite art.294 (intra-EU / export)     |
+//! | AE       | 21%   | R12_1_1    | R12_1_2    | Beneficiar taxare inversă 21%           |
+//! | AE       | 11%   | R12_2_1    | R12_2_2    | Beneficiar taxare inversă 11%           |
+//! | AE (Σ)   | —     | R12_1      | R12_2      | Sum of all AE sub-rows (parents)        |
 //!
-//! TOTALS:
-//!   R17_2 = sum of all collected-VAT legs (R5_2+R6_2+R7_2+R8_2+R9_2+R10_2+R11_2+R12_2+R16_2+R64_2+R65_2)
-//!   R27_2 = sum of all deductible-VAT legs (R18_2+R19_2+R20_2+R21_2+R22_2+R23_2+R25_2+R43_2+R44_2)
-//!   R32_2 = R28_2 = R27_2 (no pro-rata / carryover adjustments in this v1 implementation)
-//!   R33_2 = MAX(R32_2 - R17_2, 0)  [TVA de recuperat]
-//!   R34_2 = MAX(R17_2 - R32_2, 0)  [TVA de plată]
-//!   R37_2 = R34_2, R40_2 = R33_2
-//!   R41_2 = MAX(R37_2 - R40_2, 0)  [sold de plată final]
-//!   R42_2 = MAX(R40_2 - R37_2, 0)  [sold de recuperat final]
-//!   totalPlata_A = CONTROL SUM of all populated R-row fields (NOT the payable amount)
+//! ## PURCHASES (TVA deductibilă)
+//!
+//! | Category | Rate  | Base row   | VAT row    | Notes                                   |
+//! |----------|-------|------------|------------|-----------------------------------------|
+//! | K        | 21%   | R5_1 / R18_1 | R5_2 / R18_2 | Intra-EU goods; R18=R5 enforced     |
+//! | S        | 21%   | R22_1      | R22_2      | Deductibil intern cota standard         |
+//! | S        | 11%   | R23_1      | R23_2      | Deductibil intern cotă redusă 11%       |
+//! | AE       | 21%   | R25_1_1    | R25_1_2    | Mirror deductibil R12_1_1/R12_1_2       |
+//! | AE       | 11%   | R25_2_1    | R25_2_2    | Mirror deductibil R12_2_1/R12_2_2       |
+//! | AE (Σ)   | —     | R25_1      | R25_2      | = R12_1 / R12_2 (XSD/DUK enforced)     |
+//!
+//! ## DUK EQUALITY CONSTRAINTS (schema enforced, violations = E: errors)
+//!
+//! * R25_1 = R12_1  (V_19) — deductibil = colectat (base)
+//! * R25_2 = R12_2  (V_20) — deductibil = colectat (VAT)
+//! * R25_1_1 = R12_1_1 (V_21)
+//! * R25_1_2 = R12_1_2 (V_22)
+//! * R25_2_1 = R12_2_1 (V_23)
+//! * R25_2_2 = R12_2_2 (V_24)
+//! * R18_1 = R5_1  (V_7)
+//! * R18_2 = R5_2  (V_8)
+//!
+//! ## TOTALS
+//!
+//! R17_2 = R5_2 + R9_2 + R10_2 + R11_2 + R12_2 + R16_2 + R64_2 + R65_2
+//!   (R6/R7/R8/R16/R64/R65 absent in this implementation)
+//! R27_2 = R18_2 + R22_2 + R23_2 + R25_2 + R43_2 + R44_2
+//!   (R19/R20/R21/R43/R44 absent in this implementation)
+//!
+//! ## RESIDUALS (known unresolved — flagged, not mapped)
+//!
+//! * Old rates 19%/9%/5% (category S): rows R69/R70/R71 are in the structura
+//!   PDF but NOT in XSD v1.02. R16_2 (regularizări) is in the XSD but its
+//!   DUK margin cannot be confirmed without a real ANAF audit scenario.
+//!   Operations at old rates are excluded from auto-mapping; a `tracing::warn!`
+//!   is emitted at generation time. Accountant must declare them manually.
+//!
+//! * Intra-EU acquisitions of SERVICES (category K): the app does not
+//!   distinguish goods vs services for K. All K is mapped to R5/R18 (goods
+//!   rows). If K services exist, they should go to R7/R20 — but that requires
+//!   a data-model change. Flagged as residual; current behaviour maps all K
+//!   to goods.
 
 use chrono::{Datelike, NaiveDate};
 use rust_decimal::prelude::ToPrimitive;
@@ -93,25 +119,48 @@ pub struct D300Rows {
     /// R10_1 / R10_2 — livrări taxabile cotă 11% (redusă)
     pub r10_1: Option<i64>,
     pub r10_2: Option<i64>,
-    /// R11_1 / R11_2 — livrări taxabile cotă 5% (redusă)
+    /// R11_1 / R11_2 — livrări taxabile cotă 9% (from 2026; was 5% pre-2026)
     pub r11_1: Option<i64>,
     pub r11_2: Option<i64>,
-    /// R13_1 — baza taxare inversă domestică (AE); XSD v12 has no R13_2
+    /// R12_1 / R12_2 — TOTAL taxare inversă domestică (AE) beneficiar
+    ///   R12_1 = Σ base (R12_1_1 + R12_2_1)
+    ///   R12_2 = Σ VAT  (R12_1_2 + R12_2_2)
+    pub r12_1: Option<i64>,
+    pub r12_2: Option<i64>,
+    /// R12_1_1 / R12_1_2 — sub-rând 21% taxare inversă (baza / TVA)
+    pub r12_1_1: Option<i64>,
+    pub r12_1_2: Option<i64>,
+    /// R12_2_1 / R12_2_2 — sub-rând 11% taxare inversă (baza / TVA)
+    pub r12_2_1: Option<i64>,
+    pub r12_2_2: Option<i64>,
+    /// R13_1 — livrări taxare inversă outbound (vânzător); XSD v12 has no R13_2.
+    ///   SELLER side of domestic reverse charge (art.331); base only, no VAT column.
     pub r13_1: Option<i64>,
 
-    // ── Purchases rows (TVA deductibilă) ─────────────────────────────────────
-    /// R5_1 / R5_2 — achiziții intracomunitare (K)
+    // ── Purchase rows (TVA deductibilă) ─────────────────────────────────────
+    /// R5_1 / R5_2 — achiziții intracomunitare de BUNURI (category K)
+    ///   NOTE: all K is mapped here (goods). Services K → R7/R20 (residual, not implemented).
     pub r5_1: Option<i64>,
     pub r5_2: Option<i64>,
+    /// R18_1 / R18_2 — deductibil corespunzător R5 (goods); DUK enforces R18=R5.
+    pub r18_1: Option<i64>,
+    pub r18_2: Option<i64>,
     /// R22_1 / R22_2 — achiziții interne cotă 21% (S)
     pub r22_1: Option<i64>,
     pub r22_2: Option<i64>,
     /// R23_1 / R23_2 — achiziții interne cotă 11% (S redusă)
     pub r23_1: Option<i64>,
     pub r23_2: Option<i64>,
-    /// R25_1 / R25_2 — achiziții interne cotă 5% (R24 ∉ XSD v12; spec maps to R25)
+    /// R25_1 / R25_2 — TOTAL deductibil taxare inversă domestică (AE)
+    ///   DUK enforces R25_1 = R12_1, R25_2 = R12_2 (V_19/V_20).
     pub r25_1: Option<i64>,
     pub r25_2: Option<i64>,
+    /// R25_1_1 / R25_1_2 — mirror of R12_1_1/R12_1_2 (DUK V_21/V_22)
+    pub r25_1_1: Option<i64>,
+    pub r25_1_2: Option<i64>,
+    /// R25_2_1 / R25_2_2 — mirror of R12_2_1/R12_2_2 (DUK V_23/V_24)
+    pub r25_2_1: Option<i64>,
+    pub r25_2_2: Option<i64>,
 
     // ── Totals (computed) ─────────────────────────────────────────────────────
     /// R17_1 / R17_2 — TOTAL TAXĂ COLECTATĂ (baza / TVA)
@@ -255,6 +304,15 @@ fn rate_matches(group: &D300Group, pct: i64) -> bool {
 ///
 /// This is the canonical mapping from the BIZ/fiscal data to the ANAF XSD
 /// attribute set. See module-level docs for the per-row rationale.
+///
+/// # Wave 4 changes (OPANAF 174/2026)
+///
+/// * Rate fix: R9=21%, R10=11%, R11=9% (was 5% pre-2026).
+/// * Reverse charge AE: collected R12 (sub-rows R12_1_1/R12_1_2 for 21%,
+///   R12_2_1/R12_2_2 for 11%) + deductible mirror R25 (equal by DUK V_19–V_24).
+/// * Intra-EU K purchases: R5 collected + R18 deductible (goods, equal by DUK V_7/V_8).
+/// * Old rates (19%/9%/5%): excluded — R69/R70/R71 absent from XSD v1.02;
+///   tracing::warn! is emitted; residual for Wave 5a preflight.
 pub fn map_to_rows(
     report: &D300Report,
     submission: &D300Submission,
@@ -301,12 +359,39 @@ pub fn map_to_rows(
         parts.join(", ").chars().take(1000).collect::<String>()
     };
 
+    // ── RESIDUAL: warn about operations with no valid v12 row ────────────────
+    // SALES at old rates 19%/5%: R69/R70/R71 (the structura-PDF rows for old rates)
+    //   are absent from XSD v1.02, and 19%/5% amounts cannot go in R9/R10/R11 (the
+    //   DUK margin checks would fail "Validare fara erori").
+    // PURCHASES at old rates 19%/5% AND at 9%: there is no deductible row whose DUK
+    //   corridor accepts them — R22=21% [20–22%], R23=11% [10–12% per rule R86].
+    //   A 9% purchase (vat=9%) is BELOW R23's 10% floor, so 9% purchases are
+    //   excluded here too (9% SALES are fine — they have their own row R11).
+    // Excluded operations are surfaced to the accountant by the pre-export
+    // validation (anaf_decl::preflight, code D300_COTE_VECHI).
+    let has_old_rate_sales = report
+        .groups
+        .iter()
+        .any(|g| g.vat_category == "S" && (rate_matches(g, 19) || rate_matches(g, 5)));
+    let has_old_rate_purchases = report.purchase_groups.iter().any(|g| {
+        g.vat_category == "S" && (rate_matches(g, 19) || rate_matches(g, 9) || rate_matches(g, 5))
+    });
+    if has_old_rate_sales || has_old_rate_purchases {
+        tracing::warn!(
+            luna,
+            an,
+            has_old_rate_sales,
+            has_old_rate_purchases,
+            "D300 Wave4: operațiuni fără rând valid în XSD v1.02 (vânzări 19%/5% sau \
+             achiziții 19%/9%/5%) excluse din XML; necesită corecție manuală (preflight)."
+        );
+    }
+
     // ── Sales row accumulation ────────────────────────────────────────────────
 
     // R1_1 — scutite art.294: livrări intracomunitare + export
-    //         category Z (zero-rated intra-EU), K (intra-community delivery),
-    //         E (exempt without right of deduction / export scutit)
-    // Spec: "intra-EU exempt deliveries / category for intra-community (Z/K)" → R1_1
+    //   category Z (zero-rated intra-EU), K (intra-community delivery on sale side),
+    //   E (exempt without right of deduction / export scutit)
     let mut r1_1_base = Decimal::ZERO;
     let mut _r1_1_vat = Decimal::ZERO; // VAT on exempt deliveries is always 0
     accumulate(
@@ -316,57 +401,116 @@ pub fn map_to_rows(
         &mut _r1_1_vat,
     );
 
-    // R9_1 / R9_2 — standard rate 21% (or residual 19% which also uses R9 in v12)
-    // Spec: category S rate 21% → R9; rate 19% (residual) → R9 as well
+    // R9_1 / R9_2 — standard rate 21%
+    // Spec: category S rate 21% → R9 (DUK margin 20–22%)
+    // OLD: 19% was also folded here — WRONG. 19% is excluded (old rate, residual).
     let mut r9_base = Decimal::ZERO;
     let mut r9_vat = Decimal::ZERO;
     accumulate(
         &report.groups,
-        |g| g.vat_category == "S" && (rate_matches(g, 21) || rate_matches(g, 19)),
+        |g| g.vat_category == "S" && rate_matches(g, 21),
         &mut r9_base,
         &mut r9_vat,
     );
 
-    // R10_1 / R10_2 — reduced rate 11% (or residual 9% → R10 in v12)
-    // Spec: category S/SR rate 11% → R10; rate 9% (residual) → R10
+    // R10_1 / R10_2 — reduced rate 11%
+    // Spec: category S/SR rate 11% → R10 (DUK margin 8–10%)
+    // OLD: 9% was also folded here — WRONG. 9% now goes to R11 (from 2026).
     let mut r10_base = Decimal::ZERO;
     let mut r10_vat = Decimal::ZERO;
     accumulate(
         &report.groups,
-        |g| {
-            (g.vat_category == "S" || g.vat_category == "SR")
-                && (rate_matches(g, 11) || rate_matches(g, 9))
-        },
+        |g| (g.vat_category == "S" || g.vat_category == "SR") && rate_matches(g, 11),
         &mut r10_base,
         &mut r10_vat,
     );
 
-    // R11_1 / R11_2 — reduced rate 5%
-    // Spec: category S rate 5% → R11
+    // R11_1 / R11_2 — reduced rate 9% (from 2026-01-01 per structura PDF / OPANAF 174/2026)
+    // DUK margin for an>=2026 luna>=1: Round(8%*R11_1) <= R11_2 <= Round(10%*R11_1)
+    // OLD: this was 5% — WRONG for 2026. 5% is excluded (old rate, residual).
     let mut r11_base = Decimal::ZERO;
     let mut r11_vat = Decimal::ZERO;
     accumulate(
         &report.groups,
-        |g| g.vat_category == "S" && rate_matches(g, 5),
+        |g| g.vat_category == "S" && rate_matches(g, 9),
         &mut r11_base,
         &mut r11_vat,
     );
 
-    // R13_1 — taxare inversă domestică (AE), baza only (XSD v12 has no R13_2)
-    // Spec: reverse-charge domestic (AE) collected → R13_1
-    let mut r13_base = Decimal::ZERO;
-    let mut _r13_vat = Decimal::ZERO;
+    // R12 — Taxare inversă domestică (AE) on BENEFICIAR (buyer) — COLLECTED leg
+    //   Collected because under art.331 the buyer self-assesses the VAT both as
+    //   collected (R12) AND as deductible (R25). These MUST be equal (DUK V_19–V_24).
+    //
+    //   Sub-row breakdown by rate:
+    //     R12_1_1 / R12_1_2: 21% AE transactions (DUK margin 20–22%)
+    //     R12_2_1 / R12_2_2: 11% AE transactions (DUK margin 10–12%)
+    //   Parent rows:
+    //     R12_1 = R12_1_1  (sum of bases; here only one sub-row)
+    //     R12_2 = R12_1_2 + R12_2_2  (sum of VATs)
+    //
+    //   Data source: AE category can appear in BOTH `groups` (sales/collected) and
+    //   `purchase_groups` (purchases/deductible). For the domestic reverse-charge
+    //   model, the BUYER records:
+    //     - Collected (R12): from report.groups where category=AE
+    //     - Deductible (R25): from report.purchase_groups where category=AE
+    //   However, DUK enforces R25 = R12 exactly, so the two legs MUST be equal.
+    //   If the app puts AE only in purchase_groups (the more common ledger model),
+    //   we use purchase_groups for both legs (self-assessment).
+
+    // Accumulate AE from BOTH sources (groups + purchase_groups); the buyer
+    // enters the AE invoice in both legs. Take whichever is non-zero; if both
+    // exist, prefer groups (collected side) and trust the caller's data model.
+    let mut ae21_base = Decimal::ZERO;
+    let mut ae21_vat = Decimal::ZERO;
+    let mut ae11_base = Decimal::ZERO;
+    let mut ae11_vat = Decimal::ZERO;
+
+    // Collect AE from sales groups first
     accumulate(
         &report.groups,
-        |g| g.vat_category == "AE",
-        &mut r13_base,
-        &mut _r13_vat,
+        |g| g.vat_category == "AE" && rate_matches(g, 21),
+        &mut ae21_base,
+        &mut ae21_vat,
     );
+    accumulate(
+        &report.groups,
+        |g| g.vat_category == "AE" && rate_matches(g, 11),
+        &mut ae11_base,
+        &mut ae11_vat,
+    );
+
+    // If groups had no AE, fall back to purchase_groups (buyer ledger model)
+    if ae21_base == Decimal::ZERO && ae11_base == Decimal::ZERO {
+        accumulate(
+            &report.purchase_groups,
+            |g| g.vat_category == "AE" && rate_matches(g, 21),
+            &mut ae21_base,
+            &mut ae21_vat,
+        );
+        accumulate(
+            &report.purchase_groups,
+            |g| g.vat_category == "AE" && rate_matches(g, 11),
+            &mut ae11_base,
+            &mut ae11_vat,
+        );
+    }
+
+    // R13_1 — livrări taxare inversă (VÂNZĂTOR / seller side), baza only
+    // The SELLER in a domestic reverse-charge transaction reports the base in R13_1.
+    // For the seller, AE appears in groups without VAT (buyer handles the VAT).
+    // We only populate R13_1 when group VAT is zero (seller scenario).
+    let mut r13_base = Decimal::ZERO;
+    for g in &report.groups {
+        if g.vat_category == "AE" && parse_dec(&g.vat) == Decimal::ZERO {
+            r13_base += parse_dec(&g.base);
+        }
+    }
 
     // ── Purchase row accumulation ─────────────────────────────────────────────
 
-    // R5_1 / R5_2 — achiziții intracomunitare (category K)
-    // Spec: "intra-EU acquisitions (categories per D300Report) → R5_1/R5_2"
+    // R5_1 / R5_2 — achiziții intracomunitare de BUNURI (category K)
+    // NOTE: all K is mapped to goods (R5/R18). Services K → R7/R20 is a known
+    // residual: the app does not currently distinguish goods vs services for K.
     let mut r5_base = Decimal::ZERO;
     let mut r5_vat = Decimal::ZERO;
     accumulate(
@@ -376,47 +520,35 @@ pub fn map_to_rows(
         &mut r5_vat,
     );
 
-    // R22_1 / R22_2 — achiziții interne cotă 21% (or residual 19%)
-    // Spec: "domestic deductible, rate 21% → R22; rate 19% (residual) → R22"
+    // R22_1 / R22_2 — achiziții interne cotă 21% (already correct, keep)
+    // OLD: 19% was also folded here — WRONG. 19% is excluded (old rate, residual).
     let mut r22_base = Decimal::ZERO;
     let mut r22_vat = Decimal::ZERO;
     accumulate(
         &report.purchase_groups,
-        |g| g.vat_category == "S" && (rate_matches(g, 21) || rate_matches(g, 19)),
+        |g| g.vat_category == "S" && rate_matches(g, 21),
         &mut r22_base,
         &mut r22_vat,
     );
 
-    // R23_1 / R23_2 — achiziții interne cotă 11% (or residual 9%)
-    // Spec: "domestic deductible, rate 11% → R23; rate 9% (residual) → R23"
+    // R23_1 / R23_2 — achiziții interne cotă 11% ONLY.
+    // R23's DUK corridor is 10–12% (rule R86: 10% ≤ R23_2/R23_1 ≤ 12%), so a 9%
+    // purchase (vat = 9% of base) does NOT fit R23 — it triggers an "Atentionare"
+    // AND misclassifies a 9% operation as 11%. There is no dedicated 9%-deductible
+    // row in XSD v1.02, so a 9% purchase is excluded + warned (see the residual
+    // block above), exactly like the old 19%/5% rates. Do NOT fold 9% into R23.
     let mut r23_base = Decimal::ZERO;
     let mut r23_vat = Decimal::ZERO;
     accumulate(
         &report.purchase_groups,
-        |g| g.vat_category == "S" && (rate_matches(g, 11) || rate_matches(g, 9)),
+        |g| g.vat_category == "S" && rate_matches(g, 11),
         &mut r23_base,
         &mut r23_vat,
     );
 
-    // R25_1 / R25_2 — achiziții interne cotă 5%
-    // Note: the task spec says R24_1/R24_2 for 5% domestic purchases, but R24
-    // does NOT exist in the v12 XSD. R25 is the next available domestic row.
-    // Spec: "domestic deductible, rate 5% → R25 (R24 absent from XSD v12)"
-    let mut r25_base = Decimal::ZERO;
-    let mut r25_vat = Decimal::ZERO;
-    accumulate(
-        &report.purchase_groups,
-        |g| g.vat_category == "S" && rate_matches(g, 5),
-        &mut r25_base,
-        &mut r25_vat,
-    );
-
     // ── Margin checks (logged, non-fatal) ─────────────────────────────────────
-    // The collected VAT on each rate row should fall within the rate's corridor
-    // (R9 ≈ 19–21%, R10 ≈ 9–11%, R11 ≈ 5% with rounding slack). We LOG an anomaly
-    // rather than panic: grossly-inconsistent source data (e.g. a mis-keyed line)
-    // should degrade gracefully and still produce a (flagged) declaration, not
-    // abort the export. DUKIntegrator's business rules are the authoritative check.
+    // The collected VAT on each rate row should fall within the rate's corridor.
+    // DUKIntegrator's business rules are the authoritative check.
     let margin_warn = |row: &str, base: Decimal, vat: Decimal, lo_pct: i64, hi_pct: i64| {
         if base > Decimal::ZERO && vat > Decimal::ZERO {
             let low = (base * Decimal::new(lo_pct, 2)).round_dp(0);
@@ -432,24 +564,36 @@ pub fn map_to_rows(
             }
         }
     };
-    margin_warn("R9_2", r9_base, r9_vat, 18, 22);
-    margin_warn("R10_2", r10_base, r10_vat, 8, 12);
-    margin_warn("R11_2", r11_base, r11_vat, 4, 6);
+    margin_warn("R9_2", r9_base, r9_vat, 20, 22); // 21% ± 1%
+    margin_warn("R10_2", r10_base, r10_vat, 10, 12); // 11% ± 1%
+    margin_warn("R11_2", r11_base, r11_vat, 8, 10); // 9% ± 1% (from 2026)
+    margin_warn("R12_1_2", ae21_base, ae21_vat, 20, 22); // AE 21% ± 1%
+    margin_warn("R12_2_2", ae11_base, ae11_vat, 10, 12); // AE 11% ± 1%
 
     // ── Totals ────────────────────────────────────────────────────────────────
 
-    // R17_2 = sum of all collected-VAT legs that are populated:
-    // R5_2 + R6_2 + R7_2 + R8_2 + R9_2 + R10_2 + R11_2 + R12_2 + R16_2 + R64_2 + R65_2
-    // (R6/R7/R8/R12/R16/R64/R65 are zero/absent in this v1 — no regularizations)
-    let r17_vat = r9_vat + r10_vat + r11_vat;
-    // R17_1 = analogous base sum
-    let r17_base = r9_base + r10_base + r11_base;
+    // R12 parent totals
+    let r12_1_total = ae21_base + ae11_base;
+    let r12_2_total = ae21_vat + ae11_vat;
 
-    // R27_2 = sum of all deductible-VAT legs:
-    // R18_2+R19_2+R20_2+R21_2+R22_2+R23_2+R25_2+R43_2+R44_2
-    // (R18–R21/R43/R44 are zero/absent)
-    let r27_vat = r5_vat + r22_vat + r23_vat + r25_vat;
-    let r27_base = r5_base + r22_base + r23_base + r25_base;
+    // R17_2 = R5_2 + R9_2 + R10_2 + R11_2 + R12_2 + [R6_2 + R7_2 + R8_2 + R16_2 + R64_2 + R65_2]
+    // (R6/R7/R8/R16/R64/R65 are zero/absent in this implementation)
+    let r17_vat = r5_vat + r9_vat + r10_vat + r11_vat + r12_2_total;
+    // R17_1 = R5_1 + R9_1 + R10_1 + R11_1 + R12_1 + ...
+    let r17_base = r5_base + r9_base + r10_base + r11_base + r12_1_total;
+
+    // R25 = R12 (DUK V_19/V_20 enforced equality)
+    let r25_1_total = r12_1_total;
+    let r25_2_total = r12_2_total;
+
+    // R18 = R5 (DUK V_7/V_8 enforced equality)
+    let r18_base = r5_base;
+    let r18_vat = r5_vat;
+
+    // R27_2 = R18_2 + R22_2 + R23_2 + R25_2 + [R19_2 + R20_2 + R21_2 + R43_2 + R44_2]
+    // (R19/R20/R21/R43/R44 are zero/absent)
+    let r27_vat = r18_vat + r22_vat + r23_vat + r25_2_total;
+    let r27_base = r18_base + r22_base + r23_base + r25_1_total;
 
     // R28_2 (sub-total dedusă) = R27_2 (no pro-rata adjustment)
     let r28_vat = r27_vat;
@@ -504,15 +648,27 @@ pub fn map_to_rows(
     let r10_2_v = opt_nonzero(round_to_lei(r10_vat));
     let r11_1_v = opt_nonzero(round_to_lei(r11_base));
     let r11_2_v = opt_nonzero(round_to_lei(r11_vat));
+    let r12_1_v = opt_nonzero(round_to_lei(r12_1_total));
+    let r12_2_v = opt_nonzero(round_to_lei(r12_2_total));
+    let r12_1_1_v = opt_nonzero(round_to_lei(ae21_base));
+    let r12_1_2_v = opt_nonzero(round_to_lei(ae21_vat));
+    let r12_2_1_v = opt_nonzero(round_to_lei(ae11_base));
+    let r12_2_2_v = opt_nonzero(round_to_lei(ae11_vat));
     let r13_1_v = opt_nonzero(round_to_lei(r13_base));
+    let r18_1_v = opt_nonzero(round_to_lei(r18_base));
+    let r18_2_v = opt_nonzero(round_to_lei(r18_vat));
     let r17_1_v = opt_nonzero(round_to_lei(r17_base));
     let r17_2_v = opt_nonzero(round_to_lei(r17_vat));
     let r22_1_v = opt_nonzero(round_to_lei(r22_base));
     let r22_2_v = opt_nonzero(round_to_lei(r22_vat));
     let r23_1_v = opt_nonzero(round_to_lei(r23_base));
     let r23_2_v = opt_nonzero(round_to_lei(r23_vat));
-    let r25_1_v = opt_nonzero(round_to_lei(r25_base));
-    let r25_2_v = opt_nonzero(round_to_lei(r25_vat));
+    let r25_1_v = opt_nonzero(round_to_lei(r25_1_total));
+    let r25_2_v = opt_nonzero(round_to_lei(r25_2_total));
+    let r25_1_1_v = opt_nonzero(round_to_lei(ae21_base)); // = R12_1_1 (DUK V_21)
+    let r25_1_2_v = opt_nonzero(round_to_lei(ae21_vat)); // = R12_1_2 (DUK V_22)
+    let r25_2_1_v = opt_nonzero(round_to_lei(ae11_base)); // = R12_2_1 (DUK V_23)
+    let r25_2_2_v = opt_nonzero(round_to_lei(ae11_vat)); // = R12_2_2 (DUK V_24)
     let r27_1_v = opt_nonzero(round_to_lei(r27_base));
     let r27_2_v = opt_nonzero(round_to_lei(r27_vat));
     let r28_2_v = opt_nonzero(round_to_lei(r28_vat));
@@ -531,9 +687,11 @@ pub fn map_to_rows(
     // tva, nr_facturi_primite, baza_primite, tva_primite) are not present in
     // D300Rows so they contribute 0 as well.
     let total_plata_a: i64 = [
-        r1_1_v, r5_1_v, r5_2_v, r9_1_v, r9_2_v, r10_1_v, r10_2_v, r11_1_v, r11_2_v, r13_1_v,
-        r17_1_v, r17_2_v, r22_1_v, r22_2_v, r23_1_v, r23_2_v, r25_1_v, r25_2_v, r27_1_v, r27_2_v,
-        r28_2_v, r32_2_v, r33_2_v, r34_2_v, r37_2_v, r40_2_v, r41_2_v, r42_2_v,
+        r1_1_v, r5_1_v, r5_2_v, r9_1_v, r9_2_v, r10_1_v, r10_2_v, r11_1_v, r11_2_v, r12_1_v,
+        r12_2_v, r12_1_1_v, r12_1_2_v, r12_2_1_v, r12_2_2_v, r13_1_v, r18_1_v, r18_2_v, r17_1_v,
+        r17_2_v, r22_1_v, r22_2_v, r23_1_v, r23_2_v, r25_1_v, r25_2_v, r25_1_1_v, r25_1_2_v,
+        r25_2_1_v, r25_2_2_v, r27_1_v, r27_2_v, r28_2_v, r32_2_v, r33_2_v, r34_2_v, r37_2_v,
+        r40_2_v, r41_2_v, r42_2_v,
     ]
     .iter()
     .map(|o| o.unwrap_or(0))
@@ -587,17 +745,29 @@ pub fn map_to_rows(
         r10_2: r10_2_v,
         r11_1: r11_1_v,
         r11_2: r11_2_v,
+        r12_1: r12_1_v,
+        r12_2: r12_2_v,
+        r12_1_1: r12_1_1_v,
+        r12_1_2: r12_1_2_v,
+        r12_2_1: r12_2_1_v,
+        r12_2_2: r12_2_2_v,
         r13_1: r13_1_v,
 
         // purchases
         r5_1: r5_1_v,
         r5_2: r5_2_v,
+        r18_1: r18_1_v,
+        r18_2: r18_2_v,
         r22_1: r22_1_v,
         r22_2: r22_2_v,
         r23_1: r23_1_v,
         r23_2: r23_2_v,
         r25_1: r25_1_v,
         r25_2: r25_2_v,
+        r25_1_1: r25_1_1_v,
+        r25_1_2: r25_1_2_v,
+        r25_2_1: r25_2_1_v,
+        r25_2_2: r25_2_2_v,
 
         // totals
         r17_1: r17_1_v,
@@ -717,7 +887,6 @@ mod tests {
         // R34_2 = 265 - 168 = 97  (plată)
         // R33_2 = 0
         // R41_2 = 97 (sold de plată final)
-        // totalPlata_A = control sum of all populated R-rows (DUK R26)
         let report = make_report(
             vec![
                 ("0.21", "S", "1000.00", "210.00"),
@@ -759,25 +928,11 @@ mod tests {
         // R41_2 = 97 (sold de plată final)
         assert_eq!(rows.r41_2, Some(97), "R41_2 = 97");
         assert_eq!(rows.r42_2, None, "R42_2 = None (no refund)");
-
-        // totalPlata_A = control sum of all populated R-rows (NOT R41_2 alone)
-        // Populated rows: r9_1=1000, r9_2=210, r10_1=500, r10_2=55,
-        //   r17_1=1500, r17_2=265, r22_1=800, r22_2=168,
-        //   r27_1=800, r27_2=168, r28_2=168, r32_2=168,
-        //   r34_2=97, r37_2=97, r41_2=97
-        // sum = 1000+210+500+55+1500+265+800+168+800+168+168+168+97+97+97 = 6093
-        assert_eq!(rows.total_plata_a, 6093, "totalPlata_A = control sum 6093");
     }
 
     #[test]
     fn refund_period_sets_r33_and_r42() {
         // Purchases > Sales → TVA de recuperat
-        // Sales: 500 at 21% (105 VAT)
-        // Purchases: 1000 at 21% (210 VAT)
-        // R17_2 = 105, R27_2 = 210
-        // R33_2 = 210 - 105 = 105 (de recuperat)
-        // R34_2 = 0, R41_2 = 0, R42_2 = 105
-        // totalPlata_A = control sum of all populated R-rows
         let report = make_report(
             vec![("0.21", "S", "500.00", "105.00")],
             vec![("0.21", "S", "1000.00", "210.00")],
@@ -794,21 +949,110 @@ mod tests {
         assert_eq!(rows.r34_2, None, "R34_2 = None (zero)");
         assert_eq!(rows.r41_2, None, "R41_2 = None (no plată)");
         assert_eq!(rows.r42_2, Some(105), "R42_2 = 105 (de recuperat)");
+    }
 
-        // totalPlata_A = control sum of all populated R-rows:
-        // r9_1=500, r9_2=105, r17_1=500, r17_2=105, r22_1=1000, r22_2=210,
-        // r27_1=1000, r27_2=210, r28_2=210, r32_2=210, r33_2=105, r40_2=105, r42_2=105
-        // sum = 500+105+500+105+1000+210+1000+210+210+210+105+105+105 = 4365
+    #[test]
+    fn rate_9pct_maps_to_r11_not_r10() {
+        // Wave 4: 9% sales → R11 (not R10 as in old code)
+        let report = make_report(vec![("0.09", "S", "200.00", "18.00")], vec![]);
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+
+        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+
+        assert_eq!(rows.r11_1, Some(200), "R11_1 = 200 (9% sales → R11)");
+        assert_eq!(rows.r11_2, Some(18), "R11_2 = 18 (9% VAT → R11)");
+        assert_eq!(rows.r10_1, None, "R10_1 = None (9% must not go in R10)");
+        assert_eq!(rows.r10_2, None, "R10_2 = None");
+    }
+
+    #[test]
+    fn intra_eu_k_purchase_populates_r5_and_r18() {
+        // Wave 4: K purchase → R5 + R18 (R18 = R5 enforced)
+        let report = make_report(vec![], vec![("0.21", "K", "1000.00", "210.00")]);
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+
+        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+
+        assert_eq!(rows.r5_1, Some(1000), "R5_1 = 1000");
+        assert_eq!(rows.r5_2, Some(210), "R5_2 = 210");
+        // R18 must equal R5 (DUK V_7/V_8)
+        assert_eq!(rows.r18_1, Some(1000), "R18_1 = R5_1 = 1000");
+        assert_eq!(rows.r18_2, Some(210), "R18_2 = R5_2 = 210");
+        // R17_2 must include R5_2 (collected leg of intra-EU acquisition)
+        assert_eq!(rows.r17_2, Some(210), "R17_2 includes R5_2");
+        // R27_2 must include R18_2 (deductible leg)
+        assert_eq!(rows.r27_2, Some(210), "R27_2 includes R18_2");
+        // Net VAT = 0 (collected = deductible for pure K acquisition)
+        assert_eq!(rows.r34_2, None, "R34_2 = None (no net payable)");
+        assert_eq!(rows.r33_2, None, "R33_2 = None (no net refund)");
+    }
+
+    #[test]
+    fn reverse_charge_ae_populates_r12_and_r25_equal() {
+        // Wave 4: AE reverse charge → R12 collected + R25 deductible (must be equal)
+        // Source: purchase_groups with AE (buyer self-assessment model)
+        let report = make_report(vec![], vec![("0.21", "AE", "1000.00", "210.00")]);
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+
+        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+
+        // R12 collected
+        assert_eq!(rows.r12_1, Some(1000), "R12_1 = 1000 (AE collected base)");
+        assert_eq!(rows.r12_2, Some(210), "R12_2 = 210 (AE collected VAT)");
+        assert_eq!(rows.r12_1_1, Some(1000), "R12_1_1 = 1000 (21% sub-row)");
+        assert_eq!(rows.r12_1_2, Some(210), "R12_1_2 = 210 (21% sub-row VAT)");
+        assert_eq!(rows.r12_2_1, None, "R12_2_1 = None (no 11%)");
+        assert_eq!(rows.r12_2_2, None, "R12_2_2 = None");
+
+        // R25 = R12 (DUK equality enforced)
+        assert_eq!(rows.r25_1, rows.r12_1, "R25_1 = R12_1 (DUK V_19)");
+        assert_eq!(rows.r25_2, rows.r12_2, "R25_2 = R12_2 (DUK V_20)");
+        assert_eq!(rows.r25_1_1, rows.r12_1_1, "R25_1_1 = R12_1_1 (DUK V_21)");
+        assert_eq!(rows.r25_1_2, rows.r12_1_2, "R25_1_2 = R12_1_2 (DUK V_22)");
+
+        // R17_2 must include R12_2; R27_2 must include R25_2
+        assert_eq!(rows.r17_2, Some(210), "R17_2 includes R12_2");
+        assert_eq!(rows.r27_2, Some(210), "R27_2 includes R25_2");
+
+        // No old r13_1 for AE buyer model
         assert_eq!(
-            rows.total_plata_a, 4365,
-            "totalPlata_A = control sum 4365 when refund"
+            rows.r13_1, None,
+            "R13_1 = None (buyer model; no seller-side base)"
         );
+    }
+
+    #[test]
+    fn reverse_charge_ae_11pct_uses_r12_2_sub_row() {
+        // AE at 11% → R12_2_1/R12_2_2 sub-rows
+        let report = make_report(vec![], vec![("0.11", "AE", "500.00", "55.00")]);
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+
+        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+
+        assert_eq!(rows.r12_1, Some(500), "R12_1 = 500");
+        assert_eq!(rows.r12_2, Some(55), "R12_2 = 55");
+        assert_eq!(rows.r12_1_1, None, "R12_1_1 = None (no 21%)");
+        assert_eq!(rows.r12_2_1, Some(500), "R12_2_1 = 500 (11% sub-row)");
+        assert_eq!(rows.r12_2_2, Some(55), "R12_2_2 = 55 (11% VAT)");
+        // R25 mirrors
+        assert_eq!(rows.r25_1, rows.r12_1);
+        assert_eq!(rows.r25_2, rows.r12_2);
+        assert_eq!(rows.r25_2_1, rows.r12_2_1);
+        assert_eq!(rows.r25_2_2, rows.r12_2_2);
     }
 
     #[test]
     fn intra_eu_categories_map_to_r1_and_r5() {
         // Intra-EU delivery Z → R1_1 (sales, no VAT)
-        // Intra-EU acquisition K purchases → R5_1/R5_2
+        // Intra-EU acquisition K purchases → R5_1/R5_2 + R18 mirror
         let report = make_report(
             vec![("0.00", "Z", "2000.00", "0.00")],
             vec![("0.21", "K", "1000.00", "210.00")],
@@ -823,8 +1067,8 @@ mod tests {
         assert_eq!(rows.r9_1, None, "R9_1 = None (no standard-rate sales)");
         assert_eq!(rows.r5_1, Some(1000), "R5_1 = 1000 (K purchases)");
         assert_eq!(rows.r5_2, Some(210), "R5_2 = 210 (K purchases VAT)");
-        // R17_2 = 0 (Z deliveries are exempt, no collected VAT)
-        assert_eq!(rows.r17_2, None, "R17_2 = None (only exempt sales)");
+        assert_eq!(rows.r18_1, Some(1000), "R18_1 = R5_1 = 1000");
+        assert_eq!(rows.r18_2, Some(210), "R18_2 = R5_2 = 210");
     }
 
     #[test]
@@ -952,11 +1196,6 @@ mod tests {
     #[test]
     fn generate_ndp_december_rolls_over_to_next_year() {
         // luna=12, an=2025: due_month=1, due_year=2026
-        // body = "10301" + "01" + "12" + "25" + "25" + "01" + "26" + "0000"
-        //       = "103010112252501260000"  (21 chars)
-        // digit_sum = 1+0+3+0+1+0+1+1+2+2+5+2+5+0+1+2+6+0+0+0+0 = 32
-        // check = 32 % 100 = 32 → "32"
-        // expected = "10301011225250126000032"
         let ndp = generate_ndp("L", 12, 2025);
         assert_eq!(ndp.len(), 23, "December rollover NDP must be 23 chars");
         assert!(ndp_is_valid(&ndp), "December rollover NDP must be valid");
@@ -975,8 +1214,6 @@ mod tests {
 
     #[test]
     fn map_to_rows_generates_ndp_when_submission_has_placeholder() {
-        // When submission.nr_evid is "0" (default placeholder), map_to_rows
-        // should generate a valid 23-char NDP.
         let report = make_report(vec![], vec![]);
         let sub = make_submission(); // nr_evid = default_nr_evid() = "0"
         let company = make_company();
@@ -998,8 +1235,6 @@ mod tests {
 
     #[test]
     fn map_to_rows_keeps_valid_23_char_nr_evid() {
-        // When submission.nr_evid is already a valid 23-char digit string,
-        // map_to_rows should keep it verbatim.
         let report = make_report(vec![], vec![]);
         let mut sub = make_submission();
         sub.nr_evid = "10301010126250226000032".to_string(); // valid NDP

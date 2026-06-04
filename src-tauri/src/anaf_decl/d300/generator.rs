@@ -113,17 +113,33 @@ pub fn generate_d300_xml(rows: &D300Rows, ver: &SchemaVersion) -> AppResult<Stri
     push_opt!(rows.r10_2, "R10_2");
     push_opt!(rows.r11_1, "R11_1");
     push_opt!(rows.r11_2, "R11_2");
+    // R12 — reverse charge collected (AE beneficiar); parent rows + sub-rows by rate
+    // DUK requires R12_1 >= R12_1_1 + R12_2_1 and R12_2 >= R12_1_2 + R12_2_2
+    push_opt!(rows.r12_1, "R12_1");
+    push_opt!(rows.r12_2, "R12_2");
+    push_opt!(rows.r12_1_1, "R12_1_1");
+    push_opt!(rows.r12_1_2, "R12_1_2");
+    push_opt!(rows.r12_2_1, "R12_2_1");
+    push_opt!(rows.r12_2_2, "R12_2_2");
     push_opt!(rows.r13_1, "R13_1");
 
     // Purchase rows
     push_opt!(rows.r5_1, "R5_1");
     push_opt!(rows.r5_2, "R5_2");
+    // R18 — deductibil intra-EU goods; DUK V_7/V_8: R18_1=R5_1, R18_2=R5_2
+    push_opt!(rows.r18_1, "R18_1");
+    push_opt!(rows.r18_2, "R18_2");
     push_opt!(rows.r22_1, "R22_1");
     push_opt!(rows.r22_2, "R22_2");
     push_opt!(rows.r23_1, "R23_1");
     push_opt!(rows.r23_2, "R23_2");
+    // R25 — reverse charge deductible (AE beneficiar); DUK V_19–V_24: R25=R12
     push_opt!(rows.r25_1, "R25_1");
     push_opt!(rows.r25_2, "R25_2");
+    push_opt!(rows.r25_1_1, "R25_1_1");
+    push_opt!(rows.r25_1_2, "R25_1_2");
+    push_opt!(rows.r25_2_1, "R25_2_1");
+    push_opt!(rows.r25_2_2, "R25_2_2");
 
     // Totals
     push_opt!(rows.r17_1, "R17_1");

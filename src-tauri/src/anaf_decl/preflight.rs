@@ -236,6 +236,50 @@ pub async fn preflight(
         }
     }
 
+    // ── Check 5b: operations at rates with no D300 v12 row (excluded from XML) ─
+    // Sales at old 19%/5% and purchases at 19%/9%/5% have no valid row in the v12
+    // schema (R69/R70/R71 absent; R23 corridor 10–12% rejects 9% purchases), so the
+    // generator EXCLUDES them. Surface that to the accountant so the exclusion is
+    // never silent — they must regulariza manually.
+    if matches!(kind, DeclKind::D300) {
+        let bad_sales: i64 = sqlx::query_scalar(
+            "SELECT COUNT(DISTINCT i.id) FROM invoice_line_items l \
+             JOIN invoices i ON i.id = l.invoice_id \
+             WHERE i.company_id = ?1 AND i.status IN ('VALIDATED','STORNED') \
+               AND i.issue_date >= ?2 AND i.issue_date <= ?3 \
+               AND l.vat_category = 'S' AND CAST(l.vat_rate AS REAL) IN (19.0, 5.0)",
+        )
+        .bind(company_id)
+        .bind(period_from)
+        .bind(period_to)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+        let bad_purch: i64 = sqlx::query_scalar(
+            "SELECT COUNT(DISTINCT ri.id) FROM received_invoice_vat_lines vl \
+             JOIN received_invoices ri ON ri.id = vl.received_invoice_id \
+             WHERE ri.company_id = ?1 AND ri.status != 'REJECTED' \
+               AND ri.issue_date >= ?2 AND ri.issue_date <= ?3 \
+               AND vl.vat_category = 'S' AND CAST(vl.vat_rate AS REAL) IN (19.0, 9.0, 5.0)",
+        )
+        .bind(company_id)
+        .bind(period_from)
+        .bind(period_to)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+        if bad_sales > 0 || bad_purch > 0 {
+            issues.push(PreflightIssue::warning(
+                "D300_COTE_VECHI",
+                format!(
+                    "{bad_sales} vânzări (cote 19%/5%) și {bad_purch} achiziții (cote 19%/9%/5%) \
+                     nu au rând în D300 v12 și au fost excluse din calcul."
+                ),
+                "Aceste operațiuni necesită regularizare manuală în decont (rd. 16 / rd. 33).",
+            ));
+        }
+    }
+
     // ── Check 6: Empty period ────────────────────────────────────────────────
 
     let sales_count: i64 = sqlx::query_scalar(
