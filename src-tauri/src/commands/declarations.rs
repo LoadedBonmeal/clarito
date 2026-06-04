@@ -777,7 +777,8 @@ pub async fn export_d300_official(
     let xml = generate_d300_xml(&rows, &ver)?;
 
     // Layer D: validate with the bundled DUK before writing. Graceful: no runtime → proceed.
-    let tmp = std::env::temp_dir().join("d300_official_check.xml");
+    let tmp =
+        std::env::temp_dir().join(format!("d300_official_check_{}.xml", uuid::Uuid::now_v7()));
     std::fs::write(&tmp, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
     let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
     let duk = crate::anaf_decl::duk::run_duk(&provider, DeclKind::D300, &tmp)?;

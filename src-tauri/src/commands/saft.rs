@@ -104,7 +104,8 @@ pub async fn export_saft_official(
     };
 
     // Layer D: validate with the bundled DUK before writing. Graceful: no runtime → proceed.
-    let tmp = std::env::temp_dir().join("d406_official_check.xml");
+    let tmp =
+        std::env::temp_dir().join(format!("d406_official_check_{}.xml", uuid::Uuid::now_v7()));
     std::fs::write(&tmp, xml.as_bytes())
         .map_err(|e| AppError::Other(format!("Nu s-a putut scrie temp D406: {e}")))?;
     let provider = crate::anaf_decl::duk::BundledProvider::new(&app);

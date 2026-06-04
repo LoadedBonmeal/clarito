@@ -84,14 +84,20 @@ jobs:
       - name: Smoke — bundled JRE sanity
         shell: bash
         run: |
-          JAVA_BIN=$(find src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Clarito.app \
+          # Best-effort only — never fail the build. The .app is consumed into the
+          # .dmg by the bundler, and unbundled builds have no JRE at all; both leave
+          # nothing to find, so disable errexit and always exit 0. (Search the
+          # surviving bundle/ dir, not the dmg-consumed Clarito.app.)
+          set +e
+          JAVA_BIN=$(find src-tauri/target/aarch64-apple-darwin/release/bundle \
             -name java -path '*jre-min*' 2>/dev/null | head -1)
           if [ -n "$JAVA_BIN" ]; then
             echo "Found bundled JRE: $JAVA_BIN"
             "$JAVA_BIN" -version && echo "::notice::Bundled JRE OK (arm64)"
           else
-            echo "::warning::Bundled JRE not found in .app — check resources glob"
-          fi || true
+            echo "::notice::No bundled JRE found (unbundled build, or .app consumed into .dmg) — smoke skipped."
+          fi
+          exit 0
 
       # Unsigned dev artifact — NOT for distribution. Signed builds come from release.yml (tag v*).
       - name: Upload DMG (arm64)
@@ -184,14 +190,17 @@ jobs:
       - name: Smoke — bundled JRE sanity
         shell: bash
         run: |
-          JAVA_BIN=$(find src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Clarito.app \
+          # Best-effort only — never fail the build (see arm64 job for rationale).
+          set +e
+          JAVA_BIN=$(find src-tauri/target/x86_64-apple-darwin/release/bundle \
             -name java -path '*jre-min*' 2>/dev/null | head -1)
           if [ -n "$JAVA_BIN" ]; then
             echo "Found bundled JRE: $JAVA_BIN"
-            "$JAVA_BIN" -version && echo "::notice::Bundled JRE OK (x64)" || true
+            "$JAVA_BIN" -version && echo "::notice::Bundled JRE OK (x64)"
           else
-            echo "::warning::Bundled JRE not found in .app — check resources glob"
-          fi || true
+            echo "::notice::No bundled JRE found (unbundled build, or .app consumed into .dmg) — smoke skipped."
+          fi
+          exit 0
 
       # Unsigned dev artifact — NOT for distribution. Signed builds come from release.yml (tag v*).
       - name: Upload DMG (x64)
@@ -270,14 +279,17 @@ jobs:
       - name: Smoke — bundled JRE sanity
         shell: bash
         run: |
+          # Best-effort only — never fail the build (see arm64 job for rationale).
+          set +e
           JAVA_BIN=$(find src-tauri/target/x86_64-pc-windows-msvc/release/bundle \
             -name java.exe -path '*jre-min*' 2>/dev/null | head -1)
           if [ -n "$JAVA_BIN" ]; then
             echo "Found bundled JRE: $JAVA_BIN"
-            "$JAVA_BIN" -version && echo "Bundled JRE OK (Windows x64)" || true
+            "$JAVA_BIN" -version && echo "::notice::Bundled JRE OK (Windows x64)"
           else
-            echo "::warning::Bundled JRE not found — check resources glob"
-          fi || true
+            echo "::notice::No bundled JRE found (unbundled build) — smoke skipped."
+          fi
+          exit 0
 
       # Unsigned dev artifact — NOT for distribution. Signed builds come from release.yml (tag v*).
       - name: Upload installer

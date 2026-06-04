@@ -540,7 +540,8 @@ pub async fn export_d394_official(
     let xml = generate_d394_xml(&doc, &submission, &company, &ver)?;
 
     // Layer D: validate with the bundled DUK before writing. Graceful: no runtime → proceed.
-    let tmp = std::env::temp_dir().join("d394_official_check.xml");
+    let tmp =
+        std::env::temp_dir().join(format!("d394_official_check_{}.xml", uuid::Uuid::now_v7()));
     std::fs::write(&tmp, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
     let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
     let duk = crate::anaf_decl::duk::run_duk(&provider, DeclKind::D394, &tmp)?;
