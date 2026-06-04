@@ -61,9 +61,13 @@ pub struct SaftOfficialParams {
 /// available — see `anaf_decl::validation::validate_with_xsd`.
 #[tauri::command]
 pub async fn export_saft_official(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     params: SaftOfficialParams,
-) -> AppResult<String> {
+    skip_duk_override: bool,
+) -> AppResult<crate::commands::declarations::OfficialExportResult> {
+    use crate::anaf_decl::DeclKind;
+    use crate::commands::declarations::duk_gate_allows_write;
     use crate::commands::integrations::validate_export_path;
 
     let dest = validate_export_path(&params.dest_path)?;
@@ -99,10 +103,37 @@ pub async fn export_saft_official(
         generate_saft_xml(&state.db, &company, &date_from, &date_to).await?
     };
 
+    // Layer D: validate with the bundled DUK before writing. Graceful: no runtime → proceed.
+    let tmp = std::env::temp_dir().join("d406_official_check.xml");
+    std::fs::write(&tmp, xml.as_bytes())
+        .map_err(|e| AppError::Other(format!("Nu s-a putut scrie temp D406: {e}")))?;
+    let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
+    let duk = crate::anaf_decl::duk::run_duk(&provider, DeclKind::D406, &tmp)?;
+    let _ = std::fs::remove_file(&tmp);
+    let (duk_available, duk_passed, issues) = match &duk {
+        Some(o) => (true, o.passed, o.errors.clone()),
+        None => (false, false, Vec::new()),
+    };
+    if !duk_gate_allows_write(duk_available, duk_passed, skip_duk_override) {
+        return Ok(crate::commands::declarations::OfficialExportResult {
+            path: String::new(),
+            written: false,
+            duk_available,
+            duk_passed,
+            issues,
+        });
+    }
+
     std::fs::write(&dest, xml.as_bytes())
         .map_err(|e| AppError::Other(format!("Nu s-a putut scrie fișierul D406: {e}")))?;
 
-    Ok(dest.to_string_lossy().to_string())
+    Ok(crate::commands::declarations::OfficialExportResult {
+        path: dest.to_string_lossy().to_string(),
+        written: true,
+        duk_available,
+        duk_passed,
+        issues,
+    })
 }
 
 // ─── Legacy preview command (unchanged) ───────────────────────────────────────

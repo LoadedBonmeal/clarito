@@ -187,6 +187,14 @@ pub async fn export_activity_log_csv(state: State<'_, AppState>) -> AppResult<St
     Ok(csv)
 }
 
+/// Verifică dacă versiunile formularelor ANAF grupate sunt la zi față de manifesto-ul CDN.
+/// Erorile de rețea sunt non-fatale — returnează vector gol (fără banner).
+#[tauri::command]
+pub async fn check_form_versions() -> AppResult<Vec<crate::anaf_decl::form_versions::FormStaleness>>
+{
+    Ok(crate::anaf_decl::form_versions::check().await)
+}
+
 /// Activează / dezactivează pornirea automată la login (LaunchAgent pe macOS, Registry pe Windows).
 #[tauri::command]
 pub async fn set_autostart(

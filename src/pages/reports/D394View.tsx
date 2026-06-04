@@ -19,6 +19,7 @@ import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import { queryKeys } from "@/lib/queries";
 import type { D394Submission } from "@/types";
+import type { PreflightIssue } from "@/lib/tauri";
 
 interface Props {
   dateFrom: string;
@@ -30,6 +31,8 @@ export function D394View({ dateFrom, dateTo }: Props) {
   const [exporting,         setExporting]         = useState(false);
   const [exportingOfficial, setExportingOfficial] = useState(false);
   const [showD394Modal,     setShowD394Modal]     = useState(false);
+  const [dukBlock,          setDukBlock]          = useState<PreflightIssue[] | null>(null);
+  const [lastSubmission,    setLastSubmission]    = useState<D394Submission | null>(null);
 
   const periodFrom = dateFrom;
   const periodTo   = dateTo;
@@ -86,8 +89,9 @@ export function D394View({ dateFrom, dateTo }: Props) {
     }
   };
 
-  const handleExportOfficial = async (submission: D394Submission) => {
+  const handleExportOfficial = async (submission: D394Submission, override = false) => {
     if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    setLastSubmission(submission);
     const savePath = await saveDialog({
       title:       "Salvează D394 oficial ANAF (XML)",
       defaultPath: `d394-oficial-${periodFrom}-${periodTo}.xml`,
@@ -96,15 +100,26 @@ export function D394View({ dateFrom, dateTo }: Props) {
     if (!savePath) return;
     setExportingOfficial(true);
     try {
-      const saved = await api.d394.exportD394Official(
+      const res = await api.d394.exportD394Official(
         activeCompanyId,
         periodFrom,
         periodTo,
         savePath,
         submission,
+        override,
       );
-      notify.success(`D394 oficial salvat: ${saved}`);
-      try { await openPath(saved); } catch { /* reveal best-effort */ }
+      if (!res.written) {
+        setDukBlock(res.issues);
+        notify.error("DUKIntegrator a găsit erori. Corectați-le sau exportați oricum.");
+        return;
+      }
+      setDukBlock(null);
+      notify.success(
+        res.dukAvailable
+          ? `D394 oficial salvat (DUK: valid): ${res.path}`
+          : `D394 oficial salvat: ${res.path} (validare DUK indisponibilă local)`,
+      );
+      try { await openPath(res.path); } catch { /* reveal best-effort */ }
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut exporta D394 oficial."));
     } finally {
@@ -121,6 +136,17 @@ export function D394View({ dateFrom, dateTo }: Props) {
     <div className="rf-col">
       {/* ── Preflight validation panel ────────────────────────────────── */}
       <PreflightPanel issues={preflightIssues} />
+
+      {/* ── DUK block panel ──────────────────────────────────────────── */}
+      {dukBlock && (
+        <div style={{ marginTop: 12 }}>
+          <PreflightPanel issues={dukBlock} />
+          <Btn variant="danger" size="sm" style={{ marginTop: 8 }}
+               onClick={() => lastSubmission && void handleExportOfficial(lastSubmission, true)}>
+            Exportă oricum (ignoră DUK)
+          </Btn>
+        </div>
+      )}
 
       {/* ── Livrări (vânzări) ──────────────────────────────────────────── */}
       <SectionCard

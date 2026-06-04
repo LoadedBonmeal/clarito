@@ -333,6 +333,7 @@ pub fn run() {
             commands::system::export_activity_log_csv,
             commands::system::set_autostart,
             commands::system::get_autostart,
+            commands::system::check_form_versions,
             // ubl
             commands::ubl::generate_invoice_xml,
             commands::ubl::generate_invoice_pdf,

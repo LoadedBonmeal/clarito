@@ -32,6 +32,7 @@ import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import { queryKeys } from "@/lib/queries";
 import type { D300Report, D300Submission } from "@/types";
+import type { PreflightIssue } from "@/lib/tauri";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -83,6 +84,8 @@ export function DeclarationsPage() {
   const [exporting, setExporting] = useState(false);
   const [exportingOfficial, setExportingOfficial] = useState(false);
   const [showD300Modal,     setShowD300Modal]     = useState(false);
+  const [dukBlock,          setDukBlock]          = useState<PreflightIssue[] | null>(null);
+  const [lastSubmission,    setLastSubmission]    = useState<D300Submission | null>(null);
 
   // TVA deductibilă — pre-completată din totalDeductibleVat; editabilă manual ca override.
   const [manualDeductible, setManualDeductible] = useState<string>("0.00");
@@ -184,8 +187,9 @@ export function DeclarationsPage() {
   };
 
   // ── Exportă D300 oficial ANAF (schema v12) ────────────────────────────────
-  const handleExportOfficial = async (submission: D300Submission) => {
+  const handleExportOfficial = async (submission: D300Submission, override = false) => {
     if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    setLastSubmission(submission);
     const savePath = await saveDialog({
       title:       "Salvează D300 oficial ANAF (XML)",
       defaultPath: `d300-${selectedYear}-${String(selectedMonth).padStart(2, "0")}.xml`,
@@ -207,15 +211,26 @@ export function DeclarationsPage() {
         regDedusaBaza:    regDB !== 0 ? regDB : null,
         regDedusaTva:     regDT !== 0 ? regDT : null,
       };
-      const saved = await api.declarations.exportD300Official(
+      const res = await api.declarations.exportD300Official(
         activeCompanyId,
         dateFrom,
         dateTo,
         savePath,
         submissionWithReg,
+        override,
       );
-      notify.success(`D300 oficial salvat: ${saved}`);
-      try { await openPath(saved); } catch { /* reveal best-effort */ }
+      if (!res.written) {
+        setDukBlock(res.issues);
+        notify.error("DUKIntegrator a găsit erori. Corectați-le sau exportați oricum.");
+        return;
+      }
+      setDukBlock(null);
+      notify.success(
+        res.dukAvailable
+          ? `D300 oficial salvat (DUK: valid): ${res.path}`
+          : `D300 oficial salvat: ${res.path} (validare DUK indisponibilă local)`,
+      );
+      try { await openPath(res.path); } catch { /* reveal best-effort */ }
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut exporta D300 oficial."));
     } finally {
@@ -283,6 +298,17 @@ export function DeclarationsPage() {
 
         {/* ── Preflight validation panel ──────────────────────────────────── */}
         <PreflightPanel issues={preflightIssues} />
+
+        {/* ── DUK block panel ─────────────────────────────────────────────── */}
+        {dukBlock && (
+          <div style={{ marginTop: 12 }}>
+            <PreflightPanel issues={dukBlock} />
+            <Btn variant="danger" size="sm" style={{ marginTop: 8 }}
+                 onClick={() => lastSubmission && void handleExportOfficial(lastSubmission, true)}>
+              Exportă oricum (ignoră DUK)
+            </Btn>
+          </div>
+        )}
 
         {/* ── TVA colectată + deductibilă ─────────────────────────────────── */}
         <div className="rf-grid-2">
