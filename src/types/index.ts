@@ -737,6 +737,15 @@ export interface ReconcileReport {
   discrepancies: string[];
 }
 
+// ─── ANAF form-version staleness ─────────────────────────────────────────
+
+/** One stale declaration form returned by `check_form_versions`. */
+export interface FormStaleness {
+  form: string;
+  bundled: string;
+  latest: string;
+}
+
 // ─── Error (din backend) ──────────────────────────────────────────────────
 
 export interface AppErrorPayload {

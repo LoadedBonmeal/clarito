@@ -30,6 +30,7 @@ import { Sidebar } from "./Sidebar";
 import { StatusBar } from "./StatusBar";
 import { CommandPalette } from "./CommandPalette";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
+import { Banner } from "@/components/rf";
 import { Icon } from "@/components/shared/Icon";
 import { ShortcutsDialog } from "@/components/shared/ShortcutsDialog";
 import { useTheme } from "@/hooks/use-theme";
@@ -251,6 +252,14 @@ export function AppShell({ children }: AppShellProps) {
     queryFn: () => api.companies.list(),
   });
 
+  // ANAF form-version staleness — checked once at launch, graceful on network failure
+  const [stalenessDismissed, setStalenessDismissed] = useState(false);
+  const { data: stalenessForms = [] } = useQuery({
+    queryKey: ["anaf", "formVersions"],
+    queryFn: () => api.system.checkFormVersions().catch(() => []),
+    staleTime: 60 * 60 * 1000, // 1 hour
+  });
+
   const activeCompany = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
   const activeCompanyName = activeCompany?.legalName ?? "—";
 
@@ -260,6 +269,30 @@ export function AppShell({ children }: AppShellProps) {
         <Sidebar onOpenCompanySwitcher={() => setSwitcherOpen(true)} />
         <div className="app-main">
           <TopBar />
+          {stalenessForms.length > 0 && !stalenessDismissed && (
+            <Banner
+              variant="warning"
+              actions={
+                <button
+                  type="button"
+                  onClick={() => setStalenessDismissed(true)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: "0 4px",
+                    lineHeight: 1,
+                    color: "var(--rf-text-dim)",
+                  }}
+                  aria-label="Închide notificare"
+                >
+                  ×
+                </button>
+              }
+            >
+              Formular ANAF actualizat ({stalenessForms.map((f) => f.form).join(", ")}) — actualizați aplicația pentru validare corectă.
+            </Banner>
+          )}
           <div className="rf-content">
             <div className="rf-page" key={location.pathname}>{children}</div>
           </div>

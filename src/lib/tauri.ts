@@ -26,6 +26,7 @@ import type {
   D394Submission,
   DataExportResult,
   DiagnosticReport,
+  FormStaleness,
   GlPostResult,
   Invoice,
   InvoiceFilter,
@@ -212,6 +213,7 @@ export const system = {
       Array<{ id: string; entityId: string; metadata: string; createdAt: number }>
     >("get_activity_log"),
   exportActivityLogCsv: () => invoke<string>("export_activity_log_csv"),
+  checkFormVersions: () => invoke<FormStaleness[]>("check_form_versions"),
 };
 
 // ─── UBL ──────────────────────────────────────────────────────────────────
