@@ -75,6 +75,21 @@ pub struct D300Submission {
     /// Pro-rata TVA (0.0 – 100.0, default 100.0 = nu se aplică pro-rata).
     #[serde(default = "default_pro_rata")]
     pub pro_rata: f64,
+
+    // ── Regularizări cote vechi (Wave 8) ─────────────────────────────────────
+    /// Override baza R16_1 (regularizări taxă colectată, cote vechi 19%/5%).
+    /// `None` = use auto-computed value from `D300Report.reg_colectata_baza`.
+    #[serde(default)]
+    pub reg_colectata_baza: Option<i64>,
+    /// Override TVA R16_2 (regularizări taxă colectată, cote vechi 19%/5%).
+    #[serde(default)]
+    pub reg_colectata_tva: Option<i64>,
+    /// Override baza R30_1 (regularizări taxă dedusă, cote vechi 19%/9%/5%).
+    #[serde(default)]
+    pub reg_dedusa_baza: Option<i64>,
+    /// Override TVA R30_2 (regularizări taxă dedusă, cote vechi 19%/9%/5%).
+    #[serde(default)]
+    pub reg_dedusa_tva: Option<i64>,
 }
 
 fn default_nr_evid() -> String {
@@ -105,6 +120,10 @@ impl Default for D300Submission {
             solicit_ramb: false,
             nr_evid: default_nr_evid(),
             pro_rata: default_pro_rata(),
+            reg_colectata_baza: None,
+            reg_colectata_tva: None,
+            reg_dedusa_baza: None,
+            reg_dedusa_tva: None,
         }
     }
 }

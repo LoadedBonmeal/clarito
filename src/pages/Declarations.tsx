@@ -87,6 +87,12 @@ export function DeclarationsPage() {
   // TVA deductibilă — pre-completată din totalDeductibleVat; editabilă manual ca override.
   const [manualDeductible, setManualDeductible] = useState<string>("0.00");
 
+  // Wave 8: regularizări cote vechi (R16/R30) — pre-completate din report; editabile.
+  const [regColectataBaza, setRegColectataBaza] = useState<string>("0");
+  const [regColectataTva, setRegColectataTva]   = useState<string>("0");
+  const [regDedusaBaza, setRegDedusaBaza]       = useState<string>("0");
+  const [regDedusaTva, setRegDedusaTva]         = useState<string>("0");
+
   // Fetch active company for pre-filling submission modal (bank/IBAN).
   const { data: activeCompany } = useQuery({
     queryKey: queryKeys.companies.detail(activeCompanyId ?? ""),
@@ -97,6 +103,11 @@ export function DeclarationsPage() {
   useEffect(() => {
     if (report) {
       setManualDeductible(report.totalDeductibleVat);
+      // Wave 8: pre-fill regularizări from auto-computed values (rounded to integer lei).
+      setRegColectataBaza(String(Math.round(parseDec(report.regColectataBaza))));
+      setRegColectataTva(String(Math.round(parseDec(report.regColectataTva))));
+      setRegDedusaBaza(String(Math.round(parseDec(report.regDedusaBaza))));
+      setRegDedusaTva(String(Math.round(parseDec(report.regDedusaTva))));
     }
   }, [report]);
 
@@ -183,12 +194,25 @@ export function DeclarationsPage() {
     if (!savePath) return;
     setExportingOfficial(true);
     try {
+      // Wave 8: merge regularizări overrides into submission.
+      // Only pass non-zero values so the backend uses None (auto-computed) when 0.
+      const regCB = Math.round(parseDec(regColectataBaza));
+      const regCT = Math.round(parseDec(regColectataTva));
+      const regDB = Math.round(parseDec(regDedusaBaza));
+      const regDT = Math.round(parseDec(regDedusaTva));
+      const submissionWithReg: D300Submission = {
+        ...submission,
+        regColectataBaza: regCB !== 0 ? regCB : null,
+        regColectataTva:  regCT !== 0 ? regCT : null,
+        regDedusaBaza:    regDB !== 0 ? regDB : null,
+        regDedusaTva:     regDT !== 0 ? regDT : null,
+      };
       const saved = await api.declarations.exportD300Official(
         activeCompanyId,
         dateFrom,
         dateTo,
         savePath,
-        submission,
+        submissionWithReg,
       );
       notify.success(`D300 oficial salvat: ${saved}`);
       try { await openPath(saved); } catch { /* reveal best-effort */ }
@@ -411,6 +435,104 @@ export function DeclarationsPage() {
             </div>
           </SectionCard>
         </div>
+
+        {/* ── Regularizări cote vechi (19%/9%/5%) — Wave 8 ───────────────── */}
+        {report && (parseDec(report.regColectataTva) !== 0 || parseDec(report.regDedusaTva) !== 0) && (
+          <SectionCard icon="xml" title="Regularizări cote vechi (19%/9%/5%)">
+            <div style={{ padding: "8px 16px 4px", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
+              Operațiunile la cote vechi sunt raportate automat în rândurile de regularizări
+              (R16 — taxă colectată; R30 — taxă dedusă). Verificați și ajustați dacă este necesar.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+              {/* R16 — regularizări colectată */}
+              <div style={{ padding: "8px 16px 12px", borderRight: "1px solid var(--rf-border)" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--rf-text)", marginBottom: 8 }}>
+                  R16 — Regularizări taxă colectată
+                </div>
+                <Field label="Bază impozabilă (lei)">
+                  <Input
+                    type="number"
+                    id="reg-colectata-baza"
+                    step="1"
+                    num
+                    value={regColectataBaza}
+                    onChange={(e) => setRegColectataBaza(e.target.value)}
+                  />
+                </Field>
+                <Field label="TVA colectată (lei)">
+                  <Input
+                    type="number"
+                    id="reg-colectata-tva"
+                    step="1"
+                    num
+                    value={regColectataTva}
+                    onChange={(e) => setRegColectataTva(e.target.value)}
+                  />
+                </Field>
+                {report && (
+                  parseDec(regColectataBaza) !== Math.round(parseDec(report.regColectataBaza)) ||
+                  parseDec(regColectataTva)  !== Math.round(parseDec(report.regColectataTva))
+                ) && (
+                  <button
+                    type="button"
+                    className="rf-btn rf-btn--ghost rf-btn--sm"
+                    style={{ marginTop: 4 }}
+                    onClick={() => {
+                      setRegColectataBaza(String(Math.round(parseDec(report.regColectataBaza))));
+                      setRegColectataTva(String(Math.round(parseDec(report.regColectataTva))));
+                    }}
+                    title="Resetează la valorile calculate automat"
+                  >
+                    <Icon name="refresh" size={12} /> Resetează la calculat
+                  </button>
+                )}
+              </div>
+              {/* R30 — regularizări dedusă */}
+              <div style={{ padding: "8px 16px 12px" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--rf-text)", marginBottom: 8 }}>
+                  R30 — Regularizări taxă dedusă
+                </div>
+                <Field label="Bază impozabilă (lei)">
+                  <Input
+                    type="number"
+                    id="reg-dedusa-baza"
+                    step="1"
+                    num
+                    value={regDedusaBaza}
+                    onChange={(e) => setRegDedusaBaza(e.target.value)}
+                  />
+                </Field>
+                <Field label="TVA dedusă (lei)">
+                  <Input
+                    type="number"
+                    id="reg-dedusa-tva"
+                    step="1"
+                    num
+                    value={regDedusaTva}
+                    onChange={(e) => setRegDedusaTva(e.target.value)}
+                  />
+                </Field>
+                {report && (
+                  parseDec(regDedusaBaza) !== Math.round(parseDec(report.regDedusaBaza)) ||
+                  parseDec(regDedusaTva)  !== Math.round(parseDec(report.regDedusaTva))
+                ) && (
+                  <button
+                    type="button"
+                    className="rf-btn rf-btn--ghost rf-btn--sm"
+                    style={{ marginTop: 4 }}
+                    onClick={() => {
+                      setRegDedusaBaza(String(Math.round(parseDec(report.regDedusaBaza))));
+                      setRegDedusaTva(String(Math.round(parseDec(report.regDedusaTva))));
+                    }}
+                    title="Resetează la valorile calculate automat"
+                  >
+                    <Icon name="refresh" size={12} /> Resetează la calculat
+                  </button>
+                )}
+              </div>
+            </div>
+          </SectionCard>
+        )}
 
         {/* ── TVA de plată / recuperat summary ────────────────────────────── */}
         <Card>

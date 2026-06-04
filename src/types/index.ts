@@ -434,6 +434,15 @@ export interface D300Report {
   purchaseUnparsedCount: number;
   /** TVA netă de plată = TVA colectată − TVA deductibilă (negativă = de recuperat). */
   netVat: string;
+  // Wave 8: regularizări cote vechi (auto-computed prefill values)
+  /** Σ baza vânzări S la cote vechi 19%/5% → R16_1 prefill. */
+  regColectataBaza: string;
+  /** Σ TVA vânzări S la cote vechi 19%/5% → R16_2 prefill. */
+  regColectataTva: string;
+  /** Σ baza achiziții S la cote vechi 19%/9%/5% → R30_1 prefill. */
+  regDedusaBaza: string;
+  /** Σ TVA achiziții S la cote vechi 19%/9%/5% → R30_2 prefill. */
+  regDedusaTva: string;
 }
 
 // ─── D394 Declarație informativă livrări/achiziții ───────────────────────────
@@ -665,6 +674,11 @@ export interface D300Submission {
   solicitRamb?: boolean;
   nrEvid?: string;   // default "0"
   proRata?: number;  // default 100.0
+  // Wave 8: regularizări cote vechi (optional overrides; null = use auto-computed)
+  regColectataBaza?: number | null;  // R16_1 override (lei întregi)
+  regColectataTva?: number | null;   // R16_2 override
+  regDedusaBaza?: number | null;     // R30_1 override
+  regDedusaTva?: number | null;      // R30_2 override
 }
 
 // ─── D394Submission — câmpuri suplimentare pentru exportul oficial D394 ────
