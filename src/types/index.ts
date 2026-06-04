@@ -271,6 +271,8 @@ export interface ReceivedInvoice {
   xmlPath: string;
   pdfPath: string | null;
   status: ReceivedStatus;
+  /** Tipul achiziției intra-UE: "goods" (default, R5/R18) sau "services" (R7/R20). */
+  intraEuKind: "goods" | "services";
   downloadedAt: number;
   createdAt: number;
 }

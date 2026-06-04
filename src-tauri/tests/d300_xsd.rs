@@ -81,12 +81,14 @@ fn test_report() -> D300Report {
                 vat_category: "S".to_string(),
                 base: "10000.00".to_string(),
                 vat: "2100.00".to_string(),
+                intra_eu_kind: None,
             },
             D300Group {
                 vat_rate: "0.11".to_string(),
                 vat_category: "S".to_string(),
                 base: "5000.00".to_string(),
                 vat: "550.00".to_string(),
+                intra_eu_kind: None,
             },
         ],
         total_base: "15000.00".to_string(),
@@ -97,6 +99,7 @@ fn test_report() -> D300Report {
             vat_category: "S".to_string(),
             base: "8000.00".to_string(),
             vat: "1680.00".to_string(),
+            intra_eu_kind: None,
         }],
         total_deductible_base: "8000.00".to_string(),
         total_deductible_vat: "1680.00".to_string(),
@@ -298,6 +301,7 @@ fn d300_wave4_scenario_a_reverse_charge_ae() {
             vat_category: "AE".to_string(),
             base: "1000.00".to_string(),
             vat: "210.00".to_string(),
+            intra_eu_kind: None,
         }],
         total_deductible_base: "1000.00".to_string(),
         total_deductible_vat: "210.00".to_string(),
@@ -400,6 +404,7 @@ fn d300_wave4_scenario_b_intra_eu_k_purchase() {
             vat_category: "K".to_string(),
             base: "2000.00".to_string(),
             vat: "420.00".to_string(),
+            intra_eu_kind: Some("goods".to_string()),
         }],
         total_deductible_base: "2000.00".to_string(),
         total_deductible_vat: "420.00".to_string(),
@@ -476,18 +481,21 @@ fn d300_wave4_scenario_c_multirate_sales() {
                 vat_category: "S".to_string(),
                 base: "1000.00".to_string(),
                 vat: "210.00".to_string(),
+                intra_eu_kind: None,
             },
             D300Group {
                 vat_rate: "0.11".to_string(),
                 vat_category: "S".to_string(),
                 base: "500.00".to_string(),
                 vat: "55.00".to_string(),
+                intra_eu_kind: None,
             },
             D300Group {
                 vat_rate: "0.09".to_string(),
                 vat_category: "S".to_string(),
                 base: "200.00".to_string(),
                 vat: "18.00".to_string(),
+                intra_eu_kind: None,
             },
         ],
         total_base: "1700.00".to_string(),
@@ -569,6 +577,7 @@ fn d300_wave4_scenario_d_9pct_purchase_excluded() {
             vat_category: "S".to_string(),
             base: "1000.00".to_string(),
             vat: "210.00".to_string(),
+            intra_eu_kind: None,
         }],
         total_base: "1000.00".to_string(),
         total_vat: "210.00".to_string(),
@@ -579,6 +588,7 @@ fn d300_wave4_scenario_d_9pct_purchase_excluded() {
             vat_category: "S".to_string(),
             base: "1000.00".to_string(),
             vat: "90.00".to_string(),
+            intra_eu_kind: None,
         }],
         total_deductible_base: "1000.00".to_string(),
         total_deductible_vat: "90.00".to_string(),
@@ -665,4 +675,138 @@ fn d300_totals_reconciliation() {
     assert!(xml.contains("R17_2=\"2650\""), "XML R17_2");
     assert!(xml.contains("R34_2=\"970\""), "XML R34_2");
     assert!(xml.contains("totalPlata_A=\"60930\""), "XML totalPlata_A");
+}
+
+/// WAVE 7 SCENARIO: Intra-EU acquisition of SERVICES (category K, intra_eu_kind=services).
+///
+/// K purchase with intra_eu_kind=services: base=3000, VAT=630 (21%).
+/// Expected:
+///   - R7_1=3000, R7_2=630 (collected leg of services reverse charge)
+///   - R20_1=3000, R20_2=630 (deductible leg; DUK V_13/V_14: R20=R7)
+///   - R5_1/R5_2 must be None (goods row empty — this is a services acquisition)
+///   - R18_1/R18_2 must be None (goods deductible row empty)
+///   - R17_2=630 (includes R7_2), R27_2=630 (includes R20_2)
+///   - Net VAT = 0 (collected = deductible for pure K services acquisition)
+///   - Must pass XSD AND DUK ("Validare fara erori").
+#[test]
+fn d300_wave7_intra_eu_services() {
+    let xsd_path = std::path::Path::new("tools/anaf/sample_d300_v12.xml");
+    if !xsd_path.exists() {
+        eprintln!("SKIP: XSD not found");
+        return;
+    }
+    if !efactura_desktop_lib::anaf_decl::validation::xmllint_available() {
+        eprintln!("SKIP: xmllint not available");
+        return;
+    }
+
+    let period = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("date");
+    let ver = resolve(DeclKind::D300, period).expect("version");
+
+    // K purchase with intra_eu_kind=services (e.g. SaaS from EU vendor)
+    let report = D300Report {
+        company_cui: "RO12345674".to_string(),
+        period_from: "2026-01-01".to_string(),
+        period_to: "2026-01-31".to_string(),
+        groups: vec![],
+        total_base: "0.00".to_string(),
+        total_vat: "0.00".to_string(),
+        invoice_count: 0,
+        purchase_groups: vec![D300Group {
+            vat_rate: "0.21".to_string(),
+            vat_category: "K".to_string(),
+            base: "3000.00".to_string(),
+            vat: "630.00".to_string(),
+            intra_eu_kind: Some("services".to_string()),
+        }],
+        total_deductible_base: "3000.00".to_string(),
+        total_deductible_vat: "630.00".to_string(),
+        purchase_invoice_count: 1,
+        purchase_unparsed_count: 0,
+        net_vat: "0.00".to_string(),
+    };
+
+    let rows =
+        map_to_rows(&report, &test_submission(), &test_company(), period).expect("map_to_rows");
+
+    // R7/R20 populated for services
+    assert_eq!(
+        rows.r7_1,
+        Some(3000),
+        "Wave7: R7_1=3000 (services collected base)"
+    );
+    assert_eq!(
+        rows.r7_2,
+        Some(630),
+        "Wave7: R7_2=630 (services collected VAT)"
+    );
+    assert_eq!(rows.r20_1, Some(3000), "Wave7: R20_1=R7_1=3000 (DUK V_13)");
+    assert_eq!(rows.r20_2, Some(630), "Wave7: R20_2=R7_2=630 (DUK V_14)");
+
+    // R5/R18 must be empty (this is a services acquisition, not goods)
+    assert_eq!(rows.r5_1, None, "Wave7: R5_1=None (no goods)");
+    assert_eq!(rows.r5_2, None, "Wave7: R5_2=None (no goods)");
+    assert_eq!(
+        rows.r18_1, None,
+        "Wave7: R18_1=None (goods deductible empty)"
+    );
+    assert_eq!(
+        rows.r18_2, None,
+        "Wave7: R18_2=None (goods deductible empty)"
+    );
+
+    // Totals include R7/R20
+    assert_eq!(rows.r17_2, Some(630), "Wave7: R17_2 includes R7_2");
+    assert_eq!(rows.r27_2, Some(630), "Wave7: R27_2 includes R20_2");
+
+    // Net VAT = 0 (collected == deductible for K services)
+    assert_eq!(rows.r34_2, None, "Wave7: no net payable");
+    assert_eq!(rows.r33_2, None, "Wave7: no net refund");
+
+    let xml = generate_d300_xml(&rows, &ver).expect("generate");
+    eprintln!("Wave7 Services XML:\n{xml}");
+
+    // DUMP for DUK
+    if let Ok(dump_dir) = std::env::var("EFACTURA_DUMP_DIR") {
+        let path = std::path::Path::new(&dump_dir).join("d300_wave7_services.xml");
+        std::fs::write(&path, xml.as_bytes()).expect("write dump");
+        eprintln!("DUMP: wave7 services → {:?}", path);
+    }
+
+    // XML must contain R7 and R20, must NOT contain R5 or R18
+    assert!(xml.contains("R7_1=\"3000\""), "XML must have R7_1=3000");
+    assert!(xml.contains("R7_2=\"630\""), "XML must have R7_2=630");
+    assert!(xml.contains("R20_1=\"3000\""), "XML must have R20_1=3000");
+    assert!(xml.contains("R20_2=\"630\""), "XML must have R20_2=630");
+    assert!(
+        !xml.contains("R5_1="),
+        "XML must NOT have R5 (services, not goods)"
+    );
+    assert!(
+        !xml.contains("R18_1="),
+        "XML must NOT have R18 (goods deductible empty)"
+    );
+
+    // XSD validation
+    let tmp = std::env::temp_dir().join("d300_wave7_services.xml");
+    std::fs::write(&tmp, xml.as_bytes()).expect("write tmp");
+    let xsd_result = efactura_desktop_lib::anaf_decl::validation::validate_with_xsd(xsd_path, &tmp)
+        .expect("xmllint");
+    if !xsd_result.passed {
+        for e in &xsd_result.errors {
+            eprintln!("XSD error: {e}");
+        }
+    }
+    assert!(
+        xsd_result.passed,
+        "Wave7 Services: must pass XSD validation: {:?}",
+        xsd_result.errors
+    );
+    let _ = std::fs::remove_file(&tmp);
+
+    // DUK validation (mandatory gate)
+    match run_duk(&xml, "wave7_services") {
+        Ok(passed) => assert!(passed, "Wave7 Services: DUK must say 'Validare fara erori'"),
+        Err(e) => eprintln!("SKIP DUK Wave7 Services: {e}"),
+    }
 }

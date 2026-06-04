@@ -140,6 +140,25 @@ pub async fn reparse_received_vat(
     Ok(updated)
 }
 
+/// Setează tipul achiziției intra-UE (goods/services) pentru o factură primită.
+///
+/// Determină rândul D300: goods→R5/R18 (bunuri), services→R7/R20 (servicii).
+/// Relevant numai pentru facturile cu category "K" (achiziții intracomunitare).
+#[tauri::command]
+pub async fn set_received_intra_eu_kind(
+    state: State<'_, AppState>,
+    received_invoice_id: String,
+    company_id: String,
+    kind: String,
+) -> AppResult<()> {
+    if kind != "goods" && kind != "services" {
+        return Err(AppError::Validation(format!(
+            "intra_eu_kind trebuie să fie 'goods' sau 'services', primit: '{kind}'"
+        )));
+    }
+    received::set_intra_eu_kind(&state.db, &received_invoice_id, &company_id, &kind).await
+}
+
 /// Exportă un subset de facturi primite ca CSV (CRLF, RFC-4180).
 ///
 /// Coloane: Furnizor, CUI, Serie-Număr, Dată, Net, TVA, Total, Monedă, Status.

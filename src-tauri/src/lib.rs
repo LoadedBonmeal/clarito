@@ -305,6 +305,7 @@ pub fn run() {
             commands::received::update_received_status,
             commands::received::reparse_received_vat,
             commands::received::export_received_csv,
+            commands::received::set_received_intra_eu_kind,
             // notifications
             commands::notifications::list_notifications,
             commands::notifications::unread_notification_count,
