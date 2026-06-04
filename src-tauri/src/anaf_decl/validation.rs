@@ -4,7 +4,7 @@
 //! degrades gracefully: when Java or the jar are absent, `duk_available()` is
 //! false and callers skip, so the normal build stays green.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::anaf_decl::DeclKind;
@@ -36,6 +36,36 @@ pub fn duk_available() -> bool {
         .unwrap_or(false)
 }
 
+/// Run a Java declaration validator and return its raw textual output (result file
+/// contents, falling back to stdout). `java` is the binary, `jar` the DUKIntegrator jar.
+pub fn run_java_validator(
+    java: &Path,
+    jar: &Path,
+    decl: DeclKind,
+    xml_path: &Path,
+) -> AppResult<String> {
+    let result_path = std::env::temp_dir().join(format!(
+        "duk_result_{}.txt",
+        xml_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("decl")
+    ));
+    let output = std::process::Command::new(java)
+        .arg("-jar")
+        .arg(jar)
+        .arg("-v")
+        .arg(decl.as_duk_type())
+        .arg(xml_path)
+        .arg(&result_path)
+        .output()
+        .map_err(|e| AppError::Other(format!("Nu pot porni DUKIntegrator: {e}")))?;
+    let body = std::fs::read_to_string(&result_path)
+        .unwrap_or_else(|_| String::from_utf8_lossy(&output.stdout).to_string());
+    let _ = std::fs::remove_file(&result_path);
+    Ok(body)
+}
+
 /// Validate `xml_path` with DUKIntegrator's `-v` mode. Returns Err if the harness
 /// is not configured (call `duk_available()` first to skip).
 pub fn validate_with_duk(decl: DeclKind, xml_path: &Path) -> AppResult<DukResult> {
@@ -44,33 +74,13 @@ pub fn validate_with_duk(decl: DeclKind, xml_path: &Path) -> AppResult<DukResult
         .filter(|p| !p.is_empty())
         .ok_or_else(|| AppError::Other(format!("{DUK_JAR_ENV} not set")))?;
 
-    // Result file in a temp dir alongside the input.
-    let result_path = std::env::temp_dir().join(format!(
-        "duk_result_{}.txt",
-        xml_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("decl")
-    ));
-
-    let output = Command::new("java")
-        .arg("-jar")
-        .arg(&jar)
-        .arg("-v")
-        .arg(decl.as_duk_type())
-        .arg(xml_path)
-        .arg(&result_path)
-        .output()
-        .map_err(|e| AppError::Other(format!("Failed to launch DUKIntegrator: {e}")))?;
+    // Delegate java invocation to shared core.
+    let body = run_java_validator(Path::new("java"), &PathBuf::from(&jar), decl, xml_path)?;
 
     // DUKIntegrator writes findings to the result file (and sometimes stdout).
     // Best-effort tolerant parse: treat any line containing a Romanian error
     // marker as an error; "ok"/"corect"/no errors => passed. Refine once the
     // jar is vendored and the exact result format is confirmed against fixtures.
-    let body = std::fs::read_to_string(&result_path)
-        .unwrap_or_else(|_| String::from_utf8_lossy(&output.stdout).to_string());
-    let _ = std::fs::remove_file(&result_path);
-
     let mut errors: Vec<String> = Vec::new();
     for line in body.lines() {
         let l = line.trim();
@@ -90,8 +100,7 @@ pub fn validate_with_duk(decl: DeclKind, xml_path: &Path) -> AppResult<DukResult
     let passed = errors.is_empty()
         && (body.to_lowercase().contains("corect")
             || body.to_lowercase().contains("ok")
-            || body.trim().is_empty()
-            || output.status.success());
+            || body.trim().is_empty());
 
     Ok(DukResult { passed, errors })
 }

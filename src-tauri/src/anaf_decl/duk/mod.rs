@@ -2,7 +2,7 @@
 //! `BundledProvider` resolves the JRE+jars shipped in the app; `EnvProvider` uses
 //! `EFACTURA_DUK_JAR` + system `java` (dev/CI). Both produce a `DukRuntime`.
 
-// TODO(remove in P1.T2/T3): used by later tasks
+// TODO(remove in P1.T4): DukOutcome used by BundledProvider wiring in T4
 #![allow(dead_code, unused_imports)]
 
 use std::path::{Path, PathBuf};
@@ -58,6 +58,20 @@ pub struct DukOutcome {
     pub errors: Vec<PreflightIssue>,
 }
 
+/// Run DUK against `xml` using the runtime from `provider`. Returns `None` when no
+/// runtime is available (caller falls back to layer A). Never panics.
+pub fn run_duk(
+    provider: &dyn DukProvider,
+    decl: DeclKind,
+    xml: &Path,
+) -> AppResult<Option<DukOutcome>> {
+    let Some(rt) = provider.resolve() else {
+        return Ok(None);
+    };
+    let raw = crate::anaf_decl::validation::run_java_validator(&rt.java, &rt.duk_jar(), decl, xml)?;
+    Ok(Some(parse_duk_output(&raw)))
+}
+
 /// Parse DUKIntegrator's textual output (result file or stdout) into issues.
 /// Clean marker: output contains "fara erori"/"fără erori". Any line with a DUK
 /// error marker becomes an `error` `PreflightIssue` with code "DUK".
@@ -86,8 +100,9 @@ pub fn parse_duk_output(raw: &str) -> DukOutcome {
             });
         }
     }
+    let lower = raw.to_lowercase();
     let clean =
-        raw.to_lowercase().contains("fara erori") || raw.to_lowercase().contains("fără erori");
+        lower.contains("fara erori") || lower.contains("fără erori") || lower.trim() == "ok";
     DukOutcome {
         passed: errors.is_empty() && clean,
         errors,
