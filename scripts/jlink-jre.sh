@@ -15,4 +15,8 @@ MODULES="java.base,java.desktop,java.logging,java.xml,java.naming,java.managemen
 rm -rf "$OUT"
 "${JAVA_HOME}/bin/jlink" --add-modules "$MODULES" \
   --strip-debug --no-man-pages --no-header-files --compress=2 --output "$OUT"
+# jlink creates read-only legal/ files (444) — make them user-writable so that
+# tauri_build::build() can re-copy them on subsequent `cargo check/build` runs
+# without hitting "Permission denied (os error 13)".
+chmod -R u+w "$OUT"
 "$OUT/bin/java" -version
