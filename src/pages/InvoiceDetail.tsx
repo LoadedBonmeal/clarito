@@ -284,7 +284,7 @@ export function InvoiceDetailPage() {
             >
               {duplicateInvoice.isPending ? "Duplicare…" : "Duplicare"}
             </Btn>
-            {invoice.status === "VALIDATED" && (
+            {invoice.status === "VALIDATED" && invoice.stornoOfInvoiceId === null && (
               <Btn
                 variant="secondary"
                 icon="storno"

@@ -19,4 +19,10 @@ rm -rf "$OUT"
 # tauri_build::build() can re-copy them on subsequent `cargo check/build` runs
 # without hitting "Permission denied (os error 13)".
 chmod -R u+w "$OUT"
-"$OUT/bin/java" -version
+# Windows jlink emits bin/java.exe; macOS/Linux emit bin/java. Pick whichever exists
+# so the smoke check works on every runner (under set -e a missing binary still fails).
+if [ -x "$OUT/bin/java.exe" ]; then
+  "$OUT/bin/java.exe" -version
+else
+  "$OUT/bin/java" -version
+fi

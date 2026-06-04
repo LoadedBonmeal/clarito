@@ -425,12 +425,14 @@ fn rule_br_ro_035_line_vat_rates(ctx: &RuleContext<'_>) -> Option<String> {
         let pos = i + 1;
         match line.vat_category.as_str() {
             "S" => {
-                // Valid RO TVA rates for category S:
-                //   5% — super-redusă (permanent)
-                //   9% — redusă (până la 2025-07-31)
-                //  11% — redusă (din 2025-08-01)
-                //  19% — standard (până la 2025-07-31)
-                //  21% — standard (din 2025-08-01)
+                // Valid RO TVA rates for category S (Legea 141/2025). Historical rates are
+                // kept in the list so corrections/regularizări of pre-Aug-2025 invoices still
+                // validate; the invoice picker demotes them to "(istoric)" (migration 0023):
+                //  21% — standard (din 01.08.2025)
+                //  11% — redusă generală unică (din 01.08.2025)
+                //   9% — tranzitoriu: locuințe către persoane fizice, până la 31.07.2026
+                //  19% — istoric (până la 31.07.2025); doar regularizări
+                //   5% — istoric/abrogat; doar regularizări
                 let rate_dec = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
                 let valid_s_rates = [
                     Decimal::from(5),

@@ -41,11 +41,16 @@ function localDateISO(d: Date): string {
 
 function nextDatePreview(freq: string, day: number): string {
   const today = new Date();
-  let next = new Date(today.getFullYear(), today.getMonth(), day);
+  // Mirror the backend scheduler (db/recurring.rs::advance_date): the day-of-month is
+  // clamped to 28 so it is valid in every month (incl. February) and never overflows
+  // into the next month — keeps the preview truthful about the scheduled date.
+  const d = Math.min(Math.max(day, 1), 28);
+  const mk = (y: number, m: number) => new Date(y, m, d);
+  let next = mk(today.getFullYear(), today.getMonth());
   if (next <= today) {
-    if (freq === "monthly") next = new Date(today.getFullYear(), today.getMonth() + 1, day);
-    else if (freq === "quarterly") next = new Date(today.getFullYear(), today.getMonth() + 3, day);
-    else next = new Date(today.getFullYear() + 1, today.getMonth(), day);
+    if (freq === "monthly") next = mk(today.getFullYear(), today.getMonth() + 1);
+    else if (freq === "quarterly") next = mk(today.getFullYear(), today.getMonth() + 3);
+    else next = mk(today.getFullYear() + 1, today.getMonth());
   }
   return localDateISO(next);
 }
