@@ -298,6 +298,26 @@ pub(crate) async fn submit_invoice_inner(
         ));
     }
 
+    // Helper: revert invoice QUEUED → DRAFT so the user can retry after ANY
+    // pre-submission error (validation, UBL generation, archive, token, upload).
+    // Only reverts if still QUEUED — never overwrites a later status.
+    let revert_to_draft = |pool: &sqlx::SqlitePool, invoice_id: &str| {
+        let pool = pool.clone();
+        let invoice_id = invoice_id.to_string();
+        async move {
+            let _ = sqlx::query(
+                "UPDATE invoices SET status = 'DRAFT', updated_at = unixepoch() \
+                 WHERE id = ?1 AND status = 'QUEUED'",
+            )
+            .bind(&invoice_id)
+            .execute(&pool)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = ?e, %invoice_id, "Failed to revert invoice to DRAFT status after ANAF error");
+            });
+        }
+    };
+
     // 2. Încarcă factura + liniile din DB (acum cu status QUEUED)
     let invoice_with_lines = db_invoices::get_with_lines(pool, invoice_id).await?;
     let invoice = invoice_with_lines.invoice;
@@ -320,19 +340,26 @@ pub(crate) async fn submit_invoice_inner(
     let storno_ref = resolve_storno_ref(pool, &invoice).await?;
 
     // 3. Generează XML UBL
-    let xml_string = generate_ubl(&GeneratorInput {
+    let xml_string = match generate_ubl(&GeneratorInput {
         invoice: invoice.clone(),
         lines: lines.clone(),
         seller: company.clone(),
         buyer: buyer.clone(),
         storno_ref: storno_ref.clone(),
-    })?;
+    }) {
+        Ok(xml) => xml,
+        Err(e) => {
+            revert_to_draft(pool, invoice_id).await;
+            return Err(e);
+        }
+    };
 
     // 4. Validează — dacă sunt erori blocante, oprește
     let (data_errors, _data_warnings) =
         validate_invoice_data(&invoice, &lines, &company, &buyer, storno_ref.as_deref());
     if !data_errors.is_empty() {
         let msg = data_errors.join("; ");
+        revert_to_draft(pool, invoice_id).await;
         return Err(AppError::Validation(msg));
     }
 
@@ -377,25 +404,6 @@ pub(crate) async fn submit_invoice_inner(
         .execute(pool)
         .await
         .map_err(AppError::Database)?;
-
-    // Helper: revert invoice to DRAFT so the user can retry after any error.
-    // Only reverts if still QUEUED — avoids accidentally overwriting a later status.
-    let revert_to_draft = |pool: &sqlx::SqlitePool, invoice_id: &str| {
-        let pool = pool.clone();
-        let invoice_id = invoice_id.to_string();
-        async move {
-            let _ = sqlx::query(
-                "UPDATE invoices SET status = 'DRAFT', updated_at = unixepoch() \
-                 WHERE id = ?1 AND status = 'QUEUED'",
-            )
-            .bind(&invoice_id)
-            .execute(&pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = ?e, %invoice_id, "Failed to revert invoice to DRAFT status after ANAF error");
-            });
-        }
-    };
 
     // 6. Obține token valid din keychain (înainte de a schimba statusul)
     let refresh_lock = app

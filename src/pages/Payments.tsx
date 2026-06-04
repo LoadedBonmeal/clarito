@@ -60,7 +60,7 @@ export function PaymentsPage() {
   const [filter, setFilter] = useState<PayFilter>("all");
   const [query, setQuery] = useState("");
   // addModal.invoiceId === "" means opened from header — user must pick an invoice first.
-  const [addModal, setAddModal] = useState<{ invoiceId: string; totalAmount: string } | null>(null);
+  const [addModal, setAddModal] = useState<{ invoiceId: string; totalAmount: string; currency: string } | null>(null);
   // Invoice picked via the header-triggered combobox (only used when addModal.invoiceId is "").
   const [pickedInvoice, setPickedInvoice] = useState<Invoice | null>(null);
   const [form, setForm] = useState({
@@ -234,7 +234,7 @@ export function PaymentsPage() {
             size="sm"
             onClick={() => {
               setPickedInvoice(null);
-              setAddModal({ invoiceId: "", totalAmount: "" });
+              setAddModal({ invoiceId: "", totalAmount: "", currency: "RON" });
               setForm({ amount: "", paidAt: new Date().toISOString().slice(0, 10), method: "transfer", reference: "" });
             }}
           >
@@ -366,7 +366,7 @@ export function PaymentsPage() {
                             title="Adaugă plată"
                             disabled={payStatus === "PAID"}
                             onClick={() => {
-                              setAddModal({ invoiceId: inv.id, totalAmount: inv.totalAmount });
+                              setAddModal({ invoiceId: inv.id, totalAmount: inv.totalAmount, currency: inv.currency ?? "RON" });
                               setForm({
                                 amount: rest.toFixed(2),
                                 paidAt: new Date().toISOString().slice(0, 10),
@@ -503,7 +503,7 @@ export function PaymentsPage() {
                       <span style={{ color: "var(--rf-text-muted)" }}>#{p.reference}</span>
                     )}
                     <span style={{ fontWeight: 600, minWidth: 80, textAlign: "right" }}>
-                      {p.amount} RON
+                      {p.amount} {pickedInvoice?.currency ?? addModal.currency}
                     </span>
                     <IconBtn
                       icon="trash"
@@ -531,7 +531,7 @@ export function PaymentsPage() {
           </div>
 
           <div className="rf-grid-2">
-            <Field label="Sumă (RON)" required>
+            <Field label={`Sumă (${pickedInvoice?.currency ?? addModal.currency})`} required>
               <Input
                 type="number"
                 step="0.01"

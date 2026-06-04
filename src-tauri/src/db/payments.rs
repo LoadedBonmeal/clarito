@@ -55,23 +55,30 @@ pub async fn create(pool: &SqlitePool, input: CreatePaymentInput) -> AppResult<P
         ));
     }
 
-    // Verify the invoice belongs to the given company before inserting
-    let invoice_exists: Option<String> =
-        sqlx::query_scalar("SELECT id FROM invoices WHERE id = ?1 AND company_id = ?2 LIMIT 1")
-            .bind(&input.invoice_id)
-            .bind(&input.company_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(AppError::Database)?;
+    // Verify the invoice belongs to the given company AND fetch its currency, so a
+    // payment defaults to the INVOICE's currency (not always RON). Otherwise a payment
+    // on a EUR invoice would be stored as RON, corrupting paid/remaining and the GL.
+    let invoice_currency: Option<String> = sqlx::query_scalar(
+        "SELECT COALESCE(NULLIF(TRIM(currency), ''), 'RON') FROM invoices \
+         WHERE id = ?1 AND company_id = ?2 LIMIT 1",
+    )
+    .bind(&input.invoice_id)
+    .bind(&input.company_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::Database)?;
 
-    if invoice_exists.is_none() {
-        return Err(AppError::Validation(
-            "Factura nu aparține companiei specificate.".into(),
-        ));
-    }
+    let invoice_currency = match invoice_currency {
+        Some(c) => c,
+        None => {
+            return Err(AppError::Validation(
+                "Factura nu aparține companiei specificate.".into(),
+            ))
+        }
+    };
 
     let id = new_id();
-    let currency = input.currency.unwrap_or_else(|| "RON".to_string());
+    let currency = input.currency.unwrap_or(invoice_currency);
     let method = input.method.unwrap_or_else(|| "transfer".to_string());
 
     sqlx::query(
