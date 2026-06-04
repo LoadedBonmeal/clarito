@@ -49,9 +49,76 @@ impl DukProvider for EnvProvider {
     }
 }
 
+/// Result of a DUK run, in the same `PreflightIssue` vocabulary as layer A.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DukOutcome {
+    /// True only if DUK was available, ran, AND reported no errors.
+    pub passed: bool,
+    pub errors: Vec<PreflightIssue>,
+}
+
+/// Parse DUKIntegrator's textual output (result file or stdout) into issues.
+/// Clean marker: output contains "fara erori"/"fără erori". Any line with a DUK
+/// error marker becomes an `error` `PreflightIssue` with code "DUK".
+pub fn parse_duk_output(raw: &str) -> DukOutcome {
+    let mut errors = Vec::new();
+    for line in raw.lines() {
+        let l = line.trim();
+        if l.is_empty() {
+            continue;
+        }
+        let low = l.to_lowercase();
+        let looks_error = low.contains("eroare")
+            || low.contains("erori")
+            || low.contains("nu se incadreaza")
+            || low.contains("nu se încadrează")
+            || low.contains("invalid")
+            || low.contains("atentionare")
+            || low.contains("atenționare")
+            || low.contains("nu este corect");
+        if looks_error && !low.contains("fara erori") && !low.contains("fără erori") {
+            errors.push(PreflightIssue {
+                severity: "error".to_string(),
+                code: "DUK".to_string(),
+                message: l.to_string(),
+                hint: "Eroare raportată de validatorul oficial ANAF (DUKIntegrator).".to_string(),
+            });
+        }
+    }
+    let clean =
+        raw.to_lowercase().contains("fara erori") || raw.to_lowercase().contains("fără erori");
+    DukOutcome {
+        passed: errors.is_empty() && clean,
+        errors,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn parser_clean_output_is_passing() {
+        let out = parse_duk_output("Validare fara erori fisier: /tmp/x.xml\n");
+        assert!(out.passed);
+        assert!(out.errors.is_empty());
+    }
+
+    #[test]
+    fn parser_error_lines_become_issues() {
+        let raw = "Atentionari la validare fisier: /tmp/x.xml\n\
+                   A: validari globale\n TVA(25) nu se incadreaza in 11% +- marja 1%\n";
+        let out = parse_duk_output(raw);
+        assert!(!out.passed);
+        assert!(!out.errors.is_empty());
+        assert_eq!(out.errors[0].code, "DUK");
+        assert_eq!(out.errors[0].severity, "error");
+        assert!(out
+            .errors
+            .iter()
+            .any(|i| i.message.contains("nu se incadreaza")));
+    }
+
     #[test]
     fn env_provider_resolves_when_jar_and_java_present() {
         let p = EnvProvider;
