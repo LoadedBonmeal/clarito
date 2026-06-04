@@ -159,7 +159,8 @@ pub async fn create(
     .bind(&input.name)
     .bind(input.unit.as_deref().unwrap_or("buc"))
     .bind(input.unit_price.as_deref().unwrap_or("0.00"))
-    .bind(input.vat_rate.as_deref().unwrap_or("19"))
+    // 2026 standard rate (Legea 141/2025) when the caller omits it.
+    .bind(input.vat_rate.as_deref().unwrap_or("21"))
     .bind(input.vat_category.as_deref().unwrap_or("S"))
     .bind(&code_trimmed)
     .bind(&input.stock_qty)

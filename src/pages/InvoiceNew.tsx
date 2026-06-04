@@ -57,7 +57,8 @@ function fmtDateRO(iso: string): string {
 }
 
 function newLineRow(vatPayer: boolean, base?: Partial<CreateLineInput>): LineRow {
-  const vatRate = vatPayer ? 19 : 0;
+  // 2026 standard rate is 21% (Legea 141/2025, from 1-Aug-2025). Non-payers → 0.
+  const vatRate = vatPayer ? 21 : 0;
   return {
     name: "",
     quantity: 1,

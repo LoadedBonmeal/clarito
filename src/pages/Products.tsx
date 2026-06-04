@@ -346,7 +346,7 @@ function ProductModal({
     name: product?.name ?? "",
     unit: product?.unit ?? "buc",
     unitPrice: product?.unitPrice ?? "0.00",
-    vatRate: product?.vatRate ?? "19",
+    vatRate: product?.vatRate ?? "21", // 2026 standard (Legea 141/2025); editing preserves the existing rate
     vatCategory: product?.vatCategory ?? "S",
     code: product?.code ?? "",
     stockQty: product?.stockQty ?? "",
@@ -399,7 +399,7 @@ function ProductModal({
       art331Code: (form.art331Code as string)?.trim() || undefined,
       unit: form.unit || "buc",
       unitPrice: form.unitPrice || "0.00",
-      vatRate: form.vatRate || "19",
+      vatRate: form.vatRate || "21",
       vatCategory: form.vatCategory || "S",
     };
     if (isEdit) {

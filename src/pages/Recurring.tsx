@@ -56,7 +56,7 @@ const DEFAULT_LINE: LineRow = {
   quantity: 1,
   unit: "buc",
   unitPrice: 0,
-  vatRate: 19,
+  vatRate: 21,
   vatCategory: "S",
 };
 

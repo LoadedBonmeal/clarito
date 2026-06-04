@@ -171,9 +171,9 @@ export function LineItemsEditor({
       quantity: 1,
       unit: "buc",
       unitPrice: 0,
-      vatRate: sellerVatPayer ? 19 : 0,
+      vatRate: sellerVatPayer ? 21 : 0,
       vatCategory: deduceVatCategory(
-        sellerVatPayer ? 19 : 0,
+        sellerVatPayer ? 21 : 0,
         buyerCountry,
         sellerVatPayer,
       ),
