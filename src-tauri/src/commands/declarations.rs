@@ -27,6 +27,28 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::ubl::fx::{amount_to_ron, parse_rate};
 
+// ── DUK gate types ────────────────────────────────────────────────────────────
+
+/// Result of an official export attempt with the DUK gate.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficialExportResult {
+    /// The written file path, or empty if blocked by DUK.
+    pub path: String,
+    pub written: bool,
+    /// Whether a DUK runtime was available to validate.
+    pub duk_available: bool,
+    /// Whether DUK reported clean (only meaningful when duk_available).
+    pub duk_passed: bool,
+    pub issues: Vec<crate::anaf_decl::preflight::PreflightIssue>,
+}
+
+/// DRY gate decision: returns true (write allowed) unless DUK is available,
+/// reported failure, and the user has NOT requested an override.
+pub fn duk_gate_allows_write(available: bool, passed: bool, override_: bool) -> bool {
+    !(available && !passed && !override_)
+}
+
 // ── Structs ───────────────────────────────────────────────────────────────────
 
 /// Un grup de TVA colectat (cotă + categorie).
@@ -713,14 +735,17 @@ fn build_and_write_xml(report: D300Report, dest_path: String) -> AppResult<Strin
 /// Parametrul `submission` conține câmpurile completate de utilizator (declarant, CAEN, bancă etc.)
 /// care nu sunt derivabile din datele fiscale.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn export_d300_official(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     company_id: String,
     period_from: String,
     period_to: String,
     submission: D300Submission,
     dest_path: String,
-) -> AppResult<String> {
+    skip_duk_override: bool,
+) -> AppResult<OfficialExportResult> {
     use crate::anaf_decl::d300::generator::generate_d300_xml;
     use crate::anaf_decl::d300::rows::map_to_rows;
 
@@ -748,11 +773,38 @@ pub async fn export_d300_official(
     // Map to D300Rows (all amounts rounded to lei, totals computed).
     let rows = map_to_rows(&report, &submission, &company, period)?;
 
-    // Generate XML and write to disk.
+    // Generate XML.
     let xml = generate_d300_xml(&rows, &ver)?;
-    std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
 
-    Ok(dest)
+    // Layer D: validate with the bundled DUK before writing. Graceful: no runtime → proceed.
+    let tmp = std::env::temp_dir().join("d300_official_check.xml");
+    std::fs::write(&tmp, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
+    let duk = crate::anaf_decl::duk::run_duk(&provider, DeclKind::D300, &tmp)?;
+    let _ = std::fs::remove_file(&tmp);
+    let (duk_available, duk_passed, issues) = match &duk {
+        Some(o) => (true, o.passed, o.errors.clone()),
+        None => (false, false, Vec::new()),
+    };
+    if !duk_gate_allows_write(duk_available, duk_passed, skip_duk_override) {
+        return Ok(OfficialExportResult {
+            path: String::new(),
+            written: false,
+            duk_available,
+            duk_passed,
+            issues,
+        });
+    }
+
+    // Write to disk.
+    std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    Ok(OfficialExportResult {
+        path: dest,
+        written: true,
+        duk_available,
+        duk_passed,
+        issues,
+    })
 }
 
 /// Pre-export validation — runs pure-Rust checks and returns friendly Romanian
@@ -799,6 +851,37 @@ mod tests {
     use super::*;
     use rust_decimal::Decimal;
     use std::str::FromStr;
+
+    // ── DUK gate logic ────────────────────────────────────────────────────────
+
+    /// duk_gate_allows_write: write is blocked only when DUK is available,
+    /// failed, and the user has NOT requested an override.
+    #[test]
+    fn gate_blocks_when_available_and_failed_without_override() {
+        // available=true, passed=false, override=false → blocked
+        assert!(!duk_gate_allows_write(true, false, false));
+    }
+
+    #[test]
+    fn gate_allows_when_duk_not_available() {
+        // available=false → always allow (graceful fallback)
+        assert!(duk_gate_allows_write(false, false, false));
+        assert!(duk_gate_allows_write(false, true, false));
+        assert!(duk_gate_allows_write(false, false, true));
+    }
+
+    #[test]
+    fn gate_allows_when_duk_passed() {
+        // available=true, passed=true → allow
+        assert!(duk_gate_allows_write(true, true, false));
+        assert!(duk_gate_allows_write(true, true, true));
+    }
+
+    #[test]
+    fn gate_allows_when_override_set() {
+        // available=true, passed=false, override=true → allow (user override)
+        assert!(duk_gate_allows_write(true, false, true));
+    }
 
     /// Verifică că gruparea după (cotă, categorie) produce rânduri distincte —
     /// același comportament ca BIZ-12 din reports.rs.

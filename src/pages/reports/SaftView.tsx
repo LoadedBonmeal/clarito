@@ -87,14 +87,14 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
     setExportingOfficial(true);
     try {
       // export_saft_official takes params wrapper: { companyId, year, month, destPath }
-      const saved = await api.saft.exportSaftOfficial(
+      const result = await api.saft.exportSaftOfficial(
         activeCompanyId,
         selectedYear,
         selectedMonth,
         savePath,
       );
-      notify.success(`D406 oficial salvat: ${saved}`);
-      try { await openPath(saved); } catch { /* reveal best-effort */ }
+      notify.success(`D406 oficial salvat: ${result.path}`);
+      try { await openPath(result.path); } catch { /* reveal best-effort */ }
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut exporta D406 oficial."));
     } finally {

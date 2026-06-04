@@ -492,9 +492,16 @@ export const saft = {
    * ca argument `params` (nu flat args):
    *   params: { companyId, year, month?, destPath }
    */
-  exportSaftOfficial: (companyId: string, year: number, month: number, destPath: string) =>
-    invoke<string>("export_saft_official", {
+  exportSaftOfficial: (
+    companyId: string,
+    year: number,
+    month: number,
+    destPath: string,
+    skipDukOverride = false,
+  ) =>
+    invoke<OfficialExportResult>("export_saft_official", {
       params: { companyId, year, month, destPath },
+      skipDukOverride,
     }),
 };
 
@@ -523,6 +530,18 @@ export interface PreflightIssue {
   code: string;
   message: string;
   hint: string;
+}
+
+/** Result of an official export attempt — includes DUK gate outcome. */
+export interface OfficialExportResult {
+  /** Written file path, or empty string if blocked by DUK. */
+  path: string;
+  written: boolean;
+  /** Whether a DUK runtime was available to validate. */
+  dukAvailable: boolean;
+  /** Whether DUK reported clean (only meaningful when dukAvailable). */
+  dukPassed: boolean;
+  issues: PreflightIssue[];
 }
 
 export const declarations = {
@@ -561,13 +580,15 @@ export const declarations = {
     periodTo: string,
     destPath: string,
     submission: D300Submission,
+    skipDukOverride = false,
   ) =>
-    invoke<string>("export_d300_official", {
+    invoke<OfficialExportResult>("export_d300_official", {
       companyId,
       periodFrom,
       periodTo,
       submission,
       destPath,
+      skipDukOverride,
     }),
   /**
    * Pre-export validation — runs pure-Rust checks and returns friendly Romanian
@@ -609,13 +630,15 @@ export const d394 = {
     periodTo: string,
     destPath: string,
     submission: D394Submission,
+    skipDukOverride = false,
   ) =>
-    invoke<string>("export_d394_official", {
+    invoke<OfficialExportResult>("export_d394_official", {
       companyId,
       periodFrom,
       periodTo,
       submission,
       destPath,
+      skipDukOverride,
     }),
 };
 

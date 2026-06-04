@@ -207,15 +207,15 @@ export function DeclarationsPage() {
         regDedusaBaza:    regDB !== 0 ? regDB : null,
         regDedusaTva:     regDT !== 0 ? regDT : null,
       };
-      const saved = await api.declarations.exportD300Official(
+      const result = await api.declarations.exportD300Official(
         activeCompanyId,
         dateFrom,
         dateTo,
         savePath,
         submissionWithReg,
       );
-      notify.success(`D300 oficial salvat: ${saved}`);
-      try { await openPath(saved); } catch { /* reveal best-effort */ }
+      notify.success(`D300 oficial salvat: ${result.path}`);
+      try { await openPath(result.path); } catch { /* reveal best-effort */ }
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut exporta D300 oficial."));
     } finally {

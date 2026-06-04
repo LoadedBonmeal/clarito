@@ -96,15 +96,15 @@ export function D394View({ dateFrom, dateTo }: Props) {
     if (!savePath) return;
     setExportingOfficial(true);
     try {
-      const saved = await api.d394.exportD394Official(
+      const result = await api.d394.exportD394Official(
         activeCompanyId,
         periodFrom,
         periodTo,
         savePath,
         submission,
       );
-      notify.success(`D394 oficial salvat: ${saved}`);
-      try { await openPath(saved); } catch { /* reveal best-effort */ }
+      notify.success(`D394 oficial salvat: ${result.path}`);
+      try { await openPath(result.path); } catch { /* reveal best-effort */ }
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut exporta D394 oficial."));
     } finally {

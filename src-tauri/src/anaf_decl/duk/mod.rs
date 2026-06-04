@@ -2,9 +2,6 @@
 //! `BundledProvider` resolves the JRE+jars shipped in the app; `EnvProvider` uses
 //! `EFACTURA_DUK_JAR` + system `java` (dev/CI). Both produce a `DukRuntime`.
 
-// TODO(remove in P1.T4): DukOutcome used by BundledProvider wiring in T4
-#![allow(dead_code, unused_imports)]
-
 use std::path::{Path, PathBuf};
 
 use crate::anaf_decl::preflight::PreflightIssue;
@@ -46,6 +43,41 @@ impl DukProvider for EnvProvider {
             .filter(|p| p.is_file())
             .unwrap_or_else(|| PathBuf::from("java"));
         Some(DukRuntime { java, jar_dir })
+    }
+}
+
+/// Runtime provider: resolves the jlink JRE + DUK jars bundled as Tauri resources.
+pub struct BundledProvider {
+    jre_bin: PathBuf,
+    jar_dir: PathBuf,
+}
+
+impl BundledProvider {
+    pub fn new(app: &tauri::AppHandle) -> Self {
+        use tauri::Manager;
+        let res = app.path().resource_dir().unwrap_or_default();
+        let java = if cfg!(windows) {
+            "jre-min/bin/java.exe"
+        } else {
+            "jre-min/bin/java"
+        };
+        Self {
+            jre_bin: res.join(java),
+            jar_dir: res.join("duk"),
+        }
+    }
+}
+
+impl DukProvider for BundledProvider {
+    fn resolve(&self) -> Option<DukRuntime> {
+        if self.jre_bin.is_file() && self.jar_dir.join("DUKIntegrator.jar").is_file() {
+            Some(DukRuntime {
+                java: self.jre_bin.clone(),
+                jar_dir: self.jar_dir.clone(),
+            })
+        } else {
+            None // not bundled (e.g. dev) → graceful fallback
+        }
     }
 }
 

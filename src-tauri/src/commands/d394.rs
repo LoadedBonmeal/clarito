@@ -494,18 +494,22 @@ pub async fn export_d394(
 /// Spre deosebire de `export_d394` (preview JSON-like), aceasta produce un XML
 /// strict conform cu schema oficială XSD (`sample_d394.xml`).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn export_d394_official(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     company_id: String,
     period_from: String,
     period_to: String,
     submission: crate::anaf_decl::d394::D394Submission,
     dest_path: String,
-) -> AppResult<String> {
+    skip_duk_override: bool,
+) -> AppResult<crate::commands::declarations::OfficialExportResult> {
     use crate::anaf_decl::d394::generator::generate_d394_xml;
     use crate::anaf_decl::d394::sections::build_sections;
     use crate::anaf_decl::version::resolve;
     use crate::anaf_decl::DeclKind;
+    use crate::commands::declarations::duk_gate_allows_write;
     use crate::db::companies;
     use chrono::NaiveDate;
 
@@ -535,10 +539,35 @@ pub async fn export_d394_official(
     // Generate schema-conformant XML
     let xml = generate_d394_xml(&doc, &submission, &company, &ver)?;
 
+    // Layer D: validate with the bundled DUK before writing. Graceful: no runtime → proceed.
+    let tmp = std::env::temp_dir().join("d394_official_check.xml");
+    std::fs::write(&tmp, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
+    let duk = crate::anaf_decl::duk::run_duk(&provider, DeclKind::D394, &tmp)?;
+    let _ = std::fs::remove_file(&tmp);
+    let (duk_available, duk_passed, issues) = match &duk {
+        Some(o) => (true, o.passed, o.errors.clone()),
+        None => (false, false, Vec::new()),
+    };
+    if !duk_gate_allows_write(duk_available, duk_passed, skip_duk_override) {
+        return Ok(crate::commands::declarations::OfficialExportResult {
+            path: String::new(),
+            written: false,
+            duk_available,
+            duk_passed,
+            issues,
+        });
+    }
+
     // Write to disk
     std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
-
-    Ok(dest)
+    Ok(crate::commands::declarations::OfficialExportResult {
+        path: dest,
+        written: true,
+        duk_available,
+        duk_passed,
+        issues,
+    })
 }
 
 // ── XML builder ───────────────────────────────────────────────────────────────
