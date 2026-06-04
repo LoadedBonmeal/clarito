@@ -234,6 +234,12 @@ export const anaf = {
     invoke<boolean>("anaf_is_authenticated", { companyId }),
   logout: (companyId: string) =>
     invoke<void>("anaf_logout", { companyId }),
+  /** Save (or clear, if empty) the OAuth client_secret in the OS keychain. */
+  setOauthClientSecret: (secret: string) =>
+    invoke<void>("anaf_set_oauth_client_secret", { secret }),
+  /** True if an OAuth client_secret is stored (value never returned to JS). */
+  hasOauthClientSecret: () =>
+    invoke<boolean>("anaf_has_oauth_client_secret"),
   submitInvoice: (companyId: string, invoiceId: string, testMode = false) =>
     invoke<string>("anaf_submit_invoice", { companyId, invoiceId, testMode }),
   checkStatus: (companyId: string, invoiceId: string, testMode = false) =>
@@ -508,6 +514,14 @@ export const gl = {
 
 // ─── Declarations (D300) ──────────────────────────────────────────────────
 
+/** A single pre-export validation finding from the Rust preflight engine. */
+export interface PreflightIssue {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  hint: string;
+}
+
 export const declarations = {
   /** Calculează decontul D300 — TVA colectat (vânzări) pentru o perioadă. */
   compute: (companyId: string, periodFrom: string, periodTo: string) =>
@@ -551,6 +565,23 @@ export const declarations = {
       periodTo,
       submission,
       destPath,
+    }),
+  /**
+   * Pre-export validation — runs pure-Rust checks and returns friendly Romanian
+   * messages for common DUKIntegrator-fatal issues.
+   * `kind` is one of: "D300", "D394", "D406".
+   */
+  preflight: (
+    companyId: string,
+    kind: string,
+    periodFrom: string,
+    periodTo: string,
+  ) =>
+    invoke<PreflightIssue[]>("preflight_declaration", {
+      companyId,
+      kind,
+      periodFrom,
+      periodTo,
     }),
 };
 

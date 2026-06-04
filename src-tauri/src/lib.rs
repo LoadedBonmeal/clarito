@@ -340,6 +340,8 @@ pub fn run() {
             commands::anaf::anaf_authorize,
             commands::anaf::anaf_is_authenticated,
             commands::anaf::anaf_logout,
+            commands::anaf::anaf_set_oauth_client_secret,
+            commands::anaf::anaf_has_oauth_client_secret,
             commands::anaf::anaf_submit_invoice,
             commands::anaf::anaf_check_invoice_status,
             commands::anaf::anaf_sync_spv,
@@ -387,6 +389,7 @@ pub fn run() {
             commands::declarations::compute_d300,
             commands::declarations::export_d300,
             commands::declarations::export_d300_official,
+            commands::declarations::preflight_declaration,
             // d394 — livrări/achiziții pe teritoriul național
             commands::d394::compute_d394,
             commands::d394::export_d394,

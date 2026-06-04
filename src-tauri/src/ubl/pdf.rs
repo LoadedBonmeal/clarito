@@ -1,6 +1,8 @@
 //! Generare PDF simplu pentru factură folosind `printpdf 0.7`.
 
 use printpdf::*;
+// Use printpdf's re-exported image crate (avoids name ambiguity with printpdf::image module).
+use printpdf::image_crate as img_crate;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use std::str::FromStr;
@@ -28,7 +30,57 @@ const LINE_H: f32 = 5.0; // mm per text line
 // Liberation Sans — sourced from the shared fonts module (single binary copy).
 use crate::ubl::fonts::{FONT_BOLD_BYTES, FONT_REGULAR_BYTES};
 
-pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
+// ─── Template config ──────────────────────────────────────────────────────────
+
+/// Configures the visual appearance of the generated PDF invoice.
+///
+/// The default preset is `"clasic"` which produces output byte-equivalent to
+/// the original (no colour, no logo unless `seller.logo_path` is set).
+#[derive(Debug, Clone)]
+pub struct InvoiceTemplate {
+    /// One of: `"clasic"`, `"modern"`, `"minimal"`.
+    pub preset: String,
+    /// Accent colour as `"#RRGGBB"`. Used according to the preset rules.
+    pub accent_hex: String,
+}
+
+impl Default for InvoiceTemplate {
+    fn default() -> Self {
+        Self {
+            preset: "clasic".into(),
+            accent_hex: "#000000".into(),
+        }
+    }
+}
+
+/// Parse `"#RRGGBB"` into a printpdf `Color::Rgb`. Falls back to black on any
+/// parse failure so a bad setting value never breaks PDF generation.
+fn parse_accent(hex: &str) -> Color {
+    let h = hex.trim().trim_start_matches('#');
+    if h.len() == 6 {
+        if let (Ok(r), Ok(g), Ok(b)) = (
+            u8::from_str_radix(&h[0..2], 16),
+            u8::from_str_radix(&h[2..4], 16),
+            u8::from_str_radix(&h[4..6], 16),
+        ) {
+            return Color::Rgb(Rgb::new(
+                r as f32 / 255.0,
+                g as f32 / 255.0,
+                b as f32 / 255.0,
+                None,
+            ));
+        }
+    }
+    Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None))
+}
+
+fn black() -> Color {
+    Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None))
+}
+
+// ─── Public entry point ───────────────────────────────────────────────────────
+
+pub fn generate_pdf(input: &GeneratorInput, template: &InvoiceTemplate) -> AppResult<Vec<u8>> {
     let (doc, page1, layer1) = PdfDocument::new("Factura", Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
     let layer = doc.get_page(page1).get_layer(layer1);
 
@@ -43,10 +95,18 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     let seller = &input.seller;
     let buyer = &input.buyer;
 
+    let accent = parse_accent(&template.accent_hex);
+    let preset = template.preset.as_str();
+
+    // Apply accent to title? (modern + minimal)
+    let accent_title = matches!(preset, "modern" | "minimal");
+    // Apply accent to section headings + dividers? (modern only)
+    let accent_sections = matches!(preset, "modern");
+
     // Current Y cursor (counts down from top)
     let mut y: f32 = PAGE_H - MARGIN;
 
-    // ── Header ────────────────────────────────────────────────────────────────
+    // ── Company name (always black) ───────────────────────────────────────────
     layer.use_text(
         seller.legal_name.clone(),
         FONT_TITLE,
@@ -56,8 +116,19 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     );
     y -= 8.0;
 
+    // ── Try to embed logo in top-right corner ─────────────────────────────────
+    // Pass the current y (after the company name line) so the logo sits near the header top.
+    try_embed_logo(&doc, &layer, seller, PAGE_H - MARGIN);
+
+    // ── Invoice title ─────────────────────────────────────────────────────────
     let title = format!("FACTURA Nr. {}", inv.full_number);
+    if accent_title {
+        layer.set_fill_color(accent.clone());
+    }
     layer.use_text(title, FONT_TITLE, Mm(MARGIN), Mm(y), &font_bold);
+    if accent_title {
+        layer.set_fill_color(black());
+    }
     y -= 6.0;
 
     let date_line = format!(
@@ -68,19 +139,34 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     y -= 8.0;
 
     // ── Divider ───────────────────────────────────────────────────────────────
+    if accent_sections {
+        layer.set_outline_color(accent.clone());
+    }
     draw_hline(&layer, MARGIN, PAGE_W - MARGIN, y + 2.0);
+    if accent_sections {
+        layer.set_outline_color(black());
+    }
     y -= 2.0;
 
     // ── Seller / Buyer blocks ─────────────────────────────────────────────────
     let block_top = y;
 
     // Seller (left)
+    if accent_sections {
+        layer.set_fill_color(accent.clone());
+    }
     layer.use_text("FURNIZOR", FONT_HEADING, Mm(MARGIN), Mm(y), &font_bold);
+    if accent_sections {
+        layer.set_fill_color(black());
+    }
     y -= LINE_H;
     y = write_seller_block(&layer, &font_normal, &font_bold, seller, MARGIN, y);
 
     // Buyer (right) — reset y to block_top
     let mut y_right = block_top;
+    if accent_sections {
+        layer.set_fill_color(accent.clone());
+    }
     layer.use_text(
         "CUMPARATOR",
         FONT_HEADING,
@@ -88,6 +174,9 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
         Mm(y_right),
         &font_bold,
     );
+    if accent_sections {
+        layer.set_fill_color(black());
+    }
     y_right -= LINE_H;
     write_buyer_block(&layer, &font_normal, buyer, COL_MID, y_right);
 
@@ -98,7 +187,13 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
     }
 
     // ── Line items table ──────────────────────────────────────────────────────
+    if accent_sections {
+        layer.set_outline_color(accent.clone());
+    }
     draw_hline(&layer, MARGIN, PAGE_W - MARGIN, y);
+    if accent_sections {
+        layer.set_outline_color(black());
+    }
     y -= 5.0;
 
     // Table header
@@ -286,8 +381,81 @@ pub fn generate_pdf(input: &GeneratorInput) -> AppResult<Vec<u8>> {
         }
     }
 
+    let _ = y; // silence unused-variable warning after notes block
+
     doc.save_to_bytes()
         .map_err(|e| AppError::Pdf(e.to_string()))
+}
+
+// ─── Logo embedding (defensive) ───────────────────────────────────────────────
+
+/// Try to embed the seller logo in the top-right of the header.
+/// Any failure (missing file, decode error, unsupported format) is silently
+/// ignored with a `tracing::warn!` — this function never returns an error.
+fn try_embed_logo(
+    _doc: &PdfDocumentReference,
+    layer: &PdfLayerReference,
+    seller: &Company,
+    header_top_y: f32,
+) {
+    let path = match &seller.logo_path {
+        Some(p) if !p.is_empty() => p.clone(),
+        _ => return,
+    };
+
+    if !std::path::Path::new(&path).exists() {
+        tracing::warn!("Invoice logo file not found: {}", path);
+        return;
+    }
+
+    // image 0.24: ImageReader is at image::io::Reader.
+    // with_guessed_format() may return std::io::Error; flatten both into ImageError.
+    let dyn_img = match (|| -> Result<img_crate::DynamicImage, img_crate::ImageError> {
+        let reader = img_crate::io::Reader::open(&path).map_err(img_crate::ImageError::IoError)?;
+        let reader = reader
+            .with_guessed_format()
+            .map_err(img_crate::ImageError::IoError)?;
+        reader.decode()
+    })() {
+        Ok(img) => img,
+        Err(e) => {
+            tracing::warn!("Invoice logo decode failed ({}): {}", path, e);
+            return;
+        }
+    };
+
+    // Target max logo width: 32 mm at 300 DPI.
+    // At 300 DPI, 1 mm = 300/25.4 px ≈ 11.81 px.
+    const DPI: f32 = 300.0;
+    const MAX_W_MM: f32 = 32.0;
+    let px_per_mm = DPI / 25.4;
+    let max_w_px = MAX_W_MM * px_per_mm;
+
+    let img_w_px = dyn_img.width() as f32;
+    let scale = if img_w_px > max_w_px {
+        max_w_px / img_w_px
+    } else {
+        1.0
+    };
+
+    let logo_w_mm = img_w_px * scale / px_per_mm;
+
+    // Place logo in top-right corner, same Y baseline as the header.
+    let logo_x_mm = PAGE_W - MARGIN - logo_w_mm;
+    let logo_y_mm = header_top_y - 8.0; // offset to sit near seller name line
+
+    let pdf_image = Image::from_dynamic_image(&dyn_img);
+    pdf_image.add_to_layer(
+        layer.clone(),
+        ImageTransform {
+            translate_x: Some(Mm(logo_x_mm)),
+            translate_y: Some(Mm(logo_y_mm)),
+            scale_x: Some(scale),
+            scale_y: Some(scale),
+            dpi: Some(DPI),
+            ..Default::default()
+        },
+    );
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -589,6 +757,112 @@ fn number_to_words_ro(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::companies::Company;
+    use crate::db::contacts::Contact;
+    use crate::db::invoices::{Invoice, LineItem};
+
+    fn sample_input() -> GeneratorInput {
+        let seller = Company {
+            id: "company-1".to_string(),
+            cui: "RO12345678".to_string(),
+            legal_name: "Test SRL".to_string(),
+            trade_name: None,
+            registry_number: None,
+            vat_payer: true,
+            address: "Str. Exemplu nr. 1".to_string(),
+            city: "București".to_string(),
+            county: "Sector 1".to_string(),
+            postal_code: None,
+            country: "RO".to_string(),
+            email: None,
+            phone: None,
+            iban: None,
+            bank_name: None,
+            is_active: true,
+            spv_enabled: false,
+            invoice_series: "FAC".to_string(),
+            last_invoice_number: 1,
+            logo_path: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+
+        let buyer = Contact {
+            id: "contact-1".to_string(),
+            company_id: "company-1".to_string(),
+            contact_type: "CUSTOMER".to_string(),
+            cui: Some("RO87654321".to_string()),
+            legal_name: "Client SRL".to_string(),
+            vat_payer: true,
+            address: Some("Str. Client nr. 2".to_string()),
+            city: Some("Cluj-Napoca".to_string()),
+            county: Some("Cluj".to_string()),
+            country: "RO".to_string(),
+            email: None,
+            phone: None,
+            currency: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+
+        let invoice = Invoice {
+            id: "invoice-1".to_string(),
+            company_id: "company-1".to_string(),
+            contact_id: "contact-1".to_string(),
+            series: "FAC".to_string(),
+            number: 1,
+            full_number: "FAC-2024-0001".to_string(),
+            issue_date: "2024-01-15".to_string(),
+            due_date: "2024-02-15".to_string(),
+            currency: "RON".to_string(),
+            exchange_rate: None,
+            subtotal_amount: "100.00".to_string(),
+            vat_amount: "19.00".to_string(),
+            total_amount: "119.00".to_string(),
+            status: "DRAFT".to_string(),
+            anaf_upload_id: None,
+            anaf_index: None,
+            anaf_submitted_at: None,
+            anaf_validated_at: None,
+            anaf_rejected_at: None,
+            xml_path: None,
+            pdf_path: None,
+            signature_xml_path: None,
+            rejection_reason: None,
+            rejection_code: None,
+            notes: None,
+            payment_means_code: "30".to_string(),
+            storno_of_invoice_id: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+
+        let line = LineItem {
+            id: "line-1".to_string(),
+            invoice_id: "invoice-1".to_string(),
+            position: 1,
+            name: "Serviciu consultanță".to_string(),
+            description: None,
+            quantity: "1.00".to_string(),
+            unit: "H87".to_string(),
+            unit_price: "100.00".to_string(),
+            vat_rate: "19.00".to_string(),
+            vat_category: "S".to_string(),
+            subtotal_amount: "100.00".to_string(),
+            vat_amount: "19.00".to_string(),
+            total_amount: "119.00".to_string(),
+            cpv_code: None,
+            art331_code: None,
+        };
+
+        GeneratorInput {
+            invoice,
+            lines: vec![line],
+            seller,
+            buyer,
+            storno_ref: None,
+        }
+    }
 
     // BIZ-21: amount-in-words must preserve exact decimal cents
     // (the old f64-based path lost precision on values like 1234.99).
@@ -614,5 +888,75 @@ mod tests {
             words.to_lowercase().contains("lei"),
             "expected 'lei' in output, got: {words}"
         );
+    }
+
+    // ── Template PDF tests ────────────────────────────────────────────────────
+
+    /// (a) Default template (clasic) generates valid PDF bytes.
+    #[test]
+    fn pdf_clasic_template_generates_ok() {
+        let input = sample_input();
+        let result = generate_pdf(&input, &InvoiceTemplate::default());
+        let bytes = result.expect("clasic template must succeed");
+        assert!(!bytes.is_empty(), "PDF must not be empty");
+        assert!(
+            bytes.starts_with(b"%PDF"),
+            "PDF must start with %PDF header"
+        );
+    }
+
+    /// (b) Modern template with accent colour generates valid PDF bytes.
+    #[test]
+    fn pdf_modern_template_generates_ok() {
+        let input = sample_input();
+        let tmpl = InvoiceTemplate {
+            preset: "modern".into(),
+            accent_hex: "#1a73e8".into(),
+        };
+        let result = generate_pdf(&input, &tmpl);
+        let bytes = result.expect("modern template must succeed");
+        assert!(!bytes.is_empty(), "PDF must not be empty");
+        assert!(bytes.starts_with(b"%PDF"), "must be a valid PDF");
+    }
+
+    /// (c) Logo path pointing to a tiny PNG — logo is embedded, no error.
+    #[test]
+    fn pdf_with_valid_logo_path_ok() {
+        use std::io::Write;
+
+        // Write a minimal 2x2 RGBA PNG to a tempfile.
+        let mut tmpfile = tempfile::NamedTempFile::new().expect("tempfile");
+        // 2x2 white PNG, generated via image crate
+        let raw_img = img_crate::RgbaImage::from_pixel(2, 2, img_crate::Rgba([255, 255, 255, 255]));
+        let dyn_img = img_crate::DynamicImage::ImageRgba8(raw_img);
+        let mut png_bytes: Vec<u8> = Vec::new();
+        dyn_img
+            .write_to(
+                &mut std::io::Cursor::new(&mut png_bytes),
+                img_crate::ImageFormat::Png,
+            )
+            .expect("write PNG");
+        tmpfile.write_all(&png_bytes).expect("write tmpfile");
+        let path = tmpfile.path().to_str().unwrap().to_string();
+
+        let mut input = sample_input();
+        input.seller.logo_path = Some(path);
+
+        let result = generate_pdf(&input, &InvoiceTemplate::default());
+        let bytes = result.expect("PDF with logo must succeed");
+        assert!(!bytes.is_empty());
+        assert!(bytes.starts_with(b"%PDF"));
+    }
+
+    /// (d) Non-existent logo path — PDF still generated without error.
+    #[test]
+    fn pdf_with_nonexistent_logo_path_ok() {
+        let mut input = sample_input();
+        input.seller.logo_path = Some("/nonexistent/x.png".to_string());
+
+        let result = generate_pdf(&input, &InvoiceTemplate::default());
+        let bytes = result.expect("PDF with missing logo must still succeed (graceful fallback)");
+        assert!(!bytes.is_empty());
+        assert!(bytes.starts_with(b"%PDF"));
     }
 }

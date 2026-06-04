@@ -421,10 +421,14 @@ export function ReceivedPage() {
                         <td style={{ fontWeight: 600, fontFamily: "var(--rf-mono)" }}>{docNo}</td>
                         <td style={{ color: "var(--rf-text-muted)" }}>{inv.issueDate}</td>
                         <td className="rf-num" style={{ fontFamily: "var(--rf-mono)", color: "var(--rf-text-muted)", fontVariantNumeric: "tabular-nums" }}>
-                          {inv.netAmount != null ? fmtRON(inv.netAmount) : "—"}
+                          {inv.netAmount != null ? fmtRON(inv.netAmount) : (
+                            <span title="Defalcare TVA incompletă din XML — folosiți «Recalculează TVA din XML». Nu contribuie la TVA deductibilă." style={{ color: "var(--rf-warning)", cursor: "help", fontWeight: 700 }}>—</span>
+                          )}
                         </td>
                         <td className="rf-num" style={{ fontFamily: "var(--rf-mono)", color: "var(--rf-text-muted)", fontVariantNumeric: "tabular-nums" }}>
-                          {inv.vatAmount != null ? fmtRON(inv.vatAmount) : "—"}
+                          {inv.vatAmount != null ? fmtRON(inv.vatAmount) : (
+                            <span title="Defalcare TVA incompletă din XML — folosiți «Recalculează TVA din XML». Nu contribuie la TVA deductibilă." style={{ color: "var(--rf-warning)", cursor: "help", fontWeight: 700 }}>—</span>
+                          )}
                         </td>
                         <td className="rf-num" style={{ fontFamily: "var(--rf-mono)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{fmtRON(inv.totalAmount)}</td>
                         <td style={{ fontFamily: "var(--rf-mono)", color: "var(--rf-text-muted)" }}>{inv.currency}</td>

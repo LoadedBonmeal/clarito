@@ -127,7 +127,7 @@ pub(crate) async fn d300_vat_totals(
 
     // ── TVA deductibilă: Σvat_amount din received_invoice_vat_lines ──
     let purch_rows = sqlx::query(
-        "SELECT vl.vat_amount, COALESCE(ri.currency,'RON') as currency, ri.exchange_rate \
+        "SELECT vl.vat_amount, vl.vat_category, COALESCE(ri.currency,'RON') as currency, ri.exchange_rate \
          FROM received_invoice_vat_lines vl \
          JOIN received_invoices ri ON ri.id = vl.received_invoice_id \
          WHERE ri.company_id = ?1 \
@@ -145,6 +145,7 @@ pub(crate) async fn d300_vat_totals(
     let mut deductible = Decimal::ZERO;
     for row in &purch_rows {
         let vat_s: String = row.try_get("vat_amount").unwrap_or_default();
+        let category: String = row.try_get("vat_category").unwrap_or_default();
         let currency: String = row
             .try_get("currency")
             .unwrap_or_else(|_| "RON".to_string());
@@ -152,11 +153,19 @@ pub(crate) async fn d300_vat_totals(
             row.try_get::<Option<f64>, _>("exchange_rate")
                 .unwrap_or(None),
         );
-        deductible += amount_to_ron(
+        let vat_ron = amount_to_ron(
             Decimal::from_str(&vat_s).unwrap_or(Decimal::ZERO),
             &currency,
             fx,
         );
+        deductible += vat_ron;
+        // Taxare inversă (AE intern / K intracomunitar): cumpărătorul autolichidează
+        // TVA-ul colectat (registrul GL înregistrează C 4427 pe lângă D 4426).
+        // Reflectăm și pe latura colectată ca reconcilierea GL ↔ D300 să se închidă
+        // pentru achizițiile art.331 / intracomunitare.
+        if category == "AE" || category == "K" {
+            collected += vat_ron;
+        }
     }
 
     Ok((collected.round_dp(2), deductible.round_dp(2)))
@@ -658,6 +667,34 @@ pub async fn export_d300_official(
     std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
 
     Ok(dest)
+}
+
+/// Pre-export validation — runs pure-Rust checks and returns friendly Romanian
+/// messages for the most common DUKIntegrator-fatal issues.
+///
+/// `kind` is one of: `"D300"`, `"D394"`, `"D406"` (or `"SAFT"` as alias).
+/// Anything unrecognised defaults to `D300`.
+#[tauri::command]
+pub async fn preflight_declaration(
+    state: State<'_, AppState>,
+    company_id: String,
+    kind: String,
+    period_from: String,
+    period_to: String,
+) -> AppResult<Vec<crate::anaf_decl::preflight::PreflightIssue>> {
+    let decl_kind = match kind.to_uppercase().as_str() {
+        "D394" => DeclKind::D394,
+        "D406" | "SAFT" => DeclKind::D406,
+        _ => DeclKind::D300, // "D300" or anything unrecognised
+    };
+    crate::anaf_decl::preflight::preflight(
+        &state.db,
+        &company_id,
+        decl_kind,
+        &period_from,
+        &period_to,
+    )
+    .await
 }
 
 /// Escapes XML special characters in a string value.

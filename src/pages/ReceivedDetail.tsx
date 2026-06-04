@@ -156,6 +156,49 @@ export function ReceivedDetailPage() {
                   </div>
                 </Card>
 
+                {/* Defalcare TVA — net/TVA/total + avertisment dacă lipsește din XML */}
+                <SectionCard icon="receipt" title="Defalcare TVA">
+                  {inv.netAmount != null ? (
+                    <div style={{ padding: "0 16px 16px" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px 24px" }}>
+                        <div>
+                          <div className="rf-sec-title">Bază impozabilă</div>
+                          <div className="mono" style={{ fontWeight: 600, marginTop: 4 }}>
+                            {fmtRON(inv.netAmount)} {inv.currency}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="rf-sec-title">TVA</div>
+                          <div className="mono" style={{ fontWeight: 600, marginTop: 4 }}>
+                            {inv.vatAmount != null ? `${fmtRON(inv.vatAmount)} ${inv.currency}` : "—"}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="rf-sec-title">Total</div>
+                          <div className="mono" style={{ fontWeight: 700, marginTop: 4, color: "var(--rf-accent)" }}>
+                            {fmtRON(inv.totalAmount)} {inv.currency}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: 10 }}>
+                        {inv.vatAmount != null ? (
+                          <Badge variant="success">Defalcare parsată din XML</Badge>
+                        ) : (
+                          <Badge variant="warning">TVA lipsă din XML — verificați factura</Badge>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ padding: "0 16px 16px" }}>
+                      <Banner variant="warning">
+                        <b>Defalcare TVA indisponibilă</b> — această factură nu are baza și TVA extrase din
+                        XML, deci <b>nu contribuie la TVA deductibilă</b> în D300/D394. Apăsați
+                        «Recalculează TVA» (în antet) pentru a re-parsa din fișierul XML.
+                      </Banner>
+                    </div>
+                  )}
+                </SectionCard>
+
                 {/* ANAF/SPV info */}
                 <SectionCard icon="cloud" title="Informații ANAF/SPV">
                   <div style={{ padding: "0 16px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 24px" }}>

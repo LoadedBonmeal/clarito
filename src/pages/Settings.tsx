@@ -186,6 +186,8 @@ export function SettingsPage() {
   // ANAF advanced OAuth config
   const [anafAdvancedOpen, setAnafAdvancedOpen] = useState(false);
   const [anafClientId, setAnafClientId] = useState("");
+  const [anafClientSecret, setAnafClientSecret] = useState("");
+  const [anafHasSecret, setAnafHasSecret] = useState(false);
   const [anafRedirectUri, setAnafRedirectUri] = useState("");
   const [anafCallbackPort, setAnafCallbackPort] = useState("");
   const [anafAuthorizeUrl, setAnafAuthorizeUrl] = useState("");
@@ -196,6 +198,12 @@ export function SettingsPage() {
 
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+
+  // Invoice template
+  const [templatePreset, setTemplatePreset] = useState("clasic");
+  const [templateAccent, setTemplateAccent] = useState("#000000");
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateSaved, setTemplateSaved] = useState(false);
 
   // SmartBill
   const [smartbillUser, setSmartbillUser] = useState("");
@@ -231,6 +239,23 @@ export function SettingsPage() {
       setAnafCallbackPort(port ?? "");
       setAnafAuthorizeUrl(aurl ?? "");
       setAnafTokenUrl(turl ?? "");
+      try {
+        setAnafHasSecret(await api.anaf.hasOauthClientSecret());
+      } catch {
+        setAnafHasSecret(false);
+      }
+    })();
+  }, []);
+
+  // Load invoice template settings on mount
+  useEffect(() => {
+    void (async () => {
+      const [preset, accent] = await Promise.all([
+        api.settings.get("invoice_template_preset"),
+        api.settings.get("invoice_template_accent"),
+      ]);
+      if (preset) setTemplatePreset(preset);
+      if (accent) setTemplateAccent(accent);
     })();
   }, []);
 
@@ -283,6 +308,12 @@ export function SettingsPage() {
         api.settings.set("anaf_oauth_authorize_url", anafAuthorizeUrl),
         api.settings.set("anaf_oauth_token_url", anafTokenUrl),
       ]);
+      // client_secret-ul merge în keychain, doar dacă utilizatorul a introdus o valoare nouă.
+      if (anafClientSecret.trim() !== "") {
+        await api.anaf.setOauthClientSecret(anafClientSecret.trim());
+        setAnafClientSecret("");
+        setAnafHasSecret(true);
+      }
       setAnafAdvancedSaved(true);
       setTimeout(() => setAnafAdvancedSaved(false), 3000);
     } catch (e) {
@@ -320,6 +351,22 @@ export function SettingsPage() {
       notify.error("Eroare la salvare credențiale SmartBill.");
     } finally {
       setSavingSmartbill(false);
+    }
+  };
+
+  const handleSaveTemplate = async () => {
+    setSavingTemplate(true);
+    try {
+      await Promise.all([
+        api.settings.set("invoice_template_preset", templatePreset),
+        api.settings.set("invoice_template_accent", templateAccent),
+      ]);
+      setTemplateSaved(true);
+      setTimeout(() => setTemplateSaved(false), 3000);
+    } catch (e) {
+      notify.error(formatError(e, "Eroare la salvarea șablonului de factură."));
+    } finally {
+      setSavingTemplate(false);
     }
   };
 
@@ -459,6 +506,56 @@ export function SettingsPage() {
           </div>
         </SectionCard>
 
+        {/* ── Șablon factură (PDF) ── */}
+        <SectionCard icon="file" title="Șablon factură (PDF)" subtitle="Aspectul vizual al PDF-ului generat">
+          <div style={{ padding: "0 24px 16px" }}>
+            <SettingRow label="Preset" desc="Definește elementele colorate în PDF.">
+              <Select
+                value={templatePreset}
+                onChange={(e) => setTemplatePreset(e.target.value)}
+                style={{ minWidth: 180 }}
+              >
+                <option value="clasic">Clasic (negru, implicit)</option>
+                <option value="modern">Modern (accent pe titlu, secțiuni, linii)</option>
+                <option value="minimal">Minimal (accent doar pe titlu)</option>
+              </Select>
+            </SettingRow>
+            <SettingRow label="Culoare accent" desc="Aplicată conform preset-ului ales (#RRGGBB)." last>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <input
+                  type="color"
+                  value={templateAccent}
+                  onChange={(e) => setTemplateAccent(e.target.value)}
+                  style={{ width: 48, height: 32, padding: 2, border: "1px solid var(--rf-border)", borderRadius: 6, cursor: "pointer" }}
+                  title="Selectați culoarea accent"
+                />
+                <Input
+                  className="rf-mono"
+                  value={templateAccent}
+                  onChange={(e) => setTemplateAccent(e.target.value)}
+                  style={{ width: 110 }}
+                  placeholder="#000000"
+                />
+              </div>
+            </SettingRow>
+            <div style={{ paddingTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
+              <Btn
+                variant="primary"
+                size="sm"
+                disabled={savingTemplate}
+                onClick={() => void handleSaveTemplate()}
+              >
+                {savingTemplate ? "Se salvează…" : "Salvează"}
+              </Btn>
+              {templateSaved && (
+                <span style={{ fontSize: 12, color: "var(--rf-success)" }}>
+                  <Icon name="checkCircle" size={14} /> Salvat
+                </span>
+              )}
+            </div>
+          </div>
+        </SectionCard>
+
         {/* ── ANAF / SPV ── */}
         <SectionCard
           icon="shield"
@@ -540,15 +637,30 @@ export function SettingsPage() {
             {anafAdvancedOpen && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingTop: 14 }}>
                 <Banner variant="info">
-                  Lăsați gol pentru valorile implicite. Modificați doar dacă știți ce faceți (ex. mediu de test OAuth, client_id propriu înregistrat la ANAF).
+                  Pentru conectarea la SPV, ANAF cere o aplicație OAuth proprie: în SPV → „Gestionare
+                  profil OAuth" înregistrați aplicația (cu Redirect URI-ul de mai jos) și veți primi un
+                  <b> Client ID</b> și un <b>Client Secret</b>. Completați-le aici. Restul câmpurilor pot
+                  rămâne goale (valori implicite).
                 </Banner>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <Field label="Client ID" help="Furnizat de ANAF la înregistrarea aplicației">
+                  <Field label="Client ID" help="Generat de ANAF la înregistrarea aplicației OAuth">
                     <Input
                       className="rf-mono"
-                      placeholder="efactura-desktop (implicit)"
+                      placeholder="client_id de la ANAF"
                       value={anafClientId}
                       onChange={(e) => setAnafClientId(e.target.value)}
+                    />
+                  </Field>
+                  <Field
+                    label="Client Secret"
+                    help={anafHasSecret ? "Salvat în keychain — lăsați gol pentru a-l păstra" : "Generat de ANAF; stocat securizat în keychain"}
+                  >
+                    <Input
+                      type="password"
+                      className="rf-mono"
+                      placeholder={anafHasSecret ? "•••••••• (configurat)" : "client_secret de la ANAF"}
+                      value={anafClientSecret}
+                      onChange={(e) => setAnafClientSecret(e.target.value)}
                     />
                   </Field>
                   <Field label="Redirect URI">
@@ -570,7 +682,7 @@ export function SettingsPage() {
                   <Field label="URL autorizare">
                     <Input
                       className="rf-mono"
-                      placeholder="https://logincert.anaf.ro/anaf-oauth2-server/authorize"
+                      placeholder="https://logincert.anaf.ro/anaf-oauth2/v1/authorize"
                       value={anafAuthorizeUrl}
                       onChange={(e) => setAnafAuthorizeUrl(e.target.value)}
                     />
@@ -579,7 +691,7 @@ export function SettingsPage() {
                     <Field label="URL token">
                       <Input
                         className="rf-mono"
-                        placeholder="https://logincert.anaf.ro/anaf-oauth2-server/token"
+                        placeholder="https://logincert.anaf.ro/anaf-oauth2/v1/token"
                         value={anafTokenUrl}
                         onChange={(e) => setAnafTokenUrl(e.target.value)}
                       />

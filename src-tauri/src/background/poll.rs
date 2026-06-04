@@ -31,6 +31,7 @@ pub(crate) async fn refresh_token_for(
     let result = oauth::refresh_token_bundle_with_client_id(
         &bundle.refresh_token,
         &config.client_id,
+        &config.client_secret,
         &config.token_url,
     )
     .await
@@ -113,6 +114,7 @@ pub(crate) async fn poll_submitted_for_company(
             let result = oauth::refresh_token_bundle_with_client_id(
                 &bundle.refresh_token,
                 &config.client_id,
+                &config.client_secret,
                 &config.token_url,
             )
             .await

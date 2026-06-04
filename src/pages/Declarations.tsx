@@ -23,6 +23,7 @@ import {
   Input,
 } from "@/components/rf";
 import { Icon } from "@/components/shared/Icon";
+import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { D300SubmissionModal } from "@/components/modals/D300SubmissionModal";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -101,6 +102,14 @@ export function DeclarationsPage() {
 
   const yearOptions = buildYearOptions();
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
+
+  // ── Pre-export validation (preflight) ─────────────────────────────────────
+  const { data: preflightIssues = [] } = useQuery({
+    queryKey: ["preflight", "d300", activeCompanyId ?? "", dateFrom, dateTo],
+    queryFn: () => api.declarations.preflight(activeCompanyId!, "D300", dateFrom, dateTo),
+    enabled: !!activeCompanyId,
+    staleTime: 30_000,
+  });
 
   const monthSegOptions = MONTHS.map((label, idx) => ({
     value: String(idx + 1),
@@ -247,6 +256,9 @@ export function DeclarationsPage() {
           TVA deductibilă se calculează din facturile primite procesate. Verificați că toate
           facturile lunii au fost descărcate și parsate din SPV pentru un decont corect.
         </Banner>
+
+        {/* ── Preflight validation panel ──────────────────────────────────── */}
+        <PreflightPanel issues={preflightIssues} />
 
         {/* ── TVA colectată + deductibilă ─────────────────────────────────── */}
         <div className="rf-grid-2">

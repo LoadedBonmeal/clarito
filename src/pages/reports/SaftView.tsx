@@ -4,10 +4,12 @@
  */
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
 import { SectionCard, Btn, Banner } from "@/components/rf";
+import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
@@ -33,13 +35,26 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
 
   const monthName = MONTHS[selectedMonth - 1] ?? String(selectedMonth);
 
+  // Compute period strings for preflight (first→last day of selected month).
+  const mm = String(selectedMonth).padStart(2, "0");
+  const lastDay = new Date(selectedYear, selectedMonth, 0).getDate();
+  const periodFrom = `${selectedYear}-${mm}-01`;
+  const periodTo   = `${selectedYear}-${mm}-${String(lastDay).padStart(2, "0")}`;
+
+  // ── Pre-export validation (preflight) ──────────────────────────────────────
+  const { data: preflightIssues = [] } = useQuery({
+    queryKey: ["preflight", "d406", activeCompanyId ?? "", periodFrom, periodTo],
+    queryFn: () => api.declarations.preflight(activeCompanyId!, "D406", periodFrom, periodTo),
+    enabled: !!activeCompanyId,
+    staleTime: 30_000,
+  });
+
   const handleExport = async () => {
     if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
     if (allInvoicesForYear.length === 0) {
       notify.info(`Nu există date pentru anul ${selectedYear}.`);
       return;
     }
-    const mm = String(selectedMonth).padStart(2, "0");
     const savePath = await saveDialog({
       title:       "Salvează SAF-T D406",
       defaultPath: `saft-d406-${selectedYear}-${mm}.xml`,
@@ -63,7 +78,6 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
 
   const handleExportOfficial = async () => {
     if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
-    const mm = String(selectedMonth).padStart(2, "0");
     const savePath = await saveDialog({
       title:       "Salvează D406 oficial ANAF",
       defaultPath: `d406-oficial-${selectedYear}-${mm}.xml`,
@@ -114,6 +128,9 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
       {/* Export card */}
       <SectionCard icon="download" title="Generează SAF-T">
         <div style={{ padding: "4px 16px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Preflight validation panel */}
+          <PreflightPanel issues={preflightIssues} />
+
           <div style={{ fontSize: 13, color: "var(--rf-text-muted)", lineHeight: 1.5 }}>
             Exportă SAF-T D406 pentru <b>{monthName} {selectedYear}</b>.
           </div>

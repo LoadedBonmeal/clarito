@@ -45,6 +45,45 @@ pub fn delete_smartbill_token(company_id: &str) -> AppResult<()> {
     Ok(())
 }
 
+// ─── ANAF OAuth client_secret storage ───────────────────────────────────────
+//
+// client_secret-ul aplicației OAuth înregistrate la ANAF (client confidențial)
+// este stocat în OS keychain, NU în SQLite — este o parolă de aplicație și nu
+// trebuie expusă renderer-ului JS prin IPC. Este global pe instalare (un singur
+// client OAuth înregistrat la ANAF), deci folosim un account fix.
+
+const OAUTH_SECRET_SERVICE: &str = "com.lucaris.efactura.oauth_secret";
+const OAUTH_SECRET_ACCOUNT: &str = "global";
+
+/// Stochează client_secret-ul OAuth ANAF în OS keychain.
+pub fn store_oauth_client_secret(secret: &str) -> AppResult<()> {
+    let entry = Entry::new(OAUTH_SECRET_SERVICE, OAUTH_SECRET_ACCOUNT)
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    entry
+        .set_password(secret)
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    Ok(())
+}
+
+/// Citește client_secret-ul OAuth ANAF din OS keychain. `None` dacă nu există.
+pub fn get_oauth_client_secret() -> AppResult<Option<String>> {
+    let entry = Entry::new(OAUTH_SECRET_SERVICE, OAUTH_SECRET_ACCOUNT)
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    match entry.get_password() {
+        Ok(s) => Ok(Some(s)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(AppError::Other(e.to_string())),
+    }
+}
+
+/// Șterge client_secret-ul OAuth ANAF din OS keychain (best-effort).
+pub fn delete_oauth_client_secret() -> AppResult<()> {
+    let entry = Entry::new(OAUTH_SECRET_SERVICE, OAUTH_SECRET_ACCOUNT)
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    let _ = entry.delete_credential();
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenBundle {
     pub access_token: String,

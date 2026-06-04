@@ -9,7 +9,7 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::ubl::generator::{generate_ubl, GeneratorInput};
 use crate::ubl::paths;
-use crate::ubl::pdf::generate_pdf;
+use crate::ubl::pdf::{generate_pdf, InvoiceTemplate};
 use crate::ubl::validator::{validate_ubl, ValidationResult};
 
 #[tauri::command]
@@ -99,10 +99,27 @@ pub async fn generate_invoice_pdf(
         buyer,
         storno_ref,
     };
+
+    // Fetch invoice template settings (fall back to defaults on any error).
+    let template = {
+        let preset = crate::db::settings::get(&state.db, "invoice_template_preset")
+            .await
+            .unwrap_or(None)
+            .unwrap_or_else(|| "clasic".to_string());
+        let accent = crate::db::settings::get(&state.db, "invoice_template_accent")
+            .await
+            .unwrap_or(None)
+            .unwrap_or_else(|| "#000000".to_string());
+        InvoiceTemplate {
+            preset,
+            accent_hex: accent,
+        }
+    };
+
     let path = paths::pdf_path(&app, &inv.company_id, &invoice_id);
     let path_clone = path.clone();
     let path_str_result = tauri::async_runtime::spawn_blocking(move || -> AppResult<String> {
-        let pdf_bytes = generate_pdf(&input)?;
+        let pdf_bytes = generate_pdf(&input, &template)?;
         std::fs::write(&path_clone, &pdf_bytes).map_err(AppError::Io)?;
         path_clone
             .to_str()
