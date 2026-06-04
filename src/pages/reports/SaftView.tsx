@@ -11,6 +11,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { SectionCard, Btn, Banner } from "@/components/rf";
 import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { api } from "@/lib/tauri";
+import type { PreflightIssue } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
@@ -32,6 +33,7 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [exporting,         setExporting]         = useState(false);
   const [exportingOfficial, setExportingOfficial] = useState(false);
+  const [dukBlock,          setDukBlock]          = useState<PreflightIssue[] | null>(null);
 
   const monthName = MONTHS[selectedMonth - 1] ?? String(selectedMonth);
 
@@ -76,7 +78,7 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
     }
   };
 
-  const handleExportOfficial = async () => {
+  const handleExportOfficial = async (override = false) => {
     if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
     const savePath = await saveDialog({
       title:       "Salvează D406 oficial ANAF",
@@ -87,14 +89,25 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
     setExportingOfficial(true);
     try {
       // export_saft_official takes params wrapper: { companyId, year, month, destPath }
-      const result = await api.saft.exportSaftOfficial(
+      const res = await api.saft.exportSaftOfficial(
         activeCompanyId,
         selectedYear,
         selectedMonth,
         savePath,
+        override,
       );
-      notify.success(`D406 oficial salvat: ${result.path}`);
-      try { await openPath(result.path); } catch { /* reveal best-effort */ }
+      if (!res.written) {
+        setDukBlock(res.issues);
+        notify.error("DUKIntegrator a găsit erori. Corectați-le sau exportați oricum.");
+        return;
+      }
+      setDukBlock(null);
+      notify.success(
+        res.dukAvailable
+          ? `D406 oficial salvat (DUK: valid): ${res.path}`
+          : `D406 oficial salvat: ${res.path} (validare DUK indisponibilă local)`,
+      );
+      try { await openPath(res.path); } catch { /* reveal best-effort */ }
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut exporta D406 oficial."));
     } finally {
@@ -130,6 +143,17 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
         <div style={{ padding: "4px 16px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
           {/* Preflight validation panel */}
           <PreflightPanel issues={preflightIssues} />
+
+          {/* DUK block panel */}
+          {dukBlock && (
+            <div style={{ marginTop: 12 }}>
+              <PreflightPanel issues={dukBlock} />
+              <Btn variant="danger" size="sm" style={{ marginTop: 8 }}
+                   onClick={() => void handleExportOfficial(true)}>
+                Exportă oricum (ignoră DUK)
+              </Btn>
+            </div>
+          )}
 
           <div style={{ fontSize: 13, color: "var(--rf-text-muted)", lineHeight: 1.5 }}>
             Exportă SAF-T D406 pentru <b>{monthName} {selectedYear}</b>.
