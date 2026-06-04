@@ -158,6 +158,9 @@ export const received = {
   /** Export a selection of received invoices as CSV text. Returns the CSV string. */
   exportCsv: (companyId: string, ids: string[]) =>
     invoke<string>("export_received_csv", { companyId, ids }),
+  /** Setează tipul achiziției intra-UE: "goods" (R5/R18) sau "services" (R7/R20). */
+  setIntraEuKind: (receivedInvoiceId: string, companyId: string, kind: "goods" | "services") =>
+    invoke<void>("set_received_intra_eu_kind", { receivedInvoiceId, companyId, kind }),
 };
 
 // ─── Notifications ────────────────────────────────────────────────────────

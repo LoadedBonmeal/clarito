@@ -41,6 +41,9 @@ pub struct D300Group {
     pub base: String,
     /// TVA colectat, aranjat cu 2 zecimale.
     pub vat: String,
+    /// Tipul achiziției intra-UE (numai pentru category="K"): "goods" sau "services".
+    /// None pentru orice alt grup. Determină rândul D300: goods→R5/R18, services→R7/R20.
+    pub intra_eu_kind: Option<String>,
 }
 
 /// Raportul D300 — TVA colectat (vânzări) + TVA deductibil (achiziții).
@@ -303,6 +306,7 @@ pub async fn compute_d300(
                 vat_category: category,
                 base: base_sum.round_dp(2).to_string(),
                 vat: vat_sum.round_dp(2).to_string(),
+                intra_eu_kind: None, // sales groups never have an intra_eu_kind
             }
         })
         .collect();
@@ -346,9 +350,11 @@ pub async fn compute_d300(
 
     // Fetch liniile VAT din facturile primite (JOIN pentru filtru perioadă + companie).
     // Wave 4: fetch ri.currency + ri.exchange_rate for RON normalisation.
+    // Wave 7: fetch ri.intra_eu_kind so K acquisitions can be split goods/services.
     let purchase_line_rows = sqlx::query(
         "SELECT vl.vat_rate, vl.vat_category, vl.base_amount, vl.vat_amount, \
-                COALESCE(ri.currency, 'RON') AS currency, ri.exchange_rate \
+                COALESCE(ri.currency, 'RON') AS currency, ri.exchange_rate, \
+                ri.intra_eu_kind \
          FROM received_invoice_vat_lines vl \
          JOIN received_invoices ri ON ri.id = vl.received_invoice_id \
          WHERE ri.company_id = ?1 \
@@ -363,8 +369,11 @@ pub async fn compute_d300(
     .await
     .map_err(AppError::Database)?;
 
-    // Acumulăm per (rate_key, category) — același pattern ca vânzări.
-    let mut purchase_groups: BTreeMap<(i64, String), (Decimal, Decimal, Decimal)> = BTreeMap::new();
+    // Acumulăm per (rate_key, category, kind) — kind este non-empty numai pentru K.
+    // Astfel K-goods și K-services acumulează separat; toate celelalte categorii
+    // folosesc kind="" (nu contează pentru rândul D300 al lor).
+    let mut purchase_groups: BTreeMap<(i64, String, String), (Decimal, Decimal, Decimal)> =
+        BTreeMap::new();
 
     for row in &purchase_line_rows {
         let rate_s: String = row.try_get("vat_rate").unwrap_or_default();
@@ -380,9 +389,21 @@ pub async fn compute_d300(
             row.try_get::<Option<f64>, _>("exchange_rate")
                 .unwrap_or(None),
         );
+        // intra_eu_kind: meaningful only for K; default "goods" (migration default).
+        let intra_eu_kind: String = row
+            .try_get("intra_eu_kind")
+            .unwrap_or_else(|_| "goods".to_string());
 
         let rate = Decimal::from_str(&rate_s).unwrap_or(Decimal::ZERO);
         let rate_key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
+
+        // kind key: only meaningful for K; empty string for all other categories
+        // so they accumulate as before (no behavioural change outside K).
+        let kind_key = if category == "K" {
+            intra_eu_kind.clone()
+        } else {
+            String::new()
+        };
 
         // Convert per-line amounts to RON before accumulating (RON rows unchanged).
         let base_ron = amount_to_ron(
@@ -396,11 +417,9 @@ pub async fn compute_d300(
             fx,
         );
 
-        let e = purchase_groups.entry((rate_key, category)).or_insert((
-            rate,
-            Decimal::ZERO,
-            Decimal::ZERO,
-        ));
+        let e = purchase_groups
+            .entry((rate_key, category, kind_key))
+            .or_insert((rate, Decimal::ZERO, Decimal::ZERO));
         e.1 += base_ron;
         e.2 += vat_ron;
     }
@@ -411,14 +430,25 @@ pub async fn compute_d300(
     let purchase_groups_vec: Vec<D300Group> = purchase_groups
         .into_iter()
         .rev()
-        .map(|((_rate_key, category), (rate, base_sum, vat_sum))| {
+        .map(|((_rate_key, category, kind), (rate, base_sum, vat_sum))| {
             total_deductible_base += base_sum;
             total_deductible_vat += vat_sum;
+            // intra_eu_kind: Some("goods"|"services") for K groups; None elsewhere.
+            let intra_eu_kind = if category == "K" {
+                Some(if kind.is_empty() {
+                    "goods".to_string()
+                } else {
+                    kind
+                })
+            } else {
+                None
+            };
             D300Group {
                 vat_rate: rate.round_dp(2).to_string(),
                 vat_category: category,
                 base: base_sum.round_dp(2).to_string(),
                 vat: vat_sum.round_dp(2).to_string(),
+                intra_eu_kind,
             }
         })
         .collect();
@@ -795,6 +825,7 @@ mod tests {
                 vat_category: "S".to_string(),
                 base: "1000.00".to_string(),
                 vat: "190.00".to_string(),
+                intra_eu_kind: None,
             }],
             total_base: "1000.00".to_string(),
             total_vat: "190.00".to_string(),
@@ -804,6 +835,7 @@ mod tests {
                 vat_category: "S".to_string(),
                 base: "500.00".to_string(),
                 vat: "95.00".to_string(),
+                intra_eu_kind: None,
             }],
             total_deductible_base: "500.00".to_string(),
             total_deductible_vat: "95.00".to_string(),
@@ -880,6 +912,7 @@ mod tests {
                 vat_category: "S".to_string(),
                 base: "1000.00".to_string(),
                 vat: "190.00".to_string(),
+                intra_eu_kind: None,
             }],
             total_base: "1000.00".to_string(),
             total_vat: "190.00".to_string(),

@@ -32,6 +32,11 @@ pub struct ReceivedInvoice {
 
     pub status: String,
 
+    /// Tipul achiziției intra-UE: "goods" (default) sau "services".
+    /// Determină rândul D300: goods→R5/R18, services→R7/R20.
+    /// Relevant numai pentru facturile cu vat_category="K".
+    pub intra_eu_kind: String,
+
     pub downloaded_at: i64,
     pub created_at: i64,
 }
@@ -87,7 +92,7 @@ pub async fn list(
         SELECT id, company_id, anaf_download_id, anaf_index, issuer_cui, \
                issuer_name, series, number, total_amount, net_amount, vat_amount, \
                currency, exchange_rate, issue_date, xml_path, pdf_path, \
-               status, downloaded_at, created_at \
+               status, intra_eu_kind, downloaded_at, created_at \
         FROM received_invoices \
         WHERE (?1 IS NULL OR company_id = ?1) \
           AND (NOT ?2 OR status = CASE WHEN ?3 THEN 'NEW'      ELSE NULL END \
@@ -124,7 +129,7 @@ pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Rec
         "SELECT id, company_id, anaf_download_id, anaf_index, issuer_cui, \
          issuer_name, series, number, total_amount, net_amount, vat_amount, \
          currency, exchange_rate, issue_date, xml_path, pdf_path, \
-         status, downloaded_at, created_at \
+         status, intra_eu_kind, downloaded_at, created_at \
          FROM received_invoices WHERE id = ?1 AND company_id = ?2",
     )
     .bind(id)
@@ -132,6 +137,29 @@ pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Rec
     .fetch_optional(pool)
     .await?
     .ok_or(AppError::NotFound)
+}
+
+/// Setează tipul achiziției intra-UE pentru o factură primită.
+/// `kind` trebuie să fie "goods" sau "services".
+pub async fn set_intra_eu_kind(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+    kind: &str,
+) -> AppResult<()> {
+    let rows = sqlx::query(
+        "UPDATE received_invoices SET intra_eu_kind = ?1 WHERE id = ?2 AND company_id = ?3",
+    )
+    .bind(kind)
+    .bind(id)
+    .bind(company_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    if rows == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(())
 }
 
 pub async fn set_status(

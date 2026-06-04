@@ -129,6 +129,16 @@ pub fn generate_d300_xml(rows: &D300Rows, ver: &SchemaVersion) -> AppResult<Stri
     // R18 — deductibil intra-EU goods; DUK V_7/V_8: R18_1=R5_1, R18_2=R5_2
     push_opt!(rows.r18_1, "R18_1");
     push_opt!(rows.r18_2, "R18_2");
+    // R7 — intra-EU services collected (Wave 7); DUK V_13/V_14: R20=R7
+    push_opt!(rows.r7_1, "R7_1");
+    push_opt!(rows.r7_2, "R7_2");
+    push_opt!(rows.r7_1_1, "R7_1_1");
+    push_opt!(rows.r7_1_2, "R7_1_2");
+    // R20 — intra-EU services deductible; DUK V_13/V_14: R20=R7, V_15: R20_1_1=R7_1_1
+    push_opt!(rows.r20_1, "R20_1");
+    push_opt!(rows.r20_2, "R20_2");
+    push_opt!(rows.r20_1_1, "R20_1_1");
+    push_opt!(rows.r20_1_2, "R20_1_2");
     push_opt!(rows.r22_1, "R22_1");
     push_opt!(rows.r22_2, "R22_2");
     push_opt!(rows.r23_1, "R23_1");

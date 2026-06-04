@@ -79,6 +79,17 @@ export function ReceivedDetailPage() {
     onError: (e) => notify.error(formatError(e, "Eroare recalculare TVA.")),
   });
 
+  const { mutate: setIntraEuKind, isPending: isSettingKind } = useMutation({
+    mutationFn: (kind: "goods" | "services") => {
+      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă selectată."));
+      return api.received.setIntraEuKind(id, activeCompanyId, kind);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.received.detail(id) });
+    },
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut actualiza tipul achiziției.")),
+  });
+
   const docTitle = inv
     ? inv.series && inv.number
       ? `${inv.series}-${inv.number}`
@@ -197,6 +208,34 @@ export function ReceivedDetailPage() {
                       </Banner>
                     </div>
                   )}
+                </SectionCard>
+
+                {/* Achiziție intra-UE — tip bunuri / servicii pentru D300 */}
+                <SectionCard icon="globe" title="Achiziție intra-UE">
+                  <div style={{ padding: "0 16px 16px" }}>
+                    <div style={{ marginBottom: 8, fontSize: 13, color: "var(--rf-text-muted)" }}>
+                      Determină rândul D300: <strong>Bunuri</strong> → R5/R18, <strong>Servicii</strong> → R7/R20.
+                      Relevant numai pentru facturile cu category K (achiziții intracomunitare).
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Btn
+                        variant={inv.intraEuKind === "goods" ? "primary" : "secondary"}
+                        size="sm"
+                        disabled={isSettingKind || inv.intraEuKind === "goods"}
+                        onClick={() => setIntraEuKind("goods")}
+                      >
+                        Bunuri
+                      </Btn>
+                      <Btn
+                        variant={inv.intraEuKind === "services" ? "primary" : "secondary"}
+                        size="sm"
+                        disabled={isSettingKind || inv.intraEuKind === "services"}
+                        onClick={() => setIntraEuKind("services")}
+                      >
+                        Servicii
+                      </Btn>
+                    </div>
+                  </div>
                 </SectionCard>
 
                 {/* ANAF/SPV info */}

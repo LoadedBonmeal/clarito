@@ -28,14 +28,15 @@
 //!
 //! ## PURCHASES (TVA deductibilă)
 //!
-//! | Category | Rate  | Base row   | VAT row    | Notes                                   |
-//! |----------|-------|------------|------------|-----------------------------------------|
-//! | K        | 21%   | R5_1 / R18_1 | R5_2 / R18_2 | Intra-EU goods; R18=R5 enforced     |
-//! | S        | 21%   | R22_1      | R22_2      | Deductibil intern cota standard         |
-//! | S        | 11%   | R23_1      | R23_2      | Deductibil intern cotă redusă 11%       |
-//! | AE       | 21%   | R25_1_1    | R25_1_2    | Mirror deductibil R12_1_1/R12_1_2       |
-//! | AE       | 11%   | R25_2_1    | R25_2_2    | Mirror deductibil R12_2_1/R12_2_2       |
-//! | AE (Σ)   | —     | R25_1      | R25_2      | = R12_1 / R12_2 (XSD/DUK enforced)     |
+//! | Category | Kind     | Rate  | Base row   | VAT row    | Notes                               |
+//! |----------|----------|-------|------------|------------|-------------------------------------|
+//! | K        | goods    | 21%   | R5_1 / R18_1 | R5_2 / R18_2 | Intra-EU bunuri; R18=R5        |
+//! | K        | services | 21%   | R7_1 / R20_1 | R7_2 / R20_2 | Intra-EU servicii; R20=R7     |
+//! | S        | —        | 21%   | R22_1      | R22_2      | Deductibil intern cotă standard     |
+//! | S        | —        | 11%   | R23_1      | R23_2      | Deductibil intern cotă redusă 11%   |
+//! | AE       | —        | 21%   | R25_1_1    | R25_1_2    | Mirror R12_1_1/R12_1_2              |
+//! | AE       | —        | 11%   | R25_2_1    | R25_2_2    | Mirror R12_2_1/R12_2_2              |
+//! | AE (Σ)   | —        | —     | R25_1      | R25_2      | = R12_1 / R12_2 (DUK enforced)     |
 //!
 //! ## DUK EQUALITY CONSTRAINTS (schema enforced, violations = E: errors)
 //!
@@ -45,15 +46,18 @@
 //! * R25_1_2 = R12_1_2 (V_22)
 //! * R25_2_1 = R12_2_1 (V_23)
 //! * R25_2_2 = R12_2_2 (V_24)
-//! * R18_1 = R5_1  (V_7)
+//! * R18_1 = R5_1  (V_7)  — intra-EU goods deductible = collected
 //! * R18_2 = R5_2  (V_8)
+//! * R20_1 = R7_1  (V_13) — intra-EU services deductible = collected
+//! * R20_2 = R7_2  (V_14)
+//! * R20_1_1 = R7_1_1 (V_15)
 //!
 //! ## TOTALS
 //!
-//! R17_2 = R5_2 + R9_2 + R10_2 + R11_2 + R12_2 + R16_2 + R64_2 + R65_2
-//!   (R6/R7/R8/R16/R64/R65 absent in this implementation)
-//! R27_2 = R18_2 + R22_2 + R23_2 + R25_2 + R43_2 + R44_2
-//!   (R19/R20/R21/R43/R44 absent in this implementation)
+//! R17_2 = R5_2 + R7_2 + R9_2 + R10_2 + R11_2 + R12_2 + R16_2 + R64_2 + R65_2
+//!   (R6/R8/R16/R64/R65 absent in this implementation; R7 added Wave 7)
+//! R27_2 = R18_2 + R20_2 + R22_2 + R23_2 + R25_2 + R43_2 + R44_2
+//!   (R19/R21/R43/R44 absent in this implementation; R20 added Wave 7)
 //!
 //! ## RESIDUALS (known unresolved — flagged, not mapped)
 //!
@@ -63,11 +67,9 @@
 //!   Operations at old rates are excluded from auto-mapping; a `tracing::warn!`
 //!   is emitted at generation time. Accountant must declare them manually.
 //!
-//! * Intra-EU acquisitions of SERVICES (category K): the app does not
-//!   distinguish goods vs services for K. All K is mapped to R5/R18 (goods
-//!   rows). If K services exist, they should go to R7/R20 — but that requires
-//!   a data-model change. Flagged as residual; current behaviour maps all K
-//!   to goods.
+//! * Intra-EU acquisitions of SERVICES (category K, intra_eu_kind="services"):
+//!   Wave 7: mapped to R7/R20 (services rows). DUK V_13/V_14: R20=R7.
+//!   Goods acquisitions (intra_eu_kind="goods" or default): R5/R18 (unchanged).
 
 use chrono::{Datelike, NaiveDate};
 use rust_decimal::prelude::ToPrimitive;
@@ -138,13 +140,26 @@ pub struct D300Rows {
     pub r13_1: Option<i64>,
 
     // ── Purchase rows (TVA deductibilă) ─────────────────────────────────────
-    /// R5_1 / R5_2 — achiziții intracomunitare de BUNURI (category K)
-    ///   NOTE: all K is mapped here (goods). Services K → R7/R20 (residual, not implemented).
+    /// R5_1 / R5_2 — achiziții intracomunitare de BUNURI (category K, intra_eu_kind=goods)
     pub r5_1: Option<i64>,
     pub r5_2: Option<i64>,
-    /// R18_1 / R18_2 — deductibil corespunzător R5 (goods); DUK enforces R18=R5.
+    /// R18_1 / R18_2 — deductibil corespunzător R5 (goods); DUK enforces R18=R5 (V_7/V_8).
     pub r18_1: Option<i64>,
     pub r18_2: Option<i64>,
+    /// R7_1 / R7_2 — achiziții intracomunitare de SERVICII (category K, intra_eu_kind=services)
+    ///   Collected leg of intra-EU services reverse charge. DUK V_13: R20_1=R7_1, V_14: R20_2=R7_2.
+    pub r7_1: Option<i64>,
+    pub r7_2: Option<i64>,
+    /// R7_1_1 / R7_1_2 — sub-rows for R7 at rate 21% (mirrors R5_1_1/R5_1_2 structure).
+    ///   DUK V_15: R20_1_1=R7_1_1. Populated when there are 21% K-services.
+    pub r7_1_1: Option<i64>,
+    pub r7_1_2: Option<i64>,
+    /// R20_1 / R20_2 — deductibil corespunzător R7 (services); DUK enforces R20=R7 (V_13/V_14).
+    pub r20_1: Option<i64>,
+    pub r20_2: Option<i64>,
+    /// R20_1_1 / R20_1_2 — mirror of R7_1_1/R7_1_2 (DUK V_15).
+    pub r20_1_1: Option<i64>,
+    pub r20_1_2: Option<i64>,
     /// R22_1 / R22_2 — achiziții interne cotă 21% (S)
     pub r22_1: Option<i64>,
     pub r22_2: Option<i64>,
@@ -508,16 +523,27 @@ pub fn map_to_rows(
 
     // ── Purchase row accumulation ─────────────────────────────────────────────
 
-    // R5_1 / R5_2 — achiziții intracomunitare de BUNURI (category K)
-    // NOTE: all K is mapped to goods (R5/R18). Services K → R7/R20 is a known
-    // residual: the app does not currently distinguish goods vs services for K.
+    // R5_1 / R5_2 — achiziții intracomunitare de BUNURI (K, intra_eu_kind=goods or default)
+    // Only K groups with intra_eu_kind != "services" land here.
     let mut r5_base = Decimal::ZERO;
     let mut r5_vat = Decimal::ZERO;
     accumulate(
         &report.purchase_groups,
-        |g| g.vat_category == "K",
+        |g| g.vat_category == "K" && g.intra_eu_kind.as_deref() != Some("services"),
         &mut r5_base,
         &mut r5_vat,
+    );
+
+    // R7_1 / R7_2 — achiziții intracomunitare de SERVICII (K, intra_eu_kind=services)
+    // Collected leg of intra-EU services self-assessment.
+    // DUK V_13: R20_1=R7_1, V_14: R20_2=R7_2, V_15: R20_1_1=R7_1_1.
+    let mut r7_base = Decimal::ZERO;
+    let mut r7_vat = Decimal::ZERO;
+    accumulate(
+        &report.purchase_groups,
+        |g| g.vat_category == "K" && g.intra_eu_kind.as_deref() == Some("services"),
+        &mut r7_base,
+        &mut r7_vat,
     );
 
     // R22_1 / R22_2 — achiziții interne cotă 21% (already correct, keep)
@@ -576,11 +602,12 @@ pub fn map_to_rows(
     let r12_1_total = ae21_base + ae11_base;
     let r12_2_total = ae21_vat + ae11_vat;
 
-    // R17_2 = R5_2 + R9_2 + R10_2 + R11_2 + R12_2 + [R6_2 + R7_2 + R8_2 + R16_2 + R64_2 + R65_2]
-    // (R6/R7/R8/R16/R64/R65 are zero/absent in this implementation)
-    let r17_vat = r5_vat + r9_vat + r10_vat + r11_vat + r12_2_total;
-    // R17_1 = R5_1 + R9_1 + R10_1 + R11_1 + R12_1 + ...
-    let r17_base = r5_base + r9_base + r10_base + r11_base + r12_1_total;
+    // R17_2 = R5_2 + R7_2 + R9_2 + R10_2 + R11_2 + R12_2 + [R6_2 + R8_2 + R16_2 + R64_2 + R65_2]
+    // (R6/R8/R16/R64/R65 are zero/absent in this implementation)
+    // R7_2 is the collected leg of intra-EU SERVICES (Wave 7)
+    let r17_vat = r5_vat + r7_vat + r9_vat + r10_vat + r11_vat + r12_2_total;
+    // R17_1 = R5_1 + R7_1 + R9_1 + R10_1 + R11_1 + R12_1 + ...
+    let r17_base = r5_base + r7_base + r9_base + r10_base + r11_base + r12_1_total;
 
     // R25 = R12 (DUK V_19/V_20 enforced equality)
     let r25_1_total = r12_1_total;
@@ -590,10 +617,15 @@ pub fn map_to_rows(
     let r18_base = r5_base;
     let r18_vat = r5_vat;
 
-    // R27_2 = R18_2 + R22_2 + R23_2 + R25_2 + [R19_2 + R20_2 + R21_2 + R43_2 + R44_2]
-    // (R19/R20/R21/R43/R44 are zero/absent)
-    let r27_vat = r18_vat + r22_vat + r23_vat + r25_2_total;
-    let r27_base = r18_base + r22_base + r23_base + r25_1_total;
+    // R20 = R7 (DUK V_13/V_14 enforced equality)
+    let r20_base = r7_base;
+    let r20_vat = r7_vat;
+
+    // R27_2 = R18_2 + R20_2 + R22_2 + R23_2 + R25_2 + [R19_2 + R21_2 + R43_2 + R44_2]
+    // (R19/R21/R43/R44 are zero/absent)
+    // R20_2 is the deductible leg of intra-EU SERVICES (Wave 7)
+    let r27_vat = r18_vat + r20_vat + r22_vat + r23_vat + r25_2_total;
+    let r27_base = r18_base + r20_base + r22_base + r23_base + r25_1_total;
 
     // R28_2 (sub-total dedusă) = R27_2 (no pro-rata adjustment)
     let r28_vat = r27_vat;
@@ -642,6 +674,15 @@ pub fn map_to_rows(
     let r1_1_v = opt_nonzero(round_to_lei(r1_1_base));
     let r5_1_v = opt_nonzero(round_to_lei(r5_base));
     let r5_2_v = opt_nonzero(round_to_lei(r5_vat));
+    // R7 — intra-EU services collected (Wave 7)
+    let r7_1_v = opt_nonzero(round_to_lei(r7_base));
+    let r7_2_v = opt_nonzero(round_to_lei(r7_vat));
+    // R7 sub-rows: currently we accumulate all K-services into a single bucket
+    // (no per-rate breakdown like R12 does for AE). The XSD has R7_1_1/R7_1_2
+    // but DUK only mandates V_15: R20_1_1=R7_1_1, not that they must be present.
+    // We omit the sub-rows here (None) — DUK does not require them to be present.
+    let r7_1_1_v: Option<i64> = None;
+    let r7_1_2_v: Option<i64> = None;
     let r9_1_v = opt_nonzero(round_to_lei(r9_base));
     let r9_2_v = opt_nonzero(round_to_lei(r9_vat));
     let r10_1_v = opt_nonzero(round_to_lei(r10_base));
@@ -659,6 +700,12 @@ pub fn map_to_rows(
     let r18_2_v = opt_nonzero(round_to_lei(r18_vat));
     let r17_1_v = opt_nonzero(round_to_lei(r17_base));
     let r17_2_v = opt_nonzero(round_to_lei(r17_vat));
+    // R20 — intra-EU services deductible = R7 (DUK V_13/V_14 equality)
+    let r20_1_v = opt_nonzero(round_to_lei(r20_base));
+    let r20_2_v = opt_nonzero(round_to_lei(r20_vat));
+    // R20 sub-rows mirror R7 sub-rows (DUK V_15: R20_1_1=R7_1_1). Since r7_1_1_v=None, None.
+    let r20_1_1_v: Option<i64> = r7_1_1_v; // = None
+    let r20_1_2_v: Option<i64> = r7_1_2_v; // = None
     let r22_1_v = opt_nonzero(round_to_lei(r22_base));
     let r22_2_v = opt_nonzero(round_to_lei(r22_vat));
     let r23_1_v = opt_nonzero(round_to_lei(r23_base));
@@ -686,12 +733,14 @@ pub fn map_to_rows(
     // Absent (None) fields contribute 0.  Header-summary fields (nr_facturi, baza,
     // tva, nr_facturi_primite, baza_primite, tva_primite) are not present in
     // D300Rows so they contribute 0 as well.
+    // Wave 7: include R7_* and R20_* in the control sum.
     let total_plata_a: i64 = [
-        r1_1_v, r5_1_v, r5_2_v, r9_1_v, r9_2_v, r10_1_v, r10_2_v, r11_1_v, r11_2_v, r12_1_v,
-        r12_2_v, r12_1_1_v, r12_1_2_v, r12_2_1_v, r12_2_2_v, r13_1_v, r18_1_v, r18_2_v, r17_1_v,
-        r17_2_v, r22_1_v, r22_2_v, r23_1_v, r23_2_v, r25_1_v, r25_2_v, r25_1_1_v, r25_1_2_v,
-        r25_2_1_v, r25_2_2_v, r27_1_v, r27_2_v, r28_2_v, r32_2_v, r33_2_v, r34_2_v, r37_2_v,
-        r40_2_v, r41_2_v, r42_2_v,
+        r1_1_v, r5_1_v, r5_2_v, r7_1_v, r7_2_v, r7_1_1_v, r7_1_2_v, r9_1_v, r9_2_v, r10_1_v,
+        r10_2_v, r11_1_v, r11_2_v, r12_1_v, r12_2_v, r12_1_1_v, r12_1_2_v, r12_2_1_v, r12_2_2_v,
+        r13_1_v, r18_1_v, r18_2_v, r17_1_v, r17_2_v, r20_1_v, r20_2_v, r20_1_1_v, r20_1_2_v,
+        r22_1_v, r22_2_v, r23_1_v, r23_2_v, r25_1_v, r25_2_v, r25_1_1_v, r25_1_2_v, r25_2_1_v,
+        r25_2_2_v, r27_1_v, r27_2_v, r28_2_v, r32_2_v, r33_2_v, r34_2_v, r37_2_v, r40_2_v, r41_2_v,
+        r42_2_v,
     ]
     .iter()
     .map(|o| o.unwrap_or(0))
@@ -758,6 +807,15 @@ pub fn map_to_rows(
         r5_2: r5_2_v,
         r18_1: r18_1_v,
         r18_2: r18_2_v,
+        // R7/R20 — intra-EU services (Wave 7)
+        r7_1: r7_1_v,
+        r7_2: r7_2_v,
+        r7_1_1: r7_1_1_v,
+        r7_1_2: r7_1_2_v,
+        r20_1: r20_1_v,
+        r20_2: r20_2_v,
+        r20_1_1: r20_1_1_v,
+        r20_1_2: r20_1_2_v,
         r22_1: r22_1_v,
         r22_2: r22_2_v,
         r23_1: r23_1_v,
@@ -844,6 +902,7 @@ mod tests {
                 vat_category: cat.to_string(),
                 base: base.to_string(),
                 vat: vat.to_string(),
+                intra_eu_kind: None,
             })
             .collect();
         let purchase_groups: Vec<D300Group> = purchases
@@ -853,6 +912,12 @@ mod tests {
                 vat_category: cat.to_string(),
                 base: base.to_string(),
                 vat: vat.to_string(),
+                // K purchases in the test helper default to goods (None → accumulate_goods)
+                intra_eu_kind: if cat == "K" {
+                    Some("goods".to_string())
+                } else {
+                    None
+                },
             })
             .collect();
 
@@ -1123,12 +1188,14 @@ mod tests {
             vat_category: "S".to_string(),
             base: "100".to_string(),
             vat: "21".to_string(),
+            intra_eu_kind: None,
         };
         let g_pct = D300Group {
             vat_rate: "21.00".to_string(),
             vat_category: "S".to_string(),
             base: "100".to_string(),
             vat: "21".to_string(),
+            intra_eu_kind: None,
         };
         assert!(rate_matches(&g_frac, 21), "fractional 0.21 should match 21");
         assert!(rate_matches(&g_pct, 21), "percent 21.00 should match 21");
