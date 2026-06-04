@@ -60,13 +60,20 @@ jobs:
             curl -fsSL "${{ secrets.DUK_JARS_URL }}" -o /tmp/duk.zip
             unzip -q /tmp/duk.zip -d src-tauri/resources/duk
           else
-            echo "::error::DUK_JARS_URL secret not set — cannot bundle DUK validator. See docs/duk-release-notes.md."
-            exit 1
+            echo "::warning::DUK_JARS_URL not set — building UNBUNDLED (no local DUK). Set the secret to ship bundled installers."
+            mkdir -p src-tauri/resources/jre-min/bin
+            echo "unbundled placeholder" > src-tauri/resources/jre-min/.keep
+            echo "unbundled placeholder" > src-tauri/resources/duk/.keep
           fi
 
       - name: Build minimal JRE (jlink, arm64)
         shell: bash
-        run: JAVA_HOME="$JAVA_HOME" bash scripts/jlink-jre.sh
+        run: |
+          if [ -n "${{ secrets.DUK_JARS_URL }}" ]; then
+            JAVA_HOME="$JAVA_HOME" bash scripts/jlink-jre.sh
+          else
+            echo "::warning::Skipping jlink — unbundled build (no DUK_JARS_URL)."
+          fi
 
       - name: Build (unsigned, arm64)
         run: pnpm tauri build --target aarch64-apple-darwin --bundles dmg
@@ -153,13 +160,20 @@ jobs:
             curl -fsSL "${{ secrets.DUK_JARS_URL }}" -o /tmp/duk.zip
             unzip -q /tmp/duk.zip -d src-tauri/resources/duk
           else
-            echo "::error::DUK_JARS_URL secret not set — cannot bundle DUK validator. See docs/duk-release-notes.md."
-            exit 1
+            echo "::warning::DUK_JARS_URL not set — building UNBUNDLED (no local DUK). Set the secret to ship bundled installers."
+            mkdir -p src-tauri/resources/jre-min/bin
+            echo "unbundled placeholder" > src-tauri/resources/jre-min/.keep
+            echo "unbundled placeholder" > src-tauri/resources/duk/.keep
           fi
 
       - name: Build minimal JRE (jlink, x64)
         shell: bash
-        run: JAVA_HOME="$JAVA_HOME" bash scripts/jlink-jre.sh
+        run: |
+          if [ -n "${{ secrets.DUK_JARS_URL }}" ]; then
+            JAVA_HOME="$JAVA_HOME" bash scripts/jlink-jre.sh
+          else
+            echo "::warning::Skipping jlink — unbundled build (no DUK_JARS_URL)."
+          fi
 
       - name: Build (unsigned, x64)
         run: pnpm tauri build --target x86_64-apple-darwin --bundles dmg
@@ -234,13 +248,20 @@ jobs:
             curl -fsSL "${{ secrets.DUK_JARS_URL }}" -o /tmp/duk.zip
             unzip -q /tmp/duk.zip -d src-tauri/resources/duk
           else
-            echo "::error::DUK_JARS_URL secret not set — cannot bundle DUK validator. See docs/duk-release-notes.md."
-            exit 1
+            echo "::warning::DUK_JARS_URL not set — building UNBUNDLED (no local DUK). Set the secret to ship bundled installers."
+            mkdir -p src-tauri/resources/jre-min/bin
+            echo "unbundled placeholder" > src-tauri/resources/jre-min/.keep
+            echo "unbundled placeholder" > src-tauri/resources/duk/.keep
           fi
 
       - name: Build minimal JRE (jlink, Windows x64)
         shell: bash
-        run: JAVA_HOME="$JAVA_HOME" bash scripts/jlink-jre.sh
+        run: |
+          if [ -n "${{ secrets.DUK_JARS_URL }}" ]; then
+            JAVA_HOME="$JAVA_HOME" bash scripts/jlink-jre.sh
+          else
+            echo "::warning::Skipping jlink — unbundled build (no DUK_JARS_URL)."
+          fi
 
       - name: Build NSIS installer (skip MSI — WiX light.exe flaky on CI)
         run: pnpm tauri build --target x86_64-pc-windows-msvc --bundles nsis
