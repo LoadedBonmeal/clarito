@@ -23,6 +23,7 @@ import { formatError } from "@/lib/error-mapper";
 import type { AppErrorPayload } from "@/types";
 import { useAppStore } from "@/lib/store";
 import { fmtShortcut } from "@/lib/platform";
+import { efacturaDeadline, deadlineDaysLeft, formatDeadline } from "@/lib/efacturaDeadline";
 import {
   PageHeader, Btn, SectionCard, Card, Modal, Banner,
 } from "@/components/rf";
@@ -383,6 +384,27 @@ export function InvoiceDetailPage() {
           </Banner>
         </div>
       )}
+
+      {/* e-Factura 5-working-day send deadline (2026+) — informational. */}
+      {invoice.issueDate >= "2026-01-01" &&
+        ["DRAFT", "QUEUED", "REJECTED"].includes(invoice.status) &&
+        (() => {
+          const dl = efacturaDeadline(invoice.issueDate);
+          if (!dl) return null;
+          const left = deadlineDaysLeft(dl);
+          const overdue = left < 0;
+          const n = Math.abs(left);
+          return (
+            <div style={{ margin: "0 32px 8px" }}>
+              <Banner variant={overdue ? "error" : left <= 1 ? "warning" : "info"}>
+                e-Factura: de trimis până la <strong>{formatDeadline(dl)}</strong>{" "}
+                {overdue
+                  ? `— termen depășit cu ${n} ${n === 1 ? "zi" : "zile"}.`
+                  : `(${left} ${left === 1 ? "zi" : "zile"} rămase). Termen legal: 5 zile lucrătoare de la emitere.`}
+              </Banner>
+            </div>
+          );
+        })()}
 
       {/* Main split layout */}
       <div

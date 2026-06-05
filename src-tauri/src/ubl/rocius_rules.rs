@@ -88,6 +88,7 @@ pub fn run_all(ctx: &RuleContext<'_>) -> (Vec<String>, Vec<String>) {
     warn!(warn_br_ro_w01_due_far_future);
     warn!(warn_br_ro_w02_zero_value_line);
     warn!(warn_br_ro_w03_vat_payer_missing_prefix);
+    warn!(warn_br_ro_w04_old_vat_rate);
 
     (errors, warnings)
 }
@@ -746,6 +747,37 @@ fn warn_br_ro_w03_vat_payer_missing_prefix(ctx: &RuleContext<'_>) -> Option<Stri
         }
     }
     None
+}
+
+fn warn_br_ro_w04_old_vat_rate(ctx: &RuleContext<'_>) -> Option<String> {
+    // Old/repealed rates (19%/5%) and the transitional housing 9% stay valid so that
+    // corrections / advance reversals / regularizări of pre-01.08.2025 operations still
+    // pass validation (the VAT rate follows the faptul generator, not the issue date).
+    // On a current-period invoice (issued >= 01.08.2025) they are legitimate ONLY for
+    // such regularizări — surface a non-blocking warning so the user confirms intent.
+    let issue = ctx.invoice.issue_date.as_str();
+    if issue < "2025-08-01" {
+        return None;
+    }
+    let has_old = ctx.lines.iter().any(|l| {
+        if l.vat_category != "S" {
+            return false;
+        }
+        let r = Decimal::from_str(&l.vat_rate).unwrap_or(Decimal::ZERO);
+        r == Decimal::from(19)
+            || r == Decimal::from(5)
+            || (r == Decimal::from(9) && issue > "2026-07-31")
+    });
+    if has_old {
+        Some(
+            "[W04] Cotă TVA istorică (19%/5%/9%) pe o factură din perioada curentă — validă \
+             doar pentru regularizări, storno de avans sau corecții ale operațiunilor cu fapt \
+             generator înainte de 01.08.2025."
+                .into(),
+        )
+    } else {
+        None
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
