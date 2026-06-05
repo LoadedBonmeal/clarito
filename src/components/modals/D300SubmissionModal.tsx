@@ -60,7 +60,9 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
   // ── Validation ───────────────────────────────────────────────────────────────
 
   const caenValid = /^\d{4}$/.test(caen.trim());
-  const canSubmit = numeDeclar.trim() !== "" && prenumeDeclar.trim() !== "" && caenValid;
+  const proRataValid = Number.isFinite(proRata) && proRata >= 0 && proRata <= 100;
+  const canSubmit =
+    numeDeclar.trim() !== "" && prenumeDeclar.trim() !== "" && caenValid && proRataValid;
 
   // ── Submit ───────────────────────────────────────────────────────────────────
 

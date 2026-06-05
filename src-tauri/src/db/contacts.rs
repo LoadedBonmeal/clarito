@@ -335,6 +335,23 @@ pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<
     // S1: scoped get — returns NotFound if contact doesn't exist OR belongs
     // to a different company.
     let _ = get(pool, id, company_id).await?;
+
+    // Block deletion when the contact is referenced by invoices — the FK would otherwise
+    // reject it with an opaque DB error. Give a clear, actionable message instead.
+    let ref_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM invoices WHERE contact_id = ?1 AND company_id = ?2",
+    )
+    .bind(id)
+    .bind(company_id)
+    .fetch_one(pool)
+    .await
+    .map_err(AppError::Database)?;
+    if ref_count > 0 {
+        return Err(AppError::Validation(format!(
+            "Partenerul este referențiat de {ref_count} factură(i) — ștergeți sau reasignați-le mai întâi."
+        )));
+    }
+
     let res = sqlx::query("DELETE FROM contacts WHERE id = ?1 AND company_id = ?2")
         .bind(id)
         .bind(company_id)
@@ -408,6 +425,19 @@ mod tests {
                 currency TEXT,
                 created_at INTEGER NOT NULL DEFAULT (unixepoch()),
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Minimal invoices table so delete()'s referential-integrity check
+        // (SELECT COUNT(*) FROM invoices ...) can run in these unit tests.
+        sqlx::query(
+            "CREATE TABLE invoices (
+                id TEXT PRIMARY KEY NOT NULL,
+                company_id TEXT NOT NULL,
+                contact_id TEXT NOT NULL
             )",
         )
         .execute(&pool)

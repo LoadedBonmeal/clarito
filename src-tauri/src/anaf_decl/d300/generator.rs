@@ -61,8 +61,10 @@ pub fn generate_d300_xml(rows: &D300Rows, ver: &SchemaVersion) -> AppResult<Stri
     elem.push_attribute(("cont", rows.cont.as_str()));
     elem.push_attribute(("caen", rows.caen.as_str()));
     elem.push_attribute(("tip_decont", rows.tip_decont.as_str()));
-    // pro_rata: DblGen3_2 pattern \d{0,3}(\.\d{0,2})? — format to at most 2 dp
-    let pro_rata_str = format!("{:.2}", rows.pro_rata);
+    // pro_rata: DblGen3_2 pattern \d{0,3}(\.\d{0,2})? — format to at most 2 dp.
+    // Clamp to the XSD-allowed [0, 100] range (defence-in-depth; the submission form
+    // also blocks out-of-range values).
+    let pro_rata_str = format!("{:.2}", rows.pro_rata.clamp(0.0, 100.0));
     // Trim trailing zeros per pattern but keep at least the integer part
     let pro_rata_str = pro_rata_str
         .trim_end_matches('0')
