@@ -34,6 +34,7 @@ fn test_company() -> Company {
         trade_name: None,
         registry_number: Some("J40/1234/2020".to_string()),
         vat_payer: true,
+        cash_vat: false,
         address: "Calea Victoriei 155".to_string(),
         city: "Bucuresti".to_string(),
         county: "IF".to_string(),

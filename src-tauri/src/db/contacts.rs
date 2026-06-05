@@ -26,6 +26,9 @@ pub struct Contact {
     /// True for an individual/consumer (persoană fizică) — B2C. No CUI required;
     /// the UBL generator emits the ANAF placeholder "0000000000000".
     pub is_individual: bool,
+    /// Supplier applies TVA la încasare (cash VAT) — sourced from ANAF's RPATVAÎ register.
+    /// Drives the buyer's deferred deduction (see src-tauri/CASH_VAT_DESIGN.md).
+    pub cash_vat: bool,
 
     pub address: Option<String>,
     pub city: Option<String>,
@@ -99,7 +102,7 @@ pub async fn list(pool: &SqlitePool, filter: ContactFilter) -> AppResult<Vec<Con
 
     // ?1 company_id (Option<&str>), ?2 query_term (Option<&str>)
     let items = sqlx::query_as::<_, Contact>(
-        "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, is_individual, \
+        "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, is_individual, cash_vat, \
          address, city, county, country, email, phone, currency, created_at, updated_at \
          FROM contacts \
          WHERE (?1 IS NULL OR company_id = ?1) \
@@ -117,7 +120,7 @@ pub async fn list(pool: &SqlitePool, filter: ContactFilter) -> AppResult<Vec<Con
 /// Returns NotFound if the id doesn't exist OR belongs to a different company.
 pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Contact> {
     sqlx::query_as::<_, Contact>(
-        "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, is_individual, \
+        "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, is_individual, cash_vat, \
          address, city, county, country, email, phone, currency, created_at, updated_at \
          FROM contacts WHERE id = ?1 AND company_id = ?2",
     )
@@ -385,6 +388,7 @@ mod tests {
                 trade_name TEXT,
                 registry_number TEXT,
                 vat_payer INTEGER NOT NULL DEFAULT 1,
+                cash_vat INTEGER NOT NULL DEFAULT 0,
                 address TEXT NOT NULL DEFAULT '',
                 city TEXT NOT NULL DEFAULT '',
                 county TEXT NOT NULL DEFAULT '',
@@ -416,6 +420,7 @@ mod tests {
                 legal_name TEXT NOT NULL DEFAULT '',
                 vat_payer INTEGER NOT NULL DEFAULT 0,
                 is_individual INTEGER NOT NULL DEFAULT 0,
+                cash_vat INTEGER NOT NULL DEFAULT 0,
                 address TEXT,
                 city TEXT,
                 county TEXT,

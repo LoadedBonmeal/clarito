@@ -20,6 +20,9 @@ pub struct Company {
     pub trade_name: Option<String>,
     pub registry_number: Option<String>,
     pub vat_payer: bool,
+    /// TVA la încasare (cash-VAT regime). When true, VAT exigibility is deferred to
+    /// collection — see src-tauri/CASH_VAT_DESIGN.md.
+    pub cash_vat: bool,
 
     pub address: String,
     pub city: String,
@@ -76,6 +79,7 @@ pub struct UpdateCompanyInput {
     pub trade_name: Option<String>,
     pub registry_number: Option<String>,
     pub vat_payer: Option<bool>,
+    pub cash_vat: Option<bool>,
 
     pub address: Option<String>,
     pub city: Option<String>,
@@ -99,7 +103,7 @@ pub struct UpdateCompanyInput {
 
 pub async fn list(pool: &SqlitePool) -> AppResult<Vec<Company>> {
     let rows = sqlx::query_as::<_, Company>(
-        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, \
+        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, cash_vat, \
          address, city, county, postal_code, country, email, phone, iban, bank_name, \
          is_active, spv_enabled, invoice_series, last_invoice_number, logo_path, \
          created_at, updated_at \
@@ -112,7 +116,7 @@ pub async fn list(pool: &SqlitePool) -> AppResult<Vec<Company>> {
 
 pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Company> {
     let row = sqlx::query_as::<_, Company>(
-        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, \
+        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, cash_vat, \
          address, city, county, postal_code, country, email, phone, iban, bank_name, \
          is_active, spv_enabled, invoice_series, last_invoice_number, logo_path, \
          created_at, updated_at \
@@ -131,7 +135,7 @@ pub async fn get_by_cui(pool: &SqlitePool, cui: &str) -> AppResult<Option<Compan
     // Task 5: only active companies block re-registration of the same CUI.
     // A soft-deleted (is_active = 0) company must not prevent re-adding the same CUI.
     let row = sqlx::query_as::<_, Company>(
-        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, \
+        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, cash_vat, \
          address, city, county, postal_code, country, email, phone, iban, bank_name, \
          is_active, spv_enabled, invoice_series, last_invoice_number, logo_path, \
          created_at, updated_at \
@@ -147,7 +151,7 @@ pub async fn get_by_cui(pool: &SqlitePool, cui: &str) -> AppResult<Option<Compan
 /// Used by `create` to detect soft-deleted rows that can be reactivated.
 async fn get_by_cui_any_status(pool: &SqlitePool, cui: &str) -> AppResult<Option<Company>> {
     let row = sqlx::query_as::<_, Company>(
-        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, \
+        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, cash_vat, \
          address, city, county, postal_code, country, email, phone, iban, bank_name, \
          is_active, spv_enabled, invoice_series, last_invoice_number, logo_path, \
          created_at, updated_at \
@@ -282,7 +286,8 @@ pub async fn update(pool: &SqlitePool, id: &str, input: UpdateCompanyInput) -> A
             spv_enabled     = ?16,
             invoice_series  = ?17,
             logo_path       = ?18,
-            updated_at      = ?19
+            updated_at      = ?19,
+            cash_vat        = ?20
         WHERE id = ?1",
     )
     .bind(id)
@@ -304,6 +309,7 @@ pub async fn update(pool: &SqlitePool, id: &str, input: UpdateCompanyInput) -> A
     .bind(input.invoice_series.unwrap_or(current.invoice_series))
     .bind(input.logo_path.or(current.logo_path))
     .bind(now)
+    .bind(input.cash_vat.unwrap_or(current.cash_vat))
     .execute(pool)
     .await?;
 
@@ -465,6 +471,7 @@ mod tests {
                 trade_name TEXT,
                 registry_number TEXT,
                 vat_payer INTEGER NOT NULL DEFAULT 1,
+                cash_vat INTEGER NOT NULL DEFAULT 0,
                 address TEXT NOT NULL DEFAULT '',
                 city TEXT NOT NULL DEFAULT '',
                 county TEXT NOT NULL DEFAULT '',

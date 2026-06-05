@@ -931,6 +931,7 @@ mod tests {
             trade_name: None,
             registry_number: None,
             vat_payer: true,
+            cash_vat: false,
             address: "Str. Testului 1".to_string(),
             city: "București".to_string(),
             county: "IF".to_string(),
