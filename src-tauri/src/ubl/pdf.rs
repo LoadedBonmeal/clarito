@@ -138,6 +138,18 @@ pub fn generate_pdf(input: &GeneratorInput, template: &InvoiceTemplate) -> AppRe
     layer.use_text(date_line, FONT_NORMAL, Mm(MARGIN), Mm(y), &font_normal);
     y -= 8.0;
 
+    // Mențiunea obligatorie "TVA la încasare" (Cod fiscal art. 319 alin. (20) lit. r).
+    if crate::ubl::generator::invoice_under_cash_vat(seller, &input.lines) {
+        layer.use_text(
+            "TVA la încasare",
+            FONT_NORMAL,
+            Mm(MARGIN),
+            Mm(y),
+            &font_bold,
+        );
+        y -= 6.0;
+    }
+
     // ── Divider ───────────────────────────────────────────────────────────────
     if accent_sections {
         layer.set_outline_color(accent.clone());

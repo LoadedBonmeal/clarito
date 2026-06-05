@@ -25,6 +25,16 @@ pub struct GeneratorInput {
     pub storno_ref: Option<String>,
 }
 
+/// Mențiunea obligatorie "TVA la încasare" (Cod fiscal art. 319 alin. (20) lit. r) se aplică
+/// atunci când furnizorul aplică regimul TVA la încasare ŞI factura conţine cel puţin o
+/// livrare taxabilă standard ("S") — operaţiunile excluse (taxare inversă / scutite / intra-UE
+/// per art. 282 alin. (6)) nu declanşează mențiunea.
+pub fn invoice_under_cash_vat(seller: &Company, lines: &[LineItem]) -> bool {
+    lines.iter().any(|l| {
+        crate::anaf_decl::cash_vat::sales_status(seller.cash_vat, &l.vat_category).applies()
+    })
+}
+
 /// Generează un string XML UBL 2.1 valid CIUS-RO pentru factura dată.
 pub fn generate_ubl(input: &GeneratorInput) -> AppResult<String> {
     let mut writer = Writer::new(Cursor::new(Vec::new()));
@@ -91,6 +101,12 @@ pub fn generate_ubl(input: &GeneratorInput) -> AppResult<String> {
         writer
             .write_event(Event::End(BytesEnd::new("cbc:InvoiceTypeCode")))
             .map_err(|e| AppError::Xml(e.to_string()))?;
+    }
+
+    // BT-22 — mențiunea obligatorie "TVA la încasare" (art. 319 alin. (20) lit. r). UBL impune
+    // cbc:Note după InvoiceTypeCode şi înainte de DocumentCurrencyCode.
+    if invoice_under_cash_vat(seller, &input.lines) {
+        write_text(&mut writer, "cbc:Note", "TVA la încasare")?;
     }
 
     write_text(&mut writer, "cbc:DocumentCurrencyCode", currency)?;
@@ -882,6 +898,47 @@ mod tests {
             &bytes[..3],
             &[0xEF, 0xBB, 0xBF],
             "XML must start with UTF-8 BOM (EF BB BF)"
+        );
+    }
+
+    #[test]
+    fn cash_vat_mention_present_for_cash_vat_seller_with_s_line() {
+        let mut input = sample_input();
+        input.seller.cash_vat = true; // sample line is category "S"
+        let xml = generate_ubl(&input).expect("should generate XML");
+        assert!(
+            xml.contains("<cbc:Note>TVA la încasare</cbc:Note>"),
+            "BT-22 cash-VAT mention must be present"
+        );
+        // Order: Note must sit between InvoiceTypeCode and DocumentCurrencyCode.
+        let note = xml.find("cbc:Note").expect("note");
+        let itc = xml.find("cbc:InvoiceTypeCode").expect("type code");
+        let dcc = xml.find("cbc:DocumentCurrencyCode").expect("currency");
+        assert!(
+            itc < note && note < dcc,
+            "Note must follow InvoiceTypeCode, precede currency"
+        );
+    }
+
+    #[test]
+    fn cash_vat_mention_absent_for_non_cash_vat_seller() {
+        let input = sample_input(); // cash_vat = false
+        let xml = generate_ubl(&input).expect("should generate XML");
+        assert!(
+            !xml.contains("TVA la încasare"),
+            "no mention when the seller is not on cash VAT"
+        );
+    }
+
+    #[test]
+    fn cash_vat_mention_absent_when_only_excluded_lines() {
+        let mut input = sample_input();
+        input.seller.cash_vat = true;
+        input.lines[0].vat_category = "E".to_string(); // exempt — excluded (art. 282(6))
+        let xml = generate_ubl(&input).expect("should generate XML");
+        assert!(
+            !xml.contains("TVA la încasare"),
+            "an exempt-only invoice gets no cash-VAT mention"
         );
     }
 

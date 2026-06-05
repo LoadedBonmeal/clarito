@@ -89,6 +89,19 @@ Deep-research (4-agent workflow, primary-source read of the official PDF, advers
   -identical to today. Old-rate buckets feed the existing reg_colectata (rd.16) loop.
 - **4d — official XSD D300** (d300/rows.rs) wiring + DUKIntegrator on a cash-VAT fixture.
 
+## Progress
+- **DONE** slices 1, 2, 3, 4a, 4b (all gated green, committed, not pushed).
+- **4b** wires both `compute_d300` and `d300_vat_totals`; the official XSD D300 follows
+  automatically (rows.rs maps the D300Report). Adversarial QA (3-lens workflow) fixed before
+  commit: storno reversal was dropped for cash-VAT (now gated on `CAST(total_amount)>0` so
+  credit notes stay on the issue-date path); SQL `TRIM(vat_category)` symmetry; half-away
+  `ron_to_bani`; date-only `paid_at`; payment converted in invoice currency.
+- **TODO 4d** — DUKIntegrator on a cash-VAT fixture (needs Java; can't run locally).
+- **TODO 5** — GL 4428.colectat/.deductibil postings + **proportional** storno-against-settlement
+  (4b does only accrual-style storno reversal; reconcile still diverges for cash-VAT until 5).
+- **TODO 6** — invoice "TVA la încasare" mention. **TODO 7** — buyer-side (needs payments-out on
+  received invoices). **TODO 8** — plafon monitor + 097.
+
 ## Plafon monitor
 Rolling 12-month CA (excl. fixed-asset/intangible disposals); on crossing the date-applicable
 plafon, flag mandatory exit (097 reminder, deadline 20th of the following month) and stop
