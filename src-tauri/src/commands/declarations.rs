@@ -183,7 +183,7 @@ async fn cash_vat_collected_groups(
          FROM payments p JOIN invoices i ON i.id = p.invoice_id \
          WHERE p.company_id = ?1 \
            AND substr(p.paid_at,1,10) >= ?2 AND substr(p.paid_at,1,10) <= ?3 \
-           AND i.status IN ('VALIDATED','STORNED') \
+           AND i.status = 'VALIDATED' \
            AND CAST(i.total_amount AS REAL) > 0 \
            AND (?4 IS NULL OR i.issue_date >= ?4) \
            AND (?5 IS NULL OR i.issue_date <= ?5)",
@@ -345,6 +345,7 @@ pub(crate) async fn d300_vat_totals(
     if cash_vat {
         collected_sql.push_str(
             " AND NOT (TRIM(l.vat_category) = 'S' \
+               AND i.status = 'VALIDATED' \
                AND CAST(i.total_amount AS REAL) > 0 \
                AND (?4 IS NULL OR i.issue_date >= ?4) \
                AND (?5 IS NULL OR i.issue_date <= ?5))",
@@ -520,6 +521,7 @@ pub async fn compute_d300(
         // Deferred "S" lines (issued in-window) move to the collection-date path.
         sales_sql.push_str(
             " AND NOT (TRIM(l.vat_category) = 'S' \
+               AND i.status = 'VALIDATED' \
                AND CAST(i.total_amount AS REAL) > 0 \
                AND (?4 IS NULL OR i.issue_date >= ?4) \
                AND (?5 IS NULL OR i.issue_date <= ?5))",
@@ -1877,6 +1879,37 @@ mod cash_vat_routing_tests {
             mar,
             Decimal::ZERO,
             "storno must reverse the collected VAT, not be dropped"
+        );
+    }
+
+    #[tokio::test]
+    async fn cash_vat_storned_original_not_deferred() {
+        // A STORNED original is NOT deferred — it follows the same issue-date path as a
+        // non-cash-VAT invoice (so GL, which treats STORNED as is_storno, stays consistent).
+        let pool = pool().await;
+        seed_company(&pool, "co", true, Some("2026-01-01")).await;
+        seed_invoice(&pool, "co", "inv1", "2026-03-10", "10000", "2100", "12100").await;
+        sqlx::query("UPDATE invoices SET status='STORNED' WHERE id='inv1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        seed_payment(&pool, "co", "inv1", "p1", "12100", "2026-04-15").await;
+
+        let (mar, _) = d300_vat_totals(&pool, "co", "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        let (apr, _) = d300_vat_totals(&pool, "co", "2026-04-01", "2026-04-30")
+            .await
+            .unwrap();
+        assert_eq!(
+            mar,
+            dec("2100"),
+            "STORNED original counted at its issue date"
+        );
+        assert_eq!(
+            apr,
+            Decimal::ZERO,
+            "STORNED original is not deferred to collection"
         );
     }
 }

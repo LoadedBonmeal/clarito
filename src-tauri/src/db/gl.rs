@@ -37,6 +37,7 @@ use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
 
+use crate::anaf_decl::cash_vat::{allocate_collection, RateBucket};
 use crate::anaf_decl::saft::masterfiles::{canonical_partner_id, saft_tax_code_dir, TaxDirection};
 use crate::db::models::new_id;
 use crate::error::AppResult;
@@ -158,6 +159,10 @@ fn post_sales_invoice(
     partner_cui: Option<&str>,
     vat_groups: &[(Decimal, Decimal, String, Decimal)], // (net, vat, category, rate)
     is_storno: bool,
+    // TVA la încasare: when true, the standard-rate ("S") output VAT is not yet exigible at
+    // invoice date — credit 4428 "TVA neexigibilă" instead of 4427; it transfers to 4427 on
+    // collection (see post_payment). Excluded categories (AE/E/Z/K) keep 4427.
+    cash_vat_applies: bool,
 ) -> (GlJournal, Vec<GlEntry>) {
     // Use canonical partner ID (CUI-based) so it matches MasterFiles and SourceDocuments
     let contact_id = canonical_partner_id(contact_id_raw, partner_cui.unwrap_or(""));
@@ -257,12 +262,19 @@ fn post_sales_invoice(
         });
         record_id += 1;
 
-        // C 4427 TVA colectată = VAT (only when group has VAT)
+        // C 4427 TVA colectată = VAT (only when group has VAT). Under cash VAT the standard
+        // "S" VAT is not yet exigible → 4428 "TVA neexigibilă" (transferred to 4427 on
+        // collection). Excluded categories keep normal exigibility (4427).
+        let vat_account = if cash_vat_applies && category == "S" {
+            "4428"
+        } else {
+            "4427"
+        };
         if *vat_ron != Decimal::ZERO {
             entries.push(GlEntry {
                 id: new_id(),
                 record_id,
-                account_code: "4427".to_string(),
+                account_code: vat_account.to_string(),
                 debit: if vat < Decimal::ZERO {
                     -vat
                 } else {
@@ -415,6 +427,11 @@ fn post_payment(
     partner_cui: Option<&str>,
     amount_ron: Decimal,
     method: &str,
+    // TVA la încasare: per-rate VAT made exigible by THIS collection (rate, vat_ron). For a
+    // cash-VAT invoice each entry posts the exigibility transfer D 4428 / C 4427; empty for
+    // normal-VAT invoices (no second leg). Cumulative over the invoice's receipts this clears
+    // 4428 to zero exactly (vat_released trues up the final receipt).
+    released: &[(Decimal, Decimal)],
 ) -> (GlJournal, Vec<GlEntry>) {
     // Use canonical partner ID so it matches MasterFiles and SourceDocuments
     let contact_id = canonical_partner_id(contact_id_raw, partner_cui.unwrap_or(""));
@@ -438,7 +455,7 @@ fn post_payment(
         supplier_id: None,
     };
 
-    let entries = vec![
+    let mut entries = vec![
         // D 5121 Bancă / 5311 Casa (per payment method) = amount
         GlEntry {
             id: new_id(),
@@ -473,7 +490,158 @@ fn post_payment(
         },
     ];
 
+    // TVA la încasare — exigibility transfer for the VAT made exigible by this collection:
+    // per rate, D 4428 "TVA neexigibilă" / C 4427 "TVA colectată". Now the VAT enters the decont.
+    let mut record_id: i64 = 3;
+    for (rate, vat) in released {
+        if *vat == Decimal::ZERO {
+            continue;
+        }
+        let tc = sales_tax_code_str("S", *rate);
+        let rate_str = fmt_dec(*rate);
+        // D 4428 — release out of TVA neexigibilă.
+        entries.push(GlEntry {
+            id: new_id(),
+            record_id,
+            account_code: "4428".to_string(),
+            debit: *vat,
+            credit: Decimal::ZERO,
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "300".to_string(),
+            tax_code: tc.clone(),
+            tax_percentage: Some(rate_str.clone()),
+            tax_base: None,
+            tax_amount: None,
+        });
+        record_id += 1;
+        // C 4427 — now exigible TVA colectată.
+        entries.push(GlEntry {
+            id: new_id(),
+            record_id,
+            account_code: "4427".to_string(),
+            debit: Decimal::ZERO,
+            credit: *vat,
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "300".to_string(),
+            tax_code: tc,
+            tax_percentage: Some(rate_str),
+            tax_base: None,
+            tax_amount: Some(fmt_dec(*vat)),
+        });
+        record_id += 1;
+    }
+
     (journal, entries)
+}
+
+/// RON `Decimal` → integer bani (round half-away-from-zero), matching declarations::ron_to_bani.
+fn to_bani(d: Decimal) -> i64 {
+    use rust_decimal::prelude::ToPrimitive;
+    use rust_decimal::RoundingStrategy;
+    (d * Decimal::from(100))
+        .round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
+        .to_i64()
+        .unwrap_or(0)
+}
+
+/// Per-rate VAT `(rate, vat_ron)` made exigible by a single collection on a cash-VAT sales
+/// invoice — the `D 4428 / C 4427` transfer for post_payment. Builds the invoice's standard
+/// ("S") rate buckets + full gross in RON bani, the cumulative collected BEFORE this receipt
+/// (strictly earlier by paid_at, then id), then `allocate_collection` (proportional, true-up
+/// on the final receipt so 4428 clears to exactly zero). Empty if the invoice has no "S" lines.
+async fn cash_vat_release_for_payment(
+    pool: &SqlitePool,
+    invoice_id: &str,
+    payment_id: &str,
+    paid_at: &str,
+    currency: &str,
+    fx: Option<Decimal>,
+    amount_ron: Decimal,
+) -> AppResult<Vec<(Decimal, Decimal)>> {
+    use rust_decimal::prelude::ToPrimitive;
+    use std::collections::BTreeMap;
+
+    let line_rows = sqlx::query(
+        "SELECT vat_category, vat_rate, subtotal_amount, vat_amount \
+         FROM invoice_line_items WHERE invoice_id = ?1",
+    )
+    .bind(invoice_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut gross_bani: i64 = 0;
+    let mut bucket_acc: BTreeMap<i64, (Decimal, i64, i64)> = BTreeMap::new();
+    for l in &line_rows {
+        let cat: String = l
+            .try_get("vat_category")
+            .unwrap_or_else(|_| "S".to_string());
+        let rate_s: String = l.try_get("vat_rate").unwrap_or_default();
+        let base_s: String = l.try_get("subtotal_amount").unwrap_or_default();
+        let vat_s: String = l.try_get("vat_amount").unwrap_or_default();
+        let base_ron = amount_to_ron(dec(&base_s), currency, fx);
+        let vat_ron = amount_to_ron(dec(&vat_s), currency, fx);
+        gross_bani += to_bani(base_ron) + to_bani(vat_ron);
+        if cat.trim() == "S" {
+            let rate = dec(&rate_s);
+            let rate_key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
+            let e = bucket_acc.entry(rate_key).or_insert((rate, 0, 0));
+            e.1 += to_bani(base_ron);
+            e.2 += to_bani(vat_ron);
+        }
+    }
+    if bucket_acc.is_empty() || gross_bani <= 0 {
+        return Ok(Vec::new());
+    }
+
+    let buckets: Vec<RateBucket> = bucket_acc
+        .iter()
+        .map(|(k, (_r, b, v))| RateBucket {
+            rate_key: *k,
+            base_bani: *b,
+            vat_bani: *v,
+        })
+        .collect();
+    let rate_of: BTreeMap<i64, Decimal> =
+        bucket_acc.iter().map(|(k, (r, _, _))| (*k, *r)).collect();
+
+    // Cumulative collected BEFORE this receipt (strictly earlier by paid_at, then id),
+    // converted+rounded PER payment (skipping non-positive rows) so paid_before is byte-
+    // identical to declarations::cash_vat_collected_groups — otherwise round2(Σ) vs Σ round2
+    // would drift by a bani on FX invoices and GL 4427 would diverge from D300 collected.
+    let prior_rows = sqlx::query(
+        "SELECT amount FROM payments \
+         WHERE invoice_id = ?1 \
+           AND (substr(paid_at,1,10) < substr(?2,1,10) \
+                OR (substr(paid_at,1,10) = substr(?2,1,10) AND id < ?3))",
+    )
+    .bind(invoice_id)
+    .bind(paid_at)
+    .bind(payment_id)
+    .fetch_all(pool)
+    .await?;
+    let mut paid_before_bani: i64 = 0;
+    for pr in &prior_rows {
+        let a: String = pr.try_get("amount").unwrap_or_default();
+        let b = to_bani(amount_to_ron(dec(&a), currency, fx));
+        if b > 0 {
+            paid_before_bani += b;
+        }
+    }
+    let payment_bani = to_bani(amount_ron);
+
+    let mut out: Vec<(Decimal, Decimal)> = Vec::new();
+    for rb in allocate_collection(gross_bani, &buckets, paid_before_bani, payment_bani) {
+        if rb.vat_bani == 0 {
+            continue;
+        }
+        let rate = *rate_of.get(&rb.rate_key).unwrap_or(&Decimal::ZERO);
+        out.push((rate, Decimal::from(rb.vat_bani) / Decimal::from(100)));
+    }
+    Ok(out)
 }
 
 // ─── DB insert helpers ────────────────────────────────────────────────────────
@@ -580,6 +748,32 @@ pub async fn generate_gl_entries(
     let mut entries_inserted: i64 = 0;
     let mut journals_replaced: i64 = 0;
 
+    // Cash-VAT (TVA la încasare) regime flags: drive 4428 routing + the collection release.
+    let (company_cash_vat, cash_vat_start, cash_vat_end): (bool, Option<String>, Option<String>) = {
+        let r = sqlx::query(
+            "SELECT cash_vat, cash_vat_start, cash_vat_end FROM companies WHERE id = ?1 LIMIT 1",
+        )
+        .bind(company_id)
+        .fetch_optional(pool)
+        .await?;
+        match r {
+            Some(row) => (
+                row.try_get::<bool, _>("cash_vat").unwrap_or(false),
+                row.try_get::<Option<String>, _>("cash_vat_start")
+                    .unwrap_or(None),
+                row.try_get::<Option<String>, _>("cash_vat_end")
+                    .unwrap_or(None),
+            ),
+            None => (false, None, None),
+        }
+    };
+    // True when an invoice issued on `issue_date` is under the cash-VAT regime window.
+    let in_cash_vat_window = |issue_date: &str| -> bool {
+        company_cash_vat
+            && cash_vat_start.as_deref().is_none_or(|s| issue_date >= s)
+            && cash_vat_end.as_deref().is_none_or(|e| issue_date <= e)
+    };
+
     // ── 1. Facturi emise ──────────────────────────────────────────────────────
 
     // FIX 1: Fetch invoice headers without aggregate — we query per-rate groups separately.
@@ -660,6 +854,11 @@ pub async fn generate_gl_entries(
         // Storno: dacă are referință la factură originală SAU status == STORNED
         let is_storno = storno_ref.is_some() || status == "STORNED";
 
+        // Cash VAT: route standard ("S") output VAT to 4428 (neexigibilă) only for fresh
+        // (non-storno) invoices issued within the regime window. Storno keeps today's 4427
+        // behaviour (the proportional 4428/4427 reversal is deferred — see CASH_VAT_DESIGN.md).
+        let cash_vat_applies = !is_storno && in_cash_vat_window(&issue_date);
+
         let (journal, entries) = post_sales_invoice(
             company_id,
             &inv_id,
@@ -669,6 +868,7 @@ pub async fn generate_gl_entries(
             contact_cui.as_deref(),
             &vat_groups,
             is_storno,
+            cash_vat_applies,
         );
 
         // FIX 2: Balance guard — reject before writing.
@@ -845,7 +1045,9 @@ pub async fn generate_gl_entries(
 
     let payment_rows = sqlx::query(
         "SELECT p.id, p.invoice_id, p.paid_at, p.amount, p.currency, p.method, \
-                i.contact_id, c.cui as contact_cui, i.exchange_rate \
+                i.contact_id, c.cui as contact_cui, i.exchange_rate, \
+                i.issue_date as inv_issue_date, i.status as inv_status, \
+                i.storno_of_invoice_id as inv_storno_ref \
          FROM payments p \
          JOIN invoices i ON i.id = p.invoice_id \
          LEFT JOIN contacts c ON c.id = i.contact_id \
@@ -885,6 +1087,22 @@ pub async fn generate_gl_entries(
         );
         let amount_ron = amount_to_ron(dec(&amount_s), &currency, inv_fx);
 
+        // Cash VAT: if this payment settles a (non-storno) cash-VAT invoice issued in-window,
+        // compute the per-rate VAT it makes exigible — post_payment adds D 4428 / C 4427.
+        let inv_issue: String = row.try_get("inv_issue_date").unwrap_or_default();
+        let inv_status: String = row.try_get("inv_status").unwrap_or_default();
+        let inv_storno_ref: Option<String> = row.try_get("inv_storno_ref").unwrap_or(None);
+        let inv_is_storno = inv_storno_ref.is_some() || inv_status == "STORNED";
+        let released: Vec<(Decimal, Decimal)> = if !inv_is_storno && in_cash_vat_window(&inv_issue)
+        {
+            cash_vat_release_for_payment(
+                pool, &inv_id, &pay_id, &paid_at, &currency, inv_fx, amount_ron,
+            )
+            .await?
+        } else {
+            Vec::new()
+        };
+
         let (journal, entries) = post_payment(
             company_id,
             &pay_id,
@@ -894,6 +1112,7 @@ pub async fn generate_gl_entries(
             contact_cui.as_deref(),
             amount_ron,
             &method,
+            &released,
         );
 
         // FIX 2: Balance guard.
@@ -2012,5 +2231,187 @@ mod tests {
             assert_balanced(&balanced, "test-balanced").is_ok(),
             "Balance guard must accept a balanced set"
         );
+    }
+
+    // ── Cash VAT (TVA la încasare) — 4428 postings + collection release ───────
+    async fn enable_cash_vat(pool: &SqlitePool, company: &str, start: &str) {
+        sqlx::query("UPDATE companies SET cash_vat=1, cash_vat_start=?2 WHERE id=?1")
+            .bind(company)
+            .bind(start)
+            .execute(pool)
+            .await
+            .expect("enable cash vat");
+    }
+
+    async fn insert_pay(
+        pool: &SqlitePool,
+        company: &str,
+        inv: &str,
+        pid: &str,
+        amount: &str,
+        paid_at: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO payments (id, invoice_id, company_id, amount, currency, paid_at, method) \
+             VALUES (?1,?2,?3,?4,'RON',?5,'transfer')",
+        )
+        .bind(pid)
+        .bind(inv)
+        .bind(company)
+        .bind(amount)
+        .bind(paid_at)
+        .execute(pool)
+        .await
+        .expect("insert payment");
+    }
+
+    /// (Σdebit, Σcredit) for an account across ALL of a company's journals.
+    async fn account_balance(
+        pool: &SqlitePool,
+        company: &str,
+        account: &str,
+    ) -> (Decimal, Decimal) {
+        let rows = sqlx::query(
+            "SELECT e.debit, e.credit FROM gl_entry e \
+             JOIN gl_journal j ON j.id = e.journal_pk \
+             WHERE j.company_id = ?1 AND e.account_code = ?2",
+        )
+        .bind(company)
+        .bind(account)
+        .fetch_all(pool)
+        .await
+        .unwrap();
+        let mut d = Decimal::ZERO;
+        let mut c = Decimal::ZERO;
+        for r in &rows {
+            d += dec(&r.try_get::<String, _>("debit").unwrap_or_default());
+            c += dec(&r.try_get::<String, _>("credit").unwrap_or_default());
+        }
+        (d, c)
+    }
+
+    #[tokio::test]
+    async fn cash_vat_sale_credits_4428_not_4427() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        enable_cash_vat(&pool, "co", "2025-01-01").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        // insert_invoice uses issue_date 2025-01-15, rate 19, category S.
+        insert_invoice(
+            &pool,
+            "co",
+            "inv",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+        )
+        .await;
+
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        // Output VAT is neexigibilă at invoice date: in 4428, NOT 4427.
+        let (_, c4428) = account_balance(&pool, "co", "4428").await;
+        let (_, c4427) = account_balance(&pool, "co", "4427").await;
+        assert_eq!(c4428, dec("190"), "VAT must be credited to 4428");
+        assert_eq!(c4427, Decimal::ZERO, "nothing exigible yet (no collection)");
+    }
+
+    #[tokio::test]
+    async fn cash_vat_full_collection_transfers_4428_to_4427() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        enable_cash_vat(&pool, "co", "2025-01-01").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice(
+            &pool,
+            "co",
+            "inv",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+        )
+        .await;
+        insert_pay(&pool, "co", "inv", "p1", "1190", "2025-01-20").await;
+
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
+        let (_, c4427) = account_balance(&pool, "co", "4427").await;
+        assert_eq!(
+            c4428 - d4428,
+            Decimal::ZERO,
+            "4428 fully cleared on collection"
+        );
+        assert_eq!(c4427, dec("190"), "full VAT now exigible in 4427");
+    }
+
+    #[tokio::test]
+    async fn cash_vat_partial_collection_is_proportional() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        enable_cash_vat(&pool, "co", "2025-01-01").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice(
+            &pool,
+            "co",
+            "inv",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+        )
+        .await;
+        // Collect half (595 of 1190) → release 595 × 19/119 = 95.
+        insert_pay(&pool, "co", "inv", "p1", "595", "2025-01-20").await;
+
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
+        let (_, c4427) = account_balance(&pool, "co", "4427").await;
+        assert_eq!(c4427, dec("95"), "half the VAT exigible");
+        assert_eq!(c4428 - d4428, dec("95"), "the other half stays neexigibilă");
+    }
+
+    #[tokio::test]
+    async fn non_cash_vat_sale_still_credits_4427() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await; // cash_vat stays 0
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice(
+            &pool,
+            "co",
+            "inv",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+        )
+        .await;
+        insert_pay(&pool, "co", "inv", "p1", "1190", "2025-01-20").await;
+
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let (_, c4427) = account_balance(&pool, "co", "4427").await;
+        let (_, c4428) = account_balance(&pool, "co", "4428").await;
+        assert_eq!(c4427, dec("190"), "normal VAT: 4427 at invoice date");
+        assert_eq!(c4428, Decimal::ZERO, "no 4428 for a non-cash-VAT company");
     }
 }
