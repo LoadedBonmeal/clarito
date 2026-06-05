@@ -89,6 +89,35 @@ pub fn purchase_status(supplier_cash_vat: bool, vat_category: &str) -> CashVatSt
     }
 }
 
+/// Round-half-away-from-zero integer division `a / b` (for `b > 0`).
+fn round_div(a: i64, b: i64) -> i64 {
+    if b == 0 {
+        return 0;
+    }
+    let half = b / 2;
+    if a >= 0 {
+        (a + half) / b
+    } else {
+        -((-a + half) / b)
+    }
+}
+
+/// VAT made exigibilă by a single (partial) collection under cash VAT, with exact true-up
+/// on the final receipt. Cumulative-proportional: the VAT exigible at the post-payment
+/// cumulative collected minus at the pre-payment cumulative — so rounding cannot drift and
+/// the receipt that fully collects the invoice releases the entire residual VAT. All money
+/// in the same integer unit (bani).
+pub fn vat_released(invoice_gross: i64, invoice_vat: i64, paid_before: i64, payment: i64) -> i64 {
+    if invoice_gross <= 0 || payment <= 0 {
+        return 0;
+    }
+    let before = paid_before.clamp(0, invoice_gross);
+    let after = (paid_before + payment).clamp(0, invoice_gross);
+    let exig_after = round_div(invoice_vat.saturating_mul(after), invoice_gross);
+    let exig_before = round_div(invoice_vat.saturating_mul(before), invoice_gross);
+    (exig_after - exig_before).max(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,5 +161,46 @@ mod tests {
         // Reverse-charge / intra-EU purchases deduct immediately even from a cash-VAT supplier.
         assert!(!purchase_status(true, "AE").applies());
         assert!(!purchase_status(true, "K").applies());
+    }
+
+    #[test]
+    fn full_collection_releases_all_vat() {
+        // 21% invoice: base 10000, VAT 2100, gross 12100. One full receipt clears it all.
+        assert_eq!(vat_released(12100, 2100, 0, 12100), 2100);
+    }
+
+    #[test]
+    fn partial_collections_true_up_to_invoice_vat() {
+        // Two halves of a 12100 / 2100 invoice each release 1050; sum == 2100.
+        let r1 = vat_released(12100, 2100, 0, 6050);
+        let r2 = vat_released(12100, 2100, 6050, 6050);
+        assert_eq!(r1, 1050);
+        assert_eq!(r2, 1050);
+        assert_eq!(r1 + r2, 2100);
+    }
+
+    #[test]
+    fn uneven_thirds_sum_exactly_with_no_drift() {
+        // 19% invoice: base 10000, VAT 1900, gross 11900. Pay 3967 + 3967 + 3966.
+        let (g, v) = (11900, 1900);
+        let r1 = vat_released(g, v, 0, 3967);
+        let r2 = vat_released(g, v, 3967, 3967);
+        let r3 = vat_released(g, v, 7934, 3966);
+        assert_eq!(
+            r1 + r2 + r3,
+            v,
+            "Σ releases must equal invoice VAT (true-up)"
+        );
+    }
+
+    #[test]
+    fn overpayment_caps_and_zero_inputs() {
+        // Paying more than the invoice never releases more than the invoice VAT.
+        assert_eq!(vat_released(12100, 2100, 0, 99999), 2100);
+        // A receipt after the invoice is fully collected releases nothing.
+        assert_eq!(vat_released(12100, 2100, 12100, 5000), 0);
+        // Degenerate inputs are inert.
+        assert_eq!(vat_released(0, 0, 0, 100), 0);
+        assert_eq!(vat_released(12100, 2100, 0, 0), 0);
     }
 }
