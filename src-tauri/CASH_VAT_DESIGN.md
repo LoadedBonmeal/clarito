@@ -90,7 +90,13 @@ Deep-research (4-agent workflow, primary-source read of the official PDF, advers
 - **4d — official XSD D300** (d300/rows.rs) wiring + DUKIntegrator on a cash-VAT fixture.
 
 ## Progress
-- **DONE** slices 1, 2, 3, 4a, 4b (all gated green, committed, not pushed).
+- **DONE** slices 1, 2, 3, 4a, 4b, 5, 6 (all gated green, committed, not pushed).
+- **5** (GL): post_sales_invoice credits 4428 for non-storno cash-VAT S; post_payment posts
+  the per-rate D 4428 / C 4427 release; clears to zero on full collection. Adversarial QA fixed
+  two GL↔D300 consistency bugs pre-commit: STORNED originals now deferred only when VALIDATED
+  (D300 + GL aligned); FX paid_before accumulated per-payment to match cash_vat_collected_groups.
+  Deferred to slice 7: 4428.col/.ded analytic split + collected-then-refunded storno reversal.
+- **CANNOT run locally**: DUKIntegrator (slice 4d) — jar present but no Java runtime installed.
 - **4b** wires both `compute_d300` and `d300_vat_totals`; the official XSD D300 follows
   automatically (rows.rs maps the D300Report). Adversarial QA (3-lens workflow) fixed before
   commit: storno reversal was dropped for cash-VAT (now gated on `CAST(total_amount)>0` so
