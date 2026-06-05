@@ -53,11 +53,41 @@ that obligation was repealed (OUG 111/2013, after ECJ C-169/12 *TNT Express*). T
 - Storno/credit note: target the correct bucket by parent settlement state — unsettled →
   reverse 4428; settled → adjust 4427/4426; partial → split proportionally.
 
-## D300 routing
-- Collected rows (rd.9/10/11) ← settlement events `side='collected'` in period, grouped by rate
-  (NOT invoice lines by issue_date). Deductible rows ← `side='deductible'`. Anything still in
-  4428 is excluded by construction. Period granularity = company.vat_period.
-- Prior-period base adjustments (art. 287) → rd.16 regularizări (gate on a period lock).
+## D300 routing — VERIFIED against OPANAF 174/2026 F300 (Anexa 1 form + Anexa 2 instr.)
+Deep-research (4-agent workflow, primary-source read of the official PDF, adversarial pass
+**NOT REFUTED**) confirmed:
+- **No dedicated cash-VAT operative row.** Deferred output/input VAT flows into the SAME
+  per-rate rows, in the COLLECTION / PAYMENT period. Each row's instruction is keyed to
+  *exigibilitate*, not invoice date.
+- **Collected (output):** rd.9 = 21%, rd.10 = 11%, rd.11 = 9% (Legea 141/2025) → rd.19 total.
+  Collections of OLD-rate invoices (24/20/19/9/5%, by the invoice's ORIGINAL rate) → rd.16
+  "Regularizări taxă colectată" (the app already routes 19/5% S to reg_colectata).
+- **Deductible (input):** rd.24 = 21%, rd.25 = 11% → rd.31/32. Old-rate → rd.33. NOTE: rd.26 =
+  reverse-charge/simplificare (26.1=21%, 26.2=11%), NOT a 5% row; there is NO 5% deductible row
+  and NO rd.24.1/25.1 legacy sub-rows in OPANAF 174/2026.
+- **Memo rows (informational; never enter rd.19/rd.35 or TVA de plată):** rd.A/A1 = closing 4428
+  (TVA neexigibilă) balance on UNcollected cash-VAT sales; rd.B/B1 = buyer analogue (input not
+  yet paid). A1/B1 look-back is contradictory in the official doc (face: 6 luni/2 trim.; instr.:
+  5 luni/trim. anterior) → make configurable, default to the instructions.
+- **Base defers with the VAT:** rd.9/10/11 base = proportional net (paid_allocated − vat_released).
+- **Excluded (art. 282(6)) stay on issue_date:** AE reverse-charge → rd.13; E exempt → rd.14;
+  K intra-EU → rd.1/3 (exigibility art. 222 Directive / art. 319(9)). Only category 'S' domestic
+  standard supplies of a cash-VAT company defer to collection.
+- **e-TVA precompletat will legitimately diverge** (built from e-Factura issue-date data) — do
+  NOT auto-align D300 to it; conformare-reply obligation removed 2026-01-01.
+
+## Slice 4 decomposition (seller side first; buyer side is slice 7)
+- **4a — snapshot:** `invoices.cash_vat_applies INTEGER NOT NULL DEFAULT 0`, set = company.cash_vat
+  at invoice creation. Per-invoice snapshot (immune to later regime changes); existing rows = 0
+  (no behaviour change). Routing gates on this, NOT the live company flag.
+- **4b — pure allocation:** `allocate_collection(s_lines, paid_before, payment)` → per-rate
+  (released_base, released_vat) using `vat_released` with the FULL invoice gross as denominator
+  (a payment settles the whole invoice pro-rata; only S lines defer, E/Z stay at issue_date).
+- **4c — wiring:** `cash_vat_collected_groups(pool, company, period)` summing released base+VAT over
+  payments (paid_at ∈ period) against cash_vat_applies sales invoices, grouped by ORIGINAL rate;
+  splice into `compute_d300` + `d300_vat_totals` so excluded categories + non-cash-VAT are byte
+  -identical to today. Old-rate buckets feed the existing reg_colectata (rd.16) loop.
+- **4d — official XSD D300** (d300/rows.rs) wiring + DUKIntegrator on a cash-VAT fixture.
 
 ## Plafon monitor
 Rolling 12-month CA (excl. fixed-asset/intangible disposals); on crossing the date-applicable

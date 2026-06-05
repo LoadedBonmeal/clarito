@@ -118,6 +118,48 @@ pub fn vat_released(invoice_gross: i64, invoice_vat: i64, paid_before: i64, paym
     (exig_after - exig_before).max(0)
 }
 
+/// One rate group of an invoice, in integer bani, used as input to cash-VAT release
+/// allocation. `rate_key` is the caller's D300 grouping key (e.g. `(rate × 100).round()`),
+/// carried through opaquely.
+#[derive(Debug, Clone, Copy)]
+pub struct RateBucket {
+    pub rate_key: i64,
+    pub base_bani: i64,
+    pub vat_bani: i64,
+}
+
+/// The base + VAT released into one rate group by a single collection, in bani.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReleasedBucket {
+    pub rate_key: i64,
+    pub base_bani: i64,
+    pub vat_bani: i64,
+}
+
+/// Allocate a single (partial) collection across an invoice's cash-VAT rate buckets.
+///
+/// `gross_bani` is the FULL invoice gross (all categories, including any exempt lines) — the
+/// denominator, because one payment settles the whole invoice proportionally. Only the
+/// deferred buckets (the standard-rate "S" lines) are passed in and released here; excluded
+/// lines (exempt / reverse-charge / intra-EU) keep invoice-date exigibility and are routed
+/// elsewhere. Each component is released via `vat_released`, so every bucket trues up exactly
+/// when the invoice is fully collected (no bani drift).
+pub fn allocate_collection(
+    gross_bani: i64,
+    buckets: &[RateBucket],
+    paid_before: i64,
+    payment: i64,
+) -> Vec<ReleasedBucket> {
+    buckets
+        .iter()
+        .map(|b| ReleasedBucket {
+            rate_key: b.rate_key,
+            base_bani: vat_released(gross_bani, b.base_bani, paid_before, payment),
+            vat_bani: vat_released(gross_bani, b.vat_bani, paid_before, payment),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +244,58 @@ mod tests {
         // Degenerate inputs are inert.
         assert_eq!(vat_released(0, 0, 0, 100), 0);
         assert_eq!(vat_released(12100, 2100, 0, 0), 0);
+    }
+
+    #[test]
+    fn allocate_single_bucket_full() {
+        // One 21% bucket, gross == bucket gross, paid in full.
+        let b = [RateBucket {
+            rate_key: 2100,
+            base_bani: 10000,
+            vat_bani: 2100,
+        }];
+        let out = allocate_collection(12100, &b, 0, 12100);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].rate_key, 2100);
+        assert_eq!(out[0].base_bani, 10000);
+        assert_eq!(out[0].vat_bani, 2100);
+    }
+
+    #[test]
+    fn allocate_uses_full_gross_with_exempt_line() {
+        // Invoice: S 10000 + 2100 VAT, plus an exempt line 5000 / 0 VAT. Gross 17100.
+        // Only the S bucket is passed; a half payment releases half the S base+VAT.
+        let s = [RateBucket {
+            rate_key: 2100,
+            base_bani: 10000,
+            vat_bani: 2100,
+        }];
+        let out = allocate_collection(17100, &s, 0, 8550);
+        assert_eq!(out[0].base_bani, 5000);
+        assert_eq!(out[0].vat_bani, 1050);
+    }
+
+    #[test]
+    fn allocate_two_buckets_and_true_up() {
+        // 21% (10000/2100) + 11% (5000/550). Gross 17650. Pay 8825 then 8825.
+        let bk = [
+            RateBucket {
+                rate_key: 2100,
+                base_bani: 10000,
+                vat_bani: 2100,
+            },
+            RateBucket {
+                rate_key: 1100,
+                base_bani: 5000,
+                vat_bani: 550,
+            },
+        ];
+        let p1 = allocate_collection(17650, &bk, 0, 8825);
+        let p2 = allocate_collection(17650, &bk, 8825, 8825);
+        // Each bucket's base and VAT sum across the two receipts to the invoice totals.
+        assert_eq!(p1[0].vat_bani + p2[0].vat_bani, 2100);
+        assert_eq!(p1[1].vat_bani + p2[1].vat_bani, 550);
+        assert_eq!(p1[0].base_bani + p2[0].base_bani, 10000);
+        assert_eq!(p1[1].base_bani + p2[1].base_bani, 5000);
     }
 }
