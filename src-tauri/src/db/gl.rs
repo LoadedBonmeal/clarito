@@ -405,6 +405,7 @@ fn post_purchase_invoice(
 }
 
 /// Postare plată client primită.
+#[allow(clippy::too_many_arguments)]
 fn post_payment(
     company_id: &str,
     payment_id: &str,
@@ -413,13 +414,20 @@ fn post_payment(
     contact_id_raw: &str,
     partner_cui: Option<&str>,
     amount_ron: Decimal,
+    method: &str,
 ) -> (GlJournal, Vec<GlEntry>) {
     // Use canonical partner ID so it matches MasterFiles and SourceDocuments
     let contact_id = canonical_partner_id(contact_id_raw, partner_cui.unwrap_or(""));
+    // Route the debit to the account matching the payment instrument: cash hits
+    // 5311 "Casa" (CASA journal); everything else (bank transfer / card) hits 5121.
+    let (debit_account, journal_id) = match method.to_ascii_lowercase().as_str() {
+        "cash" | "numerar" => ("5311", "CASA"),
+        _ => ("5121", "BANCA"),
+    };
     let journal = GlJournal {
         id: new_id(),
         company_id: company_id.to_string(),
-        journal_id: "BANCA".to_string(),
+        journal_id: journal_id.to_string(),
         journal_type: "PAYMENT".to_string(),
         transaction_id: payment_id.to_string(),
         transaction_date: paid_at.to_string(),
@@ -431,11 +439,11 @@ fn post_payment(
     };
 
     let entries = vec![
-        // D 5121 Bancă lei = amount
+        // D 5121 Bancă / 5311 Casa (per payment method) = amount
         GlEntry {
             id: new_id(),
             record_id: 1,
-            account_code: "5121".to_string(),
+            account_code: debit_account.to_string(),
             debit: amount_ron,
             credit: Decimal::ZERO,
             partner_cui: None,
@@ -836,7 +844,7 @@ pub async fn generate_gl_entries(
     // ── 3. Plăți clienți ─────────────────────────────────────────────────────
 
     let payment_rows = sqlx::query(
-        "SELECT p.id, p.invoice_id, p.paid_at, p.amount, p.currency, \
+        "SELECT p.id, p.invoice_id, p.paid_at, p.amount, p.currency, p.method, \
                 i.contact_id, c.cui as contact_cui, i.exchange_rate \
          FROM payments p \
          JOIN invoices i ON i.id = p.invoice_id \
@@ -861,6 +869,9 @@ pub async fn generate_gl_entries(
             .unwrap_or_else(|_| "RON".to_string());
         let contact_id: String = row.try_get("contact_id").unwrap_or_default();
         let contact_cui: Option<String> = row.try_get("contact_cui").unwrap_or(None);
+        let method: String = row
+            .try_get("method")
+            .unwrap_or_else(|_| "transfer".to_string());
 
         // Convert a foreign-currency payment to RON using the invoice's exchange
         // rate (the rate the receivable in 4111 was booked at). This makes the
@@ -882,6 +893,7 @@ pub async fn generate_gl_entries(
             &contact_id,
             contact_cui.as_deref(),
             amount_ron,
+            &method,
         );
 
         // FIX 2: Balance guard.

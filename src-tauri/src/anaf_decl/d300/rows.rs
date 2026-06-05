@@ -674,8 +674,21 @@ pub fn map_to_rows(
     let r27_vat = r18_vat + r20_vat + r22_vat + r23_vat + r25_2_total;
     let r27_base = r18_base + r20_base + r22_base + r23_base + r25_1_total;
 
-    // R28_2 (sub-total dedusă) = R27_2 (no pro-rata adjustment)
-    let r28_vat = r27_vat;
+    // R28_2 (rd.31, "SUB-TOTAL TAXĂ DEDUSĂ") — apply pro-rata de deducere (art. 300 Cod
+    // fiscal; OPANAF 174/2026). The schema does NOT auto-apply pro-rata: the filer supplies
+    // rd.31, constrained to rd.31 <= rd.30 (DUK control V_6). The app does not track each
+    // purchase's deduction destination, so it scales the whole deductible VAT by the declared
+    // pro_rata — exact for a fully mixed-use activity. A purely deductible payer files
+    // pro_rata = 100 (the default) → rd.31 == rd.30 (behaviour unchanged for everyone else).
+    let hundred = Decimal::from(100);
+    let pro_rata_pct = Decimal::try_from(submission.pro_rata)
+        .unwrap_or(hundred)
+        .clamp(Decimal::ZERO, hundred);
+    let r28_vat = if pro_rata_pct >= hundred {
+        r27_vat
+    } else {
+        (r27_vat * pro_rata_pct / hundred).round_dp(0)
+    };
 
     // R32_2 = R28_2 + R29_2 + R30_2 + R31_2
     // DUK rule R108: R32_2 = R28_2 + R30_2 (regularizări dedusă flows here, not into R27)

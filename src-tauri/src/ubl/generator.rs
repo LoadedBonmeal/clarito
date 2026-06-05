@@ -366,9 +366,10 @@ fn write_customer_party(
         } else if country_code.is_empty() || country_code == "RO" {
             format!("RO{}", trimmed)
         } else {
-            // Non-RO buyer, no prefix in stored value — leave digits as-is
-            // (we cannot safely synthesize a foreign VAT-ID prefix here).
-            trimmed.to_string()
+            // Non-RO buyer with no country prefix in the stored value: synthesize it
+            // from the buyer's country so the EU VAT ID (BT-48) is well-formed
+            // (e.g. "DE123456789") — CIUS/Schematron rejects an unprefixed foreign VAT ID.
+            format!("{country_code}{trimmed}")
         };
         write_text(writer, "cbc:CompanyID", &buyer_cui_xml)?;
         writer
