@@ -115,6 +115,207 @@ pub struct D300Report {
 
 // ── Shared D300 VAT core (used by compute_d300 + gl::reconcile) ──────────────
 
+/// Convert a RON `Decimal` to integer bani (round half-away-from-zero, matching
+/// `cash_vat::round_div`). Inputs reaching this are already ≤2 decimals (post `amount_to_ron`),
+/// so the strategy only matters as a guard against a future 3-decimal caller.
+fn ron_to_bani(d: Decimal) -> i64 {
+    use rust_decimal::prelude::ToPrimitive;
+    use rust_decimal::RoundingStrategy;
+    (d * Decimal::from(100))
+        .round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
+        .to_i64()
+        .unwrap_or(0)
+}
+
+/// Fetch a company's cash-VAT regime flag + effective window (`cash_vat`, start, end).
+/// Missing company → `(false, None, None)`.
+async fn fetch_cash_vat_flags(
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+) -> AppResult<(bool, Option<String>, Option<String>)> {
+    let row = sqlx::query(
+        "SELECT cash_vat, cash_vat_start, cash_vat_end FROM companies WHERE id = ?1 LIMIT 1",
+    )
+    .bind(company_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::Database)?;
+    Ok(match row {
+        Some(r) => (
+            r.try_get::<bool, _>("cash_vat").unwrap_or(false),
+            r.try_get::<Option<String>, _>("cash_vat_start")
+                .unwrap_or(None),
+            r.try_get::<Option<String>, _>("cash_vat_end")
+                .unwrap_or(None),
+        ),
+        None => (false, None, None),
+    })
+}
+
+/// Cash-VAT (TVA la încasare) collected groups: for a company on the regime, the deferred
+/// standard-rate ("S") output VAT attributed to the **collection** period instead of the
+/// issue date (Cod fiscal art. 282 alin. (3)-(5); OPANAF 174/2026 F300 rd.9/10/11, old rate
+/// → rd.16). For each payment with `paid_at` in `[period_from, period_to]` against a deferred
+/// sales invoice (status VALIDATED/STORNED, issued within the regime window, with ≥1 "S"
+/// line), releases base+VAT proportionally — cumulative across ALL the invoice's payments so
+/// prior-period partials never re-release — grouped by the line's ORIGINAL rate (so old-rate
+/// collections still reach the rd.16 regularizări via the existing prefill loop). Excluded
+/// categories and out-of-window "S" lines are NOT here; they keep the issue-date path.
+///
+/// Returns map `(rate_key, "S")` → `(rate, base_ron, vat_ron)`. Credit notes / storno
+/// (non-positive gross) are inert here — proportional reversal is slice 5 (GL).
+async fn cash_vat_collected_groups(
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    cash_vat_start: Option<&str>,
+    cash_vat_end: Option<&str>,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<BTreeMap<(i64, String), (Decimal, Decimal, Decimal)>> {
+    use crate::anaf_decl::cash_vat::{allocate_collection, RateBucket};
+    use rust_decimal::prelude::ToPrimitive;
+
+    let mut out: BTreeMap<(i64, String), (Decimal, Decimal, Decimal)> = BTreeMap::new();
+
+    // Invoices with a collection in [period], status ok, issued within the regime window.
+    let invoice_rows = sqlx::query(
+        "SELECT DISTINCT i.id, COALESCE(i.currency,'RON') AS currency, i.exchange_rate \
+         FROM payments p JOIN invoices i ON i.id = p.invoice_id \
+         WHERE p.company_id = ?1 \
+           AND substr(p.paid_at,1,10) >= ?2 AND substr(p.paid_at,1,10) <= ?3 \
+           AND i.status IN ('VALIDATED','STORNED') \
+           AND CAST(i.total_amount AS REAL) > 0 \
+           AND (?4 IS NULL OR i.issue_date >= ?4) \
+           AND (?5 IS NULL OR i.issue_date <= ?5)",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .bind(cash_vat_start)
+    .bind(cash_vat_end)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    for inv in &invoice_rows {
+        let invoice_id: String = inv.try_get("id").unwrap_or_default();
+        let currency: String = inv
+            .try_get("currency")
+            .unwrap_or_else(|_| "RON".to_string());
+        let fx = parse_rate(
+            inv.try_get::<Option<f64>, _>("exchange_rate")
+                .unwrap_or(None),
+        );
+
+        // Build the invoice's "S" rate buckets + full gross (ALL categories) in RON bani.
+        let line_rows = sqlx::query(
+            "SELECT vat_category, vat_rate, subtotal_amount, vat_amount \
+             FROM invoice_line_items WHERE invoice_id = ?1",
+        )
+        .bind(&invoice_id)
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::Database)?;
+
+        let mut gross_bani: i64 = 0;
+        // rate_key → (rate, base_bani, vat_bani)
+        let mut bucket_acc: BTreeMap<i64, (Decimal, i64, i64)> = BTreeMap::new();
+        for l in &line_rows {
+            let category: String = l
+                .try_get("vat_category")
+                .unwrap_or_else(|_| "S".to_string());
+            let rate_s: String = l.try_get("vat_rate").unwrap_or_default();
+            let base_s: String = l.try_get("subtotal_amount").unwrap_or_default();
+            let vat_s: String = l.try_get("vat_amount").unwrap_or_default();
+
+            let base_ron = amount_to_ron(
+                Decimal::from_str(&base_s).unwrap_or(Decimal::ZERO),
+                &currency,
+                fx,
+            );
+            let vat_ron = amount_to_ron(
+                Decimal::from_str(&vat_s).unwrap_or(Decimal::ZERO),
+                &currency,
+                fx,
+            );
+            gross_bani += ron_to_bani(base_ron) + ron_to_bani(vat_ron);
+
+            if category.trim() == "S" {
+                let rate = Decimal::from_str(&rate_s).unwrap_or(Decimal::ZERO);
+                let rate_key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
+                let e = bucket_acc.entry(rate_key).or_insert((rate, 0, 0));
+                e.1 += ron_to_bani(base_ron);
+                e.2 += ron_to_bani(vat_ron);
+            }
+        }
+
+        // No deferred "S" lines, or a credit note / storno (non-positive gross): skip.
+        if bucket_acc.is_empty() || gross_bani <= 0 {
+            continue;
+        }
+
+        let buckets: Vec<RateBucket> = bucket_acc
+            .iter()
+            .map(|(k, (_r, b, v))| RateBucket {
+                rate_key: *k,
+                base_bani: *b,
+                vat_bani: *v,
+            })
+            .collect();
+        let rate_of: BTreeMap<i64, Decimal> =
+            bucket_acc.iter().map(|(k, (r, _, _))| (*k, *r)).collect();
+
+        // Walk ALL payments up to period end chronologically; release only the in-period ones.
+        let pay_rows = sqlx::query(
+            "SELECT amount, paid_at \
+             FROM payments WHERE invoice_id = ?1 AND substr(paid_at,1,10) <= ?2 \
+             ORDER BY paid_at, id",
+        )
+        .bind(&invoice_id)
+        .bind(period_to)
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::Database)?;
+
+        let mut paid_before: i64 = 0;
+        for p in &pay_rows {
+            let amt_s: String = p.try_get("amount").unwrap_or_default();
+            let paid_at: String = p.try_get("paid_at").unwrap_or_default();
+            // Payments settle in the invoice's currency (db/payments.rs defaults to it);
+            // convert with the invoice currency + rate so the collected/gross ratio holds.
+            let pay_bani = ron_to_bani(amount_to_ron(
+                Decimal::from_str(&amt_s).unwrap_or(Decimal::ZERO),
+                &currency,
+                fx,
+            ));
+            if pay_bani <= 0 {
+                continue;
+            }
+            // Date-only comparison (defensive against a time component on paid_at).
+            let pd = if paid_at.len() >= 10 {
+                &paid_at[..10]
+            } else {
+                paid_at.as_str()
+            };
+            if pd >= period_from && pd <= period_to {
+                for rb in allocate_collection(gross_bani, &buckets, paid_before, pay_bani) {
+                    let rate = *rate_of.get(&rb.rate_key).unwrap_or(&Decimal::ZERO);
+                    let e = out.entry((rb.rate_key, "S".to_string())).or_insert((
+                        rate,
+                        Decimal::ZERO,
+                        Decimal::ZERO,
+                    ));
+                    e.1 += Decimal::from(rb.base_bani) / Decimal::from(100);
+                    e.2 += Decimal::from(rb.vat_bani) / Decimal::from(100);
+                }
+            }
+            paid_before += pay_bani;
+        }
+    }
+
+    Ok(out)
+}
+
 /// Computează totalul TVA colectat + deductibil din sursele primare pentru o
 /// perioadă, fără niciun override.  Aceasta este sursa unică de adevăr la care
 /// trebuie să se raporteze atât `compute_d300` cât și `reconcile` din GL.
@@ -126,8 +327,13 @@ pub(crate) async fn d300_vat_totals(
     period_from: &str,
     period_to: &str,
 ) -> crate::error::AppResult<(Decimal, Decimal)> {
+    // Cash-VAT regime: when on, standard-rate ("S") output VAT is exigible on COLLECTION, so
+    // it is excluded from the issue-date sum below and re-added by collection date via
+    // cash_vat_collected_groups — kept byte-consistent with compute_d300.
+    let (cash_vat, cash_vat_start, cash_vat_end) = fetch_cash_vat_flags(pool, company_id).await?;
+
     // ── TVA colectată: Σvat_amount din liniile facturilor emise (VALIDATED+STORNED) ──
-    let sales_rows = sqlx::query(
+    let mut collected_sql = String::from(
         "SELECT l.vat_amount, COALESCE(i.currency,'RON') as currency, i.exchange_rate \
          FROM invoice_line_items l \
          JOIN invoices i ON i.id = l.invoice_id \
@@ -135,13 +341,28 @@ pub(crate) async fn d300_vat_totals(
            AND i.status IN ('VALIDATED','STORNED') \
            AND i.issue_date >= ?2 \
            AND i.issue_date <= ?3",
-    )
-    .bind(company_id)
-    .bind(period_from)
-    .bind(period_to)
-    .fetch_all(pool)
-    .await
-    .map_err(crate::error::AppError::Database)?;
+    );
+    if cash_vat {
+        collected_sql.push_str(
+            " AND NOT (TRIM(l.vat_category) = 'S' \
+               AND CAST(i.total_amount AS REAL) > 0 \
+               AND (?4 IS NULL OR i.issue_date >= ?4) \
+               AND (?5 IS NULL OR i.issue_date <= ?5))",
+        );
+    }
+    let mut sales_q = sqlx::query(&collected_sql)
+        .bind(company_id)
+        .bind(period_from)
+        .bind(period_to);
+    if cash_vat {
+        sales_q = sales_q
+            .bind(cash_vat_start.clone())
+            .bind(cash_vat_end.clone());
+    }
+    let sales_rows = sales_q
+        .fetch_all(pool)
+        .await
+        .map_err(crate::error::AppError::Database)?;
 
     let mut collected = Decimal::ZERO;
     for row in &sales_rows {
@@ -158,6 +379,22 @@ pub(crate) async fn d300_vat_totals(
             &currency,
             fx,
         );
+    }
+
+    // Cash-VAT: add the deferred "S" output VAT made exigible by collections in the period.
+    if cash_vat {
+        let deferred = cash_vat_collected_groups(
+            pool,
+            company_id,
+            cash_vat_start.as_deref(),
+            cash_vat_end.as_deref(),
+            period_from,
+            period_to,
+        )
+        .await?;
+        for (_, _base, vat) in deferred.values() {
+            collected += *vat;
+        }
     }
 
     // ── TVA deductibilă: Σvat_amount din received_invoice_vat_lines ──
@@ -239,6 +476,11 @@ pub async fn compute_d300(
         .try_get("cui")
         .unwrap_or_else(|_| company_id.clone());
 
+    // Cash-VAT regime: when on, standard-rate ("S") output VAT is exigible on COLLECTION.
+    // Such lines are excluded from the issue-date grouping below and re-added by collection
+    // date via cash_vat_collected_groups; excluded categories + non-cash-VAT are unchanged.
+    let (cash_vat, cash_vat_start, cash_vat_end) = fetch_cash_vat_flags(pool, &company_id).await?;
+
     // Numărul total de facturi din setul fiscal autorizat în perioadă (pentru header).
     // Setul fiscal: VALIDATED + STORNED — același set ca rapoartele TVA, jurnalele,
     // D394 și SAF-T, pentru reconciliere completă (storno-fix).
@@ -264,7 +506,7 @@ pub async fn compute_d300(
     // Wave 4: fetch i.currency + i.exchange_rate for RON normalisation.
     // Storno-fix: setul fiscal autorizat este VALIDATED + STORNED, identic cu
     // rapoartele TVA, D394 și SAF-T, astfel încât D300 reconciliază cu celelalte.
-    let line_rows = sqlx::query(
+    let mut sales_sql = String::from(
         "SELECT l.vat_rate, l.vat_category, l.subtotal_amount, l.vat_amount, \
                 COALESCE(i.currency, 'RON') AS currency, i.exchange_rate \
          FROM invoice_line_items l \
@@ -273,13 +515,26 @@ pub async fn compute_d300(
            AND i.issue_date >= ?1 \
            AND i.issue_date <= ?2 \
            AND i.company_id = ?3",
-    )
-    .bind(&period_from)
-    .bind(&period_to)
-    .bind(&company_id)
-    .fetch_all(pool)
-    .await
-    .map_err(AppError::Database)?;
+    );
+    if cash_vat {
+        // Deferred "S" lines (issued in-window) move to the collection-date path.
+        sales_sql.push_str(
+            " AND NOT (TRIM(l.vat_category) = 'S' \
+               AND CAST(i.total_amount AS REAL) > 0 \
+               AND (?4 IS NULL OR i.issue_date >= ?4) \
+               AND (?5 IS NULL OR i.issue_date <= ?5))",
+        );
+    }
+    let mut sales_q = sqlx::query(&sales_sql)
+        .bind(&period_from)
+        .bind(&period_to)
+        .bind(&company_id);
+    if cash_vat {
+        sales_q = sales_q
+            .bind(cash_vat_start.clone())
+            .bind(cash_vat_end.clone());
+    }
+    let line_rows = sales_q.fetch_all(pool).await.map_err(AppError::Database)?;
 
     // Acumulăm în BTreeMap<(rate_key_i64, category), (rate_dec, base_sum, vat_sum)>
     // — același pattern ca în reports.rs::generate_vat_report.
@@ -320,6 +575,28 @@ pub async fn compute_d300(
             .or_insert((rate, Decimal::ZERO, Decimal::ZERO));
         e.1 += base_ron;
         e.2 += vat_ron;
+    }
+
+    // Cash-VAT: splice in the deferred "S" base+VAT made exigible by collections in the
+    // period (grouped by original rate). Old-rate buckets (19/5%) flow through the existing
+    // reg_colectata (rd.16) loop below exactly like issue-date old-rate S sales.
+    if cash_vat {
+        let deferred = cash_vat_collected_groups(
+            pool,
+            &company_id,
+            cash_vat_start.as_deref(),
+            cash_vat_end.as_deref(),
+            &period_from,
+            &period_to,
+        )
+        .await?;
+        for ((rate_key, cat), (rate, base, vat)) in deferred {
+            let e = groups
+                .entry((rate_key, cat))
+                .or_insert((rate, Decimal::ZERO, Decimal::ZERO));
+            e.1 += base;
+            e.2 += vat;
+        }
     }
 
     // Calculăm totalurile și construim Vec<D300Group> descrescător după cotă.
@@ -1392,5 +1669,214 @@ mod tests {
         let g9 = &purchase_groups[&(rate_9_key, "S".to_string())];
         assert_eq!(g9.1, Decimal::from_str("200.00").unwrap());
         assert_eq!(g9.2, Decimal::from_str("18.00").unwrap());
+    }
+}
+
+// ── Cash-VAT (TVA la încasare) collection-date routing — DB integration tests ──
+#[cfg(test)]
+mod cash_vat_routing_tests {
+    use super::*;
+    use sqlx::SqlitePool;
+
+    async fn pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("migrations");
+        pool
+    }
+
+    async fn seed_company(pool: &SqlitePool, id: &str, cash_vat: bool, start: Option<&str>) {
+        sqlx::query(
+            "INSERT INTO companies \
+             (id, cui, legal_name, address, city, county, country, cash_vat, cash_vat_start) \
+             VALUES (?1,'12345678','Test SRL','Str 1','Bucuresti','B','RO',?2,?3)",
+        )
+        .bind(id)
+        .bind(cash_vat as i64)
+        .bind(start)
+        .execute(pool)
+        .await
+        .expect("insert company");
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, contact_type, cui, legal_name) \
+             VALUES (?1,?2,'CUSTOMER','99','Client')",
+        )
+        .bind(format!("c-{id}"))
+        .bind(id)
+        .execute(pool)
+        .await
+        .expect("insert contact");
+    }
+
+    // Single 21% "S" line; gross = net + vat.
+    async fn seed_invoice(
+        pool: &SqlitePool,
+        company: &str,
+        inv: &str,
+        issue: &str,
+        net: &str,
+        vat: &str,
+        gross: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, issue_date, due_date, \
+              currency, subtotal_amount, vat_amount, total_amount, status, payment_means_code, \
+              created_at, updated_at) \
+             VALUES (?1,?2,?3,?1,1,?1,?4,?4,'RON',?5,?6,?7,'VALIDATED','42',1,1)",
+        )
+        .bind(inv)
+        .bind(company)
+        .bind(format!("c-{company}"))
+        .bind(issue)
+        .bind(net)
+        .bind(vat)
+        .bind(gross)
+        .execute(pool)
+        .await
+        .expect("insert invoice");
+        sqlx::query(
+            "INSERT INTO invoice_line_items \
+             (id, invoice_id, position, name, quantity, unit, unit_price, vat_rate, \
+              vat_category, subtotal_amount, vat_amount, total_amount) \
+             VALUES (?1,?2,'1','P','1','buc',?3,'21','S',?3,?4,?5)",
+        )
+        .bind(format!("l-{inv}"))
+        .bind(inv)
+        .bind(net)
+        .bind(vat)
+        .bind(gross)
+        .execute(pool)
+        .await
+        .expect("insert line");
+    }
+
+    async fn seed_payment(
+        pool: &SqlitePool,
+        company: &str,
+        inv: &str,
+        pid: &str,
+        amount: &str,
+        paid_at: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO payments (id, invoice_id, company_id, amount, currency, paid_at, method) \
+             VALUES (?1,?2,?3,?4,'RON',?5,'transfer')",
+        )
+        .bind(pid)
+        .bind(inv)
+        .bind(company)
+        .bind(amount)
+        .bind(paid_at)
+        .execute(pool)
+        .await
+        .expect("insert payment");
+    }
+
+    fn dec(s: &str) -> Decimal {
+        Decimal::from_str(s).unwrap()
+    }
+
+    #[tokio::test]
+    async fn cash_vat_defers_collected_to_payment_period() {
+        // 21% invoice (10000 + 2100), issued March, half-paid March, half-paid April.
+        let pool = pool().await;
+        seed_company(&pool, "co", true, Some("2026-01-01")).await;
+        seed_invoice(&pool, "co", "inv1", "2026-03-10", "10000", "2100", "12100").await;
+        seed_payment(&pool, "co", "inv1", "p1", "6050", "2026-03-20").await;
+        seed_payment(&pool, "co", "inv1", "p2", "6050", "2026-04-15").await;
+
+        let (mar, _) = d300_vat_totals(&pool, "co", "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        let (apr, _) = d300_vat_totals(&pool, "co", "2026-04-01", "2026-04-30")
+            .await
+            .unwrap();
+        assert_eq!(mar, dec("1050"), "March = half the VAT (half collected)");
+        assert_eq!(apr, dec("1050"), "April = remaining half (true-up)");
+        assert_eq!(mar + apr, dec("2100"), "Σ over periods = invoice VAT");
+    }
+
+    #[tokio::test]
+    async fn non_cash_vat_company_routes_by_issue_date() {
+        // Same invoice/payments, but the company is NOT on cash VAT → unchanged accrual.
+        let pool = pool().await;
+        seed_company(&pool, "co", false, None).await;
+        seed_invoice(&pool, "co", "inv1", "2026-03-10", "10000", "2100", "12100").await;
+        seed_payment(&pool, "co", "inv1", "p1", "6050", "2026-03-20").await;
+        seed_payment(&pool, "co", "inv1", "p2", "6050", "2026-04-15").await;
+
+        let (mar, _) = d300_vat_totals(&pool, "co", "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        let (apr, _) = d300_vat_totals(&pool, "co", "2026-04-01", "2026-04-30")
+            .await
+            .unwrap();
+        assert_eq!(mar, dec("2100"), "accrual: full VAT in the issue month");
+        assert_eq!(apr, Decimal::ZERO, "accrual: nothing in April");
+    }
+
+    #[tokio::test]
+    async fn cash_vat_pre_window_invoice_stays_accrual() {
+        // Invoice issued BEFORE the regime start must keep invoice-date exigibility even
+        // though it is collected after adoption (it was already declared at issue date).
+        let pool = pool().await;
+        seed_company(&pool, "co", true, Some("2026-03-01")).await;
+        seed_invoice(&pool, "co", "inv0", "2026-02-10", "10000", "2100", "12100").await;
+        seed_payment(&pool, "co", "inv0", "p1", "12100", "2026-03-20").await;
+
+        let (feb, _) = d300_vat_totals(&pool, "co", "2026-02-01", "2026-02-28")
+            .await
+            .unwrap();
+        let (mar, _) = d300_vat_totals(&pool, "co", "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        assert_eq!(
+            feb,
+            dec("2100"),
+            "pre-window invoice: full VAT at issue date"
+        );
+        assert_eq!(
+            mar,
+            Decimal::ZERO,
+            "pre-window invoice: nothing deferred to March"
+        );
+    }
+
+    #[tokio::test]
+    async fn cash_vat_storno_credit_note_reverses_collected() {
+        // A cash-VAT "S" sale collected in full, then storno'd via a negative credit note
+        // the same month, must net the collected VAT back to zero. The credit note (negative
+        // total) stays on the issue-date path so the reversal is not dropped; the positive
+        // sale is deferred and re-added on collection. (Proportional-to-collection reversal
+        // is slice 5; here the accrual-style reversal must at least be correct.)
+        let pool = pool().await;
+        seed_company(&pool, "co", true, Some("2026-01-01")).await;
+        seed_invoice(&pool, "co", "inv1", "2026-03-10", "10000", "2100", "12100").await;
+        seed_payment(&pool, "co", "inv1", "p1", "12100", "2026-03-15").await;
+        // Negative credit note (storno) — VALIDATED, negative amounts, no collection.
+        seed_invoice(
+            &pool,
+            "co",
+            "cn1",
+            "2026-03-25",
+            "-10000",
+            "-2100",
+            "-12100",
+        )
+        .await;
+
+        let (mar, _) = d300_vat_totals(&pool, "co", "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        assert_eq!(
+            mar,
+            Decimal::ZERO,
+            "storno must reverse the collected VAT, not be dropped"
+        );
     }
 }
