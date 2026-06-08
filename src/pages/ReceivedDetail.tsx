@@ -238,6 +238,11 @@ export function ReceivedDetailPage() {
                   </div>
                 </SectionCard>
 
+                {/* Plăți furnizor — buyer-side TVA la încasare */}
+                {activeCompanyId && (
+                  <SupplierPaymentsCard receivedInvoiceId={id} companyId={activeCompanyId} />
+                )}
+
                 {/* ANAF/SPV info */}
                 <SectionCard icon="cloud" title="Informații ANAF/SPV">
                   <div style={{ padding: "0 16px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 24px" }}>
@@ -383,5 +388,172 @@ export function ReceivedDetailPage() {
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * Supplier-payment panel (payments-out). Buyer-side TVA la încasare: the deduction is exercised
+ * on the payment date, so recording payments here drives the deferred-deduction release in D300
+ * (rd.24/25) and the GL transfer 4428 → 4426.
+ */
+function SupplierPaymentsCard({
+  receivedInvoiceId,
+  companyId,
+}: {
+  receivedInvoiceId: string;
+  companyId: string;
+}) {
+  const queryClient = useQueryClient();
+  const today = new Date().toISOString().slice(0, 10);
+  const [amount, setAmount] = useState("");
+  const [paidAt, setPaidAt] = useState(today);
+  const [method, setMethod] = useState("transfer");
+
+  const summaryKey = ["receivedPayments", receivedInvoiceId];
+  const { data: summary, isLoading } = useQuery({
+    queryKey: summaryKey,
+    queryFn: () => api.receivedPayments.summary(receivedInvoiceId, companyId),
+  });
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: summaryKey });
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.received.detail(receivedInvoiceId),
+    });
+  };
+
+  const { mutate: addPayment, isPending: isAdding } = useMutation({
+    mutationFn: () =>
+      api.receivedPayments.add({
+        receivedInvoiceId,
+        companyId,
+        amount: amount.trim(),
+        paidAt,
+        method,
+      }),
+    onSuccess: () => {
+      setAmount("");
+      invalidate();
+      notify.success("Plată furnizor înregistrată.");
+    },
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut înregistra plata.")),
+  });
+
+  const { mutate: removePayment } = useMutation({
+    mutationFn: (paymentId: string) => api.receivedPayments.delete(paymentId, companyId),
+    onSuccess: invalidate,
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge plata.")),
+  });
+
+  const statusVariant =
+    summary?.paymentStatus === "PAID"
+      ? "success"
+      : summary?.paymentStatus === "PARTIAL"
+        ? "warning"
+        : "neutral";
+  const statusLabel =
+    summary?.paymentStatus === "PAID"
+      ? "Plătită integral"
+      : summary?.paymentStatus === "PARTIAL"
+        ? "Parțial plătită"
+        : "Neplătită";
+
+  return (
+    <SectionCard icon="wallet" title="Plăți furnizor (TVA la încasare)">
+      <div style={{ padding: "0 16px 16px" }}>
+        <div style={{ fontSize: 13, color: "var(--rf-text-muted)", marginBottom: 12 }}>
+          Pentru achiziții de la furnizori cu «TVA la încasare» (sau dacă aplicați regimul),
+          dreptul de deducere se exercită la <strong>data plății</strong>. Înregistrați plățile
+          aici pentru a deduce TVA în perioada plății (D300) și a transfera 4428 → 4426 în
+          contabilitate.
+        </div>
+        {isLoading ? (
+          <div style={{ color: "var(--rf-text-muted)" }}>Se încarcă…</div>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 12 }}>
+              <Badge variant={statusVariant}>{statusLabel}</Badge>
+              <span className="mono" style={{ fontSize: 13 }}>
+                Plătit {fmtRON(summary?.paidAmount ?? "0")} din {fmtRON(summary?.totalAmount ?? "0")}
+              </span>
+            </div>
+            {summary && summary.payments.length > 0 ? (
+              <div style={{ marginBottom: 12 }}>
+                {summary.payments.map((p) => (
+                  <div
+                    key={p.id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "6px 0",
+                      borderBottom: "1px solid var(--rf-border)",
+                    }}
+                  >
+                    <span style={{ fontSize: 13 }}>
+                      {p.paidAt} · {p.method}
+                    </span>
+                    <span style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                      <span className="mono" style={{ fontWeight: 600 }}>
+                        {fmtRON(p.amount)}
+                      </span>
+                      <Btn variant="ghost" size="sm" onClick={() => removePayment(p.id)}>
+                        Șterge
+                      </Btn>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Empty title="Nicio plată înregistrată." />
+            )}
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <label style={{ display: "flex", flexDirection: "column", fontSize: 12, gap: 2 }}>
+                Sumă (RON)
+                <input
+                  className="rf-input"
+                  type="text"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  style={{ width: 120 }}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", fontSize: 12, gap: 2 }}>
+                Data plății
+                <input
+                  className="rf-input"
+                  type="date"
+                  value={paidAt}
+                  onChange={(e) => setPaidAt(e.target.value)}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", fontSize: 12, gap: 2 }}>
+                Metodă
+                <select
+                  className="rf-input"
+                  value={method}
+                  onChange={(e) => setMethod(e.target.value)}
+                >
+                  <option value="transfer">Transfer bancar</option>
+                  <option value="cash">Numerar</option>
+                  <option value="card">Card</option>
+                  <option value="compensare">Compensare</option>
+                </select>
+              </label>
+              <Btn
+                variant="primary"
+                size="sm"
+                disabled={isAdding || !amount.trim()}
+                onClick={() => addPayment()}
+              >
+                Adaugă plată
+              </Btn>
+            </div>
+          </>
+        )}
+      </div>
+    </SectionCard>
   );
 }

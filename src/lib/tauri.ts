@@ -413,6 +413,54 @@ export const payments = {
     invoke<PaymentSummary[]>("list_payment_summaries", { companyId }),
 };
 
+// ─── Supplier payments (payments-out, buyer-side TVA la încasare) ───────────
+
+export interface ReceivedPayment {
+  id: string;
+  receivedInvoiceId: string;
+  companyId: string;
+  amount: string;
+  currency: string;
+  paidAt: string;
+  method: string;
+  reference?: string;
+  notes?: string;
+  createdAt: number;
+}
+
+export interface ReceivedPaymentSummary {
+  receivedInvoiceId: string;
+  totalAmount: string;
+  paidAmount: string;
+  paymentStatus: "UNPAID" | "PARTIAL" | "PAID";
+  payments: ReceivedPayment[];
+}
+
+export interface AddReceivedPaymentArgs {
+  receivedInvoiceId: string;
+  companyId: string;
+  amount: string;
+  currency?: string;
+  paidAt: string;
+  method?: string;
+  reference?: string;
+  notes?: string;
+}
+
+export const receivedPayments = {
+  add: (args: AddReceivedPaymentArgs) =>
+    invoke<ReceivedPayment>("add_received_payment", { args }),
+  list: (receivedInvoiceId: string, companyId: string) =>
+    invoke<ReceivedPayment[]>("list_received_payments", { receivedInvoiceId, companyId }),
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_received_payment", { id, companyId }),
+  summary: (receivedInvoiceId: string, companyId: string) =>
+    invoke<ReceivedPaymentSummary>("get_received_payment_summary", {
+      receivedInvoiceId,
+      companyId,
+    }),
+};
+
 // ─── Recurring invoices ────────────────────────────────────────────────────
 
 export interface RecurringInvoice {
@@ -792,6 +840,7 @@ export const api = {
   products,
   receipts,
   received,
+  receivedPayments,
   recurring,
   reports,
   saft,

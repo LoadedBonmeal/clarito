@@ -90,7 +90,18 @@ Deep-research (4-agent workflow, primary-source read of the official PDF, advers
 - **4d — official XSD D300** (d300/rows.rs) wiring + DUKIntegrator on a cash-VAT fixture.
 
 ## Progress
-- **DONE** slices 1, 2, 3, 4a, 4b, 5, 6, 8 (all gated green, committed, not pushed).
+- **DONE** slices 1, 2, 3, 4a, 4b, 5, 6, 7a, 7b, 7c, 7d, 8 (all gated green, committed, not pushed).
+- **7 (buyer side)** complete on the backend: 7a payments-out subsystem (migration 0027
+  received_invoice_payments + db/commands), 7b purchase_deferred ((supplier∨buyer)∧S), 7c D300
+  deductible deferral (cash_vat_deductible_groups + DEFERRED_RECEIVED_PREDICATE + buyer_side_active),
+  7d GL (4428 input + D 4426/C 4428 release on supplier payment, first time supplier payments
+  hit the GL). Deep-researched (art. 297(2)/(3); refute fixed the 3-pronged carve-out incl.
+  art. 313(10)). Adversarial QA fixed 4 GL↔D300 consistency bugs: REJECTED-invoice release,
+  AE/K self-assessed VAT in the payable denominator, raw-vs-substr paid_at, payment-vs-invoice
+  currency. GL 4426 now reconciles with D300 deductible. **TODO 7e**: React UI to record
+  supplier payments (commands exist + registered). Accepted refinements: no per-invoice supplier
+  snapshot (live contacts.cash_vat); plain 4428 (no .col/.ded analytic; SAF-T builds accounts
+  from the chart).
 - **8** (plafon monitor): plafon_lei(date) (4.5M pre-2026 / 5M 2026 / 5.5M 2027+, OUG 8/2026)
   + plafon_breach_month + compute_plafon_status command — cumulative current-year CA vs plafon,
   exit-notificare deadline (20th of month after breach) + cash-vat-stops date (end of following
