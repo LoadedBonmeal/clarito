@@ -441,6 +441,8 @@ pub fn run() {
             commands::gl::reconcile_gl,
             commands::gl::close_vat_period,
             commands::gl::trial_balance,
+            commands::gl::journal_register,
+            commands::gl::general_ledger,
             // stock movements — Phase 6a (SAF-T MovementOfGoods)
             commands::stock::create_stock_movement,
             commands::stock::list_stock_movements,

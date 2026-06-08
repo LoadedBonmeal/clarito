@@ -768,6 +768,51 @@ export interface TrialBalanceRow {
   closingCredit: string;
 }
 
+/** One line of the Registru-jurnal (cod 14-1-1). */
+export interface JournalRegisterRow {
+  nrCrt: number;
+  date: string;
+  document: string;
+  explanation: string;
+  debitAccount: string;
+  creditAccount: string;
+  debit: string;
+  credit: string;
+}
+
+/** Mirrors Rust `JournalRegister` (src-tauri/src/db/gl.rs). */
+export interface JournalRegister {
+  rows: JournalRegisterRow[];
+  totalDebit: string;
+  totalCredit: string;
+  balanced: boolean;
+}
+
+/** One movement line of a Cartea mare account sheet (fișă de cont). */
+export interface LedgerEntry {
+  date: string;
+  document: string;
+  explanation: string;
+  contra: string;
+  debit: string;
+  credit: string;
+  balance: string;
+  balanceSide: string;
+}
+
+/** One synthetic-account sheet of the Cartea mare (cod 14-1-3). */
+export interface LedgerAccount {
+  accountCode: string;
+  accountName: string;
+  openingDebit: string;
+  openingCredit: string;
+  entries: LedgerEntry[];
+  totalDebit: string;
+  totalCredit: string;
+  closingDebit: string;
+  closingCredit: string;
+}
+
 /** Mirrors Rust `TrialBalance` (src-tauri/src/db/gl.rs) — balanța de verificare. */
 export interface TrialBalance {
   rows: TrialBalanceRow[];

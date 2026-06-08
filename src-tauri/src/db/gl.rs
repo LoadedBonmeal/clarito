@@ -1938,6 +1938,300 @@ pub async fn trial_balance(
     })
 }
 
+// ─── Registru-jurnal (cod 14-1-1) ────────────────────────────────────────────
+
+/// One line of the Registru-jurnal (model 14-1-1): one GL entry, with the account on its
+/// own side (debit or credit) and the sum.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JournalRegisterRow {
+    pub nr_crt: i64,
+    pub date: String,
+    pub document: String,
+    pub explanation: String,
+    pub debit_account: String,
+    pub credit_account: String,
+    pub debit: String,
+    pub credit: String,
+}
+
+/// Registru-jurnal for a period + footer totals (Σ debit must equal Σ credit).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JournalRegister {
+    pub rows: Vec<JournalRegisterRow>,
+    pub total_debit: String,
+    pub total_credit: String,
+    pub balanced: bool,
+}
+
+/// Registru-jurnal (model cod 14-1-1, OMFP 2634/2015): the chronological list of all GL
+/// entries in the period, with the debit/credit account symbol and the sums. Mandatory
+/// register (Legea 82/1991 art. 20); may be kept electronic, printed on demand.
+pub async fn journal_register(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<JournalRegister> {
+    let rows_q = sqlx::query(
+        "SELECT j.transaction_date AS d, j.journal_id, j.transaction_id, j.description, \
+                e.account_code, e.debit, e.credit \
+         FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
+         WHERE j.company_id = ?1 AND j.transaction_date >= ?2 AND j.transaction_date <= ?3 \
+         ORDER BY j.transaction_date, j.transaction_id, e.record_id",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_all(pool)
+    .await?;
+
+    let mut rows = Vec::new();
+    let mut total_d = Decimal::ZERO;
+    let mut total_c = Decimal::ZERO;
+    for (i, r) in rows_q.iter().enumerate() {
+        let debit = dec(&r.try_get::<String, _>("debit").unwrap_or_default());
+        let credit = dec(&r.try_get::<String, _>("credit").unwrap_or_default());
+        let account: String = r.try_get("account_code").unwrap_or_default();
+        let journal_id: String = r.try_get("journal_id").unwrap_or_default();
+        let tx_id: String = r.try_get("transaction_id").unwrap_or_default();
+        total_d += debit;
+        total_c += credit;
+        rows.push(JournalRegisterRow {
+            nr_crt: (i + 1) as i64,
+            date: r.try_get("d").unwrap_or_default(),
+            document: format!("{journal_id} {tx_id}").trim().to_string(),
+            explanation: r
+                .try_get::<Option<String>, _>("description")
+                .unwrap_or(None)
+                .unwrap_or_default(),
+            debit_account: if debit > Decimal::ZERO {
+                account.clone()
+            } else {
+                String::new()
+            },
+            credit_account: if credit > Decimal::ZERO {
+                account
+            } else {
+                String::new()
+            },
+            debit: fmt_dec(debit),
+            credit: fmt_dec(credit),
+        });
+    }
+    let balanced = (total_d - total_c).abs() < Decimal::new(1, 2);
+    Ok(JournalRegister {
+        rows,
+        total_debit: fmt_dec(total_d),
+        total_credit: fmt_dec(total_c),
+        balanced,
+    })
+}
+
+// ─── Cartea mare / fișă de cont (cod 14-1-3) ─────────────────────────────────
+
+/// One movement line of an account's ledger sheet (fișă de cont), with the corresponding
+/// account(s) and the running balance after the line.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LedgerEntry {
+    pub date: String,
+    pub document: String,
+    pub explanation: String,
+    pub contra: String,
+    pub debit: String,
+    pub credit: String,
+    pub balance: String,
+    pub balance_side: String,
+}
+
+/// One synthetic account's ledger sheet (filă din Cartea mare).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LedgerAccount {
+    pub account_code: String,
+    pub account_name: String,
+    pub opening_debit: String,
+    pub opening_credit: String,
+    pub entries: Vec<LedgerEntry>,
+    pub total_debit: String,
+    pub total_credit: String,
+    pub closing_debit: String,
+    pub closing_credit: String,
+}
+
+/// Cartea mare (model cod 14-1-3 / fișă de cont pentru operațiuni diverse): one sheet per
+/// synthetic account, with the opening balance, the period movements (with corespondent
+/// account + running sold) and the closing balance. Mandatory register (Legea 82/1991).
+pub async fn general_ledger(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<Vec<LedgerAccount>> {
+    use std::collections::{BTreeMap, HashMap};
+
+    // Account names from the chart.
+    let name_rows = sqlx::query(
+        "SELECT account_code, account_name FROM chart_of_accounts WHERE company_id = ?1",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?;
+    let mut names: HashMap<String, String> = HashMap::new();
+    for r in &name_rows {
+        let c: String = r.try_get("account_code").unwrap_or_default();
+        let n: String = r.try_get("account_name").unwrap_or_default();
+        names.insert(c, n);
+    }
+
+    // Opening balance per account (net debit−credit) before the period.
+    let opening_rows = sqlx::query(
+        "SELECT e.account_code, \
+                COALESCE(SUM(CAST(e.debit AS REAL)-CAST(e.credit AS REAL)),0.0) AS net \
+         FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
+         WHERE j.company_id = ?1 AND j.transaction_date < ?2 \
+         GROUP BY e.account_code",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .fetch_all(pool)
+    .await?;
+    let mut opening: HashMap<String, Decimal> = HashMap::new();
+    for r in &opening_rows {
+        let c: String = r.try_get("account_code").unwrap_or_default();
+        opening.insert(c, dec_f(r.try_get::<f64, _>("net").unwrap_or(0.0)));
+    }
+
+    // All period entries with their journal, to derive corespondent accounts per journal.
+    let ent_rows = sqlx::query(
+        "SELECT e.journal_pk, j.transaction_date AS d, j.journal_id, j.transaction_id, \
+                j.description, e.account_code, e.debit, e.credit, e.record_id \
+         FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
+         WHERE j.company_id = ?1 AND j.transaction_date >= ?2 AND j.transaction_date <= ?3 \
+         ORDER BY j.transaction_date, j.transaction_id, e.record_id",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_all(pool)
+    .await?;
+
+    // Per journal: the debit-side and credit-side account sets (for corespondent display).
+    let mut jrnl_debit: HashMap<String, Vec<String>> = HashMap::new();
+    let mut jrnl_credit: HashMap<String, Vec<String>> = HashMap::new();
+    for r in &ent_rows {
+        let jpk: String = r.try_get("journal_pk").unwrap_or_default();
+        let acc: String = r.try_get("account_code").unwrap_or_default();
+        let d = dec(&r.try_get::<String, _>("debit").unwrap_or_default());
+        let c = dec(&r.try_get::<String, _>("credit").unwrap_or_default());
+        if d > Decimal::ZERO {
+            jrnl_debit.entry(jpk).or_default().push(acc);
+        } else if c > Decimal::ZERO {
+            jrnl_credit.entry(jpk).or_default().push(acc);
+        }
+    }
+    let contra = |opposite: Option<&Vec<String>>| -> String {
+        match opposite {
+            Some(v) if v.len() == 1 => v[0].clone(),
+            Some(v) if !v.is_empty() => "%".to_string(),
+            _ => String::new(),
+        }
+    };
+
+    // Build per-account ledger sheets (ordered by account_code).
+    let mut accounts: BTreeMap<String, LedgerAccount> = BTreeMap::new();
+    // Seed accounts that have only an opening balance (no period movement).
+    for (code, net) in &opening {
+        accounts
+            .entry(code.clone())
+            .or_insert_with(|| LedgerAccount {
+                account_code: code.clone(),
+                account_name: names.get(code).cloned().unwrap_or_else(|| code.clone()),
+                opening_debit: fmt_dec((*net).max(Decimal::ZERO)),
+                opening_credit: fmt_dec((-*net).max(Decimal::ZERO)),
+                entries: Vec::new(),
+                total_debit: "0.00".into(),
+                total_credit: "0.00".into(),
+                closing_debit: "0.00".into(),
+                closing_credit: "0.00".into(),
+            });
+    }
+
+    // Running balances start from opening.
+    let mut running: HashMap<String, Decimal> = opening.clone();
+    let mut totals: HashMap<String, (Decimal, Decimal)> = HashMap::new();
+
+    for r in &ent_rows {
+        let acc: String = r.try_get("account_code").unwrap_or_default();
+        let jpk: String = r.try_get("journal_pk").unwrap_or_default();
+        let debit = dec(&r.try_get::<String, _>("debit").unwrap_or_default());
+        let credit = dec(&r.try_get::<String, _>("credit").unwrap_or_default());
+        let journal_id: String = r.try_get("journal_id").unwrap_or_default();
+        let tx_id: String = r.try_get("transaction_id").unwrap_or_default();
+
+        let acct = accounts
+            .entry(acc.clone())
+            .or_insert_with(|| LedgerAccount {
+                account_code: acc.clone(),
+                account_name: names.get(&acc).cloned().unwrap_or_else(|| acc.clone()),
+                opening_debit: "0.00".into(),
+                opening_credit: "0.00".into(),
+                entries: Vec::new(),
+                total_debit: "0.00".into(),
+                total_credit: "0.00".into(),
+                closing_debit: "0.00".into(),
+                closing_credit: "0.00".into(),
+            });
+
+        // Corespondent = the opposite side's account(s) of this journal.
+        let contra_acc = if debit > Decimal::ZERO {
+            contra(jrnl_credit.get(&jpk))
+        } else {
+            contra(jrnl_debit.get(&jpk))
+        };
+
+        let bal = running.entry(acc.clone()).or_insert(Decimal::ZERO);
+        *bal += debit - credit;
+        let side = if *bal >= Decimal::ZERO { "D" } else { "C" };
+
+        acct.entries.push(LedgerEntry {
+            date: r.try_get("d").unwrap_or_default(),
+            document: format!("{journal_id} {tx_id}").trim().to_string(),
+            explanation: r
+                .try_get::<Option<String>, _>("description")
+                .unwrap_or(None)
+                .unwrap_or_default(),
+            contra: contra_acc,
+            debit: fmt_dec(debit),
+            credit: fmt_dec(credit),
+            balance: fmt_dec((*bal).abs()),
+            balance_side: side.to_string(),
+        });
+
+        let t = totals.entry(acc).or_insert((Decimal::ZERO, Decimal::ZERO));
+        t.0 += debit;
+        t.1 += credit;
+    }
+
+    // Finalise per-account totals + closing.
+    for (code, acct) in accounts.iter_mut() {
+        let (td, tc) = totals
+            .get(code)
+            .copied()
+            .unwrap_or((Decimal::ZERO, Decimal::ZERO));
+        let open = opening.get(code).copied().unwrap_or(Decimal::ZERO);
+        let closing = open + td - tc;
+        acct.total_debit = fmt_dec(td);
+        acct.total_credit = fmt_dec(tc);
+        acct.closing_debit = fmt_dec(closing.max(Decimal::ZERO));
+        acct.closing_credit = fmt_dec((-closing).max(Decimal::ZERO));
+    }
+
+    Ok(accounts.into_values().collect())
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -3414,5 +3708,96 @@ mod tests {
         assert_eq!(dec(&find("4111").closing_debit), dec("0"));
         assert_eq!(dec(&find("4111").period_debit), dec("1190"));
         assert_eq!(dec(&find("4111").period_credit), dec("1190"));
+    }
+
+    // ── Registru-jurnal + Cartea mare (Phase 2.4) ────────────────────────────
+    #[tokio::test]
+    async fn journal_register_is_chronological_and_balanced() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice(
+            &pool,
+            "co",
+            "inv",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+        )
+        .await;
+        insert_pay(&pool, "co", "inv", "p1", "1190", "2025-01-20").await;
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let jr = journal_register(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        assert!(jr.balanced, "Σ debit = Σ credit");
+        assert_eq!(jr.total_debit, jr.total_credit);
+        // nr_crt is sequential from 1.
+        assert_eq!(jr.rows.first().unwrap().nr_crt, 1);
+        assert_eq!(
+            jr.rows.last().unwrap().nr_crt,
+            jr.rows.len() as i64,
+            "nr_crt continuous"
+        );
+        // Each line has exactly one side populated.
+        for row in &jr.rows {
+            let has_d = !row.debit_account.is_empty();
+            let has_c = !row.credit_account.is_empty();
+            assert!(
+                has_d ^ has_c,
+                "exactly one of debit/credit account per line"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn general_ledger_sheets_have_running_balance() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice(
+            &pool,
+            "co",
+            "inv",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+        )
+        .await;
+        insert_pay(&pool, "co", "inv", "p1", "1190", "2025-01-20").await;
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let gl = general_ledger(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        let acc = |code: &str| {
+            gl.iter()
+                .find(|a| a.account_code == code)
+                .expect("account sheet")
+        };
+
+        // 4111: debit 1190 (sale) then credit 1190 (receipt) → closing zero, 2 movements.
+        let a4111 = acc("4111");
+        assert_eq!(a4111.entries.len(), 2);
+        assert_eq!(dec(&a4111.total_debit), dec("1190"));
+        assert_eq!(dec(&a4111.total_credit), dec("1190"));
+        assert_eq!(dec(&a4111.closing_debit), dec("0"));
+        assert_eq!(dec(&a4111.closing_credit), dec("0"));
+        // 5121: single receipt → closing debit 1190, corespondent 4111.
+        let a5121 = acc("5121");
+        assert_eq!(dec(&a5121.closing_debit), dec("1190"));
+        assert_eq!(a5121.entries[0].contra, "4111");
+        assert_eq!(a5121.entries[0].balance_side, "D");
     }
 }

@@ -45,6 +45,8 @@ import type {
   ReconcileReport,
   VatSettlementResult,
   TrialBalance,
+  JournalRegister,
+  LedgerAccount,
   SyncResult,
   UpdateAccountInput,
   UpdateCompanyInput,
@@ -584,6 +586,12 @@ export const gl = {
    */
   trialBalance: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<TrialBalance>("trial_balance", { companyId, periodFrom, periodTo }),
+  /** Registru-jurnal (cod 14-1-1). */
+  journalRegister: (companyId: string, periodFrom: string, periodTo: string) =>
+    invoke<JournalRegister>("journal_register", { companyId, periodFrom, periodTo }),
+  /** Cartea mare (cod 14-1-3) — câte o filă pe cont. */
+  generalLedger: (companyId: string, periodFrom: string, periodTo: string) =>
+    invoke<LedgerAccount[]>("general_ledger", { companyId, periodFrom, periodTo }),
 };
 
 // ─── Declarations (D300) ──────────────────────────────────────────────────

@@ -6,7 +6,9 @@
 
 use tauri::State;
 
+use crate::db::gl::{general_ledger as db_general_ledger, LedgerAccount};
 use crate::db::gl::{generate_gl_entries as db_generate, reconcile as db_reconcile};
+use crate::db::gl::{journal_register as db_journal_register, JournalRegister};
 use crate::db::gl::{post_vat_settlement as db_close_vat, VatSettlementResult};
 use crate::db::gl::{trial_balance as db_trial_balance, TrialBalance};
 use crate::db::gl::{GlPostResult, ReconcileReport};
@@ -71,4 +73,26 @@ pub async fn trial_balance(
     period_to: String,
 ) -> AppResult<TrialBalance> {
     db_trial_balance(&state.db, &company_id, &period_from, &period_to).await
+}
+
+/// Registru-jurnal (cod 14-1-1) — lista cronologică a notelor contabile din perioadă.
+#[tauri::command]
+pub async fn journal_register(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+) -> AppResult<JournalRegister> {
+    db_journal_register(&state.db, &company_id, &period_from, &period_to).await
+}
+
+/// Cartea mare (cod 14-1-3 / fișă de cont) — câte o filă pe cont sintetic.
+#[tauri::command]
+pub async fn general_ledger(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+) -> AppResult<Vec<LedgerAccount>> {
+    db_general_ledger(&state.db, &company_id, &period_from, &period_to).await
 }

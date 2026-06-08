@@ -20,7 +20,10 @@ import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
-import type { GlPostResult, ReconcileReport, VatSettlementResult, TrialBalance } from "@/types";
+import type {
+  GlPostResult, ReconcileReport, VatSettlementResult, TrialBalance,
+  JournalRegister, LedgerAccount,
+} from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -58,10 +61,14 @@ export function GlLedgerPage() {
   const [reconciling,     setReconciling]     = useState(false);
   const [closing,         setClosing]         = useState(false);
   const [loadingTb,       setLoadingTb]       = useState(false);
+  const [loadingJr,       setLoadingJr]       = useState(false);
+  const [loadingCm,       setLoadingCm]       = useState(false);
   const [postResult,      setPostResult]      = useState<GlPostResult | null>(null);
   const [reconcileReport, setReconcileReport] = useState<ReconcileReport | null>(null);
   const [vatClose,        setVatClose]        = useState<VatSettlementResult | null>(null);
   const [trialBal,        setTrialBal]        = useState<TrialBalance | null>(null);
+  const [journalReg,      setJournalReg]      = useState<JournalRegister | null>(null);
+  const [ledger,          setLedger]          = useState<LedgerAccount[] | null>(null);
 
   const yearOptions    = buildYearOptions();
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
@@ -164,6 +171,39 @@ export function GlLedgerPage() {
     }
   };
 
+  // ── Registru-jurnal + Cartea mare ─────────────────────────────────────────
+
+  const handleJournalRegister = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    setLoadingJr(true);
+    setJournalReg(null);
+    try {
+      const jr = await api.gl.journalRegister(activeCompanyId, dateFrom, dateTo);
+      setJournalReg(jr);
+      if (jr.rows.length === 0) notify.info("Nicio notă contabilă în perioadă.");
+      else notify.success(`Registru-jurnal: ${jr.rows.length} rânduri${jr.balanced ? " (echilibrat)" : " — DEZECHILIBRAT"}.`);
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut genera registrul-jurnal."));
+    } finally {
+      setLoadingJr(false);
+    }
+  };
+
+  const handleGeneralLedger = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    setLoadingCm(true);
+    setLedger(null);
+    try {
+      const cm = await api.gl.generalLedger(activeCompanyId, dateFrom, dateTo);
+      setLedger(cm);
+      notify.success(`Cartea mare: ${cm.length} conturi.`);
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut genera cartea mare."));
+    } finally {
+      setLoadingCm(false);
+    }
+  };
+
   // ── Reset on period change ────────────────────────────────────────────────
 
   const handlePeriodChange = () => {
@@ -171,6 +211,8 @@ export function GlLedgerPage() {
     setReconcileReport(null);
     setVatClose(null);
     setTrialBal(null);
+    setJournalReg(null);
+    setLedger(null);
   };
 
   return (
@@ -220,6 +262,22 @@ export function GlLedgerPage() {
               onClick={() => void handleTrialBalance()}
             >
               {loadingTb ? "Calculez…" : "Balanță de verificare"}
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon="ledger"
+              disabled={loadingJr || !activeCompanyId}
+              onClick={() => void handleJournalRegister()}
+            >
+              {loadingJr ? "…" : "Registru-jurnal"}
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon="ledger"
+              disabled={loadingCm || !activeCompanyId}
+              onClick={() => void handleGeneralLedger()}
+            >
+              {loadingCm ? "…" : "Cartea mare"}
             </Btn>
           </>
         }
@@ -365,6 +423,112 @@ export function GlLedgerPage() {
                   </tr>
                 </tfoot>
               </table>
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── Registru-jurnal ──────────────────────────────────────────────── */}
+        {journalReg && (
+          <SectionCard icon="ledger" title="Registru-jurnal (cod 14-1-1)">
+            <div style={{ padding: "12px 16px 4px", display: "flex", alignItems: "center", gap: 12 }}>
+              <Badge variant={journalReg.balanced ? "success" : "error"}>
+                {journalReg.balanced ? "Echilibrat" : "DEZECHILIBRAT"}
+              </Badge>
+              <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>{journalReg.rows.length} înregistrări</span>
+            </div>
+            <div style={{ overflowX: "auto", padding: "0 16px 16px" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid var(--rf-border)", textAlign: "left" }}>
+                    <th style={{ padding: "4px 8px" }}>Nr.</th>
+                    <th style={{ padding: "4px 8px" }}>Data</th>
+                    <th style={{ padding: "4px 8px" }}>Document</th>
+                    <th style={{ padding: "4px 8px" }}>Explicații</th>
+                    <th style={{ padding: "4px 8px" }}>Cont D</th>
+                    <th style={{ padding: "4px 8px" }}>Cont C</th>
+                    <th style={{ padding: "4px 8px", textAlign: "right" }}>Sume D</th>
+                    <th style={{ padding: "4px 8px", textAlign: "right" }}>Sume C</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {journalReg.rows.map((r) => (
+                    <tr key={r.nrCrt} style={{ borderBottom: "1px solid var(--rf-border)" }}>
+                      <td style={{ padding: "2px 8px" }}>{r.nrCrt}</td>
+                      <td style={{ padding: "2px 8px" }}>{r.date}</td>
+                      <td style={{ padding: "2px 8px" }}>{r.document}</td>
+                      <td style={{ padding: "2px 8px" }}>{r.explanation}</td>
+                      <td className="rf-mono" style={{ padding: "2px 8px" }}>{r.debitAccount || "—"}</td>
+                      <td className="rf-mono" style={{ padding: "2px 8px" }}>{r.creditAccount || "—"}</td>
+                      <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{parseDec(r.debit) === 0 ? "—" : fmtRON(r.debit)}</td>
+                      <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{parseDec(r.credit) === 0 ? "—" : fmtRON(r.credit)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: "2px solid var(--rf-border)", fontWeight: 700 }}>
+                    <td colSpan={6} style={{ padding: "4px 8px" }}>TOTAL</td>
+                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(journalReg.totalDebit)}</td>
+                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(journalReg.totalCredit)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── Cartea mare ──────────────────────────────────────────────────── */}
+        {ledger && (
+          <SectionCard icon="ledger" title="Cartea mare (cod 14-1-3)">
+            <div style={{ padding: "8px 16px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
+              {ledger.length === 0 && (
+                <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>Nicio mișcare contabilă în perioadă.</span>
+              )}
+              {ledger.map((a) => (
+                <div key={a.accountCode} style={{ border: "1px solid var(--rf-border)", borderRadius: 6 }}>
+                  <div style={{ padding: "6px 10px", background: "var(--rf-surface-2, transparent)", display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 13 }}>
+                    <span><span className="rf-mono">{a.accountCode}</span> · {a.accountName}</span>
+                    <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
+                      sold inițial {parseDec(a.openingDebit) > 0 ? `${fmtRON(a.openingDebit)} D` : parseDec(a.openingCredit) > 0 ? `${fmtRON(a.openingCredit)} C` : "0"}
+                    </span>
+                  </div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid var(--rf-border)", textAlign: "left", color: "var(--rf-text-muted)" }}>
+                          <th style={{ padding: "2px 8px" }}>Data</th>
+                          <th style={{ padding: "2px 8px" }}>Document</th>
+                          <th style={{ padding: "2px 8px" }}>Cont coresp.</th>
+                          <th style={{ padding: "2px 8px", textAlign: "right" }}>Debit</th>
+                          <th style={{ padding: "2px 8px", textAlign: "right" }}>Credit</th>
+                          <th style={{ padding: "2px 8px", textAlign: "right" }}>Sold</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {a.entries.map((e, i) => (
+                          <tr key={i} style={{ borderBottom: "1px solid var(--rf-border-subtle, var(--rf-border))" }}>
+                            <td style={{ padding: "2px 8px" }}>{e.date}</td>
+                            <td style={{ padding: "2px 8px" }}>{e.document}</td>
+                            <td className="rf-mono" style={{ padding: "2px 8px" }}>{e.contra || "—"}</td>
+                            <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{parseDec(e.debit) === 0 ? "—" : fmtRON(e.debit)}</td>
+                            <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{parseDec(e.credit) === 0 ? "—" : fmtRON(e.credit)}</td>
+                            <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{fmtRON(e.balance)} {e.balanceSide}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr style={{ borderTop: "1px solid var(--rf-border)", fontWeight: 600 }}>
+                          <td colSpan={3} style={{ padding: "3px 8px" }}>Rulaj / sold final</td>
+                          <td className="rf-mono" style={{ padding: "3px 8px", textAlign: "right" }}>{fmtRON(a.totalDebit)}</td>
+                          <td className="rf-mono" style={{ padding: "3px 8px", textAlign: "right" }}>{fmtRON(a.totalCredit)}</td>
+                          <td className="rf-mono" style={{ padding: "3px 8px", textAlign: "right" }}>
+                            {parseDec(a.closingDebit) > 0 ? `${fmtRON(a.closingDebit)} D` : parseDec(a.closingCredit) > 0 ? `${fmtRON(a.closingCredit)} C` : "0"}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              ))}
             </div>
           </SectionCard>
         )}
