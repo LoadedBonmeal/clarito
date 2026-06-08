@@ -43,6 +43,7 @@ import type {
   ReceivedInvoice,
   ReceivedStatus,
   ReconcileReport,
+  VatSettlementResult,
   SyncResult,
   UpdateAccountInput,
   UpdateCompanyInput,
@@ -570,6 +571,12 @@ export const gl = {
    */
   reconcile: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<ReconcileReport>("reconcile_gl", { companyId, periodFrom, periodTo }),
+  /**
+   * Închiderea/regularizarea TVA: netează 4426/4427 → 4423 (de plată) / 4424 (de recuperat).
+   * Rust command `close_vat_period` (flat args): company_id, period_from, period_to
+   */
+  closeVat: (companyId: string, periodFrom: string, periodTo: string) =>
+    invoke<VatSettlementResult>("close_vat_period", { companyId, periodFrom, periodTo }),
 };
 
 // ─── Declarations (D300) ──────────────────────────────────────────────────

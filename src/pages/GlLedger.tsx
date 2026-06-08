@@ -20,7 +20,7 @@ import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
-import type { GlPostResult, ReconcileReport } from "@/types";
+import type { GlPostResult, ReconcileReport, VatSettlementResult } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -56,8 +56,10 @@ export function GlLedgerPage() {
 
   const [generating,      setGenerating]      = useState(false);
   const [reconciling,     setReconciling]     = useState(false);
+  const [closing,         setClosing]         = useState(false);
   const [postResult,      setPostResult]      = useState<GlPostResult | null>(null);
   const [reconcileReport, setReconcileReport] = useState<ReconcileReport | null>(null);
+  const [vatClose,        setVatClose]        = useState<VatSettlementResult | null>(null);
 
   const yearOptions    = buildYearOptions();
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
@@ -112,11 +114,37 @@ export function GlLedgerPage() {
     }
   };
 
+  // ── Închiderea TVA (regularizare 4426/4427 → 4423/4424) ───────────────────
+
+  const handleCloseVat = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    setClosing(true);
+    setVatClose(null);
+    try {
+      const result = await api.gl.closeVat(activeCompanyId, dateFrom, dateTo);
+      setVatClose(result);
+      if (!result.posted) {
+        notify.info("Nimic de regularizat — conturile 4426/4427 sunt deja zero pentru perioadă.");
+      } else if (parseDec(result.dePlata) > 0) {
+        notify.success(`Închidere TVA: de plată ${result.dePlata} lei (4423).`);
+      } else if (parseDec(result.deRecuperat) > 0) {
+        notify.success(`Închidere TVA: de recuperat ${result.deRecuperat} lei (4424).`);
+      } else {
+        notify.success("Închidere TVA: TVA colectată = deductibilă (sold zero).");
+      }
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut posta închiderea TVA."));
+    } finally {
+      setClosing(false);
+    }
+  };
+
   // ── Reset on period change ────────────────────────────────────────────────
 
   const handlePeriodChange = () => {
     setPostResult(null);
     setReconcileReport(null);
+    setVatClose(null);
   };
 
   return (
@@ -150,6 +178,14 @@ export function GlLedgerPage() {
               onClick={() => void handleReconcile()}
             >
               {reconciling ? "Reconciliez…" : "Reconciliază cu D300"}
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon="ledger"
+              disabled={closing || !activeCompanyId}
+              onClick={() => void handleCloseVat()}
+            >
+              {closing ? "Închid TVA…" : "Închidere TVA"}
             </Btn>
           </>
         }
@@ -197,6 +233,49 @@ export function GlLedgerPage() {
                 </Banner>
               </div>
             )}
+          </SectionCard>
+        )}
+
+        {/* ── Rezultat închidere TVA ───────────────────────────────────────── */}
+        {vatClose && (
+          <SectionCard icon="ledger" title="Închidere TVA (regularizare)">
+            <div style={{ padding: "12px 16px", display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>TVA colectată (4427)</span>
+                <span className="rf-mono" style={{ fontSize: 18, fontWeight: 600 }}>{fmtRON(vatClose.collected)}</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>TVA deductibilă (4426)</span>
+                <span className="rf-mono" style={{ fontSize: 18, fontWeight: 600 }}>{fmtRON(vatClose.deductible)}</span>
+              </div>
+              {parseDec(vatClose.dePlata) > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>De plată (4423)</span>
+                  <span className="rf-mono" style={{ fontSize: 22, fontWeight: 700, color: "var(--rf-warning)" }}>{fmtRON(vatClose.dePlata)}</span>
+                </div>
+              )}
+              {parseDec(vatClose.deRecuperat) > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>De recuperat (4424)</span>
+                  <span className="rf-mono" style={{ fontSize: 22, fontWeight: 700, color: "var(--rf-success)" }}>{fmtRON(vatClose.deRecuperat)}</span>
+                </div>
+              )}
+            </div>
+            <div style={{ padding: "0 16px 12px" }}>
+              {vatClose.posted ? (
+                <Banner variant="info">
+                  Nota de regularizare a fost postată la <b>{vatClose.entryDate}</b>: conturile
+                  4426/4427 au fost aduse la sold zero, diferența în {parseDec(vatClose.dePlata) > 0 ? "4423 «TVA de plată»" : parseDec(vatClose.deRecuperat) > 0 ? "4424 «TVA de recuperat»" : "—"}.
+                  Contul 4428 «TVA neexigibilă» nu este afectat. TVA de plată se achită până la
+                  data de 25 a lunii următoare.
+                </Banner>
+              ) : (
+                <Banner variant="info">
+                  Nimic de regularizat — conturile 4426/4427 sunt deja zero pentru perioadă
+                  (eventuala TVA neexigibilă rămâne în 4428 până la încasare/plată).
+                </Banner>
+              )}
+            </div>
           </SectionCard>
         )}
 

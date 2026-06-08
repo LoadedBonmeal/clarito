@@ -740,6 +740,20 @@ export interface ReconcileReport {
   discrepancies: string[];
 }
 
+/**
+ * Mirrors Rust `VatSettlementResult` (src-tauri/src/db/gl.rs) — period-end VAT close.
+ * Monetary fields are RON strings with 2 decimals.
+ */
+export interface VatSettlementResult {
+  collected: string;
+  deductible: string;
+  netVat: string;
+  dePlata: string;
+  deRecuperat: string;
+  entryDate: string;
+  posted: boolean;
+}
+
 // ─── ANAF form-version staleness ─────────────────────────────────────────
 
 /** One stale declaration form returned by `check_form_versions`. */
