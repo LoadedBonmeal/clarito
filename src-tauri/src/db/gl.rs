@@ -1783,6 +1783,161 @@ pub async fn post_vat_settlement(
     })
 }
 
+// ─── Balanța de verificare (cod 14-6-30, patru egalități) ────────────────────
+
+/// f64 → Decimal rounded to 2 decimals (GL sums come back as REAL).
+fn dec_f(f: f64) -> Decimal {
+    Decimal::try_from(f).unwrap_or(Decimal::ZERO).round_dp(2)
+}
+
+/// One account row of the balanța de verificare.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrialBalanceRow {
+    pub account_code: String,
+    pub account_name: String,
+    pub opening_debit: String,
+    pub opening_credit: String,
+    pub period_debit: String,
+    pub period_credit: String,
+    pub total_debit: String,
+    pub total_credit: String,
+    pub closing_debit: String,
+    pub closing_credit: String,
+}
+
+/// Balanța de verificare with the four column-pairs + footer totals + the balanced flag.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrialBalance {
+    pub rows: Vec<TrialBalanceRow>,
+    pub total_opening_debit: String,
+    pub total_opening_credit: String,
+    pub total_period_debit: String,
+    pub total_period_credit: String,
+    pub total_total_debit: String,
+    pub total_total_credit: String,
+    pub total_closing_debit: String,
+    pub total_closing_credit: String,
+    /// True when all four egalități hold (within 0.01 RON).
+    pub balanced: bool,
+}
+
+/// Balanța de verificare (model cod 14-6-30, "cu patru egalități"; OMFP 2634/2015), derived
+/// from the GL. Per synthetic account: solduri inițiale (net sold before `period_from`),
+/// rulajele perioadei (debit/credit în interval), total sume (= sold inițial + rulaj, pe parte)
+/// și solduri finale. Obligatorie LUNAR (Legea 82/1991, modificată prin OUG 138/2024).
+pub async fn trial_balance(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<TrialBalance> {
+    use std::collections::HashMap;
+
+    // Account names from the chart.
+    let name_rows = sqlx::query(
+        "SELECT account_code, account_name FROM chart_of_accounts WHERE company_id = ?1",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?;
+    let mut names: HashMap<String, String> = HashMap::new();
+    for r in &name_rows {
+        let c: String = r.try_get("account_code").unwrap_or_default();
+        let n: String = r.try_get("account_name").unwrap_or_default();
+        names.insert(c, n);
+    }
+
+    // Per account: opening net (< period_from) + period debit/credit ([period_from, period_to]).
+    let rows = sqlx::query(
+        "SELECT e.account_code, \
+           COALESCE(SUM(CASE WHEN j.transaction_date < ?2 \
+                             THEN CAST(e.debit AS REAL)-CAST(e.credit AS REAL) ELSE 0 END),0.0) AS opening_net, \
+           COALESCE(SUM(CASE WHEN j.transaction_date >= ?2 THEN CAST(e.debit AS REAL) ELSE 0 END),0.0) AS period_debit, \
+           COALESCE(SUM(CASE WHEN j.transaction_date >= ?2 THEN CAST(e.credit AS REAL) ELSE 0 END),0.0) AS period_credit \
+         FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
+         WHERE j.company_id = ?1 AND j.transaction_date <= ?3 \
+         GROUP BY e.account_code ORDER BY e.account_code",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out: Vec<TrialBalanceRow> = Vec::new();
+    let mut t_od = Decimal::ZERO;
+    let mut t_oc = Decimal::ZERO;
+    let mut t_pd = Decimal::ZERO;
+    let mut t_pc = Decimal::ZERO;
+    let mut t_td = Decimal::ZERO;
+    let mut t_tc = Decimal::ZERO;
+    let mut t_cd = Decimal::ZERO;
+    let mut t_cc = Decimal::ZERO;
+
+    for r in &rows {
+        let code: String = r.try_get("account_code").unwrap_or_default();
+        let opening_net = dec_f(r.try_get::<f64, _>("opening_net").unwrap_or(0.0));
+        let period_d = dec_f(r.try_get::<f64, _>("period_debit").unwrap_or(0.0));
+        let period_c = dec_f(r.try_get::<f64, _>("period_credit").unwrap_or(0.0));
+        let opening_d = opening_net.max(Decimal::ZERO);
+        let opening_c = (-opening_net).max(Decimal::ZERO);
+        let total_d = opening_d + period_d;
+        let total_c = opening_c + period_c;
+        let closing_net = total_d - total_c;
+        let closing_d = closing_net.max(Decimal::ZERO);
+        let closing_c = (-closing_net).max(Decimal::ZERO);
+
+        // Skip accounts with no opening balance and no period movement.
+        if opening_d.is_zero() && opening_c.is_zero() && period_d.is_zero() && period_c.is_zero() {
+            continue;
+        }
+
+        t_od += opening_d;
+        t_oc += opening_c;
+        t_pd += period_d;
+        t_pc += period_c;
+        t_td += total_d;
+        t_tc += total_c;
+        t_cd += closing_d;
+        t_cc += closing_c;
+
+        let name = names.get(&code).cloned().unwrap_or_else(|| code.clone());
+        out.push(TrialBalanceRow {
+            account_code: code,
+            account_name: name,
+            opening_debit: fmt_dec(opening_d),
+            opening_credit: fmt_dec(opening_c),
+            period_debit: fmt_dec(period_d),
+            period_credit: fmt_dec(period_c),
+            total_debit: fmt_dec(total_d),
+            total_credit: fmt_dec(total_c),
+            closing_debit: fmt_dec(closing_d),
+            closing_credit: fmt_dec(closing_c),
+        });
+    }
+
+    let tol = Decimal::new(1, 2); // 0.01 RON
+    let balanced = (t_od - t_oc).abs() < tol
+        && (t_pd - t_pc).abs() < tol
+        && (t_td - t_tc).abs() < tol
+        && (t_cd - t_cc).abs() < tol;
+
+    Ok(TrialBalance {
+        rows: out,
+        total_opening_debit: fmt_dec(t_od),
+        total_opening_credit: fmt_dec(t_oc),
+        total_period_debit: fmt_dec(t_pd),
+        total_period_credit: fmt_dec(t_pc),
+        total_total_debit: fmt_dec(t_td),
+        total_total_credit: fmt_dec(t_tc),
+        total_closing_debit: fmt_dec(t_cd),
+        total_closing_credit: fmt_dec(t_cc),
+        balanced,
+    })
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -3213,5 +3368,51 @@ mod tests {
         // No 4423/4424 movement.
         let (_, c4423) = account_balance(&pool, "co", "4423").await;
         assert_eq!(c4423, Decimal::ZERO);
+    }
+
+    // ── Balanța de verificare (Phase 2.4) ────────────────────────────────────
+    #[tokio::test]
+    async fn trial_balance_satisfies_four_equalities() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice(
+            &pool,
+            "co",
+            "inv",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+        )
+        .await;
+        insert_pay(&pool, "co", "inv", "p1", "1190", "2025-01-20").await;
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let tb = trial_balance(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        assert!(tb.balanced, "the four egalități must hold");
+        assert_eq!(tb.total_period_debit, tb.total_period_credit);
+        assert_eq!(tb.total_closing_debit, tb.total_closing_credit);
+
+        let find = |code: &str| {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .expect("account row present")
+        };
+        // Sale D 4111/C 707/C 4427 + receipt D 5121/C 4111.
+        assert_eq!(dec(&find("5121").closing_debit), dec("1190"));
+        assert_eq!(dec(&find("707").closing_credit), dec("1000"));
+        assert_eq!(dec(&find("4427").closing_credit), dec("190"));
+        // 4111 fully settled within the period → no closing balance, but rulaj shows the flow.
+        assert_eq!(dec(&find("4111").closing_debit), dec("0"));
+        assert_eq!(dec(&find("4111").period_debit), dec("1190"));
+        assert_eq!(dec(&find("4111").period_credit), dec("1190"));
     }
 }

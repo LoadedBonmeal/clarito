@@ -44,6 +44,7 @@ import type {
   ReceivedStatus,
   ReconcileReport,
   VatSettlementResult,
+  TrialBalance,
   SyncResult,
   UpdateAccountInput,
   UpdateCompanyInput,
@@ -577,6 +578,12 @@ export const gl = {
    */
   closeVat: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<VatSettlementResult>("close_vat_period", { companyId, periodFrom, periodTo }),
+  /**
+   * Balanța de verificare (cod 14-6-30, patru egalități) pentru perioadă.
+   * Rust command `trial_balance` (flat args): company_id, period_from, period_to
+   */
+  trialBalance: (companyId: string, periodFrom: string, periodTo: string) =>
+    invoke<TrialBalance>("trial_balance", { companyId, periodFrom, periodTo }),
 };
 
 // ─── Declarations (D300) ──────────────────────────────────────────────────

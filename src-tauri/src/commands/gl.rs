@@ -8,6 +8,7 @@ use tauri::State;
 
 use crate::db::gl::{generate_gl_entries as db_generate, reconcile as db_reconcile};
 use crate::db::gl::{post_vat_settlement as db_close_vat, VatSettlementResult};
+use crate::db::gl::{trial_balance as db_trial_balance, TrialBalance};
 use crate::db::gl::{GlPostResult, ReconcileReport};
 use crate::error::AppResult;
 use crate::state::AppState;
@@ -59,4 +60,15 @@ pub async fn close_vat_period(
     period_to: String,
 ) -> AppResult<VatSettlementResult> {
     db_close_vat(&state.db, &company_id, &period_from, &period_to).await
+}
+
+/// Balanța de verificare (cod 14-6-30, patru egalități) pentru perioadă — din GL.
+#[tauri::command]
+pub async fn trial_balance(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+) -> AppResult<TrialBalance> {
+    db_trial_balance(&state.db, &company_id, &period_from, &period_to).await
 }

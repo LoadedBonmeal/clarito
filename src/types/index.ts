@@ -754,6 +754,34 @@ export interface VatSettlementResult {
   posted: boolean;
 }
 
+/** One account row of the balanța de verificare (cod 14-6-30). RON strings, 2 decimals. */
+export interface TrialBalanceRow {
+  accountCode: string;
+  accountName: string;
+  openingDebit: string;
+  openingCredit: string;
+  periodDebit: string;
+  periodCredit: string;
+  totalDebit: string;
+  totalCredit: string;
+  closingDebit: string;
+  closingCredit: string;
+}
+
+/** Mirrors Rust `TrialBalance` (src-tauri/src/db/gl.rs) — balanța de verificare. */
+export interface TrialBalance {
+  rows: TrialBalanceRow[];
+  totalOpeningDebit: string;
+  totalOpeningCredit: string;
+  totalPeriodDebit: string;
+  totalPeriodCredit: string;
+  totalTotalDebit: string;
+  totalTotalCredit: string;
+  totalClosingDebit: string;
+  totalClosingCredit: string;
+  balanced: boolean;
+}
+
 // ─── ANAF form-version staleness ─────────────────────────────────────────
 
 /** One stale declaration form returned by `check_form_versions`. */

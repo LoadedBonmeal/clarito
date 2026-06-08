@@ -20,7 +20,7 @@ import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
-import type { GlPostResult, ReconcileReport, VatSettlementResult } from "@/types";
+import type { GlPostResult, ReconcileReport, VatSettlementResult, TrialBalance } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -57,9 +57,11 @@ export function GlLedgerPage() {
   const [generating,      setGenerating]      = useState(false);
   const [reconciling,     setReconciling]     = useState(false);
   const [closing,         setClosing]         = useState(false);
+  const [loadingTb,       setLoadingTb]       = useState(false);
   const [postResult,      setPostResult]      = useState<GlPostResult | null>(null);
   const [reconcileReport, setReconcileReport] = useState<ReconcileReport | null>(null);
   const [vatClose,        setVatClose]        = useState<VatSettlementResult | null>(null);
+  const [trialBal,        setTrialBal]        = useState<TrialBalance | null>(null);
 
   const yearOptions    = buildYearOptions();
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
@@ -139,12 +141,36 @@ export function GlLedgerPage() {
     }
   };
 
+  // ── Balanța de verificare ─────────────────────────────────────────────────
+
+  const handleTrialBalance = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    setLoadingTb(true);
+    setTrialBal(null);
+    try {
+      const tb = await api.gl.trialBalance(activeCompanyId, dateFrom, dateTo);
+      setTrialBal(tb);
+      if (!tb.balanced) {
+        notify.warn("Balanța NU este echilibrată — verificați notele contabile (rulați «Generează»).");
+      } else if (tb.rows.length === 0) {
+        notify.info("Nicio mișcare contabilă în perioadă.");
+      } else {
+        notify.success("Balanță de verificare generată — echilibrată (patru egalități).");
+      }
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut genera balanța de verificare."));
+    } finally {
+      setLoadingTb(false);
+    }
+  };
+
   // ── Reset on period change ────────────────────────────────────────────────
 
   const handlePeriodChange = () => {
     setPostResult(null);
     setReconcileReport(null);
     setVatClose(null);
+    setTrialBal(null);
   };
 
   return (
@@ -186,6 +212,14 @@ export function GlLedgerPage() {
               onClick={() => void handleCloseVat()}
             >
               {closing ? "Închid TVA…" : "Închidere TVA"}
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon="reports"
+              disabled={loadingTb || !activeCompanyId}
+              onClick={() => void handleTrialBalance()}
+            >
+              {loadingTb ? "Calculez…" : "Balanță de verificare"}
             </Btn>
           </>
         }
@@ -275,6 +309,62 @@ export function GlLedgerPage() {
                   (eventuala TVA neexigibilă rămâne în 4428 până la încasare/plată).
                 </Banner>
               )}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── Balanță de verificare ────────────────────────────────────────── */}
+        {trialBal && (
+          <SectionCard icon="reports" title="Balanță de verificare (cod 14-6-30)">
+            <div style={{ padding: "12px 16px 4px", display: "flex", alignItems: "center", gap: 12 }}>
+              <Badge variant={trialBal.balanced ? "success" : "error"}>
+                {trialBal.balanced ? "Echilibrată — patru egalități" : "NEechilibrată"}
+              </Badge>
+              <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
+                {trialBal.rows.length} conturi · obligatorie lunar (Legea 82/1991)
+              </span>
+            </div>
+            <div style={{ overflowX: "auto", padding: "0 16px 16px" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid var(--rf-border)", textAlign: "right" }}>
+                    <th style={{ textAlign: "left", padding: "4px 8px" }}>Cont</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px" }}>Denumire</th>
+                    <th colSpan={2} style={{ padding: "4px 8px" }}>Solduri inițiale</th>
+                    <th colSpan={2} style={{ padding: "4px 8px" }}>Rulaje perioadă</th>
+                    <th colSpan={2} style={{ padding: "4px 8px" }}>Total sume</th>
+                    <th colSpan={2} style={{ padding: "4px 8px" }}>Solduri finale</th>
+                  </tr>
+                  <tr style={{ borderBottom: "1px solid var(--rf-border)", textAlign: "right", color: "var(--rf-text-muted)" }}>
+                    <th colSpan={2}></th>
+                    <th style={{ padding: "2px 8px" }}>D</th><th style={{ padding: "2px 8px" }}>C</th>
+                    <th style={{ padding: "2px 8px" }}>D</th><th style={{ padding: "2px 8px" }}>C</th>
+                    <th style={{ padding: "2px 8px" }}>D</th><th style={{ padding: "2px 8px" }}>C</th>
+                    <th style={{ padding: "2px 8px" }}>D</th><th style={{ padding: "2px 8px" }}>C</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trialBal.rows.map((r) => (
+                    <tr key={r.accountCode} style={{ borderBottom: "1px solid var(--rf-border-subtle, var(--rf-border))" }}>
+                      <td className="rf-mono" style={{ padding: "2px 8px" }}>{r.accountCode}</td>
+                      <td style={{ padding: "2px 8px" }}>{r.accountName}</td>
+                      {[r.openingDebit, r.openingCredit, r.periodDebit, r.periodCredit, r.totalDebit, r.totalCredit, r.closingDebit, r.closingCredit].map((v, i) => (
+                        <td key={i} className="rf-mono" style={{ padding: "2px 8px", textAlign: "right", color: parseDec(v) === 0 ? "var(--rf-text-muted)" : undefined }}>
+                          {parseDec(v) === 0 ? "—" : fmtRON(v)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: "2px solid var(--rf-border)", fontWeight: 700 }}>
+                    <td colSpan={2} style={{ padding: "4px 8px" }}>TOTAL</td>
+                    {[trialBal.totalOpeningDebit, trialBal.totalOpeningCredit, trialBal.totalPeriodDebit, trialBal.totalPeriodCredit, trialBal.totalTotalDebit, trialBal.totalTotalCredit, trialBal.totalClosingDebit, trialBal.totalClosingCredit].map((v, i) => (
+                      <td key={i} className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(v)}</td>
+                    ))}
+                  </tr>
+                </tfoot>
+              </table>
             </div>
           </SectionCard>
         )}
