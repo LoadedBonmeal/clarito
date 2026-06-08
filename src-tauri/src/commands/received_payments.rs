@@ -20,6 +20,7 @@ pub struct AddReceivedPaymentArgs {
     pub method: Option<String>,
     pub reference: Option<String>,
     pub notes: Option<String>,
+    pub exchange_rate: Option<f64>,
 }
 
 #[tauri::command]
@@ -38,6 +39,7 @@ pub async fn add_received_payment(
             method: args.method,
             reference: args.reference,
             notes: args.notes,
+            exchange_rate: args.exchange_rate,
         },
     )
     .await

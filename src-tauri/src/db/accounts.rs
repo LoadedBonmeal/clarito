@@ -656,6 +656,12 @@ fn standard_accounts() -> Vec<SeedEntry> {
             parent: None,
         },
         SeedEntry {
+            code: "709",
+            name: "Reduceri comerciale acordate",
+            class: 7,
+            parent: None,
+        },
+        SeedEntry {
             code: "758",
             name: "Alte venituri din exploatare",
             class: 7,

@@ -128,6 +128,9 @@ pub struct CreateLineInput {
     pub cpv_code: Option<String>,
     /// Art. 331 reverse-charge product category code (snapshot from product).
     pub art331_code: Option<String>,
+    /// Sales-revenue nature → GL 701/704/707/709. "product"|"service"|"goods"|"reduction".
+    /// None defaults to "goods" (707), preserving prior behaviour.
+    pub revenue_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -440,11 +443,13 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
             "INSERT INTO invoice_line_items (
                 id, invoice_id, position, name, description,
                 quantity, unit, unit_price, vat_rate, vat_category,
-                subtotal_amount, vat_amount, total_amount, cpv_code, art331_code
+                subtotal_amount, vat_amount, total_amount, cpv_code, art331_code,
+                revenue_kind
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7, ?8, ?9, ?10,
-                ?11, ?12, ?13, ?14, ?15
+                ?11, ?12, ?13, ?14, ?15,
+                ?16
             )",
         )
         .bind(line_id)
@@ -483,6 +488,7 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         .bind(line_total)
         .bind(&line.cpv_code)
         .bind(&line.art331_code)
+        .bind(line.revenue_kind.as_deref().unwrap_or("goods"))
         .execute(&mut *tx)
         .await?;
     }

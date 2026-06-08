@@ -37,6 +37,8 @@ pub struct CreateReceivedPaymentInput {
     pub method: Option<String>,
     pub reference: Option<String>,
     pub notes: Option<String>,
+    /// Payment-date BNR exchange rate (for FX gain/loss). None → invoice rate (no FX diff).
+    pub exchange_rate: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -91,8 +93,8 @@ pub async fn create(
 
     sqlx::query(
         "INSERT INTO received_invoice_payments \
-         (id, received_invoice_id, company_id, amount, currency, paid_at, method, reference, notes) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         (id, received_invoice_id, company_id, amount, currency, paid_at, method, reference, notes, exchange_rate) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )
     .bind(&id)
     .bind(&input.received_invoice_id)
@@ -103,6 +105,7 @@ pub async fn create(
     .bind(&method)
     .bind(&input.reference)
     .bind(&input.notes)
+    .bind(input.exchange_rate)
     .execute(pool)
     .await?;
 
@@ -247,6 +250,7 @@ mod tests {
             method: Some("transfer".into()),
             reference: None,
             notes: None,
+            exchange_rate: None,
         }
     }
 

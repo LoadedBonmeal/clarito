@@ -144,6 +144,18 @@ fn purchase_tax_code_str(category: &str, rate: Decimal) -> String {
 
 // ─── Posting templates (pure functions) ──────────────────────────────────────
 
+/// Sales-revenue account for a line by its kind (OMFP 1802/2014, funcțiunea clasei 7):
+/// product → 701 (produse finite), service → 704 (servicii), reduction → 709 (reduceri
+/// comerciale acordate), goods (default) → 707 (mărfuri).
+fn revenue_account(revenue_kind: &str) -> &'static str {
+    match revenue_kind.trim() {
+        "product" => "701",
+        "service" => "704",
+        "reduction" => "709",
+        _ => "707",
+    }
+}
+
 /// Postare factură emisă (vânzări) — per-rate groups approach.
 ///
 /// `vat_groups`: slice of (net_ron, vat_ron, category, rate) — one entry per
@@ -160,7 +172,7 @@ fn post_sales_invoice(
     issue_date: &str,
     contact_id_raw: &str,
     partner_cui: Option<&str>,
-    vat_groups: &[(Decimal, Decimal, String, Decimal)], // (net, vat, category, rate)
+    vat_groups: &[(Decimal, Decimal, String, Decimal, String)], // (net, vat, category, rate, revenue_kind)
     is_storno: bool,
     // TVA la încasare: when true, the standard-rate ("S") output VAT is not yet exigible at
     // invoice date — credit 4428 "TVA neexigibilă" instead of 4427; it transfers to 4427 on
@@ -178,7 +190,7 @@ fn post_sales_invoice(
 
     // FIX 2: Compute gross as Σnet + Σvat so the GL always balances exactly,
     // independent of any rounding discrepancy in the stored total_amount.
-    let gross_raw: Decimal = vat_groups.iter().map(|(n, v, _, _)| *n + *v).sum();
+    let gross_raw: Decimal = vat_groups.iter().map(|(n, v, _, _, _)| *n + *v).sum();
     let gross = gross_raw * sign;
 
     let journal = GlJournal {
@@ -232,18 +244,18 @@ fn post_sales_invoice(
     });
     record_id += 1;
 
-    // FIX 1: Per-(category, rate) group: C 707 + C 4427 — mirrors purchase posting.
-    for (net_ron, vat_ron, category, rate) in vat_groups {
+    // Per-(category, rate, revenue_kind) group: C 70x revenue + C 4427/4428 VAT.
+    for (net_ron, vat_ron, category, rate, revenue_kind) in vat_groups {
         let net = *net_ron * sign;
         let vat = *vat_ron * sign;
         let tc = sales_tax_code_str(category, *rate);
         let rate_str = fmt_dec(*rate);
 
-        // C 707 Venituri mărfuri = net (poartă info TVA per cotă)
+        // C 70x Venituri = net (701/704/707 by kind; 709 for granted reductions).
         entries.push(GlEntry {
             id: new_id(),
             record_id,
-            account_code: "707".to_string(),
+            account_code: revenue_account(revenue_kind).to_string(),
             debit: if net < Decimal::ZERO {
                 -net
             } else {
@@ -440,7 +452,12 @@ fn post_payment(
     paid_at: &str,
     contact_id_raw: &str,
     partner_cui: Option<&str>,
-    amount_ron: Decimal,
+    // The receivable (4111) is relieved at the INVOICE-date rate; the cash hits the bank at the
+    // PAYMENT-date rate. For a foreign-currency invoice the difference is the FX result (665/765).
+    cash_ron: Decimal,
+    receivable_ron: Decimal,
+    // Foreign-currency settlement uses the valută treasury accounts (5124/5314), not 5121/5311.
+    foreign: bool,
     method: &str,
     // TVA la încasare: per-rate VAT made exigible by THIS collection (rate, vat_ron). For a
     // cash-VAT invoice each entry posts the exigibility transfer D 4428 / C 4427; empty for
@@ -450,11 +467,12 @@ fn post_payment(
 ) -> (GlJournal, Vec<GlEntry>) {
     // Use canonical partner ID so it matches MasterFiles and SourceDocuments
     let contact_id = canonical_partner_id(contact_id_raw, partner_cui.unwrap_or(""));
-    // Route the debit to the account matching the payment instrument: cash hits
-    // 5311 "Casa" (CASA journal); everything else (bank transfer / card) hits 5121.
-    let (debit_account, journal_id) = match method.to_ascii_lowercase().as_str() {
-        "cash" | "numerar" => ("5311", "CASA"),
-        _ => ("5121", "BANCA"),
+    // Treasury account by instrument + currency: cash → 5311/5314, bank/card → 5121/5124.
+    let (debit_account, journal_id) = match (method.to_ascii_lowercase().as_str(), foreign) {
+        ("cash" | "numerar", false) => ("5311", "CASA"),
+        ("cash" | "numerar", true) => ("5314", "CASA"),
+        (_, true) => ("5124", "BANCA"),
+        (_, false) => ("5121", "BANCA"),
     };
     let journal = GlJournal {
         id: new_id(),
@@ -471,12 +489,12 @@ fn post_payment(
     };
 
     let mut entries = vec![
-        // D 5121 Bancă / 5311 Casa (per payment method) = amount
+        // D 5121/5124/5311/5314 (treasury, payment-date rate) = cash_ron
         GlEntry {
             id: new_id(),
             record_id: 1,
             account_code: debit_account.to_string(),
-            debit: amount_ron,
+            debit: cash_ron,
             credit: Decimal::ZERO,
             partner_cui: None,
             customer_id: None,
@@ -487,13 +505,13 @@ fn post_payment(
             tax_base: None,
             tax_amount: None,
         },
-        // C 4111 Clienți = amount
+        // C 4111 Clienți (invoice-date rate) = receivable_ron
         GlEntry {
             id: new_id(),
             record_id: 2,
             account_code: "4111".to_string(),
             debit: Decimal::ZERO,
-            credit: amount_ron,
+            credit: receivable_ron,
             partner_cui: partner_cui.map(|s| s.to_string()),
             customer_id: Some(contact_id.clone()),
             supplier_id: None,
@@ -505,9 +523,38 @@ fn post_payment(
         },
     ];
 
+    let mut record_id: i64 = 3;
+
+    // FX gain/loss (diferențe de curs valutar) — the receipt's RON differs from the receivable
+    // because the rate moved between invoice and collection. cash > receivable → favourable
+    // (C 765); cash < receivable → unfavourable (D 665).
+    let fx_diff = cash_ron - receivable_ron;
+    if !fx_diff.is_zero() {
+        let (acc, debit, credit) = if fx_diff > Decimal::ZERO {
+            ("765", Decimal::ZERO, fx_diff)
+        } else {
+            ("665", -fx_diff, Decimal::ZERO)
+        };
+        entries.push(GlEntry {
+            id: new_id(),
+            record_id,
+            account_code: acc.to_string(),
+            debit,
+            credit,
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "000".to_string(),
+            tax_code: "000000".to_string(),
+            tax_percentage: None,
+            tax_base: None,
+            tax_amount: None,
+        });
+        record_id += 1;
+    }
+
     // TVA la încasare — exigibility transfer for the VAT made exigible by this collection:
     // per rate, D 4428 "TVA neexigibilă" / C 4427 "TVA colectată". Now the VAT enters the decont.
-    let mut record_id: i64 = 3;
     for (rate, vat) in released {
         if *vat == Decimal::ZERO {
             continue;
@@ -776,17 +823,22 @@ fn post_received_payment(
     received_invoice_id: &str,
     paid_at: &str,
     issuer_cui: &str,
-    amount_ron: Decimal,
+    // Payable (401) relieved at INVOICE rate; cash leaves at PAYMENT rate → FX diff (665/765).
+    cash_ron: Decimal,
+    payable_ron: Decimal,
+    foreign: bool,
     method: &str,
     // Per-rate input VAT made exigible/deductible by THIS payment (rate, vat_ron); empty for
     // a non-deferred invoice. Each posts the transfer D 4426 / C 4428.
     released: &[(Decimal, Decimal)],
 ) -> (GlJournal, Vec<GlEntry>) {
     let supplier_canon = canonical_partner_id(received_invoice_id, issuer_cui);
-    // Money leaves: credit the cash account matching the instrument (cash → 5311, else 5121).
-    let (credit_account, journal_id) = match method.to_ascii_lowercase().as_str() {
-        "cash" | "numerar" => ("5311", "CASA"),
-        _ => ("5121", "BANCA"),
+    // Money leaves: credit the treasury by instrument + currency (cash → 5311/5314, else 5121/5124).
+    let (credit_account, journal_id) = match (method.to_ascii_lowercase().as_str(), foreign) {
+        ("cash" | "numerar", false) => ("5311", "CASA"),
+        ("cash" | "numerar", true) => ("5314", "CASA"),
+        (_, true) => ("5124", "BANCA"),
+        (_, false) => ("5121", "BANCA"),
     };
     let journal = GlJournal {
         id: new_id(),
@@ -803,12 +855,12 @@ fn post_received_payment(
     };
 
     let mut entries = vec![
-        // D 401 Furnizori = amount (settle the payable)
+        // D 401 Furnizori (invoice-date rate) = payable_ron
         GlEntry {
             id: new_id(),
             record_id: 1,
             account_code: "401".to_string(),
-            debit: amount_ron,
+            debit: payable_ron,
             credit: Decimal::ZERO,
             partner_cui: Some(issuer_cui.to_string()),
             customer_id: None,
@@ -819,13 +871,13 @@ fn post_received_payment(
             tax_base: None,
             tax_amount: None,
         },
-        // C 5121/5311 = amount (cash out)
+        // C 5121/5124/5311/5314 (treasury, payment-date rate) = cash_ron
         GlEntry {
             id: new_id(),
             record_id: 2,
             account_code: credit_account.to_string(),
             debit: Decimal::ZERO,
-            credit: amount_ron,
+            credit: cash_ron,
             partner_cui: None,
             customer_id: None,
             supplier_id: None,
@@ -837,8 +889,36 @@ fn post_received_payment(
         },
     ];
 
-    // TVA la încasare — the deduction becomes exigible: per rate, D 4426 / C 4428.
     let mut record_id: i64 = 3;
+
+    // FX gain/loss on the payable: cash paid (payment rate) vs payable (invoice rate). Paid
+    // MORE lei than the payable → unfavourable (D 665); paid FEWER → favourable (C 765).
+    let fx_diff = cash_ron - payable_ron;
+    if !fx_diff.is_zero() {
+        let (acc, debit, credit) = if fx_diff > Decimal::ZERO {
+            ("665", fx_diff, Decimal::ZERO)
+        } else {
+            ("765", Decimal::ZERO, -fx_diff)
+        };
+        entries.push(GlEntry {
+            id: new_id(),
+            record_id,
+            account_code: acc.to_string(),
+            debit,
+            credit,
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "000".to_string(),
+            tax_code: "000000".to_string(),
+            tax_percentage: None,
+            tax_base: None,
+            tax_amount: None,
+        });
+        record_id += 1;
+    }
+
+    // TVA la încasare — the deduction becomes exigible: per rate, D 4426 / C 4428.
     for (rate, vat) in released {
         if *vat == Decimal::ZERO {
             continue;
@@ -1073,23 +1153,27 @@ pub async fn generate_gl_entries(
         // This mirrors the purchase per-rate approach and correctly handles mixed-rate invoices.
         let group_rows = sqlx::query(
             "SELECT vat_category, vat_rate, \
+                    COALESCE(revenue_kind,'goods') AS revenue_kind, \
                     COALESCE(SUM(CAST(subtotal_amount AS REAL)),0.0) as net_sum, \
                     COALESCE(SUM(CAST(vat_amount AS REAL)),0.0) as vat_sum \
              FROM invoice_line_items \
              WHERE invoice_id = ?1 \
-             GROUP BY vat_category, vat_rate",
+             GROUP BY vat_category, vat_rate, revenue_kind",
         )
         .bind(&inv_id)
         .fetch_all(pool)
         .await?;
 
-        let vat_groups: Vec<(Decimal, Decimal, String, Decimal)> = group_rows
+        let vat_groups: Vec<(Decimal, Decimal, String, Decimal, String)> = group_rows
             .iter()
             .map(|r| {
                 let cat: String = r
                     .try_get("vat_category")
                     .unwrap_or_else(|_| "S".to_string());
                 let rate_s: String = r.try_get("vat_rate").unwrap_or_else(|_| "19".to_string());
+                let revenue_kind: String = r
+                    .try_get("revenue_kind")
+                    .unwrap_or_else(|_| "goods".to_string());
                 let net_f: f64 = r.try_get("net_sum").unwrap_or(0.0);
                 let vat_f: f64 = r.try_get("vat_sum").unwrap_or(0.0);
                 let net = amount_to_ron(
@@ -1102,7 +1186,7 @@ pub async fn generate_gl_entries(
                     &currency,
                     fx,
                 );
-                (net, vat, cat, dec(&rate_s))
+                (net, vat, cat, dec(&rate_s), revenue_kind)
             })
             .collect();
 
@@ -1310,6 +1394,7 @@ pub async fn generate_gl_entries(
 
     let payment_rows = sqlx::query(
         "SELECT p.id, p.invoice_id, p.paid_at, p.amount, p.currency, p.method, \
+                p.exchange_rate AS pay_rate, \
                 i.contact_id, c.cui as contact_cui, i.exchange_rate, \
                 i.issue_date as inv_issue_date, i.status as inv_status, \
                 i.storno_of_invoice_id as inv_storno_ref \
@@ -1350,7 +1435,15 @@ pub async fn generate_gl_entries(
             row.try_get::<Option<f64>, _>("exchange_rate")
                 .unwrap_or(None),
         );
-        let amount_ron = amount_to_ron(dec(&amount_s), &currency, inv_fx);
+        // Payment-date rate (0029): if absent, fall back to the invoice rate → no FX diff.
+        let pay_fx =
+            parse_rate(row.try_get::<Option<f64>, _>("pay_rate").unwrap_or(None)).or(inv_fx);
+        // Receivable relieved at invoice rate; cash booked at payment rate (the FX delta).
+        let receivable_ron = amount_to_ron(dec(&amount_s), &currency, inv_fx);
+        let cash_ron = amount_to_ron(dec(&amount_s), &currency, pay_fx);
+        let foreign = !currency.eq_ignore_ascii_case("RON");
+        // Cash-VAT release works off the invoice-rate amount (the basis the 4428 was booked at).
+        let amount_ron = receivable_ron;
 
         // Cash VAT: if this payment settles a (non-storno) cash-VAT invoice issued in-window,
         // compute the per-rate VAT it makes exigible — post_payment adds D 4428 / C 4427.
@@ -1375,7 +1468,9 @@ pub async fn generate_gl_entries(
             &paid_at,
             &contact_id,
             contact_cui.as_deref(),
-            amount_ron,
+            cash_ron,
+            receivable_ron,
+            foreign,
             &method,
             &released,
         );
@@ -1416,6 +1511,7 @@ pub async fn generate_gl_entries(
     // now-deductible input VAT (D 4426 / C 4428).
     let recv_payment_rows = sqlx::query(
         "SELECT rp.id, rp.received_invoice_id, rp.paid_at, rp.amount, rp.method, \
+                rp.exchange_rate AS pay_rate, \
                 ri.issuer_cui, ri.issue_date AS inv_issue_date, ri.exchange_rate, \
                 COALESCE(ri.currency,'RON') AS inv_currency \
          FROM received_invoice_payments rp \
@@ -1450,7 +1546,13 @@ pub async fn generate_gl_entries(
             row.try_get::<Option<f64>, _>("exchange_rate")
                 .unwrap_or(None),
         );
-        let amount_ron = amount_to_ron(dec(&amount_s), &currency, inv_fx);
+        let pay_fx =
+            parse_rate(row.try_get::<Option<f64>, _>("pay_rate").unwrap_or(None)).or(inv_fx);
+        let payable_ron = amount_to_ron(dec(&amount_s), &currency, inv_fx);
+        let cash_ron = amount_to_ron(dec(&amount_s), &currency, pay_fx);
+        let foreign = !currency.eq_ignore_ascii_case("RON");
+        // Cash-VAT release works off the invoice-rate amount (the basis the 4428 was booked at).
+        let amount_ron = payable_ron;
 
         // Release the deferred input VAT only for a deferred invoice (supplier OR buyer cash VAT).
         let deferred = in_cash_vat_window(&inv_issue) || supplier_on_cash_vat(&issuer_cui);
@@ -1469,7 +1571,9 @@ pub async fn generate_gl_entries(
             &recv_id,
             &paid_at,
             &issuer_cui,
-            amount_ron,
+            cash_ron,
+            payable_ron,
+            foreign,
             &method,
             &released,
         );
@@ -2669,10 +2773,13 @@ mod tests {
             .expect("generate");
 
         let jpk = get_journal_pk(&pool, "pay3b").await;
+        // EUR cash hits the valută bank account 5124 (not the lei 5121). No payment-date rate
+        // stored → cash converts at the invoice rate, so no FX leg and the legs match.
+        let d5124 = get_entry_amount(&pool, &jpk, "5124", "debit").await;
         let d5121 = get_entry_amount(&pool, &jpk, "5121", "debit").await;
         let c4111 = get_entry_amount(&pool, &jpk, "4111", "credit").await;
-        // 119 EUR × 5.0 = 595 RON (nu 119 ca și cum ar fi RON).
-        assert_eq!(d5121, rdec!(595), "D 5121 = 119 EUR × 5.0 = 595 RON");
+        assert_eq!(d5124, rdec!(595), "D 5124 = 119 EUR × 5.0 = 595 RON");
+        assert_eq!(d5121, rdec!(0), "lei bank untouched for an EUR receipt");
         assert_eq!(c4111, rdec!(595), "C 4111 = 595 RON");
 
         let (td, tc) = sum_entries(&pool, &jpk).await;
@@ -3815,5 +3922,94 @@ mod tests {
         assert_eq!(dec(&a5121.closing_debit), dec("1190"));
         assert_eq!(a5121.entries[0].contra, "4111");
         assert_eq!(a5121.entries[0].balance_side, "D");
+    }
+
+    // ── Revenue split 701/704/707/709 (Phase 2.3) ────────────────────────────
+    #[tokio::test]
+    async fn revenue_split_routes_service_to_704_and_reduction_to_709() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        sqlx::query(
+            "INSERT INTO invoices (id, company_id, contact_id, series, number, full_number, \
+             issue_date, due_date, currency, subtotal_amount, vat_amount, total_amount, status, \
+             payment_means_code, created_at, updated_at) \
+             VALUES ('inv','co','ct','inv',1,'inv','2025-01-15','2025-02-15','RON','900','171','1071','VALIDATED','42',1,1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Service line 1000/190 (→704) + a granted reduction -100/-19 (→709).
+        sqlx::query(
+            "INSERT INTO invoice_line_items (id, invoice_id, position, name, quantity, unit, \
+             unit_price, vat_rate, vat_category, subtotal_amount, vat_amount, total_amount, revenue_kind) \
+             VALUES ('l1','inv','1','Consultanță','1','buc','1000','19','S','1000','190','1190','service'), \
+                    ('l2','inv','2','Discount','1','buc','-100','19','S','-100','-19','-119','reduction')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let (_, c704) = account_balance(&pool, "co", "704").await;
+        let (d709, _) = account_balance(&pool, "co", "709").await;
+        let (_, c707) = account_balance(&pool, "co", "707").await;
+        assert_eq!(c704, dec("1000"), "service revenue → 704");
+        assert_eq!(d709, dec("100"), "granted reduction → 709 (debit)");
+        assert_eq!(c707, dec("0"), "nothing on 707 (no goods line)");
+    }
+
+    // ── FX gain/loss 665/765 at settlement (Phase 2.3) ───────────────────────
+    #[tokio::test]
+    async fn fx_gain_on_foreign_currency_receipt() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        // EUR invoice at rate 5.0: 100 EUR exempt (Z) → 4111 = 500 RON.
+        sqlx::query(
+            "INSERT INTO invoices (id, company_id, contact_id, series, number, full_number, \
+             issue_date, due_date, currency, exchange_rate, subtotal_amount, vat_amount, \
+             total_amount, status, payment_means_code, created_at, updated_at) \
+             VALUES ('inv','co','ct','inv',1,'inv','2025-01-10','2025-02-10','EUR',5.0,'100','0','100','VALIDATED','42',1,1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO invoice_line_items (id, invoice_id, position, name, quantity, unit, \
+             unit_price, vat_rate, vat_category, subtotal_amount, vat_amount, total_amount) \
+             VALUES ('l','inv','1','Export','1','buc','100','0','Z','100','0','100')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Collect 100 EUR at rate 5.1 → cash 510 RON; receivable was 500 → FX gain 10.
+        sqlx::query(
+            "INSERT INTO payments (id, invoice_id, company_id, amount, currency, paid_at, method, exchange_rate) \
+             VALUES ('p1','inv','co','100','EUR','2025-01-20','transfer',5.1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let (d5124, _) = account_balance(&pool, "co", "5124").await;
+        let (_, c765) = account_balance(&pool, "co", "765").await;
+        let (d4111, c4111) = account_balance(&pool, "co", "4111").await;
+        assert_eq!(
+            d5124,
+            dec("510"),
+            "EUR cash booked at the payment rate on 5124"
+        );
+        assert_eq!(c765, dec("10"), "favourable FX diff → 765");
+        assert_eq!(
+            d4111 - c4111,
+            Decimal::ZERO,
+            "receivable fully relieved at invoice rate"
+        );
     }
 }

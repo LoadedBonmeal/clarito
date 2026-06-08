@@ -32,6 +32,8 @@ pub struct CreatePaymentInput {
     pub method: Option<String>,
     pub reference: Option<String>,
     pub notes: Option<String>,
+    /// Payment-date BNR exchange rate (for FX gain/loss). None → invoice rate (no FX diff).
+    pub exchange_rate: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,8 +84,8 @@ pub async fn create(pool: &SqlitePool, input: CreatePaymentInput) -> AppResult<P
     let method = input.method.unwrap_or_else(|| "transfer".to_string());
 
     sqlx::query(
-        "INSERT INTO payments (id, invoice_id, company_id, amount, currency, paid_at, method, reference, notes)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO payments (id, invoice_id, company_id, amount, currency, paid_at, method, reference, notes, exchange_rate)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )
     .bind(&id)
     .bind(&input.invoice_id)
@@ -94,6 +96,7 @@ pub async fn create(pool: &SqlitePool, input: CreatePaymentInput) -> AppResult<P
     .bind(&method)
     .bind(&input.reference)
     .bind(&input.notes)
+    .bind(input.exchange_rate)
     .execute(pool)
     .await?;
 
