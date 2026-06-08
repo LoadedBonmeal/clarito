@@ -98,10 +98,17 @@ Deep-research (4-agent workflow, primary-source read of the official PDF, advers
   hit the GL). Deep-researched (art. 297(2)/(3); refute fixed the 3-pronged carve-out incl.
   art. 313(10)). Adversarial QA fixed 4 GL↔D300 consistency bugs: REJECTED-invoice release,
   AE/K self-assessed VAT in the payable denominator, raw-vs-substr paid_at, payment-vs-invoice
-  currency. GL 4426 now reconciles with D300 deductible. **TODO 7e**: React UI to record
-  supplier payments (commands exist + registered). Accepted refinements: no per-invoice supplier
-  snapshot (live contacts.cash_vat); plain 4428 (no .col/.ded analytic; SAF-T builds accounts
-  from the chart).
+  currency. GL 4426 now reconciles with D300 deductible. **7e DONE**: SupplierPaymentsCard on
+  ReceivedDetail (record/list/delete supplier payments) + typed receivedPayments wrappers.
+  Accepted refinements: no per-invoice supplier snapshot (live contacts.cash_vat); plain 4428
+  (no .col/.ded analytic; SAF-T builds accounts from the chart).
+
+## Program status — COMPLETE except DUKIntegrator
+The whole TVA-la-încasare regime is implemented, both sides + the plafon monitor:
+SELLER (1,2,3,4a,4b,5,6) · BUYER (7a-7e) · PLAFON (8). Backed by 5 deep-research workflows and
+3 adversarial-QA workflows (caught + fixed 8 GL↔D300 consistency bugs). Gate green (509 tests).
+**Only remaining: 4d** — validate a cash-VAT D300 against DUKIntegrator; blocked locally (jar
+present, no Java runtime). Install a JRE (`brew install temurin`) to run it.
 - **8** (plafon monitor): plafon_lei(date) (4.5M pre-2026 / 5M 2026 / 5.5M 2027+, OUG 8/2026)
   + plafon_breach_month + compute_plafon_status command — cumulative current-year CA vs plafon,
   exit-notificare deadline (20th of month after breach) + cash-vat-stops date (end of following
