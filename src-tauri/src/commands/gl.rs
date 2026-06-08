@@ -7,6 +7,7 @@
 use tauri::State;
 
 use crate::db::gl::{generate_gl_entries as db_generate, reconcile as db_reconcile};
+use crate::db::gl::{post_vat_settlement as db_close_vat, VatSettlementResult};
 use crate::db::gl::{GlPostResult, ReconcileReport};
 use crate::error::AppResult;
 use crate::state::AppState;
@@ -46,4 +47,16 @@ pub async fn reconcile_gl(
     period_to: String,
 ) -> AppResult<ReconcileReport> {
     db_reconcile(&state.db, &company_id, &period_from, &period_to).await
+}
+
+/// Închiderea/regularizarea TVA: netează 4426/4427 → 4423 (de plată) sau 4424 (de recuperat)
+/// la sfârșitul perioadei. Idempotentă; nu atinge 4428 «TVA neexigibilă».
+#[tauri::command]
+pub async fn close_vat_period(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+) -> AppResult<VatSettlementResult> {
+    db_close_vat(&state.db, &company_id, &period_from, &period_to).await
 }

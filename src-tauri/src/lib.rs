@@ -439,6 +439,7 @@ pub fn run() {
             // GL auto-posting engine (Phase 5a)
             commands::gl::generate_gl_entries,
             commands::gl::reconcile_gl,
+            commands::gl::close_vat_period,
             // stock movements — Phase 6a (SAF-T MovementOfGoods)
             commands::stock::create_stock_movement,
             commands::stock::list_stock_movements,

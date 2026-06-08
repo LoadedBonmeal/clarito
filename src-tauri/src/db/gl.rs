@@ -1622,6 +1622,167 @@ pub async fn reconcile(
     })
 }
 
+// ─── VAT settlement (închiderea / regularizarea TVA) ─────────────────────────
+
+/// Rezultatul închiderii TVA pentru o perioadă fiscală.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VatSettlementResult {
+    /// Net exigible TVA colectată (4427) for the period (RON).
+    pub collected: String,
+    /// Net exigible TVA deductibilă (4426) for the period (RON).
+    pub deductible: String,
+    /// collected − deductible.
+    pub net_vat: String,
+    /// TVA de plată (credit 4423) — the positive net, else "0.00".
+    pub de_plata: String,
+    /// TVA de recuperat (debit 4424) — the absolute negative net, else "0.00".
+    pub de_recuperat: String,
+    /// Date the closing note carries (last day of the period).
+    pub entry_date: String,
+    /// False when there is nothing to close (both 4426 and 4427 already zero).
+    pub posted: bool,
+}
+
+/// Închiderea / regularizarea TVA la sfârșitul perioadei fiscale (OMFP 1802/2014). Netează
+/// DOAR conturile EXIGIBILE 4426/4427 în 4423 "TVA de plată" sau 4424 "TVA de recuperat",
+/// aducându-le la sold ZERO. Contul 4428 "TVA neexigibilă" și notele de închidere anterioare
+/// (VAT_CLOSE) sunt EXCLUSE din netting — astfel taxarea inversă (D 4426 = C 4427) și
+/// transferurile TVA la încasare (4428→4426/4427) sunt deja încorporate în solduri.
+///
+/// Nota este datată ultima zi a perioadei și este idempotentă (source_type='VAT_CLOSE').
+/// NU compensează soldul 4424 din perioada precedentă (rămâne pe bilanț / se reportează în
+/// D300 rd.38/40) și NU postează plata 4423 → 5121 — operațiuni separate.
+pub async fn post_vat_settlement(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<VatSettlementResult> {
+    // Net exigible balances straight from the GL, excluding 4428 and any prior close.
+    let row = sqlx::query(
+        "SELECT \
+           COALESCE(SUM(CASE WHEN e.account_code='4427' \
+                             THEN CAST(e.credit AS REAL)-CAST(e.debit AS REAL) ELSE 0 END),0.0) AS collected, \
+           COALESCE(SUM(CASE WHEN e.account_code='4426' \
+                             THEN CAST(e.debit AS REAL)-CAST(e.credit AS REAL) ELSE 0 END),0.0) AS deductible \
+         FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
+         WHERE j.company_id = ?1 \
+           AND j.transaction_date >= ?2 AND j.transaction_date <= ?3 \
+           AND j.source_type <> 'VAT_CLOSE' \
+           AND e.account_code IN ('4426','4427')",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_one(pool)
+    .await?;
+
+    let collected = Decimal::try_from(row.try_get::<f64, _>("collected").unwrap_or(0.0))
+        .unwrap_or(Decimal::ZERO)
+        .round_dp(2);
+    let deductible = Decimal::try_from(row.try_get::<f64, _>("deductible").unwrap_or(0.0))
+        .unwrap_or(Decimal::ZERO)
+        .round_dp(2);
+    let net_vat = collected - deductible;
+    let source_id = format!("{period_from}_{period_to}");
+
+    let mut tx = pool.begin().await?;
+    // Idempotent: drop any prior close for this exact period before re-posting.
+    sqlx::query(
+        "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='VAT_CLOSE' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(&source_id)
+    .execute(&mut *tx)
+    .await?;
+
+    let de_plata = net_vat.max(Decimal::ZERO);
+    let de_recuperat = (-net_vat).max(Decimal::ZERO);
+
+    // Nothing to close (both exigible accounts already zero) → no journal.
+    if collected.is_zero() && deductible.is_zero() {
+        tx.commit().await?;
+        return Ok(VatSettlementResult {
+            collected: fmt_dec(collected),
+            deductible: fmt_dec(deductible),
+            net_vat: fmt_dec(net_vat),
+            de_plata: fmt_dec(de_plata),
+            de_recuperat: fmt_dec(de_recuperat),
+            entry_date: period_to.to_string(),
+            posted: false,
+        });
+    }
+
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: "DIVERSE".to_string(),
+        journal_type: "VAT_CLOSE".to_string(),
+        transaction_id: format!("REGTVA-{period_to}"),
+        transaction_date: period_to.to_string(),
+        description: Some(format!("Regularizare TVA {period_from} … {period_to}")),
+        source_type: "VAT_CLOSE".to_string(),
+        source_id: source_id.clone(),
+        customer_id: None,
+        supplier_id: None,
+    };
+
+    let mk = |record_id: i64, account: &str, debit: Decimal, credit: Decimal| GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: account.to_string(),
+        debit,
+        credit,
+        partner_cui: None,
+        customer_id: None,
+        supplier_id: None,
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+    };
+
+    let mut entries: Vec<GlEntry> = Vec::new();
+    let mut record_id: i64 = 1;
+    // D 4427 — zero the collected.
+    if !collected.is_zero() {
+        entries.push(mk(record_id, "4427", collected, Decimal::ZERO));
+        record_id += 1;
+    }
+    // C 4426 — zero the deductible.
+    if !deductible.is_zero() {
+        entries.push(mk(record_id, "4426", Decimal::ZERO, deductible));
+        record_id += 1;
+    }
+    // Difference → 4423 (de plată) or 4424 (de recuperat); never both.
+    if net_vat > Decimal::ZERO {
+        entries.push(mk(record_id, "4423", Decimal::ZERO, net_vat));
+    } else if net_vat < Decimal::ZERO {
+        entries.push(mk(record_id, "4424", -net_vat, Decimal::ZERO));
+    }
+
+    assert_balanced(&entries, &source_id)?;
+
+    let journal_pk = journal.id.clone();
+    insert_journal(&mut tx, &journal).await?;
+    for e in &entries {
+        insert_entry(&mut tx, &journal_pk, e).await?;
+    }
+    tx.commit().await?;
+
+    Ok(VatSettlementResult {
+        collected: fmt_dec(collected),
+        deductible: fmt_dec(deductible),
+        net_vat: fmt_dec(net_vat),
+        de_plata: fmt_dec(de_plata),
+        de_recuperat: fmt_dec(de_recuperat),
+        entry_date: period_to.to_string(),
+        posted: true,
+    })
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2909,5 +3070,148 @@ mod tests {
             Decimal::ZERO,
             "no 4428 movement for a rejected invoice"
         );
+    }
+
+    // ── VAT settlement / închiderea TVA (Phase 2.2) ──────────────────────────
+    #[tokio::test]
+    async fn vat_settlement_de_plata() {
+        // Collected 190 (sale) > deductible 95 (purchase) → 4423 de plată 95; 4426/4427 zeroed.
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice(
+            &pool,
+            "co",
+            "inv",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+        )
+        .await;
+        insert_received(&pool, "co", "ri", "S", "19", "500", "95").await;
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let r = post_vat_settlement(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        assert!(r.posted);
+        assert_eq!(dec(&r.collected), dec("190"));
+        assert_eq!(dec(&r.deductible), dec("95"));
+        assert_eq!(dec(&r.de_plata), dec("95"));
+        assert_eq!(dec(&r.de_recuperat), dec("0"));
+        assert_eq!(r.entry_date, "2025-01-31");
+
+        let (d4427, c4427) = account_balance(&pool, "co", "4427").await;
+        let (d4426, c4426) = account_balance(&pool, "co", "4426").await;
+        let (_, c4423) = account_balance(&pool, "co", "4423").await;
+        assert_eq!(c4427 - d4427, Decimal::ZERO, "4427 closed to zero");
+        assert_eq!(d4426 - c4426, Decimal::ZERO, "4426 closed to zero");
+        assert_eq!(c4423, dec("95"), "TVA de plată on 4423");
+    }
+
+    #[tokio::test]
+    async fn vat_settlement_de_recuperat() {
+        // Collected 95 < deductible 190 → 4424 de recuperat 95.
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice(
+            &pool,
+            "co",
+            "inv",
+            "ct",
+            "VALIDATED",
+            "500",
+            "95",
+            "595",
+            None,
+        )
+        .await;
+        insert_received(&pool, "co", "ri", "S", "19", "1000", "190").await;
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let r = post_vat_settlement(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        assert_eq!(dec(&r.de_recuperat), dec("95"));
+        assert_eq!(dec(&r.de_plata), dec("0"));
+        let (d4424, _) = account_balance(&pool, "co", "4424").await;
+        assert_eq!(d4424, dec("95"), "TVA de recuperat on 4424");
+    }
+
+    #[tokio::test]
+    async fn vat_settlement_idempotent() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice(
+            &pool,
+            "co",
+            "inv",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+        )
+        .await;
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        post_vat_settlement(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        post_vat_settlement(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        // Re-running replaces, not duplicates → 4423 credit is 190 once, not 380.
+        let (_, c4423) = account_balance(&pool, "co", "4423").await;
+        assert_eq!(c4423, dec("190"));
+    }
+
+    #[tokio::test]
+    async fn vat_settlement_excludes_4428_neexigibila() {
+        // Cash-VAT sale never collected → output VAT sits in 4428. The close must NOT touch it
+        // (nothing exigible to settle).
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        enable_cash_vat(&pool, "co", "2025-01-01").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice(
+            &pool,
+            "co",
+            "inv",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+        )
+        .await;
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let r = post_vat_settlement(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        assert!(!r.posted, "nothing exigible to close");
+        assert_eq!(dec(&r.collected), dec("0"));
+        // The 4428 balance is untouched (still credit 190).
+        let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
+        assert_eq!(c4428 - d4428, dec("190"), "4428 neexigibilă left intact");
+        // No 4423/4424 movement.
+        let (_, c4423) = account_balance(&pool, "co", "4423").await;
+        assert_eq!(c4423, Decimal::ZERO);
     }
 }
