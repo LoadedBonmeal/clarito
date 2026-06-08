@@ -444,6 +444,142 @@ pub(crate) async fn d300_vat_totals(
     Ok((collected.round_dp(2), deductible.round_dp(2)))
 }
 
+// ── Cash-VAT plafon monitor (slice 8) ───────────────────────────────────────
+
+/// Cash-VAT (TVA la încasare) plafon status for a company at a reference date.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlafonStatus {
+    /// Whether the company currently has the cash-VAT regime enabled.
+    pub on_cash_vat: bool,
+    /// Cumulative current-year cifra de afaceri (net, RON, 2 decimals).
+    pub ca_ron: String,
+    /// Applicable plafon in lei (OUG 8/2026).
+    pub plafon_lei: i64,
+    /// True when the cumulative CA strictly exceeds the plafon (mandatory exit triggered).
+    pub exceeded: bool,
+    /// The "YYYY-MM" month the plafon was first breached, if any.
+    pub breach_month: Option<String>,
+    /// Art. 324 alin. (14) exit-notificare deadline (form 700; 20th of the month after breach).
+    pub notificare_deadline: Option<String>,
+    /// Last date cash VAT still applies to new invoices (end of the fiscal period following
+    /// the breach month); normal VAT applies from the next day. In-flight 4428 still finishes.
+    pub cash_vat_stops_after: Option<String>,
+}
+
+/// Last calendar day of `(year, month)`.
+fn last_day_of_month(year: i32, month: u32) -> Option<NaiveDate> {
+    let (ny, nm) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+    NaiveDate::from_ymd_opt(ny, nm, 1)?.pred_opt()
+}
+
+/// Monitor the cash-VAT eligibility plafon: cumulative current-year cifra de afaceri (net of
+/// taxable + exempt supplies, issue-date basis) vs the OUG 8/2026 plafon, and — if breached —
+/// the art. 324 alin. (14) exit-notificare deadline and the date cash VAT stops applying.
+///
+/// Note: the CA cannot exclude occasional fixed-asset / intangible disposals (the app does not
+/// classify them), so it is a slight over-estimate vs the strict art. 282(3) base.
+#[tauri::command]
+pub async fn cash_vat_plafon_status(
+    state: State<'_, AppState>,
+    company_id: String,
+    as_of: String,
+) -> AppResult<PlafonStatus> {
+    compute_plafon_status(&state.db, &company_id, &as_of).await
+}
+
+pub(crate) async fn compute_plafon_status(
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    as_of: &str,
+) -> AppResult<PlafonStatus> {
+    use rust_decimal::prelude::ToPrimitive;
+
+    let on_cash_vat = fetch_cash_vat_flags(pool, company_id).await?.0;
+
+    // Current-year window [YYYY-01-01, as_of].
+    let year = as_of.get(0..4).unwrap_or("").to_string();
+    let year_start = format!("{year}-01-01");
+
+    // Net (subtotal) per issue-month for the authorised fiscal set (VALIDATED + STORNED).
+    let rows = sqlx::query(
+        "SELECT substr(issue_date,1,7) AS ym, subtotal_amount, \
+                COALESCE(currency,'RON') AS currency, exchange_rate \
+         FROM invoices \
+         WHERE company_id = ?1 \
+           AND status IN ('VALIDATED','STORNED') \
+           AND issue_date >= ?2 \
+           AND issue_date <= ?3",
+    )
+    .bind(company_id)
+    .bind(&year_start)
+    .bind(as_of)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    // Accumulate net (RON) per month.
+    let mut by_month: BTreeMap<String, Decimal> = BTreeMap::new();
+    let mut ca = Decimal::ZERO;
+    for row in &rows {
+        let ym: String = row.try_get("ym").unwrap_or_default();
+        let net_s: String = row.try_get("subtotal_amount").unwrap_or_default();
+        let currency: String = row
+            .try_get("currency")
+            .unwrap_or_else(|_| "RON".to_string());
+        let fx = parse_rate(
+            row.try_get::<Option<f64>, _>("exchange_rate")
+                .unwrap_or(None),
+        );
+        let net = amount_to_ron(
+            Decimal::from_str(&net_s).unwrap_or(Decimal::ZERO),
+            &currency,
+            fx,
+        );
+        *by_month.entry(ym).or_insert(Decimal::ZERO) += net;
+        ca += net;
+    }
+
+    // Ascending (month, net_lei) for the breach scan.
+    let monthly_lei: Vec<(String, i64)> = by_month
+        .iter()
+        .map(|(m, n)| (m.clone(), n.round_dp(0).to_i64().unwrap_or(0)))
+        .collect();
+
+    let plafon = crate::anaf_decl::cash_vat::plafon_lei(as_of);
+    let breach_month = crate::anaf_decl::cash_vat::plafon_breach_month(&monthly_lei, plafon);
+
+    // Exit deadlines: notificare by the 20th of the month AFTER the breach; cash VAT keeps
+    // applying through the end of that same following fiscal period (art. 282 alin. (5)).
+    let (notificare_deadline, cash_vat_stops_after) = match &breach_month {
+        Some(bm) => {
+            let y: i32 = bm.get(0..4).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let m: u32 = bm.get(5..7).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+            let deadline = format!("{ny:04}-{nm:02}-20");
+            let stops = last_day_of_month(ny, nm)
+                .map(|d| d.format("%Y-%m-%d").to_string())
+                .unwrap_or_default();
+            (Some(deadline), Some(stops))
+        }
+        None => (None, None),
+    };
+
+    Ok(PlafonStatus {
+        on_cash_vat,
+        ca_ron: ca.round_dp(2).to_string(),
+        plafon_lei: plafon,
+        exceeded: breach_month.is_some(),
+        breach_month,
+        notificare_deadline,
+        cash_vat_stops_after,
+    })
+}
+
 /// Calculează decontul D300 (TVA colectat — vânzări + TVA deductibil — achiziții)
 /// pentru o companie și o perioadă.
 ///
@@ -1911,5 +2047,57 @@ mod cash_vat_routing_tests {
             Decimal::ZERO,
             "STORNED original is not deferred to collection"
         );
+    }
+
+    #[tokio::test]
+    async fn plafon_status_flags_breach_and_exit_dates() {
+        // Cumulative 2026 net crosses 5.000.000 lei in March → exit notificare by 20.04.2026,
+        // cash VAT stops after 30.04.2026.
+        let pool = pool().await;
+        seed_company(&pool, "co", true, Some("2026-01-01")).await;
+        seed_invoice(&pool, "co", "i1", "2026-01-15", "2000000", "0", "2000000").await;
+        seed_invoice(&pool, "co", "i2", "2026-02-15", "2000000", "0", "2000000").await;
+        seed_invoice(&pool, "co", "i3", "2026-03-15", "1500000", "0", "1500000").await;
+
+        let s = compute_plafon_status(&pool, "co", "2026-03-31")
+            .await
+            .unwrap();
+        assert!(s.on_cash_vat);
+        assert_eq!(s.plafon_lei, 5_000_000);
+        assert_eq!(s.ca_ron, "5500000");
+        assert!(s.exceeded);
+        assert_eq!(s.breach_month.as_deref(), Some("2026-03"));
+        assert_eq!(s.notificare_deadline.as_deref(), Some("2026-04-20"));
+        assert_eq!(s.cash_vat_stops_after.as_deref(), Some("2026-04-30"));
+    }
+
+    #[tokio::test]
+    async fn plafon_status_under_threshold_is_clean() {
+        let pool = pool().await;
+        seed_company(&pool, "co", true, Some("2026-01-01")).await;
+        seed_invoice(&pool, "co", "i1", "2026-02-15", "1000000", "0", "1000000").await;
+
+        let s = compute_plafon_status(&pool, "co", "2026-06-30")
+            .await
+            .unwrap();
+        assert!(!s.exceeded);
+        assert_eq!(s.breach_month, None);
+        assert_eq!(s.notificare_deadline, None);
+        assert_eq!(s.ca_ron, "1000000");
+    }
+
+    #[tokio::test]
+    async fn plafon_breach_in_december_rolls_to_next_year() {
+        // Breach in Dec 2026 → notificare 2027-01-20, cash VAT stops after 2027-01-31.
+        let pool = pool().await;
+        seed_company(&pool, "co", true, Some("2026-01-01")).await;
+        seed_invoice(&pool, "co", "i1", "2026-12-10", "6000000", "0", "6000000").await;
+
+        let s = compute_plafon_status(&pool, "co", "2026-12-31")
+            .await
+            .unwrap();
+        assert_eq!(s.breach_month.as_deref(), Some("2026-12"));
+        assert_eq!(s.notificare_deadline.as_deref(), Some("2027-01-20"));
+        assert_eq!(s.cash_vat_stops_after.as_deref(), Some("2027-01-31"));
     }
 }

@@ -160,6 +160,36 @@ pub fn allocate_collection(
         .collect()
 }
 
+/// The cash-VAT eligibility/exit plafon in lei, in force on `date` (ISO "YYYY-MM-DD").
+///
+/// OUG 8/2026 staged it: 4.500.000 lei through 28.02.2026, 5.000.000 from 01.03.2026, and
+/// 5.500.000 from 01.01.2027. For the EXIT test (cumulative current-year turnover) the OUG
+/// 8/2026 art. 9 transitional protects a Jan–Feb 2026 breach that stays under 5.000.000, so
+/// the practical 2026 exit plafon is 5.000.000 for the whole year — which is what this returns.
+pub fn plafon_lei(date: &str) -> i64 {
+    if date >= "2027-01-01" {
+        5_500_000
+    } else if date >= "2026-01-01" {
+        5_000_000
+    } else {
+        4_500_000
+    }
+}
+
+/// First month (`monthly_net_lei` is ascending `("YYYY-MM", net_lei)`) whose CUMULATIVE net
+/// turnover strictly exceeds `plafon_lei` — i.e. the month the mandatory-exit obligation is
+/// triggered (art. 282 alin. (4) / art. 324 alin. (14)). `None` if never breached.
+pub fn plafon_breach_month(monthly_net_lei: &[(String, i64)], plafon_lei: i64) -> Option<String> {
+    let mut cumulative: i64 = 0;
+    for (month, net) in monthly_net_lei {
+        cumulative = cumulative.saturating_add(*net);
+        if cumulative > plafon_lei {
+            return Some(month.clone());
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,6 +303,42 @@ mod tests {
         let out = allocate_collection(17100, &s, 0, 8550);
         assert_eq!(out[0].base_bani, 5000);
         assert_eq!(out[0].vat_bani, 1050);
+    }
+
+    #[test]
+    fn plafon_lei_by_date() {
+        assert_eq!(plafon_lei("2025-12-31"), 4_500_000);
+        assert_eq!(plafon_lei("2026-02-15"), 5_000_000); // transitional → practical 5M
+        assert_eq!(plafon_lei("2026-03-01"), 5_000_000);
+        assert_eq!(plafon_lei("2026-12-31"), 5_000_000);
+        assert_eq!(plafon_lei("2027-01-01"), 5_500_000);
+        assert_eq!(plafon_lei("2028-06-30"), 5_500_000);
+    }
+
+    #[test]
+    fn plafon_breach_detects_first_crossing_month() {
+        let months = vec![
+            ("2026-01".to_string(), 2_000_000),
+            ("2026-02".to_string(), 2_000_000),
+            ("2026-03".to_string(), 1_500_000), // cumulative 5.5M > 5M here
+            ("2026-04".to_string(), 1_000_000),
+        ];
+        assert_eq!(
+            plafon_breach_month(&months, 5_000_000),
+            Some("2026-03".to_string())
+        );
+    }
+
+    #[test]
+    fn plafon_breach_none_when_under() {
+        let months = vec![
+            ("2026-01".to_string(), 2_000_000),
+            ("2026-02".to_string(), 2_000_000),
+        ];
+        assert_eq!(plafon_breach_month(&months, 5_000_000), None);
+        // Exactly at the plafon is NOT a breach (strictly greater).
+        let exact = vec![("2026-01".to_string(), 5_000_000)];
+        assert_eq!(plafon_breach_month(&exact, 5_000_000), None);
     }
 
     #[test]

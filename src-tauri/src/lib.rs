@@ -389,6 +389,7 @@ pub fn run() {
             commands::recurring::toggle_recurring_active,
             // declarations d300
             commands::declarations::compute_d300,
+            commands::declarations::cash_vat_plafon_status,
             commands::declarations::export_d300,
             commands::declarations::export_d300_official,
             commands::declarations::preflight_declaration,

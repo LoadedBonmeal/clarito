@@ -90,7 +90,11 @@ Deep-research (4-agent workflow, primary-source read of the official PDF, advers
 - **4d — official XSD D300** (d300/rows.rs) wiring + DUKIntegrator on a cash-VAT fixture.
 
 ## Progress
-- **DONE** slices 1, 2, 3, 4a, 4b, 5, 6 (all gated green, committed, not pushed).
+- **DONE** slices 1, 2, 3, 4a, 4b, 5, 6, 8 (all gated green, committed, not pushed).
+- **8** (plafon monitor): plafon_lei(date) (4.5M pre-2026 / 5M 2026 / 5.5M 2027+, OUG 8/2026)
+  + plafon_breach_month + compute_plafon_status command — cumulative current-year CA vs plafon,
+  exit-notificare deadline (20th of month after breach) + cash-vat-stops date (end of following
+  period). Deep-researched (ANAF Brașov 2026 guide). UI 097-reminder banner = follow-up.
 - **5** (GL): post_sales_invoice credits 4428 for non-storno cash-VAT S; post_payment posts
   the per-rate D 4428 / C 4427 release; clears to zero on full collection. Adversarial QA fixed
   two GL↔D300 consistency bugs pre-commit: STORNED originals now deferred only when VALIDATED
