@@ -126,6 +126,9 @@ fn dec(s: &str) -> Decimal {
 }
 
 fn fmt_dec(d: Decimal) -> String {
+    // Canonicalise zero so `-Decimal::ZERO` (from `(-net).max(0)` on a settled account) never
+    // renders as "-0.00" on a statutory register / balance column.
+    let d = if d.is_zero() { Decimal::ZERO } else { d };
     format!("{:.2}", d)
 }
 
@@ -2132,11 +2135,21 @@ pub async fn general_ledger(
             jrnl_credit.entry(jpk).or_default().push(acc);
         }
     }
-    let contra = |opposite: Option<&Vec<String>>| -> String {
-        match opposite {
-            Some(v) if v.len() == 1 => v[0].clone(),
-            Some(v) if !v.is_empty() => "%".to_string(),
-            _ => String::new(),
+    // Corespondent account(s) of the opposite side, excluding the line's own account and
+    // de-duplicated: one distinct account → its symbol; several → "%" (operațiuni diverse).
+    let contra = |opposite: Option<&Vec<String>>, own: &str| -> String {
+        let mut uniq: Vec<&str> = Vec::new();
+        if let Some(v) = opposite {
+            for a in v {
+                if a.as_str() != own && !uniq.contains(&a.as_str()) {
+                    uniq.push(a.as_str());
+                }
+            }
+        }
+        match uniq.len() {
+            0 => String::new(),
+            1 => uniq[0].to_string(),
+            _ => "%".to_string(),
         }
     };
 
@@ -2187,9 +2200,9 @@ pub async fn general_ledger(
 
         // Corespondent = the opposite side's account(s) of this journal.
         let contra_acc = if debit > Decimal::ZERO {
-            contra(jrnl_credit.get(&jpk))
+            contra(jrnl_credit.get(&jpk), &acc)
         } else {
-            contra(jrnl_debit.get(&jpk))
+            contra(jrnl_debit.get(&jpk), &acc)
         };
 
         let bal = running.entry(acc.clone()).or_insert(Decimal::ZERO);
@@ -3708,6 +3721,9 @@ mod tests {
         assert_eq!(dec(&find("4111").closing_debit), dec("0"));
         assert_eq!(dec(&find("4111").period_debit), dec("1190"));
         assert_eq!(dec(&find("4111").period_credit), dec("1190"));
+        // A settled account must render canonical "0.00", never "-0.00".
+        assert_eq!(find("4111").closing_credit, "0.00");
+        assert_eq!(find("4111").closing_debit, "0.00");
     }
 
     // ── Registru-jurnal + Cartea mare (Phase 2.4) ────────────────────────────
