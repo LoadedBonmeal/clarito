@@ -381,6 +381,11 @@ pub fn run() {
             commands::payments::delete_payment,
             commands::payments::get_payment_summary,
             commands::payments::list_payment_summaries,
+            // supplier payments (payments-out / buyer-side TVA la încasare)
+            commands::received_payments::add_received_payment,
+            commands::received_payments::list_received_payments,
+            commands::received_payments::delete_received_payment,
+            commands::received_payments::get_received_payment_summary,
             // recurring invoices
             commands::recurring::create_recurring_invoice,
             commands::recurring::list_recurring_invoices,

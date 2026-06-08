@@ -25,6 +25,7 @@ pub mod payments;
 pub mod products;
 pub mod receipts;
 pub mod received;
+pub mod received_payments;
 pub mod recurring;
 pub mod reports;
 pub mod saft;

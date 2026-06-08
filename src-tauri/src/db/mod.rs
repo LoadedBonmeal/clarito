@@ -26,6 +26,7 @@ pub mod gl;
 pub mod payments;
 pub mod products;
 pub mod receipts;
+pub mod received_payments;
 pub mod recurring;
 pub mod seed;
 pub mod stock;
