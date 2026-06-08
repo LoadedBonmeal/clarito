@@ -89,6 +89,23 @@ pub fn purchase_status(supplier_cash_vat: bool, vat_category: &str) -> CashVatSt
     }
 }
 
+/// Whether the right to deduct input VAT on a PURCHASE line is DEFERRED to payment under
+/// buyer-side TVA la încasare (Cod fiscal art. 297 alin. (2)-(3); Norme pct. 69). Two
+/// independent triggers — deferral applies when the SUPPLIER applies cash VAT (alin. (2),
+/// any buyer) OR the BUYER applies cash VAT (alin. (3), all its domestic purchases).
+///
+/// Only standard-rate domestic acquisitions (category "S") defer; the art. 297 alin. (3)
+/// carve-outs — reverse-charge (art. 307(2)-(6) / 313(10) / 331 → "AE"), intra-EU acquisitions
+/// ("K"), imports, and exempt/zero-rated/out-of-scope — deduct at the normal exigibility date
+/// (their VAT is self-assessed or paid to customs, never "paid to the supplier").
+pub fn purchase_deferred(
+    supplier_cash_vat: bool,
+    buyer_cash_vat: bool,
+    vat_category: &str,
+) -> bool {
+    (supplier_cash_vat || buyer_cash_vat) && vat_category.trim() == "S"
+}
+
 /// Round-half-away-from-zero integer division `a / b` (for `b > 0`).
 fn round_div(a: i64, b: i64) -> i64 {
     if b == 0 {
@@ -303,6 +320,24 @@ mod tests {
         let out = allocate_collection(17100, &s, 0, 8550);
         assert_eq!(out[0].base_bani, 5000);
         assert_eq!(out[0].vat_bani, 1050);
+    }
+
+    #[test]
+    fn purchase_deferred_or_trigger_on_s_only() {
+        // Either trigger defers a standard-rate purchase.
+        assert!(purchase_deferred(true, false, "S")); // supplier on cash VAT (art. 297(2))
+        assert!(purchase_deferred(false, true, "S")); // buyer on cash VAT (art. 297(3))
+        assert!(purchase_deferred(true, true, "S"));
+        assert!(purchase_deferred(true, false, " S ")); // whitespace tolerant
+                                                        // Neither trigger → immediate deduction.
+        assert!(!purchase_deferred(false, false, "S"));
+        // Carve-outs never defer, even when a trigger is on.
+        for cat in ["AE", "K", "E", "Z", "O", "G"] {
+            assert!(
+                !purchase_deferred(true, true, cat),
+                "{cat} must deduct at the normal date"
+            );
+        }
     }
 
     #[test]
