@@ -316,6 +316,187 @@ async fn cash_vat_collected_groups(
     Ok(out)
 }
 
+/// True when buyer-side cash-VAT routing could change anything for this company: either the
+/// buyer itself applies cash VAT, or it has at least one supplier (contact) flagged as
+/// applying cash VAT (RPATVAÎ). When false, the deductible side is byte-identical to before.
+async fn buyer_side_active(
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    buyer_cash_vat: bool,
+) -> AppResult<bool> {
+    if buyer_cash_vat {
+        return Ok(true);
+    }
+    let has: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM contacts WHERE company_id = ?1 AND cash_vat = 1)",
+    )
+    .bind(company_id)
+    .fetch_one(pool)
+    .await
+    .map_err(AppError::Database)?;
+    Ok(has != 0)
+}
+
+/// SQL predicate (parameters `?4=buyer_cash_vat`, `?5=start`, `?6=end`) selecting a received
+/// invoice whose input VAT is DEFERRED to payment: the buyer applies cash VAT in window
+/// (art. 297(3)) OR the supplier applies cash VAT (art. 297(2), RPATVAÎ contact matched by CUI,
+/// RO-prefix/case-insensitive). Used both to gate cash_vat_deductible_groups and to exclude
+/// the same lines from the issue-date deductible sum.
+const DEFERRED_RECEIVED_PREDICATE: &str = "( \
+       (?4 = 1 AND (?5 IS NULL OR ri.issue_date >= ?5) AND (?6 IS NULL OR ri.issue_date <= ?6)) \
+       OR EXISTS (SELECT 1 FROM contacts c WHERE c.company_id = ri.company_id \
+                  AND REPLACE(UPPER(TRIM(c.cui)),'RO','') = REPLACE(UPPER(TRIM(ri.issuer_cui)),'RO','') \
+                  AND c.cash_vat = 1) \
+     )";
+
+/// Cash-VAT (TVA la încasare) DEDUCTIBLE groups — buyer-side mirror of
+/// `cash_vat_collected_groups`. For a deferred received invoice the standard-rate ("S") input
+/// VAT becomes deductible only as the supplier is PAID (art. 297(2)/(3)), so it is attributed
+/// to the PAYMENT period (D300 rd.24/25; old rate → rd.33). Sums the released base+VAT over
+/// received_invoice_payments (paid_at ∈ period), proportional (allocate_collection), grouped by
+/// original rate. Returns map `(rate_key, "S")` → `(rate, base_ron, vat_ron)`.
+async fn cash_vat_deductible_groups(
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    buyer_cash_vat: bool,
+    cash_vat_start: Option<&str>,
+    cash_vat_end: Option<&str>,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<BTreeMap<(i64, String), (Decimal, Decimal, Decimal)>> {
+    use crate::anaf_decl::cash_vat::{allocate_collection, RateBucket};
+    use rust_decimal::prelude::ToPrimitive;
+
+    let mut out: BTreeMap<(i64, String), (Decimal, Decimal, Decimal)> = BTreeMap::new();
+
+    let sql = format!(
+        "SELECT DISTINCT ri.id, COALESCE(ri.currency,'RON') AS currency, ri.exchange_rate \
+         FROM received_invoice_payments rp \
+         JOIN received_invoices ri ON ri.id = rp.received_invoice_id \
+         WHERE rp.company_id = ?1 \
+           AND substr(rp.paid_at,1,10) >= ?2 AND substr(rp.paid_at,1,10) <= ?3 \
+           AND ri.status != 'REJECTED' \
+           AND {DEFERRED_RECEIVED_PREDICATE}"
+    );
+    let invoice_rows = sqlx::query(&sql)
+        .bind(company_id)
+        .bind(period_from)
+        .bind(period_to)
+        .bind(buyer_cash_vat as i64)
+        .bind(cash_vat_start)
+        .bind(cash_vat_end)
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::Database)?;
+
+    for inv in &invoice_rows {
+        let invoice_id: String = inv.try_get("id").unwrap_or_default();
+        let currency: String = inv
+            .try_get("currency")
+            .unwrap_or_else(|_| "RON".to_string());
+        let fx = parse_rate(
+            inv.try_get::<Option<f64>, _>("exchange_rate")
+                .unwrap_or(None),
+        );
+
+        let line_rows = sqlx::query(
+            "SELECT vat_category, vat_rate, base_amount, vat_amount \
+             FROM received_invoice_vat_lines WHERE received_invoice_id = ?1",
+        )
+        .bind(&invoice_id)
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::Database)?;
+
+        let mut gross_bani: i64 = 0;
+        let mut bucket_acc: BTreeMap<i64, (Decimal, i64, i64)> = BTreeMap::new();
+        for l in &line_rows {
+            let category: String = l
+                .try_get("vat_category")
+                .unwrap_or_else(|_| "S".to_string());
+            let rate_s: String = l.try_get("vat_rate").unwrap_or_default();
+            let base_s: String = l.try_get("base_amount").unwrap_or_default();
+            let vat_s: String = l.try_get("vat_amount").unwrap_or_default();
+            let base_ron = amount_to_ron(
+                Decimal::from_str(&base_s).unwrap_or(Decimal::ZERO),
+                &currency,
+                fx,
+            );
+            let vat_ron = amount_to_ron(
+                Decimal::from_str(&vat_s).unwrap_or(Decimal::ZERO),
+                &currency,
+                fx,
+            );
+            gross_bani += ron_to_bani(base_ron) + ron_to_bani(vat_ron);
+            if category.trim() == "S" {
+                let rate = Decimal::from_str(&rate_s).unwrap_or(Decimal::ZERO);
+                let rate_key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
+                let e = bucket_acc.entry(rate_key).or_insert((rate, 0, 0));
+                e.1 += ron_to_bani(base_ron);
+                e.2 += ron_to_bani(vat_ron);
+            }
+        }
+        if bucket_acc.is_empty() || gross_bani <= 0 {
+            continue;
+        }
+
+        let buckets: Vec<RateBucket> = bucket_acc
+            .iter()
+            .map(|(k, (_r, b, v))| RateBucket {
+                rate_key: *k,
+                base_bani: *b,
+                vat_bani: *v,
+            })
+            .collect();
+        let rate_of: BTreeMap<i64, Decimal> =
+            bucket_acc.iter().map(|(k, (r, _, _))| (*k, *r)).collect();
+
+        let pay_rows = sqlx::query(
+            "SELECT amount, paid_at FROM received_invoice_payments \
+             WHERE received_invoice_id = ?1 AND substr(paid_at,1,10) <= ?2 ORDER BY paid_at, id",
+        )
+        .bind(&invoice_id)
+        .bind(period_to)
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::Database)?;
+
+        let mut paid_before: i64 = 0;
+        for p in &pay_rows {
+            let amt_s: String = p.try_get("amount").unwrap_or_default();
+            let paid_at: String = p.try_get("paid_at").unwrap_or_default();
+            let pay_bani = ron_to_bani(amount_to_ron(
+                Decimal::from_str(&amt_s).unwrap_or(Decimal::ZERO),
+                &currency,
+                fx,
+            ));
+            if pay_bani <= 0 {
+                continue;
+            }
+            let pd = if paid_at.len() >= 10 {
+                &paid_at[..10]
+            } else {
+                paid_at.as_str()
+            };
+            if pd >= period_from && pd <= period_to {
+                for rb in allocate_collection(gross_bani, &buckets, paid_before, pay_bani) {
+                    let rate = *rate_of.get(&rb.rate_key).unwrap_or(&Decimal::ZERO);
+                    let e = out.entry((rb.rate_key, "S".to_string())).or_insert((
+                        rate,
+                        Decimal::ZERO,
+                        Decimal::ZERO,
+                    ));
+                    e.1 += Decimal::from(rb.base_bani) / Decimal::from(100);
+                    e.2 += Decimal::from(rb.vat_bani) / Decimal::from(100);
+                }
+            }
+            paid_before += pay_bani;
+        }
+    }
+
+    Ok(out)
+}
+
 /// Computează totalul TVA colectat + deductibil din sursele primare pentru o
 /// perioadă, fără niciun override.  Aceasta este sursa unică de adevăr la care
 /// trebuie să se raporteze atât `compute_d300` cât și `reconcile` din GL.
@@ -398,8 +579,12 @@ pub(crate) async fn d300_vat_totals(
         }
     }
 
+    // Buyer-side cash VAT: when the buyer applies cash VAT OR has a cash-VAT supplier, the
+    // deferred "S" input VAT is excluded here and re-added by supplier-payment date below.
+    let buyer_active = buyer_side_active(pool, company_id, cash_vat).await?;
+
     // ── TVA deductibilă: Σvat_amount din received_invoice_vat_lines ──
-    let purch_rows = sqlx::query(
+    let mut deductible_sql = String::from(
         "SELECT vl.vat_amount, vl.vat_category, COALESCE(ri.currency,'RON') as currency, ri.exchange_rate \
          FROM received_invoice_vat_lines vl \
          JOIN received_invoices ri ON ri.id = vl.received_invoice_id \
@@ -407,13 +592,26 @@ pub(crate) async fn d300_vat_totals(
            AND ri.issue_date >= ?2 \
            AND ri.issue_date <= ?3 \
            AND ri.status != 'REJECTED'",
-    )
-    .bind(company_id)
-    .bind(period_from)
-    .bind(period_to)
-    .fetch_all(pool)
-    .await
-    .map_err(crate::error::AppError::Database)?;
+    );
+    if buyer_active {
+        deductible_sql.push_str(&format!(
+            " AND NOT (TRIM(vl.vat_category) = 'S' AND {DEFERRED_RECEIVED_PREDICATE})"
+        ));
+    }
+    let mut pq = sqlx::query(&deductible_sql)
+        .bind(company_id)
+        .bind(period_from)
+        .bind(period_to);
+    if buyer_active {
+        pq = pq
+            .bind(cash_vat as i64)
+            .bind(cash_vat_start.clone())
+            .bind(cash_vat_end.clone());
+    }
+    let purch_rows = pq
+        .fetch_all(pool)
+        .await
+        .map_err(crate::error::AppError::Database)?;
 
     let mut deductible = Decimal::ZERO;
     for row in &purch_rows {
@@ -438,6 +636,24 @@ pub(crate) async fn d300_vat_totals(
         // pentru achizițiile art.331 / intracomunitare.
         if category == "AE" || category == "K" {
             collected += vat_ron;
+        }
+    }
+
+    // Buyer-side cash VAT: add the deferred "S" input VAT made deductible by supplier payments
+    // in the period (art. 297(2)/(3); D300 rd.24/25).
+    if buyer_active {
+        let deferred_ded = cash_vat_deductible_groups(
+            pool,
+            company_id,
+            cash_vat,
+            cash_vat_start.as_deref(),
+            cash_vat_end.as_deref(),
+            period_from,
+            period_to,
+        )
+        .await?;
+        for (_, _base, vat) in deferred_ded.values() {
+            deductible += *vat;
         }
     }
 
@@ -798,7 +1014,9 @@ pub async fn compute_d300(
     // Fetch liniile VAT din facturile primite (JOIN pentru filtru perioadă + companie).
     // Wave 4: fetch ri.currency + ri.exchange_rate for RON normalisation.
     // Wave 7: fetch ri.intra_eu_kind so K acquisitions can be split goods/services.
-    let purchase_line_rows = sqlx::query(
+    // Buyer-side cash VAT: deferred "S" input VAT moves to the supplier-payment-date path.
+    let buyer_active = buyer_side_active(pool, &company_id, cash_vat).await?;
+    let mut purchase_sql = String::from(
         "SELECT vl.vat_rate, vl.vat_category, vl.base_amount, vl.vat_amount, \
                 COALESCE(ri.currency, 'RON') AS currency, ri.exchange_rate, \
                 ri.intra_eu_kind \
@@ -808,13 +1026,23 @@ pub async fn compute_d300(
            AND ri.issue_date >= ?2 \
            AND ri.issue_date <= ?3 \
            AND ri.status != 'REJECTED'",
-    )
-    .bind(&company_id)
-    .bind(&period_from)
-    .bind(&period_to)
-    .fetch_all(pool)
-    .await
-    .map_err(AppError::Database)?;
+    );
+    if buyer_active {
+        purchase_sql.push_str(&format!(
+            " AND NOT (TRIM(vl.vat_category) = 'S' AND {DEFERRED_RECEIVED_PREDICATE})"
+        ));
+    }
+    let mut pq = sqlx::query(&purchase_sql)
+        .bind(&company_id)
+        .bind(&period_from)
+        .bind(&period_to);
+    if buyer_active {
+        pq = pq
+            .bind(cash_vat as i64)
+            .bind(cash_vat_start.clone())
+            .bind(cash_vat_end.clone());
+    }
+    let purchase_line_rows = pq.fetch_all(pool).await.map_err(AppError::Database)?;
 
     // Acumulăm per (rate_key, category, kind) — kind este non-empty numai pentru K.
     // Astfel K-goods și K-services acumulează separat; toate celelalte categorii
@@ -869,6 +1097,29 @@ pub async fn compute_d300(
             .or_insert((rate, Decimal::ZERO, Decimal::ZERO));
         e.1 += base_ron;
         e.2 += vat_ron;
+    }
+
+    // Cash-VAT buyer side: splice in the deferred "S" input VAT made deductible by supplier
+    // payments in the period (kind="" — S is never intra-EU). Old-rate buckets feed the
+    // existing reg_dedusa (rd.33) loop exactly like issue-date old-rate S purchases.
+    if buyer_active {
+        let deferred_ded = cash_vat_deductible_groups(
+            pool,
+            &company_id,
+            cash_vat,
+            cash_vat_start.as_deref(),
+            cash_vat_end.as_deref(),
+            &period_from,
+            &period_to,
+        )
+        .await?;
+        for ((rate_key, cat), (rate, base, vat)) in deferred_ded {
+            let e = purchase_groups
+                .entry((rate_key, cat, String::new()))
+                .or_insert((rate, Decimal::ZERO, Decimal::ZERO));
+            e.1 += base;
+            e.2 += vat;
+        }
     }
 
     let mut total_deductible_base = Decimal::ZERO;
@@ -2099,5 +2350,145 @@ mod cash_vat_routing_tests {
         assert_eq!(s.breach_month.as_deref(), Some("2026-12"));
         assert_eq!(s.notificare_deadline.as_deref(), Some("2027-01-20"));
         assert_eq!(s.cash_vat_stops_after.as_deref(), Some("2027-01-31"));
+    }
+
+    // ── Buyer-side (slice 7c) seeders + tests ────────────────────────────────
+    async fn seed_cash_vat_supplier(pool: &SqlitePool, company: &str, cui: &str) {
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, contact_type, cui, legal_name, cash_vat) \
+             VALUES (?1,?2,'SUPPLIER',?3,'Furnizor TI',1)",
+        )
+        .bind(format!("sup-{cui}"))
+        .bind(company)
+        .bind(cui)
+        .execute(pool)
+        .await
+        .expect("insert supplier");
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn seed_received(
+        pool: &SqlitePool,
+        company: &str,
+        rid: &str,
+        issuer_cui: &str,
+        issue: &str,
+        net: &str,
+        vat: &str,
+        gross: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO received_invoices \
+             (id, company_id, anaf_download_id, issuer_cui, issuer_name, total_amount, \
+              currency, issue_date, xml_path, status) \
+             VALUES (?1,?2,?1,?3,'Furnizor',?4,'RON',?5,'/x.xml','REVIEWED')",
+        )
+        .bind(rid)
+        .bind(company)
+        .bind(issuer_cui)
+        .bind(gross)
+        .bind(issue)
+        .execute(pool)
+        .await
+        .expect("insert received");
+        sqlx::query(
+            "INSERT INTO received_invoice_vat_lines \
+             (id, received_invoice_id, vat_rate, vat_category, base_amount, vat_amount) \
+             VALUES (?1,?2,'21','S',?3,?4)",
+        )
+        .bind(format!("vl-{rid}"))
+        .bind(rid)
+        .bind(net)
+        .bind(vat)
+        .execute(pool)
+        .await
+        .expect("insert vat line");
+    }
+
+    async fn seed_received_payment(
+        pool: &SqlitePool,
+        company: &str,
+        rid: &str,
+        pid: &str,
+        amount: &str,
+        paid_at: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO received_invoice_payments \
+             (id, received_invoice_id, company_id, amount, currency, paid_at, method) \
+             VALUES (?1,?2,?3,?4,'RON',?5,'transfer')",
+        )
+        .bind(pid)
+        .bind(rid)
+        .bind(company)
+        .bind(amount)
+        .bind(paid_at)
+        .execute(pool)
+        .await
+        .expect("insert received payment");
+    }
+
+    #[tokio::test]
+    async fn buyer_side_supplier_triggered_defers_deductible() {
+        // Buyer NOT on cash VAT, but the supplier (matched by CUI) is → deduction defers to
+        // the supplier-payment date (art. 297(2)).
+        let pool = pool().await;
+        seed_company(&pool, "co", false, None).await; // buyer not on cash VAT
+        seed_cash_vat_supplier(&pool, "co", "RO99").await;
+        seed_received(
+            &pool,
+            "co",
+            "ri1",
+            "RO99",
+            "2026-03-10",
+            "10000",
+            "2100",
+            "12100",
+        )
+        .await;
+        seed_received_payment(&pool, "co", "ri1", "rp1", "6050", "2026-03-20").await;
+        seed_received_payment(&pool, "co", "ri1", "rp2", "6050", "2026-04-15").await;
+
+        let (_, mar) = d300_vat_totals(&pool, "co", "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        let (_, apr) = d300_vat_totals(&pool, "co", "2026-04-01", "2026-04-30")
+            .await
+            .unwrap();
+        assert_eq!(mar, dec("1050"), "March = half the input VAT (half paid)");
+        assert_eq!(apr, dec("1050"), "April = remaining half (true-up)");
+        assert_eq!(
+            mar + apr,
+            dec("2100"),
+            "Σ deductible over periods = invoice VAT"
+        );
+    }
+
+    #[tokio::test]
+    async fn buyer_side_inactive_keeps_issue_date_deduction() {
+        // No cash-VAT supplier, buyer not on cash VAT → deduct at the invoice date as before.
+        let pool = pool().await;
+        seed_company(&pool, "co", false, None).await;
+        seed_received(
+            &pool,
+            "co",
+            "ri1",
+            "RO77",
+            "2026-03-10",
+            "10000",
+            "2100",
+            "12100",
+        )
+        .await;
+        seed_received_payment(&pool, "co", "ri1", "rp1", "12100", "2026-04-15").await;
+
+        let (_, mar) = d300_vat_totals(&pool, "co", "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        let (_, apr) = d300_vat_totals(&pool, "co", "2026-04-01", "2026-04-30")
+            .await
+            .unwrap();
+        assert_eq!(mar, dec("2100"), "normal: full deduction at invoice date");
+        assert_eq!(apr, Decimal::ZERO, "nothing deferred to the payment month");
     }
 }
