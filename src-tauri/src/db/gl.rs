@@ -305,6 +305,7 @@ fn post_sales_invoice(
 ///
 /// Returnează (journal, entries).
 /// Pentru reverse-charge (AE / K): adaugă leg D 4426 = C 4427.
+#[allow(clippy::too_many_arguments)]
 fn post_purchase_invoice(
     company_id: &str,
     received_invoice_id: &str,
@@ -313,6 +314,11 @@ fn post_purchase_invoice(
     issuer_cui: &str,
     gross_ron: Decimal,
     vat_lines: &[(Decimal, Decimal, String, Decimal)], // (net, vat, category, rate)
+    // Buyer-side TVA la încasare: when true, standard-rate ("S") input VAT is not yet
+    // deductible at invoice date — debit 4428 "TVA neexigibilă" instead of 4426; it transfers
+    // to 4426 on supplier payment (see post_received_payment). Reverse-charge (AE/K) never
+    // defers (self-assessed immediately), so it keeps 4426 + the 4427 auto-assessment leg.
+    cash_vat_deferred: bool,
 ) -> (GlJournal, Vec<GlEntry>) {
     // Canonical supplier ID = RO-stripped CUI digits
     let supplier_canon = canonical_partner_id(received_invoice_id, issuer_cui);
@@ -357,11 +363,17 @@ fn post_purchase_invoice(
         });
         record_id += 1;
 
-        // D 4426 TVA deductibilă = VAT (pentru taxe non-reverse-charge, sau auto-assessment)
+        // D 4426 TVA deductibilă = VAT (sau 4428 neexigibilă când deducerea e amânată la plată
+        // sub TVA la încasare — doar pentru "S"; AE/K se autolichidează imediat pe 4426).
+        let vat_debit_account = if cash_vat_deferred && category == "S" {
+            "4428"
+        } else {
+            "4426"
+        };
         entries.push(GlEntry {
             id: new_id(),
             record_id,
-            account_code: "4426".to_string(),
+            account_code: vat_debit_account.to_string(),
             debit: *vat,
             credit: Decimal::ZERO,
             partner_cui: None,
@@ -644,6 +656,215 @@ async fn cash_vat_release_for_payment(
     Ok(out)
 }
 
+/// Buyer-side analogue of `cash_vat_release_for_payment`: the per-rate input VAT `(rate,
+/// vat_ron)` made DEDUCTIBLE by a single supplier payment on a deferred received invoice — the
+/// `D 4426 / C 4428` transfer. Builds the received invoice's "S" rate buckets + full gross
+/// from received_invoice_vat_lines, the cumulative paid_before (strictly-earlier received
+/// payments by paid_at, then id), then `allocate_collection` (true-up clears 4428 to zero).
+async fn cash_vat_release_for_received_payment(
+    pool: &SqlitePool,
+    received_invoice_id: &str,
+    payment_id: &str,
+    paid_at: &str,
+    currency: &str,
+    fx: Option<Decimal>,
+    amount_ron: Decimal,
+) -> AppResult<Vec<(Decimal, Decimal)>> {
+    use rust_decimal::prelude::ToPrimitive;
+    use std::collections::BTreeMap;
+
+    let line_rows = sqlx::query(
+        "SELECT vat_category, vat_rate, base_amount, vat_amount \
+         FROM received_invoice_vat_lines WHERE received_invoice_id = ?1",
+    )
+    .bind(received_invoice_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut gross_bani: i64 = 0;
+    let mut bucket_acc: BTreeMap<i64, (Decimal, i64, i64)> = BTreeMap::new();
+    for l in &line_rows {
+        let cat: String = l
+            .try_get("vat_category")
+            .unwrap_or_else(|_| "S".to_string());
+        let rate_s: String = l.try_get("vat_rate").unwrap_or_default();
+        let base_s: String = l.try_get("base_amount").unwrap_or_default();
+        let vat_s: String = l.try_get("vat_amount").unwrap_or_default();
+        let base_ron = amount_to_ron(dec(&base_s), currency, fx);
+        let vat_ron = amount_to_ron(dec(&vat_s), currency, fx);
+        gross_bani += to_bani(base_ron) + to_bani(vat_ron);
+        if cat.trim() == "S" {
+            let rate = dec(&rate_s);
+            let rate_key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
+            let e = bucket_acc.entry(rate_key).or_insert((rate, 0, 0));
+            e.1 += to_bani(base_ron);
+            e.2 += to_bani(vat_ron);
+        }
+    }
+    if bucket_acc.is_empty() || gross_bani <= 0 {
+        return Ok(Vec::new());
+    }
+
+    let buckets: Vec<RateBucket> = bucket_acc
+        .iter()
+        .map(|(k, (_r, b, v))| RateBucket {
+            rate_key: *k,
+            base_bani: *b,
+            vat_bani: *v,
+        })
+        .collect();
+    let rate_of: BTreeMap<i64, Decimal> =
+        bucket_acc.iter().map(|(k, (r, _, _))| (*k, *r)).collect();
+
+    let prior_rows = sqlx::query(
+        "SELECT amount FROM received_invoice_payments \
+         WHERE received_invoice_id = ?1 \
+           AND (substr(paid_at,1,10) < substr(?2,1,10) \
+                OR (substr(paid_at,1,10) = substr(?2,1,10) AND id < ?3))",
+    )
+    .bind(received_invoice_id)
+    .bind(paid_at)
+    .bind(payment_id)
+    .fetch_all(pool)
+    .await?;
+    let mut paid_before_bani: i64 = 0;
+    for pr in &prior_rows {
+        let a: String = pr.try_get("amount").unwrap_or_default();
+        let b = to_bani(amount_to_ron(dec(&a), currency, fx));
+        if b > 0 {
+            paid_before_bani += b;
+        }
+    }
+    let payment_bani = to_bani(amount_ron);
+
+    let mut out: Vec<(Decimal, Decimal)> = Vec::new();
+    for rb in allocate_collection(gross_bani, &buckets, paid_before_bani, payment_bani) {
+        if rb.vat_bani == 0 {
+            continue;
+        }
+        let rate = *rate_of.get(&rb.rate_key).unwrap_or(&Decimal::ZERO);
+        out.push((rate, Decimal::from(rb.vat_bani) / Decimal::from(100)));
+    }
+    Ok(out)
+}
+
+/// Postare plată furnizor (payment-OUT against a received invoice): settle the payable and —
+/// for a deferred cash-VAT invoice — release the now-deductible input VAT.
+#[allow(clippy::too_many_arguments)]
+fn post_received_payment(
+    company_id: &str,
+    payment_id: &str,
+    received_invoice_id: &str,
+    paid_at: &str,
+    issuer_cui: &str,
+    amount_ron: Decimal,
+    method: &str,
+    // Per-rate input VAT made exigible/deductible by THIS payment (rate, vat_ron); empty for
+    // a non-deferred invoice. Each posts the transfer D 4426 / C 4428.
+    released: &[(Decimal, Decimal)],
+) -> (GlJournal, Vec<GlEntry>) {
+    let supplier_canon = canonical_partner_id(received_invoice_id, issuer_cui);
+    // Money leaves: credit the cash account matching the instrument (cash → 5311, else 5121).
+    let (credit_account, journal_id) = match method.to_ascii_lowercase().as_str() {
+        "cash" | "numerar" => ("5311", "CASA"),
+        _ => ("5121", "BANCA"),
+    };
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: journal_id.to_string(),
+        journal_type: "PAYMENT".to_string(),
+        transaction_id: payment_id.to_string(),
+        transaction_date: paid_at.to_string(),
+        description: Some(format!("Plata furnizor factura {received_invoice_id}")),
+        source_type: "RECEIVED_PAYMENT".to_string(),
+        source_id: payment_id.to_string(),
+        customer_id: None,
+        supplier_id: Some(supplier_canon.clone()),
+    };
+
+    let mut entries = vec![
+        // D 401 Furnizori = amount (settle the payable)
+        GlEntry {
+            id: new_id(),
+            record_id: 1,
+            account_code: "401".to_string(),
+            debit: amount_ron,
+            credit: Decimal::ZERO,
+            partner_cui: Some(issuer_cui.to_string()),
+            customer_id: None,
+            supplier_id: Some(supplier_canon),
+            tax_type: "000".to_string(),
+            tax_code: "000000".to_string(),
+            tax_percentage: None,
+            tax_base: None,
+            tax_amount: None,
+        },
+        // C 5121/5311 = amount (cash out)
+        GlEntry {
+            id: new_id(),
+            record_id: 2,
+            account_code: credit_account.to_string(),
+            debit: Decimal::ZERO,
+            credit: amount_ron,
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "000".to_string(),
+            tax_code: "000000".to_string(),
+            tax_percentage: None,
+            tax_base: None,
+            tax_amount: None,
+        },
+    ];
+
+    // TVA la încasare — the deduction becomes exigible: per rate, D 4426 / C 4428.
+    let mut record_id: i64 = 3;
+    for (rate, vat) in released {
+        if *vat == Decimal::ZERO {
+            continue;
+        }
+        let tc = purchase_tax_code_str("S", *rate);
+        let rate_str = fmt_dec(*rate);
+        // D 4426 — now-deductible TVA deductibilă.
+        entries.push(GlEntry {
+            id: new_id(),
+            record_id,
+            account_code: "4426".to_string(),
+            debit: *vat,
+            credit: Decimal::ZERO,
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "300".to_string(),
+            tax_code: tc.clone(),
+            tax_percentage: Some(rate_str.clone()),
+            tax_base: None,
+            tax_amount: Some(fmt_dec(*vat)),
+        });
+        record_id += 1;
+        // C 4428 — release out of TVA neexigibilă.
+        entries.push(GlEntry {
+            id: new_id(),
+            record_id,
+            account_code: "4428".to_string(),
+            debit: Decimal::ZERO,
+            credit: *vat,
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "300".to_string(),
+            tax_code: tc,
+            tax_percentage: Some(rate_str),
+            tax_base: None,
+            tax_amount: None,
+        });
+        record_id += 1;
+    }
+
+    (journal, entries)
+}
+
 // ─── DB insert helpers ────────────────────────────────────────────────────────
 
 /// FIX 3: helpers accept a transaction executor so each document's
@@ -772,6 +993,25 @@ pub async fn generate_gl_entries(
         company_cash_vat
             && cash_vat_start.as_deref().is_none_or(|s| issue_date >= s)
             && cash_vat_end.as_deref().is_none_or(|e| issue_date <= e)
+    };
+
+    // Suppliers (contacts) flagged as applying cash VAT (RPATVAÎ), normalised CUIs — drives the
+    // art. 297(2) buyer-side deferral (a purchase from such a supplier defers the deduction).
+    let cash_vat_supplier_cuis: std::collections::HashSet<String> = {
+        let rows = sqlx::query(
+            "SELECT REPLACE(UPPER(TRIM(cui)),'RO','') AS ncui FROM contacts \
+             WHERE company_id = ?1 AND cash_vat = 1 AND cui IS NOT NULL",
+        )
+        .bind(company_id)
+        .fetch_all(pool)
+        .await?;
+        rows.iter()
+            .filter_map(|r| r.try_get::<String, _>("ncui").ok())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+    let supplier_on_cash_vat = |issuer_cui: &str| -> bool {
+        cash_vat_supplier_cuis.contains(&issuer_cui.trim().to_uppercase().replace("RO", ""))
     };
 
     // ── 1. Facturi emise ──────────────────────────────────────────────────────
@@ -1000,6 +1240,11 @@ pub async fn generate_gl_entries(
             })
             .sum();
 
+        // Buyer-side TVA la încasare: defer the "S" input VAT to 4428 when the supplier applies
+        // cash VAT (art. 297(2)) OR the buyer applies it in-window (art. 297(3)).
+        let cash_vat_deferred =
+            in_cash_vat_window(&issue_date) || supplier_on_cash_vat(&issuer_cui);
+
         let (journal, entries) = post_purchase_invoice(
             company_id,
             &recv_id,
@@ -1008,6 +1253,7 @@ pub async fn generate_gl_entries(
             &issuer_cui,
             gross_ron,
             &vat_lines,
+            cash_vat_deferred,
         );
 
         // FIX 2: Balance guard.
@@ -1143,6 +1389,89 @@ pub async fn generate_gl_entries(
             entries_inserted += 1;
         }
 
+        tx.commit().await?;
+    }
+
+    // ── 4. Plăți furnizori (payments-out) ─────────────────────────────────────
+    // Settle the payable (D 401 / C 512x) and, for a deferred cash-VAT invoice, release the
+    // now-deductible input VAT (D 4426 / C 4428).
+    let recv_payment_rows = sqlx::query(
+        "SELECT rp.id, rp.received_invoice_id, rp.paid_at, rp.amount, rp.currency, rp.method, \
+                ri.issuer_cui, ri.issue_date AS inv_issue_date, ri.exchange_rate \
+         FROM received_invoice_payments rp \
+         JOIN received_invoices ri ON ri.id = rp.received_invoice_id \
+         WHERE rp.company_id = ?1 \
+           AND rp.paid_at >= ?2 \
+           AND rp.paid_at <= ?3",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_all(pool)
+    .await?;
+
+    for row in &recv_payment_rows {
+        let pay_id: String = row.try_get("id").unwrap_or_default();
+        let recv_id: String = row.try_get("received_invoice_id").unwrap_or_default();
+        let paid_at: String = row.try_get("paid_at").unwrap_or_default();
+        let amount_s: String = row.try_get("amount").unwrap_or_default();
+        let currency: String = row
+            .try_get("currency")
+            .unwrap_or_else(|_| "RON".to_string());
+        let method: String = row
+            .try_get("method")
+            .unwrap_or_else(|_| "transfer".to_string());
+        let issuer_cui: String = row.try_get("issuer_cui").unwrap_or_default();
+        let inv_issue: String = row.try_get("inv_issue_date").unwrap_or_default();
+        let inv_fx = parse_rate(
+            row.try_get::<Option<f64>, _>("exchange_rate")
+                .unwrap_or(None),
+        );
+        let amount_ron = amount_to_ron(dec(&amount_s), &currency, inv_fx);
+
+        // Release the deferred input VAT only for a deferred invoice (supplier OR buyer cash VAT).
+        let deferred = in_cash_vat_window(&inv_issue) || supplier_on_cash_vat(&issuer_cui);
+        let released: Vec<(Decimal, Decimal)> = if deferred {
+            cash_vat_release_for_received_payment(
+                pool, &recv_id, &pay_id, &paid_at, &currency, inv_fx, amount_ron,
+            )
+            .await?
+        } else {
+            Vec::new()
+        };
+
+        let (journal, entries) = post_received_payment(
+            company_id,
+            &pay_id,
+            &recv_id,
+            &paid_at,
+            &issuer_cui,
+            amount_ron,
+            &method,
+            &released,
+        );
+        assert_balanced(&entries, &pay_id)?;
+
+        let mut tx = pool.begin().await?;
+        let deleted = sqlx::query(
+            "DELETE FROM gl_journal \
+             WHERE company_id=?1 AND source_type='RECEIVED_PAYMENT' AND source_id=?2",
+        )
+        .bind(company_id)
+        .bind(&pay_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if deleted > 0 {
+            journals_replaced += 1;
+        }
+        let journal_id = journal.id.clone();
+        insert_journal(&mut tx, &journal).await?;
+        journals_inserted += 1;
+        for entry in &entries {
+            insert_entry(&mut tx, &journal_id, entry).await?;
+            entries_inserted += 1;
+        }
         tx.commit().await?;
     }
 
@@ -2413,5 +2742,84 @@ mod tests {
         let (_, c4428) = account_balance(&pool, "co", "4428").await;
         assert_eq!(c4427, dec("190"), "normal VAT: 4427 at invoice date");
         assert_eq!(c4428, Decimal::ZERO, "no 4428 for a non-cash-VAT company");
+    }
+
+    // ── Buyer-side (slice 7d) — input VAT 4428 + release on supplier payment ──
+    async fn insert_cash_vat_supplier(pool: &SqlitePool, company: &str, cui: &str) {
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, contact_type, cui, legal_name, cash_vat) \
+             VALUES (?1,?2,'SUPPLIER',?3,'Furnizor TI',1)",
+        )
+        .bind(format!("sup-{cui}"))
+        .bind(company)
+        .bind(cui)
+        .execute(pool)
+        .await
+        .expect("insert cash-vat supplier");
+    }
+
+    async fn insert_recv_pay(
+        pool: &SqlitePool,
+        company: &str,
+        rid: &str,
+        pid: &str,
+        amount: &str,
+        paid_at: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO received_invoice_payments \
+             (id, received_invoice_id, company_id, amount, currency, paid_at, method) \
+             VALUES (?1,?2,?3,?4,'RON',?5,'transfer')",
+        )
+        .bind(pid)
+        .bind(rid)
+        .bind(company)
+        .bind(amount)
+        .bind(paid_at)
+        .execute(pool)
+        .await
+        .expect("insert received payment");
+    }
+
+    #[tokio::test]
+    async fn buyer_cash_vat_supplier_defers_input_to_4428_then_releases() {
+        // Buyer not on cash VAT, but the supplier (CUI123, matched) is → input VAT parks in
+        // 4428 at invoice, then transfers to 4426 on payment, clearing 4428.
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        insert_cash_vat_supplier(&pool, "co", "CUI123").await;
+        insert_received(&pool, "co", "ri", "S", "19", "1000", "190").await;
+        insert_recv_pay(&pool, "co", "ri", "rp1", "1190", "2025-01-20").await;
+
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
+        let (d4426, _) = account_balance(&pool, "co", "4426").await;
+        assert_eq!(d4428 - c4428, Decimal::ZERO, "4428 cleared on payment");
+        assert_eq!(d4426, dec("190"), "input VAT deductible after payment");
+    }
+
+    #[tokio::test]
+    async fn non_cash_vat_purchase_uses_4426_at_invoice() {
+        // No cash-VAT supplier, buyer not on cash VAT → input VAT deductible at invoice date.
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        insert_received(&pool, "co", "ri", "S", "19", "1000", "190").await;
+        insert_recv_pay(&pool, "co", "ri", "rp1", "1190", "2025-01-20").await;
+
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let (d4426, _) = account_balance(&pool, "co", "4426").await;
+        let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
+        assert_eq!(d4426, dec("190"), "input VAT deductible at invoice date");
+        assert_eq!(
+            d4428 + c4428,
+            Decimal::ZERO,
+            "no 4428 for a normal supplier"
+        );
     }
 }
