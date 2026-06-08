@@ -596,7 +596,15 @@ async fn cash_vat_release_for_payment(
         let vat_s: String = l.try_get("vat_amount").unwrap_or_default();
         let base_ron = amount_to_ron(dec(&base_s), currency, fx);
         let vat_ron = amount_to_ron(dec(&vat_s), currency, fx);
-        gross_bani += to_bani(base_ron) + to_bani(vat_ron);
+        // Denominator = the PAYABLE/collectible. Reverse-charge (AE) / intra-EU (K) VAT is
+        // self-assessed and never paid to/by the supplier, so it is excluded — otherwise a
+        // fully-settled mixed invoice would never reach gross and the S VAT would never fully
+        // release (4428 stuck). (No-op on the sales side, where AE/K lines carry VAT=0.)
+        let is_reverse_charge = matches!(cat.trim(), "AE" | "K");
+        gross_bani += to_bani(base_ron);
+        if !is_reverse_charge {
+            gross_bani += to_bani(vat_ron);
+        }
         if cat.trim() == "S" {
             let rate = dec(&rate_s);
             let rate_key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
@@ -692,7 +700,15 @@ async fn cash_vat_release_for_received_payment(
         let vat_s: String = l.try_get("vat_amount").unwrap_or_default();
         let base_ron = amount_to_ron(dec(&base_s), currency, fx);
         let vat_ron = amount_to_ron(dec(&vat_s), currency, fx);
-        gross_bani += to_bani(base_ron) + to_bani(vat_ron);
+        // Denominator = the PAYABLE/collectible. Reverse-charge (AE) / intra-EU (K) VAT is
+        // self-assessed and never paid to/by the supplier, so it is excluded — otherwise a
+        // fully-settled mixed invoice would never reach gross and the S VAT would never fully
+        // release (4428 stuck). (No-op on the sales side, where AE/K lines carry VAT=0.)
+        let is_reverse_charge = matches!(cat.trim(), "AE" | "K");
+        gross_bani += to_bani(base_ron);
+        if !is_reverse_charge {
+            gross_bani += to_bani(vat_ron);
+        }
         if cat.trim() == "S" {
             let rate = dec(&rate_s);
             let rate_key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
@@ -1396,13 +1412,15 @@ pub async fn generate_gl_entries(
     // Settle the payable (D 401 / C 512x) and, for a deferred cash-VAT invoice, release the
     // now-deductible input VAT (D 4426 / C 4428).
     let recv_payment_rows = sqlx::query(
-        "SELECT rp.id, rp.received_invoice_id, rp.paid_at, rp.amount, rp.currency, rp.method, \
-                ri.issuer_cui, ri.issue_date AS inv_issue_date, ri.exchange_rate \
+        "SELECT rp.id, rp.received_invoice_id, rp.paid_at, rp.amount, rp.method, \
+                ri.issuer_cui, ri.issue_date AS inv_issue_date, ri.exchange_rate, \
+                COALESCE(ri.currency,'RON') AS inv_currency \
          FROM received_invoice_payments rp \
          JOIN received_invoices ri ON ri.id = rp.received_invoice_id \
          WHERE rp.company_id = ?1 \
-           AND rp.paid_at >= ?2 \
-           AND rp.paid_at <= ?3",
+           AND substr(rp.paid_at,1,10) >= ?2 \
+           AND substr(rp.paid_at,1,10) <= ?3 \
+           AND ri.status != 'REJECTED'",
     )
     .bind(company_id)
     .bind(period_from)
@@ -1415,8 +1433,10 @@ pub async fn generate_gl_entries(
         let recv_id: String = row.try_get("received_invoice_id").unwrap_or_default();
         let paid_at: String = row.try_get("paid_at").unwrap_or_default();
         let amount_s: String = row.try_get("amount").unwrap_or_default();
+        // Convert in the INVOICE currency (the VAT lines + payable live there; payments default
+        // to it) — avoids a mismatch if a payment row's currency was overridden differently.
         let currency: String = row
-            .try_get("currency")
+            .try_get("inv_currency")
             .unwrap_or_else(|_| "RON".to_string());
         let method: String = row
             .try_get("method")
@@ -2820,6 +2840,74 @@ mod tests {
             d4428 + c4428,
             Decimal::ZERO,
             "no 4428 for a normal supplier"
+        );
+    }
+
+    #[tokio::test]
+    async fn buyer_mixed_s_and_reverse_charge_releases_full_s_vat() {
+        // S line 1000/190 (deferred) + AE line 1000/190 self-assessed. The payable is 2190
+        // (AE VAT not paid to the supplier). A full 2190 payment must release the WHOLE S VAT
+        // (190) — the AE VAT must not inflate the denominator.
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        insert_cash_vat_supplier(&pool, "co", "CUI123").await;
+        sqlx::query(
+            "INSERT INTO received_invoices \
+             (id, company_id, anaf_download_id, issuer_cui, issuer_name, total_amount, \
+              net_amount, vat_amount, currency, issue_date, xml_path, status, downloaded_at, created_at) \
+             VALUES ('ri','co','dl','CUI123','Furnizor','2190','2000','190','RON','2025-01-15','x.xml','NEW',1,1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO received_invoice_vat_lines (id, received_invoice_id, vat_rate, vat_category, base_amount, vat_amount) \
+             VALUES ('vlS','ri','19','S','1000','190'),('vlAE','ri','19','AE','1000','190')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        insert_recv_pay(&pool, "co", "ri", "rp1", "2190", "2025-01-20").await;
+
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
+        let (d4426, _) = account_balance(&pool, "co", "4426").await;
+        assert_eq!(
+            d4428 - c4428,
+            Decimal::ZERO,
+            "S 4428 fully cleared (AE VAT excluded from the payable denominator)"
+        );
+        // 4426 debit = AE auto-assessment (190 at invoice) + S release (190 at payment) = 380.
+        assert_eq!(d4426, dec("380"));
+    }
+
+    #[tokio::test]
+    async fn rejected_received_invoice_posts_no_deduction_or_release() {
+        // A REJECTED received invoice contributes nothing to GL (matches D300 exclusion).
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        insert_cash_vat_supplier(&pool, "co", "CUI123").await;
+        insert_received(&pool, "co", "ri", "S", "19", "1000", "190").await;
+        insert_recv_pay(&pool, "co", "ri", "rp1", "1190", "2025-01-20").await;
+        sqlx::query("UPDATE received_invoices SET status='REJECTED' WHERE id='ri'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        let (d4426, _) = account_balance(&pool, "co", "4426").await;
+        let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
+        assert_eq!(d4426, Decimal::ZERO, "no deduction for a rejected invoice");
+        assert_eq!(
+            d4428 + c4428,
+            Decimal::ZERO,
+            "no 4428 movement for a rejected invoice"
         );
     }
 }

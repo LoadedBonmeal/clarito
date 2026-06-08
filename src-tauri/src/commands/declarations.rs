@@ -238,7 +238,14 @@ async fn cash_vat_collected_groups(
                 &currency,
                 fx,
             );
-            gross_bani += ron_to_bani(base_ron) + ron_to_bani(vat_ron);
+            // Denominator = the collectible/payable; reverse-charge (AE) / intra-EU (K) VAT is
+            // self-assessed, not settled with the partner, so it is excluded (no-op when those
+            // lines carry VAT=0, as self-issued sales do).
+            let is_reverse_charge = matches!(category.trim(), "AE" | "K");
+            gross_bani += ron_to_bani(base_ron);
+            if !is_reverse_charge {
+                gross_bani += ron_to_bani(vat_ron);
+            }
 
             if category.trim() == "S" {
                 let rate = Decimal::from_str(&rate_s).unwrap_or(Decimal::ZERO);
@@ -427,7 +434,14 @@ async fn cash_vat_deductible_groups(
                 &currency,
                 fx,
             );
-            gross_bani += ron_to_bani(base_ron) + ron_to_bani(vat_ron);
+            // Denominator = the PAYABLE; reverse-charge (AE) / intra-EU (K) input VAT is
+            // self-assessed and not paid to the supplier, so it is excluded — otherwise a
+            // fully-paid mixed invoice would never release all the deferred S input VAT.
+            let is_reverse_charge = matches!(category.trim(), "AE" | "K");
+            gross_bani += ron_to_bani(base_ron);
+            if !is_reverse_charge {
+                gross_bani += ron_to_bani(vat_ron);
+            }
             if category.trim() == "S" {
                 let rate = Decimal::from_str(&rate_s).unwrap_or(Decimal::ZERO);
                 let rate_key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
