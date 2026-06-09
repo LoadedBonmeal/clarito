@@ -7,6 +7,7 @@
 
 pub mod cash_vat;
 pub mod d300;
+pub mod d390;
 pub mod d394;
 pub mod duk;
 pub mod form_versions;

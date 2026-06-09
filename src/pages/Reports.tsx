@@ -37,6 +37,7 @@ import { formatError } from "@/lib/error-mapper";
 import type { Contact } from "@/types";
 import type { ReportView } from "@/router";
 
+import { D390View }            from "./reports/D390View";
 import { D394View }            from "./reports/D394View";
 import { SaftView }            from "./reports/SaftView";
 import { SalesJournalView }    from "./reports/SalesJournalView";
@@ -88,6 +89,7 @@ function vatCategoryLabel(cat: string): string {
 
 const TABS: { value: ReportView; label: string }[] = [
   { value: "tva",               label: "Sumar TVA"          },
+  { value: "d390",              label: "D390"                },
   { value: "d394",              label: "D394"                },
   { value: "saft",              label: "D406 SAF-T"          },
   { value: "sales-journal",     label: "Jurnal vânzări"      },
@@ -482,6 +484,10 @@ export function ReportsPage() {
         )}
 
         {/* ── D394 ───────────────────────────────────────────────────────── */}
+        {view === "d390" && (
+          <D390View dateFrom={dateFrom} dateTo={dateTo} />
+        )}
+
         {view === "d394" && (
           <D394View dateFrom={dateFrom} dateTo={dateTo} />
         )}

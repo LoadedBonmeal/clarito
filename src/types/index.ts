@@ -470,6 +470,33 @@ export interface D394Partner {
 }
 
 /** Raportul D394 — livrări (vânzări) + achiziții per partener. */
+/** D390 declarația recapitulativă (VIES) — one aggregated operation row. */
+export interface D390Op {
+  /** Operation type: L/T/A/P/S/R. */
+  tip: string;
+  /** Partner country code (2 letters). */
+  tara: string;
+  /** Partner VAT id without the country prefix. */
+  codO: string;
+  /** Partner name. */
+  denO: string;
+  /** Taxable base in RON (whole lei). */
+  baza: number;
+}
+
+export interface D390Doc {
+  luna: number;
+  an: number;
+  operations: D390Op[];
+}
+
+export interface D390Submission {
+  dRec?: boolean;
+  numeDeclar?: string;
+  prenumeDeclar?: string;
+  functieDeclar?: string;
+}
+
 export interface D394Report {
   companyCui: string;
   periodFrom: string;

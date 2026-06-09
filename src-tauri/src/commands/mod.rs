@@ -10,6 +10,7 @@ pub mod assets;
 pub mod bnr;
 pub mod companies;
 pub mod contacts;
+pub mod d390;
 pub mod d394;
 pub mod declarations;
 pub mod feedback;

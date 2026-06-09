@@ -395,6 +395,8 @@ pub fn run() {
             // declarations d300
             commands::declarations::compute_d300,
             commands::declarations::cash_vat_plafon_status,
+            commands::d390::compute_d390,
+            commands::d390::export_d390,
             commands::declarations::export_d300,
             commands::declarations::export_d300_official,
             commands::declarations::preflight_declaration,

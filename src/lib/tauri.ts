@@ -681,6 +681,23 @@ export const declarations = {
     }),
 };
 
+// ─── D390 — Declarație recapitulativă (VIES) intra-UE ────────────────────
+
+export const d390 = {
+  /** Calculează D390 — operațiuni intra-UE grupate pe partener + tip (L/A/P/S). */
+  compute: (companyId: string, periodFrom: string, periodTo: string) =>
+    invoke<import("@/types").D390Doc>("compute_d390", { companyId, periodFrom, periodTo }),
+  /** Generează XML D390 (declaratie390 v3) și îl salvează la destPath. Returnează calea. */
+  export: (
+    companyId: string,
+    periodFrom: string,
+    periodTo: string,
+    destPath: string,
+    submission?: import("@/types").D390Submission,
+  ) =>
+    invoke<string>("export_d390", { companyId, periodFrom, periodTo, destPath, submission }),
+};
+
 // ─── D394 — Declarație informativă livrări/achiziții ─────────────────────
 
 export const d394 = {
@@ -847,6 +864,7 @@ export const api = {
   certificates,
   companies,
   contacts,
+  d390,
   d394,
   declarations,
   feedback,
