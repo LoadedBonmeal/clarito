@@ -227,12 +227,33 @@ fn dec(s: &str) -> Decimal {
     Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO)
 }
 
-/// Insert a raw ledger event, then recompute the product's full valued stream.
+/// Verify the product exists AND belongs to the company (multi-tenant guard). NotFound otherwise —
+/// stock operations must never act cross-company via an id-only lookup.
+pub async fn assert_product_owned(
+    pool: &SqlitePool,
+    company_id: &str,
+    product_id: &str,
+) -> AppResult<()> {
+    let owned: Option<String> =
+        sqlx::query_scalar("SELECT id FROM products WHERE id=?1 AND company_id=?2")
+            .bind(product_id)
+            .bind(company_id)
+            .fetch_optional(pool)
+            .await?;
+    if owned.is_none() {
+        return Err(AppError::NotFound);
+    }
+    Ok(())
+}
+
+/// Insert a raw ledger event, then recompute the product's full valued stream. Returns an optional
+/// user-facing warning (gestiune negativă after this movement).
 pub async fn record_movement(
     pool: &SqlitePool,
     input: &StockMovementInput,
     dir: Dir,
-) -> AppResult<()> {
+) -> AppResult<Option<String>> {
+    assert_product_owned(pool, &input.company_id, &input.product_id).await?;
     let qty = Decimal::from_str(input.qty.trim())
         .map_err(|_| AppError::Validation("Cantitate invalidă.".into()))?;
     if qty <= Decimal::ZERO {
@@ -240,8 +261,21 @@ pub async fn record_movement(
             "Cantitatea trebuie să fie > 0.".into(),
         ));
     }
+    // An IN must carry a valid, non-negative unit cost — garbage must NOT silently become 0 (it
+    // would corrupt the valuation and the GL).
     let unit_cost = match dir {
-        Dir::In => dec(input.unit_cost.as_deref().unwrap_or("0")),
+        Dir::In => {
+            let raw = input.unit_cost.as_deref().unwrap_or("");
+            let c = Decimal::from_str(raw.trim()).map_err(|_| {
+                AppError::Validation("Cost unitar invalid — folosiți formatul 12.34.".into())
+            })?;
+            if c.is_sign_negative() {
+                return Err(AppError::Validation(
+                    "Costul unitar nu poate fi negativ.".into(),
+                ));
+            }
+            c
+        }
         Dir::Out => Decimal::ZERO,
     };
     sqlx::query(
@@ -266,25 +300,26 @@ pub async fn record_movement(
 }
 
 /// Replay the product's full event stream with the chosen method and rewrite the ledger + the
-/// product cache (stock_qty / avg_cost / stock_value) in one transaction.
+/// product cache (stock_qty / avg_cost / stock_value) in one transaction. Returns a warning string
+/// if any movement drove the stock negative (gestiune negativă — not allowed by OMFP 1802).
 pub async fn recompute_product(
     pool: &SqlitePool,
     company_id: &str,
     product_id: &str,
-) -> AppResult<()> {
-    let method: String =
-        sqlx::query_scalar("SELECT COALESCE(valuation_method,'CMP') FROM products WHERE id=?1")
-            .bind(product_id)
-            .fetch_optional(pool)
-            .await?
-            .unwrap_or_else(|| "CMP".to_string());
-
-    let stock_account: String =
-        sqlx::query_scalar("SELECT COALESCE(stock_account,'371') FROM products WHERE id=?1")
-            .bind(product_id)
-            .fetch_optional(pool)
-            .await?
-            .unwrap_or_else(|| "371".to_string());
+) -> AppResult<Option<String>> {
+    // Read the policy with the company scope — never cross-tenant on an id-only lookup.
+    let policy: Option<(String, String)> = sqlx::query_as(
+        "SELECT COALESCE(valuation_method,'CMP'), COALESCE(stock_account,'371') \
+         FROM products WHERE id=?1 AND company_id=?2",
+    )
+    .bind(product_id)
+    .bind(company_id)
+    .fetch_optional(pool)
+    .await?;
+    let (method, stock_account) = match policy {
+        Some(p) => p,
+        None => return Err(AppError::NotFound),
+    };
 
     let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
         "SELECT id, direction, qty, unit_cost, entry_date FROM stock_ledger \
@@ -319,7 +354,7 @@ pub async fn recompute_product(
     for v in &valued {
         sqlx::query(
             "UPDATE stock_ledger SET unit_cost=?2, value=?3, run_qty=?4, run_value=?5, \
-             fifo_remaining=?6 WHERE id=?1",
+             fifo_remaining=?6 WHERE id=?1 AND company_id=?7",
         )
         .bind(&v.id)
         .bind(format!("{:.2}", v.unit_cost))
@@ -327,6 +362,7 @@ pub async fn recompute_product(
         .bind(format!("{:.6}", v.run_qty))
         .bind(format!("{:.2}", v.run_value))
         .bind(format!("{:.6}", v.fifo_remaining))
+        .bind(company_id)
         .execute(&mut *tx)
         .await?;
     }
@@ -339,11 +375,12 @@ pub async fn recompute_product(
     } else {
         Decimal::ZERO
     };
-    sqlx::query("UPDATE products SET stock_qty=?2, avg_cost=?3, stock_value=?4 WHERE id=?1")
+    sqlx::query("UPDATE products SET stock_qty=?2, avg_cost=?3, stock_value=?4 WHERE id=?1 AND company_id=?5")
         .bind(product_id)
         .bind(format!("{:.6}", qty))
         .bind(format!("{:.2}", avg))
         .bind(format!("{:.2}", value))
+        .bind(company_id)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
@@ -363,7 +400,16 @@ pub async fn recompute_product(
         )
         .await?;
     }
-    Ok(())
+
+    // Surface gestiune negativă (OMFP 1802 forbids it) — the last event that drove stock < 0.
+    let warning = valued
+        .iter()
+        .any(|v| v.negative_stock || v.run_qty.is_sign_negative())
+        .then(|| {
+            "Atenție: stocul a devenit negativ (gestiune negativă) — verificați recepțiile."
+                .to_string()
+        });
+    Ok(warning)
 }
 
 /// The valued stock ledger (fișa de magazie) for a product.
@@ -386,6 +432,73 @@ pub async fn ledger(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
+
+    async fn setup() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        for (cid, pid, cui) in [("co1", "p1", "12345678"), ("co2", "p2", "87654321")] {
+            sqlx::query(
+                "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+                 VALUES (?1,?2,'T SRL','S','C','CJ','RO')",
+            )
+            .bind(cid)
+            .bind(cui)
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO products (id, company_id, name, unit) VALUES (?1,?2,'Marfă','buc')",
+            )
+            .bind(pid)
+            .bind(cid)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        pool
+    }
+
+    #[tokio::test]
+    async fn record_movement_rejects_cross_company() {
+        let pool = setup().await;
+        // co2 tries to move co1's product p1 → NotFound (multi-tenant guard).
+        let input = StockMovementInput {
+            company_id: "co2".into(),
+            product_id: "p1".into(),
+            entry_date: "2026-06-01".into(),
+            qty: "5".into(),
+            unit_cost: Some("10".into()),
+            doc_type: None,
+            doc_ref: None,
+        };
+        assert!(matches!(
+            record_movement(&pool, &input, Dir::In).await,
+            Err(crate::error::AppError::NotFound)
+        ));
+        // Own product → ok.
+        let own = StockMovementInput {
+            company_id: "co1".into(),
+            product_id: "p1".into(),
+            ..input.clone()
+        };
+        assert!(record_movement(&pool, &own, Dir::In).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn record_movement_rejects_garbage_cost() {
+        let pool = setup().await;
+        let bad = StockMovementInput {
+            company_id: "co1".into(),
+            product_id: "p1".into(),
+            entry_date: "2026-06-01".into(),
+            qty: "5".into(),
+            unit_cost: Some("abc".into()),
+            doc_type: None,
+            doc_ref: None,
+        };
+        assert!(record_movement(&pool, &bad, Dir::In).await.is_err());
+    }
 
     fn ev(dir: Dir, qty: &str, cost: &str) -> StockEvent {
         StockEvent {

@@ -598,8 +598,9 @@ function StockModal({
       };
       return tab === "in" ? api.stockValuation.recordReceipt(input) : api.stockValuation.recordIssue(input);
     },
-    onSuccess: () => {
+    onSuccess: (warning) => {
       notify.success(tab === "in" ? "Recepție înregistrată." : "Descărcare gestiune înregistrată.");
+      if (warning) notify.warn(warning);
       setQty(""); setCost(""); setDocRef("");
       void refetch();
       void qc.invalidateQueries({ queryKey: queryKeys.products.all });

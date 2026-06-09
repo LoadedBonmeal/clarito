@@ -8,18 +8,23 @@ use crate::db::stock_valuation::{self, Dir, LedgerRow, StockMovementInput as Sto
 use crate::error::AppResult;
 use crate::state::AppState;
 
-/// Record a stock receipt (IN, at purchase cost) + revalue the product + post the GL leg.
+/// Record a stock receipt (IN, at purchase cost) + revalue the product + post the GL leg. Returns an
+/// optional warning (gestiune negativă).
 #[tauri::command]
 pub async fn record_stock_receipt(
     state: State<'_, AppState>,
     input: StockValInput,
-) -> AppResult<()> {
+) -> AppResult<Option<String>> {
     stock_valuation::record_movement(&state.db, &input, Dir::In).await
 }
 
-/// Record a stock issue / descărcare gestiune (OUT, valued via FIFO/CMP) + post the GL leg.
+/// Record a stock issue / descărcare gestiune (OUT, valued via FIFO/CMP) + post the GL leg. Returns
+/// an optional warning (gestiune negativă).
 #[tauri::command]
-pub async fn record_stock_issue(state: State<'_, AppState>, input: StockValInput) -> AppResult<()> {
+pub async fn record_stock_issue(
+    state: State<'_, AppState>,
+    input: StockValInput,
+) -> AppResult<Option<String>> {
     stock_valuation::record_movement(&state.db, &input, Dir::Out).await
 }
 
@@ -42,14 +47,19 @@ pub async fn set_stock_valuation(
     method: String,
     stock_account: String,
 ) -> AppResult<()> {
+    stock_valuation::assert_product_owned(&state.db, &company_id, &product_id).await?;
     let m = if method == "FIFO" { "FIFO" } else { "CMP" };
-    sqlx::query("UPDATE products SET valuation_method=?2, stock_account=?3 WHERE id=?1")
-        .bind(&product_id)
-        .bind(m)
-        .bind(&stock_account)
-        .execute(&state.db)
-        .await?;
-    stock_valuation::recompute_product(&state.db, &company_id, &product_id).await
+    sqlx::query(
+        "UPDATE products SET valuation_method=?2, stock_account=?3 WHERE id=?1 AND company_id=?4",
+    )
+    .bind(&product_id)
+    .bind(m)
+    .bind(&stock_account)
+    .bind(&company_id)
+    .execute(&state.db)
+    .await?;
+    stock_valuation::recompute_product(&state.db, &company_id, &product_id).await?;
+    Ok(())
 }
 
 /// Create a new stock movement with lines.

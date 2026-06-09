@@ -883,9 +883,9 @@ export const products = {
  */
 export const stockValuation = {
   recordReceipt: (input: import("@/types").StockMovementInput) =>
-    invoke<void>("record_stock_receipt", { input }),
+    invoke<string | null>("record_stock_receipt", { input }),
   recordIssue: (input: import("@/types").StockMovementInput) =>
-    invoke<void>("record_stock_issue", { input }),
+    invoke<string | null>("record_stock_issue", { input }),
   ledger: (companyId: string, productId: string) =>
     invoke<import("@/types").StockLedgerRow[]>("stock_ledger", { companyId, productId }),
   setValuation: (companyId: string, productId: string, method: string, stockAccount: string) =>
