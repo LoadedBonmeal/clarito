@@ -55,6 +55,37 @@ fn fmt(d: Decimal) -> String {
     format!("{:.2}", d)
 }
 
+/// Part-time (contract Pi) minimum CAS/CASS base override — art. 146 alin. (5^6)-(5^9) + art. 168
+/// alin. (6^1) Cod fiscal (OG 16/2022), cu derogarea sumei netaxabile (OUG 156/2024). Baza CAS/CASS
+/// nu poate fi sub salariul minim ÎNTREG (NU prorata cu fracția de normă orară). 2026: 4.050−300 =
+/// 3.750 lei (sem. I) / 4.325−200 = 4.125 lei (de la 1 iulie, HG 146/2026). Diferența de contribuție
+/// față de cea pe venitul realizat e suportată de ANGAJATOR. Excepții (art. 146 (5^7)): pensionarii
+/// pentru limită de vârstă etc. — pentru ei baza rămâne venitul realizat (helper-ul întoarce None).
+///
+/// Returnează Some((baza_minimă, cas_diff_angajator, cass_diff_angajator)) când se aplică majorarea.
+pub fn part_time_min_base(
+    gross: Decimal,
+    tip_contract: &str,
+    pensionar: bool,
+    month: u32,
+) -> Option<(Decimal, Decimal, Decimal)> {
+    if tip_contract == "N" || pensionar || gross <= Decimal::ZERO {
+        return None;
+    }
+    // Baza minimă = salariul minim − suma netaxabilă (NU se prorata cu ore/normă).
+    let base = if month <= 6 {
+        Decimal::from(3750) // 4.050 − 300
+    } else {
+        Decimal::from(4125) // 4.325 − 200 (de la 1 iulie 2026, HG 146/2026)
+    };
+    if gross >= base {
+        return None; // venitul realizat ≥ baza minimă → fără majorare.
+    }
+    let cas_diff = pct(base, CAS_PCT) - pct(gross, CAS_PCT);
+    let cass_diff = pct(base, CASS_PCT) - pct(gross, CASS_PCT);
+    Some((base, cas_diff, cass_diff))
+}
+
 /// Compute one monthly salary state from the gross + personal deduction (2026 rates).
 pub fn compute_payroll(input: &PayrollInput) -> PayrollResult {
     let z = Decimal::ZERO;
@@ -88,6 +119,25 @@ mod tests {
     use std::str::FromStr;
     fn d(s: &str) -> Decimal {
         Decimal::from_str(s).unwrap()
+    }
+
+    #[test]
+    fn part_time_min_base_full_minimum_not_prorated() {
+        // Part-time P1, gross 3.000, H1 (month 3): baza = salariul minim ÎNTREG 3.750 (NU prorata).
+        // cas_diff = 938 − 750 = 188 (pct(3750,25%)=937.5→938); cass_diff = 375 − 300 = 75.
+        let r = part_time_min_base(d("3000"), "P1", false, 3);
+        assert_eq!(r, Some((d("3750"), d("188"), d("75"))));
+        // H2 (month 8): baza 4.125.
+        assert_eq!(
+            part_time_min_base(d("3000"), "P1", false, 8).unwrap().0,
+            d("4125")
+        );
+        // Full-time N → fără majorare.
+        assert_eq!(part_time_min_base(d("3000"), "N", false, 3), None);
+        // Pensionar → exceptat (art. 146 (5^7)).
+        assert_eq!(part_time_min_base(d("3000"), "P1", true, 3), None);
+        // Venit ≥ baza minimă → fără majorare.
+        assert_eq!(part_time_min_base(d("4000"), "P1", false, 3), None);
     }
 
     #[test]

@@ -69,15 +69,18 @@ fn esc(s: &str) -> String {
 pub fn generate_d112_xml(h: &D112Header, employees: &[D112Employee]) -> String {
     let count = employees.len() as i64;
     let tot = |f: fn(&D112Employee) -> i64| employees.iter().map(f).sum::<i64>();
-    let (t_gross, t_cas, t_cass, t_cam) = (
+    let (t_gross, t_cas, t_cass, t_cam, t_impozit) = (
         tot(|e| e.gross),
         tot(|e| e.cas),
         tot(|e| e.cass),
         tot(|e| e.cam),
+        tot(|e| e.impozit),
     );
 
-    // angajatorA — câte un rând per obligație bugetară (cod_oblig din CodObligSType): 412 CAS
-    // (pensii), 432 CASS (sănătate), 602 CAM. A_codBugetar = codul template "20470101XX".
+    // angajatorA — câte un rând per obligație (A_codOblig din Nomenclator 3, verificat în structura
+    // D112 0126/2026): poz.01 = 602 impozit pe salarii; poz.02 = 412 CAS; poz.07 = 432 CASS;
+    // poz.46 = 480 CAM. (XSD-ul public DecUnica.xsd nu mai e actualizat cu 480; aplicația D112 îl
+    // acceptă.) A_codBugetar = codul template "20470101XX".
     let oblig = |cod: &str, suma: i64| {
         format!(
             "    <angajatorA A_codOblig=\"{cod}\" A_codBugetar=\"20470101XX\" \
@@ -85,11 +88,12 @@ A_datorat=\"{suma}\" A_deductibil=\"0\" A_plata=\"{suma}\"/>\n"
         )
     };
     let mut ang = String::new();
-    ang.push_str(&oblig("412", t_cas)); // CAS
-    ang.push_str(&oblig("432", t_cass)); // CASS
-    ang.push_str(&oblig("602", t_cam)); // CAM
-    let total_plata = t_cas + t_cass + t_cam; // totalPlata_A = Σ obligații angajator.
-                                              // angajatorB — numere asigurați + fond de salarii.
+    ang.push_str(&oblig("602", t_impozit)); // impozit pe veniturile din salarii
+    ang.push_str(&oblig("412", t_cas)); // CAS (pensii)
+    ang.push_str(&oblig("432", t_cass)); // CASS (sănătate)
+    ang.push_str(&oblig("480", t_cam)); // CAM (asiguratorie pentru muncă)
+    let total_plata = t_impozit + t_cas + t_cass + t_cam; // totalPlata_A = Σ obligații angajator.
+                                                          // angajatorB — numere asigurați + fond de salarii.
     ang.push_str(&format!(
         "    <angajatorB B_cnp=\"{count}\" B_sanatate=\"{count}\" B_pensie=\"{count}\" \
 B_brutSalarii=\"{t_gross}\"/>\n"
@@ -197,12 +201,14 @@ mod tests {
         );
         assert!(xml.contains("luna_r=\"6\" an_r=\"2026\""));
         assert!(xml.contains("nume_declar=\"Popescu\""));
-        // Employer obligation rows (CAS/CASS/CAM totals over 2 employees).
+        // Employer obligation rows: 602 impozit (2×325=650), 412 CAS (2.500), 432 CASS (1.000),
+        // 480 CAM (226) — totals over 2 employees.
+        assert!(xml.contains("A_codOblig=\"602\" A_codBugetar=\"20470101XX\" A_datorat=\"650\""));
         assert!(xml.contains("A_codOblig=\"412\" A_codBugetar=\"20470101XX\" A_datorat=\"2500\""));
         assert!(xml.contains("A_codOblig=\"432\" A_codBugetar=\"20470101XX\" A_datorat=\"1000\""));
-        assert!(xml.contains("A_codOblig=\"602\" A_codBugetar=\"20470101XX\" A_datorat=\"226\""));
-        // angajator totalPlata_A = Σ obligații (2500+1000+226) + angajatorB counts/gross.
-        assert!(xml.contains("totalPlata_A=\"3726\""));
+        assert!(xml.contains("A_codOblig=\"480\" A_codBugetar=\"20470101XX\" A_datorat=\"226\""));
+        // totalPlata_A = 650 + 2500 + 1000 + 226 = 4376.
+        assert!(xml.contains("totalPlata_A=\"4376\""));
         assert!(xml.contains("B_cnp=\"2\" B_sanatate=\"2\" B_pensie=\"2\" B_brutSalarii=\"10000\""));
         // Two insured persons with asiguratA contributions.
         assert_eq!(xml.matches("<asigurat ").count(), 2);

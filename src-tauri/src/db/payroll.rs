@@ -228,6 +228,10 @@ pub async fn run_payroll(
     period_to: &str,
 ) -> AppResult<PayrollRun> {
     let dec = |s: &str| Decimal::from_str(s).unwrap_or(Decimal::ZERO);
+    let month: u32 = period_from
+        .get(5..7)
+        .and_then(|m| m.parse().ok())
+        .unwrap_or(1);
     let employees = list(pool, company_id).await?;
     let mut states = Vec::new();
     let (mut t_gross, mut t_cas, mut t_cass, mut t_tax, mut t_net, mut t_cam) = (
@@ -238,11 +242,20 @@ pub async fn run_payroll(
         Decimal::ZERO,
         Decimal::ZERO,
     );
+    // Employer-borne part-time minimum-base CAS/CASS difference (art. 146 (5^6)).
+    let (mut t_cas_diff, mut t_cass_diff) = (Decimal::ZERO, Decimal::ZERO);
     for e in employees.iter().filter(|e| e.active) {
+        let gross = dec(&e.gross_salary);
         let r = compute_payroll(&PayrollInput {
-            gross: dec(&e.gross_salary),
+            gross,
             personal_deduction: dec(&e.personal_deduction),
         });
+        if let Some((_, cas_diff, cass_diff)) =
+            crate::anaf_decl::d112::part_time_min_base(gross, &e.tip_contract, e.pensionar, month)
+        {
+            t_cas_diff += cas_diff;
+            t_cass_diff += cass_diff;
+        }
         t_gross += dec(&r.gross);
         t_cas += dec(&r.cas);
         t_cass += dec(&r.cass);
@@ -271,6 +284,8 @@ pub async fn run_payroll(
         t_cass,
         t_tax,
         t_cam,
+        t_cas_diff,
+        t_cass_diff,
     )
     .await?;
 

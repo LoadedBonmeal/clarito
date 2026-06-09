@@ -2406,6 +2406,9 @@ pub async fn post_payroll(
     cass: Decimal,
     impozit: Decimal,
     cam: Decimal,
+    // Part-time minimum-base employer-borne CAS/CASS difference (art. 146 (5^6)). 0 if none.
+    cas_diff: Decimal,
+    cass_diff: Decimal,
 ) -> AppResult<PayrollPostResult> {
     let source_id = format!("{period_from}_{period_to}");
     let net = gross - cas - cass - impozit;
@@ -2469,6 +2472,21 @@ pub async fn post_payroll(
     if !cam.is_zero() {
         entries.push(mk(rec, "646", cam, Decimal::ZERO)); // cheltuieli CAM (angajator)
         entries.push(mk(rec + 1, "436", Decimal::ZERO, cam)); // CAM datorată
+        rec += 2;
+    }
+    // Part-time minimum-base top-up borne by the employer: D 6458 / C 4315 (CAS) + C 4316 (CASS).
+    // Brings 4315/4316 up to the contribution on the minimum base (= what D112 declares).
+    let emp_diff = cas_diff + cass_diff;
+    if !emp_diff.is_zero() {
+        entries.push(mk(rec, "6458", emp_diff, Decimal::ZERO));
+        rec += 1;
+        if !cas_diff.is_zero() {
+            entries.push(mk(rec, "4315", Decimal::ZERO, cas_diff));
+            rec += 1;
+        }
+        if !cass_diff.is_zero() {
+            entries.push(mk(rec, "4316", Decimal::ZERO, cass_diff));
+        }
     }
     assert_balanced(&entries, &source_id)?;
 
