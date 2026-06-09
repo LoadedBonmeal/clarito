@@ -76,30 +76,33 @@ pub fn reconcile_line(
 ) -> EtvaLine {
     let diff = d300 - precompletat;
     let abs_diff = diff.abs();
-    // pct relative to the precompletat (ANAF's reference); guard div-by-zero.
-    let pct = if precompletat.is_zero() {
+    // pct relative to the precompletat (ANAF's reference); guard div-by-zero. Keep it UNROUNDED
+    // for the threshold test (rounding first would flag a true 19.95% as 20%); round for display.
+    let pct_exact = if precompletat.is_zero() {
         if diff.is_zero() {
             Decimal::ZERO
         } else {
             Decimal::from(100)
         }
     } else {
-        (abs_diff / precompletat.abs() * Decimal::from(100)).round_dp(1)
+        abs_diff / precompletat.abs() * Decimal::from(100)
     };
-    let significant =
-        abs_diff >= Decimal::from(SIGNIFICANT_ABS_LEI) && pct >= Decimal::from(SIGNIFICANT_PCT);
+    let significant = abs_diff >= Decimal::from(SIGNIFICANT_ABS_LEI)
+        && pct_exact >= Decimal::from(SIGNIFICANT_PCT);
     EtvaLine {
         label: label.to_string(),
         d300: fmt2(d300),
         precompletat: fmt2(precompletat),
         diff: fmt2(diff),
-        diff_pct: format!("{pct}"),
+        diff_pct: format!("{}", pct_exact.round_dp(1)),
         significant,
         note,
     }
 }
 
 fn fmt2(d: Decimal) -> String {
+    // Round to 2dp first so a sub-cent negative (e.g. -0.001) renders "0.00", never "-0.00".
+    let d = d.round_dp(2);
     let d = if d.is_zero() { Decimal::ZERO } else { d };
     format!("{:.2}", d)
 }
@@ -133,5 +136,15 @@ mod tests {
         assert!(!l.significant);
         assert_eq!(l.diff, "0.00");
         assert_eq!(l.diff_pct, "0");
+
+        // sub-cent negative diff must render "0.00", not "-0.00".
+        let l = reconcile_line("m1", dec("100.00"), dec("100.001"), None);
+        assert_eq!(l.diff, "0.00");
+
+        // a true 19.95% (≥5.000 lei) must NOT be flagged — threshold is strict ≥20% on the
+        // unrounded ratio (regression guard against rounding 19.95 → 20.0 before the test).
+        let l = reconcile_line("m2", dec("119950"), dec("100000"), None);
+        assert_eq!(l.diff, "19950.00");
+        assert!(!l.significant, "19.95% is below the 20% threshold");
     }
 }
