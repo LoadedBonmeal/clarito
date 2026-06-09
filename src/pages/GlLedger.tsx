@@ -281,15 +281,16 @@ export function GlLedgerPage() {
     if (!caen) return;
     if (!/^\d{4}$/.test(caen)) { notify.error("Cod CAEN invalid — 4 cifre."); return; }
     const dest = await saveDialog({
-      title: "Salvează bilanț XML (ANAF S1005)",
+      title: "Salvează bilanț XML (ANAF S1005/S1003)",
       defaultPath: `bilant-${year}.xml`,
       filters: [{ name: "XML", extensions: ["xml"] }],
     });
     if (!dest) return;
     try {
       await api.gl.exportBilantXml(activeCompanyId, year, caen, dest);
-      notify.success(`Bilanț XML (S1005) exportat — F10 + F20. Importați-l în PDF-ul inteligent ` +
-        `ANAF, verificați header-ul (cod fiscal teritorial, întocmitor) și completați F30.`);
+      notify.success(`Bilanț XML exportat (micro S1005 / mică S1003, după mărime) — F10 + F20. ` +
+        `Importați-l în PDF-ul inteligent ANAF, verificați header-ul și completați F30 (și F20 ` +
+        `detaliat pentru entitate mică).`);
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut exporta bilanțul XML."));
     }

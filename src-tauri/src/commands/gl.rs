@@ -141,8 +141,14 @@ pub async fn export_bilant_xml(
     .await
     .ok();
 
+    // Entity size → form: total assets ≤ 2.250.000 lei (microentitate) → S1005/UU, else entitate
+    // mică → S1003/BS. (The full F20 of a small entity is completed in the ANAF app after import.)
+    let bil = db_bilant(&state.db, &company_id, &from, &to).await?;
+    let total_assets: f64 = bil.total_assets.parse().unwrap_or(0.0);
+    let micro = total_assets <= 2_250_000.0;
+
     let f10 = compute_f10(&tb);
-    let f20 = compute_f20(&pnl, prior.as_ref());
+    let f20 = compute_f20(&pnl, prior.as_ref(), micro);
     let header = BilantHeader {
         year,
         cui: company.cui.clone(),
@@ -153,7 +159,7 @@ pub async fn export_bilant_xml(
         county: company.county.clone(),
         nume_admin: company.legal_name.clone(),
     };
-    let xml = generate_bilant_xml(&header, &f10, &f20);
+    let xml = generate_bilant_xml(&header, &f10, &f20, micro);
     std::fs::write(&dest_path, xml).map_err(|e| AppError::Other(e.to_string()))?;
     Ok(dest_path)
 }

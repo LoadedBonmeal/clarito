@@ -185,8 +185,16 @@ fn current_liabilities(tb: &TrialBalance) -> (Decimal, Decimal) {
     (-o, -c)
 }
 
-/// Map the P&L to the micro F20 fields (col 2 = current year; col 1 = prior, supplied or 0).
-pub fn compute_f20(pnl: &ProfitLoss, prior: Option<&ProfitLoss>) -> HashMap<String, i64> {
+/// Map the P&L to the F20 fields (col 2 = current year, col 1 = prior). For the MICRO form (UU,
+/// s1005) the simplified 9-row layout (cifra de afaceri rd.01, venituri totale rd.07, cheltuieli
+/// totale rd.08, rezultat rd.09). For the SMALL form (BS, s1003) the row codes differ (full 70-row
+/// F20), so we emit only the confirmed cifra de afaceri (F20_001) — the full P&L is completed in
+/// the ANAF app after import.
+pub fn compute_f20(
+    pnl: &ProfitLoss,
+    prior: Option<&ProfitLoss>,
+    micro: bool,
+) -> HashMap<String, i64> {
     let p = |s: &str| s.parse::<Decimal>().unwrap_or(Decimal::ZERO);
     let mut f = HashMap::new();
     let mut col = |row: &str, cur: Decimal, pri: Decimal| {
@@ -194,22 +202,22 @@ pub fn compute_f20(pnl: &ProfitLoss, prior: Option<&ProfitLoss>) -> HashMap<Stri
         f.insert(format!("F20_{row}2"), lei(cur));
     };
     let prv = |get: &dyn Fn(&ProfitLoss) -> Decimal| prior.map(get).unwrap_or(Decimal::ZERO);
-
-    // Simplified micro F20: 001 cifra de afaceri (≈ operating revenue), totals + result.
     let op_rev = |x: &ProfitLoss| p(&x.operating_revenue);
-    let tot_rev = |x: &ProfitLoss| p(&x.total_revenue);
-    let tot_exp = |x: &ProfitLoss| p(&x.total_expense);
-    let tax = |x: &ProfitLoss| p(&x.income_tax);
-    let net_res = |x: &ProfitLoss| p(&x.net_result);
 
-    col("001", op_rev(pnl), prv(&op_rev)); // cifra de afaceri netă
-    col("007", tot_rev(pnl), prv(&tot_rev)); // venituri totale
-    col(
-        "008",
-        tot_exp(pnl) + tax(pnl),
-        prv(&|x| tot_exp(x) + tax(x)),
-    ); // cheltuieli totale (incl. impozit)
-    col("009", net_res(pnl), prv(&net_res)); // rezultat net
+    col("001", op_rev(pnl), prv(&op_rev)); // cifra de afaceri netă (rd.01) — same code in both forms
+    if micro {
+        let tot_rev = |x: &ProfitLoss| p(&x.total_revenue);
+        let tot_exp = |x: &ProfitLoss| p(&x.total_expense);
+        let tax = |x: &ProfitLoss| p(&x.income_tax);
+        let net_res = |x: &ProfitLoss| p(&x.net_result);
+        col("007", tot_rev(pnl), prv(&tot_rev)); // venituri totale (micro rd.07)
+        col(
+            "008",
+            tot_exp(pnl) + tax(pnl),
+            prv(&|x| tot_exp(x) + tax(x)),
+        ); // cheltuieli totale
+        col("009", net_res(pnl), prv(&net_res)); // rezultat net (micro rd.09)
+    }
     f
 }
 
@@ -292,17 +300,28 @@ pub struct BilantHeader {
     pub nume_admin: String,
 }
 
-/// Build the `<Bilant1005>` (micro / tipBIL=UU) XML from the header + F10 + F20 field maps. The
-/// schema namespace, root and tipBIL are fixed to the S1005 micro form (the validated schema).
+/// Build the bilanț XML for the entity-size form: `micro` = true → `<Bilant1005>` (tipBIL=UU,
+/// s1005:v14, microentitate); false → `<Bilant1003>` (tipBIL=BS, s1003:v15, entitate mică). The
+/// F10 (balance sheet) is the same prescurtat layout for both; F20 differs (see `compute_f20`).
 pub fn generate_bilant_xml(
     h: &BilantHeader,
     f10: &HashMap<String, i64>,
     f20: &HashMap<String, i64>,
+    micro: bool,
 ) -> String {
     let total_plata = f10.get("F10_0492").copied().unwrap_or(0); // control sum = total capitaluri.
     let cod_tt = county_code(&h.county);
-    // AN_CAEN must be 2024 or 2025 (Str_coduriCaen2024_2025 / IntInt2024_2025); pin to 2025.
-    let an_caen = 2025;
+    let an_caen = 2025; // Str_coduriCaen2024_2025 / IntInt2024_2025.
+    let (root, ns, tip, art27) = if micro {
+        (
+            "Bilant1005",
+            "mfp:anaf:dgti:s1005:declaratie:v14",
+            "UU",
+            " bifa_art27=\"0\"",
+        )
+    } else {
+        ("Bilant1003", "mfp:anaf:dgti:s1003:declaratie:v15", "BS", "")
+    };
 
     let attrs = |m: &HashMap<String, i64>| {
         let mut keys: Vec<_> = m.keys().cloned().collect();
@@ -315,16 +334,20 @@ pub fn generate_bilant_xml(
 
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-<Bilant1005 xmlns=\"mfp:anaf:dgti:s1005:declaratie:v14\" \
+<{root} xmlns=\"{ns}\" \
 luna=\"12\" an=\"{an}\" cui=\"{cui}\" den=\"{den}\" adresa=\"{adr}\" \
 caen=\"{caen}\" caenE=\"{caen}\" AN_CAEN=\"{an_caen}\" regCom=\"{reg}\" \
-bifa_aprob=\"0\" bifaMC=\"1\" bifaDD=\"0\" bifaGG=\"0\" bifaAA=\"0\" bifa_art27=\"0\" \
-tipBIL=\"UU\" interes_public=\"0\" codTT=\"{tt}\" codJJ=\"1\" codPP=\"11\" \
+bifa_aprob=\"0\" bifaMC=\"1\" bifaDD=\"0\" bifaGG=\"0\" bifaAA=\"0\"{art27} \
+tipBIL=\"{tip}\" interes_public=\"0\" codTT=\"{tt}\" codJJ=\"1\" codPP=\"11\" \
 nume_admin=\"{adm}\" nume_intocmit=\"{adm}\" calit_intocmit=\"11\" \
 totalPlata_A=\"{tp}\">\n\
   <F10 {f10}/>\n\
   <F20 {f20}/>\n\
-</Bilant1005>\n",
+</{root}>\n",
+        root = root,
+        ns = ns,
+        tip = tip,
+        art27 = art27,
         an = h.year,
         an_caen = an_caen,
         cui = esc(&h.cui),
@@ -417,7 +440,7 @@ mod tests {
         let mut f10 = HashMap::new();
         f10.insert("F10_0492".to_string(), 90000i64);
         let f20 = HashMap::new();
-        let xml = generate_bilant_xml(&h, &f10, &f20);
+        let xml = generate_bilant_xml(&h, &f10, &f20, true);
         assert!(xml.contains("<Bilant1005"));
         assert!(xml.contains("mfp:anaf:dgti:s1005:declaratie:v14"));
         assert!(xml.contains("tipBIL=\"UU\""));
@@ -428,6 +451,13 @@ mod tests {
         assert!(xml.contains("AN_CAEN=\"2025\""));
         assert!(xml.contains("totalPlata_A=\"90000\""));
         assert!(xml.contains("F10_0492=\"90000\""));
+
+        // Small-entity form → Bilant1003 / BS / s1003 namespace, no bifa_art27.
+        let bs = generate_bilant_xml(&h, &f10, &f20, false);
+        assert!(bs.contains("<Bilant1003"));
+        assert!(bs.contains("mfp:anaf:dgti:s1003:declaratie:v15"));
+        assert!(bs.contains("tipBIL=\"BS\""));
+        assert!(!bs.contains("bifa_art27"));
     }
 
     #[test]
