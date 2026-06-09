@@ -11,6 +11,7 @@ mod anaf;
 pub mod anaf_decl;
 mod background;
 pub mod commands;
+mod constraint_guard;
 pub mod db;
 mod error;
 pub mod notifications;
