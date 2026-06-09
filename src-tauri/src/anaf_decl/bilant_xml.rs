@@ -313,15 +313,12 @@ pub fn generate_bilant_xml(
     let total_plata = f10.get("F10_0492").copied().unwrap_or(0); // control sum = total capitaluri.
     let cod_tt = county_code(&h.county);
     let an_caen = 2025; // Str_coduriCaen2024_2025 / IntInt2024_2025.
-    let (root, ns, tip, art27) = match form {
-        "BL" => ("Bilant1002", "mfp:anaf:dgti:s1002:declaratie:v15", "BL", ""),
-        "BS" => ("Bilant1003", "mfp:anaf:dgti:s1003:declaratie:v15", "BS", ""),
-        _ => (
-            "Bilant1005",
-            "mfp:anaf:dgti:s1005:declaratie:v14",
-            "UU",
-            " bifa_art27=\"0\"",
-        ),
+                        // bifa_art27 (IntInt0_0, must be 0) is required by ALL three schemas (s1005/s1003/s1002), so it
+                        // is emitted unconditionally below.
+    let (root, ns, tip) = match form {
+        "BL" => ("Bilant1002", "mfp:anaf:dgti:s1002:declaratie:v15", "BL"),
+        "BS" => ("Bilant1003", "mfp:anaf:dgti:s1003:declaratie:v15", "BS"),
+        _ => ("Bilant1005", "mfp:anaf:dgti:s1005:declaratie:v14", "UU"),
     };
 
     let attrs = |m: &HashMap<String, i64>| {
@@ -338,17 +335,17 @@ pub fn generate_bilant_xml(
 <{root} xmlns=\"{ns}\" \
 luna=\"12\" an=\"{an}\" cui=\"{cui}\" den=\"{den}\" adresa=\"{adr}\" \
 caen=\"{caen}\" caenE=\"{caen}\" AN_CAEN=\"{an_caen}\" regCom=\"{reg}\" \
-bifa_aprob=\"1\" bifaMC=\"1\" bifaDD=\"0\" bifaGG=\"0\" bifaAA=\"0\"{art27} \
+bifa_aprob=\"1\" bifaMC=\"1\" bifaDD=\"0\" bifaGG=\"0\" bifaAA=\"0\" bifa_art27=\"0\" \
 tipBIL=\"{tip}\" interes_public=\"0\" codTT=\"{tt}\" codJJ=\"1\" codPP=\"11\" \
 nume_admin=\"{adm}\" nume_intocmit=\"{adm}\" calit_intocmit=\"11\" \
 totalPlata_A=\"{tp}\">\n\
   <F10 {f10}/>\n\
   <F20 {f20}/>\n\
+  <F30/>\n\
 </{root}>\n",
         root = root,
         ns = ns,
         tip = tip,
-        art27 = art27,
         an = h.year,
         an_caen = an_caen,
         cui = esc(&h.cui),
@@ -454,19 +451,19 @@ mod tests {
         assert!(xml.contains("totalPlata_A=\"90000\""));
         assert!(xml.contains("F10_0492=\"90000\""));
 
-        // Small-entity form → Bilant1003 / BS / s1003 namespace, no bifa_art27.
+        // Small-entity form → Bilant1003 / BS / s1003 namespace; bifa_art27 required (IntInt0_0).
         let bs = generate_bilant_xml(&h, &f10, &f20, "BS");
         assert!(bs.contains("<Bilant1003"));
         assert!(bs.contains("mfp:anaf:dgti:s1003:declaratie:v15"));
         assert!(bs.contains("tipBIL=\"BS\""));
-        assert!(!bs.contains("bifa_art27"));
+        assert!(bs.contains("bifa_art27=\"0\""));
 
-        // Large-entity form → Bilant1002 / BL / s1002 namespace.
+        // Large-entity form → Bilant1002 / BL / s1002 namespace; bifa_art27 required.
         let bl = generate_bilant_xml(&h, &f10, &f20, "BL");
         assert!(bl.contains("<Bilant1002"));
         assert!(bl.contains("mfp:anaf:dgti:s1002:declaratie:v15"));
         assert!(bl.contains("tipBIL=\"BL\""));
-        assert!(!bl.contains("bifa_art27"));
+        assert!(bl.contains("bifa_art27=\"0\""));
     }
 
     #[test]

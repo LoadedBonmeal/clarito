@@ -774,6 +774,12 @@ pub fn build_sections(
 
     for op in &op1_list {
         for op11 in &op.op11_list {
+            // `detaliu/@bun` is an Int_nomenclatorBunuri code (21..=36). op11/@codPR also allows
+            // other values (e.g. cereal NC codes 1001/1201… valid for art. 331), which must NOT
+            // become a <detaliu> — they'd fail the XSD enum. Skip them here (op11 still emits them).
+            if !(21..=36).contains(&op11.cod_pr) {
+                continue;
+            }
             let entry = det_map
                 .entry((op.tip_partener, op.cota))
                 .or_default()

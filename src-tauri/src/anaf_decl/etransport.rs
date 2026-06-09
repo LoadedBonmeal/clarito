@@ -187,15 +187,15 @@ pub fn validate_etransport(d: &EtransportDeclaration) -> Vec<String> {
     }
     if !route_complete(&d.loc_start) {
         errs.push(
-            "Locul de plecare incomplet: completați județul + localitatea, sau un punct de \
-             frontieră / birou vamal."
+            "Locul de plecare incomplet: completați județul + localitatea + strada, sau un punct \
+             de frontieră / birou vamal."
                 .into(),
         );
     }
     if !route_complete(&d.loc_final) {
         errs.push(
-            "Locul de sosire incomplet: completați județul + localitatea, sau un punct de \
-             frontieră / birou vamal."
+            "Locul de sosire incomplet: completați județul + localitatea + strada, sau un punct \
+             de frontieră / birou vamal."
                 .into(),
         );
     }
@@ -203,7 +203,8 @@ pub fn validate_etransport(d: &EtransportDeclaration) -> Vec<String> {
 }
 
 fn dec_attr(v: f64) -> String {
-    format!("{v:.4}")
+    // eTransport PosDec_12_2 allows at most 2 fraction digits.
+    format!("{v:.2}")
 }
 
 /// Truncate + strip control chars for an attribute value (quick-xml escapes &<>'" itself).
@@ -230,7 +231,9 @@ fn route_complete(loc: &RouteLoc) -> bool {
             .cod_birou_vamal
             .as_ref()
             .is_some_and(|s| !s.trim().is_empty())
-        || (loc.cod_judet.is_some() && !loc.denumire_localitate.trim().is_empty())
+        || (loc.cod_judet.is_some()
+            && !loc.denumire_localitate.trim().is_empty()
+            && !loc.denumire_strada.trim().is_empty())
 }
 
 fn write_route(
@@ -258,11 +261,10 @@ fn write_route(
                 clean(&loc.denumire_localitate, 200).as_str(),
             ));
         }
-        if !loc.denumire_strada.is_empty() {
-            l.push_attribute(("denumireStrada", clean(&loc.denumire_strada, 200).as_str()));
-        }
+        // denumireStrada is required by LocatieType — always emit (clean cap = Str100 maxLength).
+        l.push_attribute(("denumireStrada", clean(&loc.denumire_strada, 100).as_str()));
         if !loc.numar.is_empty() {
-            l.push_attribute(("numar", clean(&loc.numar, 50).as_str()));
+            l.push_attribute(("numar", clean(&loc.numar, 20).as_str()));
         }
         if !loc.cod_postal.is_empty() {
             l.push_attribute(("codPostal", clean(&loc.cod_postal, 10).as_str()));
@@ -308,7 +310,7 @@ pub fn generate_etransport_xml(d: &EtransportDeclaration) -> AppResult<String> {
         if !g.cod_tarifar.is_empty() {
             e.push_attribute(("codTarifar", clean(&g.cod_tarifar, 8).as_str()));
         }
-        e.push_attribute(("denumireMarfa", clean(&g.denumire_marfa, 500).as_str()));
+        e.push_attribute(("denumireMarfa", clean(&g.denumire_marfa, 200).as_str())); // Str200
         e.push_attribute(("cantitate", dec_attr(g.cantitate).as_str()));
         e.push_attribute(("codUnitateMasura", clean(&g.cod_unitate_masura, 3).as_str()));
         if let Some(n) = g.greutate_neta {
@@ -338,21 +340,18 @@ pub fn generate_etransport_xml(d: &EtransportDeclaration) -> AppResult<String> {
     if !t.nr_remorca2.is_empty() {
         dt.push_attribute(("nrRemorca2", clean(&t.nr_remorca2, 20).as_str()));
     }
-    if !t.cod_tara_org_transport.is_empty() {
-        dt.push_attribute((
-            "codTaraOrgTransport",
-            clean(&t.cod_tara_org_transport, 2).as_str(),
-        ));
-    }
+    // codTaraOrgTransport + denumireOrgTransport are required by DateTransportType — always emit.
+    dt.push_attribute((
+        "codTaraOrgTransport",
+        clean(&t.cod_tara_org_transport, 2).as_str(),
+    ));
     if !t.cod_org_transport.is_empty() {
         dt.push_attribute(("codOrgTransport", clean(&t.cod_org_transport, 30).as_str()));
     }
-    if !t.denumire_org_transport.is_empty() {
-        dt.push_attribute((
-            "denumireOrgTransport",
-            clean(&t.denumire_org_transport, 200).as_str(),
-        ));
-    }
+    dt.push_attribute((
+        "denumireOrgTransport",
+        clean(&t.denumire_org_transport, 200).as_str(),
+    ));
     dt.push_attribute(("dataTransport", clean(&t.data_transport, 10).as_str()));
     w.write_event(Event::Empty(dt)).map_err(map)?;
 
@@ -418,6 +417,7 @@ mod tests {
             loc_final: RouteLoc {
                 cod_judet: Some(12),
                 denumire_localitate: "Cluj-Napoca".into(),
+                denumire_strada: "Str. B".into(),
                 ..Default::default()
             },
             documents: vec![TransportDoc {
@@ -455,7 +455,7 @@ mod tests {
         assert!(xml.contains("codDeclarant=\"12345678\""));
         assert!(xml.contains("<notificare codTipOperatiune=\"30\""));
         assert!(xml.contains("denumireMarfa=\"Roșii\""));
-        assert!(xml.contains("greutateBruta=\"1050.0000\""));
+        assert!(xml.contains("greutateBruta=\"1050.00\""));
         assert!(xml.contains("codUnitateMasura=\"KGM\""));
         assert!(xml.contains("<partenerComercial codTara=\"RO\""));
         assert!(xml.contains("nrVehicul=\"B100ABC\""));
