@@ -1052,6 +1052,24 @@ export interface D101Result {
   balanceRecoverable: string;
 }
 
+export interface IncomeTaxResult {
+  taxRegime: string;
+  expenseAccount: string;
+  payableAccount: string;
+  amount: string;
+  estimated: boolean;
+  posted: boolean;
+  entryDate: string;
+}
+
+export interface AnnualCloseResult {
+  year: number;
+  result121: string;
+  kind: string;
+  posted: boolean;
+  entryDate: string;
+}
+
 export interface BilantReport {
   periodTo: string;
   immobilizedAssets: string;

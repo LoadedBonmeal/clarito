@@ -49,6 +49,8 @@ import type {
   ProfitLoss,
   ClosePeriodResult,
   BilantReport,
+  IncomeTaxResult,
+  AnnualCloseResult,
   JournalRegister,
   LedgerAccount,
   SyncResult,
@@ -606,6 +608,12 @@ export const gl = {
   /** Bilanț contabil (balance sheet) pentru perioadă. */
   bilant: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<BilantReport>("bilant", { companyId, periodFrom, periodTo }),
+  /** Postează impozitul pe venit/profit (698/691 → 4418/4411); amount = override opțional. */
+  postIncomeTax: (companyId: string, periodFrom: string, periodTo: string, amount?: string) =>
+    invoke<IncomeTaxResult>("post_income_tax", { companyId, periodFrom, periodTo, amount: amount ?? null }),
+  /** Închiderea anuală 121 → 117 «Rezultatul reportat». */
+  postAnnualClose: (companyId: string, year: number) =>
+    invoke<AnnualCloseResult>("post_annual_close", { companyId, year }),
   /** Postează închiderea conturilor 6/7 → 121 (idempotent per perioadă). */
   closePeriod: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<ClosePeriodResult>("close_period", { companyId, periodFrom, periodTo }),

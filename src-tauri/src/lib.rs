@@ -455,6 +455,8 @@ pub fn run() {
             commands::gl::trial_balance,
             commands::gl::profit_and_loss,
             commands::gl::bilant,
+            commands::gl::post_income_tax,
+            commands::gl::post_annual_close,
             commands::gl::close_period,
             commands::gl::journal_register,
             commands::gl::general_ledger,

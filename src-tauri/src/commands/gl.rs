@@ -12,6 +12,8 @@ use crate::db::gl::{bilant as db_bilant, BilantReport};
 use crate::db::gl::{general_ledger as db_general_ledger, LedgerAccount};
 use crate::db::gl::{generate_gl_entries as db_generate, reconcile as db_reconcile};
 use crate::db::gl::{journal_register as db_journal_register, JournalRegister};
+use crate::db::gl::{post_annual_close as db_annual_close, AnnualCloseResult};
+use crate::db::gl::{post_income_tax as db_income_tax, IncomeTaxResult};
 use crate::db::gl::{post_period_close as db_close_period, ClosePeriodResult};
 use crate::db::gl::{post_vat_settlement as db_close_vat, VatSettlementResult};
 use crate::db::gl::{trial_balance as db_trial_balance, TrialBalance};
@@ -110,6 +112,40 @@ pub async fn bilant(
     period_to: String,
 ) -> AppResult<BilantReport> {
     db_bilant(&state.db, &company_id, &period_from, &period_to).await
+}
+
+/// Postează impozitul pe venit/profit (D 698/691 = C 4418/4411) pentru perioadă, după regimul
+/// companiei. `amount` (string Decimal) suprascrie estimarea (ex. cifra exactă din D101).
+#[tauri::command]
+pub async fn post_income_tax(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+    amount: Option<String>,
+) -> AppResult<IncomeTaxResult> {
+    let company = crate::db::companies::get(&state.db, &company_id).await?;
+    let amt = amount.and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+    db_income_tax(
+        &state.db,
+        &company_id,
+        &company.tax_regime,
+        &period_from,
+        &period_to,
+        amt,
+    )
+    .await
+}
+
+/// Închiderea anuală: transferă soldul contului 121 în 117 «Rezultatul reportat» (OMFP 1802/2014).
+/// Idempotentă per an (source_type='ANNUAL_CLOSE'); nota se datează 1 ianuarie a anului următor.
+#[tauri::command]
+pub async fn post_annual_close(
+    state: State<'_, AppState>,
+    company_id: String,
+    year: i32,
+) -> AppResult<AnnualCloseResult> {
+    db_annual_close(&state.db, &company_id, year).await
 }
 
 /// Închiderea conturilor de venituri și cheltuieli (clasele 6 și 7) în 121 «Profit sau pierdere»

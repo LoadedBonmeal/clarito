@@ -2123,6 +2123,263 @@ pub async fn post_period_close(
     })
 }
 
+// ─── Impozit pe venit/profit (691/698 → 4411/4418) + închidere anuală 121 → 117 ─
+
+/// Result of posting the income-tax expense.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomeTaxResult {
+    pub tax_regime: String,
+    pub expense_account: String,
+    pub payable_account: String,
+    pub amount: String,
+    pub estimated: bool,
+    pub posted: bool,
+    pub entry_date: String,
+}
+
+/// Post the income-tax expense for the period: micro → D 698 / C 4418 (1% × venituri); profit →
+/// D 691 / C 4411 (16% × rezultat brut pozitiv). `amount` overrides the estimate (e.g. the exact
+/// D101 figure). Idempotent per `(company, 'TAX_CLOSE', period)`. The 698/691 balance is later
+/// swept into 121 by `post_period_close` (so the result is net of tax) — run this BEFORE the close.
+pub async fn post_income_tax(
+    pool: &SqlitePool,
+    company_id: &str,
+    tax_regime: &str,
+    period_from: &str,
+    period_to: &str,
+    amount: Option<Decimal>,
+) -> AppResult<IncomeTaxResult> {
+    let (expense_account, payable_account) = if tax_regime == "micro" {
+        ("698", "4418")
+    } else {
+        ("691", "4411")
+    };
+    // Estimate from the pre-tax P&L if no explicit amount: micro 1% × venituri, profit 16% × brut+.
+    let (amount, estimated) = match amount {
+        Some(a) => (a.max(Decimal::ZERO).round_dp(2), false),
+        None => {
+            let pnl = profit_and_loss(pool, company_id, tax_regime, period_from, period_to).await?;
+            let v = if tax_regime == "micro" {
+                pnl.total_revenue
+                    .parse::<Decimal>()
+                    .unwrap_or(Decimal::ZERO)
+                    * Decimal::new(1, 2)
+            } else {
+                pnl.gross_result
+                    .parse::<Decimal>()
+                    .unwrap_or(Decimal::ZERO)
+                    .max(Decimal::ZERO)
+                    * Decimal::new(16, 2)
+            };
+            (v.round_dp(2), true)
+        }
+    };
+    let source_id = format!("{period_from}_{period_to}");
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='TAX_CLOSE' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(&source_id)
+    .execute(&mut *tx)
+    .await?;
+
+    if amount.is_zero() {
+        tx.commit().await?;
+        return Ok(IncomeTaxResult {
+            tax_regime: tax_regime.to_string(),
+            expense_account: expense_account.to_string(),
+            payable_account: payable_account.to_string(),
+            amount: fmt_dec(amount),
+            estimated,
+            posted: false,
+            entry_date: period_to.to_string(),
+        });
+    }
+
+    let mk = |record_id: i64, account: &str, debit: Decimal, credit: Decimal| GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: account.to_string(),
+        debit,
+        credit,
+        partner_cui: None,
+        customer_id: None,
+        supplier_id: None,
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+    };
+    let entries = vec![
+        mk(1, expense_account, amount, Decimal::ZERO),
+        mk(2, payable_account, Decimal::ZERO, amount),
+    ];
+    assert_balanced(&entries, &source_id)?;
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: "DIVERSE".to_string(),
+        journal_type: "TAX_CLOSE".to_string(),
+        transaction_id: format!("IMPOZIT-{period_to}"),
+        transaction_date: period_to.to_string(),
+        description: Some(format!(
+            "Impozit pe {} {period_from} … {period_to}",
+            if tax_regime == "micro" {
+                "venit"
+            } else {
+                "profit"
+            }
+        )),
+        source_type: "TAX_CLOSE".to_string(),
+        source_id: source_id.clone(),
+        customer_id: None,
+        supplier_id: None,
+    };
+    let journal_pk = journal.id.clone();
+    insert_journal(&mut tx, &journal).await?;
+    for e in &entries {
+        insert_entry(&mut tx, &journal_pk, e).await?;
+    }
+    tx.commit().await?;
+
+    Ok(IncomeTaxResult {
+        tax_regime: tax_regime.to_string(),
+        expense_account: expense_account.to_string(),
+        payable_account: payable_account.to_string(),
+        amount: fmt_dec(amount),
+        estimated,
+        posted: true,
+        entry_date: period_to.to_string(),
+    })
+}
+
+/// Result of the annual 121 → 117 reset.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnnualCloseResult {
+    pub year: i32,
+    pub result_121: String,
+    /// "profit" (D 121 / C 117) | "loss" (D 117 / C 121) | "zero".
+    pub kind: String,
+    pub posted: bool,
+    pub entry_date: String,
+}
+
+/// Annual reset: transfer the year's 121 «Profit sau pierdere» balance to 117 «Rezultatul
+/// reportat» (OMFP 1802/2014) — profit (121 credit) → D 121 / C 117; loss (121 debit) → D 117 /
+/// C 121. Posted at the START of the next year. Idempotent per `(company, 'ANNUAL_CLOSE', year)`.
+/// Reads the 121 balance EXCLUDING any prior ANNUAL_CLOSE so re-running is safe.
+pub async fn post_annual_close(
+    pool: &SqlitePool,
+    company_id: &str,
+    year: i32,
+) -> AppResult<AnnualCloseResult> {
+    let from = format!("{year}-01-01");
+    let to = format!("{year}-12-31");
+    let row = sqlx::query(
+        "SELECT COALESCE(SUM(CAST(e.credit AS REAL)-CAST(e.debit AS REAL)),0.0) AS net_credit \
+         FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
+         WHERE j.company_id=?1 AND e.account_code='121' \
+           AND j.transaction_date >= ?2 AND j.transaction_date <= ?3 \
+           AND j.source_type <> 'ANNUAL_CLOSE'",
+    )
+    .bind(company_id)
+    .bind(&from)
+    .bind(&to)
+    .fetch_one(pool)
+    .await?;
+    let net_credit = dec_f(row.try_get::<f64, _>("net_credit").unwrap_or(0.0)); // profit if > 0
+    let source_id = year.to_string();
+    let entry_date = format!("{}-01-01", year + 1);
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='ANNUAL_CLOSE' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(&source_id)
+    .execute(&mut *tx)
+    .await?;
+
+    if net_credit.is_zero() {
+        tx.commit().await?;
+        return Ok(AnnualCloseResult {
+            year,
+            result_121: fmt_dec(net_credit),
+            kind: "zero".into(),
+            posted: false,
+            entry_date,
+        });
+    }
+
+    let mk = |record_id: i64, account: &str, debit: Decimal, credit: Decimal| GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: account.to_string(),
+        debit,
+        credit,
+        partner_cui: None,
+        customer_id: None,
+        supplier_id: None,
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+    };
+    // Profit (121 credit balance): D 121 / C 117. Loss (121 debit balance): D 117 / C 121.
+    let (kind, entries) = if net_credit > Decimal::ZERO {
+        (
+            "profit",
+            vec![
+                mk(1, "121", net_credit, Decimal::ZERO),
+                mk(2, "117", Decimal::ZERO, net_credit),
+            ],
+        )
+    } else {
+        let loss = -net_credit;
+        (
+            "loss",
+            vec![
+                mk(1, "117", loss, Decimal::ZERO),
+                mk(2, "121", Decimal::ZERO, loss),
+            ],
+        )
+    };
+    assert_balanced(&entries, &source_id)?;
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: "DIVERSE".to_string(),
+        journal_type: "ANNUAL_CLOSE".to_string(),
+        transaction_id: format!("REPORTAT-{year}"),
+        transaction_date: entry_date.clone(),
+        description: Some(format!("Închidere anuală 121 → 117 (rezultat {year})")),
+        source_type: "ANNUAL_CLOSE".to_string(),
+        source_id: source_id.clone(),
+        customer_id: None,
+        supplier_id: None,
+    };
+    let journal_pk = journal.id.clone();
+    insert_journal(&mut tx, &journal).await?;
+    for e in &entries {
+        insert_entry(&mut tx, &journal_pk, e).await?;
+    }
+    tx.commit().await?;
+
+    Ok(AnnualCloseResult {
+        year,
+        result_121: fmt_dec(net_credit),
+        kind: kind.into(),
+        posted: true,
+        entry_date,
+    })
+}
+
 // ─── Balanța de verificare (cod 14-6-30, patru egalități) ────────────────────
 
 /// f64 → Decimal rounded to 2 decimals (GL sums come back as REAL).
@@ -3042,6 +3299,118 @@ mod tests {
         assert_eq!(b.long_term_debt, "20000.00");
         assert_eq!(b.total_equity_liabilities, "105000.00");
         assert!(b.balanced, "Active = Capitaluri + Datorii");
+    }
+
+    /// Insert a manual balanced journal (account, debit, credit lines) for the close tests.
+    async fn manual_journal(
+        pool: &SqlitePool,
+        company_id: &str,
+        date: &str,
+        src: &str,
+        lines: &[(&str, Decimal, Decimal)],
+    ) {
+        let mut tx = pool.begin().await.unwrap();
+        let j = GlJournal {
+            id: new_id(),
+            company_id: company_id.into(),
+            journal_id: "DIVERSE".into(),
+            journal_type: "MANUAL".into(),
+            transaction_id: src.into(),
+            transaction_date: date.into(),
+            description: None,
+            source_type: "MANUAL".into(),
+            source_id: src.into(),
+            customer_id: None,
+            supplier_id: None,
+        };
+        let jpk = j.id.clone();
+        insert_journal(&mut tx, &j).await.unwrap();
+        for (i, (acc, d, c)) in lines.iter().enumerate() {
+            let e = GlEntry {
+                id: new_id(),
+                record_id: i as i64 + 1,
+                account_code: acc.to_string(),
+                debit: *d,
+                credit: *c,
+                partner_cui: None,
+                customer_id: None,
+                supplier_id: None,
+                tax_type: "000".into(),
+                tax_code: "000000".into(),
+                tax_percentage: None,
+                tax_base: None,
+                tax_amount: None,
+            };
+            insert_entry(&mut tx, &jpk, &e).await.unwrap();
+        }
+        tx.commit().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn income_tax_micro_then_close_then_annual_reset() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co1").await;
+        // A sale (C 707 10.000 / D 4111) and an expense (D 607 6.000 / C 401).
+        manual_journal(
+            &pool,
+            "co1",
+            "2026-06-15",
+            "s1",
+            &[
+                ("4111", rdec!(10000), Decimal::ZERO),
+                ("707", Decimal::ZERO, rdec!(10000)),
+            ],
+        )
+        .await;
+        manual_journal(
+            &pool,
+            "co1",
+            "2026-06-15",
+            "e1",
+            &[
+                ("607", rdec!(6000), Decimal::ZERO),
+                ("401", Decimal::ZERO, rdec!(6000)),
+            ],
+        )
+        .await;
+
+        // Income tax (micro, estimate) = 1% × venituri 10.000 = 100 → D 698 / C 4418.
+        let t = post_income_tax(&pool, "co1", "micro", "2026-01-01", "2026-12-31", None)
+            .await
+            .unwrap();
+        assert!(t.posted);
+        assert_eq!(t.expense_account, "698");
+        assert_eq!(t.amount, "100.00");
+        assert!(t.estimated);
+
+        // Close 6/7 → 121: sweeps 707 (10.000), 607 (6.000) AND 698 (100) → 121 credit = 3.900.
+        let c = post_period_close(&pool, "co1", "2026-01-01", "2026-12-31")
+            .await
+            .unwrap();
+        assert_eq!(c.result, "3900.00");
+        let tb = trial_balance(&pool, "co1", "2026-01-01", "2026-12-31")
+            .await
+            .unwrap();
+        let c121 = tb.rows.iter().find(|x| x.account_code == "121").unwrap();
+        assert_eq!(c121.closing_credit, "3900.00");
+        // 4418 (impozit pe venit de plată) carries the tax liability.
+        let p4418 = tb.rows.iter().find(|x| x.account_code == "4418").unwrap();
+        assert_eq!(p4418.closing_credit, "100.00");
+
+        // Annual reset: 121 (3.900 credit) → D 121 / C 117. Idempotent.
+        let a = post_annual_close(&pool, "co1", 2026).await.unwrap();
+        assert!(a.posted);
+        assert_eq!(a.kind, "profit");
+        assert_eq!(a.result_121, "3900.00");
+        assert_eq!(a.entry_date, "2027-01-01");
+        let a2 = post_annual_close(&pool, "co1", 2026).await.unwrap();
+        assert_eq!(a2.result_121, "3900.00", "idempotent");
+        // After the reset, 117 holds the carried-forward profit.
+        let tb2 = trial_balance(&pool, "co1", "2026-01-01", "2027-12-31")
+            .await
+            .unwrap();
+        let c117 = tb2.rows.iter().find(|x| x.account_code == "117").unwrap();
+        assert_eq!(c117.closing_credit, "3900.00");
     }
 
     // ── Helper: in-memory pool cu schema migrată ──────────────────────────────

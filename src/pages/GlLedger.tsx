@@ -239,6 +239,41 @@ export function GlLedgerPage() {
     }
   };
 
+  const handleIncomeTax = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    const ok = await confirm(
+      `Postează impozitul pe venit/profit (estimat) pentru ${dateFrom} … ${dateTo}? Se înregistrează ` +
+        "D 698/691 = C 4418/4411. Idempotent per perioadă; rulați înainte de «Închide perioada».",
+      { title: "Postare impozit", kind: "warning" },
+    );
+    if (!ok) return;
+    try {
+      const r = await api.gl.postIncomeTax(activeCompanyId, dateFrom, dateTo);
+      if (!r.posted) notify.info("Impozit zero — nimic de postat.");
+      else notify.success(`Impozit postat: ${r.amount} lei (${r.expenseAccount} → ${r.payableAccount})${r.estimated ? " — estimat" : ""}.`);
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut posta impozitul."));
+    }
+  };
+
+  const handleAnnualClose = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    const year = Number(dateFrom.slice(0, 4));
+    const ok = await confirm(
+      `Postează închiderea anuală 121 → 117 pentru anul ${year}? Soldul contului 121 (rezultatul ` +
+        `anului) se transferă în 117 «Rezultatul reportat», cu nota datată 01.01.${year + 1}. Idempotent.`,
+      { title: "Închidere anuală 121 → 117", kind: "warning" },
+    );
+    if (!ok) return;
+    try {
+      const r = await api.gl.postAnnualClose(activeCompanyId, year);
+      if (!r.posted) notify.info("Sold 121 zero — nimic de transferat.");
+      else notify.success(`Închidere anuală ${year}: ${r.kind === "profit" ? "profit" : "pierdere"} ${r.result121} lei → 117.`);
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut posta închiderea anuală."));
+    }
+  };
+
   // ── Registru-jurnal + Cartea mare ─────────────────────────────────────────
 
   const handleJournalRegister = async () => {
@@ -366,11 +401,29 @@ export function GlLedgerPage() {
             <Btn
               variant="secondary"
               icon="ledger"
+              disabled={!activeCompanyId}
+              onClick={() => void handleIncomeTax()}
+              title="Postează impozitul pe venit/profit (698/691 → 4418/4411)"
+            >
+              Impozit
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon="ledger"
               disabled={closingPeriod || !activeCompanyId}
               onClick={() => void handleClosePeriod()}
               title="Postează închiderea conturilor 6/7 → 121 pentru perioadă"
             >
               {closingPeriod ? "Închid…" : "Închide perioada"}
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon="ledger"
+              disabled={!activeCompanyId}
+              onClick={() => void handleAnnualClose()}
+              title="Închiderea anuală 121 → 117 (rezultat reportat)"
+            >
+              Închidere anuală
             </Btn>
           </>
         }
