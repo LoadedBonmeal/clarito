@@ -470,6 +470,33 @@ export interface D394Partner {
 }
 
 /** Raportul D394 — livrări (vânzări) + achiziții per partener. */
+/** RO e-TVA — precompletat (P300ETVA) values imported from SPV for the self-check. */
+export interface EtvaPrecompletat {
+  collectedVat: string;
+  deductibleVat: string;
+}
+
+/** RO e-TVA — one reconciled line (D300 vs precompletat). */
+export interface EtvaLine {
+  label: string;
+  d300: string;
+  precompletat: string;
+  diff: string;
+  diffPct: string;
+  /** |diff| ≥ 5.000 lei AND |diff%| ≥ 20% (the significance guideline). */
+  significant: boolean;
+  note: string | null;
+}
+
+export interface EtvaReconciliation {
+  periodFrom: string;
+  periodTo: string;
+  lines: EtvaLine[];
+  anySignificant: boolean;
+  /** Company on TVA la încasare → divergences are expected (not errors). */
+  cashVat: boolean;
+}
+
 /** D390 declarația recapitulativă (VIES) — one aggregated operation row. */
 export interface D390Op {
   /** Operation type: L/T/A/P/S/R. */

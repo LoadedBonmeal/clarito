@@ -10,6 +10,7 @@ pub mod d300;
 pub mod d390;
 pub mod d394;
 pub mod duk;
+pub mod etva;
 pub mod form_versions;
 pub mod preflight;
 pub mod saft;

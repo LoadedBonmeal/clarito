@@ -620,6 +620,19 @@ export const declarations = {
   /** Calculează decontul D300 — TVA colectat (vânzări) pentru o perioadă. */
   compute: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<import("@/types").D300Report>("compute_d300", { companyId, periodFrom, periodTo }),
+  /** RO e-TVA: reconciliază D300 calculat vs decontul precompletat (P300ETVA) — self-check. */
+  reconcileEtva: (
+    companyId: string,
+    periodFrom: string,
+    periodTo: string,
+    precompletat: import("@/types").EtvaPrecompletat,
+  ) =>
+    invoke<import("@/types").EtvaReconciliation>("reconcile_etva", {
+      companyId,
+      periodFrom,
+      periodTo,
+      precompletat,
+    }),
   /**
    * Generează XML D300 și îl salvează la destPath. Returnează calea.
    * R4: `manualDeductibleVat` — when provided, overrides the server-computed

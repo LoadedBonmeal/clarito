@@ -1525,6 +1525,59 @@ fn xml_escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+// ── RO e-TVA reconciliation (pre-filing self-check) ─────────────────────────────
+
+/// Reconcile the app-computed D300 against the ANAF "decont precompletat" (P300ETVA) values the
+/// caller imports from SPV. 2026: the conformance notification is abolished (OUG 89/2025 +
+/// OUG 13/2026) — this is an INFORMATIVE self-check, not a notification-response flow. The
+/// precompletat JSON has no published XSD and is fetched via a dedicated SPV endpoint (auth
+/// required); live retrieval/JSON-mapping is out of scope, so the caller supplies the values.
+#[tauri::command]
+pub async fn reconcile_etva(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+    precompletat: crate::anaf_decl::etva::EtvaPrecompletat,
+) -> crate::error::AppResult<crate::anaf_decl::etva::EtvaReconciliation> {
+    use crate::anaf_decl::etva::{reconcile_line, EtvaReconciliation};
+    let pool = &state.db;
+    let (collected, deductible) =
+        d300_vat_totals(pool, &company_id, &period_from, &period_to).await?;
+    let (cash_vat, _, _) = fetch_cash_vat_flags(pool, &company_id).await?;
+    let note = if cash_vat {
+        Some(
+            "TVA la încasare: divergența față de precompletat (construit pe datele e-Factura, \
+             nu pe încasare) este așteptată."
+                .to_string(),
+        )
+    } else {
+        None
+    };
+    let pc_collected =
+        Decimal::from_str(precompletat.collected_vat.trim()).unwrap_or(Decimal::ZERO);
+    let pc_deductible =
+        Decimal::from_str(precompletat.deductible_vat.trim()).unwrap_or(Decimal::ZERO);
+    let lines = vec![
+        reconcile_line("TVA colectată", collected, pc_collected, note.clone()),
+        reconcile_line("TVA deductibilă", deductible, pc_deductible, note.clone()),
+        reconcile_line(
+            "TVA de plată / de recuperat",
+            collected - deductible,
+            pc_collected - pc_deductible,
+            note,
+        ),
+    ];
+    let any_significant = lines.iter().any(|l| l.significant);
+    Ok(EtvaReconciliation {
+        period_from,
+        period_to,
+        lines,
+        any_significant,
+        cash_vat,
+    })
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

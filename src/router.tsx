@@ -18,6 +18,7 @@ import {
 
 export type ReportView =
   | "tva"
+  | "etva"
   | "d390"
   | "d394"
   | "saft"
@@ -27,6 +28,7 @@ export type ReportView =
 
 const REPORT_VIEWS: ReportView[] = [
   "tva",
+  "etva",
   "d390",
   "d394",
   "saft",
