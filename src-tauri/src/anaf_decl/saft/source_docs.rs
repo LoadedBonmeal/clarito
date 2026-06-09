@@ -102,6 +102,17 @@ struct SaftLine {
     vat_ron: Decimal,
     total_ron: Decimal,
     unit: String,
+    revenue_kind: String,
+}
+
+/// SAF-T revenue AccountID for a sales line by its kind — must match db::gl::revenue_account.
+fn saft_revenue_account(revenue_kind: &str) -> &'static str {
+    match revenue_kind.trim() {
+        "product" => "701",
+        "service" => "704",
+        "reduction" => "709",
+        _ => "707",
+    }
 }
 
 pub async fn write_sales_invoices(
@@ -158,7 +169,7 @@ pub async fn write_sales_invoices(
         let sql = format!(
             "SELECT invoice_id, position, name, description, quantity, unit_price, \
                     vat_rate, vat_category, subtotal_amount, vat_amount, total_amount, \
-                    COALESCE(unit, 'buc') AS unit \
+                    COALESCE(unit, 'buc') AS unit, COALESCE(revenue_kind,'goods') AS revenue_kind \
              FROM invoice_line_items \
              WHERE invoice_id IN ({placeholders}) \
              ORDER BY invoice_id, position"
@@ -197,6 +208,9 @@ pub async fn write_sales_invoices(
                 .unwrap_or_else(|_| "0".to_string()));
             let unit: String = row.try_get("unit").unwrap_or_else(|_| "buc".to_string());
             let position: i64 = row.try_get("position").unwrap_or(0);
+            let revenue_kind: String = row
+                .try_get("revenue_kind")
+                .unwrap_or_else(|_| "goods".to_string());
 
             lines_by_invoice.entry(inv_id).or_default().push(SaftLine {
                 position,
@@ -209,6 +223,7 @@ pub async fn write_sales_invoices(
                 vat_ron: vat,
                 total_ron: total,
                 unit,
+                revenue_kind,
             });
         }
     }
@@ -351,6 +366,7 @@ pub async fn write_sales_invoices(
                 inv_vat_ron,
                 "C",
                 "H87",
+                "707", // synthetic fallback line → default revenue account
             )?;
         } else {
             for line in &lines_ron {
@@ -371,6 +387,7 @@ pub async fn write_sales_invoices(
                     line.vat_ron,
                     "C", // revenue = credit
                     &line.unit,
+                    saft_revenue_account(&line.revenue_kind),
                 )?;
             }
         }
@@ -404,10 +421,11 @@ fn write_invoice_line(
     tax_amount: Decimal,
     dci: &str, // "C" or "D"
     _uom: &str,
+    account_id: &str, // revenue account 701/704/707/709 (must match the GL)
 ) -> AppResult<()> {
     start_elem(w, "InvoiceLine")?;
     write_text_elem(w, "LineNumber", &line_no.to_string())?;
-    write_text_elem(w, "AccountID", "707")?;
+    write_text_elem(w, "AccountID", account_id)?;
     write_text_elem(w, "Quantity", &dec6(quantity))?;
     // UnitPrice is SAFmonetaryType (simple decimal), NOT AmountStructure
     write_text_elem(w, "UnitPrice", &dec2(unit_price))?;

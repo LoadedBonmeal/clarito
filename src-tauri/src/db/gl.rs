@@ -3,9 +3,9 @@
 //! ## Șabloane de înregistrare (standard RO)
 //!
 //! **Factură emisă** (VALIDATED / STORNED):
-//!   D 4111 (Clienți)         = gross
-//!   C 707 (Venituri mărfuri) = net    [implicit; 704 pt servicii — neimplementat în v1]
-//!   C 4427 (TVA colectată)   = VAT
+//!   D 4111 (Clienți)              = gross
+//!   C 70x (Venituri)              = net  — 701/704/707 după revenue_kind, 709 pt reduceri
+//!   C 4427 (TVA colectată)        = VAT  (sau 4428 neexigibilă sub TVA la încasare)
 //!
 //! **Factură primită** (received_invoice_vat_lines per cotă):
 //!   D 607 (Cheltuieli mărfuri) = net per linie VAT  [implicit; 371 neimplementat în v1]
@@ -24,11 +24,16 @@
 //! **Storno / notă de credit** (storno_of_invoice_id != NULL sau tip 381):
 //!   Aceleași conturi ca factura de vânzare dar cu SUME NEGATIVE (stornare în roșu).
 //!
+//! **Plată valutară — diferențe de curs (665/765)**: creanța/datoria se stinge la cursul
+//!   FACTURII, iar trezoreria (5124/5314) la cursul PLĂȚII; diferența → 665 (cheltuială) /
+//!   765 (venit). Vezi post_payment / post_received_payment.
+//!
 //! ## Simplificări / amânări explicite (v1)
-//!   - Cont venituri fix 707 (nu distingem 704 servicii vs 707 mărfuri — lipsă câmp tip).
+//!   - Venit pe 70x după revenue_kind (701/704/707/709); implicit goods→707.
 //!   - Cont cheltuieli fix 607 (nu distingem 371 stocuri vs 607 — lipsă câmp tip achiziție).
-//!   - Diferențe de curs FX (665/765 vs 4111): neimplementat în v1 deoarece rata la
-//!     data plății nu e stocată în tabela payments (câmp currency există, dar nu rate).
+//!   - Reevaluarea lunară a soldurilor în valută (pct. 325 OMFP 1802/2014): neimplementată
+//!     încă (necesită cursul BNR de închidere + valoarea contabilă reevaluată per document).
+//!   - Reduceri comerciale primite (609) latura achiziție: amânat (facturile primite nu au linii).
 //!   - Facturi primite fără defalcare TVA (net_amount IS NULL): omise din postare
 //!     (înregistrate ca count în GlPostResult.skipped_received).
 
@@ -1393,8 +1398,9 @@ pub async fn generate_gl_entries(
     // ── 3. Plăți clienți ─────────────────────────────────────────────────────
 
     let payment_rows = sqlx::query(
-        "SELECT p.id, p.invoice_id, p.paid_at, p.amount, p.currency, p.method, \
+        "SELECT p.id, p.invoice_id, p.paid_at, p.amount, p.method, \
                 p.exchange_rate AS pay_rate, \
+                COALESCE(i.currency,'RON') AS inv_currency, \
                 i.contact_id, c.cui as contact_cui, i.exchange_rate, \
                 i.issue_date as inv_issue_date, i.status as inv_status, \
                 i.storno_of_invoice_id as inv_storno_ref \
@@ -1416,8 +1422,9 @@ pub async fn generate_gl_entries(
         let inv_id: String = row.try_get("invoice_id").unwrap_or_default();
         let paid_at: String = row.try_get("paid_at").unwrap_or_default();
         let amount_s: String = row.try_get("amount").unwrap_or_default();
+        // Use the INVOICE currency (the receivable was booked in it) — not the payment row's.
         let currency: String = row
-            .try_get("currency")
+            .try_get("inv_currency")
             .unwrap_or_else(|_| "RON".to_string());
         let contact_id: String = row.try_get("contact_id").unwrap_or_default();
         let contact_cui: Option<String> = row.try_get("contact_cui").unwrap_or(None);
@@ -1425,22 +1432,22 @@ pub async fn generate_gl_entries(
             .try_get("method")
             .unwrap_or_else(|_| "transfer".to_string());
 
-        // Convert a foreign-currency payment to RON using the invoice's exchange
-        // rate (the rate the receivable in 4111 was booked at). This makes the
-        // bank/receivable legs balance in RON instead of posting the raw foreign
-        // amount as if it were RON. The FX gain/loss leg (665/765) — the delta
-        // between invoice-date and payment-date rates — remains deferred in v1
-        // because the payment-date rate is not stored.
+        // FX: the receivable in 4111 was booked at the INVOICE rate; the cash moves at the
+        // PAYMENT rate, and the difference is the FX result (665/765).
         let inv_fx = parse_rate(
             row.try_get::<Option<f64>, _>("exchange_rate")
                 .unwrap_or(None),
         );
-        // Payment-date rate (0029): if absent, fall back to the invoice rate → no FX diff.
         let pay_fx =
             parse_rate(row.try_get::<Option<f64>, _>("pay_rate").unwrap_or(None)).or(inv_fx);
-        // Receivable relieved at invoice rate; cash booked at payment rate (the FX delta).
         let receivable_ron = amount_to_ron(dec(&amount_s), &currency, inv_fx);
-        let cash_ron = amount_to_ron(dec(&amount_s), &currency, pay_fx);
+        // Only recognise an FX diff when the INVOICE rate is known (else the receivable itself
+        // is the raw amount and a payment rate would book a fictitious gain/loss).
+        let cash_ron = if inv_fx.is_some() {
+            amount_to_ron(dec(&amount_s), &currency, pay_fx)
+        } else {
+            receivable_ron
+        };
         let foreign = !currency.eq_ignore_ascii_case("RON");
         // Cash-VAT release works off the invoice-rate amount (the basis the 4428 was booked at).
         let amount_ron = receivable_ron;
@@ -1549,7 +1556,12 @@ pub async fn generate_gl_entries(
         let pay_fx =
             parse_rate(row.try_get::<Option<f64>, _>("pay_rate").unwrap_or(None)).or(inv_fx);
         let payable_ron = amount_to_ron(dec(&amount_s), &currency, inv_fx);
-        let cash_ron = amount_to_ron(dec(&amount_s), &currency, pay_fx);
+        // Recognise FX only when the invoice rate is known (else no fictitious diff).
+        let cash_ron = if inv_fx.is_some() {
+            amount_to_ron(dec(&amount_s), &currency, pay_fx)
+        } else {
+            payable_ron
+        };
         let foreign = !currency.eq_ignore_ascii_case("RON");
         // Cash-VAT release works off the invoice-rate amount (the basis the 4428 was booked at).
         let amount_ron = payable_ron;
@@ -1649,9 +1661,11 @@ pub async fn reconcile(
         .unwrap_or(Decimal::ZERO)
         .round_dp(2);
 
-    // ── Σcredit 4427 ────────────────────────────────────────────────────────
+    // ── Net 4427 (credit − debit) ─────────────────────────────────────────────
+    // Net, not Σcredit: a VAT-bearing reduction / credit note posts 4427 as a DEBIT, so the
+    // exigible colectată is credit − debit — matching post_vat_settlement and D300.
     let c4427_f: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(CAST(e.credit AS REAL)), 0.0) \
+        "SELECT COALESCE(SUM(CAST(e.credit AS REAL) - CAST(e.debit AS REAL)), 0.0) \
          FROM gl_entry e \
          JOIN gl_journal j ON j.id = e.journal_pk \
          WHERE j.company_id = ?1 \
@@ -1669,9 +1683,10 @@ pub async fn reconcile(
         .unwrap_or(Decimal::ZERO)
         .round_dp(2);
 
-    // ── Σdebit 4426 ─────────────────────────────────────────────────────────
+    // ── Net 4426 (debit − credit) ─────────────────────────────────────────────
+    // Net, so a received credit note (4426 credit) reduces the deductibilă symmetrically.
     let d4426_f: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(CAST(e.debit AS REAL)), 0.0) \
+        "SELECT COALESCE(SUM(CAST(e.debit AS REAL) - CAST(e.credit AS REAL)), 0.0) \
          FROM gl_entry e \
          JOIN gl_journal j ON j.id = e.journal_pk \
          WHERE j.company_id = ?1 \
@@ -3959,6 +3974,17 @@ mod tests {
         assert_eq!(c704, dec("1000"), "service revenue → 704");
         assert_eq!(d709, dec("100"), "granted reduction → 709 (debit)");
         assert_eq!(c707, dec("0"), "nothing on 707 (no goods line)");
+
+        // reconcile must net the reduction's 4427 debit: GL collected = 190 − 19 = 171 = D300.
+        let rec = reconcile(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        assert_eq!(dec(&rec.vat_collected_gl), dec("171"));
+        assert_eq!(dec(&rec.vat_collected_d300), dec("171"));
+        assert!(
+            !rec.discrepancies.iter().any(|d| d.contains("colectat")),
+            "no false TVA-colectată discrepancy on a VAT-bearing reduction"
+        );
     }
 
     // ── FX gain/loss 665/765 at settlement (Phase 2.3) ───────────────────────
