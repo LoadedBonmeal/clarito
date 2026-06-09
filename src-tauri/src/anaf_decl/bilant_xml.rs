@@ -338,7 +338,7 @@ pub fn generate_bilant_xml(
 <{root} xmlns=\"{ns}\" \
 luna=\"12\" an=\"{an}\" cui=\"{cui}\" den=\"{den}\" adresa=\"{adr}\" \
 caen=\"{caen}\" caenE=\"{caen}\" AN_CAEN=\"{an_caen}\" regCom=\"{reg}\" \
-bifa_aprob=\"0\" bifaMC=\"1\" bifaDD=\"0\" bifaGG=\"0\" bifaAA=\"0\"{art27} \
+bifa_aprob=\"1\" bifaMC=\"1\" bifaDD=\"0\" bifaGG=\"0\" bifaAA=\"0\"{art27} \
 tipBIL=\"{tip}\" interes_public=\"0\" codTT=\"{tt}\" codJJ=\"1\" codPP=\"11\" \
 nume_admin=\"{adm}\" nume_intocmit=\"{adm}\" calit_intocmit=\"11\" \
 totalPlata_A=\"{tp}\">\n\
@@ -445,6 +445,7 @@ mod tests {
         assert!(xml.contains("<Bilant1005"));
         assert!(xml.contains("mfp:anaf:dgti:s1005:declaratie:v14"));
         assert!(xml.contains("tipBIL=\"UU\""));
+        assert!(xml.contains("bifa_aprob=\"1\"")); // IntInt1_1 — must be exactly 1 (XSD-validated)
         assert!(xml.contains("bifa_art27=\"0\""));
         assert!(xml.contains("calit_intocmit=\"11\""));
         assert!(xml.contains("codTT=\"12\"")); // CJ → 12
