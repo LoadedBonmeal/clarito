@@ -697,6 +697,28 @@ export const declarations = {
     }),
 };
 
+// ─── e-Transport (UIT) ───────────────────────────────────────────────────
+
+export const etransport = {
+  /** Validează o declarație e-Transport. Returnează lista de probleme (gol = valid). */
+  validate: (declaration: import("@/types").EtransportDeclaration) =>
+    invoke<string[]>("etransport_validate", { declaration }),
+  /** Validează + generează XML-ul e-Transport (schema v2). */
+  generateXml: (declaration: import("@/types").EtransportDeclaration) =>
+    invoke<string>("etransport_generate_xml", { declaration }),
+  /** Trimite declarația la ANAF (live). Returnează indexul + Cod UIT. */
+  submit: (
+    companyId: string,
+    declaration: import("@/types").EtransportDeclaration,
+    testMode = false,
+  ) =>
+    invoke<import("@/types").EtransportUploadResponse>("etransport_submit", {
+      companyId,
+      declaration,
+      testMode,
+    }),
+};
+
 // ─── D390 — Declarație recapitulativă (VIES) intra-UE ────────────────────
 
 export const d390 = {
@@ -883,6 +905,7 @@ export const api = {
   d390,
   d394,
   declarations,
+  etransport,
   feedback,
   gdpr,
   gl,

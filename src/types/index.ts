@@ -470,6 +470,63 @@ export interface D394Partner {
 }
 
 /** Raportul D394 — livrări (vânzări) + achiziții per partener. */
+// ─── e-Transport (UIT) ────────────────────────────────────────────────────
+export interface EtransportGood {
+  codScopOperatiune: string;
+  codTarifar?: string;
+  denumireMarfa: string;
+  cantitate: number;
+  codUnitateMasura: string;
+  greutateNeta?: number | null;
+  greutateBruta: number;
+  valoareLeiFaraTva?: number | null;
+}
+export interface EtransportPartner {
+  codTara: string;
+  cod?: string;
+  denumire: string;
+}
+export interface EtransportTransport {
+  nrVehicul: string;
+  nrRemorca1?: string;
+  nrRemorca2?: string;
+  codTaraOrgTransport?: string;
+  codOrgTransport?: string;
+  denumireOrgTransport?: string;
+  dataTransport: string;
+}
+export interface EtransportRouteLoc {
+  codPtf?: number | null;
+  codBirouVamal?: string | null;
+  codJudet?: number | null;
+  denumireLocalitate?: string;
+  denumireStrada?: string;
+  numar?: string;
+  codPostal?: string;
+  alteInfo?: string;
+}
+export interface EtransportDoc {
+  tipDocument: string;
+  numarDocument?: string;
+  dataDocument?: string;
+}
+export interface EtransportDeclaration {
+  codDeclarant: string;
+  refDeclarant?: string;
+  codTipOperatiune: string;
+  goods: EtransportGood[];
+  partner: EtransportPartner;
+  transport: EtransportTransport;
+  locStart: EtransportRouteLoc;
+  locFinal: EtransportRouteLoc;
+  documents: EtransportDoc[];
+}
+export interface EtransportUploadResponse {
+  // Serialized as-is from ANAF's response (snake_case index + UIT) — not camelCased.
+  index_incarcare: string;
+  UIT?: string | null;
+}
+
 /** SPV general inbox (SPVWS2) item — recipise/notificări/somații/decizii. */
 export interface SpvInboxItem {
   id: string;

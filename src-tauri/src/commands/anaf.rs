@@ -40,7 +40,7 @@ fn sanitize_path_component(s: &str) -> String {
 /// `is_expired()` — dacă alt task a reîmprospătat între timp, sărim refresh-ul
 /// și returnăm token-ul proaspăt. Astfel evităm `invalid_grant` de la ANAF când
 /// două task-uri concurrent văd token-ul expirat simultan.
-async fn get_valid_token(
+pub(crate) async fn get_valid_token(
     company_id: &str,
     pool: &sqlx::SqlitePool,
     lock: &tokio::sync::Mutex<()>,

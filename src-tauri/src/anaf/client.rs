@@ -37,6 +37,14 @@ pub struct StatusResponse {
     pub erori: Option<String>,
 }
 
+/// e-Transport upload response (UploadV2Response): the upload index + the issued Cod UIT.
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct EtransportUploadResponse {
+    pub index_incarcare: String,
+    #[serde(rename = "UIT", default)]
+    pub uit: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SpvMessage {
     pub id: String,
@@ -493,6 +501,48 @@ impl AnafClient {
                 detalii: m.detalii,
             })
             .collect())
+    }
+
+    /// Submit an e-Transport declaration (schema v2). Unlike D300/D394, e-Transport HAS an OAuth
+    /// REST API: POST {base}/ETRANSPORT/ws/v1/upload/ETRANSP/{cif}/2, same Bearer token as
+    /// e-Factura. Returns the upload index + the issued Cod UIT. Live-only (needs ANAF auth).
+    pub async fn upload_etransport(
+        &self,
+        token: &str,
+        company_cui: &str,
+        xml_bytes: Vec<u8>,
+    ) -> Result<EtransportUploadResponse, String> {
+        let cui = company_cui.trim_start_matches("RO").trim();
+        let url = format!(
+            "{}/ETRANSPORT/ws/v1/upload/ETRANSP/{}/2",
+            self.base_url, cui
+        );
+        let resp = self
+            .client
+            .post(&url)
+            .header(reqwest::header::CONTENT_TYPE, "application/xml")
+            .bearer_auth(token)
+            .body(xml_bytes)
+            .send()
+            .await
+            .map_err(|e| format!("Upload e-Transport request eșuat: {e}"))?;
+        let status = resp.status();
+        if status == 401 {
+            return Err(ERR_UNAUTHORIZED.to_string());
+        }
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        if !status.is_success() {
+            tracing::warn!(
+                status = status.as_u16(),
+                body_len = body.len(),
+                "ANAF e-Transport upload error"
+            );
+            return Err(format!(
+                "Eroare comunicare ANAF e-Transport ({status}). Reîncercați."
+            ));
+        }
+        serde_json::from_str::<EtransportUploadResponse>(&body)
+            .map_err(|e| format!("Răspuns e-Transport invalid: {e} — body: {body}"))
     }
 
     /// Descarcă un mesaj SPV după ID. Returnează bytes ZIP.
