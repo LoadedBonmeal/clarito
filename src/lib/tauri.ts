@@ -889,6 +889,9 @@ export const payroll = {
     invoke<void>("delete_employee", { id, companyId }),
   run: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<import("@/types").PayrollRun>("run_payroll", { companyId, periodFrom, periodTo }),
+  /** Exportă D112 (XML) pentru luna dată la destPath. Returnează calea. */
+  exportD112Xml: (companyId: string, year: number, month: number, caen: string, destPath: string) =>
+    invoke<string>("export_d112_xml", { companyId, year, month, caen, destPath }),
 };
 
 export const vatRates = {

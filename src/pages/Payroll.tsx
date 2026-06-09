@@ -6,7 +6,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirm, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import {
   PageHeader, Btn, IconBtn, Card, Field, Input, Modal, Banner, Segmented, Empty,
@@ -58,6 +58,27 @@ export function PayrollPage() {
     onError: (e) => notify.error(formatError(e, "Eroare la ștergere.")),
   });
 
+  const handleD112 = async () => {
+    if (!companyId) { notify.warn("Selectați o companie activă."); return; }
+    const caen = (window.prompt("Cod CAEN al companiei (4 cifre, ex. 6201):", "") ?? "").trim();
+    if (!caen) return;
+    if (!/^\d{4}$/.test(caen)) { notify.error("Cod CAEN invalid — 4 cifre."); return; }
+    const dest = await saveDialog({
+      title: "Salvează D112 (XML)",
+      defaultPath: `d112-${year}-${String(month).padStart(2, "0")}.xml`,
+      filters: [{ name: "XML", extensions: ["xml"] }],
+    });
+    if (!dest) return;
+    try {
+      await api.payroll.exportD112Xml(companyId, year, month, caen, dest);
+      notify.success(`D112 (XML) exportat — antet + obligații angajator + ${employees.filter((e) => e.active).length} ` +
+        `asigurați. Importați-l în aplicația D112 (PDF inteligent), validați (DUKIntegrator) și ` +
+        `completați declarantul + blocurile speciale înainte de depunere.`);
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut exporta D112."));
+    }
+  };
+
   return (
     <div className="rf-page">
       <PageHeader
@@ -88,6 +109,9 @@ export function PayrollPage() {
             />
             <Btn variant="secondary" icon="ledger" disabled={runMut.isPending || !companyId} onClick={() => runMut.mutate()}>
               {runMut.isPending ? "Calculez…" : "Rulează stat salarii"}
+            </Btn>
+            <Btn variant="secondary" icon="download" disabled={!companyId} onClick={handleD112}>
+              D112 XML
             </Btn>
           </div>
         </Card>

@@ -464,6 +464,7 @@ pub fn run() {
             commands::payroll::update_employee,
             commands::payroll::delete_employee,
             commands::payroll::run_payroll,
+            commands::payroll::export_d112_xml,
             commands::gl::close_period,
             commands::gl::journal_register,
             commands::gl::general_ledger,
