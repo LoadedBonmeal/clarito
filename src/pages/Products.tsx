@@ -15,7 +15,7 @@ import { Icon } from "@/components/shared/Icon";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import {
   PageHeader, Btn, IconBtn, Badge, Card, Field, Input, Select,
-  Tabs, Empty, Modal, SearchInput,
+  Tabs, Empty, Modal, SearchInput, Banner,
 } from "@/components/rf";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
@@ -60,6 +60,7 @@ export function ProductsPage() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "active">("all");
   const [modal, setModal] = useState<"create" | { edit: Product } | null>(null);
+  const [stockProduct, setStockProduct] = useState<Product | null>(null);
 
   const {
     data: allProducts = [],
@@ -280,6 +281,12 @@ export function ProductsPage() {
                             onClick={() => setModal({ edit: p })}
                           />
                           <IconBtn
+                            icon="stock"
+                            title="Gestiune (recepție / descărcare / fișă)"
+                            size={14}
+                            onClick={() => setStockProduct(p)}
+                          />
+                          <IconBtn
                             icon="trash"
                             title="Șterge"
                             size={14}
@@ -320,6 +327,17 @@ export function ProductsPage() {
               queryKey: queryKeys.products.all,
             });
             setModal(null);
+          }}
+        />
+      )}
+
+      {stockProduct && activeCompanyId && (
+        <StockModal
+          companyId={activeCompanyId}
+          product={stockProduct}
+          onClose={() => {
+            setStockProduct(null);
+            void queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
           }}
         />
       )}
@@ -545,6 +563,95 @@ function ProductModal({
           </div>
         )}
       </form>
+    </Modal>
+  );
+}
+
+// ─── Stock movements (gestiune: recepție / descărcare / fișă de magazie) ──────
+
+function StockModal({
+  companyId, product, onClose,
+}: {
+  companyId: string;
+  product: Product;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [tab, setTab] = useState<"in" | "out">("in");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [qty, setQty] = useState("");
+  const [cost, setCost] = useState("");
+  const [docRef, setDocRef] = useState("");
+
+  const { data: ledger = [], refetch } = useQuery({
+    queryKey: ["stock-ledger", product.id],
+    queryFn: () => api.stockValuation.ledger(companyId, product.id),
+  });
+
+  const mut = useMutation({
+    mutationFn: () => {
+      if (!/^\d+(\.\d+)?$/.test(qty.trim())) throw new Error("Cantitate invalidă.");
+      const input = {
+        companyId, productId: product.id, entryDate: date, qty: qty.trim(),
+        unitCost: tab === "in" ? (cost.trim() || "0") : undefined,
+        docType: tab === "in" ? "NIR" : "BC", docRef: docRef.trim() || undefined,
+      };
+      return tab === "in" ? api.stockValuation.recordReceipt(input) : api.stockValuation.recordIssue(input);
+    },
+    onSuccess: () => {
+      notify.success(tab === "in" ? "Recepție înregistrată." : "Descărcare gestiune înregistrată.");
+      setQty(""); setCost(""); setDocRef("");
+      void refetch();
+      void qc.invalidateQueries({ queryKey: queryKeys.products.all });
+    },
+    onError: (e) => notify.error(formatError(e, "Eroare la mișcarea de stoc.")),
+  });
+
+  return (
+    <Modal open onOpenChange={(o) => { if (!o) onClose(); }} title={`Gestiune: ${product.name}`} width={680}>
+      <Banner variant="info">
+        Evaluare stoc OMFP 1802/2014 (FIFO/CMP). Recepția intră la cost; descărcarea e evaluată
+        automat. Nota contabilă (D 371 / C 401 la intrare; D 6xx / C 371 la ieșire) se postează în jurnal.
+      </Banner>
+      <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
+        <Btn variant={tab === "in" ? "primary" : "secondary"} size="sm" onClick={() => setTab("in")}>Recepție (intrare)</Btn>
+        <Btn variant={tab === "out" ? "primary" : "secondary"} size="sm" onClick={() => setTab("out")}>Descărcare (ieșire)</Btn>
+      </div>
+      <div className="rf-grid-2" style={{ marginBottom: 8 }}>
+        <Field label="Data"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Cantitate"><Input inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="10" /></Field>
+      </div>
+      <div className="rf-grid-2" style={{ marginBottom: 8 }}>
+        {tab === "in" && (
+          <Field label="Cost unitar (lei)"><Input inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="5.00" /></Field>
+        )}
+        <Field label="Document"><Input value={docRef} onChange={(e) => setDocRef(e.target.value)} placeholder="NIR 123" /></Field>
+      </div>
+      <Btn variant="primary" icon="check" disabled={mut.isPending} onClick={() => mut.mutate()}>
+        {mut.isPending ? "Se salvează…" : "Înregistrează"}
+      </Btn>
+
+      <div style={{ marginTop: 16, fontWeight: 600 }}>Fișa de magazie</div>
+      <table className="rf-tbl" style={{ marginTop: 6 }}>
+        <thead>
+          <tr><th>Data</th><th>Tip</th><th className="right">Cant.</th><th className="right">Cost unit.</th><th className="right">Valoare</th><th className="right">Sold cant.</th><th className="right">Sold valoare</th></tr>
+        </thead>
+        <tbody>
+          {ledger.length === 0 ? (
+            <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--rf-text-muted)" }}>Nicio mișcare.</td></tr>
+          ) : ledger.map((r) => (
+            <tr key={r.id}>
+              <td className="mono">{r.entryDate}</td>
+              <td>{r.direction === "IN" ? "Intrare" : "Ieșire"}</td>
+              <td className="right rf-mono">{r.qty}</td>
+              <td className="right rf-mono">{fmtRON(r.unitCost)}</td>
+              <td className="right rf-mono">{fmtRON(r.value)}</td>
+              <td className="right rf-mono">{r.runQty}</td>
+              <td className="right rf-mono" style={{ fontWeight: 600 }}>{fmtRON(r.runValue)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </Modal>
   );
 }

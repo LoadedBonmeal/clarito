@@ -1012,6 +1012,29 @@ export interface ClosePeriodResult {
   entryDate: string;
 }
 
+export interface StockMovementInput {
+  companyId: string;
+  productId: string;
+  entryDate: string;
+  qty: string;
+  unitCost?: string;
+  docType?: string;
+  docRef?: string;
+}
+
+export interface StockLedgerRow {
+  id: string;
+  entryDate: string;
+  direction: string;
+  qty: string;
+  unitCost: string;
+  value: string;
+  runQty: string;
+  runValue: string;
+  docType: string | null;
+  docRef: string | null;
+}
+
 export interface FixedAsset {
   id: string;
   companyId: string;

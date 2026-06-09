@@ -878,6 +878,17 @@ export const products = {
  * No company_id is passed — Romanian VAT rates are national (same for all
  * companies). This is the deliberate exception to the company-scoping rule.
  */
+export const stockValuation = {
+  recordReceipt: (input: import("@/types").StockMovementInput) =>
+    invoke<void>("record_stock_receipt", { input }),
+  recordIssue: (input: import("@/types").StockMovementInput) =>
+    invoke<void>("record_stock_issue", { input }),
+  ledger: (companyId: string, productId: string) =>
+    invoke<import("@/types").StockLedgerRow[]>("stock_ledger", { companyId, productId }),
+  setValuation: (companyId: string, productId: string, method: string, stockAccount: string) =>
+    invoke<void>("set_stock_valuation", { companyId, productId, method, stockAccount }),
+};
+
 export const assets = {
   list: (companyId: string) =>
     invoke<import("@/types").FixedAsset[]>("list_fixed_assets", { companyId }),
@@ -1024,6 +1035,7 @@ export const api = {
   recurring,
   reports,
   assets,
+  stockValuation,
   payroll,
   saft,
   settings,

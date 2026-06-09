@@ -472,6 +472,10 @@ pub fn run() {
             commands::stock::create_stock_movement,
             commands::stock::list_stock_movements,
             commands::stock::delete_stock_movement,
+            commands::stock::record_stock_receipt,
+            commands::stock::record_stock_issue,
+            commands::stock::stock_ledger,
+            commands::stock::set_stock_valuation,
             // fixed assets — Phase 6b (SAF-T Assets)
             commands::assets::create_fixed_asset,
             commands::assets::list_fixed_assets,

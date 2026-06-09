@@ -2675,6 +2675,103 @@ pub async fn post_asset_disposal(
     Ok(())
 }
 
+// ─── Stocuri (mișcări → GL) ──────────────────────────────────────────────────
+
+/// Expense account for a stock account's issue (descărcare gestiune): 371→607, 301→601, 302→602,
+/// 303→603, 345/348→711 (variația stocurilor), 381→608.
+fn stock_expense_account(stock_account: &str) -> &'static str {
+    match stock_account {
+        a if a.starts_with("371") => "607",
+        a if a.starts_with("301") => "601",
+        a if a.starts_with("302") => "602",
+        a if a.starts_with("303") => "603",
+        a if a.starts_with("345") || a.starts_with("348") => "711",
+        a if a.starts_with("381") => "608",
+        _ => "607",
+    }
+}
+
+/// Post one stock movement to the GL (idempotent per `(company,'STOCK',ledger_id)`):
+/// IN  → D stock_account / C 401 (recepție la cost);
+/// OUT → D 6xx (descărcare) / C stock_account (la cost evaluat). Zero value → delete only.
+pub async fn post_stock_movement(
+    pool: &SqlitePool,
+    company_id: &str,
+    ledger_id: &str,
+    date: &str,
+    stock_account: &str,
+    is_in: bool,
+    value: Decimal,
+) -> AppResult<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='STOCK' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(ledger_id)
+    .execute(&mut *tx)
+    .await?;
+
+    if value.is_zero() {
+        tx.commit().await?;
+        return Ok(());
+    }
+
+    let mk = |record_id: i64, account: &str, debit: Decimal, credit: Decimal| GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: account.to_string(),
+        debit,
+        credit,
+        partner_cui: None,
+        customer_id: None,
+        supplier_id: None,
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+    };
+    let entries = if is_in {
+        vec![
+            mk(1, stock_account, value, Decimal::ZERO), // D 371
+            mk(2, "401", Decimal::ZERO, value),         // C 401
+        ]
+    } else {
+        let exp = stock_expense_account(stock_account);
+        vec![
+            mk(1, exp, value, Decimal::ZERO),           // D 607
+            mk(2, stock_account, Decimal::ZERO, value), // C 371
+        ]
+    };
+    assert_balanced(&entries, ledger_id)?;
+
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: "STOCURI".to_string(),
+        journal_type: "STOCK".to_string(),
+        transaction_id: format!("STK-{ledger_id}"),
+        transaction_date: date.to_string(),
+        description: Some(if is_in {
+            "Recepție stoc".to_string()
+        } else {
+            "Descărcare gestiune".to_string()
+        }),
+        source_type: "STOCK".to_string(),
+        source_id: ledger_id.to_string(),
+        customer_id: None,
+        supplier_id: None,
+    };
+    let journal_pk = journal.id.clone();
+    insert_journal(&mut tx, &journal).await?;
+    for e in &entries {
+        insert_entry(&mut tx, &journal_pk, e).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 // ─── Balanța de verificare (cod 14-6-30, patru egalități) ────────────────────
 
 /// f64 → Decimal rounded to 2 decimals (GL sums come back as REAL).
