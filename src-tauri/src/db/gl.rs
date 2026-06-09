@@ -2964,6 +2964,8 @@ pub struct ProfitLoss {
     pub revenue_lines: Vec<PnlLine>,
     pub expense_lines: Vec<PnlLine>,
     pub operating_revenue: String,
+    /// Cifra de afaceri netă (clasa 70x) — F20 rd.01; ⊂ operating_revenue.
+    pub cifra_afaceri: String,
     pub financial_revenue: String,
     pub total_revenue: String,
     pub operating_expense: String,
@@ -2991,6 +2993,7 @@ pub fn compute_pnl(
     let mut closing_entries = Vec::new();
     let mut op_rev = Decimal::ZERO;
     let mut fin_rev = Decimal::ZERO;
+    let mut ca_net = Decimal::ZERO; // cifra de afaceri netă = clasa 70x (+/- 709 reduceri)
     let mut op_exp = Decimal::ZERO;
     let mut fin_exp = Decimal::ZERO;
     let mut income_tax_booked = Decimal::ZERO;
@@ -3008,6 +3011,11 @@ pub fn compute_pnl(
                 fin_rev += net_credit;
             } else {
                 op_rev += net_credit;
+            }
+            // Cifra de afaceri netă = doar 70x (vânzări) — exclude 71x variația stocurilor, 72x
+            // producția imobilizată, 74x subvenții, 75x alte venituri din exploatare.
+            if code.starts_with("70") {
+                ca_net += net_credit;
             }
             revenue_lines.push(PnlLine {
                 code: code.clone(),
@@ -3072,6 +3080,7 @@ pub fn compute_pnl(
         revenue_lines,
         expense_lines,
         operating_revenue: fmt_dec(op_rev),
+        cifra_afaceri: fmt_dec(ca_net),
         financial_revenue: fmt_dec(fin_rev),
         total_revenue: fmt_dec(total_revenue),
         operating_expense: fmt_dec(op_exp),

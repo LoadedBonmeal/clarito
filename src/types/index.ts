@@ -1258,6 +1258,7 @@ export interface ProfitLoss {
   revenueLines: PnlLine[];
   expenseLines: PnlLine[];
   operatingRevenue: string;
+  cifraAfaceri: string;
   financialRevenue: string;
   totalRevenue: string;
   operatingExpense: string;

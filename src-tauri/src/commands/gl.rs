@@ -107,11 +107,16 @@ pub async fn profit_and_loss(
 /// PDF-ul inteligent ANAF. Header-ul (cod fiscal teritorial, întocmitor, audit) + F30 «Date
 /// informative» se completează în aplicația ANAF după import. Returnează calea fișierului scris.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn export_bilant_xml(
     state: State<'_, AppState>,
     company_id: String,
     year: i32,
     caen: String,
+    // avg_employees: nr. mediu de salariați (criteriu OMFP de mărime); None/0 dacă necunoscut.
+    // form_override: forțează forma ("UU"|"BS"|"BL"); altfel se clasifică automat (2-din-3).
+    avg_employees: Option<i64>,
+    form_override: Option<String>,
     dest_path: String,
 ) -> AppResult<String> {
     use crate::anaf_decl::bilant_xml::{
@@ -151,18 +156,22 @@ pub async fn export_bilant_xml(
     .await
     .ok();
 
-    // Entity size → form (OMFP-1802, simplified on total assets): ≤ 2.250.000 lei →
-    // microîntreprindere S1005/UU; ≤ 25.000.000 lei → entitate mică S1003/BS; else entitate
-    // mare/mijlocie S1002/BL. The full F20 (small/large) + the developed F10 (large, rd.1-103) are
-    // completed in the ANAF app after import.
+    // Entity size → form (OMFP 1802/2014 pct. 9, OMF 4164/2024): the "2-din-3 criterii" rule —
+    // an entity stays in a size class if it does NOT exceed at least 2 of {total active, cifra de
+    // afaceri netă, nr. mediu salariați}. micro = {2.250.000, 4.500.000, 10}; entitate mică =
+    // {25.000.000, 50.000.000, 50}; peste = mijlocie/mare. A form_override (from the UI) wins.
     let bil = db_bilant(&state.db, &company_id, &from, &to).await?;
     let total_assets: f64 = bil.total_assets.parse().unwrap_or(0.0);
-    let form = if total_assets <= 2_250_000.0 {
-        "UU"
-    } else if total_assets <= 25_000_000.0 {
-        "BS"
-    } else {
-        "BL"
+    let turnover: f64 = pnl.operating_revenue.parse().unwrap_or(0.0); // ≈ cifra de afaceri
+    let emp = avg_employees.unwrap_or(0).max(0) as f64;
+    let exceeds = |a: f64, t: f64, e: f64| {
+        u8::from(total_assets > a) + u8::from(turnover > t) + u8::from(emp > e)
+    };
+    let form = match form_override.as_deref() {
+        Some(f @ ("UU" | "BS" | "BL")) => f,
+        _ if exceeds(2_250_000.0, 4_500_000.0, 10.0) <= 1 => "UU",
+        _ if exceeds(25_000_000.0, 50_000_000.0, 50.0) <= 1 => "BS",
+        _ => "BL",
     };
     let micro = form == "UU";
 

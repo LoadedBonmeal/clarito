@@ -15,6 +15,9 @@ import {
   Badge,
   Banner,
   Btn,
+  Modal,
+  Field,
+  Input,
 } from "@/components/rf";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -67,6 +70,7 @@ export function GlLedgerPage() {
   const [postResult,      setPostResult]      = useState<GlPostResult | null>(null);
   const [reconcileReport, setReconcileReport] = useState<ReconcileReport | null>(null);
   const [vatClose,        setVatClose]        = useState<VatSettlementResult | null>(null);
+  const [showBilantExport, setShowBilantExport] = useState(false);
   const [trialBal,        setTrialBal]        = useState<TrialBalance | null>(null);
   const [journalReg,      setJournalReg]      = useState<JournalRegister | null>(null);
   const [ledger,          setLedger]          = useState<LedgerAccount[] | null>(null);
@@ -274,23 +278,20 @@ export function GlLedgerPage() {
     }
   };
 
-  const handleExportBilantXml = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+  const runBilantExport = async (caen: string, avgEmployees: number | null, formOverride: string | null) => {
+    if (!activeCompanyId) return;
     const year = Number(dateFrom.slice(0, 4));
-    const caen = (window.prompt("Cod CAEN al companiei (4 cifre, ex. 6201):", "") ?? "").trim();
-    if (!caen) return;
-    if (!/^\d{4}$/.test(caen)) { notify.error("Cod CAEN invalid — 4 cifre."); return; }
     const dest = await saveDialog({
-      title: "Salvează bilanț XML (ANAF S1005/S1003)",
+      title: "Salvează bilanț XML (ANAF S1005/S1003/S1002)",
       defaultPath: `bilant-${year}.xml`,
       filters: [{ name: "XML", extensions: ["xml"] }],
     });
     if (!dest) return;
     try {
-      await api.gl.exportBilantXml(activeCompanyId, year, caen, dest);
-      notify.success(`Bilanț XML exportat (micro S1005 / mică S1003, după mărime) — F10 + F20. ` +
-        `Importați-l în PDF-ul inteligent ANAF, verificați header-ul și completați F30 (și F20 ` +
-        `detaliat pentru entitate mică).`);
+      await api.gl.exportBilantXml(activeCompanyId, year, caen, avgEmployees, formOverride, dest);
+      notify.success(`Bilanț XML exportat (forma după criteriile de mărime) — F10 + F20. ` +
+        `Importați-l în PDF-ul inteligent ANAF, verificați header-ul și completați F30.`);
+      setShowBilantExport(false);
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut exporta bilanțul XML."));
     }
@@ -424,8 +425,8 @@ export function GlLedgerPage() {
               variant="secondary"
               icon="declaration"
               disabled={!activeCompanyId}
-              onClick={() => void handleExportBilantXml()}
-              title="Exportă bilanțul XML oficial ANAF (S1005/S1003) pentru import în PDF inteligent"
+              onClick={() => setShowBilantExport(true)}
+              title="Exportă bilanțul XML oficial ANAF (S1005/S1003/S1002) pentru import în PDF inteligent"
             >
               Bilanț XML
             </Btn>
@@ -927,6 +928,76 @@ export function GlLedgerPage() {
           </SectionCard>
         )}
       </div>
+
+      {showBilantExport && (
+        <BilantExportModal
+          onClose={() => setShowBilantExport(false)}
+          onExport={runBilantExport}
+        />
+      )}
     </div>
+  );
+}
+
+/** Bilanț XML export dialog — CAEN + nr. mediu salariați + alegerea formei (auto / UU / BS / BL),
+ *  înlocuiește window.prompt (care nu funcționează în WebView-ul Tauri). */
+function BilantExportModal({
+  onClose,
+  onExport,
+}: {
+  onClose: () => void;
+  onExport: (caen: string, avgEmployees: number | null, formOverride: string | null) => Promise<void>;
+}) {
+  const [caen, setCaen] = useState("");
+  const [emp, setEmp] = useState("");
+  const [form, setForm] = useState("auto");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!/^\d{4}$/.test(caen.trim())) { notify.error("Cod CAEN invalid — 4 cifre (ex. 6201)."); return; }
+    setBusy(true);
+    try {
+      await onExport(
+        caen.trim(),
+        emp.trim() === "" ? null : Number(emp),
+        form === "auto" ? null : form,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open onOpenChange={(o) => { if (!o) onClose(); }} title="Export bilanț XML (ANAF)" width={460}
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose} disabled={busy}>Anulează</Btn>
+          <Btn variant="primary" icon="declaration" disabled={busy} onClick={() => void submit()}>
+            {busy ? "Se exportă…" : "Exportă"}
+          </Btn>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <Banner variant="info">
+          Forma (microîntreprindere S1005 / mică S1003 / mare S1002) se alege după criteriile OMFP
+          (2 din 3: active, cifra de afaceri, nr. salariați). Puteți forța forma dacă o cunoașteți.
+        </Banner>
+        <Field label="Cod CAEN (4 cifre)" required>
+          <Input className="mono" placeholder="6201" value={caen} onChange={(e) => setCaen(e.target.value)} autoFocus />
+        </Field>
+        <Field label="Nr. mediu de salariați (criteriu de mărime)">
+          <Input inputMode="numeric" placeholder="ex. 8" value={emp} onChange={(e) => setEmp(e.target.value)} />
+        </Field>
+        <Field label="Forma">
+          <select className="rf-input" value={form} onChange={(e) => setForm(e.target.value)}>
+            <option value="auto">Automat (după criterii)</option>
+            <option value="UU">Microîntreprindere (S1005)</option>
+            <option value="BS">Entitate mică (S1003)</option>
+            <option value="BL">Entitate mare/mijlocie (S1002)</option>
+          </select>
+        </Field>
+      </div>
+    </Modal>
   );
 }
