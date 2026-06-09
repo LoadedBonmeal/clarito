@@ -186,12 +186,11 @@ fn post_sales_invoice(
 ) -> (GlJournal, Vec<GlEntry>) {
     // Use canonical partner ID (CUI-based) so it matches MasterFiles and SourceDocuments
     let contact_id = canonical_partner_id(contact_id_raw, partner_cui.unwrap_or(""));
-    // Storno: negăm toate sumele (stornare în roșu conform OMFP 1802/2014).
-    let sign = if is_storno {
-        Decimal::NEGATIVE_ONE
-    } else {
-        Decimal::ONE
-    };
+    // Sign is ALWAYS +1: the stored line amounts are already correctly signed (a normal sale is
+    // positive; a storno credit note is stored with NEGATIVE lines). This matches D300/D394, which
+    // sum the stored signed amounts WITHOUT negation. A STORNED original keeps its positive sale
+    // (it happened) and is reversed by the credit note's negative lines — never flipped in place.
+    let sign = Decimal::ONE;
 
     // FIX 2: Compute gross as Σnet + Σvat so the GL always balances exactly,
     // independent of any rounding discrepancy in the stored total_amount.
@@ -1145,7 +1144,6 @@ pub async fn generate_gl_entries(
         let contact_id: String = row.try_get("contact_id").unwrap_or_default();
         let contact_cui: Option<String> = row.try_get("contact_cui").unwrap_or(None);
         let storno_ref: Option<String> = row.try_get("storno_of_invoice_id").unwrap_or(None);
-        let status: String = row.try_get("status").unwrap_or_default();
         let currency: String = row
             .try_get("currency")
             .unwrap_or_else(|_| "RON".to_string());
@@ -1199,12 +1197,16 @@ pub async fn generate_gl_entries(
             continue; // invoice with no lines — skip
         }
 
-        // Storno: dacă are referință la factură originală SAU status == STORNED
-        let is_storno = storno_ref.is_some() || status == "STORNED";
+        // "is_storno" = this document is a credit note (has storno_of_invoice_id). A STORNED
+        // ORIGINAL is NOT a storno doc — it keeps its positive sale (it happened) and is reversed
+        // by the separate credit note's negative lines. (Was previously also true for status==
+        // STORNED, which double-inverted the sign vs D300 — FIX-1.)
+        let is_storno = storno_ref.is_some();
 
-        // Cash VAT: route standard ("S") output VAT to 4428 (neexigibilă) only for fresh
-        // (non-storno) invoices issued within the regime window. Storno keeps today's 4427
-        // behaviour (the proportional 4428/4427 reversal is deferred — see CASH_VAT_DESIGN.md).
+        // Cash VAT: route standard ("S") output VAT to 4428 (neexigibilă) only for non-credit-note
+        // invoices issued within the regime window — so a STORNED original re-posts to 4428 exactly
+        // as it did when VALIDATED. (Credit-note 4428/4427 reversal under cash VAT is deferred —
+        // see CASH_VAT_DESIGN.md.)
         let cash_vat_applies = !is_storno && in_cash_vat_window(&issue_date);
 
         let (journal, entries) = post_sales_invoice(
@@ -2859,29 +2861,23 @@ mod tests {
         let cid = "co5";
         insert_company(&pool, cid).await;
         insert_contact(&pool, cid, "ct5", "CUI5").await;
-        // Factură originală
+        // Realistic storno (mirrors commands::storno_invoice): the ORIGINAL is set to STORNED but
+        // keeps its POSITIVE lines (the sale happened), and a SEPARATE credit note with
+        // storno_of_invoice_id carries NEGATIVE lines (the reversal). FIX-1: no sign flip — the
+        // stored amounts are already signed, matching D300.
         insert_invoice(
-            &pool,
-            cid,
-            "inv5",
-            "ct5",
-            "VALIDATED",
-            "1000",
-            "190",
-            "1190",
-            None,
+            &pool, cid, "inv5", "ct5", "STORNED", "1000", "190", "1190", None,
         )
         .await;
-        // Notă de credit / storno cu referință la original
         insert_invoice(
             &pool,
             cid,
             "inv5s",
             "ct5",
             "VALIDATED",
-            "1000",
-            "190",
-            "1190",
+            "-1000",
+            "-190",
+            "-1190",
             Some("inv5"),
         )
         .await;
@@ -2890,22 +2886,55 @@ mod tests {
             .await
             .expect("generate");
 
+        // The STORNED original still posts the REAL (positive) sale — not a backwards reversal.
+        let jpk_orig = get_journal_pk(&pool, "inv5").await;
+        assert_eq!(
+            get_entry_amount(&pool, &jpk_orig, "4111", "debit").await,
+            rdec!(1190),
+            "STORNED original keeps D 4111 = 1190"
+        );
+        assert_eq!(
+            get_entry_amount(&pool, &jpk_orig, "707", "credit").await,
+            rdec!(1000),
+            "STORNED original keeps C 707 = 1000"
+        );
+
+        // The credit note (negative stored lines) posts the reversal: C 4111 / D 707.
         let jpk_storno = get_journal_pk(&pool, "inv5s").await;
-
-        // Storno: 4111 trebuie să fie pe CREDIT (nu debit) — suma negativă => credit
-        let d4111 = get_entry_amount(&pool, &jpk_storno, "4111", "debit").await;
-        let c4111 = get_entry_amount(&pool, &jpk_storno, "4111", "credit").await;
-        let d707 = get_entry_amount(&pool, &jpk_storno, "707", "debit").await;
-        let c707 = get_entry_amount(&pool, &jpk_storno, "707", "credit").await;
-
-        // La storno sumele sunt negate: gross negativ => credit 4111; net negativ => debit 707
-        assert_eq!(d4111, Decimal::ZERO, "Storno: 4111 nu trebuie debit");
-        assert_eq!(c4111, rdec!(1190), "Storno: C 4111 = 1190 (stornare)");
-        assert_eq!(c707, Decimal::ZERO, "Storno: 707 nu trebuie credit");
-        assert_eq!(d707, rdec!(1000), "Storno: D 707 = 1000 (stornare)");
+        assert_eq!(
+            get_entry_amount(&pool, &jpk_storno, "4111", "debit").await,
+            Decimal::ZERO,
+            "Storno: 4111 nu trebuie debit"
+        );
+        assert_eq!(
+            get_entry_amount(&pool, &jpk_storno, "4111", "credit").await,
+            rdec!(1190),
+            "Storno: C 4111 = 1190 (stornare)"
+        );
+        assert_eq!(
+            get_entry_amount(&pool, &jpk_storno, "707", "credit").await,
+            Decimal::ZERO,
+            "Storno: 707 nu trebuie credit"
+        );
+        assert_eq!(
+            get_entry_amount(&pool, &jpk_storno, "707", "debit").await,
+            rdec!(1000),
+            "Storno: D 707 = 1000 (stornare)"
+        );
 
         let (td, tc) = sum_entries(&pool, &jpk_storno).await;
         assert_eq!(td, tc, "Storno: dezechilibru GL");
+
+        // GL ↔ D300 ties out: original +190 and credit note -190 net to 0 collected, in-period
+        // AND on a re-run (no sign inversion of prior-period revenue — FIX-1 regression guard).
+        let rec = reconcile(&pool, cid, "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        assert!(
+            rec.discrepancies.is_empty(),
+            "reconcile must be clean: {:?}",
+            rec.discrepancies
+        );
     }
 
     // ── Test 6: Idempotență ───────────────────────────────────────────────────
