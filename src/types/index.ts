@@ -106,6 +106,8 @@ export interface CreateCompanyInput {
   iban?: string;
   bankName?: string;
   invoiceSeries?: string;
+  /** "micro" or "profit" — settable at creation. */
+  taxRegime?: string;
 }
 
 export type UpdateCompanyInput = Partial<

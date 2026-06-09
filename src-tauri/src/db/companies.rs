@@ -144,6 +144,8 @@ pub struct CreateCompanyInput {
     pub bank_name: Option<String>,
 
     pub invoice_series: Option<String>,
+    /// "micro" (default) or "profit" — the tax regime, settable at creation.
+    pub tax_regime: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -306,12 +308,12 @@ pub async fn create(pool: &SqlitePool, input: CreateCompanyInput) -> AppResult<C
             id, cui, legal_name, trade_name, registry_number, vat_payer,
             address, city, county, postal_code, country,
             email, phone, iban, bank_name,
-            invoice_series, created_at, updated_at
+            invoice_series, tax_regime, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10, ?11,
             ?12, ?13, ?14, ?15,
-            ?16, ?17, ?17
+            ?16, ?18, ?17, ?17
         )",
     )
     .bind(&id)
@@ -331,6 +333,7 @@ pub async fn create(pool: &SqlitePool, input: CreateCompanyInput) -> AppResult<C
     .bind(&input.bank_name)
     .bind(input.invoice_series.as_deref().unwrap_or("FACT"))
     .bind(now)
+    .bind(input.tax_regime.as_deref().unwrap_or("micro"))
     .execute(pool)
     .await?;
 
@@ -620,6 +623,7 @@ mod tests {
             iban: None,
             bank_name: None,
             invoice_series: None,
+            tax_regime: None,
         }
     }
 

@@ -264,6 +264,10 @@ export function LineItemsEditor({
     cursor: "pointer",
   };
 
+  // Legea 141/2025: 19% and 5% are abolished from 01.08.2025 for new operations. Warn if a line
+  // still carries one (e.g. auto-filled from an old product), steering to 21% / 11%.
+  const hasAbolishedRate = lines.some((l) => l.vatRate === 19 || l.vatRate === 5);
+
   return (
     <div
       style={{
@@ -271,6 +275,18 @@ export function LineItemsEditor({
         borderTop: "1px solid var(--rf-border)",
       }}
     >
+      {hasAbolishedRate && (
+        <div
+          className="rf-banner rf-banner--warning"
+          style={{ margin: "8px 12px", display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}
+        >
+          <Icon name="alertTriangle" size={16} />
+          <span>
+            O linie folosește o cotă TVA abrogată (19% sau 5%, Legea 141/2025, de la 01.08.2025).
+            Pentru operațiuni noi folosiți <b>21%</b> (standard) sau <b>11%</b> (redus).
+          </span>
+        </div>
+      )}
       <table
         style={{
           width: "100%",

@@ -38,6 +38,7 @@ pub async fn run_if_empty(pool: &SqlitePool) -> AppResult<()> {
             iban: Some("RO49AAAA1B31007593840000".into()),
             bank_name: Some("Banca Transilvania".into()),
             invoice_series: Some("ACME".into()),
+            tax_regime: None,
         },
     )
     .await?;
@@ -60,6 +61,7 @@ pub async fn run_if_empty(pool: &SqlitePool) -> AppResult<()> {
             iban: Some("RO12BTRL01234567890123".into()),
             bank_name: Some("BCR".into()),
             invoice_series: Some("CT".into()),
+            tax_regime: None,
         },
     )
     .await?;

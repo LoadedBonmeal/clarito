@@ -71,6 +71,7 @@ const schema = z.object({
   bankName: z.string().optional(),
   invoiceSeries: z.string().min(1, "Seria e obligatorie."),
   vatPayer: z.boolean().optional(),
+  taxRegime: z.enum(["micro", "profit"]).optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -103,6 +104,7 @@ export function CompanyNewPage() {
       bankName: "",
       invoiceSeries: "FACT",
       vatPayer: false,
+      taxRegime: "micro",
     },
   });
 
@@ -150,6 +152,7 @@ export function CompanyNewPage() {
       iban: v.iban || undefined,
       bankName: v.bankName || undefined,
       invoiceSeries: v.invoiceSeries,
+      taxRegime: v.taxRegime ?? "micro",
     });
   };
 
@@ -336,6 +339,14 @@ export function CompanyNewPage() {
                     {...form.register("vatPayer")}
                   />
                   Plătitor TVA
+                </label>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+                  <span className="rf-kv-label">Regim fiscal</span>
+                  <select className="rf-input" {...form.register("taxRegime")}>
+                    <option value="micro">Microîntreprindere (impozit pe venit 1%)</option>
+                    <option value="profit">Impozit pe profit (16%)</option>
+                  </select>
                 </label>
               </form>
             )}
