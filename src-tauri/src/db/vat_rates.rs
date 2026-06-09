@@ -158,12 +158,51 @@ pub async fn set_active(pool: &SqlitePool, id: &str, active: bool) -> AppResult<
     get(pool, id).await
 }
 
+/// Advisory note for a VAT rate used on a given issue date, per Legea 141/2025 (rates effective
+/// 1 Aug 2025). Returns `Some(message)` when the rate is abolished or conditional for that date,
+/// `None` for a clean current rate. Used to WARN (not block) — a 19%/5% rate stays valid for
+/// correcting/storning pre-Aug-2025 invoices. `issue_date` is `YYYY-MM-DD`.
+pub fn vat_rate_note(rate_pct: i64, issue_date: &str) -> Option<String> {
+    let after_reform = issue_date >= "2025-08-01";
+    match (rate_pct, after_reform) {
+        (19, true) | (5, true) => Some(format!(
+            "Cota {rate_pct}% a fost abrogată de la 01.08.2025 (Legea 141/2025). Pentru operațiuni \
+             noi folosiți 21% (standard) sau 11% (redus); păstrați {rate_pct}% doar pentru \
+             corectarea/stornarea facturilor emise înainte de 01.08.2025."
+        )),
+        (9, true) => Some(
+            "Cota 9% se aplică doar tranzitoriu pentru livrarea de locuințe care îndeplinesc \
+             condițiile Legii 141/2025 (suprafață utilă ≤120 mp, valoare ≤600.000 lei exclusiv \
+             TVA, act de avans încheiat înainte de 01.08.2025), până la 31.07.2026."
+                .to_string(),
+        ),
+        _ => None,
+    }
+}
+
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
+
+    #[test]
+    fn vat_rate_note_flags_abolished_and_transitional_rates() {
+        // 19%/5% abolished from 01.08.2025 → advisory on/after that date.
+        assert!(vat_rate_note(19, "2026-09-01")
+            .unwrap()
+            .contains("abrogată"));
+        assert!(vat_rate_note(5, "2025-08-01").unwrap().contains("abrogată"));
+        // before the reform they are clean.
+        assert!(vat_rate_note(19, "2025-07-31").is_none());
+        // 9% is transitional housing.
+        assert!(vat_rate_note(9, "2026-01-01").unwrap().contains("locuințe"));
+        // current rates are clean.
+        assert!(vat_rate_note(21, "2026-09-01").is_none());
+        assert!(vat_rate_note(11, "2026-09-01").is_none());
+        assert!(vat_rate_note(0, "2026-09-01").is_none());
+    }
 
     /// Build an in-memory SQLite pool with the vat_rates schema and seed rows.
     async fn setup_pool() -> SqlitePool {

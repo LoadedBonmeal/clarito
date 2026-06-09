@@ -427,6 +427,7 @@ pub fn run() {
             // vat rates — global editable catalog (R15 Wave 2)
             commands::vat_rates::list_vat_rates,
             commands::vat_rates::get_vat_rate,
+            commands::vat_rates::vat_rate_note,
             commands::vat_rates::create_vat_rate,
             commands::vat_rates::update_vat_rate,
             commands::vat_rates::delete_vat_rate,

@@ -829,6 +829,9 @@ export const vatRates = {
     invoke<VatRate[]>("list_vat_rates", { activeOnly: activeOnly ?? null }),
   /** Get a single VAT rate by id. Returns NotFound if missing. */
   get: (id: string) => invoke<VatRate>("get_vat_rate", { id }),
+  /** Legislative advisory (Legea 141/2025) for a rate on an issue date — null if none. */
+  note: (ratePct: number, issueDate: string) =>
+    invoke<string | null>("vat_rate_note", { ratePct, issueDate }),
   /** Create a new VAT rate entry. */
   create: (input: VatRateInput) => invoke<VatRate>("create_vat_rate", { input }),
   /** Update an existing VAT rate entry. */

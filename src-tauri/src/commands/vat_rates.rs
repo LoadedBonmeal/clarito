@@ -26,6 +26,13 @@ pub async fn get_vat_rate(state: State<'_, AppState>, id: String) -> AppResult<V
     vat_rates::get(&state.db, &id).await
 }
 
+/// Legislative advisory for a rate on a given issue date (Legea 141/2025): a note when 19%/5% are
+/// used after 01.08.2025 (abolished) or 9% (transitional housing), else null. Pure — no DB.
+#[tauri::command]
+pub async fn vat_rate_note(rate_pct: i64, issue_date: String) -> AppResult<Option<String>> {
+    Ok(vat_rates::vat_rate_note(rate_pct, &issue_date))
+}
+
 /// R15 Wave 2: Create a new VAT rate entry.
 #[tauri::command]
 pub async fn create_vat_rate(
