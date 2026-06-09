@@ -53,6 +53,10 @@ pub struct D101Result {
     pub non_deductible_expenses: String,
     pub fiscal_result: String,
     pub prior_loss: String,
+    /// Pierderea efectiv recuperată anul acesta = min(prior_loss, 70% × profit fiscal pozitiv).
+    pub loss_used: String,
+    /// Pierderea rămasă de reportat = prior_loss − loss_used.
+    pub loss_remaining: String,
     pub taxable_profit: String,
     pub tax16: String,
     pub sponsorship_cap: String,
@@ -78,7 +82,12 @@ pub fn compute_d101(input: &D101Input) -> D101Result {
     let fiscal_result =
         input.accounting_result - input.non_taxable_revenue - input.fiscal_deductions
             + input.non_deductible_expenses;
-    let taxable_profit = (fiscal_result - input.prior_loss).max(z);
+    // Recuperarea pierderii fiscale e PLAFONATĂ la 70% din profitul fiscal pozitiv al anului (OUG
+    // 115/2023, art. 31 — în vigoare de la 2024). Diferența rămâne de reportat (max 7 ani).
+    let loss_cap = r2(fiscal_result.max(z) * Decimal::new(70, 2)); // 70%
+    let loss_used = input.prior_loss.max(z).min(loss_cap);
+    let loss_remaining = (input.prior_loss.max(z) - loss_used).max(z);
+    let taxable_profit = (fiscal_result - loss_used).max(z);
     let tax16 = r2(taxable_profit * Decimal::new(16, 2)); // 16%
                                                           // Sponsorship credit: min(0,75% × cifra de afaceri, 20% × impozit), then capped by the amount paid.
     let cap_turnover = r2(input.turnover * Decimal::new(75, 4)); // 0.0075
@@ -95,6 +104,8 @@ pub fn compute_d101(input: &D101Input) -> D101Result {
         non_deductible_expenses: fmt(input.non_deductible_expenses),
         fiscal_result: fmt(fiscal_result),
         prior_loss: fmt(input.prior_loss),
+        loss_used: fmt(loss_used),
+        loss_remaining: fmt(loss_remaining),
         taxable_profit: fmt(taxable_profit),
         tax16: fmt(tax16),
         sponsorship_cap: fmt(sponsorship_cap),
@@ -143,20 +154,31 @@ mod tests {
 
     #[test]
     fn loss_yields_zero_tax_and_carries_prior_loss() {
-        // Fiscal result negative → taxable 0 → tax 0.
+        // Fiscal result negative → taxable 0 → tax 0; nicio pierdere recuperată (cap 0).
         let r = compute_d101(&D101Input {
             accounting_result: d("-20000"),
+            prior_loss: d("3000"),
             ..Default::default()
         });
         assert_eq!(r.taxable_profit, "0.00");
         assert_eq!(r.tax16, "0.00");
-        // Prior loss exceeds a small profit → taxable 0.
-        let r2 = compute_d101(&D101Input {
-            accounting_result: d("5000"),
-            prior_loss: d("8000"),
+        assert_eq!(r.loss_used, "0.00");
+        assert_eq!(r.loss_remaining, "3000.00"); // se reportează integral
+    }
+
+    #[test]
+    fn prior_loss_recovery_capped_at_70_percent() {
+        // Profit fiscal 100.000, pierdere reportată 80.000. Recuperare = min(80.000, 70%×100.000) =
+        // 70.000 → impozabil 30.000; impozit 16% = 4.800; rămân 10.000 de reportat (OUG 115/2023).
+        let r = compute_d101(&D101Input {
+            accounting_result: d("100000"),
+            prior_loss: d("80000"),
             ..Default::default()
         });
-        assert_eq!(r2.taxable_profit, "0.00");
-        assert_eq!(r2.tax16, "0.00");
+        assert_eq!(r.fiscal_result, "100000.00");
+        assert_eq!(r.loss_used, "70000.00");
+        assert_eq!(r.loss_remaining, "10000.00");
+        assert_eq!(r.taxable_profit, "30000.00");
+        assert_eq!(r.tax16, "4800.00");
     }
 }

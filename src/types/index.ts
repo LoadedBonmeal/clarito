@@ -1176,6 +1176,9 @@ export interface IntrastatStatus {
 
 /** D100 (obligații de plată) — quarterly obligation row. */
 export interface D100Result {
+  /** False când D100 nu se aplică (profit, trim. IV → se regularizează prin D101). */
+  applicable: boolean;
+  note: string | null;
   codOblig: string;
   label: string;
   base: string;
@@ -1203,6 +1206,8 @@ export interface D101Result {
   nonDeductibleExpenses: string;
   fiscalResult: string;
   priorLoss: string;
+  lossUsed: string;
+  lossRemaining: string;
   taxableProfit: string;
   tax16: string;
   sponsorshipCap: string;

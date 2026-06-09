@@ -33,8 +33,8 @@ pub async fn compute_payroll(input: PayrollInput) -> AppResult<PayrollResult> {
     Ok(compute_payroll_fn(&input))
 }
 
-/// D100 (obligații de plată) — rândul trimestrial: micro cod 121 (1% × venituri) sau profit cod
-/// 103 (16% × rezultat), din P&L-ul perioadei; suma de plată = datorată − plăți anterioare.
+/// D100 (obligații de plată) — rândul trimestrial: micro poziția 5 (1% × venituri) sau profit
+/// poziția 2 (16% × rezultat), din P&L-ul perioadei; suma de plată = datorată − plăți anterioare.
 #[tauri::command]
 pub async fn compute_d100(
     state: State<'_, AppState>,
