@@ -55,6 +55,8 @@ pub struct CreateContactInput {
     pub legal_name: String,
     pub vat_payer: Option<bool>,
     pub is_individual: Option<bool>,
+    /// TVA la încasare (cash VAT) — captured from ANAF; drives buyer-side deferred deduction.
+    pub cash_vat: Option<bool>,
 
     pub address: Option<String>,
     pub city: Option<String>,
@@ -75,6 +77,7 @@ pub struct UpdateContactInput {
     pub legal_name: Option<String>,
     pub vat_payer: Option<bool>,
     pub is_individual: Option<bool>,
+    pub cash_vat: Option<bool>,
 
     pub address: Option<String>,
     pub city: Option<String>,
@@ -223,11 +226,11 @@ pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<C
         "INSERT INTO contacts (
             id, company_id, contact_type, cui, legal_name, vat_payer,
             address, city, county, country, email, phone, currency,
-            is_individual, created_at, updated_at
+            is_individual, cash_vat, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-            ?14, ?15, ?15
+            ?14, ?16, ?15, ?15
         )",
     )
     .bind(&id)
@@ -245,6 +248,7 @@ pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<C
     .bind(&input.currency)
     .bind(input.is_individual.unwrap_or(false))
     .bind(now)
+    .bind(input.cash_vat.unwrap_or(false))
     .execute(pool)
     .await?;
 
@@ -327,6 +331,7 @@ pub async fn update(
             phone        = ?11,
             currency     = ?12,
             is_individual = ?13,
+            cash_vat     = ?16,
             updated_at   = ?14
         WHERE id = ?1 AND company_id = ?15",
     )
@@ -345,6 +350,7 @@ pub async fn update(
     .bind(input.is_individual.unwrap_or(current.is_individual))
     .bind(now)
     .bind(company_id)
+    .bind(input.cash_vat.unwrap_or(current.cash_vat))
     .execute(pool)
     .await?;
 
@@ -610,6 +616,7 @@ mod tests {
             legal_name: "Primul Client SRL".to_string(),
             vat_payer: Some(false),
             is_individual: None,
+            cash_vat: None,
             address: None,
             city: None,
             county: None,
@@ -629,6 +636,7 @@ mod tests {
             legal_name: "Al Doilea Client SRL".to_string(),
             vat_payer: Some(false),
             is_individual: None,
+            cash_vat: None,
             address: None,
             city: None,
             county: None,
@@ -651,6 +659,7 @@ mod tests {
             legal_name: "Client Comp2 SRL".to_string(),
             vat_payer: Some(false),
             is_individual: None,
+            cash_vat: None,
             address: None,
             city: None,
             county: None,
@@ -677,6 +686,7 @@ mod tests {
             legal_name: "Propria Firma SRL".to_string(),
             vat_payer: Some(true),
             is_individual: None,
+            cash_vat: None,
             address: None,
             city: None,
             county: None,
@@ -704,6 +714,7 @@ mod tests {
             legal_name: "Alt Client SRL".to_string(),
             vat_payer: Some(false),
             is_individual: None,
+            cash_vat: None,
             address: None,
             city: None,
             county: None,

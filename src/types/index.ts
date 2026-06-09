@@ -129,6 +129,8 @@ export interface Contact {
   vatPayer: boolean;
   /** True for an individual/consumer (persoană fizică) — B2C; no CUI required. */
   isIndividual: boolean;
+  /** TVA la încasare (cash VAT) — buyer-side deduction deferred to payment (art. 297). */
+  cashVat: boolean;
   address: string | null;
   city: string | null;
   county: string | null;
@@ -147,6 +149,8 @@ export interface CreateContactInput {
   legalName: string;
   vatPayer?: boolean;
   isIndividual?: boolean;
+  /** TVA la încasare (cash VAT) — captured from ANAF. */
+  cashVat?: boolean;
   address?: string;
   city?: string;
   county?: string;
@@ -381,6 +385,11 @@ export interface AnafCompanyData {
   registryNumber: string | null;
   phone: string | null;
   vatPayer: boolean;
+  /** TVA la încasare (cash VAT). */
+  cashVat: boolean;
+  /** Registered in "Registrul RO e-Factura". */
+  efacturaRegistered: boolean;
+  /** False = inactive contributor (restricted buyer deductibility, art. 11). */
   active: boolean;
 }
 

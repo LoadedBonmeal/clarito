@@ -16,7 +16,7 @@ import { CsvImportModal } from "@/components/shared/CsvImportModal";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import {
   PageHeader, Btn, IconBtn, Badge, Card, Field, Input, Select,
-  Segmented, SearchInput, Empty, Modal,
+  Segmented, SearchInput, Empty, Modal, Banner,
 } from "@/components/rf";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
@@ -355,6 +355,7 @@ function ContactModal({
     legalName: contact?.legalName ?? "",
     vatPayer: contact?.vatPayer ?? false,
     isIndividual: contact?.isIndividual ?? false,
+    cashVat: contact?.cashVat ?? false,
     address: contact?.address ?? "",
     city: contact?.city ?? "",
     county: contact?.county ?? "",
@@ -363,6 +364,42 @@ function ContactModal({
     phone: contact?.phone ?? "",
   });
   const [error, setError] = useState<string | null>(null);
+
+  // ANAF CUI lookup → auto-fill the form (name/address/vatPayer/cashVat) + surface inactive /
+  // cash-VAT / e-Factura status. Fired on the CUI field's blur (valid RO CUI) or the button.
+  const [anafInfo, setAnafInfo] = useState<
+    { inactive: boolean; cashVat: boolean; efactura: boolean } | null
+  >(null);
+  const [lastLookedUp, setLastLookedUp] = useState<string>("");
+  const anafLookup = useMutation({
+    mutationFn: (cui: string) => api.companies.fetchAnafData(cui),
+    onSuccess: (d) => {
+      setForm((f) => ({
+        ...f,
+        legalName: d.legalName || f.legalName,
+        address: d.address || f.address,
+        city: d.city || f.city,
+        county: d.county || f.county,
+        vatPayer: d.vatPayer,
+        cashVat: d.cashVat,
+      }));
+      setAnafInfo({ inactive: !d.active, cashVat: d.cashVat, efactura: d.efacturaRegistered });
+      notify.success(`Date preluate din ANAF: ${d.legalName}`);
+    },
+    onError: () => {
+      setAnafInfo(null);
+      notify.error("CUI-ul nu a fost găsit în baza ANAF.");
+    },
+  });
+
+  const triggerAnafLookup = () => {
+    const raw = (form.cui ?? "").trim();
+    const clean = raw.toUpperCase().replace(/^RO/, "");
+    // Only for a RO-format CUI on a non-individual; skip duplicate lookups of the same value.
+    if (form.isIndividual || !/^\d{2,10}$/.test(clean) || clean === lastLookedUp) return;
+    setLastLookedUp(clean);
+    anafLookup.mutate(raw);
+  };
 
   const create = useMutation({
     mutationFn: (input: CreateContactInput) => api.contacts.create(input),
@@ -465,11 +502,28 @@ function ContactModal({
             </Select>
           </Field>
           <Field label="CUI">
-            <Input
-              placeholder="ex. RO12345678"
-              className="mono"
-              {...field("cui")}
-            />
+            <div style={{ display: "flex", gap: 6 }}>
+              <Input
+                placeholder="ex. RO12345678"
+                className="mono"
+                style={{ flex: 1 }}
+                {...field("cui")}
+                onBlur={triggerAnafLookup}
+              />
+              <Btn
+                variant="secondary"
+                size="sm"
+                disabled={anafLookup.isPending || (form.isIndividual as boolean)}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setLastLookedUp("");
+                  triggerAnafLookup();
+                }}
+                title="Preia datele firmei din ANAF după CUI"
+              >
+                {anafLookup.isPending ? "…" : "ANAF ↓"}
+              </Btn>
+            </div>
           </Field>
         </div>
 
@@ -561,6 +615,32 @@ function ContactModal({
           />
           Persoană fizică (consumator) — B2C, fără CUI
         </label>
+
+        <label
+          style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}
+        >
+          <input
+            type="checkbox"
+            className="rf-cbx"
+            checked={form.cashVat as boolean}
+            onChange={(e) => setForm((f) => ({ ...f, cashVat: e.target.checked }))}
+          />
+          TVA la încasare (cash-VAT)
+        </label>
+
+        {anafInfo?.inactive && (
+          <Banner variant="error">
+            Contribuabil <b>INACTIV</b> la ANAF — facturile primite au deductibilitate restricționată
+            pentru cheltuieli și TVA (art. 11 Cod fiscal). Verificați înainte de a înregistra
+            achiziții.
+          </Banner>
+        )}
+        {anafInfo?.cashVat && (
+          <Banner variant="warning">
+            Furnizor cu <b>TVA la încasare</b> — TVA deductibilă se amână până la plata facturii
+            (art. 297 Cod fiscal).
+          </Banner>
+        )}
 
         {error && (
           <div className="rf-banner rf-banner--error">

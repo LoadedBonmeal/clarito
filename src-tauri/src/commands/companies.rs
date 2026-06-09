@@ -132,6 +132,13 @@ pub struct AnafCompanyData {
     pub registry_number: Option<String>,
     pub phone: Option<String>,
     pub vat_payer: bool,
+    /// TVA la încasare (cash VAT) — `inregistrare_RTVAI.statusTvaIncasare`. The buyer's VAT
+    /// deduction is deferred to payment (art. 297 Cod fiscal) when the supplier is on cash VAT.
+    pub cash_vat: bool,
+    /// Registered in "Registrul RO e-Factura" — `date_generale.statusRO_e_Factura`.
+    pub efactura_registered: bool,
+    /// False when the company is an inactive contributor (`stare_inactiv.statusInactivi`) — its
+    /// invoices carry restricted deductibility for the buyer (art. 11 Cod fiscal).
     pub active: bool,
 }
 
@@ -152,7 +159,7 @@ pub async fn fetch_anaf_company_data(cui: String) -> AppResult<AnafCompanyData> 
     let body = serde_json::json!([{"cui": cui_number, "data": today}]);
     let client = reqwest::Client::new();
     let response = client
-        .post("https://webservicesp.anaf.ro/PlatitorTvaRest/api/v9/ws/tva")
+        .post("https://webservicesp.anaf.ro/api/PlatitorTvaRest/v9/tva")
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
         .json(&body)
@@ -187,9 +194,28 @@ pub async fn fetch_anaf_company_data(cui: String) -> AppResult<AnafCompanyData> 
     }
 
     let entry = &found_list[0];
-    let date_gen = entry.get("date_generale").ok_or(AppError::NotFound)?;
-    let inreg_tva = entry.get("inregistrare_scop_tva");
+    map_anaf_entry(entry, cleaned).ok_or(AppError::NotFound)
+}
 
+/// Map one `found[i]` entry from the ANAF v9 PlatitorTvaRest reply to `AnafCompanyData`. Pure +
+/// unit-tested so the (subtle) field keys stay correct: `inregistrare_scop_Tva` (capital T),
+/// the structured `adresa_sediu_social` for city/county, cash-VAT, e-Factura, and inactive status.
+/// Returns `None` if `date_generale` is missing.
+fn map_anaf_entry(entry: &serde_json::Value, cleaned: String) -> Option<AnafCompanyData> {
+    let date_gen = entry.get("date_generale")?;
+    // NB: the v9 key is `inregistrare_scop_Tva` (capital T) — the lowercase spelling never matches.
+    let inreg_tva = entry.get("inregistrare_scop_Tva");
+    // Structured registered-office address (date_generale has no localitate/judet — only a flat
+    // `adresa` string); use the `s`-prefixed fields for a clean city + 2-letter county code.
+    let sediu = entry.get("adresa_sediu_social");
+    let sediu_field = |field: &str| -> String {
+        sediu
+            .and_then(|s| s.get(field))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
     let str_field = |field: &str| -> String {
         date_gen
             .get(field)
@@ -198,14 +224,8 @@ pub async fn fetch_anaf_company_data(cui: String) -> AppResult<AnafCompanyData> 
             .trim()
             .to_string()
     };
-
     let opt_str_field = |field: &str| -> Option<String> {
-        let s = date_gen
-            .get(field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string();
+        let s = str_field(field);
         if s.is_empty() {
             None
         } else {
@@ -215,23 +235,43 @@ pub async fn fetch_anaf_company_data(cui: String) -> AppResult<AnafCompanyData> 
 
     let legal_name = str_field("denumire");
     let address = str_field("adresa");
-    let city = str_field("localitate");
-    let raw_county = str_field("judet");
-    let county = if raw_county.len() > 2 {
-        raw_county[..2].to_uppercase()
+    // City from the structured office (e.g. "Mun. Bacău"), stripping the admin prefix; county as
+    // the 2-letter auto code ("BC") the app uses. Fall back to nothing if the office is absent.
+    let raw_city = sediu_field("sdenumire_Localitate");
+    let city = if raw_city.contains("ucure") {
+        // The capital arrives as "Sector N Mun. Bucureşti" (note the ş) — normalise to "București".
+        "București".to_string()
     } else {
-        raw_county.to_uppercase()
+        raw_city
+            .strip_prefix("Mun. ")
+            .or_else(|| raw_city.strip_prefix("Municipiul "))
+            .or_else(|| raw_city.strip_prefix("Oraș "))
+            .or_else(|| raw_city.strip_prefix("Com. "))
+            .or_else(|| raw_city.strip_prefix("Sat "))
+            .unwrap_or(&raw_city)
+            .trim()
+            .to_string()
     };
+    let county = sediu_field("scod_JudetAuto").to_uppercase();
     let postal_code = opt_str_field("codPostal");
     let registry_number = opt_str_field("nrRegCom");
     let phone = opt_str_field("telefon");
 
-    let vat_payer = inreg_tva
-        .and_then(|v| v.get("scpTVA"))
+    // VAT scope, cash VAT, e-Factura registration, inactive status.
+    let bool_at = |obj: Option<&serde_json::Value>, field: &str| -> bool {
+        obj.and_then(|v| v.get(field))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    };
+    let vat_payer = bool_at(inreg_tva, "scpTVA");
+    let cash_vat = bool_at(entry.get("inregistrare_RTVAI"), "statusTvaIncasare");
+    let efactura_registered = date_gen
+        .get("statusRO_e_Factura")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let active = !bool_at(entry.get("stare_inactiv"), "statusInactivi");
 
-    Ok(AnafCompanyData {
+    Some(AnafCompanyData {
         cui: cleaned,
         legal_name,
         address,
@@ -241,6 +281,78 @@ pub async fn fetch_anaf_company_data(cui: String) -> AppResult<AnafCompanyData> 
         registry_number,
         phone,
         vat_payer,
-        active: true,
+        cash_vat,
+        efactura_registered,
+        active,
     })
+}
+
+#[cfg(test)]
+mod anaf_tests {
+    use super::map_anaf_entry;
+
+    #[test]
+    fn maps_v9_entry_with_correct_keys() {
+        // Shape mirrors the real ANAF v9 reply (verified against a live lookup).
+        let entry = serde_json::json!({
+            "date_generale": {
+                "denumire": "DEDEMAN SRL",
+                "adresa": "JUD. BACĂU, MUN. BACĂU, STR. ALEXEI TOLSTOI, NR.8",
+                "nrRegCom": "J04/123/1993",
+                "telefon": "0234513330",
+                "codPostal": "600093",
+                "statusRO_e_Factura": true
+            },
+            "inregistrare_scop_Tva": { "scpTVA": true },
+            "inregistrare_RTVAI": { "statusTvaIncasare": false },
+            "stare_inactiv": { "statusInactivi": false },
+            "adresa_sediu_social": {
+                "sdenumire_Localitate": "Mun. Bacău",
+                "sdenumire_Judet": "BACĂU",
+                "scod_JudetAuto": "BC",
+                "scod_Postal": "600093"
+            }
+        });
+        let d = map_anaf_entry(&entry, "2816464".into()).expect("maps");
+        assert_eq!(d.legal_name, "DEDEMAN SRL");
+        assert!(d.vat_payer, "scpTVA under the capital-T key must be read");
+        assert!(!d.cash_vat);
+        assert!(d.efactura_registered);
+        assert!(d.active, "statusInactivi=false → active");
+        assert_eq!(d.city, "Bacău", "admin prefix stripped");
+        assert_eq!(d.county, "BC", "2-letter auto code");
+    }
+
+    #[test]
+    fn inactive_and_cash_vat_are_flagged() {
+        let entry = serde_json::json!({
+            "date_generale": { "denumire": "X SRL", "adresa": "" },
+            "inregistrare_scop_Tva": { "scpTVA": true },
+            "inregistrare_RTVAI": { "statusTvaIncasare": true },
+            "stare_inactiv": { "statusInactivi": true }
+        });
+        let d = map_anaf_entry(&entry, "123".into()).expect("maps");
+        assert!(d.cash_vat, "statusTvaIncasare=true");
+        assert!(!d.active, "statusInactivi=true → inactive");
+    }
+
+    #[test]
+    fn bucharest_locality_normalises_to_city_and_sector_county() {
+        // The capital arrives as "Sector N Mun. Bucureşti" with county auto-code "B".
+        let entry = serde_json::json!({
+            "date_generale": { "denumire": "Y SRL", "adresa": "" },
+            "adresa_sediu_social": {
+                "sdenumire_Localitate": "Sector 6 Mun. Bucureşti",
+                "scod_JudetAuto": "B"
+            }
+        });
+        let d = map_anaf_entry(&entry, "1".into()).expect("maps");
+        assert_eq!(d.city, "București");
+        assert_eq!(d.county, "B");
+    }
+
+    #[test]
+    fn missing_date_generale_returns_none() {
+        assert!(map_anaf_entry(&serde_json::json!({}), "1".into()).is_none());
+    }
 }
