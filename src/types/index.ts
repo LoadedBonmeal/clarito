@@ -1005,6 +1005,26 @@ export interface ClosePeriodResult {
   entryDate: string;
 }
 
+export interface BilantReport {
+  periodTo: string;
+  immobilizedAssets: string;
+  inventory: string;
+  receivables: string;
+  shortInvestments: string;
+  cashBank: string;
+  prepaidExpenses: string;
+  totalAssets: string;
+  equity: string;
+  currentResult: string;
+  provisions: string;
+  longTermDebt: string;
+  currentLiabilities: string;
+  deferredRevenue: string;
+  totalEquityLiabilities: string;
+  balanced: boolean;
+  entitySizeNote: string;
+}
+
 export interface ProfitLoss {
   periodFrom: string;
   periodTo: string;

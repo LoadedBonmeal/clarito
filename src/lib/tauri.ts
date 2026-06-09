@@ -48,6 +48,7 @@ import type {
   TrialBalance,
   ProfitLoss,
   ClosePeriodResult,
+  BilantReport,
   JournalRegister,
   LedgerAccount,
   SyncResult,
@@ -602,6 +603,9 @@ export const gl = {
   /** Contul de profit și pierdere (P&L) + notele de închidere 6/7 → 121. */
   profitAndLoss: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<ProfitLoss>("profit_and_loss", { companyId, periodFrom, periodTo }),
+  /** Bilanț contabil (balance sheet) pentru perioadă. */
+  bilant: (companyId: string, periodFrom: string, periodTo: string) =>
+    invoke<BilantReport>("bilant", { companyId, periodFrom, periodTo }),
   /** Postează închiderea conturilor 6/7 → 121 (idempotent per perioadă). */
   closePeriod: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<ClosePeriodResult>("close_period", { companyId, periodFrom, periodTo }),

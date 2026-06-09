@@ -2432,6 +2432,132 @@ pub fn compute_pnl(
     }
 }
 
+// ─── Bilanț contabil (balance sheet) ─────────────────────────────────────────
+
+/// Synthetic-level balance sheet (bilanț prescurtat essence), derived from the trial balance.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BilantReport {
+    pub period_to: String,
+    // ACTIVE
+    pub immobilized_assets: String,
+    pub inventory: String,
+    pub receivables: String,
+    pub short_investments: String,
+    pub cash_bank: String,
+    pub prepaid_expenses: String,
+    pub total_assets: String,
+    // CAPITALURI ȘI DATORII
+    pub equity: String,
+    /// Rezultatul exercițiului (inclus în capitaluri); 0 dacă perioada e deja închisă în 121.
+    pub current_result: String,
+    pub provisions: String,
+    pub long_term_debt: String,
+    pub current_liabilities: String,
+    pub deferred_revenue: String,
+    pub total_equity_liabilities: String,
+    /// Active = Capitaluri + Datorii (în limita a 0,01 lei).
+    pub balanced: bool,
+    pub entity_size_note: String,
+}
+
+/// Build the balance sheet from the (full) trial-balance rows. Class 1-5 are classified by code +
+/// balance side; the class-6/7 net result is folded into equity as the period result, so the sheet
+/// balances whether or not the formal 6/7 → 121 close has been posted. Pure + testable.
+pub fn compute_bilant(rows: &[TrialBalanceRow], period_to: &str) -> BilantReport {
+    let parse = |s: &str| s.parse::<Decimal>().unwrap_or(Decimal::ZERO);
+    let z = Decimal::ZERO;
+    let (mut immob, mut inv, mut recv, mut shinv, mut cash, mut prepaid) = (z, z, z, z, z, z);
+    let (mut equity, mut provisions, mut ltd, mut curr_liab, mut def_rev) = (z, z, z, z, z);
+    let (mut rev7, mut exp6) = (z, z);
+    for r in rows {
+        let code = &r.account_code;
+        let nd = parse(&r.closing_debit) - parse(&r.closing_credit); // net debit (asset side +)
+        let nc = -nd; // net credit (liability/equity side +)
+        match code.chars().next() {
+            Some('2') => immob += nd, // 20x/21x/23x/26x net of 28x/29x (credit) by sign
+            Some('3') => inv += nd,   // stocuri net of 39x
+            Some('4') => {
+                if code == "471" {
+                    prepaid += nd;
+                } else if code == "472" || code.starts_with("475") {
+                    def_rev += nc;
+                } else if nd > z {
+                    recv += nd;
+                } else {
+                    curr_liab += nc;
+                }
+            }
+            Some('5') => {
+                if code.starts_with("50") || code.starts_with("59") {
+                    shinv += nd;
+                } else if nd > z {
+                    cash += nd;
+                } else {
+                    curr_liab += nc; // e.g. 519 credite bancare pe termen scurt
+                }
+            }
+            Some('1') => {
+                if code.starts_with("15") {
+                    provisions += nc;
+                } else if code.starts_with("16") {
+                    ltd += nc;
+                } else {
+                    equity += nc; // 10x/11x/12x (incl. 121 if already closed; 129 debit subtracts)
+                }
+            }
+            Some('6') => exp6 += nd,
+            Some('7') => rev7 += nc,
+            _ => {}
+        }
+    }
+    let current_result = rev7 - exp6; // 0 when 6/7 already swept to 121
+    let equity_total = equity + current_result;
+    let total_assets = immob + inv + recv + shinv + cash + prepaid;
+    let total_el = equity_total + provisions + ltd + curr_liab + def_rev;
+    let balanced = (total_assets - total_el).abs() < Decimal::new(1, 2);
+    let entity_size_note = if total_assets <= Decimal::from(2_250_000) {
+        "Probabil microîntreprindere (active ≤ 2.250.000 lei) → bilanț prescurtat, formular S1005. \
+         Încadrarea finală cere 2 din 3 criterii (active, cifră de afaceri, nr. salariați)."
+    } else if total_assets <= Decimal::from(25_000_000) {
+        "Probabil entitate mică → bilanț prescurtat, formular S1003."
+    } else {
+        "Probabil entitate mijlocie/mare → bilanț dezvoltat, formular S1002."
+    }
+    .to_string();
+
+    BilantReport {
+        period_to: period_to.to_string(),
+        immobilized_assets: fmt_dec(immob),
+        inventory: fmt_dec(inv),
+        receivables: fmt_dec(recv),
+        short_investments: fmt_dec(shinv),
+        cash_bank: fmt_dec(cash),
+        prepaid_expenses: fmt_dec(prepaid),
+        total_assets: fmt_dec(total_assets),
+        equity: fmt_dec(equity_total),
+        current_result: fmt_dec(current_result),
+        provisions: fmt_dec(provisions),
+        long_term_debt: fmt_dec(ltd),
+        current_liabilities: fmt_dec(curr_liab),
+        deferred_revenue: fmt_dec(def_rev),
+        total_equity_liabilities: fmt_dec(total_el),
+        balanced,
+        entity_size_note,
+    }
+}
+
+/// Build the bilanț for a period from the GL trial balance.
+pub async fn bilant(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<BilantReport> {
+    let tb = trial_balance(pool, company_id, period_from, period_to).await?;
+    Ok(compute_bilant(&tb.rows, period_to))
+}
+
 // ─── Registru-jurnal (cod 14-1-1) ────────────────────────────────────────────
 
 /// One line of the Registru-jurnal (model 14-1-1): one GL entry, with the account on its
@@ -2889,6 +3015,33 @@ mod tests {
             Some("4000.00".into()),
             "idempotent — 121 not doubled"
         );
+    }
+
+    #[test]
+    fn bilant_balances_assets_against_equity_and_liabilities() {
+        let rows = vec![
+            tb_row("2131", "Echipamente", "50000.00", "0.00"),
+            tb_row("2813", "Amortizare echipamente", "0.00", "10000.00"), // contra → nets immob
+            tb_row("371", "Mărfuri", "20000.00", "0.00"),
+            tb_row("4111", "Clienți", "30000.00", "0.00"),
+            tb_row("5121", "Bancă", "15000.00", "0.00"),
+            tb_row("101", "Capital social", "0.00", "50000.00"),
+            tb_row("401", "Furnizori", "0.00", "25000.00"),
+            tb_row("162", "Credite bancare termen lung", "0.00", "20000.00"),
+            tb_row("707", "Venituri mărfuri", "0.00", "10000.00"), // not yet closed
+        ];
+        let b = compute_bilant(&rows, "2026-12-31");
+        assert_eq!(b.immobilized_assets, "40000.00"); // 50.000 − 10.000 amortizare
+        assert_eq!(b.inventory, "20000.00");
+        assert_eq!(b.receivables, "30000.00");
+        assert_eq!(b.cash_bank, "15000.00");
+        assert_eq!(b.total_assets, "105000.00");
+        assert_eq!(b.current_result, "10000.00"); // 707 folded into equity even before the close
+        assert_eq!(b.equity, "60000.00"); // 50.000 capital + 10.000 rezultat
+        assert_eq!(b.current_liabilities, "25000.00");
+        assert_eq!(b.long_term_debt, "20000.00");
+        assert_eq!(b.total_equity_liabilities, "105000.00");
+        assert!(b.balanced, "Active = Capitaluri + Datorii");
     }
 
     // ── Helper: in-memory pool cu schema migrată ──────────────────────────────

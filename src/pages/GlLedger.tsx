@@ -23,7 +23,7 @@ import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import type {
   GlPostResult, ReconcileReport, VatSettlementResult, TrialBalance,
-  JournalRegister, LedgerAccount, ProfitLoss,
+  JournalRegister, LedgerAccount, ProfitLoss, BilantReport,
 } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -73,6 +73,8 @@ export function GlLedgerPage() {
   const [pnl,             setPnl]             = useState<ProfitLoss | null>(null);
   const [loadingPnl,      setLoadingPnl]      = useState(false);
   const [closingPeriod,   setClosingPeriod]   = useState(false);
+  const [bilant,          setBilant]          = useState<BilantReport | null>(null);
+  const [loadingBilant,   setLoadingBilant]   = useState(false);
 
   const yearOptions    = buildYearOptions();
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
@@ -218,6 +220,25 @@ export function GlLedgerPage() {
     }
   };
 
+  const handleBilant = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    setLoadingBilant(true);
+    setBilant(null);
+    try {
+      const b = await api.gl.bilant(activeCompanyId, dateFrom, dateTo);
+      setBilant(b);
+      if (!b.balanced) {
+        notify.warn("Bilanțul NU se verifică (Active ≠ Capitaluri + Datorii) — verificați balanța.");
+      } else {
+        notify.success(`Bilanț generat — total active ${b.totalAssets} lei (echilibrat).`);
+      }
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut genera bilanțul."));
+    } finally {
+      setLoadingBilant(false);
+    }
+  };
+
   // ── Registru-jurnal + Cartea mare ─────────────────────────────────────────
 
   const handleJournalRegister = async () => {
@@ -333,6 +354,14 @@ export function GlLedgerPage() {
               onClick={() => void handleProfitLoss()}
             >
               {loadingPnl ? "…" : "Profit și pierdere"}
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon="reports"
+              disabled={loadingBilant || !activeCompanyId}
+              onClick={() => void handleBilant()}
+            >
+              {loadingBilant ? "…" : "Bilanț"}
             </Btn>
             <Btn
               variant="secondary"
@@ -556,6 +585,68 @@ export function GlLedgerPage() {
                   Notele de închidere (D 7xx / C 121, D 121 / C 6xx) sunt pregătite ({pnl.closingEntries.length} rânduri).
                 </div>
               )}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── Bilanț contabil ──────────────────────────────────────────────── */}
+        {bilant && (
+          <SectionCard icon="reports" title="Bilanț contabil (sinteză)">
+            <div style={{ padding: "12px 16px 4px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <Badge variant={bilant.balanced ? "success" : "error"}>
+                {bilant.balanced ? "Verificat — Active = Capitaluri + Datorii" : "NEverificat"}
+              </Badge>
+              <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>{bilant.entitySizeNote}</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, padding: "8px 16px 16px" }}>
+              <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
+                <tbody>
+                  <tr style={{ fontWeight: 700, borderBottom: "1px solid var(--rf-border)" }}>
+                    <td style={{ padding: "4px 8px" }}>ACTIVE</td><td />
+                  </tr>
+                  {[
+                    ["Active imobilizate (net)", bilant.immobilizedAssets],
+                    ["Stocuri", bilant.inventory],
+                    ["Creanțe", bilant.receivables],
+                    ["Investiții pe termen scurt", bilant.shortInvestments],
+                    ["Casa și conturi la bănci", bilant.cashBank],
+                    ["Cheltuieli în avans", bilant.prepaidExpenses],
+                  ].map(([label, v]) => (
+                    <tr key={label}>
+                      <td style={{ padding: "2px 8px", color: "var(--rf-text-muted)" }}>{label}</td>
+                      <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{fmtRON(v)}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ fontWeight: 700, borderTop: "2px solid var(--rf-border)" }}>
+                    <td style={{ padding: "4px 8px" }}>TOTAL ACTIVE</td>
+                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(bilant.totalAssets)}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
+                <tbody>
+                  <tr style={{ fontWeight: 700, borderBottom: "1px solid var(--rf-border)" }}>
+                    <td style={{ padding: "4px 8px" }}>CAPITALURI ȘI DATORII</td><td />
+                  </tr>
+                  {[
+                    ["Capitaluri proprii (incl. rezultat)", bilant.equity],
+                    ["— din care rezultatul exercițiului", bilant.currentResult],
+                    ["Provizioane", bilant.provisions],
+                    ["Datorii pe termen lung", bilant.longTermDebt],
+                    ["Datorii curente", bilant.currentLiabilities],
+                    ["Venituri în avans", bilant.deferredRevenue],
+                  ].map(([label, v]) => (
+                    <tr key={label}>
+                      <td style={{ padding: "2px 8px", color: "var(--rf-text-muted)" }}>{label}</td>
+                      <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{fmtRON(v)}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ fontWeight: 700, borderTop: "2px solid var(--rf-border)" }}>
+                    <td style={{ padding: "4px 8px" }}>TOTAL CAPITALURI + DATORII</td>
+                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(bilant.totalEquityLiabilities)}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </SectionCard>
         )}

@@ -8,6 +8,7 @@ use tauri::State;
 
 use crate::db::gl::profit_and_loss as db_profit_and_loss;
 use crate::db::gl::ProfitLoss;
+use crate::db::gl::{bilant as db_bilant, BilantReport};
 use crate::db::gl::{general_ledger as db_general_ledger, LedgerAccount};
 use crate::db::gl::{generate_gl_entries as db_generate, reconcile as db_reconcile};
 use crate::db::gl::{journal_register as db_journal_register, JournalRegister};
@@ -97,6 +98,18 @@ pub async fn profit_and_loss(
         &period_to,
     )
     .await
+}
+
+/// Bilanț contabil (balance sheet) pentru perioadă — agregă clasele 1-5 din balanță (active,
+/// capitaluri, datorii), cu rezultatul exercițiului inclus în capitaluri. OMFP 1802/2014.
+#[tauri::command]
+pub async fn bilant(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+) -> AppResult<BilantReport> {
+    db_bilant(&state.db, &company_id, &period_from, &period_to).await
 }
 
 /// Închiderea conturilor de venituri și cheltuieli (clasele 6 și 7) în 121 «Profit sau pierdere»
