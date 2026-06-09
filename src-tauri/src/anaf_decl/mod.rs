@@ -5,6 +5,7 @@
 //! pattern (see `ubl/generator.rs`), NOT the legacy hand-rolled string builders
 //! in `commands/{declarations,d394,saft}.rs`.
 
+pub mod bilant_xml;
 pub mod cash_vat;
 pub mod d101;
 pub mod d112;

@@ -6,7 +6,7 @@
  */
 
 import { useState } from "react";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirm, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import {
   PageHeader,
@@ -274,6 +274,27 @@ export function GlLedgerPage() {
     }
   };
 
+  const handleExportBilantXml = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    const year = Number(dateFrom.slice(0, 4));
+    const caen = (window.prompt("Cod CAEN al companiei (4 cifre, ex. 6201):", "") ?? "").trim();
+    if (!caen) return;
+    if (!/^\d{4}$/.test(caen)) { notify.error("Cod CAEN invalid — 4 cifre."); return; }
+    const dest = await saveDialog({
+      title: "Salvează bilanț XML (ANAF S1005)",
+      defaultPath: `bilant-${year}.xml`,
+      filters: [{ name: "XML", extensions: ["xml"] }],
+    });
+    if (!dest) return;
+    try {
+      await api.gl.exportBilantXml(activeCompanyId, year, caen, dest);
+      notify.success(`Bilanț XML (S1005) exportat — F10 + F20. Importați-l în PDF-ul inteligent ` +
+        `ANAF, verificați header-ul (cod fiscal teritorial, întocmitor) și completați F30.`);
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut exporta bilanțul XML."));
+    }
+  };
+
   // ── Registru-jurnal + Cartea mare ─────────────────────────────────────────
 
   const handleJournalRegister = async () => {
@@ -397,6 +418,15 @@ export function GlLedgerPage() {
               onClick={() => void handleBilant()}
             >
               {loadingBilant ? "…" : "Bilanț"}
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon="declaration"
+              disabled={!activeCompanyId}
+              onClick={() => void handleExportBilantXml()}
+              title="Exportă bilanțul XML oficial ANAF (S1005/S1003) pentru import în PDF inteligent"
+            >
+              Bilanț XML
             </Btn>
             <Btn
               variant="secondary"

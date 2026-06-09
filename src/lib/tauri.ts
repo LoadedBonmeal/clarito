@@ -608,6 +608,9 @@ export const gl = {
   /** Bilanț contabil (balance sheet) pentru perioadă. */
   bilant: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<BilantReport>("bilant", { companyId, periodFrom, periodTo }),
+  /** Exportă bilanțul XML oficial ANAF (S1005 micro) la destPath. Returnează calea. */
+  exportBilantXml: (companyId: string, year: number, caen: string, destPath: string) =>
+    invoke<string>("export_bilant_xml", { companyId, year, caen, destPath }),
   /** Postează impozitul pe venit/profit (698/691 → 4418/4411); amount = override opțional. */
   postIncomeTax: (companyId: string, periodFrom: string, periodTo: string, amount?: string) =>
     invoke<IncomeTaxResult>("post_income_tax", { companyId, periodFrom, periodTo, amount: amount ?? null }),

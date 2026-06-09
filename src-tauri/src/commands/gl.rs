@@ -18,7 +18,7 @@ use crate::db::gl::{post_period_close as db_close_period, ClosePeriodResult};
 use crate::db::gl::{post_vat_settlement as db_close_vat, VatSettlementResult};
 use crate::db::gl::{trial_balance as db_trial_balance, TrialBalance};
 use crate::db::gl::{GlPostResult, ReconcileReport};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
 /// Generează (sau re-generează idempotent) notele contabile GL pentru o perioadă.
@@ -100,6 +100,62 @@ pub async fn profit_and_loss(
         &period_to,
     )
     .await
+}
+
+/// Exportă bilanțul în format XML oficial ANAF (S1005 «UU» micro / S1003 «BS» entitate mică) cu
+/// blocurile F10 (bilanț) + F20 (cont de profit și pierdere) din contabilitate, pentru import în
+/// PDF-ul inteligent ANAF. Header-ul (cod fiscal teritorial, întocmitor, audit) + F30 «Date
+/// informative» se completează în aplicația ANAF după import. Returnează calea fișierului scris.
+#[tauri::command]
+pub async fn export_bilant_xml(
+    state: State<'_, AppState>,
+    company_id: String,
+    year: i32,
+    caen: String,
+    dest_path: String,
+) -> AppResult<String> {
+    use crate::anaf_decl::bilant_xml::{
+        compute_f10, compute_f20, generate_bilant_xml, BilantHeader,
+    };
+    // CAEN is a required, enum-validated header field — must be a 4-digit code.
+    let caen = caen.trim().to_string();
+    if caen.len() != 4 || !caen.chars().all(|c| c.is_ascii_digit()) {
+        return Err(AppError::Validation(
+            "Cod CAEN invalid — introduceți 4 cifre (ex. 6201).".into(),
+        ));
+    }
+    let company = crate::db::companies::get(&state.db, &company_id).await?;
+    let from = format!("{year}-01-01");
+    let to = format!("{year}-12-31");
+    let tb = db_trial_balance(&state.db, &company_id, &from, &to).await?;
+    let pnl = db_profit_and_loss(&state.db, &company_id, &company.tax_regime, &from, &to).await?;
+    // Prior-year P&L for the F20 comparative column (best-effort).
+    let pyear = year - 1;
+    let prior = db_profit_and_loss(
+        &state.db,
+        &company_id,
+        &company.tax_regime,
+        &format!("{pyear}-01-01"),
+        &format!("{pyear}-12-31"),
+    )
+    .await
+    .ok();
+
+    let f10 = compute_f10(&tb);
+    let f20 = compute_f20(&pnl, prior.as_ref());
+    let header = BilantHeader {
+        year,
+        cui: company.cui.clone(),
+        den: company.legal_name.clone(),
+        adresa: format!("{}, {}, {}", company.address, company.city, company.county),
+        reg_com: company.registry_number.clone().unwrap_or_default(),
+        caen,
+        county: company.county.clone(),
+        nume_admin: company.legal_name.clone(),
+    };
+    let xml = generate_bilant_xml(&header, &f10, &f20);
+    std::fs::write(&dest_path, xml).map_err(|e| AppError::Other(e.to_string()))?;
+    Ok(dest_path)
 }
 
 /// Bilanț contabil (balance sheet) pentru perioadă — agregă clasele 1-5 din balanță (active,
