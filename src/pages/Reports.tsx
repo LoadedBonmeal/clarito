@@ -39,6 +39,7 @@ import type { ReportView } from "@/router";
 
 import { D390View }            from "./reports/D390View";
 import { D394View }            from "./reports/D394View";
+import { D101View }            from "./reports/D101View";
 import { EtvaView }            from "./reports/EtvaView";
 import { SaftView }            from "./reports/SaftView";
 import { SalesJournalView }    from "./reports/SalesJournalView";
@@ -93,6 +94,7 @@ const TABS: { value: ReportView; label: string }[] = [
   { value: "etva",              label: "e-TVA"               },
   { value: "d390",              label: "D390"                },
   { value: "d394",              label: "D394"                },
+  { value: "d101",              label: "D101"                },
   { value: "saft",              label: "D406 SAF-T"          },
   { value: "sales-journal",     label: "Jurnal vânzări"      },
   { value: "purchase-journal",  label: "Jurnal cumpărări"    },
@@ -496,6 +498,10 @@ export function ReportsPage() {
 
         {view === "d394" && (
           <D394View dateFrom={dateFrom} dateTo={dateTo} />
+        )}
+
+        {view === "d101" && (
+          <D101View dateFrom={dateFrom} dateTo={dateTo} />
         )}
 
         {/* ── SAF-T ──────────────────────────────────────────────────────── */}

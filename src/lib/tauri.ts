@@ -664,6 +664,19 @@ export const declarations = {
       luna,
       testMode,
     }),
+  /** D101 (impozit pe profit) worksheet: base from the period P&L + the supplied adjustments. */
+  computeD101: (
+    companyId: string,
+    periodFrom: string,
+    periodTo: string,
+    input: import("@/types").D101Input,
+  ) =>
+    invoke<import("@/types").D101Result>("compute_d101", {
+      companyId,
+      periodFrom,
+      periodTo,
+      input,
+    }),
   /**
    * Generează XML D300 și îl salvează la destPath. Returnează calea.
    * R4: `manualDeductibleVat` — when provided, overrides the server-computed

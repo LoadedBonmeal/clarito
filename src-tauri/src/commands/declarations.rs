@@ -19,6 +19,7 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 use tauri::State;
 
+use crate::anaf_decl::d101::{compute_d101 as compute_d101_fn, D101Input, D101Result};
 use crate::anaf_decl::d300::D300Submission;
 use crate::anaf_decl::version::resolve;
 use crate::anaf_decl::DeclKind;
@@ -26,6 +27,31 @@ use crate::db::companies;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::ubl::fx::{amount_to_ron, parse_rate};
+
+/// D101 (impozit pe profit anual) worksheet: takes the base (rezultat brut + cifră de afaceri) from
+/// the period P&L and applies the caller-supplied fiscal adjustments (art. 19 Cod fiscal).
+#[tauri::command]
+pub async fn compute_d101(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+    input: D101Input,
+) -> AppResult<D101Result> {
+    let company = companies::get(&state.db, &company_id).await?;
+    let pnl = crate::db::gl::profit_and_loss(
+        &state.db,
+        &company_id,
+        &company.tax_regime,
+        &period_from,
+        &period_to,
+    )
+    .await?;
+    let mut input = input;
+    input.accounting_result = pnl.gross_result.parse().unwrap_or(Decimal::ZERO);
+    input.turnover = pnl.operating_revenue.parse().unwrap_or(Decimal::ZERO);
+    Ok(compute_d101_fn(&input))
+}
 
 // ── DUK gate types ────────────────────────────────────────────────────────────
 

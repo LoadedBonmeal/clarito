@@ -6,6 +6,7 @@
 //! in `commands/{declarations,d394,saft}.rs`.
 
 pub mod cash_vat;
+pub mod d101;
 pub mod d300;
 pub mod d390;
 pub mod d394;

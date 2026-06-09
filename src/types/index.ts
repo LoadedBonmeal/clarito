@@ -1005,6 +1005,33 @@ export interface ClosePeriodResult {
   entryDate: string;
 }
 
+/** D101 (impozit pe profit) worksheet adjustments — the user-entered fiscal items. */
+export interface D101Input {
+  nonTaxableRevenue?: string;
+  fiscalDeductions?: string;
+  nonDeductibleExpenses?: string;
+  priorLoss?: string;
+  sponsorship?: string;
+  anticipatedPayments?: string;
+}
+
+export interface D101Result {
+  accountingResult: string;
+  nonTaxableRevenue: string;
+  fiscalDeductions: string;
+  nonDeductibleExpenses: string;
+  fiscalResult: string;
+  priorLoss: string;
+  taxableProfit: string;
+  tax16: string;
+  sponsorshipCap: string;
+  sponsorshipCredit: string;
+  taxAfterCredits: string;
+  anticipatedPayments: string;
+  balanceDue: string;
+  balanceRecoverable: string;
+}
+
 export interface BilantReport {
   periodTo: string;
   immobilizedAssets: string;

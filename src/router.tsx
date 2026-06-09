@@ -21,6 +21,7 @@ export type ReportView =
   | "etva"
   | "d390"
   | "d394"
+  | "d101"
   | "saft"
   | "sales-journal"
   | "purchase-journal"
@@ -31,6 +32,7 @@ const REPORT_VIEWS: ReportView[] = [
   "etva",
   "d390",
   "d394",
+  "d101",
   "saft",
   "sales-journal",
   "purchase-journal",
