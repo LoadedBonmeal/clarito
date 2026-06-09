@@ -18,7 +18,11 @@ import type { EtransportDeclaration, EtransportGood, EtransportDoc } from "@/typ
 
 const OPERATION_TYPES: { value: string; label: string }[] = [
   { value: "10", label: "10 — Achiziție intracomunitară" },
+  { value: "12", label: "12 — Operațiuni în sistem lohn (intrare)" },
+  { value: "14", label: "14 — Stocuri la dispoziția clientului (intrare)" },
   { value: "20", label: "20 — Livrare intracomunitară" },
+  { value: "22", label: "22 — Operațiuni în sistem lohn (ieșire)" },
+  { value: "24", label: "24 — Stocuri la dispoziția clientului (ieșire)" },
   { value: "30", label: "30 — Transport pe teritoriul național" },
   { value: "40", label: "40 — Import" },
   { value: "50", label: "50 — Export" },
@@ -65,6 +69,8 @@ export function EtransportPage() {
   const [dataTransport, setDataTransport] = useState("");
   const [startLoc, setStartLoc] = useState("");
   const [finalLoc, setFinalLoc] = useState("");
+  const [judetStart, setJudetStart] = useState("");
+  const [judetFinal, setJudetFinal] = useState("");
   const [documents, setDocuments] = useState<EtransportDoc[]>([emptyDoc()]);
   const [errors, setErrors] = useState<string[]>([]);
 
@@ -74,8 +80,8 @@ export function EtransportPage() {
     goods,
     partner: { codTara: partnerCountry, cod: partnerCode, denumire: partnerName },
     transport: { nrVehicul, dataTransport },
-    locStart: { denumireLocalitate: startLoc },
-    locFinal: { denumireLocalitate: finalLoc },
+    locStart: { codJudet: judetStart ? Number(judetStart) : null, denumireLocalitate: startLoc },
+    locFinal: { codJudet: judetFinal ? Number(judetFinal) : null, denumireLocalitate: finalLoc },
     documents,
   });
 
@@ -165,11 +171,16 @@ export function EtransportPage() {
               <label style={lbl}><span style={muted}>Cod partener</span><input className="rf-input" value={partnerCode} onChange={(e) => setPartnerCode(e.target.value)} /></label>
             </div>
 
-            {/* Transport + route */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+            {/* Transport */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <label style={lbl}><span style={muted}>Nr. vehicul</span><input className="rf-input" value={nrVehicul} onChange={(e) => setNrVehicul(e.target.value.toUpperCase())} /></label>
               <label style={lbl}><span style={muted}>Data transport</span><input className="rf-input" type="date" value={dataTransport} onChange={(e) => setDataTransport(e.target.value)} /></label>
+            </div>
+            {/* Route — județ (cod 1..52) + localitate sunt ambele necesare pentru o adresă validă */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr 2fr", gap: 12 }}>
+              <label style={lbl}><span style={muted}>Județ plecare (cod)</span><input className="rf-input" inputMode="numeric" value={judetStart} onChange={(e) => setJudetStart(e.target.value)} /></label>
               <label style={lbl}><span style={muted}>Localitate plecare</span><input className="rf-input" value={startLoc} onChange={(e) => setStartLoc(e.target.value)} /></label>
+              <label style={lbl}><span style={muted}>Județ sosire (cod)</span><input className="rf-input" inputMode="numeric" value={judetFinal} onChange={(e) => setJudetFinal(e.target.value)} /></label>
               <label style={lbl}><span style={muted}>Localitate sosire</span><input className="rf-input" value={finalLoc} onChange={(e) => setFinalLoc(e.target.value)} /></label>
             </div>
 

@@ -13,7 +13,7 @@
 //! token as e-Factura. The live upload lives in anaf::client; this module builds + validates the
 //! payload (pure, fully testable) and is the input to that call.
 
-use quick_xml::events::{BytesEnd, BytesStart, Event};
+use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 use quick_xml::Writer;
 use serde::Deserialize;
 use std::io::Cursor;
@@ -176,6 +176,20 @@ pub fn validate_etransport(d: &EtransportDeclaration) -> Vec<String> {
     if d.documents.is_empty() {
         errs.push("Cel puțin un document de transport este obligatoriu.".into());
     }
+    if !route_complete(&d.loc_start) {
+        errs.push(
+            "Locul de plecare incomplet: completați județul + localitatea, sau un punct de \
+             frontieră / birou vamal."
+                .into(),
+        );
+    }
+    if !route_complete(&d.loc_final) {
+        errs.push(
+            "Locul de sosire incomplet: completați județul + localitatea, sau un punct de \
+             frontieră / birou vamal."
+                .into(),
+        );
+    }
     errs
 }
 
@@ -186,6 +200,28 @@ fn dec_attr(v: f64) -> String {
 /// Truncate + strip control chars for an attribute value (quick-xml escapes &<>'" itself).
 fn clean(s: &str, max: usize) -> String {
     s.chars().filter(|c| !c.is_control()).take(max).collect()
+}
+
+/// CUI digits-only (strip an "RO" prefix) — codDeclarant must be digits and must match the CIF
+/// in the upload URL (which is also RO-stripped).
+fn strip_ro(cui: &str) -> String {
+    let s = cui.trim();
+    s.strip_prefix("RO")
+        .or_else(|| s.strip_prefix("ro"))
+        .unwrap_or(s)
+        .trim()
+        .to_string()
+}
+
+/// Is a route endpoint complete per the schema: a full address (codJudet + localitate) OR a
+/// border-crossing point (codPtf) OR a customs office (codBirouVamal).
+fn route_complete(loc: &RouteLoc) -> bool {
+    loc.cod_ptf.is_some()
+        || loc
+            .cod_birou_vamal
+            .as_ref()
+            .is_some_and(|s| !s.trim().is_empty())
+        || (loc.cod_judet.is_some() && !loc.denumire_localitate.trim().is_empty())
 }
 
 fn write_route(
@@ -235,11 +271,16 @@ fn write_route(
 pub fn generate_etransport_xml(d: &EtransportDeclaration) -> AppResult<String> {
     let map = |e: quick_xml::Error| AppError::Other(format!("XML write error: {e}"));
     let mut w = Writer::new(Cursor::new(Vec::<u8>::new()));
+    w.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))
+        .map_err(map)?;
 
     let mut root = BytesStart::new("eTransport");
     root.push_attribute(("xmlns", NAMESPACE));
     root.push_attribute(("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance"));
-    root.push_attribute(("codDeclarant", clean(&d.cod_declarant, 13).as_str()));
+    root.push_attribute((
+        "codDeclarant",
+        clean(&strip_ro(&d.cod_declarant), 13).as_str(),
+    ));
     if !d.ref_declarant.is_empty() {
         root.push_attribute(("refDeclarant", clean(&d.ref_declarant, 50).as_str()));
     }
@@ -413,6 +454,34 @@ mod tests {
         assert!(xml.contains("<locStartTraseuRutier><locatie codJudet=\"40\""));
         assert!(xml.contains("tipDocument=\"20\""));
         assert!(xml.contains("</eTransport>"));
+    }
+
+    #[test]
+    fn strips_ro_prefix_from_declarant_to_match_url_cif() {
+        let mut d = sample();
+        d.cod_declarant = "RO12345678".into();
+        let xml = generate_etransport_xml(&d).unwrap();
+        assert!(xml.contains("codDeclarant=\"12345678\""));
+        assert!(xml.starts_with("<?xml"));
+    }
+
+    #[test]
+    fn validation_rejects_incomplete_route_endpoints() {
+        let mut d = sample();
+        d.loc_start = RouteLoc {
+            denumire_localitate: "București".into(), // localitate without codJudet → incomplete
+            ..Default::default()
+        };
+        let errs = validate_etransport(&d);
+        assert!(errs.iter().any(|e| e.contains("Locul de plecare")));
+        // a border point alone is complete:
+        d.loc_start = RouteLoc {
+            cod_ptf: Some(4),
+            ..Default::default()
+        };
+        assert!(!validate_etransport(&d)
+            .iter()
+            .any(|e| e.contains("Locul de plecare")));
     }
 
     #[test]
