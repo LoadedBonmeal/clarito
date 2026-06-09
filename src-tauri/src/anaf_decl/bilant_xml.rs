@@ -300,27 +300,28 @@ pub struct BilantHeader {
     pub nume_admin: String,
 }
 
-/// Build the bilanț XML for the entity-size form: `micro` = true → `<Bilant1005>` (tipBIL=UU,
-/// s1005:v14, microentitate); false → `<Bilant1003>` (tipBIL=BS, s1003:v15, entitate mică). The
-/// F10 (balance sheet) is the same prescurtat layout for both; F20 differs (see `compute_f20`).
+/// Build the bilanț XML for the entity-size `form`: "UU" → `<Bilant1005>` (s1005:v14,
+/// microîntreprindere); "BS" → `<Bilant1003>` (s1003:v15, entitate mică); "BL" → `<Bilant1002>`
+/// (s1002:v15, entitate mare/mijlocie). UU + BS share the prescurtat F10 (rd.1-49); the developed
+/// F10 (rd.1-103) of the BL form is a different row layout — its F10 is completed in the ANAF app.
 pub fn generate_bilant_xml(
     h: &BilantHeader,
     f10: &HashMap<String, i64>,
     f20: &HashMap<String, i64>,
-    micro: bool,
+    form: &str,
 ) -> String {
     let total_plata = f10.get("F10_0492").copied().unwrap_or(0); // control sum = total capitaluri.
     let cod_tt = county_code(&h.county);
     let an_caen = 2025; // Str_coduriCaen2024_2025 / IntInt2024_2025.
-    let (root, ns, tip, art27) = if micro {
-        (
+    let (root, ns, tip, art27) = match form {
+        "BL" => ("Bilant1002", "mfp:anaf:dgti:s1002:declaratie:v15", "BL", ""),
+        "BS" => ("Bilant1003", "mfp:anaf:dgti:s1003:declaratie:v15", "BS", ""),
+        _ => (
             "Bilant1005",
             "mfp:anaf:dgti:s1005:declaratie:v14",
             "UU",
             " bifa_art27=\"0\"",
-        )
-    } else {
-        ("Bilant1003", "mfp:anaf:dgti:s1003:declaratie:v15", "BS", "")
+        ),
     };
 
     let attrs = |m: &HashMap<String, i64>| {
@@ -440,7 +441,7 @@ mod tests {
         let mut f10 = HashMap::new();
         f10.insert("F10_0492".to_string(), 90000i64);
         let f20 = HashMap::new();
-        let xml = generate_bilant_xml(&h, &f10, &f20, true);
+        let xml = generate_bilant_xml(&h, &f10, &f20, "UU");
         assert!(xml.contains("<Bilant1005"));
         assert!(xml.contains("mfp:anaf:dgti:s1005:declaratie:v14"));
         assert!(xml.contains("tipBIL=\"UU\""));
@@ -453,11 +454,18 @@ mod tests {
         assert!(xml.contains("F10_0492=\"90000\""));
 
         // Small-entity form → Bilant1003 / BS / s1003 namespace, no bifa_art27.
-        let bs = generate_bilant_xml(&h, &f10, &f20, false);
+        let bs = generate_bilant_xml(&h, &f10, &f20, "BS");
         assert!(bs.contains("<Bilant1003"));
         assert!(bs.contains("mfp:anaf:dgti:s1003:declaratie:v15"));
         assert!(bs.contains("tipBIL=\"BS\""));
         assert!(!bs.contains("bifa_art27"));
+
+        // Large-entity form → Bilant1002 / BL / s1002 namespace.
+        let bl = generate_bilant_xml(&h, &f10, &f20, "BL");
+        assert!(bl.contains("<Bilant1002"));
+        assert!(bl.contains("mfp:anaf:dgti:s1002:declaratie:v15"));
+        assert!(bl.contains("tipBIL=\"BL\""));
+        assert!(!bl.contains("bifa_art27"));
     }
 
     #[test]
