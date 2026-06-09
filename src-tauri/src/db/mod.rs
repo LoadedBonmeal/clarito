@@ -24,6 +24,7 @@ pub mod accounts;
 pub mod assets;
 pub mod gl;
 pub mod payments;
+pub mod payroll;
 pub mod products;
 pub mod receipts;
 pub mod received_payments;

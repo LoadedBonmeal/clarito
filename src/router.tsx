@@ -55,6 +55,7 @@ import { ReceivedPage } from "@/pages/Received";
 import { ReceivedDetailPage } from "@/pages/ReceivedDetail";
 import { NotificationsPage } from "@/pages/Notifications";
 import { ContactsPage } from "@/pages/Contacts";
+import { PayrollPage } from "@/pages/Payroll";
 import { ReportsPage } from "@/pages/Reports";
 import { EtransportPage } from "@/pages/Etransport";
 import { SettingsPage } from "@/pages/Settings";
@@ -174,6 +175,12 @@ const contactsRoute = createRoute({
   component: ContactsPage,
 });
 
+const payrollRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/payroll",
+  component: PayrollPage,
+});
+
 const reportsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/reports",
@@ -270,6 +277,7 @@ const routeTree = rootRoute.addChildren([
   receivedDetailRoute,
   notificationsRoute,
   contactsRoute,
+  payrollRoute,
   productsRoute,
   receiptsRoute,
   vatRatesRoute,

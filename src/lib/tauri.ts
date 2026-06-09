@@ -866,6 +866,19 @@ export const products = {
  * No company_id is passed — Romanian VAT rates are national (same for all
  * companies). This is the deliberate exception to the company-scoping rule.
  */
+export const payroll = {
+  list: (companyId: string) =>
+    invoke<import("@/types").Employee[]>("list_employees", { companyId }),
+  create: (input: import("@/types").CreateEmployeeInput) =>
+    invoke<import("@/types").Employee>("create_employee", { input }),
+  update: (id: string, companyId: string, input: import("@/types").UpdateEmployeeInput) =>
+    invoke<import("@/types").Employee>("update_employee", { id, companyId, input }),
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_employee", { id, companyId }),
+  run: (companyId: string, periodFrom: string, periodTo: string) =>
+    invoke<import("@/types").PayrollRun>("run_payroll", { companyId, periodFrom, periodTo }),
+};
+
 export const vatRates = {
   /** List all (or only active) VAT rates from the global catalog. */
   list: (activeOnly?: boolean) =>
@@ -980,6 +993,7 @@ export const api = {
   receivedPayments,
   recurring,
   reports,
+  payroll,
   saft,
   settings,
   system,

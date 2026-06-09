@@ -2380,6 +2380,126 @@ pub async fn post_annual_close(
     })
 }
 
+// ─── Salarii (statul de plată → GL) ──────────────────────────────────────────
+
+/// Result of posting the monthly payroll to the GL.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PayrollPostResult {
+    pub gross: String,
+    pub net: String,
+    pub posted: bool,
+    pub entry_date: String,
+}
+
+/// Post the monthly payroll aggregate to the GL (OMFP 1802/2014 monograph): D 641 / C 421 (gross);
+/// D 421 / C 4315 (CAS), C 4316 (CASS), C 444 (impozit) — withholdings; D 646 / C 436 (CAM,
+/// employer). After this, 421 = net payable. Idempotent per `(company,'PAYROLL',period)`.
+#[allow(clippy::too_many_arguments)]
+pub async fn post_payroll(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+    gross: Decimal,
+    cas: Decimal,
+    cass: Decimal,
+    impozit: Decimal,
+    cam: Decimal,
+) -> AppResult<PayrollPostResult> {
+    let source_id = format!("{period_from}_{period_to}");
+    let net = gross - cas - cass - impozit;
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='PAYROLL' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(&source_id)
+    .execute(&mut *tx)
+    .await?;
+
+    if gross.is_zero() {
+        tx.commit().await?;
+        return Ok(PayrollPostResult {
+            gross: fmt_dec(gross),
+            net: fmt_dec(net),
+            posted: false,
+            entry_date: period_to.to_string(),
+        });
+    }
+
+    let mk = |record_id: i64, account: &str, debit: Decimal, credit: Decimal| GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: account.to_string(),
+        debit,
+        credit,
+        partner_cui: None,
+        customer_id: None,
+        supplier_id: None,
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+    };
+    let mut entries = vec![
+        mk(1, "641", gross, Decimal::ZERO), // cheltuieli salarii
+        mk(2, "421", Decimal::ZERO, gross), // salarii datorate
+    ];
+    let mut rec = 3;
+    let withholding = cas + cass + impozit;
+    if !withholding.is_zero() {
+        entries.push(mk(rec, "421", withholding, Decimal::ZERO));
+        rec += 1;
+    }
+    if !cas.is_zero() {
+        entries.push(mk(rec, "4315", Decimal::ZERO, cas));
+        rec += 1;
+    }
+    if !cass.is_zero() {
+        entries.push(mk(rec, "4316", Decimal::ZERO, cass));
+        rec += 1;
+    }
+    if !impozit.is_zero() {
+        entries.push(mk(rec, "444", Decimal::ZERO, impozit));
+        rec += 1;
+    }
+    if !cam.is_zero() {
+        entries.push(mk(rec, "646", cam, Decimal::ZERO)); // cheltuieli CAM (angajator)
+        entries.push(mk(rec + 1, "436", Decimal::ZERO, cam)); // CAM datorată
+    }
+    assert_balanced(&entries, &source_id)?;
+
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: "SALARII".to_string(),
+        journal_type: "PAYROLL".to_string(),
+        transaction_id: format!("SAL-{period_to}"),
+        transaction_date: period_to.to_string(),
+        description: Some(format!("State de salarii {period_from} … {period_to}")),
+        source_type: "PAYROLL".to_string(),
+        source_id: source_id.clone(),
+        customer_id: None,
+        supplier_id: None,
+    };
+    let journal_pk = journal.id.clone();
+    insert_journal(&mut tx, &journal).await?;
+    for e in &entries {
+        insert_entry(&mut tx, &journal_pk, e).await?;
+    }
+    tx.commit().await?;
+
+    Ok(PayrollPostResult {
+        gross: fmt_dec(gross),
+        net: fmt_dec(net),
+        posted: true,
+        entry_date: period_to.to_string(),
+    })
+}
+
 // ─── Balanța de verificare (cod 14-6-30, patru egalități) ────────────────────
 
 /// f64 → Decimal rounded to 2 decimals (GL sums come back as REAL).

@@ -24,6 +24,7 @@ pub mod journals;
 pub mod license;
 pub mod notifications;
 pub mod payments;
+pub mod payroll;
 pub mod products;
 pub mod receipts;
 pub mod received;

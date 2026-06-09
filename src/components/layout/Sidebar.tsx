@@ -110,6 +110,7 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
         { id: "chitante",        label: "Chitanțe",             icon: "receipt",   path: "/receipts" },
         { id: "plati",           label: "Urmărire Plăți",       icon: "bank",      path: "/payments" },
         { id: "recurente",       label: "Facturi Recurente",    icon: "refresh",   path: "/recurring" },
+        { id: "salarizare",      label: "Salarizare",           icon: "users",     path: "/payroll" },
         { id: "stocuri",         label: "Articole & Stocuri",  icon: "stock",     path: "/products" },
         { id: "plan-conturi",    label: "Plan de conturi",      icon: "database",  path: "/accounts" },
         { id: "cote-tva",        label: "Cote TVA",             icon: "tag",       path: "/vat-rates" },

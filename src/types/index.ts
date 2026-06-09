@@ -1007,6 +1007,55 @@ export interface ClosePeriodResult {
   entryDate: string;
 }
 
+export interface Employee {
+  id: string;
+  companyId: string;
+  cnp: string;
+  fullName: string;
+  grossSalary: string;
+  personalDeduction: string;
+  employmentDate: string | null;
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateEmployeeInput {
+  companyId: string;
+  cnp: string;
+  fullName: string;
+  grossSalary: string;
+  personalDeduction?: string;
+  employmentDate?: string | null;
+}
+
+export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, "companyId">> & {
+  active?: boolean;
+};
+
+export interface EmployeeState {
+  employeeId: string;
+  fullName: string;
+  gross: string;
+  cas: string;
+  cass: string;
+  incomeTax: string;
+  net: string;
+  cam: string;
+}
+
+export interface PayrollRun {
+  states: EmployeeState[];
+  totalGross: string;
+  totalCas: string;
+  totalCass: string;
+  totalIncomeTax: string;
+  totalNet: string;
+  totalCam: string;
+  posted: boolean;
+  entryDate: string;
+}
+
 /** Payroll (D112 core) — one salary state. */
 export interface PayrollInput {
   gross: string;
