@@ -12,10 +12,11 @@
 //! "Diferență semnificativă" (the threshold ANAF historically used, kept here as the self-check
 //! guideline): a per-line difference exceeding BOTH ≥ 20% AND an absolute ≥ 5.000 lei.
 //!
-//! NOTE: ANAF delivers the precompletat as JSON-in-a-zip via a dedicated SPV endpoint, with NO
-//! published XSD. Live retrieval (SPV auth) and mapping the actual P300ETVA JSON fields are out of
-//! scope here (need a real sample + credentials); this module reconciles a precompletat whose
-//! key values the caller supplies (imported/entered from the SPV download).
+//! NOTE: ANAF delivers the precompletat as JSON-in-a-zip via a dedicated service
+//! (GET {base}/decont/ws/v1/info?cui&an&luna, OAuth2), with NO published XSD. The app FETCHES it
+//! (`AnafClient::fetch_etva_decont` + `etva_fetch_precompletat`) and `extract_etva_jsons` returns
+//! the raw JSON files for the user to read — the exact P300ETVA key names are undocumented, so the
+//! reconciliation still takes the key VAT totals the user supplies from that JSON.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -100,6 +101,33 @@ pub fn reconcile_line(
     }
 }
 
+/// Extract the JSON files from a precompletat (P300ETVA) zip → (filename, raw JSON) pairs. The
+/// ANAF `/decont/ws/v1/info` reply is a zip with two JSON files (the decont + its details); the
+/// exact key names are NOT publicly documented, so the raw JSON is surfaced for the user to map.
+pub fn extract_etva_jsons(zip_bytes: &[u8]) -> Result<Vec<(String, String)>, String> {
+    use std::io::Read;
+    let cursor = std::io::Cursor::new(zip_bytes);
+    let mut archive =
+        zip::ZipArchive::new(cursor).map_err(|e| format!("Arhivă e-TVA invalidă: {e}"))?;
+    let mut out = Vec::new();
+    for i in 0..archive.len() {
+        let mut f = archive
+            .by_index(i)
+            .map_err(|e| format!("Intrare zip {i}: {e}"))?;
+        let name = f.name().to_string();
+        if name.to_lowercase().ends_with(".json") {
+            let mut s = String::new();
+            f.read_to_string(&mut s)
+                .map_err(|e| format!("Citire {name}: {e}"))?;
+            out.push((name, s));
+        }
+    }
+    if out.is_empty() {
+        return Err("Arhiva e-TVA nu conține fișiere JSON.".into());
+    }
+    Ok(out)
+}
+
 fn fmt2(d: Decimal) -> String {
     // Round to 2dp first so a sub-cent negative (e.g. -0.001) renders "0.00", never "-0.00".
     let d = d.round_dp(2);
@@ -140,6 +168,38 @@ mod tests {
         // sub-cent negative diff must render "0.00", not "-0.00".
         let l = reconcile_line("m1", dec("100.00"), dec("100.001"), None);
         assert_eq!(l.diff, "0.00");
+    }
+
+    #[test]
+    fn extracts_json_files_from_a_precompletat_zip() {
+        use std::io::Write;
+        // Build a synthetic precompletat zip (decont + detalii JSON + a stray non-JSON entry).
+        let mut buf = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default();
+            w.start_file("P300ETVA.json", opts).unwrap();
+            w.write_all(br#"{"rd19":{"tva":"190.00"}}"#).unwrap();
+            w.start_file("P300ETVA_detalii.json", opts).unwrap();
+            w.write_all(br#"{"surse":[]}"#).unwrap();
+            w.start_file("readme.txt", opts).unwrap();
+            w.write_all(b"ignore me").unwrap();
+            w.finish().unwrap();
+        }
+        let files = extract_etva_jsons(&buf).unwrap();
+        assert_eq!(files.len(), 2, "only the two JSON files, not the .txt");
+        assert!(files.iter().any(|(n, _)| n == "P300ETVA.json"));
+        assert!(files.iter().any(|(_, c)| c.contains("rd19")));
+        // a zip with no JSON → error.
+        let mut empty = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut empty));
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default();
+            w.start_file("x.txt", opts).unwrap();
+            w.write_all(b"x").unwrap();
+            w.finish().unwrap();
+        }
+        assert!(extract_etva_jsons(&empty).is_err());
 
         // a true 19.95% (≥5.000 lei) must NOT be flagged — threshold is strict ≥20% on the
         // unrounded ratio (regression guard against rounding 19.95 → 20.0 before the test).

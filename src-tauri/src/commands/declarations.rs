@@ -1578,6 +1578,61 @@ pub async fn reconcile_etva(
     })
 }
 
+/// One JSON file extracted from the e-TVA precompletat zip.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EtvaPrecompletatFile {
+    pub name: String,
+    pub json: String,
+}
+
+/// Fetch the RO e-TVA decont precompletat (P300ETVA) from ANAF for a period and return its JSON
+/// files. Dedicated service GET {base}/decont/ws/v1/info?cui&an&luna (OAuth2). The exact JSON key
+/// names are not publicly documented (only the PDF row model rd.1–36 is), so the raw JSON is
+/// returned for the user to read/map into the reconciliation inputs. Live-only (needs ANAF auth).
+#[tauri::command]
+pub async fn etva_fetch_precompletat(
+    state: State<'_, AppState>,
+    company_id: String,
+    an: i32,
+    luna: u32,
+    test_mode: bool,
+) -> crate::error::AppResult<Vec<EtvaPrecompletatFile>> {
+    use crate::anaf::client::{AnafClient, ERR_UNAUTHORIZED};
+    let pool = &state.db;
+    let company = companies::get(pool, &company_id).await?;
+    let token =
+        crate::commands::anaf::get_valid_token(&company_id, pool, &state.token_refresh_lock)
+            .await?;
+    let client = AnafClient::new(test_mode);
+
+    let mut res = client
+        .fetch_etva_decont(&token, &company.cui, an, luna)
+        .await;
+    if let Err(ref e) = res {
+        if e == ERR_UNAUTHORIZED {
+            if let Ok(new_tok) = crate::background::refresh_token_after_401(
+                &company_id,
+                pool,
+                &state.token_refresh_lock,
+                &token,
+            )
+            .await
+            {
+                res = client
+                    .fetch_etva_decont(&new_tok, &company.cui, an, luna)
+                    .await;
+            }
+        }
+    }
+    let zip = res.map_err(AppError::Other)?;
+    let files = crate::anaf_decl::etva::extract_etva_jsons(&zip).map_err(AppError::Other)?;
+    Ok(files
+        .into_iter()
+        .map(|(name, json)| EtvaPrecompletatFile { name, json })
+        .collect())
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

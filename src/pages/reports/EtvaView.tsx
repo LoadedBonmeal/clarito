@@ -35,6 +35,18 @@ export function EtvaView({ dateFrom, dateTo }: Props) {
     onError: (err) => notify.error(formatError(err, "Nu s-a putut reconcilia e-TVA.")),
   });
 
+  // Fetch the precompletat zip from ANAF (an/luna from the period start) → its raw JSON files.
+  const fetchP300 = useMutation({
+    mutationFn: () => {
+      if (!activeCompanyId) throw new Error("Selectați o companie activă.");
+      const an = Number(dateFrom.slice(0, 4));
+      const luna = Number(dateFrom.slice(5, 7));
+      return api.declarations.fetchEtvaPrecompletat(activeCompanyId, an, luna);
+    },
+    onSuccess: (files) => notify.success(`${files.length} fișier(e) e-TVA descărcate din SPV.`),
+    onError: (err) => notify.error(formatError(err, "Nu s-a putut descărca precompletatul din SPV.")),
+  });
+
   const result = recon.data;
 
   return (
@@ -73,6 +85,15 @@ export function EtvaView({ dateFrom, dateTo }: Props) {
             />
           </label>
           <Btn
+            variant="secondary"
+            size="sm"
+            disabled={fetchP300.isPending || !activeCompanyId}
+            onClick={() => fetchP300.mutate()}
+            title="Descarcă decontul precompletat (P300ETVA) din SPV"
+          >
+            {fetchP300.isPending ? "Se descarcă…" : "Solicită din SPV"}
+          </Btn>
+          <Btn
             variant="primary"
             size="sm"
             disabled={recon.isPending || !activeCompanyId}
@@ -81,6 +102,22 @@ export function EtvaView({ dateFrom, dateTo }: Props) {
             {recon.isPending ? "Se reconciliază…" : "Reconciliază"}
           </Btn>
         </div>
+
+        {fetchP300.data && fetchP300.data.length > 0 && (
+          <div style={{ padding: "0 16px 12px" }}>
+            <div style={{ fontSize: 12, color: "var(--rf-text-muted)", marginBottom: 6 }}>
+              Precompletat din SPV (copiați valorile TVA colectată / deductibilă în câmpurile de mai sus):
+            </div>
+            {fetchP300.data.map((f) => (
+              <details key={f.name} style={{ marginBottom: 6 }}>
+                <summary style={{ cursor: "pointer", fontSize: 12.5, fontWeight: 500 }}>{f.name}</summary>
+                <pre style={{ maxHeight: 240, overflow: "auto", fontSize: 11, background: "var(--rf-bg-subtle)", padding: 8, borderRadius: 6 }}>
+                  {f.json}
+                </pre>
+              </details>
+            ))}
+          </div>
+        )}
 
         {result && (
           <>

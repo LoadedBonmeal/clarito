@@ -614,6 +614,49 @@ impl AnafClient {
         parse_etransport_upload(&body)
     }
 
+    /// Fetch the RO e-TVA "decont precompletat" (P300ETVA) for a period. Dedicated ANAF service
+    /// (NOT the general SPV /cerere): GET {base}/decont/ws/v1/info?cui&an&luna (OAuth2 bearer).
+    /// Returns the raw ZIP bytes, which contain two JSON files (the precompletat decont + details).
+    /// Live-only (needs ANAF auth + a real period). cui/an/luna are numeric.
+    pub async fn fetch_etva_decont(
+        &self,
+        token: &str,
+        company_cui: &str,
+        an: i32,
+        luna: u32,
+    ) -> Result<Vec<u8>, String> {
+        let trimmed = company_cui.trim();
+        let cui = trimmed
+            .strip_prefix("RO")
+            .or_else(|| trimmed.strip_prefix("ro"))
+            .unwrap_or(trimmed)
+            .trim();
+        let url = format!("{}/decont/ws/v1/info", self.base_url);
+        let resp = self
+            .client
+            .get(&url)
+            .query(&[
+                ("cui", cui.to_string()),
+                ("an", an.to_string()),
+                ("luna", luna.to_string()),
+            ])
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| format!("Cerere e-TVA decont eșuată: {e}"))?;
+        let status = resp.status();
+        if status == 401 {
+            return Err(ERR_UNAUTHORIZED.to_string());
+        }
+        let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+        if !status.is_success() {
+            return Err(format!(
+                "Eroare comunicare ANAF e-TVA ({status}). Verificați perioada/permisiunile."
+            ));
+        }
+        Ok(bytes.to_vec())
+    }
+
     /// Descarcă un mesaj SPV după ID. Returnează bytes ZIP.
     ///
     /// Retry policy: 5xx → backoff; 429 → Retry-After; 401 → ERR_UNAUTHORIZED.

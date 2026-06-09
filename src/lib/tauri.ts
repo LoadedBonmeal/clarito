@@ -640,6 +640,14 @@ export const declarations = {
       periodTo,
       precompletat,
     }),
+  /** Fetch the e-TVA decont precompletat (P300ETVA) zip from ANAF → its JSON files (raw). */
+  fetchEtvaPrecompletat: (companyId: string, an: number, luna: number, testMode = false) =>
+    invoke<import("@/types").EtvaPrecompletatFile[]>("etva_fetch_precompletat", {
+      companyId,
+      an,
+      luna,
+      testMode,
+    }),
   /**
    * Generează XML D300 și îl salvează la destPath. Returnează calea.
    * R4: `manualDeductibleVat` — when provided, overrides the server-computed

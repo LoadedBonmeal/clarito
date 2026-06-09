@@ -539,6 +539,12 @@ export interface SpvInboxItem {
   category: string;
 }
 
+/** One JSON file extracted from the e-TVA precompletat (P300ETVA) zip fetched from ANAF. */
+export interface EtvaPrecompletatFile {
+  name: string;
+  json: string;
+}
+
 /** RO e-TVA — precompletat (P300ETVA) values imported from SPV for the self-check. */
 export interface EtvaPrecompletat {
   collectedVat: string;

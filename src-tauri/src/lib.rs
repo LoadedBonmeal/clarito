@@ -399,6 +399,7 @@ pub fn run() {
             commands::d390::compute_d390,
             commands::d390::export_d390,
             commands::declarations::reconcile_etva,
+            commands::declarations::etva_fetch_precompletat,
             commands::etransport::etransport_validate,
             commands::etransport::etransport_generate_xml,
             commands::etransport::etransport_submit,
