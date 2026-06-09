@@ -111,6 +111,24 @@ export function DashboardPage() {
   });
   const anafConnected = !activeCompanyId || !!isAnafAuth;
 
+  // Micro-enterprise ceiling monitor (100.000 EUR, OUG 89/2025). Uses the current BNR EUR rate
+  // (fallback 5.0 if the fetch fails) to convert the ceiling to RON.
+  const currentYear = new Date().getFullYear();
+  const { data: regimeStatus } = useQuery({
+    queryKey: ["taxRegimeStatus", activeCompanyId, currentYear],
+    enabled:  !!activeCompanyId,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      let eur = 5.0;
+      try {
+        eur = await api.bnr.fetchRate("EUR", new Date().toISOString().slice(0, 10));
+      } catch {
+        /* offline / weekend — fall back to ~5.0 RON/EUR for the warning */
+      }
+      return api.companies.taxRegimeStatus(activeCompanyId!, currentYear, eur);
+    },
+  });
+
   // ── Derived data ───────────────────────────────────────────────────────────
 
   const contactMap = useMemo(
@@ -296,6 +314,29 @@ export function DashboardPage() {
             .
           </Banner>
         )}
+
+        {/* ── Micro-enterprise ceiling alert (100.000 EUR, OUG 89/2025) ───── */}
+        {regimeStatus &&
+          (regimeStatus.level === "exceeded" || regimeStatus.level === "approaching") && (
+            <Banner
+              variant={regimeStatus.level === "exceeded" ? "error" : "warning"}
+              title={
+                regimeStatus.level === "exceeded"
+                  ? "Plafon microîntreprindere depășit"
+                  : "Vă apropiați de plafonul de microîntreprindere"
+              }
+              actions={
+                <Btn size="sm" onClick={() => void navigate({ to: "/companies" })}>
+                  Setări firmă
+                </Btn>
+              }
+            >
+              Cifra de afaceri {currentYear}: <b className="rf-mono">{regimeStatus.ytdTurnoverRon}</b>{" "}
+              lei ({regimeStatus.pct}% din plafonul de{" "}
+              <b className="rf-mono">{regimeStatus.ceilingRon}</b> lei ≈ 100.000 EUR).
+              {regimeStatus.note ? ` ${regimeStatus.note}` : ""}
+            </Banner>
+          )}
 
         {/* ── Unread notifications note ──────────────────────────────────── */}
         {unreadCount > 0 && (
