@@ -1912,6 +1912,217 @@ pub async fn post_vat_settlement(
     })
 }
 
+// ─── Închiderea conturilor 6/7 → 121 (rezultatul perioadei) ──────────────────
+
+/// Result of posting the period-close (6/7 → 121).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClosePeriodResult {
+    pub total_revenue: String,
+    pub total_expense: String,
+    pub result: String,
+    pub entries_count: i64,
+    pub posted: bool,
+    pub entry_date: String,
+}
+
+/// Net class-6/7 balances for the period (debit-positive), EXCLUDING any prior period-close
+/// (`source_type='PNL_CLOSE'`) so the figures are the pre-close activity and re-posting is
+/// idempotent. Returns (account_code, account_name, net_debit) for non-zero accounts only.
+async fn class67_balances(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<Vec<(String, String, Decimal)>> {
+    use std::collections::HashMap;
+    let name_rows = sqlx::query(
+        "SELECT account_code, account_name FROM chart_of_accounts WHERE company_id = ?1",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?;
+    let mut names: HashMap<String, String> = HashMap::new();
+    for r in &name_rows {
+        let c: String = r.try_get("account_code").unwrap_or_default();
+        let n: String = r.try_get("account_name").unwrap_or_default();
+        names.insert(c, n);
+    }
+    let rows = sqlx::query(
+        "SELECT e.account_code, \
+           COALESCE(SUM(CAST(e.debit AS REAL)-CAST(e.credit AS REAL)),0.0) AS net_debit \
+         FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
+         WHERE j.company_id = ?1 AND j.transaction_date >= ?2 AND j.transaction_date <= ?3 \
+           AND j.source_type <> 'PNL_CLOSE' \
+           AND (e.account_code LIKE '6%' OR e.account_code LIKE '7%') \
+         GROUP BY e.account_code ORDER BY e.account_code",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_all(pool)
+    .await?;
+    let mut out = Vec::new();
+    for r in &rows {
+        let code: String = r.try_get("account_code").unwrap_or_default();
+        let net_debit = dec_f(r.try_get::<f64, _>("net_debit").unwrap_or(0.0));
+        if net_debit.is_zero() {
+            continue;
+        }
+        let name = names.get(&code).cloned().unwrap_or_else(|| code.clone());
+        out.push((code, name, net_debit));
+    }
+    Ok(out)
+}
+
+/// Trial-balance rows (closing balances only) for the P&L, built from `class67_balances` so the
+/// P&L reflects the period's revenue/expense even after the formal close has zeroed 6/7 in the GL.
+async fn pnl_rows(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<Vec<TrialBalanceRow>> {
+    let balances = class67_balances(pool, company_id, period_from, period_to).await?;
+    Ok(balances
+        .into_iter()
+        .map(|(code, name, net_debit)| TrialBalanceRow {
+            account_code: code,
+            account_name: name,
+            opening_debit: "0.00".into(),
+            opening_credit: "0.00".into(),
+            period_debit: "0.00".into(),
+            period_credit: "0.00".into(),
+            total_debit: "0.00".into(),
+            total_credit: "0.00".into(),
+            closing_debit: fmt_dec(net_debit.max(Decimal::ZERO)),
+            closing_credit: fmt_dec((-net_debit).max(Decimal::ZERO)),
+        })
+        .collect())
+}
+
+/// Build the P&L for a period (regime-aware), reading class-6/7 activity excluding any prior close.
+pub async fn profit_and_loss(
+    pool: &SqlitePool,
+    company_id: &str,
+    tax_regime: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<ProfitLoss> {
+    let rows = pnl_rows(pool, company_id, period_from, period_to).await?;
+    Ok(compute_pnl(&rows, tax_regime, period_from, period_to))
+}
+
+/// Post the period-close: sweep every class-6/7 balance into 121 (OMFP 1802/2014 — D 7xx / C 121
+/// for revenue, D 121 / C 6xx for expense; contra accounts handled by balance sign). Idempotent
+/// per `(company_id, 'PNL_CLOSE', period)`. Does NOT post the income-tax expense (the accountant
+/// books 691/698 separately with the exact figure) and does NOT touch the annual 121→117 reset.
+pub async fn post_period_close(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<ClosePeriodResult> {
+    let balances = class67_balances(pool, company_id, period_from, period_to).await?;
+    let source_id = format!("{period_from}_{period_to}");
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='PNL_CLOSE' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(&source_id)
+    .execute(&mut *tx)
+    .await?;
+
+    let mk = |record_id: i64, account: &str, debit: Decimal, credit: Decimal| GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: account.to_string(),
+        debit,
+        credit,
+        partner_cui: None,
+        customer_id: None,
+        supplier_id: None,
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+    };
+
+    let mut entries: Vec<GlEntry> = Vec::new();
+    let mut record_id: i64 = 1;
+    let mut debit_121 = Decimal::ZERO; // total expenses swept (D 121)
+    let mut credit_121 = Decimal::ZERO; // total revenue swept (C 121)
+    for (code, _name, net_debit) in &balances {
+        if *net_debit > Decimal::ZERO {
+            // Debit-balance account (expense / contra-revenue) → credit it to zero, debit 121.
+            entries.push(mk(record_id, code, Decimal::ZERO, *net_debit));
+            debit_121 += *net_debit;
+        } else {
+            // Credit-balance account (revenue / contra-expense) → debit it to zero, credit 121.
+            let cr = -*net_debit;
+            entries.push(mk(record_id, code, cr, Decimal::ZERO));
+            credit_121 += cr;
+        }
+        record_id += 1;
+    }
+    let result = credit_121 - debit_121;
+
+    if entries.is_empty() {
+        tx.commit().await?;
+        return Ok(ClosePeriodResult {
+            total_revenue: fmt_dec(credit_121),
+            total_expense: fmt_dec(debit_121),
+            result: fmt_dec(result),
+            entries_count: 0,
+            posted: false,
+            entry_date: period_to.to_string(),
+        });
+    }
+    // The two 121 legs (gross revenue close + gross expense close) — keeps 121's turnover correct.
+    if !credit_121.is_zero() {
+        entries.push(mk(record_id, "121", Decimal::ZERO, credit_121));
+        record_id += 1;
+    }
+    if !debit_121.is_zero() {
+        entries.push(mk(record_id, "121", debit_121, Decimal::ZERO));
+    }
+    assert_balanced(&entries, &source_id)?;
+
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: "DIVERSE".to_string(),
+        journal_type: "PNL_CLOSE".to_string(),
+        transaction_id: format!("INCHID-{period_to}"),
+        transaction_date: period_to.to_string(),
+        description: Some(format!(
+            "Închidere conturi 6/7 → 121 ({period_from} … {period_to})"
+        )),
+        source_type: "PNL_CLOSE".to_string(),
+        source_id: source_id.clone(),
+        customer_id: None,
+        supplier_id: None,
+    };
+    let journal_pk = journal.id.clone();
+    insert_journal(&mut tx, &journal).await?;
+    for e in &entries {
+        insert_entry(&mut tx, &journal_pk, e).await?;
+    }
+    tx.commit().await?;
+
+    Ok(ClosePeriodResult {
+        total_revenue: fmt_dec(credit_121),
+        total_expense: fmt_dec(debit_121),
+        result: fmt_dec(result),
+        entries_count: entries.len() as i64,
+        posted: true,
+        entry_date: period_to.to_string(),
+    })
+}
+
 // ─── Balanța de verificare (cod 14-6-30, patru egalități) ────────────────────
 
 /// f64 → Decimal rounded to 2 decimals (GL sums come back as REAL).
@@ -2593,6 +2804,91 @@ mod tests {
         assert_eq!(pnl.net_result, "1680.00");
         // 691 is not in expense_lines (reported as income tax, not operating expense).
         assert!(!pnl.expense_lines.iter().any(|l| l.code == "691"));
+    }
+
+    #[tokio::test]
+    async fn period_close_sweeps_67_to_121_and_is_idempotent() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co1").await;
+        // Manual journal: a sale (D 4111 / C 707 = 10.000) + an expense (D 607 / C 401 = 6.000).
+        let mut tx = pool.begin().await.unwrap();
+        let j = GlJournal {
+            id: new_id(),
+            company_id: "co1".into(),
+            journal_id: "DIVERSE".into(),
+            journal_type: "MANUAL".into(),
+            transaction_id: "M1".into(),
+            transaction_date: "2026-03-15".into(),
+            description: None,
+            source_type: "MANUAL".into(),
+            source_id: "m1".into(),
+            customer_id: None,
+            supplier_id: None,
+        };
+        let jpk = j.id.clone();
+        insert_journal(&mut tx, &j).await.unwrap();
+        let mk = |rec: i64, acc: &str, d: Decimal, c: Decimal| GlEntry {
+            id: new_id(),
+            record_id: rec,
+            account_code: acc.into(),
+            debit: d,
+            credit: c,
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "000".into(),
+            tax_code: "000000".into(),
+            tax_percentage: None,
+            tax_base: None,
+            tax_amount: None,
+        };
+        for e in [
+            mk(1, "4111", rdec!(10000), Decimal::ZERO),
+            mk(2, "707", Decimal::ZERO, rdec!(10000)),
+            mk(3, "607", rdec!(6000), Decimal::ZERO),
+            mk(4, "401", Decimal::ZERO, rdec!(6000)),
+        ] {
+            insert_entry(&mut tx, &jpk, &e).await.unwrap();
+        }
+        tx.commit().await.unwrap();
+
+        let r = post_period_close(&pool, "co1", "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        assert!(r.posted);
+        assert_eq!(r.total_revenue, "10000.00");
+        assert_eq!(r.total_expense, "6000.00");
+        assert_eq!(r.result, "4000.00");
+
+        // After the close, 707/607 net to zero and 121 carries the result (4.000 credit = profit).
+        let c121 = |tb: &TrialBalance| {
+            tb.rows
+                .iter()
+                .find(|x| x.account_code == "121")
+                .map(|x| x.closing_credit.clone())
+        };
+        let tb = trial_balance(&pool, "co1", "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        let r707 = tb.rows.iter().find(|x| x.account_code == "707").unwrap();
+        assert_eq!(r707.closing_debit, "0.00");
+        assert_eq!(r707.closing_credit, "0.00");
+        assert_eq!(c121(&tb), Some("4000.00".into()));
+        assert!(tb.balanced, "trial balance still balances after the close");
+
+        // Idempotent: re-running does not double 121.
+        let r2 = post_period_close(&pool, "co1", "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        assert_eq!(r2.result, "4000.00");
+        let tb2 = trial_balance(&pool, "co1", "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        assert_eq!(
+            c121(&tb2),
+            Some("4000.00".into()),
+            "idempotent — 121 not doubled"
+        );
     }
 
     // ── Helper: in-memory pool cu schema migrată ──────────────────────────────

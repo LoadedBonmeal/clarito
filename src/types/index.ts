@@ -996,6 +996,15 @@ export interface ClosingEntry {
   amount: string;
 }
 
+export interface ClosePeriodResult {
+  totalRevenue: string;
+  totalExpense: string;
+  result: string;
+  entriesCount: number;
+  posted: boolean;
+  entryDate: string;
+}
+
 export interface ProfitLoss {
   periodFrom: string;
   periodTo: string;

@@ -266,6 +266,36 @@ fn standard_accounts() -> Vec<SeedEntry> {
             parent: None,
         },
         SeedEntry {
+            code: "117",
+            name: "Rezultatul reportat",
+            class: 1,
+            parent: None,
+        },
+        SeedEntry {
+            code: "4411",
+            name: "Impozitul pe profit",
+            class: 4,
+            parent: None,
+        },
+        SeedEntry {
+            code: "4418",
+            name: "Impozitul pe venit",
+            class: 4,
+            parent: None,
+        },
+        SeedEntry {
+            code: "691",
+            name: "Cheltuieli cu impozitul pe profit",
+            class: 6,
+            parent: None,
+        },
+        SeedEntry {
+            code: "698",
+            name: "Cheltuieli cu impozitul pe venit și cu alte impozite",
+            class: 6,
+            parent: None,
+        },
+        SeedEntry {
             code: "161",
             name: "Împrumuturi din emisiuni de obligațiuni",
             class: 1,

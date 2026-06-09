@@ -6,6 +6,7 @@
  */
 
 import { useState } from "react";
+import { confirm } from "@tauri-apps/plugin-dialog";
 
 import {
   PageHeader,
@@ -71,6 +72,7 @@ export function GlLedgerPage() {
   const [ledger,          setLedger]          = useState<LedgerAccount[] | null>(null);
   const [pnl,             setPnl]             = useState<ProfitLoss | null>(null);
   const [loadingPnl,      setLoadingPnl]      = useState(false);
+  const [closingPeriod,   setClosingPeriod]   = useState(false);
 
   const yearOptions    = buildYearOptions();
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
@@ -190,6 +192,32 @@ export function GlLedgerPage() {
     }
   };
 
+  const handleClosePeriod = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    const ok = await confirm(
+      "Postează închiderea conturilor de venituri și cheltuieli (clasele 6 și 7) în contul 121 " +
+        `pentru perioada ${dateFrom} … ${dateTo}? Operațiunea este idempotentă (re-postarea ` +
+        "înlocuiește închiderea anterioară a aceleiași perioade).",
+      { title: "Închidere perioadă (6/7 → 121)", kind: "warning" },
+    );
+    if (!ok) return;
+    setClosingPeriod(true);
+    try {
+      const r = await api.gl.closePeriod(activeCompanyId, dateFrom, dateTo);
+      if (!r.posted) {
+        notify.info("Nicio mișcare pe conturile de venituri/cheltuieli în perioadă.");
+      } else {
+        notify.success(`Închidere postată: rezultat ${r.result} lei (${r.entriesCount} note).`);
+        // Refresh the P&L (it excludes the close, so it still shows the activity).
+        await handleProfitLoss();
+      }
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut posta închiderea perioadei."));
+    } finally {
+      setClosingPeriod(false);
+    }
+  };
+
   // ── Registru-jurnal + Cartea mare ─────────────────────────────────────────
 
   const handleJournalRegister = async () => {
@@ -305,6 +333,15 @@ export function GlLedgerPage() {
               onClick={() => void handleProfitLoss()}
             >
               {loadingPnl ? "…" : "Profit și pierdere"}
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon="ledger"
+              disabled={closingPeriod || !activeCompanyId}
+              onClick={() => void handleClosePeriod()}
+              title="Postează închiderea conturilor 6/7 → 121 pentru perioadă"
+            >
+              {closingPeriod ? "Închid…" : "Închide perioada"}
             </Btn>
           </>
         }

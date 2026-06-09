@@ -6,10 +6,12 @@
 
 use tauri::State;
 
-use crate::db::gl::{compute_pnl, ProfitLoss};
+use crate::db::gl::profit_and_loss as db_profit_and_loss;
+use crate::db::gl::ProfitLoss;
 use crate::db::gl::{general_ledger as db_general_ledger, LedgerAccount};
 use crate::db::gl::{generate_gl_entries as db_generate, reconcile as db_reconcile};
 use crate::db::gl::{journal_register as db_journal_register, JournalRegister};
+use crate::db::gl::{post_period_close as db_close_period, ClosePeriodResult};
 use crate::db::gl::{post_vat_settlement as db_close_vat, VatSettlementResult};
 use crate::db::gl::{trial_balance as db_trial_balance, TrialBalance};
 use crate::db::gl::{GlPostResult, ReconcileReport};
@@ -87,13 +89,26 @@ pub async fn profit_and_loss(
     period_to: String,
 ) -> AppResult<ProfitLoss> {
     let company = crate::db::companies::get(&state.db, &company_id).await?;
-    let tb = db_trial_balance(&state.db, &company_id, &period_from, &period_to).await?;
-    Ok(compute_pnl(
-        &tb.rows,
+    db_profit_and_loss(
+        &state.db,
+        &company_id,
         &company.tax_regime,
         &period_from,
         &period_to,
-    ))
+    )
+    .await
+}
+
+/// Închiderea conturilor de venituri și cheltuieli (clasele 6 și 7) în 121 «Profit sau pierdere»
+/// pentru perioadă (OMFP 1802/2014). Idempotentă per perioadă (source_type='PNL_CLOSE').
+#[tauri::command]
+pub async fn close_period(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+) -> AppResult<ClosePeriodResult> {
+    db_close_period(&state.db, &company_id, &period_from, &period_to).await
 }
 
 /// Registru-jurnal (cod 14-1-1) — lista cronologică a notelor contabile din perioadă.
