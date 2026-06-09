@@ -74,8 +74,10 @@ export function D101View({ dateFrom, dateTo }: Props) {
           <Banner variant="info">
             Doar pentru companiile plătitoare de <b>impozit pe profit</b> (nu microîntreprinderi).
             Rezultatul brut și cifra de afaceri se preiau din contul de profit și pierdere al
-            perioadei; introduceți ajustările fiscale. Depunerea se face manual prin PDF inteligent
-            ANAF + SPV (termen 25 martie). Estimarea nu include toate ajustările posibile.
+            perioadei; introduceți ajustările fiscale. Recuperarea pierderii din anii precedenți e
+            plafonată la 70% din profitul fiscal (OUG 115/2023). Depunerea se face manual prin PDF
+            inteligent ANAF + SPV (termen 25 iunie anul următor pentru exercițiile 2021-2025,
+            ulterior 25 martie). Estimarea nu include toate ajustările posibile.
           </Banner>
         </div>
 
@@ -114,7 +116,8 @@ export function D101View({ dateFrom, dateTo }: Props) {
                   ["− Deduceri fiscale", r.fiscalDeductions],
                   ["+ Cheltuieli nedeductibile", r.nonDeductibleExpenses],
                   ["= Rezultat fiscal", r.fiscalResult],
-                  ["− Pierdere reportată", r.priorLoss],
+                  ["Pierdere reportată disponibilă", r.priorLoss],
+                  ["− Pierdere recuperată (max 70%)", r.lossUsed],
                   ["= Profit impozabil", r.taxableProfit],
                   ["Impozit 16%", r.tax16],
                   ["Plafon sponsorizare (0,75% CA / 20% impozit)", r.sponsorshipCap],
@@ -136,6 +139,11 @@ export function D101View({ dateFrom, dateTo }: Props) {
                 <Badge variant="success">De recuperat: {fmtRON(r.balanceRecoverable)} lei</Badge>
               ) : (
                 <Badge variant="success">Sold zero</Badge>
+              )}
+              {Number(r.lossRemaining) > 0 && (
+                <span style={{ marginLeft: 8, fontSize: 12, color: "var(--rf-text-muted)" }}>
+                  Pierdere rămasă de reportat: {fmtRON(r.lossRemaining)} lei
+                </span>
               )}
             </div>
           </div>

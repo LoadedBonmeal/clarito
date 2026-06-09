@@ -28,10 +28,17 @@ export function PayrollPage() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [modal, setModal] = useState<"create" | { edit: Employee } | null>(null);
   const [run, setRun] = useState<PayrollRun | null>(null);
+  const [showD112, setShowD112] = useState(false);
 
   const { data: employees = [] } = useQuery({
     queryKey: ["employees", companyId],
     queryFn: () => api.payroll.list(companyId!),
+    enabled: !!companyId,
+  });
+
+  const { data: sedii = [] } = useQuery({
+    queryKey: ["sedii", companyId],
+    queryFn: () => api.payroll.listSedii(companyId!),
     enabled: !!companyId,
   });
 
@@ -58,11 +65,8 @@ export function PayrollPage() {
     onError: (e) => notify.error(formatError(e, "Eroare la ștergere.")),
   });
 
-  const handleD112 = async () => {
-    if (!companyId) { notify.warn("Selectați o companie activă."); return; }
-    const caen = (window.prompt("Cod CAEN al companiei (4 cifre, ex. 6201):", "") ?? "").trim();
-    if (!caen) return;
-    if (!/^\d{4}$/.test(caen)) { notify.error("Cod CAEN invalid — 4 cifre."); return; }
+  const runD112 = async (caen: string) => {
+    if (!companyId) return;
     const dest = await saveDialog({
       title: "Salvează D112 (XML)",
       defaultPath: `d112-${year}-${String(month).padStart(2, "0")}.xml`,
@@ -74,6 +78,7 @@ export function PayrollPage() {
       notify.success(`D112 (XML) exportat — antet + obligații angajator + ${employees.filter((e) => e.active).length} ` +
         `asigurați. Importați-l în aplicația D112 (PDF inteligent), validați (DUKIntegrator) și ` +
         `completați declarantul + blocurile speciale înainte de depunere.`);
+      setShowD112(false);
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut exporta D112."));
     }
@@ -92,7 +97,8 @@ export function PayrollPage() {
       <div className="rf-page-body">
         <Banner variant="info">
           Calcul salarial 2026: CAS 25%, CASS 10%, impozit 10%, CAM 2,25% (angajator). Rularea
-          lunară postează nota contabilă agregată în jurnal. D112 (XML) urmează.
+          lunară postează nota contabilă agregată în jurnal; exportați D112 (XML) pentru import în
+          aplicația ANAF.
         </Banner>
 
         <Card>
@@ -110,7 +116,7 @@ export function PayrollPage() {
             <Btn variant="secondary" icon="ledger" disabled={runMut.isPending || !companyId} onClick={() => runMut.mutate()}>
               {runMut.isPending ? "Calculez…" : "Rulează stat salarii"}
             </Btn>
-            <Btn variant="secondary" icon="download" disabled={!companyId} onClick={handleD112}>
+            <Btn variant="secondary" icon="download" disabled={!companyId} onClick={() => setShowD112(true)}>
               D112 XML
             </Btn>
           </div>
@@ -144,6 +150,12 @@ export function PayrollPage() {
             </table>
           )}
         </Card>
+
+        {companyId && <SediiManager companyId={companyId} sedii={sedii} />}
+
+        {companyId && (
+          <ConcediiManager companyId={companyId} periodYm={period.from.slice(0, 7)} employees={employees} />
+        )}
 
         {/* Payroll register */}
         {run && run.states.length > 0 && (
@@ -192,6 +204,7 @@ export function PayrollPage() {
         <EmployeeModal
           companyId={companyId}
           employee={modal === "create" ? null : modal.edit}
+          sedii={sedii}
           onClose={() => setModal(null)}
           onSaved={() => {
             setModal(null);
@@ -199,15 +212,24 @@ export function PayrollPage() {
           }}
         />
       )}
+
+      {showD112 && (
+        <CaenExportModal
+          title="Export D112 (XML)"
+          onClose={() => setShowD112(false)}
+          onExport={runD112}
+        />
+      )}
     </div>
   );
 }
 
 function EmployeeModal({
-  companyId, employee, onClose, onSaved,
+  companyId, employee, sedii, onClose, onSaved,
 }: {
   companyId: string;
   employee: Employee | null;
+  sedii: import("@/types").SecondaryOffice[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -220,6 +242,8 @@ function EmployeeModal({
     tipContract: employee?.tipContract ?? "N",
     oreNorma: employee ? String(employee.oreNorma) : "8",
     pensionar: employee?.pensionar ?? false,
+    exceptieCasMin: employee?.exceptieCasMin ?? "",
+    sediuCif: employee?.sediuCif ?? "",
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -234,6 +258,8 @@ function EmployeeModal({
         tipContract: form.tipContract,
         oreNorma: Number(form.oreNorma) || 8,
         pensionar: form.pensionar,
+        exceptieCasMin: form.exceptieCasMin,
+        sediuCif: form.sediuCif,
       };
       if (isEdit) {
         return api.payroll.update(employee!.id, companyId, payload);
@@ -294,8 +320,232 @@ function EmployeeModal({
             onChange={(e) => setForm((f) => ({ ...f, pensionar: e.target.checked }))} />
           Pensionar (D112 A_2)
         </label>
+        <Field label="Excepție bază minimă CAS/CASS part-time (art. 146 alin. 5⁷)">
+          <select className="rf-input" value={form.exceptieCasMin}
+            onChange={(e) => setForm((f) => ({ ...f, exceptieCasMin: e.target.value }))}>
+            <option value="">Fără excepție (se aplică baza minimă)</option>
+            <option value="elev_student">Elev/student până la 26 ani (lit. a)</option>
+            <option value="ucenic">Ucenic până la 18 ani (lit. b)</option>
+            <option value="dizabilitate">Persoană cu dizabilități / &lt; 8h/zi (lit. c)</option>
+            <option value="contracte_multiple">Contracte multiple ≥ salariul minim (lit. e)</option>
+          </select>
+        </Field>
+        <Field label="Sediu (D112) — impozit pe salarii la sediu secundar">
+          <select className="rf-input" value={form.sediuCif}
+            onChange={(e) => setForm((f) => ({ ...f, sediuCif: e.target.value }))}>
+            <option value="">Sediu principal</option>
+            {sedii.map((s) => (
+              <option key={s.id} value={s.cif}>{s.cif}{s.name ? ` — ${s.name}` : ""}</option>
+            ))}
+          </select>
+        </Field>
         {error && <Banner variant="error">{error}</Banner>}
       </div>
     </Modal>
+  );
+}
+
+/** Reusable CAEN-only export dialog — replaces window.prompt (a no-op in Tauri's WebView). */
+function CaenExportModal({
+  title,
+  onClose,
+  onExport,
+}: {
+  title: string;
+  onClose: () => void;
+  onExport: (caen: string) => Promise<void>;
+}) {
+  const [caen, setCaen] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!/^\d{4}$/.test(caen.trim())) { notify.error("Cod CAEN invalid — 4 cifre (ex. 6201)."); return; }
+    setBusy(true);
+    try {
+      await onExport(caen.trim());
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open onOpenChange={(o) => { if (!o) onClose(); }} title={title} width={420}
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose} disabled={busy}>Anulează</Btn>
+          <Btn variant="primary" icon="download" disabled={busy} onClick={() => void submit()}>
+            {busy ? "Se exportă…" : "Exportă"}
+          </Btn>
+        </>
+      }
+    >
+      <Field label="Cod CAEN (4 cifre)" required>
+        <Input className="mono" placeholder="6201" value={caen} onChange={(e) => setCaen(e.target.value)} autoFocus />
+      </Field>
+    </Modal>
+  );
+}
+
+/** Sedii secundare (D112 angajatorF2) — adăugare/ștergere; salariații se repartizează în formularul
+ *  angajatului. CIF doar cifre, unic per companie. */
+function SediiManager({
+  companyId,
+  sedii,
+}: {
+  companyId: string;
+  sedii: import("@/types").SecondaryOffice[];
+}) {
+  const qc = useQueryClient();
+  const [cif, setCif] = useState("");
+  const [name, setName] = useState("");
+
+  const add = useMutation({
+    mutationFn: () => api.payroll.createSediu(companyId, cif.trim(), name.trim()),
+    onSuccess: () => {
+      setCif(""); setName("");
+      void qc.invalidateQueries({ queryKey: ["sedii", companyId] });
+    },
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut adăuga sediul secundar.")),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.payroll.deleteSediu(id, companyId),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["sedii", companyId] }),
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge sediul secundar.")),
+  });
+
+  return (
+    <Card>
+      <div style={{ padding: "10px 12px", fontWeight: 600 }}>Sedii secundare (D112 angajatorF2)</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "0 12px 12px", flexWrap: "wrap" }}>
+        <Input className="mono" style={{ maxWidth: 140 }} placeholder="CIF sediu" value={cif}
+          onChange={(e) => setCif(e.target.value)} />
+        <Input style={{ maxWidth: 220 }} placeholder="Denumire (opțional)" value={name}
+          onChange={(e) => setName(e.target.value)} />
+        <Btn variant="secondary" size="sm" icon="plus" disabled={add.isPending || !cif.trim()}
+          onClick={() => add.mutate()}>Adaugă</Btn>
+      </div>
+      {sedii.length > 0 && (
+        <table className="rf-tbl">
+          <thead><tr><th>CIF</th><th>Denumire</th><th></th></tr></thead>
+          <tbody>
+            {sedii.map((s) => (
+              <tr key={s.id}>
+                <td className="mono">{s.cif}</td>
+                <td>{s.name || "—"}</td>
+                <td className="right">
+                  <IconBtn icon="trash" onClick={async () => {
+                    if (await confirm(`Ștergeți sediul secundar ${s.cif}?`, { kind: "warning" })) remove.mutate(s.id);
+                  }} title="Șterge" />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
+  );
+}
+
+/** Concedii medicale (OUG 158/2005) — registru per lună: certificat (serie/nr/cod), zile (angajator
+ *  + FNUASS) și indemnizațiile. Sursa blocului D112 asiguratD; emiterea în XML se validează ulterior
+ *  în DUKIntegrator. */
+function ConcediiManager({
+  companyId,
+  periodYm,
+  employees,
+}: {
+  companyId: string;
+  periodYm: string;
+  employees: Employee[];
+}) {
+  const qc = useQueryClient();
+  const { data: leaves = [] } = useQuery({
+    queryKey: ["concedii", companyId, periodYm],
+    queryFn: () => api.payroll.listConcedii(companyId, periodYm),
+    enabled: !!companyId,
+  });
+  const [f, setF] = useState({
+    employeeId: "", serie: "", numar: "", codIndemnizatie: "01",
+    dataInceput: "", dataSfarsit: "", zileAngajator: "", zileFnuass: "",
+    sumaAngajator: "", sumaFnuass: "",
+  });
+
+  const empName = (id: string) => employees.find((e) => e.id === id)?.fullName ?? id;
+
+  const add = useMutation({
+    mutationFn: () => {
+      if (!f.employeeId) throw new Error("Selectați angajatul.");
+      return api.payroll.createConcediu({
+        companyId, employeeId: f.employeeId, periodYm,
+        serie: f.serie, numar: f.numar, codIndemnizatie: f.codIndemnizatie,
+        dataInceput: f.dataInceput, dataSfarsit: f.dataSfarsit,
+        zileAngajator: Number(f.zileAngajator) || 0, zileFnuass: Number(f.zileFnuass) || 0,
+        sumaAngajator: f.sumaAngajator || "0", sumaFnuass: f.sumaFnuass || "0",
+      });
+    },
+    onSuccess: () => {
+      setF((s) => ({ ...s, serie: "", numar: "", dataInceput: "", dataSfarsit: "", zileAngajator: "", zileFnuass: "", sumaAngajator: "", sumaFnuass: "" }));
+      void qc.invalidateQueries({ queryKey: ["concedii", companyId, periodYm] });
+    },
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut adăuga concediul medical.")),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.payroll.deleteConcediu(id, companyId),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["concedii", companyId, periodYm] }),
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge concediul medical.")),
+  });
+
+  const num = (k: keyof typeof f) => ({ value: f[k], onChange: (e: React.ChangeEvent<HTMLInputElement>) => setF((s) => ({ ...s, [k]: e.target.value })) });
+
+  return (
+    <Card>
+      <div style={{ padding: "10px 12px", fontWeight: 600 }}>Concedii medicale (OUG 158/2005) — {periodYm}</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "0 12px 12px", flexWrap: "wrap" }}>
+        <select className="rf-input" style={{ maxWidth: 180 }} value={f.employeeId}
+          onChange={(e) => setF((s) => ({ ...s, employeeId: e.target.value }))}>
+          <option value="">Angajat…</option>
+          {employees.map((e) => <option key={e.id} value={e.id}>{e.fullName}</option>)}
+        </select>
+        <Input style={{ maxWidth: 70 }} placeholder="Serie" {...num("serie")} />
+        <Input style={{ maxWidth: 90 }} placeholder="Nr." {...num("numar")} />
+        <select className="rf-input" style={{ maxWidth: 130 }} value={f.codIndemnizatie}
+          onChange={(e) => setF((s) => ({ ...s, codIndemnizatie: e.target.value }))} title="Cod indemnizație (D_9)">
+          <option value="01">01 boală obișnuită</option>
+          <option value="06">06 sarcină/lăuzie</option>
+          <option value="09">09 îngrijire copil</option>
+          <option value="15">15 risc maternal</option>
+        </select>
+        <Input style={{ maxWidth: 130 }} placeholder="Început (AAAA-LL-ZZ)" {...num("dataInceput")} />
+        <Input style={{ maxWidth: 130 }} placeholder="Sfârșit" {...num("dataSfarsit")} />
+        <Input style={{ maxWidth: 90 }} inputMode="numeric" placeholder="Zile ang." {...num("zileAngajator")} />
+        <Input style={{ maxWidth: 90 }} inputMode="numeric" placeholder="Zile FNUASS" {...num("zileFnuass")} />
+        <Input style={{ maxWidth: 110 }} inputMode="decimal" placeholder="Indem. ang." {...num("sumaAngajator")} />
+        <Input style={{ maxWidth: 110 }} inputMode="decimal" placeholder="Indem. FNUASS" {...num("sumaFnuass")} />
+        <Btn variant="secondary" size="sm" icon="plus" disabled={add.isPending || !f.employeeId}
+          onClick={() => add.mutate()}>Adaugă</Btn>
+      </div>
+      {leaves.length > 0 && (
+        <table className="rf-tbl">
+          <thead><tr><th>Angajat</th><th>Cert.</th><th>Cod</th><th className="right">Zile</th><th className="right">Indem. ang.</th><th className="right">Indem. FNUASS</th><th></th></tr></thead>
+          <tbody>
+            {leaves.map((l) => (
+              <tr key={l.id}>
+                <td>{empName(l.employeeId)}</td>
+                <td className="mono">{l.serie} {l.numar}</td>
+                <td className="mono">{l.codIndemnizatie}</td>
+                <td className="right rf-mono">{l.zileAngajator + l.zileFnuass}</td>
+                <td className="right rf-mono">{fmtRON(l.sumaAngajator)}</td>
+                <td className="right rf-mono">{fmtRON(l.sumaFnuass)}</td>
+                <td className="right">
+                  <IconBtn icon="trash" onClick={async () => {
+                    if (await confirm("Ștergeți acest concediu medical?", { kind: "warning" })) remove.mutate(l.id);
+                  }} title="Șterge" />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
   );
 }

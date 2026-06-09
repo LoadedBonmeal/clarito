@@ -47,9 +47,30 @@ pub struct D112Employee {
     /// Baza CAS (A_13) / baza CASS (A_11) — egale cu brutul, sau ajustate la baza minimă part-time.
     pub baza_cas: i64,
     pub baza_cass: i64,
+    /// CIF-ul sediului secundar la care e repartizat salariatul (D112 angajatorF2); '' = principal.
+    pub sediu_cif: String,
 }
 
 const NS: &str = "mfp:anaf:dgti:declaratie_unica:declaratie:v1";
+
+/// D112 employer obligations — each is `(A_codOblig, A_codBugetar)` taken verbatim from Nomenclator 3
+/// of the in-force *structura D112_A7.2.6 (v7), luna 01/2026* (structura_D112_0126_030226.pdf).
+///
+/// IMPORTANT: do NOT validate these against the `DecUnica*.xsd` files under `static.anaf.ro/.../
+/// declunica/` — those are the OBSOLETE 2011 "Declarația Unică" kit (a different declaration; its
+/// `CodObligSType` stops at 449 and lacks 480). The authoritative obligation list for D112 is
+/// Nomenclator 3 in the structura, validated by the live DUKIntegrator. The `XX`/`X` placeholders in
+/// the budget codes are resolved automatically by the PDF-inteligent on selection.
+pub mod oblig {
+    /// poz. 01 — Impozit pe veniturile din salarii și asimilate salariilor (cod bugetar 5503XXXXXX).
+    pub const IMPOZIT: (&str, &str) = ("602", "5503XXXXXX");
+    /// poz. 02 — CAS (pensii) datorată de asigurat (cod bugetar 5503XXXXXX).
+    pub const CAS: (&str, &str) = ("412", "5503XXXXXX");
+    /// poz. 07 — CASS (sănătate) datorată de asigurat (cod bugetar 5503XXXXXX).
+    pub const CASS: (&str, &str) = ("432", "5503XXXXXX");
+    /// poz. 46 — CAM (contribuția asigurătorie pentru muncă), angajator (cod bugetar 20470300XX).
+    pub const CAM: (&str, &str) = ("480", "20470300XX");
+}
 
 fn esc(s: &str) -> String {
     s.chars()
@@ -69,33 +90,61 @@ fn esc(s: &str) -> String {
 pub fn generate_d112_xml(h: &D112Header, employees: &[D112Employee]) -> String {
     let count = employees.len() as i64;
     let tot = |f: fn(&D112Employee) -> i64| employees.iter().map(f).sum::<i64>();
-    let (t_gross, t_cas, t_cass, t_cam) = (
+    let (t_gross, t_cas, t_cass, t_cam, t_impozit) = (
         tot(|e| e.gross),
         tot(|e| e.cas),
         tot(|e| e.cass),
         tot(|e| e.cam),
+        tot(|e| e.impozit),
     );
 
-    // angajatorA — câte un rând per obligație bugetară (cod_oblig din CodObligSType): 412 CAS
-    // (pensii), 432 CASS (sănătate), 602 CAM. A_codBugetar = codul template "20470101XX".
-    let oblig = |cod: &str, suma: i64| {
+    // angajatorA — câte un rând per obligație, cu (A_codOblig, A_codBugetar) din Nomenclator 3 al
+    // structurii D112_A7.2.6 v7 (01/2026). Vezi modulul `oblig` pentru sursă + de ce NU se validează
+    // contra DecUnica.xsd (formularul obsolet 2011 «Declarația Unică»).
+    let oblig = |(cod, buget): (&str, &str), suma: i64| {
         format!(
-            "    <angajatorA A_codOblig=\"{cod}\" A_codBugetar=\"20470101XX\" \
+            "    <angajatorA A_codOblig=\"{cod}\" A_codBugetar=\"{buget}\" \
 A_datorat=\"{suma}\" A_deductibil=\"0\" A_plata=\"{suma}\"/>\n"
         )
     };
     let mut ang = String::new();
-    ang.push_str(&oblig("412", t_cas)); // CAS
-    ang.push_str(&oblig("432", t_cass)); // CASS
-    ang.push_str(&oblig("602", t_cam)); // CAM
-    let total_plata = t_cas + t_cass + t_cam; // totalPlata_A = Σ obligații angajator.
-                                              // angajatorB — numere asigurați + fond de salarii.
+    ang.push_str(&oblig(oblig::IMPOZIT, t_impozit)); // 602 impozit pe veniturile din salarii
+    ang.push_str(&oblig(oblig::CAS, t_cas)); // 412 CAS (pensii)
+    ang.push_str(&oblig(oblig::CASS, t_cass)); // 432 CASS (sănătate)
+    ang.push_str(&oblig(oblig::CAM, t_cam)); // 480 CAM (asigurătorie pentru muncă)
+    let total_plata = t_impozit + t_cas + t_cass + t_cam; // totalPlata_A = Σ obligații angajator.
+                                                          // angajatorB — numere asigurați + fond de salarii.
     ang.push_str(&format!(
         "    <angajatorB B_cnp=\"{count}\" B_sanatate=\"{count}\" B_pensie=\"{count}\" \
 B_brutSalarii=\"{t_gross}\"/>\n"
     ));
     // angajatorC6 — bază + contribuție (sumar) — completat în aplicație; emis 0 pentru validitate.
     ang.push_str("    <angajatorC6 C6_baza=\"0\" C6_ct=\"0\"/>\n");
+
+    // Sedii secundare (angajatorF1 sediu principal + angajatorF2 per sediu): impozitul pe salarii se
+    // repartizează după CIF-ul sediului fiecărui salariat. Se emite DOAR dacă există sedii secundare.
+    // F*_deplata = F*_suma − F*_suma_ded − F*_suma_scut (deduceri/scutiri = 0 în acest caz de bază).
+    let mut by_sediu: std::collections::BTreeMap<&str, i64> = std::collections::BTreeMap::new();
+    for e in employees {
+        *by_sediu.entry(e.sediu_cif.trim()).or_default() += e.impozit;
+    }
+    let has_sedii = by_sediu.keys().any(|c| !c.is_empty());
+    if has_sedii {
+        let head = by_sediu.get("").copied().unwrap_or(0);
+        ang.push_str(&format!(
+            "    <angajatorF1 F1_suma=\"{head}\" F1_suma_ded=\"0\" F1_suma_scut=\"0\" \
+F1_deplata=\"{head}\"/>\n"
+        ));
+        let mut idx = 0;
+        for (cif, suma) in by_sediu.iter().filter(|(c, _)| !c.is_empty()) {
+            idx += 1;
+            ang.push_str(&format!(
+                "    <angajatorF2 F2_cif=\"{cif}\" F2_id=\"{idx}\" F2_suma=\"{suma}\" \
+F2_suma_ded=\"0\" F2_suma_scut=\"0\" F2_deplata=\"{suma}\"/>\n",
+                cif = esc(cif)
+            ));
+        }
+    }
 
     // asigurat* — câte unul per salariat, cu blocul de contribuții asiguratA (caz standard).
     let mut asig = String::new();
@@ -174,6 +223,7 @@ mod tests {
             ore_norma: 8,
             baza_cas: 5000,
             baza_cass: 5000,
+            sediu_cif: "".into(),
         }
     }
 
@@ -197,16 +247,71 @@ mod tests {
         );
         assert!(xml.contains("luna_r=\"6\" an_r=\"2026\""));
         assert!(xml.contains("nume_declar=\"Popescu\""));
-        // Employer obligation rows (CAS/CASS/CAM totals over 2 employees).
-        assert!(xml.contains("A_codOblig=\"412\" A_codBugetar=\"20470101XX\" A_datorat=\"2500\""));
-        assert!(xml.contains("A_codOblig=\"432\" A_codBugetar=\"20470101XX\" A_datorat=\"1000\""));
-        assert!(xml.contains("A_codOblig=\"602\" A_codBugetar=\"20470101XX\" A_datorat=\"226\""));
-        // angajator totalPlata_A = Σ obligații (2500+1000+226) + angajatorB counts/gross.
-        assert!(xml.contains("totalPlata_A=\"3726\""));
+        // Employer obligation rows: 602 impozit (2×325=650), 412 CAS (2.500), 432 CASS (1.000),
+        // 480 CAM (226) — totals over 2 employees. Budget codes per structura: 5503XXXXXX for
+        // impozit/CAS/CASS, 20470300XX for CAM.
+        assert!(xml.contains("A_codOblig=\"602\" A_codBugetar=\"5503XXXXXX\" A_datorat=\"650\""));
+        assert!(xml.contains("A_codOblig=\"412\" A_codBugetar=\"5503XXXXXX\" A_datorat=\"2500\""));
+        assert!(xml.contains("A_codOblig=\"432\" A_codBugetar=\"5503XXXXXX\" A_datorat=\"1000\""));
+        assert!(xml.contains("A_codOblig=\"480\" A_codBugetar=\"20470300XX\" A_datorat=\"226\""));
+        // totalPlata_A = 650 + 2500 + 1000 + 226 = 4376.
+        assert!(xml.contains("totalPlata_A=\"4376\""));
         assert!(xml.contains("B_cnp=\"2\" B_sanatate=\"2\" B_pensie=\"2\" B_brutSalarii=\"10000\""));
         // Two insured persons with asiguratA contributions.
         assert_eq!(xml.matches("<asigurat ").count(), 2);
         assert!(xml.contains("A_1=\"1\" A_2=\"0\" A_3=\"N\" A_4=\"8\""));
         assert!(xml.contains("A_13=\"5000\" A_14=\"1250\"")); // baza CAS + CAS
+    }
+
+    #[test]
+    fn sedii_secundare_split_impozit_into_f1_f2() {
+        // Două sedii: angajatul A la sediu secundar CIF 99, B la sediu principal. Impozit 325 fiecare.
+        let mut a = emp("1", "A");
+        a.sediu_cif = "99".into();
+        let b = emp("2", "B"); // sediu principal ('')
+        let h = D112Header {
+            luna: 6,
+            an: 2026,
+            nume_declar: "X".into(),
+            prenume_declar: "-".into(),
+            functie_declar: "Adm".into(),
+            cif: "12345678".into(),
+            caen: "6201".into(),
+            den: "T".into(),
+            casa: "CJ".into(),
+        };
+        let xml = generate_d112_xml(&h, &[a, b]);
+        // F1 (sediu principal) = 325 (angajatul B); F2 pentru CIF 99 = 325 (angajatul A).
+        assert!(xml.contains("<angajatorF1 F1_suma=\"325\" F1_suma_ded=\"0\" F1_suma_scut=\"0\" F1_deplata=\"325\"/>"));
+        assert!(xml.contains("<angajatorF2 F2_cif=\"99\" F2_id=\"1\" F2_suma=\"325\" F2_suma_ded=\"0\" F2_suma_scut=\"0\" F2_deplata=\"325\"/>"));
+    }
+
+    #[test]
+    fn no_sedii_omits_f1_f2() {
+        let h = D112Header {
+            luna: 6,
+            an: 2026,
+            nume_declar: "X".into(),
+            prenume_declar: "-".into(),
+            functie_declar: "Adm".into(),
+            cif: "12345678".into(),
+            caen: "6201".into(),
+            den: "T".into(),
+            casa: "CJ".into(),
+        };
+        let xml = generate_d112_xml(&h, &[emp("1", "A")]); // toți la sediu principal
+        assert!(!xml.contains("angajatorF1"));
+        assert!(!xml.contains("angajatorF2"));
+    }
+
+    #[test]
+    fn obligation_codes_match_structura_2026() {
+        // Lock (codOblig, codBugetar) against drift (audit Note 1): structura D112 v7 (01/2026) maps
+        // impozit→(602,5503XXXXXX), CAS→(412,5503XXXXXX), CASS→(432,5503XXXXXX), CAM→(480,20470300XX).
+        // The "stops-at-449" DecUnica.xsd is the obsolete 2011 Declarația Unică form, not D112.
+        assert_eq!(oblig::IMPOZIT, ("602", "5503XXXXXX"));
+        assert_eq!(oblig::CAS, ("412", "5503XXXXXX"));
+        assert_eq!(oblig::CASS, ("432", "5503XXXXXX"));
+        assert_eq!(oblig::CAM, ("480", "20470300XX"));
     }
 }

@@ -1,7 +1,7 @@
 /**
  * D100View — Declarația privind obligațiile de plată la bugetul de stat (rândul trimestrial).
- * Micro → cod 121 (1% × venituri); profit → cod 103 (16% × rezultat), din P&L-ul perioadei.
- * Depunerea rămâne manuală prin PDF inteligent + SPV.
+ * Micro → poziția 5 (1% × venituri); profit → poziția 2 (16% × rezultat), din P&L-ul perioadei.
+ * Trim. IV pe profit se regularizează prin D101. Depunerea rămâne manuală prin PDF inteligent + SPV.
  */
 
 import { useMemo, useState } from "react";
@@ -45,9 +45,10 @@ export function D100View({ dateFrom, dateTo }: Props) {
       <SectionCard icon="declaration" title="D100 — Obligații de plată (trimestrial)">
         <div style={{ padding: "0 16px 12px" }}>
           <Banner variant="info">
-            Rândul trimestrial pentru perioada selectată (T{quarter} {year}): micro → cod 121
-            (1% × venituri), profit → cod 103 (16% × rezultat). Scadența: 25 a lunii următoare
-            trimestrului. Depunerea se face manual prin PDF inteligent ANAF + SPV.
+            Rândul trimestrial pentru perioada selectată (T{quarter} {year}): micro → poziția 5
+            (1% × venituri), profit → poziția 2 (16% × rezultat). Scadența: 25 a lunii următoare
+            trimestrului (profit T4 se regularizează prin D101). Depunerea se face manual prin
+            PDF inteligent ANAF + SPV.
           </Banner>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", padding: "0 16px 12px", alignItems: "flex-end" }}>
@@ -60,7 +61,12 @@ export function D100View({ dateFrom, dateTo }: Props) {
           </Btn>
         </div>
 
-        {r && (
+        {r && r.note && (
+          <div style={{ padding: "0 16px 12px" }}>
+            <Banner variant={r.applicable ? "info" : "warning"}>{r.note}</Banner>
+          </div>
+        )}
+        {r && r.applicable && (
           <div className="rf-tbl-wrap" style={{ padding: "0 16px 16px" }}>
             <table className="rf-tbl">
               <thead>

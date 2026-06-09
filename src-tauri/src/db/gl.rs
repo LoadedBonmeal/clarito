@@ -2406,6 +2406,9 @@ pub async fn post_payroll(
     cass: Decimal,
     impozit: Decimal,
     cam: Decimal,
+    // Part-time minimum-base employer-borne CAS/CASS difference (art. 146 (5^6)). 0 if none.
+    cas_diff: Decimal,
+    cass_diff: Decimal,
 ) -> AppResult<PayrollPostResult> {
     let source_id = format!("{period_from}_{period_to}");
     let net = gross - cas - cass - impozit;
@@ -2469,6 +2472,21 @@ pub async fn post_payroll(
     if !cam.is_zero() {
         entries.push(mk(rec, "646", cam, Decimal::ZERO)); // cheltuieli CAM (angajator)
         entries.push(mk(rec + 1, "436", Decimal::ZERO, cam)); // CAM datorată
+        rec += 2;
+    }
+    // Part-time minimum-base top-up borne by the employer: D 6458 / C 4315 (CAS) + C 4316 (CASS).
+    // Brings 4315/4316 up to the contribution on the minimum base (= what D112 declares).
+    let emp_diff = cas_diff + cass_diff;
+    if !emp_diff.is_zero() {
+        entries.push(mk(rec, "6458", emp_diff, Decimal::ZERO));
+        rec += 1;
+        if !cas_diff.is_zero() {
+            entries.push(mk(rec, "4315", Decimal::ZERO, cas_diff));
+            rec += 1;
+        }
+        if !cass_diff.is_zero() {
+            entries.push(mk(rec, "4316", Decimal::ZERO, cass_diff));
+        }
     }
     assert_balanced(&entries, &source_id)?;
 
@@ -2692,8 +2710,12 @@ fn stock_expense_account(stock_account: &str) -> &'static str {
 }
 
 /// Post one stock movement to the GL (idempotent per `(company,'STOCK',ledger_id)`):
-/// IN  → D stock_account / C 401 (recepție la cost);
-/// OUT → D 6xx (descărcare) / C stock_account (la cost evaluat). Zero value → delete only.
+/// IN  → D stock_account / C 6xx (reclasă recepția la stoc — netează cheltuiala 607/601… deja
+///       înregistrată de factura de achiziție: factură D 607/C 401 + recepție D 371/C 607 = D 371/
+///       C 401 capitalizat; pentru producție 345/348 → D 345 / C 711);
+/// OUT → D 6xx (descărcare gestiune) / C stock_account (la cost evaluat). Zero value → delete only.
+/// Notă: o recepție fără factură în aplicație (stoc inițial, factură pe hârtie) creditează temporar
+/// 6xx până la descărcare — o reclasă net-zero pe ciclul stocului, dar vizibilă în cursul perioadei.
 pub async fn post_stock_movement(
     pool: &SqlitePool,
     company_id: &str,
@@ -2732,13 +2754,13 @@ pub async fn post_stock_movement(
         tax_base: None,
         tax_amount: None,
     };
+    let exp = stock_expense_account(stock_account);
     let entries = if is_in {
         vec![
-            mk(1, stock_account, value, Decimal::ZERO), // D 371
-            mk(2, "401", Decimal::ZERO, value),         // C 401
+            mk(1, stock_account, value, Decimal::ZERO), // D 371 (capitalizare)
+            mk(2, exp, Decimal::ZERO, value),           // C 607/711 (netează cheltuiala/producția)
         ]
     } else {
-        let exp = stock_expense_account(stock_account);
         vec![
             mk(1, exp, value, Decimal::ZERO),           // D 607
             mk(2, stock_account, Decimal::ZERO, value), // C 371
@@ -2960,6 +2982,8 @@ pub struct ProfitLoss {
     pub revenue_lines: Vec<PnlLine>,
     pub expense_lines: Vec<PnlLine>,
     pub operating_revenue: String,
+    /// Cifra de afaceri netă (clasa 70x) — F20 rd.01; ⊂ operating_revenue.
+    pub cifra_afaceri: String,
     pub financial_revenue: String,
     pub total_revenue: String,
     pub operating_expense: String,
@@ -2987,6 +3011,7 @@ pub fn compute_pnl(
     let mut closing_entries = Vec::new();
     let mut op_rev = Decimal::ZERO;
     let mut fin_rev = Decimal::ZERO;
+    let mut ca_net = Decimal::ZERO; // cifra de afaceri netă = clasa 70x (+/- 709 reduceri)
     let mut op_exp = Decimal::ZERO;
     let mut fin_exp = Decimal::ZERO;
     let mut income_tax_booked = Decimal::ZERO;
@@ -3004,6 +3029,11 @@ pub fn compute_pnl(
                 fin_rev += net_credit;
             } else {
                 op_rev += net_credit;
+            }
+            // Cifra de afaceri netă = doar 70x (vânzări) — exclude 71x variația stocurilor, 72x
+            // producția imobilizată, 74x subvenții, 75x alte venituri din exploatare.
+            if code.starts_with("70") {
+                ca_net += net_credit;
             }
             revenue_lines.push(PnlLine {
                 code: code.clone(),
@@ -3068,6 +3098,7 @@ pub fn compute_pnl(
         revenue_lines,
         expense_lines,
         operating_revenue: fmt_dec(op_rev),
+        cifra_afaceri: fmt_dec(ca_net),
         financial_revenue: fmt_dec(fin_rev),
         total_revenue: fmt_dec(total_revenue),
         operating_expense: fmt_dec(op_exp),

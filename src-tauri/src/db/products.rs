@@ -30,6 +30,10 @@ pub struct Product {
     /// Allowed values: cereal NC codes + category codes 22–31,36 (tp=1) / 22,23,32–35 (tp=2).
     /// NULL = use default 22 in D394.
     pub art331_code: Option<String>,
+    /// Stock valuation policy (OMFP 1802): 'FIFO' | 'CMP' (default CMP).
+    pub valuation_method: Option<String>,
+    /// GL stock account for this product (371 mărfuri / 301 materii prime / 345 produse…).
+    pub stock_account: Option<String>,
     pub active: bool,
     pub created_at: i64,
     pub updated_at: i64,
@@ -79,7 +83,7 @@ pub async fn list(
     let query_term = query.filter(|s| !s.is_empty());
     let items = sqlx::query_as::<_, Product>(
         "SELECT id, company_id, name, unit, unit_price, vat_rate, vat_category, \
-         code, stock_qty, art331_code, active, created_at, updated_at \
+         code, stock_qty, art331_code, valuation_method, stock_account, active, created_at, updated_at \
          FROM products \
          WHERE company_id = ?1 \
            AND (?2 IS NULL OR name LIKE '%' || ?2 || '%' OR code LIKE '%' || ?2 || '%') \
@@ -96,7 +100,7 @@ pub async fn list(
 pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Product> {
     let product = sqlx::query_as::<_, Product>(
         "SELECT id, company_id, name, unit, unit_price, vat_rate, vat_category, \
-         code, stock_qty, art331_code, active, created_at, updated_at \
+         code, stock_qty, art331_code, valuation_method, stock_account, active, created_at, updated_at \
          FROM products WHERE id = ?1",
     )
     .bind(id)
@@ -292,6 +296,8 @@ mod tests {
                 code         TEXT,
                 stock_qty    TEXT,
                 art331_code  TEXT,
+                valuation_method TEXT,
+                stock_account    TEXT,
                 active       INTEGER NOT NULL DEFAULT 1,
                 created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
                 updated_at   INTEGER NOT NULL DEFAULT (unixepoch())

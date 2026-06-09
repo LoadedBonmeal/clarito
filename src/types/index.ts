@@ -686,6 +686,10 @@ export interface Product {
   stockQty: string | null;
   /** Art. 331 reverse-charge product category code for D394 op11 codPR. Null = use default 22. */
   art331Code: string | null;
+  /** Stock valuation policy (OMFP 1802): 'FIFO' | 'CMP'. Null = CMP. */
+  valuationMethod: string | null;
+  /** GL stock account (371/301/345…). Null = 371. */
+  stockAccount: string | null;
   active: boolean;
   createdAt: number;
   updatedAt: number;
@@ -1100,8 +1104,63 @@ export interface Employee {
   pensionar: boolean;
   tipContract: string;
   oreNorma: number;
+  /** art. 146 (5^7) excepție de la baza minimă CAS/CASS part-time: ''/'elev_student'/'ucenic'/
+   *  'dizabilitate'/'contracte_multiple' (pensionarii via `pensionar`). */
+  exceptieCasMin: string;
+  /** CIF-ul sediului secundar la care e repartizat (D112 angajatorF2); '' = sediu principal. */
+  sediuCif: string;
   createdAt: number;
   updatedAt: number;
+}
+
+/** Sediu secundar / punct de lucru (D112 angajatorF2). */
+export interface SecondaryOffice {
+  id: string;
+  companyId: string;
+  cif: string;
+  name: string;
+  createdAt: number;
+}
+
+/** Certificat de concediu medical (OUG 158/2005) — registru, sursa D112 asiguratD. */
+export interface MedicalLeave {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  periodYm: string;
+  serie: string;
+  numar: string;
+  codIndemnizatie: string;
+  dataAcordare: string;
+  dataInceput: string;
+  dataSfarsit: string;
+  zileAngajator: number;
+  zileFnuass: number;
+  bazaCalcul: string;
+  zileBaza: number;
+  sumaAngajator: string;
+  sumaFnuass: string;
+  procent: number;
+  createdAt: number;
+}
+
+export interface MedicalLeaveInput {
+  companyId: string;
+  employeeId: string;
+  periodYm: string;
+  serie?: string;
+  numar?: string;
+  codIndemnizatie?: string;
+  dataAcordare?: string;
+  dataInceput?: string;
+  dataSfarsit?: string;
+  zileAngajator?: number;
+  zileFnuass?: number;
+  bazaCalcul?: string;
+  zileBaza?: number;
+  sumaAngajator?: string;
+  sumaFnuass?: string;
+  procent?: number;
 }
 
 export interface CreateEmployeeInput {
@@ -1115,6 +1174,8 @@ export interface CreateEmployeeInput {
   pensionar?: boolean;
   tipContract?: string;
   oreNorma?: number;
+  exceptieCasMin?: string;
+  sediuCif?: string;
 }
 
 export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, "companyId">> & {
@@ -1176,6 +1237,9 @@ export interface IntrastatStatus {
 
 /** D100 (obligații de plată) — quarterly obligation row. */
 export interface D100Result {
+  /** False când D100 nu se aplică (profit, trim. IV → se regularizează prin D101). */
+  applicable: boolean;
+  note: string | null;
   codOblig: string;
   label: string;
   base: string;
@@ -1203,6 +1267,8 @@ export interface D101Result {
   nonDeductibleExpenses: string;
   fiscalResult: string;
   priorLoss: string;
+  lossUsed: string;
+  lossRemaining: string;
   taxableProfit: string;
   tax16: string;
   sponsorshipCap: string;
@@ -1258,6 +1324,7 @@ export interface ProfitLoss {
   revenueLines: PnlLine[];
   expenseLines: PnlLine[];
   operatingRevenue: string;
+  cifraAfaceri: string;
   financialRevenue: string;
   totalRevenue: string;
   operatingExpense: string;

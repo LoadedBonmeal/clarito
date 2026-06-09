@@ -107,11 +107,18 @@ pub async fn profit_and_loss(
 /// PDF-ul inteligent ANAF. Header-ul (cod fiscal teritorial, întocmitor, audit) + F30 «Date
 /// informative» se completează în aplicația ANAF după import. Returnează calea fișierului scris.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn export_bilant_xml(
     state: State<'_, AppState>,
     company_id: String,
     year: i32,
     caen: String,
+    // avg_employees: nr. mediu de salariați (criteriu OMFP de mărime); None/0 dacă necunoscut.
+    // form_override: forțează forma ("UU"|"BS"|"BL"); altfel se clasifică automat (2-din-3).
+    // prior_year_form: forma stabilită anul precedent ("UU"|"BS"|"BL") — regula celor 2 ani.
+    avg_employees: Option<i64>,
+    form_override: Option<String>,
+    prior_year_form: Option<String>,
     dest_path: String,
 ) -> AppResult<String> {
     use crate::anaf_decl::bilant_xml::{
@@ -151,19 +158,36 @@ pub async fn export_bilant_xml(
     .await
     .ok();
 
-    // Entity size → form (OMFP-1802, simplified on total assets): ≤ 2.250.000 lei →
-    // microîntreprindere S1005/UU; ≤ 25.000.000 lei → entitate mică S1003/BS; else entitate
-    // mare/mijlocie S1002/BL. The full F20 (small/large) + the developed F10 (large, rd.1-103) are
-    // completed in the ANAF app after import.
+    // Entity size → form (OMFP 1802/2014 pct. 9, OMF 4164/2024): the "2-din-3 criterii" rule —
+    // an entity stays in a size class if it does NOT exceed at least 2 of {total active, cifra de
+    // afaceri netă, nr. mediu salariați}. micro = {2.250.000, 4.500.000, 10}; entitate mică =
+    // {25.000.000, 50.000.000, 50}; peste = mijlocie/mare.
     let bil = db_bilant(&state.db, &company_id, &from, &to).await?;
     let total_assets: f64 = bil.total_assets.parse().unwrap_or(0.0);
-    let form = if total_assets <= 2_250_000.0 {
+    // Criteriul de mărime e CIFRA DE AFACERI NETĂ (clasa 70x), NU operating_revenue (care include
+    // 71x variația stocurilor, 72x producția imobilizată, 74x subvenții, 75x alte venituri) — OMFP
+    // 1802/2014 pct. 9.
+    let turnover: f64 = pnl.cifra_afaceri.parse().unwrap_or(0.0);
+    let emp = avg_employees.unwrap_or(0).max(0) as f64;
+    let exceeds = |a: f64, t: f64, e: f64| {
+        u8::from(total_assets > a) + u8::from(turnover > t) + u8::from(emp > e)
+    };
+    let current_form = if exceeds(2_250_000.0, 4_500_000.0, 10.0) <= 1 {
         "UU"
-    } else if total_assets <= 25_000_000.0 {
+    } else if exceeds(25_000_000.0, 50_000_000.0, 50.0) <= 1 {
         "BS"
     } else {
         "BL"
     };
+    // Regula celor DOI ANI consecutivi (OMFP 1802/2014 pct. 13 alin. (2)) — vezi resolve_size_form:
+    // o singură depășire NU schimbă forma; se păstrează forma anului precedent până la al 2-lea an
+    // (forțat prin form_override). form_override are întâietate.
+    let form = crate::anaf_decl::bilant_xml::resolve_size_form(
+        current_form,
+        form_override.as_deref(),
+        prior_year_form.as_deref(),
+    );
+    let form = form.as_str();
     let micro = form == "UU";
 
     // UU + BS share the prescurtat F10 + simplified F20; BL (entitate mare) files the DEVELOPED F10

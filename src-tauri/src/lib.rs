@@ -11,6 +11,7 @@ mod anaf;
 pub mod anaf_decl;
 mod background;
 pub mod commands;
+mod constraint_guard;
 pub mod db;
 mod error;
 pub mod notifications;
@@ -464,6 +465,12 @@ pub fn run() {
             commands::payroll::create_employee,
             commands::payroll::update_employee,
             commands::payroll::delete_employee,
+            commands::payroll::list_secondary_offices,
+            commands::payroll::create_secondary_office,
+            commands::payroll::delete_secondary_office,
+            commands::payroll::list_medical_leaves,
+            commands::payroll::create_medical_leave,
+            commands::payroll::delete_medical_leave,
             commands::payroll::run_payroll,
             commands::payroll::export_d112_xml,
             commands::gl::close_period,

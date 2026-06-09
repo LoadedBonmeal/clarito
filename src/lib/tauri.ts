@@ -609,8 +609,18 @@ export const gl = {
   bilant: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<BilantReport>("bilant", { companyId, periodFrom, periodTo }),
   /** Exportă bilanțul XML oficial ANAF (S1005 micro) la destPath. Returnează calea. */
-  exportBilantXml: (companyId: string, year: number, caen: string, destPath: string) =>
-    invoke<string>("export_bilant_xml", { companyId, year, caen, destPath }),
+  exportBilantXml: (
+    companyId: string,
+    year: number,
+    caen: string,
+    avgEmployees: number | null,
+    formOverride: string | null,
+    priorYearForm: string | null,
+    destPath: string,
+  ) =>
+    invoke<string>("export_bilant_xml", {
+      companyId, year, caen, avgEmployees, formOverride, priorYearForm, destPath,
+    }),
   /** Postează impozitul pe venit/profit (698/691 → 4418/4411); amount = override opțional. */
   postIncomeTax: (companyId: string, periodFrom: string, periodTo: string, amount?: string) =>
     invoke<IncomeTaxResult>("post_income_tax", { companyId, periodFrom, periodTo, amount: amount ?? null }),
@@ -883,9 +893,9 @@ export const products = {
  */
 export const stockValuation = {
   recordReceipt: (input: import("@/types").StockMovementInput) =>
-    invoke<void>("record_stock_receipt", { input }),
+    invoke<string | null>("record_stock_receipt", { input }),
   recordIssue: (input: import("@/types").StockMovementInput) =>
-    invoke<void>("record_stock_issue", { input }),
+    invoke<string | null>("record_stock_issue", { input }),
   ledger: (companyId: string, productId: string) =>
     invoke<import("@/types").StockLedgerRow[]>("stock_ledger", { companyId, productId }),
   setValuation: (companyId: string, productId: string, method: string, stockAccount: string) =>
@@ -916,6 +926,18 @@ export const payroll = {
     invoke<import("@/types").Employee>("update_employee", { id, companyId, input }),
   delete: (id: string, companyId: string) =>
     invoke<void>("delete_employee", { id, companyId }),
+  listSedii: (companyId: string) =>
+    invoke<import("@/types").SecondaryOffice[]>("list_secondary_offices", { companyId }),
+  createSediu: (companyId: string, cif: string, name: string) =>
+    invoke<import("@/types").SecondaryOffice>("create_secondary_office", { companyId, cif, name }),
+  deleteSediu: (id: string, companyId: string) =>
+    invoke<void>("delete_secondary_office", { id, companyId }),
+  listConcedii: (companyId: string, periodYm: string) =>
+    invoke<import("@/types").MedicalLeave[]>("list_medical_leaves", { companyId, periodYm }),
+  createConcediu: (input: import("@/types").MedicalLeaveInput) =>
+    invoke<import("@/types").MedicalLeave>("create_medical_leave", { input }),
+  deleteConcediu: (id: string, companyId: string) =>
+    invoke<void>("delete_medical_leave", { id, companyId }),
   run: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<import("@/types").PayrollRun>("run_payroll", { companyId, periodFrom, periodTo }),
   /** Exportă D112 (XML) pentru luna dată la destPath. Returnează calea. */

@@ -18,6 +18,29 @@ use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 
+/// Resolve the bilanț size form applying the OMFP 1802/2014 pct. 13 alin. (2) two-consecutive-years
+/// rule: a single year in which the criteria point to a different category than the one established
+/// last year (`prior_year`) does NOT switch the category — the entity keeps `prior_year` until the
+/// breach persists a second consecutive year (which the user confirms via `form_override`).
+/// `form_override` always wins; an absent/invalid `prior_year` falls back to `current`.
+pub fn resolve_size_form(
+    current: &str,
+    form_override: Option<&str>,
+    prior_year: Option<&str>,
+) -> String {
+    let valid = |f: &str| matches!(f, "UU" | "BS" | "BL");
+    // Defensive: an out-of-range `current` falls back to the smallest form (micro/UU) rather than
+    // emitting a garbage code; in practice the caller always passes a computed UU/BS/BL.
+    let current = if valid(current) { current } else { "UU" };
+    if let Some(o) = form_override.filter(|f| valid(f)) {
+        return o.to_string();
+    }
+    match prior_year.filter(|f| valid(f)) {
+        Some(p) if p != current => p.to_string(), // one-year change → sticky to prior year
+        _ => current.to_string(),
+    }
+}
+
 /// Round a Decimal RON value to whole lei (i64), commercial rounding.
 fn lei(d: Decimal) -> i64 {
     d.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
@@ -307,9 +330,11 @@ pub fn compute_f10_developed(tb: &TrialBalance) -> HashMap<String, i64> {
     put(&mut f, "049", o, c, true);
     let (o, c) = net(tb, |x| sw(x, "16") || sw(x, "519"));
     put(&mut f, "046", o, c, true);
-    // Other current settlement debts (the big residual bucket rd.52).
+    // Other current settlement debts (the big residual bucket rd.52): 42x salarii/contributii, 43x,
+    // 44x (incl. 441 impozit pe profit datorat + 4423 TVA de plată), 455/456/457/458, 462, 466, 473,
+    // 509, 518x/519x interest+overdraft.
     let (o, c) = net(tb, |x| {
-        (sw(x, "42")
+        sw(x, "42")
             || sw(x, "43")
             || sw(x, "44")
             || sw(x, "455")
@@ -322,15 +347,16 @@ pub fn compute_f10_developed(tb: &TrialBalance) -> HashMap<String, i64> {
             || sw(x, "509")
             || sw(x, "5186")
             || sw(x, "5191")
-            || sw(x, "5198"))
-            && !sw(x, "441") // 441 split below not needed for the lump
+            || sw(x, "5198")
     });
-    // keep only credit (datorii); clamp negatives.
+    // Keep only the CREDIT (liability) part: net is debit-positive, so credit balances are negative;
+    // min(0) selects them, and put(credit=true) negates back to the positive liability figure.
+    // (Debit balances of these accounts are receivables, mapped under rd.34 — emit 0 here.)
     put(
         &mut f,
         "052",
-        (-o).min(Decimal::ZERO),
-        (-c).min(Decimal::ZERO),
+        o.min(Decimal::ZERO),
+        c.min(Decimal::ZERO),
         true,
     );
 
@@ -531,10 +557,16 @@ pub fn compute_f20_full(cur: &TrialBalance, prior: Option<&TrialBalance>) -> Has
 }
 
 /// "Settlement" accounts whose debit balance is a creanță and credit balance a datorie:
-/// class-4 (excl. avans 471/472/475) + interest 518x + short-term bank credit 519x (incl. their
-/// 4-digit analytics 5191/5198 — the common overdraft accounts that must not be dropped).
+/// class-4 (excl. avans 471/472/475 AND 4093/4094 avansuri imobilizări, which belong in rd.01/02 of
+/// the F10, not creanțe) + interest 518x + short-term bank credit 519x (incl. their 4-digit
+/// analytics 5191/5198 — the common overdraft accounts that must not be dropped).
 fn is_settlement(code: &str) -> bool {
-    (code.starts_with('4') && code != "471" && code != "472" && !code.starts_with("475"))
+    (code.starts_with('4')
+        && code != "471"
+        && code != "472"
+        && !code.starts_with("475")
+        && !code.starts_with("4093")
+        && !code.starts_with("4094"))
         || code.starts_with("518")
         || code.starts_with("519")
 }
@@ -596,9 +628,10 @@ pub fn compute_f20(
         f.insert(format!("F20_{row}2"), lei(cur));
     };
     let prv = |get: &dyn Fn(&ProfitLoss) -> Decimal| prior.map(get).unwrap_or(Decimal::ZERO);
-    let op_rev = |x: &ProfitLoss| p(&x.operating_revenue);
+    // Cifra de afaceri netă (rd.01) = clasa 70x — NU operating_revenue (care include 71x/72x/74x/75x).
+    let ca = |x: &ProfitLoss| p(&x.cifra_afaceri);
 
-    col("001", op_rev(pnl), prv(&op_rev)); // cifra de afaceri netă (rd.01) — same code in both forms
+    col("001", ca(pnl), prv(&ca)); // cifra de afaceri netă (rd.01) — same code in both forms
     if micro {
         let tot_rev = |x: &ProfitLoss| p(&x.total_revenue);
         let tot_exp = |x: &ProfitLoss| p(&x.total_expense);
@@ -759,6 +792,22 @@ totalPlata_A=\"{tp}\">\n\
 mod tests {
     use super::*;
 
+    #[test]
+    fn size_form_two_consecutive_years_rule() {
+        // No prior year → use the current-year computation.
+        assert_eq!(resolve_size_form("BS", None, None), "BS");
+        // Stable: current == prior → keep it.
+        assert_eq!(resolve_size_form("UU", None, Some("UU")), "UU");
+        // One-year change (criteria say BS, but last year was UU) → STICKY to UU (pct. 13(2)).
+        assert_eq!(resolve_size_form("BS", None, Some("UU")), "UU");
+        // Second year confirmed → the user forces the new form via override.
+        assert_eq!(resolve_size_form("BS", Some("BS"), Some("UU")), "BS");
+        // Override always wins; invalid prior is ignored.
+        assert_eq!(resolve_size_form("BL", None, Some("ZZ")), "BL");
+        // Defensive: an invalid `current` falls back to UU.
+        assert_eq!(resolve_size_form("ZZ", None, None), "UU");
+    }
+
     fn tb_row(
         code: &str,
         od: &str,
@@ -870,6 +919,8 @@ mod tests {
             tb_row("5121", "0", "0", "15000", "0"),
             tb_row("1012", "0", "0", "0", "50000"),
             tb_row("401", "0", "0", "0", "25000"),
+            tb_row("421", "0", "0", "0", "5850"), // salarii datorate → rd.052 (datorii curente)
+            tb_row("4423", "0", "0", "0", "2000"), // TVA de plată → rd.052
             tb_row("121", "0", "0", "0", "30000"),
         ]);
         let f10 = compute_f10_developed(&t);
@@ -878,6 +929,8 @@ mod tests {
         assert_eq!(f10["F10_0172"], 40000);
         // rd.025 active imobilizate total = 40.000 (only corporale).
         assert_eq!(f10["F10_0252"], 40000);
+        // rd.052 (datorii curente diverse) = 421 5.850 + 4423 2.000 = 7.850 (sign-fixed; was 0).
+        assert_eq!(f10["F10_0522"], 7850);
         let f20 = compute_f20_full(&t, None);
         let h = BilantHeader {
             year: 2026,

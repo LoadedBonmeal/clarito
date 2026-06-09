@@ -30,6 +30,12 @@ pub struct Employee {
     pub pensionar: bool,
     pub tip_contract: String,
     pub ore_norma: i64,
+    /// art. 146 (5^7) excepție de la baza minimă CAS/CASS part-time: ''/'elev_student'/'ucenic'/
+    /// 'dizabilitate'/'contracte_multiple' (pensionarii via `pensionar`).
+    pub exceptie_cas_min: String,
+    /// CIF-ul sediului secundar la care e repartizat salariatul (D112 angajatorF2); '' = sediu
+    /// principal.
+    pub sediu_cif: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -52,6 +58,10 @@ pub struct CreateEmployeeInput {
     pub tip_contract: Option<String>,
     #[serde(default)]
     pub ore_norma: Option<i64>,
+    #[serde(default)]
+    pub exceptie_cas_min: Option<String>,
+    #[serde(default)]
+    pub sediu_cif: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -67,11 +77,13 @@ pub struct UpdateEmployeeInput {
     pub pensionar: Option<bool>,
     pub tip_contract: Option<String>,
     pub ore_norma: Option<i64>,
+    pub exceptie_cas_min: Option<String>,
+    pub sediu_cif: Option<String>,
 }
 
 const COLS: &str = "id, company_id, cnp, full_name, gross_salary, personal_deduction, \
                     employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
-                    created_at, updated_at";
+                    exceptie_cas_min, sediu_cif, created_at, updated_at";
 
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Employee>> {
     let q = format!(
@@ -122,8 +134,9 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     let now = now_unix();
     sqlx::query(
         "INSERT INTO employees (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
-         employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, created_at, \
-         updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11,?12,?12)",
+         employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
+         exceptie_cas_min, sediu_cif, created_at, updated_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11,?12,?13,?14,?14)",
     )
     .bind(&id)
     .bind(&input.company_id)
@@ -136,6 +149,8 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     .bind(input.pensionar.unwrap_or(false))
     .bind(input.tip_contract.as_deref().unwrap_or("N"))
     .bind(input.ore_norma.unwrap_or(8))
+    .bind(input.exceptie_cas_min.as_deref().unwrap_or(""))
+    .bind(input.sediu_cif.as_deref().unwrap_or("").trim())
     .bind(now)
     .execute(pool)
     .await?;
@@ -161,7 +176,8 @@ pub async fn update(
     sqlx::query(
         "UPDATE employees SET cnp=?3, full_name=?4, gross_salary=?5, personal_deduction=?6, \
          employment_date=?7, active=?8, tip_asigurat=?9, pensionar=?10, tip_contract=?11, \
-         ore_norma=?12, updated_at=?13 WHERE id=?1 AND company_id=?2",
+         ore_norma=?12, exceptie_cas_min=?13, sediu_cif=?14, updated_at=?15 \
+         WHERE id=?1 AND company_id=?2",
     )
     .bind(id)
     .bind(company_id)
@@ -175,6 +191,13 @@ pub async fn update(
     .bind(input.pensionar.unwrap_or(cur.pensionar))
     .bind(input.tip_contract.as_deref().unwrap_or(&cur.tip_contract))
     .bind(input.ore_norma.unwrap_or(cur.ore_norma))
+    .bind(
+        input
+            .exceptie_cas_min
+            .as_deref()
+            .unwrap_or(&cur.exceptie_cas_min),
+    )
+    .bind(input.sediu_cif.as_deref().unwrap_or(&cur.sediu_cif))
     .bind(now_unix())
     .execute(pool)
     .await?;
@@ -184,6 +207,79 @@ pub async fn update(
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
     get(pool, id, company_id).await?;
     sqlx::query("DELETE FROM employees WHERE id=?1 AND company_id=?2")
+        .bind(id)
+        .bind(company_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+// ─── Sedii secundare (D112 angajatorF2) ──────────────────────────────────────
+
+/// Un sediu secundar / punct de lucru — impozitul pe salarii al angajaților repartizați aici se
+/// declară separat în D112 (angajatorF2), per CIF.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct SecondaryOffice {
+    pub id: String,
+    pub company_id: String,
+    pub cif: String,
+    pub name: String,
+    pub created_at: i64,
+}
+
+pub async fn list_sedii(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<SecondaryOffice>> {
+    Ok(sqlx::query_as::<_, SecondaryOffice>(
+        "SELECT id, company_id, cif, name, created_at FROM secondary_offices \
+         WHERE company_id=?1 ORDER BY cif",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn create_sediu(
+    pool: &SqlitePool,
+    company_id: &str,
+    cif: &str,
+    name: &str,
+) -> AppResult<SecondaryOffice> {
+    let cif = cif.trim();
+    // CIF sediu secundar: obligatoriu + validat cu același algoritm mod-11 ca al companiei (valid_cui
+    // întoarce true pentru gol, de aceea respingem explicit golul).
+    if cif.is_empty() || !crate::anaf_decl::valid_cui(cif) {
+        return Err(AppError::Validation(
+            "CIF sediu secundar invalid — verificați cifra de control.".into(),
+        ));
+    }
+    let id = new_id();
+    sqlx::query(
+        "INSERT INTO secondary_offices (id, company_id, cif, name, created_at) \
+         VALUES (?1,?2,?3,?4,?5)",
+    )
+    .bind(&id)
+    .bind(company_id)
+    .bind(cif)
+    .bind(name.trim())
+    .bind(now_unix())
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        if e.to_string().contains("UNIQUE") {
+            AppError::Validation(format!("Există deja un sediu secundar cu CIF {cif}."))
+        } else {
+            AppError::from(e)
+        }
+    })?;
+    list_sedii(pool, company_id)
+        .await?
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or(AppError::NotFound)
+}
+
+pub async fn delete_sediu(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
+    sqlx::query("DELETE FROM secondary_offices WHERE id=?1 AND company_id=?2")
         .bind(id)
         .bind(company_id)
         .execute(pool)
@@ -228,6 +324,10 @@ pub async fn run_payroll(
     period_to: &str,
 ) -> AppResult<PayrollRun> {
     let dec = |s: &str| Decimal::from_str(s).unwrap_or(Decimal::ZERO);
+    let month: u32 = period_from
+        .get(5..7)
+        .and_then(|m| m.parse().ok())
+        .unwrap_or(1);
     let employees = list(pool, company_id).await?;
     let mut states = Vec::new();
     let (mut t_gross, mut t_cas, mut t_cass, mut t_tax, mut t_net, mut t_cam) = (
@@ -238,11 +338,22 @@ pub async fn run_payroll(
         Decimal::ZERO,
         Decimal::ZERO,
     );
+    // Employer-borne part-time minimum-base CAS/CASS difference (art. 146 (5^6)).
+    let (mut t_cas_diff, mut t_cass_diff) = (Decimal::ZERO, Decimal::ZERO);
     for e in employees.iter().filter(|e| e.active) {
+        let gross = dec(&e.gross_salary);
         let r = compute_payroll(&PayrollInput {
-            gross: dec(&e.gross_salary),
+            gross,
             personal_deduction: dec(&e.personal_deduction),
         });
+        let exempt =
+            crate::anaf_decl::d112::exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
+        if let Some((_, cas_diff, cass_diff)) =
+            crate::anaf_decl::d112::part_time_min_base(gross, &e.tip_contract, exempt, month)
+        {
+            t_cas_diff += cas_diff;
+            t_cass_diff += cass_diff;
+        }
         t_gross += dec(&r.gross);
         t_cas += dec(&r.cas);
         t_cass += dec(&r.cass);
@@ -271,6 +382,8 @@ pub async fn run_payroll(
         t_cass,
         t_tax,
         t_cam,
+        t_cas_diff,
+        t_cass_diff,
     )
     .await?;
 
@@ -307,6 +420,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sedii_crud_and_cif_checksum() {
+        let pool = setup().await;
+        // A structurally-valid RO CUI (mod-11) is accepted; a wrong-checksum one is rejected.
+        let ok = create_sediu(&pool, "co1", "12345674", "Punct lucru").await;
+        assert!(ok.is_ok(), "valid CIF should be accepted: {ok:?}");
+        assert!(create_sediu(&pool, "co1", "12345678", "x").await.is_err()); // bad checksum
+        assert!(create_sediu(&pool, "co1", "abc", "x").await.is_err()); // non-numeric
+        assert!(create_sediu(&pool, "co1", "", "x").await.is_err()); // empty
+                                                                     // Duplicate CIF rejected.
+        assert!(create_sediu(&pool, "co1", "12345674", "dup").await.is_err());
+        let list = list_sedii(&pool, "co1").await.unwrap();
+        assert_eq!(list.len(), 1);
+        delete_sediu(&pool, &list[0].id, "co1").await.unwrap();
+        assert!(list_sedii(&pool, "co1").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn run_payroll_aggregates_and_posts_gl() {
         let pool = setup().await;
         for (cnp, name) in [("1", "A"), ("2", "B")] {
@@ -323,6 +453,8 @@ mod tests {
                     pensionar: None,
                     tip_contract: None,
                     ore_norma: None,
+                    exceptie_cas_min: None,
+                    sediu_cif: None,
                 },
             )
             .await

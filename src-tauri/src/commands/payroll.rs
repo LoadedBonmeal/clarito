@@ -98,6 +98,59 @@ pub async fn delete_employee(
     payroll::delete(&state.db, &id, &company_id).await
 }
 
+#[tauri::command]
+pub async fn list_medical_leaves(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_ym: String,
+) -> AppResult<Vec<crate::db::concedii::MedicalLeave>> {
+    crate::db::concedii::list(&state.db, &company_id, &period_ym).await
+}
+
+#[tauri::command]
+pub async fn create_medical_leave(
+    state: State<'_, AppState>,
+    input: crate::db::concedii::MedicalLeaveInput,
+) -> AppResult<crate::db::concedii::MedicalLeave> {
+    crate::db::concedii::create(&state.db, input).await
+}
+
+#[tauri::command]
+pub async fn delete_medical_leave(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+) -> AppResult<()> {
+    crate::db::concedii::delete(&state.db, &id, &company_id).await
+}
+
+#[tauri::command]
+pub async fn list_secondary_offices(
+    state: State<'_, AppState>,
+    company_id: String,
+) -> AppResult<Vec<payroll::SecondaryOffice>> {
+    payroll::list_sedii(&state.db, &company_id).await
+}
+
+#[tauri::command]
+pub async fn create_secondary_office(
+    state: State<'_, AppState>,
+    company_id: String,
+    cif: String,
+    name: String,
+) -> AppResult<payroll::SecondaryOffice> {
+    payroll::create_sediu(&state.db, &company_id, &cif, &name).await
+}
+
+#[tauri::command]
+pub async fn delete_secondary_office(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+) -> AppResult<()> {
+    payroll::delete_sediu(&state.db, &id, &company_id).await
+}
+
 /// Rulează statul de salarii lunar: calculează stările individuale (ratele 2026) și postează nota
 /// agregată în GL (641/421, 4315, 4316, 444, 646/436). Idempotentă per perioadă.
 #[tauri::command]
@@ -130,8 +183,13 @@ pub async fn export_d112_xml(
     let company = crate::db::companies::get(&state.db, &company_id).await?;
     let employees = payroll::list(&state.db, &company_id).await?;
     let dec = |s: &str| Decimal::from_str(s).unwrap_or(Decimal::ZERO);
-    let lei = |s: &str| dec(s).round().to_i64().unwrap_or(0);
-    let leid = |d: Decimal| round2(d).round().to_i64().unwrap_or(0); // whole lei (commercial)
+    // Whole-lei, COMMERCIAL rounding (MidpointAwayFromZero) — never banker's `.round()`.
+    let leid = |d: Decimal| {
+        d.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_i64()
+            .unwrap_or(0)
+    };
+    let lei = |s: &str| leid(dec(s));
 
     let nzl = working_days(year, month); // zile lucrătoare în lună (Luni-Vineri)
     let mut d112_emps = Vec::new();
@@ -145,22 +203,18 @@ pub async fn export_d112_xml(
         let mut baza_cass = gross;
         let mut cas = dec(&r.cas);
         let mut cass = dec(&r.cass);
-        // Part-time (contract Pi): baza CAS/CASS nu poate fi sub baza minimă prorata la zile lucrate
-        // (salariul minim − suma deductibilă), iar diferența de contribuție e suportată de angajator.
-        if e.tip_contract != "N" && gross > Decimal::ZERO && nzl > 0 {
-            let (sal_min, suma): (i64, i64) = if month <= 6 { (4050, 300) } else { (4325, 200) };
-            let sm = Decimal::from(sal_min - suma);
-            let part_base = round2(
-                sm * Decimal::from(e.ore_norma.max(0)) * Decimal::from(nzl)
-                    / (Decimal::from(8) * Decimal::from(nzl)),
-            );
-            // (ore_norma/8 prorates the daily-hours fraction; days net out for a full-month contract.)
-            if gross < part_base {
-                baza_cas = part_base;
-                baza_cass = part_base;
-                cas = round2(part_base * Decimal::new(25, 2));
-                cass = round2(part_base * Decimal::new(10, 2));
-            }
+        // Part-time (contract Pi): baza CAS/CASS = salariul minim întreg (NU prorata cu norma orară),
+        // categoriile art. 146 (5^7) exceptate — via the shared helper. Contribuția declarată e pe
+        // baza majorată.
+        let exempt =
+            crate::anaf_decl::d112::exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
+        if let Some((base, _, _)) =
+            crate::anaf_decl::d112::part_time_min_base(gross, &e.tip_contract, exempt, month)
+        {
+            baza_cas = base;
+            baza_cass = base;
+            cas = round2(base * Decimal::new(25, 2));
+            cass = round2(base * Decimal::new(10, 2));
         }
         let (nume, prenume) = split_name(&e.full_name);
         d112_emps.push(D112Employee {
@@ -186,6 +240,7 @@ pub async fn export_d112_xml(
             ore_norma: e.ore_norma.clamp(6, 8) as u32,
             baza_cas: leid(baza_cas),
             baza_cass: leid(baza_cass),
+            sediu_cif: e.sediu_cif.clone(),
         });
     }
 
