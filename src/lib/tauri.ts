@@ -255,6 +255,9 @@ export const anaf = {
     invoke<string>("anaf_check_invoice_status", { companyId, invoiceId, testMode }),
   syncSpv: (companyId: string, testMode = false) =>
     invoke<number>("anaf_sync_spv", { companyId, testMode }),
+  /** General SPV inbox (SPVWS2): recipise, notificări, somații, decizii. Read-only. */
+  listSpvInbox: (companyId: string, days = 60, testMode = false) =>
+    invoke<import("@/types").SpvInboxItem[]>("anaf_list_spv_inbox", { companyId, days, testMode }),
 };
 
 // ─── Certificates ─────────────────────────────────────────────────────────

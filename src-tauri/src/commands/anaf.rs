@@ -670,3 +670,61 @@ pub async fn anaf_sync_spv(
 ) -> AppResult<i32> {
     crate::background::do_sync_spv(&state.db, &company_id, &app, test_mode).await
 }
+
+/// One SPV-inbox item: the raw SPV message + its category bucket.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpvInboxItem {
+    pub id: String,
+    pub tip: String,
+    pub data_creare: String,
+    pub cif: String,
+    pub id_solicitare: String,
+    pub detalii: Option<String>,
+    /// Inbox bucket: recipisa | notificare | somatie | decizie | factura | altele.
+    pub category: &'static str,
+}
+
+/// Read the GENERAL SPV inbox (SPVWS2) — declaration recipise, notificări, somații, decizii —
+/// distinct from the e-Factura sync. Read-only; ANAF provides no declaration-submission API
+/// (D300/D394/D406 are uploaded manually in the SPV portal), so this surfaces the responses.
+/// Live-only: requires a connected ANAF account; not reachable without credentials.
+#[tauri::command]
+pub async fn anaf_list_spv_inbox(
+    state: tauri::State<'_, AppState>,
+    company_id: String,
+    days: u32,
+    test_mode: bool,
+) -> AppResult<Vec<SpvInboxItem>> {
+    use crate::anaf::client::{classify_spv_tip, ERR_UNAUTHORIZED};
+    let pool = &state.db;
+    let company = companies::get(pool, &company_id).await?;
+    let token = get_valid_token(&company_id, pool, &state.token_refresh_lock).await?;
+    let client = AnafClient::new(test_mode);
+
+    let days = days.clamp(1, 60);
+    let mut result = client.list_spv_messages(&token, &company.cui, days).await;
+    if let Err(ref e) = result {
+        if e == ERR_UNAUTHORIZED {
+            if let Ok(new_tok) =
+                crate::background::refresh_token_for(&company_id, pool, &state.token_refresh_lock)
+                    .await
+            {
+                result = client.list_spv_messages(&new_tok, &company.cui, days).await;
+            }
+        }
+    }
+    let messages = result.map_err(AppError::Other)?;
+    Ok(messages
+        .into_iter()
+        .map(|m| SpvInboxItem {
+            category: classify_spv_tip(&m.tip),
+            id: m.id,
+            tip: m.tip,
+            data_creare: m.data_creare,
+            cif: m.cif,
+            id_solicitare: m.id_solicitare,
+            detalii: m.detalii,
+        })
+        .collect())
+}

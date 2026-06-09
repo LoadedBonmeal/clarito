@@ -470,6 +470,18 @@ export interface D394Partner {
 }
 
 /** Raportul D394 — livrări (vânzări) + achiziții per partener. */
+/** SPV general inbox (SPVWS2) item — recipise/notificări/somații/decizii. */
+export interface SpvInboxItem {
+  id: string;
+  tip: string;
+  dataCreare: string;
+  cif: string;
+  idSolicitare: string;
+  detalii: string | null;
+  /** recipisa | notificare | somatie | decizie | factura | altele. */
+  category: string;
+}
+
 /** RO e-TVA — precompletat (P300ETVA) values imported from SPV for the self-check. */
 export interface EtvaPrecompletat {
   collectedVat: string;

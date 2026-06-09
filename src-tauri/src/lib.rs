@@ -347,6 +347,7 @@ pub fn run() {
             commands::anaf::anaf_submit_invoice,
             commands::anaf::anaf_check_invoice_status,
             commands::anaf::anaf_sync_spv,
+            commands::anaf::anaf_list_spv_inbox,
             commands::anaf::anaf_refresh_certificate,
             commands::anaf::anaf_revoke_certificate,
             commands::anaf::anaf_get_certificates,

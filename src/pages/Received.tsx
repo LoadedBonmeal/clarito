@@ -12,6 +12,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { SpvInbox } from "@/components/shared/SpvInbox";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import {
   PageHeader, Btn, IconBtn, Badge, Card, SearchInput, Empty,
@@ -240,6 +241,7 @@ export function ReceivedPage() {
       />
 
       <div className="rf-page-body">
+        <SpvInbox />
         <Card>
           {/* Tabs + Toolbar */}
           <div style={{ borderBottom: "1px solid var(--rf-border)" }}>

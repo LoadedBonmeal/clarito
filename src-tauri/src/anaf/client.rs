@@ -47,6 +47,26 @@ pub struct SpvMessage {
     pub detalii: Option<String>,
 }
 
+/// Categorise a general-SPV message `tip` into an inbox bucket. The SPVWS2 inbox carries
+/// declaration recipise, notificări, somații, decizii etc. (distinct from the e-Factura FCTEL
+/// message list). Pure — drives the inbox grouping + the "actionable" highlight (somații).
+pub fn classify_spv_tip(tip: &str) -> &'static str {
+    let t = tip.to_uppercase();
+    if t.contains("SOMA") {
+        "somatie"
+    } else if t.contains("RECIP") {
+        "recipisa"
+    } else if t.contains("DECIZ") {
+        "decizie"
+    } else if t.contains("NOTIF") {
+        "notificare"
+    } else if t.contains("FACTUR") {
+        "factura"
+    } else {
+        "altele"
+    }
+}
+
 // ─── Structuri raw pentru parsare JSON ANAF ────────────────────────────────
 
 #[derive(Deserialize)]
@@ -421,6 +441,60 @@ impl AnafClient {
         Ok(all_messages)
     }
 
+    /// List the GENERAL SPV inbox via SPVWS2 — declaration recipise, notificări, somații, decizii
+    /// (distinct from the e-Factura FCTEL message list above). Read-only; reuses the OAuth bearer
+    /// token. NOTE: SPVWS2 lives on a different host (`webserviced.anaf.ro`) and there is no public
+    /// test instance, so this is exercised only against live ANAF — not reachable in unit tests.
+    /// The response shares the e-Factura `{mesaje:[…]}` shape, so `MessagesRaw` is reused.
+    pub async fn list_spv_messages(
+        &self,
+        token: &str,
+        company_cui: &str,
+        days: u32,
+    ) -> Result<Vec<SpvMessage>, String> {
+        let base = "https://webserviced.anaf.ro/SPVWS2/rest";
+        let url = format!("{base}/listaMesaje");
+        let days_str = days.to_string();
+        let resp = self
+            .client
+            .get(&url)
+            .query(&[("zile", days_str.as_str()), ("cif", company_cui)])
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| format!("List SPV messages request eșuat: {e}"))?;
+        let status = resp.status();
+        if status == 401 {
+            return Err(ERR_UNAUTHORIZED.to_string());
+        }
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        if !status.is_success() {
+            tracing::warn!(
+                status = status.as_u16(),
+                body_len = body.len(),
+                "ANAF SPVWS2 list messages error"
+            );
+            return Err(format!(
+                "Eroare comunicare ANAF SPV ({status}). Reîncercați sau contactați suportul."
+            ));
+        }
+        let raw: MessagesRaw =
+            serde_json::from_str(&body).map_err(|e| format!("JSON SPV messages invalid: {e}"))?;
+        Ok(raw
+            .mesaje
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| SpvMessage {
+                id: m.id,
+                tip: m.tip,
+                data_creare: m.data_creare,
+                cif: m.cif,
+                id_solicitare: m.id_solicitare,
+                detalii: m.detalii,
+            })
+            .collect())
+    }
+
     /// Descarcă un mesaj SPV după ID. Returnează bytes ZIP.
     ///
     /// Retry policy: 5xx → backoff; 429 → Retry-After; 401 → ERR_UNAUTHORIZED.
@@ -498,5 +572,20 @@ impl AnafClient {
             let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
             return Ok(bytes.to_vec());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_spv_tip;
+
+    #[test]
+    fn classifies_spv_message_types() {
+        assert_eq!(classify_spv_tip("SOMATIE"), "somatie");
+        assert_eq!(classify_spv_tip("Recipisa declaratie D300"), "recipisa");
+        assert_eq!(classify_spv_tip("DECIZIE de impunere"), "decizie");
+        assert_eq!(classify_spv_tip("Notificare conformare"), "notificare");
+        assert_eq!(classify_spv_tip("FACTURA PRIMITA"), "factura");
+        assert_eq!(classify_spv_tip("altceva"), "altele");
     }
 }
