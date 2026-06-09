@@ -1144,6 +1144,7 @@ pub async fn generate_gl_entries(
         let contact_id: String = row.try_get("contact_id").unwrap_or_default();
         let contact_cui: Option<String> = row.try_get("contact_cui").unwrap_or(None);
         let storno_ref: Option<String> = row.try_get("storno_of_invoice_id").unwrap_or(None);
+        let status: String = row.try_get("status").unwrap_or_default();
         let currency: String = row
             .try_get("currency")
             .unwrap_or_else(|_| "RON".to_string());
@@ -1203,11 +1204,13 @@ pub async fn generate_gl_entries(
         // STORNED, which double-inverted the sign vs D300 — FIX-1.)
         let is_storno = storno_ref.is_some();
 
-        // Cash VAT: route standard ("S") output VAT to 4428 (neexigibilă) only for non-credit-note
-        // invoices issued within the regime window — so a STORNED original re-posts to 4428 exactly
-        // as it did when VALIDATED. (Credit-note 4428/4427 reversal under cash VAT is deferred —
-        // see CASH_VAT_DESIGN.md.)
-        let cash_vat_applies = !is_storno && in_cash_vat_window(&issue_date);
+        // Cash VAT: defer standard ("S") output VAT to 4428 (neexigibilă) only for a LIVE fresh
+        // sale — i.e. not a credit note (is_storno) AND not a STORNED original. A STORNED original
+        // will never be collected, so its VAT must stay exigible on 4427 (the payment loop posts no
+        // 4428→4427 release for STORNED, and D300 counts it as collected at issue) — keeping the
+        // three sides consistent. (Credit-note 4428/4427 reversal under cash VAT is deferred — see
+        // CASH_VAT_DESIGN.md.)
+        let cash_vat_applies = !is_storno && status != "STORNED" && in_cash_vat_window(&issue_date);
 
         let (journal, entries) = post_sales_invoice(
             company_id,
@@ -3444,6 +3447,54 @@ mod tests {
         let (_, c4427) = account_balance(&pool, "co", "4427").await;
         assert_eq!(c4428, dec("190"), "VAT must be credited to 4428");
         assert_eq!(c4427, Decimal::ZERO, "nothing exigible yet (no collection)");
+    }
+
+    // A STORNED cash-VAT original must NOT defer to 4428 (it will never be collected) — its VAT
+    // stays exigible on 4427, the credit note reverses it, and GL ↔ D300 ties out. (Regression
+    // guard for the FIX-1 cash-VAT follow-up.)
+    #[tokio::test]
+    async fn cash_vat_storno_does_not_strand_vat_in_4428_and_reconciles() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        enable_cash_vat(&pool, "co", "2025-01-01").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice(
+            &pool, "co", "o", "ct", "STORNED", "1000", "190", "1190", None,
+        )
+        .await;
+        insert_invoice(
+            &pool,
+            "co",
+            "cn",
+            "ct",
+            "VALIDATED",
+            "-1000",
+            "-190",
+            "-1190",
+            Some("o"),
+        )
+        .await;
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        // Nothing stranded in 4428: the storned sale's VAT went to 4427, not deferred.
+        let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
+        assert_eq!(d4428, Decimal::ZERO);
+        assert_eq!(
+            c4428,
+            Decimal::ZERO,
+            "no S VAT stranded in 4428 for a storned sale"
+        );
+        // GL ↔ D300 ties: +190 (storned original) − 190 (credit note) = 0 collected.
+        let rec = reconcile(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        assert!(
+            rec.discrepancies.is_empty(),
+            "cash-VAT storno must reconcile: {:?}",
+            rec.discrepancies
+        );
     }
 
     #[tokio::test]
