@@ -61,9 +61,13 @@ pub async fn etransport_submit(
         .await;
     if let Err(ref e) = result {
         if e == ERR_UNAUTHORIZED {
-            if let Ok(new_tok) =
-                crate::background::refresh_token_for(&company_id, pool, &state.token_refresh_lock)
-                    .await
+            if let Ok(new_tok) = crate::background::refresh_token_after_401(
+                &company_id,
+                pool,
+                &state.token_refresh_lock,
+                &token,
+            )
+            .await
             {
                 result = client
                     .upload_etransport(&new_tok, &company.cui, xml.into_bytes())

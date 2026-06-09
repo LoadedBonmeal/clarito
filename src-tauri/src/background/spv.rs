@@ -105,7 +105,9 @@ pub(crate) async fn do_sync_spv(
                 company_id,
                 "ANAF 401 on list_messages — reîmprospătăm token"
             );
-            if let Ok(new_tok) = super::poll::refresh_token_for(company_id, pool, lock).await {
+            if let Ok(new_tok) =
+                super::poll::refresh_token_after_401(company_id, pool, lock, &access_token).await
+            {
                 access_token = new_tok;
                 messages_result = client.list_messages(&access_token, &company.cui, 60).await;
             }
@@ -197,7 +199,10 @@ pub(crate) async fn do_sync_spv(
                     msg_id = msg.id.as_str(),
                     "ANAF 401 on download — reîmprospătăm token"
                 );
-                if let Ok(new_tok) = super::poll::refresh_token_for(company_id, pool, lock).await {
+                if let Ok(new_tok) =
+                    super::poll::refresh_token_after_401(company_id, pool, lock, &access_token)
+                        .await
+                {
                     access_token = new_tok;
                     dl_result = client.download_message(&access_token, &msg.id).await;
                 }

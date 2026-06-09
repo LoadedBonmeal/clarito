@@ -70,7 +70,9 @@ pub fn generate_d390_xml(
     ));
     root.push_attribute((
         "prenume_declar",
-        take(&submission.prenume_declar, 75).as_str(),
+        // Mandatory (DA) — default to "-" for a legal-entity declarant with no separate first
+        // name, so the field is never emitted empty (ANAF rejects an empty prenume_declar).
+        field_or(&submission.prenume_declar, "-", 75).as_str(),
     ));
     root.push_attribute((
         "functie_declar",

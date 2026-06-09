@@ -8,23 +8,40 @@ use tauri::{AppHandle, Emitter, Manager};
 ///
 /// Serializat prin `lock` cu double-check: dacă alt task a reîmprospătat token-ul
 /// cât timp așteptam lock-ul, returnăm token-ul proaspăt fără a apela ANAF din nou.
-pub(crate) async fn refresh_token_for(
+/// Refresh after a 401: `failed_token` is the access token ANAF just rejected. ANAF can 401 a
+/// token that is still locally non-expired (revocation, cert change, clock skew), so we must NOT
+/// short-circuit on is_expired here — instead, only reuse the keychain token if it CHANGED since
+/// the failed attempt (another task already refreshed), otherwise force a real refresh.
+pub(crate) async fn refresh_token_after_401(
     company_id: &str,
     pool: &sqlx::SqlitePool,
     lock: &tokio::sync::Mutex<()>,
+    failed_token: &str,
+) -> Result<String, String> {
+    refresh_token_for_impl(company_id, pool, lock, Some(failed_token)).await
+}
+
+async fn refresh_token_for_impl(
+    company_id: &str,
+    pool: &sqlx::SqlitePool,
+    lock: &tokio::sync::Mutex<()>,
+    failed_token: Option<&str>,
 ) -> Result<String, String> {
     use crate::anaf::{keychain::TokenBundle, oauth};
 
     // Acquire the app-wide refresh lock to serialize concurrent callers.
     let _guard = lock.lock().await;
 
-    // Double-check: re-load from keychain — another task may have refreshed while
-    // we waited for the lock.
+    // Double-check: re-load from keychain — another task may have refreshed while we waited.
     let bundle = TokenBundle::load(company_id)
         .ok_or_else(|| format!("Nu există token pentru compania {}", company_id))?;
-    if !bundle.is_expired() {
-        // Another task already refreshed — use the fresh token.
-        return Ok(bundle.access_token);
+    match failed_token {
+        // 401 path: reuse only if another task already swapped the token; else force a refresh.
+        Some(ft) if bundle.access_token != ft => return Ok(bundle.access_token),
+        Some(_) => {}
+        // Proactive path: skip the refresh if the token is still valid.
+        None if !bundle.is_expired() => return Ok(bundle.access_token),
+        None => {}
     }
 
     let config = crate::commands::anaf::build_oauth_config(pool).await;
@@ -159,7 +176,9 @@ pub(crate) async fn poll_submitted_for_company(
             if let Err(ref e) = result {
                 if e == ERR_UNAUTHORIZED {
                     tracing::info!(company_id, "ANAF 401 — reîmprospătăm token și reîncercăm");
-                    if let Ok(new_tok) = refresh_token_for(company_id, pool, lock).await {
+                    if let Ok(new_tok) =
+                        refresh_token_after_401(company_id, pool, lock, &access_token).await
+                    {
                         access_token = new_tok;
                         result = client.check_status(&access_token, upload_id).await;
                     }

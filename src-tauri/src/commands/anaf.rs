@@ -562,9 +562,13 @@ pub async fn anaf_check_invoice_status(
         use crate::anaf::client::ERR_UNAUTHORIZED;
         if e == ERR_UNAUTHORIZED {
             tracing::info!(company_id, "ANAF 401 on check_status — reîmprospătăm token");
-            if let Ok(new_tok) =
-                crate::background::refresh_token_for(&company_id, pool, &state.token_refresh_lock)
-                    .await
+            if let Ok(new_tok) = crate::background::refresh_token_after_401(
+                &company_id,
+                pool,
+                &state.token_refresh_lock,
+                &token,
+            )
+            .await
             {
                 check_result = client.check_status(&new_tok, &upload_id).await;
             }
@@ -679,7 +683,7 @@ pub struct SpvInboxItem {
     pub tip: String,
     pub data_creare: String,
     pub cif: String,
-    pub id_solicitare: String,
+    pub id_solicitare: Option<String>,
     pub detalii: Option<String>,
     /// Inbox bucket: recipisa | notificare | somatie | decizie | factura | altele.
     pub category: &'static str,
@@ -706,9 +710,13 @@ pub async fn anaf_list_spv_inbox(
     let mut result = client.list_spv_messages(&token, &company.cui, days).await;
     if let Err(ref e) = result {
         if e == ERR_UNAUTHORIZED {
-            if let Ok(new_tok) =
-                crate::background::refresh_token_for(&company_id, pool, &state.token_refresh_lock)
-                    .await
+            if let Ok(new_tok) = crate::background::refresh_token_after_401(
+                &company_id,
+                pool,
+                &state.token_refresh_lock,
+                &token,
+            )
+            .await
             {
                 result = client.list_spv_messages(&new_tok, &company.cui, days).await;
             }

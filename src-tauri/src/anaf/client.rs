@@ -51,7 +51,9 @@ pub struct SpvMessage {
     pub tip: String,
     pub data_creare: String,
     pub cif: String,
-    pub id_solicitare: String,
+    /// Null in the live SPVWS2 inbox for unsolicited messages (recipise/notificări/somații).
+    #[serde(default)]
+    pub id_solicitare: Option<String>,
     pub detalii: Option<String>,
 }
 
@@ -73,6 +75,66 @@ pub fn classify_spv_tip(tip: &str) -> &'static str {
     } else {
         "altele"
     }
+}
+
+/// Parse the e-Transport upload response (ANAF UploadV2). Surfaces a logical rejection
+/// (ExecutionStatus != 0 or an errors[] array) as a human message instead of a generic
+/// parse error; tolerates `index_incarcare` as a JSON number OR string; `UIT` may be absent
+/// (it is issued asynchronously — fetched via a later status query). Pure + testable.
+fn parse_etransport_upload(body: &str) -> Result<EtransportUploadResponse, String> {
+    let preview = || body.trim().chars().take(300).collect::<String>();
+    let v: serde_json::Value = serde_json::from_str(body)
+        .map_err(|_| format!("Răspuns e-Transport neașteptat de la ANAF: {}", preview()))?;
+
+    let errors: Vec<String> = v
+        .get("Errors")
+        .or_else(|| v.get("errors"))
+        .and_then(|e| e.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|e| {
+                    e.get("errorMessage")
+                        .or_else(|| e.get("message"))
+                        .and_then(|m| m.as_str())
+                        .map(|s| s.to_string())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if !errors.is_empty() {
+        return Err(format!(
+            "ANAF a respins declarația e-Transport: {}",
+            errors.join("; ")
+        ));
+    }
+    if let Some(st) = v.get("ExecutionStatus").and_then(|x| x.as_i64()) {
+        if st != 0 {
+            return Err(format!(
+                "ANAF a respins declarația e-Transport (ExecutionStatus={st})."
+            ));
+        }
+    }
+
+    let index = v
+        .get("index_incarcare")
+        .map(|x| {
+            x.as_str()
+                .map(|s| s.to_string())
+                .or_else(|| x.as_i64().map(|n| n.to_string()))
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    if index.is_empty() {
+        return Err(format!(
+            "Răspuns e-Transport fără index de încărcare: {}",
+            preview()
+        ));
+    }
+    let uit = v.get("UIT").and_then(|x| x.as_str()).map(|s| s.to_string());
+    Ok(EtransportUploadResponse {
+        index_incarcare: index,
+        uit,
+    })
 }
 
 // ─── Structuri raw pentru parsare JSON ANAF ────────────────────────────────
@@ -100,7 +162,8 @@ struct SpvMessageRaw {
     tip: String,
     data_creare: String,
     cif: String,
-    id_solicitare: String,
+    #[serde(default)]
+    id_solicitare: Option<String>,
     detalii: Option<String>,
 }
 
@@ -512,7 +575,14 @@ impl AnafClient {
         company_cui: &str,
         xml_bytes: Vec<u8>,
     ) -> Result<EtransportUploadResponse, String> {
-        let cui = company_cui.trim_start_matches("RO").trim();
+        // Strip an "RO"/"ro" prefix once (case-insensitive) so the URL CIF matches the XML
+        // codDeclarant (which uses the same RO-strip) — digits-only path segment.
+        let trimmed = company_cui.trim();
+        let cui = trimmed
+            .strip_prefix("RO")
+            .or_else(|| trimmed.strip_prefix("ro"))
+            .unwrap_or(trimmed)
+            .trim();
         let url = format!(
             "{}/ETRANSPORT/ws/v1/upload/ETRANSP/{}/2",
             self.base_url, cui
@@ -541,8 +611,7 @@ impl AnafClient {
                 "Eroare comunicare ANAF e-Transport ({status}). Reîncercați."
             ));
         }
-        serde_json::from_str::<EtransportUploadResponse>(&body)
-            .map_err(|e| format!("Răspuns e-Transport invalid: {e} — body: {body}"))
+        parse_etransport_upload(&body)
     }
 
     /// Descarcă un mesaj SPV după ID. Returnează bytes ZIP.
@@ -627,7 +696,33 @@ impl AnafClient {
 
 #[cfg(test)]
 mod tests {
-    use super::classify_spv_tip;
+    use super::{classify_spv_tip, parse_etransport_upload, MessagesRaw};
+
+    #[test]
+    fn etransport_upload_parse_handles_number_string_errors_and_garbage() {
+        // index as a JSON NUMBER (the real shape) — must not fail on the String-typed field.
+        let ok_num = parse_etransport_upload(
+            r#"{"dateResponse":"x","ExecutionStatus":0,"index_incarcare":5012345678,"UIT":"3R0ABC"}"#,
+        )
+        .unwrap();
+        assert_eq!(ok_num.index_incarcare, "5012345678");
+        assert_eq!(ok_num.uit.as_deref(), Some("3R0ABC"));
+        // index as a string + no UIT yet (issued async).
+        let ok_str =
+            parse_etransport_upload(r#"{"ExecutionStatus":0,"index_incarcare":"42"}"#).unwrap();
+        assert_eq!(ok_str.index_incarcare, "42");
+        assert!(ok_str.uit.is_none());
+        // logical rejection: errors[] surfaced as a human message.
+        let rej = parse_etransport_upload(
+            r#"{"ExecutionStatus":1,"errors":[{"errorMessage":"codTipOperatiune invalid"}]}"#,
+        )
+        .unwrap_err();
+        assert!(rej.contains("codTipOperatiune invalid"));
+        // ExecutionStatus != 0 without errors[].
+        assert!(parse_etransport_upload(r#"{"ExecutionStatus":2,"index_incarcare":"1"}"#).is_err());
+        // non-JSON (e.g. an XML/HTML body) → graceful error, not a panic.
+        assert!(parse_etransport_upload("<html>503</html>").is_err());
+    }
 
     #[test]
     fn classifies_spv_message_types() {
@@ -637,5 +732,18 @@ mod tests {
         assert_eq!(classify_spv_tip("Notificare conformare"), "notificare");
         assert_eq!(classify_spv_tip("FACTURA PRIMITA"), "factura");
         assert_eq!(classify_spv_tip("altceva"), "altele");
+    }
+
+    #[test]
+    fn parses_spv_message_with_null_id_solicitare() {
+        // Real SPVWS2 inbox returns id_solicitare:null for unsolicited messages (recipise etc.).
+        let json = r#"{"mesaje":[{"id":"100","tip":"RECIPISA","data_creare":"202606090900","cif":"123","id_solicitare":null}]}"#;
+        let raw: MessagesRaw = serde_json::from_str(json).expect("must parse null id_solicitare");
+        let msgs = raw.mesaje.unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert!(msgs[0].id_solicitare.is_none());
+        // and an entirely missing id_solicitare must also parse (serde default).
+        let json2 = r#"{"mesaje":[{"id":"101","tip":"MESAJ","data_creare":"x","cif":"123"}]}"#;
+        assert!(serde_json::from_str::<MessagesRaw>(json2).is_ok());
     }
 }

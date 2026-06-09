@@ -39,12 +39,12 @@ fn strip_ro(cui: &str) -> String {
     s.trim().to_string()
 }
 
-/// Escape XML attribute value characters.
+/// Sanitize an attribute value: strip XML-1.0-forbidden control characters. We must NOT
+/// entity-escape here — `BytesStart::push_attribute` already escapes & < > ' " once, so
+/// pre-escaping would double-escape (e.g. "A & B" → "A &amp;amp; B"). Same fix as the D390
+/// generator.
 fn xml_attr(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('"', "&quot;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+    s.chars().filter(|c| !c.is_control()).collect()
 }
 
 /// Generate a schema-valid D394 v5 XML string.
@@ -531,6 +531,23 @@ mod tests {
         assert!(xml.contains("<declaratie394 "));
         assert!(xml.contains("xmlns=\"mfp:anaf:dgti:d394:declaratie:v5\""));
         assert!(xml.contains("</declaratie394>"));
+    }
+
+    #[test]
+    fn company_name_special_chars_are_single_escaped() {
+        let period = NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
+        let ver = resolve(DeclKind::D394, period).unwrap();
+        let report = test_report();
+        let sub = test_submission();
+        let mut company = test_company();
+        company.legal_name = "A & B <SRL>".to_string();
+
+        let doc = build_sections(&report, &sub, &company, period).unwrap();
+        let xml = generate_d394_xml(&doc, &sub, &company, &ver).unwrap();
+
+        // push_attribute escapes once; xml_attr must NOT pre-escape (else &amp;amp;).
+        assert!(xml.contains("den=\"A &amp; B &lt;SRL&gt;\""));
+        assert!(!xml.contains("&amp;amp;"), "must not double-escape");
     }
 
     #[test]

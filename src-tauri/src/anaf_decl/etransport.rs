@@ -135,8 +135,17 @@ pub fn validate_etransport(d: &EtransportDeclaration) -> Vec<String> {
     if d.cod_declarant.trim().is_empty() {
         errs.push("Lipsește codul declarantului (CUI).".into());
     }
-    if d.cod_tip_operatiune.trim().is_empty() {
+    const VALID_OP_TYPES: &[&str] = &[
+        "10", "12", "14", "20", "22", "24", "30", "40", "50", "60", "70",
+    ];
+    let op = d.cod_tip_operatiune.trim();
+    if op.is_empty() {
         errs.push("Lipsește tipul operațiunii (codTipOperatiune).".into());
+    } else if !VALID_OP_TYPES.contains(&op) {
+        errs.push(format!(
+            "Tip operațiune invalid: '{op}' (permise: {}).",
+            VALID_OP_TYPES.join("/")
+        ));
     }
     if d.goods.is_empty() {
         errs.push("Cel puțin o linie de marfă este obligatorie.".into());

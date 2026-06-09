@@ -533,7 +533,7 @@ export interface SpvInboxItem {
   tip: string;
   dataCreare: string;
   cif: string;
-  idSolicitare: string;
+  idSolicitare: string | null;
   detalii: string | null;
   /** recipisa | notificare | somatie | decizie | factura | altele. */
   category: string;

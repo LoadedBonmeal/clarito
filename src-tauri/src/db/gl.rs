@@ -1712,7 +1712,9 @@ pub async fn reconcile(
     // ── Discrepanțe ─────────────────────────────────────────────────────────
     let mut discrepancies: Vec<String> = Vec::new();
 
-    let balanced = total_debit == total_credit;
+    // Tolerance, not strict ==, to match trial_balance/journal_register: per-journal rounding
+    // (assert_balanced allows up to 0.005) can accumulate a sub-cent period imbalance.
+    let balanced = (total_debit - total_credit).abs() < Decimal::new(1, 2);
     if !balanced {
         discrepancies.push(format!(
             "Dezechilibru GL: Σdebit={total_debit} ≠ Σcredit={total_credit} (diferenta {})",

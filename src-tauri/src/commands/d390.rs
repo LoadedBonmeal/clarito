@@ -6,7 +6,7 @@
 //! Partner VAT id is split into country (2-letter prefix) + codO; RO / non-EU partners are
 //! excluded (those belong to D394, not D390). Bases are summed per (tip, country, codO) in RON.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::str::FromStr;
 
 use rust_decimal::prelude::ToPrimitive;
@@ -55,7 +55,8 @@ pub(crate) async fn compute_d390_doc(
 ) -> AppResult<D390Doc> {
     // key = (tip, tara, codO) → (denO, base_ron)
     let mut agg: BTreeMap<(String, String, String), (String, Decimal)> = BTreeMap::new();
-    let mut dropped: i64 = 0;
+    // Count DISTINCT invoices skipped (all of an invoice's K-lines share one partner), not lines.
+    let mut dropped_invoices: HashSet<String> = HashSet::new();
 
     let mut add = |tip: &str, vat: &str, name: &str, base: Decimal| -> bool {
         match split_vat(vat) {
@@ -75,7 +76,7 @@ pub(crate) async fn compute_d390_doc(
 
     // ── Inbound: received K lines → A (goods) / S (services) ──────────────────
     let recv = sqlx::query(
-        "SELECT ri.issuer_cui, ri.issuer_name, COALESCE(ri.intra_eu_kind,'goods') AS kind, \
+        "SELECT ri.id AS inv_id, ri.issuer_cui, ri.issuer_name, COALESCE(ri.intra_eu_kind,'goods') AS kind, \
                 vl.base_amount, COALESCE(ri.currency,'RON') AS currency, ri.exchange_rate \
          FROM received_invoice_vat_lines vl \
          JOIN received_invoices ri ON ri.id = vl.received_invoice_id \
@@ -102,13 +103,14 @@ pub(crate) async fn compute_d390_doc(
         );
         let tip = if kind.trim() == "services" { "S" } else { "A" };
         if !add(tip, &cui, &name, base) {
-            dropped += 1;
+            let inv_id: String = r.try_get("inv_id").unwrap_or_default();
+            dropped_invoices.insert(inv_id);
         }
     }
 
     // ── Outbound: sales K lines → L (goods) / P (services) ────────────────────
     let sales = sqlx::query(
-        "SELECT c.cui AS partner_cui, c.legal_name AS partner_name, \
+        "SELECT i.id AS inv_id, c.cui AS partner_cui, c.legal_name AS partner_name, \
                 COALESCE(l.revenue_kind,'goods') AS kind, l.subtotal_amount, \
                 COALESCE(i.currency,'RON') AS currency, i.exchange_rate \
          FROM invoice_line_items l \
@@ -142,7 +144,8 @@ pub(crate) async fn compute_d390_doc(
             .map(|c| add(tip, c, &name, base))
             .unwrap_or(false);
         if !added {
-            dropped += 1;
+            let inv_id: String = r.try_get("inv_id").unwrap_or_default();
+            dropped_invoices.insert(inv_id);
         }
     }
 
@@ -176,7 +179,7 @@ pub(crate) async fn compute_d390_doc(
         luna,
         an,
         operations,
-        dropped,
+        dropped: dropped_invoices.len() as i64,
     })
 }
 
