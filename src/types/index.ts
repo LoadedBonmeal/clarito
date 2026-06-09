@@ -1154,6 +1154,18 @@ export interface PayrollResult {
   totalEmployerCost: string;
 }
 
+/** Intrastat threshold monitor (per flow). */
+export interface IntrastatFlowStatus {
+  ytdRon: string;
+  pct: number;
+  level: string; // "ok" | "approaching" | "exceeded"
+}
+export interface IntrastatStatus {
+  thresholdRon: string;
+  dispatches: IntrastatFlowStatus;
+  arrivals: IntrastatFlowStatus;
+}
+
 /** D100 (obligații de plată) — quarterly obligation row. */
 export interface D100Result {
   codOblig: string;

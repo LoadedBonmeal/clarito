@@ -678,6 +678,9 @@ export const declarations = {
   /** Calcul salariu (nucleul D112): brut → net + contribuții, ratele 2026. */
   computePayroll: (input: import("@/types").PayrollInput) =>
     invoke<import("@/types").PayrollResult>("compute_payroll", { input }),
+  /** Intrastat threshold monitor (1.000.000 lei per flow, Ord. INS 1604/2025). */
+  intrastatStatus: (companyId: string, asOf: string) =>
+    invoke<import("@/types").IntrastatStatus>("intrastat_status", { companyId, asOf }),
   /** D100 (obligații de plată) quarterly row — micro 121 / profit 103, from the period P&L. */
   computeD100: (
     companyId: string,

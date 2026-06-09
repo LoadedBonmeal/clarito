@@ -787,6 +787,134 @@ pub async fn cash_vat_plafon_status(
     compute_plafon_status(&state.db, &company_id, &as_of).await
 }
 
+/// Intrastat threshold monitor (1.000.000 lei per flow, Ord. INS 1604/2025).
+#[tauri::command]
+pub async fn intrastat_status(
+    state: State<'_, AppState>,
+    company_id: String,
+    as_of: String,
+) -> AppResult<IntrastatStatus> {
+    compute_intrastat_status(&state.db, &company_id, &as_of).await
+}
+
+/// 2026 Intrastat value threshold per flow (Ord. INS 1604/2025): 1.000.000 lei for both expedieri
+/// (dispatches) and introduceri (arrivals). Above it on a flow, monthly Intrastat is mandatory.
+const INTRASTAT_THRESHOLD_RON: i64 = 1_000_000;
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntrastatFlowStatus {
+    pub ytd_ron: String,
+    pub pct: i64,
+    /// "ok" | "approaching" (≥80%) | "exceeded" (>100%).
+    pub level: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntrastatStatus {
+    pub threshold_ron: String,
+    pub dispatches: IntrastatFlowStatus,
+    pub arrivals: IntrastatFlowStatus,
+}
+
+fn intrastat_flow_status(ytd: Decimal, threshold: Decimal) -> IntrastatFlowStatus {
+    let pct = if threshold.is_zero() {
+        0
+    } else {
+        use rust_decimal::prelude::ToPrimitive;
+        (ytd / threshold * Decimal::from(100))
+            .round()
+            .to_i64()
+            .unwrap_or(0)
+    };
+    let level = if ytd > threshold {
+        "exceeded"
+    } else if pct >= 80 {
+        "approaching"
+    } else {
+        "ok"
+    };
+    IntrastatFlowStatus {
+        ytd_ron: format!("{:.2}", ytd),
+        pct,
+        level: level.to_string(),
+    }
+}
+
+/// Intrastat threshold monitor: YTD intra-EU GOODS value per flow vs the 1.000.000-lei threshold.
+/// Dispatches = outbound intra-EU goods (invoice lines, vat_category 'K'); arrivals = inbound
+/// intra-EU goods acquisitions (received_invoice_vat_lines 'K' + intra_eu_kind 'goods').
+pub(crate) async fn compute_intrastat_status(
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    as_of: &str,
+) -> AppResult<IntrastatStatus> {
+    let year = as_of.get(0..4).unwrap_or("").to_string();
+    let year_start = format!("{year}-01-01");
+
+    // DISPATCHES — outbound intra-EU goods invoice lines.
+    let disp_rows = sqlx::query(
+        "SELECT li.subtotal_amount AS amt, COALESCE(i.currency,'RON') AS currency, \
+                i.exchange_rate AS fx \
+         FROM invoice_line_items li JOIN invoices i ON li.invoice_id = i.id \
+         WHERE i.company_id = ?1 AND i.status IN ('VALIDATED','STORNED') \
+           AND i.issue_date >= ?2 AND i.issue_date <= ?3 \
+           AND li.vat_category = 'K' AND COALESCE(li.revenue_kind,'goods') IN ('goods','product')",
+    )
+    .bind(company_id)
+    .bind(&year_start)
+    .bind(as_of)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
+    let mut dispatches = Decimal::ZERO;
+    for row in &disp_rows {
+        let amt: String = row.try_get("amt").unwrap_or_default();
+        let currency: String = row.try_get("currency").unwrap_or_else(|_| "RON".into());
+        let fx = parse_rate(row.try_get::<Option<f64>, _>("fx").unwrap_or(None));
+        dispatches += amount_to_ron(
+            Decimal::from_str(&amt).unwrap_or(Decimal::ZERO),
+            &currency,
+            fx,
+        );
+    }
+
+    // ARRIVALS — inbound intra-EU goods acquisitions.
+    let arr_rows = sqlx::query(
+        "SELECT vl.base_amount AS amt, COALESCE(ri.currency,'RON') AS currency, \
+                ri.exchange_rate AS fx \
+         FROM received_invoice_vat_lines vl JOIN received_invoices ri ON vl.received_invoice_id = ri.id \
+         WHERE ri.company_id = ?1 AND ri.status != 'REJECTED' \
+           AND ri.issue_date >= ?2 AND ri.issue_date <= ?3 \
+           AND vl.vat_category = 'K' AND COALESCE(ri.intra_eu_kind,'goods') = 'goods'",
+    )
+    .bind(company_id)
+    .bind(&year_start)
+    .bind(as_of)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
+    let mut arrivals = Decimal::ZERO;
+    for row in &arr_rows {
+        let amt: String = row.try_get("amt").unwrap_or_default();
+        let currency: String = row.try_get("currency").unwrap_or_else(|_| "RON".into());
+        let fx = parse_rate(row.try_get::<Option<f64>, _>("fx").unwrap_or(None));
+        arrivals += amount_to_ron(
+            Decimal::from_str(&amt).unwrap_or(Decimal::ZERO),
+            &currency,
+            fx,
+        );
+    }
+
+    let threshold = Decimal::from(INTRASTAT_THRESHOLD_RON);
+    Ok(IntrastatStatus {
+        threshold_ron: format!("{:.2}", threshold),
+        dispatches: intrastat_flow_status(dispatches, threshold),
+        arrivals: intrastat_flow_status(arrivals, threshold),
+    })
+}
+
 pub(crate) async fn compute_plafon_status(
     pool: &sqlx::SqlitePool,
     company_id: &str,
@@ -2530,6 +2658,20 @@ mod cash_vat_routing_tests {
         assert_eq!(s.breach_month, None);
         assert_eq!(s.notificare_deadline, None);
         assert_eq!(s.ca_ron, "1000000");
+    }
+
+    #[tokio::test]
+    async fn intrastat_status_empty_is_ok() {
+        // Exercises the dispatch + arrival SQL (catches column-name errors); no intra-EU goods → ok.
+        let pool = pool().await;
+        seed_company(&pool, "co", false, None).await;
+        let s = compute_intrastat_status(&pool, "co", "2026-06-30")
+            .await
+            .unwrap();
+        assert_eq!(s.threshold_ron, "1000000.00");
+        assert_eq!(s.dispatches.level, "ok");
+        assert_eq!(s.arrivals.level, "ok");
+        assert_eq!(s.dispatches.ytd_ron, "0.00");
     }
 
     #[tokio::test]

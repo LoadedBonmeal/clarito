@@ -397,6 +397,7 @@ pub fn run() {
             // declarations d300
             commands::declarations::compute_d300,
             commands::declarations::cash_vat_plafon_status,
+            commands::declarations::intrastat_status,
             commands::d390::compute_d390,
             commands::d390::export_d390,
             commands::declarations::reconcile_etva,

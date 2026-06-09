@@ -129,6 +129,14 @@ export function DashboardPage() {
     },
   });
 
+  const { data: intrastat } = useQuery({
+    queryKey: ["intrastatStatus", activeCompanyId, currentYear],
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60_000,
+    queryFn: () =>
+      api.declarations.intrastatStatus(activeCompanyId!, new Date().toISOString().slice(0, 10)),
+  });
+
   // ── Derived data ───────────────────────────────────────────────────────────
 
   const contactMap = useMemo(
@@ -354,6 +362,29 @@ export function DashboardPage() {
               {regimeStatus.cashVatNote ? ` ${regimeStatus.cashVatNote}` : ""}
             </Banner>
           )}
+
+        {/* ── Intrastat threshold alerts (1.000.000 lei/flux, Ord. INS 1604/2025) ── */}
+        {intrastat &&
+          ([
+            { label: "expedieri", f: intrastat.dispatches },
+            { label: "introduceri", f: intrastat.arrivals },
+          ] as const)
+            .filter(({ f }) => f.level === "exceeded" || f.level === "approaching")
+            .map(({ label, f }) => (
+              <Banner
+                key={label}
+                variant={f.level === "exceeded" ? "error" : "warning"}
+                title={
+                  f.level === "exceeded"
+                    ? `Prag Intrastat depășit (${label}) — declarație lunară obligatorie`
+                    : `Vă apropiați de pragul Intrastat (${label})`
+                }
+              >
+                Valoare {label} {currentYear}: <b className="rf-mono">{f.ytdRon}</b> lei ({f.pct}% din
+                pragul de <b className="rf-mono">{intrastat.thresholdRon}</b> lei). Peste prag,
+                depuneți Intrastat lunar până pe 15 (Ord. INS 1604/2025).
+              </Banner>
+            ))}
 
         {/* ── Unread notifications note ──────────────────────────────────── */}
         {unreadCount > 0 && (
