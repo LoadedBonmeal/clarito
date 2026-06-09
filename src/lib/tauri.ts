@@ -615,9 +615,12 @@ export const gl = {
     caen: string,
     avgEmployees: number | null,
     formOverride: string | null,
+    priorYearForm: string | null,
     destPath: string,
   ) =>
-    invoke<string>("export_bilant_xml", { companyId, year, caen, avgEmployees, formOverride, destPath }),
+    invoke<string>("export_bilant_xml", {
+      companyId, year, caen, avgEmployees, formOverride, priorYearForm, destPath,
+    }),
   /** Postează impozitul pe venit/profit (698/691 → 4418/4411); amount = override opțional. */
   postIncomeTax: (companyId: string, periodFrom: string, periodTo: string, amount?: string) =>
     invoke<IncomeTaxResult>("post_income_tax", { companyId, periodFrom, periodTo, amount: amount ?? null }),

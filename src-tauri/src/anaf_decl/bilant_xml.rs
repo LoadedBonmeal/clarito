@@ -18,6 +18,26 @@ use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 
+/// Resolve the bilanț size form applying the OMFP 1802/2014 pct. 13 alin. (2) two-consecutive-years
+/// rule: a single year in which the criteria point to a different category than the one established
+/// last year (`prior_year`) does NOT switch the category — the entity keeps `prior_year` until the
+/// breach persists a second consecutive year (which the user confirms via `form_override`).
+/// `form_override` always wins; an absent/invalid `prior_year` falls back to `current`.
+pub fn resolve_size_form(
+    current: &str,
+    form_override: Option<&str>,
+    prior_year: Option<&str>,
+) -> String {
+    let valid = |f: &str| matches!(f, "UU" | "BS" | "BL");
+    if let Some(o) = form_override.filter(|f| valid(f)) {
+        return o.to_string();
+    }
+    match prior_year.filter(|f| valid(f)) {
+        Some(p) if p != current => p.to_string(), // one-year change → sticky to prior year
+        _ => current.to_string(),
+    }
+}
+
 /// Round a Decimal RON value to whole lei (i64), commercial rounding.
 fn lei(d: Decimal) -> i64 {
     d.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
@@ -768,6 +788,20 @@ totalPlata_A=\"{tp}\">\n\
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn size_form_two_consecutive_years_rule() {
+        // No prior year → use the current-year computation.
+        assert_eq!(resolve_size_form("BS", None, None), "BS");
+        // Stable: current == prior → keep it.
+        assert_eq!(resolve_size_form("UU", None, Some("UU")), "UU");
+        // One-year change (criteria say BS, but last year was UU) → STICKY to UU (pct. 13(2)).
+        assert_eq!(resolve_size_form("BS", None, Some("UU")), "UU");
+        // Second year confirmed → the user forces the new form via override.
+        assert_eq!(resolve_size_form("BS", Some("BS"), Some("UU")), "BS");
+        // Override always wins; invalid prior is ignored.
+        assert_eq!(resolve_size_form("BL", None, Some("ZZ")), "BL");
+    }
 
     fn tb_row(
         code: &str,
