@@ -2500,6 +2500,181 @@ pub async fn post_payroll(
     })
 }
 
+// ─── Amortizare mijloace fixe (registru → GL) ────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DepreciationPostResult {
+    pub total: String,
+    pub posted: bool,
+    pub entry_date: String,
+}
+
+/// Post the monthly depreciation aggregate to the GL: D 6811 «cheltuieli amortizare» / C 281x
+/// «amortizări imobilizări» (OMFP 1802). `lines` = (expense_acct, amort_acct, amount) per pair.
+/// Idempotent per `(company,'DEPREC',period)`.
+pub async fn post_depreciation(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+    lines: Vec<(String, String, Decimal)>,
+) -> AppResult<DepreciationPostResult> {
+    let source_id = format!("{period_from}_{period_to}");
+    let total: Decimal = lines.iter().map(|(_, _, a)| *a).sum();
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='DEPREC' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(&source_id)
+    .execute(&mut *tx)
+    .await?;
+
+    if total.is_zero() {
+        tx.commit().await?;
+        return Ok(DepreciationPostResult {
+            total: fmt_dec(total),
+            posted: false,
+            entry_date: period_to.to_string(),
+        });
+    }
+
+    let mk = |record_id: i64, account: &str, debit: Decimal, credit: Decimal| GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: account.to_string(),
+        debit,
+        credit,
+        partner_cui: None,
+        customer_id: None,
+        supplier_id: None,
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+    };
+    let mut entries = Vec::new();
+    let mut rec = 1;
+    for (expense, amort, amt) in &lines {
+        if amt.is_zero() {
+            continue;
+        }
+        entries.push(mk(rec, expense, *amt, Decimal::ZERO)); // D 6811
+        entries.push(mk(rec + 1, amort, Decimal::ZERO, *amt)); // C 281x
+        rec += 2;
+    }
+    assert_balanced(&entries, &source_id)?;
+
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: "AMORT".to_string(),
+        journal_type: "DEPREC".to_string(),
+        transaction_id: format!("AMORT-{period_to}"),
+        transaction_date: period_to.to_string(),
+        description: Some(format!(
+            "Amortizare mijloace fixe {period_from} … {period_to}"
+        )),
+        source_type: "DEPREC".to_string(),
+        source_id: source_id.clone(),
+        customer_id: None,
+        supplier_id: None,
+    };
+    let journal_pk = journal.id.clone();
+    insert_journal(&mut tx, &journal).await?;
+    for e in &entries {
+        insert_entry(&mut tx, &journal_pk, e).await?;
+    }
+    tx.commit().await?;
+
+    Ok(DepreciationPostResult {
+        total: fmt_dec(total),
+        posted: true,
+        entry_date: period_to.to_string(),
+    })
+}
+
+/// Post an asset disposal de-recognition: D 281x (accumulated) + D 6583 (residual) / C 21x (cost).
+/// Idempotent per `(company,'DISPOSAL',asset_id)`.
+#[allow(clippy::too_many_arguments)]
+pub async fn post_asset_disposal(
+    pool: &SqlitePool,
+    company_id: &str,
+    asset_id: &str,
+    disposal_date: &str,
+    cost: Decimal,
+    accumulated: Decimal,
+    asset_acct: &str,
+    amort_acct: &str,
+) -> AppResult<()> {
+    let residual = (cost - accumulated).max(Decimal::ZERO);
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='DISPOSAL' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(asset_id)
+    .execute(&mut *tx)
+    .await?;
+
+    if cost.is_zero() {
+        tx.commit().await?;
+        return Ok(());
+    }
+
+    let mk = |record_id: i64, account: &str, debit: Decimal, credit: Decimal| GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: account.to_string(),
+        debit,
+        credit,
+        partner_cui: None,
+        customer_id: None,
+        supplier_id: None,
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+    };
+    let mut entries = Vec::new();
+    let mut rec = 1;
+    if !accumulated.is_zero() {
+        entries.push(mk(rec, amort_acct, accumulated, Decimal::ZERO)); // D 281x
+        rec += 1;
+    }
+    if !residual.is_zero() {
+        entries.push(mk(rec, "6583", residual, Decimal::ZERO)); // D 6583 valoare rămasă
+        rec += 1;
+    }
+    entries.push(mk(rec, asset_acct, Decimal::ZERO, cost)); // C 21x cost
+    assert_balanced(&entries, asset_id)?;
+
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: "CEDARE".to_string(),
+        journal_type: "DISPOSAL".to_string(),
+        transaction_id: format!("CED-{asset_id}"),
+        transaction_date: disposal_date.to_string(),
+        description: Some(format!("Scoatere din funcțiune mijloc fix {asset_id}")),
+        source_type: "DISPOSAL".to_string(),
+        source_id: asset_id.to_string(),
+        customer_id: None,
+        supplier_id: None,
+    };
+    let journal_pk = journal.id.clone();
+    insert_journal(&mut tx, &journal).await?;
+    for e in &entries {
+        insert_entry(&mut tx, &journal_pk, e).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 // ─── Balanța de verificare (cod 14-6-30, patru egalități) ────────────────────
 
 /// f64 → Decimal rounded to 2 decimals (GL sums come back as REAL).

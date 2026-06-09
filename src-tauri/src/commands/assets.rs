@@ -3,7 +3,7 @@
 
 use tauri::State;
 
-use crate::db::assets::{self, FixedAsset, FixedAssetInput};
+use crate::db::assets::{self, AssetDepreciationRow, DepreciationRun, FixedAsset, FixedAssetInput};
 use crate::error::AppResult;
 use crate::state::AppState;
 
@@ -34,4 +34,47 @@ pub async fn delete_fixed_asset(
     company_id: String,
 ) -> AppResult<()> {
     assets::delete(&state.db, &id, &company_id).await
+}
+
+/// Update a fixed asset (partial).
+#[tauri::command]
+pub async fn update_fixed_asset(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+    input: FixedAssetInput,
+) -> AppResult<FixedAsset> {
+    assets::update(&state.db, &id, &company_id, input).await
+}
+
+/// Run the monthly straight-line depreciation + post 6811/281x to the GL. Idempotent per month.
+#[tauri::command]
+pub async fn run_depreciation(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+) -> AppResult<DepreciationRun> {
+    assets::run_depreciation(&state.db, &company_id, &period_from, &period_to).await
+}
+
+/// Dispose of an asset (de-recognize from the GL: 281x + 6583 / 21x).
+#[tauri::command]
+pub async fn dispose_asset(
+    state: State<'_, AppState>,
+    company_id: String,
+    asset_id: String,
+    disposal_date: String,
+) -> AppResult<()> {
+    assets::dispose(&state.db, &company_id, &asset_id, &disposal_date).await
+}
+
+/// List the recorded monthly depreciation register (optionally one period).
+#[tauri::command]
+pub async fn list_depreciation(
+    state: State<'_, AppState>,
+    company_id: String,
+    period: Option<String>,
+) -> AppResult<Vec<AssetDepreciationRow>> {
+    assets::list_depreciation(&state.db, &company_id, period).await
 }

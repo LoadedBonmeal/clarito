@@ -272,15 +272,35 @@ pub fn compute_depreciation(
         };
     }
 
-    let monthly = (cost / Decimal::from(asset.life_months)).round_dp(2);
+    // Commercial rounding (MidpointAwayFromZero) — never bare round_dp for money.
+    let monthly = crate::db::invoices::round2(cost / Decimal::from(asset.life_months));
 
-    let months_begin = months_elapsed_since_acquisition(&asset.date_of_acquisition, begin_date);
-    let months_end = months_elapsed_since_acquisition(&asset.date_of_acquisition, end_date);
-
-    // Accumulated depreciation: months × monthly, capped at cost, never negative.
-    let acc_begin = cap_at_cost(Decimal::from(months_begin.max(0)) * monthly, cost);
-    let acc_end = cap_at_cost(Decimal::from(months_end.max(0)) * monthly, cost);
-
+    // Amortizarea începe din luna URMĂTOARE punerii în funcțiune (start_up_date / PIF) — art. 28
+    // alin. (12) Cod fiscal + OMFP 1802/2014. n = months from PIF; the asset is depreciable in a
+    // month iff 1 <= n <= life_months. accumulated_begin is "before this period"; accumulated_end is
+    // "after end month". The final month (n == life_months) absorbs the rounding remainder → cost.
+    let (pif_y, pif_m) = parse_ym(&asset.start_up_date);
+    let pif = pif_y * 12 + pif_m as i64;
+    let acc_after = |as_of: &str| -> Decimal {
+        let (y, m) = parse_ym(as_of);
+        let n = (y * 12 + m as i64) - pif; // depreciable-month index at this month
+        if n < 1 {
+            Decimal::ZERO
+        } else if n >= asset.life_months {
+            cost // last-month remainder folded in → exactly cost
+        } else {
+            Decimal::from(n) * monthly
+        }
+    };
+    // accumulated at period start = accumulated through the month BEFORE `begin_date`.
+    let (by, bm) = parse_ym(begin_date);
+    let before_begin = format!(
+        "{:04}-{:02}-01",
+        if bm == 1 { by - 1 } else { by },
+        if bm == 1 { 12 } else { bm - 1 }
+    );
+    let acc_begin = acc_after(&before_begin);
+    let acc_end = acc_after(end_date);
     let for_period = (acc_end - acc_begin).max(Decimal::ZERO);
 
     DepreciationCalc {
@@ -294,20 +314,15 @@ pub fn compute_depreciation(
     }
 }
 
-/// Number of full months elapsed from `acquisition_date` to `as_of_date`.
-/// Both dates are `YYYY-MM-DD`. Returns 0 if as_of_date is before acquisition.
-fn months_elapsed_since_acquisition(acquisition_date: &str, as_of_date: &str) -> i64 {
-    let (acq_y, acq_m) = parse_ym(acquisition_date);
-    let (as_y, as_m) = parse_ym(as_of_date);
-    let elapsed = (as_y * 12 + as_m as i64) - (acq_y * 12 + acq_m as i64);
-    elapsed.max(0)
-}
-
-fn cap_at_cost(value: Decimal, cost: Decimal) -> Decimal {
-    if value > cost {
-        cost
-    } else {
-        value
+/// Map a 21x asset account to its 281x amortization mirror (OMFP 1802 chart).
+pub fn amort_account_for(asset_account: &str) -> &'static str {
+    match asset_account {
+        a if a.starts_with("212") => "2812",
+        a if a.starts_with("213") => "2813",
+        a if a.starts_with("214") => "2814",
+        a if a.starts_with("205") => "2805",
+        a if a.starts_with("208") => "2808",
+        _ => "2813",
     }
 }
 
@@ -321,6 +336,261 @@ fn parse_ym(date: &str) -> (i64, u32) {
     } else {
         (0, 1)
     }
+}
+
+// ─── Update + monthly depreciation run + disposal ────────────────────────────
+
+/// Partial update of a fixed asset (mirrors the payroll partial-update + money validation).
+pub async fn update(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+    input: FixedAssetInput,
+) -> AppResult<FixedAsset> {
+    let cur = get(pool, id, company_id).await?;
+    let cost = if input.acquisition_cost.trim().is_empty() {
+        cur.acquisition_cost.clone()
+    } else {
+        let d = Decimal::from_str(input.acquisition_cost.trim())
+            .map_err(|_| AppError::Validation("Cost invalid — folosiți 1234.56.".into()))?;
+        if d.is_sign_negative() {
+            return Err(AppError::Validation("Costul nu poate fi negativ.".into()));
+        }
+        d.to_string()
+    };
+    sqlx::query(
+        "UPDATE fixed_assets SET asset_code=?3, account_id=?4, description=?5, \
+         date_of_acquisition=?6, start_up_date=?7, acquisition_cost=?8, life_months=?9, \
+         depreciation_method=?10, disposal_date=?11, active=?12, updated_at=?13 \
+         WHERE id=?1 AND company_id=?2",
+    )
+    .bind(id)
+    .bind(company_id)
+    .bind(&input.asset_code)
+    .bind(input.account_id.as_deref().unwrap_or(&cur.account_id))
+    .bind(&input.description)
+    .bind(&input.date_of_acquisition)
+    .bind(input.start_up_date.as_deref().unwrap_or(&cur.start_up_date))
+    .bind(&cost)
+    .bind(input.life_months.unwrap_or(cur.life_months))
+    .bind(
+        input
+            .depreciation_method
+            .as_deref()
+            .unwrap_or(&cur.depreciation_method),
+    )
+    .bind(input.disposal_date.or(cur.disposal_date))
+    .bind(input.active.unwrap_or(cur.active))
+    .bind(now_unix())
+    .execute(pool)
+    .await?;
+    get(pool, id, company_id).await
+}
+
+/// One asset's computed depreciation for the month.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetDepreciationState {
+    pub asset_id: String,
+    pub asset_code: String,
+    pub description: String,
+    pub monthly_charge: String,
+    pub accumulated: String,
+    pub book_value: String,
+    pub expense_acct: String,
+    pub amort_acct: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DepreciationRun {
+    pub states: Vec<AssetDepreciationState>,
+    pub total_amount: String,
+    pub posted: bool,
+    pub entry_date: String,
+}
+
+fn ym_of(date: &str) -> i64 {
+    let (y, m) = parse_ym(date);
+    y * 12 + m as i64
+}
+
+/// Compute + record the monthly straight-line depreciation for every active asset and post the
+/// aggregate to the GL (D 6811 / C 281x). Idempotent per (company, month).
+pub async fn run_depreciation(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<DepreciationRun> {
+    let period_ym = ym_of(period_from);
+    let period = &period_from[..7]; // YYYY-MM
+    let assets = list(pool, company_id).await?;
+    let mut states = Vec::new();
+    let mut total = Decimal::ZERO;
+    // Aggregate per (expense, amort) account pair for the GL note.
+    let mut by_pair: std::collections::BTreeMap<(String, String), Decimal> =
+        std::collections::BTreeMap::new();
+
+    for a in assets
+        .iter()
+        .filter(|a| a.active && a.depreciation_method == "liniara")
+    {
+        // Skip assets disposed before this month.
+        if let Some(dd) = &a.disposal_date {
+            if ym_of(dd) < period_ym {
+                continue;
+            }
+        }
+        let calc = compute_depreciation(a, period_from, period_to);
+        if calc.for_period.is_zero() {
+            continue;
+        }
+        let amort = amort_account_for(&a.account_id).to_string();
+        total += calc.for_period;
+        *by_pair
+            .entry(("6811".to_string(), amort.clone()))
+            .or_default() += calc.for_period;
+
+        // Idempotent UPSERT into the register.
+        sqlx::query(
+            "INSERT INTO asset_depreciation (id, company_id, asset_id, period, amount, accumulated, \
+             book_value, expense_acct, amort_acct, created_at) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,'6811',?8,?9) \
+             ON CONFLICT(company_id, asset_id, period) DO UPDATE SET \
+             amount=?5, accumulated=?6, book_value=?7, amort_acct=?8",
+        )
+        .bind(new_id())
+        .bind(company_id)
+        .bind(&a.id)
+        .bind(period)
+        .bind(format!("{:.2}", calc.for_period))
+        .bind(format!("{:.2}", calc.accumulated_end))
+        .bind(format!("{:.2}", calc.book_value_end))
+        .bind(&amort)
+        .bind(now_unix())
+        .execute(pool)
+        .await?;
+
+        states.push(AssetDepreciationState {
+            asset_id: a.id.clone(),
+            asset_code: a.asset_code.clone(),
+            description: a.description.clone(),
+            monthly_charge: format!("{:.2}", calc.for_period),
+            accumulated: format!("{:.2}", calc.accumulated_end),
+            book_value: format!("{:.2}", calc.book_value_end),
+            expense_acct: "6811".into(),
+            amort_acct: amort,
+        });
+    }
+
+    let lines: Vec<(String, String, Decimal)> = by_pair
+        .into_iter()
+        .map(|((exp, amort), amt)| (exp, amort, amt))
+        .collect();
+    let post =
+        crate::db::gl::post_depreciation(pool, company_id, period_from, period_to, lines).await?;
+
+    Ok(DepreciationRun {
+        states,
+        total_amount: format!("{:.2}", total),
+        posted: post.posted,
+        entry_date: post.entry_date,
+    })
+}
+
+/// Dispose of an asset: de-recognize it from the GL (D 281x accumulated + D 6583 residual / C 21x
+/// cost) using the accumulated already in the register, and mark it disposed.
+pub async fn dispose(
+    pool: &SqlitePool,
+    company_id: &str,
+    asset_id: &str,
+    disposal_date: &str,
+) -> AppResult<()> {
+    let asset = get(pool, asset_id, company_id).await?;
+    let cost = Decimal::from_str(asset.acquisition_cost.trim()).unwrap_or(Decimal::ZERO);
+    // Accumulated = Σ register amounts through the disposal month (single source of truth so GL ties).
+    // Sum the Decimal-as-TEXT amounts in Rust to avoid f64 precision loss.
+    let disp_ym = &disposal_date[..7];
+    let amounts: Vec<String> = sqlx::query_scalar::<_, String>(
+        "SELECT amount FROM asset_depreciation \
+         WHERE company_id=?1 AND asset_id=?2 AND period<=?3",
+    )
+    .bind(company_id)
+    .bind(asset_id)
+    .bind(disp_ym)
+    .fetch_all(pool)
+    .await?;
+    let accumulated: Decimal = amounts
+        .iter()
+        .filter_map(|s| Decimal::from_str(s.trim()).ok())
+        .sum();
+    let accumulated = if accumulated > cost {
+        cost
+    } else {
+        accumulated
+    };
+
+    crate::db::gl::post_asset_disposal(
+        pool,
+        company_id,
+        asset_id,
+        disposal_date,
+        cost,
+        accumulated,
+        &asset.account_id,
+        amort_account_for(&asset.account_id),
+    )
+    .await?;
+
+    sqlx::query(
+        "UPDATE fixed_assets SET disposal_date=?3, active=0, updated_at=?4 \
+         WHERE id=?1 AND company_id=?2",
+    )
+    .bind(asset_id)
+    .bind(company_id)
+    .bind(disposal_date)
+    .bind(now_unix())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// List the recorded monthly depreciation register for a company (optionally a period).
+#[derive(Debug, Clone, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetDepreciationRow {
+    pub asset_id: String,
+    pub period: String,
+    pub amount: String,
+    pub accumulated: String,
+    pub book_value: String,
+}
+
+pub async fn list_depreciation(
+    pool: &SqlitePool,
+    company_id: &str,
+    period: Option<String>,
+) -> AppResult<Vec<AssetDepreciationRow>> {
+    let rows =
+        match period {
+            Some(p) => sqlx::query_as::<_, AssetDepreciationRow>(
+                "SELECT asset_id, period, amount, accumulated, book_value FROM asset_depreciation \
+                 WHERE company_id=?1 AND period=?2 ORDER BY asset_id",
+            )
+            .bind(company_id)
+            .bind(p)
+            .fetch_all(pool)
+            .await?,
+            None => sqlx::query_as::<_, AssetDepreciationRow>(
+                "SELECT asset_id, period, amount, accumulated, book_value FROM asset_depreciation \
+                 WHERE company_id=?1 ORDER BY period DESC, asset_id",
+            )
+            .bind(company_id)
+            .fetch_all(pool)
+            .await?,
+        };
+    Ok(rows)
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
@@ -355,25 +625,38 @@ mod tests {
     }
 
     #[test]
-    fn depreciation_basic_monthly() {
-        // cost=1200, life=12m → monthly=100
+    fn depreciation_starts_month_after_pif() {
+        // cost=1200, life=12m, PIF Jan 2025 → NO charge in Jan (PIF month); first charge in Feb.
         let asset = sample_asset("1200.00", 12, "2025-01-01");
-        let calc = compute_depreciation(&asset, "2025-01-01", "2025-01-31");
-        // At period start (2025-01-01) months elapsed from acquisition = 0
-        // At period end (2025-01-31) months elapsed = 0 (same month)
-        assert_eq!(calc.monthly, Decimal::from_str("100.00").unwrap());
-        assert_eq!(calc.book_value_begin, Decimal::from_str("1200.00").unwrap());
+        let jan = compute_depreciation(&asset, "2025-01-01", "2025-01-31");
+        assert_eq!(jan.monthly, Decimal::from_str("100.00").unwrap());
+        assert_eq!(jan.for_period, Decimal::ZERO); // PIF month: not depreciated
+        let feb = compute_depreciation(&asset, "2025-02-01", "2025-02-28");
+        assert_eq!(feb.for_period, Decimal::from_str("100.00").unwrap()); // first charge
+    }
+
+    #[test]
+    fn depreciation_last_month_absorbs_remainder() {
+        // cost=1000, life=3 → monthly=333.33; months 1,2 = 333.33; month 3 = 333.34; Σ=1000.00.
+        let asset = sample_asset("1000.00", 3, "2025-01-01");
+        assert_eq!(
+            compute_depreciation(&asset, "2025-02-01", "2025-02-28").for_period,
+            Decimal::from_str("333.33").unwrap()
+        );
+        let m3 = compute_depreciation(&asset, "2025-04-01", "2025-04-30"); // 3rd depreciable month
+        assert_eq!(m3.for_period, Decimal::from_str("333.34").unwrap());
+        assert_eq!(m3.accumulated_end, Decimal::from_str("1000.00").unwrap());
+        assert_eq!(m3.book_value_end, Decimal::ZERO);
     }
 
     #[test]
     fn depreciation_after_one_year() {
-        // cost=1200, life=12m, acquired 2024-01-01, period 2025-01-01..2025-01-31
-        // months_elapsed at begin = 12, at end = 12 → fully depreciated
+        // cost=1200, life=12m, PIF 2024-01-01 → 12th (final) charge in Jan 2025.
         let asset = sample_asset("1200.00", 12, "2024-01-01");
         let calc = compute_depreciation(&asset, "2025-01-01", "2025-01-31");
         assert_eq!(calc.accumulated_end, Decimal::from_str("1200.00").unwrap());
         assert_eq!(calc.book_value_end, Decimal::ZERO);
-        assert_eq!(calc.for_period, Decimal::ZERO); // already fully depreciated
+        assert_eq!(calc.for_period, Decimal::from_str("100.00").unwrap()); // final month charge
     }
 
     #[test]

@@ -351,10 +351,34 @@ fn standard_accounts() -> Vec<SeedEntry> {
             parent: None,
         },
         SeedEntry {
+            code: "2812",
+            name: "Amortizarea construcțiilor",
+            class: 2,
+            parent: Some("281"),
+        },
+        SeedEntry {
             code: "2813",
             name: "Amortizarea instalațiilor tehnice",
             class: 2,
             parent: Some("281"),
+        },
+        SeedEntry {
+            code: "2814",
+            name: "Amortizarea altor imobilizări corporale",
+            class: 2,
+            parent: Some("281"),
+        },
+        SeedEntry {
+            code: "6811",
+            name: "Cheltuieli de exploatare privind amortizarea imobilizărilor",
+            class: 6,
+            parent: None,
+        },
+        SeedEntry {
+            code: "6583",
+            name: "Cheltuieli privind activele cedate și alte operații de capital",
+            class: 6,
+            parent: None,
         },
         // ── Clasa 3 — Conturi de stocuri ───────────────────────────────────
         SeedEntry {

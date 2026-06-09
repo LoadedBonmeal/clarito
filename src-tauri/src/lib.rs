@@ -476,6 +476,10 @@ pub fn run() {
             commands::assets::create_fixed_asset,
             commands::assets::list_fixed_assets,
             commands::assets::delete_fixed_asset,
+            commands::assets::update_fixed_asset,
+            commands::assets::run_depreciation,
+            commands::assets::dispose_asset,
+            commands::assets::list_depreciation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

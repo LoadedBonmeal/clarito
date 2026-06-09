@@ -1012,6 +1012,58 @@ export interface ClosePeriodResult {
   entryDate: string;
 }
 
+export interface FixedAsset {
+  id: string;
+  companyId: string;
+  assetCode: string;
+  accountId: string;
+  description: string;
+  valuationClass: string;
+  supplierId: string;
+  supplierName: string;
+  dateOfAcquisition: string;
+  startUpDate: string;
+  acquisitionCost: string;
+  lifeMonths: number;
+  depreciationMethod: string;
+  depreciationPct: string;
+  disposalDate: string | null;
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface FixedAssetInput {
+  assetCode: string;
+  accountId?: string;
+  description: string;
+  dateOfAcquisition: string;
+  startUpDate?: string;
+  acquisitionCost: string;
+  lifeMonths?: number;
+  depreciationMethod?: string;
+  disposalDate?: string | null;
+  active?: boolean;
+}
+
+export interface AssetDepreciationState {
+  assetId: string;
+  assetCode: string;
+  description: string;
+  monthlyCharge: string;
+  accumulated: string;
+  bookValue: string;
+  expenseAcct: string;
+  amortAcct: string;
+}
+
+export interface DepreciationRun {
+  states: AssetDepreciationState[];
+  totalAmount: string;
+  posted: boolean;
+  entryDate: string;
+}
+
 export interface Employee {
   id: string;
   companyId: string;
