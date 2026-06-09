@@ -6,6 +6,7 @@
 
 use tauri::State;
 
+use crate::db::gl::{compute_pnl, ProfitLoss};
 use crate::db::gl::{general_ledger as db_general_ledger, LedgerAccount};
 use crate::db::gl::{generate_gl_entries as db_generate, reconcile as db_reconcile};
 use crate::db::gl::{journal_register as db_journal_register, JournalRegister};
@@ -73,6 +74,26 @@ pub async fn trial_balance(
     period_to: String,
 ) -> AppResult<TrialBalance> {
     db_trial_balance(&state.db, &company_id, &period_from, &period_to).await
+}
+
+/// Contul de profit și pierdere (P&L) pentru perioadă — venituri (clasa 7) și cheltuieli
+/// (clasa 6) din balanță, rezultatul brut/net + impozitul (înregistrat sau estimat după regimul
+/// fiscal al companiei) și notele de închidere 6/7 → 121 (OMFP 1802/2014).
+#[tauri::command]
+pub async fn profit_and_loss(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+) -> AppResult<ProfitLoss> {
+    let company = crate::db::companies::get(&state.db, &company_id).await?;
+    let tb = db_trial_balance(&state.db, &company_id, &period_from, &period_to).await?;
+    Ok(compute_pnl(
+        &tb.rows,
+        &company.tax_regime,
+        &period_from,
+        &period_to,
+    ))
 }
 
 /// Registru-jurnal (cod 14-1-1) — lista cronologică a notelor contabile din perioadă.

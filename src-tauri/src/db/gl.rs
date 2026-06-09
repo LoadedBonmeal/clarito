@@ -2067,6 +2067,160 @@ pub async fn trial_balance(
     })
 }
 
+// ─── Cont de profit și pierdere + închiderea conturilor 6/7 → 121 ────────────
+
+/// One revenue/expense line of the P&L.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PnlLine {
+    pub code: String,
+    pub name: String,
+    pub amount: String,
+}
+
+/// One closing entry (D account / C 121, or D 121 / C account).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClosingEntry {
+    pub debit_account: String,
+    pub credit_account: String,
+    pub amount: String,
+}
+
+/// Contul de profit și pierdere (P&L) for a period, derived from the trial balance: class-7
+/// balances are revenue, class-6 are expenses. `income_tax` is the booked 691/698 if present,
+/// else estimated by regime (micro 1% × venituri, profit 16% × rezultat brut). `closing_entries`
+/// previews the OMFP-1802 close (D 7xx / C 121 and D 121 / C 6xx) the accountant would post.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfitLoss {
+    pub period_from: String,
+    pub period_to: String,
+    pub tax_regime: String,
+    pub revenue_lines: Vec<PnlLine>,
+    pub expense_lines: Vec<PnlLine>,
+    pub operating_revenue: String,
+    pub financial_revenue: String,
+    pub total_revenue: String,
+    pub operating_expense: String,
+    pub financial_expense: String,
+    pub total_expense: String,
+    /// venituri − cheltuieli (excluding the income-tax expense 691/698).
+    pub gross_result: String,
+    pub income_tax: String,
+    /// True when `income_tax` is an estimate (nothing booked to 691/698 yet).
+    pub income_tax_estimated: bool,
+    pub net_result: String,
+    pub closing_entries: Vec<ClosingEntry>,
+}
+
+/// Build the P&L from trial-balance rows. Pure + testable. `tax_regime` is "micro" or "profit".
+pub fn compute_pnl(
+    rows: &[TrialBalanceRow],
+    tax_regime: &str,
+    period_from: &str,
+    period_to: &str,
+) -> ProfitLoss {
+    let parse = |s: &str| s.parse::<Decimal>().unwrap_or(Decimal::ZERO);
+    let mut revenue_lines = Vec::new();
+    let mut expense_lines = Vec::new();
+    let mut closing_entries = Vec::new();
+    let mut op_rev = Decimal::ZERO;
+    let mut fin_rev = Decimal::ZERO;
+    let mut op_exp = Decimal::ZERO;
+    let mut fin_exp = Decimal::ZERO;
+    let mut income_tax_booked = Decimal::ZERO;
+
+    for r in rows {
+        let code = &r.account_code;
+        let net_credit = parse(&r.closing_credit) - parse(&r.closing_debit);
+        let net_debit = -net_credit;
+        if code.starts_with('7') {
+            // Revenue: normal credit balance. Skip zero. Financial = 76x/78x, else operating.
+            if net_credit.is_zero() {
+                continue;
+            }
+            if code.starts_with("76") || code.starts_with("78") {
+                fin_rev += net_credit;
+            } else {
+                op_rev += net_credit;
+            }
+            revenue_lines.push(PnlLine {
+                code: code.clone(),
+                name: r.account_name.clone(),
+                amount: fmt_dec(net_credit),
+            });
+            // D 7xx / C 121 (sign handles contra-revenue like 709 automatically via net_credit<0).
+            closing_entries.push(ClosingEntry {
+                debit_account: code.clone(),
+                credit_account: "121".into(),
+                amount: fmt_dec(net_credit),
+            });
+        } else if code.starts_with('6') {
+            // Expense: normal debit balance. 691/698 (income tax) are reported separately.
+            if net_debit.is_zero() {
+                continue;
+            }
+            if code == "691" || code == "698" {
+                income_tax_booked += net_debit;
+                continue;
+            }
+            if code.starts_with("66") || code == "686" {
+                fin_exp += net_debit;
+            } else {
+                op_exp += net_debit;
+            }
+            expense_lines.push(PnlLine {
+                code: code.clone(),
+                name: r.account_name.clone(),
+                amount: fmt_dec(net_debit),
+            });
+            // D 121 / C 6xx.
+            closing_entries.push(ClosingEntry {
+                debit_account: "121".into(),
+                credit_account: code.clone(),
+                amount: fmt_dec(net_debit),
+            });
+        }
+    }
+
+    let total_revenue = op_rev + fin_rev;
+    let total_expense = op_exp + fin_exp;
+    let gross_result = total_revenue - total_expense;
+    // Income tax: booked 691/698 if any, else estimate by regime. Micro is 1% of revenue;
+    // profit is 16% of the positive gross result (accounting result — fiscal adjustments aside).
+    let (income_tax, income_tax_estimated) = if !income_tax_booked.is_zero() {
+        (income_tax_booked, false)
+    } else if tax_regime == "micro" {
+        ((total_revenue * Decimal::new(1, 2)).round_dp(2), true)
+    } else {
+        (
+            (gross_result.max(Decimal::ZERO) * Decimal::new(16, 2)).round_dp(2),
+            true,
+        )
+    };
+    let net_result = gross_result - income_tax;
+
+    ProfitLoss {
+        period_from: period_from.to_string(),
+        period_to: period_to.to_string(),
+        tax_regime: tax_regime.to_string(),
+        revenue_lines,
+        expense_lines,
+        operating_revenue: fmt_dec(op_rev),
+        financial_revenue: fmt_dec(fin_rev),
+        total_revenue: fmt_dec(total_revenue),
+        operating_expense: fmt_dec(op_exp),
+        financial_expense: fmt_dec(fin_exp),
+        total_expense: fmt_dec(total_expense),
+        gross_result: fmt_dec(gross_result),
+        income_tax: fmt_dec(income_tax),
+        income_tax_estimated,
+        net_result: fmt_dec(net_result),
+        closing_entries,
+    }
+}
+
 // ─── Registru-jurnal (cod 14-1-1) ────────────────────────────────────────────
 
 /// One line of the Registru-jurnal (model 14-1-1): one GL entry, with the account on its
@@ -2378,6 +2532,68 @@ mod tests {
     use super::*;
     use rust_decimal_macros::dec as rdec;
     use sqlx::SqlitePool;
+
+    fn tb_row(
+        code: &str,
+        name: &str,
+        closing_debit: &str,
+        closing_credit: &str,
+    ) -> TrialBalanceRow {
+        TrialBalanceRow {
+            account_code: code.into(),
+            account_name: name.into(),
+            opening_debit: "0.00".into(),
+            opening_credit: "0.00".into(),
+            period_debit: "0.00".into(),
+            period_credit: "0.00".into(),
+            total_debit: "0.00".into(),
+            total_credit: "0.00".into(),
+            closing_debit: closing_debit.into(),
+            closing_credit: closing_credit.into(),
+        }
+    }
+
+    #[test]
+    fn pnl_aggregates_revenue_expense_and_estimates_micro_tax() {
+        // 707 revenue 10.000 (credit), 607 expense 6.000 (debit), 665 fin. expense 100, 765 fin.
+        // revenue 50. Gross = (10.000+50) − (6.000+100) = 3.950.
+        let rows = vec![
+            tb_row("707", "Venituri mărfuri", "0.00", "10000.00"),
+            tb_row("765", "Venituri din diferențe de curs", "0.00", "50.00"),
+            tb_row("607", "Cheltuieli mărfuri", "6000.00", "0.00"),
+            tb_row("665", "Cheltuieli din diferențe de curs", "100.00", "0.00"),
+            tb_row("4111", "Clienți", "11900.00", "0.00"), // balance-sheet acct → ignored
+        ];
+        let pnl = compute_pnl(&rows, "micro", "2026-01-01", "2026-12-31");
+        assert_eq!(pnl.total_revenue, "10050.00");
+        assert_eq!(pnl.financial_revenue, "50.00");
+        assert_eq!(pnl.total_expense, "6100.00");
+        assert_eq!(pnl.financial_expense, "100.00");
+        assert_eq!(pnl.gross_result, "3950.00");
+        // micro tax estimate = 1% × revenue 10.050 = 100.50
+        assert!(pnl.income_tax_estimated);
+        assert_eq!(pnl.income_tax, "100.50");
+        assert_eq!(pnl.net_result, "3849.50");
+        // closing entries: D 707/765 / C 121 and D 121 / C 607/665 (4 lines, no balance-sheet acct).
+        assert_eq!(pnl.closing_entries.len(), 4);
+    }
+
+    #[test]
+    fn pnl_uses_booked_income_tax_when_present_and_profit_16pct() {
+        // profit regime, with 691 already booked 320 → income_tax is the booked figure, not 16%.
+        let rows = vec![
+            tb_row("704", "Venituri servicii", "0.00", "5000.00"),
+            tb_row("641", "Cheltuieli salarii", "3000.00", "0.00"),
+            tb_row("691", "Cheltuieli impozit profit", "320.00", "0.00"),
+        ];
+        let pnl = compute_pnl(&rows, "profit", "2026-01-01", "2026-12-31");
+        assert_eq!(pnl.gross_result, "2000.00"); // 5000 − 3000 (691 excluded from expense)
+        assert!(!pnl.income_tax_estimated, "booked 691 used");
+        assert_eq!(pnl.income_tax, "320.00");
+        assert_eq!(pnl.net_result, "1680.00");
+        // 691 is not in expense_lines (reported as income tax, not operating expense).
+        assert!(!pnl.expense_lines.iter().any(|l| l.code == "691"));
+    }
 
     // ── Helper: in-memory pool cu schema migrată ──────────────────────────────
     async fn setup_pool() -> SqlitePool {

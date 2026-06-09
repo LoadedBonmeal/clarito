@@ -451,6 +451,7 @@ pub fn run() {
             commands::gl::reconcile_gl,
             commands::gl::close_vat_period,
             commands::gl::trial_balance,
+            commands::gl::profit_and_loss,
             commands::gl::journal_register,
             commands::gl::general_ledger,
             // stock movements — Phase 6a (SAF-T MovementOfGoods)

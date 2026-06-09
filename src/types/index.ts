@@ -982,6 +982,39 @@ export interface TrialBalance {
   balanced: boolean;
 }
 
+// ─── Cont de profit și pierdere (P&L) ────────────────────────────────────
+
+export interface PnlLine {
+  code: string;
+  name: string;
+  amount: string;
+}
+
+export interface ClosingEntry {
+  debitAccount: string;
+  creditAccount: string;
+  amount: string;
+}
+
+export interface ProfitLoss {
+  periodFrom: string;
+  periodTo: string;
+  taxRegime: string;
+  revenueLines: PnlLine[];
+  expenseLines: PnlLine[];
+  operatingRevenue: string;
+  financialRevenue: string;
+  totalRevenue: string;
+  operatingExpense: string;
+  financialExpense: string;
+  totalExpense: string;
+  grossResult: string;
+  incomeTax: string;
+  incomeTaxEstimated: boolean;
+  netResult: string;
+  closingEntries: ClosingEntry[];
+}
+
 // ─── ANAF form-version staleness ─────────────────────────────────────────
 
 /** One stale declaration form returned by `check_form_versions`. */

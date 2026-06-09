@@ -22,7 +22,7 @@ import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import type {
   GlPostResult, ReconcileReport, VatSettlementResult, TrialBalance,
-  JournalRegister, LedgerAccount,
+  JournalRegister, LedgerAccount, ProfitLoss,
 } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -69,6 +69,8 @@ export function GlLedgerPage() {
   const [trialBal,        setTrialBal]        = useState<TrialBalance | null>(null);
   const [journalReg,      setJournalReg]      = useState<JournalRegister | null>(null);
   const [ledger,          setLedger]          = useState<LedgerAccount[] | null>(null);
+  const [pnl,             setPnl]             = useState<ProfitLoss | null>(null);
+  const [loadingPnl,      setLoadingPnl]      = useState(false);
 
   const yearOptions    = buildYearOptions();
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
@@ -168,6 +170,23 @@ export function GlLedgerPage() {
       notify.error(formatError(err, "Nu s-a putut genera balanța de verificare."));
     } finally {
       setLoadingTb(false);
+    }
+  };
+
+  // ── Cont de profit și pierdere ────────────────────────────────────────────
+
+  const handleProfitLoss = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    setLoadingPnl(true);
+    setPnl(null);
+    try {
+      const r = await api.gl.profitAndLoss(activeCompanyId, dateFrom, dateTo);
+      setPnl(r);
+      notify.success(`Cont de profit și pierdere — rezultat net: ${r.netResult} lei.`);
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut genera contul de profit și pierdere."));
+    } finally {
+      setLoadingPnl(false);
     }
   };
 
@@ -278,6 +297,14 @@ export function GlLedgerPage() {
               onClick={() => void handleGeneralLedger()}
             >
               {loadingCm ? "…" : "Cartea mare"}
+            </Btn>
+            <Btn
+              variant="secondary"
+              icon="reports"
+              disabled={loadingPnl || !activeCompanyId}
+              onClick={() => void handleProfitLoss()}
+            >
+              {loadingPnl ? "…" : "Profit și pierdere"}
             </Btn>
           </>
         }
@@ -423,6 +450,75 @@ export function GlLedgerPage() {
                   </tr>
                 </tfoot>
               </table>
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── Cont de profit și pierdere ───────────────────────────────────── */}
+        {pnl && (
+          <SectionCard icon="reports" title="Cont de profit și pierdere (închidere 6/7 → 121)">
+            <div style={{ padding: "12px 16px 4px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <Badge variant={parseDec(pnl.netResult) >= 0 ? "success" : "error"}>
+                Rezultat net: {fmtRON(pnl.netResult)} lei
+              </Badge>
+              <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
+                Regim: {pnl.taxRegime === "micro" ? "microîntreprindere (1%)" : "impozit pe profit (16%)"}
+                {" · "}OMFP 1802/2014
+              </span>
+            </div>
+            <div style={{ overflowX: "auto", padding: "0 16px 16px" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <tbody>
+                  <tr style={{ fontWeight: 700, borderBottom: "1px solid var(--rf-border)" }}>
+                    <td style={{ padding: "6px 8px" }}>Venituri (clasa 7)</td>
+                    <td className="rf-mono" style={{ padding: "6px 8px", textAlign: "right" }}>{fmtRON(pnl.totalRevenue)}</td>
+                  </tr>
+                  {pnl.revenueLines.map((l) => (
+                    <tr key={l.code}>
+                      <td style={{ padding: "2px 8px 2px 24px", color: "var(--rf-text-muted)" }}>
+                        <span className="rf-mono">{l.code}</span> {l.name}
+                      </td>
+                      <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{fmtRON(l.amount)}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ fontWeight: 700, borderBottom: "1px solid var(--rf-border)", borderTop: "1px solid var(--rf-border)" }}>
+                    <td style={{ padding: "6px 8px" }}>Cheltuieli (clasa 6, fără impozit pe venit/profit)</td>
+                    <td className="rf-mono" style={{ padding: "6px 8px", textAlign: "right" }}>{fmtRON(pnl.totalExpense)}</td>
+                  </tr>
+                  {pnl.expenseLines.map((l) => (
+                    <tr key={l.code}>
+                      <td style={{ padding: "2px 8px 2px 24px", color: "var(--rf-text-muted)" }}>
+                        <span className="rf-mono">{l.code}</span> {l.name}
+                      </td>
+                      <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{fmtRON(l.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: "2px solid var(--rf-border)", fontWeight: 600 }}>
+                    <td style={{ padding: "4px 8px" }}>Rezultat brut (venituri − cheltuieli)</td>
+                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(pnl.grossResult)}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: "4px 8px" }}>
+                      Impozit pe {pnl.taxRegime === "micro" ? "venit" : "profit"}
+                      {pnl.incomeTaxEstimated ? " (estimat)" : " (înregistrat)"}
+                    </td>
+                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(pnl.incomeTax)}</td>
+                  </tr>
+                  <tr style={{ fontWeight: 700, borderTop: "1px solid var(--rf-border)" }}>
+                    <td style={{ padding: "4px 8px" }}>Rezultat net</td>
+                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(pnl.netResult)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+              {pnl.incomeTaxEstimated && (
+                <div style={{ fontSize: 11.5, color: "var(--rf-text-muted)", marginTop: 8 }}>
+                  Impozitul este estimat ({pnl.taxRegime === "micro" ? "1% × venituri" : "16% × rezultat brut pozitiv"});
+                  pentru profit, ajustările fiscale (cheltuieli nedeductibile, venituri neimpozabile) nu sunt incluse.
+                  Notele de închidere (D 7xx / C 121, D 121 / C 6xx) sunt pregătite ({pnl.closingEntries.length} rânduri).
+                </div>
+              )}
             </div>
           </SectionCard>
         )}
