@@ -8,6 +8,7 @@
 //! Money: stocat ca TEXT (Decimal string) în DB. Exchange rate rămâne REAL (rată FX, nu bani).
 
 use rust_decimal::Decimal;
+use rust_decimal::RoundingStrategy;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
@@ -15,6 +16,15 @@ use crate::db::models::{
     new_id, now_unix, InvoiceStatus, Page, Paginated, VALID_PAYMENT_MEANS_CODES, VALID_VAT_RATES,
 };
 use crate::error::{AppError, AppResult};
+
+/// Round money to 2 decimals using COMMERCIAL rounding (half away from zero), the Romanian/
+/// EN16931 reference convention for VAT amounts — e.g. 2.50 × 21% = 0.5250 → 0.53. Kept
+/// consistent across line, subtotal and total (and with D300's `ron_to_bani`) so the invoice
+/// reconciles internally and with the VAT return; rust_decimal's default `round_dp` is banker's
+/// (nearest-even), which would store 0.52 and drift from the RO norm.
+pub(crate) fn round2(d: Decimal) -> Decimal {
+    d.round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero)
+}
 
 // ─── Models ────────────────────────────────────────────────────────────────
 
@@ -369,22 +379,22 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
             } else {
                 Decimal::ZERO
             };
-            let ls = (qty * price).round_dp(2);
-            let lv = (ls * rate / hundred).round_dp(2);
+            let ls = round2(qty * price);
+            let lv = round2(ls * rate / hundred);
             let lt = ls + lv;
             subtotal_dec += ls;
             vat_total_dec += lv;
             (
                 new_id(),
-                ls.round_dp(2).to_string(),
-                lv.round_dp(2).to_string(),
-                lt.round_dp(2).to_string(),
+                round2(ls).to_string(),
+                round2(lv).to_string(),
+                round2(lt).to_string(),
             )
         })
         .collect();
-    let subtotal = subtotal_dec.round_dp(2).to_string();
-    let vat_total = vat_total_dec.round_dp(2).to_string();
-    let total = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
+    let subtotal = round2(subtotal_dec).to_string();
+    let vat_total = round2(vat_total_dec).to_string();
+    let total = round2(subtotal_dec + vat_total_dec).to_string();
 
     let mut tx = pool.begin().await?;
 
@@ -778,9 +788,33 @@ pub async fn set_status_scoped(
 
 #[cfg(test)]
 mod tests {
+    use super::round2;
     use rust_decimal::Decimal;
     use sqlx::sqlite::SqlitePoolOptions;
     use std::str::FromStr;
+
+    #[test]
+    fn round2_is_commercial_half_away_not_bankers() {
+        // 2.50 × 21% = 0.5250 → 0.53 (RO commercial / EN16931 reference), NOT 0.52 (banker's).
+        assert_eq!(
+            round2(Decimal::from_str("0.5250").unwrap()).to_string(),
+            "0.53"
+        );
+        assert_eq!(
+            round2(Decimal::from_str("-0.5250").unwrap()).to_string(),
+            "-0.53"
+        );
+        // a non-midpoint value is unaffected.
+        assert_eq!(
+            round2(Decimal::from_str("0.521").unwrap()).to_string(),
+            "0.52"
+        );
+        // banker's would round 0.125 → 0.12; commercial → 0.13.
+        assert_eq!(
+            round2(Decimal::from_str("0.125").unwrap()).to_string(),
+            "0.13"
+        );
+    }
 
     use crate::db::models::VALID_PAYMENT_MEANS_CODES;
 

@@ -157,6 +157,26 @@ pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<C
         }
     }
 
+    // Validate the RO mod-11 CUI checksum — symmetric with company creation — but ONLY for a
+    // RO-format CUI (all-digit, 2-10) on a non-individual, RO/unspecified-country contact. Foreign
+    // VAT ids (country prefix or non-RO country) and individuals (CNP) are skipped so a valid
+    // intra-EU partner or person isn't wrongly rejected.
+    let is_individual = input.is_individual.unwrap_or(false);
+    let is_ro_country = input
+        .country
+        .as_deref()
+        .map(|c| c.trim().eq_ignore_ascii_case("RO"))
+        .unwrap_or(true);
+    if !is_individual && is_ro_country {
+        if let Some(ref c) = input.cui {
+            let norm = c.trim().to_uppercase();
+            let digits = norm.strip_prefix("RO").unwrap_or(&norm).trim();
+            if (2..=10).contains(&digits.len()) && digits.chars().all(|ch| ch.is_ascii_digit()) {
+                companies::validate_cui(c)?;
+            }
+        }
+    }
+
     // Task 2: prevent duplicate (company_id, cui) per company.
     // Normalize the same way the self-CUI check does (trim + uppercase + strip RO prefix)
     // so "RO111" and "111" are treated as the same CUI (consistent de-duplication).

@@ -1,7 +1,9 @@
 use sqlx::SqlitePool;
 use tauri::State;
 
-use crate::db::invoices::{self, CreateInvoiceInput, Invoice, InvoiceFilter, InvoiceWithLines};
+use crate::db::invoices::{
+    self, round2, CreateInvoiceInput, Invoice, InvoiceFilter, InvoiceWithLines,
+};
 use crate::db::models::{
     new_id, InvoiceStatus, Paginated, VALID_PAYMENT_MEANS_CODES, VALID_VAT_RATES,
 };
@@ -255,22 +257,22 @@ pub async fn update_invoice_draft(
             } else {
                 Decimal::ZERO
             };
-            let ls = (qty * price).round_dp(2);
-            let lv = (ls * rate / hundred).round_dp(2);
+            let ls = round2(qty * price);
+            let lv = round2(ls * rate / hundred);
             let lt = ls + lv;
             subtotal_dec += ls;
             vat_total_dec += lv;
             (
                 new_id(),
-                ls.round_dp(2).to_string(),
-                lv.round_dp(2).to_string(),
-                lt.round_dp(2).to_string(),
+                round2(ls).to_string(),
+                round2(lv).to_string(),
+                round2(lt).to_string(),
             )
         })
         .collect();
-    let subtotal = subtotal_dec.round_dp(2).to_string();
-    let vat_total = vat_total_dec.round_dp(2).to_string();
-    let total = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
+    let subtotal = round2(subtotal_dec).to_string();
+    let vat_total = round2(vat_total_dec).to_string();
+    let total = round2(subtotal_dec + vat_total_dec).to_string();
     // Fix 2: preserve the existing series/number — do not let the client change them on a draft edit
     let full_number = format!("{}-{:04}", existing.series, existing.number);
 
@@ -552,8 +554,8 @@ pub async fn storno_invoice(
             let qty = -Decimal::from_str(&l.quantity).unwrap_or(Decimal::ZERO);
             let price = Decimal::from_str(&l.unit_price).unwrap_or(Decimal::ZERO);
             let rate = Decimal::from_str(&l.vat_rate).unwrap_or(Decimal::ZERO);
-            let ls = (qty * price).round_dp(2);
-            let lv = (ls * rate / hundred).round_dp(2);
+            let ls = round2(qty * price);
+            let lv = round2(ls * rate / hundred);
             let lt = ls + lv;
             subtotal_dec += ls;
             vat_total_dec += lv;
@@ -575,9 +577,9 @@ pub async fn storno_invoice(
         })
         .collect();
 
-    let subtotal = subtotal_dec.round_dp(2).to_string();
-    let vat_total = vat_total_dec.round_dp(2).to_string();
-    let total = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
+    let subtotal = round2(subtotal_dec).to_string();
+    let vat_total = round2(vat_total_dec).to_string();
+    let total = round2(subtotal_dec + vat_total_dec).to_string();
 
     let issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
     // BIZ-14: due_date defaults to issue_date when not explicitly provided.
