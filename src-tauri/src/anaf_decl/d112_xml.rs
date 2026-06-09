@@ -39,6 +39,14 @@ pub struct D112Employee {
     pub cam: i64,
     /// Zile lucrate în lună.
     pub zile: u32,
+    /// asiguratA: A_1 tip asigurat, A_2 pensionar (0/1), A_3 tip contract, A_4 ore normă.
+    pub tip_asigurat: String,
+    pub pensionar: bool,
+    pub tip_contract: String,
+    pub ore_norma: u32,
+    /// Baza CAS (A_13) / baza CASS (A_11) — egale cu brutul, sau ajustate la baza minimă part-time.
+    pub baza_cas: i64,
+    pub baza_cass: i64,
 }
 
 const NS: &str = "mfp:anaf:dgti:declaratie_unica:declaratie:v1";
@@ -101,15 +109,21 @@ B_brutSalarii=\"{t_gross}\"/>\n"
         asig.push_str(&format!(
             "  <asigurat idAsig=\"{id}\" cnpAsig=\"{cnp}\" numeAsig=\"{nume}\" \
 prenAsig=\"{pren}\"{data} asigCI=\"1\" asigSO=\"1\">\n\
-    <asiguratA A_1=\"1\" A_2=\"0\" A_3=\"N\" A_4=\"8\" A_5=\"{gross}\" A_8=\"{zile}\" \
-A_11=\"{gross}\" A_12=\"{cass}\" A_13=\"{gross}\" A_14=\"{cas}\" A_20=\"{impozit}\"/>\n\
+    <asiguratA A_1=\"{a1}\" A_2=\"{a2}\" A_3=\"{a3}\" A_4=\"{a4}\" A_5=\"{gross}\" A_8=\"{zile}\" \
+A_11=\"{baza_cass}\" A_12=\"{cass}\" A_13=\"{baza_cas}\" A_14=\"{cas}\" A_20=\"{impozit}\"/>\n\
   </asigurat>\n",
             cnp = esc(&e.cnp),
             nume = esc(&e.nume),
             pren = esc(&e.prenume),
+            a1 = esc(&e.tip_asigurat),
+            a2 = if e.pensionar { 1 } else { 0 },
+            a3 = esc(&e.tip_contract),
+            a4 = e.ore_norma,
             gross = e.gross,
             zile = e.zile,
+            baza_cass = e.baza_cass,
             cass = e.cass,
+            baza_cas = e.baza_cas,
             cas = e.cas,
             impozit = e.impozit,
         ));
@@ -154,6 +168,12 @@ mod tests {
             impozit: 325,
             cam: 113,
             zile: 21,
+            tip_asigurat: "1".into(),
+            pensionar: false,
+            tip_contract: "N".into(),
+            ore_norma: 8,
+            baza_cas: 5000,
+            baza_cass: 5000,
         }
     }
 

@@ -217,23 +217,36 @@ function EmployeeModal({
     fullName: employee?.fullName ?? "",
     grossSalary: employee?.grossSalary ?? "",
     personalDeduction: employee?.personalDeduction ?? "0",
+    tipContract: employee?.tipContract ?? "N",
+    oreNorma: employee ? String(employee.oreNorma) : "8",
+    pensionar: employee?.pensionar ?? false,
   });
   const [error, setError] = useState<string | null>(null);
 
   const save = useMutation({
     mutationFn: () => {
       if (!form.fullName.trim()) throw new Error("Numele e obligatoriu.");
+      const payload = {
+        cnp: form.cnp,
+        fullName: form.fullName,
+        grossSalary: form.grossSalary,
+        personalDeduction: form.personalDeduction,
+        tipContract: form.tipContract,
+        oreNorma: Number(form.oreNorma) || 8,
+        pensionar: form.pensionar,
+      };
       if (isEdit) {
-        return api.payroll.update(employee!.id, companyId, form);
+        return api.payroll.update(employee!.id, companyId, payload);
       }
-      const input: CreateEmployeeInput = { companyId, ...form };
+      const input: CreateEmployeeInput = { companyId, ...payload };
       return api.payroll.create(input);
     },
     onSuccess: onSaved,
     onError: (e) => setError(formatError(e, "Eroare la salvare.")),
   });
 
-  const field = (k: keyof typeof form) => ({
+  type StrKey = "cnp" | "fullName" | "grossSalary" | "personalDeduction" | "oreNorma";
+  const field = (k: StrKey) => ({
     value: form[k],
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value })),
   });
@@ -260,6 +273,27 @@ function EmployeeModal({
           <Field label="Salariu brut (lei)"><Input inputMode="decimal" placeholder="5000" {...field("grossSalary")} /></Field>
           <Field label="Deducere personală (lei)"><Input inputMode="decimal" placeholder="0" {...field("personalDeduction")} /></Field>
         </div>
+        <div className="rf-grid-2">
+          <Field label="Tip contract (D112)">
+            <select className="rf-input" value={form.tipContract}
+              onChange={(e) => setForm((f) => ({ ...f, tipContract: e.target.value }))}>
+              <option value="N">N — normă întreagă</option>
+              <option value="P1">P1 — parțial</option>
+              <option value="P2">P2 — parțial</option>
+              <option value="P3">P3 — parțial</option>
+              <option value="P4">P4 — parțial</option>
+              <option value="P5">P5 — parțial</option>
+              <option value="P6">P6 — parțial</option>
+              <option value="P7">P7 — parțial</option>
+            </select>
+          </Field>
+          <Field label="Ore normă/zi"><Input inputMode="numeric" placeholder="8" {...field("oreNorma")} /></Field>
+        </div>
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+          <input type="checkbox" checked={form.pensionar}
+            onChange={(e) => setForm((f) => ({ ...f, pensionar: e.target.checked }))} />
+          Pensionar (D112 A_2)
+        </label>
         {error && <Banner variant="error">{error}</Banner>}
       </div>
     </Modal>

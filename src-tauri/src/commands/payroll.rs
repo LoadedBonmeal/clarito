@@ -19,6 +19,40 @@ fn split_name(full: &str) -> (String, String) {
     (nume, if pren.is_empty() { "-".into() } else { pren })
 }
 
+use crate::db::invoices::round2;
+
+/// Day of week (0=Sunday..6=Saturday) via Sakamoto's algorithm.
+fn weekday(y: i32, m: u32, d: u32) -> u32 {
+    let t = [0i32, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let yy = if m < 3 { y - 1 } else { y };
+    (((yy + yy / 4 - yy / 100 + yy / 400 + t[(m - 1) as usize] + d as i32) % 7 + 7) % 7) as u32
+}
+
+fn days_in_month(y: i32, m: u32) -> u32 {
+    match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 30,
+    }
+}
+
+/// Working days (Mon-Fri) in a month — the D112 NZL used for part-time base proration.
+fn working_days(year: i32, month: u32) -> u32 {
+    (1..=days_in_month(year, month))
+        .filter(|&d| {
+            let w = weekday(year, month, d);
+            w != 0 && w != 6
+        })
+        .count() as u32
+}
+
 /// Convert an ISO date (YYYY-MM-DD) to the D112 zz.ll.aaaa format; pass other strings through.
 fn ro_date(iso: &str) -> String {
     let p: Vec<&str> = iso.split('-').collect();
@@ -97,13 +131,37 @@ pub async fn export_d112_xml(
     let employees = payroll::list(&state.db, &company_id).await?;
     let dec = |s: &str| Decimal::from_str(s).unwrap_or(Decimal::ZERO);
     let lei = |s: &str| dec(s).round().to_i64().unwrap_or(0);
+    let leid = |d: Decimal| round2(d).round().to_i64().unwrap_or(0); // whole lei (commercial)
 
+    let nzl = working_days(year, month); // zile lucrătoare în lună (Luni-Vineri)
     let mut d112_emps = Vec::new();
     for e in employees.iter().filter(|e| e.active) {
         let r = compute_payroll(&PayrollInput {
             gross: dec(&e.gross_salary),
             personal_deduction: dec(&e.personal_deduction),
         });
+        let gross = dec(&r.gross);
+        let mut baza_cas = gross;
+        let mut baza_cass = gross;
+        let mut cas = dec(&r.cas);
+        let mut cass = dec(&r.cass);
+        // Part-time (contract Pi): baza CAS/CASS nu poate fi sub baza minimă prorata la zile lucrate
+        // (salariul minim − suma deductibilă), iar diferența de contribuție e suportată de angajator.
+        if e.tip_contract != "N" && gross > Decimal::ZERO && nzl > 0 {
+            let (sal_min, suma): (i64, i64) = if month <= 6 { (4050, 300) } else { (4325, 200) };
+            let sm = Decimal::from(sal_min - suma);
+            let part_base = round2(
+                sm * Decimal::from(e.ore_norma.max(0)) * Decimal::from(nzl)
+                    / (Decimal::from(8) * Decimal::from(nzl)),
+            );
+            // (ore_norma/8 prorates the daily-hours fraction; days net out for a full-month contract.)
+            if gross < part_base {
+                baza_cas = part_base;
+                baza_cass = part_base;
+                cas = round2(part_base * Decimal::new(25, 2));
+                cass = round2(part_base * Decimal::new(10, 2));
+            }
+        }
         let (nume, prenume) = split_name(&e.full_name);
         d112_emps.push(D112Employee {
             cnp: e.cnp.clone(),
@@ -114,12 +172,20 @@ pub async fn export_d112_xml(
                 .as_deref()
                 .map(ro_date)
                 .unwrap_or_default(),
-            gross: lei(&r.gross),
-            cas: lei(&r.cas),
-            cass: lei(&r.cass),
+            gross: leid(gross),
+            cas: leid(cas),
+            cass: leid(cass),
             impozit: lei(&r.income_tax),
             cam: lei(&r.cam),
-            zile: 21, // zile lucrate uzuale — verificate/ajustate în aplicația D112.
+            zile: nzl,
+            tip_asigurat: e.tip_asigurat.clone(),
+            pensionar: e.pensionar,
+            tip_contract: e.tip_contract.clone(),
+            // A_4 ore normă zilnică must be 6/7/8 (the position's daily norm); part-time is captured
+            // via tip_contract (Pi) + the reduced base, not by lowering A_4.
+            ore_norma: e.ore_norma.clamp(6, 8) as u32,
+            baza_cas: leid(baza_cas),
+            baza_cass: leid(baza_cass),
         });
     }
 

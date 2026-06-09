@@ -24,6 +24,12 @@ pub struct Employee {
     pub personal_deduction: String,
     pub employment_date: Option<String>,
     pub active: bool,
+    /// D112 asiguratA fields: A_1 tip asigurat (Nomenclator 5, "1"=salariat), A_2 pensionar (0/1),
+    /// A_3 tip contract (Nomenclator 12, "N"=normă întreagă, "P1".."P7"=parțial), A_4 ore normă (6/7/8).
+    pub tip_asigurat: String,
+    pub pensionar: bool,
+    pub tip_contract: String,
+    pub ore_norma: i64,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -38,6 +44,14 @@ pub struct CreateEmployeeInput {
     #[serde(default)]
     pub personal_deduction: Option<String>,
     pub employment_date: Option<String>,
+    #[serde(default)]
+    pub tip_asigurat: Option<String>,
+    #[serde(default)]
+    pub pensionar: Option<bool>,
+    #[serde(default)]
+    pub tip_contract: Option<String>,
+    #[serde(default)]
+    pub ore_norma: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -49,10 +63,15 @@ pub struct UpdateEmployeeInput {
     pub personal_deduction: Option<String>,
     pub employment_date: Option<String>,
     pub active: Option<bool>,
+    pub tip_asigurat: Option<String>,
+    pub pensionar: Option<bool>,
+    pub tip_contract: Option<String>,
+    pub ore_norma: Option<i64>,
 }
 
 const COLS: &str = "id, company_id, cnp, full_name, gross_salary, personal_deduction, \
-                    employment_date, active, created_at, updated_at";
+                    employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
+                    created_at, updated_at";
 
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Employee>> {
     let q = format!(
@@ -103,8 +122,8 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     let now = now_unix();
     sqlx::query(
         "INSERT INTO employees (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
-         employment_date, active, created_at, updated_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8,?8)",
+         employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, created_at, \
+         updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11,?12,?12)",
     )
     .bind(&id)
     .bind(&input.company_id)
@@ -113,6 +132,10 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     .bind(&gross)
     .bind(&ded)
     .bind(&input.employment_date)
+    .bind(input.tip_asigurat.as_deref().unwrap_or("1"))
+    .bind(input.pensionar.unwrap_or(false))
+    .bind(input.tip_contract.as_deref().unwrap_or("N"))
+    .bind(input.ore_norma.unwrap_or(8))
     .bind(now)
     .execute(pool)
     .await?;
@@ -137,7 +160,8 @@ pub async fn update(
     };
     sqlx::query(
         "UPDATE employees SET cnp=?3, full_name=?4, gross_salary=?5, personal_deduction=?6, \
-         employment_date=?7, active=?8, updated_at=?9 WHERE id=?1 AND company_id=?2",
+         employment_date=?7, active=?8, tip_asigurat=?9, pensionar=?10, tip_contract=?11, \
+         ore_norma=?12, updated_at=?13 WHERE id=?1 AND company_id=?2",
     )
     .bind(id)
     .bind(company_id)
@@ -147,6 +171,10 @@ pub async fn update(
     .bind(&ded)
     .bind(input.employment_date.or(cur.employment_date))
     .bind(input.active.unwrap_or(cur.active))
+    .bind(input.tip_asigurat.as_deref().unwrap_or(&cur.tip_asigurat))
+    .bind(input.pensionar.unwrap_or(cur.pensionar))
+    .bind(input.tip_contract.as_deref().unwrap_or(&cur.tip_contract))
+    .bind(input.ore_norma.unwrap_or(cur.ore_norma))
     .bind(now_unix())
     .execute(pool)
     .await?;
@@ -291,6 +319,10 @@ mod tests {
                     gross_salary: "5000".into(),
                     personal_deduction: Some("0".into()),
                     employment_date: None,
+                    tip_asigurat: None,
+                    pensionar: None,
+                    tip_contract: None,
+                    ore_norma: None,
                 },
             )
             .await

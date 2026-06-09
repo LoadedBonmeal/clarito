@@ -1096,6 +1096,10 @@ export interface Employee {
   personalDeduction: string;
   employmentDate: string | null;
   active: boolean;
+  tipAsigurat: string;
+  pensionar: boolean;
+  tipContract: string;
+  oreNorma: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -1107,6 +1111,10 @@ export interface CreateEmployeeInput {
   grossSalary: string;
   personalDeduction?: string;
   employmentDate?: string | null;
+  tipAsigurat?: string;
+  pensionar?: boolean;
+  tipContract?: string;
+  oreNorma?: number;
 }
 
 export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, "companyId">> & {
