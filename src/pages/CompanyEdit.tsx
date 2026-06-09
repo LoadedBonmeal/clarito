@@ -64,6 +64,7 @@ const schema = z.object({
   bankName: z.string().optional(),
   invoiceSeries: z.string().min(1, "Seria e obligatorie."),
   vatPayer: z.boolean(),
+  taxRegime: z.enum(["micro", "profit"]),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -100,6 +101,7 @@ export function CompanyEditPage() {
           bankName: data.bankName ?? "",
           invoiceSeries: data.invoiceSeries,
           vatPayer: data.vatPayer,
+          taxRegime: data.taxRegime === "profit" ? "profit" : "micro",
         }
       : undefined,
   });
@@ -142,6 +144,7 @@ export function CompanyEditPage() {
       bankName: v.bankName || undefined,
       invoiceSeries: v.invoiceSeries,
       vatPayer: v.vatPayer,
+      taxRegime: v.taxRegime,
     });
   };
 
@@ -347,6 +350,18 @@ export function CompanyEditPage() {
                     {...form.register("vatPayer")}
                   />
                   Plătitor TVA
+                </label>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+                  <span className="rf-kv-label">Regim fiscal</span>
+                  <select className="rf-input" {...form.register("taxRegime")}>
+                    <option value="micro">Microîntreprindere (impozit pe venit 1%)</option>
+                    <option value="profit">Impozit pe profit (16%)</option>
+                  </select>
+                  <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)" }}>
+                    Plafon micro 2026: 100.000 EUR (OUG 89/2025). La depășire se trece la impozit pe
+                    profit din trimestrul depășirii.
+                  </span>
                 </label>
               </div>
             )}

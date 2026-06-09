@@ -453,6 +453,7 @@ mod tests {
             bank_name: None,
             is_active: true,
             spv_enabled: false,
+            tax_regime: "micro".into(),
             invoice_series: "F".to_string(),
             last_invoice_number: 0,
             logo_path: None,

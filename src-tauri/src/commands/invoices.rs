@@ -1002,6 +1002,7 @@ mod tests {
                 phone TEXT,
                 email TEXT,
                 spv_enabled INTEGER NOT NULL DEFAULT 0,
+                tax_regime TEXT NOT NULL DEFAULT 'micro',
                 last_invoice_number INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL DEFAULT (unixepoch()),
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())

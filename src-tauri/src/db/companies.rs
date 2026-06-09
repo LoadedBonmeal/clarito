@@ -3,11 +3,81 @@
 //! Suport multi-tenant: un user poate avea N companii. Tier-ul licenței
 //! limitează numărul (verificarea se face în layer-ul de comenzi).
 
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
 use crate::db::models::{new_id, now_unix};
 use crate::error::{AppError, AppResult};
+
+/// 2026 micro-enterprise turnover ceiling in EUR (OUG 89/2025). Above its lei-equivalent (at the
+/// year-end BNR rate) the company owes profit tax (16%) from the quarter the ceiling was exceeded.
+pub const MICRO_CEILING_EUR: i64 = 100_000;
+
+/// Micro-ceiling monitoring result for a company.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaxRegimeStatus {
+    pub tax_regime: String,
+    pub ytd_turnover_ron: String,
+    pub ceiling_ron: String,
+    pub pct: i64,
+    /// "ok" | "approaching" (≥80%) | "exceeded" (>100%) | "na" (profit regime).
+    pub level: String,
+    pub note: Option<String>,
+}
+
+/// Compute the micro-ceiling status from the YTD turnover (RON) and the EUR→RON rate. Pure +
+/// testable. For a profit-tax company the ceiling does not apply (level "na").
+pub fn micro_ceiling_status(
+    tax_regime: &str,
+    ytd_turnover_ron: Decimal,
+    eur_ron: Decimal,
+) -> TaxRegimeStatus {
+    let ceiling = Decimal::from(MICRO_CEILING_EUR) * eur_ron;
+    if tax_regime != "micro" {
+        return TaxRegimeStatus {
+            tax_regime: tax_regime.to_string(),
+            ytd_turnover_ron: format!("{:.2}", ytd_turnover_ron),
+            ceiling_ron: format!("{:.2}", ceiling),
+            pct: 0,
+            level: "na".into(),
+            note: None,
+        };
+    }
+    let pct = if ceiling.is_zero() {
+        0
+    } else {
+        (ytd_turnover_ron / ceiling * Decimal::from(100))
+            .round()
+            .to_i64()
+            .unwrap_or(0)
+    };
+    let (level, note) =
+        if ytd_turnover_ron > ceiling {
+            ("exceeded", Some(
+            "Ați depășit plafonul micro de 100.000 EUR. Treceți la impozit pe profit (16%) \
+             începând cu trimestrul în care a fost depășit plafonul (OUG 89/2025)."
+                .to_string(),
+        ))
+        } else if pct >= 80 {
+            ("approaching", Some(
+            "Vă apropiați de plafonul micro de 100.000 EUR — monitorizați cifra de afaceri pentru \
+             a anticipa trecerea la impozit pe profit.".to_string(),
+        ))
+        } else {
+            ("ok", None)
+        };
+    TaxRegimeStatus {
+        tax_regime: tax_regime.to_string(),
+        ytd_turnover_ron: format!("{:.2}", ytd_turnover_ron),
+        ceiling_ron: format!("{:.2}", ceiling),
+        pct,
+        level: level.into(),
+        note,
+    }
+}
 
 // ─── Model ─────────────────────────────────────────────────────────────────
 
@@ -37,6 +107,10 @@ pub struct Company {
 
     pub is_active: bool,
     pub spv_enabled: bool,
+
+    /// Tax regime: "micro" (impozit pe venit 1%, ceiling 100.000 EUR — 2026) or "profit"
+    /// (impozit pe profit 16%). Drives the micro-ceiling warning + which declarations apply.
+    pub tax_regime: String,
 
     pub invoice_series: String,
     pub last_invoice_number: i64,
@@ -94,6 +168,7 @@ pub struct UpdateCompanyInput {
 
     pub is_active: Option<bool>,
     pub spv_enabled: Option<bool>,
+    pub tax_regime: Option<String>,
 
     pub invoice_series: Option<String>,
     pub logo_path: Option<String>,
@@ -105,7 +180,7 @@ pub async fn list(pool: &SqlitePool) -> AppResult<Vec<Company>> {
     let rows = sqlx::query_as::<_, Company>(
         "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, cash_vat, \
          address, city, county, postal_code, country, email, phone, iban, bank_name, \
-         is_active, spv_enabled, invoice_series, last_invoice_number, logo_path, \
+         is_active, spv_enabled, tax_regime, invoice_series, last_invoice_number, logo_path, \
          created_at, updated_at \
          FROM companies WHERE is_active = 1 ORDER BY legal_name",
     )
@@ -118,7 +193,7 @@ pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Company> {
     let row = sqlx::query_as::<_, Company>(
         "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, cash_vat, \
          address, city, county, postal_code, country, email, phone, iban, bank_name, \
-         is_active, spv_enabled, invoice_series, last_invoice_number, logo_path, \
+         is_active, spv_enabled, tax_regime, invoice_series, last_invoice_number, logo_path, \
          created_at, updated_at \
          FROM companies WHERE id = ?1",
     )
@@ -137,7 +212,7 @@ pub async fn get_by_cui(pool: &SqlitePool, cui: &str) -> AppResult<Option<Compan
     let row = sqlx::query_as::<_, Company>(
         "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, cash_vat, \
          address, city, county, postal_code, country, email, phone, iban, bank_name, \
-         is_active, spv_enabled, invoice_series, last_invoice_number, logo_path, \
+         is_active, spv_enabled, tax_regime, invoice_series, last_invoice_number, logo_path, \
          created_at, updated_at \
          FROM companies WHERE cui = ?1 AND is_active = 1",
     )
@@ -153,7 +228,7 @@ async fn get_by_cui_any_status(pool: &SqlitePool, cui: &str) -> AppResult<Option
     let row = sqlx::query_as::<_, Company>(
         "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, cash_vat, \
          address, city, county, postal_code, country, email, phone, iban, bank_name, \
-         is_active, spv_enabled, invoice_series, last_invoice_number, logo_path, \
+         is_active, spv_enabled, tax_regime, invoice_series, last_invoice_number, logo_path, \
          created_at, updated_at \
          FROM companies WHERE cui = ?1",
     )
@@ -287,7 +362,8 @@ pub async fn update(pool: &SqlitePool, id: &str, input: UpdateCompanyInput) -> A
             invoice_series  = ?17,
             logo_path       = ?18,
             updated_at      = ?19,
-            cash_vat        = ?20
+            cash_vat        = ?20,
+            tax_regime      = ?21
         WHERE id = ?1",
     )
     .bind(id)
@@ -310,6 +386,7 @@ pub async fn update(pool: &SqlitePool, id: &str, input: UpdateCompanyInput) -> A
     .bind(input.logo_path.or(current.logo_path))
     .bind(now)
     .bind(input.cash_vat.unwrap_or(current.cash_vat))
+    .bind(input.tax_regime.unwrap_or(current.tax_regime))
     .execute(pool)
     .await?;
 
@@ -400,6 +477,32 @@ pub fn validate_cui(cui: &str) -> AppResult<()> {
 mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
+    use std::str::FromStr;
+
+    #[test]
+    fn micro_ceiling_status_levels() {
+        let eur = Decimal::from_str("5.00").unwrap(); // 100.000 EUR → 500.000 RON ceiling
+        let dec = |s: &str| Decimal::from_str(s).unwrap();
+        // ok: 100k/500k = 20%
+        let ok = micro_ceiling_status("micro", dec("100000"), eur);
+        assert_eq!(ok.level, "ok");
+        assert_eq!(ok.pct, 20);
+        assert!(ok.note.is_none());
+        // approaching at ≥80%: 450k/500k = 90%
+        assert_eq!(
+            micro_ceiling_status("micro", dec("450000"), eur).level,
+            "approaching"
+        );
+        // exceeded: 600k > 500k → advises profit tax
+        let ex = micro_ceiling_status("micro", dec("600000"), eur);
+        assert_eq!(ex.level, "exceeded");
+        assert!(ex.note.unwrap().contains("profit"));
+        // profit-tax company → ceiling not applicable
+        assert_eq!(
+            micro_ceiling_status("profit", dec("600000"), eur).level,
+            "na"
+        );
+    }
 
     // ── validate_cui unit tests ──────────────────────────────────────────────
 
@@ -483,6 +586,7 @@ mod tests {
                 bank_name TEXT,
                 is_active INTEGER NOT NULL DEFAULT 1,
                 spv_enabled INTEGER NOT NULL DEFAULT 0,
+                tax_regime TEXT NOT NULL DEFAULT 'micro',
                 invoice_series TEXT NOT NULL DEFAULT 'FACT',
                 last_invoice_number INTEGER NOT NULL DEFAULT 0,
                 logo_path TEXT,

@@ -1,6 +1,8 @@
 use tauri::State;
 
-use crate::db::companies::{self, Company, CreateCompanyInput, UpdateCompanyInput};
+use crate::db::companies::{
+    self, Company, CreateCompanyInput, TaxRegimeStatus, UpdateCompanyInput,
+};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -12,6 +14,43 @@ pub async fn list_companies(state: State<'_, AppState>) -> AppResult<Vec<Company
 #[tauri::command]
 pub async fn get_company(state: State<'_, AppState>, id: String) -> AppResult<Company> {
     companies::get(&state.db, &id).await
+}
+
+/// Micro-ceiling status for a company: its year-to-date sales turnover (RON) vs the 100.000 EUR
+/// micro ceiling (`eur_ron` = the EUR→RON rate the FE supplies, e.g. the year-end BNR rate), with
+/// an advisory when approaching/exceeding it. Turnover proxy = validated, non-storno sales net.
+#[tauri::command]
+pub async fn tax_regime_status(
+    state: State<'_, AppState>,
+    company_id: String,
+    year: i32,
+    eur_ron: f64,
+) -> AppResult<TaxRegimeStatus> {
+    use rust_decimal::Decimal;
+    let pool = &state.db;
+    let company = companies::get(pool, &company_id).await?;
+    let from = format!("{year}-01-01");
+    let to = format!("{year}-12-31");
+    let turnover_f: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(CAST(subtotal_amount AS REAL) * COALESCE(exchange_rate, 1.0)), 0.0) \
+         FROM invoices \
+         WHERE company_id = ?1 AND status = 'VALIDATED' AND storno_of_invoice_id IS NULL \
+           AND issue_date >= ?2 AND issue_date <= ?3",
+    )
+    .bind(&company_id)
+    .bind(&from)
+    .bind(&to)
+    .fetch_one(pool)
+    .await?;
+    let turnover = Decimal::try_from(turnover_f.max(0.0))
+        .unwrap_or(Decimal::ZERO)
+        .round_dp(2);
+    let eur = Decimal::try_from(eur_ron.max(0.0)).unwrap_or(Decimal::ZERO);
+    Ok(companies::micro_ceiling_status(
+        &company.tax_regime,
+        turnover,
+        eur,
+    ))
 }
 
 #[tauri::command]

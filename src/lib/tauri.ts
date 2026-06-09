@@ -14,6 +14,7 @@ import type {
   Account,
   AccountInput,
   AnafCompanyData,
+  TaxRegimeStatus,
   AppInfo,
   Certificate,
   Company,
@@ -94,6 +95,9 @@ export const companies = {
     invoke<number>("get_next_invoice_number", { companyId }),
   fetchAnafData: (cui: string) =>
     invoke<AnafCompanyData>("fetch_anaf_company_data", { cui }),
+  /** Micro-ceiling status (turnover vs 100.000 EUR) for a company in `year`; `eurRon` = EUR→RON. */
+  taxRegimeStatus: (companyId: string, year: number, eurRon: number) =>
+    invoke<TaxRegimeStatus>("tax_regime_status", { companyId, year, eurRon }),
 };
 
 // ─── Contacts ─────────────────────────────────────────────────────────────

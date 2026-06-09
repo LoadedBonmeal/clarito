@@ -30,6 +30,7 @@ fn test_company() -> Company {
         bank_name: Some("Banca Transilvania".to_string()),
         is_active: true,
         spv_enabled: false,
+        tax_regime: "micro".into(),
         invoice_series: "F".to_string(),
         last_invoice_number: 5,
         logo_path: None,

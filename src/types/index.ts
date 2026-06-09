@@ -67,6 +67,8 @@ export interface Company {
 
   isActive: boolean;
   spvEnabled: boolean;
+  /** "micro" (impozit pe venit 1%) or "profit" (impozit pe profit 16%) — 2026. */
+  taxRegime: string;
 
   invoiceSeries: string;
   lastInvoiceNumber: number;
@@ -75,6 +77,17 @@ export interface Company {
 
   createdAt: number;
   updatedAt: number;
+}
+
+/** Micro-ceiling status (100.000 EUR, OUG 89/2025) for a company in a year. */
+export interface TaxRegimeStatus {
+  taxRegime: string;
+  ytdTurnoverRon: string;
+  ceilingRon: string;
+  pct: number;
+  /** "ok" | "approaching" | "exceeded" | "na" (profit regime). */
+  level: string;
+  note: string | null;
 }
 
 export interface CreateCompanyInput {
@@ -101,6 +114,8 @@ export type UpdateCompanyInput = Partial<
   isActive?: boolean;
   spvEnabled?: boolean;
   logoPath?: string;
+  /** "micro" or "profit" (tax regime). */
+  taxRegime?: string;
 };
 
 // ─── Contact ──────────────────────────────────────────────────────────────

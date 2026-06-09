@@ -270,6 +270,7 @@ pub fn run() {
             // companies
             commands::companies::list_companies,
             commands::companies::get_company,
+            commands::companies::tax_regime_status,
             commands::companies::create_company,
             commands::companies::update_company,
             commands::companies::delete_company,

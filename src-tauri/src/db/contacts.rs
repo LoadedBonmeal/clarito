@@ -420,6 +420,7 @@ mod tests {
                 bank_name TEXT,
                 is_active INTEGER NOT NULL DEFAULT 1,
                 spv_enabled INTEGER NOT NULL DEFAULT 0,
+                tax_regime TEXT NOT NULL DEFAULT 'micro',
                 invoice_series TEXT NOT NULL DEFAULT 'FACT',
                 last_invoice_number INTEGER NOT NULL DEFAULT 0,
                 logo_path TEXT,
