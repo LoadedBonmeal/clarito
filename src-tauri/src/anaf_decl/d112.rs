@@ -55,21 +55,34 @@ fn fmt(d: Decimal) -> String {
     format!("{:.2}", d)
 }
 
+/// True dacă salariatul e EXCEPTAT de la baza minimă CAS/CASS part-time conform art. 146 alin. (5^7)
+/// Cod fiscal (pentru el baza rămâne venitul realizat). Categoriile (lit. a–e), OG 16/2022:
+/// a) elevi/studenți până la 26 ani; b) ucenici până la 18 ani; c) persoane cu dizabilități / care
+/// pot lucra < 8h/zi potrivit legii; d) pensionari (limită de vârstă) — flagul `pensionar`;
+/// e) venit cumulat din mai multe contracte ≥ salariul minim (procedura OMF 1855/2022).
+pub fn exempt_part_time_min_base(pensionar: bool, exceptie_cas_min: &str) -> bool {
+    pensionar
+        || matches!(
+            exceptie_cas_min,
+            "elev_student" | "ucenic" | "dizabilitate" | "contracte_multiple"
+        )
+}
+
 /// Part-time (contract Pi) minimum CAS/CASS base override — art. 146 alin. (5^6)-(5^9) + art. 168
 /// alin. (6^1) Cod fiscal (OG 16/2022), cu derogarea sumei netaxabile (OUG 156/2024). Baza CAS/CASS
 /// nu poate fi sub salariul minim ÎNTREG (NU prorata cu fracția de normă orară). 2026: 4.050−300 =
 /// 3.750 lei (sem. I) / 4.325−200 = 4.125 lei (de la 1 iulie, HG 146/2026). Diferența de contribuție
-/// față de cea pe venitul realizat e suportată de ANGAJATOR. Excepții (art. 146 (5^7)): pensionarii
-/// pentru limită de vârstă etc. — pentru ei baza rămâne venitul realizat (helper-ul întoarce None).
+/// față de cea pe venitul realizat e suportată de ANGAJATOR. `exempt` (art. 146 (5^7), via
+/// [`exempt_part_time_min_base`]) sare peste majorare — baza rămâne venitul realizat.
 ///
 /// Returnează Some((baza_minimă, cas_diff_angajator, cass_diff_angajator)) când se aplică majorarea.
 pub fn part_time_min_base(
     gross: Decimal,
     tip_contract: &str,
-    pensionar: bool,
+    exempt: bool,
     month: u32,
 ) -> Option<(Decimal, Decimal, Decimal)> {
-    if tip_contract == "N" || pensionar || gross <= Decimal::ZERO {
+    if tip_contract == "N" || exempt || gross <= Decimal::ZERO {
         return None;
     }
     // Baza minimă = salariul minim − suma netaxabilă (NU se prorata cu ore/normă).
@@ -134,10 +147,22 @@ mod tests {
         );
         // Full-time N → fără majorare.
         assert_eq!(part_time_min_base(d("3000"), "N", false, 3), None);
-        // Pensionar → exceptat (art. 146 (5^7)).
+        // Exceptat (art. 146 (5^7)) → baza rămâne venitul realizat.
         assert_eq!(part_time_min_base(d("3000"), "P1", true, 3), None);
         // Venit ≥ baza minimă → fără majorare.
         assert_eq!(part_time_min_base(d("4000"), "P1", false, 3), None);
+    }
+
+    #[test]
+    fn art146_5_7_exemption_categories() {
+        // Pensionar (lit. d) + cele 4 categorii cu cod → exceptat; restul → neexceptat.
+        assert!(exempt_part_time_min_base(true, ""));
+        assert!(exempt_part_time_min_base(false, "elev_student")); // lit. a
+        assert!(exempt_part_time_min_base(false, "ucenic")); // lit. b
+        assert!(exempt_part_time_min_base(false, "dizabilitate")); // lit. c
+        assert!(exempt_part_time_min_base(false, "contracte_multiple")); // lit. e
+        assert!(!exempt_part_time_min_base(false, ""));
+        assert!(!exempt_part_time_min_base(false, "altceva"));
     }
 
     #[test]

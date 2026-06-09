@@ -228,6 +228,7 @@ function EmployeeModal({
     tipContract: employee?.tipContract ?? "N",
     oreNorma: employee ? String(employee.oreNorma) : "8",
     pensionar: employee?.pensionar ?? false,
+    exceptieCasMin: employee?.exceptieCasMin ?? "",
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -242,6 +243,7 @@ function EmployeeModal({
         tipContract: form.tipContract,
         oreNorma: Number(form.oreNorma) || 8,
         pensionar: form.pensionar,
+        exceptieCasMin: form.exceptieCasMin,
       };
       if (isEdit) {
         return api.payroll.update(employee!.id, companyId, payload);
@@ -302,6 +304,16 @@ function EmployeeModal({
             onChange={(e) => setForm((f) => ({ ...f, pensionar: e.target.checked }))} />
           Pensionar (D112 A_2)
         </label>
+        <Field label="Excepție bază minimă CAS/CASS part-time (art. 146 alin. 5⁷)">
+          <select className="rf-input" value={form.exceptieCasMin}
+            onChange={(e) => setForm((f) => ({ ...f, exceptieCasMin: e.target.value }))}>
+            <option value="">Fără excepție (se aplică baza minimă)</option>
+            <option value="elev_student">Elev/student până la 26 ani (lit. a)</option>
+            <option value="ucenic">Ucenic până la 18 ani (lit. b)</option>
+            <option value="dizabilitate">Persoană cu dizabilități / &lt; 8h/zi (lit. c)</option>
+            <option value="contracte_multiple">Contracte multiple ≥ salariul minim (lit. e)</option>
+          </select>
+        </Field>
         {error && <Banner variant="error">{error}</Banner>}
       </div>
     </Modal>

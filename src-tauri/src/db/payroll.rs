@@ -30,6 +30,9 @@ pub struct Employee {
     pub pensionar: bool,
     pub tip_contract: String,
     pub ore_norma: i64,
+    /// art. 146 (5^7) excepție de la baza minimă CAS/CASS part-time: ''/'elev_student'/'ucenic'/
+    /// 'dizabilitate'/'contracte_multiple' (pensionarii via `pensionar`).
+    pub exceptie_cas_min: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -52,6 +55,8 @@ pub struct CreateEmployeeInput {
     pub tip_contract: Option<String>,
     #[serde(default)]
     pub ore_norma: Option<i64>,
+    #[serde(default)]
+    pub exceptie_cas_min: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -67,11 +72,12 @@ pub struct UpdateEmployeeInput {
     pub pensionar: Option<bool>,
     pub tip_contract: Option<String>,
     pub ore_norma: Option<i64>,
+    pub exceptie_cas_min: Option<String>,
 }
 
 const COLS: &str = "id, company_id, cnp, full_name, gross_salary, personal_deduction, \
                     employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
-                    created_at, updated_at";
+                    exceptie_cas_min, created_at, updated_at";
 
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Employee>> {
     let q = format!(
@@ -122,8 +128,9 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     let now = now_unix();
     sqlx::query(
         "INSERT INTO employees (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
-         employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, created_at, \
-         updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11,?12,?12)",
+         employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
+         exceptie_cas_min, created_at, updated_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11,?12,?13,?13)",
     )
     .bind(&id)
     .bind(&input.company_id)
@@ -136,6 +143,7 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     .bind(input.pensionar.unwrap_or(false))
     .bind(input.tip_contract.as_deref().unwrap_or("N"))
     .bind(input.ore_norma.unwrap_or(8))
+    .bind(input.exceptie_cas_min.as_deref().unwrap_or(""))
     .bind(now)
     .execute(pool)
     .await?;
@@ -161,7 +169,7 @@ pub async fn update(
     sqlx::query(
         "UPDATE employees SET cnp=?3, full_name=?4, gross_salary=?5, personal_deduction=?6, \
          employment_date=?7, active=?8, tip_asigurat=?9, pensionar=?10, tip_contract=?11, \
-         ore_norma=?12, updated_at=?13 WHERE id=?1 AND company_id=?2",
+         ore_norma=?12, exceptie_cas_min=?13, updated_at=?14 WHERE id=?1 AND company_id=?2",
     )
     .bind(id)
     .bind(company_id)
@@ -175,6 +183,12 @@ pub async fn update(
     .bind(input.pensionar.unwrap_or(cur.pensionar))
     .bind(input.tip_contract.as_deref().unwrap_or(&cur.tip_contract))
     .bind(input.ore_norma.unwrap_or(cur.ore_norma))
+    .bind(
+        input
+            .exceptie_cas_min
+            .as_deref()
+            .unwrap_or(&cur.exceptie_cas_min),
+    )
     .bind(now_unix())
     .execute(pool)
     .await?;
@@ -250,8 +264,10 @@ pub async fn run_payroll(
             gross,
             personal_deduction: dec(&e.personal_deduction),
         });
+        let exempt =
+            crate::anaf_decl::d112::exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
         if let Some((_, cas_diff, cass_diff)) =
-            crate::anaf_decl::d112::part_time_min_base(gross, &e.tip_contract, e.pensionar, month)
+            crate::anaf_decl::d112::part_time_min_base(gross, &e.tip_contract, exempt, month)
         {
             t_cas_diff += cas_diff;
             t_cass_diff += cass_diff;
@@ -338,6 +354,7 @@ mod tests {
                     pensionar: None,
                     tip_contract: None,
                     ore_norma: None,
+                    exceptie_cas_min: None,
                 },
             )
             .await

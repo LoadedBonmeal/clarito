@@ -151,9 +151,12 @@ pub async fn export_d112_xml(
         let mut cas = dec(&r.cas);
         let mut cass = dec(&r.cass);
         // Part-time (contract Pi): baza CAS/CASS = salariul minim întreg (NU prorata cu norma orară),
-        // pensionarii exceptați — via the shared helper. Contribuția declarată e pe baza majorată.
+        // categoriile art. 146 (5^7) exceptate — via the shared helper. Contribuția declarată e pe
+        // baza majorată.
+        let exempt =
+            crate::anaf_decl::d112::exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
         if let Some((base, _, _)) =
-            crate::anaf_decl::d112::part_time_min_base(gross, &e.tip_contract, e.pensionar, month)
+            crate::anaf_decl::d112::part_time_min_base(gross, &e.tip_contract, exempt, month)
         {
             baza_cas = base;
             baza_cass = base;

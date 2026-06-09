@@ -1104,6 +1104,9 @@ export interface Employee {
   pensionar: boolean;
   tipContract: string;
   oreNorma: number;
+  /** art. 146 (5^7) excepție de la baza minimă CAS/CASS part-time: ''/'elev_student'/'ucenic'/
+   *  'dizabilitate'/'contracte_multiple' (pensionarii via `pensionar`). */
+  exceptieCasMin: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -1119,6 +1122,7 @@ export interface CreateEmployeeInput {
   pensionar?: boolean;
   tipContract?: string;
   oreNorma?: number;
+  exceptieCasMin?: string;
 }
 
 export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, "companyId">> & {
