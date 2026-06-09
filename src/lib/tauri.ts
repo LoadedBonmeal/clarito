@@ -406,6 +406,8 @@ export interface AddPaymentArgs {
   method?: string;
   reference?: string;
   notes?: string;
+  /** Payment-date BNR rate (foreign-currency invoices) → books FX gain/loss 665/765. */
+  exchangeRate?: number;
 }
 
 export const payments = {
@@ -452,6 +454,8 @@ export interface AddReceivedPaymentArgs {
   method?: string;
   reference?: string;
   notes?: string;
+  /** Payment-date BNR rate (foreign-currency invoices) → books FX gain/loss 665/765. */
+  exchangeRate?: number;
 }
 
 export const receivedPayments = {

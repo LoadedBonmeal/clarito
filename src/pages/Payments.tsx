@@ -68,6 +68,7 @@ export function PaymentsPage() {
     paidAt: new Date().toISOString().slice(0, 10),
     method: "transfer",
     reference: "",
+    exchangeRate: "",
   });
 
   // Fetch all invoices
@@ -124,7 +125,7 @@ export function PaymentsPage() {
       void queryClient.invalidateQueries({ queryKey: ["payments", "summary"] });
       notify.success("Plată adăugată cu succes");
       setAddModal(null);
-      setForm({ amount: "", paidAt: new Date().toISOString().slice(0, 10), method: "transfer", reference: "" });
+      setForm({ amount: "", paidAt: new Date().toISOString().slice(0, 10), method: "transfer", reference: "", exchangeRate: "" });
     },
     onError: (e) => notify.error(formatError(e, "Nu s-a putut adăuga plata.")),
   });
@@ -235,7 +236,7 @@ export function PaymentsPage() {
             onClick={() => {
               setPickedInvoice(null);
               setAddModal({ invoiceId: "", totalAmount: "", currency: "RON" });
-              setForm({ amount: "", paidAt: new Date().toISOString().slice(0, 10), method: "transfer", reference: "" });
+              setForm({ amount: "", paidAt: new Date().toISOString().slice(0, 10), method: "transfer", reference: "", exchangeRate: "" });
             }}
           >
             Adaugă plată
@@ -372,6 +373,7 @@ export function PaymentsPage() {
                                 paidAt: new Date().toISOString().slice(0, 10),
                                 method: "transfer",
                                 reference: "",
+                                exchangeRate: "",
                               });
                             }}
                           />
@@ -418,6 +420,7 @@ export function PaymentsPage() {
                   // Resolve the invoiceId: row-level sets it directly; header flow uses pickedInvoice.
                   const resolvedInvoiceId = addModal.invoiceId || pickedInvoice?.id;
                   if (!resolvedInvoiceId) return;
+                  const rate = parseFloat(form.exchangeRate);
                   addMutation.mutate({
                     invoiceId: resolvedInvoiceId,
                     companyId: activeCompanyId,
@@ -425,6 +428,7 @@ export function PaymentsPage() {
                     paidAt: form.paidAt,
                     method: form.method,
                     reference: form.reference || undefined,
+                    exchangeRate: Number.isFinite(rate) && rate > 0 ? rate : undefined,
                   });
                 }}
               >
@@ -565,6 +569,18 @@ export function PaymentsPage() {
                 onChange={(e) => setForm((f) => ({ ...f, reference: e.target.value }))}
               />
             </Field>
+            {(pickedInvoice?.currency ?? addModal.currency) !== "RON" && (
+              <Field label="Curs BNR la data plății (dif. de curs 665/765)">
+                <Input
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  placeholder="ex. 4.9750"
+                  value={form.exchangeRate}
+                  onChange={(e) => setForm((f) => ({ ...f, exchangeRate: e.target.value }))}
+                />
+              </Field>
+            )}
           </div>
         </Modal>
       )}

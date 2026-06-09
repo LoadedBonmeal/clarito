@@ -240,7 +240,11 @@ export function ReceivedDetailPage() {
 
                 {/* Plăți furnizor — buyer-side TVA la încasare */}
                 {activeCompanyId && (
-                  <SupplierPaymentsCard receivedInvoiceId={id} companyId={activeCompanyId} />
+                  <SupplierPaymentsCard
+                    receivedInvoiceId={id}
+                    companyId={activeCompanyId}
+                    currency={inv.currency ?? "RON"}
+                  />
                 )}
 
                 {/* ANAF/SPV info */}
@@ -399,15 +403,18 @@ export function ReceivedDetailPage() {
 function SupplierPaymentsCard({
   receivedInvoiceId,
   companyId,
+  currency,
 }: {
   receivedInvoiceId: string;
   companyId: string;
+  currency: string;
 }) {
   const queryClient = useQueryClient();
   const today = new Date().toISOString().slice(0, 10);
   const [amount, setAmount] = useState("");
   const [paidAt, setPaidAt] = useState(today);
   const [method, setMethod] = useState("transfer");
+  const [exchangeRate, setExchangeRate] = useState("");
 
   const summaryKey = ["receivedPayments", receivedInvoiceId];
   const { data: summary, isLoading } = useQuery({
@@ -423,16 +430,20 @@ function SupplierPaymentsCard({
   };
 
   const { mutate: addPayment, isPending: isAdding } = useMutation({
-    mutationFn: () =>
-      api.receivedPayments.add({
+    mutationFn: () => {
+      const rate = parseFloat(exchangeRate);
+      return api.receivedPayments.add({
         receivedInvoiceId,
         companyId,
         amount: amount.trim(),
         paidAt,
         method,
-      }),
+        exchangeRate: Number.isFinite(rate) && rate > 0 ? rate : undefined,
+      });
+    },
     onSuccess: () => {
       setAmount("");
+      setExchangeRate("");
       invalidate();
       notify.success("Plată furnizor înregistrată.");
     },
@@ -542,6 +553,20 @@ function SupplierPaymentsCard({
                   <option value="compensare">Compensare</option>
                 </select>
               </label>
+              {currency !== "RON" && (
+                <label style={{ display: "flex", flexDirection: "column", fontSize: 12, gap: 2 }}>
+                  Curs BNR la plată
+                  <input
+                    className="rf-input"
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    value={exchangeRate}
+                    onChange={(e) => setExchangeRate(e.target.value)}
+                    placeholder="ex. 4.9750"
+                  />
+                </label>
+              )}
               <Btn
                 variant="primary"
                 size="sm"
