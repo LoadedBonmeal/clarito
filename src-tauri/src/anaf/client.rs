@@ -699,6 +699,43 @@ mod tests {
     use super::{classify_spv_tip, parse_etransport_upload, MessagesRaw};
 
     #[test]
+    fn etransport_upload_parse_matches_documented_uploadv2_contract() {
+        // Golden fixture: the documented ANAF e-Transport UploadV2 JSON reply (per the
+        // printesoi/e-factura-go SDK + the MF Swagger spec). index_incarcare is an int64,
+        // ExecutionStatus int32 (0 = accepted), plus UIT/dateResponse/trace_id/ref_declarant and
+        // an optional `atentie` (non-fatal warning). We must extract the index + UIT and tolerate
+        // the extra fields. Locks the contract this deep-research verified.
+        let accepted = r#"{
+            "dateResponse": "202606091000",
+            "ExecutionStatus": 0,
+            "index_incarcare": 5012345678,
+            "UIT": "3R0ABCDEF123456",
+            "trace_id": "9f1c-aa",
+            "ref_declarant": "REF-1",
+            "atentie": "Declaratie acceptata cu observatii."
+        }"#;
+        let r = parse_etransport_upload(accepted).unwrap();
+        assert_eq!(
+            r.index_incarcare, "5012345678",
+            "int64 index → string, no parse error"
+        );
+        assert_eq!(r.uit.as_deref(), Some("3R0ABCDEF123456"));
+
+        // Documented rejection: ExecutionStatus != 0 with an Errors[] list → human message.
+        let rejected = r#"{
+            "dateResponse": "202606091000",
+            "ExecutionStatus": 1,
+            "trace_id": "9f1c-bb",
+            "Errors": [{"errorMessage": "Greutate bruta invalida pe linia 1"}]
+        }"#;
+        let err = parse_etransport_upload(rejected).unwrap_err();
+        assert!(
+            err.contains("Greutate bruta invalida"),
+            "surfaces ANAF errorMessage: {err}"
+        );
+    }
+
+    #[test]
     fn etransport_upload_parse_handles_number_string_errors_and_garbage() {
         // index as a JSON NUMBER (the real shape) — must not fail on the String-typed field.
         let ok_num = parse_etransport_upload(
