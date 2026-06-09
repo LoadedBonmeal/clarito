@@ -179,8 +179,9 @@ async fn process_recurring_invoices(
                 Decimal::ZERO
             };
 
-            let ls = (qty * price).round_dp(2);
-            let lv = (ls * eff_rate / hundred).round_dp(2);
+            // Commercial rounding (MidpointAwayFromZero) for money — the same helper invoices use.
+            let ls = crate::db::invoices::round2(qty * price);
+            let lv = crate::db::invoices::round2(ls * eff_rate / hundred);
             let lt = ls + lv;
             subtotal_dec += ls;
             vat_total_dec += lv;
@@ -213,9 +214,9 @@ async fn process_recurring_invoices(
             continue; // tx not yet begun here — nothing to roll back
         }
 
-        let subtotal = subtotal_dec.round_dp(2).to_string();
-        let vat_total = vat_total_dec.round_dp(2).to_string();
-        let total = (subtotal_dec + vat_total_dec).round_dp(2).to_string();
+        let subtotal = crate::db::invoices::round2(subtotal_dec).to_string();
+        let vat_total = crate::db::invoices::round2(vat_total_dec).to_string();
+        let total = crate::db::invoices::round2(subtotal_dec + vat_total_dec).to_string();
 
         let now_unix = chrono::Utc::now().timestamp();
 

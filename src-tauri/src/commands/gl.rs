@@ -125,6 +125,15 @@ pub async fn export_bilant_xml(
         ));
     }
     let company = crate::db::companies::get(&state.db, &company_id).await?;
+    // county_code() falls back to 40 (București) for unknown codes — reject anything that isn't a
+    // real 2-letter auto-code (other than the legitimate "B") so codTT isn't silently wrong.
+    let county_norm = company.county.trim().to_uppercase();
+    if county_norm != "B" && crate::anaf_decl::bilant_xml::county_code(&county_norm) == 40 {
+        return Err(AppError::Validation(format!(
+            "Cod județ invalid: '{}'. Folosiți codul auto din 2 litere (ex. CJ, B, IF, TM).",
+            company.county
+        )));
+    }
     let from = format!("{year}-01-01");
     let to = format!("{year}-12-31");
     let tb = db_trial_balance(&state.db, &company_id, &from, &to).await?;

@@ -839,10 +839,18 @@ pub(crate) async fn compute_plafon_status(
         ca += net;
     }
 
-    // Ascending (month, net_lei) for the breach scan.
+    // Ascending (month, net_lei) for the breach scan. Commercial rounding (MidpointAwayFromZero)
+    // — the ANAF whole-lei convention; banker's rounding could miss a real plafon breach.
     let monthly_lei: Vec<(String, i64)> = by_month
         .iter()
-        .map(|(m, n)| (m.clone(), n.round_dp(0).to_i64().unwrap_or(0)))
+        .map(|(m, n)| {
+            (
+                m.clone(),
+                n.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_i64()
+                    .unwrap_or(0),
+            )
+        })
         .collect();
 
     let plafon = crate::anaf_decl::cash_vat::plafon_lei(as_of);

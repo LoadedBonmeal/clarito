@@ -323,6 +323,7 @@ pub async fn create(pool: &SqlitePool, input: CreateCompanyInput) -> AppResult<C
                 iban            = ?13,
                 bank_name       = ?14,
                 invoice_series  = ?15,
+                tax_regime      = ?17,
                 is_active       = 1,
                 updated_at      = ?16
             WHERE id = ?1",
@@ -343,6 +344,7 @@ pub async fn create(pool: &SqlitePool, input: CreateCompanyInput) -> AppResult<C
         .bind(&input.bank_name)
         .bind(input.invoice_series.as_deref().unwrap_or("FACT"))
         .bind(now)
+        .bind(input.tax_regime.as_deref().unwrap_or("micro"))
         .execute(pool)
         .await?;
         return get(pool, &existing.id).await;

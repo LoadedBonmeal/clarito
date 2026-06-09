@@ -6,6 +6,7 @@
 //! lunii următoare trimestrului. Depunerea rămâne manuală (PDF inteligent + SPV).
 
 use rust_decimal::Decimal;
+use rust_decimal::RoundingStrategy;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -60,7 +61,9 @@ pub fn compute_d100(tax_regime: &str, input: &D100Input) -> D100Result {
     let z = Decimal::ZERO;
     let (cod_oblig, label, base, rate, suma_datorata) = if tax_regime == "micro" {
         let base = input.revenue.max(z);
-        let s = (base * Decimal::new(1, 2)).round_dp(0); // 1%
+        // Commercial rounding (MidpointAwayFromZero) — the ANAF convention (cf. d112.rs / bilant_xml).
+        let s = (base * Decimal::new(1, 2))
+            .round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero); // 1%
         (
             "121",
             "Impozit pe veniturile microîntreprinderilor (1%)",
@@ -70,7 +73,8 @@ pub fn compute_d100(tax_regime: &str, input: &D100Input) -> D100Result {
         )
     } else {
         let base = input.result.max(z);
-        let s = (base * Decimal::new(16, 2)).round_dp(0); // 16%
+        let s = (base * Decimal::new(16, 2))
+            .round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero); // 16%
         (
             "103",
             "Impozit pe profit (16%)",
@@ -117,6 +121,22 @@ mod tests {
         assert_eq!(r.suma_datorata, "2000");
         assert_eq!(r.suma_de_plata, "2000");
         assert_eq!(r.scadenta, "25.04.2026");
+    }
+
+    #[test]
+    fn micro_uses_commercial_rounding_at_half() {
+        // 250 × 1% = 2.50 → commercial rounding gives 3 (banker's would give 2).
+        let r = compute_d100(
+            "micro",
+            &D100Input {
+                quarter: 1,
+                year: 2026,
+                revenue: d("250"),
+                result: d("0"),
+                prior_payments: d("0"),
+            },
+        );
+        assert_eq!(r.suma_datorata, "3");
     }
 
     #[test]

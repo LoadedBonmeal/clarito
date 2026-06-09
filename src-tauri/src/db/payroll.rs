@@ -74,12 +74,31 @@ pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Emp
         .ok_or(AppError::NotFound)
 }
 
+/// Parse a money amount (non-negative), returning its canonical Decimal string. Rejects garbage so a
+/// salary never silently becomes 0 and corrupts the payroll totals / GL postings.
+fn parse_money(label: &str, s: &str) -> AppResult<String> {
+    let d = Decimal::from_str(s.trim()).map_err(|_| {
+        AppError::Validation(format!("{label} invalid — folosiți formatul 1234.56."))
+    })?;
+    if d.is_sign_negative() {
+        return Err(AppError::Validation(format!(
+            "{label} nu poate fi negativ."
+        )));
+    }
+    Ok(d.to_string())
+}
+
 pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<Employee> {
     if input.full_name.trim().is_empty() {
         return Err(AppError::Validation(
             "Numele angajatului e obligatoriu.".into(),
         ));
     }
+    let gross = parse_money("Salariul brut", &input.gross_salary)?;
+    let ded = parse_money(
+        "Deducerea personală",
+        input.personal_deduction.as_deref().unwrap_or("0"),
+    )?;
     let id = new_id();
     let now = now_unix();
     sqlx::query(
@@ -91,8 +110,8 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     .bind(&input.company_id)
     .bind(input.cnp.trim())
     .bind(input.full_name.trim())
-    .bind(&input.gross_salary)
-    .bind(input.personal_deduction.as_deref().unwrap_or("0"))
+    .bind(&gross)
+    .bind(&ded)
     .bind(&input.employment_date)
     .bind(now)
     .execute(pool)
@@ -107,6 +126,15 @@ pub async fn update(
     input: UpdateEmployeeInput,
 ) -> AppResult<Employee> {
     let cur = get(pool, id, company_id).await?;
+    // Validate any supplied money fields (partial update) so garbage never silently becomes 0.
+    let gross = match input.gross_salary.as_deref() {
+        Some(s) => parse_money("Salariul brut", s)?,
+        None => cur.gross_salary.clone(),
+    };
+    let ded = match input.personal_deduction.as_deref() {
+        Some(s) => parse_money("Deducerea personală", s)?,
+        None => cur.personal_deduction.clone(),
+    };
     sqlx::query(
         "UPDATE employees SET cnp=?3, full_name=?4, gross_salary=?5, personal_deduction=?6, \
          employment_date=?7, active=?8, updated_at=?9 WHERE id=?1 AND company_id=?2",
@@ -115,13 +143,8 @@ pub async fn update(
     .bind(company_id)
     .bind(input.cnp.as_deref().unwrap_or(&cur.cnp))
     .bind(input.full_name.as_deref().unwrap_or(&cur.full_name))
-    .bind(input.gross_salary.as_deref().unwrap_or(&cur.gross_salary))
-    .bind(
-        input
-            .personal_deduction
-            .as_deref()
-            .unwrap_or(&cur.personal_deduction),
-    )
+    .bind(&gross)
+    .bind(&ded)
     .bind(input.employment_date.or(cur.employment_date))
     .bind(input.active.unwrap_or(cur.active))
     .bind(now_unix())
