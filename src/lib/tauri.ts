@@ -678,6 +678,18 @@ export const declarations = {
   /** Calcul salariu (nucleul D112): brut → net + contribuții, ratele 2026. */
   computePayroll: (input: import("@/types").PayrollInput) =>
     invoke<import("@/types").PayrollResult>("compute_payroll", { input }),
+  /** D100 (obligații de plată) quarterly row — micro 121 / profit 103, from the period P&L. */
+  computeD100: (
+    companyId: string,
+    periodFrom: string,
+    periodTo: string,
+    quarter: number,
+    year: number,
+    priorPayments: string,
+  ) =>
+    invoke<import("@/types").D100Result>("compute_d100", {
+      companyId, periodFrom, periodTo, quarter, year, priorPayments,
+    }),
   /** D101 (impozit pe profit) worksheet: base from the period P&L + the supplied adjustments. */
   computeD101: (
     companyId: string,

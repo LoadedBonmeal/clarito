@@ -402,6 +402,7 @@ pub fn run() {
             commands::declarations::reconcile_etva,
             commands::declarations::etva_fetch_precompletat,
             commands::declarations::compute_d101,
+            commands::declarations::compute_d100,
             commands::declarations::compute_payroll,
             commands::etransport::etransport_validate,
             commands::etransport::etransport_generate_xml,

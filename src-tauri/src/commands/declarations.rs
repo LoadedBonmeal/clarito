@@ -19,6 +19,7 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 use tauri::State;
 
+use crate::anaf_decl::d100::{compute_d100 as compute_d100_fn, D100Input, D100Result};
 use crate::anaf_decl::d101::{compute_d101 as compute_d101_fn, D101Input, D101Result};
 use crate::anaf_decl::d112::{compute_payroll as compute_payroll_fn, PayrollInput, PayrollResult};
 use crate::anaf_decl::d300::D300Submission;
@@ -30,6 +31,37 @@ use crate::db::companies;
 #[tauri::command]
 pub async fn compute_payroll(input: PayrollInput) -> AppResult<PayrollResult> {
     Ok(compute_payroll_fn(&input))
+}
+
+/// D100 (obligații de plată) — rândul trimestrial: micro cod 121 (1% × venituri) sau profit cod
+/// 103 (16% × rezultat), din P&L-ul perioadei; suma de plată = datorată − plăți anterioare.
+#[tauri::command]
+pub async fn compute_d100(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+    quarter: u32,
+    year: i32,
+    prior_payments: String,
+) -> AppResult<D100Result> {
+    let company = companies::get(&state.db, &company_id).await?;
+    let pnl = crate::db::gl::profit_and_loss(
+        &state.db,
+        &company_id,
+        &company.tax_regime,
+        &period_from,
+        &period_to,
+    )
+    .await?;
+    let input = D100Input {
+        quarter,
+        year,
+        revenue: pnl.total_revenue.parse().unwrap_or(Decimal::ZERO),
+        result: pnl.gross_result.parse().unwrap_or(Decimal::ZERO),
+        prior_payments: prior_payments.parse().unwrap_or(Decimal::ZERO),
+    };
+    Ok(compute_d100_fn(&company.tax_regime, &input))
 }
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;

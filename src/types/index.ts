@@ -1079,6 +1079,18 @@ export interface PayrollResult {
   totalEmployerCost: string;
 }
 
+/** D100 (obligații de plată) — quarterly obligation row. */
+export interface D100Result {
+  codOblig: string;
+  label: string;
+  base: string;
+  ratePct: string;
+  sumaDatorata: string;
+  priorPayments: string;
+  sumaDePlata: string;
+  scadenta: string;
+}
+
 /** D101 (impozit pe profit) worksheet adjustments — the user-entered fiscal items. */
 export interface D101Input {
   nonTaxableRevenue?: string;

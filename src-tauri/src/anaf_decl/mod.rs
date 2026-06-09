@@ -7,6 +7,7 @@
 
 pub mod bilant_xml;
 pub mod cash_vat;
+pub mod d100;
 pub mod d101;
 pub mod d112;
 pub mod d300;
