@@ -28,6 +28,7 @@ export function PayrollPage() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [modal, setModal] = useState<"create" | { edit: Employee } | null>(null);
   const [run, setRun] = useState<PayrollRun | null>(null);
+  const [showD112, setShowD112] = useState(false);
 
   const { data: employees = [] } = useQuery({
     queryKey: ["employees", companyId],
@@ -58,11 +59,8 @@ export function PayrollPage() {
     onError: (e) => notify.error(formatError(e, "Eroare la ștergere.")),
   });
 
-  const handleD112 = async () => {
-    if (!companyId) { notify.warn("Selectați o companie activă."); return; }
-    const caen = (window.prompt("Cod CAEN al companiei (4 cifre, ex. 6201):", "") ?? "").trim();
-    if (!caen) return;
-    if (!/^\d{4}$/.test(caen)) { notify.error("Cod CAEN invalid — 4 cifre."); return; }
+  const runD112 = async (caen: string) => {
+    if (!companyId) return;
     const dest = await saveDialog({
       title: "Salvează D112 (XML)",
       defaultPath: `d112-${year}-${String(month).padStart(2, "0")}.xml`,
@@ -74,6 +72,7 @@ export function PayrollPage() {
       notify.success(`D112 (XML) exportat — antet + obligații angajator + ${employees.filter((e) => e.active).length} ` +
         `asigurați. Importați-l în aplicația D112 (PDF inteligent), validați (DUKIntegrator) și ` +
         `completați declarantul + blocurile speciale înainte de depunere.`);
+      setShowD112(false);
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut exporta D112."));
     }
@@ -92,7 +91,8 @@ export function PayrollPage() {
       <div className="rf-page-body">
         <Banner variant="info">
           Calcul salarial 2026: CAS 25%, CASS 10%, impozit 10%, CAM 2,25% (angajator). Rularea
-          lunară postează nota contabilă agregată în jurnal. D112 (XML) urmează.
+          lunară postează nota contabilă agregată în jurnal; exportați D112 (XML) pentru import în
+          aplicația ANAF.
         </Banner>
 
         <Card>
@@ -110,7 +110,7 @@ export function PayrollPage() {
             <Btn variant="secondary" icon="ledger" disabled={runMut.isPending || !companyId} onClick={() => runMut.mutate()}>
               {runMut.isPending ? "Calculez…" : "Rulează stat salarii"}
             </Btn>
-            <Btn variant="secondary" icon="download" disabled={!companyId} onClick={handleD112}>
+            <Btn variant="secondary" icon="download" disabled={!companyId} onClick={() => setShowD112(true)}>
               D112 XML
             </Btn>
           </div>
@@ -197,6 +197,14 @@ export function PayrollPage() {
             setModal(null);
             void qc.invalidateQueries({ queryKey: ["employees", companyId] });
           }}
+        />
+      )}
+
+      {showD112 && (
+        <CaenExportModal
+          title="Export D112 (XML)"
+          onClose={() => setShowD112(false)}
+          onExport={runD112}
         />
       )}
     </div>
@@ -296,6 +304,47 @@ function EmployeeModal({
         </label>
         {error && <Banner variant="error">{error}</Banner>}
       </div>
+    </Modal>
+  );
+}
+
+/** Reusable CAEN-only export dialog — replaces window.prompt (a no-op in Tauri's WebView). */
+function CaenExportModal({
+  title,
+  onClose,
+  onExport,
+}: {
+  title: string;
+  onClose: () => void;
+  onExport: (caen: string) => Promise<void>;
+}) {
+  const [caen, setCaen] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!/^\d{4}$/.test(caen.trim())) { notify.error("Cod CAEN invalid — 4 cifre (ex. 6201)."); return; }
+    setBusy(true);
+    try {
+      await onExport(caen.trim());
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open onOpenChange={(o) => { if (!o) onClose(); }} title={title} width={420}
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose} disabled={busy}>Anulează</Btn>
+          <Btn variant="primary" icon="download" disabled={busy} onClick={() => void submit()}>
+            {busy ? "Se exportă…" : "Exportă"}
+          </Btn>
+        </>
+      }
+    >
+      <Field label="Cod CAEN (4 cifre)" required>
+        <Input className="mono" placeholder="6201" value={caen} onChange={(e) => setCaen(e.target.value)} autoFocus />
+      </Field>
     </Modal>
   );
 }

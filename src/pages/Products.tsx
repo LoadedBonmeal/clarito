@@ -582,10 +582,22 @@ function StockModal({
   const [qty, setQty] = useState("");
   const [cost, setCost] = useState("");
   const [docRef, setDocRef] = useState("");
+  const [method, setMethod] = useState(product.valuationMethod === "FIFO" ? "FIFO" : "CMP");
+  const [stockAcct, setStockAcct] = useState(product.stockAccount || "371");
 
   const { data: ledger = [], refetch } = useQuery({
     queryKey: ["stock-ledger", product.id],
     queryFn: () => api.stockValuation.ledger(companyId, product.id),
+  });
+
+  const valMut = useMutation({
+    mutationFn: (m: string) => api.stockValuation.setValuation(companyId, product.id, m, stockAcct.trim() || "371"),
+    onSuccess: () => {
+      notify.success("Metodă de evaluare actualizată — stocul a fost reevaluat.");
+      void refetch();
+      void qc.invalidateQueries({ queryKey: queryKeys.products.all });
+    },
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut schimba metoda de evaluare.")),
   });
 
   const mut = useMutation({
@@ -615,6 +627,28 @@ function StockModal({
         automat. Nota contabilă (D 371 / C 607 la intrare — reclasă din cheltuiala facturii; D 345 /
         C 711 la producție; D 6xx / C 371 la ieșire) se postează în jurnal.
       </Banner>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "12px 0", flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>Metodă:</span>
+        <select
+          className="rf-input"
+          style={{ maxWidth: 150 }}
+          value={method}
+          onChange={(e) => { setMethod(e.target.value); valMut.mutate(e.target.value); }}
+          disabled={valMut.isPending}
+        >
+          <option value="CMP">CMP (cost mediu)</option>
+          <option value="FIFO">FIFO</option>
+        </select>
+        <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>Cont:</span>
+        <input
+          className="rf-input mono"
+          style={{ maxWidth: 90 }}
+          value={stockAcct}
+          onChange={(e) => setStockAcct(e.target.value)}
+          onBlur={() => valMut.mutate(method)}
+          placeholder="371"
+        />
+      </div>
       <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
         <Btn variant={tab === "in" ? "primary" : "secondary"} size="sm" onClick={() => setTab("in")}>Recepție (intrare)</Btn>
         <Btn variant={tab === "out" ? "primary" : "secondary"} size="sm" onClick={() => setTab("out")}>Descărcare (ieșire)</Btn>

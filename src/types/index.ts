@@ -686,6 +686,10 @@ export interface Product {
   stockQty: string | null;
   /** Art. 331 reverse-charge product category code for D394 op11 codPR. Null = use default 22. */
   art331Code: string | null;
+  /** Stock valuation policy (OMFP 1802): 'FIFO' | 'CMP'. Null = CMP. */
+  valuationMethod: string | null;
+  /** GL stock account (371/301/345…). Null = 371. */
+  stockAccount: string | null;
   active: boolean;
   createdAt: number;
   updatedAt: number;

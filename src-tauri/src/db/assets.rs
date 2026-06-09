@@ -815,4 +815,76 @@ mod tests {
         let err = get(&pool, &asset.id, "co-1").await.unwrap_err();
         assert!(matches!(err, AppError::NotFound));
     }
+
+    // Full migrate-based pool (GL + register tables) for the posting tests.
+    async fn migrate_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co-1','RO99','T SRL','S','C','CJ','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn depreciation_then_disposal_post_balanced_gl() {
+        let pool = migrate_pool().await;
+        // Cost 3.600, viață 36 luni → amortizare lunară 100; cont 213 → amortizare 2813.
+        let asset = create(
+            &pool,
+            "co-1",
+            FixedAssetInput {
+                acquisition_cost: "3600.00".into(),
+                life_months: Some(36),
+                date_of_acquisition: "2026-01-10".into(),
+                start_up_date: Some("2026-01-10".into()),
+                ..sample_input()
+            },
+        )
+        .await
+        .unwrap();
+
+        // One month of depreciation → D 6811 100 / C 2813 100.
+        run_depreciation(&pool, "co-1", "2026-02-01", "2026-02-28")
+            .await
+            .unwrap();
+        let tb = crate::db::gl::trial_balance(&pool, "co-1", "2026-02-01", "2026-02-28")
+            .await
+            .unwrap();
+        let bal = |c: &str| {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == c)
+                .map(|r| (r.closing_debit.clone(), r.closing_credit.clone()))
+        };
+        assert_eq!(bal("6811"), Some(("100.00".into(), "0.00".into())));
+        assert_eq!(bal("2813"), Some(("0.00".into(), "100.00".into())));
+        assert!(tb.balanced);
+
+        // Dispose at end of Feb: accumulated 100, valoare rămasă 3.500 → D 2813 100 + D 6583 3500 /
+        // C 213 3600. Over the full period the GL stays balanced.
+        dispose(&pool, "co-1", &asset.id, "2026-02-28")
+            .await
+            .unwrap();
+        let tb2 = crate::db::gl::trial_balance(&pool, "co-1", "2026-01-01", "2026-12-31")
+            .await
+            .unwrap();
+        assert!(tb2.balanced);
+        let bal2 = |c: &str| {
+            tb2.rows
+                .iter()
+                .find(|r| r.account_code == c)
+                .map(|r| r.closing_debit.clone())
+        };
+        // 6583 (cheltuieli din cedarea activelor) carries the residual book value.
+        assert_eq!(bal2("6583"), Some("3500.00".into()));
+        // The asset is now inactive.
+        let a = get(&pool, &asset.id, "co-1").await.unwrap();
+        assert!(!a.active);
+        assert_eq!(a.disposal_date.as_deref(), Some("2026-02-28"));
+    }
 }

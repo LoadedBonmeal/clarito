@@ -27,6 +27,7 @@ export function AssetsPage() {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [modal, setModal] = useState<"create" | { edit: FixedAsset } | null>(null);
+  const [disposing, setDisposing] = useState<FixedAsset | null>(null);
   const [run, setRun] = useState<DepreciationRun | null>(null);
 
   const { data: assets = [] } = useQuery({
@@ -63,6 +64,7 @@ export function AssetsPage() {
       api.assets.dispose(companyId!, id, date),
     onSuccess: () => {
       notify.success("Mijloc fix scos din funcțiune (281x + 6583 / 21x).");
+      setDisposing(null);
       void qc.invalidateQueries({ queryKey: ["assets", companyId] });
     },
     onError: (e) => notify.error(formatError(e, "Eroare la scoaterea din funcțiune.")),
@@ -122,10 +124,7 @@ export function AssetsPage() {
                     <td className="right">
                       <IconBtn icon="edit" onClick={() => setModal({ edit: a })} title="Editează" />
                       {a.active && (
-                        <IconBtn icon="archive" onClick={async () => {
-                          const date = (window.prompt("Data scoaterii din funcțiune (AAAA-LL-ZZ):", period.to) ?? "").trim();
-                          if (/^\d{4}-\d{2}-\d{2}$/.test(date)) dispose.mutate({ id: a.id, date });
-                        }} title="Scoate din funcțiune" />
+                        <IconBtn icon="archive" onClick={() => setDisposing(a)} title="Scoate din funcțiune" />
                       )}
                       <IconBtn icon="trash" onClick={async () => {
                         if (await confirm(`Ștergeți mijlocul fix "${a.description}"?`, { kind: "warning" })) del.mutate(a.id);
@@ -182,7 +181,55 @@ export function AssetsPage() {
           }}
         />
       )}
+
+      {disposing && (
+        <DisposeModal
+          asset={disposing}
+          defaultDate={period.to}
+          busy={dispose.isPending}
+          onClose={() => setDisposing(null)}
+          onConfirm={(date) => dispose.mutate({ id: disposing.id, date })}
+        />
+      )}
     </div>
+  );
+}
+
+/** Scoatere din funcțiune — alegerea datei, înlocuiește window.prompt (no-op în WebView-ul Tauri). */
+function DisposeModal({
+  asset, defaultDate, busy, onClose, onConfirm,
+}: {
+  asset: FixedAsset;
+  defaultDate: string;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (date: string) => void;
+}) {
+  const [date, setDate] = useState(defaultDate);
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(date.trim());
+
+  return (
+    <Modal open onOpenChange={(o) => { if (!o) onClose(); }} title="Scoatere din funcțiune" width={420}
+      footer={
+        <>
+          <Btn variant="secondary" onClick={onClose} disabled={busy}>Anulează</Btn>
+          <Btn variant="primary" icon="archive" disabled={busy || !valid}
+            onClick={() => { if (valid) onConfirm(date.trim()); }}>
+            {busy ? "Se procesează…" : "Scoate din funcțiune"}
+          </Btn>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <Banner variant="info">
+          Mijlocul fix «{asset.description}» ({asset.assetCode}) va fi scos din funcțiune la data
+          aleasă (notă contabilă 281x + 6583 / 21x).
+        </Banner>
+        <Field label="Data scoaterii din funcțiune (AAAA-LL-ZZ)" required>
+          <Input className="mono" placeholder="2026-06-30" value={date} onChange={(e) => setDate(e.target.value)} autoFocus />
+        </Field>
+      </div>
+    </Modal>
   );
 }
 
