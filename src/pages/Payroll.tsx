@@ -153,6 +153,10 @@ export function PayrollPage() {
 
         {companyId && <SediiManager companyId={companyId} sedii={sedii} />}
 
+        {companyId && (
+          <ConcediiManager companyId={companyId} periodYm={period.from.slice(0, 7)} employees={employees} />
+        )}
+
         {/* Payroll register */}
         {run && run.states.length > 0 && (
           <Card>
@@ -431,6 +435,110 @@ function SediiManager({
                 <td className="right">
                   <IconBtn icon="trash" onClick={async () => {
                     if (await confirm(`Ștergeți sediul secundar ${s.cif}?`, { kind: "warning" })) remove.mutate(s.id);
+                  }} title="Șterge" />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
+  );
+}
+
+/** Concedii medicale (OUG 158/2005) — registru per lună: certificat (serie/nr/cod), zile (angajator
+ *  + FNUASS) și indemnizațiile. Sursa blocului D112 asiguratD; emiterea în XML se validează ulterior
+ *  în DUKIntegrator. */
+function ConcediiManager({
+  companyId,
+  periodYm,
+  employees,
+}: {
+  companyId: string;
+  periodYm: string;
+  employees: Employee[];
+}) {
+  const qc = useQueryClient();
+  const { data: leaves = [] } = useQuery({
+    queryKey: ["concedii", companyId, periodYm],
+    queryFn: () => api.payroll.listConcedii(companyId, periodYm),
+    enabled: !!companyId,
+  });
+  const [f, setF] = useState({
+    employeeId: "", serie: "", numar: "", codIndemnizatie: "01",
+    dataInceput: "", dataSfarsit: "", zileAngajator: "", zileFnuass: "",
+    sumaAngajator: "", sumaFnuass: "",
+  });
+
+  const empName = (id: string) => employees.find((e) => e.id === id)?.fullName ?? id;
+
+  const add = useMutation({
+    mutationFn: () => {
+      if (!f.employeeId) throw new Error("Selectați angajatul.");
+      return api.payroll.createConcediu({
+        companyId, employeeId: f.employeeId, periodYm,
+        serie: f.serie, numar: f.numar, codIndemnizatie: f.codIndemnizatie,
+        dataInceput: f.dataInceput, dataSfarsit: f.dataSfarsit,
+        zileAngajator: Number(f.zileAngajator) || 0, zileFnuass: Number(f.zileFnuass) || 0,
+        sumaAngajator: f.sumaAngajator || "0", sumaFnuass: f.sumaFnuass || "0",
+      });
+    },
+    onSuccess: () => {
+      setF((s) => ({ ...s, serie: "", numar: "", dataInceput: "", dataSfarsit: "", zileAngajator: "", zileFnuass: "", sumaAngajator: "", sumaFnuass: "" }));
+      void qc.invalidateQueries({ queryKey: ["concedii", companyId, periodYm] });
+    },
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut adăuga concediul medical.")),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.payroll.deleteConcediu(id, companyId),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["concedii", companyId, periodYm] }),
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge concediul medical.")),
+  });
+
+  const num = (k: keyof typeof f) => ({ value: f[k], onChange: (e: React.ChangeEvent<HTMLInputElement>) => setF((s) => ({ ...s, [k]: e.target.value })) });
+
+  return (
+    <Card>
+      <div style={{ padding: "10px 12px", fontWeight: 600 }}>Concedii medicale (OUG 158/2005) — {periodYm}</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "0 12px 12px", flexWrap: "wrap" }}>
+        <select className="rf-input" style={{ maxWidth: 180 }} value={f.employeeId}
+          onChange={(e) => setF((s) => ({ ...s, employeeId: e.target.value }))}>
+          <option value="">Angajat…</option>
+          {employees.map((e) => <option key={e.id} value={e.id}>{e.fullName}</option>)}
+        </select>
+        <Input style={{ maxWidth: 70 }} placeholder="Serie" {...num("serie")} />
+        <Input style={{ maxWidth: 90 }} placeholder="Nr." {...num("numar")} />
+        <select className="rf-input" style={{ maxWidth: 130 }} value={f.codIndemnizatie}
+          onChange={(e) => setF((s) => ({ ...s, codIndemnizatie: e.target.value }))} title="Cod indemnizație (D_9)">
+          <option value="01">01 boală obișnuită</option>
+          <option value="06">06 sarcină/lăuzie</option>
+          <option value="09">09 îngrijire copil</option>
+          <option value="15">15 risc maternal</option>
+        </select>
+        <Input style={{ maxWidth: 130 }} placeholder="Început (AAAA-LL-ZZ)" {...num("dataInceput")} />
+        <Input style={{ maxWidth: 130 }} placeholder="Sfârșit" {...num("dataSfarsit")} />
+        <Input style={{ maxWidth: 90 }} inputMode="numeric" placeholder="Zile ang." {...num("zileAngajator")} />
+        <Input style={{ maxWidth: 90 }} inputMode="numeric" placeholder="Zile FNUASS" {...num("zileFnuass")} />
+        <Input style={{ maxWidth: 110 }} inputMode="decimal" placeholder="Indem. ang." {...num("sumaAngajator")} />
+        <Input style={{ maxWidth: 110 }} inputMode="decimal" placeholder="Indem. FNUASS" {...num("sumaFnuass")} />
+        <Btn variant="secondary" size="sm" icon="plus" disabled={add.isPending || !f.employeeId}
+          onClick={() => add.mutate()}>Adaugă</Btn>
+      </div>
+      {leaves.length > 0 && (
+        <table className="rf-tbl">
+          <thead><tr><th>Angajat</th><th>Cert.</th><th>Cod</th><th className="right">Zile</th><th className="right">Indem. ang.</th><th className="right">Indem. FNUASS</th><th></th></tr></thead>
+          <tbody>
+            {leaves.map((l) => (
+              <tr key={l.id}>
+                <td>{empName(l.employeeId)}</td>
+                <td className="mono">{l.serie} {l.numar}</td>
+                <td className="mono">{l.codIndemnizatie}</td>
+                <td className="right rf-mono">{l.zileAngajator + l.zileFnuass}</td>
+                <td className="right rf-mono">{fmtRON(l.sumaAngajator)}</td>
+                <td className="right rf-mono">{fmtRON(l.sumaFnuass)}</td>
+                <td className="right">
+                  <IconBtn icon="trash" onClick={async () => {
+                    if (await confirm("Ștergeți acest concediu medical?", { kind: "warning" })) remove.mutate(l.id);
                   }} title="Șterge" />
                 </td>
               </tr>

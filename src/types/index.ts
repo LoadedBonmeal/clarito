@@ -1122,6 +1122,47 @@ export interface SecondaryOffice {
   createdAt: number;
 }
 
+/** Certificat de concediu medical (OUG 158/2005) — registru, sursa D112 asiguratD. */
+export interface MedicalLeave {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  periodYm: string;
+  serie: string;
+  numar: string;
+  codIndemnizatie: string;
+  dataAcordare: string;
+  dataInceput: string;
+  dataSfarsit: string;
+  zileAngajator: number;
+  zileFnuass: number;
+  bazaCalcul: string;
+  zileBaza: number;
+  sumaAngajator: string;
+  sumaFnuass: string;
+  procent: number;
+  createdAt: number;
+}
+
+export interface MedicalLeaveInput {
+  companyId: string;
+  employeeId: string;
+  periodYm: string;
+  serie?: string;
+  numar?: string;
+  codIndemnizatie?: string;
+  dataAcordare?: string;
+  dataInceput?: string;
+  dataSfarsit?: string;
+  zileAngajator?: number;
+  zileFnuass?: number;
+  bazaCalcul?: string;
+  zileBaza?: number;
+  sumaAngajator?: string;
+  sumaFnuass?: string;
+  procent?: number;
+}
+
 export interface CreateEmployeeInput {
   companyId: string;
   cnp: string;

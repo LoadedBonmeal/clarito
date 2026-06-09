@@ -99,6 +99,32 @@ pub async fn delete_employee(
 }
 
 #[tauri::command]
+pub async fn list_medical_leaves(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_ym: String,
+) -> AppResult<Vec<crate::db::concedii::MedicalLeave>> {
+    crate::db::concedii::list(&state.db, &company_id, &period_ym).await
+}
+
+#[tauri::command]
+pub async fn create_medical_leave(
+    state: State<'_, AppState>,
+    input: crate::db::concedii::MedicalLeaveInput,
+) -> AppResult<crate::db::concedii::MedicalLeave> {
+    crate::db::concedii::create(&state.db, input).await
+}
+
+#[tauri::command]
+pub async fn delete_medical_leave(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+) -> AppResult<()> {
+    crate::db::concedii::delete(&state.db, &id, &company_id).await
+}
+
+#[tauri::command]
 pub async fn list_secondary_offices(
     state: State<'_, AppState>,
     company_id: String,
