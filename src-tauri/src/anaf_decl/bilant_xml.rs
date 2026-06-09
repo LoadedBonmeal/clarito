@@ -136,6 +136,400 @@ pub fn compute_f10(tb: &TrialBalance) -> HashMap<String, i64> {
     f
 }
 
+/// Period turnover (rulaj) of accounts matching `pred`: (debit_turnover, credit_turnover). Used for
+/// the developed F20 (cont de profit și pierdere).
+fn turn(tb: &TrialBalance, pred: impl Fn(&str) -> bool) -> (Decimal, Decimal) {
+    let p = |s: &str| s.parse::<Decimal>().unwrap_or(Decimal::ZERO);
+    let (mut d, mut c) = (Decimal::ZERO, Decimal::ZERO);
+    for r in &tb.rows {
+        if pred(&r.account_code) {
+            d += p(&r.period_debit);
+            c += p(&r.period_credit);
+        }
+    }
+    (d, c)
+}
+
+/// Developed F10 (bilanț dezvoltat, rd.1-103) for the LARGE form S1002/BL. Maps account prefixes to
+/// the developed rows (assets debit-positive, capital/liabilities credit-positive), then derives the
+/// official TOTAL rows from the structura formulas so the XSD «corelație» cross-checks pass.
+pub fn compute_f10_developed(tb: &TrialBalance) -> HashMap<String, i64> {
+    let mut f: HashMap<String, i64> = HashMap::new();
+    let sw = |code: &str, p: &str| code.starts_with(p);
+    // Asset row (debit-positive net). credit_side=false.
+    let put = |f: &mut HashMap<String, i64>, row: &str, o: Decimal, c: Decimal, credit: bool| {
+        let (o, c) = if credit { (-o, -c) } else { (o, c) };
+        f.insert(format!("F10_{row}1"), lei(o));
+        f.insert(format!("F10_{row}2"), lei(c));
+    };
+
+    // ── A.I Imobilizări necorporale (rd.01-07) — net of 280x/290x amortization/depreciation ──
+    let (o, c) = net(tb, |x| sw(x, "201") || sw(x, "2801"));
+    put(&mut f, "001", o, c, false);
+    let (o, c) = net(tb, |x| sw(x, "203") || sw(x, "2803") || sw(x, "2903"));
+    put(&mut f, "002", o, c, false);
+    let (o, c) = net(tb, |x| {
+        sw(x, "205")
+            || sw(x, "208")
+            || sw(x, "2805")
+            || sw(x, "2808")
+            || sw(x, "2905")
+            || sw(x, "2908")
+    });
+    put(&mut f, "003", o, c, false);
+    let (o, c) = net(tb, |x| sw(x, "2071") || sw(x, "2807"));
+    put(&mut f, "004", o, c, false);
+    let (o, c) = net(tb, |x| sw(x, "206") || sw(x, "2806") || sw(x, "2906"));
+    put(&mut f, "005", o, c, false);
+    let (o, c) = net(tb, |x| x == "4094");
+    put(&mut f, "006", o, c, false);
+
+    // ── A.II Imobilizări corporale (rd.08-17) ──
+    let (o, c) = net(tb, |x| {
+        sw(x, "211")
+            || sw(x, "212")
+            || sw(x, "2811")
+            || sw(x, "2812")
+            || sw(x, "2911")
+            || sw(x, "2912")
+    });
+    put(&mut f, "008", o, c, false);
+    let (o, c) = net(tb, |x| {
+        sw(x, "213") || sw(x, "223") || sw(x, "2813") || sw(x, "2913")
+    });
+    put(&mut f, "009", o, c, false);
+    let (o, c) = net(tb, |x| {
+        sw(x, "214") || sw(x, "224") || sw(x, "2814") || sw(x, "2914")
+    });
+    put(&mut f, "010", o, c, false);
+    let (o, c) = net(tb, |x| sw(x, "215") || sw(x, "2815") || sw(x, "2915"));
+    put(&mut f, "011", o, c, false);
+    let (o, c) = net(tb, |x| sw(x, "231") || sw(x, "2931"));
+    put(&mut f, "012", o, c, false);
+    let (o, c) = net(tb, |x| sw(x, "235") || sw(x, "2935"));
+    put(&mut f, "013", o, c, false);
+    let (o, c) = net(tb, |x| sw(x, "216") || sw(x, "2816") || sw(x, "2916"));
+    put(&mut f, "014", o, c, false);
+    let (o, c) = net(tb, |x| {
+        sw(x, "217") || sw(x, "227") || sw(x, "2817") || sw(x, "2917")
+    });
+    put(&mut f, "015", o, c, false);
+    let (o, c) = net(tb, |x| x == "4093");
+    put(&mut f, "016", o, c, false);
+
+    // ── A.III Imobilizări financiare (rd.18-23) ──
+    let (o, c) = net(tb, |x| sw(x, "261") || sw(x, "2961"));
+    put(&mut f, "018", o, c, false);
+    let (o, c) = net(tb, |x| {
+        sw(x, "263") || sw(x, "265") || sw(x, "266") || sw(x, "267") || sw(x, "296")
+    });
+    put(&mut f, "022", o, c, false);
+
+    // ── B.I Stocuri (rd.26-30) ── (lump by class-3 less adjustments + 409x advances)
+    let (o, c) = net(tb, |x| {
+        (sw(x, "30")
+            || sw(x, "32")
+            || sw(x, "33")
+            || sw(x, "34")
+            || sw(x, "35")
+            || sw(x, "36")
+            || sw(x, "37")
+            || sw(x, "38"))
+            && !sw(x, "39")
+    });
+    let (oa, ca) = net(tb, |x| sw(x, "39")); // adjustments (credit) reduce stocks
+    put(&mut f, "028", o + oa, c + ca, false);
+    let (o, c) = net(tb, |x| x == "4091");
+    put(&mut f, "029", o, c, false);
+
+    // ── B.II Creanțe (rd.31-35, 301) ── class-4 debit + 5187 + 409x
+    let (o, c) = net(tb, |x| {
+        (sw(x, "4")
+            && !sw(x, "401")
+            && !sw(x, "403")
+            && !sw(x, "404")
+            && !sw(x, "405")
+            && !sw(x, "408")
+            && !sw(x, "419")
+            && !sw(x, "421")
+            && !sw(x, "423")
+            && !sw(x, "424")
+            && !sw(x, "426")
+            && !sw(x, "427")
+            && !sw(x, "428")
+            && !sw(x, "431")
+            && !sw(x, "437")
+            && !sw(x, "438")
+            && !sw(x, "440")
+            && !sw(x, "441")
+            && !sw(x, "442")
+            && !sw(x, "444")
+            && !sw(x, "446")
+            && !sw(x, "447")
+            && !sw(x, "448")
+            && !sw(x, "455")
+            && !sw(x, "457")
+            && !sw(x, "458")
+            && !sw(x, "462")
+            && !sw(x, "466")
+            && !sw(x, "467")
+            && !sw(x, "472")
+            && !sw(x, "475")
+            && !sw(x, "478")
+            && !sw(x, "409"))
+            || sw(x, "5187")
+    });
+    // Only keep the net DEBIT part (receivables); credit balances belong to datorii.
+    put(
+        &mut f,
+        "034",
+        o.max(Decimal::ZERO),
+        c.max(Decimal::ZERO),
+        false,
+    );
+
+    // ── B.III Investiții pe termen scurt (rd.37-39) + Casa (rd.40) ──
+    let (o, c) = net(tb, |x| sw(x, "50") || sw(x, "59"));
+    put(&mut f, "037", o, c, false);
+    let (o, c) = net(tb, |x| {
+        sw(x, "511") || sw(x, "512") || sw(x, "53") || sw(x, "54") || sw(x, "508")
+    });
+    put(&mut f, "040", o, c, false);
+
+    // ── C Cheltuieli în avans (rd.42/43) ──
+    let (o, c) = net(tb, |x| x == "471");
+    put(&mut f, "043", o, c, false);
+
+    // ── D Datorii ≤ 1 an (rd.45-53) — credit-positive ──
+    let (o, c) = net(tb, |x| sw(x, "401") || sw(x, "404") || sw(x, "408"));
+    put(&mut f, "048", o, c, true);
+    let (o, c) = net(tb, |x| sw(x, "403") || sw(x, "405"));
+    put(&mut f, "049", o, c, true);
+    let (o, c) = net(tb, |x| sw(x, "16") || sw(x, "519"));
+    put(&mut f, "046", o, c, true);
+    // Other current settlement debts (the big residual bucket rd.52).
+    let (o, c) = net(tb, |x| {
+        (sw(x, "42")
+            || sw(x, "43")
+            || sw(x, "44")
+            || sw(x, "455")
+            || sw(x, "456")
+            || sw(x, "457")
+            || sw(x, "458")
+            || sw(x, "462")
+            || sw(x, "466")
+            || sw(x, "473")
+            || sw(x, "509")
+            || sw(x, "5186")
+            || sw(x, "5191")
+            || sw(x, "5198"))
+            && !sw(x, "441") // 441 split below not needed for the lump
+    });
+    // keep only credit (datorii); clamp negatives.
+    put(
+        &mut f,
+        "052",
+        (-o).min(Decimal::ZERO),
+        (-c).min(Decimal::ZERO),
+        true,
+    );
+
+    // ── H Provizioane (rd.65-68) — credit-positive ──
+    let (o, c) = net(tb, |x| sw(x, "15"));
+    put(&mut f, "067", o, c, true);
+
+    // ── I Venituri în avans (rd.69-79) ──
+    let (o, c) = net(tb, |x| x == "472" || sw(x, "475") || sw(x, "478"));
+    put(&mut f, "072", o, c, true);
+
+    // ── J Capitaluri (rd.80-103) — sold credit, IntPoz≥0 ──
+    let (o, c) = net(tb, |x| sw(x, "1012"));
+    put(&mut f, "080", o, c, true);
+    let (o, c) = net(tb, |x| sw(x, "1011"));
+    put(&mut f, "081", o, c, true);
+    let (o, c) = net(tb, |x| sw(x, "104"));
+    put(&mut f, "086", o, c, true);
+    let (o, c) = net(tb, |x| sw(x, "105"));
+    put(&mut f, "087", o, c, true);
+    let (o, c) = net(tb, |x| sw(x, "106"));
+    put(&mut f, "090", o, c, true);
+    // Rezultat reportat 117: sold C → rd.95; sold D → rd.96.
+    let (o117, c117) = net(tb, |x| sw(x, "117"));
+    put(
+        &mut f,
+        "095",
+        o117.min(Decimal::ZERO),
+        c117.min(Decimal::ZERO),
+        true,
+    ); // -net = credit part
+    put(
+        &mut f,
+        "096",
+        o117.max(Decimal::ZERO),
+        c117.max(Decimal::ZERO),
+        false,
+    ); // debit part
+       // Rezultatul exercițiului = 121 sold + not-yet-closed 6/7 result.
+    let (o121, c121) = net(tb, |x| x == "121");
+    let (o67, c67) = net(tb, |x| sw(x, "7") || sw(x, "6"));
+    let (res_o, res_c) = ((-o121) + (-o67), (-c121) + (-c67)); // credit-positive result
+    f.insert("F10_0971".into(), lei(res_o.max(Decimal::ZERO)));
+    f.insert("F10_0972".into(), lei(res_c.max(Decimal::ZERO)));
+    f.insert("F10_0981".into(), lei((-res_o).max(Decimal::ZERO)));
+    f.insert("F10_0982".into(), lei((-res_c).max(Decimal::ZERO)));
+
+    // ── Derived TOTAL rows (structura formulas) ──
+    let g = |f: &HashMap<String, i64>, row: &str, col: u8| {
+        *f.get(&format!("F10_{row}{col}")).unwrap_or(&0)
+    };
+    let sum = |f: &HashMap<String, i64>, rows: &[&str], col: u8| {
+        rows.iter().map(|r| g(f, r, col)).sum::<i64>()
+    };
+    for col in [1u8, 2] {
+        let r007 = sum(&f, &["001", "002", "003", "004", "005", "006"], col);
+        let r017 = sum(
+            &f,
+            &[
+                "008", "009", "010", "011", "012", "013", "014", "015", "016",
+            ],
+            col,
+        );
+        let r024 = sum(&f, &["018", "019", "020", "021", "022", "023"], col);
+        f.insert(format!("F10_007{col}"), r007);
+        f.insert(format!("F10_017{col}"), r017);
+        f.insert(format!("F10_024{col}"), r024);
+        f.insert(format!("F10_025{col}"), r007 + r017 + r024);
+        let r030 = sum(&f, &["026", "027", "028", "029"], col);
+        let r036 = sum(&f, &["031", "032", "033", "034", "035", "301"], col);
+        let r039 = sum(&f, &["037", "038"], col);
+        f.insert(format!("F10_030{col}"), r030);
+        f.insert(format!("F10_036{col}"), r036);
+        f.insert(format!("F10_039{col}"), r039);
+        f.insert(
+            format!("F10_041{col}"),
+            r030 + r036 + r039 + g(&f, "040", col),
+        );
+        let r053 = sum(
+            &f,
+            &["045", "046", "047", "048", "049", "050", "051", "052"],
+            col,
+        );
+        f.insert(format!("F10_053{col}"), r053);
+        let r042 = g(&f, "043", col) + g(&f, "044", col);
+        f.insert(format!("F10_042{col}"), r042);
+        let r041 = r030 + r036 + r039 + g(&f, "040", col);
+        let r054 = r041 + g(&f, "043", col)
+            - r053
+            - g(&f, "070", col)
+            - g(&f, "073", col)
+            - g(&f, "076", col);
+        f.insert(format!("F10_054{col}"), r054);
+        f.insert(
+            format!("F10_055{col}"),
+            r025_value(&f, col) + g(&f, "044", col) + r054,
+        );
+        f.insert(
+            format!("F10_068{col}"),
+            sum(&f, &["065", "066", "067"], col),
+        );
+        f.insert(
+            format!("F10_079{col}"),
+            sum(&f, &["069", "072", "075", "078"], col),
+        );
+        let r085 = sum(&f, &["080", "081", "082", "083", "084"], col);
+        let r091 = sum(&f, &["088", "089", "090"], col);
+        f.insert(format!("F10_085{col}"), r085);
+        f.insert(format!("F10_091{col}"), r091);
+        let r100 = r085 + g(&f, "086", col) + g(&f, "087", col) + r091 - g(&f, "092", col)
+            + g(&f, "093", col)
+            - g(&f, "094", col)
+            + g(&f, "095", col)
+            - g(&f, "096", col)
+            + g(&f, "097", col)
+            - g(&f, "098", col)
+            - g(&f, "099", col);
+        f.insert(format!("F10_100{col}"), r100);
+        f.insert(
+            format!("F10_103{col}"),
+            r100 + g(&f, "101", col) + g(&f, "102", col),
+        );
+    }
+
+    // IntPoz clamp for the capital + amounts rows that the schema declares ≥0.
+    for row in [
+        "080", "081", "082", "083", "084", "085", "088", "089", "090", "091", "095", "097", "100",
+        "103",
+    ] {
+        for col in [1u8, 2] {
+            if let Some(v) = f.get_mut(&format!("F10_{row}{col}")) {
+                if *v < 0 {
+                    *v = 0;
+                }
+            }
+        }
+    }
+    f
+}
+
+fn r025_value(f: &HashMap<String, i64>, col: u8) -> i64 {
+    *f.get(&format!("F10_025{col}")).unwrap_or(&0)
+}
+
+/// Full developed F20 (cont de profit și pierdere, rd.1-70). col 1 = exercițiul precedent (from the
+/// prior trial balance, if supplied), col 2 = curent. Values from period turnover.
+pub fn compute_f20_full(cur: &TrialBalance, prior: Option<&TrialBalance>) -> HashMap<String, i64> {
+    let mut f = HashMap::new();
+    // For one TB, returns the full-F20 row → value map (credit turnover for revenue, debit for exp).
+    let rows_for = |tb: &TrialBalance| -> HashMap<String, i64> {
+        let sw = |c: &str, p: &str| c.starts_with(p);
+        let cr = |pred: &dyn Fn(&str) -> bool| turn(tb, pred).1; // credit turnover (revenue)
+        let db = |pred: &dyn Fn(&str) -> bool| turn(tb, pred).0; // debit turnover (expense)
+        let mut m: HashMap<String, i64> = HashMap::new();
+        // Revenue
+        let ca = cr(&|x| sw(x, "70")); // 70x net sales (≈ cifra de afaceri)
+        m.insert("001".into(), lei(ca));
+        m.insert("016".into(), lei(ca)); // venituri exploatare total (simplified to revenue)
+                                         // Expense by nature
+        let exp_mat = db(&|x| sw(x, "60") && !sw(x, "607") && !sw(x, "609"));
+        let exp_marf = db(&|x| sw(x, "607"));
+        let exp_pers = db(&|x| sw(x, "64"));
+        let exp_amort = db(&|x| sw(x, "681"));
+        let exp_alte = db(&|x| sw(x, "61") || sw(x, "62") || sw(x, "65"));
+        let exp_total = exp_mat + exp_marf + exp_pers + exp_amort + exp_alte;
+        m.insert("042".into(), lei(exp_total)); // cheltuieli exploatare total
+        let rez_expl = ca - exp_total;
+        m.insert("043".into(), lei(rez_expl.max(Decimal::ZERO)));
+        m.insert("044".into(), lei((-rez_expl).max(Decimal::ZERO)));
+        // Financial
+        let ven_fin = cr(&|x| sw(x, "76"));
+        let chelt_fin = db(&|x| sw(x, "66"));
+        m.insert("052".into(), lei(ven_fin));
+        m.insert("059".into(), lei(chelt_fin));
+        let ven_tot = ca + ven_fin;
+        let chelt_tot = exp_total + chelt_fin;
+        m.insert("062".into(), lei(ven_tot));
+        m.insert("063".into(), lei(chelt_tot));
+        let rez_brut = ven_tot - chelt_tot;
+        m.insert("064".into(), lei(rez_brut.max(Decimal::ZERO)));
+        m.insert("065".into(), lei((-rez_brut).max(Decimal::ZERO)));
+        let imp = db(&|x| sw(x, "691") || sw(x, "698"));
+        m.insert("066".into(), lei(imp));
+        let rez_net = rez_brut - imp;
+        m.insert("069".into(), lei(rez_net.max(Decimal::ZERO)));
+        m.insert("070".into(), lei((-rez_net).max(Decimal::ZERO)));
+        m
+    };
+    let cur_rows = rows_for(cur);
+    let prior_rows = prior.map(rows_for).unwrap_or_default();
+    let all_keys: std::collections::BTreeSet<String> =
+        cur_rows.keys().chain(prior_rows.keys()).cloned().collect();
+    for k in all_keys {
+        f.insert(format!("F20_{k}1"), *prior_rows.get(&k).unwrap_or(&0));
+        f.insert(format!("F20_{k}2"), *cur_rows.get(&k).unwrap_or(&0));
+    }
+    f
+}
+
 /// "Settlement" accounts whose debit balance is a creanță and credit balance a datorie:
 /// class-4 (excl. avans 471/472/475) + interest 518x + short-term bank credit 519x (incl. their
 /// 4-digit analytics 5191/5198 — the common overdraft accounts that must not be dropped).
@@ -464,6 +858,42 @@ mod tests {
         assert!(bl.contains("mfp:anaf:dgti:s1002:declaratie:v15"));
         assert!(bl.contains("tipBIL=\"BL\""));
         assert!(bl.contains("bifa_art27=\"0\""));
+    }
+
+    #[test]
+    fn developed_bl_generates_and_writes_for_xmllint() {
+        let t = tb(vec![
+            tb_row("2131", "0", "0", "50000", "0"),
+            tb_row("2813", "0", "0", "0", "10000"),
+            tb_row("371", "0", "0", "20000", "0"),
+            tb_row("4111", "0", "0", "30000", "0"),
+            tb_row("5121", "0", "0", "15000", "0"),
+            tb_row("1012", "0", "0", "0", "50000"),
+            tb_row("401", "0", "0", "0", "25000"),
+            tb_row("121", "0", "0", "0", "30000"),
+        ]);
+        let f10 = compute_f10_developed(&t);
+        // rd.09 (213 corporale) net = 50.000 − 10.000 = 40.000; total imob corporale rd.017 = 40.000.
+        assert_eq!(f10["F10_0092"], 40000);
+        assert_eq!(f10["F10_0172"], 40000);
+        // rd.025 active imobilizate total = 40.000 (only corporale).
+        assert_eq!(f10["F10_0252"], 40000);
+        let f20 = compute_f20_full(&t, None);
+        let h = BilantHeader {
+            year: 2026,
+            cui: "12345678".into(),
+            den: "Mare SRL".into(),
+            adresa: "Str 1".into(),
+            reg_com: "J40/1/2020".into(),
+            caen: "6201".into(),
+            county: "CJ".into(),
+            nume_admin: "Ion Popescu".into(),
+        };
+        let xml = generate_bilant_xml(&h, &f10, &f20, "BL");
+        assert!(xml.contains("<Bilant1002"));
+        assert!(xml.contains("F10_0172=\"40000\""));
+        // Write for external `xmllint --schema s1002.xsd` validation.
+        let _ = std::fs::write("/tmp/bl-generated.xml", &xml);
     }
 
     #[test]

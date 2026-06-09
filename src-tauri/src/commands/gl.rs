@@ -115,7 +115,8 @@ pub async fn export_bilant_xml(
     dest_path: String,
 ) -> AppResult<String> {
     use crate::anaf_decl::bilant_xml::{
-        compute_f10, compute_f20, generate_bilant_xml, BilantHeader,
+        compute_f10, compute_f10_developed, compute_f20, compute_f20_full, generate_bilant_xml,
+        BilantHeader,
     };
     // CAEN is a required, enum-validated header field — must be a 4-digit code.
     let caen = caen.trim().to_string();
@@ -165,14 +166,25 @@ pub async fn export_bilant_xml(
     };
     let micro = form == "UU";
 
-    // UU + BS share the prescurtat F10; the BL developed F10 (rd.1-103) is a different layout, so
-    // we don't emit the prescurtat codes there (they'd land in the wrong rows) — completed in-app.
-    let f10 = if form == "BL" {
-        std::collections::HashMap::new()
+    // UU + BS share the prescurtat F10 + simplified F20; BL (entitate mare) files the DEVELOPED F10
+    // (rd.1-103) + the full F20 (rd.1-70), which use a different row layout.
+    let (f10, f20) = if form == "BL" {
+        // Prior-year trial balance for the F20 comparative column (best-effort).
+        let prior_tb = db_trial_balance(
+            &state.db,
+            &company_id,
+            &format!("{pyear}-01-01"),
+            &format!("{pyear}-12-31"),
+        )
+        .await
+        .ok();
+        (
+            compute_f10_developed(&tb),
+            compute_f20_full(&tb, prior_tb.as_ref()),
+        )
     } else {
-        compute_f10(&tb)
+        (compute_f10(&tb), compute_f20(&pnl, prior.as_ref(), micro))
     };
-    let f20 = compute_f20(&pnl, prior.as_ref(), micro);
     let header = BilantHeader {
         year,
         cui: company.cui.clone(),
