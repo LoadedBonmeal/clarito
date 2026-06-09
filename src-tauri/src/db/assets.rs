@@ -432,10 +432,18 @@ pub async fn run_depreciation(
     let mut by_pair: std::collections::BTreeMap<(String, String), Decimal> =
         std::collections::BTreeMap::new();
 
-    for a in assets
-        .iter()
-        .filter(|a| a.active && a.depreciation_method == "liniara")
-    {
+    // Idempotent: clear this period's register rows first, then rebuild — so a re-run after a
+    // disposal (or any change) leaves no stale rows and the register matches the re-posted GL note.
+    sqlx::query("DELETE FROM asset_depreciation WHERE company_id=?1 AND period=?2")
+        .bind(company_id)
+        .bind(period)
+        .execute(pool)
+        .await?;
+
+    // Depreciate every asset that is amortizable in THIS period — keyed on the disposal month, not
+    // the `active` flag (a disposed asset has active=0 but must still appear in its pre-disposal
+    // months when those months are re-run).
+    for a in assets.iter().filter(|a| a.depreciation_method == "liniara") {
         // Skip assets disposed before this month.
         if let Some(dd) = &a.disposal_date {
             if ym_of(dd) < period_ym {

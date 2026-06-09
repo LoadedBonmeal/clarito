@@ -2692,8 +2692,12 @@ fn stock_expense_account(stock_account: &str) -> &'static str {
 }
 
 /// Post one stock movement to the GL (idempotent per `(company,'STOCK',ledger_id)`):
-/// IN  → D stock_account / C 401 (recepție la cost);
-/// OUT → D 6xx (descărcare) / C stock_account (la cost evaluat). Zero value → delete only.
+/// IN  → D stock_account / C 6xx (reclasă recepția la stoc — netează cheltuiala 607/601… deja
+///       înregistrată de factura de achiziție: factură D 607/C 401 + recepție D 371/C 607 = D 371/
+///       C 401 capitalizat; pentru producție 345/348 → D 345 / C 711);
+/// OUT → D 6xx (descărcare gestiune) / C stock_account (la cost evaluat). Zero value → delete only.
+/// Notă: o recepție fără factură în aplicație (stoc inițial, factură pe hârtie) creditează temporar
+/// 6xx până la descărcare — o reclasă net-zero pe ciclul stocului, dar vizibilă în cursul perioadei.
 pub async fn post_stock_movement(
     pool: &SqlitePool,
     company_id: &str,
@@ -2732,13 +2736,13 @@ pub async fn post_stock_movement(
         tax_base: None,
         tax_amount: None,
     };
+    let exp = stock_expense_account(stock_account);
     let entries = if is_in {
         vec![
-            mk(1, stock_account, value, Decimal::ZERO), // D 371
-            mk(2, "401", Decimal::ZERO, value),         // C 401
+            mk(1, stock_account, value, Decimal::ZERO), // D 371 (capitalizare)
+            mk(2, exp, Decimal::ZERO, value),           // C 607/711 (netează cheltuiala/producția)
         ]
     } else {
-        let exp = stock_expense_account(stock_account);
         vec![
             mk(1, exp, value, Decimal::ZERO),           // D 607
             mk(2, stock_account, Decimal::ZERO, value), // C 371

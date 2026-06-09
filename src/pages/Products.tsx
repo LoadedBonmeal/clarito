@@ -612,7 +612,8 @@ function StockModal({
     <Modal open onOpenChange={(o) => { if (!o) onClose(); }} title={`Gestiune: ${product.name}`} width={680}>
       <Banner variant="info">
         Evaluare stoc OMFP 1802/2014 (FIFO/CMP). Recepția intră la cost; descărcarea e evaluată
-        automat. Nota contabilă (D 371 / C 401 la intrare; D 6xx / C 371 la ieșire) se postează în jurnal.
+        automat. Nota contabilă (D 371 / C 607 la intrare — reclasă din cheltuiala facturii; D 345 /
+        C 711 la producție; D 6xx / C 371 la ieșire) se postează în jurnal.
       </Banner>
       <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
         <Btn variant={tab === "in" ? "primary" : "secondary"} size="sm" onClick={() => setTab("in")}>Recepție (intrare)</Btn>

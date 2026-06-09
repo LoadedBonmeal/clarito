@@ -486,6 +486,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stock_in_gl_reclasses_to_stock_account_not_401() {
+        // Receipt 10 @ 5 → D 371 50 / C 607 50 (reclasă din cheltuiala facturii), NOT C 401.
+        let pool = setup().await;
+        let input = StockMovementInput {
+            company_id: "co1".into(),
+            product_id: "p1".into(),
+            entry_date: "2026-06-01".into(),
+            qty: "10".into(),
+            unit_cost: Some("5".into()),
+            doc_type: None,
+            doc_ref: None,
+        };
+        record_movement(&pool, &input, Dir::In).await.unwrap();
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let bal = |code: &str| {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| (r.closing_debit.clone(), r.closing_credit.clone()))
+        };
+        assert_eq!(bal("371"), Some(("50.00".into(), "0.00".into())));
+        assert_eq!(bal("607"), Some(("0.00".into(), "50.00".into())));
+        assert_eq!(bal("401"), None); // no supplier liability fabricated
+        assert!(tb.balanced);
+    }
+
+    #[tokio::test]
     async fn record_movement_rejects_garbage_cost() {
         let pool = setup().await;
         let bad = StockMovementInput {
