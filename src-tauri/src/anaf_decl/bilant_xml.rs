@@ -29,6 +29,9 @@ pub fn resolve_size_form(
     prior_year: Option<&str>,
 ) -> String {
     let valid = |f: &str| matches!(f, "UU" | "BS" | "BL");
+    // Defensive: an out-of-range `current` falls back to the smallest form (micro/UU) rather than
+    // emitting a garbage code; in practice the caller always passes a computed UU/BS/BL.
+    let current = if valid(current) { current } else { "UU" };
     if let Some(o) = form_override.filter(|f| valid(f)) {
         return o.to_string();
     }
@@ -801,6 +804,8 @@ mod tests {
         assert_eq!(resolve_size_form("BS", Some("BS"), Some("UU")), "BS");
         // Override always wins; invalid prior is ignored.
         assert_eq!(resolve_size_form("BL", None, Some("ZZ")), "BL");
+        // Defensive: an invalid `current` falls back to UU.
+        assert_eq!(resolve_size_form("ZZ", None, None), "UU");
     }
 
     fn tb_row(

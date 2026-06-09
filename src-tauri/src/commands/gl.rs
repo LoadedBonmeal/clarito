@@ -164,7 +164,10 @@ pub async fn export_bilant_xml(
     // {25.000.000, 50.000.000, 50}; peste = mijlocie/mare.
     let bil = db_bilant(&state.db, &company_id, &from, &to).await?;
     let total_assets: f64 = bil.total_assets.parse().unwrap_or(0.0);
-    let turnover: f64 = pnl.operating_revenue.parse().unwrap_or(0.0); // ≈ cifra de afaceri
+    // Criteriul de mărime e CIFRA DE AFACERI NETĂ (clasa 70x), NU operating_revenue (care include
+    // 71x variația stocurilor, 72x producția imobilizată, 74x subvenții, 75x alte venituri) — OMFP
+    // 1802/2014 pct. 9.
+    let turnover: f64 = pnl.cifra_afaceri.parse().unwrap_or(0.0);
     let emp = avg_employees.unwrap_or(0).max(0) as f64;
     let exceeds = |a: f64, t: f64, e: f64| {
         u8::from(total_assets > a) + u8::from(turnover > t) + u8::from(emp > e)

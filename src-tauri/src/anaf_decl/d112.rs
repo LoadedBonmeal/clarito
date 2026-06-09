@@ -75,6 +75,12 @@ pub fn exempt_part_time_min_base(pensionar: bool, exceptie_cas_min: &str) -> boo
 /// față de cea pe venitul realizat e suportată de ANGAJATOR. `exempt` (art. 146 (5^7), via
 /// [`exempt_part_time_min_base`]) sare peste majorare — baza rămâne venitul realizat.
 ///
+/// Limitare cunoscută: art. 146 (5^6) permite proratarea bazei minime la numărul zilelor lucrătoare
+/// din lună în care contractul a fost ACTIV (angajare/încetare la mijlocul lunii). Aplicația nu
+/// urmărește încă data încetării / zilele active, deci se folosește baza minimă ÎNTREAGĂ — o
+/// supra-declarare conservatoare (protejează baza de pensie a salariatului). Proratarea pe zile e o
+/// extensie ulterioară.
+///
 /// Returnează Some((baza_minimă, cas_diff_angajator, cass_diff_angajator)) când se aplică majorarea.
 pub fn part_time_min_base(
     gross: Decimal,

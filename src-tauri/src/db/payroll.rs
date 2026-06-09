@@ -245,9 +245,11 @@ pub async fn create_sediu(
     name: &str,
 ) -> AppResult<SecondaryOffice> {
     let cif = cif.trim();
-    if cif.is_empty() || !cif.chars().all(|c| c.is_ascii_digit()) {
+    // CIF sediu secundar: obligatoriu + validat cu același algoritm mod-11 ca al companiei (valid_cui
+    // întoarce true pentru gol, de aceea respingem explicit golul).
+    if cif.is_empty() || !crate::anaf_decl::valid_cui(cif) {
         return Err(AppError::Validation(
-            "CIF sediu secundar invalid — doar cifre.".into(),
+            "CIF sediu secundar invalid — verificați cifra de control.".into(),
         ));
     }
     let id = new_id();
@@ -415,6 +417,23 @@ mod tests {
         .await
         .unwrap();
         pool
+    }
+
+    #[tokio::test]
+    async fn sedii_crud_and_cif_checksum() {
+        let pool = setup().await;
+        // A structurally-valid RO CUI (mod-11) is accepted; a wrong-checksum one is rejected.
+        let ok = create_sediu(&pool, "co1", "12345674", "Punct lucru").await;
+        assert!(ok.is_ok(), "valid CIF should be accepted: {ok:?}");
+        assert!(create_sediu(&pool, "co1", "12345678", "x").await.is_err()); // bad checksum
+        assert!(create_sediu(&pool, "co1", "abc", "x").await.is_err()); // non-numeric
+        assert!(create_sediu(&pool, "co1", "", "x").await.is_err()); // empty
+                                                                     // Duplicate CIF rejected.
+        assert!(create_sediu(&pool, "co1", "12345674", "dup").await.is_err());
+        let list = list_sedii(&pool, "co1").await.unwrap();
+        assert_eq!(list.len(), 1);
+        delete_sediu(&pool, &list[0].id, "co1").await.unwrap();
+        assert!(list_sedii(&pool, "co1").await.unwrap().is_empty());
     }
 
     #[tokio::test]
