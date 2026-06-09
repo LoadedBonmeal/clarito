@@ -1107,8 +1107,19 @@ export interface Employee {
   /** art. 146 (5^7) excepție de la baza minimă CAS/CASS part-time: ''/'elev_student'/'ucenic'/
    *  'dizabilitate'/'contracte_multiple' (pensionarii via `pensionar`). */
   exceptieCasMin: string;
+  /** CIF-ul sediului secundar la care e repartizat (D112 angajatorF2); '' = sediu principal. */
+  sediuCif: string;
   createdAt: number;
   updatedAt: number;
+}
+
+/** Sediu secundar / punct de lucru (D112 angajatorF2). */
+export interface SecondaryOffice {
+  id: string;
+  companyId: string;
+  cif: string;
+  name: string;
+  createdAt: number;
 }
 
 export interface CreateEmployeeInput {
@@ -1123,6 +1134,7 @@ export interface CreateEmployeeInput {
   tipContract?: string;
   oreNorma?: number;
   exceptieCasMin?: string;
+  sediuCif?: string;
 }
 
 export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, "companyId">> & {

@@ -926,6 +926,12 @@ export const payroll = {
     invoke<import("@/types").Employee>("update_employee", { id, companyId, input }),
   delete: (id: string, companyId: string) =>
     invoke<void>("delete_employee", { id, companyId }),
+  listSedii: (companyId: string) =>
+    invoke<import("@/types").SecondaryOffice[]>("list_secondary_offices", { companyId }),
+  createSediu: (companyId: string, cif: string, name: string) =>
+    invoke<import("@/types").SecondaryOffice>("create_secondary_office", { companyId, cif, name }),
+  deleteSediu: (id: string, companyId: string) =>
+    invoke<void>("delete_secondary_office", { id, companyId }),
   run: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<import("@/types").PayrollRun>("run_payroll", { companyId, periodFrom, periodTo }),
   /** Exportă D112 (XML) pentru luna dată la destPath. Returnează calea. */

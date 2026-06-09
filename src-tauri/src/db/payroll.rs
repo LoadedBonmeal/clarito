@@ -33,6 +33,9 @@ pub struct Employee {
     /// art. 146 (5^7) excepție de la baza minimă CAS/CASS part-time: ''/'elev_student'/'ucenic'/
     /// 'dizabilitate'/'contracte_multiple' (pensionarii via `pensionar`).
     pub exceptie_cas_min: String,
+    /// CIF-ul sediului secundar la care e repartizat salariatul (D112 angajatorF2); '' = sediu
+    /// principal.
+    pub sediu_cif: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -57,6 +60,8 @@ pub struct CreateEmployeeInput {
     pub ore_norma: Option<i64>,
     #[serde(default)]
     pub exceptie_cas_min: Option<String>,
+    #[serde(default)]
+    pub sediu_cif: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -73,11 +78,12 @@ pub struct UpdateEmployeeInput {
     pub tip_contract: Option<String>,
     pub ore_norma: Option<i64>,
     pub exceptie_cas_min: Option<String>,
+    pub sediu_cif: Option<String>,
 }
 
 const COLS: &str = "id, company_id, cnp, full_name, gross_salary, personal_deduction, \
                     employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
-                    exceptie_cas_min, created_at, updated_at";
+                    exceptie_cas_min, sediu_cif, created_at, updated_at";
 
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Employee>> {
     let q = format!(
@@ -129,8 +135,8 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     sqlx::query(
         "INSERT INTO employees (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
          employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
-         exceptie_cas_min, created_at, updated_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11,?12,?13,?13)",
+         exceptie_cas_min, sediu_cif, created_at, updated_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11,?12,?13,?14,?14)",
     )
     .bind(&id)
     .bind(&input.company_id)
@@ -144,6 +150,7 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     .bind(input.tip_contract.as_deref().unwrap_or("N"))
     .bind(input.ore_norma.unwrap_or(8))
     .bind(input.exceptie_cas_min.as_deref().unwrap_or(""))
+    .bind(input.sediu_cif.as_deref().unwrap_or("").trim())
     .bind(now)
     .execute(pool)
     .await?;
@@ -169,7 +176,8 @@ pub async fn update(
     sqlx::query(
         "UPDATE employees SET cnp=?3, full_name=?4, gross_salary=?5, personal_deduction=?6, \
          employment_date=?7, active=?8, tip_asigurat=?9, pensionar=?10, tip_contract=?11, \
-         ore_norma=?12, exceptie_cas_min=?13, updated_at=?14 WHERE id=?1 AND company_id=?2",
+         ore_norma=?12, exceptie_cas_min=?13, sediu_cif=?14, updated_at=?15 \
+         WHERE id=?1 AND company_id=?2",
     )
     .bind(id)
     .bind(company_id)
@@ -189,6 +197,7 @@ pub async fn update(
             .as_deref()
             .unwrap_or(&cur.exceptie_cas_min),
     )
+    .bind(input.sediu_cif.as_deref().unwrap_or(&cur.sediu_cif))
     .bind(now_unix())
     .execute(pool)
     .await?;
@@ -198,6 +207,77 @@ pub async fn update(
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
     get(pool, id, company_id).await?;
     sqlx::query("DELETE FROM employees WHERE id=?1 AND company_id=?2")
+        .bind(id)
+        .bind(company_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+// ─── Sedii secundare (D112 angajatorF2) ──────────────────────────────────────
+
+/// Un sediu secundar / punct de lucru — impozitul pe salarii al angajaților repartizați aici se
+/// declară separat în D112 (angajatorF2), per CIF.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct SecondaryOffice {
+    pub id: String,
+    pub company_id: String,
+    pub cif: String,
+    pub name: String,
+    pub created_at: i64,
+}
+
+pub async fn list_sedii(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<SecondaryOffice>> {
+    Ok(sqlx::query_as::<_, SecondaryOffice>(
+        "SELECT id, company_id, cif, name, created_at FROM secondary_offices \
+         WHERE company_id=?1 ORDER BY cif",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn create_sediu(
+    pool: &SqlitePool,
+    company_id: &str,
+    cif: &str,
+    name: &str,
+) -> AppResult<SecondaryOffice> {
+    let cif = cif.trim();
+    if cif.is_empty() || !cif.chars().all(|c| c.is_ascii_digit()) {
+        return Err(AppError::Validation(
+            "CIF sediu secundar invalid — doar cifre.".into(),
+        ));
+    }
+    let id = new_id();
+    sqlx::query(
+        "INSERT INTO secondary_offices (id, company_id, cif, name, created_at) \
+         VALUES (?1,?2,?3,?4,?5)",
+    )
+    .bind(&id)
+    .bind(company_id)
+    .bind(cif)
+    .bind(name.trim())
+    .bind(now_unix())
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        if e.to_string().contains("UNIQUE") {
+            AppError::Validation(format!("Există deja un sediu secundar cu CIF {cif}."))
+        } else {
+            AppError::from(e)
+        }
+    })?;
+    list_sedii(pool, company_id)
+        .await?
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or(AppError::NotFound)
+}
+
+pub async fn delete_sediu(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
+    sqlx::query("DELETE FROM secondary_offices WHERE id=?1 AND company_id=?2")
         .bind(id)
         .bind(company_id)
         .execute(pool)
@@ -355,6 +435,7 @@ mod tests {
                     tip_contract: None,
                     ore_norma: None,
                     exceptie_cas_min: None,
+                    sediu_cif: None,
                 },
             )
             .await

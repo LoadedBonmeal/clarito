@@ -36,6 +36,12 @@ export function PayrollPage() {
     enabled: !!companyId,
   });
 
+  const { data: sedii = [] } = useQuery({
+    queryKey: ["sedii", companyId],
+    queryFn: () => api.payroll.listSedii(companyId!),
+    enabled: !!companyId,
+  });
+
   const period = useMemo(() => {
     const mm = String(month).padStart(2, "0");
     const last = new Date(year, month, 0).getDate();
@@ -145,6 +151,8 @@ export function PayrollPage() {
           )}
         </Card>
 
+        {companyId && <SediiManager companyId={companyId} sedii={sedii} />}
+
         {/* Payroll register */}
         {run && run.states.length > 0 && (
           <Card>
@@ -192,6 +200,7 @@ export function PayrollPage() {
         <EmployeeModal
           companyId={companyId}
           employee={modal === "create" ? null : modal.edit}
+          sedii={sedii}
           onClose={() => setModal(null)}
           onSaved={() => {
             setModal(null);
@@ -212,10 +221,11 @@ export function PayrollPage() {
 }
 
 function EmployeeModal({
-  companyId, employee, onClose, onSaved,
+  companyId, employee, sedii, onClose, onSaved,
 }: {
   companyId: string;
   employee: Employee | null;
+  sedii: import("@/types").SecondaryOffice[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -229,6 +239,7 @@ function EmployeeModal({
     oreNorma: employee ? String(employee.oreNorma) : "8",
     pensionar: employee?.pensionar ?? false,
     exceptieCasMin: employee?.exceptieCasMin ?? "",
+    sediuCif: employee?.sediuCif ?? "",
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -244,6 +255,7 @@ function EmployeeModal({
         oreNorma: Number(form.oreNorma) || 8,
         pensionar: form.pensionar,
         exceptieCasMin: form.exceptieCasMin,
+        sediuCif: form.sediuCif,
       };
       if (isEdit) {
         return api.payroll.update(employee!.id, companyId, payload);
@@ -314,6 +326,15 @@ function EmployeeModal({
             <option value="contracte_multiple">Contracte multiple ≥ salariul minim (lit. e)</option>
           </select>
         </Field>
+        <Field label="Sediu (D112) — impozit pe salarii la sediu secundar">
+          <select className="rf-input" value={form.sediuCif}
+            onChange={(e) => setForm((f) => ({ ...f, sediuCif: e.target.value }))}>
+            <option value="">Sediu principal</option>
+            {sedii.map((s) => (
+              <option key={s.id} value={s.cif}>{s.cif}{s.name ? ` — ${s.name}` : ""}</option>
+            ))}
+          </select>
+        </Field>
         {error && <Banner variant="error">{error}</Banner>}
       </div>
     </Modal>
@@ -358,5 +379,65 @@ function CaenExportModal({
         <Input className="mono" placeholder="6201" value={caen} onChange={(e) => setCaen(e.target.value)} autoFocus />
       </Field>
     </Modal>
+  );
+}
+
+/** Sedii secundare (D112 angajatorF2) — adăugare/ștergere; salariații se repartizează în formularul
+ *  angajatului. CIF doar cifre, unic per companie. */
+function SediiManager({
+  companyId,
+  sedii,
+}: {
+  companyId: string;
+  sedii: import("@/types").SecondaryOffice[];
+}) {
+  const qc = useQueryClient();
+  const [cif, setCif] = useState("");
+  const [name, setName] = useState("");
+
+  const add = useMutation({
+    mutationFn: () => api.payroll.createSediu(companyId, cif.trim(), name.trim()),
+    onSuccess: () => {
+      setCif(""); setName("");
+      void qc.invalidateQueries({ queryKey: ["sedii", companyId] });
+    },
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut adăuga sediul secundar.")),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.payroll.deleteSediu(id, companyId),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["sedii", companyId] }),
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge sediul secundar.")),
+  });
+
+  return (
+    <Card>
+      <div style={{ padding: "10px 12px", fontWeight: 600 }}>Sedii secundare (D112 angajatorF2)</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "0 12px 12px", flexWrap: "wrap" }}>
+        <Input className="mono" style={{ maxWidth: 140 }} placeholder="CIF sediu" value={cif}
+          onChange={(e) => setCif(e.target.value)} />
+        <Input style={{ maxWidth: 220 }} placeholder="Denumire (opțional)" value={name}
+          onChange={(e) => setName(e.target.value)} />
+        <Btn variant="secondary" size="sm" icon="plus" disabled={add.isPending || !cif.trim()}
+          onClick={() => add.mutate()}>Adaugă</Btn>
+      </div>
+      {sedii.length > 0 && (
+        <table className="rf-tbl">
+          <thead><tr><th>CIF</th><th>Denumire</th><th></th></tr></thead>
+          <tbody>
+            {sedii.map((s) => (
+              <tr key={s.id}>
+                <td className="mono">{s.cif}</td>
+                <td>{s.name || "—"}</td>
+                <td className="right">
+                  <IconBtn icon="trash" onClick={async () => {
+                    if (await confirm(`Ștergeți sediul secundar ${s.cif}?`, { kind: "warning" })) remove.mutate(s.id);
+                  }} title="Șterge" />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
   );
 }

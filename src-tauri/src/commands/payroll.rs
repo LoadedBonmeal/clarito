@@ -98,6 +98,33 @@ pub async fn delete_employee(
     payroll::delete(&state.db, &id, &company_id).await
 }
 
+#[tauri::command]
+pub async fn list_secondary_offices(
+    state: State<'_, AppState>,
+    company_id: String,
+) -> AppResult<Vec<payroll::SecondaryOffice>> {
+    payroll::list_sedii(&state.db, &company_id).await
+}
+
+#[tauri::command]
+pub async fn create_secondary_office(
+    state: State<'_, AppState>,
+    company_id: String,
+    cif: String,
+    name: String,
+) -> AppResult<payroll::SecondaryOffice> {
+    payroll::create_sediu(&state.db, &company_id, &cif, &name).await
+}
+
+#[tauri::command]
+pub async fn delete_secondary_office(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+) -> AppResult<()> {
+    payroll::delete_sediu(&state.db, &id, &company_id).await
+}
+
 /// Rulează statul de salarii lunar: calculează stările individuale (ratele 2026) și postează nota
 /// agregată în GL (641/421, 4315, 4316, 444, 646/436). Idempotentă per perioadă.
 #[tauri::command]
@@ -187,6 +214,7 @@ pub async fn export_d112_xml(
             ore_norma: e.ore_norma.clamp(6, 8) as u32,
             baza_cas: leid(baza_cas),
             baza_cass: leid(baza_cass),
+            sediu_cif: e.sediu_cif.clone(),
         });
     }
 
