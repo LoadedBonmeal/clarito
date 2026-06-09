@@ -338,6 +338,23 @@ export function DashboardPage() {
             </Banner>
           )}
 
+        {/* ── Cash-VAT plafon alert (5.000.000 lei, OUG 8/2026) ──────────── */}
+        {regimeStatus &&
+          (regimeStatus.cashVatLevel === "exceeded" || regimeStatus.cashVatLevel === "approaching") && (
+            <Banner
+              variant={regimeStatus.cashVatLevel === "exceeded" ? "error" : "warning"}
+              title={
+                regimeStatus.cashVatLevel === "exceeded"
+                  ? "Plafon TVA la încasare depășit"
+                  : "Vă apropiați de plafonul TVA la încasare"
+              }
+            >
+              Cifra de afaceri {currentYear}: <b className="rf-mono">{regimeStatus.ytdTurnoverRon}</b>{" "}
+              lei (plafon TVA la încasare <b className="rf-mono">{regimeStatus.cashVatPlafonRon}</b> lei).
+              {regimeStatus.cashVatNote ? ` ${regimeStatus.cashVatNote}` : ""}
+            </Banner>
+          )}
+
         {/* ── Unread notifications note ──────────────────────────────────── */}
         {unreadCount > 0 && (
           <Banner

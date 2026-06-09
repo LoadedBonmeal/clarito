@@ -15,7 +15,12 @@ use crate::error::{AppError, AppResult};
 /// year-end BNR rate) the company owes profit tax (16%) from the quarter the ceiling was exceeded.
 pub const MICRO_CEILING_EUR: i64 = 100_000;
 
-/// Micro-ceiling monitoring result for a company.
+/// 2026 cash-VAT (TVA la încasare) eligibility plafon in lei (OUG 8/2026, art. 282 alin. (3) lit. a):
+/// 5.000.000 lei from 1 March 2026. Above it the company leaves cash VAT at the end of the period
+/// FOLLOWING the one in which the plafon was exceeded.
+pub const CASH_VAT_PLAFON_RON: i64 = 5_000_000;
+
+/// Micro-ceiling + cash-VAT-plafon monitoring result for a company.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaxRegimeStatus {
@@ -26,15 +31,52 @@ pub struct TaxRegimeStatus {
     /// "ok" | "approaching" (≥80%) | "exceeded" (>100%) | "na" (profit regime).
     pub level: String,
     pub note: Option<String>,
+    /// Cash-VAT plafon (5.000.000 lei) status. "na" when the company isn't on cash VAT.
+    pub cash_vat_plafon_ron: String,
+    pub cash_vat_level: String,
+    pub cash_vat_note: Option<String>,
 }
 
-/// Compute the micro-ceiling status from the YTD turnover (RON) and the EUR→RON rate. Pure +
-/// testable. For a profit-tax company the ceiling does not apply (level "na").
+/// Cash-VAT plafon status (level, note) from the YTD turnover. "na" when not on cash VAT.
+fn cash_vat_plafon_status(
+    cash_vat: bool,
+    ytd_turnover_ron: Decimal,
+) -> (&'static str, Option<String>) {
+    if !cash_vat {
+        return ("na", None);
+    }
+    let plafon = Decimal::from(CASH_VAT_PLAFON_RON);
+    if ytd_turnover_ron > plafon {
+        (
+            "exceeded",
+            Some(
+                "Ați depășit plafonul TVA la încasare de 5.000.000 lei. Treceți la exigibilitate \
+             normală de la sfârșitul perioadei fiscale următoare celei în care l-ați depășit; \
+             depuneți declarația de mențiuni până pe 20 (OUG 8/2026)."
+                    .to_string(),
+            ),
+        )
+    } else if ytd_turnover_ron * Decimal::from(100) >= plafon * Decimal::from(80) {
+        ("approaching", Some(
+            "Vă apropiați de plafonul TVA la încasare de 5.000.000 lei — monitorizați cifra de \
+             afaceri."
+                .to_string(),
+        ))
+    } else {
+        ("ok", None)
+    }
+}
+
+/// Compute the micro-ceiling + cash-VAT status from the YTD turnover (RON) and the EUR→RON rate.
+/// Pure + testable. For a profit-tax company the micro ceiling does not apply (level "na").
 pub fn micro_ceiling_status(
     tax_regime: &str,
+    cash_vat: bool,
     ytd_turnover_ron: Decimal,
     eur_ron: Decimal,
 ) -> TaxRegimeStatus {
+    let (cv_level, cv_note) = cash_vat_plafon_status(cash_vat, ytd_turnover_ron);
+    let cash_vat_plafon_ron = format!("{}.00", CASH_VAT_PLAFON_RON);
     let ceiling = Decimal::from(MICRO_CEILING_EUR) * eur_ron;
     if tax_regime != "micro" {
         return TaxRegimeStatus {
@@ -44,6 +86,9 @@ pub fn micro_ceiling_status(
             pct: 0,
             level: "na".into(),
             note: None,
+            cash_vat_plafon_ron,
+            cash_vat_level: cv_level.into(),
+            cash_vat_note: cv_note,
         };
     }
     let pct = if ceiling.is_zero() {
@@ -76,6 +121,9 @@ pub fn micro_ceiling_status(
         pct,
         level: level.into(),
         note,
+        cash_vat_plafon_ron,
+        cash_vat_level: cv_level.into(),
+        cash_vat_note: cv_note,
     }
 }
 
@@ -487,22 +535,48 @@ mod tests {
         let eur = Decimal::from_str("5.00").unwrap(); // 100.000 EUR → 500.000 RON ceiling
         let dec = |s: &str| Decimal::from_str(s).unwrap();
         // ok: 100k/500k = 20%
-        let ok = micro_ceiling_status("micro", dec("100000"), eur);
+        let ok = micro_ceiling_status("micro", false, dec("100000"), eur);
         assert_eq!(ok.level, "ok");
         assert_eq!(ok.pct, 20);
         assert!(ok.note.is_none());
-        // approaching at ≥80%: 450k/500k = 90%
+        assert_eq!(ok.cash_vat_level, "na"); // not on cash VAT
+                                             // approaching at ≥80%: 450k/500k = 90%
         assert_eq!(
-            micro_ceiling_status("micro", dec("450000"), eur).level,
+            micro_ceiling_status("micro", false, dec("450000"), eur).level,
             "approaching"
         );
         // exceeded: 600k > 500k → advises profit tax
-        let ex = micro_ceiling_status("micro", dec("600000"), eur);
+        let ex = micro_ceiling_status("micro", false, dec("600000"), eur);
         assert_eq!(ex.level, "exceeded");
         assert!(ex.note.unwrap().contains("profit"));
         // profit-tax company → ceiling not applicable
         assert_eq!(
-            micro_ceiling_status("profit", dec("600000"), eur).level,
+            micro_ceiling_status("profit", false, dec("600000"), eur).level,
+            "na"
+        );
+    }
+
+    #[test]
+    fn cash_vat_plafon_levels() {
+        let eur = Decimal::from_str("5.00").unwrap();
+        let dec = |s: &str| Decimal::from_str(s).unwrap();
+        // On cash VAT, below 80% of 5M → ok.
+        assert_eq!(
+            micro_ceiling_status("profit", true, dec("1000000"), eur).cash_vat_level,
+            "ok"
+        );
+        // ≥80% of 5M (4.000.000) → approaching.
+        assert_eq!(
+            micro_ceiling_status("profit", true, dec("4200000"), eur).cash_vat_level,
+            "approaching"
+        );
+        // > 5M → exceeded, advises switching to normal exigibility.
+        let ex = micro_ceiling_status("profit", true, dec("5500000"), eur);
+        assert_eq!(ex.cash_vat_level, "exceeded");
+        assert!(ex.cash_vat_note.unwrap().contains("încasare"));
+        // Not on cash VAT → na regardless of turnover.
+        assert_eq!(
+            micro_ceiling_status("micro", false, dec("9000000"), eur).cash_vat_level,
             "na"
         );
     }

@@ -48,6 +48,7 @@ pub async fn tax_regime_status(
     let eur = Decimal::try_from(eur_ron.max(0.0)).unwrap_or(Decimal::ZERO);
     Ok(companies::micro_ceiling_status(
         &company.tax_regime,
+        company.cash_vat,
         turnover,
         eur,
     ))

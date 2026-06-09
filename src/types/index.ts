@@ -88,6 +88,11 @@ export interface TaxRegimeStatus {
   /** "ok" | "approaching" | "exceeded" | "na" (profit regime). */
   level: string;
   note: string | null;
+  /** Cash-VAT plafon (5.000.000 lei). */
+  cashVatPlafonRon: string;
+  /** "ok" | "approaching" | "exceeded" | "na" (not on cash VAT). */
+  cashVatLevel: string;
+  cashVatNote: string | null;
 }
 
 export interface CreateCompanyInput {
