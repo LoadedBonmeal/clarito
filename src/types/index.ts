@@ -1005,6 +1005,24 @@ export interface ClosePeriodResult {
   entryDate: string;
 }
 
+/** Payroll (D112 core) — one salary state. */
+export interface PayrollInput {
+  gross: string;
+  personalDeduction?: string;
+}
+
+export interface PayrollResult {
+  gross: string;
+  cas: string;
+  cass: string;
+  personalDeduction: string;
+  taxableBase: string;
+  incomeTax: string;
+  net: string;
+  cam: string;
+  totalEmployerCost: string;
+}
+
 /** D101 (impozit pe profit) worksheet adjustments — the user-entered fiscal items. */
 export interface D101Input {
   nonTaxableRevenue?: string;

@@ -664,6 +664,9 @@ export const declarations = {
       luna,
       testMode,
     }),
+  /** Calcul salariu (nucleul D112): brut → net + contribuții, ratele 2026. */
+  computePayroll: (input: import("@/types").PayrollInput) =>
+    invoke<import("@/types").PayrollResult>("compute_payroll", { input }),
   /** D101 (impozit pe profit) worksheet: base from the period P&L + the supplied adjustments. */
   computeD101: (
     companyId: string,

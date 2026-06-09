@@ -22,6 +22,7 @@ export type ReportView =
   | "d390"
   | "d394"
   | "d101"
+  | "salariu"
   | "saft"
   | "sales-journal"
   | "purchase-journal"
@@ -33,6 +34,7 @@ const REPORT_VIEWS: ReportView[] = [
   "d390",
   "d394",
   "d101",
+  "salariu",
   "saft",
   "sales-journal",
   "purchase-journal",

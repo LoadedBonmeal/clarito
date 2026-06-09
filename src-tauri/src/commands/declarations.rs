@@ -20,10 +20,17 @@ use std::str::FromStr;
 use tauri::State;
 
 use crate::anaf_decl::d101::{compute_d101 as compute_d101_fn, D101Input, D101Result};
+use crate::anaf_decl::d112::{compute_payroll as compute_payroll_fn, PayrollInput, PayrollResult};
 use crate::anaf_decl::d300::D300Submission;
 use crate::anaf_decl::version::resolve;
 use crate::anaf_decl::DeclKind;
 use crate::db::companies;
+
+/// Calcul salariu (nucleul D112): brut → net + contribuții + cost angajator, cu ratele 2026.
+#[tauri::command]
+pub async fn compute_payroll(input: PayrollInput) -> AppResult<PayrollResult> {
+    Ok(compute_payroll_fn(&input))
+}
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::ubl::fx::{amount_to_ron, parse_rate};
