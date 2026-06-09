@@ -137,11 +137,13 @@ fn field_or(value: &str, fallback: &str, max: usize) -> String {
     } else {
         value
     };
-    v.chars().take(max).collect()
+    take(v, max)
 }
 
+/// Truncate to `max` chars and drop XML-1.0-forbidden control characters (quick-xml escapes
+/// &<>'" but writes control bytes raw, which would make the document non-well-formed).
 fn take(s: &str, max: usize) -> String {
-    s.chars().take(max).collect()
+    s.chars().filter(|c| !c.is_control()).take(max).collect()
 }
 
 #[cfg(test)]
@@ -197,6 +199,7 @@ mod tests {
                     baza: 5000,
                 },
             ],
+            dropped: 0,
         }
     }
 

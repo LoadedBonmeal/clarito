@@ -868,6 +868,7 @@ mod tests {
             total_amount: "119.00".to_string(),
             cpv_code: None,
             art331_code: None,
+            revenue_kind: "goods".into(),
         };
 
         GeneratorInput {

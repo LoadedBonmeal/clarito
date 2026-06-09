@@ -235,6 +235,7 @@ mod tests {
                 total_amount TEXT NOT NULL DEFAULT '0',
                 cpv_code TEXT,
                 art331_code TEXT
+                ,revenue_kind TEXT NOT NULL DEFAULT 'goods'
             )",
         )
         .execute(&pool)

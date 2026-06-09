@@ -20,19 +20,30 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::ubl::fx::{amount_to_ron, parse_rate};
 
-/// Split an intra-EU partner VAT id into (country, codO). Returns None for RO / unprefixed
-/// ids (domestic or unknown — not declarable on D390).
+/// EU member-state VAT prefixes (EL = Greece). RO is intentionally excluded below (domestic).
+const EU_VAT_PREFIXES: &[&str] = &[
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "EL", "HU", "IE", "IT", "LV",
+    "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
+];
+
+/// Split an intra-EU partner VAT id into (country, codO). Returns None for RO (domestic),
+/// non-EU / unrecognised prefixes (e.g. GB post-Brexit), or unprefixed/blank ids — none of
+/// which are declarable on D390.
 fn split_vat(vat: &str) -> Option<(String, String)> {
     let v = vat.trim().to_uppercase();
-    if v.len() < 3 {
+    let bytes = v.as_bytes();
+    // Guard on BYTES (split_at is byte-indexed) AND require an ASCII 2-letter prefix so the
+    // slice never lands mid-codepoint on dirty (multi-byte) input.
+    if bytes.len() < 3 || !bytes[0].is_ascii_alphabetic() || !bytes[1].is_ascii_alphabetic() {
         return None;
     }
     let (prefix, rest) = v.split_at(2);
-    if prefix.chars().all(|c| c.is_ascii_alphabetic()) && prefix != "RO" && !rest.is_empty() {
-        Some((prefix.to_string(), rest.to_string()))
-    } else {
-        None
+    // codO is alphanumeric — drops embedded spaces, punctuation and control chars.
+    let cod_o: String = rest.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    if prefix == "RO" || !EU_VAT_PREFIXES.contains(&prefix) || cod_o.is_empty() {
+        return None;
     }
+    Some((prefix.to_string(), cod_o))
 }
 
 /// Aggregate the period's intra-EU operations into a D390 document.
@@ -44,16 +55,21 @@ pub(crate) async fn compute_d390_doc(
 ) -> AppResult<D390Doc> {
     // key = (tip, tara, codO) → (denO, base_ron)
     let mut agg: BTreeMap<(String, String, String), (String, Decimal)> = BTreeMap::new();
+    let mut dropped: i64 = 0;
 
-    let mut add = |tip: &str, vat: &str, name: &str, base: Decimal| {
-        if let Some((tara, cod_o)) = split_vat(vat) {
-            let e = agg
-                .entry((tip.to_string(), tara, cod_o))
-                .or_insert((name.to_string(), Decimal::ZERO));
-            if e.0.trim().is_empty() {
-                e.0 = name.to_string();
+    let mut add = |tip: &str, vat: &str, name: &str, base: Decimal| -> bool {
+        match split_vat(vat) {
+            Some((tara, cod_o)) => {
+                let e = agg
+                    .entry((tip.to_string(), tara, cod_o))
+                    .or_insert((name.to_string(), Decimal::ZERO));
+                if e.0.trim().is_empty() {
+                    e.0 = name.to_string();
+                }
+                e.1 += base;
+                true
             }
-            e.1 += base;
+            None => false,
         }
     };
 
@@ -85,7 +101,9 @@ pub(crate) async fn compute_d390_doc(
             fx,
         );
         let tip = if kind.trim() == "services" { "S" } else { "A" };
-        add(tip, &cui, &name, base);
+        if !add(tip, &cui, &name, base) {
+            dropped += 1;
+        }
     }
 
     // ── Outbound: sales K lines → L (goods) / P (services) ────────────────────
@@ -96,7 +114,8 @@ pub(crate) async fn compute_d390_doc(
          FROM invoice_line_items l \
          JOIN invoices i ON i.id = l.invoice_id \
          LEFT JOIN contacts c ON c.id = i.contact_id \
-         WHERE i.company_id = ?1 AND i.status IN ('VALIDATED','STORNED') \
+         WHERE i.company_id = ?1 AND i.status = 'VALIDATED' \
+           AND i.storno_of_invoice_id IS NULL \
            AND i.issue_date >= ?2 AND i.issue_date <= ?3 AND l.vat_category = 'K'",
     )
     .bind(company_id)
@@ -118,8 +137,12 @@ pub(crate) async fn compute_d390_doc(
             fx,
         );
         let tip = if kind.trim() == "service" { "P" } else { "L" };
-        if let Some(cui) = cui {
-            add(tip, &cui, &name, base);
+        let added = cui
+            .as_deref()
+            .map(|c| add(tip, c, &name, base))
+            .unwrap_or(false);
+        if !added {
+            dropped += 1;
         }
     }
 
@@ -144,10 +167,16 @@ pub(crate) async fn compute_d390_doc(
         .get(5..7)
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
+    if an < 2020 || !(1..=12).contains(&luna) {
+        return Err(AppError::Validation(format!(
+            "Perioadă D390 invalidă: '{period_from}' (aștept YYYY-MM-DD)"
+        )));
+    }
     Ok(D390Doc {
         luna,
         an,
         operations,
+        dropped,
     })
 }
 
@@ -178,6 +207,11 @@ pub async fn export_d390(
 
     let company = companies::get(&state.db, &company_id).await?;
     let doc = compute_d390_doc(&state.db, &company_id, &period_from, &period_to).await?;
+    if doc.operations.is_empty() {
+        return Err(AppError::Validation(
+            "Nu există operațiuni intra-UE de raportat în perioada selectată.".into(),
+        ));
+    }
     let submission = submission.unwrap_or_default();
     let xml = generator::generate_d390_xml(&doc, &submission, &company)?;
 
@@ -208,6 +242,84 @@ mod tests {
         assert_eq!(split_vat("RO12345678"), None, "RO is domestic, not D390");
         assert_eq!(split_vat("12345678"), None, "no country prefix");
         assert_eq!(split_vat(""), None);
+        assert_eq!(split_vat("GB123456789"), None, "GB non-EU post-Brexit");
+        assert_eq!(split_vat("中12"), None, "multi-byte prefix must not panic");
+        assert_eq!(
+            split_vat("DE 123 456"),
+            Some(("DE".into(), "123456".into())),
+            "inner whitespace stripped from codO"
+        );
+    }
+
+    #[tokio::test]
+    async fn excludes_storno_and_counts_missing_vat_as_dropped() {
+        let pool = pool().await;
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co','12345678','Test SRL','S','B','B','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // EU customer but with NO cui on file → outbound K sale is DROPPED (under-reporting flag).
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, contact_type, cui, legal_name) \
+             VALUES ('ct','co','CUSTOMER',NULL,'Kunde GmbH')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO invoices (id, company_id, contact_id, series, number, full_number, \
+             issue_date, due_date, currency, subtotal_amount, vat_amount, total_amount, status, \
+             payment_means_code, created_at, updated_at) \
+             VALUES ('inv','co','ct','inv',1,'inv','2026-03-10','2026-04-10','RON','1000','0','1000','VALIDATED','42',1,1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO invoice_line_items (id, invoice_id, position, name, quantity, unit, \
+             unit_price, vat_rate, vat_category, subtotal_amount, vat_amount, total_amount) \
+             VALUES ('l','inv','1','M','1','buc','1000','0','K','1000','0','1000')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // A storno credit note (storno_of_invoice_id set) to a valid DE customer → EXCLUDED.
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, contact_type, cui, legal_name) \
+             VALUES ('ct2','co','CUSTOMER','DE999','Kunde2')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO invoices (id, company_id, contact_id, series, number, full_number, \
+             issue_date, due_date, currency, subtotal_amount, vat_amount, total_amount, status, \
+             payment_means_code, storno_of_invoice_id, created_at, updated_at) \
+             VALUES ('st','co','ct2','st',1,'st','2026-03-12','2026-04-12','RON','-500','0','-500','VALIDATED','42','inv',1,1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO invoice_line_items (id, invoice_id, position, name, quantity, unit, \
+             unit_price, vat_rate, vat_category, subtotal_amount, vat_amount, total_amount) \
+             VALUES ('sl','st','1','M','-1','buc','500','0','K','-500','0','-500')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let doc = compute_d390_doc(&pool, "co", "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        assert!(
+            doc.operations.is_empty(),
+            "storno excluded + no-cui sale dropped → no operations, no negatives"
+        );
+        assert_eq!(doc.dropped, 1, "the no-cui EU sale is flagged as dropped");
     }
 
     #[tokio::test]

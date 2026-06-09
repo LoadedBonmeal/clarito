@@ -488,6 +488,8 @@ export interface D390Doc {
   luna: number;
   an: number;
   operations: D390Op[];
+  /** Intra-EU operations skipped for a missing/invalid partner VAT id (under-reporting flag). */
+  dropped: number;
 }
 
 export interface D390Submission {

@@ -57,4 +57,7 @@ pub struct D390Doc {
     pub luna: u32,
     pub an: i32,
     pub operations: Vec<D390Op>,
+    /// Count of intra-EU ('K') operations skipped because the partner VAT id was missing or
+    /// not a valid EU code — surfaced so the user can fix the data (else VIES under-reporting).
+    pub dropped: i64,
 }

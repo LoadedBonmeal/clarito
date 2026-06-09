@@ -91,6 +91,8 @@ pub struct LineItem {
     /// Art. 331 reverse-charge product category code — snapshot from product at creation.
     /// Used by D394 op11 codPR. NULL = use default 22.
     pub art331_code: Option<String>,
+    /// Revenue nature → GL 701/704/707/709. "product"|"service"|"goods"|"reduction".
+    pub revenue_kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -294,7 +296,7 @@ async fn list_lines(pool: &SqlitePool, invoice_id: &str) -> AppResult<Vec<LineIt
     Ok(sqlx::query_as::<_, LineItem>(
         "SELECT id, invoice_id, position, name, description, quantity, unit, \
          unit_price, vat_rate, vat_category, subtotal_amount, vat_amount, total_amount, \
-         cpv_code, art331_code \
+         cpv_code, art331_code, COALESCE(revenue_kind,'goods') AS revenue_kind \
          FROM invoice_line_items WHERE invoice_id = ?1 ORDER BY position",
     )
     .bind(invoice_id)

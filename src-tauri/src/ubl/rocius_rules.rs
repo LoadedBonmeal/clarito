@@ -892,6 +892,7 @@ mod tests {
             total_amount: "119.00".into(),
             cpv_code: None,
             art331_code: None,
+            revenue_kind: "goods".into(),
         }
     }
 

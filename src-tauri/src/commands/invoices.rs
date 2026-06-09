@@ -543,6 +543,7 @@ pub async fn storno_invoice(
         subtotal: String,
         vat_amount: String,
         total: String,
+        revenue_kind: String,
     }
 
     let storno_lines: Vec<StornoLine> = orig_lines
@@ -569,6 +570,7 @@ pub async fn storno_invoice(
                 subtotal: ls.to_string(),
                 vat_amount: lv.to_string(),
                 total: lt.to_string(),
+                revenue_kind: l.revenue_kind.clone(),
             }
         })
         .collect();
@@ -670,11 +672,11 @@ pub async fn storno_invoice(
             "INSERT INTO invoice_line_items (
                 id, invoice_id, position, name, description,
                 quantity, unit, unit_price, vat_rate, vat_category,
-                subtotal_amount, vat_amount, total_amount, cpv_code
+                subtotal_amount, vat_amount, total_amount, cpv_code, revenue_kind
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7, ?8, ?9, ?10,
-                ?11, ?12, ?13, ?14
+                ?11, ?12, ?13, ?14, ?15
             )",
         )
         .bind(&line.id)
@@ -691,6 +693,7 @@ pub async fn storno_invoice(
         .bind(&line.vat_amount)
         .bind(&line.total)
         .bind(&line.cpv_code)
+        .bind(&line.revenue_kind)
         .execute(&mut *tx)
         .await
         .map_err(AppError::Database)?;
@@ -840,11 +843,11 @@ pub async fn duplicate_invoice(
             "INSERT INTO invoice_line_items (
                 id, invoice_id, position, name, description,
                 quantity, unit, unit_price, vat_rate, vat_category,
-                subtotal_amount, vat_amount, total_amount, cpv_code
+                subtotal_amount, vat_amount, total_amount, cpv_code, revenue_kind
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7, ?8, ?9, ?10,
-                ?11, ?12, ?13, ?14
+                ?11, ?12, ?13, ?14, ?15
             )",
         )
         .bind(&line_id)
@@ -861,6 +864,7 @@ pub async fn duplicate_invoice(
         .bind(&line.vat_amount)
         .bind(&line.total_amount)
         .bind(&line.cpv_code)
+        .bind(&line.revenue_kind)
         .execute(&mut *tx)
         .await
         .map_err(AppError::Database)?;
@@ -1074,6 +1078,7 @@ mod tests {
                 total_amount TEXT NOT NULL DEFAULT '0',
                 cpv_code TEXT,
                 art331_code TEXT
+                ,revenue_kind TEXT NOT NULL DEFAULT 'goods'
             )",
         )
         .execute(&pool)
@@ -1324,6 +1329,7 @@ mod tests {
                 total_amount TEXT NOT NULL DEFAULT '0',
                 cpv_code TEXT,
                 art331_code TEXT
+                ,revenue_kind TEXT NOT NULL DEFAULT 'goods'
             )",
         )
         .execute(&pool)

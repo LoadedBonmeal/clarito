@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import { SectionCard, Btn, Badge } from "@/components/rf";
+import { SectionCard, Btn, Badge, Banner } from "@/components/rf";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -113,6 +113,17 @@ export function D390View({ dateFrom, dateTo }: Props) {
             Nicio operațiune intra-UE (vat_category «K») în perioada selectată.
           </div>
         ) : (
+          <>
+          {(doc?.dropped ?? 0) > 0 && (
+            <div style={{ padding: "0 16px 12px" }}>
+              <Banner variant="warning">
+                <b>{doc!.dropped}</b>{" "}
+                {doc!.dropped === 1 ? "operațiune intra-UE a fost ignorată" : "operațiuni intra-UE au fost ignorate"}{" "}
+                — partenerul nu are un cod TVA UE valid (cod lipsă sau prefix non-UE). Completați
+                CUI-ul partenerului pentru a evita sub-raportarea în VIES.
+              </Banner>
+            </div>
+          )}
           <div className="rf-tbl-wrap">
             <table className="rf-tbl">
               <thead>
@@ -145,6 +156,7 @@ export function D390View({ dateFrom, dateTo }: Props) {
               </tfoot>
             </table>
           </div>
+          </>
         )}
       </SectionCard>
     </div>
