@@ -28,23 +28,23 @@ export function StatCard({
   return (
     <div className={cn("rf-card rf-stat", className)}>
       <div className="rf-stat-top">
+        <div className="rf-label">{label}</div>
         {icon && (
           <span className="rf-stat-ic">
-            <Icon name={icon} size={20} />
-          </span>
-        )}
-        {delta && (
-          <span className={`rf-delta rf-delta--${deltaDir}`}>
-            {delta}
+            <Icon name={icon} size={16} />
           </span>
         )}
       </div>
-      <div className="rf-label">{label}</div>
       <div className="rf-value">
         {value}
         {unit && <span className="rf-unit">{unit}</span>}
       </div>
-      {ctx && <div className="rf-ctx">{ctx}</div>}
+      {(delta || ctx) && (
+        <div className="rf-stat-foot">
+          {delta && <span className={`rf-delta rf-delta--${deltaDir}`}>{delta}</span>}
+          {ctx && <span className="rf-ctx">{ctx}</span>}
+        </div>
+      )}
     </div>
   );
 }

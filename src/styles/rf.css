@@ -88,15 +88,16 @@
 .rf-card-head h3 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .rf-card-head .rf-sub { font-size: 12.5px; color: var(--rf-text-muted); margin-top: 2px; }
 
-/* ---------- Stat card ---------- */
-.rf-stat { padding: 24px; }
-.rf-stat-top { display: flex; align-items: flex-start; justify-content: space-between; }
-.rf-stat-ic { width: 44px; height: 44px; border-radius: 11px; display: grid; place-items: center; background: var(--rf-accent-tint); color: var(--rf-accent); }
-.rf-stat .rf-label { font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--rf-text-dim); margin-top: 18px; }
-.rf-stat .rf-value { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; margin: 6px 0 0; display: flex; align-items: baseline; gap: 7px; font-family: var(--rf-mono); font-variant-numeric: tabular-nums; }
-.rf-stat .rf-value .rf-unit { font-size: 14px; font-weight: 500; color: var(--rf-text-dim); letter-spacing: 0; }
-.rf-stat .rf-ctx { font-size: 12.5px; color: var(--rf-text-muted); margin-top: 8px; }
-.rf-delta { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; }
+/* ---------- Stat card (design .kpi: label left, dim icon right, value, delta) ---------- */
+.rf-stat { padding: 15px 16px; }
+.rf-stat-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rf-stat-ic { display: grid; place-items: center; color: var(--rf-text-dim); flex-shrink: 0; }
+.rf-stat .rf-label { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--rf-text-muted); margin: 0; }
+.rf-stat .rf-value { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin: 12px 0 0; display: flex; align-items: baseline; gap: 5px; font-family: var(--rf-mono); font-variant-numeric: tabular-nums; }
+.rf-stat .rf-value .rf-unit { font-size: 13px; font-weight: 500; color: var(--rf-text-dim); letter-spacing: 0; }
+.rf-stat-foot { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+.rf-stat .rf-ctx { font-size: 12px; color: var(--rf-text-muted); margin: 0; }
+.rf-delta { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
 .rf-delta--up { color: var(--rf-success); background: var(--rf-success-bg); }
 .rf-delta--down { color: var(--rf-error); background: var(--rf-error-bg); }
 .rf-delta--neutral { color: var(--rf-text-muted); background: var(--rf-neutral-bg); font-weight: 500; }
@@ -274,19 +275,20 @@ table.rf-tbl thead th.rf-ck, table.rf-tbl tbody td.rf-ck { width: 36px; text-ali
 
 /* ---------- Shell: Sidebar ---------- */
 .rf-sidebar {
+  grid-area: side;
   width: 248px; flex-shrink: 0; background: var(--rf-sidebar);
   border-right: 1px solid var(--rf-border); overflow-y: auto;
-  display: flex; flex-direction: column; padding: 22px 14px 16px;
+  display: flex; flex-direction: column; padding: 14px 14px 12px;
   transition: width .22s cubic-bezier(.4,0,.2,1), padding .22s cubic-bezier(.4,0,.2,1);
 }
-.rf-sidebar.collapsed { width: 72px; padding: 22px 12px 16px; }
+.rf-sidebar.collapsed { width: 72px; padding: 14px 12px 12px; }
 
 .rf-brand-wordmark { display: flex; align-items: center; gap: 9px; padding: 0 8px 4px; }
 .rf-brand-wordmark .rf-name { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; color: var(--rf-accent); }
 .rf-sidebar.collapsed .rf-brand-wordmark .rf-name { display: none; }
 
-.rf-company-card { margin: 16px 4px 8px; padding: 11px 12px; background: var(--rf-neutral-bg); border-radius: var(--rf-radius); cursor: pointer; border: 1px solid transparent; transition: border-color .12s, background .12s; text-align: left; width: calc(100% - 8px); }
-.rf-company-card:hover { border-color: var(--rf-border-strong); background: var(--rf-content); }
+.rf-company-card { margin: 16px 4px 8px; padding: 11px 12px; background: var(--rf-content); border-radius: var(--rf-radius); cursor: pointer; border: 1px solid var(--rf-border); transition: border-color .12s, background .12s; text-align: left; width: calc(100% - 8px); }
+.rf-company-card:hover { background: var(--rf-neutral-bg); }
 .rf-company-card .rf-cc-label { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--rf-text-dim); font-family: var(--rf-mono); }
 .rf-company-card .rf-cc-name { font-size: 13.5px; font-weight: 600; margin-top: 3px; display: flex; align-items: center; gap: 6px; }
 .rf-company-card .rf-cc-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
@@ -297,14 +299,19 @@ table.rf-tbl thead th.rf-ck, table.rf-tbl tbody td.rf-ck { width: 36px; text-ali
 .rf-sidebar.collapsed .rf-nav-group-label { opacity: 0; height: 10px; padding: 8px 0; overflow: hidden; }
 
 .rf-nav-item {
-  display: flex; align-items: center; gap: 11px; height: 38px; padding: 0 12px;
-  border-radius: var(--rf-radius-sm); cursor: pointer; color: var(--rf-text-muted); font-size: 13.5px; font-weight: 500;
-  border: none; background: transparent; width: 100%; text-align: left; font-family: var(--rf-font);
-  transition: background .12s ease, color .12s ease;
+  display: flex; align-items: center; gap: 11px; height: 38px; padding: 0 11px;
+  border-radius: 10px; cursor: pointer; color: var(--rf-text); font-size: 13.5px; font-weight: 500;
+  border: 1px solid transparent; background: transparent; width: 100%; text-align: left; font-family: var(--rf-font);
+  transition: border-color .18s ease, background .12s ease, color .12s ease;
 }
-.rf-nav-item:hover { background: var(--rf-neutral-bg); color: var(--rf-text); }
-.rf-nav-item.active { background: var(--rf-accent-tint); color: var(--rf-accent); font-weight: 600; }
-.rf-nav-item.active .rf-nav-ic { color: var(--rf-accent); }
+.rf-nav-item:hover:not(.active) { background: var(--rf-neutral-bg); }
+/* Active = elevated white card with hairline border (design signature). */
+.rf-nav-item.active {
+  background: var(--rf-content); color: var(--rf-text); font-weight: 600;
+  border-color: var(--rf-border);
+  box-shadow: 0 1px 1px rgba(0,0,0,.03), 0 6px 16px -8px rgba(0,0,0,.22), 0 2px 5px -2px rgba(0,0,0,.08);
+}
+.rf-nav-item.active .rf-nav-ic { color: var(--rf-text); }
 .rf-nav-ic { color: var(--rf-text-dim); flex-shrink: 0; }
 .rf-nav-item:hover .rf-nav-ic { color: var(--rf-text-muted); }
 .rf-nav-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -322,16 +329,35 @@ table.rf-tbl thead th.rf-ck, table.rf-tbl tbody td.rf-ck { width: 36px; text-ali
   justify-content: center; padding: 0 8px 4px;
 }
 .rf-nav-badge { font-size: 11px; font-weight: 600; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; line-height: 1; font-variant-numeric: tabular-nums; background: var(--rf-neutral-bg); color: var(--rf-text-muted); font-family: var(--rf-mono); }
-.rf-nav-item.active .rf-nav-badge { background: #fff; color: var(--rf-accent); }
+.rf-nav-item.active .rf-nav-badge { background: var(--rf-content); color: var(--rf-text-muted); border: 1px solid var(--rf-border); }
 .rf-nav-badge.accent { background: var(--rf-accent); color: #fff; }
 
 .rf-sidebar-foot { border-top: 1px solid var(--rf-border); margin-top: 10px; padding-top: 10px; display: flex; flex-direction: column; gap: 1px; }
 
+/* User / account card (sidebar foot) + profile pop */
+.rf-user-card { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--rf-border); border-radius: 11px; cursor: pointer; background: transparent; width: 100%; text-align: left; font-family: var(--rf-font); transition: background .12s, border-color .12s; }
+.rf-user-card:hover { background: var(--rf-neutral-bg); }
+.rf-u-ava { width: 32px; height: 32px; border-radius: 999px; background: var(--rf-neutral-bg); border: 1px solid var(--rf-border); display: grid; place-items: center; font-size: 12px; font-weight: 600; color: var(--rf-text-muted); flex-shrink: 0; }
+.rf-u-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.rf-u-name { font-size: 13px; font-weight: 600; color: var(--rf-text); }
+.rf-u-mail { font-size: 11.5px; color: var(--rf-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rf-sidebar.collapsed .rf-user-card { justify-content: center; padding: 8px; }
+.rf-profile-pop { position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; z-index: 60; padding: 6px; background: var(--rf-content); border: 1px solid var(--rf-border); border-radius: var(--rf-radius); box-shadow: var(--rf-shadow-md); animation: rf-pop .14s ease-out both; transform-origin: bottom center; }
+.rf-profile-pop button:hover { background: var(--rf-neutral-bg); }
+
 /* ---------- Shell: Topbar ---------- */
 .rf-topbar {
+  grid-area: top;
   height: 60px; flex-shrink: 0; display: flex; align-items: center; gap: 14px;
-  padding: 0 24px; background: var(--rf-content); border-bottom: 1px solid var(--rf-border);
+  padding: 0 16px; background: var(--rf-content); border-bottom: 1px solid var(--rf-border);
 }
+/* Brand block sits above the sidebar (left), aligned to the sidebar column. */
+.rf-topbar-brand { display: flex; align-items: center; gap: 8px; width: 232px; flex-shrink: 0; }
+.rf-topbar-brand .rf-name { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; color: var(--rf-text); }
+.rf-topbar-collapse { width: 30px; height: 30px; border-radius: 8px; border: 0; background: transparent; display: grid; place-items: center; cursor: pointer; color: var(--rf-text-dim); flex-shrink: 0; }
+.rf-topbar-collapse:hover { background: var(--rf-neutral-bg); color: var(--rf-text); }
+.rf-searchwrap { flex: 1; display: flex; justify-content: center; min-width: 0; }
+.rf-topright { display: flex; align-items: center; gap: 10px; flex-shrink: 0; justify-content: flex-end; }
 .rf-breadcrumb { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--rf-text-dim); min-width: 0; flex-shrink: 1; overflow: hidden; }
 .rf-breadcrumb .rf-crumb { color: var(--rf-text-muted); white-space: nowrap; }
 .rf-breadcrumb .rf-crumb.current { color: var(--rf-text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }

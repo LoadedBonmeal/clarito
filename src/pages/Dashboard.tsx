@@ -103,6 +103,19 @@ export function DashboardPage() {
     enabled:  !!activeCompanyId,
   });
 
+  // Received invoices — for the "Facturi primite" KPI + the emise-vs-primite chart.
+  const receivedFilter = useMemo(
+    () => ({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
+    [activeCompanyId],
+  );
+  const { data: receivedPage } = useQuery({
+    queryKey: queryKeys.received.list(receivedFilter),
+    queryFn:  () => api.received.list(receivedFilter),
+    enabled:  !!activeCompanyId,
+  });
+  const receivedItems = receivedPage?.items ?? [];
+  const receivedTotal = receivedPage?.total ?? 0;
+
   const { data: isAnafAuth } = useQuery({
     queryKey: queryKeys.anaf.auth(activeCompanyId ?? ""),
     queryFn:  () => api.anaf.isAuthenticated(activeCompanyId!),
@@ -222,6 +235,43 @@ export function DashboardPage() {
 
   const recentInvoices   = invoices.slice(0, 10);
   const timelineItems    = notifications.slice(0, 8);
+
+  // ── Monthly emise-vs-primite chart (last 6 months, by document count) ───────
+  const chartData = useMemo(() => {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const months: { key: string; label: string }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({ key: `${d.getFullYear()}-${pad(d.getMonth() + 1)}`, label: d.toLocaleDateString("ro-RO", { month: "short" }) });
+    }
+    const emiseBy: Record<string, number> = {};
+    const primiteBy: Record<string, number> = {};
+    for (const inv of invoices) { const m = inv.issueDate.slice(0, 7); emiseBy[m] = (emiseBy[m] ?? 0) + 1; }
+    for (const r of receivedItems) { const m = r.issueDate.slice(0, 7); primiteBy[m] = (primiteBy[m] ?? 0) + 1; }
+    return months.map((mo) => ({ ...mo, emise: emiseBy[mo.key] ?? 0, primite: primiteBy[mo.key] ?? 0 }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoices, receivedItems, currentMonth]);
+  const chartMax = Math.max(1, ...chartData.flatMap((d) => [d.emise, d.primite]));
+  const curChart = chartData[chartData.length - 1] ?? { key: "", label: "", emise: 0, primite: 0 };
+
+  // ── "Total facturat" + delta vs previous month (shown only in month mode) ──
+  const totalFacturat = totalNet + totalVat;
+  const { deltaPct, deltaDir, prevMonthLabel } = useMemo(() => {
+    const monthTotal = (key: string) =>
+      invoices
+        .filter((inv) => inv.issueDate.slice(0, 7) === key)
+        .reduce((s, inv) => s + parseDec(inv.subtotalAmount) + parseDec(inv.vatAmount), 0);
+    const prevD = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const prevKey = `${prevD.getFullYear()}-${pad(prevD.getMonth() + 1)}`;
+    const curKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+    const prevTotal = monthTotal(prevKey);
+    const label = prevD.toLocaleDateString("ro-RO", { month: "long" });
+    if (prevTotal <= 0) return { deltaPct: null as number | null, deltaDir: "neutral" as "up" | "down" | "neutral", prevMonthLabel: label };
+    const pct = Math.round(((monthTotal(curKey) - prevTotal) / prevTotal) * 100);
+    return { deltaPct: pct, deltaDir: (pct >= 0 ? "up" : "down") as "up" | "down" | "neutral", prevMonthLabel: label };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoices, currentMonth]);
 
   const activeCompany    = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
   const monthLabel       = now.toLocaleDateString("ro-RO", { month: "long", year: "numeric" });
@@ -433,119 +483,104 @@ export function DashboardPage() {
           />
         )}
 
-        {/* ── KPI stat cards ─────────────────────────────────────────────── */}
-        <div className="rf-grid-3">
+        {/* ── KPI stat cards (design: 4 tiles) ───────────────────────────── */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16 }}>
           <StatCard
             icon="chart"
-            label={`Vânzări — ${monthLabel}`}
-            value={fmtRON(totalNet + totalVat)}
+            label={`Total facturat${periodMode === "month" ? ` — ${monthLabel}` : ""}`}
+            value={fmtRON(totalFacturat)}
             unit="RON"
-            ctx={`${periodInvoices.length} facturi · ${fmtRON(totalNet)} net`}
+            delta={
+              periodMode === "month" && deltaPct != null
+                ? `${deltaDir === "up" ? "↑" : "↓"} ${Math.abs(deltaPct)}% față de ${prevMonthLabel}`
+                : undefined
+            }
+            deltaDir={deltaDir}
+            ctx={
+              periodMode === "month" && deltaPct != null
+                ? undefined
+                : `${periodInvoices.length} facturi · ${fmtRON(totalNet)} net`
+            }
+          />
+          <StatCard
+            icon="fileOut"
+            label="Facturi emise"
+            value={periodInvoices.length}
+            unit="documente"
+            ctx={
+              [
+                validatedCount > 0 ? `${validatedCount} validate` : null,
+                submittedCount > 0 ? `${submittedCount} trimise` : null,
+                rejectedCount > 0 ? `${rejectedCount} respinse` : null,
+                draftCount > 0 ? `${draftCount} schițe` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || "în perioada selectată"
+            }
+          />
+          <StatCard
+            icon="fileIn"
+            label="Facturi primite"
+            value={receivedTotal}
+            unit="documente"
+            ctx="sincronizate din SPV"
           />
           <StatCard
             icon="bank"
-            label="TVA colectată"
+            label="TVA de colectat"
             value={fmtRON(totalVat)}
             unit="RON"
-            ctx={`din ${periodInvoices.length} facturi în perioadă`}
+            ctx={`din ${periodInvoices.length} facturi`}
           />
-          <div className="rf-card rf-stat">
-            <div className="rf-stat-top">
-              <span className="rf-stat-ic">
-                <Icon name="fileOut" size={20} />
-              </span>
-            </div>
-            <div className="rf-label">Facturi emise</div>
-            <div className="rf-value">
-              {periodInvoices.length}
-              <span className="rf-unit">facturi</span>
-            </div>
-            <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-              {validatedCount > 0 && (
-                <StatusBadge status="VALIDATED" />
-              )}
-              {submittedCount > 0 && (
-                <span style={{ fontSize: 11.5, color: "var(--rf-info)", fontWeight: 500 }}>
-                  {submittedCount} trimise
-                </span>
-              )}
-              {rejectedCount > 0 && (
-                <StatusBadge status="REJECTED" />
-              )}
-              {draftCount > 0 && (
-                <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", fontWeight: 500 }}>
-                  {draftCount} schițe
-                </span>
-              )}
-            </div>
-          </div>
         </div>
 
         {/* ── Companies + Activity ───────────────────────────────────────── */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20, alignItems: "start" }}>
-          {/* Companies table */}
+          {/* Facturare lunară — emise vs primite (last 6 months, by count) */}
           <SectionCard
-            icon="building"
-            title="Companii administrate"
-            subtitle={`${companies.length} ${companies.length === 1 ? "companie" : "companii"}`}
+            icon="chart"
+            title="Facturare lunară"
+            subtitle={`Emise vs. primite · ${curChart.label}: ${curChart.emise} emise · ${curChart.primite} primite`}
             actions={
-              <Btn
-                variant="ghost"
-                size="sm"
-                iconRight="chevronRight"
-                onClick={() => void navigate({ to: "/companies" })}
-              >
-                Vezi toate
-              </Btn>
+              <div style={{ display: "flex", gap: 14, fontSize: 11.5, color: "var(--rf-text-muted)", alignItems: "center" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: "var(--rf-accent)" }} /> Emise
+                </span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: "var(--rf-neutral-bg)", border: "1px solid var(--rf-border)" }} /> Primite
+                </span>
+              </div>
             }
           >
-            <div className="rf-tbl-wrap">
-              <table className="rf-tbl">
-                <thead>
-                  <tr>
-                    <th>CUI</th>
-                    <th>Denumire</th>
-                    <th>Localitate</th>
-                    <th style={{ textAlign: "center" }}>SPV</th>
-                    <th>Serie</th>
-                    <th className="right">Ultimul nr.</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {companies.slice(0, 8).map((c) => (
-                    <tr
-                      key={c.id}
-                      className={`clickable${c.id === activeCompanyId ? " selected" : ""}`}
-                      onClick={() => void navigate({ to: "/companies/$id", params: { id: c.id } })}
-                    >
-                      <td className="rf-mono">{c.cui}</td>
-                      <td style={{ fontWeight: 500 }}>{c.legalName}</td>
-                      <td style={{ color: "var(--rf-text-muted)" }}>{c.city}</td>
-                      <td style={{ textAlign: "center" }}>
-                        {c.spvEnabled ? (
-                          <Icon name="checkCircle" size={15} style={{ color: "var(--rf-success)" }} />
-                        ) : (
-                          <Icon name="xCircle" size={15} style={{ color: "var(--rf-text-dim)" }} />
-                        )}
-                      </td>
-                      <td className="rf-mono">{c.invoiceSeries}</td>
-                      <td className="right rf-mono">{c.lastInvoiceNumber}</td>
-                    </tr>
-                  ))}
-                  {companies.length === 0 && (
-                    <tr>
-                      <td colSpan={6} style={{ textAlign: "center", padding: 20, color: "var(--rf-text-muted)" }}>
-                        Nicio companie. <button type="button" className="rf-link" onClick={() => void navigate({ to: "/companies/new" })}>Adaugă companie →</button>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 14, height: 200, padding: "20px 20px 12px" }}>
+              {chartData.map((d) => (
+                <div key={d.key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 9, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 6, height: 150, width: "100%" }}>
+                    <div
+                      title={`${d.emise} emise`}
+                      style={{ width: 16, borderRadius: "4px 4px 0 0", background: "var(--rf-accent)", height: `${Math.max(d.emise > 0 ? 3 : 0, (d.emise / chartMax) * 100)}%`, transition: "height .4s cubic-bezier(.2,.8,.2,1)" }}
+                    />
+                    <div
+                      title={`${d.primite} primite`}
+                      style={{ width: 16, borderRadius: "4px 4px 0 0", background: "var(--rf-neutral-bg)", border: "1px solid var(--rf-border)", height: `${Math.max(d.primite > 0 ? 3 : 0, (d.primite / chartMax) * 100)}%`, transition: "height .4s cubic-bezier(.2,.8,.2,1)" }}
+                    />
+                  </div>
+                  <span style={{ fontSize: 11.5, color: d.key === curChart.key ? "var(--rf-text)" : "var(--rf-text-dim)", fontWeight: d.key === curChart.key ? 600 : 400 }}>{d.label}</span>
+                </div>
+              ))}
             </div>
           </SectionCard>
 
           {/* Activity timeline */}
-          <SectionCard icon="clock" title="Activitate recentă">
+          <SectionCard
+            icon="clock"
+            title="Activitate SPV"
+            actions={
+              <Btn variant="ghost" size="sm" iconRight="chevronRight" onClick={() => void navigate({ to: "/notifications" })}>
+                Vezi tot
+              </Btn>
+            }
+          >
             {/* ANAF status indicator */}
             <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 4px 12px", fontSize: 12 }}>
               <span

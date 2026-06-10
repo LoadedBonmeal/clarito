@@ -43,7 +43,7 @@ interface AppState {
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
-      theme: "system",
+      theme: "light",
       setTheme: (theme) => set({ theme }),
 
       density: "comfortable",
@@ -68,6 +68,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "rofactura-app-state",
+      version: 1,
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         theme: state.theme,
@@ -75,6 +76,14 @@ export const useAppStore = create<AppState>()(
         sidebarCollapsed: state.sidebarCollapsed,
         activeCompanyId: state.activeCompanyId,
       }),
+      // Redesign rollout (v1): the new monochrome design system is light-first.
+      // Reset any previously-persisted "system"/"dark" choice to light once, so
+      // the approved light design is what users see. Dark stays available via toggle.
+      migrate: (persisted, version) => {
+        const s = (persisted ?? {}) as Record<string, unknown>;
+        if (version < 1) s.theme = "light";
+        return s as unknown as AppState;
+      },
     },
   ),
 );

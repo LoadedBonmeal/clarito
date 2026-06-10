@@ -1,20 +1,21 @@
 /**
  * Sidebar — white grouped navigation (rf- prefixed classes).
  *
- * Groups: TABLOU DE BORD / E-FACTURA / OPERATIV / RAPORTARE.
- * Top: logo + company-card → opens CompanySwitcher in AppShell.
- * Footer: Setări link, Ajutor (openUrl).
- * Preserves badge queries from original Sidebar.tsx.
+ * Sits below the full-width TopBar (design grid). Top: company-card →
+ * opens CompanySwitcher in AppShell. Groups: TABLOU DE BORD / E-FACTURA /
+ * OPERATIV / RAPORTARE. Foot: Setări + Ajutor links + a user/account card
+ * that opens the profile menu (theme · documentație · ieșire).
  */
 
-import { Link, useLocation } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 
 import { Icon } from "@/components/shared/Icon";
-import { BrandMark } from "@/components/shared/BrandMark";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import { isMac } from "@/lib/platform";
 
 // ── Nav data ──────────────────────────────────────────────────────────────────
 
@@ -42,8 +43,23 @@ interface SidebarProps {
 
 export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
   const location = useLocation();
+  const navigate = useNavigate();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
+
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
+
+  // Close profile pop on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) setProfileOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   // ── Badge queries (same as original) ──────────────────────────────────────
 
@@ -75,6 +91,12 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
     queryKey: queryKeys.contacts.list({ companyId: activeCompanyId ?? undefined }),
     queryFn: () => api.contacts.list({ companyId: activeCompanyId ?? undefined }),
     enabled: !!activeCompanyId,
+  });
+
+  // License holder = the closest thing to a "user" identity (single-user app).
+  const { data: license } = useQuery({
+    queryKey: ["license", "current"],
+    queryFn: () => api.license.get(),
   });
 
   const invoicesBadge = invoicesPaged?.total;
@@ -133,27 +155,35 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
   const activeCompany = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
   const companyInitials = (activeCompany?.legalName ?? "RF").slice(0, 2).toUpperCase();
 
+  // ── Account identity (license email) ───────────────────────────────────────
+  const accountEmail = license?.email ?? "Cont Clarito";
+  const accountInitials = (license?.email ?? "Clarito").slice(0, 2).toUpperCase();
+
+  const handleExit = async () => {
+    const { exit } = await import("@tauri-apps/plugin-process");
+    await exit(0);
+  };
+  const handleDocs = async () => {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl("https://mfinante.gov.ro/ro/web/efactura/informatii-tehnice");
+  };
+
   return (
     <nav className={`rf-sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
-      {/* Brand wordmark */}
-      <div className="rf-brand-wordmark">
-        <BrandMark size={28} className="rf-logo-img" />
-        <span className="rf-name">Clarito</span>
-      </div>
-
       {/* Company card — opens switcher modal in AppShell */}
       <button
         type="button"
         className="rf-company-card"
         onClick={onOpenCompanySwitcher}
         title="Schimbă compania activă"
+        style={{ marginTop: 2 }}
       >
         {/* Avatar (shown when collapsed) */}
         <span
           style={{
             display: sidebarCollapsed ? "grid" : "none",
             width: 32, height: 32, borderRadius: 8,
-            background: "var(--rf-accent-tint)", color: "var(--rf-accent)",
+            background: "var(--rf-accent)", color: "var(--rf-text-on-accent)",
             placeItems: "center", fontSize: 12, fontWeight: 700, flexShrink: 0,
           }}
         >
@@ -180,10 +210,6 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
           <div key={grp.group}>
             <div className="rf-nav-group-label">{grp.group}</div>
             {grp.items.map((item) => {
-              // Active when the path matches exactly, or (for prefix items like
-              // /invoices) when the current path is a child route (e.g.
-              // /invoices/$id). Stornate lives at its own /stornate route, so
-              // there is no longer any search-param disambiguation to do.
               const isActive = item.matchPrefix
                 ? location.pathname === item.matchPrefix ||
                   location.pathname.startsWith(`${item.matchPrefix}/`)
@@ -239,17 +265,65 @@ export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
           type="button"
           className="rf-nav-item"
           title="Documentație e-Factura"
-          onClick={() => {
-            void import("@tauri-apps/plugin-opener").then((m) =>
-              m.openUrl("https://mfinante.gov.ro/ro/web/efactura/informatii-tehnice")
-            );
-          }}
+          onClick={() => void handleDocs()}
         >
           <span className="rf-nav-ic"><Icon name="help" size={18} /></span>
           <span className="rf-nav-label">Ajutor</span>
         </button>
 
+        {/* User / account card → profile menu */}
+        <div ref={profileRef} style={{ position: "relative", marginTop: 6 }}>
+          <button
+            type="button"
+            className="rf-user-card"
+            onClick={() => setProfileOpen((o) => !o)}
+            title="Cont și setări"
+          >
+            <span className="rf-u-ava">{accountInitials}</span>
+            {!sidebarCollapsed && (
+              <span className="rf-u-meta">
+                <span className="rf-u-name">Cont</span>
+                <span className="rf-u-mail">{accountEmail}</span>
+              </span>
+            )}
+          </button>
+          {profileOpen && (
+            <div className="rf-profile-pop">
+              <button type="button" style={profileItemStyle} onClick={() => { setProfileOpen(false); void navigate({ to: "/settings" }); }}>
+                <Icon name="settings" size={15} /><span>Setări</span>
+              </button>
+              <button type="button" style={profileItemStyle} onClick={() => { setProfileOpen(false); setTheme(theme === "dark" ? "light" : "dark"); }}>
+                <Icon name="view" size={15} /><span>Comută tema</span>
+                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--rf-text-dim)" }}>{theme === "dark" ? "Luminoasă" : "Întunecată"}</span>
+              </button>
+              <button type="button" style={profileItemStyle} onClick={() => { setProfileOpen(false); void handleDocs(); }}>
+                <Icon name="help" size={15} /><span>Documentație e-Factura</span>
+              </button>
+              <div style={{ height: 1, background: "var(--rf-border)", margin: "4px 0" }} />
+              <button type="button" style={{ ...profileItemStyle, color: "var(--rf-error)" }} onClick={() => void handleExit()}>
+                <Icon name="x" size={15} /><span>Ieșire</span>
+                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--rf-text-dim)" }}>{isMac ? "⌘Q" : "Alt+F4"}</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </nav>
   );
 }
+
+const profileItemStyle: React.CSSProperties = {
+  display: "flex",
+  width: "100%",
+  gap: 10,
+  alignItems: "center",
+  border: "none",
+  background: "transparent",
+  padding: "9px 11px",
+  cursor: "pointer",
+  borderRadius: "var(--rf-radius-sm)",
+  fontSize: 13.5,
+  color: "var(--rf-text)",
+  textAlign: "left",
+  fontFamily: "inherit",
+};

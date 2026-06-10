@@ -1,61 +1,63 @@
 /* ------------------------------------------------------------------
-   Efactura — design tokens
-   Modern fintech-SaaS palette — indigo accent, white sidebar, airy.
+   Clarito — design tokens
+   Monochrome editorial palette — near-black ink (#1D1D1F) accent,
+   flat white surfaces, hairline borders (#ECECEC). 1:1 with the
+   approved Claude-Design system (clarito-shell.css).
    ------------------------------------------------------------------ */
 
 :root {
-  /* accent — indigo (#4F46E5 = modern fintech) */
-  --accent: #4F46E5;
-  --accent-hover: #4338CA;
-  --accent-soft: #EEF2FF;
-  --accent-border: #D5D9FB;
+  /* accent — monochrome ink (Apple-style #1D1D1F, per design clarito-shell.css) */
+  --accent: #1D1D1F;
+  --accent-hover: #000000;
+  --accent-soft: #F4F4F5;
+  --accent-border: #E0E0E2;
   --on-accent: #FFFFFF;
 
-  /* surface palette */
-  --bg: #F8F9FA;
+  /* surface palette — flat white, hairline separation */
+  --bg: #FFFFFF;
   --bg-content: #FFFFFF;
   --bg-sidebar: #FFFFFF;          /* white sidebar */
   --bg-toolbar: #FFFFFF;          /* flat toolbar */
   --bg-statusbar: #FFFFFF;
-  --bg-table-header: #F9FAFB;
+  --bg-table-header: #FCFCFD;
   --bg-row-zebra: #FFFFFF;
-  --bg-row-hover: #F9FAFB;
-  --bg-row-selected: #EEF2FF;
+  --bg-row-hover: #F7F7F8;
+  --bg-row-selected: #F4F4F5;
 
   /* input chrome */
   --input-bg: #FFFFFF;
-  --input-border: #D1D5DB;
+  --input-border: #DCDCDE;
   --input-border-focus: var(--accent);
-  --input-shadow-inset: inset 0 1px 0 rgba(15,23,42,0.04);
+  --input-shadow-inset: inset 0 1px 0 rgba(15,23,42,0.03);
 
   /* text */
-  --text: #191C1D;
-  --text-muted: #51525C;
-  --text-dim: #8A8D98;
+  --text: #1D1D1F;
+  --text-muted: #6E6E73;
+  --text-dim: #9A9AA0;
   --text-link: var(--accent);
 
   /* borders */
-  --border: #E5E7EB;
-  --border-strong: #D1D5DB;
-  --border-soft: #F0F1F4;
+  --border: #ECECEC;
+  --border-strong: #DADADA;
+  --border-soft: #F2F2F2;
 
   /* shadows — soft, felt-not-seen */
-  --shadow-card: 0 1px 3px 0 rgba(16,24,40,0.06), 0 1px 2px -1px rgba(16,24,40,0.04);
-  --shadow-pop:  0 12px 32px -8px rgba(16,24,40,0.14), 0 4px 10px -4px rgba(16,24,40,0.07);
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.04), 0 1px 1px rgba(0,0,0,0.03);
+  --shadow-pop:  0 12px 32px -10px rgba(0,0,0,0.28), 0 2px 6px rgba(0,0,0,0.05);
 
-  /* status colors — rf family */
-  --st-draft-bg: #F3F4F6;
-  --st-draft-fg: #51525C;
-  --st-pending-bg: #FFFBEB;
+  /* status colors — rf family (monochrome + 3 semantic accents, translucent) */
+  --st-draft-bg: #F4F4F5;
+  --st-draft-fg: #6E6E73;
+  --st-pending-bg: rgba(180,83,9,0.07);
   --st-pending-fg: #B45309;
-  --st-submitted-bg: #EEF2FF;
-  --st-submitted-fg: #4F46E5;
-  --st-validated-bg: #ECFDF5;
+  --st-submitted-bg: #F4F4F5;
+  --st-submitted-fg: #1D1D1F;
+  --st-validated-bg: rgba(4,120,87,0.07);
   --st-validated-fg: #047857;
-  --st-rejected-bg: #FEF2F2;
+  --st-rejected-bg: rgba(220,38,38,0.06);
   --st-rejected-fg: #DC2626;
-  --st-archived-bg: #F3F4F6;
-  --st-archived-fg: #51525C;
+  --st-archived-bg: #F4F4F5;
+  --st-archived-fg: #6E6E73;
 
   /* density (tweakable) */
   --row-h: 48px;
@@ -73,16 +75,16 @@
   /* ── rf-* alias block — used by rf.css and the new component kit ── */
   --rf-accent:        var(--accent);
   --rf-accent-hover:  var(--accent-hover);
-  --rf-accent-active: #3525CD;
+  --rf-accent-active: #000000;
   --rf-accent-tint:   var(--accent-soft);
-  --rf-accent-tint-2: #F5F6FE;
-  --rf-accent-ring:   rgba(79, 70, 229, 0.22);
+  --rf-accent-tint-2: #FAFAFB;
+  --rf-accent-ring:   rgba(29, 29, 31, 0.16);
 
   --rf-content:       var(--bg-content);
   --rf-app-bg:        var(--bg);
   --rf-sidebar:       var(--bg-sidebar);
   --rf-toolbar-1:     var(--bg-toolbar);
-  --rf-toolbar-2:     #F8F9FA;
+  --rf-toolbar-2:     #FFFFFF;
   --rf-table-head:    var(--bg-table-header);
   --rf-zebra:         var(--bg-row-zebra);
   --rf-hover:         var(--bg-row-hover);
@@ -97,22 +99,22 @@
   --rf-border:        var(--border);
   --rf-border-strong: var(--border-strong);
 
-  /* semantic status */
+  /* semantic status — translucent fills (design chip style) */
   --rf-success:       #047857;
-  --rf-success-bg:    #ECFDF5;
-  --rf-success-bd:    #BBF0D6;
+  --rf-success-bg:    rgba(4, 120, 87, 0.07);
+  --rf-success-bd:    rgba(4, 120, 87, 0.18);
   --rf-error:         #DC2626;
-  --rf-error-bg:      #FEF2F2;
-  --rf-error-bd:      #FBD2D2;
+  --rf-error-bg:      rgba(220, 38, 38, 0.06);
+  --rf-error-bd:      rgba(220, 38, 38, 0.18);
   --rf-warning:       #B45309;
-  --rf-warning-bg:    #FFFBEB;
-  --rf-warning-bd:    #FCE7B0;
-  --rf-info:          #4F46E5;
-  --rf-info-bg:       #EEF2FF;
-  --rf-info-bd:       #D5D9FB;
-  --rf-neutral:       #51525C;
-  --rf-neutral-bg:    #F3F4F6;
-  --rf-neutral-bd:    #E5E7EB;
+  --rf-warning-bg:    rgba(180, 83, 9, 0.07);
+  --rf-warning-bd:    rgba(180, 83, 9, 0.18);
+  --rf-info:          #44464B;
+  --rf-info-bg:       #F4F4F5;
+  --rf-info-bd:       #E2E2E4;
+  --rf-neutral:       #6E6E73;
+  --rf-neutral-bg:    #F4F4F5;
+  --rf-neutral-bd:    #E8E8EA;
 
   /* radius */
   --rf-radius:    12px;
@@ -120,9 +122,9 @@
   --rf-radius-lg: 16px;
 
   /* elevation */
-  --rf-shadow-sm: 0 1px 3px 0 rgba(16,24,40,0.04), 0 1px 2px -1px rgba(16,24,40,0.03);
-  --rf-shadow:    0 1px 3px 0 rgba(16,24,40,0.06), 0 1px 2px -1px rgba(16,24,40,0.04);
-  --rf-shadow-md: 0 12px 32px -8px rgba(16,24,40,0.14), 0 4px 10px -4px rgba(16,24,40,0.07);
+  --rf-shadow-sm: 0 1px 2px rgba(0,0,0,0.03);
+  --rf-shadow:    0 1px 2px rgba(0,0,0,0.04), 0 1px 1px rgba(0,0,0,0.03);
+  --rf-shadow-md: 0 12px 32px -10px rgba(0,0,0,0.28), 0 2px 6px rgba(0,0,0,0.05);
 
   /* row density */
   --rf-row-h: 48px;
@@ -151,11 +153,11 @@
 
 /* dark mode */
 .dark {
-  --accent: #8B95FF;
-  --accent-hover: #9AA3FF;
-  --accent-soft: #232745;
-  --accent-border: #2d3157;
-  --on-accent: #0B0D12;
+  --accent: #F5F5F7;
+  --accent-hover: #FFFFFF;
+  --accent-soft: #26262B;
+  --accent-border: #36363C;
+  --on-accent: #1D1D1F;
 
   --bg: #0B0D12;
   --bg-content: #15171F;
@@ -165,7 +167,7 @@
   --bg-table-header: #1A1D26;
   --bg-row-zebra: #15171F;
   --bg-row-hover: #1C1F29;
-  --bg-row-selected: #232745;
+  --bg-row-selected: #23262F;
 
   --input-bg: #0F1115;
   --input-border: #323641;
@@ -184,42 +186,42 @@
 
   --st-draft-bg: #1D2029;       --st-draft-fg: #9DA2B0;
   --st-pending-bg: #2a2010;     --st-pending-fg: #F5B642;
-  --st-submitted-bg: #1a1d2e;   --st-submitted-fg: #8B95FF;
+  --st-submitted-bg: #1D2029;   --st-submitted-fg: #ECEDF2;
   --st-validated-bg: #0e2a1f;   --st-validated-fg: #3DD68C;
   --st-rejected-bg: #2c1517;    --st-rejected-fg: #FB7A7A;
   --st-archived-bg: #1D2029;    --st-archived-fg: #9DA2B0;
 
-  /* rf aliases updated for dark */
-  --rf-accent:        #8B95FF;
-  --rf-accent-hover:  #9AA3FF;
-  --rf-accent-active: #B0B7FF;
-  --rf-accent-tint:   #232745;
-  --rf-accent-tint-2: #1A1D2E;
-  --rf-accent-ring:   rgba(139, 149, 255, 0.40);
+  /* rf aliases updated for dark — monochrome (light ink accent) */
+  --rf-accent:        #F5F5F7;
+  --rf-accent-hover:  #FFFFFF;
+  --rf-accent-active: #E2E2E6;
+  --rf-accent-tint:   #26262B;
+  --rf-accent-tint-2: #1F1F24;
+  --rf-accent-ring:   rgba(245, 245, 247, 0.22);
 
   --rf-content:       #15171F;
   --rf-app-bg:        #0B0D12;
   --rf-sidebar:       #101219;
   --rf-toolbar-1:     #15171F;
-  --rf-toolbar-2:     #0F1116;
+  --rf-toolbar-2:     #15171F;
   --rf-table-head:    #1A1D26;
   --rf-zebra:         #15171F;
   --rf-hover:         #1C1F29;
-  --rf-selected:      #232745;
+  --rf-selected:      #23262F;
   --rf-overlay:       rgba(3, 5, 10, 0.66);
 
   --rf-text:          #ECEDF2;
   --rf-text-muted:    #9DA2B0;
   --rf-text-dim:      #7A8290;
-  --rf-text-on-accent:#0B0D12;
+  --rf-text-on-accent:#1D1D1F;
 
   --rf-border:        #23262F;
   --rf-border-strong: #323641;
 
-  --rf-success: #3DD68C; --rf-success-bg: #0e2a1f; --rf-success-bd: #1e4736;
-  --rf-error:   #FB7A7A; --rf-error-bg:   #2c1517; --rf-error-bd:   #4d2528;
-  --rf-warning: #F5B642; --rf-warning-bg: #2a2010; --rf-warning-bd: #48391b;
-  --rf-info:    #8B95FF; --rf-info-bg:    #1a1d2e; --rf-info-bd:    #2d3157;
+  --rf-success: #3DD68C; --rf-success-bg: rgba(61,214,140,0.10); --rf-success-bd: rgba(61,214,140,0.22);
+  --rf-error:   #FB7A7A; --rf-error-bg:   rgba(251,122,122,0.10); --rf-error-bd:   rgba(251,122,122,0.22);
+  --rf-warning: #F5B642; --rf-warning-bg: rgba(245,182,66,0.10); --rf-warning-bd: rgba(245,182,66,0.22);
+  --rf-info:    #C7C9CE; --rf-info-bg:    #1D2029; --rf-info-bd:    #2b2f3a;
   --rf-neutral: #9DA2B0; --rf-neutral-bg: #1D2029; --rf-neutral-bd: #2b2f3a;
 }
 
@@ -282,18 +284,23 @@ input, select, textarea { font: inherit; color: inherit; }
    App skeleton
    ------------------------------------------------------------------ */
 .app {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "top top" "side main";
   height: 100vh;
   overflow: hidden;
   background: var(--bg);
 }
 
-/* Wave-1 shell scaffolding: sidebar-column + main-column */
+/* Topbar spans the full width across the top; sidebar sits below it on the
+   left, main fills the rest (design clarito-shell.css grid). */
 .app-main {
+  grid-area: main;
   display: flex;
   flex-direction: column;
-  flex: 1;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
 }
 

@@ -266,9 +266,9 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <OnboardingGate>
       <div className="app">
+        <TopBar />
         <Sidebar onOpenCompanySwitcher={() => setSwitcherOpen(true)} />
         <div className="app-main">
-          <TopBar />
           {stalenessForms.length > 0 && !stalenessDismissed && (
             <Banner
               variant="warning"
