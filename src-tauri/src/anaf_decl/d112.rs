@@ -50,7 +50,7 @@ fn pct(d: Decimal, (n, s): (i64, u32)) -> Decimal {
     (d * Decimal::new(n, s)).round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
 }
 fn fmt(d: Decimal) -> String {
-    let d = d.round_dp(2);
+    let d = d.round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero);
     let d = if d.is_zero() { Decimal::ZERO } else { d };
     format!("{:.2}", d)
 }

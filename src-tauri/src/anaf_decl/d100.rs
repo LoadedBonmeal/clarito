@@ -47,7 +47,8 @@ pub struct D100Result {
 }
 
 fn fmt(d: Decimal) -> String {
-    let d = d.round_dp(0); // D100 amounts are whole lei.
+    // D100 amounts are whole lei — COMMERCIAL rounding (half away from zero), the ANAF convention.
+    let d = d.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let d = if d.is_zero() { Decimal::ZERO } else { d };
     format!("{:.0}", d)
 }

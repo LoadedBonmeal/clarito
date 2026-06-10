@@ -149,7 +149,6 @@ pub async fn list_all_summaries(
     use rust_decimal::Decimal;
     use sqlx::Row;
     use std::collections::HashMap;
-    use std::str::FromStr;
 
     // Fetch all invoices for the company — total_amount stored as TEXT
     let invoice_rows = sqlx::query("SELECT id, total_amount FROM invoices WHERE company_id = ?1")
@@ -179,7 +178,8 @@ pub async fn list_all_summaries(
     for row in payment_rows {
         let invoice_id: String = row.try_get("invoice_id").map_err(AppError::Database)?;
         let amount_str: String = row.try_get("amount").unwrap_or_else(|_| "0".to_string());
-        let amount = Decimal::from_str(&amount_str).unwrap_or(Decimal::ZERO);
+        // Logged parse — a corrupted payment amount must not silently zero the running sum.
+        let amount = crate::db::models::dec_logged("payments.paid_map", &amount_str);
         *paid_map.entry(invoice_id.clone()).or_insert(Decimal::ZERO) += amount;
 
         let payment = Payment {
@@ -211,9 +211,10 @@ pub async fn list_all_summaries(
         let total_str: String = row
             .try_get("total_amount")
             .unwrap_or_else(|_| "0".to_string());
-        let total = Decimal::from_str(&total_str)
-            .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+        let total = crate::db::invoices::round2(crate::db::models::dec_logged(
+            "payments.summaries.total",
+            &total_str,
+        ));
         let paid = paid_map
             .get(&invoice_id)
             .copied()
@@ -256,7 +257,6 @@ pub async fn summary_for_invoice(
             .await?;
 
     use rust_decimal::Decimal;
-    use std::str::FromStr;
 
     let total_str = total.ok_or(AppError::NotFound)?;
 
@@ -270,15 +270,17 @@ pub async fn summary_for_invoice(
             .await
             .map_err(AppError::Database)?;
 
-    let paid_total = payment_rows
-        .iter()
-        .map(|s| Decimal::from_str(s).unwrap_or(Decimal::ZERO))
-        .fold(Decimal::ZERO, |acc, d| acc + d)
-        .round_dp(2);
+    let paid_total = crate::db::invoices::round2(
+        payment_rows
+            .iter()
+            .map(|s| crate::db::models::dec_logged("payments.summary.amount", s))
+            .fold(Decimal::ZERO, |acc, d| acc + d),
+    );
 
-    let invoice_total = Decimal::from_str(&total_str)
-        .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+    let invoice_total = crate::db::invoices::round2(crate::db::models::dec_logged(
+        "payments.summary.total",
+        &total_str,
+    ));
 
     let payment_status = if paid_total <= Decimal::ZERO {
         "UNPAID"

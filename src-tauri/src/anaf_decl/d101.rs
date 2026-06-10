@@ -68,7 +68,8 @@ pub struct D101Result {
 }
 
 fn r2(d: Decimal) -> Decimal {
-    d.round_dp(2)
+    // Commercial rounding (half away from zero) — banker's would diverge at .xx5 (e.g. 16% taxes).
+    d.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
 }
 fn fmt(d: Decimal) -> String {
     let d = r2(d);

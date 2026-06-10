@@ -143,7 +143,13 @@ async fn process_recurring_invoices(
             } else if let Some(s) = line["vatRate"].as_str() {
                 match s.parse::<Decimal>() {
                     Ok(d) => {
-                        let rounded = d.round_dp(0).to_i64().unwrap_or(-1);
+                        let rounded = d
+                            .round_dp_with_strategy(
+                                0,
+                                rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                            )
+                            .to_i64()
+                            .unwrap_or(-1);
                         if !crate::db::models::VALID_VAT_RATES.contains(&rounded) {
                             tracing::warn!(
                                 template_id = %template.id,
@@ -186,17 +192,20 @@ async fn process_recurring_invoices(
             subtotal_dec += ls;
             vat_total_dec += lv;
 
+            // ls/lv/lt sunt deja rotunjite comercial mai sus — re-rotunjirea cu round_dp
+            // (banker's) era redundantă și cu strategia greșită. Intrările cu zecimale în plus
+            // (qty/price/rate) se rotunjesc tot comercial, pentru consecvență.
             line_calcs.push(LineCalc {
                 name,
                 description,
-                quantity: qty.round_dp(2).to_string(),
+                quantity: crate::db::invoices::round2(qty).to_string(),
                 unit,
-                unit_price: price.round_dp(2).to_string(),
-                vat_rate: eff_rate.round_dp(2).to_string(),
+                unit_price: crate::db::invoices::round2(price).to_string(),
+                vat_rate: crate::db::invoices::round2(eff_rate).to_string(),
                 vat_category,
-                subtotal: ls.round_dp(2).to_string(),
-                vat_amount: lv.round_dp(2).to_string(),
-                total_amount: lt.round_dp(2).to_string(),
+                subtotal: ls.to_string(),
+                vat_amount: lv.to_string(),
+                total_amount: lt.to_string(),
             });
         }
 
@@ -558,8 +567,8 @@ mod tests {
             let vat_rate = Decimal::from(n);
             let qty = Decimal::ONE;
             let price = Decimal::from(100u32);
-            let ls = (qty * price).round_dp(2);
-            let lv = (ls * vat_rate / hundred).round_dp(2);
+            let ls = crate::db::invoices::round2(qty * price);
+            let lv = crate::db::invoices::round2(ls * vat_rate / hundred);
             subtotal_dec += ls;
             vat_total_dec += lv;
             line_calcs.push(format!("line-{n}"));

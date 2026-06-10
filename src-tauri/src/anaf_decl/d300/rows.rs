@@ -247,9 +247,12 @@ fn strip_ro_prefix(cui: &str) -> String {
     s.trim().to_string()
 }
 
-/// Round a `Decimal` to 0 decimal places and convert to `i64`.
+/// Round a `Decimal` to whole lei (i64) with COMMERCIAL rounding (half away from zero) — the ANAF
+/// convention; banker's would diverge at .5 lei.
 fn round_to_lei(d: Decimal) -> i64 {
-    d.round_dp(0).to_i64().unwrap_or(0)
+    d.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+        .to_i64()
+        .unwrap_or(0)
 }
 
 /// Parse a monetary string (as produced by `D300Report`) to `Decimal`.
@@ -580,34 +583,22 @@ pub fn map_to_rows(
     let r16_1_val: i64 = if let Some(ov) = submission.reg_colectata_baza {
         ov
     } else {
-        parse_dec(&report.reg_colectata_baza)
-            .round_dp(0)
-            .to_i64()
-            .unwrap_or(0)
+        round_to_lei(parse_dec(&report.reg_colectata_baza))
     };
     let r16_2_val: i64 = if let Some(ov) = submission.reg_colectata_tva {
         ov
     } else {
-        parse_dec(&report.reg_colectata_tva)
-            .round_dp(0)
-            .to_i64()
-            .unwrap_or(0)
+        round_to_lei(parse_dec(&report.reg_colectata_tva))
     };
     let r30_1_val: i64 = if let Some(ov) = submission.reg_dedusa_baza {
         ov
     } else {
-        parse_dec(&report.reg_dedusa_baza)
-            .round_dp(0)
-            .to_i64()
-            .unwrap_or(0)
+        round_to_lei(parse_dec(&report.reg_dedusa_baza))
     };
     let r30_2_val: i64 = if let Some(ov) = submission.reg_dedusa_tva {
         ov
     } else {
-        parse_dec(&report.reg_dedusa_tva)
-            .round_dp(0)
-            .to_i64()
-            .unwrap_or(0)
+        round_to_lei(parse_dec(&report.reg_dedusa_tva))
     };
 
     // ── Margin checks (logged, non-fatal) ─────────────────────────────────────
@@ -687,7 +678,9 @@ pub fn map_to_rows(
     let r28_vat = if pro_rata_pct >= hundred {
         r27_vat
     } else {
-        (r27_vat * pro_rata_pct / hundred).round_dp(0)
+        // Whole-lei, COMMERCIAL rounding (the same convention as round_to_lei).
+        (r27_vat * pro_rata_pct / hundred)
+            .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
     };
 
     // R32_2 = R28_2 + R29_2 + R30_2 + R31_2

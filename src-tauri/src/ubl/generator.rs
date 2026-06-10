@@ -627,9 +627,10 @@ fn write_amount(
 /// Formatează un `&str` numeric ca string cu 2 zecimale, rutând prin `Decimal`
 /// pentru rotunjire zecimală corectă (evită artefactele binary-float).
 fn fmt_amount(s: &str) -> String {
+    // Commercial rounding (half away from zero) — consistent with how the amounts were computed.
     let d = Decimal::from_str(s.trim())
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     format!("{:.2}", d)
 }
 
@@ -644,7 +645,7 @@ fn format_decimal_2(s: &str) -> String {
 fn format_decimal_n(s: &str, n: u32) -> String {
     let d = Decimal::from_str(s.trim())
         .unwrap_or(Decimal::ZERO)
-        .round_dp(n);
+        .round_dp_with_strategy(n, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     format!("{:.*}", n as usize, d)
 }
 

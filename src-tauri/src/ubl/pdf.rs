@@ -646,7 +646,9 @@ fn draw_hline(layer: &PdfLayerReference, x1: f32, x2: f32, y: f32) {
 /// fractional amounts (e.g. 1234.99 must yield exactly "99 bani").
 pub fn amount_to_romanian_words(amount: Decimal) -> String {
     // Work on the absolute value rounded to 2 decimals (1 ban precision).
-    let amount = amount.abs().round_dp(2);
+    let amount = amount
+        .abs()
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let lei = amount.trunc().to_u64().unwrap_or(0);
     let bani = ((amount.fract() * Decimal::from(100u32)).round())
         .to_u64()

@@ -93,3 +93,19 @@ pub fn new_id() -> String {
 pub fn now_unix() -> i64 {
     chrono::Utc::now().timestamp()
 }
+
+/// Parse a stored Decimal-as-TEXT money value, logging (never silently zeroing) a corrupted one.
+/// An empty string is treated as a legitimately-absent amount (0, no log). Use this instead of
+/// `Decimal::from_str(..).unwrap_or(ZERO)` on every money read — a malformed amount must leave a
+/// trace, otherwise reconciliation breaks with no signal.
+pub fn dec_logged(context: &str, s: &str) -> rust_decimal::Decimal {
+    match std::str::FromStr::from_str(s.trim()) {
+        Ok(d) => d,
+        Err(_) => {
+            if !s.trim().is_empty() {
+                tracing::warn!(context, value = %s, "valoare monetară invalidă — se folosește 0");
+            }
+            rust_decimal::Decimal::ZERO
+        }
+    }
+}
