@@ -262,6 +262,15 @@ pub async fn export_d112_xml(
         den: company.legal_name.chars().take(200).collect(),
         casa,
     };
+    // Modelul NOU D112 (Ordin comun 605/95/928/2.314/2026) se aplică veniturilor lunii iulie 2026+;
+    // structura emisă aici e v7 (≤ iunie 2026). FE avertizează utilizatorul; logăm și aici.
+    if year > 2026 || (year == 2026 && month >= 7) {
+        tracing::warn!(
+            year,
+            month,
+            "D112 pentru luni ≥ 07/2026 cere noul model (OPANAF 605/2026) — se emite structura v7"
+        );
+    }
     let xml = generate_d112_xml(&header, &d112_emps);
     // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the
     // IPC endpoint accepts an arbitrary string.

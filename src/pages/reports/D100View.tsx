@@ -48,7 +48,9 @@ export function D100View({ dateFrom, dateTo }: Props) {
             Rândul trimestrial pentru perioada selectată (T{quarter} {year}): micro → poziția 5
             (1% × venituri), profit → poziția 2 (16% × rezultat). Scadența: 25 a lunii următoare
             trimestrului (profit T4 se regularizează prin D101). Depunerea se face manual prin
-            PDF inteligent ANAF + SPV.
+            PDF inteligent ANAF + SPV. Regimul micro (1%) presupune îndeplinirea continuă a
+            condițiilor legale (plafon 100.000 EUR din 2026, salariat, structura veniturilor,
+            asociați) — aplicația nu le verifică pe toate; confirmați eligibilitatea.
           </Banner>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", padding: "0 16px 12px", alignItems: "flex-end" }}>

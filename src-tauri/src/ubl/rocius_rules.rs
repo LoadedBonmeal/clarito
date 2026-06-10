@@ -89,6 +89,7 @@ pub fn run_all(ctx: &RuleContext<'_>) -> (Vec<String>, Vec<String>) {
     warn!(warn_br_ro_w02_zero_value_line);
     warn!(warn_br_ro_w03_vat_payer_missing_prefix);
     warn!(warn_br_ro_w04_old_vat_rate);
+    warn!(warn_br_ro_w05_housing_9_conditions);
 
     (errors, warnings)
 }
@@ -747,6 +748,31 @@ fn warn_br_ro_w03_vat_payer_missing_prefix(ctx: &RuleContext<'_>) -> Option<Stri
         }
     }
     None
+}
+
+fn warn_br_ro_w05_housing_9_conditions(ctx: &RuleContext<'_>) -> Option<String> {
+    // Cota tranzitorie de 9% pentru locuințe (Legea 141/2025, art. 126) e condiționată: locuință
+    // ≤ 120 mp utili, valoare ≤ 600.000 lei fără TVA, livrată către persoane fizice, cu
+    // antecontract încheiat ÎNAINTE de 01.08.2025 (plata avansului conform). Aplicația nu deține
+    // aceste atribute — avertizăm ca utilizatorul să confirme condițiile înainte de emitere.
+    let issue = ctx.invoice.issue_date.as_str();
+    if issue < "2025-08-01" {
+        return None; // înainte de reformă 9% era cotă redusă generală — fără avertisment.
+    }
+    let uses_9 = ctx.lines.iter().any(|l| {
+        l.vat_category == "S"
+            && Decimal::from_str(&l.vat_rate).unwrap_or(Decimal::ZERO) == Decimal::from(9)
+    });
+    if uses_9 {
+        Some(
+            "[W05] Cota 9% (tranzitorie, locuințe) cere TOATE condițiile art. 126 Legea 141/2025: \
+             locuință ≤ 120 mp utili, valoare ≤ 600.000 lei fără TVA, către persoane fizice, cu \
+             antecontract anterior datei de 01.08.2025. Confirmați înainte de emitere."
+                .into(),
+        )
+    } else {
+        None
+    }
 }
 
 fn warn_br_ro_w04_old_vat_rate(ctx: &RuleContext<'_>) -> Option<String> {
