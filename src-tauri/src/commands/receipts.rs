@@ -158,7 +158,8 @@ pub async fn generate_receipt_pdf(
 fn fmt_amount_ro(amount: Decimal) -> String {
     // Decimal::to_string uses "." separator; replace for ro-RO display.
     // We always want 2 decimal places.
-    let rounded = amount.round_dp(2);
+    let rounded =
+        amount.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let s = format!("{:.2}", rounded);
     // s is like "1234.56" — split on '.'
     if let Some((int_part, dec_part)) = s.split_once('.') {

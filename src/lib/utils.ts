@@ -70,3 +70,14 @@ export function formatDate(date: Date | string, withTime = false): string {
     year: "numeric",
   }).format(d);
 }
+
+/** Lunile anului, nume complete (ro) — partajat de pagini (Reports/Declarations/GlLedger/SAF-T). */
+export const MONTHS_RO = [
+  "Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
+  "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie",
+] as const;
+
+/** Lunile anului, abreviate (ro) — pentru selectoare compacte (Payroll/Assets). */
+export const MONTHS_RO_SHORT = [
+  "Ian", "Feb", "Mar", "Apr", "Mai", "Iun", "Iul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;

@@ -14,7 +14,6 @@
 //! and F30 are completed in the ANAF app. This is the integration the bilanț filing path expects.
 
 use crate::db::gl::{ProfitLoss, TrialBalance};
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 
@@ -41,11 +40,9 @@ pub fn resolve_size_form(
     }
 }
 
-/// Round a Decimal RON value to whole lei (i64), commercial rounding.
+/// Round a Decimal RON value to whole lei (i64), commercial rounding (shared helper).
 fn lei(d: Decimal) -> i64 {
-    d.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
-        .to_i64()
-        .unwrap_or(0)
+    crate::anaf_decl::round_lei(d)
 }
 
 /// Net (debit-positive) balance of an account at the START of the period (opening) and END
@@ -649,18 +646,7 @@ pub fn compute_f20(
 }
 
 /// XML-escape (attribute value).
-fn esc(s: &str) -> String {
-    s.chars()
-        .filter(|c| !c.is_control())
-        .flat_map(|c| match c {
-            '&' => "&amp;".chars().collect::<Vec<_>>(),
-            '<' => "&lt;".chars().collect(),
-            '>' => "&gt;".chars().collect(),
-            '"' => "&quot;".chars().collect(),
-            other => vec![other],
-        })
-        .collect()
-}
+use crate::anaf_decl::xml_esc as esc;
 
 /// Map a 2-letter county auto-code to its ANAF județ code (Int_listaCodJud, 1-42; 40 = București).
 pub fn county_code(county: &str) -> u8 {

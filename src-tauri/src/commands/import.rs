@@ -218,7 +218,10 @@ pub async fn import_invoices_csv(
                 continue;
             }
         };
-        let vat_rate_rounded = vat_rate.round_dp(0).to_i64().unwrap_or(-1);
+        let vat_rate_rounded = vat_rate
+            .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_i64()
+            .unwrap_or(-1);
         if !crate::db::models::VALID_VAT_RATES.contains(&vat_rate_rounded) {
             errors.push(format!(
                 "Linia {row_num}: cotă TVA invalidă '{vat_rate_str}'. Valori permise: 0, 5, 9, 11, 19, 21."
@@ -317,9 +320,12 @@ pub async fn import_invoices_csv(
             let row_num = row.row_num;
 
             // Calculate amounts with Decimal precision
-            let subtotal = (row.qty * row.unit_price).round_dp(2);
-            let vat_amount = (subtotal * row.vat_rate / Decimal::from(100)).round_dp(2);
-            let total = (subtotal + vat_amount).round_dp(2);
+            let subtotal = (row.qty * row.unit_price)
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+            let vat_amount = (subtotal * row.vat_rate / Decimal::from(100))
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+            let total = (subtotal + vat_amount)
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
             let full_number = format!("{}-{:04}", row.series, row.number);
             let now = chrono::Utc::now().timestamp();
             let invoice_id = crate::db::models::new_id();
@@ -799,7 +805,11 @@ async fn import_invoice_xml_inner(
                     }
                     "PayableAmount" if depth_monetary > 0 => {
                         total_amount_str = if let Ok(d) = Decimal::from_str(text.trim()) {
-                            d.round_dp(2).to_string()
+                            d.round_dp_with_strategy(
+                                2,
+                                rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                            )
+                            .to_string()
                         } else {
                             "0.00".to_string()
                         };

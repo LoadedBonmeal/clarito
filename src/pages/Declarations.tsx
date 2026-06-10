@@ -27,7 +27,7 @@ import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { D300SubmissionModal } from "@/components/modals/D300SubmissionModal";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
-import { fmtRON, parseDec } from "@/lib/utils";
+import { fmtRON, parseDec, MONTHS_RO } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import { queryKeys } from "@/lib/queries";
@@ -36,10 +36,7 @@ import type { PreflightIssue } from "@/lib/tauri";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const MONTHS = [
-  "Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
-  "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie",
-];
+const MONTHS = MONTHS_RO;
 
 function buildYearOptions(): number[] {
   const current = new Date().getFullYear();

@@ -219,7 +219,7 @@ pub async fn list_all_summaries(
             .get(&invoice_id)
             .copied()
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
 
         let payment_status = if paid <= Decimal::ZERO {
             "UNPAID"
@@ -295,8 +295,382 @@ pub async fn summary_for_invoice(
     Ok(PaymentSummary {
         invoice_id: invoice_id.to_string(),
         total_amount: total_str,
-        paid_amount: paid_total.round_dp(2).to_string(),
+        paid_amount: paid_total
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
         payment_status: payment_status.to_string(),
         payments,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Shared fixture: in-memory DB with migrations + one company + one contact.
+    async fn pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co','RO1','T','S','C','CJ','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, contact_type, legal_name) \
+             VALUES ('ct','co','CUSTOMER','Cumpărător SRL')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    /// Helper: insert a minimal RON invoice (total_amount as TEXT per migration 006).
+    async fn seed_invoice(
+        pool: &SqlitePool,
+        id: &str,
+        company_id: &str,
+        total: &str,
+        currency: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, currency, subtotal_amount, vat_amount, total_amount, \
+              status, payment_means_code, created_at, updated_at) \
+             VALUES (?1,?2,'ct','F',1,'F/1','2026-01-01','2026-02-01',?3,'0','0',?4,'VALIDATED','30',1,1)",
+        )
+        .bind(id)
+        .bind(company_id)
+        .bind(currency)
+        .bind(total)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    // ─── Test 1: create() rejects amount ≤ 0 ───────────────────────────────
+
+    #[tokio::test]
+    async fn create_rejects_zero_amount() {
+        let pool = pool().await;
+        seed_invoice(&pool, "inv1", "co", "100.00", "RON").await;
+        let err = create(
+            &pool,
+            CreatePaymentInput {
+                invoice_id: "inv1".into(),
+                company_id: "co".into(),
+                amount: "0".into(),
+                currency: None,
+                paid_at: "2026-01-10".into(),
+                method: None,
+                reference: None,
+                notes: None,
+                exchange_rate: None,
+            },
+        )
+        .await;
+        assert!(
+            matches!(err, Err(AppError::Validation(_))),
+            "zero amount should be a Validation error"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_rejects_negative_amount() {
+        let pool = pool().await;
+        seed_invoice(&pool, "inv1", "co", "100.00", "RON").await;
+        let err = create(
+            &pool,
+            CreatePaymentInput {
+                invoice_id: "inv1".into(),
+                company_id: "co".into(),
+                amount: "-50".into(),
+                currency: None,
+                paid_at: "2026-01-10".into(),
+                method: None,
+                reference: None,
+                notes: None,
+                exchange_rate: None,
+            },
+        )
+        .await;
+        assert!(matches!(err, Err(AppError::Validation(_))));
+    }
+
+    #[tokio::test]
+    async fn create_rejects_garbage_amount() {
+        let pool = pool().await;
+        seed_invoice(&pool, "inv1", "co", "100.00", "RON").await;
+        let err = create(
+            &pool,
+            CreatePaymentInput {
+                invoice_id: "inv1".into(),
+                company_id: "co".into(),
+                amount: "abc".into(),
+                currency: None,
+                paid_at: "2026-01-10".into(),
+                method: None,
+                reference: None,
+                notes: None,
+                exchange_rate: None,
+            },
+        )
+        .await;
+        assert!(
+            matches!(err, Err(AppError::Validation(_))),
+            "garbage amount should be a Validation error"
+        );
+    }
+
+    // ─── Test 2: create() rejects invoice from another company ─────────────
+
+    #[tokio::test]
+    async fn create_rejects_cross_company_invoice() {
+        let pool = pool().await;
+        // Seed a second company and its invoice.
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co2','RO2','T2','S','C','CJ','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, contact_type, legal_name) \
+             VALUES ('ct2','co2','CUSTOMER','Alt SRL')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, currency, subtotal_amount, vat_amount, total_amount, \
+              status, payment_means_code, created_at, updated_at) \
+             VALUES ('inv2','co2','ct2','F',1,'F/1','2026-01-01','2026-02-01','RON','0','0','200.00','VALIDATED','30',1,1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Try to register a payment for 'inv2' but claim company 'co'.
+        let err = create(
+            &pool,
+            CreatePaymentInput {
+                invoice_id: "inv2".into(),
+                company_id: "co".into(), // wrong company
+                amount: "50".into(),
+                currency: None,
+                paid_at: "2026-01-10".into(),
+                method: None,
+                reference: None,
+                notes: None,
+                exchange_rate: None,
+            },
+        )
+        .await;
+        assert!(
+            matches!(err, Err(AppError::Validation(_))),
+            "cross-company invoice should be rejected as Validation error"
+        );
+    }
+
+    // ─── Test 3: create() inherits invoice currency when input.currency is None ──
+
+    #[tokio::test]
+    async fn create_defaults_to_invoice_currency() {
+        let pool = pool().await;
+        // Seed a EUR invoice.
+        seed_invoice(&pool, "inv_eur", "co", "500.00", "EUR").await;
+
+        let payment = create(
+            &pool,
+            CreatePaymentInput {
+                invoice_id: "inv_eur".into(),
+                company_id: "co".into(),
+                amount: "100".into(),
+                currency: None, // must inherit EUR from invoice
+                paid_at: "2026-01-15".into(),
+                method: None,
+                reference: None,
+                notes: None,
+                exchange_rate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            payment.currency, "EUR",
+            "payment should inherit invoice currency EUR"
+        );
+    }
+
+    // ─── Test 4: summary math — PAID / PARTIAL ──────────────────────────────
+
+    #[tokio::test]
+    async fn summary_fully_paid() {
+        let pool = pool().await;
+        seed_invoice(&pool, "inv1", "co", "100.00", "RON").await;
+
+        // Two payments summing to exactly 100.
+        for (id, amt) in [("p1", "40"), ("p2", "60")] {
+            create(
+                &pool,
+                CreatePaymentInput {
+                    invoice_id: "inv1".into(),
+                    company_id: "co".into(),
+                    amount: amt.into(),
+                    currency: None,
+                    paid_at: "2026-01-10".into(),
+                    method: None,
+                    reference: Some(id.into()),
+                    notes: None,
+                    exchange_rate: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        let s = summary_for_invoice(&pool, "inv1", "co").await.unwrap();
+        assert_eq!(s.payment_status, "PAID");
+        assert_eq!(s.paid_amount, "100");
+    }
+
+    #[tokio::test]
+    async fn summary_partial_payment() {
+        let pool = pool().await;
+        seed_invoice(&pool, "inv1", "co", "100.00", "RON").await;
+
+        create(
+            &pool,
+            CreatePaymentInput {
+                invoice_id: "inv1".into(),
+                company_id: "co".into(),
+                amount: "40".into(),
+                currency: None,
+                paid_at: "2026-01-10".into(),
+                method: None,
+                reference: None,
+                notes: None,
+                exchange_rate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let s = summary_for_invoice(&pool, "inv1", "co").await.unwrap();
+        assert_eq!(s.payment_status, "PARTIAL");
+    }
+
+    #[tokio::test]
+    async fn list_all_summaries_paid_and_partial() {
+        let pool = pool().await;
+        seed_invoice(&pool, "inv1", "co", "100.00", "RON").await;
+
+        // Fully paid invoice.
+        for amt in ["40", "60"] {
+            create(
+                &pool,
+                CreatePaymentInput {
+                    invoice_id: "inv1".into(),
+                    company_id: "co".into(),
+                    amount: amt.into(),
+                    currency: None,
+                    paid_at: "2026-01-10".into(),
+                    method: None,
+                    reference: None,
+                    notes: None,
+                    exchange_rate: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        // Second invoice — partial (need a different series/number to satisfy UNIQUE).
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, currency, subtotal_amount, vat_amount, total_amount, \
+              status, payment_means_code, created_at, updated_at) \
+             VALUES ('inv2','co','ct','F',2,'F/2','2026-01-01','2026-02-01','RON','0','0','200.00','VALIDATED','30',1,1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        create(
+            &pool,
+            CreatePaymentInput {
+                invoice_id: "inv2".into(),
+                company_id: "co".into(),
+                amount: "50".into(),
+                currency: None,
+                paid_at: "2026-01-11".into(),
+                method: None,
+                reference: None,
+                notes: None,
+                exchange_rate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let summaries = list_all_summaries(&pool, "co").await.unwrap();
+        let get = |id: &str| summaries.iter().find(|s| s.invoice_id == id).unwrap();
+
+        assert_eq!(get("inv1").payment_status, "PAID");
+        assert_eq!(get("inv2").payment_status, "PARTIAL");
+    }
+
+    // ─── Test 5: corrupted amount does NOT panic — treated as 0 ────────────
+
+    #[tokio::test]
+    async fn corrupted_payment_amount_treated_as_zero_no_panic() {
+        let pool = pool().await;
+        seed_invoice(&pool, "inv1", "co", "100.00", "RON").await;
+
+        // Insert a valid payment first.
+        create(
+            &pool,
+            CreatePaymentInput {
+                invoice_id: "inv1".into(),
+                company_id: "co".into(),
+                amount: "30".into(),
+                currency: None,
+                paid_at: "2026-01-10".into(),
+                method: None,
+                reference: None,
+                notes: None,
+                exchange_rate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Corrupt the amount directly in the DB.
+        sqlx::query("UPDATE payments SET amount = 'garbage' WHERE invoice_id = 'inv1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // summary_for_invoice must not panic and must treat garbage as 0.
+        let s = summary_for_invoice(&pool, "inv1", "co").await.unwrap();
+        assert_eq!(
+            s.paid_amount, "0",
+            "corrupted amount should be treated as 0 via dec_logged path"
+        );
+        assert_eq!(s.payment_status, "UNPAID");
+
+        // list_all_summaries must also survive without panic.
+        let all = list_all_summaries(&pool, "co").await.unwrap();
+        let inv = all.iter().find(|s| s.invoice_id == "inv1").unwrap();
+        assert_eq!(inv.paid_amount, "0");
+        assert_eq!(inv.payment_status, "UNPAID");
+    }
 }

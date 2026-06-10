@@ -15,10 +15,10 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
-import { fmtRON } from "@/lib/utils";
+import { fmtRON, MONTHS_RO_SHORT } from "@/lib/utils";
 import type { FixedAsset, FixedAssetInput, DepreciationRun } from "@/types";
 
-const MONTHS = ["Ian","Feb","Mar","Apr","Mai","Iun","Iul","Aug","Sep","Oct","Nov","Dec"];
+const MONTHS = MONTHS_RO_SHORT;
 
 export function AssetsPage() {
   const companyId = useAppStore((s) => s.activeCompanyId);

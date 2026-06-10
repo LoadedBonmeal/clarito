@@ -123,7 +123,7 @@ pub async fn export_invoices_xlsx(
                     .unwrap_or_default();
                 XlsxParseDecimal::from_str(&s)
                     .unwrap_or(XlsxParseDecimal::ZERO)
-                    .round_dp(2)
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
                     .to_f64()
                     .unwrap_or(0.0)
             },
@@ -134,7 +134,7 @@ pub async fn export_invoices_xlsx(
                 let s = row.try_get::<String, _>("vat_amount").unwrap_or_default();
                 XlsxParseDecimal::from_str(&s)
                     .unwrap_or(XlsxParseDecimal::ZERO)
-                    .round_dp(2)
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
                     .to_f64()
                     .unwrap_or(0.0)
             },
@@ -145,7 +145,7 @@ pub async fn export_invoices_xlsx(
                 let s = row.try_get::<String, _>("total_amount").unwrap_or_default();
                 XlsxParseDecimal::from_str(&s)
                     .unwrap_or(XlsxParseDecimal::ZERO)
-                    .round_dp(2)
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
                     .to_f64()
                     .unwrap_or(0.0)
             },

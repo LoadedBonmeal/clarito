@@ -481,14 +481,14 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         .bind(
             Decimal::try_from(line.quantity)
                 .unwrap_or(Decimal::ZERO)
-                .round_dp(6)
+                .round_dp_with_strategy(6, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
                 .to_string(),
         )
         .bind(&line.unit)
         .bind(
             Decimal::try_from(line.unit_price)
                 .unwrap_or(Decimal::ZERO)
-                .round_dp(2)
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
                 .to_string(),
         )
         .bind({
@@ -500,7 +500,8 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
             } else {
                 Decimal::ZERO
             };
-            eff.round_dp(2).to_string()
+            eff.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                .to_string()
         })
         .bind(&line.vat_category)
         .bind(line_subtotal)

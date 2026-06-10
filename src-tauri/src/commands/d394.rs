@@ -281,8 +281,14 @@ pub async fn compute_d394(
                 vat_category: acc.vat_category,
                 vat_rate: acc.vat_rate,
                 invoice_count: acc.invoice_ids.len() as i64,
-                base: acc.base.round_dp(2).to_string(),
-                vat: acc.vat.round_dp(2).to_string(),
+                base: acc
+                    .base
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
+                vat: acc
+                    .vat
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 art331_code: acc.art331_code,
             }
         })
@@ -437,8 +443,14 @@ pub async fn compute_d394(
                 vat_category: acc.vat_category,
                 vat_rate: acc.vat_rate,
                 invoice_count: acc.invoice_ids.len() as i64,
-                base: acc.base.round_dp(2).to_string(),
-                vat: acc.vat.round_dp(2).to_string(),
+                base: acc
+                    .base
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
+                vat: acc
+                    .vat
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 art331_code: acc.art331_code,
             }
         })
@@ -456,12 +468,20 @@ pub async fn compute_d394(
         period_from,
         period_to,
         partners: partners_vec,
-        total_base: total_base.round_dp(2).to_string(),
-        total_vat: total_vat.round_dp(2).to_string(),
+        total_base: total_base
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
+        total_vat: total_vat
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
         invoice_count: total_invoice_count,
         purchase_partners: purchase_partners_vec,
-        total_purchase_base: total_purchase_base.round_dp(2).to_string(),
-        total_purchase_vat: total_purchase_vat.round_dp(2).to_string(),
+        total_purchase_base: total_purchase_base
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
+        total_purchase_vat: total_purchase_vat
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
         purchase_invoice_count,
         purchase_unparsed_count,
     })
@@ -703,7 +723,10 @@ fn build_and_write_xml(report: D394Report, dest_path: String) -> AppResult<Strin
 
     xml.push_str("</D394>\n");
 
-    std::fs::write(&dest_path, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the
+    // IPC endpoint accepts an arbitrary string.
+    let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
+    std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
 
     Ok(dest_path)
 }

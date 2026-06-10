@@ -44,7 +44,7 @@ pub async fn tax_regime_status(
     .await?;
     let turnover = Decimal::try_from(turnover_f.max(0.0))
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let eur = Decimal::try_from(eur_ron.max(0.0)).unwrap_or(Decimal::ZERO);
     Ok(companies::micro_ceiling_status(
         &company.tax_regime,

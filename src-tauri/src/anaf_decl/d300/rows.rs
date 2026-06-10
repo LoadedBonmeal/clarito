@@ -247,12 +247,9 @@ fn strip_ro_prefix(cui: &str) -> String {
     s.trim().to_string()
 }
 
-/// Round a `Decimal` to whole lei (i64) with COMMERCIAL rounding (half away from zero) — the ANAF
-/// convention; banker's would diverge at .5 lei.
+/// Round a `Decimal` to whole lei (i64) with COMMERCIAL rounding — delegates to the shared helper.
 fn round_to_lei(d: Decimal) -> i64 {
-    d.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
-        .to_i64()
-        .unwrap_or(0)
+    crate::anaf_decl::round_lei(d)
 }
 
 /// Parse a monetary string (as produced by `D300Report`) to `Decimal`.
@@ -334,10 +331,15 @@ fn rate_matches(group: &D300Group, pct: i64) -> bool {
     // Handle both "0.21" and "21.00" encodings
     let as_pct = if d > Decimal::ONE {
         // already in percent form (e.g. "21.00")
-        d.round_dp(0).to_i64().unwrap_or(-1)
+        d.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_i64()
+            .unwrap_or(-1)
     } else {
         // fractional form (e.g. "0.21" → 21)
-        (d * Decimal::from(100)).round_dp(0).to_i64().unwrap_or(-1)
+        (d * Decimal::from(100))
+            .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_i64()
+            .unwrap_or(-1)
     };
     as_pct == pct
 }
@@ -606,9 +608,12 @@ pub fn map_to_rows(
     // DUKIntegrator's business rules are the authoritative check.
     let margin_warn = |row: &str, base: Decimal, vat: Decimal, lo_pct: i64, hi_pct: i64| {
         if base > Decimal::ZERO && vat > Decimal::ZERO {
-            let low = (base * Decimal::new(lo_pct, 2)).round_dp(0);
-            let high = (base * Decimal::new(hi_pct, 2)).round_dp(0);
-            let v = vat.round_dp(0);
+            let low = (base * Decimal::new(lo_pct, 2))
+                .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+            let high = (base * Decimal::new(hi_pct, 2))
+                .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+            let v =
+                vat.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
             if v < low || v > high {
                 tracing::warn!(
                     row,

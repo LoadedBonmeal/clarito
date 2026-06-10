@@ -31,7 +31,7 @@ import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
-import { fmtRON, parseDec } from "@/lib/utils";
+import { fmtRON, parseDec, MONTHS_RO } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import type { Contact } from "@/types";
@@ -50,10 +50,7 @@ import { AccountingExportView } from "./reports/AccountingExportView";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-const MONTHS = [
-  "Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
-  "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie",
-];
+const MONTHS = MONTHS_RO;
 
 function buildYearOptions(): number[] {
   const current = new Date().getFullYear();

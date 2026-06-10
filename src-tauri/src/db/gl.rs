@@ -1686,10 +1686,10 @@ pub async fn reconcile(
     let total_credit_f: f64 = totals_row.try_get("total_credit").unwrap_or(0.0);
     let total_debit = Decimal::try_from(total_debit_f)
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let total_credit = Decimal::try_from(total_credit_f)
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
 
     // ── Net 4427 (credit − debit) ─────────────────────────────────────────────
     // Net, not Σcredit: a VAT-bearing reduction / credit note posts 4427 as a DEBIT, so the
@@ -1711,7 +1711,7 @@ pub async fn reconcile(
     .unwrap_or(0.0);
     let vat_collected_gl = Decimal::try_from(c4427_f)
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
 
     // ── Net 4426 (debit − credit) ─────────────────────────────────────────────
     // Net, so a received credit note (4426 credit) reduces the deductibilă symmetrically.
@@ -1732,7 +1732,7 @@ pub async fn reconcile(
     .unwrap_or(0.0);
     let vat_deductible_gl = Decimal::try_from(d4426_f)
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
 
     // ── D300 TVA colectată + deductibilă via shared core (FIX 4) ────────────
     let (d300_collected, d300_deductible) =
@@ -1834,10 +1834,10 @@ pub async fn post_vat_settlement(
 
     let collected = Decimal::try_from(row.try_get::<f64, _>("collected").unwrap_or(0.0))
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let deductible = Decimal::try_from(row.try_get::<f64, _>("deductible").unwrap_or(0.0))
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let net_vat = collected - deductible;
     let source_id = format!("{period_from}_{period_to}");
 
@@ -2182,7 +2182,11 @@ pub async fn post_income_tax(
     };
     // Estimate from the pre-tax P&L if no explicit amount: micro 1% × venituri, profit 16% × brut+.
     let (amount, estimated) = match amount {
-        Some(a) => (a.max(Decimal::ZERO).round_dp(2), false),
+        Some(a) => (
+            a.max(Decimal::ZERO)
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero),
+            false,
+        ),
         None => {
             let pnl = profit_and_loss(pool, company_id, tax_regime, period_from, period_to).await?;
             let v = if tax_regime == "micro" {
@@ -2197,7 +2201,10 @@ pub async fn post_income_tax(
                     .max(Decimal::ZERO)
                     * Decimal::new(16, 2)
             };
-            (v.round_dp(2), true)
+            (
+                v.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero),
+                true,
+            )
         }
     };
     let source_id = format!("{period_from}_{period_to}");
@@ -2823,7 +2830,9 @@ pub async fn post_stock_movement(
 
 /// f64 → Decimal rounded to 2 decimals (GL sums come back as REAL).
 fn dec_f(f: f64) -> Decimal {
-    Decimal::try_from(f).unwrap_or(Decimal::ZERO).round_dp(2)
+    Decimal::try_from(f)
+        .unwrap_or(Decimal::ZERO)
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
 }
 
 /// One account row of the balanța de verificare.
@@ -3107,10 +3116,15 @@ pub fn compute_pnl(
     let (income_tax, income_tax_estimated) = if !income_tax_booked.is_zero() {
         (income_tax_booked, false)
     } else if tax_regime == "micro" {
-        ((total_revenue * Decimal::new(1, 2)).round_dp(2), true)
+        (
+            (total_revenue * Decimal::new(1, 2))
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero),
+            true,
+        )
     } else {
         (
-            (gross_result.max(Decimal::ZERO) * Decimal::new(16, 2)).round_dp(2),
+            (gross_result.max(Decimal::ZERO) * Decimal::new(16, 2))
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero),
             true,
         )
     };

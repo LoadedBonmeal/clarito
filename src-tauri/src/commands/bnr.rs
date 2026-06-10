@@ -159,7 +159,8 @@ pub(crate) fn parse_bnr_rate(xml: &str, currency: &str, target_date: &str) -> Op
 
     best.map(|(_, val, mult)| {
         let divisor = Decimal::from(mult.max(1));
-        (val / divisor).round_dp(4)
+        (val / divisor)
+            .round_dp_with_strategy(4, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
     })
 }
 

@@ -21,7 +21,7 @@ import {
 } from "@/components/rf";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
-import { fmtRON, parseDec } from "@/lib/utils";
+import { fmtRON, parseDec, MONTHS_RO } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import type {
@@ -31,10 +31,7 @@ import type {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const MONTHS = [
-  "Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
-  "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie",
-];
+const MONTHS = MONTHS_RO;
 
 function buildYearOptions(): number[] {
   const current = new Date().getFullYear();

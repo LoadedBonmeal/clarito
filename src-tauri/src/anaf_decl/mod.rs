@@ -43,6 +43,35 @@ impl DeclKind {
     }
 }
 
+// ── Shared whole-lei rounding ────────────────────────────────────────────────
+
+/// Rotunjește o sumă Decimal la lei întregi (i64), COMERCIAL (half away from zero) — convenția
+/// ANAF pentru toate declarațiile cu sume în lei întregi (bilanț, D300, D390...).
+pub(crate) fn round_lei(d: rust_decimal::Decimal) -> i64 {
+    use rust_decimal::prelude::ToPrimitive;
+    d.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+        .to_i64()
+        .unwrap_or(0)
+}
+
+// ── Shared XML escaping ──────────────────────────────────────────────────────
+
+/// Escape pentru conținut XML (text + atribute): elimină caracterele de control (ILEGALE în
+/// XML 1.0 — un nume cu \u{0b} ar invalida tot fișierul) și escapează & < > ".
+/// Folosit de TOATE generatoarele hand-rolled (d112, bilanț, SAF-T); quick-xml escapează singur.
+pub(crate) fn xml_esc(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_control())
+        .flat_map(|c| match c {
+            '&' => "&amp;".chars().collect::<Vec<_>>(),
+            '<' => "&lt;".chars().collect(),
+            '>' => "&gt;".chars().collect(),
+            '"' => "&quot;".chars().collect(),
+            other => vec![other],
+        })
+        .collect()
+}
+
 // ── CUI mod-11 checksum ──────────────────────────────────────────────────────
 
 /// Validate a Romanian CUI (Cod Unic de Înregistrare) using the official

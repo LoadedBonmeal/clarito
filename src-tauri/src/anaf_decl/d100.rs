@@ -118,7 +118,11 @@ pub fn compute_d100(tax_regime: &str, input: &D100Input) -> D100Result {
         cod_oblig: cod_oblig.to_string(),
         label: label.to_string(),
         base: fmt(base),
-        rate_pct: format!("{}", (rate * Decimal::from(100)).round_dp(0)),
+        rate_pct: format!(
+            "{}",
+            (rate * Decimal::from(100))
+                .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+        ),
         suma_datorata: fmt(suma_datorata),
         prior_payments: fmt(input.prior_payments),
         suma_de_plata: fmt(suma_de_plata),

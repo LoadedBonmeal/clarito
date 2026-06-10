@@ -485,8 +485,9 @@ fn rule_br_ro_036_line_totals_match(ctx: &RuleContext<'_>) -> Option<String> {
         let price = Decimal::from_str(&line.unit_price).unwrap_or(Decimal::ZERO);
         let stored = Decimal::from_str(&line.subtotal_amount)
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
-        let expected = (qty * price).round_dp(2);
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+        let expected = (qty * price)
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
         let diff = (expected - stored).abs();
         if diff > Decimal::new(1, 2) {
             errs.push(format!(
@@ -514,11 +515,13 @@ fn rule_br_ro_037_line_vat_amounts_match(ctx: &RuleContext<'_>) -> Option<String
         let qty = Decimal::from_str(&line.quantity).unwrap_or(Decimal::ZERO);
         let price = Decimal::from_str(&line.unit_price).unwrap_or(Decimal::ZERO);
         let rate = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
-        let net = (qty * price).round_dp(2);
-        let expected_vat = (net * rate / hundred).round_dp(2);
+        let net = (qty * price)
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+        let expected_vat = (net * rate / hundred)
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
         let stored_vat = Decimal::from_str(&line.vat_amount)
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
         let diff = (expected_vat - stored_vat).abs();
         if diff > Decimal::new(1, 2) {
             errs.push(format!(
@@ -547,10 +550,10 @@ fn rule_br_ro_040_subtotal_equals_lines(ctx: &RuleContext<'_>) -> Option<String>
         .iter()
         .map(|l| Decimal::from_str(&l.subtotal_amount).unwrap_or(Decimal::ZERO))
         .fold(Decimal::ZERO, |a, b| a + b)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let header = Decimal::from_str(&ctx.invoice.subtotal_amount)
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let diff = (sum - header).abs();
     if diff > Decimal::new(1, 2) {
         Some(format!(
@@ -568,10 +571,10 @@ fn rule_br_ro_041_vat_total_equals_lines(ctx: &RuleContext<'_>) -> Option<String
         .iter()
         .map(|l| Decimal::from_str(&l.vat_amount).unwrap_or(Decimal::ZERO))
         .fold(Decimal::ZERO, |a, b| a + b)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let header = Decimal::from_str(&ctx.invoice.vat_amount)
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let diff = (sum - header).abs();
     if diff > Decimal::new(1, 2) {
         Some(format!(
@@ -586,14 +589,15 @@ fn rule_br_ro_041_vat_total_equals_lines(ctx: &RuleContext<'_>) -> Option<String
 fn rule_br_ro_042_total_equals_subtotal_plus_vat(ctx: &RuleContext<'_>) -> Option<String> {
     let net = Decimal::from_str(&ctx.invoice.subtotal_amount)
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let vat = Decimal::from_str(&ctx.invoice.vat_amount)
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
-    let expected = (net + vat).round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+    let expected =
+        (net + vat).round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let actual = Decimal::from_str(&ctx.invoice.total_amount)
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let diff = (expected - actual).abs();
     if diff > Decimal::new(1, 2) {
         Some(format!(
@@ -619,10 +623,10 @@ fn rule_br_ro_043_vat_breakdown_by_category(ctx: &RuleContext<'_>) -> Option<Str
     for line in ctx.lines {
         let net = Decimal::from_str(&line.subtotal_amount)
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
         let vat = Decimal::from_str(&line.vat_amount)
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
         let rate = Decimal::from_str(&line.vat_rate).unwrap_or(Decimal::ZERO);
         let key = (line.vat_category.clone(), rate.to_string());
         *group_net.entry(key.clone()).or_insert(Decimal::ZERO) += net;
@@ -633,8 +637,14 @@ fn rule_br_ro_043_vat_breakdown_by_category(ctx: &RuleContext<'_>) -> Option<Str
     let mut errs: Vec<String> = Vec::new();
     for (key, net) in &group_net {
         if let (Some(&rate), Some(&vat)) = (group_rate.get(key), group_vat.get(key)) {
-            let expected_vat = (net * rate / hundred).round_dp(2);
-            let diff = (expected_vat - vat.round_dp(2)).abs();
+            let expected_vat = (net * rate / hundred)
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+            let diff = (expected_vat
+                - vat.round_dp_with_strategy(
+                    2,
+                    rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                ))
+            .abs();
             // Toleranță 0.01 RON — consistent cu BR-RO-040/041/042 (Decimal::new(1, 2)).
             if diff > Decimal::new(1, 2) {
                 errs.push(format!(

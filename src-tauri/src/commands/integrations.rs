@@ -541,9 +541,27 @@ pub async fn export_winmentor_csv(
         let curs = invoice.exchange_rate.unwrap_or(1.0);
 
         for (vat_rate, (net_dec, tva_dec, tot_dec)) in &groups {
-            let net = format!("{:.2}", net_dec.round_dp(2));
-            let tva = format!("{:.2}", tva_dec.round_dp(2));
-            let total = format!("{:.2}", tot_dec.round_dp(2));
+            let net = format!(
+                "{:.2}",
+                net_dec.round_dp_with_strategy(
+                    2,
+                    rust_decimal::RoundingStrategy::MidpointAwayFromZero
+                )
+            );
+            let tva = format!(
+                "{:.2}",
+                tva_dec.round_dp_with_strategy(
+                    2,
+                    rust_decimal::RoundingStrategy::MidpointAwayFromZero
+                )
+            );
+            let total = format!(
+                "{:.2}",
+                tot_dec.round_dp_with_strategy(
+                    2,
+                    rust_decimal::RoundingStrategy::MidpointAwayFromZero
+                )
+            );
 
             let row = format!(
                 "FACT;{serie};{numar};{data};{cui};{denumire};\

@@ -360,14 +360,14 @@ pub async fn update_invoice_draft(
         .bind(
             Decimal::try_from(line.quantity)
                 .unwrap_or(Decimal::ZERO)
-                .round_dp(6)
+                .round_dp_with_strategy(6, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
                 .to_string(),
         )
         .bind(&line.unit)
         .bind(
             Decimal::try_from(line.unit_price)
                 .unwrap_or(Decimal::ZERO)
-                .round_dp(2)
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
                 .to_string(),
         )
         .bind({
@@ -378,7 +378,8 @@ pub async fn update_invoice_draft(
             } else {
                 Decimal::ZERO
             };
-            eff.round_dp(2).to_string()
+            eff.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                .to_string()
         })
         .bind(&line.vat_category)
         .bind(line_subtotal)
@@ -576,10 +577,16 @@ pub async fn storno_invoice(
                 id: new_id(),
                 name: l.name.clone(),
                 description: Some(format!("Storno: {}", l.name)),
-                quantity: qty.round_dp(6).to_string(),
+                quantity: qty
+                    .round_dp_with_strategy(6, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 unit: l.unit.clone(),
-                unit_price: price.round_dp(2).to_string(),
-                vat_rate: rate.round_dp(2).to_string(),
+                unit_price: price
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
+                vat_rate: rate
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 vat_category: l.vat_category.clone(),
                 cpv_code: l.cpv_code.clone(),
                 subtotal: ls.to_string(),
