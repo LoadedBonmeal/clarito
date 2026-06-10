@@ -58,6 +58,9 @@ pub struct GlPostResult {
     pub entries_inserted: i64,
     pub journals_replaced: i64,
     pub skipped_received: i64,
+    /// Referințele documentelor primite SĂRITE (fără defalcare TVA) — afișate utilizatorului ca să
+    /// știe exact ce NU a fost înregistrat în jurnal, nu doar câte.
+    pub skipped_received_refs: Vec<String>,
 }
 
 /// Raport de reconciliere GL ↔ D300.
@@ -1054,9 +1057,9 @@ fn assert_balanced(entries: &[GlEntry], source_id: &str) -> AppResult<()> {
 /// este șters și reinsertat (CASCADE pe gl_entry). Astfel rularea de două ori
 /// produce exact același rezultat fără duplicate.
 ///
-/// **Atomic**: fiecare document (factură / plată) este procesat într-o tranzacție
-/// proprie (`pool.begin()` … `tx.commit()`) — un eșec parțial nu lasă date
-/// incomplete.
+/// **Atomic**: ÎNTREGUL lot rulează într-o singură tranzacție — un eșec oriunde
+/// (sau un crash la mijloc) face rollback complet, fără perioade pe jumătate
+/// postate. Re-rularea după succes rămâne idempotentă per document.
 ///
 /// Acoperă:
 /// 1. Facturi emise (VALIDATED / STORNED) în perioadă.
@@ -1071,6 +1074,11 @@ pub async fn generate_gl_entries(
     let mut journals_inserted: i64 = 0;
     let mut entries_inserted: i64 = 0;
     let mut journals_replaced: i64 = 0;
+
+    // O SINGURĂ tranzacție pe întregul lot (toate secțiunile 1-4): un eșec oriunde face rollback
+    // complet — fără stări pe jumătate postate la crash în mijlocul lotului. Idempotența per
+    // document (DELETE+INSERT pe source_id) rămâne plasa de siguranță la re-rulare.
+    let mut tx = pool.begin().await?;
 
     // Cash-VAT (TVA la încasare) regime flags: drive 4428 routing + the collection release.
     let (company_cash_vat, cash_vat_start, cash_vat_end): (bool, Option<String>, Option<String>) = {
@@ -1209,8 +1217,33 @@ pub async fn generate_gl_entries(
         // will never be collected, so its VAT must stay exigible on 4427 (the payment loop posts no
         // 4428→4427 release for STORNED, and D300 counts it as collected at issue) — keeping the
         // three sides consistent. (Credit-note 4428/4427 reversal under cash VAT is deferred — see
-        // CASH_VAT_DESIGN.md.)
+        // CASH_VAT_DESIGN.md TODO 5.)
+        //
+        // ATENȚIE cross-period: dacă originalul stă într-o PERIOADĂ ANTERIOARĂ generată înainte de
+        // stornare, jurnalul lui vechi a creditat 4428; reclasificarea (STORNED → 4427) se face
+        // doar la REGENERAREA acelei perioade. Avertizăm ca utilizatorul să regenereze și perioada
+        // originalului, altfel 4428 rămâne blocat cu TVA neexigibilă a unei vânzări anulate.
         let cash_vat_applies = !is_storno && status != "STORNED" && in_cash_vat_window(&issue_date);
+        if is_storno && company_cash_vat {
+            if let Some(orig_id) = storno_ref.as_deref() {
+                let orig_issue: Option<String> =
+                    sqlx::query_scalar("SELECT issue_date FROM invoices WHERE id = ?1")
+                        .bind(orig_id)
+                        .fetch_optional(pool)
+                        .await
+                        .unwrap_or(None);
+                if let Some(oi) = orig_issue {
+                    if oi.as_str() < period_from && in_cash_vat_window(&oi) {
+                        tracing::warn!(
+                            storno = %full_number, original_issue = %oi,
+                            "TVA la încasare: originalul stornat e într-o perioadă anterioară — \
+                             regenerați și acea perioadă, altfel 4428 rămâne cu TVA neexigibilă \
+                             a unei vânzări anulate"
+                        );
+                    }
+                }
+            }
+        }
 
         let (journal, entries) = post_sales_invoice(
             company_id,
@@ -1226,9 +1259,6 @@ pub async fn generate_gl_entries(
 
         // FIX 2: Balance guard — reject before writing.
         assert_balanced(&entries, &inv_id)?;
-
-        // FIX 3: Atomic per-document transaction.
-        let mut tx = pool.begin().await?;
 
         let deleted = sqlx::query(
             "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='INVOICE' AND source_id=?2",
@@ -1250,8 +1280,6 @@ pub async fn generate_gl_entries(
             insert_entry(&mut tx, &journal_id, entry).await?;
             entries_inserted += 1;
         }
-
-        tx.commit().await?;
     }
 
     // ── 2. Facturi primite ────────────────────────────────────────────────────
@@ -1274,18 +1302,24 @@ pub async fn generate_gl_entries(
     .fetch_all(pool)
     .await?;
 
-    // Count skipped (fără defalcare)
-    let mut skipped_received: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM received_invoices \
+    // Skipped (fără defalcare TVA) — colectăm REFERINȚELE, nu doar numărul, ca utilizatorul să
+    // vadă exact ce facturi primite nu au fost înregistrate în jurnal.
+    let mut skipped_received_refs: Vec<String> = sqlx::query(
+        "SELECT COALESCE(NULLIF(COALESCE(series,'') || COALESCE(number,''), ''), id) AS doc_ref \
+         FROM received_invoices \
          WHERE company_id=?1 AND issue_date>=?2 AND issue_date<=?3 \
-           AND status != 'REJECTED' AND net_amount IS NULL",
+           AND status != 'REJECTED' AND net_amount IS NULL \
+         ORDER BY issue_date",
     )
     .bind(company_id)
     .bind(period_from)
     .bind(period_to)
-    .fetch_one(pool)
+    .fetch_all(pool)
     .await
-    .unwrap_or(0);
+    .unwrap_or_default()
+    .iter()
+    .filter_map(|r| r.try_get::<String, _>("doc_ref").ok())
+    .collect();
 
     for row in &recv_rows {
         let recv_id: String = row.try_get("id").unwrap_or_default();
@@ -1333,7 +1367,7 @@ pub async fn generate_gl_entries(
             .collect();
 
         if vat_lines.is_empty() {
-            skipped_received += 1;
+            skipped_received_refs.push(doc_number.clone());
             continue;
         }
 
@@ -1372,9 +1406,6 @@ pub async fn generate_gl_entries(
         // FIX 2: Balance guard.
         assert_balanced(&entries, &recv_id)?;
 
-        // FIX 3: Atomic per-document transaction.
-        let mut tx = pool.begin().await?;
-
         let deleted = sqlx::query(
             "DELETE FROM gl_journal \
              WHERE company_id=?1 AND source_type='RECEIVED_INVOICE' AND source_id=?2",
@@ -1396,8 +1427,6 @@ pub async fn generate_gl_entries(
             insert_entry(&mut tx, &journal_id, entry).await?;
             entries_inserted += 1;
         }
-
-        tx.commit().await?;
     }
 
     // ── 3. Plăți clienți ─────────────────────────────────────────────────────
@@ -1490,9 +1519,6 @@ pub async fn generate_gl_entries(
         // FIX 2: Balance guard.
         assert_balanced(&entries, &pay_id)?;
 
-        // FIX 3: Atomic per-document transaction.
-        let mut tx = pool.begin().await?;
-
         let deleted = sqlx::query(
             "DELETE FROM gl_journal \
              WHERE company_id=?1 AND source_type='PAYMENT' AND source_id=?2",
@@ -1514,8 +1540,6 @@ pub async fn generate_gl_entries(
             insert_entry(&mut tx, &journal_id, entry).await?;
             entries_inserted += 1;
         }
-
-        tx.commit().await?;
     }
 
     // ── 4. Plăți furnizori (payments-out) ─────────────────────────────────────
@@ -1596,7 +1620,6 @@ pub async fn generate_gl_entries(
         );
         assert_balanced(&entries, &pay_id)?;
 
-        let mut tx = pool.begin().await?;
         let deleted = sqlx::query(
             "DELETE FROM gl_journal \
              WHERE company_id=?1 AND source_type='RECEIVED_PAYMENT' AND source_id=?2",
@@ -1616,14 +1639,16 @@ pub async fn generate_gl_entries(
             insert_entry(&mut tx, &journal_id, entry).await?;
             entries_inserted += 1;
         }
-        tx.commit().await?;
     }
+
+    tx.commit().await?;
 
     Ok(GlPostResult {
         journals_inserted,
         entries_inserted,
         journals_replaced,
-        skipped_received,
+        skipped_received: skipped_received_refs.len() as i64,
+        skipped_received_refs,
     })
 }
 

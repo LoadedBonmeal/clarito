@@ -109,6 +109,9 @@ pub(crate) async fn compute_d390_doc(
     }
 
     // ── Outbound: sales K lines → L (goods) / P (services) ────────────────────
+    // Setul fiscal = status IN ('VALIDATED','STORNED'), inclusiv notele de credit (liniile lor
+    // negative netează baza) — IDENTIC cu D300/D394/jurnale, altfel D390 nu se reconciliază cu
+    // D300 când există stornări.
     let sales = sqlx::query(
         "SELECT i.id AS inv_id, c.cui AS partner_cui, c.legal_name AS partner_name, \
                 COALESCE(l.revenue_kind,'goods') AS kind, l.subtotal_amount, \
@@ -116,8 +119,7 @@ pub(crate) async fn compute_d390_doc(
          FROM invoice_line_items l \
          JOIN invoices i ON i.id = l.invoice_id \
          LEFT JOIN contacts c ON c.id = i.contact_id \
-         WHERE i.company_id = ?1 AND i.status = 'VALIDATED' \
-           AND i.storno_of_invoice_id IS NULL \
+         WHERE i.company_id = ?1 AND i.status IN ('VALIDATED','STORNED') \
            AND i.issue_date >= ?2 AND i.issue_date <= ?3 AND l.vat_category = 'K'",
     )
     .bind(company_id)
@@ -149,7 +151,11 @@ pub(crate) async fn compute_d390_doc(
         }
     }
 
-    // Build ops (baza rounded to whole lei), ordered.
+    // Build ops (baza în lei întregi, rotunjire comercială), ordered. O bază NETĂ NEGATIVĂ pe
+    // partener (stornare peste altă perioadă) nu poate fi reprezentată pe rândurile L/T/A/P/S —
+    // ar aparține regularizărilor (R, neimplementat) — deci se exclude cu avertisment și se
+    // numără la `dropped`, ca utilizatorul să o declare manual. Bazele netate la 0 dispar firesc.
+    let mut negative_partners = 0i64;
     let operations: Vec<D390Op> = agg
         .into_iter()
         .map(|((tip, tara, cod_o), (den_o, base))| D390Op {
@@ -157,9 +163,23 @@ pub(crate) async fn compute_d390_doc(
             tara,
             cod_o,
             den_o,
-            baza: base.round_dp(0).to_i64().unwrap_or(0),
+            baza: base
+                .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                .to_i64()
+                .unwrap_or(0),
         })
-        .filter(|o| o.baza != 0)
+        .filter(|o| {
+            if o.baza < 0 {
+                tracing::warn!(
+                    tip = %o.tip, partener = %o.den_o, baza = o.baza,
+                    "D390: bază netă negativă (stornare peste perioadă) — exclusă; declarați \
+                     regularizarea (R) manual"
+                );
+                negative_partners += 1;
+                return false;
+            }
+            o.baza != 0
+        })
         .collect();
 
     let an: i32 = period_from
@@ -179,7 +199,7 @@ pub(crate) async fn compute_d390_doc(
         luna,
         an,
         operations,
-        dropped: dropped_invoices.len() as i64,
+        dropped: dropped_invoices.len() as i64 + negative_partners,
     })
 }
 
@@ -255,7 +275,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn excludes_storno_and_counts_missing_vat_as_dropped() {
+    async fn credit_note_included_negative_net_dropped_and_missing_vat_dropped() {
         let pool = pool().await;
         sqlx::query(
             "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
@@ -289,7 +309,9 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        // A storno credit note (storno_of_invoice_id set) to a valid DE customer → EXCLUDED.
+        // A storno credit note (storno_of_invoice_id set) to a valid DE customer — INCLUDED in the
+        // fiscal set (D300 parity); its partner nets −500 with no original in-period → the negative
+        // net cannot sit on L/P rows → dropped with a warning (R-row regularization is manual).
         sqlx::query(
             "INSERT INTO contacts (id, company_id, contact_type, cui, legal_name) \
              VALUES ('ct2','co','CUSTOMER','DE999','Kunde2')",
@@ -320,9 +342,12 @@ mod tests {
             .unwrap();
         assert!(
             doc.operations.is_empty(),
-            "storno excluded + no-cui sale dropped → no operations, no negatives"
+            "no-cui sale dropped + negative-net partner dropped → no operations emitted"
         );
-        assert_eq!(doc.dropped, 1, "the no-cui EU sale is flagged as dropped");
+        assert_eq!(
+            doc.dropped, 2,
+            "the no-cui EU sale + the negative-net partner are both flagged as dropped"
+        );
     }
 
     #[tokio::test]

@@ -98,11 +98,25 @@ export function GlLedgerPage() {
     try {
       const result = await api.gl.generateEntries(activeCompanyId, dateFrom, dateTo);
       setPostResult(result);
-      notify.success(
-        `GL generat: ${result.journalsInserted} jurnale, ${result.entriesInserted} intrări` +
-        (result.journalsReplaced > 0 ? ` (${result.journalsReplaced} re-generate)` : "") +
-        (result.skippedReceived  > 0 ? ` · ${result.skippedReceived} facturi primite omise (fără defalcare TVA)` : ""),
-      );
+      if (result.journalsInserted === 0) {
+        notify.info(
+          "Niciun document de înregistrat în perioada selectată — jurnalul a rămas neschimbat. " +
+          "Notele contabile se generează pe perioadă: rulați după validări/stornări noi.",
+        );
+      } else {
+        notify.success(
+          `GL generat: ${result.journalsInserted} jurnale, ${result.entriesInserted} intrări` +
+          (result.journalsReplaced > 0 ? ` (${result.journalsReplaced} re-generate)` : ""),
+        );
+      }
+      if (result.skippedReceived > 0) {
+        const refs = (result.skippedReceivedRefs ?? []).slice(0, 5).join(", ");
+        notify.warn(
+          `${result.skippedReceived} facturi primite NU au fost înregistrate (fără defalcare TVA): ` +
+          refs + (result.skippedReceived > 5 ? " …" : "") +
+          ". Completați defalcarea TVA, apoi regenerați.",
+        );
+      }
     } catch (err) {
       notify.error(formatError(err, "Nu s-au putut genera notele contabile."));
     } finally {

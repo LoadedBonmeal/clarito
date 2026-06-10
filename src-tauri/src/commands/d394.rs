@@ -98,14 +98,17 @@ pub fn normalize_vat_rate(raw: &str) -> String {
         Ok(v) => v,
         Err(_) => return "0".to_string(),
     };
-    // If the value is < 1, it's stored as a fraction (e.g. 0.19 → 19%).
-    let pct = if d < rust_decimal::Decimal::ONE && d > rust_decimal::Decimal::ZERO {
-        (d * rust_decimal::Decimal::from(100))
-            .round_dp(0)
+    // If the value is < 1, it's stored as a fraction (e.g. 0.19 → 19%). Commercial rounding,
+    // consistent with every other money/rate path.
+    let to_pct = |v: rust_decimal::Decimal| {
+        v.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
             .to_i64()
             .unwrap_or(0)
+    };
+    let pct = if d < rust_decimal::Decimal::ONE && d > rust_decimal::Decimal::ZERO {
+        to_pct(d * rust_decimal::Decimal::from(100))
     } else {
-        d.round_dp(0).to_i64().unwrap_or(0)
+        to_pct(d)
     };
     pct.to_string()
 }

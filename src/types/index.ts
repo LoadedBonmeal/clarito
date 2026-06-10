@@ -888,6 +888,8 @@ export interface GlPostResult {
   entriesInserted: number;
   journalsReplaced: number;
   skippedReceived: number;
+  /** Referințele facturilor primite sărite (fără defalcare TVA). */
+  skippedReceivedRefs: string[];
 }
 
 /**
