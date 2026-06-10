@@ -71,6 +71,35 @@ pub struct UpdateProductInput {
     pub active: Option<bool>,
 }
 
+/// Câmpurile numerice FURNIZATE trebuie să fie valide — altfel un preț corupt ar fi stocat ca
+/// atare și ar deveni tăcut 0 la fiecare citire ulterioară (dec()-fallback). Folosit identic la
+/// create() și update() (paritate de validare).
+fn validate_numeric_fields(unit_price: Option<&str>, vat_rate: Option<&str>) -> AppResult<()> {
+    if let Some(p) = unit_price {
+        let d = <rust_decimal::Decimal as std::str::FromStr>::from_str(p.trim()).map_err(|_| {
+            AppError::Validation("Preț unitar invalid — folosiți formatul 1234.56.".into())
+        })?;
+        if d.is_sign_negative() {
+            return Err(AppError::Validation(
+                "Prețul unitar nu poate fi negativ.".into(),
+            ));
+        }
+    }
+    if let Some(r) = vat_rate {
+        let ok = r
+            .trim()
+            .parse::<i64>()
+            .map(|n| crate::db::models::VALID_VAT_RATES.contains(&n))
+            .unwrap_or(false);
+        if !ok {
+            return Err(AppError::Validation(format!(
+                "Cotă TVA invalidă: {r}. Valori permise: 0, 5, 9, 11, 19, 21."
+            )));
+        }
+    }
+    Ok(())
+}
+
 // ─── Queries ───────────────────────────────────────────────────────────────
 
 /// List products for a company, with optional name/code search.
@@ -146,6 +175,8 @@ pub async fn create(
         }
     }
 
+    validate_numeric_fields(input.unit_price.as_deref(), input.vat_rate.as_deref())?;
+
     let id = new_id();
     let now = now_unix();
 
@@ -211,6 +242,8 @@ pub async fn update(
             )));
         }
     }
+
+    validate_numeric_fields(input.unit_price.as_deref(), input.vat_rate.as_deref())?;
 
     let now = now_unix();
 

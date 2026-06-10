@@ -66,6 +66,9 @@ pub async fn list_invoices(
             "Selectați o companie activă.".to_string(),
         ));
     }
+    // Datele de filtru sunt comparate ca stringuri în SQL — o dată inexistentă sare documente.
+    crate::commands::require_valid_date_opt("Data de început", f.date_from.as_deref())?;
+    crate::commands::require_valid_date_opt("Data de sfârșit", f.date_to.as_deref())?;
     invoices::list(&state.db, f).await
 }
 
@@ -226,6 +229,13 @@ pub async fn update_invoice_draft(
             return Err(AppError::Validation(format!(
                 "Cotă TVA invalidă: {}%. Valori permise: 0, 5, 9, 11, 19, 21.",
                 line.vat_rate
+            )));
+        }
+        // Cantitățile negative nu au loc pe o ciornă editată — corecțiile trec prin stornare.
+        if line.quantity < 0.0 {
+            return Err(AppError::Validation(format!(
+                "Cantitate negativă pe linia '{}' — pentru corecții folosiți stornarea.",
+                line.name
             )));
         }
     }

@@ -37,6 +37,8 @@ pub async fn generate_gl_entries(
     period_from: String,
     period_to: String,
 ) -> AppResult<GlPostResult> {
+    crate::commands::require_valid_date("Data de început", &period_from)?;
+    crate::commands::require_valid_date("Data de sfârșit", &period_to)?;
     db_generate(&state.db, &company_id, &period_from, &period_to).await
 }
 
@@ -67,6 +69,8 @@ pub async fn close_vat_period(
     period_from: String,
     period_to: String,
 ) -> AppResult<VatSettlementResult> {
+    crate::commands::require_valid_date("Data de început", &period_from)?;
+    crate::commands::require_valid_date("Data de sfârșit", &period_to)?;
     db_close_vat(&state.db, &company_id, &period_from, &period_to).await
 }
 

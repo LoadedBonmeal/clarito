@@ -80,6 +80,8 @@ pub async fn export_sales_journal(
     date_to: String,
     dest_path: String,
 ) -> AppResult<String> {
+    crate::commands::require_valid_date("Data de început", &date_from)?;
+    crate::commands::require_valid_date("Data de sfârșit", &date_to)?;
     let dest_path = crate::commands::integrations::validate_export_path(&dest_path)?
         .to_string_lossy()
         .to_string();
@@ -175,6 +177,8 @@ pub async fn export_purchase_journal(
     date_to: String,
     dest_path: String,
 ) -> AppResult<String> {
+    crate::commands::require_valid_date("Data de început", &date_from)?;
+    crate::commands::require_valid_date("Data de sfârșit", &date_to)?;
     let dest_path = crate::commands::integrations::validate_export_path(&dest_path)?
         .to_string_lossy()
         .to_string();

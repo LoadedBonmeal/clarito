@@ -346,6 +346,14 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
                 line.vat_rate
             )));
         }
+        // O factură (nu storno) nu poate avea cantități negative — ar produce pe ascuns o notă
+        // de credit. Stornările au flux separat (storno_invoice), cu linii negative legitime.
+        if line.quantity < 0.0 {
+            return Err(AppError::Validation(format!(
+                "Cantitate negativă pe linia '{}' — pentru corecții folosiți stornarea.",
+                line.name
+            )));
+        }
     }
 
     // U3: validate payment_means_code against the UNCL4461 allow-list.

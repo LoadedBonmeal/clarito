@@ -1030,6 +1030,8 @@ pub async fn compute_d300(
 ) -> AppResult<D300Report> {
     use rust_decimal::prelude::ToPrimitive;
 
+    crate::commands::require_valid_date("Data de început", &period_from)?;
+    crate::commands::require_valid_date("Data de sfârșit", &period_to)?;
     let pool = &state.db;
 
     // Fetch CUI-ul companiei.
