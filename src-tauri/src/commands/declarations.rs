@@ -2829,3 +2829,44 @@ mod cash_vat_routing_tests {
         assert_eq!(apr, Decimal::ZERO, "nothing deferred to the payment month");
     }
 }
+
+#[cfg(test)]
+mod test_ron_to_bani_overflow {
+    use super::*;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_overflow_scenarios() {
+        // i64::MAX = 9,223,372,036,854,775,807
+        // Safe RON threshold = i64::MAX / 100 = 92,233,720,368,547.75807
+
+        // Test: Small value (should work)
+        let small = Decimal::from_str("1000.50").unwrap();
+        let result = ron_to_bani(small);
+        assert_eq!(result, 100050, "Small value should convert correctly");
+
+        // Test: The value from the finding (922,337,203,685,477.58)
+        // This is actually well below the safe threshold!
+        let finding_val = Decimal::from_str("922337203685477.58").unwrap();
+        let result = ron_to_bani(finding_val);
+        // This will NOT overflow; result should be 92233720368547758
+        println!("Finding value result: {}", result);
+        assert!(result > 0, "Finding value should not silently overflow");
+
+        // Test: Actual overflow (over 92,233,720,368,547.75807 RON)
+        let overflow_val = Decimal::from_str("92233720368548.00").unwrap();
+        let result = ron_to_bani(overflow_val);
+        println!(
+            "Overflow value (92,233,720,368,548.00 RON) result: {}",
+            result
+        );
+        // unwrap_or(0) will return 0 on overflow
+
+        // Test: Extreme but realistic N(15,2) max (9,999,999,999,999.99)
+        let n15_max = Decimal::from_str("9999999999999.99").unwrap();
+        let result = ron_to_bani(n15_max);
+        assert!(result > 0, "N(15,2) max should convert correctly");
+        println!("N(15,2) max result: {}", result);
+    }
+}

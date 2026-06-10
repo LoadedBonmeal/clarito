@@ -384,8 +384,11 @@ pub async fn update_invoice_draft(
     let _ =
         crate::db::audit::log_user_action(&state.db, "invoice_updated", "invoice", &id, None).await;
 
-    // 6. Return updated invoice
-    invoices::get(&state.db, &id).await
+    // 6. Return updated invoice — re-verify ownership on the fetched row so the unscoped
+    // invoices::get can never hand a foreign invoice back across the IPC boundary.
+    let updated = invoices::get(&state.db, &id).await?;
+    check_invoice_ownership(&updated, &company_id)?;
+    Ok(updated)
 }
 
 #[derive(serde::Serialize)]
@@ -743,8 +746,11 @@ pub async fn storno_invoice(
     )
     .await;
 
-    // 6. Re-fetch factura storno pentru a returna datele complete
-    invoices::get(pool, &storno_id).await
+    // 6. Re-fetch factura storno pentru a returna datele complete — cu re-verificarea
+    // apartenenței (get-ul este nescopat; rândul abia creat trebuie să fie al companiei).
+    let storno = invoices::get(pool, &storno_id).await?;
+    check_invoice_ownership(&storno, &company_id)?;
+    Ok(storno)
 }
 
 /// MISS-04: Duplică o factură existentă într-o nouă ciornă (DRAFT).

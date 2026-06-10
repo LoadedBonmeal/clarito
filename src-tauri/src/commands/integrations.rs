@@ -12,7 +12,7 @@ use crate::state::AppState;
 // - cale absolută obligatorie
 // - fără UNC / SMB (`\\server\share`)
 // - fără componente `..`
-// - extensie permisă (csv, xlsx, xml, txt)
+// - extensie permisă (csv, xlsx, xml, txt, zip)
 // - directorul țintă trebuie să existe (canonicalizabil)
 //
 // Note: the previous `starts_with($HOME)` restriction is intentionally removed
@@ -46,9 +46,9 @@ pub(crate) fn validate_export_path(path: &str) -> AppResult<std::path::PathBuf> 
     }
 
     let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if !matches!(ext, "csv" | "xlsx" | "xml" | "txt") {
+    if !matches!(ext, "csv" | "xlsx" | "xml" | "txt" | "zip") {
         return Err(AppError::Validation(format!(
-            "Extensie fișier nepermisă: .{ext}. Permise: csv, xlsx, xml, txt."
+            "Extensie fișier nepermisă: .{ext}. Permise: csv, xlsx, xml, txt, zip."
         )));
     }
 

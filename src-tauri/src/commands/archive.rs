@@ -143,9 +143,11 @@ pub async fn export_backup(
     .await
     .map_err(|e| AppError::Other(format!("VACUUM INTO failed: {e}")))?;
 
-    // Use caller-supplied path when provided; otherwise fall back to app_data_dir.
+    // Use caller-supplied path when provided (validated: absolute, no '..', no UNC, .zip only —
+    // the IPC endpoint is callable with an arbitrary string, so never trust it raw); otherwise
+    // fall back to app_data_dir.
     let out_path = if let Some(ref p) = dest_path {
-        std::path::PathBuf::from(p)
+        crate::commands::integrations::validate_export_path(p)?
     } else {
         data_dir.join(format!("efactura_backup_{timestamp}.zip"))
     };
@@ -669,19 +671,25 @@ pub struct ArchiveIntegrityReport {
 #[tauri::command]
 pub async fn verify_archive_integrity(
     state: State<'_, AppState>,
+    company_id: String,
 ) -> AppResult<ArchiveIntegrityReport> {
     use sqlx::Row;
 
-    // Check sent invoices (xml_path may be NULL for drafts not yet submitted).
-    let sent_rows = sqlx::query("SELECT xml_path FROM invoices WHERE xml_path IS NOT NULL")
-        .fetch_all(&state.db)
-        .await?;
-
-    // Check received invoices (xml_path is always populated for received invoices).
-    let received_rows =
-        sqlx::query("SELECT xml_path FROM received_invoices WHERE xml_path IS NOT NULL")
+    // Check sent invoices (xml_path may be NULL for drafts not yet submitted). Scoped per company —
+    // the report must not mix tenants' archives.
+    let sent_rows =
+        sqlx::query("SELECT xml_path FROM invoices WHERE xml_path IS NOT NULL AND company_id = ?1")
+            .bind(&company_id)
             .fetch_all(&state.db)
             .await?;
+
+    // Check received invoices (xml_path is always populated for received invoices).
+    let received_rows = sqlx::query(
+        "SELECT xml_path FROM received_invoices WHERE xml_path IS NOT NULL AND company_id = ?1",
+    )
+    .bind(&company_id)
+    .fetch_all(&state.db)
+    .await?;
 
     let mut checked: usize = 0;
     let mut missing: Vec<String> = Vec::new();

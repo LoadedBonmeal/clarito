@@ -121,12 +121,10 @@ pub async fn export_all_my_data(
     let db_path = data_dir.join("data.db");
     let archive_dir = resolve_archive_dir(&state, &app).await?;
 
-    let dest = PathBuf::from(&dest_path);
-
-    // Ensure parent exists
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent).map_err(AppError::Io)?;
-    }
+    // Validate the caller-supplied destination (absolute, no '..', no UNC, .zip only) — the IPC
+    // endpoint accepts an arbitrary string, so never trust it raw. The parent directory must
+    // already exist (validate_export_path canonicalizes it), so no create_dir_all on raw input.
+    let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
 
     let dest_clone = dest.clone();
     let db_path_clone = db_path.clone();

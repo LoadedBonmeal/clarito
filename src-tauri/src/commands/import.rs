@@ -855,13 +855,17 @@ async fn import_invoice_xml_inner(
     };
     let anaf_download_id = format!("manual-{}", &xml_hash[..32]); // primii 128 biți
 
-    // Verificăm în avans dacă există deja (pentru mesaj de eroare mai clar)
-    let existing: Option<String> =
-        sqlx::query_scalar("SELECT id FROM received_invoices WHERE anaf_download_id = ?1 LIMIT 1")
-            .bind(&anaf_download_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(AppError::Database)?;
+    // Verificăm în avans dacă există deja (pentru mesaj de eroare mai clar). Scopat pe companie —
+    // verificarea de duplicat nu trebuie să se uite peste granița de tenant; UNIQUE-ul global pe
+    // anaf_download_id rămâne plasa de siguranță la INSERT.
+    let existing: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM received_invoices WHERE anaf_download_id = ?1 AND company_id = ?2 LIMIT 1",
+    )
+    .bind(&anaf_download_id)
+    .bind(&company_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::Database)?;
 
     if existing.is_some() {
         errors.push(format!(

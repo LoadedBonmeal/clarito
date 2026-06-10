@@ -282,9 +282,10 @@ export const certificates = {
 export const archive = {
   exportZip: (companyId: string) =>
     invoke<string>("export_invoices_zip", { companyId }),
-  verifyIntegrity: () =>
+  verifyIntegrity: (companyId: string) =>
     invoke<{ checked: number; missing: string[]; ok: boolean }>(
-      "verify_archive_integrity"
+      "verify_archive_integrity",
+      { companyId }
     ),
   getSize: () => invoke<number>("get_archive_size"),
   importBackup: (path: string) => invoke<void>("import_backup", { path }),

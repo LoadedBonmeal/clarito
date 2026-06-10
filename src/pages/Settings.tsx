@@ -1069,8 +1069,9 @@ export function SettingsPage() {
                   size="sm"
                   icon="checkCircle"
                   onClick={async () => {
+                    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
                     try {
-                      const result = await api.archive.verifyIntegrity();
+                      const result = await api.archive.verifyIntegrity(activeCompanyId);
                       if (result.ok) {
                         notify.success(`Arhiva este integră. ${result.checked} fișiere verificate.`);
                       } else {

@@ -263,6 +263,9 @@ pub async fn export_d112_xml(
         casa,
     };
     let xml = generate_d112_xml(&header, &d112_emps);
-    std::fs::write(&dest_path, xml).map_err(|e| AppError::Other(e.to_string()))?;
+    // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the
+    // IPC endpoint accepts an arbitrary string.
+    let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
+    std::fs::write(&dest, xml).map_err(|e| AppError::Other(e.to_string()))?;
     Ok(dest_path)
 }
