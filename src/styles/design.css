@@ -285,13 +285,15 @@ input, select, textarea { font: inherit; color: inherit; }
    ------------------------------------------------------------------ */
 .app {
   display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto 1fr;
+  grid-template-columns: 248px 1fr;
+  grid-template-rows: 60px 1fr;
   grid-template-areas: "top top" "side main";
   height: 100vh;
   overflow: hidden;
   background: var(--bg);
+  transition: grid-template-columns .22s ease;
 }
+.app.sidebar-collapsed { grid-template-columns: 74px 1fr; }
 
 /* Topbar spans the full width across the top; sidebar sits below it on the
    left, main fills the rest (design clarito-shell.css grid). */

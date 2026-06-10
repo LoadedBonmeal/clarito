@@ -1,0 +1,171 @@
+/* Clarito — micro-animations (semantic motion only).
+   Loaded AFTER clarito-shell.css / the dashboard's inline styles, so its
+   overrides win. Monochrome: motion only, no color flashes. */
+:root{--anim-ease:cubic-bezier(.2,.8,.2,1)}
+
+/* View-transition CSS lives in clarito-shell.css (render-blocking, in <head>)
+   so the VT names are applied before the incoming page's snapshot is captured.
+   Keeping it out of this JS-injected sheet is what makes the chrome persist. */
+
+
+/* anchor-based nav items (dashboard) — no underline */
+a.nav-item{text-decoration:none;color:inherit}
+
+/* ── kill legacy decorative hover loops (shell + dashboard inline css) ── */
+.search:hover .ic,
+.scr-search:hover .ic,
+.company:hover .chev,
+.nav-item:hover .ic{animation:none !important}
+#nouBtn:hover .ic:first-child{transform:none}
+
+@media (prefers-reduced-motion: no-preference){
+
+/* snappier press feedback everywhere (overrides shell/dashboard inline .42s) */
+@keyframes iconPop{0%{transform:scale(1)}35%{transform:scale(.86)}70%{transform:scale(1.06)}100%{transform:scale(1)}}
+.ic.pressed,.sic.pressed{animation:iconPop .22s cubic-bezier(.34,1.56,.64,1) !important;transform-origin:center}
+
+/* ═══ 1. SYNC — rotates only WHILE syncing, settles with overshoot ═══ */
+@keyframes anSyncSpin{to{transform:rotate(360deg)}}
+@keyframes anSyncSettle{0%{transform:rotate(0)}55%{transform:rotate(14deg)}100%{transform:rotate(0)}}
+[data-anim-state="syncing"] svg[data-ic="sync"]{animation:anSyncSpin .9s linear infinite;transform-origin:50% 50%}
+[data-anim-state="settle"] svg[data-ic="sync"]{animation:anSyncSettle .35s var(--anim-ease);transform-origin:50% 50%}
+
+/* SPV connected dot — subtle breathing; one soft pulse on sync success */
+@keyframes anDotBreathe{0%,100%{opacity:1}50%{opacity:.7}}
+@keyframes anDotPulse{0%{transform:scale(1)}45%{transform:scale(1.5)}100%{transform:scale(1)}}
+.spv-dot{width:6px;height:6px;border-radius:999px;background:var(--green,#047857);flex:none;animation:anDotBreathe 2.2s ease-in-out infinite}
+.spv-dot.pulse{animation:anDotPulse .4s var(--anim-ease),anDotBreathe 2.2s ease-in-out .4s infinite}
+
+/* ═══ 2. BELL — swings ONCE when unread count increases; badge pops ═══ */
+@keyframes anBellSwing{0%{transform:rotate(0)}25%{transform:rotate(-12deg)}55%{transform:rotate(9deg)}80%{transform:rotate(-4deg)}100%{transform:rotate(0)}}
+@keyframes anBadgePop{0%{transform:scale(.6);opacity:0}100%{transform:scale(1);opacity:1}}
+.bell-swing{animation:anBellSwing .5s var(--anim-ease);transform-origin:50% 15%}
+.badge-pop{animation:anBadgePop .25s var(--anim-ease)}
+
+/* ═══ 3. SEND (paper-plane) — hover nudge; click launch up-right ═══ */
+:is(.pill-btn,.btn-dark,.mini-btn,.pop-item):hover svg[data-ic="send"]{transform:translate(1px,-1px)}
+svg[data-ic="send"]{transition:transform .15s var(--anim-ease)}
+@keyframes iconLaunch{
+  0%{transform:translate(0,0) rotate(0);opacity:1}
+  45%{transform:translate(6px,-6px) rotate(-15deg);opacity:0}
+  46%{transform:translate(-5px,5px) rotate(0);opacity:0}
+  100%{transform:translate(0,0) rotate(0);opacity:1}
+}
+.send-btn .ic.launch{animation:iconLaunch .45s var(--anim-ease);transform-origin:center}
+
+/* ═══ 4. DOWNLOAD — arrow dips into the tray on hover; click = got it ═══ */
+@keyframes anTrayPeek{0%{transform:translateY(0)}50%{transform:translateY(2px)}100%{transform:translateY(0)}}
+@keyframes anTrayGot{0%{transform:translateY(0);stroke-width:1.5}40%{transform:translateY(3px);stroke-width:2.2}100%{transform:translateY(0);stroke-width:1.5}}
+:is(.pill-btn,.btn-dark,.mini-btn,.sq-btn,.pop-item,.rep-card):hover svg[data-ic="dl"]{animation:anTrayPeek .3s var(--anim-ease)}
+svg[data-ic="dl"].got{animation:anTrayGot .35s var(--anim-ease)}
+
+/* ═══ 5. TRASH lid / PEN writing angle / COPY offset — hover affordance ═══ */
+svg[data-ic="trash"],svg[data-ic="pen"],svg[data-ic="copy"],svg[data-ic="undo"],svg[data-ic="plus"]{transition:transform .18s var(--anim-ease)}
+:is(.pill-btn,.btn-dark,.mini-btn,.pop-item):hover svg[data-ic="trash"]{transform:rotate(-12deg);transform-origin:72% 22%}
+:is(.pill-btn,.btn-dark,.mini-btn,.pop-item):hover svg[data-ic="pen"]{transform:translate(-1px,1px) rotate(-12deg);transform-origin:25% 80%}
+:is(.pill-btn,.btn-dark,.mini-btn,.pop-item):hover svg[data-ic="copy"]{transform:translate(-1.5px,-1.5px)}
+
+/* ═══ 6. STORNO rotates -180 (undo); PLUS rotates 90 / becomes x when open ═══ */
+:is(.pill-btn,.btn-dark,.mini-btn,.pop-item):hover svg[data-ic="undo"]{transform:rotate(-180deg)}
+:is(.pill-btn,.btn-dark,.sq-btn,.nav-primary):hover svg[data-ic="plus"]{transform:rotate(90deg)}
+.anim-open svg[data-ic="plus"]{transform:rotate(45deg) !important}
+/* plus morphs to an × while the button is pressed (Nou + Factura noua) */
+.btn-dark svg[data-ic="plus"],.nav-primary svg[data-ic="plus"]{transition:transform .18s var(--anim-ease)}
+.btn-dark:active svg[data-ic="plus"],.nav-primary:active svg[data-ic="plus"]{transform:rotate(45deg)}
+
+/* ═══ 7. SEARCH loupe tips toward the field on focus, settles ═══ */
+@keyframes anLoupe{0%{transform:none}50%{transform:scale(1.08) rotate(8deg)}100%{transform:none}}
+.search:focus-within > .ic,
+.scr-search:focus-within > .ic{animation:anLoupe .35s var(--anim-ease);transform-origin:40% 40%}
+
+/* ═══ SIDEBAR + HEADER icon hover — one meaning-specific motion per icon ═══
+   Principle: things that TURN rotate (cog, wrench, balance, recurrence loop,
+   undo); things that MOVE translate in their direction (truck drives →, card
+   swipes →, emise lifts ↑, primite drops ↓, chart grows ↑); static nouns get a
+   gentle confident scale. transform-only, .2s ease-out. */
+.side-scroll [data-nic],
+.topbar [data-nic]{transition:transform .22s var(--anim-ease)}
+
+.side-scroll .nav-item:hover [data-nic="grid"]{transform:scale(1.12)}
+.side-scroll .nav-item:hover [data-nic="docup"]{transform:translateY(-2.5px)}
+.side-scroll .nav-item:hover [data-nic="docdown"]{transform:translateY(2.5px)}
+.side-scroll .nav-item:hover [data-nic="mail"]{transform:translateY(-1.5px) scale(1.05)}
+.side-scroll .nav-item:hover [data-nic="undo"]{transform:rotate(-22deg)}
+.side-scroll .nav-item:hover [data-nic="building"]{transform:scale(1.08)}
+.side-scroll .nav-item:hover [data-nic="users"]{transform:scale(1.08)}
+.side-scroll .nav-item:hover [data-nic="receipt"]{transform:translateY(-1.5px) rotate(-5deg)}
+.side-scroll .nav-item:hover [data-nic="card"]{transform:translateX(3px)}
+.side-scroll .nav-item:hover [data-nic="loop"]{transform:rotate(180deg)}
+.side-scroll .nav-item:hover [data-nic="idcard"]{transform:scale(1.07)}
+.side-scroll .nav-item:hover [data-nic="wrench"]{transform:rotate(-22deg)}
+.side-scroll .nav-item:hover [data-nic="cube"]{transform:rotate(-12deg) scale(1.05)}
+.side-scroll .nav-item:hover [data-nic="book"]{transform:scale(1.07) rotate(-5deg)}
+.side-scroll .nav-item:hover [data-nic="scale"]{transform:rotate(9deg);transform-origin:50% 22%}
+.side-scroll .nav-item:hover [data-nic="ledger"]{transform:rotate(-9deg);transform-origin:50% 22%}
+.side-scroll .nav-item:hover [data-nic="chart"]{transform:translateY(-2.5px)}
+.side-scroll .nav-item:hover [data-nic="doctext"]{transform:translateY(-1.5px)}
+.side-scroll .nav-item:hover [data-nic="truck"]{transform:translateX(3.5px)}
+.side-scroll .nav-item:hover [data-nic="cog"]{transform:rotate(55deg)}
+.side-scroll .nav-item:hover [data-nic="plus"]{transform:rotate(90deg)}
+@keyframes nicBell{0%{transform:rotate(0)}28%{transform:rotate(-11deg)}58%{transform:rotate(8deg)}82%{transform:rotate(-3deg)}100%{transform:rotate(0)}}
+.side-scroll .nav-item:hover [data-nic="bell"]{animation:nicBell .5s var(--anim-ease) !important;transform-origin:50% 15%}
+
+/* header: collapse panel + search loupe (sync/bell intentionally stay still —
+   they move only on their real events) */
+.topbar #collapseBtn:hover [data-nic="collapse"]{transform:scale(1.1)}
+.topbar .search:hover [data-nic="loupe"]{transform:scale(1.08) rotate(-8deg);transform-origin:40% 40%}
+
+/* ═══ HEADER cluster (SPV pill · sync · + Nou · bell) hover + interact ═══ */
+/* shield reassures with a small confident scale; the connected dot pulses */
+.spv-pill .spv-ic{transition:transform .2s var(--anim-ease)}
+.spv-pill:hover .spv-ic{transform:scale(1.14)}
+.spv-pill:hover .spv-dot{animation:anDotPulse .45s var(--anim-ease)}
+/* sync hints its job: a half-turn on hover (full spin still only while syncing) */
+#spvSync .ic{transition:transform .3s var(--anim-ease)}
+#spvSync:hover .ic{transform:rotate(-180deg)}
+#spvSync[data-anim-state] .ic{transition:none}
+/* + Nou: plus rotates 90 (via data-ic), chevron dips to invite the menu */
+.nou-wrap .chev-sm{transition:transform .2s var(--anim-ease)}
+.nou-wrap .btn-dark:hover .chev-sm{transform:translateY(2px)}
+.nou-wrap .btn-dark.anim-open .chev-sm{transform:rotate(180deg)}
+/* bell: a single swing on hover (affordance — still rings on real alerts) */
+#bellBtn:hover .ic{animation:anBellSwing .55s var(--anim-ease);transform-origin:50% 18%}
+
+/* ═══ 8. STATUS pill on row CHANGE only — icon draws itself ═══ */
+@keyframes anChipIn{0%{opacity:0;transform:translateY(2px)}100%{opacity:1;transform:none}}
+/* hidden state lives ONLY in the from-frame: a never-started (pending)
+   animation must leave the icon visible */
+@keyframes anDraw{from{stroke-dashoffset:48}to{stroke-dashoffset:0}}
+.chip-anim{animation:anChipIn .25s var(--anim-ease)}
+.chip-anim .sic path,.chip-anim .sic circle{stroke-dasharray:48;animation:anDraw .3s var(--anim-ease)}
+
+/* ═══ 9. DEADLINE warnings — ONE attention pulse when scrolled into view ═══ */
+@keyframes anAttn{0%{transform:scale(1)}45%{transform:scale(1.12)}100%{transform:scale(1)}}
+.attn-pulse{animation:anAttn .45s var(--anim-ease);transform-origin:center}
+
+/* ═══ 10. SIDEBAR — indicator slides between items ═══ */
+.side-scroll{position:relative}
+.side-scroll .company,.side-scroll .nav-item,.side-scroll .sec,.side-scroll .nav-group{position:relative;z-index:1}
+.nav-slider{position:absolute;left:12px;right:12px;height:38px;border-radius:10px;background:#fff;border:1px solid var(--line,#ECECEC);box-shadow:0 1px 1px rgba(0,0,0,.03),0 6px 16px -8px rgba(0,0,0,.22);opacity:0;pointer-events:none;z-index:0;transition:top .12s var(--anim-ease),opacity .08s ease}
+.nav-slider.on{opacity:1}
+
+/* ═══ 11. load-once: chart bars + plafon meters (JS adds classes) ═══ */
+@keyframes anGrowY{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes anGrowX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.anim-bar{transform-origin:50% 100%;animation:anGrowY .45s var(--anim-ease) backwards}
+.anim-meter{transform-origin:0 50%;animation:anGrowX .6s var(--anim-ease) backwards}
+
+/* ═══ 12. MODALS — scale .98→1 + fade in 150ms, out 120ms ═══ */
+@keyframes anModalIn{0%{opacity:0;transform:scale(.98)}100%{opacity:1;transform:scale(1)}}
+@keyframes anModalOut{0%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.98)}}
+.modal-back.show .modal{animation:anModalIn .15s var(--anim-ease)}
+.modal-back.closing .modal{animation:anModalOut .12s var(--anim-ease) forwards}
+.modal-back.closing{pointer-events:none}
+
+}/* end no-preference */
+
+/* ═══ reduced motion: everything off, end-states static ═══ */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
+  .spv-dot{animation:none}
+}

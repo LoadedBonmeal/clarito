@@ -1,329 +1,241 @@
 /**
- * Sidebar — white grouped navigation (rf- prefixed classes).
- *
- * Sits below the full-width TopBar (design grid). Top: company-card →
- * opens CompanySwitcher in AppShell. Groups: TABLOU DE BORD / E-FACTURA /
- * OPERATIV / RAPORTARE. Foot: Setări + Ajutor links + a user/account card
- * that opens the profile menu (theme · documentație · ieșire).
+ * Sidebar — verbatim port of the design `.sidebar` (clarito-shell.js), wired to
+ * real data: company card + switcher pop, grouped nav (with the "Mai multe"
+ * drawer), and the user/account card + profile pop. Nav routes + badges are real.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
-import { Icon } from "@/components/shared/Icon";
+import { Ic } from "@/components/shared/Ic";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
-import { isMac } from "@/lib/platform";
+import { notify } from "@/lib/toasts";
 
-// ── Nav data ──────────────────────────────────────────────────────────────────
-
-interface NavItem {
-  id: string;
+interface NavLink {
+  key: string;
   label: string;
   icon: string;
   path: string;
   matchPrefix?: string;
-  badgeAccent?: boolean;
-  disabled?: boolean;
   badge?: number;
+  more?: boolean;
 }
-
 interface NavGroup {
-  group: string;
-  items: NavItem[];
+  sec: string | null;
+  items: NavLink[];
 }
 
-// ── Sidebar ───────────────────────────────────────────────────────────────────
-
-interface SidebarProps {
-  onOpenCompanySwitcher: () => void;
-}
-
-export function Sidebar({ onOpenCompanySwitcher }: SidebarProps) {
+export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { i18n } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
-  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
-  const theme = useAppStore((s) => s.theme);
-  const setTheme = useAppStore((s) => s.setTheme);
+  const setActiveCompanyId = useAppStore((s) => s.setActiveCompanyId);
 
+  const [companyOpen, setCompanyOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState<Record<string, boolean>>({});
+  const companyRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
-  // Close profile pop on outside click
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    const h = (e: MouseEvent) => {
+      if (companyRef.current && !companyRef.current.contains(e.target as Node)) setCompanyOpen(false);
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) setProfileOpen(false);
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
   }, []);
 
-  // ── Badge queries (same as original) ──────────────────────────────────────
-
-  const { data: invoicesPaged } = useQuery({
-    queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined }),
-    queryFn: () =>
-      api.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 1 } }),
-    enabled: !!activeCompanyId,
-  });
-
-  const { data: receivedPaged } = useQuery({
-    queryKey: queryKeys.received.list({ companyId: activeCompanyId ?? undefined }),
-    queryFn: () =>
-      api.received.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 1 } }),
-    enabled: !!activeCompanyId,
-  });
-
-  const { data: unreadCount } = useQuery({
-    queryKey: queryKeys.notifications.unreadCount(),
-    queryFn: () => api.notifications.unreadCount(),
-  });
-
+  // ── Real data ──────────────────────────────────────────────────────────────
   const { data: companies = [] } = useQuery({
     queryKey: queryKeys.companies.list(),
     queryFn: () => api.companies.list(),
   });
-
-  const { data: contacts = [] } = useQuery({
-    queryKey: queryKeys.contacts.list({ companyId: activeCompanyId ?? undefined }),
-    queryFn: () => api.contacts.list({ companyId: activeCompanyId ?? undefined }),
-    enabled: !!activeCompanyId,
+  const { data: unreadCount } = useQuery({
+    queryKey: queryKeys.notifications.unreadCount(),
+    queryFn: () => api.notifications.unreadCount(),
   });
-
-  // License holder = the closest thing to a "user" identity (single-user app).
   const { data: license } = useQuery({
     queryKey: ["license", "current"],
     queryFn: () => api.license.get(),
   });
 
-  const invoicesBadge = invoicesPaged?.total;
-  const receivedBadge = receivedPaged?.total;
-  const spvBadge = unreadCount ?? undefined;
-  const companiesBadge = companies.length > 0 ? companies.length : undefined;
-  const contactsBadge = contacts.length > 0 ? contacts.length : undefined;
+  const activeCompany = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
+  const initials = (s: string | undefined, n = 2) => (s ?? "AC").replace(/[^A-Za-zĂÂÎȘȚ ]/g, "").split(/\s+/).map((w) => w[0]).join("").slice(0, n).toUpperCase() || "AC";
 
-  // ── Nav groups ─────────────────────────────────────────────────────────────
-
-  const NAV_GROUPS: NavGroup[] = [
-    {
-      group: "TABLOU DE BORD",
-      items: [
-        { id: "dashboard", label: "Privire generală", icon: "data", path: "/" },
-      ],
-    },
-    {
-      group: "E-FACTURA",
-      items: [
-        { id: "facturi-emise",   label: "Facturi emise",   icon: "invoice",   path: "/invoices",      matchPrefix: "/invoices",      badge: invoicesBadge },
-        { id: "facturi-primite", label: "Facturi primite", icon: "invoiceIn", path: "/received",      matchPrefix: "/received",      badge: receivedBadge },
-        { id: "mesaje-spv",      label: "Mesaje SPV",      icon: "anaf",      path: "/notifications", badge: spvBadge, badgeAccent: true },
-        { id: "stornate",        label: "Stornate",        icon: "storno",    path: "/stornate" },
-      ],
-    },
-    {
-      group: "OPERATIV",
-      items: [
-        { id: "companii",        label: "Companii",            icon: "buildings", path: "/companies",  matchPrefix: "/companies", badge: companiesBadge },
-        { id: "contacte",        label: "Clienți & Furnizori", icon: "users",     path: "/contacts",   badge: contactsBadge },
-        { id: "banca",           label: "Bancă & Casă",         icon: "bank",      path: "/bank",      disabled: true },
-        { id: "chitante",        label: "Chitanțe",             icon: "receipt",   path: "/receipts" },
-        { id: "plati",           label: "Urmărire Plăți",       icon: "bank",      path: "/payments" },
-        { id: "recurente",       label: "Facturi Recurente",    icon: "refresh",   path: "/recurring" },
-        { id: "salarizare",      label: "Salarizare",           icon: "users",     path: "/payroll" },
-        { id: "mijloace-fixe",   label: "Mijloace fixe",        icon: "buildings", path: "/assets" },
-        { id: "stocuri",         label: "Articole & Stocuri",  icon: "stock",     path: "/products" },
-        { id: "plan-conturi",    label: "Plan de conturi",      icon: "database",  path: "/accounts" },
-        { id: "cote-tva",        label: "Cote TVA",             icon: "tag",       path: "/vat-rates" },
-      ],
-    },
-    {
-      group: "RAPORTARE",
-      items: [
-        { id: "rapoarte",       label: "Rapoarte",          icon: "reports", path: "/reports" },
-        { id: "declaratii",     label: "Declarații ANAF",   icon: "anaf",    path: "/declarations" },
-        { id: "e-transport",    label: "e-Transport",       icon: "send",    path: "/etransport" },
-        { id: "jurnal-contabil", label: "Jurnal contabil",  icon: "ledger",  path: "/ledger" },
-      ],
-    },
+  // ── Nav model (design NAV → real routes) ───────────────────────────────────
+  const NAV: NavGroup[] = [
+    { sec: null, items: [
+      { key: "privire", label: "Privire generală", icon: "grid", path: "/" },
+      { key: "facturi-emise", label: "Facturi emise", icon: "docUp", path: "/invoices", matchPrefix: "/invoices" },
+      { key: "facturi-primite", label: "Facturi primite", icon: "docDown", path: "/received", matchPrefix: "/received" },
+      { key: "mesaje-spv", label: "Mesaje SPV", icon: "mail", path: "/notifications", badge: unreadCount || undefined },
+      { key: "stornate", label: "Stornate", icon: "undo", path: "/stornate" },
+    ]},
+    { sec: "Operare", items: [
+      { key: "clienti", label: "Clienți & Furnizori", icon: "users", path: "/contacts" },
+      { key: "chitante", label: "Chitanțe", icon: "receipt", path: "/receipts" },
+      { key: "urmarire-plati", label: "Urmărire plăți", icon: "card", path: "/payments" },
+      { key: "salarizare", label: "Salarizare", icon: "idcard", path: "/payroll" },
+      { key: "articole", label: "Articole & stocuri", icon: "cube", path: "/products" },
+      { key: "companii", label: "Companii", icon: "building", path: "/companies", matchPrefix: "/companies", more: true },
+      { key: "facturi-recurente", label: "Facturi recurente", icon: "loop", path: "/recurring", more: true },
+      { key: "mijloace-fixe", label: "Mijloace fixe", icon: "wrench", path: "/assets", more: true },
+      { key: "plan-conturi", label: "Plan de conturi", icon: "book", path: "/accounts", more: true },
+      { key: "cote-tva", label: "Cote TVA", icon: "scale", path: "/vat-rates", more: true },
+    ]},
+    { sec: "Raportare", items: [
+      { key: "rapoarte", label: "Rapoarte", icon: "chart", path: "/reports" },
+      { key: "declaratii", label: "Declarații ANAF", icon: "docText", path: "/declarations" },
+      { key: "etransport", label: "e-Transport", icon: "truck", path: "/etransport" },
+      { key: "contabilitate", label: "Jurnal contabil", icon: "scale", path: "/ledger" },
+    ]},
   ];
 
-  // ── Active company display ─────────────────────────────────────────────────
+  const isActive = (it: NavLink) =>
+    it.matchPrefix
+      ? location.pathname === it.matchPrefix || location.pathname.startsWith(`${it.matchPrefix}/`)
+      : location.pathname === it.path;
 
-  const activeCompany = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
-  const companyInitials = (activeCompany?.legalName ?? "RF").slice(0, 2).toUpperCase();
+  const navItem = (it: NavLink) => (
+    <Link key={it.key} to={it.path as "/"} className={`nav-item${isActive(it) ? " active" : ""}`}>
+      <Ic name={it.icon} />
+      <span className="nlabel">{it.label}</span>
+      {it.badge != null && <span className="badge num">{it.badge}</span>}
+    </Link>
+  );
 
-  // ── Account identity (license email) ───────────────────────────────────────
-  const accountEmail = license?.email ?? "Cont Clarito";
-  const accountInitials = (license?.email ?? "Clarito").slice(0, 2).toUpperCase();
-
-  const handleExit = async () => {
-    const { exit } = await import("@tauri-apps/plugin-process");
-    await exit(0);
+  const switchCompany = (id: string) => { setActiveCompanyId(id); setCompanyOpen(false); };
+  const toggleLang = () => {
+    const next = i18n.language?.startsWith("en") ? "ro" : "en";
+    void i18n.changeLanguage(next);
   };
-  const handleDocs = async () => {
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
-    await openUrl("https://mfinante.gov.ro/ro/web/efactura/informatii-tehnice");
-  };
+  const handleExit = async () => { (await import("@tauri-apps/plugin-process")).exit(0); };
+  const handleDocs = async () => { (await import("@tauri-apps/plugin-opener")).openUrl("https://mfinante.gov.ro/ro/web/efactura/informatii-tehnice"); };
+  const soon = () => notify.info("În curând.");
+
+  const langTag = i18n.language?.startsWith("en") ? "EN" : "RO";
 
   return (
-    <nav className={`rf-sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
-      {/* Company card — opens switcher modal in AppShell */}
-      <button
-        type="button"
-        className="rf-company-card"
-        onClick={onOpenCompanySwitcher}
-        title="Schimbă compania activă"
-        style={{ marginTop: 2 }}
-      >
-        {/* Avatar (shown when collapsed) */}
-        <span
-          style={{
-            display: sidebarCollapsed ? "grid" : "none",
-            width: 32, height: 32, borderRadius: 8,
-            background: "var(--rf-accent)", color: "var(--rf-text-on-accent)",
-            placeItems: "center", fontSize: 12, fontWeight: 700, flexShrink: 0,
-          }}
-        >
-          {companyInitials}
-        </span>
-        {/* Full card (shown when expanded) */}
-        {!sidebarCollapsed && (
-          <>
-            <div className="rf-cc-label">Companie</div>
-            <div className="rf-cc-name">
-              <span>{activeCompany?.legalName ?? "Nicio companie"}</span>
-              <Icon name="chevDown" size={13} style={{ color: "var(--rf-text-muted)", flexShrink: 0 }} />
+    <aside className="sidebar">
+      <div className="side-scroll">
+        {/* Company card + switcher pop */}
+        <div ref={companyRef} style={{ position: "relative" }}>
+          <button className={`company${companyOpen ? " open" : ""}`} onClick={() => setCompanyOpen((o) => !o)}>
+            <div className="co-ava round">{initials(activeCompany?.legalName)}</div>
+            <div className="meta">
+              <div className="name">{activeCompany?.legalName ?? "Nicio companie"}</div>
+              <div className="cui num">{activeCompany?.cui ?? ""}</div>
             </div>
-            {activeCompany?.cui && (
-              <div className="rf-cc-cui">{activeCompany.cui}</div>
-            )}
-          </>
-        )}
-      </button>
-
-      {/* Nav scroll area */}
-      <div className="rf-nav-scroll">
-        {NAV_GROUPS.map((grp) => (
-          <div key={grp.group}>
-            <div className="rf-nav-group-label">{grp.group}</div>
-            {grp.items.map((item) => {
-              const isActive = item.matchPrefix
-                ? location.pathname === item.matchPrefix ||
-                  location.pathname.startsWith(`${item.matchPrefix}/`)
-                : location.pathname === item.path;
-
-              if (item.disabled) {
-                return (
-                  <div
-                    key={item.id}
-                    className="rf-nav-item"
-                    style={{ opacity: 0.4, cursor: "not-allowed", pointerEvents: "none" }}
-                    title="În curând"
-                  >
-                    <span className="rf-nav-ic"><Icon name={item.icon} size={18} /></span>
-                    <span className="rf-nav-label">{item.label}</span>
-                  </div>
-                );
-              }
-
-              return (
-                <Link
-                  key={item.id}
-                  to={item.path as "/"}
-                  className={`rf-nav-item${isActive ? " active" : ""}`}
-                  title={sidebarCollapsed ? item.label : undefined}
-                >
-                  <span className="rf-nav-ic"><Icon name={item.icon} size={18} /></span>
-                  <span className="rf-nav-label">{item.label}</span>
-                  {item.badge != null && (
-                    <span className={`rf-nav-badge${item.badgeAccent ? " accent" : ""}`}>
-                      {item.badge}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-
-      {/* Footer */}
-      <div className="rf-sidebar-foot">
-        <Link
-          to="/settings"
-          className={`rf-nav-item${location.pathname === "/settings" ? " active" : ""}`}
-          title={sidebarCollapsed ? "Setări" : undefined}
-        >
-          <span className="rf-nav-ic"><Icon name="settings" size={18} /></span>
-          <span className="rf-nav-label">Setări</span>
-        </Link>
-
-        <button
-          type="button"
-          className="rf-nav-item"
-          title="Documentație e-Factura"
-          onClick={() => void handleDocs()}
-        >
-          <span className="rf-nav-ic"><Icon name="help" size={18} /></span>
-          <span className="rf-nav-label">Ajutor</span>
-        </button>
-
-        {/* User / account card → profile menu */}
-        <div ref={profileRef} style={{ position: "relative", marginTop: 6 }}>
-          <button
-            type="button"
-            className="rf-user-card"
-            onClick={() => setProfileOpen((o) => !o)}
-            title="Cont și setări"
-          >
-            <span className="rf-u-ava">{accountInitials}</span>
-            {!sidebarCollapsed && (
-              <span className="rf-u-meta">
-                <span className="rf-u-name">Cont</span>
-                <span className="rf-u-mail">{accountEmail}</span>
-              </span>
-            )}
+            <Ic name="chevUD" cls="ic chev" />
           </button>
-          {profileOpen && (
-            <div className="rf-profile-pop">
-              <button type="button" style={profileItemStyle} onClick={() => { setProfileOpen(false); void navigate({ to: "/settings" }); }}>
-                <Icon name="settings" size={15} /><span>Setări</span>
+          {companyOpen && (
+            <div className="pop show" id="companyPop">
+              <div className="col-title">Companie activă</div>
+              {activeCompany && (
+                <div className="co-row sel">
+                  <div className="co-ava">{initials(activeCompany.legalName, 1)}</div>
+                  <div className="co-meta">
+                    <div className="co-name">{activeCompany.legalName}</div>
+                    <div className="co-cui">{activeCompany.cui}</div>
+                  </div>
+                  <Ic name="check" cls="co-check" />
+                </div>
+              )}
+              {companies.filter((c) => c.id !== activeCompany?.id).length > 0 && (
+                <>
+                  <div className="pop-div" />
+                  <div className="col-title">Schimbă compania</div>
+                  {companies.filter((c) => c.id !== activeCompany?.id).map((c) => (
+                    <button key={c.id} className="co-row" onClick={() => switchCompany(c.id)}>
+                      <div className="co-ava alt">{initials(c.legalName, 1)}</div>
+                      <div className="co-meta">
+                        <div className="co-name">{c.legalName}</div>
+                        <div className="co-cui">{c.cui}</div>
+                      </div>
+                      <Ic name="check" cls="co-check" />
+                    </button>
+                  ))}
+                </>
+              )}
+              <div className="pop-div" />
+              <button className="pop-item" onClick={() => { setCompanyOpen(false); void navigate({ to: "/companies/new" }); }}>
+                <Ic name="plus" />Adaugă companie
               </button>
-              <button type="button" style={profileItemStyle} onClick={() => { setProfileOpen(false); setTheme(theme === "dark" ? "light" : "dark"); }}>
-                <Icon name="view" size={15} /><span>Comută tema</span>
-                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--rf-text-dim)" }}>{theme === "dark" ? "Luminoasă" : "Întunecată"}</span>
-              </button>
-              <button type="button" style={profileItemStyle} onClick={() => { setProfileOpen(false); void handleDocs(); }}>
-                <Icon name="help" size={15} /><span>Documentație e-Factura</span>
-              </button>
-              <div style={{ height: 1, background: "var(--rf-border)", margin: "4px 0" }} />
-              <button type="button" style={{ ...profileItemStyle, color: "var(--rf-error)" }} onClick={() => void handleExit()}>
-                <Icon name="x" size={15} /><span>Ieșire</span>
-                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--rf-text-dim)" }}>{isMac ? "⌘Q" : "Alt+F4"}</span>
+              <button className="pop-item" onClick={() => { setCompanyOpen(false); void navigate({ to: "/companies" }); }}>
+                <Ic name="cog" />Gestionează companiile
               </button>
             </div>
           )}
         </div>
+
+        {/* Nav groups */}
+        {NAV.map((g) => {
+          const prim = g.items.filter((i) => !i.more);
+          const extra = g.items.filter((i) => i.more);
+          const gid = g.sec ?? "x";
+          const open = moreOpen[gid] ?? extra.some(isActive);
+          return (
+            <div key={gid}>
+              {g.sec && <div className="sec">{g.sec}</div>}
+              <div className="nav-group">
+                {prim.map(navItem)}
+                {extra.length > 0 && (
+                  <>
+                    <div className={`nav-extra${open ? " open" : ""}`}>
+                      <div className="nav-extra-inner">{extra.map(navItem)}</div>
+                    </div>
+                    <button className={`nav-more${open ? " open" : ""}`} onClick={() => setMoreOpen((s) => ({ ...s, [gid]: !open }))}>
+                      <Ic name="chevD" />
+                      <span className="nlabel">{open ? "Mai puține" : "Mai multe"}</span>
+                      <span className="badge num">{extra.length}</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
-    </nav>
+
+      {/* Footer: user card + profile pop */}
+      <div className="side-foot" ref={profileRef} style={{ position: "relative" }}>
+        <button className={`user-card${profileOpen ? " open" : ""}`} onClick={() => setProfileOpen((o) => !o)}>
+          <div className="u-ava">{initials(license?.email ?? "Clarito", 2)}</div>
+          <div className="meta">
+            <div className="uname">Cont</div>
+            <div className="umail">{license?.email ?? "Cont Clarito"}</div>
+          </div>
+        </button>
+        {profileOpen && (
+          <div className="pop show" id="profilePop">
+            <div className="pop-head">
+              <div className="u-ava">{initials(license?.email ?? "Clarito", 2)}</div>
+              <div><div className="pn">Cont</div><div className="pm">{license?.email ?? "Cont Clarito"}</div></div>
+            </div>
+            <div className="pop-div" />
+            <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/settings" }); }}><Ic name="cog" />Setări</button>
+            <button className="pop-item" onClick={() => { toggleLang(); }}>
+              <Ic name="lang" />Limbă
+              <span className="pill-new" style={{ background: "var(--fill)", color: "var(--text-2)", border: "1px solid var(--line)" }}>{langTag}</span>
+            </button>
+            <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/notifications" }); }}>
+              <Ic name="bell" />Notificări
+              {unreadCount != null && unreadCount > 0 && <span className="pill-new" style={{ background: "var(--black)" }}>{unreadCount}</span>}
+            </button>
+            <button className="pop-item" onClick={() => { setProfileOpen(false); soon(); }}><Ic name="docText" />Documente</button>
+            <button className="pop-item" onClick={() => { setProfileOpen(false); soon(); }}><Ic name="team" />Echipă</button>
+            <button className="pop-item" onClick={() => { setProfileOpen(false); void handleDocs(); }}><Ic name="help" />Ajutor</button>
+            <div className="pop-div" />
+            <button className="pop-item" onClick={() => void handleExit()}><Ic name="exit" />Ieșire</button>
+          </div>
+        )}
+      </div>
+    </aside>
   );
 }
-
-const profileItemStyle: React.CSSProperties = {
-  display: "flex",
-  width: "100%",
-  gap: 10,
-  alignItems: "center",
-  border: "none",
-  background: "transparent",
-  padding: "9px 11px",
-  cursor: "pointer",
-  borderRadius: "var(--rf-radius-sm)",
-  fontSize: 13.5,
-  color: "var(--rf-text)",
-  textAlign: "left",
-  fontFamily: "inherit",
-};

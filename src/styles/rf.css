@@ -332,6 +332,19 @@ table.rf-tbl thead th.rf-ck, table.rf-tbl tbody td.rf-ck { width: 36px; text-ali
 .rf-nav-item.active .rf-nav-badge { background: var(--rf-content); color: var(--rf-text-muted); border: 1px solid var(--rf-border); }
 .rf-nav-badge.accent { background: var(--rf-accent); color: #fff; }
 
+/* React adaptation: design `.pop-item`/`.co-row`/`.nav-more` rendered as <button>
+   need the native button chrome reset (the prototype used <a>). */
+button.pop-item, button.co-row, button.company, button.user-card, button.nav-more, button.nav-item {
+  border: 0; background: transparent; width: 100%; text-align: left;
+  font-family: inherit; font-size: inherit;
+}
+/* SPV shield turns red when ANAF is not authenticated (design pill stays neutral). */
+.spv-ic--err { stroke: var(--rf-error); }
+
+/* "Mai multe" drawer toggle — muted vs real nav items */
+.rf-nav-more { color: var(--rf-text-muted); font-weight: 500; }
+.rf-nav-more .rf-nav-ic { color: var(--rf-text-dim); }
+
 .rf-sidebar-foot { border-top: 1px solid var(--rf-border); margin-top: 10px; padding-top: 10px; display: flex; flex-direction: column; gap: 1px; }
 
 /* User / account card (sidebar foot) + profile pop */

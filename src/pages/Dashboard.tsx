@@ -274,7 +274,6 @@ export function DashboardPage() {
   }, [invoices, currentMonth]);
 
   const activeCompany    = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
-  const monthLabel       = now.toLocaleDateString("ro-RO", { month: "long", year: "numeric" });
 
   const hour     = now.getHours();
   const greeting = hour < 12 ? "Bună dimineața" : hour < 17 ? "Bună ziua" : "Bună seara";
@@ -487,7 +486,7 @@ export function DashboardPage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16 }}>
           <StatCard
             icon="chart"
-            label={`Total facturat${periodMode === "month" ? ` — ${monthLabel}` : ""}`}
+            label="Total facturat"
             value={fmtRON(totalFacturat)}
             unit="RON"
             delta={
