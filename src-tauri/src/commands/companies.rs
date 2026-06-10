@@ -44,7 +44,7 @@ pub async fn tax_regime_status(
     .await?;
     let turnover = Decimal::try_from(turnover_f.max(0.0))
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let eur = Decimal::try_from(eur_ron.max(0.0)).unwrap_or(Decimal::ZERO);
     Ok(companies::micro_ceiling_status(
         &company.tax_regime,
@@ -52,6 +52,75 @@ pub async fn tax_regime_status(
         turnover,
         eur,
     ))
+}
+
+/// Starea plafonului de scutire TVA (art. 310 Cod fiscal, Legea 141/2025): 395.000 lei cifră de
+/// afaceri anuală de la 01.09.2025. Relevant DOAR pentru neplătitorii de TVA — depășirea obligă la
+/// înregistrarea în scopuri de TVA. `level`: none / approaching (≥80%) / exceeded.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VatRegistrationStatus {
+    pub applicable: bool,
+    pub level: String,
+    pub ytd_turnover_ron: String,
+    pub plafon_ron: String,
+    pub pct: i64,
+}
+
+#[tauri::command]
+pub async fn vat_registration_status(
+    state: State<'_, AppState>,
+    company_id: String,
+    year: i32,
+) -> AppResult<VatRegistrationStatus> {
+    use rust_decimal::Decimal;
+    const PLAFON_LEI: i64 = 395_000;
+    let pool = &state.db;
+    let company = companies::get(pool, &company_id).await?;
+    if company.vat_payer {
+        return Ok(VatRegistrationStatus {
+            applicable: false,
+            level: "none".into(),
+            ytd_turnover_ron: "0".into(),
+            plafon_ron: PLAFON_LEI.to_string(),
+            pct: 0,
+        });
+    }
+    let from = format!("{year}-01-01");
+    let to = format!("{year}-12-31");
+    let turnover_f: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(CAST(subtotal_amount AS REAL) * COALESCE(exchange_rate, 1.0)), 0.0) \
+         FROM invoices \
+         WHERE company_id = ?1 AND status IN ('VALIDATED','STORNED') \
+           AND issue_date >= ?2 AND issue_date <= ?3",
+    )
+    .bind(&company_id)
+    .bind(&from)
+    .bind(&to)
+    .fetch_one(pool)
+    .await?;
+    let turnover = crate::db::invoices::round2(
+        Decimal::try_from(turnover_f.max(0.0)).unwrap_or(Decimal::ZERO),
+    );
+    let plafon = Decimal::from(PLAFON_LEI);
+    let pct: i64 = ((turnover / plafon) * Decimal::from(100))
+        .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+        .try_into()
+        .unwrap_or(0);
+    let level = if turnover >= plafon {
+        "exceeded"
+    } else if pct >= 80 {
+        "approaching"
+    } else {
+        "none"
+    };
+    Ok(VatRegistrationStatus {
+        applicable: true,
+        level: level.into(),
+        ytd_turnover_ron: turnover.to_string(),
+        plafon_ron: PLAFON_LEI.to_string(),
+        pct,
+    })
 }
 
 #[tauri::command]

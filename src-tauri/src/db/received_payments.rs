@@ -187,10 +187,10 @@ pub async fn summary_for_received_invoice(
         .iter()
         .map(|s| Decimal::from_str(s).unwrap_or(Decimal::ZERO))
         .fold(Decimal::ZERO, |acc, d| acc + d)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let invoice_total = Decimal::from_str(&total_str)
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2);
+        .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
 
     let payment_status = if paid_total <= Decimal::ZERO {
         "UNPAID"

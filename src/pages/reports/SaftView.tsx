@@ -15,13 +15,11 @@ import type { PreflightIssue } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
+import { MONTHS_RO } from "@/lib/utils";
 
 // SaftView uses legacy export_saft_d406 (returns XML string) + new export_saft_official (writes file, returns path).
 
-const MONTHS = [
-  "Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
-  "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie",
-];
+const MONTHS = MONTHS_RO;
 
 interface Props {
   selectedYear:       number;

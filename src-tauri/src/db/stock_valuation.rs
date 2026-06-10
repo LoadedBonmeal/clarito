@@ -49,7 +49,7 @@ pub struct ValuedEvent {
 }
 
 fn q6(d: Decimal) -> Decimal {
-    d.round_dp(6)
+    d.round_dp_with_strategy(6, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
 }
 
 /// FIFO (primul intrat – primul ieșit): each OUT consumes the oldest receipt layers at their own cost.

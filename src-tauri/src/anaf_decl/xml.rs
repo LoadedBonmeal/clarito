@@ -34,9 +34,13 @@ pub fn write_text_elem(w: &mut XmlWriter, name: &str, text: &str) -> AppResult<(
     Ok(())
 }
 
-/// `<name>` decimal formatted to `dp` fractional digits `</name>`.
+/// `<name>` decimal formatted to `dp` fractional digits `</name>`. COMMERCIAL rounding (half away
+/// from zero) — the ANAF/RO money convention; values are usually pre-rounded upstream, this keeps
+/// the safety net consistent with them.
 pub fn write_decimal_elem(w: &mut XmlWriter, name: &str, val: &Decimal, dp: u32) -> AppResult<()> {
-    let s = val.round_dp(dp).to_string();
+    let s = val
+        .round_dp_with_strategy(dp, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+        .to_string();
     write_text_elem(w, name, &s)
 }
 

@@ -736,7 +736,10 @@ pub(crate) async fn d300_vat_totals(
         }
     }
 
-    Ok((collected.round_dp(2), deductible.round_dp(2)))
+    Ok((
+        collected.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero),
+        deductible.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero),
+    ))
 }
 
 // ── Cash-VAT plafon monitor (slice 8) ───────────────────────────────────────
@@ -1002,7 +1005,9 @@ pub(crate) async fn compute_plafon_status(
 
     Ok(PlafonStatus {
         on_cash_vat,
-        ca_ron: ca.round_dp(2).to_string(),
+        ca_ron: ca
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
         plafon_lei: plafon,
         exceeded: breach_month.is_some(),
         breach_month,
@@ -1030,6 +1035,8 @@ pub async fn compute_d300(
 ) -> AppResult<D300Report> {
     use rust_decimal::prelude::ToPrimitive;
 
+    crate::commands::require_valid_date("Data de început", &period_from)?;
+    crate::commands::require_valid_date("Data de sfârșit", &period_to)?;
     let pool = &state.db;
 
     // Fetch CUI-ul companiei.
@@ -1180,10 +1187,16 @@ pub async fn compute_d300(
             total_base += base_sum;
             total_vat += vat_sum;
             D300Group {
-                vat_rate: rate.round_dp(2).to_string(),
+                vat_rate: rate
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 vat_category: category,
-                base: base_sum.round_dp(2).to_string(),
-                vat: vat_sum.round_dp(2).to_string(),
+                base: base_sum
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
+                vat: vat_sum
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 intra_eu_kind: None, // sales groups never have an intra_eu_kind
             }
         })
@@ -1357,10 +1370,16 @@ pub async fn compute_d300(
                 None
             };
             D300Group {
-                vat_rate: rate.round_dp(2).to_string(),
+                vat_rate: rate
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 vat_category: category,
-                base: base_sum.round_dp(2).to_string(),
-                vat: vat_sum.round_dp(2).to_string(),
+                base: base_sum
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
+                vat: vat_sum
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 intra_eu_kind,
             }
         })
@@ -1377,10 +1396,13 @@ pub async fn compute_d300(
         if g.vat_category == "S" {
             let rate_d = Decimal::from_str(&g.vat_rate).unwrap_or(Decimal::ZERO);
             let rate_pct = if rate_d > Decimal::ONE {
-                rate_d.round_dp(0).to_i64().unwrap_or(-1)
+                rate_d
+                    .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_i64()
+                    .unwrap_or(-1)
             } else {
                 (rate_d * Decimal::from(100))
-                    .round_dp(0)
+                    .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
                     .to_i64()
                     .unwrap_or(-1)
             };
@@ -1397,10 +1419,13 @@ pub async fn compute_d300(
         if g.vat_category == "S" {
             let rate_d = Decimal::from_str(&g.vat_rate).unwrap_or(Decimal::ZERO);
             let rate_pct = if rate_d > Decimal::ONE {
-                rate_d.round_dp(0).to_i64().unwrap_or(-1)
+                rate_d
+                    .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_i64()
+                    .unwrap_or(-1)
             } else {
                 (rate_d * Decimal::from(100))
-                    .round_dp(0)
+                    .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
                     .to_i64()
                     .unwrap_or(-1)
             };
@@ -1416,19 +1441,37 @@ pub async fn compute_d300(
         period_from,
         period_to,
         groups: groups_vec,
-        total_base: total_base.round_dp(2).to_string(),
-        total_vat: total_vat.round_dp(2).to_string(),
+        total_base: total_base
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
+        total_vat: total_vat
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
         invoice_count,
         purchase_groups: purchase_groups_vec,
-        total_deductible_base: total_deductible_base.round_dp(2).to_string(),
-        total_deductible_vat: total_deductible_vat.round_dp(2).to_string(),
+        total_deductible_base: total_deductible_base
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
+        total_deductible_vat: total_deductible_vat
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
         purchase_invoice_count,
         purchase_unparsed_count,
-        net_vat: net_vat.round_dp(2).to_string(),
-        reg_colectata_baza: reg_coll_base.round_dp(2).to_string(),
-        reg_colectata_tva: reg_coll_tva.round_dp(2).to_string(),
-        reg_dedusa_baza: reg_ded_base.round_dp(2).to_string(),
-        reg_dedusa_tva: reg_ded_tva.round_dp(2).to_string(),
+        net_vat: net_vat
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
+        reg_colectata_baza: reg_coll_base
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
+        reg_colectata_tva: reg_coll_tva
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
+        reg_dedusa_baza: reg_ded_base
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
+        reg_dedusa_tva: reg_ded_tva
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
     })
 }
 
@@ -1467,8 +1510,12 @@ pub async fn export_d300(
         if let Ok(override_dec) = Decimal::from_str(override_str.trim()) {
             let total_vat = Decimal::from_str(&report.total_vat).unwrap_or(Decimal::ZERO);
             let net_vat = total_vat - override_dec;
-            report.total_deductible_vat = override_dec.round_dp(2).to_string();
-            report.net_vat = net_vat.round_dp(2).to_string();
+            report.total_deductible_vat = override_dec
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                .to_string();
+            report.net_vat = net_vat
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                .to_string();
         }
     }
 
@@ -1600,7 +1647,10 @@ fn build_and_write_xml(report: D300Report, dest_path: String) -> AppResult<Strin
 
     xml.push_str("</D300>\n");
 
-    std::fs::write(&dest_path, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the
+    // IPC endpoint accepts an arbitrary string.
+    let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
+    std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
 
     Ok(dest_path)
 }
@@ -2827,5 +2877,46 @@ mod cash_vat_routing_tests {
             .unwrap();
         assert_eq!(mar, dec("2100"), "normal: full deduction at invoice date");
         assert_eq!(apr, Decimal::ZERO, "nothing deferred to the payment month");
+    }
+}
+
+#[cfg(test)]
+mod test_ron_to_bani_overflow {
+    use super::*;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_overflow_scenarios() {
+        // i64::MAX = 9,223,372,036,854,775,807
+        // Safe RON threshold = i64::MAX / 100 = 92,233,720,368,547.75807
+
+        // Test: Small value (should work)
+        let small = Decimal::from_str("1000.50").unwrap();
+        let result = ron_to_bani(small);
+        assert_eq!(result, 100050, "Small value should convert correctly");
+
+        // Test: The value from the finding (922,337,203,685,477.58)
+        // This is actually well below the safe threshold!
+        let finding_val = Decimal::from_str("922337203685477.58").unwrap();
+        let result = ron_to_bani(finding_val);
+        // This will NOT overflow; result should be 92233720368547758
+        println!("Finding value result: {}", result);
+        assert!(result > 0, "Finding value should not silently overflow");
+
+        // Test: Actual overflow (over 92,233,720,368,547.75807 RON)
+        let overflow_val = Decimal::from_str("92233720368548.00").unwrap();
+        let result = ron_to_bani(overflow_val);
+        println!(
+            "Overflow value (92,233,720,368,548.00 RON) result: {}",
+            result
+        );
+        // unwrap_or(0) will return 0 on overflow
+
+        // Test: Extreme but realistic N(15,2) max (9,999,999,999,999.99)
+        let n15_max = Decimal::from_str("9999999999999.99").unwrap();
+        let result = ron_to_bani(n15_max);
+        assert!(result > 0, "N(15,2) max should convert correctly");
+        println!("N(15,2) max result: {}", result);
     }
 }

@@ -224,11 +224,7 @@ fn strip_ro(cui: &str) -> String {
 }
 
 // ── Escape for XML text content ────────────────────────────────────────────────
-fn esc(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
+use crate::anaf_decl::xml_esc as esc;
 
 // ── Truncate a string to n bytes (UTF-8-safe) ─────────────────────────────────
 fn trunc(s: &str, max_chars: usize) -> String {
@@ -921,7 +917,8 @@ pub async fn write_assets(
                 stored_pct
             } else if life_months_raw > 0 {
                 // Annual rate % = 100 / (life_months / 12) = 1200 / life_months
-                (Decimal::from(1200) / Decimal::from(life_months_raw)).round_dp(4)
+                (Decimal::from(1200) / Decimal::from(life_months_raw))
+                    .round_dp_with_strategy(4, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
             } else {
                 Decimal::ZERO
             }

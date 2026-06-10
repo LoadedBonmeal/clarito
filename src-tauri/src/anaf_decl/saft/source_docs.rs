@@ -20,11 +20,7 @@ use crate::error::{AppError, AppResult};
 use crate::ubl::fx::{amount_to_ron, parse_rate};
 
 // ── XML escaping ───────────────────────────────────────────────────────────────
-fn esc(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
+use crate::anaf_decl::xml_esc as esc;
 
 fn trunc(s: &str, max_chars: usize) -> String {
     s.chars().take(max_chars).collect()
@@ -458,7 +454,8 @@ fn normalize_vat_rate_dec(raw: &str) -> Decimal {
     let d = Decimal::from_str(s).unwrap_or(Decimal::ZERO);
     if d < Decimal::ONE && d > Decimal::ZERO {
         // stored as fraction — multiply to percent
-        (d * Decimal::from(100)).round_dp(2)
+        (d * Decimal::from(100))
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
     } else {
         d
     }
@@ -673,7 +670,8 @@ pub async fn write_purchase_invoices(
             // Fallback: no parsed vat_lines — derive percentage from header totals.
             // DEFECT 1 FIX: never hard-code 19%; compute from actual amounts.
             let tax_pct = if net_ron > Decimal::ZERO {
-                ((vat_ron / net_ron) * Decimal::from(100)).round_dp(0)
+                ((vat_ron / net_ron) * Decimal::from(100))
+                    .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
             } else {
                 Decimal::ZERO
             };

@@ -98,14 +98,17 @@ pub fn normalize_vat_rate(raw: &str) -> String {
         Ok(v) => v,
         Err(_) => return "0".to_string(),
     };
-    // If the value is < 1, it's stored as a fraction (e.g. 0.19 → 19%).
-    let pct = if d < rust_decimal::Decimal::ONE && d > rust_decimal::Decimal::ZERO {
-        (d * rust_decimal::Decimal::from(100))
-            .round_dp(0)
+    // If the value is < 1, it's stored as a fraction (e.g. 0.19 → 19%). Commercial rounding,
+    // consistent with every other money/rate path.
+    let to_pct = |v: rust_decimal::Decimal| {
+        v.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
             .to_i64()
             .unwrap_or(0)
+    };
+    let pct = if d < rust_decimal::Decimal::ONE && d > rust_decimal::Decimal::ZERO {
+        to_pct(d * rust_decimal::Decimal::from(100))
     } else {
-        d.round_dp(0).to_i64().unwrap_or(0)
+        to_pct(d)
     };
     pct.to_string()
 }
@@ -278,8 +281,14 @@ pub async fn compute_d394(
                 vat_category: acc.vat_category,
                 vat_rate: acc.vat_rate,
                 invoice_count: acc.invoice_ids.len() as i64,
-                base: acc.base.round_dp(2).to_string(),
-                vat: acc.vat.round_dp(2).to_string(),
+                base: acc
+                    .base
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
+                vat: acc
+                    .vat
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 art331_code: acc.art331_code,
             }
         })
@@ -434,8 +443,14 @@ pub async fn compute_d394(
                 vat_category: acc.vat_category,
                 vat_rate: acc.vat_rate,
                 invoice_count: acc.invoice_ids.len() as i64,
-                base: acc.base.round_dp(2).to_string(),
-                vat: acc.vat.round_dp(2).to_string(),
+                base: acc
+                    .base
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
+                vat: acc
+                    .vat
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 art331_code: acc.art331_code,
             }
         })
@@ -453,12 +468,20 @@ pub async fn compute_d394(
         period_from,
         period_to,
         partners: partners_vec,
-        total_base: total_base.round_dp(2).to_string(),
-        total_vat: total_vat.round_dp(2).to_string(),
+        total_base: total_base
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
+        total_vat: total_vat
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
         invoice_count: total_invoice_count,
         purchase_partners: purchase_partners_vec,
-        total_purchase_base: total_purchase_base.round_dp(2).to_string(),
-        total_purchase_vat: total_purchase_vat.round_dp(2).to_string(),
+        total_purchase_base: total_purchase_base
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
+        total_purchase_vat: total_purchase_vat
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
         purchase_invoice_count,
         purchase_unparsed_count,
     })
@@ -700,7 +723,10 @@ fn build_and_write_xml(report: D394Report, dest_path: String) -> AppResult<Strin
 
     xml.push_str("</D394>\n");
 
-    std::fs::write(&dest_path, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the
+    // IPC endpoint accepts an arbitrary string.
+    let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
+    std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
 
     Ok(dest_path)
 }

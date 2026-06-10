@@ -630,7 +630,7 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
                     // PayableAmount = valoarea totală de plată
                     "PayableAmount" => {
                         if let Ok(d) = Decimal::from_str(text.trim()) {
-                            total_amount_str = d.round_dp(2).to_string();
+                            total_amount_str = crate::db::invoices::round2(d).to_string();
                         }
                     }
                     // IssueDate = data emiterii
@@ -640,7 +640,7 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
                     // TaxExclusiveAmount în LegalMonetaryTotal = net fără TVA
                     "TaxExclusiveAmount" if depth_monetary_total > 0 && net_amount.is_none() => {
                         if let Ok(d) = Decimal::from_str(text.trim()) {
-                            net_amount = Some(d.round_dp(2).to_string());
+                            net_amount = Some(crate::db::invoices::round2(d).to_string());
                         }
                     }
                     // TaxAmount: distingem doc-level (în TaxTotal dar NU în TaxSubtotal)
@@ -655,7 +655,7 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
                     "TaxAmount" if depth_tax_total > 0 && depth_tax_subtotal == 0 => {
                         // Nivel document — TVA total factură
                         if let Ok(d) = Decimal::from_str(text.trim()) {
-                            vat_amount_doc = Some(d.round_dp(2).to_string());
+                            vat_amount_doc = Some(crate::db::invoices::round2(d).to_string());
                             // Track first vs second TaxTotal for implied-rate derivation.
                             if tax_total_count == 1 && first_tax_total_vat.is_none() {
                                 first_tax_total_vat = Some(d);
@@ -667,19 +667,25 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
                     "TaxAmount" if depth_tax_subtotal > 0 => {
                         // Nivel subtotal — TVA aferent liniei
                         if let Ok(d) = Decimal::from_str(text.trim()) {
-                            sub_vat = Some(d.round_dp(2).to_string());
+                            sub_vat = Some(crate::db::invoices::round2(d).to_string());
                         }
                     }
                     // TaxableAmount în TaxSubtotal = baza impozabilă a liniei
                     "TaxableAmount" if depth_tax_subtotal > 0 => {
                         if let Ok(d) = Decimal::from_str(text.trim()) {
-                            sub_base = Some(d.round_dp(2).to_string());
+                            sub_base = Some(crate::db::invoices::round2(d).to_string());
                         }
                     }
                     // Percent în TaxCategory = cota TVA (ex. "19")
                     "Percent" if depth_tax_category > 0 => {
                         if let Ok(d) = Decimal::from_str(text.trim()) {
-                            sub_rate = Some(d.round_dp(0).to_string());
+                            sub_rate = Some(
+                                d.round_dp_with_strategy(
+                                    0,
+                                    rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                                )
+                                .to_string(),
+                            );
                         }
                     }
                     // ID în TaxCategory = codul categoriei (S/AE/E/Z/K/G/O)

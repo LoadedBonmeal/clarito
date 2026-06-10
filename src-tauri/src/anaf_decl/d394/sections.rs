@@ -322,7 +322,9 @@ fn strip_ro(cui: &str) -> String {
 
 /// Round Decimal to 0 dp → i64.
 fn round_to_lei(d: Decimal) -> i64 {
-    d.round_dp(0).to_i64().unwrap_or(0)
+    d.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+        .to_i64()
+        .unwrap_or(0)
 }
 
 /// Parse a monetary string to Decimal.

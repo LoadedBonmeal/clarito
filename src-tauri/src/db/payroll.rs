@@ -387,7 +387,12 @@ pub async fn run_payroll(
     )
     .await?;
 
-    let f = |d: Decimal| format!("{:.2}", d.round_dp(2));
+    let f = |d: Decimal| {
+        format!(
+            "{:.2}",
+            d.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+        )
+    };
     Ok(PayrollRun {
         states,
         total_gross: f(t_gross),

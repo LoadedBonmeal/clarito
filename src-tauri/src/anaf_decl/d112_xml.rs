@@ -72,18 +72,7 @@ pub mod oblig {
     pub const CAM: (&str, &str) = ("480", "20470300XX");
 }
 
-fn esc(s: &str) -> String {
-    s.chars()
-        .filter(|c| !c.is_control())
-        .flat_map(|c| match c {
-            '&' => "&amp;".chars().collect::<Vec<_>>(),
-            '<' => "&lt;".chars().collect(),
-            '>' => "&gt;".chars().collect(),
-            '"' => "&quot;".chars().collect(),
-            other => vec![other],
-        })
-        .collect()
-}
+use crate::anaf_decl::xml_esc as esc;
 
 /// Construiește XML-ul D112 pentru o lună. `employees` sunt deja salariații activi cu contribuțiile
 /// calculate (ratele 2026). Antetul A_codBugetar folosește codul bugetar standard al CAS/CASS/CAM.

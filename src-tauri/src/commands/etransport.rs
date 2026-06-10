@@ -75,5 +75,72 @@ pub async fn etransport_submit(
             }
         }
     }
-    result.map_err(AppError::Other)
+    let resp = result.map_err(AppError::Other)?;
+
+    // Evidența UIT (audit r3 W6): codul UIT e valabil 5 zile (transport național, cod 30) sau
+    // 15 zile (operațiuni intracomunitare/import-export) de la transmitere — îl persistăm cu
+    // termenul, ca UI-ul să poată avertiza înainte de expirare. Best-effort: un eșec de inserare
+    // nu invalidează transmiterea (deja acceptată de ANAF).
+    let validity_days: i64 = if declaration.cod_tip_operatiune == "30" {
+        5
+    } else {
+        15
+    };
+    let now = crate::db::models::now_unix();
+    if let Err(e) = sqlx::query(
+        "INSERT INTO etransport_declarations \
+         (id, company_id, uit, index_incarcare, cod_tip_operatiune, partner_name, vehicle, \
+          test_mode, submitted_at, expires_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+    )
+    .bind(crate::db::models::new_id())
+    .bind(&company_id)
+    .bind(&resp.uit)
+    .bind(&resp.index_incarcare)
+    .bind(&declaration.cod_tip_operatiune)
+    .bind(&declaration.partner.denumire)
+    .bind(&declaration.transport.nr_vehicul)
+    .bind(test_mode)
+    .bind(now)
+    .bind(now + validity_days * 86_400)
+    .execute(pool)
+    .await
+    {
+        tracing::warn!(error = ?e, "e-Transport: nu s-a putut salva evidența UIT (non-fatal)");
+    }
+
+    Ok(resp)
+}
+
+/// O declarație e-Transport transmisă, cu termenul de valabilitate al UIT-ului.
+#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct EtransportDeclRecord {
+    pub id: String,
+    pub company_id: String,
+    pub uit: Option<String>,
+    pub index_incarcare: String,
+    pub cod_tip_operatiune: String,
+    pub partner_name: String,
+    pub vehicle: String,
+    pub test_mode: bool,
+    pub submitted_at: i64,
+    pub expires_at: i64,
+}
+
+/// Lista declarațiilor e-Transport transmise (cele mai recente primele).
+#[tauri::command]
+pub async fn list_etransport_declarations(
+    state: State<'_, AppState>,
+    company_id: String,
+) -> AppResult<Vec<EtransportDeclRecord>> {
+    Ok(sqlx::query_as::<_, EtransportDeclRecord>(
+        "SELECT id, company_id, uit, index_incarcare, cod_tip_operatiune, partner_name, vehicle, \
+                test_mode, submitted_at, expires_at \
+         FROM etransport_declarations WHERE company_id = ?1 \
+         ORDER BY submitted_at DESC LIMIT 200",
+    )
+    .bind(&company_id)
+    .fetch_all(&state.db)
+    .await?)
 }

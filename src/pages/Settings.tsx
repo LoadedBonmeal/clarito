@@ -1069,13 +1069,18 @@ export function SettingsPage() {
                   size="sm"
                   icon="checkCircle"
                   onClick={async () => {
+                    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
                     try {
-                      const result = await api.archive.verifyIntegrity();
+                      const result = await api.archive.verifyIntegrity(activeCompanyId);
                       if (result.ok) {
                         notify.success(`Arhiva este integră. ${result.checked} fișiere verificate.`);
                       } else {
                         notify.error(
-                          `Fișiere lipsă (${result.missing.length} din ${result.checked}): ` +
+                          `Fișiere lipsă (${result.missing.length} din ${result.checked}` +
+                          (result.missingUnderRetention > 0
+                            ? `, ${result.missingUnderRetention} sub termenul legal de păstrare de 5 ani — L82/1991`
+                            : "") +
+                          `): ` +
                           result.missing.slice(0, 5).join(", ") +
                           (result.missing.length > 5 ? " …" : "")
                         );
@@ -1187,7 +1192,21 @@ export function SettingsPage() {
                   if (!step2) return;
 
                   try {
-                    await api.gdpr.wipeAll();
+                    try {
+                      await api.gdpr.wipeAll();
+                    } catch (e) {
+                      // L82/1991: documente sub termenul legal de păstrare de 5 ani — cerem
+                      // confirmarea explicită a păstrării legale înainte de a forța ștergerea.
+                      const msg = formatError(e, "");
+                      if (!msg.includes("5 ani")) throw e;
+                      const ack = await confirm(
+                        msg + "\n\nConfirmați că ați exportat/arhivat documentele și vă asumați " +
+                        "răspunderea pentru respectarea termenului legal de păstrare?",
+                        { title: "Termen legal de păstrare (L82/1991)", kind: "warning" }
+                      );
+                      if (!ack) return;
+                      await api.gdpr.wipeAll(true);
+                    }
                     notify.success("Toate datele dvs. au fost șterse. Aplicația va reporni.");
                     setTimeout(() => { window.location.reload(); }, 2000);
                   } catch (e) {

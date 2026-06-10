@@ -143,6 +143,15 @@ pub async fn create(
     company_id: &str,
     input: FixedAssetInput,
 ) -> AppResult<FixedAsset> {
+    // Durata de viață trebuie să fie ≥ 1 lună — amortizarea lunară împarte la life_months, iar un
+    // 0 ar fi doar mascat de guard-ul din calcul (activ care nu se amortizează niciodată).
+    if let Some(lm) = input.life_months {
+        if lm < 1 {
+            return Err(AppError::Validation(
+                "Durata de amortizare trebuie să fie de cel puțin 1 lună.".into(),
+            ));
+        }
+    }
     // asset_code must be unique per company
     let existing: Option<String> = sqlx::query_scalar(
         "SELECT id FROM fixed_assets WHERE company_id = ?1 AND asset_code = ?2 LIMIT 1",

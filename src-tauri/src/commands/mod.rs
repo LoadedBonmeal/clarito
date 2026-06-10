@@ -3,6 +3,26 @@
 //! Fiecare submodul mapează 1:1 cu un modul DB. Commands sunt subțiri:
 //! validare minimă + dispatch către layer-ul DB.
 
+/// Validează o dată calendaristică reală `YYYY-MM-DD` la granița IPC. SQLite compară datele ca
+/// STRINGURI, deci o dată inexistentă ('2026-02-31', '2026-06-99') trece tăcut printr-un filtru
+/// `BETWEEN` și poate sări peste documente — respingem la intrare cu chrono.
+pub(crate) fn require_valid_date(label: &str, s: &str) -> crate::error::AppResult<()> {
+    if chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").is_err() {
+        return Err(crate::error::AppError::Validation(format!(
+            "{label} invalidă: '{s}' — folosiți o dată calendaristică reală (AAAA-LL-ZZ)."
+        )));
+    }
+    Ok(())
+}
+
+/// Varianta pentru parametri opționali de filtru.
+pub(crate) fn require_valid_date_opt(label: &str, s: Option<&str>) -> crate::error::AppResult<()> {
+    match s {
+        Some(v) if !v.trim().is_empty() => require_valid_date(label, v),
+        _ => Ok(()),
+    }
+}
+
 pub mod accounts;
 pub mod anaf;
 pub mod archive;

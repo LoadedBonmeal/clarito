@@ -15,10 +15,10 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
-import { fmtRON } from "@/lib/utils";
+import { fmtRON, MONTHS_RO_SHORT } from "@/lib/utils";
 import type { Employee, CreateEmployeeInput, PayrollRun } from "@/types";
 
-const MONTHS = ["Ian","Feb","Mar","Apr","Mai","Iun","Iul","Aug","Sep","Oct","Nov","Dec"];
+const MONTHS = MONTHS_RO_SHORT;
 
 export function PayrollPage() {
   const companyId = useAppStore((s) => s.activeCompanyId);
@@ -67,6 +67,15 @@ export function PayrollPage() {
 
   const runD112 = async (caen: string) => {
     if (!companyId) return;
+    // Noul model D112 (Ordin comun 605/95/928/2.314/2026, M.Of. 463/02.06.2026) se aplică
+    // veniturilor lunii IULIE 2026+; aplicația emite structura v7 (valabilă ≤ iunie 2026).
+    if (year > 2026 || (year === 2026 && month >= 7)) {
+      notify.warn(
+        `Pentru ${MONTHS[month - 1]} ${year} se aplică NOUL model D112 (OPANAF 605/2026), ` +
+        "neimplementat încă — fișierul exportat folosește structura veche (≤ iunie 2026) și " +
+        "poate fi respins de DUKIntegrator. Verificați înainte de depunere.",
+      );
+    }
     const dest = await saveDialog({
       title: "Salvează D112 (XML)",
       defaultPath: `d112-${year}-${String(month).padStart(2, "0")}.xml`,

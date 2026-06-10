@@ -192,10 +192,16 @@ pub async fn generate_vat_report(
         .rev()
         .map(
             |((_rate_key, category), (rate, base_sum, vat_sum, count))| VatGroup {
-                rate: rate.round_dp(2).to_string(),
+                rate: rate
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 vat_category: category,
-                base_amount: base_sum.round_dp(2).to_string(),
-                vat_amount: vat_sum.round_dp(2).to_string(),
+                base_amount: base_sum
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
+                vat_amount: vat_sum
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 invoice_count: count,
             },
         )
@@ -205,9 +211,15 @@ pub async fn generate_vat_report(
         date_from,
         date_to,
         company_id,
-        total_base: total_base_dec.round_dp(2).to_string(),
-        total_vat: total_vat_dec.round_dp(2).to_string(),
-        total_amount: total_amount_dec.round_dp(2).to_string(),
+        total_base: total_base_dec
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
+        total_vat: total_vat_dec
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
+        total_amount: total_amount_dec
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string(),
         invoice_count,
         vat_groups,
         generated_at: chrono::Utc::now().timestamp(),

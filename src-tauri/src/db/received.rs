@@ -185,3 +185,192 @@ pub async fn set_status(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co','RO1','T','S','C','CJ','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    /// Seed a minimal received_invoice row (all NOT NULL columns covered).
+    async fn seed_received(pool: &SqlitePool, id: &str, company_id: &str, total: &str) {
+        sqlx::query(
+            "INSERT INTO received_invoices \
+             (id, company_id, anaf_download_id, issuer_cui, issuer_name, \
+              total_amount, currency, issue_date, xml_path, status, intra_eu_kind, \
+              downloaded_at, created_at) \
+             VALUES (?1, ?2, ?3, 'RO999', 'Emitent SRL', ?4, 'RON', '2026-01-15', '/x.xml', \
+                     'NEW', 'goods', 1, 1)",
+        )
+        .bind(id)
+        .bind(company_id)
+        .bind(id) // anaf_download_id must be unique — reuse id
+        .bind(total)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    // ─── Test 1: basic roundtrip — insert + list returns the row ───────────
+
+    #[tokio::test]
+    async fn list_returns_inserted_row() {
+        let pool = pool().await;
+        seed_received(&pool, "ri1", "co", "250.00").await;
+
+        let result = list(
+            &pool,
+            ReceivedFilter {
+                company_id: Some("co".into()),
+                statuses: None,
+                page: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.total, 1);
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].id, "ri1");
+        assert_eq!(result.items[0].total_amount, "250.00");
+    }
+
+    #[tokio::test]
+    async fn list_cross_company_returns_empty() {
+        let pool = pool().await;
+        seed_received(&pool, "ri1", "co", "250.00").await;
+
+        // Second company — no rows belong to it.
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co2','RO2','T2','S','C','CJ','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result = list(
+            &pool,
+            ReceivedFilter {
+                company_id: Some("co2".into()),
+                statuses: None,
+                page: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.total, 0);
+        assert!(result.items.is_empty());
+    }
+
+    // ─── Test 2: get() is company-scoped (cross-company → NotFound) ────────
+
+    #[tokio::test]
+    async fn get_returns_row_for_correct_company() {
+        let pool = pool().await;
+        seed_received(&pool, "ri1", "co", "100.00").await;
+
+        let row = get(&pool, "ri1", "co").await.unwrap();
+        assert_eq!(row.id, "ri1");
+        assert_eq!(row.company_id, "co");
+    }
+
+    #[tokio::test]
+    async fn get_cross_company_returns_not_found() {
+        let pool = pool().await;
+        seed_received(&pool, "ri1", "co", "100.00").await;
+
+        let err = get(&pool, "ri1", "co2").await;
+        assert!(
+            matches!(err, Err(AppError::NotFound)),
+            "cross-company get should return NotFound"
+        );
+    }
+
+    // ─── Test 3: set_status / set_intra_eu_kind are company-scoped ─────────
+
+    #[tokio::test]
+    async fn set_status_updates_correctly() {
+        let pool = pool().await;
+        seed_received(&pool, "ri1", "co", "100.00").await;
+
+        set_status(&pool, "ri1", "co", ReceivedStatus::Approved)
+            .await
+            .unwrap();
+
+        let row = get(&pool, "ri1", "co").await.unwrap();
+        assert_eq!(row.status, "APPROVED");
+    }
+
+    #[tokio::test]
+    async fn set_status_cross_company_returns_not_found() {
+        let pool = pool().await;
+        seed_received(&pool, "ri1", "co", "100.00").await;
+
+        let err = set_status(&pool, "ri1", "wrong_co", ReceivedStatus::Reviewed).await;
+        assert!(
+            matches!(err, Err(AppError::NotFound)),
+            "cross-company set_status should return NotFound"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_intra_eu_kind_cross_company_returns_not_found() {
+        let pool = pool().await;
+        seed_received(&pool, "ri1", "co", "100.00").await;
+
+        let err = set_intra_eu_kind(&pool, "ri1", "wrong_co", "services").await;
+        assert!(
+            matches!(err, Err(AppError::NotFound)),
+            "cross-company set_intra_eu_kind should return NotFound"
+        );
+    }
+
+    // ─── Test 4: total_amount stored as TEXT — garbage survives parse ───────
+    //   (The list/get functions return the raw TEXT; there is no parse in those
+    //    code paths. This test verifies the column round-trips without panic.)
+
+    #[tokio::test]
+    async fn total_amount_garbage_text_does_not_panic_on_list() {
+        let pool = pool().await;
+        // Insert a row with a deliberately broken total_amount.
+        sqlx::query(
+            "INSERT INTO received_invoices \
+             (id, company_id, anaf_download_id, issuer_cui, issuer_name, \
+              total_amount, currency, issue_date, xml_path, status, intra_eu_kind, \
+              downloaded_at, created_at) \
+             VALUES ('bad','co','bad_dl','RO1','X','garbage','RON','2026-01-20','/b.xml','NEW','goods',1,1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // list() must return the row without panicking.
+        let result = list(
+            &pool,
+            ReceivedFilter {
+                company_id: Some("co".into()),
+                statuses: None,
+                page: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let bad = result.items.iter().find(|r| r.id == "bad").unwrap();
+        // The raw text is returned as-is; no crash.
+        assert_eq!(bad.total_amount, "garbage");
+    }
+}

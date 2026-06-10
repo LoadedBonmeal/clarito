@@ -12,7 +12,7 @@ use crate::state::AppState;
 // - cale absolută obligatorie
 // - fără UNC / SMB (`\\server\share`)
 // - fără componente `..`
-// - extensie permisă (csv, xlsx, xml, txt)
+// - extensie permisă (csv, xlsx, xml, txt, zip)
 // - directorul țintă trebuie să existe (canonicalizabil)
 //
 // Note: the previous `starts_with($HOME)` restriction is intentionally removed
@@ -46,9 +46,9 @@ pub(crate) fn validate_export_path(path: &str) -> AppResult<std::path::PathBuf> 
     }
 
     let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if !matches!(ext, "csv" | "xlsx" | "xml" | "txt") {
+    if !matches!(ext, "csv" | "xlsx" | "xml" | "txt" | "zip") {
         return Err(AppError::Validation(format!(
-            "Extensie fișier nepermisă: .{ext}. Permise: csv, xlsx, xml, txt."
+            "Extensie fișier nepermisă: .{ext}. Permise: csv, xlsx, xml, txt, zip."
         )));
     }
 
@@ -541,9 +541,27 @@ pub async fn export_winmentor_csv(
         let curs = invoice.exchange_rate.unwrap_or(1.0);
 
         for (vat_rate, (net_dec, tva_dec, tot_dec)) in &groups {
-            let net = format!("{:.2}", net_dec.round_dp(2));
-            let tva = format!("{:.2}", tva_dec.round_dp(2));
-            let total = format!("{:.2}", tot_dec.round_dp(2));
+            let net = format!(
+                "{:.2}",
+                net_dec.round_dp_with_strategy(
+                    2,
+                    rust_decimal::RoundingStrategy::MidpointAwayFromZero
+                )
+            );
+            let tva = format!(
+                "{:.2}",
+                tva_dec.round_dp_with_strategy(
+                    2,
+                    rust_decimal::RoundingStrategy::MidpointAwayFromZero
+                )
+            );
+            let total = format!(
+                "{:.2}",
+                tot_dec.round_dp_with_strategy(
+                    2,
+                    rust_decimal::RoundingStrategy::MidpointAwayFromZero
+                )
+            );
 
             let row = format!(
                 "FACT;{serie};{numar};{data};{cui};{denumire};\

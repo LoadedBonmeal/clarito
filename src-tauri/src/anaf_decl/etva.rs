@@ -95,7 +95,11 @@ pub fn reconcile_line(
         d300: fmt2(d300),
         precompletat: fmt2(precompletat),
         diff: fmt2(diff),
-        diff_pct: format!("{}", pct_exact.round_dp(1)),
+        diff_pct: format!(
+            "{}",
+            pct_exact
+                .round_dp_with_strategy(1, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+        ),
         significant,
         note,
     }
@@ -129,8 +133,9 @@ pub fn extract_etva_jsons(zip_bytes: &[u8]) -> Result<Vec<(String, String)>, Str
 }
 
 fn fmt2(d: Decimal) -> String {
-    // Round to 2dp first so a sub-cent negative (e.g. -0.001) renders "0.00", never "-0.00".
-    let d = d.round_dp(2);
+    // Round to 2dp first (commercial — the money convention) so a sub-cent negative
+    // (e.g. -0.001) renders "0.00", never "-0.00".
+    let d = d.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     let d = if d.is_zero() { Decimal::ZERO } else { d };
     format!("{:.2}", d)
 }

@@ -9,14 +9,17 @@ use rust_decimal::Decimal;
 /// - If `currency` is "RON" (case-insensitive) the amount is returned unchanged.
 /// - If `rate` is `None` the amount is returned unchanged (caller must ensure
 ///   the rate is validated before generation; see BR-RO-028).
-/// - Otherwise returns `amount * rate`, rounded to 2 decimal places.
+/// - Otherwise returns `amount * rate`, rounded to 2 decimals with COMMERCIAL
+///   rounding (MidpointAwayFromZero) — the convention all RON money paths use;
+///   `round_dp` (banker's) would diverge at .xx5 midpoints.
 pub fn amount_to_ron(amount: Decimal, currency: &str, rate: Option<Decimal>) -> Decimal {
     if currency.eq_ignore_ascii_case("RON") {
         return amount;
     }
     match rate {
         None => amount,
-        Some(r) => (amount * r).round_dp(2),
+        Some(r) => (amount * r)
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero),
     }
 }
 

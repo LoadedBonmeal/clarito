@@ -66,6 +66,9 @@ pub async fn list_invoices(
             "Selectați o companie activă.".to_string(),
         ));
     }
+    // Datele de filtru sunt comparate ca stringuri în SQL — o dată inexistentă sare documente.
+    crate::commands::require_valid_date_opt("Data de început", f.date_from.as_deref())?;
+    crate::commands::require_valid_date_opt("Data de sfârșit", f.date_to.as_deref())?;
     invoices::list(&state.db, f).await
 }
 
@@ -228,6 +231,13 @@ pub async fn update_invoice_draft(
                 line.vat_rate
             )));
         }
+        // Cantitățile negative nu au loc pe o ciornă editată — corecțiile trec prin stornare.
+        if line.quantity < 0.0 {
+            return Err(AppError::Validation(format!(
+                "Cantitate negativă pe linia '{}' — pentru corecții folosiți stornarea.",
+                line.name
+            )));
+        }
     }
 
     // U3: validate payment_means_code against the UNCL4461 allow-list.
@@ -350,14 +360,14 @@ pub async fn update_invoice_draft(
         .bind(
             Decimal::try_from(line.quantity)
                 .unwrap_or(Decimal::ZERO)
-                .round_dp(6)
+                .round_dp_with_strategy(6, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
                 .to_string(),
         )
         .bind(&line.unit)
         .bind(
             Decimal::try_from(line.unit_price)
                 .unwrap_or(Decimal::ZERO)
-                .round_dp(2)
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
                 .to_string(),
         )
         .bind({
@@ -368,7 +378,8 @@ pub async fn update_invoice_draft(
             } else {
                 Decimal::ZERO
             };
-            eff.round_dp(2).to_string()
+            eff.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                .to_string()
         })
         .bind(&line.vat_category)
         .bind(line_subtotal)
@@ -384,8 +395,11 @@ pub async fn update_invoice_draft(
     let _ =
         crate::db::audit::log_user_action(&state.db, "invoice_updated", "invoice", &id, None).await;
 
-    // 6. Return updated invoice
-    invoices::get(&state.db, &id).await
+    // 6. Return updated invoice — re-verify ownership on the fetched row so the unscoped
+    // invoices::get can never hand a foreign invoice back across the IPC boundary.
+    let updated = invoices::get(&state.db, &id).await?;
+    check_invoice_ownership(&updated, &company_id)?;
+    Ok(updated)
 }
 
 #[derive(serde::Serialize)]
@@ -563,10 +577,16 @@ pub async fn storno_invoice(
                 id: new_id(),
                 name: l.name.clone(),
                 description: Some(format!("Storno: {}", l.name)),
-                quantity: qty.round_dp(6).to_string(),
+                quantity: qty
+                    .round_dp_with_strategy(6, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 unit: l.unit.clone(),
-                unit_price: price.round_dp(2).to_string(),
-                vat_rate: rate.round_dp(2).to_string(),
+                unit_price: price
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
+                vat_rate: rate
+                    .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                    .to_string(),
                 vat_category: l.vat_category.clone(),
                 cpv_code: l.cpv_code.clone(),
                 subtotal: ls.to_string(),
@@ -743,8 +763,11 @@ pub async fn storno_invoice(
     )
     .await;
 
-    // 6. Re-fetch factura storno pentru a returna datele complete
-    invoices::get(pool, &storno_id).await
+    // 6. Re-fetch factura storno pentru a returna datele complete — cu re-verificarea
+    // apartenenței (get-ul este nescopat; rândul abia creat trebuie să fie al companiei).
+    let storno = invoices::get(pool, &storno_id).await?;
+    check_invoice_ownership(&storno, &company_id)?;
+    Ok(storno)
 }
 
 /// MISS-04: Duplică o factură existentă într-o nouă ciornă (DRAFT).

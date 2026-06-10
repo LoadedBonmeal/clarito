@@ -119,8 +119,10 @@ export function D390View({ dateFrom, dateTo }: Props) {
               <Banner variant="warning">
                 <b>{doc!.dropped}</b>{" "}
                 {doc!.dropped === 1 ? "operațiune intra-UE a fost ignorată" : "operațiuni intra-UE au fost ignorate"}{" "}
-                — partenerul nu are un cod TVA UE valid (cod lipsă sau prefix non-UE). Completați
-                CUI-ul partenerului pentru a evita sub-raportarea în VIES.
+                — partener fără cod TVA UE valid (cod lipsă / prefix non-UE) sau bază netă negativă
+                (stornare peste altă perioadă — regularizarea «R» se declară manual; tipurile
+                T/triunghiular și R nu sunt încă generate automat). Completați CUI-ul partenerului
+                sau declarați regularizarea manual pentru a evita sub-raportarea în VIES.
               </Banner>
             </div>
           )}
