@@ -247,6 +247,19 @@ export const ubl = {
   /** R14 Wave E: companyId is required — cross-company XML validation returns NotFound. */
   validateXml: (invoiceId: string, companyId: string) =>
     invoke<ValidationResult>("validate_invoice_xml", { invoiceId, companyId }),
+  /** Previzualizare șablon: PDF demo cu identitatea reală a companiei; returnează calea temp. */
+  previewInvoiceTemplate: (
+    companyId: string,
+    tpl: {
+      preset: string;
+      accentHex: string;
+      headerNote: string;
+      footerNote: string;
+      showWords: boolean;
+      showVatDetail: boolean;
+    },
+  ) =>
+    invoke<string>("preview_invoice_template", { companyId, ...tpl }),
 };
 
 // ─── ANAF ─────────────────────────────────────────────────────────────────

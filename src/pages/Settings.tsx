@@ -9,7 +9,7 @@
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect, useId } from "react";
 import { open, save, confirm } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -202,6 +202,11 @@ export function SettingsPage() {
   // Invoice template
   const [templatePreset, setTemplatePreset] = useState("clasic");
   const [templateAccent, setTemplateAccent] = useState("#000000");
+  const [templateHeaderNote, setTemplateHeaderNote] = useState("");
+  const [templateFooterNote, setTemplateFooterNote] = useState("");
+  const [templateShowWords, setTemplateShowWords] = useState(true);
+  const [templateShowVatDetail, setTemplateShowVatDetail] = useState(true);
+  const [previewingTemplate, setPreviewingTemplate] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [templateSaved, setTemplateSaved] = useState(false);
 
@@ -250,12 +255,20 @@ export function SettingsPage() {
   // Load invoice template settings on mount
   useEffect(() => {
     void (async () => {
-      const [preset, accent] = await Promise.all([
+      const [preset, accent, headerNote, footerNote, showWords, showVatDetail] = await Promise.all([
         api.settings.get("invoice_template_preset"),
         api.settings.get("invoice_template_accent"),
+        api.settings.get("invoice_template_header_note"),
+        api.settings.get("invoice_template_footer_note"),
+        api.settings.get("invoice_template_show_words"),
+        api.settings.get("invoice_template_show_vat_detail"),
       ]);
       if (preset) setTemplatePreset(preset);
       if (accent) setTemplateAccent(accent);
+      if (headerNote) setTemplateHeaderNote(headerNote);
+      if (footerNote) setTemplateFooterNote(footerNote);
+      if (showWords != null) setTemplateShowWords(showWords !== "0");
+      if (showVatDetail != null) setTemplateShowVatDetail(showVatDetail !== "0");
     })();
   }, []);
 
@@ -354,12 +367,38 @@ export function SettingsPage() {
     }
   };
 
+  const handlePreviewTemplate = async () => {
+    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    setPreviewingTemplate(true);
+    try {
+      // Previzualizează șablonul CURENT din formular (chiar nesalvat) pe o factură demo
+      // cu identitatea reală a companiei (logo, IBAN, serie).
+      const path = await api.ubl.previewInvoiceTemplate(activeCompanyId, {
+        preset: templatePreset,
+        accentHex: templateAccent,
+        headerNote: templateHeaderNote,
+        footerNote: templateFooterNote,
+        showWords: templateShowWords,
+        showVatDetail: templateShowVatDetail,
+      });
+      await openPath(path);
+    } catch (e) {
+      notify.error(formatError(e, "Nu s-a putut genera previzualizarea."));
+    } finally {
+      setPreviewingTemplate(false);
+    }
+  };
+
   const handleSaveTemplate = async () => {
     setSavingTemplate(true);
     try {
       await Promise.all([
         api.settings.set("invoice_template_preset", templatePreset),
         api.settings.set("invoice_template_accent", templateAccent),
+        api.settings.set("invoice_template_header_note", templateHeaderNote),
+        api.settings.set("invoice_template_footer_note", templateFooterNote),
+        api.settings.set("invoice_template_show_words", templateShowWords ? "1" : "0"),
+        api.settings.set("invoice_template_show_vat_detail", templateShowVatDetail ? "1" : "0"),
       ]);
       setTemplateSaved(true);
       setTimeout(() => setTemplateSaved(false), 3000);
@@ -520,7 +559,7 @@ export function SettingsPage() {
                 <option value="minimal">Minimal (accent doar pe titlu)</option>
               </Select>
             </SettingRow>
-            <SettingRow label="Culoare accent" desc="Aplicată conform preset-ului ales (#RRGGBB)." last>
+            <SettingRow label="Culoare accent" desc="Aplicată conform preset-ului ales (#RRGGBB).">
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <input
                   type="color"
@@ -538,6 +577,42 @@ export function SettingsPage() {
                 />
               </div>
             </SettingRow>
+            <SettingRow label="Antet personalizat" desc="Sub data emiterii — slogan / mențiuni legale (max 2 rânduri).">
+              <textarea
+                className="rf-input"
+                rows={2}
+                maxLength={240}
+                value={templateHeaderNote}
+                onChange={(e) => setTemplateHeaderNote(e.target.value)}
+                placeholder={"Capital social: 200 lei · J12/345/2020"}
+                style={{ minWidth: 320, resize: "vertical", fontFamily: "inherit", fontSize: 12.5 }}
+              />
+            </SettingRow>
+            <SettingRow label="Subsol personalizat" desc="La finalul facturii — mulțumiri / termeni de plată (max 3 rânduri).">
+              <textarea
+                className="rf-input"
+                rows={3}
+                maxLength={400}
+                value={templateFooterNote}
+                onChange={(e) => setTemplateFooterNote(e.target.value)}
+                placeholder={"Vă mulțumim pentru colaborare!\nPlata în 15 zile de la emitere."}
+                style={{ minWidth: 320, resize: "vertical", fontFamily: "inherit", fontSize: 12.5 }}
+              />
+            </SettingRow>
+            <SettingRow label="Suma în litere" desc="Afișează totalul scris în cuvinte sub TOTAL.">
+              <input
+                type="checkbox"
+                checked={templateShowWords}
+                onChange={(e) => setTemplateShowWords(e.target.checked)}
+              />
+            </SettingRow>
+            <SettingRow label="Detaliu TVA" desc="Afișează tabelul cu baze impozabile pe cote." last>
+              <input
+                type="checkbox"
+                checked={templateShowVatDetail}
+                onChange={(e) => setTemplateShowVatDetail(e.target.checked)}
+              />
+            </SettingRow>
             <div style={{ paddingTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
               <Btn
                 variant="primary"
@@ -546,6 +621,14 @@ export function SettingsPage() {
                 onClick={() => void handleSaveTemplate()}
               >
                 {savingTemplate ? "Se salvează…" : "Salvează"}
+              </Btn>
+              <Btn
+                variant="secondary"
+                size="sm"
+                disabled={previewingTemplate || !activeCompanyId}
+                onClick={() => void handlePreviewTemplate()}
+              >
+                {previewingTemplate ? "Se generează…" : "Previzualizează PDF demo"}
               </Btn>
               {templateSaved && (
                 <span style={{ fontSize: 12, color: "var(--rf-success)" }}>

@@ -340,6 +340,7 @@ pub fn run() {
             // ubl
             commands::ubl::generate_invoice_xml,
             commands::ubl::generate_invoice_pdf,
+            commands::ubl::preview_invoice_template,
             commands::ubl::validate_invoice_xml,
             // anaf
             commands::anaf::anaf_authorize,

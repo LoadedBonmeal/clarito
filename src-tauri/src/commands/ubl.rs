@@ -101,20 +101,7 @@ pub async fn generate_invoice_pdf(
     };
 
     // Fetch invoice template settings (fall back to defaults on any error).
-    let template = {
-        let preset = crate::db::settings::get(&state.db, "invoice_template_preset")
-            .await
-            .unwrap_or(None)
-            .unwrap_or_else(|| "clasic".to_string());
-        let accent = crate::db::settings::get(&state.db, "invoice_template_accent")
-            .await
-            .unwrap_or(None)
-            .unwrap_or_else(|| "#000000".to_string());
-        InvoiceTemplate {
-            preset,
-            accent_hex: accent,
-        }
-    };
+    let template = load_invoice_template(&state.db).await;
 
     let path = paths::pdf_path(&app, &inv.company_id, &invoice_id);
     let path_clone = path.clone();
@@ -133,6 +120,75 @@ pub async fn generate_invoice_pdf(
     invoices::set_pdf_path(&state.db, &invoice_id, &path_str_result).await?;
 
     Ok(path_str_result)
+}
+
+/// Încarcă șablonul de factură din settings (chei globale), cu fallback la implicit pe orice
+/// eroare — un setting corupt nu trebuie să blocheze generarea PDF-ului.
+async fn load_invoice_template(pool: &sqlx::SqlitePool) -> InvoiceTemplate {
+    let get = |key: &'static str| async move {
+        crate::db::settings::get(pool, key).await.unwrap_or(None)
+    };
+    let flag = |v: Option<String>, default: bool| match v.as_deref() {
+        Some("0") | Some("false") => false,
+        Some("1") | Some("true") => true,
+        _ => default,
+    };
+    InvoiceTemplate {
+        preset: get("invoice_template_preset")
+            .await
+            .unwrap_or_else(|| "clasic".to_string()),
+        accent_hex: get("invoice_template_accent")
+            .await
+            .unwrap_or_else(|| "#000000".to_string()),
+        header_note: get("invoice_template_header_note")
+            .await
+            .unwrap_or_default(),
+        footer_note: get("invoice_template_footer_note")
+            .await
+            .unwrap_or_default(),
+        show_words: flag(get("invoice_template_show_words").await, true),
+        show_vat_detail: flag(get("invoice_template_show_vat_detail").await, true),
+    }
+}
+
+/// Previzualizare șablon: generează un PDF DEMO (factură fictivă cu identitatea reală a
+/// companiei — logo, IBAN, serie) folosind șablonul primit ca parametri (poate fi NEsalvat,
+/// ca utilizatorul să vadă efectul înainte de salvare). Scrie în directorul temporar și
+/// returnează calea — FE îl deschide cu vizualizatorul de PDF al sistemului.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn preview_invoice_template(
+    state: State<'_, AppState>,
+    company_id: String,
+    preset: String,
+    accent_hex: String,
+    header_note: String,
+    footer_note: String,
+    show_words: bool,
+    show_vat_detail: bool,
+) -> AppResult<String> {
+    let seller = companies::get(&state.db, &company_id).await?;
+    let input = crate::ubl::pdf::sample_preview_input(seller);
+    let template = InvoiceTemplate {
+        preset,
+        accent_hex,
+        header_note,
+        footer_note,
+        show_words,
+        show_vat_detail,
+    };
+    let path = std::env::temp_dir().join(format!("clarito-sablon-preview-{company_id}.pdf"));
+    let path_clone = path.clone();
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
+        let pdf_bytes = generate_pdf(&input, &template)?;
+        std::fs::write(&path_clone, &pdf_bytes).map_err(AppError::Io)?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| AppError::Pdf(e.to_string()))??;
+    path.to_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| AppError::Pdf("Cale fişier invalidă UTF-8".to_string()))
 }
 
 #[tauri::command]

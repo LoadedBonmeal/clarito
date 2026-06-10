@@ -42,6 +42,17 @@ pub struct InvoiceTemplate {
     pub preset: String,
     /// Accent colour as `"#RRGGBB"`. Used according to the preset rules.
     pub accent_hex: String,
+    /// Custom branding line(s) under the date line (slogan / mențiuni legale —
+    /// ex. "Capital social: 200 lei · J40/1234/2020"). Max 2 lines (split by '\n');
+    /// empty = nothing drawn.
+    pub header_note: String,
+    /// Custom block at the bottom of the invoice (mulțumiri / termeni de plată /
+    /// mențiuni). Max 3 lines (split by '\n'); empty = nothing drawn.
+    pub footer_note: String,
+    /// Show the "suma în litere" line under the total. Default true.
+    pub show_words: bool,
+    /// Show the "Detaliu TVA" breakdown table. Default true.
+    pub show_vat_detail: bool,
 }
 
 impl Default for InvoiceTemplate {
@@ -49,7 +60,122 @@ impl Default for InvoiceTemplate {
         Self {
             preset: "clasic".into(),
             accent_hex: "#000000".into(),
+            header_note: String::new(),
+            footer_note: String::new(),
+            show_words: true,
+            show_vat_detail: true,
         }
+    }
+}
+
+/// Build a DEMO `GeneratorInput` for the template-preview feature: a fictitious invoice
+/// (2 lines, 21% + 11%) issued by the REAL `seller` company, so the preview shows the
+/// user's own logo/IBAN/identity with sample data. Never persisted.
+pub fn sample_preview_input(seller: Company) -> GeneratorInput {
+    let company_id = seller.id.clone();
+    let buyer = Contact {
+        id: "preview-client".into(),
+        company_id: company_id.clone(),
+        contact_type: "CUSTOMER".into(),
+        cui: Some("RO12345674".into()),
+        legal_name: "Client Demo SRL".into(),
+        vat_payer: true,
+        cash_vat: false,
+        is_individual: false,
+        address: Some("Str. Exemplu nr. 10".into()),
+        city: Some("Cluj-Napoca".into()),
+        county: Some("Cluj".into()),
+        country: "RO".into(),
+        email: None,
+        phone: None,
+        currency: None,
+        created_at: 0,
+        updated_at: 0,
+    };
+    let mk_line = |pos: i64,
+                   name: &str,
+                   qty: &str,
+                   price: &str,
+                   rate: &str,
+                   base: &str,
+                   vat: &str,
+                   total: &str| LineItem {
+        id: format!("preview-line-{pos}"),
+        invoice_id: "preview-invoice".into(),
+        position: pos,
+        name: name.into(),
+        description: None,
+        quantity: qty.into(),
+        unit: "H87".into(),
+        unit_price: price.into(),
+        vat_rate: rate.into(),
+        vat_category: "S".into(),
+        subtotal_amount: base.into(),
+        vat_amount: vat.into(),
+        total_amount: total.into(),
+        cpv_code: None,
+        art331_code: None,
+        revenue_kind: "goods".into(),
+    };
+    let lines = vec![
+        mk_line(
+            1,
+            "Servicii consultanță (demo)",
+            "10.00",
+            "100.00",
+            "21.00",
+            "1000.00",
+            "210.00",
+            "1210.00",
+        ),
+        mk_line(
+            2,
+            "Materiale tipărite (demo)",
+            "5.00",
+            "40.00",
+            "11.00",
+            "200.00",
+            "22.00",
+            "222.00",
+        ),
+    ];
+    let invoice = crate::db::invoices::Invoice {
+        id: "preview-invoice".into(),
+        company_id,
+        contact_id: buyer.id.clone(),
+        series: seller.invoice_series.clone(),
+        number: seller.last_invoice_number + 1,
+        full_number: format!("{}-DEMO-0001", seller.invoice_series),
+        issue_date: "2026-06-15".into(),
+        due_date: "2026-07-15".into(),
+        currency: "RON".into(),
+        exchange_rate: None,
+        subtotal_amount: "1200.00".into(),
+        vat_amount: "232.00".into(),
+        total_amount: "1432.00".into(),
+        status: "DRAFT".into(),
+        anaf_upload_id: None,
+        anaf_index: None,
+        anaf_submitted_at: None,
+        anaf_validated_at: None,
+        anaf_rejected_at: None,
+        xml_path: None,
+        pdf_path: None,
+        signature_xml_path: None,
+        rejection_reason: None,
+        rejection_code: None,
+        notes: Some("Previzualizare șablon — factură demonstrativă, nu se emite.".into()),
+        payment_means_code: "30".into(),
+        storno_of_invoice_id: None,
+        created_at: 0,
+        updated_at: 0,
+    };
+    GeneratorInput {
+        invoice,
+        lines,
+        seller,
+        buyer,
+        storno_ref: None,
     }
 }
 
@@ -137,6 +263,25 @@ pub fn generate_pdf(input: &GeneratorInput, template: &InvoiceTemplate) -> AppRe
     );
     layer.use_text(date_line, FONT_NORMAL, Mm(MARGIN), Mm(y), &font_normal);
     y -= 8.0;
+
+    // Linie(le) de antet personalizate din șablon (slogan / mențiuni legale) — max 2 rânduri.
+    if !template.header_note.trim().is_empty() {
+        for note_line in template.header_note.lines().take(2) {
+            let note_line = note_line.trim();
+            if note_line.is_empty() {
+                continue;
+            }
+            layer.use_text(
+                truncate(note_line, 110),
+                FONT_SMALL,
+                Mm(MARGIN),
+                Mm(y),
+                &font_normal,
+            );
+            y -= 4.5;
+        }
+        y -= 1.5;
+    }
 
     // Mențiunea obligatorie "TVA la încasare" (Cod fiscal art. 319 alin. (20) lit. r).
     if crate::ubl::generator::invoice_under_cash_vat(seller, &input.lines) {
@@ -273,7 +418,8 @@ pub fn generate_pdf(input: &GeneratorInput, template: &InvoiceTemplate) -> AppRe
     // ── VAT breakdown table (left side) ──────────────────────────────────────
     // BIZ-19: group by (rate, vat_category) so 0% Exempt and 0% Zero-rated
     // surface as separate rows instead of being merged into "0%".
-    {
+    // Opțional din șablon (show_vat_detail) — unele firme preferă factura compactă.
+    if template.show_vat_detail {
         let mut vat_groups: std::collections::BTreeMap<(i64, String), (Decimal, Decimal)> =
             std::collections::BTreeMap::new();
         for line in &input.lines {
@@ -359,17 +505,19 @@ pub fn generate_pdf(input: &GeneratorInput, template: &InvoiceTemplate) -> AppRe
     );
     y -= LINE_H;
 
-    // Total în cuvinte (Romanian words) — plan Task 5.3
+    // Total în cuvinte (Romanian words) — plan Task 5.3. Opțional din șablon (show_words).
     // BIZ-21: pass Decimal directly to preserve exact cents (no f64 round-trip).
-    let total_dec = Decimal::from_str(&inv.total_amount).unwrap_or(Decimal::ZERO);
-    let words = amount_to_romanian_words(total_dec);
-    cur_layer.use_text(
-        format!("({words})"),
-        FONT_SMALL,
-        Mm(totals_x),
-        Mm(y),
-        &font_normal,
-    );
+    if template.show_words {
+        let total_dec = Decimal::from_str(&inv.total_amount).unwrap_or(Decimal::ZERO);
+        let words = amount_to_romanian_words(total_dec);
+        cur_layer.use_text(
+            format!("({words})"),
+            FONT_SMALL,
+            Mm(totals_x),
+            Mm(y),
+            &font_normal,
+        );
+    }
 
     // Notes — STORNO_OF: prefix is replaced with a human-readable label
     if let Some(notes) = &inv.notes {
@@ -393,7 +541,35 @@ pub fn generate_pdf(input: &GeneratorInput, template: &InvoiceTemplate) -> AppRe
         }
     }
 
-    let _ = y; // silence unused-variable warning after notes block
+    // Nota de subsol personalizată din șablon (mulțumiri / termeni de plată) — max 3 rânduri,
+    // separată printr-o linie subțire. Apare pe ultima pagină, după blocul Note.
+    if !template.footer_note.trim().is_empty() {
+        y -= 10.0;
+        let needed = 3.0 + template.footer_note.lines().take(3).count() as f32 * 4.5;
+        if y < MARGIN + needed {
+            let (new_page, new_layer_idx) = doc.add_page(Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
+            cur_layer = doc.get_page(new_page).get_layer(new_layer_idx);
+            y = PAGE_H - MARGIN;
+        }
+        draw_hline(&cur_layer, MARGIN, PAGE_W - MARGIN, y + 2.0);
+        y -= 2.0;
+        for note_line in template.footer_note.lines().take(3) {
+            let note_line = note_line.trim();
+            if note_line.is_empty() {
+                continue;
+            }
+            cur_layer.use_text(
+                truncate(note_line, 120),
+                FONT_SMALL,
+                Mm(MARGIN),
+                Mm(y),
+                &font_normal,
+            );
+            y -= 4.5;
+        }
+    }
+
+    let _ = y; // silence unused-variable warning after the trailing blocks
 
     doc.save_to_bytes()
         .map_err(|e| AppError::Pdf(e.to_string()))
@@ -931,11 +1107,56 @@ mod tests {
         let tmpl = InvoiceTemplate {
             preset: "modern".into(),
             accent_hex: "#1a73e8".into(),
+            ..Default::default()
         };
         let result = generate_pdf(&input, &tmpl);
         let bytes = result.expect("modern template must succeed");
         assert!(!bytes.is_empty(), "PDF must not be empty");
         assert!(bytes.starts_with(b"%PDF"), "must be a valid PDF");
+    }
+
+    /// Template knobs: header/footer notes render and toggles change the output.
+    #[test]
+    fn pdf_template_knobs_render() {
+        let input = sample_input();
+        let full = generate_pdf(
+            &input,
+            &InvoiceTemplate {
+                header_note: "Capital social: 200 lei · J12/345/2020".into(),
+                footer_note: "Vă mulțumim pentru colaborare!\nPlata în 15 zile de la emitere."
+                    .into(),
+                ..Default::default()
+            },
+        )
+        .expect("template with notes must succeed");
+        assert!(full.starts_with(b"%PDF"));
+
+        let compact = generate_pdf(
+            &input,
+            &InvoiceTemplate {
+                show_words: false,
+                show_vat_detail: false,
+                ..Default::default()
+            },
+        )
+        .expect("compact template must succeed");
+        let default = generate_pdf(&input, &InvoiceTemplate::default()).unwrap();
+        // The toggles must actually remove content (compact strictly smaller than default).
+        assert!(
+            compact.len() < default.len(),
+            "compact ({}) should be smaller than default ({})",
+            compact.len(),
+            default.len()
+        );
+    }
+
+    /// The preview sample builder produces a renderable demo invoice.
+    #[test]
+    fn sample_preview_input_renders() {
+        let seller = sample_input().seller;
+        let input = sample_preview_input(seller);
+        let bytes = generate_pdf(&input, &InvoiceTemplate::default()).expect("preview renders");
+        assert!(bytes.starts_with(b"%PDF"));
     }
 
     /// (c) Logo path pointing to a tiny PNG — logo is embedded, no error.
