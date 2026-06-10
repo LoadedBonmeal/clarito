@@ -103,6 +103,12 @@ export const companies = {
   /** Micro-ceiling status (turnover vs 100.000 EUR) for a company in `year`; `eurRon` = EUR→RON. */
   taxRegimeStatus: (companyId: string, year: number, eurRon: number) =>
     invoke<TaxRegimeStatus>("tax_regime_status", { companyId, year, eurRon }),
+  /** Plafonul de scutire TVA (art. 310, 395.000 lei) — doar pentru neplătitori de TVA. */
+  vatRegistrationStatus: (companyId: string, year: number) =>
+    invoke<{ applicable: boolean; level: string; ytdTurnoverRon: string; plafonRon: string; pct: number }>(
+      "vat_registration_status",
+      { companyId, year },
+    ),
 };
 
 // ─── Contacts ─────────────────────────────────────────────────────────────
@@ -283,7 +289,7 @@ export const archive = {
   exportZip: (companyId: string) =>
     invoke<string>("export_invoices_zip", { companyId }),
   verifyIntegrity: (companyId: string) =>
-    invoke<{ checked: number; missing: string[]; ok: boolean }>(
+    invoke<{ checked: number; missing: string[]; ok: boolean; missingUnderRetention: number }>(
       "verify_archive_integrity",
       { companyId }
     ),
@@ -798,6 +804,9 @@ export const etransport = {
       declaration,
       testMode,
     }),
+  /** Evidența declarațiilor transmise (UIT + termen de valabilitate). */
+  listDeclarations: (companyId: string) =>
+    invoke<import("@/types").EtransportDeclRecord[]>("list_etransport_declarations", { companyId }),
 };
 
 // ─── D390 — Declarație recapitulativă (VIES) intra-UE ────────────────────
@@ -1027,7 +1036,8 @@ export const gdpr = {
   exportAll: (destPath: string) =>
     invoke<DataExportResult>("export_all_my_data", { destPath }),
   /** Irreversibly wipe all local data. Frontend MUST double-confirm. */
-  wipeAll: () => invoke<void>("wipe_all_data"),
+  wipeAll: (acknowledgeRetention?: boolean) =>
+    invoke<void>("wipe_all_data", { acknowledgeRetention: acknowledgeRetention ?? null }),
 };
 
 // ─── API umbrella ─────────────────────────────────────────────────────────

@@ -60,6 +60,12 @@ export function EtransportPage() {
     enabled: !!activeCompanyId,
   });
 
+  const { data: declRecords = [], refetch: refetchDecls } = useQuery({
+    queryKey: ["etransportDecls", activeCompanyId],
+    queryFn: () => api.etransport.listDeclarations(activeCompanyId!),
+    enabled: !!activeCompanyId,
+  });
+
   const [codTipOperatiune, setOp] = useState("30");
   const [goods, setGoods] = useState<EtransportGood[]>([emptyGood()]);
   const [partnerName, setPartnerName] = useState("");
@@ -111,8 +117,10 @@ export function EtransportPage() {
 
   const submit = useMutation({
     mutationFn: () => api.etransport.submit(activeCompanyId!, build()),
-    onSuccess: (res) =>
-      notify.success(res.UIT ? `UIT obținut: ${res.UIT}` : `Trimis (index ${res.index_incarcare}).`),
+    onSuccess: (res) => {
+      notify.success(res.UIT ? `UIT obținut: ${res.UIT}` : `Trimis (index ${res.index_incarcare}).`);
+      void refetchDecls();
+    },
     onError: (e) => notify.error(formatError(e, "Trimiterea la ANAF a eșuat.")),
   });
 
@@ -220,6 +228,47 @@ export function EtransportPage() {
             )}
           </div>
         </SectionCard>
+
+        {/* Evidența UIT: codul e valabil 5 zile (național) / 15 zile (intracomunitar, import-export)
+            de la transmitere — un transport pornit cu UIT expirat e sancționabil. */}
+        {declRecords.length > 0 && (
+          <SectionCard icon="truck" title="Declarații transmise (evidența UIT)"
+            subtitle="UIT valabil 5 zile (național) / 15 zile (intracomunitar / import-export)">
+            <div className="rf-tbl-wrap">
+              <table className="rf-tbl">
+                <thead>
+                  <tr><th>UIT</th><th>Operațiune</th><th>Partener</th><th>Vehicul</th><th>Transmis</th><th>Expiră</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {declRecords.map((d) => {
+                    const now = Date.now() / 1000;
+                    const expired = d.expiresAt < now;
+                    const expiringSoon = !expired && d.expiresAt - now < 86_400;
+                    return (
+                      <tr key={d.id} style={{ opacity: expired ? 0.55 : 1 }}>
+                        <td className="rf-mono">{d.uit ?? "—"}{d.testMode ? " (test)" : ""}</td>
+                        <td className="rf-mono">{d.codTipOperatiune}</td>
+                        <td>{d.partnerName || "—"}</td>
+                        <td className="rf-mono">{d.vehicle || "—"}</td>
+                        <td className="rf-mono">{new Date(d.submittedAt * 1000).toLocaleDateString("ro-RO")}</td>
+                        <td className="rf-mono">{new Date(d.expiresAt * 1000).toLocaleDateString("ro-RO")}</td>
+                        <td>
+                          {expired ? (
+                            <Badge variant="error">expirat</Badge>
+                          ) : expiringSoon ? (
+                            <Badge variant="warning">expiră în &lt;24h</Badge>
+                          ) : (
+                            <Badge variant="success">valabil</Badge>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
+        )}
       </div>
     </div>
   );

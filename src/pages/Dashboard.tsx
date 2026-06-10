@@ -132,6 +132,15 @@ export function DashboardPage() {
     },
   });
 
+  // Plafonul de scutire TVA (art. 310, Legea 141/2025): 395.000 lei CA anuală — relevant doar
+  // pentru neplătitorii de TVA; depășirea obligă la înregistrarea în scopuri de TVA.
+  const { data: vatReg } = useQuery({
+    queryKey: ["vatRegistrationStatus", activeCompanyId, currentYear],
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60_000,
+    queryFn: () => api.companies.vatRegistrationStatus(activeCompanyId!, currentYear),
+  });
+
   const { data: intrastat } = useQuery({
     queryKey: ["intrastatStatus", activeCompanyId, currentYear],
     enabled: !!activeCompanyId,
@@ -347,6 +356,24 @@ export function DashboardPage() {
               <b className="rf-mono">{regimeStatus.ceilingRon}</b> lei ≈ 100.000 EUR, la cursul BNR
               din 31.12.{currentYear - 1}: <b className="rf-mono">{regimeStatus.eurRate}</b> RON/EUR).
               {regimeStatus.note ? ` ${regimeStatus.note}` : ""}
+            </Banner>
+          )}
+
+        {/* ── Plafon scutire TVA (395.000 lei, art. 310 / Legea 141/2025) ── */}
+        {vatReg && vatReg.applicable &&
+          (vatReg.level === "exceeded" || vatReg.level === "approaching") && (
+            <Banner
+              variant={vatReg.level === "exceeded" ? "error" : "warning"}
+              title={
+                vatReg.level === "exceeded"
+                  ? "Plafon de scutire TVA depășit — înregistrarea în scopuri de TVA e obligatorie"
+                  : "Vă apropiați de plafonul de scutire TVA"
+              }
+            >
+              Cifra de afaceri {currentYear}: <b className="rf-mono">{vatReg.ytdTurnoverRon}</b> lei
+              ({vatReg.pct}% din plafonul de <b className="rf-mono">{vatReg.plafonRon}</b> lei,
+              art. 310 Cod fiscal). Depășirea obligă la solicitarea înregistrării în scopuri de TVA
+              (formular 010/700) în termenul legal.
             </Banner>
           )}
 

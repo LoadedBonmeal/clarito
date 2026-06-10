@@ -558,6 +558,22 @@ export interface EtransportUploadResponse {
   UIT?: string | null;
 }
 
+/** Evidența unei declarații e-Transport transmise (UIT + termen de valabilitate). */
+export interface EtransportDeclRecord {
+  id: string;
+  companyId: string;
+  uit: string | null;
+  indexIncarcare: string;
+  codTipOperatiune: string;
+  partnerName: string;
+  vehicle: string;
+  testMode: boolean;
+  /** Unix epoch (secunde). */
+  submittedAt: number;
+  /** Unix epoch (secunde) — UIT expiră la această dată (5/15 zile). */
+  expiresAt: number;
+}
+
 /** SPV general inbox (SPVWS2) item — recipise/notificări/somații/decizii. */
 export interface SpvInboxItem {
   id: string;

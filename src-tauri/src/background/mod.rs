@@ -118,7 +118,50 @@ pub fn spawn_background_tasks(app: AppHandle) {
         async move {
             loop {
                 sleep_until_local_time(4, 0).await;
-                if let Err(e) = spv::sync_spv(&app_inner).await {
+                let sync_result = spv::sync_spv(&app_inner).await;
+
+                // SPV păstrează mesajele DOAR 60 de zile — dacă ultima sincronizare reușită e mai
+                // veche de 45 de zile (OAuth expirat, aplicație oprită), facturile primite se
+                // apropie de purjarea iremediabilă. Notificăm o singură dată (cât e necitită).
+                if let Some(state) = app_inner.try_state::<AppState>() {
+                    let pool = state.db.clone();
+                    let last_sync: Option<String> =
+                        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'last_sync_at'")
+                            .fetch_optional(&pool)
+                            .await
+                            .unwrap_or(None);
+                    if let Some(ts) = last_sync.and_then(|v| v.parse::<i64>().ok()) {
+                        let age_days = (chrono::Utc::now().timestamp() - ts) / 86_400;
+                        if age_days >= 45 {
+                            let dup: i64 = sqlx::query_scalar(
+                                "SELECT COUNT(*) FROM notifications \
+                                 WHERE notification_type = 'spv_sync_stale' AND is_read = 0",
+                            )
+                            .fetch_one(&pool)
+                            .await
+                            .unwrap_or(0);
+                            if dup == 0 {
+                                let _ = crate::db::notifications::create(
+                                    &pool,
+                                    crate::db::notifications::CreateNotificationInput {
+                                        notification_type: "spv_sync_stale".into(),
+                                        title: "SPV nesincronizat de peste 45 de zile".into(),
+                                        body: format!(
+                                            "Ultima sincronizare SPV reușită a fost acum {age_days} zile. \
+                                             ANAF păstrează facturile primite DOAR 60 de zile — \
+                                             reconectați-vă și sincronizați înainte ca mesajele să fie \
+                                             șterse definitiv."
+                                        ),
+                                        data: None,
+                                    },
+                                )
+                                .await;
+                            }
+                        }
+                    }
+                }
+
+                if let Err(e) = sync_result {
                     tracing::warn!("SPV sync error: {:?}", e);
                 } else if let Some(state) = app_inner.try_state::<AppState>() {
                     let pool = state.db.clone();
