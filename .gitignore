@@ -47,3 +47,7 @@ src-tauri/resources/jre-min/*
 !src-tauri/resources/jre-min/.keep
 src-tauri/resources/duk/*
 !src-tauri/resources/duk/.keep
+
+# Local SQLite artifacts (test runs / dev) — never commit
+src-tauri/*.db
+src-tauri/*.sqlite
