@@ -1,0 +1,5 @@
+/* imported-by: globals.css (wired centrally) */
+/* Facturi recurente — the design prototype shows .cli-ava initials inside the
+   templates table, but clarito-pages.css hides avatars in all .scr-table cells
+   (rule added for other table ports). Re-enable them on this page only. */
+.page-recurring .scr-table .cli-ava{display:flex}

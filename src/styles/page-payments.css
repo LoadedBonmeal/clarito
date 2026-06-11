@@ -1,0 +1,11 @@
+/* imported-by: globals.css (wired centrally) */
+/* Urmărire plăți — column rules from the prototype's inline <style>, scoped
+   under .pg-payments so the nth-child overrides don't leak to other
+   .scr-table pages. */
+/* status-plata column: keep chip left-aligned under its header (not centered),
+   fixed width so it doesn't drift toward the action column */
+.pg-payments .scr-table th:nth-child(8),.pg-payments .scr-table td:nth-child(8){text-align:left;width:130px;padding-left:16px}
+/* action column (+/eye) centered in its column, with breathing room from the card edge */
+.pg-payments .scr-table th:nth-child(9),.pg-payments .scr-table td:nth-child(9){width:72px;padding-right:20px;padding-left:8px}
+.pg-payments .scr-table td:nth-child(9) .row-acts{justify-content:center}
+.pg-payments .scr-table td:nth-child(9) .mini-btn{opacity:1}

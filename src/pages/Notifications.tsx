@@ -1,38 +1,104 @@
 /**
- * Notificări ANAF/SPV — Mesaje SPV — re-skinned to rf kit (Wave 4).
- * Preserves: api.notifications.list(false), unreadCount, tabs all/unread,
- * row click → markRead + navigate (entityType/entityId),
- * Marcează toate citite → api.notifications.markAllRead,
- * delete one → api.notifications.deleteOne,
- * Șterge citite → api.notifications.deleteAllRead (confirm).
+ * Mesaje SPV / Notificări — verbatim port of the design "Mesaje SPV.html":
+ *   .page-head (title + necitite sub + pill-btn "Marchează toate citite" ·
+ *   pill-btn "Șterge citite" · btn-dark spin-btn "Reîmprospătează")
+ *   .banner.warn (retenție ANAF 60 zile) → .scr-card → .scr-toolbar
+ *   (.tabs Toate/Necitite · .spacer · .scr-search) → .msg-list
+ *   (.msg unread · .cli-ava · .msg-from/.msg-dot/.msg-time · .msg-sub ·
+ *   .msg-tag chip) → .pager (.pg-btns).
+ *
+ * ALL wiring preserved: api.notifications.list(false), unreadCount,
+ * tabs all/unread, row click → markRead + navigate (entityType/entityId,
+ * spv_msg_* → /received), markAllRead, deleteOne (kept as .mini-btn —
+ * prototype lacks it), deleteAllRead (confirm).
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { confirm } from "@tauri-apps/plugin-dialog";
 
-import { Icon } from "@/components/shared/Icon";
+import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
-import {
-  PageHeader, Btn, IconBtn, Badge, Card, Empty, Segmented,
-} from "@/components/rf";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import type { Notification } from "@/types";
 
-function fmtTime(unix: number): string {
-  return new Date(unix * 1000).toLocaleString("ro-RO");
+// ── Icons missing from the Ic map — inlined verbatim from the prototype ──────
+
+const P_CIRCLE_CHECK = '<path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>';
+const P_TRASH = '<path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/>';
+const P_WARN_TRI = '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>';
+const P_CHEV_L = '<path d="M15.75 19.5 8.25 12l7.5-7.5"/>';
+
+function InlineIc({ path, cls = "ic" }: { path: string; cls?: string }) {
+  return <svg className={cls} viewBox="0 0 24 24" aria-hidden="true" dangerouslySetInnerHTML={{ __html: path }} />;
 }
 
-function kindIcon(type: string): { icon: string; color: string } {
-  if (type === "REJECT") return { icon: "xCircle", color: "error" };
-  if (type === "VALID")  return { icon: "checkCircle", color: "success" };
-  if (type === "WARN" || type === "EXPIR") return { icon: "alertTriangle", color: "warning" };
-  return { icon: "mail", color: "info" };
+// ── Date helpers (dd lll yyyy + relative msg time) ────────────────────────────
+
+const RO_MON = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
+
+const fmtRoDateLocal = (d: Date) =>
+  `${String(d.getDate()).padStart(2, "0")} ${RO_MON[d.getMonth()]} ${d.getFullYear()}`;
+
+const sameDay = (a: Date, b: Date) =>
+  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+/** Relative time like the prototype: "acum 2 ore" / "ieri, 18:30" / "08 iun 2026". */
+function fmtMsgTime(unix: number): string {
+  const d = new Date(unix * 1000);
+  const now = new Date();
+  const diff = Math.floor(Date.now() / 1000) - unix;
+  if (diff < 3600 && sameDay(d, now)) {
+    const m = Math.max(1, Math.floor(diff / 60));
+    return `acum ${m} ${m === 1 ? "minut" : "minute"}`;
+  }
+  if (sameDay(d, now)) {
+    const h = Math.floor(diff / 3600);
+    return `acum ${h} ${h === 1 ? "oră" : "ore"}`;
+  }
+  const yest = new Date(now);
+  yest.setDate(now.getDate() - 1);
+  if (sameDay(d, yest)) {
+    return `ieri, ${d.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" })}`;
+  }
+  return fmtRoDateLocal(d);
 }
+
+// ── Notification type → sender + avatar + chip (design .chip variants) ────────
+
+interface MsgKind {
+  from: string;
+  ava: string;
+  cls: string;
+  label: string;
+  /** Ic name when available; otherwise raw inline path. */
+  icon?: string;
+  path?: string;
+}
+
+function msgKind(type: string): MsgKind {
+  const t = type.toUpperCase();
+  if (t.includes("REJECT") || t.includes("FAIL") || t.includes("ERROR"))
+    return { from: "ANAF · e-Factura", ava: "AN", cls: "late", label: "Eroare", path: P_WARN_TRI };
+  if (t.includes("VALID") || t.includes("ACCEPT") || t.includes("RECIPIS"))
+    return { from: "ANAF · e-Factura", ava: "AN", cls: "paid", label: "Recipisă", path: P_CIRCLE_CHECK };
+  if (t.includes("STALE") || t.includes("WARN") || t.includes("EXPIR"))
+    return { from: "SPV e-Factura", ava: "SP", cls: "wait", label: "Reminder", icon: "clock" };
+  if (t.includes("SYNC"))
+    return { from: "SPV e-Factura", ava: "SP", cls: "sent", label: "Sistem", icon: "sync" };
+  if (t.includes("IMPORT") || t.includes("RECEIV"))
+    return { from: "SPV e-Factura", ava: "SP", cls: "sent", label: "Notificare", icon: "send" };
+  return { from: "ANAF · e-Factura", ava: "AN", cls: "sent", label: "Notificare", icon: "send" };
+}
+
+/** Page size for the .pager (client-side pagination over the full list). */
+const PAGE_SIZE = 20;
+/** ANAF SPV message retention window (days). */
+const RETENTION_DAYS = 60;
 
 type TabFilter = "all" | "unread";
 
@@ -40,6 +106,8 @@ export function NotificationsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [tab, setTab] = useState<TabFilter>("all");
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
 
   const {
     data: notifications = [],
@@ -55,6 +123,12 @@ export function NotificationsPage() {
   const { data: unreadCount = 0 } = useQuery({
     queryKey: queryKeys.notifications.unreadCount(),
     queryFn: () => api.notifications.unreadCount(),
+  });
+
+  // "ultima sincronizare azi, 09:14" — same source as the StatusBar.
+  const { data: lastSyncRaw } = useQuery({
+    queryKey: queryKeys.settings.get("last_sync_at"),
+    queryFn: () => api.settings.get("last_sync_at"),
   });
 
   const { mutate: markRead } = useMutation({
@@ -133,199 +207,227 @@ export function NotificationsPage() {
   }
 
   const list = useMemo(() => {
-    if (tab === "unread") return notifications.filter((n) => !n.isRead);
-    return notifications;
-  }, [notifications, tab]);
+    const q = query.trim().toLowerCase();
+    return notifications
+      .filter((n) => (tab === "unread" ? !n.isRead : true))
+      .filter((n) => {
+        if (!q) return true;
+        return (
+          n.title.toLowerCase().includes(q) ||
+          n.body.toLowerCase().includes(q) ||
+          n.notificationType.toLowerCase().includes(q)
+        );
+      });
+  }, [notifications, tab, query]);
 
-  const tabOptions = [
-    { value: "all" as TabFilter, label: `Toate (${notifications.length})` },
-    { value: "unread" as TabFilter, label: `Necitite (${unreadCount})` },
-  ];
+  // Reset to page 1 whenever the filters change the result set.
+  useEffect(() => {
+    setPage(1);
+  }, [tab, query]);
+
+  const pageCount = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  const curPage = Math.min(page, pageCount);
+  const visible = list.slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE);
+  const fromIdx = list.length === 0 ? 0 : (curPage - 1) * PAGE_SIZE + 1;
+  const toIdx = Math.min(curPage * PAGE_SIZE, list.length);
+
+  // Numbered page buttons — window of max 5 around the current page.
+  const pageNums = useMemo(() => {
+    const start = Math.max(1, Math.min(curPage - 2, pageCount - 4));
+    const end = Math.min(pageCount, start + 4);
+    const nums: number[] = [];
+    for (let p = start; p <= end; p++) nums.push(p);
+    return nums;
+  }, [curPage, pageCount]);
+
+  // "cele mai vechi expiră în N zile" — oldest message + 60-day ANAF retention.
+  const expireDays = useMemo(() => {
+    if (notifications.length === 0) return null;
+    const oldest = notifications.reduce((min, n) => Math.min(min, n.createdAt), Infinity);
+    const days = Math.ceil((oldest + RETENTION_DAYS * 86400 - Date.now() / 1000) / 86400);
+    return days > 0 ? days : null;
+  }, [notifications]);
+
+  const lastSyncLabel = useMemo(() => {
+    if (!lastSyncRaw) return null;
+    const ts = parseInt(lastSyncRaw, 10);
+    if (!Number.isFinite(ts) || ts <= 0) return null;
+    const d = new Date(ts * 1000);
+    const now = new Date();
+    const hm = d.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" });
+    if (sameDay(d, now)) return `azi, ${hm}`;
+    const yest = new Date(now);
+    yest.setDate(now.getDate() - 1);
+    if (sameDay(d, yest)) return `ieri, ${hm}`;
+    return fmtRoDateLocal(d);
+  }, [lastSyncRaw]);
+
+  const readCount = notifications.filter((n) => n.isRead).length;
 
   return (
-    <div className="rf-page">
-      <PageHeader
-        title="Mesaje SPV / Notificări"
-        sub={
-          unreadCount > 0 ? (
-            <Badge variant="info" dot>{unreadCount} necitite</Badge>
-          ) : undefined
-        }
-        actions={
-          <>
-            <Btn
-              variant="secondary"
-              size="sm"
-              icon="check"
-              disabled={unreadCount === 0 || markingAll}
-              onClick={() => markAllRead()}
-            >
-              Marchează toate citite
-            </Btn>
-            <Btn
-              variant="ghost"
-              size="sm"
-              icon="trash"
-              disabled={notifications.filter((n) => n.isRead).length === 0 || deletingAllRead}
-              onClick={() => void handleDeleteAllRead()}
-            >
-              Șterge citite
-            </Btn>
-            <Btn
-              variant="primary"
-              size="sm"
-              icon="refresh"
-              onClick={() => void refetchNotifications()}
-            >
-              Reîmprospătează
-            </Btn>
-          </>
-        }
-      />
+    <div className="main-inner wide">
+      {/* page head */}
+      <div className="page-head">
+        <div>
+          <h1>Mesaje SPV / Notificări</h1>
+          <p className="sub">
+            {unreadCount} necitite · recipise, notificări, somații și decizii din SPV
+            {lastSyncLabel ? ` · ultima sincronizare ${lastSyncLabel}` : ""}
+          </p>
+        </div>
+        <div className="head-actions">
+          <button
+            className="pill-btn"
+            disabled={unreadCount === 0 || markingAll}
+            style={unreadCount === 0 || markingAll ? { opacity: 0.5, cursor: "default" } : undefined}
+            onClick={() => markAllRead()}
+          >
+            <InlineIc path={P_CIRCLE_CHECK} />Marchează toate citite
+          </button>
+          <button
+            className="pill-btn"
+            disabled={readCount === 0 || deletingAllRead}
+            style={readCount === 0 || deletingAllRead ? { opacity: 0.5, cursor: "default" } : undefined}
+            onClick={() => void handleDeleteAllRead()}
+          >
+            <InlineIc path={P_TRASH} />Șterge citite
+          </button>
+          <button className="btn-dark spin-btn" onClick={() => void refetchNotifications()}>
+            <Ic name="sync" />Reîmprospătează
+          </button>
+        </div>
+      </div>
 
-      <div className="rf-page-body" style={{ maxWidth: 860, width: "100%", margin: "0 auto" }}>
-        <Card>
-          {/* Tabs */}
-          <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--rf-border)" }}>
-            <Segmented options={tabOptions} value={tab} onChange={(v) => setTab(v)} />
+      {/* 60-day retention banner */}
+      <div className="banner warn">
+        <Ic name="clock" />
+        <span>
+          <b>ANAF păstrează mesajele doar 60 de zile</b> — sincronizați regulat pentru a nu pierde
+          recipise și notificări. Clarito arhivează automat tot ce descarcă.
+        </span>
+      </div>
+
+      <div className="scr-card">
+        {/* toolbar */}
+        <div className="scr-toolbar">
+          <div className="tabs">
+            <div className={`tab${tab === "all" ? " active" : ""}`} onClick={() => setTab("all")}>
+              Toate<span className="cnt">{notifications.length}</span>
+            </div>
+            <div className={`tab${tab === "unread" ? " active" : ""}`} onClick={() => setTab("unread")}>
+              Necitite<span className="cnt">{unreadCount}</span>
+            </div>
           </div>
+          <div className="spacer" />
+          <div className="scr-search">
+            <Ic name="lens" />
+            <input
+              type="text"
+              placeholder="Caută mesaje…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        </div>
 
-          {/* Content */}
-          {isLoading ? (
-            <Empty icon="mail" title="Se încarcă…" />
-          ) : notifError ? (
+        {/* message list */}
+        {isLoading ? (
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+        ) : notifError ? (
+          <div style={{ padding: 16 }}>
             <QueryErrorBanner error={notifErr} label="notificările" onRetry={() => void refetchNotifications()} />
-          ) : list.length === 0 ? (
-            <Empty icon="mail" title={tab === "unread" ? "Nicio notificare necitită" : "Nicio notificare"}>
-              {tab === "all" && "Sistemul va afișa aici mesajele de la ANAF."}
-            </Empty>
-          ) : (
-            <div>
-              {list.map((n, i) => {
-                const { icon, color } = kindIcon(n.notificationType);
-                return (
-                  <div
-                    key={n.id}
-                    onClick={() => handleRowClick(n)}
-                    style={{
-                      display: "flex",
-                      gap: 14,
-                      padding: "15px 18px",
-                      cursor: "pointer",
-                      borderBottom: i < list.length - 1 ? "1px solid var(--rf-border)" : "none",
-                      background: !n.isRead ? "var(--rf-accent-bg, var(--rf-success-bg))" : "transparent",
-                      transition: "background 0.1s",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (n.isRead) (e.currentTarget as HTMLDivElement).style.background = "var(--rf-neutral-bg)";
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLDivElement).style.background = !n.isRead ? "var(--rf-accent-bg, var(--rf-success-bg))" : "transparent";
-                    }}
-                  >
-                    {/* Colored icon badge */}
-                    <span
-                      style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: "var(--rf-radius-sm)",
-                        display: "grid",
-                        placeItems: "center",
-                        flexShrink: 0,
-                        background: `var(--rf-${color}-bg)`,
-                        color: `var(--rf-${color})`,
-                        border: `1px solid var(--rf-${color}-bd, var(--rf-border))`,
-                      }}
-                    >
-                      <Icon name={icon} size={17} />
-                    </span>
-
-                    {/* Content */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 2 }}>
-                        <span
-                          style={{
-                            fontSize: 13.5,
-                            fontWeight: !n.isRead ? 700 : 500,
-                            color: "var(--rf-text)",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {n.title}
-                        </span>
-                        {!n.isRead && (
-                          <span
-                            style={{
-                              width: 7,
-                              height: 7,
-                              borderRadius: "50%",
-                              background: "var(--rf-accent)",
-                              flexShrink: 0,
-                            }}
-                          />
-                        )}
-                      </div>
-                      {n.body && (
-                        <div
-                          style={{
-                            fontSize: 12,
-                            color: "var(--rf-text-muted)",
-                            marginBottom: 3,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {n.body}
-                        </div>
-                      )}
-                      <div style={{ fontSize: 11, color: "var(--rf-text-dim)", display: "flex", alignItems: "center", gap: 5 }}>
-                        <span
-                          style={{
-                            fontWeight: 600,
-                            color: `var(--rf-${color})`,
-                            textTransform: "uppercase",
-                            letterSpacing: "0.04em",
-                          }}
-                        >
-                          {n.notificationType}
-                        </span>
-                        <span style={{ opacity: 0.5 }}>·</span>
-                        <span>{fmtTime(n.createdAt)}</span>
-                      </div>
+          </div>
+        ) : list.length === 0 ? (
+          <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+            {notifications.length === 0
+              ? "Nicio notificare. Sistemul va afișa aici mesajele de la ANAF."
+              : query.trim()
+                ? "Niciun mesaj pentru căutarea aplicată."
+                : "Nicio notificare necitită."}
+          </div>
+        ) : (
+          <div className="msg-list">
+            {visible.map((n) => {
+              const k = msgKind(n.notificationType);
+              return (
+                <div
+                  key={n.id}
+                  className={`msg${!n.isRead ? " unread" : ""}`}
+                  onClick={() => handleRowClick(n)}
+                >
+                  <span className="cli-ava">{k.ava}</span>
+                  <div className="msg-main">
+                    <div className="msg-top">
+                      <span className="msg-from">{k.from}</span>
+                      {!n.isRead && <span className="msg-dot" />}
+                      <span className="msg-time num">{fmtMsgTime(n.createdAt)}</span>
                     </div>
-
-                    {/* Actions — chevron always visible, trash on hover */}
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <IconBtn
-                        icon="trash"
-                        title="Șterge notificare"
-                        disabled={deletingOne}
-                        onClick={() => deleteOne(n.id)}
-                      />
-                      <IconBtn
-                        icon="chevRight"
-                        title="Deschide"
-                        onClick={() => handleRowClick(n)}
-                      />
+                    <div className="msg-sub">
+                      {n.title}
+                      {n.body ? ` — ${n.body}` : ""}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Footer */}
-          <div className="rf-tbl-footer">
-            <span>Total: <b>{notifications.length}</b> notificări</span>
-            <span>Necitite: <b style={{ color: "var(--rf-accent)" }}>{unreadCount}</b></span>
+                  <div
+                    className="msg-tag"
+                    style={{ display: "flex", alignItems: "center", gap: 4 }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <span className={`chip ${k.cls}`}>
+                      {k.icon ? <Ic name={k.icon} cls="sic" /> : <InlineIc path={k.path!} cls="sic" />}
+                      {k.label}
+                    </span>
+                    {/* real feature kept — prototype lacks per-row delete */}
+                    <button
+                      className="mini-btn"
+                      title="Șterge notificare"
+                      disabled={deletingOne}
+                      onClick={() => deleteOne(n.id)}
+                    >
+                      <InlineIc path={P_TRASH} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </Card>
+        )}
+
+        {/* pager */}
+        <div className="pager">
+          <span>
+            Afișezi <b>{fromIdx === toIdx ? toIdx : `${fromIdx}–${toIdx}`}</b> din <b>{list.length}</b> mesaje
+            {expireDays !== null && (
+              <>
+                {" "}· cele mai vechi expiră în <b className="num">{expireDays} {expireDays === 1 ? "zi" : "zile"}</b>
+              </>
+            )}
+          </span>
+          <div className="pg-btns">
+            <button
+              className="pg-btn"
+              disabled={curPage <= 1}
+              onClick={() => setPage(curPage - 1)}
+            >
+              <InlineIc path={P_CHEV_L} />
+            </button>
+            {pageNums.map((p) => (
+              <button
+                key={p}
+                className={`pg-btn${p === curPage ? " cur" : ""}`}
+                onClick={() => setPage(p)}
+              >
+                {p}
+              </button>
+            ))}
+            <button
+              className="pg-btn"
+              disabled={curPage >= pageCount}
+              onClick={() => setPage(curPage + 1)}
+            >
+              <Ic name="chevR" />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

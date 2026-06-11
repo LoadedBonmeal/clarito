@@ -24,6 +24,8 @@
 @import "./clarito-anim.css";
 /* per-page design CSS (extracted from each prototype's inline <style>) */
 @import "./page-received.css";
+@import "./page-payments.css";
+@import "./page-recurring.css";
 
 @custom-variant dark (&:is(.dark *));
 
