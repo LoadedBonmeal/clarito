@@ -17,6 +17,8 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
@@ -30,30 +32,37 @@ import type { AnafCompanyData, AppErrorPayload, CreateCompanyInput } from "@/typ
 // ─── Constants (prototype) ────────────────────────────────────────────────────
 
 const TOTAL = 6;
-const KINDS = ["Bun venit", "Licență", "Compania", "ANAF SPV", "Numerotare", "Gata"];
+const kinds = (t: TFunction) => [
+  t("onboarding.kinds.welcome"),
+  t("onboarding.kinds.license"),
+  t("onboarding.kinds.company"),
+  t("onboarding.kinds.anafSpv"),
+  t("onboarding.kinds.numbering"),
+  t("onboarding.kinds.done"),
+];
 
 type Plan = "trial" | "solo" | "contabil" | "firma";
 
-const PLAN_LABEL: Record<Plan, string> = {
-  trial: "Trial · 3 companii",
-  solo: "Solo · 1 companie",
-  contabil: "Contabil · 15 companii",
-  firma: "Firmă · nelimitat",
-};
+const planLabel = (t: TFunction): Record<Plan, string> => ({
+  trial: t("onboarding.tiers.trial"),
+  solo: t("onboarding.tiers.solo"),
+  contabil: t("onboarding.tiers.accountant"),
+  firma: t("onboarding.tiers.firm"),
+});
 
-const PLAN_OPTS: { val: Plan; ot: string; od: string }[] = [
-  { val: "trial", ot: "Trial", od: "3 companii · 14 zile" },
-  { val: "solo", ot: "Solo", od: "1 companie" },
-  { val: "contabil", ot: "Contabil", od: "15 companii" },
-  { val: "firma", ot: "Firmă", od: "companii nelimitate" },
+const planOpts = (t: TFunction): { val: Plan; ot: string; od: string }[] => [
+  { val: "trial", ot: t("onboarding.plans.trial.name"), od: t("onboarding.plans.trial.desc") },
+  { val: "solo", ot: t("onboarding.plans.solo.name"), od: t("onboarding.plans.solo.desc") },
+  { val: "contabil", ot: t("onboarding.plans.contabil.name"), od: t("onboarding.plans.contabil.desc") },
+  { val: "firma", ot: t("onboarding.plans.firma.name"), od: t("onboarding.plans.firma.desc") },
 ];
 
-const TIER_LABEL: Record<string, string> = {
-  TRIAL: "Trial · 3 companii",
-  SOLO: "Solo · 1 companie",
-  ACCOUNTANT: "Contabil · 15 companii",
-  FIRM: "Firmă · nelimitat",
-};
+const tierLabel = (t: TFunction): Record<string, string> => ({
+  TRIAL: t("onboarding.tiers.trial"),
+  SOLO: t("onboarding.tiers.solo"),
+  ACCOUNTANT: t("onboarding.tiers.accountant"),
+  FIRM: t("onboarding.tiers.firm"),
+});
 
 // Prototype inline icons not in the Ic set (verbatim paths).
 const CheckSvg = () => (
@@ -115,7 +124,13 @@ const INITIAL_FORM: WizardFormState = {
 // ─── Main wizard ──────────────────────────────────────────────────────────────
 
 export function OnboardingWizard() {
+  const { t } = useTranslation();
   const [step, setStep] = useState(0); // 0..5 (prototype data-step)
+
+  const KINDS = kinds(t);
+  const PLAN_LABEL = planLabel(t);
+  const PLAN_OPTS = planOpts(t);
+  const TIER_LABEL = tierLabel(t);
 
   // Licență
   const [plan, setPlan] = useState<Plan>("trial");
@@ -170,7 +185,7 @@ export function OnboardingWizard() {
     onSuccess: handleLicenseActivated,
     onError: (err) => {
       const payload = err as unknown as AppErrorPayload;
-      setLicenseError(payload?.message ?? "Eroare la activarea perioadei de probă.");
+      setLicenseError(payload?.message ?? t("onboarding.errors.trialFailed"));
     },
   });
 
@@ -180,7 +195,7 @@ export function OnboardingWizard() {
     onSuccess: handleLicenseActivated,
     onError: (err) => {
       const payload = err as unknown as AppErrorPayload;
-      setLicenseError(payload?.message ?? "Licența nu a putut fi activată.");
+      setLicenseError(payload?.message ?? t("onboarding.errors.activateFailed"));
     },
   });
 
@@ -202,7 +217,7 @@ export function OnboardingWizard() {
         vatPayer: data.vatPayer,
       }));
     } catch {
-      setCuiLookupError("CUI-ul nu a fost găsit în baza ANAF.");
+      setCuiLookupError(t("onboarding.errors.cuiNotFound"));
     } finally {
       setCuiLookupLoading(false);
     }
@@ -218,18 +233,18 @@ export function OnboardingWizard() {
     },
     onError: (err) => {
       const payload = err as unknown as AppErrorPayload;
-      setFormError(payload?.message ?? "Eroare necunoscută.");
+      setFormError(payload?.message ?? t("onboarding.errors.unknown"));
     },
   });
 
   const handleCompanySubmit = () => {
     setFormError(null);
     if (createdCompanyId) { setStep(3); return; } // already created (defensive)
-    if (!form.cui.trim()) { setFormError("CUI este obligatoriu."); return; }
-    if (!form.legalName.trim()) { setFormError("Denumirea legală este obligatorie."); return; }
-    if (!form.city.trim()) { setFormError("Localitatea este obligatorie."); return; }
-    if (!form.county.trim()) { setFormError("Județul este obligatoriu."); return; }
-    if (!form.address.trim()) { setFormError("Adresa este obligatorie."); return; }
+    if (!form.cui.trim()) { setFormError(t("onboarding.errors.cuiRequired")); return; }
+    if (!form.legalName.trim()) { setFormError(t("onboarding.errors.nameRequired")); return; }
+    if (!form.city.trim()) { setFormError(t("onboarding.errors.cityRequired")); return; }
+    if (!form.county.trim()) { setFormError(t("onboarding.errors.countyRequired")); return; }
+    if (!form.address.trim()) { setFormError(t("onboarding.errors.addressRequired")); return; }
 
     create.mutate({
       cui: form.cui.trim(),
@@ -257,10 +272,10 @@ export function OnboardingWizard() {
       const authed = await api.anaf.isAuthenticated(createdCompanyId);
       setSpvConnected(authed);
       if (!authed) {
-        setSpvError("Autorizarea nu s-a finalizat. Încercați din nou sau treceți peste.");
+        setSpvError(t("onboarding.errors.spvIncomplete"));
       }
     } catch (e) {
-      setSpvError(formatError(e, "Autorizarea a eșuat. Verificați conexiunea și reîncercați."));
+      setSpvError(formatError(e, t("onboarding.errors.spvFailed")));
     } finally {
       setIsAuthenticating(false);
     }
@@ -278,7 +293,7 @@ export function OnboardingWizard() {
       setStep(5);
     },
     onError: (err) => {
-      setSerieError(formatError(err, "Seria nu a putut fi salvată."));
+      setSerieError(formatError(err, t("onboarding.errors.serieSaveFailed")));
     },
   });
 
@@ -309,13 +324,13 @@ export function OnboardingWizard() {
       setLicenseError(null);
       if (existingLicense) { handleLicenseActivated(); return; }
       if (plan === "trial") {
-        if (!trialEmail.trim()) { setLicenseError("Adresa de email este obligatorie."); return; }
+        if (!trialEmail.trim()) { setLicenseError(t("onboarding.errors.emailRequired")); return; }
         trialMutation.mutate(trialEmail.trim());
         return;
       }
       // Solo / Contabil / Firmă → activare cu cheia primită (tier-ul vine din cheie)
-      if (!licenseKey.trim()) { setLicenseError("Cheia de licență este obligatorie."); return; }
-      if (!licenseEmail.trim()) { setLicenseError("Adresa de email este obligatorie."); return; }
+      if (!licenseKey.trim()) { setLicenseError(t("onboarding.errors.keyRequired")); return; }
+      if (!licenseEmail.trim()) { setLicenseError(t("onboarding.errors.emailRequired")); return; }
       activateMutation.mutate({ key: licenseKey.trim(), email: licenseEmail.trim() });
       return;
     }
@@ -373,14 +388,11 @@ export function OnboardingWizard() {
           {/* 1 Bun venit */}
           {step === 0 && (
             <div className="step active">
-              <h2>Bun venit la Clarito</h2>
-              <p className="lead">
-                Contabilitate și e-Factura pentru firma ta — facturi, SPV, declarații și jurnale,
-                într-un singur loc. Hai să configurăm aplicația în câțiva pași.
-              </p>
+              <h2>{t("onboarding.welcome.title")}</h2>
+              <p className="lead">{t("onboarding.welcome.lead")}</p>
               <div className="toggle-note">
                 <InfoSvg />
-                <span>Datele se păstrează local pe acest dispozitiv. Poți conecta ANAF SPV acum sau mai târziu.</span>
+                <span>{t("onboarding.welcome.note")}</span>
               </div>
             </div>
           )}
@@ -388,24 +400,24 @@ export function OnboardingWizard() {
           {/* 2 Licență */}
           {step === 1 && (
             <div className="step active">
-              <h2>Licență</h2>
+              <h2>{t("onboarding.license.title")}</h2>
               {!licenseCheckLoading && existingLicense ? (
                 <>
-                  <p className="lead">Licența ta este deja activă. Poți continua configurarea.</p>
+                  <p className="lead">{t("onboarding.license.activeLead")}</p>
                   <div className="anaf-card">
                     <div className="anaf-row">
                       <div className="anaf-ic"><Ic name="shield" cls="" /></div>
                       <div style={{ flex: 1 }}>
                         <div className="at">{TIER_LABEL[existingLicense.tier] ?? existingLicense.tier}</div>
-                        <div className="as">{existingLicense.email ?? "Licență locală"}</div>
+                        <div className="as">{existingLicense.email ?? t("onboarding.license.localLicense")}</div>
                       </div>
-                      <span className="chip ok"><svg className="sic" viewBox="0 0 24 24"><path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>Activă</span>
+                      <span className="chip ok"><svg className="sic" viewBox="0 0 24 24"><path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>{t("onboarding.license.activeChip")}</span>
                     </div>
                   </div>
                 </>
               ) : (
                 <>
-                  <p className="lead">Alege planul. Îl poți schimba oricând din Setări.</p>
+                  <p className="lead">{t("onboarding.license.lead")}</p>
                   <div className="opts">
                     {PLAN_OPTS.map((o) => (
                       <div
@@ -424,25 +436,25 @@ export function OnboardingWizard() {
                   </div>
                   {plan === "trial" ? (
                     <div className="field">
-                      <label htmlFor="trial-email">Adresă email</label>
+                      <label htmlFor="trial-email">{t("onboarding.license.emailLabel")}</label>
                       <input
                         id="trial-email"
                         className="input"
                         type="email"
-                        placeholder="office@firma.ro"
+                        placeholder={t("onboarding.license.emailPlaceholder")}
                         value={trialEmail}
                         onChange={(e) => setTrialEmail(e.target.value)}
                       />
-                      <span className="hint">14 zile gratuit, fără card. Trial-ul pornește la „Continuă".</span>
+                      <span className="hint">{t("onboarding.license.trialHint")}</span>
                     </div>
                   ) : (
                     <div className="row2" style={{ marginTop: 16 }}>
                       <div className="field" style={{ marginTop: 0 }}>
-                        <label htmlFor="license-key">Cheie licență</label>
+                        <label htmlFor="license-key">{t("onboarding.license.keyLabel")}</label>
                         <input
                           id="license-key"
                           className="input num"
-                          placeholder="XXXX-XXXX-XXXX-XXXX"
+                          placeholder={t("onboarding.license.keyPlaceholder")}
                           style={{ textTransform: "uppercase", letterSpacing: "0.05em" }}
                           value={licenseKey}
                           onChange={(e) => setLicenseKey(e.target.value)}
@@ -451,12 +463,12 @@ export function OnboardingWizard() {
                         />
                       </div>
                       <div className="field" style={{ marginTop: 0 }}>
-                        <label htmlFor="license-email">Email achiziție</label>
+                        <label htmlFor="license-email">{t("onboarding.license.purchaseEmailLabel")}</label>
                         <input
                           id="license-email"
                           className="input"
                           type="email"
-                          placeholder="office@firma.ro"
+                          placeholder={t("onboarding.license.emailPlaceholder")}
                           value={licenseEmail}
                           onChange={(e) => setLicenseEmail(e.target.value)}
                         />
@@ -472,12 +484,12 @@ export function OnboardingWizard() {
           {/* 3 Compania */}
           {step === 2 && (
             <div className="step active">
-              <h2>Compania ta</h2>
-              <p className="lead">Introdu CUI-ul și completăm restul din registrul ANAF.</p>
+              <h2>{t("onboarding.company.title")}</h2>
+              <p className="lead">{t("onboarding.company.lead")}</p>
               <div className="cui-row" style={{ marginTop: 16 }}>
                 <div className="field">
-                  <label htmlFor="cui">CUI / CIF</label>
-                  <input id="cui" className="input num" type="text" placeholder="ex. RO12345678" {...field("cui")} />
+                  <label htmlFor="cui">{t("onboarding.company.cuiLabel")}</label>
+                  <input id="cui" className="input num" type="text" placeholder={t("onboarding.company.cuiPlaceholder")} {...field("cui")} />
                 </div>
                 <button
                   className="btn btn-ghost"
@@ -486,12 +498,12 @@ export function OnboardingWizard() {
                   onClick={() => { void handleCuiLookup(); }}
                 >
                   <Ic name="lens" cls="ic" />
-                  {cuiLookupLoading ? "Se caută…" : "Caută la ANAF"}
+                  {cuiLookupLoading ? t("onboarding.company.searching") : t("onboarding.company.searchAnaf")}
                 </button>
               </div>
               <div className={"fetched" + (anafData ? " show" : "")}>
                 <CheckSvg />
-                Date preluate din registrul ANAF
+                {t("onboarding.company.fetched")}
               </div>
               {cuiLookupError && <p className="werr">{cuiLookupError}</p>}
 
@@ -499,24 +511,24 @@ export function OnboardingWizard() {
                   the app keeps them editable so onboarding works and when ANAF
                   lookup fails) */}
               <div className="field">
-                <label htmlFor="w-legalName">Denumire</label>
-                <input id="w-legalName" className="input" placeholder="S.C. Exemplu S.R.L." {...field("legalName")} />
+                <label htmlFor="w-legalName">{t("onboarding.company.nameLabel")}</label>
+                <input id="w-legalName" className="input" placeholder={t("onboarding.company.namePlaceholder")} {...field("legalName")} />
               </div>
               <div className="field">
-                <label htmlFor="w-address">Adresă</label>
-                <input id="w-address" className="input" placeholder="Str. Exemplu nr. 1" {...field("address")} />
+                <label htmlFor="w-address">{t("onboarding.company.addressLabel")}</label>
+                <input id="w-address" className="input" placeholder={t("onboarding.company.addressPlaceholder")} {...field("address")} />
               </div>
               <div className="row2" style={{ marginTop: 16 }}>
                 <div className="field" style={{ marginTop: 0 }}>
-                  <label htmlFor="w-city">Localitate</label>
-                  <input id="w-city" className="input" placeholder="București" {...field("city")} />
+                  <label htmlFor="w-city">{t("onboarding.company.cityLabel")}</label>
+                  <input id="w-city" className="input" placeholder={t("onboarding.company.cityPlaceholder")} {...field("city")} />
                 </div>
                 <div className="field" style={{ marginTop: 0 }}>
-                  <label htmlFor="w-county">Județ</label>
+                  <label htmlFor="w-county">{t("onboarding.company.countyLabel")}</label>
                   <input
                     id="w-county"
                     className="input num"
-                    placeholder="B"
+                    placeholder={t("onboarding.company.countyPlaceholder")}
                     maxLength={2}
                     style={{ textTransform: "uppercase" }}
                     {...field("county")}
@@ -525,35 +537,35 @@ export function OnboardingWizard() {
               </div>
               <div className="row2" style={{ marginTop: 16 }}>
                 <div className="field" style={{ marginTop: 0 }}>
-                  <label htmlFor="w-vat">Plătitor TVA</label>
+                  <label htmlFor="w-vat">{t("onboarding.company.vatPayerLabel")}</label>
                   <select
                     id="w-vat"
                     className="select"
                     value={form.vatPayer ? "da" : "nu"}
                     onChange={(e) => setForm((f) => ({ ...f, vatPayer: e.target.value === "da" }))}
                   >
-                    <option value="nu">Nu</option>
-                    <option value="da">Da</option>
+                    <option value="nu">{t("onboarding.company.no")}</option>
+                    <option value="da">{t("onboarding.company.yes")}</option>
                   </select>
                 </div>
                 <div className="field" style={{ marginTop: 0 }}>
-                  <label htmlFor="regim">Regim fiscal</label>
+                  <label htmlFor="regim">{t("onboarding.company.regimeLabel")}</label>
                   <select
                     id="regim"
                     className="select"
                     value={form.taxRegime}
                     onChange={(e) => setForm((f) => ({ ...f, taxRegime: e.target.value }))}
                   >
-                    <option value="micro">Microîntreprindere · impozit pe venit 1%</option>
-                    <option value="profit">Impozit pe profit · 16%</option>
+                    <option value="micro">{t("onboarding.company.regimeMicro")}</option>
+                    <option value="profit">{t("onboarding.company.regimeProfit")}</option>
                   </select>
                 </div>
               </div>
 
               {anafData && (
                 <dl className="kv">
-                  <dt>TVA la încasare</dt><dd>{anafData.cashVat ? "Da" : "Nu"}</dd>
-                  {anafData.registryNumber && (<><dt>Nr. Reg. Com.</dt><dd className="num">{anafData.registryNumber}</dd></>)}
+                  <dt>{t("onboarding.company.cashVat")}</dt><dd>{anafData.cashVat ? t("onboarding.company.yes") : t("onboarding.company.no")}</dd>
+                  {anafData.registryNumber && (<><dt>{t("onboarding.company.regCom")}</dt><dd className="num">{anafData.registryNumber}</dd></>)}
                 </dl>
               )}
 
@@ -562,28 +574,28 @@ export function OnboardingWizard() {
                 type="button"
                 onClick={() => setShowOptional((v) => !v)}
               >
-                {showOptional ? "− Ascunde datele opționale" : "+ Date opționale (email, telefon, IBAN, bancă)"}
+                {showOptional ? t("onboarding.company.hideOptional") : t("onboarding.company.showOptional")}
               </button>
               {showOptional && (
                 <>
                   <div className="row2">
                     <div className="field" style={{ marginTop: 0 }}>
-                      <label htmlFor="w-email">Email</label>
-                      <input id="w-email" className="input" type="email" placeholder="office@firma.ro" {...field("email")} />
+                      <label htmlFor="w-email">{t("onboarding.company.emailLabel")}</label>
+                      <input id="w-email" className="input" type="email" placeholder={t("onboarding.license.emailPlaceholder")} {...field("email")} />
                     </div>
                     <div className="field" style={{ marginTop: 0 }}>
-                      <label htmlFor="w-phone">Telefon</label>
-                      <input id="w-phone" className="input" placeholder="+40 722 000 000" {...field("phone")} />
+                      <label htmlFor="w-phone">{t("onboarding.company.phoneLabel")}</label>
+                      <input id="w-phone" className="input" placeholder={t("onboarding.company.phonePlaceholder")} {...field("phone")} />
                     </div>
                   </div>
                   <div className="row2" style={{ marginTop: 12 }}>
                     <div className="field" style={{ marginTop: 0 }}>
-                      <label htmlFor="w-iban">IBAN</label>
-                      <input id="w-iban" className="input num" placeholder="RO49AAAA…" {...field("iban")} />
+                      <label htmlFor="w-iban">{t("onboarding.company.ibanLabel")}</label>
+                      <input id="w-iban" className="input num" placeholder={t("onboarding.company.ibanPlaceholder")} {...field("iban")} />
                     </div>
                     <div className="field" style={{ marginTop: 0 }}>
-                      <label htmlFor="w-bank">Bancă</label>
-                      <input id="w-bank" className="input" placeholder="Banca Transilvania" {...field("bankName")} />
+                      <label htmlFor="w-bank">{t("onboarding.company.bankLabel")}</label>
+                      <input id="w-bank" className="input" placeholder={t("onboarding.company.bankPlaceholder")} {...field("bankName")} />
                     </div>
                   </div>
                 </>
@@ -595,30 +607,28 @@ export function OnboardingWizard() {
           {/* 4 ANAF SPV */}
           {step === 3 && (
             <div className="step active">
-              <h2>Conectare ANAF SPV</h2>
-              <p className="lead">
-                Conectează Spațiul Privat Virtual pentru e-Factura: trimitere, recipise și mesaje, automat.
-              </p>
+              <h2>{t("onboarding.spv.title")}</h2>
+              <p className="lead">{t("onboarding.spv.lead")}</p>
               <div className="anaf-card">
                 <div className="anaf-row">
                   <div className="anaf-ic"><Ic name="shield" cls="" /></div>
                   <div style={{ flex: 1 }}>
-                    <div className="at">Spațiul Privat Virtual</div>
+                    <div className="at">{t("onboarding.spv.cardTitle")}</div>
                     <div className="as">
                       {spvConnected
-                        ? "Certificat valabil · token reînnoit automat"
-                        : "Autorizare OAuth · certificat calificat"}
+                        ? t("onboarding.spv.connectedSub")
+                        : t("onboarding.spv.disconnectedSub")}
                     </div>
                   </div>
                   {spvConnected ? (
                     <span className="chip ok">
                       <svg className="sic" viewBox="0 0 24 24"><path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
-                      Conectat
+                      {t("onboarding.spv.connected")}
                     </span>
                   ) : (
                     <span className="chip wait">
                       <svg className="sic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5" /></svg>
-                      Neconectat
+                      {t("onboarding.spv.notConnected")}
                     </span>
                   )}
                 </div>
@@ -631,21 +641,18 @@ export function OnboardingWizard() {
                     onClick={() => { void handleAuthorize(); }}
                   >
                     <ExtLinkIc />
-                    {isAuthenticating ? "Se autorizează…" : "Conectează-te la ANAF"}
+                    {isAuthenticating ? t("onboarding.spv.authorizing") : t("onboarding.spv.connect")}
                   </button>
                 )}
               </div>
               {spvError && <p className="werr">{spvError}</p>}
               <div className="toggle-note">
                 <InfoSvg />
-                <span>
-                  Este necesar un certificat digital calificat (token USB sau soft-cert) instalat în
-                  browser și portul 8787 liber. Portul se poate schimba din Setări → ANAF.
-                </span>
+                <span>{t("onboarding.spv.note")}</span>
               </div>
               {!spvConnected && (
                 <button className="btn btn-link" type="button" onClick={() => setStep(4)}>
-                  Poți face asta mai târziu →
+                  {t("onboarding.spv.skip")}
                 </button>
               )}
             </div>
@@ -654,11 +661,11 @@ export function OnboardingWizard() {
           {/* 5 Serie */}
           {step === 4 && (
             <div className="step active">
-              <h2>Serie și numerotare facturi</h2>
-              <p className="lead">Stabilește seria și de la ce număr pornește numerotarea.</p>
+              <h2>{t("onboarding.serie.title")}</h2>
+              <p className="lead">{t("onboarding.serie.lead")}</p>
               <div className="row2" style={{ marginTop: 18 }}>
                 <div className="field" style={{ marginTop: 0 }}>
-                  <label htmlFor="serie">Serie</label>
+                  <label htmlFor="serie">{t("onboarding.serie.serieLabel")}</label>
                   <input
                     id="serie"
                     className="input num"
@@ -669,7 +676,7 @@ export function OnboardingWizard() {
                   />
                 </div>
                 <div className="field" style={{ marginTop: 0 }}>
-                  <label htmlFor="nextno">Următorul număr</label>
+                  <label htmlFor="nextno">{t("onboarding.serie.nextNoLabel")}</label>
                   {/* propunere — neimplementat: backend-ul pornește mereu de la 0001 */}
                   <input
                     id="nextno"
@@ -679,14 +686,14 @@ export function OnboardingWizard() {
                     onChange={(e) => setNextNo(e.target.value)}
                     onBlur={() => {
                       if (nextNo.trim() && nextNo.trim() !== "0001") {
-                        notify.info("Număr de pornire personalizat — în curând. Numerotarea pornește de la 0001.");
+                        notify.info(t("onboarding.notify.customStartNo"));
                       }
                     }}
                   />
                 </div>
               </div>
               <div className="field">
-                <label htmlFor="anfmt">Anul în număr</label>
+                <label htmlFor="anfmt">{t("onboarding.serie.yearLabel")}</label>
                 {/* propunere — neimplementat: formatul real al numărului e SERIE-0001 */}
                 <select
                   id="anfmt"
@@ -695,15 +702,15 @@ export function OnboardingWizard() {
                   onChange={(e) => {
                     const withYear = e.target.value === "da";
                     setYearInNo(withYear);
-                    if (withYear) notify.info("Formatul cu anul în număr — în curând.");
+                    if (withYear) notify.info(t("onboarding.notify.yearFormat"));
                   }}
                 >
-                  <option value="da">Da — FAC-{new Date().getFullYear()}-0001</option>
-                  <option value="nu">Nu — FAC-0001</option>
+                  <option value="da">{t("onboarding.serie.yearYes", { year: new Date().getFullYear() })}</option>
+                  <option value="nu">{t("onboarding.serie.yearNo")}</option>
                 </select>
               </div>
               <div className="kv" style={{ gridTemplateColumns: "1fr" }}>
-                <dt style={{ color: "var(--dim)" }}>Previzualizare</dt>
+                <dt style={{ color: "var(--dim)" }}>{t("onboarding.serie.preview")}</dt>
                 <dd className="num" style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600 }}>
                   {seriePreview}
                 </dd>
@@ -717,21 +724,21 @@ export function OnboardingWizard() {
             <div className="step active">
               <div className="done-wrap">
                 <div className="done-ring"><CheckSvg /></div>
-                <h2>Gata de pornire</h2>
+                <h2>{t("onboarding.doneStep.title")}</h2>
                 <p className="lead" style={{ maxWidth: 380, margin: "7px auto 0" }}>
-                  Configurarea s-a încheiat. Poți emite prima factură și sincroniza SPV din tabloul de bord.
+                  {t("onboarding.doneStep.lead")}
                 </p>
               </div>
               <dl className="kv recap">
-                <dt>Plan</dt>
+                <dt>{t("onboarding.doneStep.plan")}</dt>
                 <dd>{existingLicense ? (TIER_LABEL[existingLicense.tier] ?? existingLicense.tier) : PLAN_LABEL[plan]}</dd>
-                <dt>Companie</dt>
+                <dt>{t("onboarding.doneStep.company")}</dt>
                 <dd>{createdName}{form.cui.trim() ? ` · ${form.cui.trim()}` : ""}</dd>
-                <dt>Regim fiscal</dt>
-                <dd>{form.taxRegime === "micro" ? "Microîntreprindere 1%" : "Impozit pe profit 16%"}</dd>
-                <dt>ANAF SPV</dt>
-                <dd>{spvConnected ? "Conectat" : "Neconectat — se poate face din Setări"}</dd>
-                <dt>Serie facturi</dt>
+                <dt>{t("onboarding.company.regimeLabel")}</dt>
+                <dd>{form.taxRegime === "micro" ? t("onboarding.doneStep.regimeMicro") : t("onboarding.doneStep.regimeProfit")}</dd>
+                <dt>{t("onboarding.doneStep.anafSpv")}</dt>
+                <dd>{spvConnected ? t("onboarding.spv.connected") : t("onboarding.doneStep.notConnectedSettings")}</dd>
+                <dt>{t("onboarding.doneStep.serie")}</dt>
                 <dd className="num">{seriePreview}</dd>
               </dl>
             </div>
@@ -747,15 +754,15 @@ export function OnboardingWizard() {
             onClick={() => setStep((s) => Math.max(0, s - 1))}
           >
             <ArrowIc back />
-            Înapoi
+            {t("onboarding.nav.back")}
           </button>
           {!isLast ? (
             <button className="btn btn-dark" type="button" disabled={busy} onClick={handleNext}>
               {busy
-                ? "Se salvează…"
+                ? t("onboarding.nav.saving")
                 : step === 0
-                ? "Începe configurarea"
-                : "Continuă"}
+                ? t("onboarding.nav.start")
+                : t("onboarding.nav.next")}
               <ArrowIc />
             </button>
           ) : (
@@ -766,7 +773,7 @@ export function OnboardingWizard() {
               onClick={() => { void handleFinish(); }}
             >
               <HomeIc />
-              {finishing ? "Se finalizează…" : "Intră în aplicație"}
+              {finishing ? t("onboarding.nav.finishing") : t("onboarding.nav.enter")}
             </button>
           )}
         </div>

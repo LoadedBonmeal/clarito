@@ -15,6 +15,7 @@
 
 import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Ic } from "@/components/shared/Ic";
 import { ProductPickerButton } from "@/components/shared/ProductCombobox";
 import { VAT_RATES, VAT_CATEGORIES, VAT_CATEGORY_LABELS } from "@/lib/constants";
@@ -102,6 +103,7 @@ export function LineItemsEditor({
   companyId,
   currency = "RON",
 }: LineItemsEditorProps) {
+  const { t } = useTranslation();
   // Fetch active VAT rates from the global DB catalog.
   const { data: dbRates } = useQuery({
     queryKey: queryKeys.vatRates.list(true),
@@ -226,8 +228,10 @@ export function LineItemsEditor({
 
   // Short labels for the Categorie <select> options (full text is in title tooltip).
   const CAT_SHORT: Record<VatCategory, string> = {
-    S: "Standard", AE: "Taxare inversă", E: "Scutit", Z: "Cotă zero",
-    O: "Afara sferei TVA", K: "Intracom. scutit", G: "Export scutit",
+    S: t("shared.lineItems.cat.S"), AE: t("shared.lineItems.cat.AE"),
+    E: t("shared.lineItems.cat.E"), Z: t("shared.lineItems.cat.Z"),
+    O: t("shared.lineItems.cat.O"), K: t("shared.lineItems.cat.K"),
+    G: t("shared.lineItems.cat.G"),
   };
 
   // Column count: # + Cod + Descriere + Cant + UM + Preț + TVA% + Categorie + Net + Total + del = 11
@@ -245,16 +249,7 @@ export function LineItemsEditor({
   const cellTd: React.CSSProperties = { padding: "6px 4px", verticalAlign: "middle" };
 
   // Plain-text tooltip for the Categorie header help badge.
-  const CAT_HELP = [
-    "Categorii TVA (CIUS-RO):",
-    "S — Standard (TVA aplicată normal)",
-    "AE — Taxare inversă (reverse-charge B2B intracomunitar sau intern, TVA 0%)",
-    "E — Scutit fără drept de deducere (intern)",
-    "Z — Cotă zero",
-    "K — Intracomunitar scutit (livrare UE, 0% + VAT ID)",
-    "G — Export scutit (livrare extra-UE)",
-    "O — În afara sferei TVA",
-  ].join("\n");
+  const CAT_HELP = t("shared.lineItems.catHelp");
 
   // Legea 141/2025: 19% and 5% are abolished from 01.08.2025 for new operations. Warn if a line
   // still carries one (e.g. auto-filled from an old product), steering to 21% / 11%.
@@ -266,8 +261,9 @@ export function LineItemsEditor({
         <div className="banner warn" style={{ margin: "10px 12px", marginBottom: 10 }}>
           <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_WARN }} />
           <span>
-            O linie folosește o cotă TVA abrogată (19% sau 5%, Legea 141/2025, de la 01.08.2025).
-            Pentru operațiuni noi folosiți <b>21%</b> (standard) sau <b>11%</b> (redus).
+            {t("shared.lineItems.abolishedWarn1")} <b>21%</b>{" "}
+            {t("shared.lineItems.abolishedWarn2")} <b>11%</b>{" "}
+            {t("shared.lineItems.abolishedWarn3")}
           </span>
         </div>
       )}
@@ -275,18 +271,18 @@ export function LineItemsEditor({
         <thead>
           <tr>
             <th style={{ width: 32, padding: "9px 8px", textAlign: "center" }}>#</th>
-            <th style={{ width: 110, padding: "9px 8px" }}>Cod</th>
-            <th style={{ padding: "9px 8px" }}>Descriere</th>
-            <th className="r" style={{ width: 64, padding: "9px 8px", whiteSpace: "nowrap" }}>Cant.</th>
-            <th style={{ width: 56, padding: "9px 8px" }}>UM</th>
-            <th className="r" style={{ width: 100, padding: "9px 8px", whiteSpace: "nowrap" }}>Preț unitar</th>
-            <th className="r" style={{ width: 64, padding: "9px 8px", whiteSpace: "nowrap" }}>TVA %</th>
+            <th style={{ width: 110, padding: "9px 8px" }}>{t("shared.lineItems.headers.code")}</th>
+            <th style={{ padding: "9px 8px" }}>{t("shared.lineItems.headers.description")}</th>
+            <th className="r" style={{ width: 64, padding: "9px 8px", whiteSpace: "nowrap" }}>{t("shared.lineItems.headers.qty")}</th>
+            <th style={{ width: 56, padding: "9px 8px" }}>{t("shared.lineItems.headers.unit")}</th>
+            <th className="r" style={{ width: 100, padding: "9px 8px", whiteSpace: "nowrap" }}>{t("shared.lineItems.headers.unitPrice")}</th>
+            <th className="r" style={{ width: 64, padding: "9px 8px", whiteSpace: "nowrap" }}>{t("shared.lineItems.headers.vatPct")}</th>
             <th style={{ width: 150, padding: "9px 8px" }}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-                Categorie
+                {t("shared.lineItems.headers.category")}
                 <span
                   title={CAT_HELP}
-                  aria-label="Explicație categorii TVA"
+                  aria-label={t("shared.lineItems.catHelpAria")}
                   style={{
                     cursor: "help", fontSize: 10, color: "var(--dim)",
                     border: "1px solid var(--line)", borderRadius: "50%",
@@ -296,8 +292,8 @@ export function LineItemsEditor({
                 >?</span>
               </span>
             </th>
-            <th className="r" style={{ width: 110, padding: "9px 8px", whiteSpace: "nowrap" }}>Valoare net</th>
-            <th className="r" style={{ width: 110, padding: "9px 8px", whiteSpace: "nowrap" }}>Total cu TVA</th>
+            <th className="r" style={{ width: 110, padding: "9px 8px", whiteSpace: "nowrap" }}>{t("shared.lineItems.headers.net")}</th>
+            <th className="r" style={{ width: 110, padding: "9px 8px", whiteSpace: "nowrap" }}>{t("shared.lineItems.headers.totalWithVat")}</th>
             <th style={{ width: 36, padding: "9px 4px" }}></th>
           </tr>
         </thead>
@@ -320,7 +316,7 @@ export function LineItemsEditor({
                     value={l.cpvCode ?? ""}
                     onChange={(e) => updateLine(i, "cpvCode", e.target.value || undefined)}
                     style={cellInput}
-                    placeholder="cod"
+                    placeholder={t("shared.lineItems.codePlaceholder")}
                   />
                 </td>
                 {/* Descriere */}
@@ -331,7 +327,7 @@ export function LineItemsEditor({
                       value={l.name}
                       onChange={(e) => updateLine(i, "name", e.target.value)}
                       style={{ ...cellInput, flex: 1, minWidth: 0 }}
-                      placeholder="Descriere articol"
+                      placeholder={t("shared.lineItems.descPlaceholder")}
                     />
                     {companyId && (
                       <ProductPickerButton
@@ -412,7 +408,7 @@ export function LineItemsEditor({
                       className="mini-btn"
                       onClick={() => removeLine(i)}
                       disabled={lines.length === 1}
-                      title="Șterge linia"
+                      title={t("shared.lineItems.deleteLine")}
                       style={lines.length === 1 ? { opacity: 0.3, cursor: "default" } : undefined}
                     >
                       <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_TRASH }} />
@@ -431,7 +427,7 @@ export function LineItemsEditor({
                   fontSize: 12.5, fontWeight: 500, color: "var(--text-2)",
                 }}
               >
-                <Ic name="plus" cls="ic" /> Adaugă linie
+                <Ic name="plus" cls="ic" /> {t("shared.lineItems.addLine")}
               </span>
             </td>
           </tr>
@@ -444,7 +440,7 @@ export function LineItemsEditor({
                 className="r muted"
                 style={{ padding: "10px 8px", fontSize: 12, borderTop: "1px solid var(--line)" }}
               >
-                Subtotal net
+                {t("shared.lineItems.subtotalNet")}
               </td>
               <td style={{ borderTop: "1px solid var(--line)" }}></td>
               <td
@@ -458,7 +454,7 @@ export function LineItemsEditor({
             </tr>
             <tr style={{ background: "var(--fill)" }}>
               <td colSpan={7} className="r muted" style={{ padding: "8px", fontSize: 12 }}>
-                TVA
+                {t("shared.lineItems.vat")}
               </td>
               <td></td>
               <td className="r num" style={{ padding: "8px", fontSize: 13 }}>
@@ -476,7 +472,7 @@ export function LineItemsEditor({
                   letterSpacing: ".04em", fontWeight: 700, color: "var(--text)",
                 }}
               >
-                Total de plată
+                {t("shared.lineItems.totalDue")}
               </td>
               <td></td>
               <td></td>

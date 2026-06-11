@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Ic } from "@/components/shared/Ic";
 import { api } from "@/lib/tauri";
 import { fmtRON } from "@/lib/utils";
@@ -26,9 +27,11 @@ interface ProductComboboxProps {
 export function ProductCombobox({
   companyId,
   onSelect,
-  placeholder = "Caută articol (denumire sau cod)…",
+  placeholder,
   disabled,
 }: ProductComboboxProps) {
+  const { t } = useTranslation();
+  const effectivePlaceholder = placeholder ?? t("shared.combobox.productPlaceholder");
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -119,7 +122,7 @@ export function ProductCombobox({
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
-        placeholder={placeholder}
+        placeholder={effectivePlaceholder}
         disabled={disabled}
         autoComplete="off"
         aria-autocomplete="list"
@@ -143,15 +146,15 @@ export function ProductCombobox({
         >
           {debouncedQuery.length < 2 ? (
             <div className="muted" style={{ padding: "9px 10px", fontSize: 12 }}>
-              Tastați cel puțin 2 caractere…
+              {t("shared.combobox.minChars")}
             </div>
           ) : isFetching ? (
             <div className="muted" style={{ padding: "9px 10px", fontSize: 12 }}>
-              Se caută…
+              {t("shared.combobox.searching")}
             </div>
           ) : results.length === 0 ? (
             <div className="muted" style={{ padding: "9px 10px", fontSize: 12 }}>
-              Niciun articol găsit pentru „{debouncedQuery}".
+              {t("shared.combobox.noProducts", { q: debouncedQuery })}
             </div>
           ) : (
             results.map((p, idx) => {
@@ -188,8 +191,10 @@ export function ProductCombobox({
                   </div>
                   <div className="doc num" style={{ fontSize: 11 }}>
                     {p.code ? `${p.code} · ` : ""}
-                    {p.unit} · TVA {p.vatRate}%
-                    {p.stockQty != null ? <span> · stoc {p.stockQty}</span> : null}
+                    {p.unit} · {t("shared.combobox.vat", { rate: p.vatRate })}
+                    {p.stockQty != null ? (
+                      <span> · {t("shared.combobox.stock", { n: p.stockQty })}</span>
+                    ) : null}
                   </div>
                 </button>
               );
@@ -211,6 +216,7 @@ export function ProductPickerButton({
   onSelect: (p: Product) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   if (!open) {
@@ -218,7 +224,7 @@ export function ProductPickerButton({
       <button
         type="button"
         className="mini-btn"
-        title="Alege din catalog"
+        title={t("shared.combobox.pickFromCatalog")}
         disabled={disabled}
         onClick={() => setOpen(true)}
       >
@@ -235,14 +241,14 @@ export function ProductPickerButton({
           onSelect(p);
           setOpen(false);
         }}
-        placeholder="Caută articol…"
+        placeholder={t("shared.combobox.searchProduct")}
         disabled={disabled}
       />
       <button
         type="button"
         className="mini-btn"
         style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}
-        title="Închide"
+        title={t("shared.common.close")}
         onClick={() => setOpen(false)}
       >
         <Ic name="xMark" />

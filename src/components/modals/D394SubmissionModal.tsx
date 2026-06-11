@@ -9,17 +9,18 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import type { Company, D394Submission } from "@/types";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const TIP_D394_OPTIONS = [
-  { value: "L", label: "L — Lunar" },
-  { value: "T", label: "T — Trimestrial" },
-  { value: "S", label: "S — Semestrial" },
-  { value: "A", label: "A — Anual" },
+const TIP_D394_KEYS = [
+  { value: "L", labelKey: "shared.declCommon.periodL" },
+  { value: "T", labelKey: "shared.declCommon.periodT" },
+  { value: "S", labelKey: "shared.declCommon.periodS" },
+  { value: "A", labelKey: "shared.declCommon.periodA" },
 ];
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -69,6 +70,7 @@ function CheckRow({
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function D394SubmissionModal({ open, onOpenChange, company, onSubmit }: Props) {
+  const { t } = useTranslation();
   const [tipD394,          setTipD394]          = useState("L");
   const [sistemTva,        setSistemTva]        = useState(false);
   const [opEfectuate,      setOpEfectuate]      = useState(false);
@@ -137,8 +139,8 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit }: P
       <div className="modal" style={{ width: 580 }}>
         <div className="modal-head">
           <div>
-            <div className="mt">Export oficial D394 — date suplimentare</div>
-            <div className="ms">Schema ANAF v5 — câmpuri obligatorii pentru PDF-ul inteligent</div>
+            <div className="mt">{t("shared.d394.title")}</div>
+            <div className="ms">{t("shared.d394.subtitle")}</div>
           </div>
           <button className="modal-x" onClick={() => onOpenChange(false)}>
             <Ic name="xMark" />
@@ -148,20 +150,20 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit }: P
           <div className="fgrid">
             {/* Tip declarație + CAEN */}
             <div className="field">
-              <label>Tip D394</label>
+              <label>{t("shared.d394.tip")}</label>
               <select
                 id="d394-tip"
                 className="select"
                 value={tipD394}
                 onChange={(e) => setTipD394(e.target.value)}
               >
-                {TIP_D394_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
+                {TIP_D394_KEYS.map((o) => (
+                  <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
                 ))}
               </select>
             </div>
             <div className="field">
-              <label>Cod CAEN principal <span className="req">*</span></label>
+              <label>{t("shared.declCommon.caenLabel")} <span className="req">*</span></label>
               <input
                 id="d394-caen"
                 className={`input num${caen.length > 0 && !caenValid ? " invalid" : ""}`}
@@ -173,13 +175,13 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit }: P
               {caen.length > 0 && !caenValid && (
                 <span className="err">
                   <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="M6 18 18 6M6 6l12 12"/>' }} />
-                  Codul CAEN trebuie să aibă exact 4 cifre.
+                  {t("shared.declCommon.caenError")}
                 </span>
               )}
             </div>
 
             <div className="field span2">
-              <label>Telefon</label>
+              <label>{t("shared.d394.phone")}</label>
               <input
                 id="d394-telefon"
                 className="input num"
@@ -192,69 +194,69 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit }: P
 
             {/* Reprezentant */}
             <div className="span2 col-title" style={{ padding: "6px 0 0" }}>
-              Reprezentant
+              {t("shared.d394.repTitle")}
             </div>
             <div className="field span2">
-              <label>Denumire reprezentant <span className="req">*</span></label>
+              <label>{t("shared.d394.repName")} <span className="req">*</span></label>
               <input
                 id="d394-denr"
                 className="input"
                 value={denR}
                 onChange={(e) => setDenR(e.target.value)}
-                placeholder="SC ACME SRL"
+                placeholder={t("shared.d394.ph.repName")}
               />
             </div>
             <div className="field">
-              <label>Funcție reprezentant</label>
+              <label>{t("shared.d394.repRole")}</label>
               <input
                 id="d394-functie"
                 className="input"
                 value={functieReprez}
                 onChange={(e) => setFunctieReprez(e.target.value)}
-                placeholder="DIRECTOR"
+                placeholder={t("shared.d394.ph.repRole")}
               />
             </div>
             <div className="field">
-              <label>Calitate (când tip=proprie)</label>
+              <label>{t("shared.d394.capacity")}</label>
               <input
                 id="d394-calitate"
                 className="input"
                 value={calitateIntocmit}
                 onChange={(e) => setCalitateIntocmit(e.target.value)}
-                placeholder="Reprezentant"
+                placeholder={t("shared.d394.ph.capacity")}
                 disabled={tipIntocmit !== 0}
                 style={tipIntocmit !== 0 ? { opacity: 0.55, background: "var(--fill)" } : undefined}
               />
             </div>
             <div className="field span2">
-              <label>Adresă reprezentant</label>
+              <label>{t("shared.d394.repAddress")}</label>
               <input
                 id="d394-adresa"
                 className="input"
                 value={adresaR}
                 onChange={(e) => setAdresaR(e.target.value)}
-                placeholder="Str. Exemplu nr. 1, București"
+                placeholder={t("shared.d394.ph.repAddress")}
               />
             </div>
 
             {/* Întocmit */}
             <div className="span2 col-title" style={{ padding: "6px 0 0" }}>
-              Persoana care a întocmit declarația
+              {t("shared.d394.preparerTitle")}
             </div>
             <div className="field">
-              <label>Tip întocmit</label>
+              <label>{t("shared.d394.preparerType")}</label>
               <select
                 id="d394-tipintocmit"
                 className="select"
                 value={String(tipIntocmit)}
                 onChange={(e) => setTipIntocmit(Number(e.target.value))}
               >
-                <option value="0">0 — Persoana proprie</option>
-                <option value="1">1 — Consultant</option>
+                <option value="0">{t("shared.d394.preparerType0")}</option>
+                <option value="1">{t("shared.d394.preparerType1")}</option>
               </select>
             </div>
             <div className="field">
-              <label>CIF persoana care a întocmit</label>
+              <label>{t("shared.d394.preparerCif")}</label>
               <input
                 id="d394-cifintocmit"
                 className="input num"
@@ -264,42 +266,42 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit }: P
               />
             </div>
             <div className="field span2">
-              <label>Denumire persoana care a întocmit <span className="req">*</span></label>
+              <label>{t("shared.d394.preparerName")} <span className="req">*</span></label>
               <input
                 id="d394-denintocmit"
                 className="input"
                 value={denIntocmit}
                 onChange={(e) => setDenIntocmit(e.target.value)}
-                placeholder="Popescu Ion"
+                placeholder={t("shared.d394.ph.preparerName")}
               />
             </div>
 
             {/* Flags */}
             <div className="span2 col-title" style={{ padding: "6px 0 0" }}>
-              Opțiuni suplimentare
+              {t("shared.declCommon.flagsTitle")}
             </div>
             <div className="field span2" style={{ gap: 9 }}>
               <CheckRow checked={sistemTva} onChange={setSistemTva}>
-                Sistem TVA la încasare
+                {t("shared.d394.flags.sistemTva")}
               </CheckRow>
               <CheckRow checked={opEfectuate} onChange={setOpEfectuate}>
-                Operațiuni cu persoane afiliate
+                {t("shared.d394.flags.opEfectuate")}
               </CheckRow>
               <CheckRow checked={optiune} onChange={setOptiune}>
-                Opțiune regim special
+                {t("shared.d394.flags.optiune")}
               </CheckRow>
               <CheckRow checked={prsAfiliat} onChange={setPrsAfiliat}>
                 Persoane afiliate
               </CheckRow>
               <CheckRow checked={solicit} onChange={setSolicit}>
-                Solicită rambursare TVA
+                {t("shared.declCommon.vatRefund")}
               </CheckRow>
             </div>
           </div>
         </div>
         <div className="modal-foot">
           <button className="pill-btn" onClick={() => onOpenChange(false)}>
-            Anulează
+            {t("shared.common.cancel")}
           </button>
           <button
             className="btn-dark"
@@ -308,7 +310,7 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit }: P
             onClick={handleSubmit}
           >
             <Ic name="dl" />
-            Exportă XML oficial
+            {t("shared.declCommon.exportXml")}
           </button>
         </div>
       </div>

@@ -12,6 +12,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Trans, useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { OnboardingWizard } from "./OnboardingWizard";
@@ -23,11 +24,12 @@ import { BrandMark } from "@/components/shared/BrandMark";
 // ─── Loading screen ───────────────────────────────────────────────────────────
 
 function LoadingScreen() {
+  const { t } = useTranslation();
   return (
     <div className="wiz-wrap">
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, margin: "auto" }}>
         <div className="wiz-spin" />
-        <span style={{ fontSize: 13.5, color: "var(--text-2)" }}>Se încarcă…</span>
+        <span style={{ fontSize: 13.5, color: "var(--text-2)" }}>{t("onboarding.loading")}</span>
       </div>
     </div>
   );
@@ -36,6 +38,7 @@ function LoadingScreen() {
 // ─── License expired screen ────────────────────────────────────────────────────
 
 function LicenseExpiredScreen() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [showActivate, setShowActivate] = useState(false);
   const [key, setKey] = useState("");
@@ -49,7 +52,7 @@ function LicenseExpiredScreen() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.companies.list() });
     },
     onError: (err) => {
-      setActivateError(formatError(err, "Licența nu a putut fi activată."));
+      setActivateError(formatError(err, t("onboarding.errors.activateFailed")));
     },
   });
 
@@ -75,10 +78,9 @@ function LicenseExpiredScreen() {
         <div className="wiz-body" style={{ minHeight: 0, paddingTop: 24 }}>
           {!showActivate ? (
             <div className="step active" style={{ minHeight: 0 }}>
-              <h2>Licența a expirat</h2>
+              <h2>{t("onboarding.expired.title")}</h2>
               <p className="lead">
-                Perioada de probă de <strong>14 zile</strong> s-a încheiat sau licența nu mai este
-                validă pe această mașină. Datele tale sunt păstrate local și nu vor fi șterse.
+                <Trans i18nKey="onboarding.expired.lead" components={{ b: <strong /> }} />
               </p>
               <div className="anaf-card">
                 <div className="anaf-row">
@@ -86,12 +88,12 @@ function LicenseExpiredScreen() {
                     <svg viewBox="0 0 24 24"><path d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" /></svg>
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div className="at">Licență Clarito</div>
-                    <div className="as">Reactivează pentru a continua să emiți facturi</div>
+                    <div className="at">{t("onboarding.expired.cardTitle")}</div>
+                    <div className="as">{t("onboarding.expired.cardSub")}</div>
                   </div>
                   <span className="chip wait">
                     <svg className="sic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5" /></svg>
-                    Expirată
+                    {t("onboarding.expired.chip")}
                   </span>
                 </div>
                 <button
@@ -101,7 +103,7 @@ function LicenseExpiredScreen() {
                   onClick={() => { void handleBuy(); }}
                 >
                   <svg className="ic" viewBox="0 0 24 24"><path d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
-                  Cumpără licența
+                  {t("onboarding.expired.buy")}
                 </button>
               </div>
               <button
@@ -109,7 +111,7 @@ function LicenseExpiredScreen() {
                 type="button"
                 onClick={() => { setShowActivate(true); setActivateError(null); }}
               >
-                Am deja o licență — introdu cheia →
+                {t("onboarding.expired.haveKey")}
               </button>
             </div>
           ) : (
@@ -119,34 +121,34 @@ function LicenseExpiredScreen() {
               onSubmit={(e) => {
                 e.preventDefault();
                 setActivateError(null);
-                if (!key.trim()) { setActivateError("Introduceți cheia de licență."); return; }
-                if (!actEmail.trim()) { setActivateError("Introduceți emailul de achiziție."); return; }
+                if (!key.trim()) { setActivateError(t("onboarding.errors.enterKey")); return; }
+                if (!actEmail.trim()) { setActivateError(t("onboarding.errors.enterPurchaseEmail")); return; }
                 activateMutation.mutate();
               }}
             >
-              <h2>Activare licență</h2>
-              <p className="lead">Introdu cheia primită prin email după achiziție.</p>
+              <h2>{t("onboarding.expired.activateTitle")}</h2>
+              <p className="lead">{t("onboarding.expired.activateLead")}</p>
               <div className="field">
-                <label htmlFor="exp-key">Cheie licență</label>
+                <label htmlFor="exp-key">{t("onboarding.license.keyLabel")}</label>
                 <input
                   id="exp-key"
                   className="input num"
-                  placeholder="XXXX-XXXX-XXXX-XXXX"
+                  placeholder={t("onboarding.license.keyPlaceholder")}
                   style={{ textTransform: "uppercase", letterSpacing: "0.05em" }}
                   value={key}
                   onChange={(e) => setKey(e.target.value.toUpperCase())}
                   autoComplete="off"
                   spellCheck={false}
                 />
-                <span className="hint">Format XXXX-XXXX-XXXX-XXXX.</span>
+                <span className="hint">{t("onboarding.expired.keyHint")}</span>
               </div>
               <div className="field">
-                <label htmlFor="exp-email">Email achiziție</label>
+                <label htmlFor="exp-email">{t("onboarding.license.purchaseEmailLabel")}</label>
                 <input
                   id="exp-email"
                   className="input"
                   type="email"
-                  placeholder="office@firma.ro"
+                  placeholder={t("onboarding.license.emailPlaceholder")}
                   value={actEmail}
                   onChange={(e) => setActEmail(e.target.value)}
                 />
@@ -165,7 +167,7 @@ function LicenseExpiredScreen() {
               onClick={() => { setShowActivate(false); setActivateError(null); }}
             >
               <svg className="ic" viewBox="0 0 24 24" style={{ transform: "scaleX(-1)" }}><path d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
-              Înapoi
+              {t("onboarding.nav.back")}
             </button>
             <button
               className="btn btn-dark"
@@ -173,12 +175,12 @@ function LicenseExpiredScreen() {
               disabled={activateMutation.isPending}
               onClick={() => {
                 setActivateError(null);
-                if (!key.trim()) { setActivateError("Introduceți cheia de licență."); return; }
-                if (!actEmail.trim()) { setActivateError("Introduceți emailul de achiziție."); return; }
+                if (!key.trim()) { setActivateError(t("onboarding.errors.enterKey")); return; }
+                if (!actEmail.trim()) { setActivateError(t("onboarding.errors.enterPurchaseEmail")); return; }
                 activateMutation.mutate();
               }}
             >
-              {activateMutation.isPending ? "Se activează…" : "Activează licența"}
+              {activateMutation.isPending ? t("onboarding.expired.activating") : t("onboarding.expired.activate")}
               <svg className="ic arrow" viewBox="0 0 24 24"><path d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
             </button>
           </div>

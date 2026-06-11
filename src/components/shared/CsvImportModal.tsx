@@ -3,6 +3,7 @@
  */
 
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Icon } from "@/components/shared/Icon";
 import { api } from "@/lib/tauri";
 import { formatError } from "@/lib/error-mapper";
@@ -28,17 +29,16 @@ const TEMPLATES: Record<"invoices" | "contacts", string> = {
     "type;cui;name;address;city;county;email;phone",
 };
 
-const TYPE_LABELS: Record<"invoices" | "contacts", string> = {
-  invoices: "Facturi",
-  contacts: "Contacte",
-};
-
 export function CsvImportModal({
   type,
   companyId,
   onClose,
   onSuccess,
 }: CsvImportModalProps) {
+  const { t } = useTranslation();
+  const typeLabel = t(
+    type === "invoices" ? "shared.csvImport.typeInvoices" : "shared.csvImport.typeContacts",
+  );
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string[]>([]);
   const [content, setContent] = useState<string>("");
@@ -68,7 +68,7 @@ export function CsvImportModal({
   };
 
   const handleImport = async () => {
-    if (!content) { setError("Selectați un fișier CSV."); return; }
+    if (!content) { setError(t("shared.csvImport.selectFile")); return; }
     setImporting(true);
     setError(null);
     try {
@@ -79,7 +79,7 @@ export function CsvImportModal({
       setResult(res);
       if (res.imported > 0) onSuccess(res.imported);
     } catch (e) {
-      setError(formatError(e, 'Importul CSV a eșuat.'));
+      setError(formatError(e, t("shared.csvImport.importFailed")));
     } finally {
       setImporting(false);
     }
@@ -113,7 +113,7 @@ export function CsvImportModal({
   };
 
   const handleDryRun = async () => {
-    if (!content) { setError("Selectați un fișier CSV."); return; }
+    if (!content) { setError(t("shared.csvImport.selectFile")); return; }
     setPreviewing(true);
     setError(null);
     try {
@@ -123,7 +123,7 @@ export function CsvImportModal({
           : await api.importData.contactsCsvDryRun(content, companyId);
       setPreviewResult(res);
     } catch (e) {
-      setError(formatError(e, 'Validarea CSV a eșuat.'));
+      setError(formatError(e, t("shared.csvImport.validateFailed")));
     } finally {
       setPreviewing(false);
     }
@@ -149,24 +149,24 @@ export function CsvImportModal({
         <DialogHeader style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <DialogTitle style={{ fontSize: 14, fontWeight: 700 }}>
-              Import {TYPE_LABELS[type]} din CSV
+              {t("shared.csvImport.title", { type: typeLabel })}
             </DialogTitle>
-            <button type="button" className="modal-x" aria-label="Închide" onClick={onClose}>
+            <button type="button" className="modal-x" aria-label={t("shared.common.close")} onClick={onClose}>
               <Icon name="x" size={14} />
             </button>
           </div>
           <DialogDescription className="sr-only">
-            Importați {TYPE_LABELS[type].toLowerCase()} dintr-un fișier CSV.
+            {t("shared.csvImport.description", { type: typeLabel.toLowerCase() })}
           </DialogDescription>
         </DialogHeader>
 
         {/* Template download */}
         <div style={{ marginBottom: 12 }}>
           <button type="button" className="pill-btn" onClick={handleDownloadTemplate}>
-            <Icon name="download" size={12} /> Descarcă template CSV
+            <Icon name="download" size={12} /> {t("shared.csvImport.downloadTemplate")}
           </button>
           <span style={{ fontSize: 10.5, color: "var(--text-muted)", marginLeft: 10 }}>
-            Folosiți template-ul ca punct de pornire.
+            {t("shared.csvImport.templateHint")}
           </span>
         </div>
 
@@ -184,7 +184,7 @@ export function CsvImportModal({
             className="pill-btn"
             onClick={() => fileRef.current?.click()}
           >
-            <Icon name="upload" size={12} /> Selectează fișier CSV
+            <Icon name="upload" size={12} /> {t("shared.csvImport.pickFile")}
           </button>
           {fileName && (
             <span style={{ fontSize: 11, marginLeft: 10, color: "var(--text-muted)" }}>
@@ -197,7 +197,7 @@ export function CsvImportModal({
         {preview.length > 0 && (
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>
-              Preview (primele {preview.length} linii):
+              {t("shared.csvImport.previewLabel", { n: preview.length })}
             </div>
             <div
               style={{
@@ -227,7 +227,7 @@ export function CsvImportModal({
               disabled={previewing}
               onClick={() => void handleDryRun()}
             >
-              {previewing ? "Se validează…" : "Validează înainte de import →"}
+              {previewing ? t("shared.csvImport.validating") : t("shared.csvImport.validateBtn")}
             </button>
           </div>
         )}
@@ -242,7 +242,7 @@ export function CsvImportModal({
             }}
           >
             <div style={{ fontWeight: 600, marginBottom: 4 }}>
-              Previzualizare: {previewResult.imported} înregistrări valide
+              {t("shared.csvImport.previewValid", { count: previewResult.imported })}
             </div>
             {previewResult.errors.length > 0 && (
               <div style={{ color: "var(--rf-error)", marginTop: 4 }}>
@@ -250,7 +250,7 @@ export function CsvImportModal({
                   <div key={i}>• {e}</div>
                 ))}
                 {previewResult.errors.length > 5 && (
-                  <div>…și încă {previewResult.errors.length - 5} erori.</div>
+                  <div>{t("shared.csvImport.moreErrors", { count: previewResult.errors.length - 5 })}</div>
                 )}
               </div>
             )}
@@ -269,14 +269,14 @@ export function CsvImportModal({
               color: result.errors.length === 0 ? "#15803D" : "#C2410C",
             }}
           >
-            <b>{result.imported} înregistrări importate.</b>
+            <b>{t("shared.csvImport.imported", { count: result.imported })}</b>
             {result.errors.length > 0 && (
               <div style={{ marginTop: 4 }}>
                 {result.errors.slice(0, 5).map((e, i) => (
                   <div key={i}>{e}</div>
                 ))}
                 {result.errors.length > 5 && (
-                  <div>…și {result.errors.length - 5} erori suplimentare.</div>
+                  <div>{t("shared.csvImport.extraErrors", { count: result.errors.length - 5 })}</div>
                 )}
               </div>
             )}
@@ -302,7 +302,7 @@ export function CsvImportModal({
         {/* Actions */}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button type="button" className="pill-btn" onClick={onClose}>
-            Închide
+            {t("shared.common.close")}
           </button>
           <button
             type="button"
@@ -310,7 +310,7 @@ export function CsvImportModal({
             disabled={!content || importing}
             onClick={handleImport}
           >
-            {importing ? "Se importă…" : "Importă"}
+            {importing ? t("shared.csvImport.importing") : t("shared.csvImport.importBtn")}
           </button>
         </div>
       </DialogContent>

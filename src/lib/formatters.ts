@@ -1,3 +1,4 @@
+import i18n from "@/lib/i18n";
 import { parseDec } from "./utils";
 
 /**
@@ -6,17 +7,17 @@ import { parseDec } from "./utils";
  *
  * Delegates parsing to `parseDec` for consistency with the rest of the codebase.
  * Note: `parseDec` returns 0 for non-numeric strings, so this function explicitly
- * pre-checks for invalid numeric content to preserve the "sumă necunoscută" signal.
+ * pre-checks for invalid numeric content to preserve the i18n.t("shared.misc.unknownAmount") signal.
  */
 export function formatOptionalRon(amount?: string | number | null): string {
   if (amount === undefined || amount === null || amount === "") {
-    return "sumă necunoscută";
+    return i18n.t("shared.misc.unknownAmount");
   }
   // Pre-check: a finite Number(amount) implies numeric content; reject NaN/Infinity
   // *before* parseDec swallows them into 0.
   const probe = typeof amount === "number" ? amount : Number(amount);
-  if (!Number.isFinite(probe)) return "sumă necunoscută";
+  if (!Number.isFinite(probe)) return i18n.t("shared.misc.unknownAmount");
   const parsed = parseDec(amount);
-  if (!Number.isFinite(parsed)) return "sumă necunoscută";
+  if (!Number.isFinite(parsed)) return i18n.t("shared.misc.unknownAmount");
   return `${parsed.toFixed(2)} RON`;
 }

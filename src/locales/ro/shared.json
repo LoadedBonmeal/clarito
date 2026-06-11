@@ -1,0 +1,254 @@
+{
+  "shared": {
+    "common": {
+      "close": "Închide",
+      "cancel": "Anulează"
+    },
+    "queryError": {
+      "message": "Nu s-au putut încărca {{label}}. {{message}}",
+      "defaultLabel": "date",
+      "unknown": "Eroare necunoscută",
+      "retry": "Reîncearcă"
+    },
+    "csvImport": {
+      "typeInvoices": "Facturi",
+      "typeContacts": "Contacte",
+      "title": "Import {{type}} din CSV",
+      "description": "Importați {{type}} dintr-un fișier CSV.",
+      "downloadTemplate": "Descarcă template CSV",
+      "templateHint": "Folosiți template-ul ca punct de pornire.",
+      "pickFile": "Selectează fișier CSV",
+      "previewLabel": "Preview (primele {{n}} linii):",
+      "selectFile": "Selectați un fișier CSV.",
+      "importFailed": "Importul CSV a eșuat.",
+      "validateFailed": "Validarea CSV a eșuat.",
+      "validating": "Se validează…",
+      "validateBtn": "Validează înainte de import →",
+      "previewValid_one": "Previzualizare: {{count}} înregistrare validă",
+      "previewValid_few": "Previzualizare: {{count}} înregistrări valide",
+      "previewValid_other": "Previzualizare: {{count}} de înregistrări valide",
+      "moreErrors_one": "…și încă {{count}} eroare.",
+      "moreErrors_few": "…și încă {{count}} erori.",
+      "moreErrors_other": "…și încă {{count}} de erori.",
+      "imported_one": "{{count}} înregistrare importată.",
+      "imported_few": "{{count}} înregistrări importate.",
+      "imported_other": "{{count}} de înregistrări importate.",
+      "extraErrors_one": "…și {{count}} eroare suplimentară.",
+      "extraErrors_few": "…și {{count}} erori suplimentare.",
+      "extraErrors_other": "…și {{count}} de erori suplimentare.",
+      "importing": "Se importă…",
+      "importBtn": "Importă"
+    },
+    "shortcuts": {
+      "title": "Scurtături tastatură",
+      "description": "Toate scurtăturile disponibile în aplicație.",
+      "groups": {
+        "general": "General",
+        "invoiceEditor": "Editor factură",
+        "quickNav": "Navigare rapidă",
+        "anafOps": "Operațiuni ANAF",
+        "company": "Companie"
+      },
+      "items": {
+        "commandPalette": "Paletă de comenzi",
+        "newInvoice": "Factură nouă",
+        "shortcutsList": "Această listă de scurtături",
+        "refreshData": "Reîmprospătează datele",
+        "saveDraft": "Salvează ciorna",
+        "sendAnaf": "Trimite la ANAF",
+        "print": "Tipărește / Preview",
+        "cancelClose": "Renunță / Închide",
+        "recordReceived": "Înregistrare factură primită",
+        "newContact": "Contact nou (client/furnizor)",
+        "saveAs": "Salvează ca… (duplică factura)",
+        "quit": "Ieșire din aplicație",
+        "sendInvoiceAnaf": "Trimite factura la ANAF",
+        "checkAnafStatus": "Verifică status mesaje ANAF",
+        "creditNote": "Storno factură",
+        "downloadSpv": "Descarcă SPV",
+        "toggleTheme": "Comută mod întunecat / luminos"
+      }
+    },
+    "preflight": {
+      "title": "Verificare înainte de export"
+    },
+    "spvInbox": {
+      "title": "Inbox SPV (recipise, notificări, somații)",
+      "days": "{{n}} zile",
+      "loading": "Se încarcă…",
+      "loadBtn": "Încarcă mesajele SPV",
+      "noCompany": "Selectați o companie activă.",
+      "loadError": "Nu s-a putut încărca inbox-ul SPV.",
+      "infoPre": "Depunerea declarațiilor D300/D394/D406 nu are API ANAF — se face manual în portalul SPV (PDF inteligent validat cu DUKIntegrator). Aici vedeți",
+      "infoBold": "răspunsurile",
+      "infoPost": "ANAF: recipise, notificări și somații.",
+      "somatii_one": "somație necesită atenție.",
+      "somatii_few": "somații necesită atenție.",
+      "somatii_other": "de somații necesită atenție.",
+      "empty": "Niciun mesaj SPV în perioada selectată.",
+      "cat": {
+        "recipisa": "Recipisă",
+        "notificare": "Notificare",
+        "somatie": "Somație",
+        "decizie": "Decizie",
+        "factura": "Factură",
+        "altele": "Altele"
+      }
+    },
+    "combobox": {
+      "contactPlaceholder": "Caută client (nume sau CUI)…",
+      "clearSelection": "Șterge selecția",
+      "changeBuyer": "Schimbă cumpărătorul",
+      "minChars": "Tastați cel puțin 2 caractere…",
+      "searching": "Se caută…",
+      "noResults": "Niciun rezultat pentru „{{q}}\".",
+      "productPlaceholder": "Caută articol (denumire sau cod)…",
+      "noProducts": "Niciun articol găsit pentru „{{q}}\".",
+      "vat": "TVA {{rate}}%",
+      "stock": "stoc {{n}}",
+      "pickFromCatalog": "Alege din catalog",
+      "searchProduct": "Caută articol…"
+    },
+    "lineItems": {
+      "abolishedWarn1": "O linie folosește o cotă TVA abrogată (19% sau 5%, Legea 141/2025, de la 01.08.2025). Pentru operațiuni noi folosiți",
+      "abolishedWarn2": "(standard) sau",
+      "abolishedWarn3": "(redus).",
+      "headers": {
+        "code": "Cod",
+        "description": "Descriere",
+        "qty": "Cant.",
+        "unit": "UM",
+        "unitPrice": "Preț unitar",
+        "vatPct": "TVA %",
+        "category": "Categorie",
+        "net": "Valoare net",
+        "totalWithVat": "Total cu TVA"
+      },
+      "catHelpAria": "Explicație categorii TVA",
+      "catHelp": "Categorii TVA (CIUS-RO):\nS — Standard (TVA aplicată normal)\nAE — Taxare inversă (reverse-charge B2B intracomunitar sau intern, TVA 0%)\nE — Scutit fără drept de deducere (intern)\nZ — Cotă zero\nK — Intracomunitar scutit (livrare UE, 0% + VAT ID)\nG — Export scutit (livrare extra-UE)\nO — În afara sferei TVA",
+      "cat": {
+        "S": "Standard",
+        "AE": "Taxare inversă",
+        "E": "Scutit",
+        "Z": "Cotă zero",
+        "O": "Afara sferei TVA",
+        "K": "Intracom. scutit",
+        "G": "Export scutit"
+      },
+      "codePlaceholder": "cod",
+      "descPlaceholder": "Descriere articol",
+      "deleteLine": "Șterge linia",
+      "addLine": "Adaugă linie",
+      "subtotalNet": "Subtotal net",
+      "vat": "TVA",
+      "totalDue": "Total de plată"
+    },
+    "declCommon": {
+      "periodL": "L — Lunar",
+      "periodT": "T — Trimestrial",
+      "periodS": "S — Semestrial",
+      "periodA": "A — Anual",
+      "caenLabel": "Cod CAEN principal",
+      "caenError": "Codul CAEN trebuie să aibă exact 4 cifre.",
+      "flagsTitle": "Opțiuni suplimentare",
+      "vatRefund": "Solicită rambursare TVA",
+      "exportXml": "Exportă XML oficial"
+    },
+    "d300": {
+      "title": "Export oficial D300 — date suplimentare",
+      "subtitle": "Schema ANAF v12 — câmpuri obligatorii pentru PDF-ul inteligent",
+      "lastName": "Nume declarant",
+      "firstName": "Prenume declarant",
+      "role": "Funcție declarant",
+      "tipDecont": "Tip decont",
+      "bank": "Bancă",
+      "iban": "Cont IBAN",
+      "temei": "Temei legal",
+      "temeiOpt0": "0 — Standard",
+      "temeiOpt2": "2 — Alt temei",
+      "temeiHint": "0 = standard, 2 = alt temei",
+      "proRata": "Pro-rată TVA (%)",
+      "proRataHint": "100 = nu se aplică pro-rată",
+      "nrEvid": "Nr. din Registrul persoanelor impozabile",
+      "nrEvidHint": "0 dacă nu este aplicabil",
+      "ph": {
+        "lastName": "Popescu",
+        "firstName": "Ion",
+        "role": "Administrator",
+        "bank": "BRD, BCR…"
+      },
+      "flags": {
+        "rep": "Depus prin reprezentant fiscal",
+        "interne": "Operațiuni interne (bifă)",
+        "cereale": "Operațiuni cu cereale",
+        "mob": "Telefoane mobile / dispozitive electronice (mobilier)",
+        "disp": "Dispozitive (telefoane, tablete, laptopuri)",
+        "cons": "Construcții"
+      }
+    },
+    "d394": {
+      "title": "Export oficial D394 — date suplimentare",
+      "subtitle": "Schema ANAF v5 — câmpuri obligatorii pentru PDF-ul inteligent",
+      "tip": "Tip D394",
+      "phone": "Telefon",
+      "repTitle": "Reprezentant",
+      "repName": "Denumire reprezentant",
+      "repRole": "Funcție reprezentant",
+      "capacity": "Calitate (când tip=proprie)",
+      "repAddress": "Adresă reprezentant",
+      "preparerTitle": "Persoana care a întocmit declarația",
+      "preparerType": "Tip întocmit",
+      "preparerType0": "0 — Persoana proprie",
+      "preparerType1": "1 — Consultant",
+      "preparerCif": "CIF persoana care a întocmit",
+      "preparerName": "Denumire persoana care a întocmit",
+      "ph": {
+        "repName": "SC ACME SRL",
+        "repRole": "DIRECTOR",
+        "capacity": "Reprezentant",
+        "repAddress": "Str. Exemplu nr. 1, București",
+        "preparerName": "Popescu Ion"
+      },
+      "flags": {
+        "sistemTva": "Sistem TVA la încasare",
+        "opEfectuate": "Operațiuni cu persoane afiliate",
+        "optiune": "Opțiune regim special",
+        "prsAfiliat": "Persoane afiliate"
+      }
+    },
+    "errors": {
+      "unexpected": "A apărut o eroare neașteptată.",
+      "notFound": "Element negăsit.",
+      "conflict": "Conflict de date.",
+      "xlsx": "Eroare la generarea fișierului Excel.",
+      "xml": "Eroare la generarea fișierului XML.",
+      "pdf": "Eroare la generarea PDF.",
+      "archive": "Eroare la arhivă/backup. Verificați spațiul pe disc și permisiunile."
+    },
+    "status": {
+      "draft": "Schiță",
+      "queued": "În așteptare",
+      "submitted": "Trimisă",
+      "validated": "Validată",
+      "rejected": "Respinsă",
+      "storned": "Stornată",
+      "new": "Nouă",
+      "reviewed": "Revizuită",
+      "approved": "Aprobată",
+      "archived": "Arhivată",
+      "pending": "În așteptare",
+      "paid": "Plătit",
+      "unpaid": "Neplătit",
+      "partial": "Parțial",
+      "overdue": "Restanță",
+      "active": "Activ",
+      "inactive": "Inactiv"
+    },
+    "misc": {
+      "unknownAmount": "sumă necunoscută",
+      "errTitle": "A apărut o eroare neașteptată",
+      "errUnknown": "Eroare necunoscută",
+      "errReload": "Reîncarcă aplicația"
+    }
+  }
+}

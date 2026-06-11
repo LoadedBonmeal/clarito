@@ -5,6 +5,8 @@
  * Returns null when there are no issues (nothing rendered).
  */
 
+import { useTranslation } from "react-i18next";
+
 import { Banner } from "@/components/shared/Banner";
 import type { PreflightIssue } from "@/lib/tauri";
 
@@ -13,6 +15,7 @@ interface Props {
 }
 
 export function PreflightPanel({ issues }: Props) {
+  const { t } = useTranslation();
   if (issues.length === 0) return null;
 
   return (
@@ -27,7 +30,7 @@ export function PreflightPanel({ issues }: Props) {
           paddingBottom: 2,
         }}
       >
-        Verificare înainte de export
+        {t("shared.preflight.title")}
       </div>
       {issues.map((issue, idx) => (
         <Banner

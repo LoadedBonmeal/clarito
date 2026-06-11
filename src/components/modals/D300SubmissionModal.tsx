@@ -9,18 +9,10 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import type { Company, D300Submission } from "@/types";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const TIP_DECONT_OPTIONS = [
-  { value: "L", label: "L — Lunar" },
-  { value: "T", label: "T — Trimestrial" },
-  { value: "S", label: "S — Semestrial" },
-  { value: "A", label: "A — Anual" },
-];
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -69,6 +61,13 @@ function CheckRow({
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: Props) {
+  const { t } = useTranslation();
+  const tipDecontOptions = [
+    { value: "L", label: t("shared.declCommon.periodL") },
+    { value: "T", label: t("shared.declCommon.periodT") },
+    { value: "S", label: t("shared.declCommon.periodS") },
+    { value: "A", label: t("shared.declCommon.periodA") },
+  ];
   const [numeDeclar,       setNumeDeclar]       = useState("");
   const [prenumeDeclar,    setPrenumeDeclar]    = useState("");
   const [functieDeclar,    setFunctieDeclar]    = useState("Administrator");
@@ -140,8 +139,8 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
       <div className="modal" style={{ width: 560 }}>
         <div className="modal-head">
           <div>
-            <div className="mt">Export oficial D300 — date suplimentare</div>
-            <div className="ms">Schema ANAF v12 — câmpuri obligatorii pentru PDF-ul inteligent</div>
+            <div className="mt">{t("shared.d300.title")}</div>
+            <div className="ms">{t("shared.d300.subtitle")}</div>
           </div>
           <button className="modal-x" onClick={() => onOpenChange(false)}>
             <Ic name="xMark" />
@@ -151,39 +150,39 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
           <div className="fgrid">
             {/* Declarant */}
             <div className="field">
-              <label>Nume declarant <span className="req">*</span></label>
+              <label>{t("shared.d300.lastName")} <span className="req">*</span></label>
               <input
                 id="d300-nume"
                 className="input"
                 value={numeDeclar}
                 onChange={(e) => setNumeDeclar(e.target.value)}
-                placeholder="Popescu"
+                placeholder={t("shared.d300.ph.lastName")}
               />
             </div>
             <div className="field">
-              <label>Prenume declarant <span className="req">*</span></label>
+              <label>{t("shared.d300.firstName")} <span className="req">*</span></label>
               <input
                 id="d300-prenume"
                 className="input"
                 value={prenumeDeclar}
                 onChange={(e) => setPrenumeDeclar(e.target.value)}
-                placeholder="Ion"
+                placeholder={t("shared.d300.ph.firstName")}
               />
             </div>
             <div className="field span2">
-              <label>Funcție declarant</label>
+              <label>{t("shared.d300.role")}</label>
               <input
                 id="d300-functie"
                 className="input"
                 value={functieDeclar}
                 onChange={(e) => setFunctieDeclar(e.target.value)}
-                placeholder="Administrator"
+                placeholder={t("shared.d300.ph.role")}
               />
             </div>
 
             {/* Companie */}
             <div className="field">
-              <label>Cod CAEN principal <span className="req">*</span></label>
+              <label>{t("shared.declCommon.caenLabel")} <span className="req">*</span></label>
               <input
                 id="d300-caen"
                 className={`input num${caen.length > 0 && !caenValid ? " invalid" : ""}`}
@@ -195,19 +194,19 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
               {caen.length > 0 && !caenValid && (
                 <span className="err">
                   <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="M6 18 18 6M6 6l12 12"/>' }} />
-                  Codul CAEN trebuie să aibă exact 4 cifre.
+                  {t("shared.declCommon.caenError")}
                 </span>
               )}
             </div>
             <div className="field">
-              <label>Tip decont</label>
+              <label>{t("shared.d300.tipDecont")}</label>
               <select
                 id="d300-tip"
                 className="select"
                 value={tipDecont}
                 onChange={(e) => setTipDecont(e.target.value)}
               >
-                {TIP_DECONT_OPTIONS.map((o) => (
+                {tipDecontOptions.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
@@ -215,17 +214,17 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
 
             {/* Bancă */}
             <div className="field">
-              <label>Bancă</label>
+              <label>{t("shared.d300.bank")}</label>
               <input
                 id="d300-banca"
                 className="input"
                 value={banca}
                 onChange={(e) => setBanca(e.target.value)}
-                placeholder="BRD, BCR…"
+                placeholder={t("shared.d300.ph.bank")}
               />
             </div>
             <div className="field">
-              <label>Cont IBAN</label>
+              <label>{t("shared.d300.iban")}</label>
               <input
                 id="d300-cont"
                 className="input num"
@@ -237,20 +236,20 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
 
             {/* Temei + Pro-rata */}
             <div className="field">
-              <label>Temei legal</label>
+              <label>{t("shared.d300.temei")}</label>
               <select
                 id="d300-temei"
                 className="select"
                 value={String(temei)}
                 onChange={(e) => setTemei(Number(e.target.value))}
               >
-                <option value="0">0 — Standard</option>
-                <option value="2">2 — Alt temei</option>
+                <option value="0">{t("shared.d300.temeiOpt0")}</option>
+                <option value="2">{t("shared.d300.temeiOpt2")}</option>
               </select>
-              <span className="hint">0 = standard, 2 = alt temei</span>
+              <span className="hint">{t("shared.d300.temeiHint")}</span>
             </div>
             <div className="field">
-              <label>Pro-rată TVA (%)</label>
+              <label>{t("shared.d300.proRata")}</label>
               <input
                 id="d300-prorata"
                 className={`input num${!proRataValid ? " invalid" : ""}`}
@@ -261,12 +260,12 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
                 value={String(proRata)}
                 onChange={(e) => setProRata(Number(e.target.value))}
               />
-              <span className="hint">100 = nu se aplică pro-rată</span>
+              <span className="hint">{t("shared.d300.proRataHint")}</span>
             </div>
 
             {/* Nr. evidență */}
             <div className="field span2">
-              <label>Nr. din Registrul persoanelor impozabile</label>
+              <label>{t("shared.d300.nrEvid")}</label>
               <input
                 id="d300-nrevid"
                 className="input num"
@@ -274,7 +273,7 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
                 onChange={(e) => setNrEvid(e.target.value)}
                 placeholder="0"
               />
-              <span className="hint">0 dacă nu este aplicabil</span>
+              <span className="hint">{t("shared.d300.nrEvidHint")}</span>
             </div>
 
             {/* Flags */}

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 /**
  * StatusBadge — badge de status e-Factura, redat ca design .chip.
  *
@@ -79,11 +80,12 @@ const CHIP_CLS: Record<Variant, string> = {
 };
 
 export function StatusBadge({ status }: { status: string }) {
+  const { t } = useTranslation();
   const lower = status.toLowerCase();
   const variant = getVariant(lower);
   return (
     <span className={`chip ${CHIP_CLS[variant]}`}>
-      {LABELS[lower] ?? status}
+      {t(`shared.status.${lower}`, { defaultValue: LABELS[lower] ?? status })}
     </span>
   );
 }

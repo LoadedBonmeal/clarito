@@ -1,0 +1,155 @@
+{
+  "onboarding": {
+    "kinds": {
+      "welcome": "Welcome",
+      "license": "License",
+      "company": "Company",
+      "anafSpv": "ANAF SPV",
+      "numbering": "Numbering",
+      "done": "Done"
+    },
+    "tiers": {
+      "trial": "Trial · 3 companies",
+      "solo": "Solo · 1 company",
+      "accountant": "Accountant · 15 companies",
+      "firm": "Firm · unlimited"
+    },
+    "plans": {
+      "trial": { "name": "Trial", "desc": "3 companies · 14 days" },
+      "solo": { "name": "Solo", "desc": "1 company" },
+      "contabil": { "name": "Accountant", "desc": "15 companies" },
+      "firma": { "name": "Firm", "desc": "unlimited companies" }
+    },
+    "welcome": {
+      "title": "Welcome to Clarito",
+      "lead": "Accounting and e-Factura for your business — invoices, SPV, returns and journals, all in one place. Let's set up the app in a few steps.",
+      "note": "Your data stays local on this device. You can connect ANAF SPV now or later."
+    },
+    "license": {
+      "title": "License",
+      "activeLead": "Your license is already active. You can continue the setup.",
+      "localLicense": "Local license",
+      "activeChip": "Active",
+      "lead": "Choose a plan. You can change it anytime from Settings.",
+      "emailLabel": "Email address",
+      "emailPlaceholder": "office@firma.ro",
+      "trialHint": "14 days free, no card required. The trial starts on \"Continue\".",
+      "keyLabel": "License key",
+      "keyPlaceholder": "XXXX-XXXX-XXXX-XXXX",
+      "purchaseEmailLabel": "Purchase email"
+    },
+    "company": {
+      "title": "Your company",
+      "lead": "Enter the CUI and we'll fill in the rest from the ANAF registry.",
+      "cuiLabel": "CUI / CIF",
+      "cuiPlaceholder": "e.g. RO12345678",
+      "searching": "Searching…",
+      "searchAnaf": "Look up at ANAF",
+      "fetched": "Data fetched from the ANAF registry",
+      "nameLabel": "Legal name",
+      "namePlaceholder": "S.C. Exemplu S.R.L.",
+      "addressLabel": "Address",
+      "addressPlaceholder": "Str. Exemplu nr. 1",
+      "cityLabel": "City",
+      "cityPlaceholder": "București",
+      "countyLabel": "County",
+      "countyPlaceholder": "B",
+      "vatPayerLabel": "VAT payer",
+      "yes": "Yes",
+      "no": "No",
+      "regimeLabel": "Tax regime",
+      "regimeMicro": "Micro-enterprise · 1% income tax",
+      "regimeProfit": "Profit tax · 16%",
+      "cashVat": "Cash-accounting VAT",
+      "regCom": "Trade Registry No.",
+      "hideOptional": "− Hide optional details",
+      "showOptional": "+ Optional details (email, phone, IBAN, bank)",
+      "emailLabel": "Email",
+      "phoneLabel": "Phone",
+      "phonePlaceholder": "+40 722 000 000",
+      "ibanLabel": "IBAN",
+      "ibanPlaceholder": "RO49AAAA…",
+      "bankLabel": "Bank",
+      "bankPlaceholder": "Banca Transilvania"
+    },
+    "spv": {
+      "title": "Connect ANAF SPV",
+      "lead": "Connect the Virtual Private Space for e-Factura: submission, receipts and messages, automatically.",
+      "cardTitle": "Spațiul Privat Virtual",
+      "connectedSub": "Valid certificate · token renewed automatically",
+      "disconnectedSub": "OAuth authorization · qualified certificate",
+      "connected": "Connected",
+      "notConnected": "Not connected",
+      "authorizing": "Authorizing…",
+      "connect": "Connect to ANAF",
+      "note": "A qualified digital certificate (USB token or soft-cert) installed in the browser and a free port 8787 are required. The port can be changed from Settings → ANAF.",
+      "skip": "You can do this later →"
+    },
+    "serie": {
+      "title": "Invoice series and numbering",
+      "lead": "Set the series and the number the numbering starts from.",
+      "serieLabel": "Series",
+      "nextNoLabel": "Next number",
+      "yearLabel": "Year in number",
+      "yearYes": "Yes — FAC-{{year}}-0001",
+      "yearNo": "No — FAC-0001",
+      "preview": "Preview"
+    },
+    "doneStep": {
+      "title": "Ready to go",
+      "lead": "Setup is complete. You can issue your first invoice and sync SPV from the dashboard.",
+      "plan": "Plan",
+      "company": "Company",
+      "regimeMicro": "Micro-enterprise 1%",
+      "regimeProfit": "Profit tax 16%",
+      "anafSpv": "ANAF SPV",
+      "notConnectedSettings": "Not connected — can be done from Settings",
+      "serie": "Invoice series"
+    },
+    "nav": {
+      "back": "Back",
+      "saving": "Saving…",
+      "start": "Start setup",
+      "next": "Continue",
+      "finishing": "Finishing…",
+      "enter": "Enter the app"
+    },
+    "errors": {
+      "trialFailed": "Error activating the trial period.",
+      "activateFailed": "The license could not be activated.",
+      "cuiNotFound": "The CUI was not found in the ANAF database.",
+      "unknown": "Unknown error.",
+      "cuiRequired": "CUI is required.",
+      "nameRequired": "The legal name is required.",
+      "cityRequired": "The city is required.",
+      "countyRequired": "The county is required.",
+      "addressRequired": "The address is required.",
+      "spvIncomplete": "The authorization did not complete. Try again or skip this step.",
+      "spvFailed": "The authorization failed. Check your connection and try again.",
+      "serieSaveFailed": "The series could not be saved.",
+      "emailRequired": "The email address is required.",
+      "keyRequired": "The license key is required.",
+      "enterKey": "Enter the license key.",
+      "enterPurchaseEmail": "Enter the purchase email."
+    },
+    "notify": {
+      "customStartNo": "Custom starting number — coming soon. Numbering starts from 0001.",
+      "yearFormat": "The year-in-number format — coming soon."
+    },
+    "loading": "Loading…",
+    "expired": {
+      "title": "The license has expired",
+      "lead": "The <b>14-day</b> trial period has ended or the license is no longer valid on this machine. Your data is kept locally and will not be deleted.",
+      "cardTitle": "Clarito license",
+      "cardSub": "Reactivate to keep issuing invoices",
+      "chip": "Expired",
+      "buy": "Buy a license",
+      "haveKey": "I already have a license — enter the key →",
+      "activateTitle": "Activate license",
+      "activateLead": "Enter the key you received by email after purchase.",
+      "keyHint": "Format XXXX-XXXX-XXXX-XXXX.",
+      "activating": "Activating…",
+      "activate": "Activate license"
+    }
+  }
+}

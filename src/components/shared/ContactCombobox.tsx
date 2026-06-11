@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Ic } from "@/components/shared/Ic";
 import { api } from "@/lib/tauri";
 import type { Contact, ContactType } from "@/types";
@@ -31,12 +32,14 @@ export function ContactCombobox({
   value,
   onChange,
   companyId,
-  placeholder = "Caută client (nume sau CUI)…",
+  placeholder,
   disabled,
   filterType,
   width = 320,
   inputId,
 }: ContactComboboxProps) {
+  const { t } = useTranslation();
+  const effectivePlaceholder = placeholder ?? t("shared.combobox.contactPlaceholder");
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -162,8 +165,8 @@ export function ContactCombobox({
             type="button"
             onClick={handleClear}
             className="mini-btn"
-            aria-label="Șterge selecția"
-            title="Schimbă cumpărătorul"
+            aria-label={t("shared.combobox.clearSelection")}
+            title={t("shared.combobox.changeBuyer")}
           >
             <Ic name="xMark" />
           </button>
@@ -190,7 +193,7 @@ export function ContactCombobox({
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
-        placeholder={placeholder}
+        placeholder={effectivePlaceholder}
         disabled={disabled}
         autoComplete="off"
         aria-autocomplete="list"
@@ -214,15 +217,15 @@ export function ContactCombobox({
         >
           {debouncedQuery.length < 2 ? (
             <div className="muted" style={{ padding: "9px 10px", fontSize: 12 }}>
-              Tastați cel puțin 2 caractere…
+              {t("shared.combobox.minChars")}
             </div>
           ) : isFetching ? (
             <div className="muted" style={{ padding: "9px 10px", fontSize: 12 }}>
-              Se caută…
+              {t("shared.combobox.searching")}
             </div>
           ) : results.length === 0 ? (
             <div className="muted" style={{ padding: "9px 10px", fontSize: 12 }}>
-              Niciun rezultat pentru „{debouncedQuery}".
+              {t("shared.combobox.noResults", { q: debouncedQuery })}
             </div>
           ) : (
             results.map((c, idx) => {

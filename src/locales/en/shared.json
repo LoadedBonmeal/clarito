@@ -1,0 +1,249 @@
+{
+  "shared": {
+    "common": {
+      "close": "Close",
+      "cancel": "Cancel"
+    },
+    "queryError": {
+      "message": "Could not load {{label}}. {{message}}",
+      "defaultLabel": "data",
+      "unknown": "Unknown error",
+      "retry": "Retry"
+    },
+    "csvImport": {
+      "typeInvoices": "Invoices",
+      "typeContacts": "Contacts",
+      "title": "Import {{type}} from CSV",
+      "description": "Import {{type}} from a CSV file.",
+      "downloadTemplate": "Download CSV template",
+      "templateHint": "Use the template as a starting point.",
+      "pickFile": "Select CSV file",
+      "previewLabel": "Preview (first {{n}} lines):",
+      "selectFile": "Select a CSV file.",
+      "importFailed": "CSV import failed.",
+      "validateFailed": "CSV validation failed.",
+      "validating": "Validating…",
+      "validateBtn": "Validate before import →",
+      "previewValid_one": "Preview: {{count}} valid record",
+      "previewValid_other": "Preview: {{count}} valid records",
+      "moreErrors_one": "…and {{count}} more error.",
+      "moreErrors_other": "…and {{count}} more errors.",
+      "imported_one": "{{count}} record imported.",
+      "imported_other": "{{count}} records imported.",
+      "extraErrors_one": "…and {{count}} additional error.",
+      "extraErrors_other": "…and {{count}} additional errors.",
+      "importing": "Importing…",
+      "importBtn": "Import"
+    },
+    "shortcuts": {
+      "title": "Keyboard shortcuts",
+      "description": "All shortcuts available in the app.",
+      "groups": {
+        "general": "General",
+        "invoiceEditor": "Invoice editor",
+        "quickNav": "Quick navigation",
+        "anafOps": "ANAF operations",
+        "company": "Company"
+      },
+      "items": {
+        "commandPalette": "Command palette",
+        "newInvoice": "New invoice",
+        "shortcutsList": "This shortcuts list",
+        "refreshData": "Refresh data",
+        "saveDraft": "Save draft",
+        "sendAnaf": "Send to ANAF",
+        "print": "Print / Preview",
+        "cancelClose": "Cancel / Close",
+        "recordReceived": "Record received invoice",
+        "newContact": "New contact (customer/supplier)",
+        "saveAs": "Save as… (duplicate invoice)",
+        "quit": "Quit application",
+        "sendInvoiceAnaf": "Send invoice to ANAF",
+        "checkAnafStatus": "Check ANAF message status",
+        "creditNote": "Credit invoice (storno)",
+        "downloadSpv": "Download SPV",
+        "toggleTheme": "Toggle dark / light mode"
+      }
+    },
+    "preflight": {
+      "title": "Pre-export check"
+    },
+    "spvInbox": {
+      "title": "SPV inbox (receipts, notifications, summonses)",
+      "days": "{{n}} days",
+      "loading": "Loading…",
+      "loadBtn": "Load SPV messages",
+      "noCompany": "Select an active company.",
+      "loadError": "Could not load the SPV inbox.",
+      "infoPre": "Submitting D300/D394/D406 returns has no ANAF API — they are filed manually in the SPV portal (smart PDF validated with DUKIntegrator). Here you see the",
+      "infoBold": "responses",
+      "infoPost": "from ANAF: receipts, notifications and summonses.",
+      "somatii_one": "summons requires attention.",
+      "somatii_other": "summonses require attention.",
+      "empty": "No SPV messages in the selected period.",
+      "cat": {
+        "recipisa": "Receipt",
+        "notificare": "Notification",
+        "somatie": "Summons",
+        "decizie": "Decision",
+        "factura": "Invoice",
+        "altele": "Other"
+      }
+    },
+    "combobox": {
+      "contactPlaceholder": "Search customer (name or CUI)…",
+      "clearSelection": "Clear selection",
+      "changeBuyer": "Change buyer",
+      "minChars": "Type at least 2 characters…",
+      "searching": "Searching…",
+      "noResults": "No results for \"{{q}}\".",
+      "productPlaceholder": "Search item (name or code)…",
+      "noProducts": "No items found for \"{{q}}\".",
+      "vat": "VAT {{rate}}%",
+      "stock": "stock {{n}}",
+      "pickFromCatalog": "Pick from catalog",
+      "searchProduct": "Search item…"
+    },
+    "lineItems": {
+      "abolishedWarn1": "A line uses an abolished VAT rate (19% or 5%, Law 141/2025, from 01.08.2025). For new operations use",
+      "abolishedWarn2": "(standard) or",
+      "abolishedWarn3": "(reduced).",
+      "headers": {
+        "code": "Code",
+        "description": "Description",
+        "qty": "Qty",
+        "unit": "Unit",
+        "unitPrice": "Unit price",
+        "vatPct": "VAT %",
+        "category": "Category",
+        "net": "Net amount",
+        "totalWithVat": "Total with VAT"
+      },
+      "catHelpAria": "VAT category explanation",
+      "catHelp": "VAT categories (CIUS-RO):\nS — Standard (VAT applied normally)\nAE — Reverse charge (intra-community or domestic B2B reverse charge, 0% VAT)\nE — Exempt without right of deduction (domestic)\nZ — Zero rate\nK — Intra-community exempt (EU supply, 0% + VAT ID)\nG — Exempt export (extra-EU supply)\nO — Outside the scope of VAT",
+      "cat": {
+        "S": "Standard",
+        "AE": "Reverse charge",
+        "E": "Exempt",
+        "Z": "Zero rate",
+        "O": "Out of VAT scope",
+        "K": "Intra-EU exempt",
+        "G": "Exempt export"
+      },
+      "codePlaceholder": "code",
+      "descPlaceholder": "Item description",
+      "deleteLine": "Delete line",
+      "addLine": "Add line",
+      "subtotalNet": "Net subtotal",
+      "vat": "VAT",
+      "totalDue": "Total due"
+    },
+    "declCommon": {
+      "periodL": "L — Monthly",
+      "periodT": "T — Quarterly",
+      "periodS": "S — Half-yearly",
+      "periodA": "A — Annual",
+      "caenLabel": "Main CAEN code",
+      "caenError": "The CAEN code must have exactly 4 digits.",
+      "flagsTitle": "Additional options",
+      "vatRefund": "Request VAT refund",
+      "exportXml": "Export official XML"
+    },
+    "d300": {
+      "title": "Official D300 export — additional details",
+      "subtitle": "ANAF schema v12 — required fields for the smart PDF",
+      "lastName": "Declarant last name",
+      "firstName": "Declarant first name",
+      "role": "Declarant position",
+      "tipDecont": "Return type",
+      "bank": "Bank",
+      "iban": "IBAN account",
+      "temei": "Legal basis",
+      "temeiOpt0": "0 — Standard",
+      "temeiOpt2": "2 — Other basis",
+      "temeiHint": "0 = standard, 2 = other basis",
+      "proRata": "VAT pro-rata (%)",
+      "proRataHint": "100 = pro-rata not applied",
+      "nrEvid": "No. in the Register of taxable persons",
+      "nrEvidHint": "0 if not applicable",
+      "ph": {
+        "lastName": "Popescu",
+        "firstName": "Ion",
+        "role": "Administrator",
+        "bank": "BRD, BCR…"
+      },
+      "flags": {
+        "rep": "Filed through a fiscal representative",
+        "interne": "Domestic operations (checkbox)",
+        "cereale": "Operations with cereals",
+        "mob": "Mobile phones / electronic devices (furniture)",
+        "disp": "Devices (phones, tablets, laptops)",
+        "cons": "Constructions"
+      }
+    },
+    "d394": {
+      "title": "Official D394 export — additional details",
+      "subtitle": "ANAF schema v5 — required fields for the smart PDF",
+      "tip": "D394 type",
+      "phone": "Phone",
+      "repTitle": "Representative",
+      "repName": "Representative name",
+      "repRole": "Representative position",
+      "capacity": "Capacity (when type=own)",
+      "repAddress": "Representative address",
+      "preparerTitle": "Person who prepared the declaration",
+      "preparerType": "Preparer type",
+      "preparerType0": "0 — Own person",
+      "preparerType1": "1 — Consultant",
+      "preparerCif": "CIF of the person who prepared it",
+      "preparerName": "Name of the person who prepared it",
+      "ph": {
+        "repName": "SC ACME SRL",
+        "repRole": "DIRECTOR",
+        "capacity": "Representative",
+        "repAddress": "Str. Exemplu nr. 1, Bucharest",
+        "preparerName": "Popescu Ion"
+      },
+      "flags": {
+        "sistemTva": "VAT on collection scheme",
+        "opEfectuate": "Operations with affiliated persons",
+        "optiune": "Special regime option",
+        "prsAfiliat": "Affiliated persons"
+      }
+    },
+    "errors": {
+      "unexpected": "An unexpected error occurred.",
+      "notFound": "Item not found.",
+      "conflict": "Data conflict.",
+      "xlsx": "Error generating the Excel file.",
+      "xml": "Error generating the XML file.",
+      "pdf": "Error generating the PDF.",
+      "archive": "Archive/backup error. Check disk space and permissions."
+    },
+    "status": {
+      "draft": "Draft",
+      "queued": "Queued",
+      "submitted": "Submitted",
+      "validated": "Validated",
+      "rejected": "Rejected",
+      "storned": "Credited",
+      "new": "New",
+      "reviewed": "Reviewed",
+      "approved": "Approved",
+      "archived": "Archived",
+      "pending": "Pending",
+      "paid": "Paid",
+      "unpaid": "Unpaid",
+      "partial": "Partial",
+      "overdue": "Overdue",
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "misc": {
+      "unknownAmount": "unknown amount",
+      "errTitle": "An unexpected error occurred",
+      "errUnknown": "Unknown error",
+      "errReload": "Reload the app"
+    }
+  }
+}

@@ -1,0 +1,155 @@
+{
+  "onboarding": {
+    "kinds": {
+      "welcome": "Bun venit",
+      "license": "Licență",
+      "company": "Compania",
+      "anafSpv": "ANAF SPV",
+      "numbering": "Numerotare",
+      "done": "Gata"
+    },
+    "tiers": {
+      "trial": "Trial · 3 companii",
+      "solo": "Solo · 1 companie",
+      "accountant": "Contabil · 15 companii",
+      "firm": "Firmă · nelimitat"
+    },
+    "plans": {
+      "trial": { "name": "Trial", "desc": "3 companii · 14 zile" },
+      "solo": { "name": "Solo", "desc": "1 companie" },
+      "contabil": { "name": "Contabil", "desc": "15 companii" },
+      "firma": { "name": "Firmă", "desc": "companii nelimitate" }
+    },
+    "welcome": {
+      "title": "Bun venit la Clarito",
+      "lead": "Contabilitate și e-Factura pentru firma ta — facturi, SPV, declarații și jurnale, într-un singur loc. Hai să configurăm aplicația în câțiva pași.",
+      "note": "Datele se păstrează local pe acest dispozitiv. Poți conecta ANAF SPV acum sau mai târziu."
+    },
+    "license": {
+      "title": "Licență",
+      "activeLead": "Licența ta este deja activă. Poți continua configurarea.",
+      "localLicense": "Licență locală",
+      "activeChip": "Activă",
+      "lead": "Alege planul. Îl poți schimba oricând din Setări.",
+      "emailLabel": "Adresă email",
+      "emailPlaceholder": "office@firma.ro",
+      "trialHint": "14 zile gratuit, fără card. Trial-ul pornește la „Continuă\".",
+      "keyLabel": "Cheie licență",
+      "keyPlaceholder": "XXXX-XXXX-XXXX-XXXX",
+      "purchaseEmailLabel": "Email achiziție"
+    },
+    "company": {
+      "title": "Compania ta",
+      "lead": "Introdu CUI-ul și completăm restul din registrul ANAF.",
+      "cuiLabel": "CUI / CIF",
+      "cuiPlaceholder": "ex. RO12345678",
+      "searching": "Se caută…",
+      "searchAnaf": "Caută la ANAF",
+      "fetched": "Date preluate din registrul ANAF",
+      "nameLabel": "Denumire",
+      "namePlaceholder": "S.C. Exemplu S.R.L.",
+      "addressLabel": "Adresă",
+      "addressPlaceholder": "Str. Exemplu nr. 1",
+      "cityLabel": "Localitate",
+      "cityPlaceholder": "București",
+      "countyLabel": "Județ",
+      "countyPlaceholder": "B",
+      "vatPayerLabel": "Plătitor TVA",
+      "yes": "Da",
+      "no": "Nu",
+      "regimeLabel": "Regim fiscal",
+      "regimeMicro": "Microîntreprindere · impozit pe venit 1%",
+      "regimeProfit": "Impozit pe profit · 16%",
+      "cashVat": "TVA la încasare",
+      "regCom": "Nr. Reg. Com.",
+      "hideOptional": "− Ascunde datele opționale",
+      "showOptional": "+ Date opționale (email, telefon, IBAN, bancă)",
+      "emailLabel": "Email",
+      "phoneLabel": "Telefon",
+      "phonePlaceholder": "+40 722 000 000",
+      "ibanLabel": "IBAN",
+      "ibanPlaceholder": "RO49AAAA…",
+      "bankLabel": "Bancă",
+      "bankPlaceholder": "Banca Transilvania"
+    },
+    "spv": {
+      "title": "Conectare ANAF SPV",
+      "lead": "Conectează Spațiul Privat Virtual pentru e-Factura: trimitere, recipise și mesaje, automat.",
+      "cardTitle": "Spațiul Privat Virtual",
+      "connectedSub": "Certificat valabil · token reînnoit automat",
+      "disconnectedSub": "Autorizare OAuth · certificat calificat",
+      "connected": "Conectat",
+      "notConnected": "Neconectat",
+      "authorizing": "Se autorizează…",
+      "connect": "Conectează-te la ANAF",
+      "note": "Este necesar un certificat digital calificat (token USB sau soft-cert) instalat în browser și portul 8787 liber. Portul se poate schimba din Setări → ANAF.",
+      "skip": "Poți face asta mai târziu →"
+    },
+    "serie": {
+      "title": "Serie și numerotare facturi",
+      "lead": "Stabilește seria și de la ce număr pornește numerotarea.",
+      "serieLabel": "Serie",
+      "nextNoLabel": "Următorul număr",
+      "yearLabel": "Anul în număr",
+      "yearYes": "Da — FAC-{{year}}-0001",
+      "yearNo": "Nu — FAC-0001",
+      "preview": "Previzualizare"
+    },
+    "doneStep": {
+      "title": "Gata de pornire",
+      "lead": "Configurarea s-a încheiat. Poți emite prima factură și sincroniza SPV din tabloul de bord.",
+      "plan": "Plan",
+      "company": "Companie",
+      "regimeMicro": "Microîntreprindere 1%",
+      "regimeProfit": "Impozit pe profit 16%",
+      "anafSpv": "ANAF SPV",
+      "notConnectedSettings": "Neconectat — se poate face din Setări",
+      "serie": "Serie facturi"
+    },
+    "nav": {
+      "back": "Înapoi",
+      "saving": "Se salvează…",
+      "start": "Începe configurarea",
+      "next": "Continuă",
+      "finishing": "Se finalizează…",
+      "enter": "Intră în aplicație"
+    },
+    "errors": {
+      "trialFailed": "Eroare la activarea perioadei de probă.",
+      "activateFailed": "Licența nu a putut fi activată.",
+      "cuiNotFound": "CUI-ul nu a fost găsit în baza ANAF.",
+      "unknown": "Eroare necunoscută.",
+      "cuiRequired": "CUI este obligatoriu.",
+      "nameRequired": "Denumirea legală este obligatorie.",
+      "cityRequired": "Localitatea este obligatorie.",
+      "countyRequired": "Județul este obligatoriu.",
+      "addressRequired": "Adresa este obligatorie.",
+      "spvIncomplete": "Autorizarea nu s-a finalizat. Încercați din nou sau treceți peste.",
+      "spvFailed": "Autorizarea a eșuat. Verificați conexiunea și reîncercați.",
+      "serieSaveFailed": "Seria nu a putut fi salvată.",
+      "emailRequired": "Adresa de email este obligatorie.",
+      "keyRequired": "Cheia de licență este obligatorie.",
+      "enterKey": "Introduceți cheia de licență.",
+      "enterPurchaseEmail": "Introduceți emailul de achiziție."
+    },
+    "notify": {
+      "customStartNo": "Număr de pornire personalizat — în curând. Numerotarea pornește de la 0001.",
+      "yearFormat": "Formatul cu anul în număr — în curând."
+    },
+    "loading": "Se încarcă…",
+    "expired": {
+      "title": "Licența a expirat",
+      "lead": "Perioada de probă de <b>14 zile</b> s-a încheiat sau licența nu mai este validă pe această mașină. Datele tale sunt păstrate local și nu vor fi șterse.",
+      "cardTitle": "Licență Clarito",
+      "cardSub": "Reactivează pentru a continua să emiți facturi",
+      "chip": "Expirată",
+      "buy": "Cumpără licența",
+      "haveKey": "Am deja o licență — introdu cheia →",
+      "activateTitle": "Activare licență",
+      "activateLead": "Introdu cheia primită prin email după achiziție.",
+      "keyHint": "Format XXXX-XXXX-XXXX-XXXX.",
+      "activating": "Se activează…",
+      "activate": "Activează licența"
+    }
+  }
+}

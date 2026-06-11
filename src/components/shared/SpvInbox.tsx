@@ -10,6 +10,7 @@
 
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { api } from "@/lib/tauri";
@@ -18,14 +19,10 @@ import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import type { SpvInboxItem } from "@/types";
 
-const CATEGORY_LABEL: Record<string, string> = {
-  recipisa: "Recipisă",
-  notificare: "Notificare",
-  somatie: "Somație",
-  decizie: "Decizie",
-  factura: "Factură",
-  altele: "Altele",
-};
+/** Known inbox categories with an i18n label under shared.spvInbox.cat.* */
+const KNOWN_CATEGORIES = new Set([
+  "recipisa", "notificare", "somatie", "decizie", "factura", "altele",
+]);
 
 /** Category → design .chip variant (same severity mapping as the old rf Badge). */
 function categoryChipCls(category: string): string {
@@ -39,15 +36,16 @@ function categoryChipCls(category: string): string {
 }
 
 export function SpvInbox() {
+  const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [days, setDays] = useState(30);
 
   const load = useMutation({
     mutationFn: (): Promise<SpvInboxItem[]> => {
-      if (!activeCompanyId) throw new Error("Selectați o companie activă.");
+      if (!activeCompanyId) throw new Error(t("shared.spvInbox.noCompany"));
       return api.anaf.listSpvInbox(activeCompanyId, days);
     },
-    onError: (err) => notify.error(formatError(err, "Nu s-a putut încărca inbox-ul SPV.")),
+    onError: (err) => notify.error(formatError(err, t("shared.spvInbox.loadError"))),
   });
 
   const items = load.data ?? [];
@@ -57,7 +55,7 @@ export function SpvInbox() {
     <div className="scr-card">
       <div className="scr-toolbar">
         <Ic name="docDown" />
-        <span className="tt">Inbox SPV (recipise, notificări, somații)</span>
+        <span className="tt">{t("shared.spvInbox.title")}</span>
         <div className="spacer" />
         <select
           className="select"
@@ -65,9 +63,9 @@ export function SpvInbox() {
           onChange={(e) => setDays(Number(e.target.value))}
           style={{ width: 110, height: 32 }}
         >
-          <option value={7}>7 zile</option>
-          <option value={30}>30 zile</option>
-          <option value={60}>60 zile</option>
+          <option value={7}>{t("shared.spvInbox.days", { n: 7 })}</option>
+          <option value={30}>{t("shared.spvInbox.days", { n: 30 })}</option>
+          <option value={60}>{t("shared.spvInbox.days", { n: 60 })}</option>
         </select>
         <button
           className="pill-btn"
@@ -76,7 +74,7 @@ export function SpvInbox() {
           onClick={() => load.mutate()}
         >
           <Ic name="sync" />
-          {load.isPending ? "Se încarcă…" : "Încarcă mesajele SPV"}
+          {load.isPending ? t("shared.spvInbox.loading") : t("shared.spvInbox.loadBtn")}
         </button>
       </div>
 
@@ -84,9 +82,8 @@ export function SpvInbox() {
         <div className="banner" style={{ marginBottom: somatii > 0 ? 10 : 12 }}>
           <Ic name="docText" />
           <span>
-            Depunerea declarațiilor D300/D394/D406 nu are API ANAF — se face manual în portalul SPV
-            (PDF inteligent validat cu DUKIntegrator). Aici vedeți <b>răspunsurile</b> ANAF:
-            recipise, notificări și somații.
+            {t("shared.spvInbox.infoPre")} <b>{t("shared.spvInbox.infoBold")}</b>{" "}
+            {t("shared.spvInbox.infoPost")}
           </span>
         </div>
 
@@ -98,7 +95,7 @@ export function SpvInbox() {
               dangerouslySetInnerHTML={{ __html: '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>' }}
             />
             <span>
-              <b>{somatii}</b> {somatii === 1 ? "somație necesită" : "somații necesită"} atenție.
+              <b>{somatii}</b> {t("shared.spvInbox.somatii", { count: somatii })}
             </span>
           </div>
         )}
@@ -106,7 +103,7 @@ export function SpvInbox() {
 
       {load.isSuccess && items.length === 0 ? (
         <div style={{ padding: "4px 16px 14px", fontSize: 12.5, color: "var(--text-2)" }}>
-          Niciun mesaj SPV în perioada selectată.
+          {t("shared.spvInbox.empty")}
         </div>
       ) : items.length > 0 ? (
         <div className="msg-list" style={{ borderTop: "1px solid var(--line)" }}>
@@ -121,7 +118,9 @@ export function SpvInbox() {
               </div>
               <span className="msg-tag">
                 <span className={`chip ${categoryChipCls(m.category)}`}>
-                  {CATEGORY_LABEL[m.category] ?? m.category}
+                  {KNOWN_CATEGORIES.has(m.category)
+                    ? t(`shared.spvInbox.cat.${m.category}`)
+                    : m.category}
                 </span>
               </span>
             </div>

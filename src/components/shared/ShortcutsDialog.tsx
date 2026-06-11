@@ -6,6 +6,8 @@
  * Open/close is controlled externally via open + onOpenChange props.
  */
 
+import { useTranslation } from "react-i18next";
+
 import {
   Dialog,
   DialogContent,
@@ -13,7 +15,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { SHORTCUT_GROUPS } from "@/lib/shortcuts";
+import { getShortcutGroups } from "@/lib/shortcuts";
 import { fmtShortcut } from "@/lib/platform";
 
 interface ShortcutsDialogProps {
@@ -22,6 +24,8 @@ interface ShortcutsDialogProps {
 }
 
 export function ShortcutsDialog({ open, onOpenChange }: ShortcutsDialogProps) {
+  const { t } = useTranslation();
+  const groups = getShortcutGroups(t);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -29,14 +33,14 @@ export function ShortcutsDialog({ open, onOpenChange }: ShortcutsDialogProps) {
         style={{ maxHeight: "80vh", overflowY: "auto" }}
       >
         <DialogHeader>
-          <DialogTitle>Scurtături tastatură</DialogTitle>
+          <DialogTitle>{t("shared.shortcuts.title")}</DialogTitle>
           <DialogDescription>
-            Toate scurtăturile disponibile în aplicație.
+            {t("shared.shortcuts.description")}
           </DialogDescription>
         </DialogHeader>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          {SHORTCUT_GROUPS.map((group) => (
+          {groups.map((group) => (
             <div key={group.title}>
               <div
                 style={{
