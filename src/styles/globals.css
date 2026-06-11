@@ -34,6 +34,7 @@
 @import "./page-settings.css";
 @import "./page-invoice-new.css";
 @import "./page-invoice-detail.css";
+@import "./page-instalare.css";
 
 @custom-variant dark (&:is(.dark *));
 

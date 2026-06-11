@@ -1,13 +1,13 @@
 /**
- * OnboardingGate — Wave 6 re-skin.
+ * OnboardingGate — Instalare design (same .wiz-wrap/.wiz card as the wizard).
  *
  * Gate logic: 100% preserved.
- *  - Loading → LoadingScreen (rf spinner)
+ *  - Loading → LoadingScreen (centered spinner on the wizard backdrop)
  *  - No companies → OnboardingWizard (first run)
- *  - Companies + invalid license → LicenseExpiredScreen (rf card)
+ *  - Companies + invalid license → LicenseExpiredScreen (.wiz card)
  *  - Companies + valid license → render children
  *
- * LicenseExpiredScreen: rf card, purchase url → openUrl, activate form → api.license.activate.
+ * LicenseExpiredScreen: purchase url → openUrl, activate form → api.license.activate.
  */
 
 import { useState, type ReactNode } from "react";
@@ -18,40 +18,17 @@ import { OnboardingWizard } from "./OnboardingWizard";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { formatError } from "@/lib/error-mapper";
-import { Icon } from "@/components/shared/Icon";
-import { Btn, Field, Input, Banner } from "@/components/rf";
+import { BrandMark } from "@/components/shared/BrandMark";
 
 // ─── Loading screen ───────────────────────────────────────────────────────────
 
 function LoadingScreen() {
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "var(--bg)",
-        zIndex: 9999,
-      }}
-    >
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
-        {/* Animated spinner using rf accent */}
-        <div
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: "50%",
-            border: "3px solid var(--rf-border)",
-            borderTopColor: "var(--rf-accent)",
-            animation: "spin 0.8s linear infinite",
-          }}
-        />
-        <span className="rf-text-muted" style={{ fontSize: 13.5 }}>Se încarcă…</span>
+    <div className="wiz-wrap">
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, margin: "auto" }}>
+        <div className="wiz-spin" />
+        <span style={{ fontSize: 13.5, color: "var(--text-2)" }}>Se încarcă…</span>
       </div>
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
@@ -76,102 +53,69 @@ function LicenseExpiredScreen() {
     },
   });
 
+  const handleBuy = async () => {
+    try {
+      const purchase = await api.settings.get("purchase_url");
+      await openUrl(purchase || "https://lucaris.ro/rofactura#pret");
+    } catch {
+      window.open("https://lucaris.ro/rofactura#pret", "_blank");
+    }
+  };
+
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "var(--bg)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 9999,
-      }}
-    >
-      <div
-        style={{
-          width: 460,
-          background: "var(--rf-content)",
-          border: "1px solid var(--rf-border)",
-          borderRadius: "var(--rf-radius)",
-          boxShadow: "var(--rf-shadow-md)",
-          padding: "40px 40px 32px",
-          textAlign: "center",
-        }}
-      >
-        {/* Icon */}
-        <div
-          style={{
-            width: 60,
-            height: 60,
-            borderRadius: "50%",
-            background: "var(--rf-error-bg)",
-            color: "var(--rf-error)",
-            display: "grid",
-            placeItems: "center",
-            margin: "0 auto 20px",
-          }}
-        >
-          <Icon name="alert" size={28} />
+    <div className="wiz-wrap">
+      <div className="wiz">
+        <div className="wiz-top">
+          <div className="brand">
+            <BrandMark size={34} />
+            <span className="word">Clarito</span>
+          </div>
         </div>
 
-        {!showActivate ? (
-          <>
-            <h2
-              style={{
-                fontSize: 20,
-                fontWeight: 700,
-                margin: "0 0 10px",
-                letterSpacing: "-0.01em",
-              }}
-            >
-              Licența a expirat
-            </h2>
-            <p className="rf-text-muted" style={{ fontSize: 13.5, margin: "0 0 8px", lineHeight: 1.7 }}>
-              Perioada de probă de <strong>14 zile</strong> s-a încheiat sau
-              licența nu mai este validă pe această mașină.
-            </p>
-            <p className="rf-text-muted" style={{ fontSize: 13.5, margin: "0 0 28px", lineHeight: 1.7 }}>
-              Datele dvs. sunt păstrate local și nu vor fi șterse.
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <Btn
-                variant="primary"
-                block
-                onClick={async () => {
-                  try {
-                    const purchase = await api.settings.get("purchase_url");
-                    await openUrl(purchase || "https://lucaris.ro/rofactura#pret");
-                  } catch {
-                    window.open("https://lucaris.ro/rofactura#pret", "_blank");
-                  }
-                }}
-              >
-                Cumpărați licența →
-              </Btn>
-              <Btn
-                variant="secondary"
-                block
+        <div className="wiz-body" style={{ minHeight: 0, paddingTop: 24 }}>
+          {!showActivate ? (
+            <div className="step active" style={{ minHeight: 0 }}>
+              <h2>Licența a expirat</h2>
+              <p className="lead">
+                Perioada de probă de <strong>14 zile</strong> s-a încheiat sau licența nu mai este
+                validă pe această mașină. Datele tale sunt păstrate local și nu vor fi șterse.
+              </p>
+              <div className="anaf-card">
+                <div className="anaf-row">
+                  <div className="anaf-ic">
+                    <svg viewBox="0 0 24 24"><path d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" /></svg>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div className="at">Licență Clarito</div>
+                    <div className="as">Reactivează pentru a continua să emiți facturi</div>
+                  </div>
+                  <span className="chip wait">
+                    <svg className="sic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5" /></svg>
+                    Expirată
+                  </span>
+                </div>
+                <button
+                  className="btn btn-dark"
+                  type="button"
+                  style={{ width: "100%", marginTop: 14 }}
+                  onClick={() => { void handleBuy(); }}
+                >
+                  <svg className="ic" viewBox="0 0 24 24"><path d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
+                  Cumpără licența
+                </button>
+              </div>
+              <button
+                className="btn btn-link"
+                type="button"
                 onClick={() => { setShowActivate(true); setActivateError(null); }}
               >
-                Am deja o licență — Introduceți cheia →
-              </Btn>
+                Am deja o licență — introdu cheia →
+              </button>
             </div>
-          </>
-        ) : (
-          <>
-            <h2
-              style={{
-                fontSize: 18,
-                fontWeight: 700,
-                margin: "0 0 20px",
-                textAlign: "left",
-                letterSpacing: "-0.01em",
-              }}
-            >
-              Activare licență
-            </h2>
+          ) : (
             <form
+              className="step active"
+              style={{ minHeight: 0 }}
               onSubmit={(e) => {
                 e.preventDefault();
                 setActivateError(null);
@@ -179,11 +123,14 @@ function LicenseExpiredScreen() {
                 if (!actEmail.trim()) { setActivateError("Introduceți emailul de achiziție."); return; }
                 activateMutation.mutate();
               }}
-              style={{ display: "flex", flexDirection: "column", gap: 12, textAlign: "left" }}
             >
-              <Field label="Cheie licență" required>
-                <Input
-                  className="rf-mono"
+              <h2>Activare licență</h2>
+              <p className="lead">Introdu cheia primită prin email după achiziție.</p>
+              <div className="field">
+                <label htmlFor="exp-key">Cheie licență</label>
+                <input
+                  id="exp-key"
+                  className="input num"
                   placeholder="XXXX-XXXX-XXXX-XXXX"
                   style={{ textTransform: "uppercase", letterSpacing: "0.05em" }}
                   value={key}
@@ -191,37 +138,50 @@ function LicenseExpiredScreen() {
                   autoComplete="off"
                   spellCheck={false}
                 />
-                <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", lineHeight: 1.5 }}>
-                  Introduceți cheia primită prin email după achiziție (format XXXX-XXXX-XXXX-XXXX).
-                </span>
-              </Field>
-              <Field label="Email achiziție" required>
-                <Input
+                <span className="hint">Format XXXX-XXXX-XXXX-XXXX.</span>
+              </div>
+              <div className="field">
+                <label htmlFor="exp-email">Email achiziție</label>
+                <input
+                  id="exp-email"
+                  className="input"
                   type="email"
                   placeholder="office@firma.ro"
                   value={actEmail}
                   onChange={(e) => setActEmail(e.target.value)}
                 />
-              </Field>
-              {activateError && <Banner variant="error">{activateError}</Banner>}
-              <Btn
-                type="submit"
-                variant="primary"
-                disabled={activateMutation.isPending}
-                block
-              >
-                {activateMutation.isPending ? "Se activează…" : "Activează →"}
-              </Btn>
-              <Btn
-                type="button"
-                variant="ghost"
-                block
-                onClick={() => { setShowActivate(false); setActivateError(null); }}
-              >
-                ← Înapoi
-              </Btn>
+              </div>
+              {activateError && <p className="werr">{activateError}</p>}
             </form>
-          </>
+          )}
+        </div>
+
+        {showActivate && (
+          <div className="wiz-foot">
+            <button
+              className="btn btn-ghost"
+              type="button"
+              disabled={activateMutation.isPending}
+              onClick={() => { setShowActivate(false); setActivateError(null); }}
+            >
+              <svg className="ic" viewBox="0 0 24 24" style={{ transform: "scaleX(-1)" }}><path d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
+              Înapoi
+            </button>
+            <button
+              className="btn btn-dark"
+              type="button"
+              disabled={activateMutation.isPending}
+              onClick={() => {
+                setActivateError(null);
+                if (!key.trim()) { setActivateError("Introduceți cheia de licență."); return; }
+                if (!actEmail.trim()) { setActivateError("Introduceți emailul de achiziție."); return; }
+                activateMutation.mutate();
+              }}
+            >
+              {activateMutation.isPending ? "Se activează…" : "Activează licența"}
+              <svg className="ic arrow" viewBox="0 0 24 24"><path d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
+            </button>
+          </div>
         )}
       </div>
     </div>

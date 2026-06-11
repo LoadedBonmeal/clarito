@@ -1,0 +1,106 @@
+/* imported-by: globals.css (wired centrally) */
+/* Instalare — first-run onboarding wizard + license screens (verbatim from the
+   prototype Instalare.html inline <style>). The wizard renders OUTSIDE the app
+   shell, but the stylesheet is global, so every rule whose class name collides
+   with clarito-shell.css (.brand, .step, .seg, .btn-dark, .chip.wait, .kv,
+   .field, .input, .select, .hint) is scoped under .wiz / .wiz-wrap. */
+
+/* prototype <body> → fullscreen overlay */
+.wiz-wrap{position:fixed;inset:0;z-index:9999;overflow:auto;display:flex;align-items:center;justify-content:center;padding:32px 20px;background:#E9E9EB;background-image:radial-gradient(circle at 50% 0,#F0F0F2,#E9E9EB 60%);--ink:var(--text);--ease:cubic-bezier(.2,.8,.2,1)}
+
+.wiz{width:520px;max-width:100%;margin:auto;background:#fff;border:1px solid var(--line);border-radius:20px;box-shadow:0 30px 80px -36px rgba(0,0,0,.4);overflow:hidden}
+.wiz-top{padding:24px 30px 0}
+.wiz .brand{display:flex;align-items:center;gap:11px;justify-content:center;width:auto;flex:none;padding:0}
+.wiz .brand .word{font-size:21px;font-weight:600;letter-spacing:-.025em}
+
+/* progress */
+.wiz .prog{display:flex;align-items:center;gap:6px;margin:22px 4px 0}
+.wiz .seg{flex:1;height:4px;border-radius:999px;background:var(--fill);overflow:hidden}
+.wiz .seg>span{display:block;height:100%;width:0;background:var(--ink);border-radius:999px;transition:width .3s var(--ease)}
+.wiz .seg.done>span{width:100%}
+.wiz .seg.cur>span{width:50%}
+.wiz .step-meta{display:flex;justify-content:space-between;align-items:baseline;margin:12px 4px 0}
+.wiz .step-meta .k{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);font-weight:600}
+.wiz .step-meta .c{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+
+.wiz-body{padding:18px 30px 4px;min-height:330px;position:relative}
+.wiz .step{display:none}
+.wiz .step::before{display:none}
+.wiz .step.active{display:block;min-height:300px;text-align:left}
+@media (prefers-reduced-motion:no-preference){
+  .wiz .step.active>*{animation:wizSlideIn .2s var(--ease)}
+  @keyframes wizSlideIn{from{transform:translateY(6px)}to{transform:none}}
+}
+.wiz .step h2{font-size:20px;font-weight:600;letter-spacing:-.02em}
+.wiz .step .lead{font-size:13.5px;color:var(--text-2);margin-top:7px;line-height:1.55}
+
+/* fields — base .field/.input/.select come from clarito-shell.css; the wizard
+   uses the prototype's slightly larger metrics */
+.wiz .field{margin-top:16px}
+.wiz .input,.wiz .select{height:38px;border-radius:9px;padding:0 12px;font-size:13.5px}
+.wiz .select{padding-right:32px}
+.wiz .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.wiz .cui-row{display:flex;gap:8px;align-items:flex-end}
+.wiz .cui-row .field{flex:1;margin-top:0}
+.wiz .hint{font-size:11.5px;color:var(--dim)}
+
+.wiz .btn{height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:0 18px;border-radius:10px;font-family:inherit;font-size:13.5px;font-weight:500;cursor:pointer;border:1px solid transparent;white-space:nowrap;text-decoration:none;background:none;color:inherit}
+.wiz .btn .ic{width:16px;height:16px;stroke:currentColor;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.wiz .btn-dark{background:var(--black);color:#fff;border-color:var(--black);font-size:13.5px;height:40px;padding:0 18px;border-radius:10px}
+.wiz .btn-dark .ic{stroke:#fff;width:16px;height:16px}
+.wiz .btn-ghost{background:#fff;color:var(--text-2);border-color:var(--line)}
+.wiz .btn-ghost:hover{background:var(--fill);color:var(--ink)}
+.wiz .btn-link{background:none;color:var(--text-2);font-size:12.5px;height:auto;padding:6px 4px;border:0}
+.wiz .btn-link:hover{color:var(--ink)}
+.wiz .btn:disabled{opacity:.45;cursor:default}
+.wiz .btn-dark .ic.arrow{transition:transform .2s var(--ease)}
+.wiz .btn-dark:hover .ic.arrow{transform:translateX(2px)}
+
+.wiz-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:18px 30px 24px;border-top:1px solid var(--line);margin-top:14px}
+
+/* plan / regime selectable cards */
+.wiz .opts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}
+.wiz .opt{border:1px solid var(--line);border-radius:12px;padding:14px 15px;cursor:pointer;position:relative;transition:border-color .15s,background .15s,transform .12s var(--ease);background:#fff}
+.wiz .opt:hover{background:#FCFCFD}
+.wiz .opt.sel{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+.wiz .opt .ot{font-size:14px;font-weight:600}
+.wiz .opt .od{font-size:12px;color:var(--text-2);margin-top:3px}
+.wiz .opt .chk{position:absolute;top:12px;right:12px;width:20px;height:20px;border-radius:999px;border:1.5px solid var(--line);display:flex;align-items:center;justify-content:center;background:#fff;transition:background .15s,border-color .15s}
+.wiz .opt.sel .chk{background:var(--ink);border-color:var(--ink)}
+.wiz .opt .chk svg{width:12px;height:12px;stroke:#fff;stroke-width:2.4;fill:none;stroke-linecap:round;stroke-linejoin:round;opacity:0;transform:scale(.5);transition:opacity .18s var(--ease),transform .2s var(--ease)}
+.wiz .opt.sel .chk svg{opacity:1;transform:none}
+.wiz .opts.cols1{grid-template-columns:1fr}
+
+/* ANAF card */
+.wiz .anaf-card{border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:18px;background:#FCFCFD}
+.wiz .anaf-row{display:flex;align-items:center;gap:11px}
+.wiz .anaf-ic{width:34px;height:34px;border-radius:9px;background:#fff;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;flex:none}
+.wiz .anaf-ic svg{width:18px;height:18px;stroke:var(--ink);stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.wiz .anaf-row .at{font-size:13px;font-weight:600}
+.wiz .anaf-row .as{font-size:11.5px;color:var(--text-2);margin-top:1px}
+/* chip base comes from clarito-shell.css; the wizard needs .ok + a dim .wait */
+.wiz .chip.ok{color:var(--green);background:rgba(4,120,87,.07);border-color:rgba(4,120,87,.18)}
+.wiz .chip.wait{color:var(--dim);background:var(--fill);border-color:var(--line)}
+
+.wiz .kv{display:grid;grid-template-columns:130px 1fr;gap:8px 12px;margin-top:16px;font-size:12.5px;padding:14px;border:1px solid var(--line);border-radius:11px;background:#FCFCFD}
+.wiz .kv dt{color:var(--dim)}
+.wiz .kv dd{color:var(--ink)}
+.wiz .fetched{font-size:11.5px;color:var(--green);margin-top:8px;display:none;align-items:center;gap:5px}
+.wiz .fetched.show{display:flex}
+.wiz .fetched svg{width:13px;height:13px;stroke:var(--green);stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
+
+/* success */
+.wiz .done-wrap{text-align:center;padding:18px 0 8px}
+.wiz .done-ring{width:72px;height:72px;border-radius:999px;background:rgba(4,120,87,.08);display:flex;align-items:center;justify-content:center;margin:0 auto 18px}
+.wiz .done-ring svg{width:36px;height:36px;stroke:var(--green);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:48;stroke-dashoffset:48}
+.wiz .step.active .done-ring svg{animation:wizDraw .5s var(--ease) .1s forwards}
+@keyframes wizDraw{to{stroke-dashoffset:0}}
+.wiz .recap{text-align:left;margin-top:18px}
+
+.wiz .toggle-note{display:flex;gap:9px;align-items:flex-start;margin-top:16px;font-size:12px;color:var(--text-2);line-height:1.45}
+.wiz .toggle-note svg{width:15px;height:15px;flex:none;margin-top:1px;stroke:var(--dim);stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round}
+
+/* app-only: real error/loading states the prototype lacks */
+.wiz .werr{font-size:12px;color:var(--red);margin-top:10px;line-height:1.5}
+.wiz-spin{width:36px;height:36px;border-radius:999px;border:3px solid var(--line);border-top-color:var(--black);animation:wizSpin .8s linear infinite}
+@keyframes wizSpin{to{transform:rotate(360deg)}}

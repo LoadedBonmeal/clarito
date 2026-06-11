@@ -1,21 +1,37 @@
 /**
- * Detaliu companie — re-skinned to rf kit (Wave 3).
- * Preserves: api.companies.get(id), info display, Editează → /companies/$id/edit,
- * SPV section with api.anaf.authorize, certificates with api.certificates.*
+ * Detaliu companie — design-system detail page (no dedicated prototype; follows
+ * the InvoiceDetail .page-head crumb + .cols-2 / .kv card conventions):
+ *   .page-head (.crumb "Companii › {denumire}" · .head-title h1 + chip SPV +
+ *   chip regim fiscal · sub CUI/localitate/serie · .head-actions Înapoi /
+ *   btn-dark Editează) → .cols-2: left = Identificare (.kv) + Adresă (.kv) +
+ *   Contact și plată (.kv), right = Facturare (.kv) + ANAF SPV (status +
+ *   Conectează SPV) + Certificate SPV (.scr-table Emis/Expiră/Status/Revocă +
+ *   Reautorizare în toolbar).
+ *
+ * ALL wiring preserved: api.companies.get(id), Editează → /companies/$id/edit,
+ * SPV connect → api.anaf.authorize (granted check + invalidations + toasts),
+ * certificate → api.certificates.list/refresh/revoke.
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams, useNavigate } from "@tanstack/react-router";
+import { useParams, useNavigate } from "@tanstack/react-router";
 
-import { Icon } from "@/components/shared/Icon";
-import {
-  PageHeader, Btn, SectionCard, Badge, Banner,
-} from "@/components/rf";
+import { Ic } from "@/components/shared/Ic";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import type { Certificate, Company } from "@/types";
+
+const RO_MON = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
+/** Unix seconds → "03 iun 2026" (design dd lll yyyy format). */
+const fmtRoDateU = (unixSec: number) => {
+  const d = new Date(unixSec * 1000);
+  return `${String(d.getDate()).padStart(2, "0")} ${RO_MON[d.getMonth()]} ${d.getFullYear()}`;
+};
+
+/** Check-circle icon — not in Ic's set; inlined verbatim from the prototype. */
+const OK_CIRCLE_PATH = '<path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>';
 
 export function CompanyDetailPage() {
   const { id } = useParams({ from: "/companies/$id" });
@@ -28,10 +44,10 @@ export function CompanyDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="rf-page">
-        <PageHeader title="Se încarcă…" />
-        <div className="rf-page-body">
-          <div style={{ padding: 40, color: "var(--rf-text-muted)", fontSize: 13 }}>Se încarcă datele companiei…</div>
+      <div className="main-inner wide">
+        <div className="page-head"><div><h1>Companie</h1></div></div>
+        <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
+          Se încarcă datele companiei…
         </div>
       </div>
     );
@@ -39,112 +55,145 @@ export function CompanyDetailPage() {
 
   if (error || !data) {
     return (
-      <div className="rf-page">
-        <PageHeader title="Companie inexistentă" />
-        <div className="rf-page-body">
-          <Banner variant="error">
-            Compania cu ID-ul <code>{id}</code> nu a fost găsită.{" "}
-            <Link to="/companies" style={{ textDecoration: "underline" }}>
+      <div className="main-inner wide">
+        <div className="page-head"><div><h1>Companie inexistentă</h1></div></div>
+        <div className="banner danger">
+          <Ic name="xMark" />
+          <span>
+            Compania cu ID-ul <span className="num">{id}</span> nu a fost găsită.{" "}
+            <a className="link" style={{ cursor: "pointer" }} onClick={() => void navigate({ to: "/companies" })}>
               Înapoi la listă
-            </Link>
-          </Banner>
+            </a>
+          </span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="rf-page">
-      <PageHeader
-        title={data.legalName}
-        sub={
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 2 }}>
-            <span className="mono" style={{ fontSize: 13, color: "var(--rf-text-muted)" }}>{data.cui}</span>
-            <span style={{ color: "var(--rf-border)" }}>·</span>
-            <span style={{ fontSize: 13, color: "var(--rf-text-muted)" }}>{data.city}, {data.county}</span>
-            <span style={{ color: "var(--rf-border)" }}>·</span>
-            <span className="mono" style={{ fontSize: 13, color: "var(--rf-text-muted)" }}>
-              {data.invoiceSeries}-{String(data.lastInvoiceNumber).padStart(4, "0")}
-            </span>
-            {data.spvEnabled ? (
-              <Badge variant="success" dot={false}>SPV activ</Badge>
-            ) : (
-              <Badge variant="neutral" dot={false}>SPV inactiv</Badge>
-            )}
+    <div className="main-inner wide">
+      {/* page head */}
+      <div className="page-head">
+        <div>
+          <div className="crumb">
+            <a onClick={() => void navigate({ to: "/companies" })} style={{ cursor: "pointer" }}>Companii</a>
+            <span className="sep">›</span>
+            <span>{data.legalName}</span>
           </div>
-        }
-        actions={
-          <>
-            <Btn
-              variant="secondary"
-              icon="arrowLeft"
-              size="sm"
-              onClick={() => void navigate({ to: "/companies" })}
-            >
-              Înapoi
-            </Btn>
-            <Btn
-              variant="primary"
-              icon="pen"
-              size="sm"
-              onClick={() =>
-                void navigate({ to: "/companies/$id/edit", params: { id: data.id } })
-              }
-            >
-              Editează
-            </Btn>
-          </>
-        }
-      />
+          <div className="head-title">
+            <h1>{data.legalName}</h1>
+            {data.spvEnabled ? (
+              <span className="chip paid">
+                <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: OK_CIRCLE_PATH }} />
+                SPV activ
+              </span>
+            ) : (
+              <span className="chip sent"><Ic name="dot" cls="sic" />SPV inactiv</span>
+            )}
+            <span className="chip sent">
+              {data.taxRegime === "profit" ? "Profit · 16%" : "Micro · 1%"}
+            </span>
+          </div>
+          <p className="sub">
+            <span className="num">{data.cui}</span> · {data.city}, {data.county} · serie{" "}
+            <span className="num">{data.invoiceSeries}-{String(data.lastInvoiceNumber).padStart(4, "0")}</span>
+          </p>
+        </div>
+        <div className="head-actions">
+          <button className="pill-btn" onClick={() => void navigate({ to: "/companies" })}>
+            Înapoi
+          </button>
+          <button
+            className="btn-dark"
+            onClick={() => void navigate({ to: "/companies/$id/edit", params: { id: data.id } })}
+          >
+            <Ic name="pen" />Editează
+          </button>
+        </div>
+      </div>
 
-      <div className="rf-page-body">
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div className="cols-2">
+        <div>
           {/* Identificare */}
-          <SectionCard icon="building" title="Identificare">
-            <div className="rf-kv-list">
-              <KvRow label="CUI" mono>{data.cui}</KvRow>
-              <KvRow label="Denumire legală">{data.legalName}</KvRow>
-              {data.tradeName && <KvRow label="Denumire comercială">{data.tradeName}</KvRow>}
-              <KvRow label="Nr. registru comerț" mono>{data.registryNumber ?? "—"}</KvRow>
-              <KvRow label="Plătitor TVA">{data.vatPayer ? "Da" : "Nu"}</KvRow>
+          <div className="scr-card" style={{ marginBottom: 14 }}>
+            <div className="scr-toolbar">
+              <div className="tt">Identificare</div>
+              <div className="spacer" />
+              <Ic name="building" cls="ic" />
             </div>
-          </SectionCard>
+            <div className="card-pad">
+              <dl className="kv">
+                <dt>CUI</dt><dd className="num">{data.cui}</dd>
+                <dt>Denumire legală</dt><dd>{data.legalName}</dd>
+                {data.tradeName && (
+                  <><dt>Denumire comercială</dt><dd>{data.tradeName}</dd></>
+                )}
+                <dt>Nr. Reg. Comerțului</dt>
+                <dd>{data.registryNumber ? <span className="num">{data.registryNumber}</span> : "—"}</dd>
+                <dt>Plătitor TVA</dt>
+                <dd>{data.vatPayer ? <span className="pos">✓ Da</span> : "Nu"}</dd>
+                <dt>Regim fiscal</dt>
+                <dd>{data.taxRegime === "profit" ? "Impozit pe profit (16%)" : "Microîntreprindere (impozit pe venit 1%)"}</dd>
+              </dl>
+            </div>
+          </div>
 
           {/* Adresă */}
-          <SectionCard icon="map" title="Adresă">
-            <div className="rf-kv-list">
-              <KvRow label="Adresă">{data.address}</KvRow>
-              <KvRow label="Localitate">{data.city}</KvRow>
-              <KvRow label="Județ">{data.county}</KvRow>
-              <KvRow label="Cod poștal">{data.postalCode ?? "—"}</KvRow>
-              <KvRow label="Țară">{data.country}</KvRow>
+          <div className="scr-card" style={{ marginBottom: 14 }}>
+            <div className="scr-toolbar"><div className="tt">Adresă</div></div>
+            <div className="card-pad">
+              <dl className="kv">
+                <dt>Adresă</dt><dd>{data.address}</dd>
+                <dt>Localitate</dt><dd>{data.city}</dd>
+                <dt>Județ</dt><dd>{data.county}</dd>
+                <dt>Cod poștal</dt>
+                <dd>{data.postalCode ? <span className="num">{data.postalCode}</span> : "—"}</dd>
+                <dt>Țară</dt><dd>{data.country}</dd>
+              </dl>
             </div>
-          </SectionCard>
+          </div>
 
           {/* Contact și plată */}
-          <SectionCard icon="mail" title="Contact și plată">
-            <div className="rf-kv-list">
-              <KvRow label="Email">{data.email ?? "—"}</KvRow>
-              <KvRow label="Telefon">{data.phone ?? "—"}</KvRow>
-              <KvRow label="IBAN" mono>{data.iban ?? "—"}</KvRow>
-              <KvRow label="Bancă">{data.bankName ?? "—"}</KvRow>
+          <div className="scr-card" style={{ marginBottom: 14 }}>
+            <div className="scr-toolbar">
+              <div className="tt">Contact și plată</div>
+              <div className="spacer" />
+              <Ic name="mail" cls="ic" />
             </div>
-          </SectionCard>
+            <div className="card-pad">
+              <dl className="kv">
+                <dt>Email</dt><dd>{data.email ?? "—"}</dd>
+                <dt>Telefon</dt>
+                <dd>{data.phone ? <span className="num">{data.phone}</span> : "—"}</dd>
+                <dt>IBAN</dt>
+                <dd>{data.iban ? <span className="num">{data.iban}</span> : "—"}</dd>
+                <dt>Bancă</dt><dd>{data.bankName ?? "—"}</dd>
+              </dl>
+            </div>
+          </div>
+        </div>
 
+        <div>
           {/* Facturare */}
-          <SectionCard icon="file" title="Facturare">
-            <div className="rf-kv-list">
-              <KvRow label="Serie facturi" mono>{data.invoiceSeries}</KvRow>
-              <KvRow label="Ultimul număr emis" mono>
-                {String(data.lastInvoiceNumber).padStart(4, "0")}
-              </KvRow>
+          <div className="scr-card" style={{ marginBottom: 14 }}>
+            <div className="scr-toolbar">
+              <div className="tt">Facturare</div>
+              <div className="spacer" />
+              <Ic name="docText" cls="ic" />
             </div>
-          </SectionCard>
+            <div className="card-pad">
+              <dl className="kv" style={{ gridTemplateColumns: "130px 1fr", fontSize: 12.5 }}>
+                <dt>Serie facturi</dt><dd className="num">{data.invoiceSeries}</dd>
+                <dt>Ultimul număr emis</dt>
+                <dd className="num">{String(data.lastInvoiceNumber).padStart(4, "0")}</dd>
+              </dl>
+            </div>
+          </div>
 
           {/* SPV */}
           <CompanySpvSection company={data} />
 
-          {/* Certificates */}
+          {/* Certificate */}
           <CertificatesSection companyId={data.id} />
         </div>
       </div>
@@ -152,28 +201,7 @@ export function CompanyDetailPage() {
   );
 }
 
-// ─── KvRow ────────────────────────────────────────────────────────────────────
-
-function KvRow({
-  label,
-  mono,
-  children,
-}: {
-  label: string;
-  mono?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rf-kv-row">
-      <span className="rf-kv-label">{label}</span>
-      <span className={["rf-kv-value", mono && "mono"].filter(Boolean).join(" ")}>
-        {children}
-      </span>
-    </div>
-  );
-}
-
-// ─── CompanySpvSection ───────────────────────────────────────────────────────
+// ─── CompanySpvSection — ANAF SPV status + connect (design card) ─────────────
 
 function CompanySpvSection({ company }: { company: Company }) {
   const queryClient = useQueryClient();
@@ -197,51 +225,55 @@ function CompanySpvSection({ company }: { company: Company }) {
   });
 
   return (
-    <SectionCard
-      icon="cloudUp"
-      title="Sistem ANAF SPV"
-      actions={
-        !company.spvEnabled && (
-          <Btn
-            variant="primary"
-            size="sm"
-            icon="external"
+    <div className="scr-card" style={{ marginBottom: 14 }}>
+      <div className="scr-toolbar">
+        <div className="tt">Sistem ANAF SPV</div>
+        <div className="spacer" />
+        {!company.spvEnabled && (
+          <button
+            className="pill-btn send-btn"
             disabled={connectSpv.isPending}
             onClick={() => connectSpv.mutate()}
           >
+            <Ic name="shield" />
             {connectSpv.isPending ? "Se autorizează…" : "Conectează SPV"}
-          </Btn>
-        )
-      }
-    >
-      <div style={{ padding: "4px 16px 16px" }}>
+          </button>
+        )}
+      </div>
+      <div className="card-pad">
         {company.spvEnabled ? (
           <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-            <Icon name="checkCircle" size={18} style={{ color: "var(--rf-success)", flexShrink: 0, marginTop: 1 }} />
+            <svg
+              className="ic"
+              viewBox="0 0 24 24"
+              style={{ stroke: "var(--green)", flex: "none", marginTop: 1 }}
+              dangerouslySetInnerHTML={{ __html: OK_CIRCLE_PATH }}
+            />
             <div>
               <div style={{ fontSize: 13, fontWeight: 600 }}>SPV conectat</div>
-              <div style={{ fontSize: 12, color: "var(--rf-text-muted)", marginTop: 2 }}>
+              <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 2 }}>
                 Această companie poate trimite facturi electronice direct către ANAF.
               </div>
             </div>
           </div>
         ) : (
           <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-            <Icon name="xCircle" size={18} style={{ color: "var(--rf-text-muted)", flexShrink: 0, marginTop: 1 }} />
+            <Ic name="xMark" cls="ic" />
             <div>
               <div style={{ fontSize: 13, fontWeight: 600 }}>SPV neconectat</div>
-              <div style={{ fontSize: 12, color: "var(--rf-text-muted)", marginTop: 2 }}>
-                Pentru a trimite facturi electronice, conectează certificatul digital pentru această companie.
+              <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 2 }}>
+                Pentru a trimite facturi electronice, conectați certificatul digital pentru această
+                companie.
               </div>
             </div>
           </div>
         )}
       </div>
-    </SectionCard>
+    </div>
   );
 }
 
-// ─── CertificatesSection ──────────────────────────────────────────────────────
+// ─── CertificatesSection — certificate SPV/OAuth (design .scr-table) ─────────
 
 function CertificatesSection({ companyId }: { companyId: string }) {
   const queryClient = useQueryClient();
@@ -275,69 +307,65 @@ function CertificatesSection({ companyId }: { companyId: string }) {
       notify.error(formatError(e, "Revocarea certificatului a eșuat.")),
   });
 
-  const fmt = (unix: number) =>
-    new Date(unix * 1000).toLocaleDateString("ro-RO");
-
   return (
-    <SectionCard
-      icon="key"
-      title="Certificate SPV / ANAF OAuth"
-      actions={
-        <Btn
-          variant="secondary"
-          size="sm"
+    <div className="scr-card">
+      <div className="scr-toolbar">
+        <div className="tt">Certificate SPV / ANAF OAuth</div>
+        <div className="spacer" />
+        <button
+          className="pill-btn"
           disabled={refreshCert.isPending}
           onClick={() => refreshCert.mutate()}
         >
+          <Ic name="sync" />
           {refreshCert.isPending ? "Autorizare…" : "Reautorizare SPV"}
-        </Btn>
-      }
-    >
-      <div className="rf-tbl-wrap">
-        {isLoading ? (
-          <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>Se încarcă…</span>
-        ) : certs.length === 0 ? (
-          <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
-            Niciun certificat activ.
-          </span>
-        ) : (
-          <table className="rf-tbl">
-            <thead>
-              <tr>
-                <th>Emis</th>
-                <th>Expiră</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {certs.map((cert: Certificate) => (
-                <tr key={cert.id}>
-                  <td>{fmt(cert.issuedAt)}</td>
-                  <td>{fmt(cert.expiresAt)}</td>
-                  <td>
-                    {cert.isActive ? (
-                      <Badge variant="success" dot={false}>Activ</Badge>
-                    ) : (
-                      <Badge variant="neutral" dot={false}>Inactiv</Badge>
-                    )}
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <Btn
-                      variant="secondary"
-                      size="sm"
-                      disabled={revokeCert.isPending}
-                      onClick={() => revokeCert.mutate(cert.id)}
-                    >
-                      Revocă
-                    </Btn>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        </button>
       </div>
-    </SectionCard>
+      {isLoading ? (
+        <div style={{ padding: "22px 14px", textAlign: "center", fontSize: 12.5, color: "var(--text-2)" }}>
+          Se încarcă…
+        </div>
+      ) : certs.length === 0 ? (
+        <div style={{ padding: "22px 14px", textAlign: "center", fontSize: 12.5, color: "var(--text-2)" }}>
+          Niciun certificat activ.
+        </div>
+      ) : (
+        <table className="scr-table">
+          <thead>
+            <tr>
+              <th>Emis</th>
+              <th>Expiră</th>
+              <th>Status</th>
+              <th className="r" style={{ width: 90 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {certs.map((cert: Certificate) => (
+              <tr key={cert.id}>
+                <td className="num">{fmtRoDateU(cert.issuedAt)}</td>
+                <td className="num">{fmtRoDateU(cert.expiresAt)}</td>
+                <td>
+                  {cert.isActive ? (
+                    <span className="chip paid"><Ic name="check" cls="sic" />Activ</span>
+                  ) : (
+                    <span className="chip sent"><Ic name="dot" cls="sic" />Inactiv</span>
+                  )}
+                </td>
+                <td className="r">
+                  <button
+                    className="pill-btn"
+                    style={{ height: 28 }}
+                    disabled={revokeCert.isPending}
+                    onClick={() => revokeCert.mutate(cert.id)}
+                  >
+                    Revocă
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
