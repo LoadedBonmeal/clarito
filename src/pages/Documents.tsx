@@ -18,6 +18,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -50,10 +51,10 @@ const fmtRoDate = (iso: string) => {
   return `${d} ${RO_MON[Number(m) - 1] ?? m} ${y}`;
 };
 
-function fmtMonth(ym: string): string {
+function fmtMonth(ym: string, lng: string): string {
   const [year, month] = ym.split("-");
   const d = new Date(Number(year), Number(month) - 1, 1);
-  return d.toLocaleDateString("ro-RO", { month: "long", year: "numeric" });
+  return d.toLocaleDateString(lng, { month: "long", year: "numeric" });
 }
 
 /** "14 KB" / "4,2 MB" — virgulă zecimală românească. */
@@ -65,22 +66,10 @@ function fmtSize(bytes: number | null | undefined): string {
 
 const PAGE_SIZE = 50;
 
-const PRESET_CHIP: Record<string, string> = {
-  clasic: "Clasic",
-  modern: "Modern",
-  minimal: "Minimal",
-};
-const PRESET_DESC: Record<string, string> = {
-  clasic: "Clasic (negru)",
-  modern: "Modern (accent pe titlu, secțiuni, linii)",
-  minimal: "Minimal (accent doar pe titlu)",
-};
-
-const FREQ_LABEL: Record<string, string> = {
-  monthly: "lunar",
-  quarterly: "trimestrial",
-  annual: "anual",
-};
+/** Preset keys with dedicated i18n labels (documents.preset.*). */
+const PRESET_KEYS = ["clasic", "modern", "minimal"];
+/** Frequency keys with dedicated i18n labels (documents.freq.*). */
+const FREQ_KEYS = ["monthly", "quarterly", "annual"];
 
 /** Numerele de pagină afișate în .pager (cu elipse), ca în prototip. */
 function pageNumbers(current: number, total: number): Array<number | "…"> {
@@ -98,6 +87,7 @@ function pageNumbers(current: number, total: number): Array<number | "…"> {
 }
 
 export function DocumentsPage() {
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
 
@@ -180,28 +170,28 @@ export function DocumentsPage() {
     const out: DocEntry[] = [];
     for (const inv of paged?.items ?? []) {
       if (inv.xmlPath) {
-        out.push({ id: `${inv.id}:xml`, kind: "invoice", ava: "F", typeLabel: "Factură XML (UBL)", assoc: inv.fullNumber, dateIso: inv.issueDate, path: inv.xmlPath });
+        out.push({ id: `${inv.id}:xml`, kind: "invoice", ava: "F", typeLabel: t("documents.type.invoiceXml"), assoc: inv.fullNumber, dateIso: inv.issueDate, path: inv.xmlPath });
       }
       if (inv.pdfPath) {
-        out.push({ id: `${inv.id}:pdf`, kind: "invoice", ava: "F", typeLabel: "Factură PDF", assoc: inv.fullNumber, dateIso: inv.issueDate, path: inv.pdfPath });
+        out.push({ id: `${inv.id}:pdf`, kind: "invoice", ava: "F", typeLabel: t("documents.type.invoicePdf"), assoc: inv.fullNumber, dateIso: inv.issueDate, path: inv.pdfPath });
       }
       if (inv.signatureXmlPath) {
-        out.push({ id: `${inv.id}:sig`, kind: "receipt", ava: "R", typeLabel: "Recipisă semnată ANAF", assoc: inv.fullNumber, dateIso: inv.issueDate, path: inv.signatureXmlPath });
+        out.push({ id: `${inv.id}:sig`, kind: "receipt", ava: "R", typeLabel: t("documents.type.signedReceipt"), assoc: inv.fullNumber, dateIso: inv.issueDate, path: inv.signatureXmlPath });
       }
     }
     for (const ri of receivedPaged?.items ?? []) {
       const num = ri.number ? `${ri.series ? `${ri.series}-` : ""}${ri.number}` : ri.anafDownloadId;
       const assoc = `${num} · ${ri.issuerName}`;
       if (ri.xmlPath) {
-        out.push({ id: `${ri.id}:xml`, kind: "invoice", ava: "P", typeLabel: "Factură primită XML (UBL)", assoc, dateIso: ri.issueDate, path: ri.xmlPath });
+        out.push({ id: `${ri.id}:xml`, kind: "invoice", ava: "P", typeLabel: t("documents.type.receivedXml"), assoc, dateIso: ri.issueDate, path: ri.xmlPath });
       }
       if (ri.pdfPath) {
-        out.push({ id: `${ri.id}:pdf`, kind: "invoice", ava: "P", typeLabel: "Factură primită PDF", assoc, dateIso: ri.issueDate, path: ri.pdfPath });
+        out.push({ id: `${ri.id}:pdf`, kind: "invoice", ava: "P", typeLabel: t("documents.type.receivedPdf"), assoc, dateIso: ri.issueDate, path: ri.pdfPath });
       }
     }
     out.sort((a, b) => b.dateIso.localeCompare(a.dateIso) || a.assoc.localeCompare(b.assoc));
     return out;
-  }, [paged, receivedPaged]);
+  }, [paged, receivedPaged, t]);
 
   const counts = useMemo(
     () => ({
@@ -269,7 +259,7 @@ export function DocumentsPage() {
       const { openPath } = await import("@tauri-apps/plugin-opener");
       await openPath(entry.path);
     } catch (e) {
-      notify.error(formatError(e, "Nu s-a putut deschide fișierul — verificați integritatea arhivei."));
+      notify.error(formatError(e, t("documents.notify.openError")));
     }
   }
 
@@ -282,34 +272,34 @@ export function DocumentsPage() {
       const { readFile, writeFile } = await import("@tauri-apps/plugin-fs");
       const data = await readFile(entry.path);
       await writeFile(dest, data);
-      notify.success(`Document salvat: ${dest}`);
+      notify.success(t("documents.notify.saved", { path: dest }));
     } catch (e) {
-      notify.error(formatError(e, "Nu s-a putut descărca fișierul."));
+      notify.error(formatError(e, t("documents.notify.downloadError")));
     }
   }
 
   async function handleArchiveZip() {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    if (!activeCompanyId) { notify.warn(t("documents.notify.noActiveCompany")); return; }
     setExportingZip(true);
     try {
       const path = await api.archive.exportZip(activeCompanyId);
-      notify.success(`Arhivă exportată: ${path}`);
+      notify.success(t("documents.notify.zipExported", { path }));
       try {
         const { openPath } = await import("@tauri-apps/plugin-opener");
         await openPath(path);
       } catch { /* reveal best-effort */ }
     } catch (e) {
-      notify.error(formatError(e, "Exportul arhivei a eșuat."));
+      notify.error(formatError(e, t("documents.notify.zipError")));
     } finally {
       setExportingZip(false);
     }
   }
 
   const tabs: Array<{ value: KindFilter; label: string; count: number }> = [
-    { value: "all",         label: "Toate",      count: counts.all },
-    { value: "invoice",     label: "Facturi",    count: counts.invoice },
-    { value: "declaration", label: "Declarații", count: counts.declaration },
-    { value: "receipt",     label: "Recipise",   count: counts.receipt },
+    { value: "all",         label: t("documents.tabs.all"),          count: counts.all },
+    { value: "invoice",     label: t("documents.tabs.invoices"),     count: counts.invoice },
+    { value: "declaration", label: t("documents.tabs.declarations"), count: counts.declaration },
+    { value: "receipt",     label: t("documents.tabs.receipts"),     count: counts.receipt },
   ];
 
   const missingCount = integrity?.missing.length ?? 0;
@@ -324,9 +314,9 @@ export function DocumentsPage() {
   if (!activeCompanyId) {
     return (
       <div className="main-inner page-documents">
-        <div className="page-head"><div><h1>Documente</h1></div></div>
+        <div className="page-head"><div><h1>{t("documents.title")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a vedea arhiva de documente.
+          {t("documents.selectCompany")}
         </div>
       </div>
     );
@@ -337,14 +327,14 @@ export function DocumentsPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Documente</h1>
+          <h1>{t("documents.title")}</h1>
           <p className="sub">
-            Arhiva și șabloanele{activeCompany ? ` · ${activeCompany.legalName}` : ""}
+            {t("documents.sub")}{activeCompany ? ` · ${activeCompany.legalName}` : ""}
           </p>
         </div>
         <div className="head-actions">
           <button className="pill-btn" disabled={exportingZip} onClick={() => void handleArchiveZip()}>
-            <Ic name="dl" />{exportingZip ? "Se exportă…" : "Exportă arhiva (ZIP)"}
+            <Ic name="dl" />{exportingZip ? t("documents.head.exporting") : t("documents.head.exportZip")}
           </button>
         </div>
       </div>
@@ -354,17 +344,16 @@ export function DocumentsPage() {
         <div className="banner warn">
           <svg className="ic" viewBox="0 0 24 24"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" /></svg>
           <span>
-            <b>Verificare integritate: {missingCount === 1 ? "1 fișier lipsă" : `${missingCount} fișiere lipsă`}</b>
-            {" "}din {integrity.checked.toLocaleString("ro-RO")} verificate
+            <b>{t("documents.integrityWarn.missing", { count: missingCount })}</b>
+            {" "}{t("documents.integrityWarn.checked", { n: integrity.checked.toLocaleString(i18n.language) })}
             {integrity.missingUnderRetention > 0 && (
               <>
-                , dintre care <b>{integrity.missingUnderRetention}</b> sub termenul legal de păstrare de <b>5 ani</b> — pot fi
-                redescărcate din SPV (sub 60 de zile) sau din backup.
+                {t("documents.integrityWarn.ofWhich")} <b>{integrity.missingUnderRetention}</b> {t("documents.integrityWarn.underRetention")} <b>{t("documents.integrityWarn.fiveYears")}</b> {t("documents.integrityWarn.redownload")}
               </>
             )}
           </span>
           <button className="pill-btn" style={{ marginLeft: "auto", flex: "none" }} onClick={() => void refetchIntegrity()}>
-            Reverifică
+            {t("documents.reverify")}
           </button>
         </div>
       )}
@@ -372,10 +361,10 @@ export function DocumentsPage() {
         <div className="banner">
           <Ic name="checkC" />
           <span>
-            <b>Verificare integritate:</b> toate cele {integrity.checked.toLocaleString("ro-RO")} fișiere din arhivă sunt prezente · păstrare legală 5 ani.
+            <b>{t("documents.integrityOk.title")}</b> {t("documents.integrityOk.body", { n: integrity.checked.toLocaleString(i18n.language) })}
           </span>
           <button className="pill-btn" style={{ marginLeft: "auto", flex: "none" }} onClick={() => void refetchIntegrity()}>
-            Reverifică
+            {t("documents.reverify")}
           </button>
         </div>
       )}
@@ -399,7 +388,7 @@ export function DocumentsPage() {
             <Ic name="lens" />
             <input
               type="text"
-              placeholder="Caută document…"
+              placeholder={t("documents.search")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -413,19 +402,19 @@ export function DocumentsPage() {
               onClick={() => setOpenPop(openPop === "period" ? "" : "period")}
             >
               <Ic name="calendar" />
-              {period === "all" ? "Toate lunile" : fmtMonth(period)}
+              {period === "all" ? t("documents.period.allMonths") : fmtMonth(period, i18n.language)}
               <Ic name="chevD" cls="ic" />
             </button>
             {openPop === "period" && (
               <div className="pop show" style={{ right: 0, top: 40, width: 210, maxHeight: 300, overflowY: "auto" }} onMouseDown={(e) => e.stopPropagation()}>
-                <div className="col-title">Perioadă</div>
+                <div className="col-title">{t("documents.period.title")}</div>
                 <button className="pop-item" onClick={() => { setPeriod("all"); setOpenPop(""); }}>
-                  <span style={{ flex: 1 }}>Toate lunile</span>
+                  <span style={{ flex: 1 }}>{t("documents.period.allMonths")}</span>
                   {period === "all" && <Ic name="check" cls="co-check" />}
                 </button>
                 {availableMonths.map((ym) => (
                   <button key={ym} className="pop-item" onClick={() => { setPeriod(ym); setOpenPop(""); }}>
-                    <span style={{ flex: 1 }}>{fmtMonth(ym)}</span>
+                    <span style={{ flex: 1 }}>{fmtMonth(ym, i18n.language)}</span>
                     {period === ym && <Ic name="check" cls="co-check" />}
                   </button>
                 ))}
@@ -436,26 +425,26 @@ export function DocumentsPage() {
 
         {/* table */}
         {isLoading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("documents.states.loading")}</div>
         ) : pagedError ? (
           <div style={{ padding: 16 }}>
-            <QueryErrorBanner error={pagedErr} label="documentele" onRetry={() => void refetchPaged()} />
+            <QueryErrorBanner error={pagedErr} label={t("documents.states.errorLabel")} onRetry={() => void refetchPaged()} />
           </div>
         ) : filtered.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
             {allEntries.length === 0
-              ? "Niciun document în arhivă. Fișierele XML și PDF apar aici pe măsură ce emiteți sau descărcați facturi."
-              : "Nicio înregistrare pentru filtrele aplicate."}
+              ? t("documents.states.empty")
+              : t("documents.states.emptyFiltered")}
           </div>
         ) : (
           <>
             <table className="scr-table">
               <thead>
                 <tr>
-                  <th>Tip document</th>
-                  <th>Document asociat</th>
-                  <th>Data</th>
-                  <th className="r">Dimensiune</th>
+                  <th>{t("documents.table.type")}</th>
+                  <th>{t("documents.table.assoc")}</th>
+                  <th>{t("documents.table.date")}</th>
+                  <th className="r">{t("documents.table.size")}</th>
                   <th className="r" style={{ width: 90 }}></th>
                 </tr>
               </thead>
@@ -468,10 +457,10 @@ export function DocumentsPage() {
                     <td className="r num">{fmtSize(sizes.get(e.path))}</td>
                     <td>
                       <div className="row-acts">
-                        <button className="mini-btn" title="Deschide" onClick={() => void handleOpen(e)}>
+                        <button className="mini-btn" title={t("documents.row.open")} onClick={() => void handleOpen(e)}>
                           <Ic name="eye" />
                         </button>
-                        <button className="mini-btn" title="Descarcă" onClick={() => void handleDownload(e)}>
+                        <button className="mini-btn" title={t("documents.row.download")} onClick={() => void handleDownload(e)}>
                           <Ic name="dl" />
                         </button>
                       </div>
@@ -484,8 +473,8 @@ export function DocumentsPage() {
             {/* pager */}
             <div className="pager">
               <span>
-                Afișezi <b>{((safePage - 1) * PAGE_SIZE + 1).toLocaleString("ro-RO")}–{Math.min(safePage * PAGE_SIZE, filtered.length).toLocaleString("ro-RO")}</b> din{" "}
-                <b>{filtered.length.toLocaleString("ro-RO")}</b> documente · păstrare legală 5 ani
+                {t("documents.pager.showing")} <b>{((safePage - 1) * PAGE_SIZE + 1).toLocaleString(i18n.language)}–{Math.min(safePage * PAGE_SIZE, filtered.length).toLocaleString(i18n.language)}</b> {t("documents.pager.of")}{" "}
+                <b>{filtered.length.toLocaleString(i18n.language)}</b> {t("documents.pager.documentsRetention")}
               </span>
               <div className="pg-btns">
                 <button className="pg-btn" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
@@ -510,24 +499,24 @@ export function DocumentsPage() {
       </div>
 
       {/* șabloane */}
-      <div className="sec-h">Șabloane</div>
+      <div className="sec-h">{t("documents.templates.secTitle")}</div>
       <div className="cols-2-even">
         <div className="scr-card">
           <div className="scr-toolbar">
-            <div className="tt">Șablon factură (PDF)</div>
+            <div className="tt">{t("documents.templates.invoiceTpl")}</div>
             <div className="spacer" />
-            <span className="chip sent">{PRESET_CHIP[presetKey] ?? presetKey}</span>
+            <span className="chip sent">{PRESET_KEYS.includes(presetKey) ? t(`documents.preset.${presetKey}`) : presetKey}</span>
           </div>
           <div className="set-row">
             <div>
-              <div className="s1">Preset · accent</div>
+              <div className="s1">{t("documents.templates.presetAccent")}</div>
               <div className="s2">
-                {PRESET_DESC[presetKey] ?? presetKey} · accent {tplSettings?.accent ?? "#000000"} · sumă în litere {tplSettings?.showWords === false ? "OFF" : "ON"}
+                {PRESET_KEYS.includes(presetKey) ? t(`documents.preset.${presetKey}Desc`) : presetKey} · {t("documents.templates.accentWord")} {tplSettings?.accent ?? "#000000"} · {t("documents.templates.amountInWords")} {tplSettings?.showWords === false ? "OFF" : "ON"}
               </div>
             </div>
             <div className="end">
               <button className="pill-btn" onClick={() => void navigate({ to: "/settings" })}>
-                Editează în Setări
+                {t("documents.templates.editInSettings")}
               </button>
             </div>
           </div>
@@ -535,19 +524,19 @@ export function DocumentsPage() {
 
         <div className="scr-card">
           <div className="scr-toolbar">
-            <div className="tt">Șabloane recurente</div>
+            <div className="tt">{t("documents.templates.recurringTpl")}</div>
             <div className="spacer" />
             <button
               className="see-all"
               style={{ height: "auto", padding: 0, border: 0, background: "transparent" }}
               onClick={() => void navigate({ to: "/recurring" })}
             >
-              Vezi toate<Ic name="chevR" />
+              {t("documents.templates.seeAll")}<Ic name="chevR" />
             </button>
           </div>
           {recurring.length === 0 ? (
             <div style={{ padding: "20px 16px", fontSize: 12.5, color: "var(--text-2)" }}>
-              Niciun șablon recurent. Creați unul din pagina „Facturi recurente”.
+              {t("documents.templates.noRecurring")}
             </div>
           ) : (
             <>
@@ -556,17 +545,17 @@ export function DocumentsPage() {
                   <div>
                     <div className="s1">{r.templateName}</div>
                     <div className="s2">
-                      {contactNames.get(r.clientId) ?? "—"} · {FREQ_LABEL[r.frequency] ?? r.frequency}
+                      {contactNames.get(r.clientId) ?? "—"} · {FREQ_KEYS.includes(r.frequency) ? t(`documents.freq.${r.frequency}`) : r.frequency}
                     </div>
                   </div>
                   <div className="end">
                     {r.active ? (
                       <span className="chip paid">
                         <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>' }} />
-                        Activ
+                        {t("documents.templates.active")}
                       </span>
                     ) : (
-                      <span className="chip sent"><Ic name="clock" cls="sic" />Inactiv</span>
+                      <span className="chip sent"><Ic name="clock" cls="sic" />{t("documents.templates.inactive")}</span>
                     )}
                   </div>
                 </div>
@@ -574,7 +563,7 @@ export function DocumentsPage() {
               {recurring.length > 3 && (
                 <div className="set-row">
                   <div className="s2">
-                    încă {recurring.length - 3} {recurring.length - 3 === 1 ? "șablon" : "șabloane"} · {activeRecurring} active
+                    {t("documents.templates.more", { count: recurring.length - 3 })} · {t("documents.templates.moreActive", { n: activeRecurring })}
                   </div>
                 </div>
               )}

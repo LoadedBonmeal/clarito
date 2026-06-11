@@ -1,0 +1,98 @@
+{
+  "accounts": {
+    "title": "Plan de conturi",
+    "sub_one": "Plan de conturi propriu companiei · {{n}} cont · soldurile se consultă în Balanță (Jurnal contabil)",
+    "sub_few": "Plan de conturi propriu companiei · {{n}} conturi · soldurile se consultă în Balanță (Jurnal contabil)",
+    "sub_other": "Plan de conturi propriu companiei · {{n}} de conturi · soldurile se consultă în Balanță (Jurnal contabil)",
+    "selectCompany": "Selectați o companie activă pentru a vedea planul de conturi.",
+    "class": {
+      "1": "1 · Conturi de capitaluri",
+      "2": "2 · Conturi de imobilizări",
+      "3": "3 · Conturi de stocuri",
+      "4": "4 · Conturi de terți",
+      "5": "5 · Conturi de trezorerie",
+      "6": "6 · Conturi de cheltuieli",
+      "7": "7 · Conturi de venituri",
+      "8": "8 · Conturi speciale",
+      "9": "9 · Conturi interne (gestiune)",
+      "generic": "Clasa {{n}}",
+      "none": "Fără clasă"
+    },
+    "head": {
+      "seeding": "Se încarcă…",
+      "seedStandard": "Populează planul standard (PCG)",
+      "newAccount": "Cont nou"
+    },
+    "tabs": {
+      "all": "Toate",
+      "active": "Active"
+    },
+    "search": "Cod sau denumire…",
+    "refresh": "Reîmprospătează",
+    "states": {
+      "loading": "Se încarcă…",
+      "errorLabel": "conturile",
+      "empty": "Niciun cont înregistrat. Puteți adăuga manual sau încărca planul standard român (PCG).",
+      "emptyFiltered": "Niciun rezultat pentru filtrele aplicate."
+    },
+    "table": {
+      "code": "Cod",
+      "name": "Denumire",
+      "class": "Clasa",
+      "parent": "Cont părinte",
+      "active": "Activ"
+    },
+    "row": {
+      "deactivate": "Dezactivează contul",
+      "activate": "Activează contul",
+      "edit": "Editează",
+      "delete": "Șterge"
+    },
+    "pager": {
+      "showing": "Afișezi",
+      "of": "din",
+      "accounts": "conturi",
+      "prevPage": "Pagina anterioară",
+      "nextPage": "Pagina următoare"
+    },
+    "confirm": {
+      "deleteTitle": "Confirmare ștergere",
+      "deleteMsg": "Șterge contul {{code}} — \"{{name}}\"? Această acțiune nu poate fi anulată."
+    },
+    "notify": {
+      "noActiveCompany": "Nicio companie activă.",
+      "seeded_one": "{{count}} cont standard încărcat.",
+      "seeded_few": "{{count}} conturi standard încărcate.",
+      "seeded_other": "{{count}} de conturi standard încărcate.",
+      "seedError": "Eroare la încărcarea planului standard.",
+      "deleted": "Cont șters.",
+      "deleteError": "Nu s-a putut șterge contul.",
+      "updateError": "Nu s-a putut actualiza contul.",
+      "created": "Cont adăugat.",
+      "saved": "Cont salvat.",
+      "createError": "Eroare la adăugare.",
+      "saveError": "Eroare la salvare."
+    },
+    "modal": {
+      "editTitle": "Editează: {{code}} — {{name}}",
+      "newTitle": "Cont nou",
+      "subtitle": "Codurile urmează Planul de Conturi General (OMFP 1802/2014).",
+      "close": "Închide",
+      "codeLabel": "Cod cont",
+      "codePlaceholder": "ex. 4111",
+      "classLabel": "Clasă",
+      "noClassOption": "— fără clasă —",
+      "nameLabel": "Denumire",
+      "namePlaceholder": "ex. Clienți",
+      "parentLabel": "Cont părinte (cod)",
+      "parentPlaceholder": "ex. 411",
+      "activeLabel": "Cont activ",
+      "codeRequired": "Codul de cont este obligatoriu.",
+      "nameRequired": "Denumirea este obligatorie.",
+      "cancel": "Anulează",
+      "saving": "Se salvează…",
+      "save": "Salvează",
+      "add": "Adaugă"
+    }
+  }
+}

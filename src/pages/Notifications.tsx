@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { confirm } from "@tauri-apps/plugin-dialog";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -47,34 +48,14 @@ const fmtRoDateLocal = (d: Date) =>
 const sameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
-/** Relative time like the prototype: "acum 2 ore" / "ieri, 18:30" / "08 iun 2026". */
-function fmtMsgTime(unix: number): string {
-  const d = new Date(unix * 1000);
-  const now = new Date();
-  const diff = Math.floor(Date.now() / 1000) - unix;
-  if (diff < 3600 && sameDay(d, now)) {
-    const m = Math.max(1, Math.floor(diff / 60));
-    return `acum ${m} ${m === 1 ? "minut" : "minute"}`;
-  }
-  if (sameDay(d, now)) {
-    const h = Math.floor(diff / 3600);
-    return `acum ${h} ${h === 1 ? "oră" : "ore"}`;
-  }
-  const yest = new Date(now);
-  yest.setDate(now.getDate() - 1);
-  if (sameDay(d, yest)) {
-    return `ieri, ${d.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" })}`;
-  }
-  return fmtRoDateLocal(d);
-}
-
 // ── Notification type → sender + avatar + chip (design .chip variants) ────────
 
 interface MsgKind {
   from: string;
   ava: string;
   cls: string;
-  label: string;
+  /** i18n key suffix under notifications.kind.* */
+  labelKey: string;
   /** Ic name when available; otherwise raw inline path. */
   icon?: string;
   path?: string;
@@ -83,16 +64,16 @@ interface MsgKind {
 function msgKind(type: string): MsgKind {
   const t = type.toUpperCase();
   if (t.includes("REJECT") || t.includes("FAIL") || t.includes("ERROR"))
-    return { from: "ANAF · e-Factura", ava: "AN", cls: "late", label: "Eroare", path: P_WARN_TRI };
+    return { from: "ANAF · e-Factura", ava: "AN", cls: "late", labelKey: "error", path: P_WARN_TRI };
   if (t.includes("VALID") || t.includes("ACCEPT") || t.includes("RECIPIS"))
-    return { from: "ANAF · e-Factura", ava: "AN", cls: "paid", label: "Recipisă", path: P_CIRCLE_CHECK };
+    return { from: "ANAF · e-Factura", ava: "AN", cls: "paid", labelKey: "receipt", path: P_CIRCLE_CHECK };
   if (t.includes("STALE") || t.includes("WARN") || t.includes("EXPIR"))
-    return { from: "SPV e-Factura", ava: "SP", cls: "wait", label: "Reminder", icon: "clock" };
+    return { from: "SPV e-Factura", ava: "SP", cls: "wait", labelKey: "reminder", icon: "clock" };
   if (t.includes("SYNC"))
-    return { from: "SPV e-Factura", ava: "SP", cls: "sent", label: "Sistem", icon: "sync" };
+    return { from: "SPV e-Factura", ava: "SP", cls: "sent", labelKey: "system", icon: "sync" };
   if (t.includes("IMPORT") || t.includes("RECEIV"))
-    return { from: "SPV e-Factura", ava: "SP", cls: "sent", label: "Notificare", icon: "send" };
-  return { from: "ANAF · e-Factura", ava: "AN", cls: "sent", label: "Notificare", icon: "send" };
+    return { from: "SPV e-Factura", ava: "SP", cls: "sent", labelKey: "notification", icon: "send" };
+  return { from: "ANAF · e-Factura", ava: "AN", cls: "sent", labelKey: "notification", icon: "send" };
 }
 
 /** Page size for the .pager (client-side pagination over the full list). */
@@ -103,6 +84,7 @@ const RETENTION_DAYS = 60;
 type TabFilter = "all" | "unread";
 
 export function NotificationsPage() {
+  const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [tab, setTab] = useState<TabFilter>("all");
@@ -142,9 +124,9 @@ export function NotificationsPage() {
     mutationFn: () => api.notifications.markAllRead(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
-      notify.success("Toate notificările marcate ca citite.");
+      notify.success(t("notifications.notify.allMarkedRead"));
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut marca ca citite.")),
+    onError: (e) => notify.error(formatError(e, t("notifications.notify.markReadError"))),
   });
 
   const { mutate: deleteOne, isPending: deletingOne } = useMutation({
@@ -152,24 +134,24 @@ export function NotificationsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge notificarea.")),
+    onError: (e) => notify.error(formatError(e, t("notifications.notify.deleteOneError"))),
   });
 
   const { mutate: deleteAllRead, isPending: deletingAllRead } = useMutation({
     mutationFn: () => api.notifications.deleteAllRead(),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
-      notify.success("Notificările citite au fost șterse.");
+      notify.success(t("notifications.notify.readDeleted"));
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-au putut șterge notificările.")),
+    onError: (e) => notify.error(formatError(e, t("notifications.notify.deleteReadError"))),
   });
 
   /** Confirm before bulk-deleting all read notifications (irreversible). */
   async function handleDeleteAllRead() {
     const readCount = notifications.filter((n) => n.isRead).length;
     const ok = await confirm(
-      `Ștergeți ${readCount} notificări citite? Această acțiune nu poate fi anulată.`,
-      { title: "Confirmare ștergere", kind: "warning" },
+      t("notifications.confirm.deleteReadMsg", { count: readCount }),
+      { title: t("notifications.confirm.deleteReadTitle"), kind: "warning" },
     );
     if (!ok) return;
     deleteAllRead();
@@ -204,6 +186,29 @@ export function NotificationsPage() {
         return;
       }
     }
+  }
+
+  /** Relative time like the prototype: "acum 2 ore" / "ieri, 18:30" / "08 iun 2026". */
+  function fmtMsgTime(unix: number): string {
+    const d = new Date(unix * 1000);
+    const now = new Date();
+    const diff = Math.floor(Date.now() / 1000) - unix;
+    if (diff < 3600 && sameDay(d, now)) {
+      const m = Math.max(1, Math.floor(diff / 60));
+      return t("notifications.time.minutesAgo", { count: m });
+    }
+    if (sameDay(d, now)) {
+      const h = Math.floor(diff / 3600);
+      return t("notifications.time.hoursAgo", { count: h });
+    }
+    const yest = new Date(now);
+    yest.setDate(now.getDate() - 1);
+    if (sameDay(d, yest)) {
+      return t("notifications.time.yesterdayAt", {
+        time: d.toLocaleTimeString(i18n.language, { hour: "2-digit", minute: "2-digit" }),
+      });
+    }
+    return fmtRoDateLocal(d);
   }
 
   const list = useMemo(() => {
@@ -254,13 +259,13 @@ export function NotificationsPage() {
     if (!Number.isFinite(ts) || ts <= 0) return null;
     const d = new Date(ts * 1000);
     const now = new Date();
-    const hm = d.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" });
-    if (sameDay(d, now)) return `azi, ${hm}`;
+    const hm = d.toLocaleTimeString(i18n.language, { hour: "2-digit", minute: "2-digit" });
+    if (sameDay(d, now)) return t("notifications.time.todayAt", { time: hm });
     const yest = new Date(now);
     yest.setDate(now.getDate() - 1);
-    if (sameDay(d, yest)) return `ieri, ${hm}`;
+    if (sameDay(d, yest)) return t("notifications.time.yesterdayAt", { time: hm });
     return fmtRoDateLocal(d);
-  }, [lastSyncRaw]);
+  }, [lastSyncRaw, t, i18n.language]);
 
   const readCount = notifications.filter((n) => n.isRead).length;
 
@@ -269,10 +274,10 @@ export function NotificationsPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Mesaje SPV / Notificări</h1>
+          <h1>{t("notifications.title")}</h1>
           <p className="sub">
-            {unreadCount} necitite · recipise, notificări, somații și decizii din SPV
-            {lastSyncLabel ? ` · ultima sincronizare ${lastSyncLabel}` : ""}
+            {t("notifications.sub.unread", { n: unreadCount })}
+            {lastSyncLabel ? t("notifications.sub.lastSync", { when: lastSyncLabel }) : ""}
           </p>
         </div>
         <div className="head-actions">
@@ -282,7 +287,7 @@ export function NotificationsPage() {
             style={unreadCount === 0 || markingAll ? { opacity: 0.5, cursor: "default" } : undefined}
             onClick={() => markAllRead()}
           >
-            <InlineIc path={P_CIRCLE_CHECK} />Marchează toate citite
+            <InlineIc path={P_CIRCLE_CHECK} />{t("notifications.head.markAllRead")}
           </button>
           <button
             className="pill-btn"
@@ -290,10 +295,10 @@ export function NotificationsPage() {
             style={readCount === 0 || deletingAllRead ? { opacity: 0.5, cursor: "default" } : undefined}
             onClick={() => void handleDeleteAllRead()}
           >
-            <InlineIc path={P_TRASH} />Șterge citite
+            <InlineIc path={P_TRASH} />{t("notifications.head.deleteRead")}
           </button>
           <button className="btn-dark spin-btn" onClick={() => void refetchNotifications()}>
-            <Ic name="sync" />Reîmprospătează
+            <Ic name="sync" />{t("notifications.head.refresh")}
           </button>
         </div>
       </div>
@@ -302,8 +307,8 @@ export function NotificationsPage() {
       <div className="banner warn">
         <Ic name="clock" />
         <span>
-          <b>ANAF păstrează mesajele doar 60 de zile</b> — sincronizați regulat pentru a nu pierde
-          recipise și notificări. Clarito arhivează automat tot ce descarcă.
+          <b>{t("notifications.banner.title")}</b>
+          {t("notifications.banner.body")}
         </span>
       </div>
 
@@ -312,10 +317,10 @@ export function NotificationsPage() {
         <div className="scr-toolbar">
           <div className="tabs">
             <div className={`tab${tab === "all" ? " active" : ""}`} onClick={() => setTab("all")}>
-              Toate<span className="cnt">{notifications.length}</span>
+              {t("notifications.tabs.all")}<span className="cnt">{notifications.length}</span>
             </div>
             <div className={`tab${tab === "unread" ? " active" : ""}`} onClick={() => setTab("unread")}>
-              Necitite<span className="cnt">{unreadCount}</span>
+              {t("notifications.tabs.unread")}<span className="cnt">{unreadCount}</span>
             </div>
           </div>
           <div className="spacer" />
@@ -323,7 +328,7 @@ export function NotificationsPage() {
             <Ic name="lens" />
             <input
               type="text"
-              placeholder="Caută mesaje…"
+              placeholder={t("notifications.search")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -332,18 +337,18 @@ export function NotificationsPage() {
 
         {/* message list */}
         {isLoading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("notifications.states.loading")}</div>
         ) : notifError ? (
           <div style={{ padding: 16 }}>
-            <QueryErrorBanner error={notifErr} label="notificările" onRetry={() => void refetchNotifications()} />
+            <QueryErrorBanner error={notifErr} label={t("notifications.states.errorLabel")} onRetry={() => void refetchNotifications()} />
           </div>
         ) : list.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
             {notifications.length === 0
-              ? "Nicio notificare. Sistemul va afișa aici mesajele de la ANAF."
+              ? t("notifications.states.empty")
               : query.trim()
-                ? "Niciun mesaj pentru căutarea aplicată."
-                : "Nicio notificare necitită."}
+                ? t("notifications.states.emptySearch")
+                : t("notifications.states.emptyUnread")}
           </div>
         ) : (
           <div className="msg-list">
@@ -374,12 +379,12 @@ export function NotificationsPage() {
                   >
                     <span className={`chip ${k.cls}`}>
                       {k.icon ? <Ic name={k.icon} cls="sic" /> : <InlineIc path={k.path!} cls="sic" />}
-                      {k.label}
+                      {t(`notifications.kind.${k.labelKey}`)}
                     </span>
                     {/* real feature kept — prototype lacks per-row delete */}
                     <button
                       className="mini-btn"
-                      title="Șterge notificare"
+                      title={t("notifications.row.delete")}
                       disabled={deletingOne}
                       onClick={() => deleteOne(n.id)}
                     >
@@ -395,10 +400,10 @@ export function NotificationsPage() {
         {/* pager */}
         <div className="pager">
           <span>
-            Afișezi <b>{fromIdx === toIdx ? toIdx : `${fromIdx}–${toIdx}`}</b> din <b>{list.length}</b> mesaje
+            {t("notifications.pager.showing")} <b>{fromIdx === toIdx ? toIdx : `${fromIdx}–${toIdx}`}</b> {t("notifications.pager.of")} <b>{list.length}</b> {t("notifications.pager.messages")}
             {expireDays !== null && (
               <>
-                {" "}· cele mai vechi expiră în <b className="num">{expireDays} {expireDays === 1 ? "zi" : "zile"}</b>
+                {" "}{t("notifications.pager.oldestExpire")} <b className="num">{t("notifications.pager.days", { count: expireDays })}</b>
               </>
             )}
           </span>

@@ -20,6 +20,7 @@ import { useMemo, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm } from "@tauri-apps/plugin-dialog";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { api } from "@/lib/tauri";
@@ -38,10 +39,9 @@ const fmtRoDate = (iso: string | null | undefined) => {
   return `${d} ${RO_MON[Number(m) - 1] ?? m} ${y}`;
 };
 
-const RO_MONTHS_FULL = [
-  "ianuarie", "februarie", "martie", "aprilie", "mai", "iunie",
-  "iulie", "august", "septembrie", "octombrie", "noiembrie", "decembrie",
-];
+/** Full month name (locale-aware) for the depreciation period UI. */
+const monthName = (m: number, lng: string): string =>
+  new Date(2000, m - 1, 1).toLocaleDateString(lng, { month: "long" });
 
 /** Render at most this many rows (plain table, no virtualizer — design parity). */
 const MAX_ROWS = 1000;
@@ -140,6 +140,7 @@ function RowMenu({ items, onClose, anchor }: { items: RowMenuItem[]; onClose: ()
 // ── AssetsPage ────────────────────────────────────────────────────────────────
 
 export function AssetsPage() {
+  const { t, i18n } = useTranslation();
   const companyId = useAppStore((s) => s.activeCompanyId);
   const qc = useQueryClient();
   const now = new Date();
@@ -174,27 +175,27 @@ export function AssetsPage() {
       setRunPeriod({ year, month });
       setAmortOpen(false);
       r.posted
-        ? notify.success(`Amortizare postată — total ${r.totalAmount} lei (6811 = 281x).`)
-        : notify.info("Nimic de amortizat în această lună.");
+        ? notify.success(t("assets.notify.posted", { total: r.totalAmount }))
+        : notify.info(t("assets.notify.nothingThisMonth"));
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut rula amortizarea.")),
+    onError: (e) => notify.error(formatError(e, t("assets.notify.runError"))),
   });
 
   const del = useMutation({
     mutationFn: (id: string) => api.assets.delete(id, companyId!),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["assets", companyId] }),
-    onError: (e) => notify.error(formatError(e, "Eroare la ștergere.")),
+    onError: (e) => notify.error(formatError(e, t("assets.notify.deleteError"))),
   });
 
   const dispose = useMutation({
     mutationFn: ({ id, date }: { id: string; date: string }) =>
       api.assets.dispose(companyId!, id, date),
     onSuccess: () => {
-      notify.success("Mijloc fix scos din funcțiune (281x + 6583 / 21x).");
+      notify.success(t("assets.notify.disposed"));
       setDisposing(null);
       void qc.invalidateQueries({ queryKey: ["assets", companyId] });
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la scoaterea din funcțiune.")),
+    onError: (e) => notify.error(formatError(e, t("assets.notify.disposeError"))),
   });
 
   const nowY = now.getFullYear();
@@ -244,25 +245,25 @@ export function AssetsPage() {
   );
   const previewTotal = previewRows.reduce((s, r) => s + r.monthly, 0);
 
-  const monthLabel = RO_MONTHS_FULL[month - 1] ?? String(month);
+  const monthLabel = monthName(month, i18n.language);
   const runLabel = runPeriod
-    ? `${RO_MONTHS_FULL[runPeriod.month - 1] ?? runPeriod.month} ${runPeriod.year}`
+    ? `${monthName(runPeriod.month, i18n.language)} ${runPeriod.year}`
     : `${monthLabel} ${year}`;
   const runAccumTotal = run ? run.states.reduce((s, st) => s + parseDec(st.accumulated), 0) : 0;
   const runRemainTotal = run ? run.states.reduce((s, st) => s + parseDec(st.bookValue), 0) : 0;
 
   const tabs: Array<{ value: TabFilter; label: string; count: number }> = [
-    { value: "active",   label: "În funcțiune",          count: inService.length },
-    { value: "full",     label: "Amortizate integral",   count: fullyAmortized.length },
-    { value: "disposed", label: "Scoase din funcțiune",  count: disposed.length },
+    { value: "active",   label: t("assets.tabs.inService"),      count: inService.length },
+    { value: "full",     label: t("assets.tabs.fullyAmortized"), count: fullyAmortized.length },
+    { value: "disposed", label: t("assets.tabs.disposed"),       count: disposed.length },
   ];
 
   if (!companyId) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Mijloace fixe</h1></div></div>
+        <div className="page-head"><div><h1>{t("assets.title")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a vedea mijloacele fixe.
+          {t("assets.selectCompany")}
         </div>
       </div>
     );
@@ -273,17 +274,17 @@ export function AssetsPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Mijloace fixe</h1>
+          <h1>{t("assets.title")}</h1>
           <p className="sub">
-            Registrul mijloacelor fixe · {assets.length === 1 ? "1 activ" : `${assets.length} active`} · amortizare liniară
+            {t("assets.sub.prefix")} · {t("assets.sub.count", { count: assets.length })} · {t("assets.sub.suffix")}
           </p>
         </div>
         <div className="head-actions">
           <button className="pill-btn" onClick={() => setModal("create")}>
-            <Ic name="plus" />Mijloc fix nou
+            <Ic name="plus" />{t("assets.head.newAsset")}
           </button>
           <button className="btn-dark spin-btn" onClick={() => setAmortOpen(true)}>
-            <Ic name="sync" />Rulează amortizarea — {monthLabel}
+            <Ic name="sync" />{t("assets.head.runDepreciation", { month: monthLabel })}
           </button>
         </div>
       </div>
@@ -291,24 +292,24 @@ export function AssetsPage() {
       {/* summary cards (estimare liniară client-side) */}
       <div className="sum-row">
         <div className="sum">
-          <div className="l">Valoare de inventar</div>
+          <div className="l">{t("assets.sum.inventoryValue")}</div>
           <div className="v num">{fmtRON(sumCost)} RON</div>
-          <div className="d">{activeOnes.length === 1 ? "1 activ în funcțiune" : `${activeOnes.length} active în funcțiune`}</div>
+          <div className="d">{t("assets.sum.inService", { count: activeOnes.length })}</div>
         </div>
         <div className="sum">
-          <div className="l">Amortizare cumulată</div>
+          <div className="l">{t("assets.sum.accumulated")}</div>
           <div className="v num">{fmtRON(sumAccum)} RON</div>
-          <div className="d">cont 281x · estimat liniar</div>
+          <div className="d">{t("assets.sum.accumulatedDesc")}</div>
         </div>
         <div className="sum">
-          <div className="l">Valoare rămasă</div>
+          <div className="l">{t("assets.sum.remaining")}</div>
           <div className="v num">{fmtRON(sumCost - sumAccum)} RON</div>
-          <div className="d">net contabil</div>
+          <div className="d">{t("assets.sum.remainingDesc")}</div>
         </div>
         <div className="sum">
-          <div className="l">Amortizare lunară</div>
+          <div className="l">{t("assets.sum.monthly")}</div>
           <div className="v num">{fmtRON(sumMonthly)} RON</div>
-          <div className="d">notă 6811 = 281x</div>
+          <div className="d">{t("assets.sum.monthlyDesc")}</div>
         </div>
       </div>
 
@@ -331,7 +332,7 @@ export function AssetsPage() {
             <Ic name="lens" />
             <input
               type="text"
-              placeholder="Caută activ…"
+              placeholder={t("assets.search")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -340,24 +341,24 @@ export function AssetsPage() {
 
         {assets.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-            Niciun mijloc fix. Adăugați mijloace fixe cu butonul „Mijloc fix nou” pentru a calcula amortizarea.
+            {t("assets.states.empty")}
           </div>
         ) : list.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-            Nicio înregistrare pentru filtrele aplicate.
+            {t("assets.states.emptyFiltered")}
           </div>
         ) : (
           <table className="scr-table">
             <thead>
               <tr>
-                <th>Cod</th>
-                <th>Descriere</th>
-                <th>Cont</th>
-                <th>PIF</th>
-                <th className="r">Cost</th>
-                <th className="r">Durată (luni)</th>
-                <th className="r">Amortizat</th>
-                <th className="r">Rămas</th>
+                <th>{t("assets.table.code")}</th>
+                <th>{t("assets.table.description")}</th>
+                <th>{t("assets.table.account")}</th>
+                <th>{t("assets.table.pif")}</th>
+                <th className="r">{t("assets.table.cost")}</th>
+                <th className="r">{t("assets.table.lifeMonths")}</th>
+                <th className="r">{t("assets.table.amortized")}</th>
+                <th className="r">{t("assets.table.remaining")}</th>
                 <th className="r" style={{ width: 64 }}></th>
               </tr>
             </thead>
@@ -367,14 +368,14 @@ export function AssetsPage() {
                   {
                     key: "history",
                     icon: <Ic name="eye" />,
-                    label: "Istoric amortizare",
+                    label: t("assets.row.history"),
                     // propunere — neimplementat (nu există API de istoric per activ)
-                    action: () => { notify.info("În curând."); setMenuFor(null); setMenuAnchor(null); },
+                    action: () => { notify.info(t("assets.soon")); setMenuFor(null); setMenuAnchor(null); },
                   },
                   {
                     key: "edit",
                     icon: <Ic name="pen" />,
-                    label: "Editează",
+                    label: t("assets.row.edit"),
                     action: () => { setModal({ edit: a }); setMenuFor(null); setMenuAnchor(null); },
                   },
                 ];
@@ -383,7 +384,7 @@ export function AssetsPage() {
                   dangerItems.push({
                     key: "dispose",
                     icon: <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SLASH_PATH }} />,
-                    label: "Scoate din funcțiune (6583)",
+                    label: t("assets.row.dispose"),
                     danger: true,
                     action: () => { setDisposing(a); setMenuFor(null); setMenuAnchor(null); },
                   });
@@ -391,12 +392,12 @@ export function AssetsPage() {
                 dangerItems.push({
                   key: "delete",
                   icon: <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: TRASH_PATH }} />,
-                  label: "Șterge",
+                  label: t("assets.row.delete"),
                   danger: true,
                   action: () => {
                     setMenuFor(null); setMenuAnchor(null);
                     void (async () => {
-                      if (await confirm(`Ștergeți mijlocul fix "${a.description}"?`, { kind: "warning" })) del.mutate(a.id);
+                      if (await confirm(t("assets.confirm.deleteMsg", { name: a.description }), { kind: "warning" })) del.mutate(a.id);
                     })();
                   },
                 });
@@ -406,20 +407,20 @@ export function AssetsPage() {
                     <td>
                       {a.description}
                       {!a.active && (
-                        <span className="chip sent" style={{ marginLeft: 6 }}>Scos din funcțiune · 6583</span>
+                        <span className="chip sent" style={{ marginLeft: 6 }}>{t("assets.row.disposedChip")}</span>
                       )}
                     </td>
                     <td><span className="doc">{a.accountId}</span></td>
                     <td className="num">{fmtRoDate(a.startUpDate || a.dateOfAcquisition)}</td>
                     <td className="r num">{fmtRON(est.cost)}</td>
-                    <td className="r num">{a.lifeMonths} luni</td>
+                    <td className="r num">{t("assets.months", { count: a.lifeMonths })}</td>
                     <td className="r num">{fmtRON(est.accumulated)}</td>
                     <td className="r num">{fmtRON(est.remaining)}</td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <div className="row-acts">
                         <button
                           className="mini-btn"
-                          title="Acțiuni"
+                          title={t("assets.row.actions")}
                           onClick={(e) => {
                             if (menuFor === a.id) { setMenuFor(null); setMenuAnchor(null); }
                             else { setMenuAnchor(e.currentTarget.getBoundingClientRect()); setMenuFor(a.id); }
@@ -444,7 +445,7 @@ export function AssetsPage() {
         )}
         {list.length > MAX_ROWS && (
           <div className="tot-foot">
-            <span className="muted">afișate primele {MAX_ROWS.toLocaleString("ro-RO")} din {list.length.toLocaleString("ro-RO")}</span>
+            <span className="muted">{t("assets.footer.showingFirst", { max: MAX_ROWS.toLocaleString(i18n.language), total: list.length.toLocaleString(i18n.language) })}</span>
           </div>
         )}
       </div>
@@ -452,24 +453,24 @@ export function AssetsPage() {
       {/* rulare amortizare — stare per activ */}
       <div className="scr-card">
         <div className="scr-toolbar">
-          <div className="tt">Rulare amortizare — stare per activ ({runLabel})</div>
-          <span className="chip sent">notă 6811 = 281x · liniară</span>
+          <div className="tt">{t("assets.run.title", { period: runLabel })}</div>
+          <span className="chip sent">{t("assets.run.chip")}</span>
           <div className="spacer" />
           {/* propunere — neimplementat (nu există export pentru rularea de amortizare) */}
-          <button className="pill-btn" onClick={() => notify.info("În curând.")}>
-            <Ic name="dl" />Export
+          <button className="pill-btn" onClick={() => notify.info(t("assets.soon"))}>
+            <Ic name="dl" />{t("assets.run.export")}
           </button>
         </div>
         {run && run.states.length > 0 ? (
           <table className="scr-table">
             <thead>
               <tr>
-                <th>Cod</th>
-                <th>Descriere</th>
-                <th className="r">Amortizare lună</th>
-                <th className="r">Cumulat</th>
-                <th className="r">Valoare rămasă</th>
-                <th>Notă</th>
+                <th>{t("assets.run.table.code")}</th>
+                <th>{t("assets.run.table.description")}</th>
+                <th className="r">{t("assets.run.table.monthCharge")}</th>
+                <th className="r">{t("assets.run.table.accumulated")}</th>
+                <th className="r">{t("assets.run.table.remaining")}</th>
+                <th>{t("assets.run.table.entry")}</th>
               </tr>
             </thead>
             <tbody>
@@ -484,15 +485,15 @@ export function AssetsPage() {
                 </tr>
               ))}
               <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
-                <td colSpan={2}>Total amortizare {runLabel}</td>
+                <td colSpan={2}>{t("assets.run.total", { period: runLabel })}</td>
                 <td className="r num">{fmtRON(run.totalAmount)}</td>
                 <td className="r num">{fmtRON(runAccumTotal)}</td>
                 <td className="r num">{fmtRON(runRemainTotal)}</td>
                 <td>
                   {run.posted ? (
-                    <span className="chip paid"><Ic name="check" cls="sic" />Postată</span>
+                    <span className="chip paid"><Ic name="check" cls="sic" />{t("assets.run.posted")}</span>
                   ) : (
-                    <span className="chip wait"><Ic name="clock" cls="sic" />Nimic de postat</span>
+                    <span className="chip wait"><Ic name="clock" cls="sic" />{t("assets.run.nothingToPost")}</span>
                   )}
                 </td>
               </tr>
@@ -501,8 +502,8 @@ export function AssetsPage() {
         ) : (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
             {run
-              ? "Nimic de amortizat în luna selectată."
-              : "Rulați amortizarea pentru a vedea starea per activ (notele 6811 = 281x)."}
+              ? t("assets.run.emptyRan")
+              : t("assets.run.emptyIdle")}
           </div>
         )}
       </div>
@@ -517,10 +518,9 @@ export function AssetsPage() {
           <div className="modal">
             <div className="modal-head">
               <div>
-                <div className="mt">Rulează amortizarea — {monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1)} {year}</div>
+                <div className="mt">{t("assets.runModal.title", { month: monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1), year })}</div>
                 <div className="ms">
-                  Se generează notele contabile 6811 = 281x pentru toate activele în funcțiune
-                  (OMFP 1802/2014 — amortizarea începe din luna următoare PIF)
+                  {t("assets.runModal.subtitle")}
                 </div>
               </div>
               <button className="modal-x" onClick={() => setAmortOpen(false)}>
@@ -530,15 +530,15 @@ export function AssetsPage() {
             <div className="modal-body">
               <div className="fgrid" style={{ marginBottom: 14 }}>
                 <div className="field">
-                  <label>Luna</label>
+                  <label>{t("assets.runModal.monthLabel")}</label>
                   <select className="select" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
-                    {RO_MONTHS_FULL.map((l, i) => (
-                      <option key={l} value={i + 1}>{l}</option>
+                    {Array.from({ length: 12 }, (_, i) => (
+                      <option key={i + 1} value={i + 1}>{monthName(i + 1, i18n.language)}</option>
                     ))}
                   </select>
                 </div>
                 <div className="field">
-                  <label>Anul</label>
+                  <label>{t("assets.runModal.yearLabel")}</label>
                   <select className="select num" value={year} onChange={(e) => setYear(Number(e.target.value))}>
                     {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => (
                       <option key={y} value={y}>{y}</option>
@@ -548,12 +548,12 @@ export function AssetsPage() {
               </div>
               {previewRows.length === 0 ? (
                 <div style={{ padding: "24px 0", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-                  Niciun activ de amortizat în luna selectată (estimare).
+                  {t("assets.runModal.emptyPreview")}
                 </div>
               ) : (
                 <table className="scr-table">
                   <thead>
-                    <tr><th>Activ</th><th>Notă</th><th className="r">Suma</th></tr>
+                    <tr><th>{t("assets.runModal.table.asset")}</th><th>{t("assets.runModal.table.entry")}</th><th className="r">{t("assets.runModal.table.amount")}</th></tr>
                   </thead>
                   <tbody>
                     {previewRows.map(({ asset: a, monthly }) => (
@@ -564,7 +564,7 @@ export function AssetsPage() {
                       </tr>
                     ))}
                     <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
-                      <td colSpan={2}>Total amortizare {monthLabel}</td>
+                      <td colSpan={2}>{t("assets.runModal.total", { month: monthLabel })}</td>
                       <td className="r num">{fmtRON(previewTotal)}</td>
                     </tr>
                   </tbody>
@@ -572,8 +572,8 @@ export function AssetsPage() {
               )}
             </div>
             <div className="modal-foot">
-              <span className="left">Sumele sunt estimative — nota exactă se calculează la rulare</span>
-              <button className="pill-btn" onClick={() => setAmortOpen(false)}>Renunță</button>
+              <span className="left">{t("assets.runModal.estimateNote")}</span>
+              <button className="pill-btn" onClick={() => setAmortOpen(false)}>{t("assets.runModal.cancel")}</button>
               <button
                 className="btn-dark"
                 disabled={runMut.isPending}
@@ -581,7 +581,7 @@ export function AssetsPage() {
                 onClick={() => runMut.mutate()}
               >
                 <Ic name="check" />
-                {runMut.isPending ? "Calculez…" : "Rulează amortizarea"}
+                {runMut.isPending ? t("assets.runModal.running") : t("assets.runModal.run")}
               </button>
             </div>
           </div>
@@ -623,6 +623,7 @@ function DisposeModal({
   onClose: () => void;
   onConfirm: (date: string) => void;
 }) {
+  const { t } = useTranslation();
   const [date, setDate] = useState(defaultDate);
   const valid = /^\d{4}-\d{2}-\d{2}$/.test(date.trim());
 
@@ -635,9 +636,9 @@ function DisposeModal({
       <div className="modal" style={{ width: 420 }}>
         <div className="modal-head">
           <div>
-            <div className="mt">Scoatere din funcțiune</div>
+            <div className="mt">{t("assets.disposeModal.title")}</div>
             <div className="ms">
-              {asset.description} ({asset.assetCode}) — notă contabilă 281x + 6583 / 21x
+              {t("assets.disposeModal.subtitle", { desc: asset.description, code: asset.assetCode })}
             </div>
           </div>
           <button className="modal-x" onClick={onClose}>
@@ -646,7 +647,7 @@ function DisposeModal({
         </div>
         <div className="modal-body">
           <div className="field">
-            <label>Data scoaterii din funcțiune (AAAA-LL-ZZ) <span className="req">*</span></label>
+            <label>{t("assets.disposeModal.dateLabel")} <span className="req">*</span></label>
             <input
               className="input num"
               placeholder="2026-06-30"
@@ -657,7 +658,7 @@ function DisposeModal({
           </div>
         </div>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={onClose} disabled={busy}>Anulează</button>
+          <button className="pill-btn" onClick={onClose} disabled={busy}>{t("assets.disposeModal.cancel")}</button>
           <button
             className="btn-dark"
             disabled={busy || !valid}
@@ -665,7 +666,7 @@ function DisposeModal({
             onClick={() => { if (valid) onConfirm(date.trim()); }}
           >
             <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636"/>' }} />
-            {busy ? "Se procesează…" : "Scoate din funcțiune"}
+            {busy ? t("assets.disposeModal.processing") : t("assets.disposeModal.confirm")}
           </button>
         </div>
       </div>
@@ -681,6 +682,7 @@ function AssetModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const isEdit = asset !== null;
   const [form, setForm] = useState({
     assetCode: asset?.assetCode ?? "",
@@ -695,7 +697,7 @@ function AssetModal({
 
   const save = useMutation({
     mutationFn: () => {
-      if (!form.description.trim()) throw new Error("Descrierea e obligatorie.");
+      if (!form.description.trim()) throw new Error(t("assets.modal.descRequired"));
       const input: FixedAssetInput = {
         assetCode: form.assetCode.trim() || "MF",
         description: form.description.trim(),
@@ -709,7 +711,7 @@ function AssetModal({
       return isEdit ? api.assets.update(asset!.id, companyId, input) : api.assets.create(companyId, input);
     },
     onSuccess: onSaved,
-    onError: (e) => setError(formatError(e, "Eroare la salvare.")),
+    onError: (e) => setError(formatError(e, t("assets.notify.saveError"))),
   });
 
   const field = (k: keyof typeof form) => ({
@@ -726,8 +728,8 @@ function AssetModal({
       <div className="modal" style={{ width: 520 }}>
         <div className="modal-head">
           <div>
-            <div className="mt">{isEdit ? `Editează: ${asset.description}` : "Mijloc fix nou"}</div>
-            <div className="ms">Registrul mijloacelor fixe — amortizare liniară (6811 = 281x)</div>
+            <div className="mt">{isEdit ? t("assets.modal.editTitle", { desc: asset.description }) : t("assets.modal.newTitle")}</div>
+            <div className="ms">{t("assets.modal.subtitle")}</div>
           </div>
           <button className="modal-x" onClick={onClose}>
             <Ic name="xMark" />
@@ -736,31 +738,31 @@ function AssetModal({
         <div className="modal-body">
           <div className="fgrid">
             <div className="field span2">
-              <label>Descriere <span className="req">*</span></label>
+              <label>{t("assets.modal.descLabel")} <span className="req">*</span></label>
               <input className="input" placeholder="Laptop Dell" {...field("description")} autoFocus />
             </div>
             <div className="field">
-              <label>Cod</label>
+              <label>{t("assets.modal.codeLabel")}</label>
               <input className="input num" placeholder="MF-001" {...field("assetCode")} />
             </div>
             <div className="field">
-              <label>Cont (21x)</label>
+              <label>{t("assets.modal.accountLabel")}</label>
               <input className="input num" placeholder="213" {...field("accountId")} />
             </div>
             <div className="field">
-              <label>Data achiziției</label>
+              <label>{t("assets.modal.acqDateLabel")}</label>
               <input className="input num" type="date" {...field("dateOfAcquisition")} />
             </div>
             <div className="field">
-              <label>Data punerii în funcțiune (PIF)</label>
+              <label>{t("assets.modal.pifLabel")}</label>
               <input className="input num" type="date" {...field("startUpDate")} />
             </div>
             <div className="field">
-              <label>Cost (lei)</label>
+              <label>{t("assets.modal.costLabel")}</label>
               <input className="input num" inputMode="decimal" placeholder="5000" {...field("acquisitionCost")} />
             </div>
             <div className="field">
-              <label>Durată (luni)</label>
+              <label>{t("assets.modal.lifeLabel")}</label>
               <input className="input num" inputMode="numeric" placeholder="36" {...field("lifeMonths")} />
             </div>
             {error && (
@@ -769,7 +771,7 @@ function AssetModal({
           </div>
         </div>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={onClose} disabled={save.isPending}>Anulează</button>
+          <button className="pill-btn" onClick={onClose} disabled={save.isPending}>{t("assets.modal.cancel")}</button>
           <button
             className="btn-dark"
             disabled={save.isPending}
@@ -777,7 +779,7 @@ function AssetModal({
             onClick={() => save.mutate()}
           >
             <Ic name="check" />
-            {save.isPending ? "Se salvează…" : isEdit ? "Salvează" : "Adaugă"}
+            {save.isPending ? t("assets.modal.saving") : isEdit ? t("assets.modal.save") : t("assets.modal.add")}
           </button>
         </div>
       </div>

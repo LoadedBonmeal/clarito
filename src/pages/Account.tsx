@@ -17,6 +17,7 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -32,13 +33,6 @@ const RO_MON = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "
 const fmtRoUnix = (ts: number): string => {
   const d = new Date(ts * 1000);
   return `${String(d.getDate()).padStart(2, "0")} ${RO_MON[d.getMonth()]} ${d.getFullYear()}`;
-};
-
-const TIER_NAMES: Record<LicenseTier, string> = {
-  TRIAL: "Probă",
-  SOLO: "Solo",
-  ACCOUNTANT: "Contabil",
-  FIRM: "Firmă",
 };
 
 const TIER_LIMITS: Record<LicenseTier, number> = {
@@ -64,6 +58,7 @@ function maskKey(key: string | null): string {
 // ── AccountPage ───────────────────────────────────────────────────────────────
 
 export function AccountPage() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
 
@@ -106,13 +101,13 @@ export function AccountPage() {
       setKeyInput("");
       setEmailInput("");
       setActivateError(null);
-      notify.success("Licența a fost activată cu succes.");
+      notify.success(t("account.notify.activated"));
     },
-    onError: (e) => setActivateError(formatError(e, "Licența nu a putut fi activată.")),
+    onError: (e) => setActivateError(formatError(e, t("account.notify.activateError"))),
   });
 
   const tier = license?.tier ?? null;
-  const tierName = tier ? (TIER_NAMES[tier] ?? tier) : null;
+  const tierName = tier ? t(`account.tier.${tier}`) : null;
   const tierLimit = tier ? (TIER_LIMITS[tier] ?? Infinity) : null;
 
   // Status — checkLicenseValidity is authoritative; fallback to isExpired while loading.
@@ -136,68 +131,74 @@ export function AccountPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Cont &amp; Licență</h1>
+          <h1>{t("account.title")}</h1>
           <p className="sub">
             {licenseLoading
-              ? "Se încarcă…"
+              ? t("account.sub.loading")
               : license
-                ? `${license.email ?? "fără email asociat"} · planul ${tierName} permite ${limit === Infinity ? "companii nelimitate" : limit === 1 ? "1 companie" : `${limit} companii`}`
-                : "Nicio licență activă — porniți perioada de probă sau activați o cheie"}
+                ? `${license.email ?? t("account.sub.noEmail")} · ${t("account.sub.planAllows", {
+                    tier: tierName,
+                    limit:
+                      limit === Infinity
+                        ? t("account.limit.unlimited")
+                        : t("account.limit.companies", { count: limit }),
+                  })}`
+                : t("account.sub.noLicense")}
           </p>
         </div>
       </div>
 
       {licenseError && (
-        <QueryErrorBanner error={licenseErr} label="licența" onRetry={() => void refetchLicense()} />
+        <QueryErrorBanner error={licenseErr} label={t("account.errorLabel")} onRetry={() => void refetchLicense()} />
       )}
 
       {/* licența ta */}
       <div className="scr-card" style={{ marginBottom: 14 }}>
         <div className="scr-toolbar">
-          <div className="tt">Licența ta</div>
+          <div className="tt">{t("account.license.title")}</div>
           <div className="spacer" />
           {license && (
             active ? (
               <span className="chip paid">
                 <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_CHECK_CIRCLE }} />
-                Activă
+                {t("account.license.active")}
               </span>
             ) : (
-              <span className="chip late"><Ic name="xMark" cls="sic" />Expirată</span>
+              <span className="chip late"><Ic name="xMark" cls="sic" />{t("account.license.expired")}</span>
             )
           )}
         </div>
         <div className="card-pad">
           {licenseLoading ? (
-            <div style={{ fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+            <div style={{ fontSize: 13, color: "var(--text-2)" }}>{t("account.license.loading")}</div>
           ) : !license ? (
             <div style={{ padding: "28px 0", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-              Nicio licență pe acest dispozitiv. Activați o cheie mai jos sau porniți perioada de probă din meniul Ajutor.
+              {t("account.license.none")}
             </div>
           ) : (
             <dl className="kv" style={{ margin: 0 }}>
-              <dt>Plan</dt>
+              <dt>{t("account.license.plan")}</dt>
               <dd>
                 <span className="chip sent">
                   <Ic name="idcard" cls="sic" />
                   {tierName}
                 </span>
               </dd>
-              <dt>Cheie licență</dt>
+              <dt>{t("account.license.key")}</dt>
               <dd><span className="doc num">{maskKey(license.licenseKey)}</span></dd>
-              <dt>Email</dt>
+              <dt>{t("account.license.email")}</dt>
               <dd>{license.email ?? "—"}</dd>
-              <dt>{license.isExpired ? "A expirat la" : "Expiră la"}</dt>
+              <dt>{license.isExpired ? t("account.license.expiredAt") : t("account.license.expiresAt")}</dt>
               <dd>
                 <span className="num">{fmtRoUnix(license.expiresAt)}</span>
                 {!license.isExpired && daysLeft !== null && license.tier === "TRIAL" && (
                   <span className="muted" style={{ marginLeft: 8 }}>
-                    · {license.trialDaysRemaining ?? daysLeft} zile rămase din perioada de probă
+                    · {t("account.license.trialDaysLeft", { count: license.trialDaysRemaining ?? daysLeft })}
                   </span>
                 )}
               </dd>
-              <dt>Dispozitiv</dt>
-              <dd className="muted">legată de acest dispozitiv</dd>
+              <dt>{t("account.license.device")}</dt>
+              <dd className="muted">{t("account.license.boundToDevice")}</dd>
             </dl>
           )}
         </div>
@@ -206,10 +207,10 @@ export function AccountPage() {
       {/* companii permise */}
       <div className="scr-card" style={{ marginBottom: 14 }}>
         <div className="scr-toolbar">
-          <div className="tt">Companii permise</div>
+          <div className="tt">{t("account.companies.title")}</div>
           <div className="spacer" />
           <span className="muted num" style={{ fontSize: 12.5 }}>
-            {used} / {limit === Infinity ? "nelimitat" : limit}
+            {used} / {limit === Infinity ? t("account.companies.unlimited") : limit}
           </span>
         </div>
         <div className="card-pad" style={{ paddingTop: 12, paddingBottom: 12 }}>
@@ -218,26 +219,29 @@ export function AccountPage() {
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 7, fontSize: 11.5, color: "var(--dim)" }}>
             <span className="num">
-              {used === 1 ? "1 companie administrată" : `${used} companii administrate`}
+              {t("account.companies.managed", { count: used })}
             </span>
             <span>
               {limit === Infinity
-                ? "planul Firmă permite companii nelimitate"
-                : `planul ${tierName ?? "—"} permite ${limit === 1 ? "1 companie" : `${limit} companii`}`}
+                ? t("account.companies.planUnlimited")
+                : t("account.sub.planAllows", {
+                    tier: tierName ?? "—",
+                    limit: t("account.limit.companies", { count: limit }),
+                  })}
             </span>
           </div>
         </div>
         {companies.length === 0 ? (
           <div style={{ padding: "28px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)", borderTop: "1px solid var(--line)" }}>
-            Nicio companie administrată încă.
+            {t("account.companies.empty")}
           </div>
         ) : (
           <table className="scr-table">
             <thead>
               <tr>
-                <th>Denumire</th>
-                <th>CUI</th>
-                <th style={{ textAlign: "center" }}>Activă</th>
+                <th>{t("account.companies.table.name")}</th>
+                <th>{t("account.companies.table.cui")}</th>
+                <th style={{ textAlign: "center" }}>{t("account.companies.table.active")}</th>
               </tr>
             </thead>
             <tbody>
@@ -261,10 +265,10 @@ export function AccountPage() {
                       {isActive ? (
                         <span className="chip paid">
                           <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_CHECK_CIRCLE }} />
-                          Activă
+                          {t("account.companies.chipActive")}
                         </span>
                       ) : (
-                        <span className="chip sent">Inactivă</span>
+                        <span className="chip sent">{t("account.companies.chipInactive")}</span>
                       )}
                     </td>
                   </tr>
@@ -278,11 +282,11 @@ export function AccountPage() {
       {/* activează o licență — vizibil când trial / expirat / fără licență */}
       {showActivate && (
         <div className="scr-card" style={{ marginBottom: 14 }}>
-          <div className="scr-toolbar"><div className="tt">Activează o licență</div></div>
+          <div className="scr-toolbar"><div className="tt">{t("account.activate.title")}</div></div>
           <div className="card-pad">
             <div className="fgrid">
               <div className="field">
-                <label>Cheie licență <span className="req">*</span></label>
+                <label>{t("account.activate.keyLabel")} <span className="req">*</span></label>
                 <input
                   className="input num"
                   placeholder="XXXX-XXXX-XXXX-XXXX"
@@ -294,11 +298,11 @@ export function AccountPage() {
                 />
               </div>
               <div className="field">
-                <label>Email achiziție <span className="req">*</span></label>
+                <label>{t("account.activate.emailLabel")} <span className="req">*</span></label>
                 <input
                   className="input"
                   type="email"
-                  placeholder="nume@firma.ro"
+                  placeholder={t("account.activate.emailPlaceholder")}
                   value={emailInput}
                   onChange={(e) => setEmailInput(e.target.value)}
                 />
@@ -317,13 +321,13 @@ export function AccountPage() {
                 disabled={activateMutation.isPending}
                 onClick={() => {
                   setActivateError(null);
-                  if (!keyInput.trim()) { setActivateError("Introduceți cheia de licență."); return; }
-                  if (!emailInput.trim()) { setActivateError("Introduceți emailul de achiziție."); return; }
+                  if (!keyInput.trim()) { setActivateError(t("account.activate.keyRequired")); return; }
+                  if (!emailInput.trim()) { setActivateError(t("account.activate.emailRequired")); return; }
                   activateMutation.mutate();
                 }}
               >
                 <Ic name="check" />
-                {activateMutation.isPending ? "Se activează…" : "Activează"}
+                {activateMutation.isPending ? t("account.activate.activating") : t("account.activate.activateBtn")}
               </button>
             </div>
           </div>
@@ -334,8 +338,8 @@ export function AccountPage() {
       <div className="banner">
         <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_INFO_CIRCLE }} />
         <span>
-          Limitele depind de plan: <b>Probă</b> 3 companii · <b>Solo</b> 1 companie ·{" "}
-          <b>Contabil</b> 15 companii · <b>Firmă</b> nelimitat. Pentru upgrade scrieți-ne la{" "}
+          {t("account.plansBanner.intro")} <b>{t("account.tier.TRIAL")}</b> {t("account.plansBanner.trialLimit")} · <b>{t("account.tier.SOLO")}</b> {t("account.plansBanner.soloLimit")} ·{" "}
+          <b>{t("account.tier.ACCOUNTANT")}</b> {t("account.plansBanner.accountantLimit")} · <b>{t("account.tier.FIRM")}</b> {t("account.plansBanner.firmLimit")}. {t("account.plansBanner.upgrade")}{" "}
           <b>support@efactura.ro</b>.
         </span>
       </div>
@@ -344,9 +348,9 @@ export function AccountPage() {
       <div className="scr-card">
         <div className="set-row">
           <div>
-            <div className="s1">Versiune aplicație</div>
+            <div className="s1">{t("account.version.title")}</div>
             <div className="s2 num">
-              {appInfo ? `${appInfo.name} v${appInfo.version}` : "Se încarcă…"}
+              {appInfo ? `${appInfo.name} v${appInfo.version}` : t("account.version.loading")}
             </div>
           </div>
         </div>

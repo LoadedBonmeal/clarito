@@ -16,6 +16,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm } from "@tauri-apps/plugin-dialog";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -32,6 +33,7 @@ const SVG_WARN =
   '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>';
 
 export function VatRatesPage() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [modal, setModal] = useState<"create" | { edit: VatRate } | null>(null);
 
@@ -61,10 +63,10 @@ export function VatRatesPage() {
     mutationFn: (id: string) => api.vatRates.delete(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.vatRates.all });
-      notify.success("Cotă TVA ștearsă.");
+      notify.success(t("vatRates.notify.deleted"));
     },
     onError: (e) =>
-      notify.error(formatError(e, "Nu s-a putut șterge cota TVA.")),
+      notify.error(formatError(e, t("vatRates.notify.deleteError"))),
   });
 
   const toggleActiveMutation = useMutation({
@@ -74,13 +76,13 @@ export function VatRatesPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.vatRates.all });
     },
     onError: (e) =>
-      notify.error(formatError(e, "Nu s-a putut modifica starea cotei.")),
+      notify.error(formatError(e, t("vatRates.notify.toggleError"))),
   });
 
   const handleDelete = async (r: VatRate) => {
     const ok = await confirm(
-      `Șterge cota "${r.label} (${r.rate}%)"? Această acțiune nu poate fi anulată.`,
-      { title: "Confirmare ștergere", kind: "warning" },
+      t("vatRates.confirm.deleteMsg", { label: r.label, rate: r.rate }),
+      { title: t("vatRates.confirm.deleteTitle"), kind: "warning" },
     );
     if (!ok) return;
     deleteMutation.mutate(r.id);
@@ -96,22 +98,22 @@ export function VatRatesPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Cote TVA</h1>
+          <h1>{t("vatRates.title")}</h1>
           <p className="sub">
-            Catalog național, comun tuturor companiilor · cotele se aleg pe linia de factură
-            {allRates.length > 0 ? ` · ${allRates.length} cote (${activeCount} active)` : ""}
+            {t("vatRates.sub")}
+            {allRates.length > 0 ? t("vatRates.subCounts", { n: allRates.length, a: activeCount }) : ""}
           </p>
         </div>
         <div className="head-actions">
           <button
             className="sq-btn spin-btn"
-            title="Reîmprospătează"
+            title={t("vatRates.refresh")}
             onClick={() => void refetch()}
           >
             <Ic name="sync" />
           </button>
           <button className="btn-dark" onClick={() => setModal("create")}>
-            <Ic name="plus" />Cotă nouă
+            <Ic name="plus" />{t("vatRates.newRate")}
           </button>
         </div>
       </div>
@@ -120,34 +122,34 @@ export function VatRatesPage() {
       <div className="banner">
         <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_INFO }} />
         <span>
-          <b>Legea 141/2025:</b> cotele 19% / 9% / 5% se aplică până la <b>31 iul 2025</b>;
-          de la <b>01 aug 2025</b> cotele standard sunt <b>21% / 11%</b>. Aplicația
-          avertizează automat când cota aleasă nu corespunde datei de emitere a facturii.
+          <b>{t("vatRates.lawBanner.title")}</b> {t("vatRates.lawBanner.p1")} <b>{t("vatRates.lawBanner.date1")}</b>
+          {t("vatRates.lawBanner.p2")} <b>{t("vatRates.lawBanner.date2")}</b> {t("vatRates.lawBanner.p3")} <b>{t("vatRates.lawBanner.rates")}</b>
+          {t("vatRates.lawBanner.p4")}
         </span>
       </div>
 
       <div className="scr-card">
         {isLoading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("vatRates.states.loading")}</div>
         ) : isError ? (
           <div style={{ padding: 16 }}>
             <QueryErrorBanner
               error={error}
-              label="cotele TVA"
+              label={t("vatRates.states.errorLabel")}
               onRetry={() => void refetch()}
             />
           </div>
         ) : sortedRates.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-            Nicio cotă TVA. Adăugați prima cotă cu butonul „Cotă nouă”.
+            {t("vatRates.states.empty")}
           </div>
         ) : (
           <table className="scr-table">
             <thead>
               <tr>
-                <th className="r" style={{ width: 90 }}>Cota</th>
-                <th>Etichetă</th>
-                <th style={{ width: 90, textAlign: "center" }}>Activă</th>
+                <th className="r" style={{ width: 90 }}>{t("vatRates.table.rate")}</th>
+                <th>{t("vatRates.table.label")}</th>
+                <th style={{ width: 90, textAlign: "center" }}>{t("vatRates.table.active")}</th>
                 <th className="r" style={{ width: 90 }}></th>
               </tr>
             </thead>
@@ -163,7 +165,7 @@ export function VatRatesPage() {
                       className={`tog${r.active ? " on" : ""}`}
                       role="switch"
                       aria-checked={r.active}
-                      aria-label={r.active ? "Dezactivează cota" : "Activează cota"}
+                      aria-label={r.active ? t("vatRates.row.deactivate") : t("vatRates.row.activate")}
                       tabIndex={0}
                       onClick={() => handleToggleActive(r)}
                       onKeyDown={(e) => {
@@ -178,14 +180,14 @@ export function VatRatesPage() {
                     <div className="row-acts">
                       <button
                         className="mini-btn"
-                        title="Editează"
+                        title={t("vatRates.row.edit")}
                         onClick={() => setModal({ edit: r })}
                       >
                         <Ic name="pen" />
                       </button>
                       <button
                         className="mini-btn"
-                        title="Șterge"
+                        title={t("vatRates.row.delete")}
                         onClick={() => void handleDelete(r)}
                       >
                         <Ic name="xMark" />
@@ -225,6 +227,7 @@ function VatRateModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const isEdit = rate !== null;
 
   const [form, setForm] = useState<VatRateInput>({
@@ -238,20 +241,20 @@ function VatRateModal({
   const create = useMutation({
     mutationFn: (input: VatRateInput) => api.vatRates.create(input),
     onSuccess: () => {
-      notify.success("Cotă TVA adăugată.");
+      notify.success(t("vatRates.notify.created"));
       onSaved();
     },
-    onError: (e) => setError(formatError(e, "Eroare la adăugare.")),
+    onError: (e) => setError(formatError(e, t("vatRates.notify.createError"))),
   });
 
   const updateMut = useMutation({
     mutationFn: (input: UpdateVatRateInput) =>
       api.vatRates.update(rate!.id, input),
     onSuccess: () => {
-      notify.success("Cotă TVA salvată.");
+      notify.success(t("vatRates.notify.saved"));
       onSaved();
     },
-    onError: (e) => setError(formatError(e, "Eroare la salvare.")),
+    onError: (e) => setError(formatError(e, t("vatRates.notify.saveError"))),
   });
 
   const isPending = create.isPending || updateMut.isPending;
@@ -261,16 +264,16 @@ function VatRateModal({
     if (isPending) return;
     setError(null);
     if (!form.rate?.trim()) {
-      setError("Cota TVA este obligatorie.");
+      setError(t("vatRates.modal.rateRequired"));
       return;
     }
     if (!form.label?.trim()) {
-      setError("Eticheta este obligatorie.");
+      setError(t("vatRates.modal.labelRequired"));
       return;
     }
     const parsed = parseFloat(form.rate);
     if (isNaN(parsed) || parsed < 0 || parsed > 100) {
-      setError("Cota TVA trebuie să fie un număr între 0 și 100.");
+      setError(t("vatRates.modal.rateRange"));
       return;
     }
     const payload = {
@@ -292,12 +295,12 @@ function VatRateModal({
       <div className="modal" style={{ width: 440 }}>
         <div className="modal-head">
           <div>
-            <div className="mt">{isEdit ? `Editează: ${rate.label}` : "Cotă TVA nouă"}</div>
+            <div className="mt">{isEdit ? t("vatRates.modal.editTitle", { label: rate.label }) : t("vatRates.modal.newTitle")}</div>
             <div className="ms">
-              Cotele active alimentează lista din editorul de factură.
+              {t("vatRates.modal.subtitle")}
             </div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label="Închide">
+          <button className="modal-x" onClick={onClose} aria-label={t("vatRates.modal.close")}>
             <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="M6 18 18 6M6 6l12 12"/>' }} />
           </button>
         </div>
@@ -305,21 +308,21 @@ function VatRateModal({
           <div className="modal-body">
             <div className="fgrid">
               <div className="field">
-                <label>Cotă TVA % <span className="req">*</span></label>
+                <label>{t("vatRates.modal.rateLabel")} <span className="req">*</span></label>
                 <input
                   className={`input num${error && !form.rate?.trim() ? " invalid" : ""}`}
                   type="number"
                   step="0.01"
                   min="0"
                   max="100"
-                  placeholder="ex. 21"
+                  placeholder={t("vatRates.modal.ratePlaceholder")}
                   value={form.rate}
                   onChange={(e) => setForm((f) => ({ ...f, rate: e.target.value }))}
                   autoFocus
                 />
               </div>
               <div className="field">
-                <label>Ordine afișare</label>
+                <label>{t("vatRates.modal.sortLabel")}</label>
                 <input
                   className="input num"
                   type="number"
@@ -333,10 +336,10 @@ function VatRateModal({
                 />
               </div>
               <div className="field span2">
-                <label>Etichetă <span className="req">*</span></label>
+                <label>{t("vatRates.modal.labelLabel")} <span className="req">*</span></label>
                 <input
                   className={`input${error && !form.label?.trim() ? " invalid" : ""}`}
-                  placeholder="ex. Cota standard (de la 01.08.2025)"
+                  placeholder={t("vatRates.modal.labelPlaceholder")}
                   value={form.label}
                   onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
                 />
@@ -349,9 +352,9 @@ function VatRateModal({
                   type="button"
                   className={`cbx${form.active ? " on" : ""}`}
                   onClick={() => setForm((f) => ({ ...f, active: !f.active }))}
-                  aria-label="Cotă activă"
+                  aria-label={t("vatRates.modal.activeAria")}
                 />
-                Cotă activă (vizibilă în dropdown-ul liniilor de factură)
+                {t("vatRates.modal.activeLabel")}
               </label>
             </div>
             {error && (
@@ -363,11 +366,11 @@ function VatRateModal({
           </div>
           <div className="modal-foot">
             <button type="button" className="pill-btn" onClick={onClose} disabled={isPending}>
-              Anulează
+              {t("vatRates.modal.cancel")}
             </button>
             <button type="submit" className="btn-dark" disabled={isPending}>
               <Ic name="check" />
-              {isPending ? "Se salvează…" : isEdit ? "Salvează" : "Adaugă"}
+              {isPending ? t("vatRates.modal.saving") : isEdit ? t("vatRates.modal.save") : t("vatRates.modal.add")}
             </button>
           </div>
         </form>

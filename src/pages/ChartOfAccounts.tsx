@@ -18,6 +18,8 @@
 import { useEffect, useMemo, useState, Fragment } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm } from "@tauri-apps/plugin-dialog";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -37,21 +39,14 @@ const SVG_WARN = '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.3
 
 // ─── Account classes (label per prototip: "1 · Conturi de capitaluri") ────────
 
-const CLASS_LABELS: Record<number, string> = {
-  1: "1 · Conturi de capitaluri",
-  2: "2 · Conturi de imobilizări",
-  3: "3 · Conturi de stocuri",
-  4: "4 · Conturi de terți",
-  5: "5 · Conturi de trezorerie",
-  6: "6 · Conturi de cheltuieli",
-  7: "7 · Conturi de venituri",
-  8: "8 · Conturi speciale",
-  9: "9 · Conturi interne (gestiune)",
-};
+/** Class label from i18n (accounts.class.1..9), fallback "Clasa N". */
+const classLabel = (t: TFunction, cls: number): string =>
+  cls >= 1 && cls <= 9 ? t(`accounts.class.${cls}`) : t("accounts.class.generic", { n: cls });
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
 export function ChartOfAccountsPage() {
+  const { t, i18n } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const queryClient = useQueryClient();
 
@@ -113,37 +108,37 @@ export function ChartOfAccountsPage() {
   const seedMutation = useMutation({
     mutationFn: () => {
       if (!activeCompanyId)
-        return Promise.reject(new Error("Nicio companie activă."));
+        return Promise.reject(new Error(t("accounts.notify.noActiveCompany")));
       return api.accounts.seedStandard(activeCompanyId);
     },
     onSuccess: (inserted) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.all });
-      notify.success(`${inserted} conturi standard încărcate.`);
+      notify.success(t("accounts.notify.seeded", { count: inserted }));
     },
     onError: (e) =>
-      notify.error(formatError(e, "Eroare la încărcarea planului standard.")),
+      notify.error(formatError(e, t("accounts.notify.seedError"))),
   });
 
   // ── Delete ───────────────────────────────────────────────────────────────────
   const deleteMutation = useMutation({
     mutationFn: (id: string) => {
       if (!activeCompanyId)
-        return Promise.reject(new Error("Nicio companie activă."));
+        return Promise.reject(new Error(t("accounts.notify.noActiveCompany")));
       return api.accounts.delete(id, activeCompanyId);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.all });
-      notify.success("Cont șters.");
+      notify.success(t("accounts.notify.deleted"));
     },
     onError: (e) =>
-      notify.error(formatError(e, "Nu s-a putut șterge contul.")),
+      notify.error(formatError(e, t("accounts.notify.deleteError"))),
   });
 
   const handleDelete = async (a: Account) => {
     if (!activeCompanyId) return;
     const ok = await confirm(
-      `Șterge contul ${a.accountCode} — "${a.accountName}"? Această acțiune nu poate fi anulată.`,
-      { title: "Confirmare ștergere", kind: "warning" },
+      t("accounts.confirm.deleteMsg", { code: a.accountCode, name: a.accountName }),
+      { title: t("accounts.confirm.deleteTitle"), kind: "warning" },
     );
     if (!ok) return;
     deleteMutation.mutate(a.id);
@@ -153,7 +148,7 @@ export function ChartOfAccountsPage() {
   const toggleMutation = useMutation({
     mutationFn: (a: Account) => {
       if (!activeCompanyId)
-        return Promise.reject(new Error("Nicio companie activă."));
+        return Promise.reject(new Error(t("accounts.notify.noActiveCompany")));
       const input: UpdateAccountInput = {
         accountCode: a.accountCode,
         accountName: a.accountName,
@@ -167,15 +162,15 @@ export function ChartOfAccountsPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.all });
     },
     onError: (e) =>
-      notify.error(formatError(e, "Nu s-a putut actualiza contul.")),
+      notify.error(formatError(e, t("accounts.notify.updateError"))),
   });
 
   if (!activeCompanyId) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Plan de conturi</h1></div></div>
+        <div className="page-head"><div><h1>{t("accounts.title")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a vedea planul de conturi.
+          {t("accounts.selectCompany")}
         </div>
       </div>
     );
@@ -186,9 +181,9 @@ export function ChartOfAccountsPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Plan de conturi</h1>
+          <h1>{t("accounts.title")}</h1>
           <p className="sub">
-            Plan de conturi propriu companiei · {list.length.toLocaleString("ro-RO")} conturi · soldurile se consultă în Balanță (Jurnal contabil)
+            {t("accounts.sub", { count: list.length, n: list.length.toLocaleString(i18n.language) })}
           </p>
         </div>
         <div className="head-actions">
@@ -198,10 +193,10 @@ export function ChartOfAccountsPage() {
             onClick={() => seedMutation.mutate()}
           >
             <Ic name="book" />
-            {seedMutation.isPending ? "Se încarcă…" : "Populează planul standard (PCG)"}
+            {seedMutation.isPending ? t("accounts.head.seeding") : t("accounts.head.seedStandard")}
           </button>
           <button className="btn-dark" onClick={() => setModal("create")}>
-            <Ic name="plus" />Cont nou
+            <Ic name="plus" />{t("accounts.head.newAccount")}
           </button>
         </div>
       </div>
@@ -214,13 +209,13 @@ export function ChartOfAccountsPage() {
               className={`tab${filter === "all" ? " active" : ""}`}
               onClick={() => setFilter("all")}
             >
-              Toate<span className="cnt">{allAccounts.length}</span>
+              {t("accounts.tabs.all")}<span className="cnt">{allAccounts.length}</span>
             </div>
             <div
               className={`tab${filter === "active" ? " active" : ""}`}
               onClick={() => setFilter("active")}
             >
-              Active<span className="cnt">{activeCount}</span>
+              {t("accounts.tabs.active")}<span className="cnt">{activeCount}</span>
             </div>
           </div>
           <div className="spacer" />
@@ -228,27 +223,27 @@ export function ChartOfAccountsPage() {
             <Ic name="lens" />
             <input
               type="text"
-              placeholder="Cod sau denumire…"
+              placeholder={t("accounts.search")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          <button className="sq-btn spin-btn" title="Reîmprospătează" onClick={() => void refetch()}>
+          <button className="sq-btn spin-btn" title={t("accounts.refresh")} onClick={() => void refetch()}>
             <Ic name="sync" />
           </button>
         </div>
 
         {/* table */}
         {isLoading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("accounts.states.loading")}</div>
         ) : isError ? (
           <div style={{ padding: 16 }}>
-            <QueryErrorBanner error={error} label="conturile" onRetry={() => void refetch()} />
+            <QueryErrorBanner error={error} label={t("accounts.states.errorLabel")} onRetry={() => void refetch()} />
           </div>
         ) : allAccounts.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
             <div style={{ marginBottom: 12 }}>
-              Niciun cont înregistrat. Puteți adăuga manual sau încărca planul standard român (PCG).
+              {t("accounts.states.empty")}
             </div>
             <button
               className="pill-btn"
@@ -257,23 +252,23 @@ export function ChartOfAccountsPage() {
               onClick={() => seedMutation.mutate()}
             >
               <Ic name="book" />
-              {seedMutation.isPending ? "Se încarcă…" : "Populează planul standard (PCG)"}
+              {seedMutation.isPending ? t("accounts.head.seeding") : t("accounts.head.seedStandard")}
             </button>
           </div>
         ) : list.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-            Niciun rezultat pentru filtrele aplicate.
+            {t("accounts.states.emptyFiltered")}
           </div>
         ) : (
           <>
             <table className="scr-table">
               <thead>
                 <tr>
-                  <th style={{ width: 110 }}>Cod</th>
-                  <th>Denumire</th>
-                  <th style={{ width: 210 }}>Clasa</th>
-                  <th style={{ width: 110 }}>Cont părinte</th>
-                  <th style={{ width: 70, textAlign: "center" }}>Activ</th>
+                  <th style={{ width: 110 }}>{t("accounts.table.code")}</th>
+                  <th>{t("accounts.table.name")}</th>
+                  <th style={{ width: 210 }}>{t("accounts.table.class")}</th>
+                  <th style={{ width: 110 }}>{t("accounts.table.parent")}</th>
+                  <th style={{ width: 70, textAlign: "center" }}>{t("accounts.table.active")}</th>
                   <th className="r" style={{ width: 90 }}></th>
                 </tr>
               </thead>
@@ -299,8 +294,8 @@ export function ChartOfAccountsPage() {
                             }}
                           >
                             {a.accountClass != null
-                              ? CLASS_LABELS[a.accountClass] ?? `Clasa ${a.accountClass}`
-                              : "Fără clasă"}
+                              ? classLabel(t, a.accountClass)
+                              : t("accounts.class.none")}
                           </td>
                         </tr>
                       )}
@@ -309,7 +304,7 @@ export function ChartOfAccountsPage() {
                         <td>{a.accountName}</td>
                         <td className="muted">
                           {a.accountClass != null
-                            ? CLASS_LABELS[a.accountClass] ?? `Clasa ${a.accountClass}`
+                            ? classLabel(t, a.accountClass)
                             : "—"}
                         </td>
                         <td>{a.parentCode ? <span className="doc">{a.parentCode}</span> : <span className="muted">—</span>}</td>
@@ -318,17 +313,17 @@ export function ChartOfAccountsPage() {
                             className={`tog${a.active ? " on" : ""}`}
                             role="switch"
                             aria-checked={a.active}
-                            title={a.active ? "Dezactivează contul" : "Activează contul"}
+                            title={a.active ? t("accounts.row.deactivate") : t("accounts.row.activate")}
                             style={{ cursor: "pointer", opacity: toggleMutation.isPending ? 0.6 : 1 }}
                             onClick={() => { if (!toggleMutation.isPending) toggleMutation.mutate(a); }}
                           />
                         </td>
                         <td>
                           <div className="row-acts">
-                            <button className="mini-btn" title="Editează" onClick={() => setModal({ edit: a })}>
+                            <button className="mini-btn" title={t("accounts.row.edit")} onClick={() => setModal({ edit: a })}>
                               <Ic name="pen" />
                             </button>
-                            <button className="mini-btn" title="Șterge" onClick={() => void handleDelete(a)}>
+                            <button className="mini-btn" title={t("accounts.row.delete")} onClick={() => void handleDelete(a)}>
                               <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_TRASH }} />
                             </button>
                           </div>
@@ -343,14 +338,14 @@ export function ChartOfAccountsPage() {
             {/* pager */}
             <div className="pager">
               <span>
-                Afișezi <b>{((page - 1) * PAGE_SIZE + 1).toLocaleString("ro-RO")}–{Math.min(page * PAGE_SIZE, list.length).toLocaleString("ro-RO")}</b> din <b>{list.length.toLocaleString("ro-RO")}</b> conturi
+                {t("accounts.pager.showing")} <b>{((page - 1) * PAGE_SIZE + 1).toLocaleString(i18n.language)}–{Math.min(page * PAGE_SIZE, list.length).toLocaleString(i18n.language)}</b> {t("accounts.pager.of")} <b>{list.length.toLocaleString(i18n.language)}</b> {t("accounts.pager.accounts")}
               </span>
               <div className="pg-btns">
                 <button
                   className="pg-btn"
                   disabled={page <= 1}
                   onClick={() => setPageRaw(page - 1)}
-                  aria-label="Pagina anterioară"
+                  aria-label={t("accounts.pager.prevPage")}
                 >
                   <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_CHEV_L }} />
                 </button>
@@ -367,7 +362,7 @@ export function ChartOfAccountsPage() {
                   className="pg-btn"
                   disabled={page >= totalPages}
                   onClick={() => setPageRaw(page + 1)}
-                  aria-label="Pagina următoare"
+                  aria-label={t("accounts.pager.nextPage")}
                 >
                   <Ic name="chevR" />
                 </button>
@@ -406,6 +401,7 @@ function AccountModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const isEdit = account !== null;
 
   const [form, setForm] = useState<AccountInput>({
@@ -420,20 +416,20 @@ function AccountModal({
   const createMut = useMutation({
     mutationFn: (input: AccountInput) => api.accounts.create(companyId, input),
     onSuccess: () => {
-      notify.success("Cont adăugat.");
+      notify.success(t("accounts.notify.created"));
       onSaved();
     },
-    onError: (e) => setError(formatError(e, "Eroare la adăugare.")),
+    onError: (e) => setError(formatError(e, t("accounts.notify.createError"))),
   });
 
   const updateMut = useMutation({
     mutationFn: (input: UpdateAccountInput) =>
       api.accounts.update(account!.id, companyId, input),
     onSuccess: () => {
-      notify.success("Cont salvat.");
+      notify.success(t("accounts.notify.saved"));
       onSaved();
     },
-    onError: (e) => setError(formatError(e, "Eroare la salvare.")),
+    onError: (e) => setError(formatError(e, t("accounts.notify.saveError"))),
   });
 
   const isPending = createMut.isPending || updateMut.isPending;
@@ -443,11 +439,11 @@ function AccountModal({
     if (isPending) return;
     setError(null);
     if (!form.accountCode?.trim()) {
-      setError("Codul de cont este obligatoriu.");
+      setError(t("accounts.modal.codeRequired"));
       return;
     }
     if (!form.accountName?.trim()) {
-      setError("Denumirea este obligatorie.");
+      setError(t("accounts.modal.nameRequired"));
       return;
     }
     const input: AccountInput = {
@@ -474,13 +470,13 @@ function AccountModal({
         <div className="modal-head">
           <div>
             <div className="mt">
-              {isEdit ? `Editează: ${account.accountCode} — ${account.accountName}` : "Cont nou"}
+              {isEdit ? t("accounts.modal.editTitle", { code: account.accountCode, name: account.accountName }) : t("accounts.modal.newTitle")}
             </div>
             <div className="ms">
-              Codurile urmează Planul de Conturi General (OMFP 1802/2014).
+              {t("accounts.modal.subtitle")}
             </div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label="Închide">
+          <button className="modal-x" onClick={onClose} aria-label={t("accounts.modal.close")}>
             <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="M6 18 18 6M6 6l12 12"/>' }} />
           </button>
         </div>
@@ -488,10 +484,10 @@ function AccountModal({
           <div className="modal-body">
             <div className="fgrid">
               <div className="field">
-                <label>Cod cont <span className="req">*</span></label>
+                <label>{t("accounts.modal.codeLabel")} <span className="req">*</span></label>
                 <input
                   className={`input num${error && !form.accountCode?.trim() ? " invalid" : ""}`}
-                  placeholder="ex. 4111"
+                  placeholder={t("accounts.modal.codePlaceholder")}
                   autoFocus
                   value={form.accountCode ?? ""}
                   onChange={(e) => setForm((f) => ({ ...f, accountCode: e.target.value }))}
@@ -504,7 +500,7 @@ function AccountModal({
                 )}
               </div>
               <div className="field">
-                <label>Clasă</label>
+                <label>{t("accounts.modal.classLabel")}</label>
                 <select
                   className="select"
                   value={String(form.accountClass ?? "")}
@@ -515,19 +511,19 @@ function AccountModal({
                     }))
                   }
                 >
-                  <option value="">— fără clasă —</option>
+                  <option value="">{t("accounts.modal.noClassOption")}</option>
                   {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((cls) => (
                     <option key={cls} value={cls}>
-                      {CLASS_LABELS[cls] ?? `Clasa ${cls}`}
+                      {classLabel(t, cls)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="field span2">
-                <label>Denumire <span className="req">*</span></label>
+                <label>{t("accounts.modal.nameLabel")} <span className="req">*</span></label>
                 <input
                   className={`input${error && !form.accountName?.trim() && form.accountCode?.trim() ? " invalid" : ""}`}
-                  placeholder="ex. Clienți"
+                  placeholder={t("accounts.modal.namePlaceholder")}
                   value={form.accountName ?? ""}
                   onChange={(e) => setForm((f) => ({ ...f, accountName: e.target.value }))}
                 />
@@ -539,10 +535,10 @@ function AccountModal({
                 )}
               </div>
               <div className="field">
-                <label>Cont părinte (cod)</label>
+                <label>{t("accounts.modal.parentLabel")}</label>
                 <input
                   className="input num"
-                  placeholder="ex. 411"
+                  placeholder={t("accounts.modal.parentPlaceholder")}
                   value={form.parentCode ?? ""}
                   onChange={(e) => setForm((f) => ({ ...f, parentCode: e.target.value || undefined }))}
                 />
@@ -555,9 +551,9 @@ function AccountModal({
                   type="button"
                   className={`cbx${form.active ? " on" : ""}`}
                   onClick={() => setForm((f) => ({ ...f, active: !f.active }))}
-                  aria-label="Cont activ"
+                  aria-label={t("accounts.modal.activeLabel")}
                 />
-                Cont activ
+                {t("accounts.modal.activeLabel")}
               </label>
             </div>
             {error && form.accountCode?.trim() && form.accountName?.trim() && (
@@ -569,11 +565,11 @@ function AccountModal({
           </div>
           <div className="modal-foot">
             <button type="button" className="pill-btn" onClick={onClose} disabled={isPending}>
-              Anulează
+              {t("accounts.modal.cancel")}
             </button>
             <button type="submit" className="btn-dark" disabled={isPending}>
               <Ic name="check" />
-              {isPending ? "Se salvează…" : isEdit ? "Salvează" : "Adaugă"}
+              {isPending ? t("accounts.modal.saving") : isEdit ? t("accounts.modal.save") : t("accounts.modal.add")}
             </button>
           </div>
         </form>

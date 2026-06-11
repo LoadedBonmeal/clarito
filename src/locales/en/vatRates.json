@@ -1,0 +1,68 @@
+{
+  "vatRates": {
+    "title": "VAT rates",
+    "sub": "National catalog, shared by all companies · rates are chosen on the invoice line",
+    "subCounts": " · {{n}} rates ({{a}} active)",
+    "refresh": "Refresh",
+    "newRate": "New rate",
+    "lawBanner": {
+      "title": "Law 141/2025:",
+      "p1": "the 19% / 9% / 5% rates apply until",
+      "date1": "31 Jul 2025",
+      "p2": "; from",
+      "date2": "01 Aug 2025",
+      "p3": "the standard rates are",
+      "rates": "21% / 11%",
+      "p4": ". The app automatically warns when the chosen rate does not match the invoice issue date."
+    },
+    "states": {
+      "loading": "Loading…",
+      "errorLabel": "VAT rates",
+      "empty": "No VAT rates. Add the first rate using the \"New rate\" button."
+    },
+    "table": {
+      "rate": "Rate",
+      "label": "Label",
+      "active": "Active"
+    },
+    "row": {
+      "deactivate": "Deactivate rate",
+      "activate": "Activate rate",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "confirm": {
+      "deleteTitle": "Confirm deletion",
+      "deleteMsg": "Delete the rate \"{{label}} ({{rate}}%)\"? This action cannot be undone."
+    },
+    "notify": {
+      "deleted": "VAT rate deleted.",
+      "deleteError": "Could not delete the VAT rate.",
+      "toggleError": "Could not change the rate's status.",
+      "created": "VAT rate added.",
+      "saved": "VAT rate saved.",
+      "createError": "Error adding the rate.",
+      "saveError": "Error saving the rate."
+    },
+    "modal": {
+      "editTitle": "Edit: {{label}}",
+      "newTitle": "New VAT rate",
+      "subtitle": "Active rates feed the list in the invoice editor.",
+      "close": "Close",
+      "rateLabel": "VAT rate %",
+      "ratePlaceholder": "e.g. 21",
+      "sortLabel": "Display order",
+      "labelLabel": "Label",
+      "labelPlaceholder": "e.g. Standard rate (from 01.08.2025)",
+      "activeAria": "Active rate",
+      "activeLabel": "Active rate (visible in the invoice line dropdown)",
+      "rateRequired": "The VAT rate is required.",
+      "labelRequired": "The label is required.",
+      "rateRange": "The VAT rate must be a number between 0 and 100.",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save": "Save",
+      "add": "Add"
+    }
+  }
+}

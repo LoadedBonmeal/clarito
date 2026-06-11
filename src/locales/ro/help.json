@@ -1,0 +1,61 @@
+{
+  "help": {
+    "title": "Ajutor & suport",
+    "sub": "Ghiduri, întrebări frecvente, scurtături și contact",
+    "subVersion": " · versiunea {{v}}",
+    "docsBtn": "Documentație e-Factura",
+    "guide": {
+      "title": "Ghid de pornire",
+      "step1": "Configurează firma",
+      "step1Desc": "CUI + ANAF",
+      "step2": "Conectează SPV",
+      "step2Desc": "OAuth + certificat",
+      "step3": "Emite prima factură",
+      "step3Desc": "CIUS-RO",
+      "step4": "Trimite D300",
+      "step4Desc": "scadență 25"
+    },
+    "faq": {
+      "title": "Întrebări frecvente",
+      "search": "Caută în întrebări…",
+      "empty": "Nicio întrebare găsită pentru „{{q}}”.",
+      "q1": "Cum trimit o factură prin e-Factura?",
+      "a1": "Creezi factura, o validezi (CIUS-RO), apoi „Validează și trimite la ANAF”. Recipisa apare în Mesaje SPV și se arhivează automat.",
+      "q2": "De ce ANAF păstrează mesajele doar 60 de zile?",
+      "a2": "SPV șterge mesajele după 60 de zile. Clarito sincronizează și arhivează local, așa că nu pierzi recipise sau notificări.",
+      "q3": "Ce plafoane monitorizează aplicația?",
+      "a3": "Micro 100.000 EUR (curs 5,0985 = 509.850 lei), înregistrare TVA 395.000 lei (art. 310) și TVA la încasare 5.000.000 lei.",
+      "q4": "D112 — modelul nou din iulie 2026?",
+      "a4": "Pentru lunile de raportare ≥ iulie 2026 se folosește modelul OPANAF 605/2026; Clarito comută automat.",
+      "q5": "Cum stornez o factură?",
+      "a5": "Din factura validată → „Storno”, introduci motivul; se creează o notă de credit cu valori negative, trimisă separat la ANAF."
+    },
+    "shortcuts": {
+      "title": "Scurtături",
+      "search": "Căutare",
+      "newInvoice": "Factură nouă",
+      "refresh": "Reîmprospătare",
+      "shortcuts": "Scurtături",
+      "saveDraft": "Salvare ciornă",
+      "send": "Trimite"
+    },
+    "contact": {
+      "title": "Contact suport",
+      "systemOk": "Sistem operațional",
+      "email": "Email",
+      "hours": "Lu–Vi 09:00–18:00",
+      "writeUs": "Scrie-ne",
+      "diagnostic": "Diagnostic",
+      "diagnosticDesc": "trimite un raport tehnic către suport",
+      "preparing": "Se pregătește…",
+      "sendReport": "Trimite raport",
+      "appVersion": "Versiune aplicație"
+    },
+    "notify": {
+      "docsError": "Nu pot deschide documentația e-Factura.",
+      "mailError": "Nu pot deschide clientul de email — scrieți la {{email}}.",
+      "reportReady": "Email pregătit în clientul dvs. de email.",
+      "reportError": "Nu pot deschide clientul de email — trimiteți manual la {{email}}."
+    }
+  }
+}

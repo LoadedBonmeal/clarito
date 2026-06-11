@@ -1,0 +1,235 @@
+{
+  "reports": {
+    "title": "Rapoarte",
+    "noCompany": "Selectați o companie activă pentru a vedea rapoartele.",
+    "subtitle_one": "Sumar TVA · jurnale · exporturi contabile · arhivă — {{count}} factură emisă în {{month}} {{year}}",
+    "subtitle_few": "Sumar TVA · jurnale · exporturi contabile · arhivă — {{count}} facturi emise în {{month}} {{year}}",
+    "subtitle_other": "Sumar TVA · jurnale · exporturi contabile · arhivă — {{count}} de facturi emise în {{month}} {{year}}",
+    "periodLabel": "Perioada: {{month}} {{year}}",
+    "truncated": "Afișate primele {{shown}} din {{total}} facturi — restrânge filtrele pentru a vedea toate înregistrările.",
+    "tabs": {
+      "tva": "Sumar TVA",
+      "etva": "e-TVA",
+      "d390": "D390",
+      "d394": "D394",
+      "d101": "D101",
+      "d100": "D100",
+      "salary": "Salariu (D112)",
+      "saft": "D406 SAF-T",
+      "salesJournal": "Jurnal vânzări",
+      "purchaseJournal": "Jurnal cumpărări",
+      "accountingExport": "Export contabil"
+    },
+    "statuses": {
+      "draft": "Schiță",
+      "queued": "În coadă",
+      "submitted": "Trimisă",
+      "validated": "Validată",
+      "rejected": "Respinsă",
+      "storned": "Stornată"
+    },
+    "cards": {
+      "generate": "Generează →",
+      "docs_one": "{{count}} document",
+      "docs_few": "{{count}} documente",
+      "docs_other": "{{count}} de documente",
+      "salesJournalDesc": "Toate facturile emise pe perioadă, defalcat pe cote TVA — export CSV",
+      "purchaseJournalDesc": "Facturile primite cu TVA deductibilă, doar documente cu defalcare completă",
+      "vatSummaryTitle": "Sumar TVA pe cote",
+      "vatSummaryDesc": "Bază și TVA pe fiecare cotă și categorie (S/AE/E/Z), pentru perioada selectată",
+      "accountingTitle": "Export contabilitate",
+      "accountingDesc": "Note contabile și parteneri pentru import în alt soft de contabilitate",
+      "sagaCsv": "Saga CSV →",
+      "winmentor": "WinMentor →",
+      "xlsxTitle": "Export XLSX general",
+      "xlsxDesc": "Facturi cu net, TVA și total în foaie de calcul, gata de pivot",
+      "download": "Descarcă →",
+      "archiveTitle": "Arhivă facturi XML + PDF",
+      "archiveDesc": "Toate e-Facturile cu recipisele semnate ANAF, organizate pe luni — ZIP",
+      "downloadArchive": "Descarcă arhiva →"
+    },
+    "kpi": {
+      "totalIssued": "Total facturi emise",
+      "totalNet": "Total net (RON)",
+      "totalVat": "Total TVA (RON)",
+      "totalGross": "Total cu TVA (RON)"
+    },
+    "vatTable": {
+      "title": "TVA colectată pe cote — {{month}} {{year}}",
+      "exportCsv": "Export TVA CSV",
+      "empty": "Nicio factură validată în perioada selectată.",
+      "chartTitle": "TVA pe cote"
+    },
+    "table": {
+      "rate": "Cotă",
+      "category": "Categorie",
+      "base": "Bază",
+      "vat": "TVA",
+      "total": "Total",
+      "number": "Număr",
+      "client": "Client",
+      "date": "Data",
+      "status": "Status",
+      "netRon": "Net (RON)",
+      "vatRon": "TVA (RON)",
+      "totalRon": "Total (RON)",
+      "supplier": "Furnizor",
+      "cui": "CUI",
+      "series": "Serie"
+    },
+    "foot": {
+      "totalBase": "Total: bază",
+      "vat": "TVA",
+      "total": "total",
+      "periodNet": "TOTAL perioadă: net"
+    },
+    "invoiceList": {
+      "title": "Facturi emise — {{month}} {{year}}"
+    },
+    "integrity": {
+      "title": "Verificare integritate arhivă",
+      "missingFiles_one": "{{count}} fișier lipsă",
+      "missingFiles_few": "{{count}} fișiere lipsă",
+      "missingFiles_other": "{{count}} de fișiere lipsă",
+      "archiveOk": "Arhivă integră",
+      "recheck": "Rerulează verificarea",
+      "rechecking": "Se verifică…",
+      "checkingArchive": "Se verifică arhiva…",
+      "headers": {
+        "check": "Verificare",
+        "detail": "Detaliu",
+        "result": "Rezultat",
+        "status": "Status"
+      },
+      "archivedDocs": "Documente arhivate",
+      "archivedDesc": "XML e-Factura + PDF + recipise semnate ANAF",
+      "complete": "Complet",
+      "missingCount": "{{n}} lipsă",
+      "missingFilesRow": "Fișiere lipsă",
+      "missingHint": "pot fi redescărcate din SPV (dacă au sub 60 de zile) sau restaurate din backup",
+      "redownload": "Redescarcă din SPV",
+      "underRetention": "Lipsă sub termenul de păstrare",
+      "underRetentionDesc1": "Documente lipsă aflate încă în perioada legală de păstrare de",
+      "years5": "5 ani",
+      "underRetentionDesc2": "— trebuie recuperate obligatoriu",
+      "actionNeeded": "Acțiune necesară",
+      "compliant": "Conform",
+      "retentionTerm": "Termen legal de păstrare",
+      "retentionDesc1": "Documentele se păstrează",
+      "retentionDesc2": "de la sfârșitul exercițiului financiar (L82/1991)"
+    },
+    "errorLabels": {
+      "vatReport": "raportul TVA",
+      "archiveIntegrity": "integritatea arhivei",
+      "yearInvoices": "facturile anului",
+      "periodInvoices": "facturile perioadei",
+      "purchaseJournal": "jurnalul de cumpărări"
+    },
+    "actions": {
+      "exportCsv": "Export CSV",
+      "reparseVat": "Recalculează TVA din XML",
+      "reparsing": "Se recalculează…"
+    },
+    "dialogs": {
+      "saveVat": "Salvează raport TVA",
+      "saveSaga": "Salvează export SAGA",
+      "saveWinmentor": "Salvează export WinMentor",
+      "saveXlsx": "Salvează export XLSX",
+      "saveSalesJournal": "Salvează jurnal vânzări",
+      "savePurchaseJournal": "Salvează jurnal cumpărări",
+      "saveSaftPreview": "Salvează SAF-T D406",
+      "saveSaftOfficial": "Salvează D406 oficial ANAF"
+    },
+    "notify": {
+      "vatSaved": "Raport TVA salvat: {{path}}",
+      "vatExportFailed": "Nu s-a putut exporta raportul TVA.",
+      "sagaSaved": "Export SAGA salvat: {{path}}",
+      "sagaFailed": "Nu s-a putut exporta în SAGA.",
+      "winmentorSaved": "Export WinMentor salvat: {{path}}",
+      "winmentorFailed": "Nu s-a putut exporta în WinMentor.",
+      "exportSaved": "Export salvat: {{path}}",
+      "xlsxFailed": "Nu s-a putut exporta XLSX.",
+      "archiveExported": "Arhivă exportată: {{path}}",
+      "archiveFailed": "Exportul arhivei a eșuat.",
+      "salesJournalSaved": "Jurnal vânzări salvat: {{path}}",
+      "salesJournalFailed": "Nu s-a putut exporta jurnalul de vânzări.",
+      "purchaseJournalSaved": "Jurnal cumpărări salvat: {{path}}",
+      "purchaseJournalFailed": "Nu s-a putut exporta jurnalul de cumpărări.",
+      "invoicesUpdated_one": "{{count}} factură actualizată",
+      "invoicesUpdated_few": "{{count}} facturi actualizate",
+      "invoicesUpdated_other": "{{count}} de facturi actualizate",
+      "reparseFailed": "Nu s-a putut recalcula TVA din XML."
+    },
+    "saft": {
+      "infoTitle": "D406 — SAF-T (Standard Audit File for Tax)",
+      "infoText": "Fișierul standard de audit fiscal (SAF-T) conține datele contabile detaliate solicitate de ANAF: conturi, jurnale, facturi, stocuri și active. Începând cu 2025, depunerea D406 este obligatorie lunar pentru contribuabilii mijlocii și mari.",
+      "banner": "Pentru companiile mici, termenul de depunere D406 a fost amânat. Verificați obligația specifică firmei dvs.",
+      "selectedPeriod": "Perioadă selectată:",
+      "invoicesAvailable_one": "{{count}} factură disponibilă pentru {{year}}",
+      "invoicesAvailable_few": "{{count}} facturi disponibile pentru {{year}}",
+      "invoicesAvailable_other": "{{count}} de facturi disponibile pentru {{year}}",
+      "noInvoices": "nicio factură disponibilă pentru {{year}}",
+      "generateTitle": "Generează SAF-T",
+      "exportFor": "Exportă SAF-T D406 pentru",
+      "previewTitle": "SAF-T D406 preview (facturi emise) pentru {{period}}",
+      "exporting": "Export în curs…",
+      "previewBtn": "Extract SAF-T (preview) {{period}}",
+      "officialTitle": "Export D406 oficial ANAF (schema completă + GL) pentru {{period}}",
+      "exportingOfficial": "Export D406 în curs…",
+      "officialBtn": "Export oficial D406 {{period}}",
+      "notify": {
+        "noDataYear": "Nu există date pentru anul {{year}}.",
+        "saved": "SAF-T D406 salvat: {{path}}",
+        "exportFailed": "Nu s-a putut exporta SAF-T D406.",
+        "officialSavedDuk": "D406 oficial salvat (DUK: valid): {{path}}",
+        "officialSavedNoDuk": "D406 oficial salvat: {{path}} (validare DUK indisponibilă local)",
+        "exportOfficialFailed": "Nu s-a putut exporta D406 oficial."
+      }
+    },
+    "salesJournal": {
+      "title": "Jurnal de vânzări",
+      "empty": "Nicio factură emisă în perioada selectată."
+    },
+    "purchaseJournal": {
+      "title": "Jurnal de cumpărări",
+      "unparsedBanner": "Pentru unele facturi primite, TVA nu a fost încă extrasă din XML. Apăsați «Recalculează TVA din XML» pentru raportare completă."
+    },
+    "accounting": {
+      "saga": {
+        "title": "Export SAGA",
+        "desc1": "Export note contabile compatibil cu",
+        "desc2": "Generează un fișier CSV cu înregistrările contabile ale perioadei. Fișierul include toate liniile de factură cu TVA defalcat.",
+        "btn": "Export SAGA (CSV)"
+      },
+      "winmentor": {
+        "title": "Export WinMentor",
+        "desc1": "Export în format CSV compatibil",
+        "desc2": "pentru import în contabilitatea principală. Coloanele respectă structura de import WinMentor standard.",
+        "btn": "Export WinMentor (CSV)"
+      }
+    },
+    "salary": {
+      "title": "Calculator salariu (nucleul D112)",
+      "banner1": "Ratele 2026:",
+      "cas": "CAS 25%",
+      "cass": "CASS 10%",
+      "tax": "impozit 10%",
+      "cam": "CAM 2,25%",
+      "banner2": "(angajator). Scutirile IT/construcții/agricultură au fost eliminate (OUG 156/2024). Deducerea personală se preia din tabelul ANAF. D112 complet (salariați + export XML) este în lucru.",
+      "grossLabel": "Salariu brut (lei)",
+      "deductionLabel": "Deducere personală (lei)",
+      "rows": {
+        "gross": "Salariu brut",
+        "cas": "CAS (pensie 25%)",
+        "cass": "CASS (sănătate 10%)",
+        "deduction": "Deducere personală",
+        "taxableBase": "Bază impozabilă",
+        "incomeTax": "Impozit pe venit (10%)",
+        "net": "Salariu net",
+        "camEmployer": "CAM angajator (2,25%)",
+        "employerCost": "Cost total angajator"
+      },
+      "computeFailed": "Nu s-a putut calcula salariul."
+    }
+  }
+}

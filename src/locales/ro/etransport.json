@@ -1,0 +1,102 @@
+{
+  "etransport": {
+    "title": "e-Transport (UIT)",
+    "schemaChip": "schema v2",
+    "sub": "Declarații UIT pentru transporturi cu risc fiscal ridicat · RO e-Transport",
+    "selectCompany": "Selectați o companie activă pentru a declara transporturi e-Transport.",
+    "op": {
+      "10": "10 — Achiziție intracomunitară",
+      "12": "12 — Operațiuni în sistem lohn (intrare)",
+      "14": "14 — Stocuri la dispoziția clientului (intrare)",
+      "20": "20 — Livrare intracomunitară",
+      "22": "22 — Operațiuni în sistem lohn (ieșire)",
+      "24": "24 — Stocuri la dispoziția clientului (ieșire)",
+      "30": "30 — Transport pe teritoriul național",
+      "40": "40 — Import",
+      "50": "50 — Export",
+      "60": "60 — Tranzacție intracomunitară (non-transfer)",
+      "70": "70 — Transport în cadrul achiziției intracom."
+    },
+    "docType": {
+      "10": "CMR",
+      "20": "Factură",
+      "30": "Aviz de însoțire",
+      "9999": "Altele"
+    },
+    "infoBanner": {
+      "p1": "Obțineți UIT-ul",
+      "b1": "înainte",
+      "p2": "de începerea transportului (cu cel mult 3 zile înainte); valabil",
+      "b2": "5 zile",
+      "p3": "(15 pentru achiziții intracomunitare). Obligatoriu pentru vehicule",
+      "b3": "≥ 2,5 t",
+      "p4": "cu marfă",
+      "b4": "> 500 kg",
+      "p5": "sau",
+      "b5": "> 10.000 lei",
+      "p6": ", plus tot transportul intracomunitar / import / export."
+    },
+    "form": {
+      "title": "Declarație UIT",
+      "declarant": "Declarant (CUI)",
+      "opType": "Tip operațiune",
+      "goods": "Bunuri transportate",
+      "add": "Adaugă",
+      "goodName": "Denumire marfă",
+      "ncCode": "Cod NC",
+      "quantity": "Cantitate",
+      "unit": "UM (KGM)",
+      "grossWeight": "Greut. brută (kg)",
+      "remove": "Șterge",
+      "partner": "Partener",
+      "partnerName": "Denumire",
+      "partnerCountry": "Țară (ISO-2)",
+      "partnerCode": "Cod partener",
+      "transport": "Transport",
+      "vehicle": "Nr. vehicul",
+      "transportDate": "Data transport",
+      "startCounty": "Județ plecare (cod)",
+      "startCity": "Localitate plecare",
+      "endCounty": "Județ sosire (cod)",
+      "endCity": "Localitate sosire",
+      "documents": "Documente transport",
+      "docNumber": "Număr",
+      "docDate": "Data",
+      "validate": "Validează",
+      "generateXml": "Generează XML",
+      "sending": "Se trimite…",
+      "sendAnaf": "Trimite la ANAF"
+    },
+    "uitBanner": {
+      "label": "UIT:",
+      "index": "· index încărcare",
+      "print": "— tipăriți codul pe documentul de transport."
+    },
+    "registry": {
+      "title": "Declarații transmise (evidența UIT)",
+      "validityNote": "UIT valabil 5 zile (național) / 15 zile (intracomunitar / import-export)",
+      "empty": "Nicio declarație transmisă încă. UIT-urile obținute apar aici.",
+      "table": {
+        "uit": "UIT",
+        "operation": "Operațiune",
+        "partner": "Partener",
+        "vehicle": "Vehicul",
+        "submitted": "Transmis",
+        "expires": "Expiră",
+        "status": "Status"
+      },
+      "chipExpired": "Expirat",
+      "chipExpiring": "Expiră în 24h",
+      "chipValid": "Valabil"
+    },
+    "notify": {
+      "valid": "Declarație validă.",
+      "validateError": "Validare eșuată.",
+      "xmlOk": "XML generat (valid).",
+      "xmlError": "Generare XML eșuată.",
+      "uitObtained": "UIT obținut: {{uit}}",
+      "sent": "Trimis (index {{index}}).",
+      "submitError": "Trimiterea la ANAF a eșuat."
+    }
+  }
+}

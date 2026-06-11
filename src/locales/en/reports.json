@@ -1,0 +1,230 @@
+{
+  "reports": {
+    "title": "Reports",
+    "noCompany": "Select an active company to see the reports.",
+    "subtitle_one": "VAT summary · journals · accounting exports · archive — {{count}} invoice issued in {{month}} {{year}}",
+    "subtitle_other": "VAT summary · journals · accounting exports · archive — {{count}} invoices issued in {{month}} {{year}}",
+    "periodLabel": "Period: {{month}} {{year}}",
+    "truncated": "Showing the first {{shown}} of {{total}} invoices — narrow the filters to see all records.",
+    "tabs": {
+      "tva": "VAT summary",
+      "etva": "e-TVA",
+      "d390": "D390",
+      "d394": "D394",
+      "d101": "D101",
+      "d100": "D100",
+      "salary": "Payroll (D112)",
+      "saft": "D406 SAF-T",
+      "salesJournal": "Sales journal",
+      "purchaseJournal": "Purchase journal",
+      "accountingExport": "Accounting export"
+    },
+    "statuses": {
+      "draft": "Draft",
+      "queued": "Queued",
+      "submitted": "Submitted",
+      "validated": "Validated",
+      "rejected": "Rejected",
+      "storned": "Credited"
+    },
+    "cards": {
+      "generate": "Generate →",
+      "docs_one": "{{count}} document",
+      "docs_other": "{{count}} documents",
+      "salesJournalDesc": "All invoices issued in the period, broken down by VAT rate — CSV export",
+      "purchaseJournalDesc": "Received invoices with deductible VAT, only documents with a complete breakdown",
+      "vatSummaryTitle": "VAT summary by rate",
+      "vatSummaryDesc": "Base and VAT for each rate and category (S/AE/E/Z), for the selected period",
+      "accountingTitle": "Accounting export",
+      "accountingDesc": "Accounting entries and partners for import into another accounting software",
+      "sagaCsv": "Saga CSV →",
+      "winmentor": "WinMentor →",
+      "xlsxTitle": "General XLSX export",
+      "xlsxDesc": "Invoices with net, VAT and total in a spreadsheet, ready to pivot",
+      "download": "Download →",
+      "archiveTitle": "Invoice archive XML + PDF",
+      "archiveDesc": "All e-Invoices with the ANAF-signed receipts, organized by month — ZIP",
+      "downloadArchive": "Download archive →"
+    },
+    "kpi": {
+      "totalIssued": "Total invoices issued",
+      "totalNet": "Total net (RON)",
+      "totalVat": "Total VAT (RON)",
+      "totalGross": "Total with VAT (RON)"
+    },
+    "vatTable": {
+      "title": "VAT collected by rate — {{month}} {{year}}",
+      "exportCsv": "Export VAT CSV",
+      "empty": "No validated invoice in the selected period.",
+      "chartTitle": "VAT by rate"
+    },
+    "table": {
+      "rate": "Rate",
+      "category": "Category",
+      "base": "Base",
+      "vat": "VAT",
+      "total": "Total",
+      "number": "Number",
+      "client": "Client",
+      "date": "Date",
+      "status": "Status",
+      "netRon": "Net (RON)",
+      "vatRon": "VAT (RON)",
+      "totalRon": "Total (RON)",
+      "supplier": "Supplier",
+      "cui": "CUI",
+      "series": "Series"
+    },
+    "foot": {
+      "totalBase": "Total: base",
+      "vat": "VAT",
+      "total": "total",
+      "periodNet": "PERIOD TOTAL: net"
+    },
+    "invoiceList": {
+      "title": "Issued invoices — {{month}} {{year}}"
+    },
+    "integrity": {
+      "title": "Archive integrity check",
+      "missingFiles_one": "{{count}} missing file",
+      "missingFiles_other": "{{count}} missing files",
+      "archiveOk": "Archive intact",
+      "recheck": "Re-run the check",
+      "rechecking": "Checking…",
+      "checkingArchive": "Checking the archive…",
+      "headers": {
+        "check": "Check",
+        "detail": "Detail",
+        "result": "Result",
+        "status": "Status"
+      },
+      "archivedDocs": "Archived documents",
+      "archivedDesc": "e-Factura XML + PDF + ANAF-signed receipts",
+      "complete": "Complete",
+      "missingCount": "{{n}} missing",
+      "missingFilesRow": "Missing files",
+      "missingHint": "they can be re-downloaded from SPV (if under 60 days old) or restored from backup",
+      "redownload": "Re-download from SPV",
+      "underRetention": "Missing within the retention period",
+      "underRetentionDesc1": "Missing documents still within the legal retention period of",
+      "years5": "5 years",
+      "underRetentionDesc2": "— recovering them is mandatory",
+      "actionNeeded": "Action needed",
+      "compliant": "Compliant",
+      "retentionTerm": "Legal retention period",
+      "retentionDesc1": "Documents are kept for",
+      "retentionDesc2": "from the end of the financial year (L82/1991)"
+    },
+    "errorLabels": {
+      "vatReport": "the VAT report",
+      "archiveIntegrity": "the archive integrity",
+      "yearInvoices": "the year's invoices",
+      "periodInvoices": "the period's invoices",
+      "purchaseJournal": "the purchase journal"
+    },
+    "actions": {
+      "exportCsv": "Export CSV",
+      "reparseVat": "Recompute VAT from XML",
+      "reparsing": "Recomputing…"
+    },
+    "dialogs": {
+      "saveVat": "Save VAT report",
+      "saveSaga": "Save SAGA export",
+      "saveWinmentor": "Save WinMentor export",
+      "saveXlsx": "Save XLSX export",
+      "saveSalesJournal": "Save sales journal",
+      "savePurchaseJournal": "Save purchase journal",
+      "saveSaftPreview": "Save SAF-T D406",
+      "saveSaftOfficial": "Save official ANAF D406"
+    },
+    "notify": {
+      "vatSaved": "VAT report saved: {{path}}",
+      "vatExportFailed": "Could not export the VAT report.",
+      "sagaSaved": "SAGA export saved: {{path}}",
+      "sagaFailed": "Could not export to SAGA.",
+      "winmentorSaved": "WinMentor export saved: {{path}}",
+      "winmentorFailed": "Could not export to WinMentor.",
+      "exportSaved": "Export saved: {{path}}",
+      "xlsxFailed": "Could not export XLSX.",
+      "archiveExported": "Archive exported: {{path}}",
+      "archiveFailed": "Archive export failed.",
+      "salesJournalSaved": "Sales journal saved: {{path}}",
+      "salesJournalFailed": "Could not export the sales journal.",
+      "purchaseJournalSaved": "Purchase journal saved: {{path}}",
+      "purchaseJournalFailed": "Could not export the purchase journal.",
+      "invoicesUpdated_one": "{{count}} invoice updated",
+      "invoicesUpdated_other": "{{count}} invoices updated",
+      "reparseFailed": "Could not recompute VAT from XML."
+    },
+    "saft": {
+      "infoTitle": "D406 — SAF-T (Standard Audit File for Tax)",
+      "infoText": "The standard audit file for tax (SAF-T) contains the detailed accounting data requested by ANAF: accounts, journals, invoices, stock and assets. Starting with 2025, filing D406 monthly is mandatory for medium and large taxpayers.",
+      "banner": "For small companies, the D406 filing deadline has been postponed. Check your company's specific obligation.",
+      "selectedPeriod": "Selected period:",
+      "invoicesAvailable_one": "{{count}} invoice available for {{year}}",
+      "invoicesAvailable_other": "{{count}} invoices available for {{year}}",
+      "noInvoices": "no invoice available for {{year}}",
+      "generateTitle": "Generate SAF-T",
+      "exportFor": "Export SAF-T D406 for",
+      "previewTitle": "SAF-T D406 preview (issued invoices) for {{period}}",
+      "exporting": "Export in progress…",
+      "previewBtn": "Extract SAF-T (preview) {{period}}",
+      "officialTitle": "Official ANAF D406 export (full schema + GL) for {{period}}",
+      "exportingOfficial": "D406 export in progress…",
+      "officialBtn": "Official D406 export {{period}}",
+      "notify": {
+        "noDataYear": "There is no data for {{year}}.",
+        "saved": "SAF-T D406 saved: {{path}}",
+        "exportFailed": "Could not export SAF-T D406.",
+        "officialSavedDuk": "Official D406 saved (DUK: valid): {{path}}",
+        "officialSavedNoDuk": "Official D406 saved: {{path}} (DUK validation unavailable locally)",
+        "exportOfficialFailed": "Could not export the official D406."
+      }
+    },
+    "salesJournal": {
+      "title": "Sales journal",
+      "empty": "No invoice issued in the selected period."
+    },
+    "purchaseJournal": {
+      "title": "Purchase journal",
+      "unparsedBanner": "For some received invoices, VAT has not yet been extracted from the XML. Press “Recompute VAT from XML” for complete reporting."
+    },
+    "accounting": {
+      "saga": {
+        "title": "SAGA export",
+        "desc1": "Accounting entries export compatible with",
+        "desc2": "Generates a CSV file with the period's accounting entries. The file includes all invoice lines with VAT breakdown.",
+        "btn": "Export SAGA (CSV)"
+      },
+      "winmentor": {
+        "title": "WinMentor export",
+        "desc1": "CSV export compatible with",
+        "desc2": "for import into the main accounting system. The columns follow the standard WinMentor import structure.",
+        "btn": "Export WinMentor (CSV)"
+      }
+    },
+    "salary": {
+      "title": "Payroll calculator (D112 core)",
+      "banner1": "2026 rates:",
+      "cas": "CAS 25%",
+      "cass": "CASS 10%",
+      "tax": "tax 10%",
+      "cam": "CAM 2.25%",
+      "banner2": "(employer). The IT/construction/agriculture exemptions were removed (OUG 156/2024). The personal deduction is taken from the ANAF table. Full D112 (employees + XML export) is in progress.",
+      "grossLabel": "Gross salary (RON)",
+      "deductionLabel": "Personal deduction (RON)",
+      "rows": {
+        "gross": "Gross salary",
+        "cas": "CAS (pension 25%)",
+        "cass": "CASS (health 10%)",
+        "deduction": "Personal deduction",
+        "taxableBase": "Taxable base",
+        "incomeTax": "Income tax (10%)",
+        "net": "Net salary",
+        "camEmployer": "Employer CAM (2.25%)",
+        "employerCost": "Total employer cost"
+      },
+      "computeFailed": "Could not compute the salary."
+    }
+  }
+}

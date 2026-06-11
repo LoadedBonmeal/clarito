@@ -1,0 +1,102 @@
+{
+  "etransport": {
+    "title": "e-Transport (UIT)",
+    "schemaChip": "schema v2",
+    "sub": "UIT declarations for transports with high fiscal risk · RO e-Transport",
+    "selectCompany": "Select an active company to declare e-Transport shipments.",
+    "op": {
+      "10": "10 — Intra-Community acquisition",
+      "12": "12 — Lohn (toll manufacturing) operations (inbound)",
+      "14": "14 — Stock at the customer's disposal (inbound)",
+      "20": "20 — Intra-Community supply",
+      "22": "22 — Lohn (toll manufacturing) operations (outbound)",
+      "24": "24 — Stock at the customer's disposal (outbound)",
+      "30": "30 — Domestic transport",
+      "40": "40 — Import",
+      "50": "50 — Export",
+      "60": "60 — Intra-Community transaction (non-transfer)",
+      "70": "70 — Transport within an intra-Community acquisition"
+    },
+    "docType": {
+      "10": "CMR",
+      "20": "Invoice",
+      "30": "Delivery note",
+      "9999": "Other"
+    },
+    "infoBanner": {
+      "p1": "Obtain the UIT",
+      "b1": "before",
+      "p2": "the transport starts (at most 3 days in advance); valid for",
+      "b2": "5 days",
+      "p3": "(15 for intra-Community acquisitions). Mandatory for vehicles",
+      "b3": "≥ 2.5 t",
+      "p4": "with goods",
+      "b4": "> 500 kg",
+      "p5": "or",
+      "b5": "> 10,000 lei",
+      "p6": ", plus all intra-Community transport / import / export."
+    },
+    "form": {
+      "title": "UIT declaration",
+      "declarant": "Declarant (CUI)",
+      "opType": "Operation type",
+      "goods": "Transported goods",
+      "add": "Add",
+      "goodName": "Goods name",
+      "ncCode": "NC code",
+      "quantity": "Quantity",
+      "unit": "Unit (KGM)",
+      "grossWeight": "Gross weight (kg)",
+      "remove": "Delete",
+      "partner": "Partner",
+      "partnerName": "Name",
+      "partnerCountry": "Country (ISO-2)",
+      "partnerCode": "Partner code",
+      "transport": "Transport",
+      "vehicle": "Vehicle no.",
+      "transportDate": "Transport date",
+      "startCounty": "Departure county (code)",
+      "startCity": "Departure locality",
+      "endCounty": "Arrival county (code)",
+      "endCity": "Arrival locality",
+      "documents": "Transport documents",
+      "docNumber": "Number",
+      "docDate": "Date",
+      "validate": "Validate",
+      "generateXml": "Generate XML",
+      "sending": "Sending…",
+      "sendAnaf": "Send to ANAF"
+    },
+    "uitBanner": {
+      "label": "UIT:",
+      "index": "· upload index",
+      "print": "— print the code on the transport document."
+    },
+    "registry": {
+      "title": "Submitted declarations (UIT register)",
+      "validityNote": "UIT valid 5 days (domestic) / 15 days (intra-Community / import-export)",
+      "empty": "No declarations submitted yet. Obtained UITs appear here.",
+      "table": {
+        "uit": "UIT",
+        "operation": "Operation",
+        "partner": "Partner",
+        "vehicle": "Vehicle",
+        "submitted": "Submitted",
+        "expires": "Expires",
+        "status": "Status"
+      },
+      "chipExpired": "Expired",
+      "chipExpiring": "Expires in 24h",
+      "chipValid": "Valid"
+    },
+    "notify": {
+      "valid": "Valid declaration.",
+      "validateError": "Validation failed.",
+      "xmlOk": "XML generated (valid).",
+      "xmlError": "XML generation failed.",
+      "uitObtained": "UIT obtained: {{uit}}",
+      "sent": "Sent (index {{index}}).",
+      "submitError": "Sending to ANAF failed."
+    }
+  }
+}

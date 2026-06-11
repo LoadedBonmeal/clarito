@@ -1,0 +1,96 @@
+{
+  "accounts": {
+    "title": "Chart of accounts",
+    "sub_one": "Company-specific chart of accounts · {{n}} account · balances are available in the Trial balance (Accounting journal)",
+    "sub_other": "Company-specific chart of accounts · {{n}} accounts · balances are available in the Trial balance (Accounting journal)",
+    "selectCompany": "Select an active company to see the chart of accounts.",
+    "class": {
+      "1": "1 · Equity accounts",
+      "2": "2 · Fixed asset accounts",
+      "3": "3 · Inventory accounts",
+      "4": "4 · Third-party accounts",
+      "5": "5 · Treasury accounts",
+      "6": "6 · Expense accounts",
+      "7": "7 · Income accounts",
+      "8": "8 · Special accounts",
+      "9": "9 · Internal (management) accounts",
+      "generic": "Class {{n}}",
+      "none": "No class"
+    },
+    "head": {
+      "seeding": "Loading…",
+      "seedStandard": "Populate the standard chart (PCG)",
+      "newAccount": "New account"
+    },
+    "tabs": {
+      "all": "All",
+      "active": "Active"
+    },
+    "search": "Code or name…",
+    "refresh": "Refresh",
+    "states": {
+      "loading": "Loading…",
+      "errorLabel": "accounts",
+      "empty": "No accounts registered. You can add them manually or load the standard Romanian chart (PCG).",
+      "emptyFiltered": "No results match the current filters."
+    },
+    "table": {
+      "code": "Code",
+      "name": "Name",
+      "class": "Class",
+      "parent": "Parent account",
+      "active": "Active"
+    },
+    "row": {
+      "deactivate": "Deactivate account",
+      "activate": "Activate account",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "pager": {
+      "showing": "Showing",
+      "of": "of",
+      "accounts": "accounts",
+      "prevPage": "Previous page",
+      "nextPage": "Next page"
+    },
+    "confirm": {
+      "deleteTitle": "Confirm deletion",
+      "deleteMsg": "Delete account {{code}} — \"{{name}}\"? This action cannot be undone."
+    },
+    "notify": {
+      "noActiveCompany": "No active company.",
+      "seeded_one": "{{count}} standard account loaded.",
+      "seeded_other": "{{count}} standard accounts loaded.",
+      "seedError": "Error loading the standard chart.",
+      "deleted": "Account deleted.",
+      "deleteError": "Could not delete the account.",
+      "updateError": "Could not update the account.",
+      "created": "Account added.",
+      "saved": "Account saved.",
+      "createError": "Error adding the account.",
+      "saveError": "Error saving the account."
+    },
+    "modal": {
+      "editTitle": "Edit: {{code}} — {{name}}",
+      "newTitle": "New account",
+      "subtitle": "Codes follow the General Chart of Accounts (OMFP 1802/2014).",
+      "close": "Close",
+      "codeLabel": "Account code",
+      "codePlaceholder": "e.g. 4111",
+      "classLabel": "Class",
+      "noClassOption": "— no class —",
+      "nameLabel": "Name",
+      "namePlaceholder": "e.g. Customers",
+      "parentLabel": "Parent account (code)",
+      "parentPlaceholder": "e.g. 411",
+      "activeLabel": "Active account",
+      "codeRequired": "The account code is required.",
+      "nameRequired": "The name is required.",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save": "Save",
+      "add": "Add"
+    }
+  }
+}

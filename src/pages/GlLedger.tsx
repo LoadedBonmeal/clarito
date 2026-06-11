@@ -18,11 +18,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { confirm, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { Trans, useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
-import { fmtRON, parseDec, MONTHS_RO } from "@/lib/utils";
+import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import type {
@@ -75,20 +76,28 @@ const isZero = (a: number) => Math.abs(a) < 0.005;
 
 const JR_PAGE_SIZE = 100;
 
-const TABS = [
-  "Registru-jurnal",
-  "Balanță",
-  "Închideri",
-  "Reconciliere D300",
-  "Bilanț XML",
-  "Cartea mare",
-  "Profit și pierdere",
-] as const;
-
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function GlLedgerPage() {
+  const { t, i18n } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
+
+  const MONTHS = [
+    t("gl.months.jan"), t("gl.months.feb"), t("gl.months.mar"),
+    t("gl.months.apr"), t("gl.months.may"), t("gl.months.jun"),
+    t("gl.months.jul"), t("gl.months.aug"), t("gl.months.sep"),
+    t("gl.months.oct"), t("gl.months.nov"), t("gl.months.dec"),
+  ];
+
+  const TABS = [
+    t("gl.tabs.journal"),
+    t("gl.tabs.balance"),
+    t("gl.tabs.closings"),
+    t("gl.tabs.reconcile"),
+    t("gl.tabs.bilant"),
+    t("gl.tabs.ledger"),
+    t("gl.tabs.pnl"),
+  ];
 
   const now = new Date();
   const [selectedYear,  setSelectedYear]  = useState(now.getFullYear());
@@ -122,7 +131,9 @@ export function GlLedgerPage() {
   const attempted = useRef<Set<string>>(new Set());
 
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
-  const monthName   = MONTHS_RO[selectedMonth - 1];
+  const monthName   = MONTHS[selectedMonth - 1];
+  /** Numele lunii în interiorul frazelor — minuscul doar în RO. */
+  const monthInline = i18n.language.startsWith("ro") ? monthName.toLowerCase() : monthName;
   const periodLabel = `${monthName} ${selectedYear}`;
 
   // Perioada selectabilă: ultimele 36 de luni.
@@ -187,7 +198,7 @@ export function GlLedgerPage() {
       setJournalReg(await api.gl.journalRegister(activeCompanyId, dateFrom, dateTo));
       setJrPage(1);
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut genera registrul-jurnal."));
+      notify.error(formatError(err, t("gl.notify.journalError")));
     } finally {
       setLoadingJr(false);
     }
@@ -199,7 +210,7 @@ export function GlLedgerPage() {
     try {
       setTrialBal(await api.gl.trialBalance(activeCompanyId, dateFrom, dateTo));
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut genera balanța de verificare."));
+      notify.error(formatError(err, t("gl.notify.balanceError")));
     } finally {
       setLoadingTb(false);
     }
@@ -211,7 +222,7 @@ export function GlLedgerPage() {
     try {
       setLedger(await api.gl.generalLedger(activeCompanyId, dateFrom, dateTo));
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut genera cartea mare."));
+      notify.error(formatError(err, t("gl.notify.ledgerError")));
     } finally {
       setLoadingCm(false);
     }
@@ -223,7 +234,7 @@ export function GlLedgerPage() {
     try {
       setPnl(await api.gl.profitAndLoss(activeCompanyId, dateFrom, dateTo));
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut genera contul de profit și pierdere."));
+      notify.error(formatError(err, t("gl.notify.pnlError")));
     } finally {
       setLoadingPnl(false);
     }
@@ -235,7 +246,7 @@ export function GlLedgerPage() {
     try {
       setBilant(await api.gl.bilant(activeCompanyId, dateFrom, dateTo));
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut genera bilanțul."));
+      notify.error(formatError(err, t("gl.notify.bilantError")));
     } finally {
       setLoadingBilant(false);
     }
@@ -243,7 +254,7 @@ export function GlLedgerPage() {
 
   const runReconcile = async (manual: boolean) => {
     if (!activeCompanyId) {
-      if (manual) notify.warn("Selectați o companie activă.");
+      if (manual) notify.warn(t("gl.notify.selectCompany"));
       return;
     }
     if (reconciling) return;
@@ -254,15 +265,15 @@ export function GlLedgerPage() {
       setReconcileReport(report);
       if (manual) {
         if (report.balanced && report.discrepancies.length === 0) {
-          notify.success("GL reconciliat cu succes — balansat și fără discrepanțe.");
+          notify.success(t("gl.notify.reconcileOk"));
         } else if (report.discrepancies.length > 0) {
-          notify.warn(`Reconciliere completă cu ${report.discrepancies.length} discrepanțe.`);
+          notify.warn(t("gl.notify.reconcileDiscrepancies", { count: report.discrepancies.length }));
         } else {
-          notify.info("Reconciliere completă — verificați raportul de mai jos.");
+          notify.info(t("gl.notify.reconcileInfo"));
         }
       }
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut reconcilia GL."));
+      notify.error(formatError(err, t("gl.notify.reconcileError")));
     } finally {
       setReconciling(false);
     }
@@ -288,34 +299,28 @@ export function GlLedgerPage() {
   // ── Generează note contabile ──────────────────────────────────────────────
 
   const handleGenerate = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    if (!activeCompanyId) { notify.warn(t("gl.notify.selectCompany")); return; }
     setGenerating(true);
     setPostResult(null);
     try {
       const result = await api.gl.generateEntries(activeCompanyId, dateFrom, dateTo);
       setPostResult(result);
       if (result.journalsInserted === 0) {
-        notify.info(
-          "Niciun document de înregistrat în perioada selectată — jurnalul a rămas neschimbat. " +
-          "Notele contabile se generează pe perioadă: rulați după validări/stornări noi.",
-        );
+        notify.info(t("gl.notify.generateNone"));
       } else {
         notify.success(
-          `GL generat: ${result.journalsInserted} jurnale, ${result.entriesInserted} intrări` +
-          (result.journalsReplaced > 0 ? ` (${result.journalsReplaced} re-generate)` : ""),
+          t("gl.notify.generateOk", { journals: result.journalsInserted, entries: result.entriesInserted }) +
+          (result.journalsReplaced > 0 ? t("gl.notify.generateReplaced", { n: result.journalsReplaced }) : ""),
         );
       }
       if (result.skippedReceived > 0) {
-        const refs = (result.skippedReceivedRefs ?? []).slice(0, 5).join(", ");
-        notify.warn(
-          `${result.skippedReceived} facturi primite NU au fost înregistrate (fără defalcare TVA): ` +
-          refs + (result.skippedReceived > 5 ? " …" : "") +
-          ". Completați defalcarea TVA, apoi regenerați.",
-        );
+        const refs = (result.skippedReceivedRefs ?? []).slice(0, 5).join(", ") +
+          (result.skippedReceived > 5 ? " …" : "");
+        notify.warn(t("gl.notify.skippedReceived", { count: result.skippedReceived, refs }));
       }
       invalidateReports();
     } catch (err) {
-      notify.error(formatError(err, "Nu s-au putut genera notele contabile."));
+      notify.error(formatError(err, t("gl.notify.generateError")));
     } finally {
       setGenerating(false);
     }
@@ -324,24 +329,24 @@ export function GlLedgerPage() {
   // ── Închiderea TVA (regularizare 4426/4427 → 4423/4424) ───────────────────
 
   const handleCloseVat = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    if (!activeCompanyId) { notify.warn(t("gl.notify.selectCompany")); return; }
     setClosing(true);
     setVatClose(null);
     try {
       const result = await api.gl.closeVat(activeCompanyId, dateFrom, dateTo);
       setVatClose(result);
       if (!result.posted) {
-        notify.info("Nimic de regularizat — conturile 4426/4427 sunt deja zero pentru perioadă.");
+        notify.info(t("gl.notify.vatNothing"));
       } else if (parseDec(result.dePlata) > 0) {
-        notify.success(`Închidere TVA: de plată ${result.dePlata} lei (4423).`);
+        notify.success(t("gl.notify.vatPay", { amount: result.dePlata }));
       } else if (parseDec(result.deRecuperat) > 0) {
-        notify.success(`Închidere TVA: de recuperat ${result.deRecuperat} lei (4424).`);
+        notify.success(t("gl.notify.vatRecover", { amount: result.deRecuperat }));
       } else {
-        notify.success("Închidere TVA: TVA colectată = deductibilă (sold zero).");
+        notify.success(t("gl.notify.vatZero"));
       }
       if (result.posted) invalidateReports();
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut posta închiderea TVA."));
+      notify.error(formatError(err, t("gl.notify.vatError")));
     } finally {
       setClosing(false);
     }
@@ -350,69 +355,71 @@ export function GlLedgerPage() {
   // ── Închidere perioadă (6/7 → 121) + impozit + închidere anuală ───────────
 
   const handleClosePeriod = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    if (!activeCompanyId) { notify.warn(t("gl.notify.selectCompany")); return; }
     const ok = await confirm(
-      "Postează închiderea conturilor de venituri și cheltuieli (clasele 6 și 7) în contul 121 " +
-        `pentru perioada ${dateFrom} … ${dateTo}? Operațiunea este idempotentă (re-postarea ` +
-        "înlocuiește închiderea anterioară a aceleiași perioade).",
-      { title: "Închidere perioadă (6/7 → 121)", kind: "warning" },
+      t("gl.confirm.closePeriodText", { from: dateFrom, to: dateTo }),
+      { title: t("gl.confirm.closePeriodTitle"), kind: "warning" },
     );
     if (!ok) return;
     setClosingPeriod(true);
     try {
       const r = await api.gl.closePeriod(activeCompanyId, dateFrom, dateTo);
       if (!r.posted) {
-        notify.info("Nicio mișcare pe conturile de venituri/cheltuieli în perioadă.");
+        notify.info(t("gl.notify.closePeriodNone"));
       } else {
-        notify.success(`Închidere postată: rezultat ${r.result} lei (${r.entriesCount} note).`);
+        notify.success(t("gl.notify.closePeriodOk", { result: r.result, n: r.entriesCount }));
         // Reîncarcă rapoartele (P&L-ul exclude închiderea, deci arată în continuare activitatea).
         invalidateReports();
       }
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut posta închiderea perioadei."));
+      notify.error(formatError(err, t("gl.notify.closePeriodError")));
     } finally {
       setClosingPeriod(false);
     }
   };
 
   const handleIncomeTax = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    if (!activeCompanyId) { notify.warn(t("gl.notify.selectCompany")); return; }
     const ok = await confirm(
-      `Postează impozitul pe venit/profit (estimat) pentru ${dateFrom} … ${dateTo}? Se înregistrează ` +
-        "D 698/691 = C 4418/4411. Idempotent per perioadă; rulați înainte de «Închide perioada».",
-      { title: "Postare impozit", kind: "warning" },
+      t("gl.confirm.taxText", { from: dateFrom, to: dateTo }),
+      { title: t("gl.confirm.taxTitle"), kind: "warning" },
     );
     if (!ok) return;
     try {
       const r = await api.gl.postIncomeTax(activeCompanyId, dateFrom, dateTo);
-      if (!r.posted) notify.info("Impozit zero — nimic de postat.");
+      if (!r.posted) notify.info(t("gl.notify.taxZero"));
       else {
-        notify.success(`Impozit postat: ${r.amount} lei (${r.expenseAccount} → ${r.payableAccount})${r.estimated ? " — estimat" : ""}.`);
+        notify.success(t(r.estimated ? "gl.notify.taxOkEstimated" : "gl.notify.taxOk", {
+          amount: r.amount, expense: r.expenseAccount, payable: r.payableAccount,
+        }));
         invalidateReports();
       }
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut posta impozitul."));
+      notify.error(formatError(err, t("gl.notify.taxError")));
     }
   };
 
   const handleAnnualClose = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    if (!activeCompanyId) { notify.warn(t("gl.notify.selectCompany")); return; }
     const year = selectedYear;
     const ok = await confirm(
-      `Postează închiderea anuală 121 → 117 pentru anul ${year}? Soldul contului 121 (rezultatul ` +
-        `anului) se transferă în 117 «Rezultatul reportat», cu nota datată 01.01.${year + 1}. Idempotent.`,
-      { title: "Închidere anuală 121 → 117", kind: "warning" },
+      t("gl.confirm.annualText", { year, nextYear: year + 1 }),
+      { title: t("gl.confirm.annualTitle"), kind: "warning" },
     );
     if (!ok) return;
     try {
       const r = await api.gl.postAnnualClose(activeCompanyId, year);
-      if (!r.posted) notify.info("Sold 121 zero — nimic de transferat.");
+      if (!r.posted) notify.info(t("gl.notify.annualZero"));
       else {
-        notify.success(`Închidere anuală ${year}: ${r.kind === "profit" ? "profit" : "pierdere"} ${r.result121} lei → 117.`);
+        notify.success(t("gl.notify.annualOk", {
+          year,
+          kind: t(r.kind === "profit" ? "gl.notify.kindProfit" : "gl.notify.kindLoss"),
+          amount: r.result121,
+        }));
         invalidateReports();
       }
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut posta închiderea anuală."));
+      notify.error(formatError(err, t("gl.notify.annualError")));
     }
   };
 
@@ -424,18 +431,17 @@ export function GlLedgerPage() {
     if (!activeCompanyId) return;
     const year = selectedYear;
     const dest = await saveDialog({
-      title: "Salvează bilanț XML (ANAF S1005/S1003/S1002)",
+      title: t("gl.export.saveTitle"),
       defaultPath: `bilant-${year}.xml`,
       filters: [{ name: "XML", extensions: ["xml"] }],
     });
     if (!dest) return;
     try {
       await api.gl.exportBilantXml(activeCompanyId, year, caen, avgEmployees, formOverride, priorYearForm, dest);
-      notify.success(`Bilanț XML exportat (forma după criteriile de mărime) — F10 + F20. ` +
-        `Importați-l în PDF-ul inteligent ANAF, verificați header-ul și completați F30.`);
+      notify.success(t("gl.notify.exportOk"));
       setShowBilantExport(false);
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut exporta bilanțul XML."));
+      notify.error(formatError(err, t("gl.notify.exportError")));
     }
   };
 
@@ -467,10 +473,10 @@ export function GlLedgerPage() {
 
   // Balanță: cele patru egalități.
   const equalities = trialBal ? [
-    { label: "Egalitatea 1 · Solduri inițiale D = C", ok: isZero(parseDec(trialBal.totalOpeningDebit) - parseDec(trialBal.totalOpeningCredit)) },
-    { label: "Egalitatea 2 · Rulaje curente D = C",   ok: isZero(parseDec(trialBal.totalPeriodDebit)  - parseDec(trialBal.totalPeriodCredit)) },
-    { label: "Egalitatea 3 · Total sume D = C",       ok: isZero(parseDec(trialBal.totalTotalDebit)   - parseDec(trialBal.totalTotalCredit)) },
-    { label: "Egalitatea 4 · Solduri finale D = C",   ok: isZero(parseDec(trialBal.totalClosingDebit) - parseDec(trialBal.totalClosingCredit)) },
+    { label: t("gl.balance.eq1"), ok: isZero(parseDec(trialBal.totalOpeningDebit) - parseDec(trialBal.totalOpeningCredit)) },
+    { label: t("gl.balance.eq2"), ok: isZero(parseDec(trialBal.totalPeriodDebit)  - parseDec(trialBal.totalPeriodCredit)) },
+    { label: t("gl.balance.eq3"), ok: isZero(parseDec(trialBal.totalTotalDebit)   - parseDec(trialBal.totalTotalCredit)) },
+    { label: t("gl.balance.eq4"), ok: isZero(parseDec(trialBal.totalClosingDebit) - parseDec(trialBal.totalClosingCredit)) },
   ] : [];
 
   // Scadența TVA: 25 a lunii următoare perioadei.
@@ -482,11 +488,11 @@ export function GlLedgerPage() {
   // Reconciliere: rândurile tabelului.
   const recRows = reconcileReport ? [
     {
-      label: "TVA colectată (4427)", d300Row: "—",
+      label: t("gl.reconcile.vatCollected"), d300Row: "—",
       gl: parseDec(reconcileReport.vatCollectedGl), d300: parseDec(reconcileReport.vatCollectedD300),
     },
     {
-      label: "TVA deductibilă (4426)", d300Row: "—",
+      label: t("gl.reconcile.vatDeductible"), d300Row: "—",
       gl: parseDec(reconcileReport.vatDeductibleGl), d300: parseDec(reconcileReport.vatDeductibleD300),
     },
   ] : [];
@@ -497,9 +503,9 @@ export function GlLedgerPage() {
   if (!activeCompanyId) {
     return (
       <div className="main-inner wide pg-gl">
-        <div className="page-head"><div><h1>Jurnal contabil (GL)</h1></div></div>
+        <div className="page-head"><div><h1>{t("gl.title")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a lucra cu jurnalul contabil.
+          {t("gl.noCompany")}
         </div>
       </div>
     );
@@ -510,10 +516,9 @@ export function GlLedgerPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Jurnal contabil (GL)</h1>
+          <h1>{t("gl.title")}</h1>
           <p className="sub">
-            {periodLabel} · note generate automat din documente · registru-jurnal cod 14-1-1,
-            balanță cod 14-6-30, cartea mare cod 14-1-3
+            {periodLabel} · {t("gl.sub")}
           </p>
         </div>
         <div className="head-actions">
@@ -529,14 +534,14 @@ export function GlLedgerPage() {
             </button>
             {openPop === "period" && (
               <div className="pop show" style={{ right: 0, top: 40, width: 210, maxHeight: 300, overflowY: "auto" }} onMouseDown={(e) => e.stopPropagation()}>
-                <div className="col-title">Perioadă</div>
+                <div className="col-title">{t("gl.head.period")}</div>
                 {periodOptions.map(({ y, m }) => (
                   <button
                     key={`${y}-${m}`}
                     className="pop-item"
                     onClick={() => { setSelectedYear(y); setSelectedMonth(m); setOpenPop(""); }}
                   >
-                    <span style={{ flex: 1 }}>{MONTHS_RO[m - 1]} {y}</span>
+                    <span style={{ flex: 1 }}>{MONTHS[m - 1]} {y}</span>
                     {selectedYear === y && selectedMonth === m && <Ic name="check" cls="co-check" />}
                   </button>
                 ))}
@@ -549,16 +554,16 @@ export function GlLedgerPage() {
             onClick={() => void handleGenerate()}
           >
             <Ic name="sync" />
-            {generating ? "Generez…" : `Generează notele pe ${monthName.toLowerCase()}`}
+            {generating ? t("gl.head.generating") : t("gl.head.generate", { month: monthInline })}
           </button>
         </div>
       </div>
 
       {/* tabs */}
       <div className="tabs" style={{ display: "inline-flex", marginBottom: 16 }}>
-        {TABS.map((t, i) => (
-          <div key={t} className={`tab${tab === i ? " active" : ""}`} onClick={() => setTab(i)}>
-            {t}
+        {TABS.map((label, i) => (
+          <div key={label} className={`tab${tab === i ? " active" : ""}`} onClick={() => setTab(i)}>
+            {label}
           </div>
         ))}
       </div>
@@ -569,22 +574,19 @@ export function GlLedgerPage() {
           <div className={`banner ${postResult.skippedReceived > 0 ? "warn" : "ok"}`} style={{ marginBottom: 14 }}>
             <InlineIc path={postResult.skippedReceived > 0 ? WARN_TRI : CIRCLE_CHECK} />
             <span>
-              <b>GL generat pentru {monthName.toLowerCase()}:</b>{" "}
-              {postResult.journalsInserted} jurnale · {postResult.entriesInserted} intrări
-              {postResult.journalsReplaced > 0 && <> · {postResult.journalsReplaced} re-generate</>}.
+              <b>{t("gl.banner.generatedFor", { month: monthInline })}</b>{" "}
+              {t("gl.banner.stats", { journals: postResult.journalsInserted, entries: postResult.entriesInserted })}
+              {postResult.journalsReplaced > 0 && <> · {t("gl.banner.regenerated", { n: postResult.journalsReplaced })}</>}.
               {postResult.skippedReceived > 0 && (
                 <>
                   {" "}<b className="neg">
-                    {postResult.skippedReceived === 1
-                      ? "1 factură primită sărită"
-                      : `${postResult.skippedReceived} facturi primite sărite`}
+                    {t("gl.banner.skipped", { count: postResult.skippedReceived })}
                   </b>{" "}
-                  (fără defalcare TVA):{" "}
+                  {t("gl.banner.noBreakdown")}{" "}
                   {(postResult.skippedReceivedRefs ?? []).slice(0, 5).map((ref, i) => (
                     <span key={ref}>{i > 0 && ", "}<span className="doc">{ref}</span></span>
                   ))}
-                  {postResult.skippedReceived > 5 && " …"} — completați defalcarea
-                  («Recalculează TVA din XML» în Jurnal cumpărări), apoi regenerați.
+                  {postResult.skippedReceived > 5 && " …"} {t("gl.banner.skippedAction")}
                 </>
               )}
             </span>
@@ -592,40 +594,40 @@ export function GlLedgerPage() {
         )}
         <div className="scr-card">
           <div className="scr-toolbar">
-            <div className="tt">Registru-jurnal (cod 14-1-1) — {periodLabel}</div>
+            <div className="tt">{t("gl.journal.title", { period: periodLabel })}</div>
             <div className="spacer" />
             <div className="scr-search" style={{ width: 190 }}>
               <Ic name="lens" />
               <input
                 type="text"
-                placeholder="Caută nota…"
+                placeholder={t("gl.journal.search")}
                 value={jrQuery}
                 onChange={(e) => { setJrQuery(e.target.value); setJrPage(1); }}
               />
             </div>
             {/* propunere — neimplementat (nu există API de export registru-jurnal) */}
-            <button className="pill-btn" onClick={() => notify.info("În curând.")}>
-              <Ic name="dl" />Export
+            <button className="pill-btn" onClick={() => notify.info(t("gl.common.soon"))}>
+              <Ic name="dl" />{t("gl.common.export")}
             </button>
           </div>
           {loadingJr ? (
-            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("gl.common.loading")}</div>
           ) : !journalReg || journalReg.rows.length === 0 ? (
             <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-              Nicio notă contabilă în perioadă — apăsați «Generează notele pe {monthName.toLowerCase()}».
+              {t("gl.journal.empty", { month: monthInline })}
             </div>
           ) : jrRows.length === 0 ? (
             <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-              Nicio notă pentru căutarea aplicată.
+              {t("gl.journal.emptySearch")}
             </div>
           ) : (
             <>
               <table className="scr-table">
                 <thead>
                   <tr>
-                    <th>Nr.</th><th>Data</th><th>Document</th><th>Explicații</th>
-                    <th>Cont D</th><th>Cont C</th>
-                    <th className="r">Sume D</th><th className="r">Sume C</th>
+                    <th>{t("gl.journal.th.nr")}</th><th>{t("gl.journal.th.date")}</th><th>{t("gl.journal.th.document")}</th><th>{t("gl.journal.th.explanation")}</th>
+                    <th>{t("gl.journal.th.debitAcc")}</th><th>{t("gl.journal.th.creditAcc")}</th>
+                    <th className="r">{t("gl.journal.th.debitAmt")}</th><th className="r">{t("gl.journal.th.creditAmt")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -644,9 +646,9 @@ export function GlLedgerPage() {
                   {!jrQuery && (
                     <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
                       <td colSpan={6}>
-                        Total rulaj — {journalReg.balanced
-                          ? "echilibrat (D = C)"
-                          : <span className="neg">DEZECHILIBRAT</span>}
+                        {t("gl.journal.total")} {journalReg.balanced
+                          ? t("gl.journal.balanced")
+                          : <span className="neg">{t("gl.journal.unbalanced")}</span>}
                       </td>
                       <td className="r num">{fmtRON(journalReg.totalDebit)}</td>
                       <td className="r num">{fmtRON(journalReg.totalCredit)}</td>
@@ -656,8 +658,8 @@ export function GlLedgerPage() {
               </table>
               <div className="pager">
                 <span>
-                  Afișezi <b>{(jrPageSafe - 1) * JR_PAGE_SIZE + 1}–{Math.min(jrPageSafe * JR_PAGE_SIZE, jrRows.length)}</b>{" "}
-                  din <b>{jrRows.length}</b> note · {monthName.toLowerCase()} {selectedYear}
+                  {t("gl.journal.pagerShowing")} <b>{(jrPageSafe - 1) * JR_PAGE_SIZE + 1}–{Math.min(jrPageSafe * JR_PAGE_SIZE, jrRows.length)}</b>{" "}
+                  {t("gl.journal.pagerOf")} <b>{jrRows.length}</b> {t("gl.journal.pagerNotes", { month: monthInline, year: selectedYear })}
                 </span>
                 <div className="pg-btns">
                   <button className="pg-btn" disabled={jrPageSafe <= 1} onClick={() => setJrPage(jrPageSafe - 1)}>
@@ -682,29 +684,29 @@ export function GlLedgerPage() {
       <div className={`panel${tab === 1 ? " show" : ""}`}>
         <div className="scr-card">
           <div className="scr-toolbar">
-            <div className="tt">Balanța de verificare — {fmtRoDate(dateTo)}</div>
+            <div className="tt">{t("gl.balance.title", { date: fmtRoDate(dateTo) })}</div>
             <div className="spacer" />
             {/* propunere — neimplementat (nu există API de export balanță XLSX) */}
-            <button className="pill-btn" onClick={() => notify.info("În curând.")}>
-              <Ic name="dl" />Export XLSX
+            <button className="pill-btn" onClick={() => notify.info(t("gl.common.soon"))}>
+              <Ic name="dl" />{t("gl.common.exportXlsx")}
             </button>
           </div>
           {loadingTb ? (
-            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("gl.common.loading")}</div>
           ) : !trialBal || trialBal.rows.length === 0 ? (
             <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-              Nicio mișcare contabilă în perioadă.
+              {t("gl.balance.empty")}
             </div>
           ) : (
             <>
               <table className="scr-table">
                 <thead>
                   <tr>
-                    <th>Cont</th>
-                    <th className="r">SI D</th><th className="r">SI C</th>
-                    <th className="r">Rulaj D</th><th className="r">Rulaj C</th>
-                    <th className="r">Total sume D</th><th className="r">Total sume C</th>
-                    <th className="r">SF D</th><th className="r">SF C</th>
+                    <th>{t("gl.balance.th.account")}</th>
+                    <th className="r">{t("gl.balance.th.siD")}</th><th className="r">{t("gl.balance.th.siC")}</th>
+                    <th className="r">{t("gl.balance.th.rulajD")}</th><th className="r">{t("gl.balance.th.rulajC")}</th>
+                    <th className="r">{t("gl.balance.th.totalD")}</th><th className="r">{t("gl.balance.th.totalC")}</th>
+                    <th className="r">{t("gl.balance.th.sfD")}</th><th className="r">{t("gl.balance.th.sfC")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -718,7 +720,7 @@ export function GlLedgerPage() {
                     </tr>
                   ))}
                   <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
-                    <td>Total</td>
+                    <td>{t("gl.balance.total")}</td>
                     {[trialBal.totalOpeningDebit, trialBal.totalOpeningCredit,
                       trialBal.totalPeriodDebit, trialBal.totalPeriodCredit,
                       trialBal.totalTotalDebit, trialBal.totalTotalCredit,
@@ -747,36 +749,36 @@ export function GlLedgerPage() {
           {/* Închidere TVA */}
           <div className="scr-card close-card">
             <div className="scr-toolbar">
-              <div className="tt">Închidere TVA — {periodLabel}</div>
+              <div className="tt">{t("gl.closings.vatTitle", { period: periodLabel })}</div>
               <div className="spacer" />
               {vatClose
                 ? vatClose.posted
-                  ? <ChipPaid label="Rulată" />
-                  : <span className="chip sent"><Ic name="dot" cls="sic" />Nimic de regularizat</span>
-                : <ChipWait label="Nerulată" />}
+                  ? <ChipPaid label={t("gl.chip.run")} />
+                  : <span className="chip sent"><Ic name="dot" cls="sic" />{t("gl.chip.nothingToSettle")}</span>
+                : <ChipWait label={t("gl.chip.notRun")} />}
             </div>
             <div className="crow">
               <div>
-                <div className="c1">TVA colectată</div>
-                <div className="c2"><span className="doc">4427</span>{vatClose?.posted ? " → închis" : " · sold perioadă"}</div>
+                <div className="c1">{t("gl.closings.vatCollected")}</div>
+                <div className="c2"><span className="doc">4427</span> {vatClose?.posted ? t("gl.closings.closed") : t("gl.closings.periodBalance")}</div>
               </div>
               <span className="amt num">{vatClose ? fmtRON(vatClose.collected) : "—"}</span>
             </div>
             <div className="crow">
               <div>
-                <div className="c1">TVA deductibilă</div>
-                <div className="c2"><span className="doc">4426</span>{vatClose?.posted ? " → închis" : " · sold perioadă"}</div>
+                <div className="c1">{t("gl.closings.vatDeductible")}</div>
+                <div className="c2"><span className="doc">4426</span> {vatClose?.posted ? t("gl.closings.closed") : t("gl.closings.periodBalance")}</div>
               </div>
               <span className="amt num">{vatClose ? fmtRON(vatClose.deductible) : "—"}</span>
             </div>
             <div className="crow">
               <div>
                 <div className="c1">
-                  {vatClose && parseDec(vatClose.deRecuperat) > 0 ? "TVA de recuperat" : "TVA de plată"}
+                  {vatClose && parseDec(vatClose.deRecuperat) > 0 ? t("gl.closings.vatRecover") : t("gl.closings.vatPay")}
                 </div>
                 <div className="c2">
                   <span className="doc">{vatClose && parseDec(vatClose.deRecuperat) > 0 ? "4424" : "4423"}</span>
-                  {" "}· scadență {vatDueLabel}
+                  {" "}{t("gl.closings.dueDate", { date: vatDueLabel })}
                 </div>
               </div>
               <span className="amt num">
@@ -789,9 +791,7 @@ export function GlLedgerPage() {
             </div>
             <div className="crow" style={{ background: "#FCFCFD" }}>
               <div className="c2" style={{ margin: 0 }}>
-                Dacă <span className="doc">4426</span> &gt; <span className="doc">4427</span>, diferența
-                merge în <span className="doc">4424</span> TVA de recuperat. <span className="doc">4428</span>
-                {" "}«TVA neexigibilă» nu este afectat.
+                <Trans i18nKey="gl.closings.vatNote" components={{ doc: <span className="doc" /> }} />
               </div>
               <button
                 className="btn-dark"
@@ -799,7 +799,7 @@ export function GlLedgerPage() {
                 disabled={closing}
                 onClick={() => void handleCloseVat()}
               >
-                {closing ? "Închid…" : vatClose?.posted ? "Rulează din nou" : "Rulează acum"}
+                {closing ? t("gl.closings.closingBtn") : vatClose?.posted ? t("gl.closings.runAgain") : t("gl.closings.runNow")}
               </button>
             </div>
           </div>
@@ -807,30 +807,30 @@ export function GlLedgerPage() {
           {/* Închidere rezultat */}
           <div className="scr-card close-card">
             <div className="scr-toolbar">
-              <div className="tt">Închidere rezultat — {periodLabel}</div>
+              <div className="tt">{t("gl.closings.resultTitle", { period: periodLabel })}</div>
               <div className="spacer" />
               {pnl
-                ? parseDec(pnl.netResult) >= 0 ? <ChipPaid label="Profit" /> : <ChipLate label="Pierdere" />
-                : <ChipWait label={loadingPnl ? "Se calculează…" : "Necalculat"} />}
+                ? parseDec(pnl.netResult) >= 0 ? <ChipPaid label={t("gl.chip.profit")} /> : <ChipLate label={t("gl.chip.loss")} />
+                : <ChipWait label={loadingPnl ? t("gl.chip.calculating") : t("gl.chip.notCalculated")} />}
             </div>
             <div className="crow">
               <div>
-                <div className="c1">Venituri de închis</div>
+                <div className="c1">{t("gl.closings.revenuesToClose")}</div>
                 <div className="c2"><span className="doc">70x–76x</span> = <span className="doc">121</span></div>
               </div>
               <span className="amt num">{pnl ? fmtRON(pnl.totalRevenue) : "—"}</span>
             </div>
             <div className="crow">
               <div>
-                <div className="c1">Cheltuieli de închis</div>
+                <div className="c1">{t("gl.closings.expensesToClose")}</div>
                 <div className="c2"><span className="doc">121</span> = <span className="doc">60x–68x</span></div>
               </div>
               <span className="amt num">{pnl ? fmtRON(pnl.totalExpense) : "—"}</span>
             </div>
             <div className="crow">
               <div>
-                <div className="c1">Rezultat net {pnl && parseDec(pnl.netResult) >= 0 ? "(profit)" : pnl ? "(pierdere)" : ""}</div>
-                <div className="c2"><span className="doc">121</span> {pnl && parseDec(pnl.netResult) >= 0 ? "sold creditor" : "sold debitor"}</div>
+                <div className="c1">{t("gl.closings.netResult")} {pnl && parseDec(pnl.netResult) >= 0 ? t("gl.closings.profitParen") : pnl ? t("gl.closings.lossParen") : ""}</div>
+                <div className="c2"><span className="doc">121</span> {pnl && parseDec(pnl.netResult) >= 0 ? t("gl.closings.creditBalance") : t("gl.closings.debitBalance")}</div>
               </div>
               <span className={`amt num${pnl ? (parseDec(pnl.netResult) >= 0 ? " pos" : " neg") : ""}`}>
                 {pnl ? `${parseDec(pnl.netResult) >= 0 ? "+" : ""}${fmtRON(pnl.netResult)}` : "—"}
@@ -838,8 +838,7 @@ export function GlLedgerPage() {
             </div>
             <div className="crow" style={{ background: "#FCFCFD" }}>
               <div className="c2" style={{ margin: 0 }}>
-                Postează închiderea <span className="doc">6/7</span> → <span className="doc">121</span> pe
-                perioadă (idempotent)
+                <Trans i18nKey="gl.closings.postNote" components={{ doc: <span className="doc" /> }} />
               </div>
               <button
                 className="btn-dark"
@@ -847,20 +846,19 @@ export function GlLedgerPage() {
                 disabled={closingPeriod}
                 onClick={() => void handleClosePeriod()}
               >
-                {closingPeriod ? "Închid…" : "Închide perioada"}
+                {closingPeriod ? t("gl.closings.closingBtn") : t("gl.closings.closeBtn")}
               </button>
             </div>
             <div className="crow" style={{ background: "#FCFCFD" }}>
               <div className="c2" style={{ margin: 0 }}>
-                Închiderea anuală <span className="doc">121</span> → <span className="doc">117</span>
-                {" "}«Rezultatul reportat» se rulează după 31 dec
+                <Trans i18nKey="gl.closings.annualNote" components={{ doc: <span className="doc" /> }} />
               </div>
               <button
                 className="pill-btn"
                 style={{ marginLeft: "auto", flex: "none" }}
                 onClick={() => void handleAnnualClose()}
               >
-                Rulează închiderea anuală
+                {t("gl.closings.runAnnual")}
               </button>
             </div>
           </div>
@@ -868,20 +866,20 @@ export function GlLedgerPage() {
           {/* Impozit */}
           <div className="scr-card close-card">
             <div className="scr-toolbar">
-              <div className="tt">Impozit — {periodLabel}</div>
+              <div className="tt">{t("gl.closings.taxTitle", { period: periodLabel })}</div>
               <div className="spacer" />
               {pnl
-                ? pnl.incomeTaxEstimated ? <ChipWait label="Estimat" /> : <ChipPaid label="Înregistrat" />
-                : <ChipWait label={loadingPnl ? "Se calculează…" : "Necalculat"} />}
+                ? pnl.incomeTaxEstimated ? <ChipWait label={t("gl.chip.estimated")} /> : <ChipPaid label={t("gl.chip.recorded")} />
+                : <ChipWait label={loadingPnl ? t("gl.chip.calculating") : t("gl.chip.notCalculated")} />}
             </div>
             <div className="crow">
               <div>
-                <div className="c1">Impozit micro 1% pe venit</div>
+                <div className="c1">{t("gl.closings.taxMicroLabel")}</div>
                 <div className="c2">
                   <span className="doc">698</span> = <span className="doc">4418</span>
                   {pnl && pnl.taxRegime === "micro"
-                    ? <> · baza: venituri {fmtRON(pnl.totalRevenue)}</>
-                    : " · nu se aplică (impozit pe profit)"}
+                    ? <> {t("gl.closings.taxMicroBase", { amount: fmtRON(pnl.totalRevenue) })}</>
+                    : <> {t("gl.closings.taxNotApplicableProfit")}</>}
                 </div>
               </div>
               <span className={`amt num${pnl && pnl.taxRegime !== "micro" ? " muted" : ""}`}>
@@ -890,12 +888,12 @@ export function GlLedgerPage() {
             </div>
             <div className="crow">
               <div>
-                <div className="c1">Impozit pe profit 16%</div>
+                <div className="c1">{t("gl.closings.taxProfitLabel")}</div>
                 <div className="c2">
                   <span className="doc">691</span> = <span className="doc">4411</span>
                   {pnl && pnl.taxRegime !== "micro"
-                    ? <> · baza: rezultat brut {fmtRON(pnl.grossResult)}</>
-                    : " · nu se aplică (regim micro)"}
+                    ? <> {t("gl.closings.taxProfitBase", { amount: fmtRON(pnl.grossResult) })}</>
+                    : <> {t("gl.closings.taxNotApplicableMicro")}</>}
                 </div>
               </div>
               <span className={`amt num${pnl && pnl.taxRegime === "micro" ? " muted" : ""}`}>
@@ -904,16 +902,14 @@ export function GlLedgerPage() {
             </div>
             <div className="crow" style={{ background: "#FCFCFD" }}>
               <div className="c2" style={{ margin: 0 }}>
-                Se înregistrează D <span className="doc">698/691</span> = C{" "}
-                <span className="doc">4418/4411</span> · idempotent per perioadă, înainte de
-                «Închide perioada»
+                <Trans i18nKey="gl.closings.taxNote" components={{ doc: <span className="doc" /> }} />
               </div>
               <button
                 className="btn-dark"
                 style={{ marginLeft: "auto", height: 30, fontSize: 12.5, flex: "none" }}
                 onClick={() => void handleIncomeTax()}
               >
-                Postează impozitul
+                {t("gl.closings.postTaxBtn")}
               </button>
             </div>
           </div>
@@ -927,9 +923,7 @@ export function GlLedgerPage() {
             <InlineIc path={WARN_TRI} />
             <span>
               <b>
-                {reconcileReport.discrepancies.length === 1
-                  ? "1 discrepanță GL ↔ D300."
-                  : `${reconcileReport.discrepancies.length} discrepanțe GL ↔ D300.`}
+                {t("gl.reconcile.bannerCount", { count: reconcileReport.discrepancies.length })}
               </b>{" "}
               {reconcileReport.discrepancies.map((d, i) => (
                 <span key={i}>{i > 0 && " · "}{d}</span>
@@ -940,35 +934,35 @@ export function GlLedgerPage() {
         {reconcileReport && reconcileReport.discrepancies.length === 0 && reconcileReport.balanced && (
           <div className="banner ok">
             <InlineIc path={CIRCLE_CHECK} />
-            <span><b>Nicio discrepanță.</b> GL balansat și aliniat cu decontul D300 pentru {periodLabel.toLowerCase()}.</span>
+            <span><Trans i18nKey="gl.reconcile.bannerOk" components={{ b: <b /> }} values={{ period: `${monthInline} ${selectedYear}` }} /></span>
           </div>
         )}
         <div className="scr-card">
           <div className="scr-toolbar">
-            <div className="tt">Reconciliere GL ↔ D300 — {periodLabel}</div>
+            <div className="tt">{t("gl.reconcile.title", { period: periodLabel })}</div>
             <div className="spacer" />
             <button
               className={`pill-btn spin-btn${reconciling ? " spinning" : ""}`}
               disabled={reconciling}
               onClick={() => void runReconcile(true)}
             >
-              <Ic name="sync" />{reconciling ? "Verific…" : "Rerulează verificarea"}
+              <Ic name="sync" />{reconciling ? t("gl.reconcile.checking") : t("gl.reconcile.rerun")}
             </button>
           </div>
           {reconciling && !reconcileReport ? (
-            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se verifică…</div>
+            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("gl.reconcile.verifying")}</div>
           ) : !reconcileReport ? (
             <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-              Apăsați «Rerulează verificarea» pentru a compara balanța GL cu decontul D300.
+              {t("gl.reconcile.emptyHint")}
             </div>
           ) : (
             <>
               <table className="scr-table">
                 <thead>
                   <tr>
-                    <th>Indicator</th><th>Rând D300</th>
-                    <th className="r">Balanța (GL)</th><th className="r">Decont (D300)</th>
-                    <th className="r">Diferența</th><th>Status</th>
+                    <th>{t("gl.reconcile.th.indicator")}</th><th>{t("gl.reconcile.th.d300Row")}</th>
+                    <th className="r">{t("gl.reconcile.th.gl")}</th><th className="r">{t("gl.reconcile.th.d300")}</th>
+                    <th className="r">{t("gl.reconcile.th.diff")}</th><th>{t("gl.reconcile.th.status")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -981,7 +975,7 @@ export function GlLedgerPage() {
                         <td className="r num">{fmtRON(r.gl)}</td>
                         <td className="r num">{fmtRON(r.d300)}</td>
                         <td className={`r num${isZero(diff) ? "" : " neg"}`}>{fmtRON(Math.abs(diff))}</td>
-                        <td>{isZero(diff) ? <ChipPaid label="OK" /> : <ChipLate label="Discrepanță" />}</td>
+                        <td>{isZero(diff) ? <ChipPaid label={t("gl.chip.ok")} /> : <ChipLate label={t("gl.chip.discrepancy")} />}</td>
                       </tr>
                     );
                   })}
@@ -990,13 +984,17 @@ export function GlLedgerPage() {
               <div className="eq-row">
                 <span className={`eq${reconcileReport.balanced ? "" : " bad"}`}>
                   <InlineIc path={reconcileReport.balanced ? EQ_CHECK : WARN_TRI} cls="sic" />
-                  Rulaj total GL — D {fmtRON(reconcileReport.totalDebit)} {reconcileReport.balanced ? "=" : "≠"} C {fmtRON(reconcileReport.totalCredit)}
+                  {t("gl.reconcile.totalEq", {
+                    debit: fmtRON(reconcileReport.totalDebit),
+                    eq: reconcileReport.balanced ? "=" : "≠",
+                    credit: fmtRON(reconcileReport.totalCredit),
+                  })}
                 </span>
                 <span className={`eq${reconcileReport.discrepancies.length === 0 ? "" : " bad"}`}>
                   <InlineIc path={reconcileReport.discrepancies.length === 0 ? EQ_CHECK : WARN_TRI} cls="sic" />
                   {reconcileReport.discrepancies.length === 0
-                    ? "Fără discrepanțe GL ↔ D300"
-                    : `${reconcileReport.discrepancies.length} ${reconcileReport.discrepancies.length === 1 ? "discrepanță" : "discrepanțe"}`}
+                    ? t("gl.reconcile.noDiscrepancies")
+                    : t("gl.reconcile.discrepancyCount", { count: reconcileReport.discrepancies.length })}
                 </span>
               </div>
             </>
@@ -1009,36 +1007,36 @@ export function GlLedgerPage() {
         <div className="cols-2">
           <div className="scr-card">
             <div className="scr-toolbar">
-              <div className="tt">Încadrare entitate — exercițiul {selectedYear}</div>
+              <div className="tt">{t("gl.bilant.entityTitle", { year: selectedYear })}</div>
               <div className="spacer" />
               {bilant
-                ? bilant.balanced ? <ChipPaid label="Echilibrat" /> : <ChipLate label="Neechilibrat" />
-                : <ChipWait label={loadingBilant ? "Se calculează…" : "Necalculat"} />}
+                ? bilant.balanced ? <ChipPaid label={t("gl.chip.balanced")} /> : <ChipLate label={t("gl.chip.unbalanced")} />
+                : <ChipWait label={loadingBilant ? t("gl.chip.calculating") : t("gl.chip.notCalculated")} />}
             </div>
             <div className="card-pad">
               {loadingBilant ? (
-                <div style={{ fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+                <div style={{ fontSize: 13, color: "var(--text-2)" }}>{t("gl.common.loading")}</div>
               ) : !bilant ? (
                 <div style={{ fontSize: 13, color: "var(--text-2)" }}>
-                  Nicio mișcare contabilă în perioadă — generați notele contabile mai întâi.
+                  {t("gl.bilant.empty")}
                 </div>
               ) : (
                 <>
                   <div className="crit">
                     <InlineIc path={CIRCLE_CHECK} cls="sic" />
-                    <div>Total active <span className="muted">· criteriu de mărime OMFP</span></div>
-                    <span className="cv num">{fmtRON(bilant.totalAssets)} lei</span>
+                    <div>{t("gl.bilant.totalAssets")} <span className="muted">{t("gl.bilant.sizeCriterion")}</span></div>
+                    <span className="cv num">{fmtRON(bilant.totalAssets)} {t("gl.bilant.lei")}</span>
                   </div>
                   <div className="crit">
                     <InlineIc path={CIRCLE_CHECK} cls="sic" />
-                    <div>Capitaluri proprii <span className="muted">· incl. rezultat</span></div>
-                    <span className="cv num">{fmtRON(bilant.equity)} lei</span>
+                    <div>{t("gl.bilant.equity")} <span className="muted">{t("gl.bilant.inclResult")}</span></div>
+                    <span className="cv num">{fmtRON(bilant.equity)} {t("gl.bilant.lei")}</span>
                   </div>
                   <div className="crit">
                     <InlineIc path={CIRCLE_CHECK} cls="sic" />
-                    <div>Rezultatul exercițiului <span className="muted">· sold 121</span></div>
+                    <div>{t("gl.bilant.yearResult")} <span className="muted">{t("gl.bilant.balance121")}</span></div>
                     <span className={`cv num ${parseDec(bilant.currentResult) >= 0 ? "pos" : "neg"}`}>
-                      {parseDec(bilant.currentResult) >= 0 ? "+" : ""}{fmtRON(bilant.currentResult)} lei
+                      {parseDec(bilant.currentResult) >= 0 ? "+" : ""}{fmtRON(bilant.currentResult)} {t("gl.bilant.lei")}
                     </span>
                   </div>
                   <div className={`banner ${bilant.balanced ? "ok" : "warn"}`} style={{ margin: "14px 0 0" }}>
@@ -1046,8 +1044,8 @@ export function GlLedgerPage() {
                     <span>
                       {bilant.entitySizeNote && <><b>{bilant.entitySizeNote}</b>{" "}</>}
                       {bilant.balanced
-                        ? <>Bilanțul se verifică: Active = Capitaluri + Datorii ({fmtRON(bilant.totalAssets)} lei).</>
-                        : <><b>Bilanțul NU se verifică</b> (Active ≠ Capitaluri + Datorii) — verificați balanța.</>}
+                        ? <>{t("gl.bilant.balancedNote", { amount: fmtRON(bilant.totalAssets) })}</>
+                        : <Trans i18nKey="gl.bilant.unbalancedNote" components={{ b: <b /> }} />}
                     </span>
                   </div>
                 </>
@@ -1056,24 +1054,22 @@ export function GlLedgerPage() {
           </div>
 
           <div className="scr-card">
-            <div className="scr-toolbar"><div className="tt">Export bilanț XML</div></div>
+            <div className="scr-toolbar"><div className="tt">{t("gl.bilant.exportTitle")}</div></div>
             <div className="card-pad">
               <dl className="kv" style={{ gridTemplateColumns: "150px 1fr", fontSize: 12.5, marginBottom: 14 }}>
-                <dt>S1005</dt><dd>Microentități — bilanț prescurtat</dd>
-                <dt>S1003</dt><dd>Entități mici — bilanț prescurtat extins</dd>
-                <dt>S1002</dt><dd>Entități mijlocii și mari — bilanț complet</dd>
+                <dt>S1005</dt><dd>{t("gl.bilant.s1005")}</dd>
+                <dt>S1003</dt><dd>{t("gl.bilant.s1003")}</dd>
+                <dt>S1002</dt><dd>{t("gl.bilant.s1002")}</dd>
               </dl>
               <button
                 className="btn-dark"
                 style={{ width: "100%", justifyContent: "center" }}
                 onClick={() => setShowBilantExport(true)}
               >
-                <Ic name="code" />Generează bilanț XML — {selectedYear}
+                <Ic name="code" />{t("gl.bilant.generateBtn", { year: selectedYear })}
               </button>
               <p className="muted" style={{ fontSize: 11.5, marginTop: 10, lineHeight: 1.5 }}>
-                XML-ul (F10 + F20) se importă în PDF-ul inteligent ANAF și se validează cu soft-ul
-                DUKIntegrator înainte de depunere. Termenul de depunere: 150 de zile de la închiderea
-                exercițiului.
+                {t("gl.bilant.exportHint")}
               </p>
             </div>
           </div>
@@ -1083,25 +1079,25 @@ export function GlLedgerPage() {
         {bilant && (
           <div className="scr-card" style={{ marginTop: 14 }}>
             <div className="scr-toolbar">
-              <div className="tt">Bilanț contabil (sinteză) — {fmtD(bilant.periodTo)}</div>
+              <div className="tt">{t("gl.bilant.synthTitle", { date: fmtD(bilant.periodTo) })}</div>
               <div className="spacer" />
               {bilant.balanced
-                ? <ChipPaid label="Active = Capitaluri + Datorii" />
-                : <ChipLate label="Nu se verifică" />}
+                ? <ChipPaid label={t("gl.chip.assetsEq")} />
+                : <ChipLate label={t("gl.chip.notVerified")} />}
             </div>
             <div className="cols-2-even" style={{ gap: 0 }}>
               <table className="scr-table">
                 <thead>
-                  <tr><th>Active</th><th className="r">Sold</th></tr>
+                  <tr><th>{t("gl.bilant.th.assets")}</th><th className="r">{t("gl.bilant.th.balance")}</th></tr>
                 </thead>
                 <tbody>
                   {([
-                    ["Active imobilizate (net)", bilant.immobilizedAssets],
-                    ["Stocuri", bilant.inventory],
-                    ["Creanțe", bilant.receivables],
-                    ["Investiții pe termen scurt", bilant.shortInvestments],
-                    ["Casa și conturi la bănci", bilant.cashBank],
-                    ["Cheltuieli în avans", bilant.prepaidExpenses],
+                    [t("gl.bilant.rows.immobilized"), bilant.immobilizedAssets],
+                    [t("gl.bilant.rows.inventory"), bilant.inventory],
+                    [t("gl.bilant.rows.receivables"), bilant.receivables],
+                    [t("gl.bilant.rows.shortInvestments"), bilant.shortInvestments],
+                    [t("gl.bilant.rows.cashBank"), bilant.cashBank],
+                    [t("gl.bilant.rows.prepaidExpenses"), bilant.prepaidExpenses],
                   ] as Array<[string, string]>).map(([label, v]) => (
                     <tr key={label}>
                       <td>{label}</td>
@@ -1109,23 +1105,23 @@ export function GlLedgerPage() {
                     </tr>
                   ))}
                   <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
-                    <td>TOTAL ACTIVE</td>
+                    <td>{t("gl.bilant.rows.totalAssets")}</td>
                     <td className="r num">{fmtRON(bilant.totalAssets)}</td>
                   </tr>
                 </tbody>
               </table>
               <table className="scr-table">
                 <thead>
-                  <tr><th>Capitaluri și datorii</th><th className="r">Sold</th></tr>
+                  <tr><th>{t("gl.bilant.th.equityLiab")}</th><th className="r">{t("gl.bilant.th.balance")}</th></tr>
                 </thead>
                 <tbody>
                   {([
-                    ["Capitaluri proprii (incl. rezultat)", bilant.equity],
-                    ["— din care rezultatul exercițiului", bilant.currentResult],
-                    ["Provizioane", bilant.provisions],
-                    ["Datorii pe termen lung", bilant.longTermDebt],
-                    ["Datorii curente", bilant.currentLiabilities],
-                    ["Venituri în avans", bilant.deferredRevenue],
+                    [t("gl.bilant.rows.equityIncl"), bilant.equity],
+                    [t("gl.bilant.rows.ofWhichResult"), bilant.currentResult],
+                    [t("gl.bilant.rows.provisions"), bilant.provisions],
+                    [t("gl.bilant.rows.longTermDebt"), bilant.longTermDebt],
+                    [t("gl.bilant.rows.currentLiabilities"), bilant.currentLiabilities],
+                    [t("gl.bilant.rows.deferredRevenue"), bilant.deferredRevenue],
                   ] as Array<[string, string]>).map(([label, v]) => (
                     <tr key={label}>
                       <td>{label}</td>
@@ -1133,7 +1129,7 @@ export function GlLedgerPage() {
                     </tr>
                   ))}
                   <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
-                    <td>TOTAL CAPITALURI + DATORII</td>
+                    <td>{t("gl.bilant.rows.totalEquityLiab")}</td>
                     <td className="r num">{fmtRON(bilant.totalEquityLiabilities)}</td>
                   </tr>
                 </tbody>
@@ -1147,13 +1143,12 @@ export function GlLedgerPage() {
       <div className={`panel${tab === 5 ? " show" : ""}`}>
         {loadingCm ? (
           <div className="scr-card">
-            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("gl.common.loading")}</div>
           </div>
         ) : !ledger || ledger.length === 0 ? (
           <div className="scr-card">
             <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-              Nicio mișcare contabilă în perioadă — cartea mare (cod 14-1-3) se completează după
-              generarea notelor.
+              {t("gl.ledger.empty")}
             </div>
           </div>
         ) : (
@@ -1163,7 +1158,7 @@ export function GlLedgerPage() {
                 <div className="tt"><span className="doc">{a.accountCode}</span> {a.accountName}</div>
                 <div className="spacer" />
                 <span className="muted" style={{ fontSize: 12 }}>
-                  sold inițial{" "}
+                  {t("gl.ledger.openingBalance")}{" "}
                   {parseDec(a.openingDebit) > 0
                     ? `${fmtRON(a.openingDebit)} D`
                     : parseDec(a.openingCredit) > 0
@@ -1174,8 +1169,8 @@ export function GlLedgerPage() {
               <table className="scr-table">
                 <thead>
                   <tr>
-                    <th>Data</th><th>Document</th><th>Explicații</th><th>Cont coresp.</th>
-                    <th className="r">Debit</th><th className="r">Credit</th><th className="r">Sold</th>
+                    <th>{t("gl.ledger.th.date")}</th><th>{t("gl.ledger.th.document")}</th><th>{t("gl.ledger.th.explanation")}</th><th>{t("gl.ledger.th.contra")}</th>
+                    <th className="r">{t("gl.ledger.th.debit")}</th><th className="r">{t("gl.ledger.th.credit")}</th><th className="r">{t("gl.ledger.th.balance")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1191,7 +1186,7 @@ export function GlLedgerPage() {
                     </tr>
                   ))}
                   <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
-                    <td colSpan={4}>Rulaj / sold final</td>
+                    <td colSpan={4}>{t("gl.ledger.totalRow")}</td>
                     <td className="r num">{fmtRON(a.totalDebit)}</td>
                     <td className="r num">{fmtRON(a.totalCredit)}</td>
                     <td className="r num">
@@ -1213,31 +1208,31 @@ export function GlLedgerPage() {
       <div className={`panel${tab === 6 ? " show" : ""}`}>
         <div className="scr-card">
           <div className="scr-toolbar">
-            <div className="tt">Cont de profit și pierdere — {periodLabel}</div>
+            <div className="tt">{t("gl.pnl.title", { period: periodLabel })}</div>
             <div className="spacer" />
             <span className="muted" style={{ fontSize: 12 }}>
               {pnl
-                ? pnl.taxRegime === "micro" ? "regim: microîntreprindere (1%)" : "regim: impozit pe profit (16%)"
+                ? pnl.taxRegime === "micro" ? t("gl.pnl.regimeMicro") : t("gl.pnl.regimeProfit")
                 : ""}{pnl ? " · OMFP 1802/2014" : ""}
             </span>
             {pnl && (
               parseDec(pnl.netResult) >= 0
-                ? <ChipPaid label={`Rezultat net +${fmtRON(pnl.netResult)}`} />
-                : <ChipLate label={`Rezultat net ${fmtRON(pnl.netResult)}`} />
+                ? <ChipPaid label={t("gl.pnl.netChip", { amount: `+${fmtRON(pnl.netResult)}` })} />
+                : <ChipLate label={t("gl.pnl.netChip", { amount: fmtRON(pnl.netResult) })} />
             )}
           </div>
           {loadingPnl ? (
-            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("gl.common.loading")}</div>
           ) : !pnl ? (
             <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-              Nicio mișcare pe conturile de venituri/cheltuieli în perioadă.
+              {t("gl.pnl.empty")}
             </div>
           ) : (
             <>
               <table className="scr-table">
                 <tbody>
                   <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
-                    <td>Venituri (clasa 7)</td>
+                    <td>{t("gl.pnl.revenues")}</td>
                     <td className="r num">{fmtRON(pnl.totalRevenue)}</td>
                   </tr>
                   {pnl.revenueLines.map((l) => (
@@ -1247,7 +1242,7 @@ export function GlLedgerPage() {
                     </tr>
                   ))}
                   <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
-                    <td>Cheltuieli (clasa 6, fără impozit pe venit/profit)</td>
+                    <td>{t("gl.pnl.expenses")}</td>
                     <td className="r num">{fmtRON(pnl.totalExpense)}</td>
                   </tr>
                   {pnl.expenseLines.map((l) => (
@@ -1257,18 +1252,18 @@ export function GlLedgerPage() {
                     </tr>
                   ))}
                   <tr style={{ fontWeight: 600 }}>
-                    <td>Rezultat brut (venituri − cheltuieli)</td>
+                    <td>{t("gl.pnl.grossResult")}</td>
                     <td className="r num">{fmtRON(pnl.grossResult)}</td>
                   </tr>
                   <tr>
                     <td>
-                      Impozit pe {pnl.taxRegime === "micro" ? "venit" : "profit"}
-                      {pnl.incomeTaxEstimated ? " (estimat)" : " (înregistrat)"}
+                      {pnl.taxRegime === "micro" ? t("gl.pnl.taxIncome") : t("gl.pnl.taxProfit")}
+                      {" "}{pnl.incomeTaxEstimated ? t("gl.pnl.estimatedParen") : t("gl.pnl.recordedParen")}
                     </td>
                     <td className="r num">{fmtRON(pnl.incomeTax)}</td>
                   </tr>
                   <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
-                    <td>Rezultat net</td>
+                    <td>{t("gl.pnl.netResult")}</td>
                     <td className={`r num ${parseDec(pnl.netResult) >= 0 ? "pos" : "neg"}`}>
                       {fmtRON(pnl.netResult)}
                     </td>
@@ -1278,10 +1273,10 @@ export function GlLedgerPage() {
               {pnl.incomeTaxEstimated && (
                 <div className="pager">
                   <span>
-                    Impozitul este estimat ({pnl.taxRegime === "micro" ? "1% × venituri" : "16% × rezultat brut pozitiv"});
-                    pentru profit, ajustările fiscale (cheltuieli nedeductibile, venituri neimpozabile) nu sunt
-                    incluse. Notele de închidere (D 7xx / C 121, D 121 / C 6xx) sunt pregătite
-                    ({pnl.closingEntries.length} rânduri).
+                    {t("gl.pnl.estimateNote", {
+                      basis: pnl.taxRegime === "micro" ? t("gl.pnl.basisMicro") : t("gl.pnl.basisProfit"),
+                      rows: pnl.closingEntries.length,
+                    })}
                   </span>
                   <span></span>
                 </div>
@@ -1316,6 +1311,7 @@ function BilantExportModal({
     caen: string, avgEmployees: number | null, formOverride: string | null, priorYearForm: string | null,
   ) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [caen, setCaen] = useState("");
   const [emp, setEmp] = useState("");
   const [form, setForm] = useState("auto");
@@ -1323,7 +1319,7 @@ function BilantExportModal({
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    if (!/^\d{4}$/.test(caen.trim())) { notify.error("Cod CAEN invalid — 4 cifre (ex. 6201)."); return; }
+    if (!/^\d{4}$/.test(caen.trim())) { notify.error(t("gl.modal.caenInvalid")); return; }
     setBusy(true);
     try {
       await onExport(
@@ -1346,10 +1342,10 @@ function BilantExportModal({
       <div className="modal">
         <div className="modal-head">
           <div>
-            <div className="mt">Generează bilanț XML — exercițiul {year}</div>
-            <div className="ms">Confirmați datele de identificare pentru XML</div>
+            <div className="mt">{t("gl.modal.title", { year })}</div>
+            <div className="ms">{t("gl.modal.subtitle")}</div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label="Închide">
+          <button className="modal-x" onClick={onClose} aria-label={t("gl.modal.close")}>
             <Ic name="xMark" />
           </button>
         </div>
@@ -1357,15 +1353,12 @@ function BilantExportModal({
           <div className="banner" style={{ marginBottom: 14 }}>
             <InlineIc path={CIRCLE_CHECK} />
             <span>
-              Forma (microîntreprindere <b>S1005</b> / mică <b>S1003</b> / mare <b>S1002</b>) se alege
-              după criteriile OMFP (2 din 3: active, cifra de afaceri, nr. salariați). Conform OMFP
-              1802/2014 pct. 13(2), categoria se schimbă doar dacă criteriile sunt depășite în{" "}
-              <b>două exerciții consecutive</b> — o singură depășire păstrează forma anului precedent.
+              <Trans i18nKey="gl.modal.banner" components={{ b: <b /> }} />
             </span>
           </div>
           <div className="fgrid">
             <div className="field">
-              <label>Cod CAEN principal <span className="req">*</span></label>
+              <label>{t("gl.modal.caenLabel")} <span className="req">*</span></label>
               <input
                 className="input num"
                 type="text"
@@ -1374,46 +1367,46 @@ function BilantExportModal({
                 onChange={(e) => setCaen(e.target.value)}
                 autoFocus
               />
-              <span className="hint">4 cifre — activitatea principală</span>
+              <span className="hint">{t("gl.modal.caenHint")}</span>
             </div>
             <div className="field">
-              <label>Număr mediu de salariați</label>
+              <label>{t("gl.modal.empLabel")}</label>
               <input
                 className="input num"
                 type="text"
                 inputMode="numeric"
-                placeholder="ex. 8"
+                placeholder={t("gl.modal.empPlaceholder")}
                 value={emp}
                 onChange={(e) => setEmp(e.target.value)}
               />
-              <span className="hint">criteriu de mărime OMFP</span>
+              <span className="hint">{t("gl.modal.empHint")}</span>
             </div>
             <div className="field span2">
-              <label>Formular (suprascriere automată)</label>
+              <label>{t("gl.modal.formLabel")}</label>
               <select className="select" value={form} onChange={(e) => setForm(e.target.value)}>
-                <option value="auto">Auto — încadrare după criterii (2 din 3 + regula 2 ani)</option>
-                <option value="UU">S1005 — Microentitate</option>
-                <option value="BS">S1003 — Entitate mică</option>
-                <option value="BL">S1002 — Entitate mijlocie / mare</option>
+                <option value="auto">{t("gl.modal.formAuto")}</option>
+                <option value="UU">{t("gl.modal.formMicro")}</option>
+                <option value="BS">{t("gl.modal.formSmall")}</option>
+                <option value="BL">{t("gl.modal.formLarge")}</option>
               </select>
             </div>
             <div className="field span2">
-              <label>Forma depusă pentru anul precedent ({year - 1})</label>
+              <label>{t("gl.modal.priorLabel", { year: year - 1 })}</label>
               <select className="select" value={priorForm} onChange={(e) => setPriorForm(e.target.value)}>
-                <option value="">Necunoscută</option>
-                <option value="UU">S1005 — Microentitate</option>
-                <option value="BS">S1003 — Entitate mică</option>
-                <option value="BL">S1002 — Entitate mijlocie / mare</option>
+                <option value="">{t("gl.modal.priorUnknown")}</option>
+                <option value="UU">{t("gl.modal.formMicro")}</option>
+                <option value="BS">{t("gl.modal.formSmall")}</option>
+                <option value="BL">{t("gl.modal.formLarge")}</option>
               </select>
-              <span className="hint">schimbarea categoriei se face doar după 2 ani consecutivi de depășire / încadrare</span>
+              <span className="hint">{t("gl.modal.priorHint")}</span>
             </div>
           </div>
         </div>
         <div className="modal-foot">
-          <span className="left">Se generează XML F10 + F20 (import în PDF inteligent ANAF)</span>
-          <button className="pill-btn" onClick={onClose} disabled={busy}>Renunță</button>
+          <span className="left">{t("gl.modal.footNote")}</span>
+          <button className="pill-btn" onClick={onClose} disabled={busy}>{t("gl.modal.cancel")}</button>
           <button className="btn-dark" disabled={busy} onClick={() => void submit()}>
-            <Ic name="dl" />{busy ? "Se exportă…" : "Generează XML"}
+            <Ic name="dl" />{busy ? t("gl.modal.exporting") : t("gl.modal.generate")}
           </button>
         </div>
       </div>

@@ -1,0 +1,72 @@
+{
+  "notifications": {
+    "title": "Mesaje SPV / Notificări",
+    "sub": {
+      "unread": "{{n}} necitite · recipise, notificări, somații și decizii din SPV",
+      "lastSync": " · ultima sincronizare {{when}}"
+    },
+    "time": {
+      "minutesAgo_one": "acum {{count}} minut",
+      "minutesAgo_few": "acum {{count}} minute",
+      "minutesAgo_other": "acum {{count}} de minute",
+      "hoursAgo_one": "acum {{count}} oră",
+      "hoursAgo_few": "acum {{count}} ore",
+      "hoursAgo_other": "acum {{count}} de ore",
+      "yesterdayAt": "ieri, {{time}}",
+      "todayAt": "azi, {{time}}"
+    },
+    "kind": {
+      "error": "Eroare",
+      "receipt": "Recipisă",
+      "reminder": "Reminder",
+      "system": "Sistem",
+      "notification": "Notificare"
+    },
+    "head": {
+      "markAllRead": "Marchează toate citite",
+      "deleteRead": "Șterge citite",
+      "refresh": "Reîmprospătează"
+    },
+    "banner": {
+      "title": "ANAF păstrează mesajele doar 60 de zile",
+      "body": " — sincronizați regulat pentru a nu pierde recipise și notificări. Clarito arhivează automat tot ce descarcă."
+    },
+    "tabs": {
+      "all": "Toate",
+      "unread": "Necitite"
+    },
+    "search": "Caută mesaje…",
+    "states": {
+      "loading": "Se încarcă…",
+      "errorLabel": "notificările",
+      "empty": "Nicio notificare. Sistemul va afișa aici mesajele de la ANAF.",
+      "emptySearch": "Niciun mesaj pentru căutarea aplicată.",
+      "emptyUnread": "Nicio notificare necitită."
+    },
+    "row": {
+      "delete": "Șterge notificare"
+    },
+    "pager": {
+      "showing": "Afișezi",
+      "of": "din",
+      "messages": "mesaje",
+      "oldestExpire": "· cele mai vechi expiră în",
+      "days_one": "{{count}} zi",
+      "days_few": "{{count}} zile",
+      "days_other": "{{count}} de zile"
+    },
+    "confirm": {
+      "deleteReadTitle": "Confirmare ștergere",
+      "deleteReadMsg_one": "Ștergeți {{count}} notificare citită? Această acțiune nu poate fi anulată.",
+      "deleteReadMsg_few": "Ștergeți {{count}} notificări citite? Această acțiune nu poate fi anulată.",
+      "deleteReadMsg_other": "Ștergeți {{count}} de notificări citite? Această acțiune nu poate fi anulată."
+    },
+    "notify": {
+      "allMarkedRead": "Toate notificările marcate ca citite.",
+      "markReadError": "Nu s-a putut marca ca citite.",
+      "deleteOneError": "Nu s-a putut șterge notificarea.",
+      "readDeleted": "Notificările citite au fost șterse.",
+      "deleteReadError": "Nu s-au putut șterge notificările."
+    }
+  }
+}

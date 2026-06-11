@@ -1,0 +1,136 @@
+{
+  "assets": {
+    "title": "Mijloace fixe",
+    "sub": {
+      "prefix": "Registrul mijloacelor fixe",
+      "count_one": "{{count}} activ",
+      "count_few": "{{count}} active",
+      "count_other": "{{count}} de active",
+      "suffix": "amortizare liniară"
+    },
+    "selectCompany": "Selectați o companie activă pentru a vedea mijloacele fixe.",
+    "head": {
+      "newAsset": "Mijloc fix nou",
+      "runDepreciation": "Rulează amortizarea — {{month}}"
+    },
+    "sum": {
+      "inventoryValue": "Valoare de inventar",
+      "inService_one": "{{count}} activ în funcțiune",
+      "inService_few": "{{count}} active în funcțiune",
+      "inService_other": "{{count}} de active în funcțiune",
+      "accumulated": "Amortizare cumulată",
+      "accumulatedDesc": "cont 281x · estimat liniar",
+      "remaining": "Valoare rămasă",
+      "remainingDesc": "net contabil",
+      "monthly": "Amortizare lunară",
+      "monthlyDesc": "notă 6811 = 281x"
+    },
+    "tabs": {
+      "inService": "În funcțiune",
+      "fullyAmortized": "Amortizate integral",
+      "disposed": "Scoase din funcțiune"
+    },
+    "search": "Caută activ…",
+    "states": {
+      "empty": "Niciun mijloc fix. Adăugați mijloace fixe cu butonul „Mijloc fix nou” pentru a calcula amortizarea.",
+      "emptyFiltered": "Nicio înregistrare pentru filtrele aplicate."
+    },
+    "table": {
+      "code": "Cod",
+      "description": "Descriere",
+      "account": "Cont",
+      "pif": "PIF",
+      "cost": "Cost",
+      "lifeMonths": "Durată (luni)",
+      "amortized": "Amortizat",
+      "remaining": "Rămas"
+    },
+    "months_one": "{{count}} lună",
+    "months_few": "{{count}} luni",
+    "months_other": "{{count}} de luni",
+    "row": {
+      "actions": "Acțiuni",
+      "history": "Istoric amortizare",
+      "edit": "Editează",
+      "dispose": "Scoate din funcțiune (6583)",
+      "delete": "Șterge",
+      "disposedChip": "Scos din funcțiune · 6583"
+    },
+    "soon": "În curând.",
+    "confirm": {
+      "deleteMsg": "Ștergeți mijlocul fix \"{{name}}\"?"
+    },
+    "footer": {
+      "showingFirst": "afișate primele {{max}} din {{total}}"
+    },
+    "run": {
+      "title": "Rulare amortizare — stare per activ ({{period}})",
+      "chip": "notă 6811 = 281x · liniară",
+      "export": "Export",
+      "table": {
+        "code": "Cod",
+        "description": "Descriere",
+        "monthCharge": "Amortizare lună",
+        "accumulated": "Cumulat",
+        "remaining": "Valoare rămasă",
+        "entry": "Notă"
+      },
+      "total": "Total amortizare {{period}}",
+      "posted": "Postată",
+      "nothingToPost": "Nimic de postat",
+      "emptyRan": "Nimic de amortizat în luna selectată.",
+      "emptyIdle": "Rulați amortizarea pentru a vedea starea per activ (notele 6811 = 281x)."
+    },
+    "runModal": {
+      "title": "Rulează amortizarea — {{month}} {{year}}",
+      "subtitle": "Se generează notele contabile 6811 = 281x pentru toate activele în funcțiune (OMFP 1802/2014 — amortizarea începe din luna următoare PIF)",
+      "monthLabel": "Luna",
+      "yearLabel": "Anul",
+      "emptyPreview": "Niciun activ de amortizat în luna selectată (estimare).",
+      "table": {
+        "asset": "Activ",
+        "entry": "Notă",
+        "amount": "Suma"
+      },
+      "total": "Total amortizare {{month}}",
+      "estimateNote": "Sumele sunt estimative — nota exactă se calculează la rulare",
+      "cancel": "Renunță",
+      "running": "Calculez…",
+      "run": "Rulează amortizarea"
+    },
+    "disposeModal": {
+      "title": "Scoatere din funcțiune",
+      "subtitle": "{{desc}} ({{code}}) — notă contabilă 281x + 6583 / 21x",
+      "dateLabel": "Data scoaterii din funcțiune (AAAA-LL-ZZ)",
+      "cancel": "Anulează",
+      "processing": "Se procesează…",
+      "confirm": "Scoate din funcțiune"
+    },
+    "modal": {
+      "editTitle": "Editează: {{desc}}",
+      "newTitle": "Mijloc fix nou",
+      "subtitle": "Registrul mijloacelor fixe — amortizare liniară (6811 = 281x)",
+      "descLabel": "Descriere",
+      "codeLabel": "Cod",
+      "accountLabel": "Cont (21x)",
+      "acqDateLabel": "Data achiziției",
+      "pifLabel": "Data punerii în funcțiune (PIF)",
+      "costLabel": "Cost (lei)",
+      "lifeLabel": "Durată (luni)",
+      "descRequired": "Descrierea e obligatorie.",
+      "cancel": "Anulează",
+      "saving": "Se salvează…",
+      "save": "Salvează",
+      "add": "Adaugă"
+    },
+    "notify": {
+      "posted": "Amortizare postată — total {{total}} lei (6811 = 281x).",
+      "nothingThisMonth": "Nimic de amortizat în această lună.",
+      "runError": "Nu s-a putut rula amortizarea.",
+      "deleteError": "Eroare la ștergere.",
+      "disposed": "Mijloc fix scos din funcțiune (281x + 6583 / 21x).",
+      "disposeError": "Eroare la scoaterea din funcțiune.",
+      "saveError": "Eroare la salvare."
+    }
+  }
+}

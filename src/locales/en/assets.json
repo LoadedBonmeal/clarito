@@ -1,0 +1,133 @@
+{
+  "assets": {
+    "title": "Fixed assets",
+    "sub": {
+      "prefix": "Fixed assets register",
+      "count_one": "{{count}} asset",
+      "count_other": "{{count}} assets",
+      "suffix": "straight-line depreciation"
+    },
+    "selectCompany": "Select an active company to see the fixed assets.",
+    "head": {
+      "newAsset": "New fixed asset",
+      "runDepreciation": "Run depreciation — {{month}}"
+    },
+    "sum": {
+      "inventoryValue": "Inventory value",
+      "inService_one": "{{count}} asset in service",
+      "inService_other": "{{count}} assets in service",
+      "accumulated": "Accumulated depreciation",
+      "accumulatedDesc": "account 281x · straight-line estimate",
+      "remaining": "Remaining value",
+      "remainingDesc": "net book value",
+      "monthly": "Monthly depreciation",
+      "monthlyDesc": "entry 6811 = 281x"
+    },
+    "tabs": {
+      "inService": "In service",
+      "fullyAmortized": "Fully depreciated",
+      "disposed": "Decommissioned"
+    },
+    "search": "Search asset…",
+    "states": {
+      "empty": "No fixed assets. Add fixed assets with the \"New fixed asset\" button to compute depreciation.",
+      "emptyFiltered": "No records match the current filters."
+    },
+    "table": {
+      "code": "Code",
+      "description": "Description",
+      "account": "Account",
+      "pif": "In service",
+      "cost": "Cost",
+      "lifeMonths": "Life (months)",
+      "amortized": "Depreciated",
+      "remaining": "Remaining"
+    },
+    "months_one": "{{count}} month",
+    "months_other": "{{count}} months",
+    "row": {
+      "actions": "Actions",
+      "history": "Depreciation history",
+      "edit": "Edit",
+      "dispose": "Decommission (6583)",
+      "delete": "Delete",
+      "disposedChip": "Decommissioned · 6583"
+    },
+    "soon": "Coming soon.",
+    "confirm": {
+      "deleteMsg": "Delete the fixed asset \"{{name}}\"?"
+    },
+    "footer": {
+      "showingFirst": "showing the first {{max}} of {{total}}"
+    },
+    "run": {
+      "title": "Depreciation run — per-asset state ({{period}})",
+      "chip": "entry 6811 = 281x · straight-line",
+      "export": "Export",
+      "table": {
+        "code": "Code",
+        "description": "Description",
+        "monthCharge": "Month depreciation",
+        "accumulated": "Accumulated",
+        "remaining": "Remaining value",
+        "entry": "Entry"
+      },
+      "total": "Total depreciation {{period}}",
+      "posted": "Posted",
+      "nothingToPost": "Nothing to post",
+      "emptyRan": "Nothing to depreciate in the selected month.",
+      "emptyIdle": "Run the depreciation to see the per-asset state (the 6811 = 281x entries)."
+    },
+    "runModal": {
+      "title": "Run depreciation — {{month}} {{year}}",
+      "subtitle": "The 6811 = 281x accounting entries are generated for all assets in service (OMFP 1802/2014 — depreciation starts the month after commissioning)",
+      "monthLabel": "Month",
+      "yearLabel": "Year",
+      "emptyPreview": "No assets to depreciate in the selected month (estimate).",
+      "table": {
+        "asset": "Asset",
+        "entry": "Entry",
+        "amount": "Amount"
+      },
+      "total": "Total depreciation {{month}}",
+      "estimateNote": "Amounts are estimates — the exact entry is computed at run time",
+      "cancel": "Cancel",
+      "running": "Computing…",
+      "run": "Run depreciation"
+    },
+    "disposeModal": {
+      "title": "Decommissioning",
+      "subtitle": "{{desc}} ({{code}}) — accounting entry 281x + 6583 / 21x",
+      "dateLabel": "Decommission date (YYYY-MM-DD)",
+      "cancel": "Cancel",
+      "processing": "Processing…",
+      "confirm": "Decommission"
+    },
+    "modal": {
+      "editTitle": "Edit: {{desc}}",
+      "newTitle": "New fixed asset",
+      "subtitle": "Fixed assets register — straight-line depreciation (6811 = 281x)",
+      "descLabel": "Description",
+      "codeLabel": "Code",
+      "accountLabel": "Account (21x)",
+      "acqDateLabel": "Acquisition date",
+      "pifLabel": "Commissioning date (PIF)",
+      "costLabel": "Cost (lei)",
+      "lifeLabel": "Life (months)",
+      "descRequired": "The description is required.",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save": "Save",
+      "add": "Add"
+    },
+    "notify": {
+      "posted": "Depreciation posted — total {{total}} lei (6811 = 281x).",
+      "nothingThisMonth": "Nothing to depreciate this month.",
+      "runError": "Could not run the depreciation.",
+      "deleteError": "Error deleting.",
+      "disposed": "Fixed asset decommissioned (281x + 6583 / 21x).",
+      "disposeError": "Error during decommissioning.",
+      "saveError": "Error saving."
+    }
+  }
+}

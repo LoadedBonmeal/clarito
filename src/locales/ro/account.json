@@ -1,0 +1,83 @@
+{
+  "account": {
+    "title": "Cont & Licență",
+    "sub": {
+      "loading": "Se încarcă…",
+      "noEmail": "fără email asociat",
+      "planAllows": "planul {{tier}} permite {{limit}}",
+      "noLicense": "Nicio licență activă — porniți perioada de probă sau activați o cheie"
+    },
+    "tier": {
+      "TRIAL": "Probă",
+      "SOLO": "Solo",
+      "ACCOUNTANT": "Contabil",
+      "FIRM": "Firmă"
+    },
+    "limit": {
+      "unlimited": "companii nelimitate",
+      "companies_one": "{{count}} companie",
+      "companies_few": "{{count}} companii",
+      "companies_other": "{{count}} de companii"
+    },
+    "errorLabel": "licența",
+    "license": {
+      "title": "Licența ta",
+      "active": "Activă",
+      "expired": "Expirată",
+      "loading": "Se încarcă…",
+      "none": "Nicio licență pe acest dispozitiv. Activați o cheie mai jos sau porniți perioada de probă din meniul Ajutor.",
+      "plan": "Plan",
+      "key": "Cheie licență",
+      "email": "Email",
+      "expiredAt": "A expirat la",
+      "expiresAt": "Expiră la",
+      "trialDaysLeft_one": "{{count}} zi rămasă din perioada de probă",
+      "trialDaysLeft_few": "{{count}} zile rămase din perioada de probă",
+      "trialDaysLeft_other": "{{count}} de zile rămase din perioada de probă",
+      "device": "Dispozitiv",
+      "boundToDevice": "legată de acest dispozitiv"
+    },
+    "companies": {
+      "title": "Companii permise",
+      "unlimited": "nelimitat",
+      "managed_one": "{{count}} companie administrată",
+      "managed_few": "{{count}} companii administrate",
+      "managed_other": "{{count}} de companii administrate",
+      "planUnlimited": "planul Firmă permite companii nelimitate",
+      "empty": "Nicio companie administrată încă.",
+      "table": {
+        "name": "Denumire",
+        "cui": "CUI",
+        "active": "Activă"
+      },
+      "chipActive": "Activă",
+      "chipInactive": "Inactivă"
+    },
+    "activate": {
+      "title": "Activează o licență",
+      "keyLabel": "Cheie licență",
+      "emailLabel": "Email achiziție",
+      "emailPlaceholder": "nume@firma.ro",
+      "keyRequired": "Introduceți cheia de licență.",
+      "emailRequired": "Introduceți emailul de achiziție.",
+      "activating": "Se activează…",
+      "activateBtn": "Activează"
+    },
+    "plansBanner": {
+      "intro": "Limitele depind de plan:",
+      "trialLimit": "3 companii",
+      "soloLimit": "1 companie",
+      "accountantLimit": "15 companii",
+      "firmLimit": "nelimitat",
+      "upgrade": "Pentru upgrade scrieți-ne la"
+    },
+    "version": {
+      "title": "Versiune aplicație",
+      "loading": "Se încarcă…"
+    },
+    "notify": {
+      "activated": "Licența a fost activată cu succes.",
+      "activateError": "Licența nu a putut fi activată."
+    }
+  }
+}

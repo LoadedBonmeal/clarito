@@ -1,0 +1,103 @@
+{
+  "documents": {
+    "title": "Documente",
+    "sub": "Arhiva și șabloanele",
+    "selectCompany": "Selectați o companie activă pentru a vedea arhiva de documente.",
+    "head": {
+      "exporting": "Se exportă…",
+      "exportZip": "Exportă arhiva (ZIP)"
+    },
+    "type": {
+      "invoiceXml": "Factură XML (UBL)",
+      "invoicePdf": "Factură PDF",
+      "signedReceipt": "Recipisă semnată ANAF",
+      "receivedXml": "Factură primită XML (UBL)",
+      "receivedPdf": "Factură primită PDF"
+    },
+    "preset": {
+      "clasic": "Clasic",
+      "modern": "Modern",
+      "minimal": "Minimal",
+      "clasicDesc": "Clasic (negru)",
+      "modernDesc": "Modern (accent pe titlu, secțiuni, linii)",
+      "minimalDesc": "Minimal (accent doar pe titlu)"
+    },
+    "freq": {
+      "monthly": "lunar",
+      "quarterly": "trimestrial",
+      "annual": "anual"
+    },
+    "integrityWarn": {
+      "missing_one": "Verificare integritate: {{count}} fișier lipsă",
+      "missing_few": "Verificare integritate: {{count}} fișiere lipsă",
+      "missing_other": "Verificare integritate: {{count}} de fișiere lipsă",
+      "checked": "din {{n}} verificate",
+      "ofWhich": ", dintre care",
+      "underRetention": "sub termenul legal de păstrare de",
+      "fiveYears": "5 ani",
+      "redownload": "— pot fi redescărcate din SPV (sub 60 de zile) sau din backup."
+    },
+    "integrityOk": {
+      "title": "Verificare integritate:",
+      "body": "toate cele {{n}} fișiere din arhivă sunt prezente · păstrare legală 5 ani."
+    },
+    "reverify": "Reverifică",
+    "tabs": {
+      "all": "Toate",
+      "invoices": "Facturi",
+      "declarations": "Declarații",
+      "receipts": "Recipise"
+    },
+    "search": "Caută document…",
+    "period": {
+      "allMonths": "Toate lunile",
+      "title": "Perioadă"
+    },
+    "states": {
+      "loading": "Se încarcă…",
+      "errorLabel": "documentele",
+      "empty": "Niciun document în arhivă. Fișierele XML și PDF apar aici pe măsură ce emiteți sau descărcați facturi.",
+      "emptyFiltered": "Nicio înregistrare pentru filtrele aplicate."
+    },
+    "table": {
+      "type": "Tip document",
+      "assoc": "Document asociat",
+      "date": "Data",
+      "size": "Dimensiune"
+    },
+    "row": {
+      "open": "Deschide",
+      "download": "Descarcă"
+    },
+    "pager": {
+      "showing": "Afișezi",
+      "of": "din",
+      "documentsRetention": "documente · păstrare legală 5 ani"
+    },
+    "templates": {
+      "secTitle": "Șabloane",
+      "invoiceTpl": "Șablon factură (PDF)",
+      "presetAccent": "Preset · accent",
+      "accentWord": "accent",
+      "amountInWords": "sumă în litere",
+      "editInSettings": "Editează în Setări",
+      "recurringTpl": "Șabloane recurente",
+      "seeAll": "Vezi toate",
+      "noRecurring": "Niciun șablon recurent. Creați unul din pagina „Facturi recurente”.",
+      "active": "Activ",
+      "inactive": "Inactiv",
+      "more_one": "încă {{count}} șablon",
+      "more_few": "încă {{count}} șabloane",
+      "more_other": "încă {{count}} de șabloane",
+      "moreActive": "{{n}} active"
+    },
+    "notify": {
+      "openError": "Nu s-a putut deschide fișierul — verificați integritatea arhivei.",
+      "saved": "Document salvat: {{path}}",
+      "downloadError": "Nu s-a putut descărca fișierul.",
+      "noActiveCompany": "Selectați o companie activă.",
+      "zipExported": "Arhivă exportată: {{path}}",
+      "zipError": "Exportul arhivei a eșuat."
+    }
+  }
+}

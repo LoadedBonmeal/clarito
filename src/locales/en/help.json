@@ -1,0 +1,61 @@
+{
+  "help": {
+    "title": "Help & support",
+    "sub": "Guides, frequently asked questions, shortcuts and contact",
+    "subVersion": " · version {{v}}",
+    "docsBtn": "e-Factura documentation",
+    "guide": {
+      "title": "Getting started guide",
+      "step1": "Set up your company",
+      "step1Desc": "CUI + ANAF",
+      "step2": "Connect SPV",
+      "step2Desc": "OAuth + certificate",
+      "step3": "Issue your first invoice",
+      "step3Desc": "CIUS-RO",
+      "step4": "Submit D300",
+      "step4Desc": "due on the 25th"
+    },
+    "faq": {
+      "title": "Frequently asked questions",
+      "search": "Search questions…",
+      "empty": "No questions found for \"{{q}}\".",
+      "q1": "How do I send an invoice through e-Factura?",
+      "a1": "You create the invoice, validate it (CIUS-RO), then \"Validate and send to ANAF\". The receipt appears in SPV Messages and is archived automatically.",
+      "q2": "Why does ANAF keep messages for only 60 days?",
+      "a2": "SPV deletes messages after 60 days. Clarito syncs and archives locally, so you don't lose receipts or notifications.",
+      "q3": "Which thresholds does the app monitor?",
+      "a3": "Micro 100,000 EUR (rate 5.0985 = 509,850 lei), VAT registration 395,000 lei (art. 310) and VAT on collection 5,000,000 lei.",
+      "q4": "D112 — the new model from July 2026?",
+      "a4": "For reporting months ≥ July 2026 the OPANAF 605/2026 model is used; Clarito switches automatically.",
+      "q5": "How do I credit (storno) an invoice?",
+      "a5": "From the validated invoice → \"Storno\", enter the reason; a credit note with negative values is created and sent separately to ANAF."
+    },
+    "shortcuts": {
+      "title": "Shortcuts",
+      "search": "Search",
+      "newInvoice": "New invoice",
+      "refresh": "Refresh",
+      "shortcuts": "Shortcuts",
+      "saveDraft": "Save draft",
+      "send": "Send"
+    },
+    "contact": {
+      "title": "Contact support",
+      "systemOk": "System operational",
+      "email": "Email",
+      "hours": "Mon–Fri 09:00–18:00",
+      "writeUs": "Write to us",
+      "diagnostic": "Diagnostics",
+      "diagnosticDesc": "send a technical report to support",
+      "preparing": "Preparing…",
+      "sendReport": "Send report",
+      "appVersion": "App version"
+    },
+    "notify": {
+      "docsError": "Cannot open the e-Factura documentation.",
+      "mailError": "Cannot open the email client — write to {{email}}.",
+      "reportReady": "Email prepared in your email client.",
+      "reportError": "Cannot open the email client — send manually to {{email}}."
+    }
+  }
+}

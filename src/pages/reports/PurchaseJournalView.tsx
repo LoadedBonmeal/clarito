@@ -7,6 +7,7 @@
 
 import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
@@ -35,6 +36,7 @@ interface Props {
 }
 
 export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
+  const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [exporting, setExporting] = useState(false);
   const [reparsing, setReparsing] = useState(false);
@@ -70,13 +72,13 @@ export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
   const totalAmount = periodReceived.reduce((s, i) => s + parseDec(i.totalAmount), 0);
 
   const handleExport = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    if (!activeCompanyId) { notify.warn(t("declarations.notify.selectCompany")); return; }
     if (periodReceived.length === 0) {
-      notify.info("Nu există date pentru perioada selectată.");
+      notify.info(t("declarations.notify.noData"));
       return;
     }
     const savePath = await saveDialog({
-      title:       "Salvează jurnal cumpărări",
+      title:       t("reports.dialogs.savePurchaseJournal"),
       defaultPath: `jurnal-cumparari-${dateFrom}-${dateTo}.csv`,
       filters:     [{ name: "CSV", extensions: ["csv"] }],
     });
@@ -84,27 +86,27 @@ export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
     setExporting(true);
     try {
       const saved = await api.journals.exportPurchases(activeCompanyId, dateFrom, dateTo, savePath);
-      notify.success(`Jurnal cumpărări salvat: ${saved}`);
+      notify.success(t("reports.notify.purchaseJournalSaved", { path: saved }));
       try { await openPath(saved); } catch { /* reveal best-effort */ }
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut exporta jurnalul de cumpărări."));
+      notify.error(formatError(err, t("reports.notify.purchaseJournalFailed")));
     } finally {
       setExporting(false);
     }
   };
 
   const handleReparseVat = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    if (!activeCompanyId) { notify.warn(t("declarations.notify.selectCompany")); return; }
     setReparsing(true);
     try {
       const n = await api.received.reparseVat(activeCompanyId);
-      notify.success(`${n} facturi actualizate`);
+      notify.success(t("reports.notify.invoicesUpdated", { count: n }));
       await queryClientHook.invalidateQueries({
         queryKey: queryKeys.received.list({ companyId: activeCompanyId }),
       });
       void refetch();
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut recalcula TVA din XML."));
+      notify.error(formatError(err, t("reports.notify.reparseFailed")));
     } finally {
       setReparsing(false);
     }
@@ -116,15 +118,14 @@ export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
         <div className="banner warn">
           <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: IC_WARN }} />
           <span>
-            Pentru unele facturi primite, TVA nu a fost încă extrasă din XML. Apăsați
-            «Recalculează TVA din XML» pentru raportare completă.
+            {t("reports.purchaseJournal.unparsedBanner")}
           </span>
         </div>
       )}
 
       <div className="scr-card">
         <div className="scr-toolbar">
-          <div className="tt">Jurnal de cumpărări</div>
+          <div className="tt">{t("reports.purchaseJournal.title")}</div>
           <span className="muted" style={{ fontSize: 12, color: "var(--text-2)" }}>
             {dateFrom !== dateTo ? `${fmtRoDate(dateFrom)} — ${fmtRoDate(dateTo)}` : fmtRoDate(dateFrom)}
           </span>
@@ -134,40 +135,40 @@ export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
             disabled={reparsing || !activeCompanyId}
             onClick={() => void handleReparseVat()}
           >
-            <Ic name="sync" />{reparsing ? "Se recalculează…" : "Recalculează TVA din XML"}
+            <Ic name="sync" />{reparsing ? t("reports.actions.reparsing") : t("reports.actions.reparseVat")}
           </button>
           <button
             className="pill-btn"
             disabled={exporting || !activeCompanyId}
             onClick={() => void handleExport()}
           >
-            <Ic name="dl" />{exporting ? "Export…" : "Export CSV"}
+            <Ic name="dl" />{exporting ? t("declarations.common.exporting") : t("reports.actions.exportCsv")}
           </button>
         </div>
 
         {isLoading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("declarations.common.loading")}</div>
         ) : isError ? (
           <div style={{ padding: 16 }}>
-            <QueryErrorBanner error={error} label="jurnalul de cumpărări" onRetry={() => void refetch()} />
+            <QueryErrorBanner error={error} label={t("reports.errorLabels.purchaseJournal")} onRetry={() => void refetch()} />
           </div>
         ) : periodReceived.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-            Nicio factură primită în perioada selectată.
+            {t("declarations.d394.emptyPurchases")}
           </div>
         ) : (
           <>
             <table className="scr-table">
               <thead>
                 <tr>
-                  <th>Furnizor</th>
-                  <th>CUI</th>
-                  <th>Serie</th>
-                  <th>Număr</th>
-                  <th>Data</th>
-                  <th className="r">Net (RON)</th>
-                  <th className="r">TVA (RON)</th>
-                  <th className="r">Total</th>
+                  <th>{t("reports.table.supplier")}</th>
+                  <th>{t("reports.table.cui")}</th>
+                  <th>{t("reports.table.series")}</th>
+                  <th>{t("reports.table.number")}</th>
+                  <th>{t("reports.table.date")}</th>
+                  <th className="r">{t("reports.table.netRon")}</th>
+                  <th className="r">{t("reports.table.vatRon")}</th>
+                  <th className="r">{t("reports.table.total")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -195,9 +196,9 @@ export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
               </tbody>
             </table>
             <div className="tot-foot">
-              <span>TOTAL perioadă: net <b className="num">{Number.isFinite(totalNet) ? fmtRON(totalNet) : "—"}</b></span>
-              <span>TVA <b className="num">{Number.isFinite(totalVat) ? fmtRON(totalVat) : "—"}</b></span>
-              <span>total <b className="num">{fmtRON(totalAmount)}</b></span>
+              <span>{t("reports.foot.periodNet")} <b className="num">{Number.isFinite(totalNet) ? fmtRON(totalNet) : "—"}</b></span>
+              <span>{t("reports.foot.vat")} <b className="num">{Number.isFinite(totalVat) ? fmtRON(totalVat) : "—"}</b></span>
+              <span>{t("reports.foot.total")} <b className="num">{fmtRON(totalAmount)}</b></span>
             </div>
           </>
         )}

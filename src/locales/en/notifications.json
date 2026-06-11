@@ -1,0 +1,68 @@
+{
+  "notifications": {
+    "title": "SPV Messages / Notifications",
+    "sub": {
+      "unread": "{{n}} unread · receipts, notifications, summonses and decisions from SPV",
+      "lastSync": " · last sync {{when}}"
+    },
+    "time": {
+      "minutesAgo_one": "{{count}} minute ago",
+      "minutesAgo_other": "{{count}} minutes ago",
+      "hoursAgo_one": "{{count}} hour ago",
+      "hoursAgo_other": "{{count}} hours ago",
+      "yesterdayAt": "yesterday, {{time}}",
+      "todayAt": "today, {{time}}"
+    },
+    "kind": {
+      "error": "Error",
+      "receipt": "Receipt",
+      "reminder": "Reminder",
+      "system": "System",
+      "notification": "Notification"
+    },
+    "head": {
+      "markAllRead": "Mark all as read",
+      "deleteRead": "Delete read",
+      "refresh": "Refresh"
+    },
+    "banner": {
+      "title": "ANAF keeps messages for only 60 days",
+      "body": " — sync regularly so you don't lose receipts and notifications. Clarito automatically archives everything it downloads."
+    },
+    "tabs": {
+      "all": "All",
+      "unread": "Unread"
+    },
+    "search": "Search messages…",
+    "states": {
+      "loading": "Loading…",
+      "errorLabel": "notifications",
+      "empty": "No notifications. Messages from ANAF will appear here.",
+      "emptySearch": "No messages match the current search.",
+      "emptyUnread": "No unread notifications."
+    },
+    "row": {
+      "delete": "Delete notification"
+    },
+    "pager": {
+      "showing": "Showing",
+      "of": "of",
+      "messages": "messages",
+      "oldestExpire": "· the oldest expire in",
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days"
+    },
+    "confirm": {
+      "deleteReadTitle": "Confirm deletion",
+      "deleteReadMsg_one": "Delete {{count}} read notification? This action cannot be undone.",
+      "deleteReadMsg_other": "Delete {{count}} read notifications? This action cannot be undone."
+    },
+    "notify": {
+      "allMarkedRead": "All notifications marked as read.",
+      "markReadError": "Could not mark as read.",
+      "deleteOneError": "Could not delete the notification.",
+      "readDeleted": "Read notifications were deleted.",
+      "deleteReadError": "Could not delete the notifications."
+    }
+  }
+}

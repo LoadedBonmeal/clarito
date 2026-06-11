@@ -1,0 +1,435 @@
+{
+  "settings": {
+    "title": "Setări",
+    "head": {
+      "noCompany": "Nicio companie activă",
+      "version": "versiune {{v}}",
+      "save": "Salvează modificările"
+    },
+    "common": {
+      "saving": "Se salvează…",
+      "saved": "Salvat",
+      "buy": "Cumpără licență",
+      "export": "Exportă",
+      "cancel": "Anulează",
+      "close": "Închide",
+      "open": "Deschide"
+    },
+    "anaf": {
+      "title": "Conectare ANAF SPV",
+      "connected": "Conectat",
+      "notConnected": "Neconectat",
+      "noCompanyChip": "fără companie activă",
+      "oauth": {
+        "title": "Autorizare OAuth ANAF",
+        "descConnected": "token valabil · reînnoire automată",
+        "descDisconnected": "autorizați aplicația în SPV pentru trimitere și sincronizare e-Factura",
+        "disconnecting": "Se deconectează…",
+        "disconnect": "Deconectează",
+        "authorizing": "Se autorizează…",
+        "connect": "Conectează"
+      },
+      "secret": {
+        "title": "Client secret OAuth",
+        "desc": "stocat în keychain-ul sistemului · valoarea nu este afișată niciodată",
+        "configured": "Configurat",
+        "missing": "Lipsește",
+        "change": "Schimbă"
+      },
+      "env": {
+        "title": "Mediu ANAF",
+        "test": "Test",
+        "prod": "Producție"
+      },
+      "cert": {
+        "title": "Certificat calificat",
+        "descValid": "valabil până la {{until}} · reînnoibil până la {{refresh}}",
+        "descNone": "niciun certificat înregistrat — se reține automat la prima autorizare SPV",
+        "valid": "Valabil",
+        "expired": "Expirat"
+      },
+      "sync": {
+        "title": "Sincronizare automată SPV",
+        "desc": "la fiecare 6 ore · mesaje + facturi primite"
+      },
+      "advanced": {
+        "title": "Configurare avansată OAuth",
+        "desc": "Client ID, Redirect URI și URL-urile ANAF pentru aplicația OAuth proprie",
+        "hide": "Ascunde",
+        "configure": "Configurează",
+        "bannerP1": "Pentru conectarea la SPV, ANAF cere o aplicație OAuth proprie: în SPV → „Gestionare profil OAuth” înregistrați aplicația (cu Redirect URI-ul de mai jos) și veți primi un",
+        "bannerP2": "și un",
+        "bannerP3": ". Completați-le aici. Restul câmpurilor pot rămâne goale (valori implicite).",
+        "clientId": "Client ID",
+        "clientIdHint": "Generat de ANAF la înregistrarea aplicației OAuth",
+        "clientIdPh": "client_id de la ANAF",
+        "clientSecret": "Client Secret",
+        "secretHintSet": "Salvat în keychain — lăsați gol pentru a-l păstra",
+        "secretHintNew": "Generat de ANAF; stocat securizat în keychain",
+        "secretPhSet": "•••••••• (configurat)",
+        "secretPhNew": "client_secret de la ANAF",
+        "redirectUri": "Redirect URI",
+        "redirectPh": "http://localhost:8787/callback (implicit)",
+        "callbackPort": "Port callback",
+        "portPh": "8787 (implicit)",
+        "authorizeUrl": "URL autorizare",
+        "tokenUrl": "URL token",
+        "save": "Salvează configurarea"
+      }
+    },
+    "company": {
+      "title": "Companie activă",
+      "notSelected": "neselectată",
+      "work": {
+        "title": "Compania de lucru",
+        "desc": "seria de facturare și numerotarea se configurează pe companie (Companii › Editează)"
+      },
+      "none": "Nicio companie configurată",
+      "selectPlaceholder": "— Selectați compania —",
+      "manage": "Gestionează",
+      "series": {
+        "title": "Serie facturi · ultimul număr",
+        "desc": "{{series}} · {{last}} (următorul: {{next}})"
+      },
+      "edit": "Editează compania",
+      "cui": "CUI",
+      "vatPayer": "plătitor de TVA",
+      "nonVatPayer": "neplătitor de TVA",
+      "spv": {
+        "title": "SPV activat",
+        "desc": "compania trimite și primește documente prin SPV",
+        "yes": "Da",
+        "no": "Nu"
+      }
+    },
+    "vat": {
+      "title": "Cote TVA — istoric legislativ (Legea 141/2025)",
+      "catalog": "Catalog complet",
+      "th": {
+        "period": "Perioadă",
+        "standard": "Standard",
+        "reduced": "Redusă",
+        "reduced2": "Redusă 2",
+        "status": "Status"
+      },
+      "until": "până la 31 iul 2025",
+      "from": "de la 01 aug 2025",
+      "historic": "istoric",
+      "inForce": "în vigoare",
+      "note": "Facturile și stornările pentru perioade anterioare folosesc automat cotele valabile la data faptului generator."
+    },
+    "backup": {
+      "title": "Backup & restaurare",
+      "archiveSize": "arhivă: {{size}}",
+      "full": {
+        "title": "Backup complet (ZIP)",
+        "desc": "bază de date + arhivă de documente — alegeți unde se salvează fișierul",
+        "download": "Descarcă"
+      },
+      "export": {
+        "title": "Export arhivă companie (XML + PDF)",
+        "desc": "exportă fișierele XML și PDF ale companiei active într-un ZIP"
+      },
+      "folder": {
+        "title": "Folder arhivă",
+        "desc": "deschide locația arhivei sau mută arhiva în alt folder",
+        "open": "Deschide folder",
+        "changeLocation": "Schimbă locația"
+      },
+      "integrity": {
+        "title": "Verificare integritate",
+        "desc": "verifică dacă toate fișierele arhivate ale companiei active există pe disc",
+        "verify": "Verifică"
+      },
+      "restore": {
+        "title": "Restaurează din ZIP",
+        "desc": "restaurarea suprascrie datele curente și repornește aplicația",
+        "upload": "Încarcă ZIP"
+      }
+    },
+    "gdpr": {
+      "title": "Date personale (GDPR)",
+      "export": {
+        "title": "Export date personale",
+        "desc": "arhivă ZIP cu baza de date + arhiva de documente (export_all_my_data)"
+      },
+      "privacy": {
+        "title": "Politica de confidențialitate",
+        "desc": "lucaris.ro/privacy — cum sunt stocate și folosite datele dvs."
+      },
+      "wipe": {
+        "title": "Ștergere totală cont și date",
+        "descPre": "documentele fiscale (facturi, jurnale, declarații) rămân arhivate",
+        "years": "5 ani",
+        "descPost": "conform obligației legale de păstrare — se șterg doar datele personale neobligatorii",
+        "button": "Șterge tot"
+      },
+      "modal": {
+        "title": "Ștergere totală — confirmare",
+        "subtitle": "Acțiunea este ireversibilă",
+        "bannerBold": "Retenție legală:",
+        "bannerP1": "facturile, jurnalele și declarațiile depuse NU pot fi șterse — legea impune păstrarea lor",
+        "banner5y": "5 ani",
+        "bannerP2": "de la sfârșitul exercițiului financiar. Acestea rămân arhivate în mod read-only. Se șterg definitiv: contul de utilizator, preferințele, contactele nefacturate și datele de marketing.",
+        "typePre": "Tastați",
+        "typePost": "pentru confirmare",
+        "cancel": "Renunță",
+        "wiping": "Se șterge…",
+        "confirm": "Șterge definitiv"
+      }
+    },
+    "activity": {
+      "title": "Jurnal activitate",
+      "exportCsv": "Export CSV",
+      "empty": "Nicio activitate înregistrată.",
+      "th": {
+        "time": "Timp",
+        "task": "Sarcină",
+        "result": "Rezultat"
+      }
+    },
+    "template": {
+      "title": "Șablon factură (PDF)",
+      "subtitle": "aspectul vizual al PDF-ului generat",
+      "preset": {
+        "label": "Preset",
+        "hint": "Definește elementele colorate în PDF.",
+        "clasic": "Clasic (negru, implicit)",
+        "modern": "Modern (accent pe titlu, secțiuni, linii)",
+        "minimal": "Minimal (accent doar pe titlu)"
+      },
+      "accent": {
+        "label": "Culoare accent",
+        "hint": "Aplicată conform preset-ului ales (#RRGGBB).",
+        "pickerTitle": "Selectați culoarea accent"
+      },
+      "header": {
+        "label": "Antet personalizat",
+        "hint": "Sub data emiterii — slogan / mențiuni legale (max 2 rânduri).",
+        "ph": "Capital social: 200 lei · J12/345/2020"
+      },
+      "footer": {
+        "label": "Subsol personalizat",
+        "hint": "La finalul facturii — mulțumiri / termeni de plată (max 3 rânduri).",
+        "ph": "Vă mulțumim pentru colaborare!\nPlata în 15 zile de la emitere."
+      },
+      "words": {
+        "title": "Suma în litere",
+        "desc": "Afișează totalul scris în cuvinte sub TOTAL."
+      },
+      "vatDetail": {
+        "title": "Detaliu TVA",
+        "desc": "Afișează tabelul cu baze impozabile pe cote."
+      },
+      "save": "Salvează",
+      "preview": "Previzualizează PDF demo",
+      "modal": {
+        "title": "Previzualizare PDF demo",
+        "live": "reacționează live la setările șablonului",
+        "mock": {
+          "logo": "SIGLA",
+          "company": "Compania mea SRL",
+          "address": "Str. Exemplu nr. 1, București",
+          "invoiceTitle": "FACTURĂ",
+          "no": "Nr.",
+          "buyer": "Cumpărător",
+          "buyerLine": "Mavericks SRL · RO 22418890 · Cluj-Napoca, jud. Cluj",
+          "items": "Articole",
+          "name": "Denumire",
+          "qty": "Cant.",
+          "price": "Preț",
+          "vat": "TVA",
+          "amount": "Valoare",
+          "row1": "Servicii consultanță",
+          "row2": "Materiale tipărite",
+          "vatDetail": "Detaliu TVA",
+          "rate": "Cotă",
+          "base": "Bază",
+          "subtotal": "Subtotal",
+          "total": "TOTAL",
+          "words": "(una mie patru sute treizeci și doi lei)"
+        },
+        "liveNote": "Mock live — PDF-ul real se generează identic local",
+        "openRealTitle": "Generează PDF-ul demo real cu identitatea companiei și îl deschide",
+        "generating": "Se generează…",
+        "openReal": "Deschide PDF real",
+        "saveTemplate": "Salvează șablonul"
+      }
+    },
+    "smartbill": {
+      "cardTitle": "Integrări",
+      "row": {
+        "title": "SmartBill — trimitere facturi",
+        "desc": "trimite factura curentă în contul SmartBill (per factură) · necesită user + token API"
+      },
+      "configured": "Configurat",
+      "notConfigured": "Neconfigurat",
+      "user": {
+        "label": "Utilizator (email)",
+        "ph": "email@firma.ro"
+      },
+      "token": {
+        "label": "Token API",
+        "hint": "SmartBill → Setări → Cont → Token API",
+        "ph": "Token din contul SmartBill"
+      },
+      "save": "Salvează credențiale"
+    },
+    "license": {
+      "cardTitle": "Licență & aspect",
+      "loadingTitle": "Licență",
+      "planActive": "Plan {{plan}} — licență activă",
+      "none": "Nicio licență activă",
+      "desc": "{{email}} · expiră {{date}} · {{days}} · legată de acest dispozitiv",
+      "daysLeft_one": "{{count}} zi rămasă",
+      "daysLeft_few": "{{count}} zile rămase",
+      "daysLeft_other": "{{count}} de zile rămase",
+      "noneDesc": "porniți trial-ul gratuit din meniul Ajutor sau activați o cheie",
+      "expired": "Expirată",
+      "active": "Activă",
+      "activateOther": "Activează altă cheie",
+      "activate": "Activează cheie",
+      "key": {
+        "label": "Cheie licență"
+      },
+      "email": {
+        "label": "Email achiziție",
+        "ph": "office@firma.ro"
+      },
+      "errors": {
+        "keyRequired": "Introduceți cheia de licență.",
+        "emailRequired": "Introduceți emailul de achiziție."
+      },
+      "activating": "Se activează…",
+      "activateBtn": "Activează",
+      "tiers": {
+        "TRIAL": "Probă gratuită",
+        "SOLO": "Solo",
+        "ACCOUNTANT": "Contabil",
+        "FIRM": "Firmă"
+      },
+      "theme": {
+        "title": "Temă interfață",
+        "desc": "comutați între tema luminoasă, întunecată sau sistem",
+        "light": "Luminos",
+        "dark": "Întunecat",
+        "system": "Sistem"
+      },
+      "density": {
+        "title": "Densitate rânduri",
+        "desc": "înălțimea rândurilor în tabele și liste",
+        "compact": "Compact",
+        "comfortable": "Confortabil",
+        "relaxed": "Lejer"
+      }
+    },
+    "notifications": {
+      "title": "Notificări",
+      "types": {
+        "validated": "Factură validată ANAF",
+        "rejected": "Factură respinsă ANAF",
+        "received": "Facturi noi primite SPV",
+        "cert_expiring": "Certificat SPV expiră",
+        "cert_expired": "Certificat SPV expirat"
+      },
+      "options": {
+        "os": "Desktop + In-app",
+        "inapp": "Doar in-app",
+        "off": "Dezactivat"
+      },
+      "quiet": {
+        "title": "Ore liniștite",
+        "desc": "dezactivează notificările OS între 22:00 și 07:00"
+      }
+    },
+    "feedback": {
+      "title": "Suport și feedback",
+      "message": {
+        "label": "Mesaj (opțional)",
+        "ph": "Descrieți problema sau sugestia (diagnosticul se atașează automat)…"
+      },
+      "autoBold": "Atașăm automat:",
+      "autoRest": "versiunea {{v}}, sistemul de operare, machine ID anonimizat, ultimele 50 linii log. La click se deschide clientul dvs. de email.",
+      "preparing": "Pregătesc…",
+      "send": "Trimite feedback"
+    },
+    "appInfo": {
+      "title": "Informații aplicație",
+      "loading": "Se încarcă…",
+      "version": "Versiune",
+      "dataDir": "Director date",
+      "db": "Bază de date",
+      "updates": {
+        "title": "Actualizări",
+        "prompt": "verificați dacă există o versiune nouă",
+        "checking": "Se verifică…",
+        "check": "Verifică actualizări",
+        "available": "Versiune nouă disponibilă: {{v}}. Descărcați de pe site.",
+        "upToDate": "Aplicația este la zi.",
+        "failed": "Nu s-a putut verifica actualizările (server indisponibil)."
+      }
+    },
+    "system": {
+      "title": "Sistem",
+      "autostart": {
+        "title": "Pornire automată la login",
+        "desc": "pornește aplicația automat la autentificarea în sistem"
+      }
+    },
+    "dev": {
+      "title": "Dezvoltare",
+      "demo": {
+        "title": "Date demo",
+        "desc": "populează baza de date cu date de test (doar DB gol)",
+        "button": "Populează DB cu date demo"
+      },
+      "confirmMsg": "Populați baza de date cu date de test? Funcționează doar dacă DB-ul este gol.",
+      "confirmTitle": "Date de test",
+      "seeded": "Date de test adăugate cu succes.",
+      "seedFailed": "Seed-ul a eșuat sau DB-ul nu este gol."
+    },
+    "notify": {
+      "anafAuthError": "Eroare autorizare ANAF.",
+      "licenseActivated": "Licența a fost activată cu succes.",
+      "licenseActivateFailed": "Licența nu a putut fi activată.",
+      "anafAdvancedSaveError": "Eroare la salvarea configurației ANAF avansate.",
+      "smartbillSaveError": "Eroare la salvare credențiale SmartBill.",
+      "selectCompany": "Selectați o companie activă.",
+      "previewFailed": "Nu s-a putut genera previzualizarea.",
+      "templateSaveError": "Eroare la salvarea șablonului de factură.",
+      "allSaved": "Modificările au fost salvate.",
+      "emailReady": "Email pregătit în clientul dvs. de email",
+      "emailFailed": "Nu pot deschide clientul de email — trimite manual la support@lucaris.ro",
+      "purchaseFailed": "Nu pot deschide pagina de cumpărare.",
+      "archiveExported": "Arhivă exportată: {{path}}",
+      "archiveExportFailed": "Exportul arhivei a eșuat.",
+      "archiveFolderFailed": "Nu s-a putut deschide folderul arhivei.",
+      "locationChanged": "Locație arhivă schimbată cu succes.",
+      "backupSaved": "Backup salvat: {{path}}",
+      "backupExportFailed": "Exportul backup-ului a eșuat.",
+      "integrityOk_one": "Arhiva este integră. {{count}} fișier verificat.",
+      "integrityOk_few": "Arhiva este integră. {{count}} fișiere verificate.",
+      "integrityOk_other": "Arhiva este integră. {{count}} de fișiere verificate.",
+      "integrityMissingPrefix": "Fișiere lipsă ({{missing}} din {{checked}}",
+      "integrityRetention": ", {{n}} sub termenul legal de păstrare de 5 ani — L82/1991",
+      "integrityFailed": "Verificarea integrității a eșuat.",
+      "restoreFailed": "Restaurarea backup-ului a eșuat.",
+      "gdprExported": "Date exportate cu succes: {{path}}",
+      "gdprExportFailed": "Exportul datelor a eșuat.",
+      "wiped": "Toate datele dvs. au fost șterse. Aplicația va reporni.",
+      "wipeFailed": "Ștergerea datelor a eșuat.",
+      "autostartFailed": "Nu s-a putut modifica setarea de pornire automată.",
+      "comingSoon": "În curând."
+    },
+    "dialogs": {
+      "changeLocationPickTitle": "Selectează noua locație arhivă",
+      "changeLocationMsg": "Schimbi locația arhivei în:\n{{dir}}\n\nFișierele existente vor fi copiate. Continuați?",
+      "changeLocationTitle": "Schimbare locație arhivă",
+      "restoreMsg": "Aceasta va înlocui baza de date curentă cu backup-ul selectat. Operațiunea nu poate fi anulată.",
+      "restoreTitle": "⚠️ Restaurare bază de date",
+      "gdprExportSaveTitle": "Alegeți locul pentru exportul datelor dvs.",
+      "gdprRetentionAck": "Confirmați că ați exportat/arhivat documentele și vă asumați răspunderea pentru respectarea termenului legal de păstrare?",
+      "gdprRetentionTitle": "Termen legal de păstrare (L82/1991)"
+    }
+  }
+}

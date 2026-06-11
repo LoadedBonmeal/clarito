@@ -1,0 +1,101 @@
+{
+  "documents": {
+    "title": "Documents",
+    "sub": "Archive and templates",
+    "selectCompany": "Select an active company to see the document archive.",
+    "head": {
+      "exporting": "Exporting…",
+      "exportZip": "Export archive (ZIP)"
+    },
+    "type": {
+      "invoiceXml": "Invoice XML (UBL)",
+      "invoicePdf": "Invoice PDF",
+      "signedReceipt": "ANAF signed receipt",
+      "receivedXml": "Received invoice XML (UBL)",
+      "receivedPdf": "Received invoice PDF"
+    },
+    "preset": {
+      "clasic": "Classic",
+      "modern": "Modern",
+      "minimal": "Minimal",
+      "clasicDesc": "Classic (black)",
+      "modernDesc": "Modern (accent on title, sections, lines)",
+      "minimalDesc": "Minimal (accent on title only)"
+    },
+    "freq": {
+      "monthly": "monthly",
+      "quarterly": "quarterly",
+      "annual": "annual"
+    },
+    "integrityWarn": {
+      "missing_one": "Integrity check: {{count}} file missing",
+      "missing_other": "Integrity check: {{count}} files missing",
+      "checked": "out of {{n}} checked",
+      "ofWhich": ", of which",
+      "underRetention": "within the legal retention period of",
+      "fiveYears": "5 years",
+      "redownload": "— they can be re-downloaded from SPV (under 60 days) or from a backup."
+    },
+    "integrityOk": {
+      "title": "Integrity check:",
+      "body": "all {{n}} files in the archive are present · legal retention 5 years."
+    },
+    "reverify": "Re-check",
+    "tabs": {
+      "all": "All",
+      "invoices": "Invoices",
+      "declarations": "Declarations",
+      "receipts": "Receipts"
+    },
+    "search": "Search document…",
+    "period": {
+      "allMonths": "All months",
+      "title": "Period"
+    },
+    "states": {
+      "loading": "Loading…",
+      "errorLabel": "documents",
+      "empty": "No documents in the archive. XML and PDF files appear here as you issue or download invoices.",
+      "emptyFiltered": "No records match the current filters."
+    },
+    "table": {
+      "type": "Document type",
+      "assoc": "Related document",
+      "date": "Date",
+      "size": "Size"
+    },
+    "row": {
+      "open": "Open",
+      "download": "Download"
+    },
+    "pager": {
+      "showing": "Showing",
+      "of": "of",
+      "documentsRetention": "documents · legal retention 5 years"
+    },
+    "templates": {
+      "secTitle": "Templates",
+      "invoiceTpl": "Invoice template (PDF)",
+      "presetAccent": "Preset · accent",
+      "accentWord": "accent",
+      "amountInWords": "amount in words",
+      "editInSettings": "Edit in Settings",
+      "recurringTpl": "Recurring templates",
+      "seeAll": "See all",
+      "noRecurring": "No recurring templates. Create one from the \"Recurring invoices\" page.",
+      "active": "Active",
+      "inactive": "Inactive",
+      "more_one": "{{count}} more template",
+      "more_other": "{{count}} more templates",
+      "moreActive": "{{n}} active"
+    },
+    "notify": {
+      "openError": "Could not open the file — check the archive integrity.",
+      "saved": "Document saved: {{path}}",
+      "downloadError": "Could not download the file.",
+      "noActiveCompany": "Select an active company.",
+      "zipExported": "Archive exported: {{path}}",
+      "zipError": "Archive export failed."
+    }
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "account": {
+    "title": "Account & License",
+    "sub": {
+      "loading": "Loading…",
+      "noEmail": "no email associated",
+      "planAllows": "the {{tier}} plan allows {{limit}}",
+      "noLicense": "No active license — start the trial period or activate a key"
+    },
+    "tier": {
+      "TRIAL": "Trial",
+      "SOLO": "Solo",
+      "ACCOUNTANT": "Accountant",
+      "FIRM": "Firm"
+    },
+    "limit": {
+      "unlimited": "unlimited companies",
+      "companies_one": "{{count}} company",
+      "companies_other": "{{count}} companies"
+    },
+    "errorLabel": "the license",
+    "license": {
+      "title": "Your license",
+      "active": "Active",
+      "expired": "Expired",
+      "loading": "Loading…",
+      "none": "No license on this device. Activate a key below or start the trial period from the Help menu.",
+      "plan": "Plan",
+      "key": "License key",
+      "email": "Email",
+      "expiredAt": "Expired on",
+      "expiresAt": "Expires on",
+      "trialDaysLeft_one": "{{count}} day left in the trial period",
+      "trialDaysLeft_other": "{{count}} days left in the trial period",
+      "device": "Device",
+      "boundToDevice": "bound to this device"
+    },
+    "companies": {
+      "title": "Allowed companies",
+      "unlimited": "unlimited",
+      "managed_one": "{{count}} company managed",
+      "managed_other": "{{count}} companies managed",
+      "planUnlimited": "the Firm plan allows unlimited companies",
+      "empty": "No companies managed yet.",
+      "table": {
+        "name": "Name",
+        "cui": "CUI",
+        "active": "Active"
+      },
+      "chipActive": "Active",
+      "chipInactive": "Inactive"
+    },
+    "activate": {
+      "title": "Activate a license",
+      "keyLabel": "License key",
+      "emailLabel": "Purchase email",
+      "emailPlaceholder": "name@company.com",
+      "keyRequired": "Enter the license key.",
+      "emailRequired": "Enter the purchase email.",
+      "activating": "Activating…",
+      "activateBtn": "Activate"
+    },
+    "plansBanner": {
+      "intro": "Limits depend on the plan:",
+      "trialLimit": "3 companies",
+      "soloLimit": "1 company",
+      "accountantLimit": "15 companies",
+      "firmLimit": "unlimited",
+      "upgrade": "For an upgrade, write to us at"
+    },
+    "version": {
+      "title": "App version",
+      "loading": "Loading…"
+    },
+    "notify": {
+      "activated": "The license was activated successfully.",
+      "activateError": "The license could not be activated."
+    }
+  }
+}

@@ -5,20 +5,23 @@
  * Design re-skin: .main-inner + .page-head + centered muted .scr-card.
  */
 
+import { useTranslation } from "react-i18next";
+
 import { Ic } from "@/components/shared/Ic";
 
 export function BankPage() {
+  const { t } = useTranslation();
   return (
     <div className="main-inner">
       <div className="page-head">
         <div>
-          <h1>Bancă &amp; Casă</h1>
-          <p className="sub">Extrase bancare, registru de casă și reconciliere încasări</p>
+          <h1>{t("bank.title")}</h1>
+          <p className="sub">{t("bank.sub")}</p>
         </div>
         <div className="head-actions">
           <span className="chip wait">
             <Ic name="clock" cls="sic" />
-            În curând
+            {t("bank.soon")}
           </span>
         </div>
       </div>
@@ -39,7 +42,7 @@ export function BankPage() {
           >
             <Ic name="card" />
           </div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>În curând</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{t("bank.soon")}</div>
           <div
             style={{
               fontSize: 12.5,
@@ -51,8 +54,7 @@ export function BankPage() {
               lineHeight: 1.5,
             }}
           >
-            Modulul Bancă &amp; Casă nu este încă disponibil. Aici veți putea importa extrase
-            bancare, ține registrul de casă și reconcilia automat încasările cu facturile emise.
+            {t("bank.desc")}
           </div>
         </div>
       </div>

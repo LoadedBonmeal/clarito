@@ -1,0 +1,68 @@
+{
+  "vatRates": {
+    "title": "Cote TVA",
+    "sub": "Catalog național, comun tuturor companiilor · cotele se aleg pe linia de factură",
+    "subCounts": " · {{n}} cote ({{a}} active)",
+    "refresh": "Reîmprospătează",
+    "newRate": "Cotă nouă",
+    "lawBanner": {
+      "title": "Legea 141/2025:",
+      "p1": "cotele 19% / 9% / 5% se aplică până la",
+      "date1": "31 iul 2025",
+      "p2": "; de la",
+      "date2": "01 aug 2025",
+      "p3": "cotele standard sunt",
+      "rates": "21% / 11%",
+      "p4": ". Aplicația avertizează automat când cota aleasă nu corespunde datei de emitere a facturii."
+    },
+    "states": {
+      "loading": "Se încarcă…",
+      "errorLabel": "cotele TVA",
+      "empty": "Nicio cotă TVA. Adăugați prima cotă cu butonul „Cotă nouă”."
+    },
+    "table": {
+      "rate": "Cota",
+      "label": "Etichetă",
+      "active": "Activă"
+    },
+    "row": {
+      "deactivate": "Dezactivează cota",
+      "activate": "Activează cota",
+      "edit": "Editează",
+      "delete": "Șterge"
+    },
+    "confirm": {
+      "deleteTitle": "Confirmare ștergere",
+      "deleteMsg": "Șterge cota \"{{label}} ({{rate}}%)\"? Această acțiune nu poate fi anulată."
+    },
+    "notify": {
+      "deleted": "Cotă TVA ștearsă.",
+      "deleteError": "Nu s-a putut șterge cota TVA.",
+      "toggleError": "Nu s-a putut modifica starea cotei.",
+      "created": "Cotă TVA adăugată.",
+      "saved": "Cotă TVA salvată.",
+      "createError": "Eroare la adăugare.",
+      "saveError": "Eroare la salvare."
+    },
+    "modal": {
+      "editTitle": "Editează: {{label}}",
+      "newTitle": "Cotă TVA nouă",
+      "subtitle": "Cotele active alimentează lista din editorul de factură.",
+      "close": "Închide",
+      "rateLabel": "Cotă TVA %",
+      "ratePlaceholder": "ex. 21",
+      "sortLabel": "Ordine afișare",
+      "labelLabel": "Etichetă",
+      "labelPlaceholder": "ex. Cota standard (de la 01.08.2025)",
+      "activeAria": "Cotă activă",
+      "activeLabel": "Cotă activă (vizibilă în dropdown-ul liniilor de factură)",
+      "rateRequired": "Cota TVA este obligatorie.",
+      "labelRequired": "Eticheta este obligatorie.",
+      "rateRange": "Cota TVA trebuie să fie un număr între 0 și 100.",
+      "cancel": "Anulează",
+      "saving": "Se salvează…",
+      "save": "Salvează",
+      "add": "Adaugă"
+    }
+  }
+}
