@@ -1,6 +1,6 @@
 [package]
 name = "efactura-desktop"
-version = "0.6.0"
+version = "0.7.0"
 description = "Clarito — Aplicație desktop pentru e-Factura ANAF"
 authors = ["Lucaris"]
 edition = "2021"
