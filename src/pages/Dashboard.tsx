@@ -16,8 +16,6 @@ import { useAppStore } from "@/lib/store";
 import { parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 
-type PeriodMode = "today" | "week" | "month" | "ytd";
-
 function fmtTime(unix: number): string {
   return new Date(unix * 1000).toLocaleTimeString("ro-RO", {
     hour: "2-digit",
@@ -28,7 +26,7 @@ function fmtTime(unix: number): string {
 export function DashboardPage() {
   const navigate  = useNavigate();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
-  const [periodMode, setPeriodMode] = useState<PeriodMode>("month");
+  const [selectedYM, setSelectedYM] = useState<string>(() => new Date().toISOString().slice(0, 7));
   const [refreshing, setRefreshing] = useState(false);
   const [monthPopOpen, setMonthPopOpen] = useState(false);
 
@@ -136,26 +134,10 @@ export function DashboardPage() {
   const currentMonth = now.toISOString().split("T")[0].slice(0, 7);
 
   const [periodFrom, periodTo] = useMemo((): [string, string] => {
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const fmt = (d: Date) =>
-      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    const todayStr = fmt(now);
-    if (periodMode === "today") return [todayStr, todayStr];
-    if (periodMode === "week") {
-      const day     = now.getDay();
-      const diffToMon = day === 0 ? -6 : 1 - day;
-      const mon = new Date(now);
-      mon.setDate(now.getDate() + diffToMon);
-      const sun = new Date(mon);
-      sun.setDate(mon.getDate() + 6);
-      return [fmt(mon), fmt(sun)];
-    }
-    if (periodMode === "ytd") return [`${now.getFullYear()}-01-01`, todayStr];
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastDay  = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    return [fmt(firstDay), fmt(lastDay)];
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodMode, currentMonth]);
+    const [y, m] = selectedYM.split("-").map(Number);
+    const last = new Date(y, m, 0).getDate();
+    return [`${selectedYM}-01`, `${selectedYM}-${String(last).padStart(2, "0")}`];
+  }, [selectedYM]);
 
   const periodInvoices = useMemo(
     () => invoices.filter((inv) => inv.issueDate >= periodFrom && inv.issueDate <= periodTo),
@@ -197,24 +179,23 @@ export function DashboardPage() {
   const chartMax = Math.max(1, ...chartData.flatMap((d) => [d.emise, d.primite]));
   const curChart = chartData[chartData.length - 1] ?? { key: "", label: "", emise: 0, primite: 0 };
 
-  // ── "Total facturat" + delta vs previous month (shown only in month mode) ──
+  // ── "Total facturat" + delta vs the month before the selected one ──
   const totalFacturat = totalNet + totalVat;
   const { deltaPct, deltaDir, prevMonthLabel } = useMemo(() => {
     const monthTotal = (key: string) =>
       invoices
         .filter((inv) => inv.issueDate.slice(0, 7) === key)
         .reduce((s, inv) => s + parseDec(inv.subtotalAmount) + parseDec(inv.vatAmount), 0);
-    const prevD = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const [y, m] = selectedYM.split("-").map(Number);
+    const prevD = new Date(y, m - 2, 1);
     const pad = (n: number) => String(n).padStart(2, "0");
     const prevKey = `${prevD.getFullYear()}-${pad(prevD.getMonth() + 1)}`;
-    const curKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
     const prevTotal = monthTotal(prevKey);
     const label = prevD.toLocaleDateString("ro-RO", { month: "long" });
     if (prevTotal <= 0) return { deltaPct: null as number | null, deltaDir: "neutral" as "up" | "down" | "neutral", prevMonthLabel: label };
-    const pct = Math.round(((monthTotal(curKey) - prevTotal) / prevTotal) * 100);
+    const pct = Math.round(((monthTotal(selectedYM) - prevTotal) / prevTotal) * 100);
     return { deltaPct: pct, deltaDir: (pct >= 0 ? "up" : "down") as "up" | "down" | "neutral", prevMonthLabel: label };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invoices, currentMonth]);
+  }, [invoices, selectedYM]);
 
   const activeCompany    = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
 
@@ -237,13 +218,10 @@ export function DashboardPage() {
     return "mail";
   };
 
-  const monthName = now.toLocaleDateString("ro-RO", { month: "long" });
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-  const periodLabel =
-    periodMode === "today" ? "Astăzi"
-    : periodMode === "week" ? "Săptămâna aceasta"
-    : periodMode === "ytd" ? `Anul ${now.getFullYear()}`
-    : `${cap(monthName)} ${now.getFullYear()}`;
+  const MONTHS_FULL = ["Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie", "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie"];
+  const [selY, selM] = selectedYM.split("-").map(Number);
+  const periodLabel = `${MONTHS_FULL[selM - 1]} ${selY}`;
   const headDate = cap(now.toLocaleDateString("ro-RO", { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
 
   // De încasat = issued, not-yet-finalized invoices in the period (proxy for outstanding).
@@ -259,12 +237,8 @@ export function DashboardPage() {
     STORNED:   { cls: "sent", icon: "undo", label: "Stornată" },
   };
 
-  const PERIODS: { v: PeriodMode; label: string }[] = [
-    { v: "today", label: "Astăzi" },
-    { v: "week", label: "Săptămâna aceasta" },
-    { v: "month", label: cap(monthName) + " " + now.getFullYear() },
-    { v: "ytd", label: `Anul ${now.getFullYear()}` },
-  ];
+  // 12 months of the selected year (design month picker).
+  const monthOptions = MONTHS_FULL.map((label, i) => ({ ym: `${selY}-${String(i + 1).padStart(2, "0")}`, label: `${label} ${selY}` }));
 
   if (!activeCompanyId) {
     return (
@@ -339,12 +313,12 @@ export function DashboardPage() {
               <Ic name="calendar" /><span>{periodLabel}</span><Ic name="chevD" cls="ic" />
             </button>
             {monthPopOpen && (
-              <div className="pop show" style={{ left: 0, top: 42, width: 210 }} onMouseDown={(e) => e.stopPropagation()}>
-                <div className="col-title">Perioadă</div>
-                {PERIODS.map((p) => (
-                  <button key={p.v} className="pop-item" onClick={() => { setPeriodMode(p.v); setMonthPopOpen(false); }}>
+              <div className="pop show" style={{ left: 0, top: 42, width: 200, maxHeight: 300, overflowY: "auto" }} onMouseDown={(e) => e.stopPropagation()}>
+                <div className="col-title">Perioadă · {selY}</div>
+                {monthOptions.map((p) => (
+                  <button key={p.ym} className="pop-item" onClick={() => { setSelectedYM(p.ym); setMonthPopOpen(false); }}>
                     <span style={{ flex: 1 }}>{p.label}</span>
-                    {periodMode === p.v && <Ic name="check" cls="co-check" />}
+                    {selectedYM === p.ym && <Ic name="check" cls="co-check" />}
                   </button>
                 ))}
               </div>
@@ -370,7 +344,7 @@ export function DashboardPage() {
           <div className="top"><span className="klabel">Total facturat</span><Ic name="docUp" /></div>
           <div className="val num">{fmtInt(totalFacturat)} <span className="cur">RON</span></div>
           <div className="delta">
-            {periodMode === "month" && deltaPct != null
+            {deltaPct != null
               ? (<><span className="ar">{deltaDir === "up" ? "↑" : "↓"} {Math.abs(deltaPct)}%</span> față de {prevMonthLabel}</>)
               : `${periodInvoices.length} facturi · ${fmtInt(totalNet)} net`}
           </div>
