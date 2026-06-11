@@ -178,8 +178,13 @@ function paginate<T>(rows: T[], args?: Record<string, unknown>): Paginated<T> {
 
 const ok = { level: "ok", ytdRon: "0", pct: 0 };
 
+/** ?demo=1&fresh=1 → simulate a first run (no companies, no license) so the
+ *  onboarding wizard renders in the browser harness. */
+const isFresh = () =>
+  typeof window !== "undefined" && new URLSearchParams(window.location.search).has("fresh");
+
 const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
-  list_companies: () => [company],
+  list_companies: () => (isFresh() ? [] : [company]),
   get_company: () => company,
   list_contacts: () => contacts,
   get_contact: (a) => contacts.find((c) => c.id === a?.id) ?? contacts[0],
@@ -202,7 +207,7 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
   fetch_bnr_rate: () => 5.0985,
   mark_notification_read: () => null,
   mark_all_notifications_read: () => null,
-  get_license: () => license,
+  get_license: () => (isFresh() ? null : license),
   check_license_validity: () => true,
   anaf_is_authenticated: () => true,
   get_setting: () => null,
