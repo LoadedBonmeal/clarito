@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Icon } from "@/components/shared/Icon";
+import { Ic } from "@/components/shared/Ic";
 import { api } from "@/lib/tauri";
 import { fmtRON } from "@/lib/utils";
 import type { Product } from "@/types";
@@ -14,6 +14,7 @@ interface ProductComboboxProps {
 
 /**
  * R15 Wave 1 — Searchable product picker backed by `search_products`.
+ * Re-skinned to the Claude-Design vocabulary (.input / .pop / .pop-item / .mini-btn).
  *
  * Debounces input (250 ms) and fires when at least 2 characters are typed.
  * Supports keyboard navigation (ArrowUp/Down/Enter/Escape).
@@ -109,7 +110,7 @@ export function ProductCombobox({
     >
       <input
         ref={inputRef}
-        className="rf-input"
+        className="input"
         type="text"
         value={query}
         onChange={(e) => {
@@ -131,30 +132,25 @@ export function ProductCombobox({
         <div
           id={listboxId}
           role="listbox"
+          className="pop show"
           style={{
-            position: "absolute",
             top: "calc(100% + 4px)",
             left: 0,
             right: 0,
-            zIndex: 50,
-            background: "var(--rf-content)",
-            border: "1px solid var(--rf-border-strong)",
-            borderRadius: "var(--rf-radius-sm)",
-            boxShadow: "var(--rf-shadow-md)",
             maxHeight: 260,
             overflowY: "auto",
           }}
         >
           {debouncedQuery.length < 2 ? (
-            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
+            <div className="muted" style={{ padding: "9px 10px", fontSize: 12 }}>
               Tastați cel puțin 2 caractere…
             </div>
           ) : isFetching ? (
-            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
+            <div className="muted" style={{ padding: "9px 10px", fontSize: 12 }}>
               Se caută…
             </div>
           ) : results.length === 0 ? (
-            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
+            <div className="muted" style={{ padding: "9px 10px", fontSize: 12 }}>
               Niciun articol găsit pentru „{debouncedQuery}".
             </div>
           ) : (
@@ -166,6 +162,7 @@ export function ProductCombobox({
                   type="button"
                   role="option"
                   aria-selected={active}
+                  className="pop-item"
                   onMouseDown={(e) => {
                     e.preventDefault();
                   }}
@@ -174,23 +171,22 @@ export function ProductCombobox({
                   style={{
                     display: "block",
                     width: "100%",
+                    height: "auto",
                     textAlign: "left",
-                    padding: "9px 12px",
-                    border: "none",
-                    borderBottom: "1px solid var(--rf-border)",
-                    background: active ? "var(--rf-accent-tint)" : "transparent",
-                    cursor: "pointer",
-                    color: active ? "var(--rf-accent)" : "var(--rf-text)",
-                    font: "inherit",
+                    padding: "7px 10px",
+                    border: 0,
+                    whiteSpace: "normal",
+                    background: active ? "var(--fill)" : "transparent",
+                    fontFamily: "inherit",
                   }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500 }}>{p.name}</span>
-                    <span className="tnum" style={{ fontSize: 12, color: "var(--rf-text-muted)", flexShrink: 0 }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{p.name}</span>
+                    <span className="num muted" style={{ fontSize: 12, flexShrink: 0 }}>
                       {fmtRON(p.unitPrice)} RON
                     </span>
                   </div>
-                  <div className="mono" style={{ fontSize: 11, color: "var(--rf-text-muted)" }}>
+                  <div className="doc num" style={{ fontSize: 11 }}>
                     {p.code ? `${p.code} · ` : ""}
                     {p.unit} · TVA {p.vatRate}%
                     {p.stockQty != null ? <span> · stoc {p.stockQty}</span> : null}
@@ -221,13 +217,12 @@ export function ProductPickerButton({
     return (
       <button
         type="button"
-        className="rf-icon-btn rf-icon-btn--ghost"
-        style={{ width: 28, height: 28 }}
+        className="mini-btn"
         title="Alege din catalog"
         disabled={disabled}
         onClick={() => setOpen(true)}
       >
-        <Icon name="stock" size={13} />
+        <Ic name="cube" />
       </button>
     );
   }
@@ -245,12 +240,12 @@ export function ProductPickerButton({
       />
       <button
         type="button"
-        className="rf-icon-btn rf-icon-btn--ghost"
-        style={{ width: 26, height: 26, position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}
+        className="mini-btn"
+        style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}
         title="Închide"
         onClick={() => setOpen(false)}
       >
-        <Icon name="x" size={10} />
+        <Ic name="xMark" />
       </button>
     </div>
   );

@@ -1,6 +1,7 @@
 /**
  * LineItemsEditor — reusable line-items table for invoices and recurring templates.
- * Re-skinned to rf kit look (Wave 2) — uses .rf-tbl classes and rf editor styles.
+ * Re-skinned to the Claude-Design vocabulary (.scr-table / .input / .select /
+ * .mini-btn / .banner.warn / add-row affordance).
  *
  * Public API (props, types, exports) is UNCHANGED — LineItemsEditor.test.tsx
  * imports only deduceVatCategory and LineRow, which are preserved exactly.
@@ -14,19 +15,19 @@
 
 import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Icon } from "@/components/shared/Icon";
+import { Ic } from "@/components/shared/Ic";
 import { ProductPickerButton } from "@/components/shared/ProductCombobox";
 import { VAT_RATES, VAT_CATEGORIES, VAT_CATEGORY_LABELS } from "@/lib/constants";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { fmtRON } from "@/lib/utils";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import type { CreateLineInput, Product, VatCategory } from "@/types";
+
+// Heroicons outline paths not present in Ic.tsx (inlined verbatim, design convention).
+const SVG_TRASH =
+  '<path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/>';
+const SVG_WARN =
+  '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>';
 
 /** EU alpha-2 country codes (excluding Romania). Used for auto-deduction of vatCategory. */
 const EU_CODES = new Set([
@@ -232,140 +233,72 @@ export function LineItemsEditor({
   // Column count: # + Cod + Descriere + Cant + UM + Preț + TVA% + Categorie + Net + Total + del = 11
   const COL_SPAN = 11;
 
-  // Cell input style — thin, borderless inline inputs for editor rows
-  const cellInput: React.CSSProperties = {
-    width: "100%",
-    border: "none",
-    background: "transparent",
-    padding: "0 4px",
-    fontSize: 13,
-    fontFamily: "inherit",
-    color: "var(--rf-text)",
-    outline: "none",
-    height: "100%",
-  };
-
-  const cellInputNum: React.CSSProperties = {
-    ...cellInput,
-    textAlign: "right",
-    fontFamily: "var(--rf-mono)",
-    fontVariantNumeric: "tabular-nums",
-  };
-
+  // Compact design .input/.select sizing for editor cells.
+  const cellInput: React.CSSProperties = { height: 30, padding: "0 8px" };
+  const cellInputNum: React.CSSProperties = { ...cellInput, textAlign: "right" };
   const cellSelect: React.CSSProperties = {
-    width: "100%",
-    border: "none",
-    background: "transparent",
-    padding: "0 2px",
+    height: 30,
+    padding: "0 24px 0 8px",
     fontSize: 12,
-    fontFamily: "inherit",
-    color: "var(--rf-text)",
-    outline: "none",
-    cursor: "pointer",
+    backgroundPosition: "right 6px center",
   };
+  const cellTd: React.CSSProperties = { padding: "6px 4px", verticalAlign: "middle" };
+
+  // Plain-text tooltip for the Categorie header help badge.
+  const CAT_HELP = [
+    "Categorii TVA (CIUS-RO):",
+    "S — Standard (TVA aplicată normal)",
+    "AE — Taxare inversă (reverse-charge B2B intracomunitar sau intern, TVA 0%)",
+    "E — Scutit fără drept de deducere (intern)",
+    "Z — Cotă zero",
+    "K — Intracomunitar scutit (livrare UE, 0% + VAT ID)",
+    "G — Export scutit (livrare extra-UE)",
+    "O — În afara sferei TVA",
+  ].join("\n");
 
   // Legea 141/2025: 19% and 5% are abolished from 01.08.2025 for new operations. Warn if a line
   // still carries one (e.g. auto-filled from an old product), steering to 21% / 11%.
   const hasAbolishedRate = lines.some((l) => l.vatRate === 19 || l.vatRate === 5);
 
   return (
-    <div
-      style={{
-        overflowX: "auto",
-        borderTop: "1px solid var(--rf-border)",
-      }}
-    >
+    <div style={{ overflowX: "auto", borderTop: "1px solid var(--line)" }}>
       {hasAbolishedRate && (
-        <div
-          className="rf-banner rf-banner--warning"
-          style={{ margin: "8px 12px", display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}
-        >
-          <Icon name="alertTriangle" size={16} />
+        <div className="banner warn" style={{ margin: "10px 12px", marginBottom: 10 }}>
+          <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_WARN }} />
           <span>
             O linie folosește o cotă TVA abrogată (19% sau 5%, Legea 141/2025, de la 01.08.2025).
             Pentru operațiuni noi folosiți <b>21%</b> (standard) sau <b>11%</b> (redus).
           </span>
         </div>
       )}
-      <table
-        style={{
-          width: "100%",
-          borderCollapse: "separate",
-          borderSpacing: 0,
-          fontSize: 13,
-          tableLayout: "auto",
-        }}
-      >
+      <table className="scr-table">
         <thead>
-          <tr
-            style={{
-              background: "var(--rf-table-head)",
-            }}
-          >
-            {/* # */}
-            <th
-              style={{
-                width: 32, padding: "0 8px", height: 38, textAlign: "center",
-                fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase",
-                color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)",
-                whiteSpace: "nowrap",
-              }}
-            >#</th>
-            {/* Cod */}
-            <th style={{ width: 110, padding: "0 8px", height: 38, textAlign: "left", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)", whiteSpace: "nowrap" }}>Cod</th>
-            {/* Descriere */}
-            <th style={{ padding: "0 8px", height: 38, textAlign: "left", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)" }}>Descriere</th>
-            {/* Cant */}
-            <th style={{ width: 64, padding: "0 8px", height: 38, textAlign: "right", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)", whiteSpace: "nowrap" }}>Cant.</th>
-            {/* UM */}
-            <th style={{ width: 56, padding: "0 8px", height: 38, textAlign: "left", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)" }}>UM</th>
-            {/* Preț */}
-            <th style={{ width: 100, padding: "0 8px", height: 38, textAlign: "right", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)", whiteSpace: "nowrap" }}>Preț unitar</th>
-            {/* TVA % */}
-            <th style={{ width: 64, padding: "0 8px", height: 38, textAlign: "right", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)", whiteSpace: "nowrap" }}>TVA %</th>
-            {/* Categorie */}
-            <th
-              style={{
-                width: 150, padding: "0 8px", height: 38, textAlign: "left", fontSize: 11,
-                fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase",
-                color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)",
-              }}
-            >
+          <tr>
+            <th style={{ width: 32, padding: "9px 8px", textAlign: "center" }}>#</th>
+            <th style={{ width: 110, padding: "9px 8px" }}>Cod</th>
+            <th style={{ padding: "9px 8px" }}>Descriere</th>
+            <th className="r" style={{ width: 64, padding: "9px 8px", whiteSpace: "nowrap" }}>Cant.</th>
+            <th style={{ width: 56, padding: "9px 8px" }}>UM</th>
+            <th className="r" style={{ width: 100, padding: "9px 8px", whiteSpace: "nowrap" }}>Preț unitar</th>
+            <th className="r" style={{ width: 64, padding: "9px 8px", whiteSpace: "nowrap" }}>TVA %</th>
+            <th style={{ width: 150, padding: "9px 8px" }}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
                 Categorie
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span
-                        style={{
-                          cursor: "help", fontSize: 10, color: "var(--rf-text-muted)",
-                          border: "1px solid var(--rf-border-strong)", borderRadius: "50%",
-                          width: 13, height: 13, display: "inline-flex", alignItems: "center",
-                          justifyContent: "center", lineHeight: 1, flexShrink: 0,
-                        }}
-                        aria-label="Explicație categorii TVA"
-                      >?</span>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" style={{ maxWidth: 280 }}>
-                      <strong>Categorii TVA (CIUS-RO):</strong><br />
-                      <b>S</b> — Standard (TVA aplicată normal)<br />
-                      <b>AE</b> — Taxare inversă (reverse-charge B2B intracomunitar sau intern, TVA 0%)<br />
-                      <b>E</b> — Scutit fără drept de deducere (intern)<br />
-                      <b>Z</b> — Cotă zero<br />
-                      <b>K</b> — Intracomunitar scutit (livrare UE, 0% + VAT ID)<br />
-                      <b>G</b> — Export scutit (livrare extra-UE)<br />
-                      <b>O</b> — În afara sferei TVA
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <span
+                  title={CAT_HELP}
+                  aria-label="Explicație categorii TVA"
+                  style={{
+                    cursor: "help", fontSize: 10, color: "var(--dim)",
+                    border: "1px solid var(--line)", borderRadius: "50%",
+                    width: 13, height: 13, display: "inline-flex", alignItems: "center",
+                    justifyContent: "center", lineHeight: 1, flexShrink: 0,
+                  }}
+                >?</span>
               </span>
             </th>
-            {/* Valoare net */}
-            <th style={{ width: 110, padding: "0 8px", height: 38, textAlign: "right", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)", whiteSpace: "nowrap" }}>Valoare net</th>
-            {/* Total cu TVA */}
-            <th style={{ width: 110, padding: "0 8px", height: 38, textAlign: "right", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--rf-text-dim)", borderBottom: "1px solid var(--rf-border)", whiteSpace: "nowrap" }}>Total cu TVA</th>
-            {/* del */}
-            <th style={{ width: 36, borderBottom: "1px solid var(--rf-border)" }}></th>
+            <th className="r" style={{ width: 110, padding: "9px 8px", whiteSpace: "nowrap" }}>Valoare net</th>
+            <th className="r" style={{ width: 110, padding: "9px 8px", whiteSpace: "nowrap" }}>Total cu TVA</th>
+            <th style={{ width: 36, padding: "9px 4px" }}></th>
           </tr>
         </thead>
         <tbody>
@@ -375,35 +308,26 @@ export function LineItemsEditor({
             const effectiveVatRate = l.vatCategory === "S" ? l.vatRate : 0;
             const lineTotal = lineNet * (1 + effectiveVatRate / 100);
             return (
-              <tr
-                key={l.rowId}
-                style={{ borderBottom: "1px solid var(--rf-border)" }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--rf-hover)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-              >
+              <tr key={l.rowId}>
                 {/* # */}
-                <td
-                  style={{
-                    textAlign: "center", color: "var(--rf-text-dim)",
-                    fontFamily: "var(--rf-mono)", padding: "0 8px",
-                    height: 46, verticalAlign: "middle",
-                  }}
-                >
+                <td className="muted num" style={{ ...cellTd, padding: "6px 8px", textAlign: "center" }}>
                   {i + 1}
                 </td>
                 {/* Cod */}
-                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
+                <td style={cellTd}>
                   <input
+                    className="input num"
                     value={l.cpvCode ?? ""}
                     onChange={(e) => updateLine(i, "cpvCode", e.target.value || undefined)}
-                    style={{ ...cellInput, fontFamily: "var(--rf-mono)" }}
+                    style={cellInput}
                     placeholder="cod"
                   />
                 </td>
                 {/* Descriere */}
-                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
+                <td style={cellTd}>
                   <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
                     <input
+                      className="input"
                       value={l.name}
                       onChange={(e) => updateLine(i, "name", e.target.value)}
                       style={{ ...cellInput, flex: 1, minWidth: 0 }}
@@ -418,8 +342,9 @@ export function LineItemsEditor({
                   </div>
                 </td>
                 {/* Cant */}
-                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
+                <td style={cellTd}>
                   <input
+                    className="input num"
                     type="number"
                     value={l.quantity}
                     onChange={(e) => updateLine(i, "quantity", parseFloat(e.target.value) || 0)}
@@ -427,16 +352,18 @@ export function LineItemsEditor({
                   />
                 </td>
                 {/* UM */}
-                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
+                <td style={cellTd}>
                   <input
+                    className="input"
                     value={l.unit}
                     onChange={(e) => updateLine(i, "unit", e.target.value)}
                     style={cellInput}
                   />
                 </td>
                 {/* Preț */}
-                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
+                <td style={cellTd}>
                   <input
+                    className="input num"
                     type="number"
                     value={l.unitPrice}
                     onChange={(e) => updateLine(i, "unitPrice", parseFloat(e.target.value) || 0)}
@@ -444,9 +371,10 @@ export function LineItemsEditor({
                   />
                 </td>
                 {/* TVA % */}
-                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
+                <td style={cellTd}>
                   <select
-                    style={{ ...cellSelect, textAlign: "right" }}
+                    className="select num"
+                    style={cellSelect}
                     value={l.vatRate}
                     onChange={(e) => updateLine(i, "vatRate", Number(e.target.value))}
                   >
@@ -456,8 +384,9 @@ export function LineItemsEditor({
                   </select>
                 </td>
                 {/* Categorie */}
-                <td style={{ padding: "0 4px", height: 46, verticalAlign: "middle" }}>
+                <td style={cellTd}>
                   <select
+                    className="select"
                     style={{ ...cellSelect, fontSize: 11 }}
                     value={l.vatCategory}
                     onChange={(e) => updateLine(i, "vatCategory", e.target.value as VatCategory)}
@@ -469,132 +398,91 @@ export function LineItemsEditor({
                   </select>
                 </td>
                 {/* Valoare net */}
-                <td
-                  style={{
-                    textAlign: "right", padding: "0 8px", height: 46, verticalAlign: "middle",
-                    fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums",
-                    color: "var(--rf-text-muted)", fontSize: 13,
-                  }}
-                >
+                <td className="r num muted" style={{ ...cellTd, padding: "6px 8px" }}>
                   {lineNet.toFixed(2)}
                 </td>
                 {/* Total cu TVA */}
-                <td
-                  style={{
-                    textAlign: "right", padding: "0 8px", height: 46, verticalAlign: "middle",
-                    fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums",
-                    fontWeight: 700, fontSize: 13,
-                  }}
-                >
+                <td className="r num" style={{ ...cellTd, padding: "6px 8px", fontWeight: 600 }}>
                   {lineTotal.toFixed(2)}
                 </td>
                 {/* Delete */}
-                <td style={{ textAlign: "center", padding: "0 4px", height: 46, verticalAlign: "middle" }}>
-                  <button
-                    className="rf-icon-btn rf-icon-btn--ghost"
-                    style={{ width: 28, height: 28 }}
-                    onClick={() => removeLine(i)}
-                    disabled={lines.length === 1}
-                    title="Șterge linia"
-                  >
-                    <Icon name="trash" size={13} />
-                  </button>
+                <td style={{ ...cellTd, padding: "6px 4px" }}>
+                  <div className="row-acts">
+                    <button
+                      className="mini-btn"
+                      onClick={() => removeLine(i)}
+                      disabled={lines.length === 1}
+                      title="Șterge linia"
+                      style={lines.length === 1 ? { opacity: 0.3, cursor: "default" } : undefined}
+                    >
+                      <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_TRASH }} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             );
           })}
-          {/* Add-line row */}
-          <tr
-            style={{ cursor: "pointer" }}
-            onClick={addLine}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--rf-hover)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-          >
-            <td
-              colSpan={COL_SPAN}
-              style={{
-                padding: "10px 16px",
-                color: "var(--rf-accent)",
-                fontSize: 13,
-                fontWeight: 500,
-              }}
-            >
-              <Icon name="plus" size={13} style={{ marginRight: 6 }} /> Adaugă linie
+          {/* Add-line row (design add-row affordance, cf. .add-sm) */}
+          <tr style={{ cursor: "pointer" }} onClick={addLine}>
+            <td colSpan={COL_SPAN} style={{ padding: "10px 16px" }}>
+              <span
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                  fontSize: 12.5, fontWeight: 500, color: "var(--text-2)",
+                }}
+              >
+                <Ic name="plus" cls="ic" /> Adaugă linie
+              </span>
             </td>
           </tr>
         </tbody>
         {showTotals && (
           <tfoot>
-            <tr
-              style={{ background: "var(--rf-table-head)", borderTop: "1px solid var(--rf-border-strong)" }}
-            >
+            <tr style={{ background: "var(--fill)" }}>
               <td
                 colSpan={7}
-                style={{
-                  textAlign: "right", padding: "0 8px", height: 40,
-                  color: "var(--rf-text-muted)", fontSize: 12,
-                }}
+                className="r muted"
+                style={{ padding: "10px 8px", fontSize: 12, borderTop: "1px solid var(--line)" }}
               >
                 Subtotal net
               </td>
-              <td></td>
+              <td style={{ borderTop: "1px solid var(--line)" }}></td>
               <td
-                style={{
-                  textAlign: "right", padding: "0 8px",
-                  fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums",
-                  fontWeight: 600, fontSize: 13,
-                }}
+                className="r num"
+                style={{ padding: "10px 8px", fontWeight: 600, fontSize: 13, borderTop: "1px solid var(--line)" }}
               >
                 {fmtRON(net)}
               </td>
-              <td></td>
-              <td></td>
+              <td style={{ borderTop: "1px solid var(--line)" }}></td>
+              <td style={{ borderTop: "1px solid var(--line)" }}></td>
             </tr>
-            <tr style={{ background: "var(--rf-table-head)" }}>
-              <td
-                colSpan={7}
-                style={{
-                  textAlign: "right", padding: "0 8px", height: 36,
-                  color: "var(--rf-text-muted)", fontSize: 12,
-                }}
-              >
+            <tr style={{ background: "var(--fill)" }}>
+              <td colSpan={7} className="r muted" style={{ padding: "8px", fontSize: 12 }}>
                 TVA
               </td>
               <td></td>
-              <td
-                style={{
-                  textAlign: "right", padding: "0 8px",
-                  fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums",
-                  fontSize: 13,
-                }}
-              >
+              <td className="r num" style={{ padding: "8px", fontSize: 13 }}>
                 {fmtRON(vat)}
               </td>
               <td></td>
               <td></td>
             </tr>
-            <tr style={{ background: "var(--rf-table-head)" }}>
+            <tr style={{ background: "var(--fill)" }}>
               <td
                 colSpan={7}
+                className="r"
                 style={{
-                  textAlign: "right", padding: "0 8px", height: 40,
-                  fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em",
-                  fontWeight: 700, color: "var(--rf-text)",
+                  padding: "10px 8px", fontSize: 11, textTransform: "uppercase",
+                  letterSpacing: ".04em", fontWeight: 700, color: "var(--text)",
                 }}
               >
                 Total de plată
               </td>
               <td></td>
               <td></td>
-              <td
-                style={{
-                  textAlign: "right", padding: "0 8px",
-                  fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums",
-                  fontSize: 15, fontWeight: 700, color: "var(--rf-accent)",
-                }}
-              >
+              <td className="r num" style={{ padding: "10px 8px", fontSize: 15, fontWeight: 600, letterSpacing: "-.02em" }}>
                 {fmtRON(total)}{" "}
-                <span style={{ fontSize: 10.5, color: "var(--rf-text-muted)", fontWeight: 400 }}>{currency}</span>
+                <span className="muted" style={{ fontSize: 10.5, fontWeight: 400 }}>{currency}</span>
               </td>
               <td></td>
             </tr>

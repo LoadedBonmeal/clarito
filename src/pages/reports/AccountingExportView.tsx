@@ -1,13 +1,14 @@
 /**
- * AccountingExportView — Export contabil (SAGA / WinMentor).
- * Wave 5 — rf look: SectionCard cards grid + Btn
+ * AccountingExportView — Export contabil SAGA / WinMentor (embedded in Rapoarte).
+ * Claude-Design classes: .scr-card grid + .scr-toolbar .tt + .pill-btn.
+ * ALL wiring preserved: api.integrations.exportSagaCsv / exportWinmentorCsv.
  */
 
 import { useState } from "react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import { SectionCard, Btn } from "@/components/rf";
+import { Ic } from "@/components/shared/Ic";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
@@ -73,43 +74,49 @@ export function AccountingExportView({ periodInvoices, dateFrom, dateTo }: Props
   };
 
   return (
-    <div className="rf-grid-2">
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
       {/* SAGA card */}
-      <SectionCard icon="ledger" title="Export SAGA">
-        <div style={{ padding: "4px 16px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
-          <p style={{ fontSize: 13, color: "var(--rf-text-muted)", lineHeight: 1.6, margin: 0 }}>
-            Export note contabile compatibil cu <b>SAGA C/PS</b>. Generează un fișier CSV cu
-            înregistrările contabile ale perioadei. Fișierul include toate liniile de factură cu
-            TVA defalcat.
+      <div className="scr-card">
+        <div className="scr-toolbar">
+          <div className="tt">Export SAGA</div>
+        </div>
+        <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6, margin: 0 }}>
+            Export note contabile compatibil cu <b style={{ color: "var(--text)" }}>SAGA C/PS</b>.
+            Generează un fișier CSV cu înregistrările contabile ale perioadei. Fișierul include
+            toate liniile de factură cu TVA defalcat.
           </p>
-          <Btn
-            variant="secondary"
-            icon="download"
+          <button
+            className="pill-btn"
+            style={{ width: "fit-content" }}
             disabled={exportingSaga || !activeCompanyId}
             onClick={() => void handleExportSaga()}
           >
-            {exportingSaga ? "Export…" : "Export SAGA (CSV)"}
-          </Btn>
+            <Ic name="dl" />{exportingSaga ? "Export…" : "Export SAGA (CSV)"}
+          </button>
         </div>
-      </SectionCard>
+      </div>
 
       {/* WinMentor card */}
-      <SectionCard icon="ledger" title="Export WinMentor">
-        <div style={{ padding: "4px 16px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
-          <p style={{ fontSize: 13, color: "var(--rf-text-muted)", lineHeight: 1.6, margin: 0 }}>
-            Export în format CSV compatibil <b>WinMentor Enterprise</b> pentru import în
-            contabilitatea principală. Coloanele respectă structura de import WinMentor standard.
+      <div className="scr-card">
+        <div className="scr-toolbar">
+          <div className="tt">Export WinMentor</div>
+        </div>
+        <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6, margin: 0 }}>
+            Export în format CSV compatibil <b style={{ color: "var(--text)" }}>WinMentor Enterprise</b> pentru
+            import în contabilitatea principală. Coloanele respectă structura de import WinMentor standard.
           </p>
-          <Btn
-            variant="secondary"
-            icon="download"
+          <button
+            className="pill-btn"
+            style={{ width: "fit-content" }}
             disabled={exportingWinmentor || !activeCompanyId}
             onClick={() => void handleExportWinmentor()}
           >
-            {exportingWinmentor ? "Export…" : "Export WinMentor (CSV)"}
-          </Btn>
+            <Ic name="dl" />{exportingWinmentor ? "Export…" : "Export WinMentor (CSV)"}
+          </button>
         </div>
-      </SectionCard>
+      </div>
     </div>
   );
 }

@@ -3,19 +3,14 @@
  * oficial ANAF (schema v5). Câmpurile stabile (telefon, reprezentant) sunt
  * inițializate cu valori sensibile.
  *
- * P7 — rf kit: Modal, Field, Input, Select, Checkbox, Btn.
+ * Design re-skin: .modal-back/.modal + .fgrid/.field + .cbx check-rows
+ * (pattern din src/pages/Receipts.tsx). Toată logica de validare/submit păstrată.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
-import {
-  Modal,
-  Field,
-  Input,
-  Select,
-  Checkbox,
-  Btn,
-} from "@/components/rf";
+import { Ic } from "@/components/shared/Ic";
 import type { Company, D394Submission } from "@/types";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -34,6 +29,41 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   company: Company;
   onSubmit: (submission: D394Submission) => void;
+}
+
+// ── CheckRow — design .cbx + label, full-row clickable ────────────────────────
+
+function CheckRow({
+  checked,
+  onChange,
+  children,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 9,
+        fontSize: 13,
+        color: "var(--text)",
+        cursor: "pointer",
+        background: "transparent",
+        border: 0,
+        padding: 0,
+        fontFamily: "inherit",
+        textAlign: "left",
+      }}
+    >
+      <span className={`cbx${checked ? " on" : ""}`} />
+      {children}
+    </button>
+  );
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -57,6 +87,14 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit }: P
   const [optiune,          setOptiune]          = useState(false);
   const [prsAfiliat,       setPrsAfiliat]       = useState(false);
   const [solicit,          setSolicit]          = useState(false);
+
+  // Esc closes the modal.
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onOpenChange(false); };
+    document.addEventListener("keydown", h);
+    return () => document.removeEventListener("keydown", h);
+  }, [open, onOpenChange]);
 
   // ── Validation ───────────────────────────────────────────────────────────────
 
@@ -88,159 +126,193 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit }: P
     onOpenChange(false);
   };
 
-  return (
-    <Modal
-      open={open}
-      onOpenChange={onOpenChange}
-      title="Export oficial D394 — date suplimentare"
-      width={580}
-      footer={
-        <>
-          <Btn variant="ghost" onClick={() => onOpenChange(false)}>Anulează</Btn>
-          <Btn variant="primary" disabled={!canSubmit} onClick={handleSubmit}>
-            Exportă XML oficial
-          </Btn>
-        </>
-      }
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      className="modal-back show"
+      style={{ position: "fixed" }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onOpenChange(false); }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* Tip declarație + CAEN */}
-        <div className="rf-grid-2" style={{ gap: 12 }}>
-          <Field label="Tip D394">
-            <Select
-              id="d394-tip"
-              value={tipD394}
-              onChange={(e) => setTipD394(e.target.value)}
-            >
-              {TIP_D394_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field
-            label="Cod CAEN principal"
-            required
-            error={caen.length > 0 && !caenValid ? "Codul CAEN trebuie să aibă exact 4 cifre." : undefined}
-          >
-            <Input
-              id="d394-caen"
-              value={caen}
-              onChange={(e) => setCaen(e.target.value)}
-              placeholder="6201"
-              maxLength={4}
-              error={caen.length > 0 && !caenValid}
-            />
-          </Field>
-        </div>
-
-        <Field label="Telefon">
-          <Input
-            id="d394-telefon"
-            value={telefon}
-            onChange={(e) => setTelefon(e.target.value)}
-            placeholder="0721000000"
-            maxLength={15}
-          />
-        </Field>
-
-        {/* Reprezentant */}
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          Reprezentant
-        </div>
-        <Field label="Denumire reprezentant" required>
-          <Input
-            id="d394-denr"
-            value={denR}
-            onChange={(e) => setDenR(e.target.value)}
-            placeholder="SC ACME SRL"
-            error={denR.length > 0 && denR.trim() === ""}
-          />
-        </Field>
-        <div className="rf-grid-2" style={{ gap: 12 }}>
-          <Field label="Funcție reprezentant">
-            <Input
-              id="d394-functie"
-              value={functieReprez}
-              onChange={(e) => setFunctieReprez(e.target.value)}
-              placeholder="DIRECTOR"
-            />
-          </Field>
-          <Field label="Calitate (când tip=proprie)">
-            <Input
-              id="d394-calitate"
-              value={calitateIntocmit}
-              onChange={(e) => setCalitateIntocmit(e.target.value)}
-              placeholder="Reprezentant"
-              disabled={tipIntocmit !== 0}
-            />
-          </Field>
-        </div>
-        <Field label="Adresă reprezentant">
-          <Input
-            id="d394-adresa"
-            value={adresaR}
-            onChange={(e) => setAdresaR(e.target.value)}
-            placeholder="Str. Exemplu nr. 1, București"
-          />
-        </Field>
-
-        {/* Întocmit */}
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          Persoana care a întocmit declarația
-        </div>
-        <div className="rf-grid-2" style={{ gap: 12 }}>
-          <Field label="Tip întocmit">
-            <Select
-              id="d394-tipintocmit"
-              value={String(tipIntocmit)}
-              onChange={(e) => setTipIntocmit(Number(e.target.value))}
-            >
-              <option value="0">0 — Persoana proprie</option>
-              <option value="1">1 — Consultant</option>
-            </Select>
-          </Field>
-          <Field label="CIF persoana care a întocmit">
-            <Input
-              id="d394-cifintocmit"
-              num
-              value={cifIntocmit}
-              onChange={(e) => setCifIntocmit(e.target.value)}
-              placeholder="0"
-            />
-          </Field>
-        </div>
-        <Field label="Denumire persoana care a întocmit" required>
-          <Input
-            id="d394-denintocmit"
-            value={denIntocmit}
-            onChange={(e) => setDenIntocmit(e.target.value)}
-            placeholder="Popescu Ion"
-            error={denIntocmit.length > 0 && denIntocmit.trim() === ""}
-          />
-        </Field>
-
-        {/* Flags */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
-            Opțiuni suplimentare
+      <div className="modal" style={{ width: 580 }}>
+        <div className="modal-head">
+          <div>
+            <div className="mt">Export oficial D394 — date suplimentare</div>
+            <div className="ms">Schema ANAF v5 — câmpuri obligatorii pentru PDF-ul inteligent</div>
           </div>
-          <Checkbox checked={sistemTva} onChange={(e) => setSistemTva(e.target.checked)}>
-            Sistem TVA la încasare
-          </Checkbox>
-          <Checkbox checked={opEfectuate} onChange={(e) => setOpEfectuate(e.target.checked)}>
-            Operațiuni cu persoane afiliate
-          </Checkbox>
-          <Checkbox checked={optiune} onChange={(e) => setOptiune(e.target.checked)}>
-            Opțiune regim special
-          </Checkbox>
-          <Checkbox checked={prsAfiliat} onChange={(e) => setPrsAfiliat(e.target.checked)}>
-            Persoane afiliate
-          </Checkbox>
-          <Checkbox checked={solicit} onChange={(e) => setSolicit(e.target.checked)}>
-            Solicită rambursare TVA
-          </Checkbox>
+          <button className="modal-x" onClick={() => onOpenChange(false)}>
+            <Ic name="xMark" />
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="fgrid">
+            {/* Tip declarație + CAEN */}
+            <div className="field">
+              <label>Tip D394</label>
+              <select
+                id="d394-tip"
+                className="select"
+                value={tipD394}
+                onChange={(e) => setTipD394(e.target.value)}
+              >
+                {TIP_D394_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Cod CAEN principal <span className="req">*</span></label>
+              <input
+                id="d394-caen"
+                className={`input num${caen.length > 0 && !caenValid ? " invalid" : ""}`}
+                value={caen}
+                onChange={(e) => setCaen(e.target.value)}
+                placeholder="6201"
+                maxLength={4}
+              />
+              {caen.length > 0 && !caenValid && (
+                <span className="err">
+                  <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="M6 18 18 6M6 6l12 12"/>' }} />
+                  Codul CAEN trebuie să aibă exact 4 cifre.
+                </span>
+              )}
+            </div>
+
+            <div className="field span2">
+              <label>Telefon</label>
+              <input
+                id="d394-telefon"
+                className="input num"
+                value={telefon}
+                onChange={(e) => setTelefon(e.target.value)}
+                placeholder="0721000000"
+                maxLength={15}
+              />
+            </div>
+
+            {/* Reprezentant */}
+            <div className="span2 col-title" style={{ padding: "6px 0 0" }}>
+              Reprezentant
+            </div>
+            <div className="field span2">
+              <label>Denumire reprezentant <span className="req">*</span></label>
+              <input
+                id="d394-denr"
+                className="input"
+                value={denR}
+                onChange={(e) => setDenR(e.target.value)}
+                placeholder="SC ACME SRL"
+              />
+            </div>
+            <div className="field">
+              <label>Funcție reprezentant</label>
+              <input
+                id="d394-functie"
+                className="input"
+                value={functieReprez}
+                onChange={(e) => setFunctieReprez(e.target.value)}
+                placeholder="DIRECTOR"
+              />
+            </div>
+            <div className="field">
+              <label>Calitate (când tip=proprie)</label>
+              <input
+                id="d394-calitate"
+                className="input"
+                value={calitateIntocmit}
+                onChange={(e) => setCalitateIntocmit(e.target.value)}
+                placeholder="Reprezentant"
+                disabled={tipIntocmit !== 0}
+                style={tipIntocmit !== 0 ? { opacity: 0.55, background: "var(--fill)" } : undefined}
+              />
+            </div>
+            <div className="field span2">
+              <label>Adresă reprezentant</label>
+              <input
+                id="d394-adresa"
+                className="input"
+                value={adresaR}
+                onChange={(e) => setAdresaR(e.target.value)}
+                placeholder="Str. Exemplu nr. 1, București"
+              />
+            </div>
+
+            {/* Întocmit */}
+            <div className="span2 col-title" style={{ padding: "6px 0 0" }}>
+              Persoana care a întocmit declarația
+            </div>
+            <div className="field">
+              <label>Tip întocmit</label>
+              <select
+                id="d394-tipintocmit"
+                className="select"
+                value={String(tipIntocmit)}
+                onChange={(e) => setTipIntocmit(Number(e.target.value))}
+              >
+                <option value="0">0 — Persoana proprie</option>
+                <option value="1">1 — Consultant</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>CIF persoana care a întocmit</label>
+              <input
+                id="d394-cifintocmit"
+                className="input num"
+                value={cifIntocmit}
+                onChange={(e) => setCifIntocmit(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+            <div className="field span2">
+              <label>Denumire persoana care a întocmit <span className="req">*</span></label>
+              <input
+                id="d394-denintocmit"
+                className="input"
+                value={denIntocmit}
+                onChange={(e) => setDenIntocmit(e.target.value)}
+                placeholder="Popescu Ion"
+              />
+            </div>
+
+            {/* Flags */}
+            <div className="span2 col-title" style={{ padding: "6px 0 0" }}>
+              Opțiuni suplimentare
+            </div>
+            <div className="field span2" style={{ gap: 9 }}>
+              <CheckRow checked={sistemTva} onChange={setSistemTva}>
+                Sistem TVA la încasare
+              </CheckRow>
+              <CheckRow checked={opEfectuate} onChange={setOpEfectuate}>
+                Operațiuni cu persoane afiliate
+              </CheckRow>
+              <CheckRow checked={optiune} onChange={setOptiune}>
+                Opțiune regim special
+              </CheckRow>
+              <CheckRow checked={prsAfiliat} onChange={setPrsAfiliat}>
+                Persoane afiliate
+              </CheckRow>
+              <CheckRow checked={solicit} onChange={setSolicit}>
+                Solicită rambursare TVA
+              </CheckRow>
+            </div>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="pill-btn" onClick={() => onOpenChange(false)}>
+            Anulează
+          </button>
+          <button
+            className="btn-dark"
+            disabled={!canSubmit}
+            style={!canSubmit ? { opacity: 0.6, cursor: "default" } : undefined}
+            onClick={handleSubmit}
+          >
+            <Ic name="dl" />
+            Exportă XML oficial
+          </button>
         </div>
       </div>
-    </Modal>
+    </div>,
+    document.body,
   );
 }

@@ -1,6 +1,8 @@
 /**
- * PurchaseJournalView — Jurnal de cumpărări pentru perioadă.
- * Wave 5 — rf look: SectionCard + rf-tbl + Banner + Btn
+ * PurchaseJournalView — Jurnal de cumpărări pentru perioadă (embedded in Rapoarte).
+ * Claude-Design classes: .scr-card + .scr-toolbar .tt + .scr-table + .banner warn + .tot-foot.
+ * ALL wiring preserved: api.received.list query, api.journals.exportPurchases CSV,
+ * api.received.reparseVat + cache invalidation, QueryErrorBanner.
  */
 
 import { useState, useMemo } from "react";
@@ -8,7 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import { SectionCard, Btn, Banner } from "@/components/rf";
+import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -16,6 +18,16 @@ import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import { queryKeys } from "@/lib/queries";
+
+const RO_MON = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
+const fmtRoDate = (iso: string) => {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  return `${d} ${RO_MON[Number(m) - 1] ?? m} ${y}`;
+};
+
+// Warning icon absent from the Ic set — inlined verbatim (design banner pattern).
+const IC_WARN = '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>';
 
 interface Props {
   dateFrom: string;
@@ -99,54 +111,53 @@ export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
   };
 
   return (
-    <div className="rf-col">
+    <div>
       {hasUnparsed && (
-        <Banner variant="warning">
-          Pentru unele facturi primite, TVA nu a fost încă extrasă din XML. Apăsați
-          «Recalculează TVA din XML» pentru raportare completă.
-        </Banner>
+        <div className="banner warn">
+          <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: IC_WARN }} />
+          <span>
+            Pentru unele facturi primite, TVA nu a fost încă extrasă din XML. Apăsați
+            «Recalculează TVA din XML» pentru raportare completă.
+          </span>
+        </div>
       )}
 
-      <SectionCard
-        icon="fileIn"
-        title="Jurnal de cumpărări"
-        subtitle={dateFrom !== dateTo ? `${dateFrom} — ${dateTo}` : dateFrom}
-        actions={
-          <div style={{ display: "flex", gap: 8 }}>
-            <Btn
-              variant="ghost"
-              size="sm"
-              icon="refresh"
-              disabled={reparsing || !activeCompanyId}
-              onClick={() => void handleReparseVat()}
-            >
-              {reparsing ? "Se recalculează…" : "Recalculează TVA din XML"}
-            </Btn>
-            <Btn
-              variant="secondary"
-              size="sm"
-              icon="download"
-              disabled={exporting || !activeCompanyId}
-              onClick={() => void handleExport()}
-            >
-              {exporting ? "Export…" : "Export CSV"}
-            </Btn>
-          </div>
-        }
-      >
+      <div className="scr-card">
+        <div className="scr-toolbar">
+          <div className="tt">Jurnal de cumpărări</div>
+          <span className="muted" style={{ fontSize: 12, color: "var(--text-2)" }}>
+            {dateFrom !== dateTo ? `${fmtRoDate(dateFrom)} — ${fmtRoDate(dateTo)}` : fmtRoDate(dateFrom)}
+          </span>
+          <div className="spacer" />
+          <button
+            className="pill-btn spin-btn"
+            disabled={reparsing || !activeCompanyId}
+            onClick={() => void handleReparseVat()}
+          >
+            <Ic name="sync" />{reparsing ? "Se recalculează…" : "Recalculează TVA din XML"}
+          </button>
+          <button
+            className="pill-btn"
+            disabled={exporting || !activeCompanyId}
+            onClick={() => void handleExport()}
+          >
+            <Ic name="dl" />{exporting ? "Export…" : "Export CSV"}
+          </button>
+        </div>
+
         {isLoading ? (
-          <div style={{ padding: "12px 16px", fontSize: 12.5, color: "var(--rf-text-muted)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
         ) : isError ? (
-          <div style={{ padding: "0 16px 16px" }}>
+          <div style={{ padding: 16 }}>
             <QueryErrorBanner error={error} label="jurnalul de cumpărări" onRetry={() => void refetch()} />
           </div>
         ) : periodReceived.length === 0 ? (
-          <div style={{ padding: "12px 16px", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
+          <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
             Nicio factură primită în perioada selectată.
           </div>
         ) : (
-          <div className="rf-tbl-wrap">
-            <table className="rf-tbl">
+          <>
+            <table className="scr-table">
               <thead>
                 <tr>
                   <th>Furnizor</th>
@@ -154,50 +165,43 @@ export function PurchaseJournalView({ dateFrom, dateTo }: Props) {
                   <th>Serie</th>
                   <th>Număr</th>
                   <th>Data</th>
-                  <th className="right">Net (RON)</th>
-                  <th className="right">TVA (RON)</th>
-                  <th className="right">Total</th>
+                  <th className="r">Net (RON)</th>
+                  <th className="r">TVA (RON)</th>
+                  <th className="r">Total</th>
                 </tr>
               </thead>
               <tbody>
                 {periodReceived.map((inv) => (
                   <tr key={inv.id}>
-                    <td style={{ fontWeight: 500 }}>{inv.issuerName}</td>
-                    <td className="rf-mono">{inv.issuerCui || <span style={{ color: "var(--rf-text-dim)" }}>—</span>}</td>
-                    <td style={{ color: "var(--rf-text-muted)" }}>{inv.series ?? "—"}</td>
-                    <td className="rf-mono">{inv.number ?? "—"}</td>
-                    <td style={{ color: "var(--rf-text-muted)" }}>{inv.issueDate}</td>
-                    <td className="right rf-mono">
-                      {inv.netAmount != null ? fmtRON(inv.netAmount) : <span style={{ color: "var(--rf-text-dim)" }}>—</span>}
+                    <td><div className="cli">{inv.issuerName}</div></td>
+                    <td className="num">{inv.issuerCui || <span className="muted">—</span>}</td>
+                    <td style={{ color: "var(--text-2)" }}>{inv.series ?? "—"}</td>
+                    <td className="num">{inv.number ?? "—"}</td>
+                    <td className="num">{fmtRoDate(inv.issueDate)}</td>
+                    <td className="r num">
+                      {inv.netAmount != null ? fmtRON(inv.netAmount) : <span className="muted">—</span>}
                     </td>
-                    <td className="right rf-mono">
-                      {inv.vatAmount != null ? fmtRON(inv.vatAmount) : <span style={{ color: "var(--rf-text-dim)" }}>—</span>}
+                    <td className="r num" style={{ color: "var(--text-2)" }}>
+                      {inv.vatAmount != null ? fmtRON(inv.vatAmount) : <span className="muted">—</span>}
                     </td>
-                    <td className="right rf-mono" style={{ fontWeight: 600 }}>
-                      {fmtRON(inv.totalAmount)}
+                    <td className="r num">
+                      <b>{fmtRON(inv.totalAmount)}</b>
                       {inv.currency !== "RON" && (
-                        <span style={{ marginLeft: 4, fontSize: 10, color: "var(--rf-text-muted)" }}>{inv.currency}</span>
+                        <span style={{ marginLeft: 4, fontSize: 10, color: "var(--text-2)" }}>{inv.currency}</span>
                       )}
                     </td>
                   </tr>
                 ))}
               </tbody>
-              <tfoot>
-                <tr>
-                  <td colSpan={5}>TOTAL perioadă</td>
-                  <td className="right rf-mono">
-                    {Number.isFinite(totalNet) ? fmtRON(totalNet) : <span style={{ color: "var(--rf-text-dim)" }}>—</span>}
-                  </td>
-                  <td className="right rf-mono">
-                    {Number.isFinite(totalVat) ? fmtRON(totalVat) : <span style={{ color: "var(--rf-text-dim)" }}>—</span>}
-                  </td>
-                  <td className="right rf-mono">{fmtRON(totalAmount)}</td>
-                </tr>
-              </tfoot>
             </table>
-          </div>
+            <div className="tot-foot">
+              <span>TOTAL perioadă: net <b className="num">{Number.isFinite(totalNet) ? fmtRON(totalNet) : "—"}</b></span>
+              <span>TVA <b className="num">{Number.isFinite(totalVat) ? fmtRON(totalVat) : "—"}</b></span>
+              <span>total <b className="num">{fmtRON(totalAmount)}</b></span>
+            </div>
+          </>
         )}
-      </SectionCard>
+      </div>
     </div>
   );
 }

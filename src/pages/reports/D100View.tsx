@@ -2,12 +2,12 @@
  * D100View — Declarația privind obligațiile de plată la bugetul de stat (rândul trimestrial).
  * Micro → poziția 5 (1% × venituri); profit → poziția 2 (16% × rezultat), din P&L-ul perioadei.
  * Trim. IV pe profit se regularizează prin D101. Depunerea rămâne manuală prin PDF inteligent + SPV.
+ * Embedded in the Reports page — Claude-Design classes (.scr-card / .scr-table / .banner / .field).
  */
 
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
-import { SectionCard, Btn, Banner } from "@/components/rf";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
@@ -19,6 +19,12 @@ interface Props {
   dateFrom: string;
   dateTo: string;
 }
+
+// Icons not in the Ic set — inlined verbatim from the prototype.
+const IC_INFO =
+  '<path d="M11.25 11.25l.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/>';
+const IC_WARN =
+  '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>';
 
 export function D100View({ dateFrom, dateTo }: Props) {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
@@ -41,54 +47,83 @@ export function D100View({ dateFrom, dateTo }: Props) {
   const r = calc.data;
 
   return (
-    <div className="rf-col">
-      <SectionCard icon="declaration" title="D100 — Obligații de plată (trimestrial)">
-        <div style={{ padding: "0 16px 12px" }}>
-          <Banner variant="info">
+    <div className="scr-card">
+      <div className="scr-toolbar">
+        <div className="tt">D100 — Obligații de plată (trimestrial)</div>
+      </div>
+
+      <div style={{ padding: "14px 16px 0" }}>
+        <div className="banner">
+          <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: IC_INFO }} />
+          <span>
             Rândul trimestrial pentru perioada selectată (T{quarter} {year}): micro → poziția 5
             (1% × venituri), profit → poziția 2 (16% × rezultat). Scadența: 25 a lunii următoare
             trimestrului (profit T4 se regularizează prin D101). Depunerea se face manual prin
             PDF inteligent ANAF + SPV. Regimul micro (1%) presupune îndeplinirea continuă a
             condițiilor legale (plafon 100.000 EUR din 2026, salariat, structura veniturilor,
             asociați) — aplicația nu le verifică pe toate; confirmați eligibilitatea.
-          </Banner>
+          </span>
         </div>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", padding: "0 16px 12px", alignItems: "flex-end" }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12.5 }}>
-            <span style={{ color: "var(--rf-text-muted)" }}>Plăți anticipate anterioare (lei)</span>
-            <input className="rf-input" inputMode="decimal" value={prior} onChange={(e) => setPrior(e.target.value)} placeholder="0" style={{ maxWidth: 200 }} />
-          </label>
-          <Btn variant="primary" size="sm" disabled={calc.isPending || !activeCompanyId} onClick={() => calc.mutate()}>
-            {calc.isPending ? "Calculez…" : "Calculează D100"}
-          </Btn>
-        </div>
+      </div>
 
-        {r && r.note && (
-          <div style={{ padding: "0 16px 12px" }}>
-            <Banner variant={r.applicable ? "info" : "warning"}>{r.note}</Banner>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", padding: "0 16px 16px", alignItems: "flex-end" }}>
+        <div className="field" style={{ width: 200 }}>
+          <label>Plăți anticipate anterioare (lei)</label>
+          <input
+            className="input"
+            inputMode="decimal"
+            value={prior}
+            onChange={(e) => setPrior(e.target.value)}
+            placeholder="0"
+          />
+        </div>
+        <button
+          className="btn-dark"
+          disabled={calc.isPending || !activeCompanyId}
+          onClick={() => calc.mutate()}
+        >
+          {calc.isPending ? "Calculez…" : "Calculează D100"}
+        </button>
+      </div>
+
+      {r && r.note && (
+        <div style={{ padding: "0 16px" }}>
+          <div className={`banner${r.applicable ? "" : " warn"}`}>
+            <svg
+              className="ic"
+              viewBox="0 0 24 24"
+              dangerouslySetInnerHTML={{ __html: r.applicable ? IC_INFO : IC_WARN }}
+            />
+            <span>{r.note}</span>
           </div>
-        )}
-        {r && r.applicable && (
-          <div className="rf-tbl-wrap" style={{ padding: "0 16px 16px" }}>
-            <table className="rf-tbl">
-              <thead>
-                <tr><th>Cod obligație</th><th>Denumire</th><th className="right">Bază</th><th className="right">Cotă</th><th className="right">Datorat</th><th className="right">De plată</th><th>Scadență</th></tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td className="rf-mono" style={{ fontWeight: 600 }}>{r.codOblig}</td>
-                  <td>{r.label}</td>
-                  <td className="right rf-mono">{fmtRON(r.base)}</td>
-                  <td className="right rf-mono">{r.ratePct}%</td>
-                  <td className="right rf-mono">{fmtRON(r.sumaDatorata)}</td>
-                  <td className="right rf-mono" style={{ fontWeight: 700 }}>{fmtRON(r.sumaDePlata)}</td>
-                  <td className="rf-mono">{r.scadenta}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SectionCard>
+        </div>
+      )}
+      {r && r.applicable && (
+        <table className="scr-table">
+          <thead>
+            <tr>
+              <th>Cod obligație</th>
+              <th>Denumire</th>
+              <th className="r">Bază</th>
+              <th className="r">Cotă</th>
+              <th className="r">Datorat</th>
+              <th className="r">De plată</th>
+              <th>Scadență</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="doc" style={{ fontWeight: 700, color: "var(--text)" }}>{r.codOblig}</td>
+              <td>{r.label}</td>
+              <td className="r num">{fmtRON(r.base)}</td>
+              <td className="r num">{r.ratePct}%</td>
+              <td className="r num">{fmtRON(r.sumaDatorata)}</td>
+              <td className="r num"><b>{fmtRON(r.sumaDePlata)}</b></td>
+              <td className="num">{r.scadenta}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

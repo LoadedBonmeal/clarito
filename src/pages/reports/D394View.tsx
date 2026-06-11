@@ -1,6 +1,9 @@
 /**
  * D394View — D394 livrări grupate pe partener + achiziții.
- * Wave 5 — rf look: SectionCard + rf-tbl + Banner
+ * Embedded in the Reports page — Claude-Design classes (.scr-card / .scr-table /
+ * .chip / .banner / .btn-dark / .pill-btn). ALL wiring preserved: compute query,
+ * preflight, DUK block + "Exportă oricum", extract + official ANAF exports,
+ * D394SubmissionModal.
  */
 
 import { useState } from "react";
@@ -8,7 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import { SectionCard, Btn, Banner, Badge } from "@/components/rf";
+import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { D394SubmissionModal } from "@/components/modals/D394SubmissionModal";
@@ -25,6 +28,10 @@ interface Props {
   dateFrom: string;
   dateTo:   string;
 }
+
+// Warn triangle — not in the Ic set, inlined verbatim from the prototype.
+const IC_WARN =
+  '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>';
 
 export function D394View({ dateFrom, dateTo }: Props) {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
@@ -133,157 +140,163 @@ export function D394View({ dateFrom, dateTo }: Props) {
   const totalPurchaseVat  = parseDec(report?.totalPurchaseVat  ?? "0");
 
   return (
-    <div className="rf-col">
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* ── Preflight validation panel ────────────────────────────────── */}
-      <PreflightPanel issues={preflightIssues} />
+      {preflightIssues.length > 0 && <PreflightPanel issues={preflightIssues} />}
 
       {/* ── DUK block panel ──────────────────────────────────────────── */}
       {dukBlock && (
-        <div style={{ marginTop: 12 }}>
+        <div>
           <PreflightPanel issues={dukBlock} />
-          <Btn variant="danger" size="sm" style={{ marginTop: 8 }}
-               onClick={() => lastSubmission && void handleExportOfficial(lastSubmission, true)}>
+          <button
+            className="pill-btn"
+            style={{ marginTop: 8, color: "var(--red)", borderColor: "rgba(220,38,38,.4)" }}
+            onClick={() => lastSubmission && void handleExportOfficial(lastSubmission, true)}
+          >
             Exportă oricum (ignoră DUK)
-          </Btn>
+          </button>
         </div>
       )}
 
       {/* ── Livrări (vânzări) ──────────────────────────────────────────── */}
-      <SectionCard
-        icon="declaration"
-        title="D394 — Declarație informativă livrări / achiziții pe partener"
-        actions={
-          <div style={{ display: "flex", gap: 8 }}>
-            <Btn
-              variant="secondary"
-              size="sm"
-              icon="xml"
-              disabled={exporting || !activeCompanyId}
-              onClick={() => void handleExport()}
-              title="Export extract D394 (document de lucru)"
-            >
-              {exporting ? "Export…" : "Extract XML"}
-            </Btn>
-            <Btn
-              variant="primary"
-              size="sm"
-              icon="anaf"
-              disabled={exportingOfficial || !activeCompanyId || !activeCompany}
-              onClick={() => setShowD394Modal(true)}
-              title="Export D394 conform schemei oficiale ANAF v5"
-            >
-              {exportingOfficial ? "Export…" : "Export oficial ANAF"}
-            </Btn>
-          </div>
-        }
-      >
+      <div className="scr-card">
+        <div className="scr-toolbar">
+          <div className="tt">D394 — Declarație informativă livrări / achiziții pe partener</div>
+          <div className="spacer" />
+          <button
+            className="pill-btn"
+            disabled={exporting || !activeCompanyId}
+            onClick={() => void handleExport()}
+            title="Export extract D394 (document de lucru)"
+          >
+            <Ic name="dl" />
+            {exporting ? "Export…" : "Extract XML"}
+          </button>
+          <button
+            className="btn-dark"
+            disabled={exportingOfficial || !activeCompanyId || !activeCompany}
+            onClick={() => setShowD394Modal(true)}
+            title="Export D394 conform schemei oficiale ANAF v5"
+          >
+            <Ic name="shield" />
+            {exportingOfficial ? "Export…" : "Export oficial ANAF"}
+          </button>
+        </div>
+
         {isLoading ? (
-          <div style={{ padding: "12px 16px", fontSize: 12.5, color: "var(--rf-text-muted)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
         ) : isError ? (
-          <div style={{ padding: "0 16px 16px" }}>
+          <div style={{ padding: 16 }}>
             <QueryErrorBanner error={error} label="raportul D394" onRetry={() => void refetch()} />
           </div>
         ) : !report || report.partners.length === 0 ? (
-          <div style={{ padding: "12px 16px", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
+          <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
             Nicio livrare validată în perioada selectată.
           </div>
         ) : (
-          <div className="rf-tbl-wrap">
-            <table className="rf-tbl">
+          <>
+            <table className="scr-table">
               <thead>
                 <tr>
                   <th>CUI partener</th>
                   <th>Denumire</th>
                   <th>Tip</th>
-                  <th className="right">Nr. facturi</th>
-                  <th className="right">Bază impozabilă</th>
-                  <th className="right">TVA</th>
+                  <th className="r">Nr. facturi</th>
+                  <th className="r">Bază impozabilă</th>
+                  <th className="r">TVA</th>
                 </tr>
               </thead>
               <tbody>
                 {report.partners.map((p, i) => (
                   <tr key={i}>
-                    <td className="rf-mono">{p.partnerCui || <span style={{ color: "var(--rf-text-dim)" }}>—</span>}</td>
+                    <td className="doc">{p.partnerCui || <span style={{ color: "var(--dim)" }}>—</span>}</td>
                     <td style={{ fontWeight: 500 }}>{p.partnerName}</td>
-                    <td><Badge variant="info">{p.vatCategory}</Badge></td>
-                    <td className="right rf-mono">{p.invoiceCount}</td>
-                    <td className="right rf-mono">{fmtRON(p.base)}</td>
-                    <td className="right rf-mono">{fmtRON(p.vat)}</td>
+                    <td><span className="chip sent">{p.vatCategory}</span></td>
+                    <td className="r num">{p.invoiceCount}</td>
+                    <td className="r num">{fmtRON(p.base)}</td>
+                    <td className="r num">{fmtRON(p.vat)}</td>
                   </tr>
                 ))}
               </tbody>
-              <tfoot>
-                <tr>
-                  <td colSpan={3}>TOTAL</td>
-                  <td className="right rf-mono">{report.invoiceCount}</td>
-                  <td className="right rf-mono">{fmtRON(totalBase)}</td>
-                  <td className="right rf-mono">{fmtRON(totalVat)}</td>
-                </tr>
-              </tfoot>
             </table>
-          </div>
+            <div className="tot-foot">
+              <span>TOTAL: <b className="num">{report.invoiceCount}</b> facturi</span>
+              <span>bază <b className="num">{fmtRON(totalBase)}</b></span>
+              <span>TVA <b className="num">{fmtRON(totalVat)}</b></span>
+            </div>
+          </>
         )}
-      </SectionCard>
+      </div>
 
       {/* ── Achiziții (received invoices) ──────────────────────────────── */}
       {report && (
-        <SectionCard icon="fileIn" title="D394 — Achiziții per furnizor">
+        <div className="scr-card">
+          <div className="scr-toolbar">
+            <div className="tt">D394 — Achiziții per furnizor</div>
+          </div>
+
           {report.purchaseUnparsedCount > 0 && (
-            <div style={{ padding: "0 16px 12px" }}>
-              <Banner variant="warning">
-                <b>{report.purchaseUnparsedCount}{" "}
-                {report.purchaseUnparsedCount === 1 ? "factură primită nu are" : "facturi primite nu au"}{" "}
-                încă defalcare TVA</b>{" "}
-                — lista furnizorilor este parțială. Folosiți{" "}
-                <b>«Recalculează TVA din XML»</b> în Jurnal cumpărări pentru a completa datele.
-              </Banner>
+            <div style={{ padding: "14px 16px 0" }}>
+              <div className="banner warn">
+                <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: IC_WARN }} />
+                <span>
+                  <b>
+                    {report.purchaseUnparsedCount}{" "}
+                    {report.purchaseUnparsedCount === 1 ? "factură primită nu are" : "facturi primite nu au"}{" "}
+                    încă defalcare TVA
+                  </b>{" "}
+                  — lista furnizorilor este parțială. Folosiți{" "}
+                  <b>«Recalculează TVA din XML»</b> în Jurnal cumpărări pentru a completa datele.
+                </span>
+              </div>
             </div>
           )}
 
           {report.purchasePartners.length === 0 ? (
-            <div style={{ padding: "12px 16px", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
+            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
               {report.purchaseInvoiceCount === 0
                 ? "Nicio factură primită în perioada selectată."
                 : "Nicio factură primită cu defalcare TVA parsată. Folosiți «Recalculează TVA din XML» în Jurnal cumpărări."}
             </div>
           ) : (
-            <div className="rf-tbl-wrap">
-              <table className="rf-tbl">
+            <>
+              <table className="scr-table">
                 <thead>
                   <tr>
                     <th>CUI furnizor</th>
                     <th>Denumire</th>
                     <th>Tip</th>
-                    <th className="right">Nr. facturi</th>
-                    <th className="right">Bază impozabilă</th>
-                    <th className="right">TVA</th>
+                    <th className="r">Nr. facturi</th>
+                    <th className="r">Bază impozabilă</th>
+                    <th className="r">TVA</th>
                   </tr>
                 </thead>
                 <tbody>
                   {report.purchasePartners.map((p, i) => (
                     <tr key={i}>
-                      <td className="rf-mono">{p.partnerCui || <span style={{ color: "var(--rf-text-dim)" }}>—</span>}</td>
+                      <td className="doc">{p.partnerCui || <span style={{ color: "var(--dim)" }}>—</span>}</td>
                       <td style={{ fontWeight: 500 }}>{p.partnerName}</td>
-                      <td><Badge variant="neutral">{p.vatCategory}</Badge></td>
-                      <td className="right rf-mono">{p.invoiceCount}</td>
-                      <td className="right rf-mono">{fmtRON(p.base)}</td>
-                      <td className="right rf-mono">{fmtRON(p.vat)}</td>
+                      <td><span className="chip sent">{p.vatCategory}</span></td>
+                      <td className="r num">{p.invoiceCount}</td>
+                      <td className="r num">{fmtRON(p.base)}</td>
+                      <td className="r num">{fmtRON(p.vat)}</td>
                     </tr>
                   ))}
                 </tbody>
-                <tfoot>
-                  <tr>
-                    <td colSpan={3}>TOTAL ACHIZIȚII (parsate)</td>
-                    <td className="right rf-mono">{report.purchasePartners.reduce((s, p) => s + p.invoiceCount, 0)}</td>
-                    <td className="right rf-mono">{fmtRON(totalPurchaseBase)}</td>
-                    <td className="right rf-mono">{fmtRON(totalPurchaseVat)}</td>
-                  </tr>
-                </tfoot>
               </table>
-            </div>
+              <div className="tot-foot">
+                <span>
+                  TOTAL ACHIZIȚII (parsate):{" "}
+                  <b className="num">{report.purchasePartners.reduce((s, p) => s + p.invoiceCount, 0)}</b> facturi
+                </span>
+                <span>bază <b className="num">{fmtRON(totalPurchaseBase)}</b></span>
+                <span>TVA <b className="num">{fmtRON(totalPurchaseVat)}</b></span>
+              </div>
+            </>
           )}
-        </SectionCard>
+        </div>
       )}
+
       {/* D394 Submission Modal (export oficial) */}
       {activeCompany && (
         <D394SubmissionModal

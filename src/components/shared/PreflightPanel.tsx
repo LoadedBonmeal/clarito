@@ -5,7 +5,7 @@
  * Returns null when there are no issues (nothing rendered).
  */
 
-import { Banner } from "@/components/rf";
+import { Banner } from "@/components/shared/Banner";
 import type { PreflightIssue } from "@/lib/tauri";
 
 interface Props {
@@ -23,7 +23,7 @@ export function PreflightPanel({ issues }: Props) {
           fontWeight: 700,
           textTransform: "uppercase",
           letterSpacing: "0.06em",
-          color: "var(--rf-text-muted)",
+          color: "var(--text-2)",
           paddingBottom: 2,
         }}
       >
@@ -40,7 +40,7 @@ export function PreflightPanel({ issues }: Props) {
               style={{
                 marginTop: 4,
                 fontSize: 12,
-                color: "var(--rf-text-muted)",
+                color: "var(--text-2)",
               }}
             >
               {issue.hint}

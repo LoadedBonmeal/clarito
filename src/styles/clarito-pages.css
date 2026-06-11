@@ -2,6 +2,26 @@
    <style> blocks; these are NOT in the shared clarito-shell.css). Accumulated as
    pages are ported. Loaded after clarito-shell.css. */
 
+/* ── React adaptation: design .pop-item/.co-row/etc. rendered as <button> need
+   the native button chrome reset (the prototype used <a>/<div>). ── */
+button.pop-item, button.co-row, button.company, button.user-card, button.nav-more,
+button.nav-item, button.cal-day, button.tab, button.cbx, button.see-all {
+  border: 0; background: transparent; width: auto;
+  text-align: left; font-family: inherit; font-size: inherit; color: inherit;
+}
+button.pop-item, button.co-row, button.company, button.user-card, button.nav-more, button.nav-item { width: 100%; }
+button.cbx { width: 16px; }
+/* SPV shield turns red when ANAF is not authenticated */
+.spv-ic--err { stroke: var(--red) !important; }
+
+/* ── Page transition: the route-keyed child inside <main> (React SPA version of
+   the design's clMainIn — chrome persists, only content settles in) ── */
+@media (prefers-reduced-motion: no-preference) {
+  .main > .cl-in { animation: clMainIn 190ms cubic-bezier(.2, .8, .2, 1); }
+  /* plafon/seat meters fill once on load (design .anim-meter) */
+  .meter > * { transform-origin: 0 50%; animation: anGrowX .6s cubic-bezier(.2, .8, .2, 1) backwards; }
+}
+
 /* ── Privire generală (dashboard) ── */
 .main-inner{max-width:1000px;margin:0 auto;padding:26px 32px 40px}
 .main-inner.wide{max-width:1100px}

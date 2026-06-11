@@ -60,6 +60,9 @@ export const ICON_PATHS: Record<string, string> = {
   checkC: '<path d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/>',
 };
 
+/** data-nic aliases — the design's per-icon nav/topbar hover rules use these names. */
+const NIC_ALIAS: Record<string, string> = { lens: "loupe" };
+
 export function Ic({ name, cls = "ic" }: { name: string; cls?: string }) {
   const path = ICON_PATHS[name];
   if (!path) return null;
@@ -68,6 +71,8 @@ export function Ic({ name, cls = "ic" }: { name: string; cls?: string }) {
       className={cls}
       viewBox="0 0 24 24"
       aria-hidden="true"
+      data-ic={name}
+      data-nic={NIC_ALIAS[name] ?? name.toLowerCase()}
       dangerouslySetInnerHTML={{ __html: path }}
     />
   );

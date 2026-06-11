@@ -1,6 +1,8 @@
 /**
- * SaftView — D406 SAF-T export panel.
- * Wave 5 — rf look: SectionCard + Banner + Btn
+ * SaftView — D406 SAF-T export panel (embedded in Rapoarte).
+ * Claude-Design classes: .scr-card + .scr-toolbar .tt + .banner + .pill-btn/.btn-dark.
+ * ALL wiring preserved: declarations.preflight, saft.exportD406 (preview),
+ * saft.exportSaftOfficial (+ DUK override), PreflightPanel.
  */
 
 import { useState } from "react";
@@ -8,7 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import { SectionCard, Btn, Banner } from "@/components/rf";
+import { Ic } from "@/components/shared/Ic";
 import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { api } from "@/lib/tauri";
 import type { PreflightIssue } from "@/lib/tauri";
@@ -20,6 +22,9 @@ import { MONTHS_RO } from "@/lib/utils";
 // SaftView uses legacy export_saft_d406 (returns XML string) + new export_saft_official (writes file, returns path).
 
 const MONTHS = MONTHS_RO;
+
+// Info icon absent from the Ic set — inlined verbatim (design banner pattern).
+const SVG_INFO_CIRCLE = '<path d="M11.25 11.25l.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/>';
 
 interface Props {
   selectedYear:       number;
@@ -114,72 +119,84 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
   };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20, alignItems: "start" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, alignItems: "start" }}>
       {/* Info card */}
-      <SectionCard icon="declaration" title="D406 — SAF-T (Standard Audit File for Tax)">
-        <div style={{ padding: "4px 16px 16px" }}>
-          <p style={{ fontSize: 13, color: "var(--rf-text-muted)", lineHeight: 1.6, margin: "0 0 12px" }}>
+      <div className="scr-card">
+        <div className="scr-toolbar">
+          <div className="tt">D406 — SAF-T (Standard Audit File for Tax)</div>
+        </div>
+        <div className="card-pad">
+          <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6, margin: "0 0 12px" }}>
             Fișierul standard de audit fiscal (SAF-T) conține datele contabile detaliate solicitate
             de ANAF: conturi, jurnale, facturi, stocuri și active. Începând cu 2025, depunerea D406
             este obligatorie lunar pentru contribuabilii mijlocii și mari.
           </p>
-          <Banner variant="info">
-            Pentru companiile mici, termenul de depunere D406 a fost amânat. Verificați obligația
-            specifică firmei dvs.
-          </Banner>
-          <div style={{ marginTop: 16, fontSize: 12.5, color: "var(--rf-text-muted)" }}>
-            Perioadă selectată: <b style={{ color: "var(--rf-text)" }}>{monthName} {selectedYear}</b>
+          <div className="banner" style={{ marginBottom: 0 }}>
+            <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_INFO_CIRCLE }} />
+            <span>
+              Pentru companiile mici, termenul de depunere D406 a fost amânat. Verificați obligația
+              specifică firmei dvs.
+            </span>
+          </div>
+          <div style={{ marginTop: 16, fontSize: 12.5, color: "var(--text-2)" }}>
+            Perioadă selectată: <b style={{ color: "var(--text)" }}>{monthName} {selectedYear}</b>
             {allInvoicesForYear.length > 0
               ? ` · ${allInvoicesForYear.length} facturi disponibile pentru ${selectedYear}`
               : ` · nicio factură disponibilă pentru ${selectedYear}`}
           </div>
         </div>
-      </SectionCard>
+      </div>
 
       {/* Export card */}
-      <SectionCard icon="download" title="Generează SAF-T">
-        <div style={{ padding: "4px 16px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="scr-card">
+        <div className="scr-toolbar">
+          <div className="tt">Generează SAF-T</div>
+        </div>
+        <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {/* Preflight validation panel */}
           <PreflightPanel issues={preflightIssues} />
 
           {/* DUK block panel */}
           {dukBlock && (
-            <div style={{ marginTop: 12 }}>
+            <div>
               <PreflightPanel issues={dukBlock} />
-              <Btn variant="danger" size="sm" style={{ marginTop: 8 }}
-                   onClick={() => void handleExportOfficial(true)}>
+              <button
+                className="pill-btn"
+                style={{ marginTop: 8, color: "var(--red)", borderColor: "rgba(220,38,38,.35)" }}
+                onClick={() => void handleExportOfficial(true)}
+              >
                 Exportă oricum (ignoră DUK)
-              </Btn>
+              </button>
             </div>
           )}
 
-          <div style={{ fontSize: 13, color: "var(--rf-text-muted)", lineHeight: 1.5 }}>
-            Exportă SAF-T D406 pentru <b>{monthName} {selectedYear}</b>.
+          <div style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.5 }}>
+            Exportă SAF-T D406 pentru <b style={{ color: "var(--text)" }}>{monthName} {selectedYear}</b>.
           </div>
           {/* Legacy preview */}
-          <Btn
-            variant="secondary"
-            icon="xml"
-            block
+          <button
+            className="pill-btn"
+            style={{ width: "100%", justifyContent: "center" }}
             disabled={exporting || !activeCompanyId}
             onClick={() => void handleExport()}
             title={`SAF-T D406 preview (facturi emise) pentru ${monthName} ${selectedYear}`}
           >
+            <Ic name="code" />
             {exporting ? "Export în curs…" : `Extract SAF-T (preview) ${monthName} ${selectedYear}`}
-          </Btn>
+          </button>
           {/* Official D406 */}
-          <Btn
-            variant="primary"
-            icon="anaf"
-            block
+          <button
+            className="btn-dark"
+            style={{ width: "100%", justifyContent: "center", opacity: exportingOfficial || !activeCompanyId ? 0.6 : 1 }}
             disabled={exportingOfficial || !activeCompanyId}
             onClick={() => void handleExportOfficial()}
             title={`Export D406 oficial ANAF (schema completă + GL) pentru ${monthName} ${selectedYear}`}
           >
+            <Ic name="shield" />
             {exportingOfficial ? "Export D406 în curs…" : `Export oficial D406 ${monthName} ${selectedYear}`}
-          </Btn>
+          </button>
         </div>
-      </SectionCard>
+      </div>
     </div>
   );
 }

@@ -1,3 +1,8 @@
+/**
+ * QueryErrorBanner — eroare de încărcare query, redată ca design .banner.danger
+ * cu buton de reîncercare .pill-btn.
+ */
+
 interface QueryErrorBannerProps {
   error: unknown;
   label?: string;
@@ -12,37 +17,21 @@ export function QueryErrorBanner({ error, label = "date", onRetry }: QueryErrorB
       : "Eroare necunoscută";
 
   return (
-    <div
-      role="alert"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "10px 16px",
-        margin: "8px 0",
-        background: "var(--error-bg, #fef2f2)",
-        border: "1px solid var(--error-border, #fca5a5)",
-        borderRadius: 6,
-        color: "var(--error-fg, #b91c1c)",
-        fontSize: 13,
-      }}
-    >
+    <div className="banner danger" role="alert">
+      <svg
+        className="ic"
+        viewBox="0 0 24 24"
+        dangerouslySetInnerHTML={{ __html: '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>' }}
+      />
       <span style={{ flex: 1 }}>
-        ⚠️ Nu s-au putut încărca {label}. {message}
+        Nu s-au putut încărca {label}. {message}
       </span>
       {onRetry && (
         <button
           type="button"
+          className="pill-btn"
           onClick={onRetry}
-          style={{
-            padding: "4px 10px",
-            background: "transparent",
-            border: "1px solid currentColor",
-            borderRadius: 4,
-            cursor: "pointer",
-            color: "inherit",
-            fontSize: 12,
-          }}
+          style={{ height: 28, padding: "0 10px", fontSize: 12, flex: "none" }}
         >
           Reîncearcă
         </button>

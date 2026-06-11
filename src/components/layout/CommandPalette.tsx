@@ -1,18 +1,20 @@
 /**
  * CommandPalette — Ctrl+K overlay.
  *
- * Restyle: rf-palette-overlay / rf-palette / rf-palette-search / rf-palette-list /
- *          rf-palette-group / rf-palette-item / rf-palette-foot.
+ * Design re-skin: .palette-back backdrop (modal-back-like, top-centered) →
+ * .palette panel (.scr-search input row · .col-title group labels ·
+ * .pop-item rows with Ic icons · .kbd hints · .palette-foot).
+ * Page-specific rules: src/styles/page-palette.css.
  *
- * All existing commands preserved verbatim.
- * ADDED: "Comută tema" command (setTheme toggle).
+ * All existing commands preserved verbatim (fuzzy search, keyboard nav,
+ * navigate actions, recent invoices, "Comută tema").
  */
 
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 
-import { Icon } from "@/components/shared/Icon";
+import { Ic } from "@/components/shared/Ic";
 import { useAppStore } from "@/lib/store";
 import { api } from "@/lib/tauri";
 import { queryKeys } from "@/lib/queries";
@@ -64,14 +66,14 @@ export function CommandPalette() {
     }
   }, [commandOpen]);
 
-  // Build commands list (all original commands + new "Comută tema")
+  // Build commands list (all original commands + "Comută tema")
   const COMMANDS: Command[] = [
     // Navigare
     {
       id: "nav-dashboard",
       label: "Privire generală (Dashboard)",
       hint: "G D",
-      icon: "data",
+      icon: "grid",
       section: "Navigare",
       action: () => { navigate({ to: "/" }); close(); },
     },
@@ -79,7 +81,7 @@ export function CommandPalette() {
       id: "nav-invoices",
       label: "Facturi emise",
       hint: "G F",
-      icon: "invoice",
+      icon: "docUp",
       section: "Navigare",
       action: () => { navigate({ to: "/invoices" }); close(); },
     },
@@ -87,7 +89,7 @@ export function CommandPalette() {
       id: "nav-received",
       label: "Facturi primite",
       hint: "G R",
-      icon: "invoiceIn",
+      icon: "docDown",
       section: "Navigare",
       action: () => { navigate({ to: "/received" }); close(); },
     },
@@ -102,14 +104,14 @@ export function CommandPalette() {
     {
       id: "nav-companies",
       label: "Companii",
-      icon: "buildings",
+      icon: "building",
       section: "Navigare",
       action: () => { navigate({ to: "/companies" }); close(); },
     },
     {
       id: "nav-reports",
       label: "Rapoarte",
-      icon: "reports",
+      icon: "chart",
       section: "Navigare",
       action: () => { navigate({ to: "/reports" }); close(); },
     },
@@ -123,7 +125,7 @@ export function CommandPalette() {
     {
       id: "nav-settings",
       label: "Setări",
-      icon: "settings",
+      icon: "cog",
       section: "Navigare",
       action: () => { navigate({ to: "/settings" }); close(); },
     },
@@ -146,15 +148,15 @@ export function CommandPalette() {
     {
       id: "act-new-company",
       label: "Companie nouă",
-      icon: "buildings",
+      icon: "building",
       section: "Acțiuni",
       action: () => { navigate({ to: "/companies/new" }); close(); },
     },
-    // NEW: Comută tema
+    // Comută tema
     {
       id: "act-toggle-theme",
       label: `Comută tema (${theme === "dark" ? "luminoasă" : "întunecată"})`,
-      icon: "view",
+      icon: "eye",
       section: "Acțiuni",
       action: () => {
         setTheme(theme === "dark" ? "light" : "dark");
@@ -168,7 +170,7 @@ export function CommandPalette() {
     id: `inv-${inv.id}`,
     label: `Factură ${inv.fullNumber}`,
     hint: inv.issueDate,
-    icon: "invoice",
+    icon: "docUp",
     section: "Recente",
     action: () => {
       navigate({ to: "/invoices/$id", params: { id: inv.id } });
@@ -218,51 +220,36 @@ export function CommandPalette() {
   let globalIdx = 0;
 
   return (
-    <div className="rf-palette-overlay" onClick={close}>
+    <div className="palette-back" onClick={close}>
       <div
-        className="rf-palette"
+        className="palette"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        <div className="rf-palette-search">
-          <Icon name="search" size={17} style={{ color: "var(--rf-text-dim)", flexShrink: 0 }} />
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setActiveIdx(0);
-            }}
-            placeholder="Caută comenzi, facturi, contacte…"
-            autoComplete="off"
-          />
-          {query && (
-            <button
-              type="button"
-              style={{
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                color: "var(--rf-text-muted)",
-                fontSize: 13,
+        <div className="palette-search">
+          <div className="scr-search">
+            <Ic name="lens" />
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setActiveIdx(0);
               }}
-              onClick={() => setQuery("")}
-            >
-              ✕
-            </button>
-          )}
+              placeholder="Caută comenzi, facturi, contacte…"
+              autoComplete="off"
+            />
+            {query && (
+              <button type="button" className="mini-btn" onClick={() => setQuery("")}>
+                <Ic name="xMark" />
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="rf-palette-list">
+        <div className="palette-list">
           {filtered.length === 0 ? (
-            <div
-              style={{
-                padding: "24px 14px",
-                textAlign: "center",
-                fontSize: 12,
-                color: "var(--rf-text-muted)",
-              }}
-            >
+            <div className="palette-empty">
               Niciun rezultat pentru „{query}"
             </div>
           ) : (
@@ -270,36 +257,20 @@ export function CommandPalette() {
               const cmds = filtered.filter((c) => c.section === section);
               return (
                 <div key={section}>
-                  <div className="rf-palette-group">{section}</div>
+                  <div className="col-title">{section}</div>
                   {cmds.map((cmd) => {
                     const idx = globalIdx++;
                     return (
                       <button
                         key={cmd.id}
                         type="button"
-                        className={`rf-palette-item${idx === activeIdx ? " active" : ""}`}
+                        className={`pop-item${idx === activeIdx ? " active" : ""}`}
                         onMouseEnter={() => setActiveIdx(idx)}
                         onClick={cmd.action}
                       >
-                        <span className="rf-pi-ic">
-                          <Icon name={cmd.icon} size={15} />
-                        </span>
+                        <Ic name={cmd.icon} />
                         <span style={{ flex: 1, textAlign: "left" }}>{cmd.label}</span>
-                        {cmd.hint && (
-                          <kbd
-                            style={{
-                              fontFamily: "var(--rf-mono)",
-                              fontSize: 11,
-                              background: "var(--rf-content)",
-                              border: "1px solid var(--rf-border)",
-                              borderRadius: 4,
-                              padding: "1px 6px",
-                              color: "var(--rf-text-muted)",
-                            }}
-                          >
-                            {cmd.hint}
-                          </kbd>
-                        )}
+                        {cmd.hint && <span className="kbd num">{cmd.hint}</span>}
                       </button>
                     );
                   })}
@@ -309,10 +280,10 @@ export function CommandPalette() {
           )}
         </div>
 
-        <div className="rf-palette-foot">
-          <span><kbd>↑↓</kbd> navigare</span>
-          <span><kbd>↵</kbd> execută</span>
-          <span><kbd>Esc</kbd> închide</span>
+        <div className="palette-foot">
+          <span><span className="kbd">↑↓</span> navigare</span>
+          <span><span className="kbd">↵</span> execută</span>
+          <span><span className="kbd">Esc</span> închide</span>
         </div>
       </div>
     </div>

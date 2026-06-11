@@ -115,6 +115,7 @@ export function TopBar() {
       {/* Right cluster */}
       <div className="topright">
         <div className="spv-pill">
+          {connected && <span className="spv-dot" />}
           <Ic name="shield" cls={connected ? "spv-ic" : "spv-ic spv-ic--err"} />
           SPV: {connected ? "Conectat" : "Neautentificat"}
           <span className="spv-div" />
@@ -130,7 +131,7 @@ export function TopBar() {
         </div>
 
         <div className="nou-wrap" ref={nouRef}>
-          <button id="nouBtn" className="btn-dark" onClick={() => setNouOpen((o) => !o)}>
+          <button id="nouBtn" className={`btn-dark${nouOpen ? " anim-open" : ""}`} onClick={() => setNouOpen((o) => !o)}>
             <Ic name="plus" />
             Nou
             <Ic name="chevD" cls="ic chev-sm" />

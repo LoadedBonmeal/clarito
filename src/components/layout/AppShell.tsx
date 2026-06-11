@@ -18,7 +18,7 @@ import { TopBar } from "./TopBar";
 import { Sidebar } from "./Sidebar";
 import { CommandPalette } from "./CommandPalette";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
-import { Banner } from "@/components/rf";
+import { Banner } from "@/components/shared/Banner";
 import { ShortcutsDialog } from "@/components/shared/ShortcutsDialog";
 import { useTheme } from "@/hooks/use-theme";
 import { useAppStore } from "@/lib/store";

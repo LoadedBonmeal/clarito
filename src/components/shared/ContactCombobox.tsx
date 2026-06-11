@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Icon } from "@/components/shared/Icon";
+import { Ic } from "@/components/shared/Ic";
 import { api } from "@/lib/tauri";
 import type { Contact, ContactType } from "@/types";
 
@@ -20,6 +20,7 @@ interface ContactComboboxProps {
 
 /**
  * MISS-05 — Typeahead contact picker backed by `search_contacts`.
+ * Re-skinned to the Claude-Design vocabulary (.input / .pop / .pop-item / .mini-btn).
  *
  * Debounces input (250ms) and only fires the search when at least 2 characters
  * are typed. Supports keyboard navigation (ArrowUp/Down/Enter/Escape) and
@@ -131,11 +132,11 @@ export function ContactCombobox({
           alignItems: "center",
           gap: 8,
           width: widthStyle,
-          minHeight: 40,
-          padding: "4px 8px 4px 12px",
-          border: "1px solid var(--rf-border-strong)",
-          background: "var(--rf-content)",
-          borderRadius: "var(--rf-radius-sm)",
+          minHeight: 36,
+          padding: "4px 6px 4px 11px",
+          border: "1px solid var(--line)",
+          background: "var(--bg)",
+          borderRadius: 8,
         }}
       >
         <div style={{ flex: 1, minWidth: 0, lineHeight: 1.25 }}>
@@ -143,7 +144,7 @@ export function ContactCombobox({
             style={{
               fontSize: 13,
               fontWeight: 500,
-              color: "var(--rf-text)",
+              color: "var(--text)",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -151,10 +152,7 @@ export function ContactCombobox({
           >
             {value.legalName}
           </div>
-          <div
-            className="mono"
-            style={{ fontSize: 11, color: "var(--rf-text-muted)" }}
-          >
+          <div className="doc num" style={{ fontSize: 11 }}>
             {value.cui ?? "—"}
             {value.country && value.country !== "RO" ? ` · ${value.country}` : ""}
           </div>
@@ -163,19 +161,18 @@ export function ContactCombobox({
           <button
             type="button"
             onClick={handleClear}
-            className="rf-icon-btn rf-icon-btn--ghost"
-            style={{ width: 26, height: 26 }}
+            className="mini-btn"
             aria-label="Șterge selecția"
             title="Schimbă cumpărătorul"
           >
-            <Icon name="x" size={12} />
+            <Ic name="xMark" />
           </button>
         )}
       </div>
     );
   }
 
-  // Empty state — input + dropdown
+  // Empty state — input + dropdown (.pop.show panel)
   return (
     <div
       ref={containerRef}
@@ -184,7 +181,7 @@ export function ContactCombobox({
       <input
         ref={inputRef}
         id={inputId}
-        className="rf-input"
+        className="input"
         type="text"
         value={query}
         onChange={(e) => {
@@ -206,30 +203,25 @@ export function ContactCombobox({
         <div
           id={listboxId}
           role="listbox"
+          className="pop show"
           style={{
-            position: "absolute",
             top: "calc(100% + 4px)",
             left: 0,
             right: 0,
-            zIndex: 50,
-            background: "var(--rf-content)",
-            border: "1px solid var(--rf-border-strong)",
-            borderRadius: "var(--rf-radius-sm)",
-            boxShadow: "var(--rf-shadow-md)",
             maxHeight: 260,
             overflowY: "auto",
           }}
         >
           {debouncedQuery.length < 2 ? (
-            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
+            <div className="muted" style={{ padding: "9px 10px", fontSize: 12 }}>
               Tastați cel puțin 2 caractere…
             </div>
           ) : isFetching ? (
-            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
+            <div className="muted" style={{ padding: "9px 10px", fontSize: 12 }}>
               Se caută…
             </div>
           ) : results.length === 0 ? (
-            <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--rf-text-muted)" }}>
+            <div className="muted" style={{ padding: "9px 10px", fontSize: 12 }}>
               Niciun rezultat pentru „{debouncedQuery}".
             </div>
           ) : (
@@ -241,6 +233,7 @@ export function ContactCombobox({
                   type="button"
                   role="option"
                   aria-selected={active}
+                  className="pop-item"
                   onMouseDown={(e) => {
                     e.preventDefault();
                   }}
@@ -249,18 +242,19 @@ export function ContactCombobox({
                   style={{
                     display: "block",
                     width: "100%",
+                    height: "auto",
                     textAlign: "left",
-                    padding: "9px 12px",
-                    border: "none",
-                    borderBottom: "1px solid var(--rf-border)",
-                    background: active ? "var(--rf-accent-tint)" : "transparent",
-                    cursor: "pointer",
-                    color: active ? "var(--rf-accent)" : "var(--rf-text)",
-                    font: "inherit",
+                    padding: "7px 10px",
+                    border: 0,
+                    whiteSpace: "normal",
+                    background: active ? "var(--fill)" : "transparent",
+                    fontFamily: "inherit",
                   }}
                 >
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>{c.legalName}</div>
-                  <div className="mono" style={{ fontSize: 11, color: "var(--rf-text-muted)" }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>
+                    {c.legalName}
+                  </div>
+                  <div className="doc num" style={{ fontSize: 11 }}>
                     {c.cui ?? "—"}
                     {c.country && c.country !== "RO" ? ` · ${c.country}` : ""}
                   </div>

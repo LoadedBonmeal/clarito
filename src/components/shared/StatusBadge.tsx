@@ -1,16 +1,15 @@
 /**
- * StatusBadge — badge de status e-Factura, stilizat cu rf pill.
+ * StatusBadge — badge de status e-Factura, redat ca design .chip.
  *
  * Acceptă atât statusuri din backend (UPPERCASE, e.g. "VALIDATED")
  * cât și pe cele vechi lowercase din sample data.
- * Restyle: rf-badge + dot colorat.
  *
- * Variant map:
- *   success (green):  validated, approved, paid, active
- *   info (indigo):    submitted, new
- *   neutral (grey):   draft, unpaid, archived, inactive
- *   error (red):      rejected, overdue
- *   warning (amber):  queued, pending, partial, reviewed, storned
+ * Variant map (păstrat pentru teste — getVariant):
+ *   success → chip paid:  validated, approved, paid, active
+ *   info    → chip sent:  submitted, new
+ *   neutral → chip sent:  draft, unpaid, archived, inactive
+ *   error   → chip late:  rejected, overdue
+ *   warning → chip wait:  queued, pending, partial, reviewed, storned
  */
 
 const LABELS: Record<string, string> = {
@@ -70,12 +69,20 @@ export function getVariant(lower: string): Variant {
   }
 }
 
+/** Variant → design .chip class (paid|wait|late|sent). */
+const CHIP_CLS: Record<Variant, string> = {
+  success: "paid",
+  info:    "sent",
+  neutral: "sent",
+  error:   "late",
+  warning: "wait",
+};
+
 export function StatusBadge({ status }: { status: string }) {
   const lower = status.toLowerCase();
   const variant = getVariant(lower);
   return (
-    <span className={`rf-badge rf-badge--${variant}`}>
-      <span className="rf-dot" />
+    <span className={`chip ${CHIP_CLS[variant]}`}>
       {LABELS[lower] ?? status}
     </span>
   );

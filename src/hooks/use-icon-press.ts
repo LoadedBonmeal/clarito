@@ -100,11 +100,28 @@ const GESTURES: Record<string, Gesture> = {
   star: { kf: TWINKLE, dur: 550, easing: SPRING },
   // Check-pop
   check: { kf: CHECK, dur: 600, easing: SPRING }, checkCircle: { kf: CHECK, dur: 600, easing: SPRING },
+  // ── design (Ic) names ──
+  sync: { kf: SPIN, dur: 900, easing: EASE }, loop: { kf: SPIN, dur: 900, easing: EASE },
+  cog: { kf: SPIN, dur: 900, easing: EASE },
+  undo: { kf: SPIN_CCW, dur: 900, easing: EASE },
+  dl: { kf: DOWN, dur: 700, easing: SPRING }, docDown: { kf: DOWN, dur: 700, easing: SPRING },
+  docUp: { kf: UP, dur: 700, easing: SPRING },
+  funnel: { kf: WIGGLE, dur: 600, easing: "ease" }, wrench: { kf: WIGGLE, dur: 600, easing: "ease" },
+  chevR: { kf: NUDGE_R, dur: 550, easing: "ease" }, chevD: { kf: DOWN, dur: 550, easing: "ease" },
+  chevUD: { kf: DOWN, dur: 550, easing: "ease" },
+  xMark: { kf: ROTATE, dur: 600, easing: EASE },
+  lens: { kf: PULSE, dur: 550, easing: SPRING },
+  checkC: { kf: CHECK, dur: 600, easing: SPRING },
+  calendar: { kf: DOWN, dur: 550, easing: "ease" }, columns: { kf: DOWN, dur: 550, easing: "ease" },
+  printer: { kf: DOWN, dur: 700, easing: SPRING }, copy: { kf: FLY, dur: 700, easing: SPRING },
+  truck: { kf: NUDGE_R, dur: 700, easing: SPRING }, mail: { kf: SWING, dur: 850, easing: "ease", origin: "50% 18%" },
+  team: { kf: PULSE, dur: 550, easing: SPRING }, lang: { kf: PULSE, dur: 550, easing: SPRING },
+  exit: { kf: NUDGE_R, dur: 550, easing: "ease" }, code: { kf: PULSE, dur: 550, easing: SPRING },
 };
 
 // Calmer, slower durations for the sidebar nav (by gesture group).
-const SIDEBAR_SPIN = new Set(["repeat", "storno"]);
-const SIDEBAR_SWING = new Set(["anaf", "bell", "tag", "bookmark"]);
+const SIDEBAR_SPIN = new Set(["repeat", "storno", "loop", "undo", "sync"]);
+const SIDEBAR_SWING = new Set(["anaf", "bell", "tag", "bookmark", "mail"]);
 
 const PRESSABLE = 'button, a[href], [role="button"]';
 
@@ -117,18 +134,18 @@ export function useIconPressAnimation() {
       if (reduce?.matches) return;
       const ctrl = (e.target as Element | null)?.closest?.(PRESSABLE) as HTMLElement | null;
       if (!ctrl || (ctrl as HTMLButtonElement).disabled) return;
-      const svg = ctrl.querySelector<SVGElement>("svg[data-icon]");
+      const svg = ctrl.querySelector<SVGElement>("svg[data-ic], svg[data-icon]");
       if (!svg || typeof svg.animate !== "function") return;
 
-      const name = svg.getAttribute("data-icon") ?? "";
+      const name = svg.getAttribute("data-ic") ?? svg.getAttribute("data-icon") ?? "";
       const g = GESTURES[name] ?? DEFAULT;
 
       // Sidebar nav + the ANAF·SPV pill animate more slowly (calmer).
       let dur = g.dur;
-      if (ctrl.closest(".rf-sidebar")) {
+      if (ctrl.closest(".sidebar")) {
         dur = SIDEBAR_SPIN.has(name) ? 1400 : SIDEBAR_SWING.has(name) ? 1300 : 900;
       }
-      if (ctrl.classList.contains("rf-spv-sync") || ctrl.closest(".rf-spv-sync")) {
+      if (ctrl.classList.contains("spv-sync") || ctrl.closest(".spv-sync")) {
         dur = 1500;
       }
 

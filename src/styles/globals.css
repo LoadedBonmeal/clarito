@@ -16,7 +16,6 @@
    Conține design tokens, variabile, CSS pentru chrome (MenuBar, Ribbon,
    Sidebar, StatusBar), tabele, butoane, badges, panels, paletă comenzi. */
 @import "./design.css";
-@import "./rf.css";
 /* Claude-Design system (verbatim port) — loaded last so its classes win any
    collision with the legacy design.css block during the page-by-page migration. */
 @import "./clarito-shell.css";
@@ -37,6 +36,7 @@
 @import "./page-instalare.css";
 @import "./page-documents.css";
 @import "./page-help.css";
+@import "./page-palette.css";
 
 @custom-variant dark (&:is(.dark *));
 

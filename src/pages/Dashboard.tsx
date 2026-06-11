@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
-import { Banner, Btn, Empty } from "@/components/rf";
+import { Banner } from "@/components/shared/Banner";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { Ic } from "@/components/shared/Ic";
 import { queryClient, queryKeys } from "@/lib/queries";
@@ -15,6 +15,27 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
+
+/** Count-up once on mount — 500ms ease-out, ro-RO formatted (design stat-card rule). */
+function CountUp({ value }: { value: number }) {
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setShown(value);
+      return;
+    }
+    let raf = 0;
+    const t0 = performance.now();
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - t0) / 500);
+      setShown(value * (1 - Math.pow(1 - p, 3)));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return <>{Math.round(shown).toLocaleString("ro-RO")}</>;
+}
 
 function fmtTime(unix: number): string {
   return new Date(unix * 1000).toLocaleTimeString("ro-RO", {
@@ -251,9 +272,10 @@ export function DashboardPage() {
     return (
       <div className="main-inner">
         <div className="page-head"><div><h1>Privire generală</h1></div></div>
-        <Empty icon="buildings" title="Selectați o companie activă pentru a vedea datele din tabloul de bord.">
+        <div style={{ padding: "48px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
+          <b style={{ display: "block", marginBottom: 4, color: "var(--text)" }}>Selectați o companie activă pentru a vedea datele din tabloul de bord.</b>
           Alegeți o companie din setări pentru a continua.
-        </Empty>
+        </div>
       </div>
     );
   }
@@ -266,33 +288,33 @@ export function DashboardPage() {
         (regimeStatus && (regimeStatus.cashVatLevel === "exceeded" || regimeStatus.cashVatLevel === "approaching")) ||
         (vatReg && vatReg.applicable && (vatReg.level === "exceeded" || vatReg.level === "approaching")) ||
         (intrastat && (intrastat.dispatches.level !== "ok" || intrastat.arrivals.level !== "ok"))) && (
-        <div className="rf-col" style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
           {invoicesError && (
             <QueryErrorBanner error={invoicesErr} label="facturile" onRetry={() => void refetchInvoices()} />
           )}
           {lastRejected && (
             <Banner variant="error" title="Factură respinsă de ANAF"
-              actions={<Btn variant="danger" size="sm" onClick={() => void navigate({ to: "/invoices/$id", params: { id: lastRejected.id } })}>Vezi factura</Btn>}>
-              Factura <b className="rf-mono">{lastRejected.fullNumber}</b> a fost respinsă de ANAF
+              actions={<button className="pill-btn" style={{ color: "var(--red)" }} onClick={() => void navigate({ to: "/invoices/$id", params: { id: lastRejected.id } })}>Vezi factura</button>}>
+              Factura <b className="num">{lastRejected.fullNumber}</b> a fost respinsă de ANAF
               {lastRejected.rejectionReason && (<>: <i>{lastRejected.rejectionReason}</i></>)}.
             </Banner>
           )}
           {regimeStatus && (regimeStatus.level === "exceeded" || regimeStatus.level === "approaching") && (
             <Banner variant={regimeStatus.level === "exceeded" ? "error" : "warning"}
               title={regimeStatus.level === "exceeded" ? "Plafon microîntreprindere depășit" : "Vă apropiați de plafonul de microîntreprindere"}>
-              Cifra de afaceri {currentYear}: <b className="rf-mono">{regimeStatus.ytdTurnoverRon}</b> lei ({regimeStatus.pct}% din plafonul ≈ 100.000 EUR la cursul {regimeStatus.eurRate}).
+              Cifra de afaceri {currentYear}: <b className="num">{regimeStatus.ytdTurnoverRon}</b> lei ({regimeStatus.pct}% din plafonul ≈ 100.000 EUR la cursul {regimeStatus.eurRate}).
             </Banner>
           )}
           {vatReg && vatReg.applicable && (vatReg.level === "exceeded" || vatReg.level === "approaching") && (
             <Banner variant={vatReg.level === "exceeded" ? "error" : "warning"}
               title={vatReg.level === "exceeded" ? "Plafon de scutire TVA depășit — înregistrarea în scopuri de TVA e obligatorie" : "Vă apropiați de plafonul de scutire TVA"}>
-              Cifra de afaceri {currentYear}: <b className="rf-mono">{vatReg.ytdTurnoverRon}</b> lei ({vatReg.pct}% din {vatReg.plafonRon} lei, art. 310).
+              Cifra de afaceri {currentYear}: <b className="num">{vatReg.ytdTurnoverRon}</b> lei ({vatReg.pct}% din {vatReg.plafonRon} lei, art. 310).
             </Banner>
           )}
           {regimeStatus && (regimeStatus.cashVatLevel === "exceeded" || regimeStatus.cashVatLevel === "approaching") && (
             <Banner variant={regimeStatus.cashVatLevel === "exceeded" ? "error" : "warning"}
               title={regimeStatus.cashVatLevel === "exceeded" ? "Plafon TVA la încasare depășit" : "Vă apropiați de plafonul TVA la încasare"}>
-              Cifra de afaceri {currentYear}: <b className="rf-mono">{regimeStatus.ytdTurnoverRon}</b> lei (plafon {regimeStatus.cashVatPlafonRon} lei).
+              Cifra de afaceri {currentYear}: <b className="num">{regimeStatus.ytdTurnoverRon}</b> lei (plafon {regimeStatus.cashVatPlafonRon} lei).
             </Banner>
           )}
           {intrastat && ([
@@ -303,7 +325,7 @@ export function DashboardPage() {
             .map(({ label, f }) => (
               <Banner key={label} variant={f.level === "exceeded" ? "error" : "warning"}
                 title={f.level === "exceeded" ? `Prag Intrastat depășit (${label}) — declarație lunară obligatorie` : `Vă apropiați de pragul Intrastat (${label})`}>
-                Valoare {label} {currentYear}: <b className="rf-mono">{f.ytdRon}</b> lei ({f.pct}% din {intrastat.thresholdRon} lei).
+                Valoare {label} {currentYear}: <b className="num">{f.ytdRon}</b> lei ({f.pct}% din {intrastat.thresholdRon} lei).
               </Banner>
             ))}
         </div>
@@ -368,7 +390,7 @@ export function DashboardPage() {
       <div className="kpis">
         <div className="kpi">
           <div className="top"><span className="klabel">Total facturat</span><Ic name="docUp" /></div>
-          <div className="val num">{fmtInt(totalFacturat)} <span className="cur">RON</span></div>
+          <div className="val num"><CountUp value={totalFacturat} /> <span className="cur">RON</span></div>
           <div className="delta">
             {deltaPct != null
               ? (<><span className="ar">{deltaDir === "up" ? "↑" : "↓"} {Math.abs(deltaPct)}%</span> față de {prevMonthLabel}</>)
@@ -377,17 +399,17 @@ export function DashboardPage() {
         </div>
         <div className="kpi">
           <div className="top"><span className="klabel">De încasat</span><Ic name="incasat" /></div>
-          <div className="val num">{fmtInt(deIncasat)} <span className="cur">RON</span></div>
+          <div className="val num"><CountUp value={deIncasat} /> <span className="cur">RON</span></div>
           <div className="delta">{openInvoices.length} facturi deschise</div>
         </div>
         <div className="kpi">
           <div className="top"><span className="klabel">Facturi primite</span><Ic name="docDown" /></div>
-          <div className="val num">{fmtInt(receivedSum)} <span className="cur">RON</span></div>
+          <div className="val num"><CountUp value={receivedSum} /> <span className="cur">RON</span></div>
           <div className="delta">{receivedTotal} documente</div>
         </div>
         <div className="kpi">
           <div className="top"><span className="klabel">TVA de colectat</span><Ic name="calc" /></div>
-          <div className="val num">{fmtInt(totalVat)} <span className="cur">RON</span></div>
+          <div className="val num"><CountUp value={totalVat} /> <span className="cur">RON</span></div>
           <div className="delta">scadență 25 {RO_MON[selM % 12]}.</div>
         </div>
       </div>
@@ -414,8 +436,8 @@ export function DashboardPage() {
                 <div key={d.key} className={`bar-col${d.key === curChart.key ? " curr" : ""}`}>
                   <div className="bar-tip"><b>{d.label}</b><span><i className="d" />Emise<em className="num">{d.emise}</em></span><span><i className="l" />Primite<em className="num">{d.primite}</em></span></div>
                   <div className="bar-stack">
-                    <div className="bar b-emise" style={{ height: eH }} />
-                    <div className="bar b-primite" style={{ height: pH }} />
+                    <div className="bar b-emise anim-bar" style={{ height: eH, animationDelay: `${chartData.indexOf(d) * 40}ms` }} />
+                    <div className="bar b-primite anim-bar" style={{ height: pH, animationDelay: `${chartData.indexOf(d) * 40 + 20}ms` }} />
                   </div>
                   <div className="mlab">{d.label}</div>
                 </div>
@@ -481,7 +503,7 @@ export function DashboardPage() {
           <tbody>
             {recentInvoices.length === 0 ? (
               <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: "var(--text-2)" }}>
-                Fără facturi. <button type="button" className="rf-link" onClick={() => void navigate({ to: "/invoices/new" })}>Creează prima factură →</button>
+                Fără facturi. <button type="button" className="link" onClick={() => void navigate({ to: "/invoices/new" })}>Creează prima factură →</button>
               </td></tr>
             ) : recentInvoices.map((inv) => {
               const chip = STATUS_CHIP[inv.status] ?? STATUS_CHIP.DRAFT;

@@ -1,6 +1,7 @@
 /**
  * D390View — declarația recapitulativă (VIES) intra-UE: operațiuni grupate pe
  * partener + tip (L/T/A/P/S/R). Aggregated from sales/received vat_category='K' lines.
+ * Embedded in the Reports page — Claude-Design classes (.scr-card / .scr-table / .chip / .banner).
  */
 
 import { useState } from "react";
@@ -8,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import { SectionCard, Btn, Badge, Banner } from "@/components/rf";
+import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -28,6 +29,10 @@ const TIP_LABEL: Record<string, string> = {
   S: "Achiziții servicii (S)",
   R: "Regim agricultori (R)",
 };
+
+// Warn triangle — not in the Ic set, inlined verbatim from the prototype.
+const IC_WARN =
+  '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>';
 
 const fmtLei = (n: number) => n.toLocaleString("ro-RO");
 
@@ -83,84 +88,79 @@ export function D390View({ dateFrom, dateTo }: Props) {
   };
 
   return (
-    <div className="rf-col">
-      <SectionCard
-        icon="declaration"
-        title="D390 — Declarație recapitulativă (VIES) intra-UE"
-        actions={
-          <Btn
-            variant="primary"
-            size="sm"
-            icon="xml"
-            disabled={exporting || !activeCompanyId || ops.length === 0}
-            onClick={() => void handleExport()}
-            title="Export XML D390 (declaratie390 v3)"
-          >
-            {exporting ? "Export…" : "Export XML"}
-          </Btn>
-        }
-      >
-        {isLoading ? (
-          <div style={{ padding: "12px 16px", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
-            Se încarcă…
-          </div>
-        ) : isError ? (
-          <div style={{ padding: "0 16px 16px" }}>
-            <QueryErrorBanner error={error} label="raportul D390" onRetry={() => void refetch()} />
-          </div>
-        ) : ops.length === 0 ? (
-          <div style={{ padding: "12px 16px", fontSize: 12.5, color: "var(--rf-text-muted)" }}>
-            Nicio operațiune intra-UE (vat_category «K») în perioada selectată.
-          </div>
-        ) : (
-          <>
+    <div className="scr-card">
+      <div className="scr-toolbar">
+        <div className="tt">D390 — Declarație recapitulativă (VIES) intra-UE</div>
+        <div className="spacer" />
+        <button
+          className="btn-dark"
+          disabled={exporting || !activeCompanyId || ops.length === 0}
+          onClick={() => void handleExport()}
+          title="Export XML D390 (declaratie390 v3)"
+        >
+          <Ic name="dl" />
+          {exporting ? "Export…" : "Export XML"}
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+      ) : isError ? (
+        <div style={{ padding: 16 }}>
+          <QueryErrorBanner error={error} label="raportul D390" onRetry={() => void refetch()} />
+        </div>
+      ) : ops.length === 0 ? (
+        <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+          Nicio operațiune intra-UE (vat_category «K») în perioada selectată.
+        </div>
+      ) : (
+        <>
           {(doc?.dropped ?? 0) > 0 && (
-            <div style={{ padding: "0 16px 12px" }}>
-              <Banner variant="warning">
-                <b>{doc!.dropped}</b>{" "}
-                {doc!.dropped === 1 ? "operațiune intra-UE a fost ignorată" : "operațiuni intra-UE au fost ignorate"}{" "}
-                — partener fără cod TVA UE valid (cod lipsă / prefix non-UE) sau bază netă negativă
-                (stornare peste altă perioadă — regularizarea «R» se declară manual; tipurile
-                T/triunghiular și R nu sunt încă generate automat). Completați CUI-ul partenerului
-                sau declarați regularizarea manual pentru a evita sub-raportarea în VIES.
-              </Banner>
+            <div style={{ padding: "14px 16px 0" }}>
+              <div className="banner warn">
+                <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: IC_WARN }} />
+                <span>
+                  <b>{doc!.dropped}</b>{" "}
+                  {doc!.dropped === 1 ? "operațiune intra-UE a fost ignorată" : "operațiuni intra-UE au fost ignorate"}{" "}
+                  — partener fără cod TVA UE valid (cod lipsă / prefix non-UE) sau bază netă negativă
+                  (stornare peste altă perioadă — regularizarea «R» se declară manual; tipurile
+                  T/triunghiular și R nu sunt încă generate automat). Completați CUI-ul partenerului
+                  sau declarați regularizarea manual pentru a evita sub-raportarea în VIES.
+                </span>
+              </div>
             </div>
           )}
-          <div className="rf-tbl-wrap">
-            <table className="rf-tbl">
-              <thead>
-                <tr>
-                  <th>Tip</th>
-                  <th>Țară</th>
-                  <th>Cod operator (fără prefix)</th>
-                  <th>Denumire</th>
-                  <th className="right">Bază (lei)</th>
+          <table className="scr-table">
+            <thead>
+              <tr>
+                <th>Tip</th>
+                <th>Țară</th>
+                <th>Cod operator (fără prefix)</th>
+                <th>Denumire</th>
+                <th className="r">Bază (lei)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ops.map((o, i) => (
+                <tr key={i}>
+                  <td>
+                    <span className="chip sent">{TIP_LABEL[o.tip] ?? o.tip}</span>
+                  </td>
+                  <td className="doc">{o.tara}</td>
+                  <td className="doc">{o.codO}</td>
+                  <td style={{ fontWeight: 500 }}>{o.denO}</td>
+                  <td className="r num">{fmtLei(o.baza)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {ops.map((o, i) => (
-                  <tr key={i}>
-                    <td>
-                      <Badge variant="info">{TIP_LABEL[o.tip] ?? o.tip}</Badge>
-                    </td>
-                    <td className="rf-mono">{o.tara}</td>
-                    <td className="rf-mono">{o.codO}</td>
-                    <td style={{ fontWeight: 500 }}>{o.denO}</td>
-                    <td className="right rf-mono">{fmtLei(o.baza)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td colSpan={4}>TOTAL ({ops.length} operatori)</td>
-                  <td className="right rf-mono">{fmtLei(totalBaza)}</td>
-                </tr>
-              </tfoot>
-            </table>
+              ))}
+            </tbody>
+          </table>
+          <div className="tot-foot">
+            <span>
+              TOTAL ({ops.length} operatori): bază <b className="num">{fmtLei(totalBaza)}</b> lei
+            </span>
           </div>
-          </>
-        )}
-      </SectionCard>
+        </>
+      )}
     </div>
   );
 }
