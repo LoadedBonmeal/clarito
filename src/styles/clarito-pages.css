@@ -1,0 +1,75 @@
+/* Clarito — page-specific design styles (verbatim from the prototypes' inline
+   <style> blocks; these are NOT in the shared clarito-shell.css). Accumulated as
+   pages are ported. Loaded after clarito-shell.css. */
+
+/* ── Privire generală (dashboard) ── */
+.main-inner{max-width:1000px;margin:0 auto;padding:26px 32px 40px}
+.main-inner.wide{max-width:1100px}
+
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:20px}
+.page-head h1{font-size:24px;font-weight:600;letter-spacing:-.02em;white-space:nowrap}
+.page-head .sub{font-size:13px;color:var(--text-2);margin-top:4px}
+.head-actions{display:flex;align-items:center;gap:8px}
+
+/* KPI cards */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:15px 16px}
+.kpi .top{display:flex;align-items:center;justify-content:space-between}
+.kpi .klabel{font-size:12px;color:var(--text-2);font-weight:500}
+.kpi .ic{width:16px;height:16px}
+.kpi .val{font-size:23px;font-weight:600;letter-spacing:-.02em;margin-top:12px}
+.kpi .val .cur{font-size:13px;font-weight:500;color:var(--dim);margin-left:4px}
+.kpi .delta{font-size:12px;color:var(--text-2);margin-top:5px;display:flex;align-items:center;gap:5px;white-space:nowrap}
+.kpi .delta .ar{font-weight:600;color:var(--text)}
+
+/* mid row: chart + activity */
+.mid{display:grid;grid-template-columns:1.7fr 1fr;gap:14px;margin-bottom:16px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px}
+.card-head{display:flex;align-items:center;justify-content:space-between;padding:15px 16px;border-bottom:1px solid var(--line)}
+.card-head .ct{font-size:14px;font-weight:600}
+.card-head .cs{font-size:12px;color:var(--dim);margin-top:2px}
+.legend{display:flex;align-items:center;gap:14px;font-size:11.5px;color:var(--text-2)}
+.legend .lg{display:flex;align-items:center;gap:6px}
+.legend .sw{width:9px;height:9px;border-radius:3px}
+
+/* chart */
+.chart{padding:18px 18px 14px;display:flex;align-items:flex-end;gap:14px;height:228px}
+.bar-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:8px;position:relative}
+.bar-stack{display:flex;flex-direction:row;align-items:flex-end;justify-content:center;gap:4px;height:100%;cursor:default}
+.bar-tip{position:absolute;bottom:calc(100% - 10px);left:50%;transform:translateX(-50%) translateY(4px);background:var(--black);color:#fff;border-radius:9px;padding:8px 10px;font-size:11px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s cubic-bezier(.2,.8,.2,1),transform .15s cubic-bezier(.2,.8,.2,1);z-index:5;box-shadow:0 8px 22px -8px rgba(0,0,0,.5)}
+.bar-tip b{display:block;font-size:11.5px;margin-bottom:4px}
+.bar-tip span{display:flex;align-items:center;gap:6px;line-height:1.7}
+.bar-tip i{width:8px;height:8px;border-radius:2px}
+.bar-tip i.d{background:#fff}
+.bar-tip i.l{background:#A1A1AA}
+.bar-tip em{margin-left:auto;padding-left:14px;font-style:normal;font-weight:600}
+.bar-col:hover .bar-tip{opacity:1;transform:translateX(-50%)}
+.bar-col:hover .bar.b-emise{background:#000}
+.bar-col:hover .bar.b-primite{background:#BFBFC6}
+.bar{width:13px;border-radius:4px 4px 0 0;background:#E4E4E7}
+.bar.b-emise{background:var(--black)}
+.bar.b-primite{background:#D4D4D8}
+.bar-col .mlab{font-size:11px;color:var(--dim);font-weight:500}
+.bar-col.curr .mlab{color:var(--text);font-weight:600}
+
+/* SPV activity feed */
+.activity{padding:6px 6px 8px}
+.act-item{display:flex;gap:11px;padding:10px 12px;border-radius:9px}
+.act-item:hover{background:var(--fill)}
+.act-ic{width:30px;height:30px;border-radius:8px;background:var(--fill);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;flex:none}
+.act-ic .ic{width:15px;height:15px}
+.act-tx{flex:1;min-width:0}
+.act-tx .a1{font-size:12.5px;color:var(--text);line-height:1.35}
+.act-tx .a1 b{font-weight:600}
+.act-tx .a2{font-size:11.5px;color:var(--dim);margin-top:2px}
+
+/* recent table */
+.table-wrap{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.tbar{display:flex;align-items:center;justify-content:space-between;padding:14px 16px}
+.tbar .tt{font-size:14px;font-weight:600}
+.tbar-actions{display:flex;align-items:center;gap:8px;position:relative}
+.cli{display:flex;align-items:center;gap:10px}
+.cli-ava{width:26px;height:26px;border-radius:7px;background:var(--fill);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--text-2);flex:none}
+.doc{font-family:var(--mono);font-size:12px;color:var(--text-2)}
+tbody tr.clickable{cursor:pointer}
+tbody tr.clickable:hover{background:var(--fill)}

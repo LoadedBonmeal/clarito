@@ -20,6 +20,7 @@
 /* Claude-Design system (verbatim port) — loaded last so its classes win any
    collision with the legacy design.css block during the page-by-page migration. */
 @import "./clarito-shell.css";
+@import "./clarito-pages.css";
 @import "./clarito-anim.css";
 
 @custom-variant dark (&:is(.dark *));

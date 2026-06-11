@@ -3,59 +3,26 @@
  * Wave 5 — rf look: PageHeader + Segmented + Banner + StatCard + SectionCard + rf-tbl
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
-import {
-  PageHeader,
-  Segmented,
-  Banner,
-  Btn,
-  StatCard,
-  SectionCard,
-  Empty,
-} from "@/components/rf";
-import { Icon } from "@/components/shared/Icon";
-import { StatusBadge } from "@/components/shared/StatusBadge";
+import { Banner, Btn, Empty } from "@/components/rf";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import { Ic } from "@/components/shared/Ic";
 import { queryClient, queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
-import { parseDec, fmtRON } from "@/lib/utils";
+import { parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 
 type PeriodMode = "today" | "week" | "month" | "ytd";
-
-const PERIOD_OPTIONS: { value: PeriodMode; label: string }[] = [
-  { value: "today",  label: "Astăzi"     },
-  { value: "week",   label: "Săptămână"  },
-  { value: "month",  label: "Lună"       },
-  { value: "ytd",    label: "An"         },
-];
 
 function fmtTime(unix: number): string {
   return new Date(unix * 1000).toLocaleTimeString("ro-RO", {
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
   });
-}
-
-function notifColor(type: string): string {
-  const t = type.toUpperCase();
-  if (t.includes("REJECT")) return "error";
-  if (t.includes("VALID"))  return "success";
-  if (t.includes("WARN") || t.includes("EXPIR")) return "warning";
-  return "info";
-}
-
-function notifIcon(type: string): string {
-  const color = notifColor(type);
-  if (color === "error")   return "xCircle";
-  if (color === "success") return "checkCircle";
-  if (color === "warning") return "alert";
-  return "info";
 }
 
 export function DashboardPage() {
@@ -63,6 +30,14 @@ export function DashboardPage() {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [periodMode, setPeriodMode] = useState<PeriodMode>("month");
   const [refreshing, setRefreshing] = useState(false);
+  const [monthPopOpen, setMonthPopOpen] = useState(false);
+
+  useEffect(() => {
+    if (!monthPopOpen) return;
+    const h = () => setMonthPopOpen(false);
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [monthPopOpen]);
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -91,12 +66,6 @@ export function DashboardPage() {
     queryFn:  () => api.notifications.list(false),
   });
 
-  const { data: unreadCount = 0 } = useQuery({
-    queryKey: queryKeys.notifications.unreadCount(),
-    queryFn:  () => api.notifications.unreadCount(),
-    refetchInterval: 60_000,
-  });
-
   const { data: contacts = [] } = useQuery({
     queryKey: queryKeys.contacts.list({ companyId: activeCompanyId ?? undefined }),
     queryFn:  () => api.contacts.list({ companyId: activeCompanyId ?? undefined }),
@@ -115,14 +84,6 @@ export function DashboardPage() {
   });
   const receivedItems = receivedPage?.items ?? [];
   const receivedTotal = receivedPage?.total ?? 0;
-
-  const { data: isAnafAuth } = useQuery({
-    queryKey: queryKeys.anaf.auth(activeCompanyId ?? ""),
-    queryFn:  () => api.anaf.isAuthenticated(activeCompanyId!),
-    enabled:  !!activeCompanyId,
-    staleTime: 30_000,
-  });
-  const anafConnected = !activeCompanyId || !!isAnafAuth;
 
   // Micro-enterprise ceiling monitor (100.000 EUR, OUG 89/2025). Conversia plafonului se face la
   // cursul BNR de la ÎNCHIDEREA EXERCIȚIULUI PRECEDENT (31.12 anul anterior) — NU la cursul zilei.
@@ -170,7 +131,6 @@ export function DashboardPage() {
   );
 
   const invoices    = invoicesPage?.items ?? [];
-  const invoiceTotal = invoicesPage?.total ?? 0;
 
   const now = new Date();
   const currentMonth = now.toISOString().split("T")[0].slice(0, 7);
@@ -208,23 +168,6 @@ export function DashboardPage() {
   );
   const totalVat = useMemo(
     () => periodInvoices.reduce((s, inv) => s + parseDec(inv.vatAmount), 0),
-    [periodInvoices],
-  );
-
-  const validatedCount = useMemo(
-    () => periodInvoices.filter((inv) => inv.status === "VALIDATED").length,
-    [periodInvoices],
-  );
-  const rejectedCount = useMemo(
-    () => periodInvoices.filter((inv) => inv.status === "REJECTED").length,
-    [periodInvoices],
-  );
-  const draftCount = useMemo(
-    () => periodInvoices.filter((inv) => inv.status === "DRAFT").length,
-    [periodInvoices],
-  );
-  const submittedCount = useMemo(
-    () => periodInvoices.filter((inv) => inv.status === "SUBMITTED").length,
     [periodInvoices],
   );
 
@@ -275,453 +218,276 @@ export function DashboardPage() {
 
   const activeCompany    = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
 
-  const hour     = now.getHours();
-  const greeting = hour < 12 ? "Bună dimineața" : hour < 17 ? "Bună ziua" : "Bună seara";
+  // ── Render helpers ──────────────────────────────────────────────────────────
+  const RO_MON = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
+  const fmtInt = (n: number) => Math.round(n).toLocaleString("ro-RO");
+  const fmtRoDate = (iso: string) => {
+    if (!iso) return "—";
+    const [y, m, d] = iso.split("-");
+    return `${d} ${RO_MON[Number(m) - 1] ?? m} ${y}`;
+  };
+  const ini = (s: string | undefined) =>
+    (s ?? "—").replace(/[^A-Za-zĂÂÎȘȚ ]/g, "").split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "—";
+  const actIcon = (type: string) => {
+    const t = type.toUpperCase();
+    if (t.includes("REJECT")) return "xMark";
+    if (t.includes("VALID") || t.includes("ACCEPT")) return "checkC";
+    if (t.includes("SYNC")) return "sync";
+    if (t.includes("IMPORT") || t.includes("RECEIV")) return "docDown";
+    return "mail";
+  };
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  const monthName = now.toLocaleDateString("ro-RO", { month: "long" });
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  const periodLabel =
+    periodMode === "today" ? "Astăzi"
+    : periodMode === "week" ? "Săptămâna aceasta"
+    : periodMode === "ytd" ? `Anul ${now.getFullYear()}`
+    : `${cap(monthName)} ${now.getFullYear()}`;
+  const headDate = cap(now.toLocaleDateString("ro-RO", { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
+
+  // De încasat = issued, not-yet-finalized invoices in the period (proxy for outstanding).
+  const openInvoices = periodInvoices.filter((i) => ["VALIDATED", "SUBMITTED", "QUEUED"].includes(i.status));
+  const deIncasat = openInvoices.reduce((s, i) => s + parseDec(i.totalAmount), 0);
+
+  const STATUS_CHIP: Record<string, { cls: string; icon: string; label: string }> = {
+    DRAFT:     { cls: "sent", icon: "docText", label: "Ciornă" },
+    QUEUED:    { cls: "wait", icon: "clock", label: "În coadă" },
+    SUBMITTED: { cls: "wait", icon: "send", label: "Trimisă" },
+    VALIDATED: { cls: "paid", icon: "checkC", label: "Validată" },
+    REJECTED:  { cls: "late", icon: "xMark", label: "Respinsă" },
+    STORNED:   { cls: "sent", icon: "undo", label: "Stornată" },
+  };
+
+  const PERIODS: { v: PeriodMode; label: string }[] = [
+    { v: "today", label: "Astăzi" },
+    { v: "week", label: "Săptămâna aceasta" },
+    { v: "month", label: cap(monthName) + " " + now.getFullYear() },
+    { v: "ytd", label: `Anul ${now.getFullYear()}` },
+  ];
 
   if (!activeCompanyId) {
     return (
-      <div className="rf-content">
-        <PageHeader title="Privire generală" />
-        <div className="rf-page-body">
-          <Empty icon="buildings" title="Selectați o companie activă pentru a vedea datele din tabloul de bord.">
-            Alegeți o companie din setări pentru a continua.
-          </Empty>
-        </div>
+      <div className="main-inner">
+        <div className="page-head"><div><h1>Privire generală</h1></div></div>
+        <Empty icon="buildings" title="Selectați o companie activă pentru a vedea datele din tabloul de bord.">
+          Alegeți o companie din setări pentru a continua.
+        </Empty>
       </div>
     );
   }
 
   return (
-    <div className="rf-content">
-      <PageHeader
-        title="Privire generală"
-        desc={`${greeting}${activeCompany ? `, ${activeCompany.legalName}` : ""}. Iată ce s-a întâmplat cu afacerea dvs. în perioada selectată.`}
-        actions={
-          <>
-            <Segmented
-              options={PERIOD_OPTIONS}
-              value={periodMode}
-              onChange={setPeriodMode}
-            />
-            <Btn
-              variant="primary"
-              icon="fileOut"
-              onClick={() => void navigate({ to: "/invoices/new" })}
-            >
-              Factură nouă
-            </Btn>
-            <Btn
-              variant="secondary"
-              icon="refresh"
-              disabled={refreshing}
-              onClick={async () => {
-                setRefreshing(true);
-                try {
-                  await queryClient.refetchQueries({ type: "active" });
-                  notify.success("Date actualizate");
-                } finally {
-                  setRefreshing(false);
-                }
-              }}
-            >
-              {refreshing ? "Se actualizează…" : "Reîmprospătează"}
-            </Btn>
-          </>
-        }
-      />
-
-      <div className="rf-page-body">
-        {/* ── Truncation warning ─────────────────────────────────────────── */}
-        {invoicesPage && invoicesPage.total > invoicesPage.items.length && (
-          <div
-            style={{
-              padding: "6px 0 10px",
-              fontSize: 12,
-              color: "var(--rf-warning, #92400e)",
-            }}
-          >
-            Afișate primele {invoicesPage.items.length.toLocaleString("ro-RO")} din {invoicesPage.total.toLocaleString("ro-RO")} facturi — restrânge filtrele pentru a vedea toate înregistrările.
-          </div>
-        )}
-
-        {/* ── Error banner ───────────────────────────────────────────────── */}
-        {invoicesError && (
-          <QueryErrorBanner
-            error={invoicesErr}
-            label="facturile"
-            onRetry={() => void refetchInvoices()}
-          />
-        )}
-
-        {/* ── Rejected invoice alert ─────────────────────────────────────── */}
-        {lastRejected && (
-          <Banner
-            variant="error"
-            title="Factură respinsă de ANAF"
-            actions={
-              <Btn
-                variant="danger"
-                size="sm"
-                onClick={() =>
-                  void navigate({ to: "/invoices/$id", params: { id: lastRejected.id } })
-                }
-              >
-                Vezi factura
-              </Btn>
-            }
-          >
-            Factura <b className="rf-mono">{lastRejected.fullNumber}</b>
-            {contactMap[lastRejected.contactId]?.legalName && (
-              <> către <b>{contactMap[lastRejected.contactId]!.legalName}</b></>
-            )}{" "}
-            a fost respinsă de ANAF
-            {lastRejected.rejectionReason && (
-              <>: <i>{lastRejected.rejectionReason}</i></>
-            )}
-            .
-          </Banner>
-        )}
-
-        {/* ── Micro-enterprise ceiling alert (100.000 EUR, OUG 89/2025) ───── */}
-        {regimeStatus &&
-          (regimeStatus.level === "exceeded" || regimeStatus.level === "approaching") && (
-            <Banner
-              variant={regimeStatus.level === "exceeded" ? "error" : "warning"}
-              title={
-                regimeStatus.level === "exceeded"
-                  ? "Plafon microîntreprindere depășit"
-                  : "Vă apropiați de plafonul de microîntreprindere"
-              }
-              actions={
-                <Btn size="sm" onClick={() => void navigate({ to: "/companies" })}>
-                  Setări firmă
-                </Btn>
-              }
-            >
-              Cifra de afaceri {currentYear}: <b className="rf-mono">{regimeStatus.ytdTurnoverRon}</b>{" "}
-              lei ({regimeStatus.pct}% din plafonul de{" "}
-              <b className="rf-mono">{regimeStatus.ceilingRon}</b> lei ≈ 100.000 EUR, la cursul BNR
-              din 31.12.{currentYear - 1}: <b className="rf-mono">{regimeStatus.eurRate}</b> RON/EUR).
-              {regimeStatus.note ? ` ${regimeStatus.note}` : ""}
+    <div className="main-inner">
+      {/* Real plafon / status monitors — shown only when triggered */}
+      {(invoicesError || lastRejected ||
+        (regimeStatus && (regimeStatus.level === "exceeded" || regimeStatus.level === "approaching")) ||
+        (regimeStatus && (regimeStatus.cashVatLevel === "exceeded" || regimeStatus.cashVatLevel === "approaching")) ||
+        (vatReg && vatReg.applicable && (vatReg.level === "exceeded" || vatReg.level === "approaching")) ||
+        (intrastat && (intrastat.dispatches.level !== "ok" || intrastat.arrivals.level !== "ok"))) && (
+        <div className="rf-col" style={{ marginBottom: 20 }}>
+          {invoicesError && (
+            <QueryErrorBanner error={invoicesErr} label="facturile" onRetry={() => void refetchInvoices()} />
+          )}
+          {lastRejected && (
+            <Banner variant="error" title="Factură respinsă de ANAF"
+              actions={<Btn variant="danger" size="sm" onClick={() => void navigate({ to: "/invoices/$id", params: { id: lastRejected.id } })}>Vezi factura</Btn>}>
+              Factura <b className="rf-mono">{lastRejected.fullNumber}</b> a fost respinsă de ANAF
+              {lastRejected.rejectionReason && (<>: <i>{lastRejected.rejectionReason}</i></>)}.
             </Banner>
           )}
-
-        {/* ── Plafon scutire TVA (395.000 lei, art. 310 / Legea 141/2025) ── */}
-        {vatReg && vatReg.applicable &&
-          (vatReg.level === "exceeded" || vatReg.level === "approaching") && (
-            <Banner
-              variant={vatReg.level === "exceeded" ? "error" : "warning"}
-              title={
-                vatReg.level === "exceeded"
-                  ? "Plafon de scutire TVA depășit — înregistrarea în scopuri de TVA e obligatorie"
-                  : "Vă apropiați de plafonul de scutire TVA"
-              }
-            >
-              Cifra de afaceri {currentYear}: <b className="rf-mono">{vatReg.ytdTurnoverRon}</b> lei
-              ({vatReg.pct}% din plafonul de <b className="rf-mono">{vatReg.plafonRon}</b> lei,
-              art. 310 Cod fiscal). Depășirea obligă la solicitarea înregistrării în scopuri de TVA
-              (formular 010/700) în termenul legal.
+          {regimeStatus && (regimeStatus.level === "exceeded" || regimeStatus.level === "approaching") && (
+            <Banner variant={regimeStatus.level === "exceeded" ? "error" : "warning"}
+              title={regimeStatus.level === "exceeded" ? "Plafon microîntreprindere depășit" : "Vă apropiați de plafonul de microîntreprindere"}>
+              Cifra de afaceri {currentYear}: <b className="rf-mono">{regimeStatus.ytdTurnoverRon}</b> lei ({regimeStatus.pct}% din plafonul ≈ 100.000 EUR la cursul {regimeStatus.eurRate}).
             </Banner>
           )}
-
-        {/* ── Cash-VAT plafon alert (5.000.000 lei, OUG 8/2026) ──────────── */}
-        {regimeStatus &&
-          (regimeStatus.cashVatLevel === "exceeded" || regimeStatus.cashVatLevel === "approaching") && (
-            <Banner
-              variant={regimeStatus.cashVatLevel === "exceeded" ? "error" : "warning"}
-              title={
-                regimeStatus.cashVatLevel === "exceeded"
-                  ? "Plafon TVA la încasare depășit"
-                  : "Vă apropiați de plafonul TVA la încasare"
-              }
-            >
-              Cifra de afaceri {currentYear}: <b className="rf-mono">{regimeStatus.ytdTurnoverRon}</b>{" "}
-              lei (plafon TVA la încasare <b className="rf-mono">{regimeStatus.cashVatPlafonRon}</b> lei).
-              {regimeStatus.cashVatNote ? ` ${regimeStatus.cashVatNote}` : ""}
+          {vatReg && vatReg.applicable && (vatReg.level === "exceeded" || vatReg.level === "approaching") && (
+            <Banner variant={vatReg.level === "exceeded" ? "error" : "warning"}
+              title={vatReg.level === "exceeded" ? "Plafon de scutire TVA depășit — înregistrarea în scopuri de TVA e obligatorie" : "Vă apropiați de plafonul de scutire TVA"}>
+              Cifra de afaceri {currentYear}: <b className="rf-mono">{vatReg.ytdTurnoverRon}</b> lei ({vatReg.pct}% din {vatReg.plafonRon} lei, art. 310).
             </Banner>
           )}
-
-        {/* ── Intrastat threshold alerts (1.000.000 lei/flux, Ord. INS 1604/2025) ── */}
-        {intrastat &&
-          ([
+          {regimeStatus && (regimeStatus.cashVatLevel === "exceeded" || regimeStatus.cashVatLevel === "approaching") && (
+            <Banner variant={regimeStatus.cashVatLevel === "exceeded" ? "error" : "warning"}
+              title={regimeStatus.cashVatLevel === "exceeded" ? "Plafon TVA la încasare depășit" : "Vă apropiați de plafonul TVA la încasare"}>
+              Cifra de afaceri {currentYear}: <b className="rf-mono">{regimeStatus.ytdTurnoverRon}</b> lei (plafon {regimeStatus.cashVatPlafonRon} lei).
+            </Banner>
+          )}
+          {intrastat && ([
             { label: "expedieri", f: intrastat.dispatches },
             { label: "introduceri", f: intrastat.arrivals },
           ] as const)
             .filter(({ f }) => f.level === "exceeded" || f.level === "approaching")
             .map(({ label, f }) => (
-              <Banner
-                key={label}
-                variant={f.level === "exceeded" ? "error" : "warning"}
-                title={
-                  f.level === "exceeded"
-                    ? `Prag Intrastat depășit (${label}) — declarație lunară obligatorie`
-                    : `Vă apropiați de pragul Intrastat (${label})`
-                }
-              >
-                Valoare {label} {currentYear}: <b className="rf-mono">{f.ytdRon}</b> lei ({f.pct}% din
-                pragul de <b className="rf-mono">{intrastat.thresholdRon}</b> lei). Peste prag,
-                depuneți Intrastat lunar până pe 15 (Ord. INS 1604/2025).
+              <Banner key={label} variant={f.level === "exceeded" ? "error" : "warning"}
+                title={f.level === "exceeded" ? `Prag Intrastat depășit (${label}) — declarație lunară obligatorie` : `Vă apropiați de pragul Intrastat (${label})`}>
+                Valoare {label} {currentYear}: <b className="rf-mono">{f.ytdRon}</b> lei ({f.pct}% din {intrastat.thresholdRon} lei).
               </Banner>
             ))}
-
-        {/* ── Unread notifications note ──────────────────────────────────── */}
-        {unreadCount > 0 && (
-          <Banner
-            variant="info"
-            title={`${unreadCount} mesaje SPV neprocesate`}
-            actions={
-              <Btn
-                size="sm"
-                onClick={() => void navigate({ to: "/notifications" })}
-              >
-                Vezi notificări
-              </Btn>
-            }
-          />
-        )}
-
-        {/* ── KPI stat cards (design: 4 tiles) ───────────────────────────── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16 }}>
-          <StatCard
-            icon="chart"
-            label="Total facturat"
-            value={fmtRON(totalFacturat)}
-            unit="RON"
-            delta={
-              periodMode === "month" && deltaPct != null
-                ? `${deltaDir === "up" ? "↑" : "↓"} ${Math.abs(deltaPct)}% față de ${prevMonthLabel}`
-                : undefined
-            }
-            deltaDir={deltaDir}
-            ctx={
-              periodMode === "month" && deltaPct != null
-                ? undefined
-                : `${periodInvoices.length} facturi · ${fmtRON(totalNet)} net`
-            }
-          />
-          <StatCard
-            icon="fileOut"
-            label="Facturi emise"
-            value={periodInvoices.length}
-            unit="documente"
-            ctx={
-              [
-                validatedCount > 0 ? `${validatedCount} validate` : null,
-                submittedCount > 0 ? `${submittedCount} trimise` : null,
-                rejectedCount > 0 ? `${rejectedCount} respinse` : null,
-                draftCount > 0 ? `${draftCount} schițe` : null,
-              ]
-                .filter(Boolean)
-                .join(" · ") || "în perioada selectată"
-            }
-          />
-          <StatCard
-            icon="fileIn"
-            label="Facturi primite"
-            value={receivedTotal}
-            unit="documente"
-            ctx="sincronizate din SPV"
-          />
-          <StatCard
-            icon="bank"
-            label="TVA de colectat"
-            value={fmtRON(totalVat)}
-            unit="RON"
-            ctx={`din ${periodInvoices.length} facturi`}
-          />
         </div>
+      )}
 
-        {/* ── Companies + Activity ───────────────────────────────────────── */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20, alignItems: "start" }}>
-          {/* Facturare lunară — emise vs primite (last 6 months, by count) */}
-          <SectionCard
-            icon="chart"
-            title="Facturare lunară"
-            subtitle={`Emise vs. primite · ${curChart.label}: ${curChart.emise} emise · ${curChart.primite} primite`}
-            actions={
-              <div style={{ display: "flex", gap: 14, fontSize: 11.5, color: "var(--rf-text-muted)", alignItems: "center" }}>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: 2, background: "var(--rf-accent)" }} /> Emise
-                </span>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: 2, background: "var(--rf-neutral-bg)", border: "1px solid var(--rf-border)" }} /> Primite
-                </span>
-              </div>
-            }
-          >
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 14, height: 200, padding: "20px 20px 12px" }}>
-              {chartData.map((d) => (
-                <div key={d.key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 9, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 6, height: 150, width: "100%" }}>
-                    <div
-                      title={`${d.emise} emise`}
-                      style={{ width: 16, borderRadius: "4px 4px 0 0", background: "var(--rf-accent)", height: `${Math.max(d.emise > 0 ? 3 : 0, (d.emise / chartMax) * 100)}%`, transition: "height .4s cubic-bezier(.2,.8,.2,1)" }}
-                    />
-                    <div
-                      title={`${d.primite} primite`}
-                      style={{ width: 16, borderRadius: "4px 4px 0 0", background: "var(--rf-neutral-bg)", border: "1px solid var(--rf-border)", height: `${Math.max(d.primite > 0 ? 3 : 0, (d.primite / chartMax) * 100)}%`, transition: "height .4s cubic-bezier(.2,.8,.2,1)" }}
-                    />
-                  </div>
-                  <span style={{ fontSize: 11.5, color: d.key === curChart.key ? "var(--rf-text)" : "var(--rf-text-dim)", fontWeight: d.key === curChart.key ? 600 : 400 }}>{d.label}</span>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-
-          {/* Activity timeline */}
-          <SectionCard
-            icon="clock"
-            title="Activitate SPV"
-            actions={
-              <Btn variant="ghost" size="sm" iconRight="chevronRight" onClick={() => void navigate({ to: "/notifications" })}>
-                Vezi tot
-              </Btn>
-            }
-          >
-            {/* ANAF status indicator */}
-            <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 4px 12px", fontSize: 12 }}>
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: anafConnected ? "var(--rf-success)" : "var(--rf-error)",
-                  flexShrink: 0,
-                }}
-              />
-              <span style={{ color: "var(--rf-text-muted)" }}>
-                ANAF SPV: <b style={{ color: anafConnected ? "var(--rf-success)" : "var(--rf-error)" }}>
-                  {anafConnected ? "conectat" : "neautentificat"}
-                </b>
-              </span>
-            </div>
-            {timelineItems.length === 0 ? (
-              <div style={{ padding: "12px 4px", fontSize: 12.5, color: "var(--rf-text-muted)", textAlign: "center" }}>
-                Fără notificări recente
-              </div>
-            ) : (
-              <div style={{ padding: "0 4px 4px" }}>
-                {timelineItems.map((n, i) => {
-                  const color = notifColor(n.notificationType);
-                  const icon  = notifIcon(n.notificationType);
-                  return (
-                    <div key={n.id} style={{ display: "flex", gap: 11, padding: "8px 10px" }}>
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                        <span
-                          style={{
-                            width: 26,
-                            height: 26,
-                            borderRadius: "50%",
-                            display: "grid",
-                            placeItems: "center",
-                            flexShrink: 0,
-                            background: `var(--rf-${color}-bg)`,
-                            color: `var(--rf-${color})`,
-                          }}
-                        >
-                          <Icon name={icon} size={13} />
-                        </span>
-                        {i < timelineItems.length - 1 && (
-                          <span style={{ width: 1.5, flex: 1, background: "var(--rf-border)", marginTop: 3 }} />
-                        )}
-                      </div>
-                      <div style={{ paddingBottom: 4, minWidth: 0 }}>
-                        <div style={{ fontSize: 12.5, lineHeight: 1.4, fontWeight: 500 }}>{n.title}</div>
-                        <div style={{ fontSize: 11, color: "var(--rf-text-muted)", marginTop: 2 }}>
-                          {fmtTime(n.createdAt)}
-                        </div>
-                        {n.body && (
-                          <div style={{ fontSize: 11.5, color: "var(--rf-text-muted)", marginTop: 1, lineHeight: 1.4 }}>
-                            {n.body}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+      <div className="page-head">
+        <div>
+          <h1>Privire generală</h1>
+          <p className="sub">{headDate} · {activeCompany?.legalName ?? ""}</p>
+        </div>
+        <div className="head-actions">
+          <div className="nou-wrap" style={{ position: "relative" }}>
+            <button className="pill-btn" onMouseDown={(e) => e.stopPropagation()} onClick={() => setMonthPopOpen((o) => !o)}>
+              <Ic name="calendar" /><span>{periodLabel}</span><Ic name="chevD" cls="ic" />
+            </button>
+            {monthPopOpen && (
+              <div className="pop show" style={{ left: 0, top: 42, width: 210 }} onMouseDown={(e) => e.stopPropagation()}>
+                <div className="col-title">Perioadă</div>
+                {PERIODS.map((p) => (
+                  <button key={p.v} className="pop-item" onClick={() => { setPeriodMode(p.v); setMonthPopOpen(false); }}>
+                    <span style={{ flex: 1 }}>{p.label}</span>
+                    {periodMode === p.v && <Ic name="check" cls="co-check" />}
+                  </button>
+                ))}
               </div>
             )}
-          </SectionCard>
-        </div>
-
-        {/* ── Recent invoices ────────────────────────────────────────────── */}
-        <SectionCard
-          icon="fileOut"
-          title={`Facturi recente · ultimele ${Math.min(recentInvoices.length, 10)}`}
-          subtitle={invoiceTotal > 0 ? `${invoiceTotal} total` : undefined}
-          actions={
-            <div style={{ display: "flex", gap: 8 }}>
-              <Btn
-                size="sm"
-                icon="plus"
-                variant="primary"
-                onClick={() => void navigate({ to: "/invoices/new" })}
-              >
-                Factură nouă
-              </Btn>
-              <Btn
-                size="sm"
-                variant="ghost"
-                iconRight="chevronRight"
-                onClick={() => void navigate({ to: "/invoices" })}
-              >
-                Vezi toate ({invoiceTotal})
-              </Btn>
-            </div>
-          }
-        >
-          <div className="rf-tbl-wrap">
-            <table className="rf-tbl">
-              <thead>
-                <tr>
-                  <th>Nr. factură</th>
-                  <th>Data</th>
-                  <th>Cumpărător</th>
-                  <th className="right">Net (RON)</th>
-                  <th className="right">TVA</th>
-                  <th className="right">Total</th>
-                  <th>Status ANAF</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentInvoices.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} style={{ textAlign: "center", padding: 24, color: "var(--rf-text-muted)" }}>
-                      Fără facturi.{" "}
-                      <button type="button" className="rf-link" onClick={() => void navigate({ to: "/invoices/new" })}>
-                        Creează prima factură →
-                      </button>
-                    </td>
-                  </tr>
-                ) : (
-                  recentInvoices.map((inv) => (
-                    <tr
-                      key={inv.id}
-                      className="clickable"
-                      onClick={() => void navigate({ to: "/invoices/$id", params: { id: inv.id } })}
-                    >
-                      <td className="rf-mono" style={{ fontWeight: 600 }}>{inv.fullNumber}</td>
-                      <td style={{ color: "var(--rf-text-muted)" }}>{inv.issueDate}</td>
-                      <td>{contactMap[inv.contactId]?.legalName ?? <span style={{ color: "var(--rf-text-dim)" }}>—</span>}</td>
-                      <td className="right rf-mono">{fmtRON(inv.subtotalAmount)}</td>
-                      <td className="right rf-mono" style={{ color: "var(--rf-text-muted)" }}>{fmtRON(inv.vatAmount)}</td>
-                      <td className="right rf-mono" style={{ fontWeight: 600 }}>{fmtRON(inv.totalAmount)}</td>
-                      <td><StatusBadge status={inv.status} /></td>
-                      <td><Icon name="chevronRight" size={13} style={{ color: "var(--rf-text-dim)" }} /></td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
           </div>
-        </SectionCard>
-
-        <div style={{ fontSize: 11.5, color: "var(--rf-text-dim)", paddingBottom: 8 }}>
-          Datele se actualizează automat la fiecare 60 s. Toate sumele sunt în <b>RON</b>.
+          <button
+            className={`sq-btn spin-btn${refreshing ? " spinning" : ""}`}
+            aria-label="Reîmprospătează"
+            disabled={refreshing}
+            onClick={async () => { setRefreshing(true); try { await queryClient.refetchQueries({ type: "active" }); notify.success("Date actualizate"); } finally { setRefreshing(false); } }}
+          >
+            <Ic name="sync" />
+          </button>
+          <button className="btn-dark" onClick={() => void navigate({ to: "/invoices/new" })}>
+            <Ic name="plus" />Factură nouă
+          </button>
         </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="kpis">
+        <div className="kpi">
+          <div className="top"><span className="klabel">Total facturat</span><Ic name="docUp" /></div>
+          <div className="val num">{fmtInt(totalFacturat)} <span className="cur">RON</span></div>
+          <div className="delta">
+            {periodMode === "month" && deltaPct != null
+              ? (<><span className="ar">{deltaDir === "up" ? "↑" : "↓"} {Math.abs(deltaPct)}%</span> față de {prevMonthLabel}</>)
+              : `${periodInvoices.length} facturi · ${fmtInt(totalNet)} net`}
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="top"><span className="klabel">De încasat</span><Ic name="incasat" /></div>
+          <div className="val num">{fmtInt(deIncasat)} <span className="cur">RON</span></div>
+          <div className="delta">{openInvoices.length} facturi deschise</div>
+        </div>
+        <div className="kpi">
+          <div className="top"><span className="klabel">Facturi primite</span><Ic name="docDown" /></div>
+          <div className="val num">{receivedTotal} <span className="cur">documente</span></div>
+          <div className="delta">sincronizate din SPV</div>
+        </div>
+        <div className="kpi">
+          <div className="top"><span className="klabel">TVA de colectat</span><Ic name="calc" /></div>
+          <div className="val num">{fmtInt(totalVat)} <span className="cur">RON</span></div>
+          <div className="delta">din {periodInvoices.length} facturi</div>
+        </div>
+      </div>
+
+      {/* mid: chart + activity */}
+      <div className="mid">
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <div className="ct">Facturare lunară</div>
+              <div className="cs">Emise vs. primite · {curChart.label}: <b>{curChart.emise}</b> emise · <b>{curChart.primite}</b> primite</div>
+            </div>
+            <div className="legend">
+              <span className="lg"><span className="sw" style={{ background: "var(--black)" }} />Emise</span>
+              <span className="lg"><span className="sw" style={{ background: "#D4D4D8" }} />Primite</span>
+            </div>
+          </div>
+          <div className="chart">
+            {chartData.map((d) => {
+              const h = 170;
+              const eH = Math.max(4, Math.round((d.emise / chartMax) * h));
+              const pH = Math.max(4, Math.round((d.primite / chartMax) * h));
+              return (
+                <div key={d.key} className={`bar-col${d.key === curChart.key ? " curr" : ""}`}>
+                  <div className="bar-tip"><b>{d.label}</b><span><i className="d" />Emise<em className="num">{d.emise}</em></span><span><i className="l" />Primite<em className="num">{d.primite}</em></span></div>
+                  <div className="bar-stack">
+                    <div className="bar b-emise" style={{ height: eH }} />
+                    <div className="bar b-primite" style={{ height: pH }} />
+                  </div>
+                  <div className="mlab">{d.label}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <div className="ct">Activitate SPV</div>
+            <a className="cs" style={{ textDecoration: "none", cursor: "pointer" }} onClick={() => void navigate({ to: "/notifications" })}>Vezi tot</a>
+          </div>
+          <div className="activity">
+            {timelineItems.length === 0 ? (
+              <div style={{ padding: "22px 4px", fontSize: 12.5, color: "var(--text-2)", textAlign: "center" }}>Fără notificări recente</div>
+            ) : timelineItems.map((n) => (
+              <div key={n.id} className="act-item">
+                <div className="act-ic"><Ic name={actIcon(n.notificationType)} /></div>
+                <div className="act-tx">
+                  <div className="a1">{n.title}</div>
+                  <div className="a2">{fmtTime(n.createdAt)}{n.body ? ` · ${n.body}` : ""}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* recent table */}
+      <div className="table-wrap">
+        <div className="tbar">
+          <div className="tt">Facturi recente</div>
+          <div className="tbar-actions">
+            <a className="see-all" style={{ cursor: "pointer" }} onClick={() => void navigate({ to: "/invoices" })}>Vezi toate<Ic name="chevR" /></a>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th className="c-client">Client</th>
+              <th className="c-doc">Document</th>
+              <th className="c-data">Data</th>
+              <th className="c-scad">Scadența</th>
+              <th className="c-val r">Valoare</th>
+              <th className="c-status">Status ANAF</th>
+            </tr>
+          </thead>
+          <tbody>
+            {recentInvoices.length === 0 ? (
+              <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: "var(--text-2)" }}>
+                Fără facturi. <button type="button" className="rf-link" onClick={() => void navigate({ to: "/invoices/new" })}>Creează prima factură →</button>
+              </td></tr>
+            ) : recentInvoices.map((inv) => {
+              const chip = STATUS_CHIP[inv.status] ?? STATUS_CHIP.DRAFT;
+              return (
+                <tr key={inv.id} className="clickable" onClick={() => void navigate({ to: "/invoices/$id", params: { id: inv.id } })}>
+                  <td className="c-client"><div className="cli"><span className="cli-ava">{ini(contactMap[inv.contactId]?.legalName)}</span>{contactMap[inv.contactId]?.legalName ?? "—"}</div></td>
+                  <td className="c-doc"><span className="doc">{inv.fullNumber}</span></td>
+                  <td className="c-data num">{fmtRoDate(inv.issueDate)}</td>
+                  <td className="c-scad num">{fmtRoDate(inv.dueDate)}</td>
+                  <td className="c-val r num">{fmtInt(parseDec(inv.totalAmount))} RON</td>
+                  <td className="c-status"><span className={`chip ${chip.cls}`}><Ic name={chip.icon} cls="sic" />{chip.label}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ fontSize: 11.5, color: "var(--dim)", padding: "4px 0 8px" }}>
+        Datele se actualizează automat la fiecare 60 s. Toate sumele sunt în <b>RON</b>.
       </div>
     </div>
   );
