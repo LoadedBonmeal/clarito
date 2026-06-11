@@ -1,0 +1,22 @@
+/* imported-by: globals.css (wired centrally) */
+/* Jurnal contabil (GL) — tab panels + balanță equalities + close-cards + criteria rows
+   (verbatim from design Contabilitate.html inline <style>). Scoped under .pg-gl because
+   legacy design.css still has a `.panel` card rule (background/border/shadow) that must
+   not leak in. */
+.pg-gl .panel{display:none;background:none;border:none;border-radius:0;box-shadow:none;overflow:visible}
+.pg-gl .panel.show{display:block}
+.pg-gl .eq-row{display:flex;gap:14px;padding:14px 16px;border-top:1px solid var(--line);background:#FCFCFD;flex-wrap:wrap}
+.pg-gl .eq{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2)}
+.pg-gl .eq .sic{width:14px;height:14px;stroke:var(--green);stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round}
+/* app addition: failed equality (the prototype only shows the all-green state) */
+.pg-gl .eq.bad{color:var(--red)}
+.pg-gl .eq.bad .sic{stroke:var(--red)}
+.pg-gl .close-card .crow{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.pg-gl .close-card .crow:last-child{border-bottom:0}
+.pg-gl .close-card .c1{font-size:13px;font-weight:600}
+.pg-gl .close-card .c2{font-size:11.5px;color:var(--dim);margin-top:2px}
+.pg-gl .close-card .amt{margin-left:auto;font-weight:600;font-size:13px;white-space:nowrap}
+.pg-gl .crit{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+.pg-gl .crit:last-child{border-bottom:0}
+.pg-gl .crit .cv{margin-left:auto;font-weight:600;white-space:nowrap}
+.pg-gl .crit .sic{width:15px;height:15px;stroke:var(--green);stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round;flex:none}

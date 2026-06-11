@@ -1,24 +1,25 @@
 /**
- * GlLedger — Jurnal contabil (GL auto-posting + reconciliere cu D300).
+ * Jurnal contabil (GL) — verbatim port of the design "Contabilitate.html":
+ *   .page-head (title + sub coduri registre + period pill + btn-dark spin-btn
+ *   "Generează notele pe …") → .tabs (Registru-jurnal · Balanță · Închideri ·
+ *   Reconciliere D300 · Bilanț XML + real-feature tabs Cartea mare · Profit și
+ *   pierdere) → .panel per tab: scr-card + scr-table (registru cu pager,
+ *   balanță cu .eq-row patru egalități), .cols-2-even .close-card (închidere
+ *   TVA / rezultat / impozit), banner + tabel reconciliere, .crit încadrare
+ *   entitate + export bilanț XML cu .modal-back/.modal.
  *
- * P7 — rf kit: PageHeader + Segmented + SectionCard + Badge + Banner + Btn.
- * Comenzi backend: generate_gl_entries (→ GlPostResult) + reconcile_gl (→ ReconcileReport).
+ * ALL wiring preserved: api.gl.generateEntries, api.gl.reconcile,
+ * api.gl.closeVat, api.gl.trialBalance, api.gl.journalRegister,
+ * api.gl.generalLedger, api.gl.profitAndLoss, api.gl.closePeriod,
+ * api.gl.bilant, api.gl.postIncomeTax, api.gl.postAnnualClose,
+ * api.gl.exportBilantXml, confirm dialogs, toasts, error handling.
  */
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { confirm, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
-import {
-  PageHeader,
-  Segmented,
-  SectionCard,
-  Badge,
-  Banner,
-  Btn,
-  Modal,
-  Field,
-  Input,
-} from "@/components/rf";
+import { Ic } from "@/components/shared/Ic";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec, MONTHS_RO } from "@/lib/utils";
@@ -31,14 +32,14 @@ import type {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const MONTHS = MONTHS_RO;
-
-function buildYearOptions(): number[] {
-  const current = new Date().getFullYear();
-  const years: number[] = [];
-  for (let y = current; y >= current - 5; y--) years.push(y);
-  return years;
-}
+const RO_MON = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
+const fmtRoDate = (iso: string) => {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  return `${d} ${RO_MON[Number(m) - 1] ?? m} ${y}`;
+};
+/** Datele din GL pot veni deja formatate — formatează doar ISO-urile. */
+const fmtD = (s: string) => (/^\d{4}-\d{2}-\d{2}/.test(s) ? fmtRoDate(s.slice(0, 10)) : s || "—");
 
 function periodDateRange(year: number, month: number): { dateFrom: string; dateTo: string } {
   const mm      = String(month).padStart(2, "0");
@@ -49,6 +50,41 @@ function periodDateRange(year: number, month: number): { dateFrom: string; dateT
   };
 }
 
+/** Icoane din prototip absente din setul Ic (inline, verbatim). */
+const CIRCLE_CHECK = '<path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>';
+const EQ_CHECK     = '<path d="M4.5 12.75 10 18l9.5-11.5"/>';
+const WARN_TRI     = '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>';
+const CHEV_L       = '<path d="M15.75 19.5 8.25 12l7.5-7.5"/>';
+
+function InlineIc({ path, cls = "ic", style }: { path: string; cls?: string; style?: React.CSSProperties }) {
+  return <svg className={cls} viewBox="0 0 24 24" aria-hidden="true" style={style} dangerouslySetInnerHTML={{ __html: path }} />;
+}
+
+const ChipPaid = ({ label }: { label: string }) => (
+  <span className="chip paid"><InlineIc path={CIRCLE_CHECK} cls="sic" />{label}</span>
+);
+const ChipWait = ({ label }: { label: string }) => (
+  <span className="chip wait"><Ic name="clock" cls="sic" />{label}</span>
+);
+const ChipLate = ({ label }: { label: string }) => (
+  <span className="chip late"><InlineIc path={WARN_TRI} cls="sic" />{label}</span>
+);
+
+/** O sumă pe 2 zecimale e „zero” sub jumătate de ban. */
+const isZero = (a: number) => Math.abs(a) < 0.005;
+
+const JR_PAGE_SIZE = 100;
+
+const TABS = [
+  "Registru-jurnal",
+  "Balanță",
+  "Închideri",
+  "Reconciliere D300",
+  "Bilanț XML",
+  "Cartea mare",
+  "Profit și pierdere",
+] as const;
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function GlLedgerPage() {
@@ -57,6 +93,8 @@ export function GlLedgerPage() {
   const now = new Date();
   const [selectedYear,  setSelectedYear]  = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
+  const [tab, setTab] = useState(0);
+  const [openPop, setOpenPop] = useState<"" | "period">("");
 
   const [generating,      setGenerating]      = useState(false);
   const [reconciling,     setReconciling]     = useState(false);
@@ -77,14 +115,175 @@ export function GlLedgerPage() {
   const [bilant,          setBilant]          = useState<BilantReport | null>(null);
   const [loadingBilant,   setLoadingBilant]   = useState(false);
 
-  const yearOptions    = buildYearOptions();
-  const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
+  const [jrQuery, setJrQuery] = useState("");
+  const [jrPage,  setJrPage]  = useState(1);
 
-  const monthSegOptions = MONTHS.map((label, idx) => ({
-    value: String(idx + 1),
-    label: label.slice(0, 3),
-  }));
-  const yearSegOptions = yearOptions.map((y) => ({ value: String(y), label: String(y) }));
+  const [refreshTick, setRefreshTick] = useState(0);
+  const attempted = useRef<Set<string>>(new Set());
+
+  const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
+  const monthName   = MONTHS_RO[selectedMonth - 1];
+  const periodLabel = `${monthName} ${selectedYear}`;
+
+  // Perioada selectabilă: ultimele 36 de luni.
+  const periodOptions = useMemo(() => {
+    const base = now.getFullYear() * 12 + now.getMonth();
+    const opts: Array<{ y: number; m: number }> = [];
+    for (let i = 0; i < 36; i++) {
+      const t = base - i;
+      opts.push({ y: Math.floor(t / 12), m: (t % 12) + 1 });
+    }
+    return opts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Close pop on outside click.
+  useEffect(() => {
+    if (!openPop) return;
+    const h = () => setOpenPop("");
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [openPop]);
+
+  // ── Reset la schimbarea perioadei / companiei ─────────────────────────────
+  const resetAll = () => {
+    setPostResult(null);
+    setReconcileReport(null);
+    setVatClose(null);
+    setTrialBal(null);
+    setJournalReg(null);
+    setLedger(null);
+    setPnl(null);
+    setBilant(null);
+    setJrPage(1);
+  };
+  const prevCtx = useRef(`${activeCompanyId}|${dateFrom}`);
+  useEffect(() => {
+    const ctx = `${activeCompanyId}|${dateFrom}`;
+    if (prevCtx.current !== ctx) {
+      prevCtx.current = ctx;
+      resetAll();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompanyId, dateFrom]);
+
+  /** Datele postate invalidează rapoartele — panourile active se reîncarcă. */
+  const invalidateReports = () => {
+    setTrialBal(null);
+    setJournalReg(null);
+    setLedger(null);
+    setPnl(null);
+    setBilant(null);
+    setReconcileReport(null);
+    setRefreshTick((t) => t + 1);
+  };
+
+  // ── Loaders (silențioși — rezultatul se vede în panou; erorile dau toast) ──
+
+  const loadJournal = async () => {
+    if (!activeCompanyId || loadingJr) return;
+    setLoadingJr(true);
+    try {
+      setJournalReg(await api.gl.journalRegister(activeCompanyId, dateFrom, dateTo));
+      setJrPage(1);
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut genera registrul-jurnal."));
+    } finally {
+      setLoadingJr(false);
+    }
+  };
+
+  const loadTrialBalance = async () => {
+    if (!activeCompanyId || loadingTb) return;
+    setLoadingTb(true);
+    try {
+      setTrialBal(await api.gl.trialBalance(activeCompanyId, dateFrom, dateTo));
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut genera balanța de verificare."));
+    } finally {
+      setLoadingTb(false);
+    }
+  };
+
+  const loadLedger = async () => {
+    if (!activeCompanyId || loadingCm) return;
+    setLoadingCm(true);
+    try {
+      setLedger(await api.gl.generalLedger(activeCompanyId, dateFrom, dateTo));
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut genera cartea mare."));
+    } finally {
+      setLoadingCm(false);
+    }
+  };
+
+  const loadPnl = async () => {
+    if (!activeCompanyId || loadingPnl) return;
+    setLoadingPnl(true);
+    try {
+      setPnl(await api.gl.profitAndLoss(activeCompanyId, dateFrom, dateTo));
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut genera contul de profit și pierdere."));
+    } finally {
+      setLoadingPnl(false);
+    }
+  };
+
+  const loadBilant = async () => {
+    if (!activeCompanyId || loadingBilant) return;
+    setLoadingBilant(true);
+    try {
+      setBilant(await api.gl.bilant(activeCompanyId, dateFrom, dateTo));
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut genera bilanțul."));
+    } finally {
+      setLoadingBilant(false);
+    }
+  };
+
+  const runReconcile = async (manual: boolean) => {
+    if (!activeCompanyId) {
+      if (manual) notify.warn("Selectați o companie activă.");
+      return;
+    }
+    if (reconciling) return;
+    setReconciling(true);
+    if (manual) setReconcileReport(null);
+    try {
+      const report = await api.gl.reconcile(activeCompanyId, dateFrom, dateTo);
+      setReconcileReport(report);
+      if (manual) {
+        if (report.balanced && report.discrepancies.length === 0) {
+          notify.success("GL reconciliat cu succes — balansat și fără discrepanțe.");
+        } else if (report.discrepancies.length > 0) {
+          notify.warn(`Reconciliere completă cu ${report.discrepancies.length} discrepanțe.`);
+        } else {
+          notify.info("Reconciliere completă — verificați raportul de mai jos.");
+        }
+      }
+    } catch (err) {
+      notify.error(formatError(err, "Nu s-a putut reconcilia GL."));
+    } finally {
+      setReconciling(false);
+    }
+  };
+
+  // Auto-load per tab activ (o singură tentativă per perioadă/companie/tick).
+  useEffect(() => {
+    if (!activeCompanyId) return;
+    const loader = tab === 0 ? "jr" : tab === 1 ? "tb" : tab === 2 || tab === 6 ? "pnl"
+      : tab === 3 ? "rec" : tab === 4 ? "bil" : "cm";
+    const key = `${loader}|${activeCompanyId}|${dateFrom}|${refreshTick}`;
+    if (attempted.current.has(key)) return;
+    attempted.current.add(key);
+    if (loader === "jr") void loadJournal();
+    else if (loader === "tb") void loadTrialBalance();
+    else if (loader === "pnl") void loadPnl();
+    else if (loader === "rec") void runReconcile(false);
+    else if (loader === "bil") void loadBilant();
+    else void loadLedger();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, activeCompanyId, dateFrom, refreshTick]);
 
   // ── Generează note contabile ──────────────────────────────────────────────
 
@@ -114,33 +313,11 @@ export function GlLedgerPage() {
           ". Completați defalcarea TVA, apoi regenerați.",
         );
       }
+      invalidateReports();
     } catch (err) {
       notify.error(formatError(err, "Nu s-au putut genera notele contabile."));
     } finally {
       setGenerating(false);
-    }
-  };
-
-  // ── Reconciliază GL cu D300 ────────────────────────────────────────────────
-
-  const handleReconcile = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
-    setReconciling(true);
-    setReconcileReport(null);
-    try {
-      const report = await api.gl.reconcile(activeCompanyId, dateFrom, dateTo);
-      setReconcileReport(report);
-      if (report.balanced && report.discrepancies.length === 0) {
-        notify.success("GL reconciliat cu succes — balansat și fără discrepanțe.");
-      } else if (report.discrepancies.length > 0) {
-        notify.warn(`Reconciliere completă cu ${report.discrepancies.length} discrepanțe.`);
-      } else {
-        notify.info("Reconciliere completă — verificați raportul de mai jos.");
-      }
-    } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut reconcilia GL."));
-    } finally {
-      setReconciling(false);
     }
   };
 
@@ -162,6 +339,7 @@ export function GlLedgerPage() {
       } else {
         notify.success("Închidere TVA: TVA colectată = deductibilă (sold zero).");
       }
+      if (result.posted) invalidateReports();
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut posta închiderea TVA."));
     } finally {
@@ -169,45 +347,7 @@ export function GlLedgerPage() {
     }
   };
 
-  // ── Balanța de verificare ─────────────────────────────────────────────────
-
-  const handleTrialBalance = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
-    setLoadingTb(true);
-    setTrialBal(null);
-    try {
-      const tb = await api.gl.trialBalance(activeCompanyId, dateFrom, dateTo);
-      setTrialBal(tb);
-      if (!tb.balanced) {
-        notify.warn("Balanța NU este echilibrată — verificați notele contabile (rulați «Generează»).");
-      } else if (tb.rows.length === 0) {
-        notify.info("Nicio mișcare contabilă în perioadă.");
-      } else {
-        notify.success("Balanță de verificare generată — echilibrată (patru egalități).");
-      }
-    } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut genera balanța de verificare."));
-    } finally {
-      setLoadingTb(false);
-    }
-  };
-
-  // ── Cont de profit și pierdere ────────────────────────────────────────────
-
-  const handleProfitLoss = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
-    setLoadingPnl(true);
-    setPnl(null);
-    try {
-      const r = await api.gl.profitAndLoss(activeCompanyId, dateFrom, dateTo);
-      setPnl(r);
-      notify.success(`Cont de profit și pierdere — rezultat net: ${r.netResult} lei.`);
-    } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut genera contul de profit și pierdere."));
-    } finally {
-      setLoadingPnl(false);
-    }
-  };
+  // ── Închidere perioadă (6/7 → 121) + impozit + închidere anuală ───────────
 
   const handleClosePeriod = async () => {
     if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
@@ -225,32 +365,13 @@ export function GlLedgerPage() {
         notify.info("Nicio mișcare pe conturile de venituri/cheltuieli în perioadă.");
       } else {
         notify.success(`Închidere postată: rezultat ${r.result} lei (${r.entriesCount} note).`);
-        // Refresh the P&L (it excludes the close, so it still shows the activity).
-        await handleProfitLoss();
+        // Reîncarcă rapoartele (P&L-ul exclude închiderea, deci arată în continuare activitatea).
+        invalidateReports();
       }
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut posta închiderea perioadei."));
     } finally {
       setClosingPeriod(false);
-    }
-  };
-
-  const handleBilant = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
-    setLoadingBilant(true);
-    setBilant(null);
-    try {
-      const b = await api.gl.bilant(activeCompanyId, dateFrom, dateTo);
-      setBilant(b);
-      if (!b.balanced) {
-        notify.warn("Bilanțul NU se verifică (Active ≠ Capitaluri + Datorii) — verificați balanța.");
-      } else {
-        notify.success(`Bilanț generat — total active ${b.totalAssets} lei (echilibrat).`);
-      }
-    } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut genera bilanțul."));
-    } finally {
-      setLoadingBilant(false);
     }
   };
 
@@ -265,7 +386,10 @@ export function GlLedgerPage() {
     try {
       const r = await api.gl.postIncomeTax(activeCompanyId, dateFrom, dateTo);
       if (!r.posted) notify.info("Impozit zero — nimic de postat.");
-      else notify.success(`Impozit postat: ${r.amount} lei (${r.expenseAccount} → ${r.payableAccount})${r.estimated ? " — estimat" : ""}.`);
+      else {
+        notify.success(`Impozit postat: ${r.amount} lei (${r.expenseAccount} → ${r.payableAccount})${r.estimated ? " — estimat" : ""}.`);
+        invalidateReports();
+      }
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut posta impozitul."));
     }
@@ -273,7 +397,7 @@ export function GlLedgerPage() {
 
   const handleAnnualClose = async () => {
     if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
-    const year = Number(dateFrom.slice(0, 4));
+    const year = selectedYear;
     const ok = await confirm(
       `Postează închiderea anuală 121 → 117 pentru anul ${year}? Soldul contului 121 (rezultatul ` +
         `anului) se transferă în 117 «Rezultatul reportat», cu nota datată 01.01.${year + 1}. Idempotent.`,
@@ -283,17 +407,22 @@ export function GlLedgerPage() {
     try {
       const r = await api.gl.postAnnualClose(activeCompanyId, year);
       if (!r.posted) notify.info("Sold 121 zero — nimic de transferat.");
-      else notify.success(`Închidere anuală ${year}: ${r.kind === "profit" ? "profit" : "pierdere"} ${r.result121} lei → 117.`);
+      else {
+        notify.success(`Închidere anuală ${year}: ${r.kind === "profit" ? "profit" : "pierdere"} ${r.result121} lei → 117.`);
+        invalidateReports();
+      }
     } catch (err) {
       notify.error(formatError(err, "Nu s-a putut posta închiderea anuală."));
     }
   };
 
+  // ── Export bilanț XML ─────────────────────────────────────────────────────
+
   const runBilantExport = async (
     caen: string, avgEmployees: number | null, formOverride: string | null, priorYearForm: string | null,
   ) => {
     if (!activeCompanyId) return;
-    const year = Number(dateFrom.slice(0, 4));
+    const year = selectedYear;
     const dest = await saveDialog({
       title: "Salvează bilanț XML (ANAF S1005/S1003/S1002)",
       defaultPath: `bilant-${year}.xml`,
@@ -310,640 +439,861 @@ export function GlLedgerPage() {
     }
   };
 
-  // ── Registru-jurnal + Cartea mare ─────────────────────────────────────────
+  // ── Date derivate pentru panouri ──────────────────────────────────────────
 
-  const handleJournalRegister = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
-    setLoadingJr(true);
-    setJournalReg(null);
-    try {
-      const jr = await api.gl.journalRegister(activeCompanyId, dateFrom, dateTo);
-      setJournalReg(jr);
-      if (jr.rows.length === 0) notify.info("Nicio notă contabilă în perioadă.");
-      else notify.success(`Registru-jurnal: ${jr.rows.length} rânduri${jr.balanced ? " (echilibrat)" : " — DEZECHILIBRAT"}.`);
-    } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut genera registrul-jurnal."));
-    } finally {
-      setLoadingJr(false);
-    }
-  };
+  // Registru-jurnal: căutare + paginare client.
+  const jrRows = useMemo(() => {
+    if (!journalReg) return [];
+    const q = jrQuery.trim().toLowerCase();
+    if (!q) return journalReg.rows;
+    return journalReg.rows.filter((r) =>
+      r.document.toLowerCase().includes(q) ||
+      r.explanation.toLowerCase().includes(q) ||
+      r.debitAccount.includes(q) ||
+      r.creditAccount.includes(q),
+    );
+  }, [journalReg, jrQuery]);
+  const jrPages    = Math.max(1, Math.ceil(jrRows.length / JR_PAGE_SIZE));
+  const jrPageSafe = Math.min(jrPage, jrPages);
+  const jrVisible  = jrRows.slice((jrPageSafe - 1) * JR_PAGE_SIZE, jrPageSafe * JR_PAGE_SIZE);
+  const jrWindow   = useMemo(() => {
+    let start = Math.max(1, jrPageSafe - 2);
+    const end = Math.min(jrPages, start + 4);
+    start = Math.max(1, end - 4);
+    const pages: number[] = [];
+    for (let p = start; p <= end; p++) pages.push(p);
+    return pages;
+  }, [jrPageSafe, jrPages]);
 
-  const handleGeneralLedger = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
-    setLoadingCm(true);
-    setLedger(null);
-    try {
-      const cm = await api.gl.generalLedger(activeCompanyId, dateFrom, dateTo);
-      setLedger(cm);
-      notify.success(`Cartea mare: ${cm.length} conturi.`);
-    } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut genera cartea mare."));
-    } finally {
-      setLoadingCm(false);
-    }
-  };
+  // Balanță: cele patru egalități.
+  const equalities = trialBal ? [
+    { label: "Egalitatea 1 · Solduri inițiale D = C", ok: isZero(parseDec(trialBal.totalOpeningDebit) - parseDec(trialBal.totalOpeningCredit)) },
+    { label: "Egalitatea 2 · Rulaje curente D = C",   ok: isZero(parseDec(trialBal.totalPeriodDebit)  - parseDec(trialBal.totalPeriodCredit)) },
+    { label: "Egalitatea 3 · Total sume D = C",       ok: isZero(parseDec(trialBal.totalTotalDebit)   - parseDec(trialBal.totalTotalCredit)) },
+    { label: "Egalitatea 4 · Solduri finale D = C",   ok: isZero(parseDec(trialBal.totalClosingDebit) - parseDec(trialBal.totalClosingCredit)) },
+  ] : [];
 
-  // ── Reset on period change ────────────────────────────────────────────────
+  // Scadența TVA: 25 a lunii următoare perioadei.
+  const vatDueNext = selectedMonth === 12
+    ? { y: selectedYear + 1, m: 1 }
+    : { y: selectedYear, m: selectedMonth + 1 };
+  const vatDueLabel = fmtRoDate(`${vatDueNext.y}-${String(vatDueNext.m).padStart(2, "0")}-25`);
 
-  const handlePeriodChange = () => {
-    setPostResult(null);
-    setReconcileReport(null);
-    setVatClose(null);
-    setTrialBal(null);
-    setJournalReg(null);
-    setLedger(null);
-  };
+  // Reconciliere: rândurile tabelului.
+  const recRows = reconcileReport ? [
+    {
+      label: "TVA colectată (4427)", d300Row: "—",
+      gl: parseDec(reconcileReport.vatCollectedGl), d300: parseDec(reconcileReport.vatCollectedD300),
+    },
+    {
+      label: "TVA deductibilă (4426)", d300Row: "—",
+      gl: parseDec(reconcileReport.vatDeductibleGl), d300: parseDec(reconcileReport.vatDeductibleD300),
+    },
+  ] : [];
+
+  const cellAmt = (v: string) => (isZero(parseDec(v)) ? <span className="muted">—</span> : fmtRON(v));
+
+  // ── Empty state (fără companie) ───────────────────────────────────────────
+  if (!activeCompanyId) {
+    return (
+      <div className="main-inner wide pg-gl">
+        <div className="page-head"><div><h1>Jurnal contabil (GL)</h1></div></div>
+        <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
+          Selectați o companie activă pentru a lucra cu jurnalul contabil.
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="rf-content">
-      <PageHeader
-        title="Jurnal contabil (GL)"
-        actions={
-          <>
-            <Segmented
-              options={monthSegOptions}
-              value={String(selectedMonth)}
-              onChange={(v) => { setSelectedMonth(Number(v)); handlePeriodChange(); }}
-            />
-            <Segmented
-              options={yearSegOptions}
-              value={String(selectedYear)}
-              onChange={(v) => { setSelectedYear(Number(v)); handlePeriodChange(); }}
-            />
-            <Btn
-              variant="secondary"
-              icon="ledger"
-              disabled={generating || !activeCompanyId}
-              onClick={() => void handleGenerate()}
+    <div className="main-inner wide pg-gl">
+      {/* page head */}
+      <div className="page-head">
+        <div>
+          <h1>Jurnal contabil (GL)</h1>
+          <p className="sub">
+            {periodLabel} · note generate automat din documente · registru-jurnal cod 14-1-1,
+            balanță cod 14-6-30, cartea mare cod 14-1-3
+          </p>
+        </div>
+        <div className="head-actions">
+          <div className="nou-wrap" style={{ position: "relative" }}>
+            <button
+              className="pill-btn"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => setOpenPop(openPop === "period" ? "" : "period")}
             >
-              {generating ? "Generez…" : "Generează note contabile"}
-            </Btn>
-            <Btn
-              variant="primary"
-              icon="reports"
-              disabled={reconciling || !activeCompanyId}
-              onClick={() => void handleReconcile()}
-            >
-              {reconciling ? "Reconciliez…" : "Reconciliază cu D300"}
-            </Btn>
-            <Btn
-              variant="secondary"
-              icon="ledger"
-              disabled={closing || !activeCompanyId}
-              onClick={() => void handleCloseVat()}
-            >
-              {closing ? "Închid TVA…" : "Închidere TVA"}
-            </Btn>
-            <Btn
-              variant="secondary"
-              icon="reports"
-              disabled={loadingTb || !activeCompanyId}
-              onClick={() => void handleTrialBalance()}
-            >
-              {loadingTb ? "Calculez…" : "Balanță de verificare"}
-            </Btn>
-            <Btn
-              variant="secondary"
-              icon="ledger"
-              disabled={loadingJr || !activeCompanyId}
-              onClick={() => void handleJournalRegister()}
-            >
-              {loadingJr ? "…" : "Registru-jurnal"}
-            </Btn>
-            <Btn
-              variant="secondary"
-              icon="ledger"
-              disabled={loadingCm || !activeCompanyId}
-              onClick={() => void handleGeneralLedger()}
-            >
-              {loadingCm ? "…" : "Cartea mare"}
-            </Btn>
-            <Btn
-              variant="secondary"
-              icon="reports"
-              disabled={loadingPnl || !activeCompanyId}
-              onClick={() => void handleProfitLoss()}
-            >
-              {loadingPnl ? "…" : "Profit și pierdere"}
-            </Btn>
-            <Btn
-              variant="secondary"
-              icon="reports"
-              disabled={loadingBilant || !activeCompanyId}
-              onClick={() => void handleBilant()}
-            >
-              {loadingBilant ? "…" : "Bilanț"}
-            </Btn>
-            <Btn
-              variant="secondary"
-              icon="declaration"
-              disabled={!activeCompanyId}
-              onClick={() => setShowBilantExport(true)}
-              title="Exportă bilanțul XML oficial ANAF (S1005/S1003/S1002) pentru import în PDF inteligent"
-            >
-              Bilanț XML
-            </Btn>
-            <Btn
-              variant="secondary"
-              icon="ledger"
-              disabled={!activeCompanyId}
-              onClick={() => void handleIncomeTax()}
-              title="Postează impozitul pe venit/profit (698/691 → 4418/4411)"
-            >
-              Impozit
-            </Btn>
-            <Btn
-              variant="secondary"
-              icon="ledger"
-              disabled={closingPeriod || !activeCompanyId}
-              onClick={() => void handleClosePeriod()}
-              title="Postează închiderea conturilor 6/7 → 121 pentru perioadă"
-            >
-              {closingPeriod ? "Închid…" : "Închide perioada"}
-            </Btn>
-            <Btn
-              variant="secondary"
-              icon="ledger"
-              disabled={!activeCompanyId}
-              onClick={() => void handleAnnualClose()}
-              title="Închiderea anuală 121 → 117 (rezultat reportat)"
-            >
-              Închidere anuală
-            </Btn>
-          </>
-        }
-      />
-
-      <div className="rf-page-body">
-        {/* Info banner */}
-        <Banner variant="info">
-          Notele contabile GL sunt generate automat din facturile emise (VALIDATED/STORNED),
-          facturile primite cu defalcare TVA și plățile înregistrate. Rularea este idempotentă —
-          documentele existente sunt re-calculate fără duplicate.
-        </Banner>
-
-        {/* ── Rezultat generare ─────────────────────────────────────────────── */}
-        {postResult && (
-          <SectionCard icon="ledger" title="Rezultat generare note contabile">
-            <div style={{ padding: "12px 16px", display: "flex", gap: 24, flexWrap: "wrap" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Jurnale inserate</span>
-                <span className="rf-mono" style={{ fontSize: 22, fontWeight: 700 }}>{postResult.journalsInserted}</span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Intrări GL</span>
-                <span className="rf-mono" style={{ fontSize: 22, fontWeight: 700 }}>{postResult.entriesInserted}</span>
-              </div>
-              {postResult.journalsReplaced > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Re-generate</span>
-                  <span className="rf-mono" style={{ fontSize: 22, fontWeight: 700, color: "var(--rf-warning)" }}>{postResult.journalsReplaced}</span>
-                </div>
-              )}
-              {postResult.skippedReceived > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Omise (fără TVA)</span>
-                  <span className="rf-mono" style={{ fontSize: 22, fontWeight: 700, color: "var(--rf-warning)" }}>{postResult.skippedReceived}</span>
-                </div>
-              )}
-            </div>
-            {postResult.skippedReceived > 0 && (
-              <div style={{ padding: "0 16px 12px" }}>
-                <Banner variant="warning">
-                  {postResult.skippedReceived}{" "}
-                  {postResult.skippedReceived === 1 ? "factură primită a fost omisă" : "facturi primite au fost omise"}{" "}
-                  deoarece nu au defalcare TVA (net_amount IS NULL). Folosiți «Recalculează TVA din XML» în Jurnal cumpărări.
-                </Banner>
+              <Ic name="calendar" />
+              {periodLabel}
+              <Ic name="chevD" cls="ic" />
+            </button>
+            {openPop === "period" && (
+              <div className="pop show" style={{ right: 0, top: 40, width: 210, maxHeight: 300, overflowY: "auto" }} onMouseDown={(e) => e.stopPropagation()}>
+                <div className="col-title">Perioadă</div>
+                {periodOptions.map(({ y, m }) => (
+                  <button
+                    key={`${y}-${m}`}
+                    className="pop-item"
+                    onClick={() => { setSelectedYear(y); setSelectedMonth(m); setOpenPop(""); }}
+                  >
+                    <span style={{ flex: 1 }}>{MONTHS_RO[m - 1]} {y}</span>
+                    {selectedYear === y && selectedMonth === m && <Ic name="check" cls="co-check" />}
+                  </button>
+                ))}
               </div>
             )}
-          </SectionCard>
-        )}
+          </div>
+          <button
+            className={`btn-dark spin-btn${generating ? " spinning" : ""}`}
+            disabled={generating}
+            onClick={() => void handleGenerate()}
+          >
+            <Ic name="sync" />
+            {generating ? "Generez…" : `Generează notele pe ${monthName.toLowerCase()}`}
+          </button>
+        </div>
+      </div>
 
-        {/* ── Rezultat închidere TVA ───────────────────────────────────────── */}
-        {vatClose && (
-          <SectionCard icon="ledger" title="Închidere TVA (regularizare)">
-            <div style={{ padding: "12px 16px", display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-end" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>TVA colectată (4427)</span>
-                <span className="rf-mono" style={{ fontSize: 18, fontWeight: 600 }}>{fmtRON(vatClose.collected)}</span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>TVA deductibilă (4426)</span>
-                <span className="rf-mono" style={{ fontSize: 18, fontWeight: 600 }}>{fmtRON(vatClose.deductible)}</span>
-              </div>
-              {parseDec(vatClose.dePlata) > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>De plată (4423)</span>
-                  <span className="rf-mono" style={{ fontSize: 22, fontWeight: 700, color: "var(--rf-warning)" }}>{fmtRON(vatClose.dePlata)}</span>
-                </div>
-              )}
-              {parseDec(vatClose.deRecuperat) > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>De recuperat (4424)</span>
-                  <span className="rf-mono" style={{ fontSize: 22, fontWeight: 700, color: "var(--rf-success)" }}>{fmtRON(vatClose.deRecuperat)}</span>
-                </div>
-              )}
-            </div>
-            <div style={{ padding: "0 16px 12px" }}>
-              {vatClose.posted ? (
-                <Banner variant="info">
-                  Nota de regularizare a fost postată la <b>{vatClose.entryDate}</b>: conturile
-                  4426/4427 au fost aduse la sold zero, diferența în {parseDec(vatClose.dePlata) > 0 ? "4423 «TVA de plată»" : parseDec(vatClose.deRecuperat) > 0 ? "4424 «TVA de recuperat»" : "—"}.
-                  Contul 4428 «TVA neexigibilă» nu este afectat. TVA de plată se achită până la
-                  data de 25 a lunii următoare.
-                </Banner>
-              ) : (
-                <Banner variant="info">
-                  Nimic de regularizat — conturile 4426/4427 sunt deja zero pentru perioadă
-                  (eventuala TVA neexigibilă rămâne în 4428 până la încasare/plată).
-                </Banner>
-              )}
-            </div>
-          </SectionCard>
-        )}
+      {/* tabs */}
+      <div className="tabs" style={{ display: "inline-flex", marginBottom: 16 }}>
+        {TABS.map((t, i) => (
+          <div key={t} className={`tab${tab === i ? " active" : ""}`} onClick={() => setTab(i)}>
+            {t}
+          </div>
+        ))}
+      </div>
 
-        {/* ── Balanță de verificare ────────────────────────────────────────── */}
-        {trialBal && (
-          <SectionCard icon="reports" title="Balanță de verificare (cod 14-6-30)">
-            <div style={{ padding: "12px 16px 4px", display: "flex", alignItems: "center", gap: 12 }}>
-              <Badge variant={trialBal.balanced ? "success" : "error"}>
-                {trialBal.balanced ? "Echilibrată — patru egalități" : "NEechilibrată"}
-              </Badge>
-              <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
-                {trialBal.rows.length} conturi · obligatorie lunar (Legea 82/1991)
-              </span>
+      {/* ── 1. REGISTRU-JURNAL ─────────────────────────────────────────────── */}
+      <div className={`panel${tab === 0 ? " show" : ""}`}>
+        {postResult && (
+          <div className={`banner ${postResult.skippedReceived > 0 ? "warn" : "ok"}`} style={{ marginBottom: 14 }}>
+            <InlineIc path={postResult.skippedReceived > 0 ? WARN_TRI : CIRCLE_CHECK} />
+            <span>
+              <b>GL generat pentru {monthName.toLowerCase()}:</b>{" "}
+              {postResult.journalsInserted} jurnale · {postResult.entriesInserted} intrări
+              {postResult.journalsReplaced > 0 && <> · {postResult.journalsReplaced} re-generate</>}.
+              {postResult.skippedReceived > 0 && (
+                <>
+                  {" "}<b className="neg">
+                    {postResult.skippedReceived === 1
+                      ? "1 factură primită sărită"
+                      : `${postResult.skippedReceived} facturi primite sărite`}
+                  </b>{" "}
+                  (fără defalcare TVA):{" "}
+                  {(postResult.skippedReceivedRefs ?? []).slice(0, 5).map((ref, i) => (
+                    <span key={ref}>{i > 0 && ", "}<span className="doc">{ref}</span></span>
+                  ))}
+                  {postResult.skippedReceived > 5 && " …"} — completați defalcarea
+                  («Recalculează TVA din XML» în Jurnal cumpărări), apoi regenerați.
+                </>
+              )}
+            </span>
+          </div>
+        )}
+        <div className="scr-card">
+          <div className="scr-toolbar">
+            <div className="tt">Registru-jurnal (cod 14-1-1) — {periodLabel}</div>
+            <div className="spacer" />
+            <div className="scr-search" style={{ width: 190 }}>
+              <Ic name="lens" />
+              <input
+                type="text"
+                placeholder="Caută nota…"
+                value={jrQuery}
+                onChange={(e) => { setJrQuery(e.target.value); setJrPage(1); }}
+              />
             </div>
-            <div style={{ overflowX: "auto", padding: "0 16px 16px" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            {/* propunere — neimplementat (nu există API de export registru-jurnal) */}
+            <button className="pill-btn" onClick={() => notify.info("În curând.")}>
+              <Ic name="dl" />Export
+            </button>
+          </div>
+          {loadingJr ? (
+            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          ) : !journalReg || journalReg.rows.length === 0 ? (
+            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+              Nicio notă contabilă în perioadă — apăsați «Generează notele pe {monthName.toLowerCase()}».
+            </div>
+          ) : jrRows.length === 0 ? (
+            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+              Nicio notă pentru căutarea aplicată.
+            </div>
+          ) : (
+            <>
+              <table className="scr-table">
                 <thead>
-                  <tr style={{ borderBottom: "2px solid var(--rf-border)", textAlign: "right" }}>
-                    <th style={{ textAlign: "left", padding: "4px 8px" }}>Cont</th>
-                    <th style={{ textAlign: "left", padding: "4px 8px" }}>Denumire</th>
-                    <th colSpan={2} style={{ padding: "4px 8px" }}>Solduri inițiale</th>
-                    <th colSpan={2} style={{ padding: "4px 8px" }}>Rulaje perioadă</th>
-                    <th colSpan={2} style={{ padding: "4px 8px" }}>Total sume</th>
-                    <th colSpan={2} style={{ padding: "4px 8px" }}>Solduri finale</th>
+                  <tr>
+                    <th>Nr.</th><th>Data</th><th>Document</th><th>Explicații</th>
+                    <th>Cont D</th><th>Cont C</th>
+                    <th className="r">Sume D</th><th className="r">Sume C</th>
                   </tr>
-                  <tr style={{ borderBottom: "1px solid var(--rf-border)", textAlign: "right", color: "var(--rf-text-muted)" }}>
-                    <th colSpan={2}></th>
-                    <th style={{ padding: "2px 8px" }}>D</th><th style={{ padding: "2px 8px" }}>C</th>
-                    <th style={{ padding: "2px 8px" }}>D</th><th style={{ padding: "2px 8px" }}>C</th>
-                    <th style={{ padding: "2px 8px" }}>D</th><th style={{ padding: "2px 8px" }}>C</th>
-                    <th style={{ padding: "2px 8px" }}>D</th><th style={{ padding: "2px 8px" }}>C</th>
+                </thead>
+                <tbody>
+                  {jrVisible.map((r) => (
+                    <tr key={r.nrCrt}>
+                      <td className="num">{r.nrCrt}</td>
+                      <td className="num">{fmtD(r.date)}</td>
+                      <td><span className="doc">{r.document || "—"}</span></td>
+                      <td>{r.explanation}</td>
+                      <td>{r.debitAccount ? <span className="doc">{r.debitAccount}</span> : <span className="muted">—</span>}</td>
+                      <td>{r.creditAccount ? <span className="doc">{r.creditAccount}</span> : <span className="muted">—</span>}</td>
+                      <td className="r num">{cellAmt(r.debit)}</td>
+                      <td className="r num">{cellAmt(r.credit)}</td>
+                    </tr>
+                  ))}
+                  {!jrQuery && (
+                    <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                      <td colSpan={6}>
+                        Total rulaj — {journalReg.balanced
+                          ? "echilibrat (D = C)"
+                          : <span className="neg">DEZECHILIBRAT</span>}
+                      </td>
+                      <td className="r num">{fmtRON(journalReg.totalDebit)}</td>
+                      <td className="r num">{fmtRON(journalReg.totalCredit)}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              <div className="pager">
+                <span>
+                  Afișezi <b>{(jrPageSafe - 1) * JR_PAGE_SIZE + 1}–{Math.min(jrPageSafe * JR_PAGE_SIZE, jrRows.length)}</b>{" "}
+                  din <b>{jrRows.length}</b> note · {monthName.toLowerCase()} {selectedYear}
+                </span>
+                <div className="pg-btns">
+                  <button className="pg-btn" disabled={jrPageSafe <= 1} onClick={() => setJrPage(jrPageSafe - 1)}>
+                    <InlineIc path={CHEV_L} />
+                  </button>
+                  {jrWindow.map((p) => (
+                    <button key={p} className={`pg-btn${p === jrPageSafe ? " cur" : ""}`} onClick={() => setJrPage(p)}>
+                      {p}
+                    </button>
+                  ))}
+                  <button className="pg-btn" disabled={jrPageSafe >= jrPages} onClick={() => setJrPage(jrPageSafe + 1)}>
+                    <Ic name="chevR" />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── 2. BALANȚĂ ─────────────────────────────────────────────────────── */}
+      <div className={`panel${tab === 1 ? " show" : ""}`}>
+        <div className="scr-card">
+          <div className="scr-toolbar">
+            <div className="tt">Balanța de verificare — {fmtRoDate(dateTo)}</div>
+            <div className="spacer" />
+            {/* propunere — neimplementat (nu există API de export balanță XLSX) */}
+            <button className="pill-btn" onClick={() => notify.info("În curând.")}>
+              <Ic name="dl" />Export XLSX
+            </button>
+          </div>
+          {loadingTb ? (
+            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          ) : !trialBal || trialBal.rows.length === 0 ? (
+            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+              Nicio mișcare contabilă în perioadă.
+            </div>
+          ) : (
+            <>
+              <table className="scr-table">
+                <thead>
+                  <tr>
+                    <th>Cont</th>
+                    <th className="r">SI D</th><th className="r">SI C</th>
+                    <th className="r">Rulaj D</th><th className="r">Rulaj C</th>
+                    <th className="r">Total sume D</th><th className="r">Total sume C</th>
+                    <th className="r">SF D</th><th className="r">SF C</th>
                   </tr>
                 </thead>
                 <tbody>
                   {trialBal.rows.map((r) => (
-                    <tr key={r.accountCode} style={{ borderBottom: "1px solid var(--rf-border-subtle, var(--rf-border))" }}>
-                      <td className="rf-mono" style={{ padding: "2px 8px" }}>{r.accountCode}</td>
-                      <td style={{ padding: "2px 8px" }}>{r.accountName}</td>
-                      {[r.openingDebit, r.openingCredit, r.periodDebit, r.periodCredit, r.totalDebit, r.totalCredit, r.closingDebit, r.closingCredit].map((v, i) => (
-                        <td key={i} className="rf-mono" style={{ padding: "2px 8px", textAlign: "right", color: parseDec(v) === 0 ? "var(--rf-text-muted)" : undefined }}>
-                          {parseDec(v) === 0 ? "—" : fmtRON(v)}
-                        </td>
+                    <tr key={r.accountCode}>
+                      <td><span className="doc">{r.accountCode}</span> {r.accountName}</td>
+                      {[r.openingDebit, r.openingCredit, r.periodDebit, r.periodCredit,
+                        r.totalDebit, r.totalCredit, r.closingDebit, r.closingCredit].map((v, i) => (
+                        <td key={i} className="r num">{cellAmt(v)}</td>
                       ))}
                     </tr>
                   ))}
-                </tbody>
-                <tfoot>
-                  <tr style={{ borderTop: "2px solid var(--rf-border)", fontWeight: 700 }}>
-                    <td colSpan={2} style={{ padding: "4px 8px" }}>TOTAL</td>
-                    {[trialBal.totalOpeningDebit, trialBal.totalOpeningCredit, trialBal.totalPeriodDebit, trialBal.totalPeriodCredit, trialBal.totalTotalDebit, trialBal.totalTotalCredit, trialBal.totalClosingDebit, trialBal.totalClosingCredit].map((v, i) => (
-                      <td key={i} className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(v)}</td>
+                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                    <td>Total</td>
+                    {[trialBal.totalOpeningDebit, trialBal.totalOpeningCredit,
+                      trialBal.totalPeriodDebit, trialBal.totalPeriodCredit,
+                      trialBal.totalTotalDebit, trialBal.totalTotalCredit,
+                      trialBal.totalClosingDebit, trialBal.totalClosingCredit].map((v, i) => (
+                      <td key={i} className="r num">{fmtRON(v)}</td>
                     ))}
                   </tr>
-                </tfoot>
+                </tbody>
               </table>
-            </div>
-          </SectionCard>
-        )}
+              <div className="eq-row">
+                {equalities.map((eq) => (
+                  <span key={eq.label} className={`eq${eq.ok ? "" : " bad"}`}>
+                    <InlineIc path={eq.ok ? EQ_CHECK : WARN_TRI} cls="sic" />
+                    {eq.label}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
 
-        {/* ── Cont de profit și pierdere ───────────────────────────────────── */}
-        {pnl && (
-          <SectionCard icon="reports" title="Cont de profit și pierdere (închidere 6/7 → 121)">
-            <div style={{ padding: "12px 16px 4px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <Badge variant={parseDec(pnl.netResult) >= 0 ? "success" : "error"}>
-                Rezultat net: {fmtRON(pnl.netResult)} lei
-              </Badge>
-              <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
-                Regim: {pnl.taxRegime === "micro" ? "microîntreprindere (1%)" : "impozit pe profit (16%)"}
-                {" · "}OMFP 1802/2014
+      {/* ── 3. ÎNCHIDERI ───────────────────────────────────────────────────── */}
+      <div className={`panel${tab === 2 ? " show" : ""}`}>
+        <div className="cols-2-even">
+          {/* Închidere TVA */}
+          <div className="scr-card close-card">
+            <div className="scr-toolbar">
+              <div className="tt">Închidere TVA — {periodLabel}</div>
+              <div className="spacer" />
+              {vatClose
+                ? vatClose.posted
+                  ? <ChipPaid label="Rulată" />
+                  : <span className="chip sent"><Ic name="dot" cls="sic" />Nimic de regularizat</span>
+                : <ChipWait label="Nerulată" />}
+            </div>
+            <div className="crow">
+              <div>
+                <div className="c1">TVA colectată</div>
+                <div className="c2"><span className="doc">4427</span>{vatClose?.posted ? " → închis" : " · sold perioadă"}</div>
+              </div>
+              <span className="amt num">{vatClose ? fmtRON(vatClose.collected) : "—"}</span>
+            </div>
+            <div className="crow">
+              <div>
+                <div className="c1">TVA deductibilă</div>
+                <div className="c2"><span className="doc">4426</span>{vatClose?.posted ? " → închis" : " · sold perioadă"}</div>
+              </div>
+              <span className="amt num">{vatClose ? fmtRON(vatClose.deductible) : "—"}</span>
+            </div>
+            <div className="crow">
+              <div>
+                <div className="c1">
+                  {vatClose && parseDec(vatClose.deRecuperat) > 0 ? "TVA de recuperat" : "TVA de plată"}
+                </div>
+                <div className="c2">
+                  <span className="doc">{vatClose && parseDec(vatClose.deRecuperat) > 0 ? "4424" : "4423"}</span>
+                  {" "}· scadență {vatDueLabel}
+                </div>
+              </div>
+              <span className="amt num">
+                <b>
+                  {vatClose
+                    ? parseDec(vatClose.deRecuperat) > 0 ? fmtRON(vatClose.deRecuperat) : fmtRON(vatClose.dePlata)
+                    : "—"}
+                </b>
               </span>
             </div>
-            <div style={{ overflowX: "auto", padding: "0 16px 16px" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <tbody>
-                  <tr style={{ fontWeight: 700, borderBottom: "1px solid var(--rf-border)" }}>
-                    <td style={{ padding: "6px 8px" }}>Venituri (clasa 7)</td>
-                    <td className="rf-mono" style={{ padding: "6px 8px", textAlign: "right" }}>{fmtRON(pnl.totalRevenue)}</td>
-                  </tr>
-                  {pnl.revenueLines.map((l) => (
-                    <tr key={l.code}>
-                      <td style={{ padding: "2px 8px 2px 24px", color: "var(--rf-text-muted)" }}>
-                        <span className="rf-mono">{l.code}</span> {l.name}
-                      </td>
-                      <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{fmtRON(l.amount)}</td>
-                    </tr>
-                  ))}
-                  <tr style={{ fontWeight: 700, borderBottom: "1px solid var(--rf-border)", borderTop: "1px solid var(--rf-border)" }}>
-                    <td style={{ padding: "6px 8px" }}>Cheltuieli (clasa 6, fără impozit pe venit/profit)</td>
-                    <td className="rf-mono" style={{ padding: "6px 8px", textAlign: "right" }}>{fmtRON(pnl.totalExpense)}</td>
-                  </tr>
-                  {pnl.expenseLines.map((l) => (
-                    <tr key={l.code}>
-                      <td style={{ padding: "2px 8px 2px 24px", color: "var(--rf-text-muted)" }}>
-                        <span className="rf-mono">{l.code}</span> {l.name}
-                      </td>
-                      <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{fmtRON(l.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr style={{ borderTop: "2px solid var(--rf-border)", fontWeight: 600 }}>
-                    <td style={{ padding: "4px 8px" }}>Rezultat brut (venituri − cheltuieli)</td>
-                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(pnl.grossResult)}</td>
-                  </tr>
-                  <tr>
-                    <td style={{ padding: "4px 8px" }}>
-                      Impozit pe {pnl.taxRegime === "micro" ? "venit" : "profit"}
-                      {pnl.incomeTaxEstimated ? " (estimat)" : " (înregistrat)"}
-                    </td>
-                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(pnl.incomeTax)}</td>
-                  </tr>
-                  <tr style={{ fontWeight: 700, borderTop: "1px solid var(--rf-border)" }}>
-                    <td style={{ padding: "4px 8px" }}>Rezultat net</td>
-                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(pnl.netResult)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-              {pnl.incomeTaxEstimated && (
-                <div style={{ fontSize: 11.5, color: "var(--rf-text-muted)", marginTop: 8 }}>
-                  Impozitul este estimat ({pnl.taxRegime === "micro" ? "1% × venituri" : "16% × rezultat brut pozitiv"});
-                  pentru profit, ajustările fiscale (cheltuieli nedeductibile, venituri neimpozabile) nu sunt incluse.
-                  Notele de închidere (D 7xx / C 121, D 121 / C 6xx) sunt pregătite ({pnl.closingEntries.length} rânduri).
+            <div className="crow" style={{ background: "#FCFCFD" }}>
+              <div className="c2" style={{ margin: 0 }}>
+                Dacă <span className="doc">4426</span> &gt; <span className="doc">4427</span>, diferența
+                merge în <span className="doc">4424</span> TVA de recuperat. <span className="doc">4428</span>
+                {" "}«TVA neexigibilă» nu este afectat.
+              </div>
+              <button
+                className="btn-dark"
+                style={{ marginLeft: "auto", height: 30, fontSize: 12.5, flex: "none" }}
+                disabled={closing}
+                onClick={() => void handleCloseVat()}
+              >
+                {closing ? "Închid…" : vatClose?.posted ? "Rulează din nou" : "Rulează acum"}
+              </button>
+            </div>
+          </div>
+
+          {/* Închidere rezultat */}
+          <div className="scr-card close-card">
+            <div className="scr-toolbar">
+              <div className="tt">Închidere rezultat — {periodLabel}</div>
+              <div className="spacer" />
+              {pnl
+                ? parseDec(pnl.netResult) >= 0 ? <ChipPaid label="Profit" /> : <ChipLate label="Pierdere" />
+                : <ChipWait label={loadingPnl ? "Se calculează…" : "Necalculat"} />}
+            </div>
+            <div className="crow">
+              <div>
+                <div className="c1">Venituri de închis</div>
+                <div className="c2"><span className="doc">70x–76x</span> = <span className="doc">121</span></div>
+              </div>
+              <span className="amt num">{pnl ? fmtRON(pnl.totalRevenue) : "—"}</span>
+            </div>
+            <div className="crow">
+              <div>
+                <div className="c1">Cheltuieli de închis</div>
+                <div className="c2"><span className="doc">121</span> = <span className="doc">60x–68x</span></div>
+              </div>
+              <span className="amt num">{pnl ? fmtRON(pnl.totalExpense) : "—"}</span>
+            </div>
+            <div className="crow">
+              <div>
+                <div className="c1">Rezultat net {pnl && parseDec(pnl.netResult) >= 0 ? "(profit)" : pnl ? "(pierdere)" : ""}</div>
+                <div className="c2"><span className="doc">121</span> {pnl && parseDec(pnl.netResult) >= 0 ? "sold creditor" : "sold debitor"}</div>
+              </div>
+              <span className={`amt num${pnl ? (parseDec(pnl.netResult) >= 0 ? " pos" : " neg") : ""}`}>
+                {pnl ? `${parseDec(pnl.netResult) >= 0 ? "+" : ""}${fmtRON(pnl.netResult)}` : "—"}
+              </span>
+            </div>
+            <div className="crow" style={{ background: "#FCFCFD" }}>
+              <div className="c2" style={{ margin: 0 }}>
+                Postează închiderea <span className="doc">6/7</span> → <span className="doc">121</span> pe
+                perioadă (idempotent)
+              </div>
+              <button
+                className="btn-dark"
+                style={{ marginLeft: "auto", height: 30, fontSize: 12.5, flex: "none" }}
+                disabled={closingPeriod}
+                onClick={() => void handleClosePeriod()}
+              >
+                {closingPeriod ? "Închid…" : "Închide perioada"}
+              </button>
+            </div>
+            <div className="crow" style={{ background: "#FCFCFD" }}>
+              <div className="c2" style={{ margin: 0 }}>
+                Închiderea anuală <span className="doc">121</span> → <span className="doc">117</span>
+                {" "}«Rezultatul reportat» se rulează după 31 dec
+              </div>
+              <button
+                className="pill-btn"
+                style={{ marginLeft: "auto", flex: "none" }}
+                onClick={() => void handleAnnualClose()}
+              >
+                Rulează închiderea anuală
+              </button>
+            </div>
+          </div>
+
+          {/* Impozit */}
+          <div className="scr-card close-card">
+            <div className="scr-toolbar">
+              <div className="tt">Impozit — {periodLabel}</div>
+              <div className="spacer" />
+              {pnl
+                ? pnl.incomeTaxEstimated ? <ChipWait label="Estimat" /> : <ChipPaid label="Înregistrat" />
+                : <ChipWait label={loadingPnl ? "Se calculează…" : "Necalculat"} />}
+            </div>
+            <div className="crow">
+              <div>
+                <div className="c1">Impozit micro 1% pe venit</div>
+                <div className="c2">
+                  <span className="doc">698</span> = <span className="doc">4418</span>
+                  {pnl && pnl.taxRegime === "micro"
+                    ? <> · baza: venituri {fmtRON(pnl.totalRevenue)}</>
+                    : " · nu se aplică (impozit pe profit)"}
                 </div>
+              </div>
+              <span className={`amt num${pnl && pnl.taxRegime !== "micro" ? " muted" : ""}`}>
+                {pnl ? (pnl.taxRegime === "micro" ? fmtRON(pnl.incomeTax) : "—") : "—"}
+              </span>
+            </div>
+            <div className="crow">
+              <div>
+                <div className="c1">Impozit pe profit 16%</div>
+                <div className="c2">
+                  <span className="doc">691</span> = <span className="doc">4411</span>
+                  {pnl && pnl.taxRegime !== "micro"
+                    ? <> · baza: rezultat brut {fmtRON(pnl.grossResult)}</>
+                    : " · nu se aplică (regim micro)"}
+                </div>
+              </div>
+              <span className={`amt num${pnl && pnl.taxRegime === "micro" ? " muted" : ""}`}>
+                {pnl ? (pnl.taxRegime !== "micro" ? fmtRON(pnl.incomeTax) : "—") : "—"}
+              </span>
+            </div>
+            <div className="crow" style={{ background: "#FCFCFD" }}>
+              <div className="c2" style={{ margin: 0 }}>
+                Se înregistrează D <span className="doc">698/691</span> = C{" "}
+                <span className="doc">4418/4411</span> · idempotent per perioadă, înainte de
+                «Închide perioada»
+              </div>
+              <button
+                className="btn-dark"
+                style={{ marginLeft: "auto", height: 30, fontSize: 12.5, flex: "none" }}
+                onClick={() => void handleIncomeTax()}
+              >
+                Postează impozitul
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 4. RECONCILIERE D300 ───────────────────────────────────────────── */}
+      <div className={`panel${tab === 3 ? " show" : ""}`}>
+        {reconcileReport && reconcileReport.discrepancies.length > 0 && (
+          <div className="banner danger">
+            <InlineIc path={WARN_TRI} />
+            <span>
+              <b>
+                {reconcileReport.discrepancies.length === 1
+                  ? "1 discrepanță GL ↔ D300."
+                  : `${reconcileReport.discrepancies.length} discrepanțe GL ↔ D300.`}
+              </b>{" "}
+              {reconcileReport.discrepancies.map((d, i) => (
+                <span key={i}>{i > 0 && " · "}{d}</span>
+              ))}
+            </span>
+          </div>
+        )}
+        {reconcileReport && reconcileReport.discrepancies.length === 0 && reconcileReport.balanced && (
+          <div className="banner ok">
+            <InlineIc path={CIRCLE_CHECK} />
+            <span><b>Nicio discrepanță.</b> GL balansat și aliniat cu decontul D300 pentru {periodLabel.toLowerCase()}.</span>
+          </div>
+        )}
+        <div className="scr-card">
+          <div className="scr-toolbar">
+            <div className="tt">Reconciliere GL ↔ D300 — {periodLabel}</div>
+            <div className="spacer" />
+            <button
+              className={`pill-btn spin-btn${reconciling ? " spinning" : ""}`}
+              disabled={reconciling}
+              onClick={() => void runReconcile(true)}
+            >
+              <Ic name="sync" />{reconciling ? "Verific…" : "Rerulează verificarea"}
+            </button>
+          </div>
+          {reconciling && !reconcileReport ? (
+            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se verifică…</div>
+          ) : !reconcileReport ? (
+            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+              Apăsați «Rerulează verificarea» pentru a compara balanța GL cu decontul D300.
+            </div>
+          ) : (
+            <>
+              <table className="scr-table">
+                <thead>
+                  <tr>
+                    <th>Indicator</th><th>Rând D300</th>
+                    <th className="r">Balanța (GL)</th><th className="r">Decont (D300)</th>
+                    <th className="r">Diferența</th><th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recRows.map((r) => {
+                    const diff = r.gl - r.d300;
+                    return (
+                      <tr key={r.label}>
+                        <td>{r.label}</td>
+                        <td><span className="doc">{r.d300Row}</span></td>
+                        <td className="r num">{fmtRON(r.gl)}</td>
+                        <td className="r num">{fmtRON(r.d300)}</td>
+                        <td className={`r num${isZero(diff) ? "" : " neg"}`}>{fmtRON(Math.abs(diff))}</td>
+                        <td>{isZero(diff) ? <ChipPaid label="OK" /> : <ChipLate label="Discrepanță" />}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div className="eq-row">
+                <span className={`eq${reconcileReport.balanced ? "" : " bad"}`}>
+                  <InlineIc path={reconcileReport.balanced ? EQ_CHECK : WARN_TRI} cls="sic" />
+                  Rulaj total GL — D {fmtRON(reconcileReport.totalDebit)} {reconcileReport.balanced ? "=" : "≠"} C {fmtRON(reconcileReport.totalCredit)}
+                </span>
+                <span className={`eq${reconcileReport.discrepancies.length === 0 ? "" : " bad"}`}>
+                  <InlineIc path={reconcileReport.discrepancies.length === 0 ? EQ_CHECK : WARN_TRI} cls="sic" />
+                  {reconcileReport.discrepancies.length === 0
+                    ? "Fără discrepanțe GL ↔ D300"
+                    : `${reconcileReport.discrepancies.length} ${reconcileReport.discrepancies.length === 1 ? "discrepanță" : "discrepanțe"}`}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── 5. BILANȚ XML ──────────────────────────────────────────────────── */}
+      <div className={`panel${tab === 4 ? " show" : ""}`}>
+        <div className="cols-2">
+          <div className="scr-card">
+            <div className="scr-toolbar">
+              <div className="tt">Încadrare entitate — exercițiul {selectedYear}</div>
+              <div className="spacer" />
+              {bilant
+                ? bilant.balanced ? <ChipPaid label="Echilibrat" /> : <ChipLate label="Neechilibrat" />
+                : <ChipWait label={loadingBilant ? "Se calculează…" : "Necalculat"} />}
+            </div>
+            <div className="card-pad">
+              {loadingBilant ? (
+                <div style={{ fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+              ) : !bilant ? (
+                <div style={{ fontSize: 13, color: "var(--text-2)" }}>
+                  Nicio mișcare contabilă în perioadă — generați notele contabile mai întâi.
+                </div>
+              ) : (
+                <>
+                  <div className="crit">
+                    <InlineIc path={CIRCLE_CHECK} cls="sic" />
+                    <div>Total active <span className="muted">· criteriu de mărime OMFP</span></div>
+                    <span className="cv num">{fmtRON(bilant.totalAssets)} lei</span>
+                  </div>
+                  <div className="crit">
+                    <InlineIc path={CIRCLE_CHECK} cls="sic" />
+                    <div>Capitaluri proprii <span className="muted">· incl. rezultat</span></div>
+                    <span className="cv num">{fmtRON(bilant.equity)} lei</span>
+                  </div>
+                  <div className="crit">
+                    <InlineIc path={CIRCLE_CHECK} cls="sic" />
+                    <div>Rezultatul exercițiului <span className="muted">· sold 121</span></div>
+                    <span className={`cv num ${parseDec(bilant.currentResult) >= 0 ? "pos" : "neg"}`}>
+                      {parseDec(bilant.currentResult) >= 0 ? "+" : ""}{fmtRON(bilant.currentResult)} lei
+                    </span>
+                  </div>
+                  <div className={`banner ${bilant.balanced ? "ok" : "warn"}`} style={{ margin: "14px 0 0" }}>
+                    <InlineIc path={bilant.balanced ? CIRCLE_CHECK : WARN_TRI} />
+                    <span>
+                      {bilant.entitySizeNote && <><b>{bilant.entitySizeNote}</b>{" "}</>}
+                      {bilant.balanced
+                        ? <>Bilanțul se verifică: Active = Capitaluri + Datorii ({fmtRON(bilant.totalAssets)} lei).</>
+                        : <><b>Bilanțul NU se verifică</b> (Active ≠ Capitaluri + Datorii) — verificați balanța.</>}
+                    </span>
+                  </div>
+                </>
               )}
             </div>
-          </SectionCard>
-        )}
+          </div>
 
-        {/* ── Bilanț contabil ──────────────────────────────────────────────── */}
-        {bilant && (
-          <SectionCard icon="reports" title="Bilanț contabil (sinteză)">
-            <div style={{ padding: "12px 16px 4px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <Badge variant={bilant.balanced ? "success" : "error"}>
-                {bilant.balanced ? "Verificat — Active = Capitaluri + Datorii" : "NEverificat"}
-              </Badge>
-              <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>{bilant.entitySizeNote}</span>
+          <div className="scr-card">
+            <div className="scr-toolbar"><div className="tt">Export bilanț XML</div></div>
+            <div className="card-pad">
+              <dl className="kv" style={{ gridTemplateColumns: "150px 1fr", fontSize: 12.5, marginBottom: 14 }}>
+                <dt>S1005</dt><dd>Microentități — bilanț prescurtat</dd>
+                <dt>S1003</dt><dd>Entități mici — bilanț prescurtat extins</dd>
+                <dt>S1002</dt><dd>Entități mijlocii și mari — bilanț complet</dd>
+              </dl>
+              <button
+                className="btn-dark"
+                style={{ width: "100%", justifyContent: "center" }}
+                onClick={() => setShowBilantExport(true)}
+              >
+                <Ic name="code" />Generează bilanț XML — {selectedYear}
+              </button>
+              <p className="muted" style={{ fontSize: 11.5, marginTop: 10, lineHeight: 1.5 }}>
+                XML-ul (F10 + F20) se importă în PDF-ul inteligent ANAF și se validează cu soft-ul
+                DUKIntegrator înainte de depunere. Termenul de depunere: 150 de zile de la închiderea
+                exercițiului.
+              </p>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, padding: "8px 16px 16px" }}>
-              <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
+          </div>
+        </div>
+
+        {/* Bilanț contabil (sinteză) — real feature kept (the prototype lacks it) */}
+        {bilant && (
+          <div className="scr-card" style={{ marginTop: 14 }}>
+            <div className="scr-toolbar">
+              <div className="tt">Bilanț contabil (sinteză) — {fmtD(bilant.periodTo)}</div>
+              <div className="spacer" />
+              {bilant.balanced
+                ? <ChipPaid label="Active = Capitaluri + Datorii" />
+                : <ChipLate label="Nu se verifică" />}
+            </div>
+            <div className="cols-2-even" style={{ gap: 0 }}>
+              <table className="scr-table">
+                <thead>
+                  <tr><th>Active</th><th className="r">Sold</th></tr>
+                </thead>
                 <tbody>
-                  <tr style={{ fontWeight: 700, borderBottom: "1px solid var(--rf-border)" }}>
-                    <td style={{ padding: "4px 8px" }}>ACTIVE</td><td />
-                  </tr>
-                  {[
+                  {([
                     ["Active imobilizate (net)", bilant.immobilizedAssets],
                     ["Stocuri", bilant.inventory],
                     ["Creanțe", bilant.receivables],
                     ["Investiții pe termen scurt", bilant.shortInvestments],
                     ["Casa și conturi la bănci", bilant.cashBank],
                     ["Cheltuieli în avans", bilant.prepaidExpenses],
-                  ].map(([label, v]) => (
+                  ] as Array<[string, string]>).map(([label, v]) => (
                     <tr key={label}>
-                      <td style={{ padding: "2px 8px", color: "var(--rf-text-muted)" }}>{label}</td>
-                      <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{fmtRON(v)}</td>
+                      <td>{label}</td>
+                      <td className="r num">{cellAmt(v)}</td>
                     </tr>
                   ))}
-                  <tr style={{ fontWeight: 700, borderTop: "2px solid var(--rf-border)" }}>
-                    <td style={{ padding: "4px 8px" }}>TOTAL ACTIVE</td>
-                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(bilant.totalAssets)}</td>
+                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                    <td>TOTAL ACTIVE</td>
+                    <td className="r num">{fmtRON(bilant.totalAssets)}</td>
                   </tr>
                 </tbody>
               </table>
-              <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
+              <table className="scr-table">
+                <thead>
+                  <tr><th>Capitaluri și datorii</th><th className="r">Sold</th></tr>
+                </thead>
                 <tbody>
-                  <tr style={{ fontWeight: 700, borderBottom: "1px solid var(--rf-border)" }}>
-                    <td style={{ padding: "4px 8px" }}>CAPITALURI ȘI DATORII</td><td />
-                  </tr>
-                  {[
+                  {([
                     ["Capitaluri proprii (incl. rezultat)", bilant.equity],
                     ["— din care rezultatul exercițiului", bilant.currentResult],
                     ["Provizioane", bilant.provisions],
                     ["Datorii pe termen lung", bilant.longTermDebt],
                     ["Datorii curente", bilant.currentLiabilities],
                     ["Venituri în avans", bilant.deferredRevenue],
-                  ].map(([label, v]) => (
+                  ] as Array<[string, string]>).map(([label, v]) => (
                     <tr key={label}>
-                      <td style={{ padding: "2px 8px", color: "var(--rf-text-muted)" }}>{label}</td>
-                      <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{fmtRON(v)}</td>
+                      <td>{label}</td>
+                      <td className="r num">{cellAmt(v)}</td>
                     </tr>
                   ))}
-                  <tr style={{ fontWeight: 700, borderTop: "2px solid var(--rf-border)" }}>
-                    <td style={{ padding: "4px 8px" }}>TOTAL CAPITALURI + DATORII</td>
-                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(bilant.totalEquityLiabilities)}</td>
+                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                    <td>TOTAL CAPITALURI + DATORII</td>
+                    <td className="r num">{fmtRON(bilant.totalEquityLiabilities)}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
-          </SectionCard>
+          </div>
         )}
+      </div>
 
-        {/* ── Registru-jurnal ──────────────────────────────────────────────── */}
-        {journalReg && (
-          <SectionCard icon="ledger" title="Registru-jurnal (cod 14-1-1)">
-            <div style={{ padding: "12px 16px 4px", display: "flex", alignItems: "center", gap: 12 }}>
-              <Badge variant={journalReg.balanced ? "success" : "error"}>
-                {journalReg.balanced ? "Echilibrat" : "DEZECHILIBRAT"}
-              </Badge>
-              <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>{journalReg.rows.length} înregistrări</span>
+      {/* ── 6. CARTEA MARE (real feature, restyled with design cards) ──────── */}
+      <div className={`panel${tab === 5 ? " show" : ""}`}>
+        {loadingCm ? (
+          <div className="scr-card">
+            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          </div>
+        ) : !ledger || ledger.length === 0 ? (
+          <div className="scr-card">
+            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+              Nicio mișcare contabilă în perioadă — cartea mare (cod 14-1-3) se completează după
+              generarea notelor.
             </div>
-            <div style={{ overflowX: "auto", padding: "0 16px 16px" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          </div>
+        ) : (
+          ledger.map((a) => (
+            <div key={a.accountCode} className="scr-card" style={{ marginBottom: 14 }}>
+              <div className="scr-toolbar">
+                <div className="tt"><span className="doc">{a.accountCode}</span> {a.accountName}</div>
+                <div className="spacer" />
+                <span className="muted" style={{ fontSize: 12 }}>
+                  sold inițial{" "}
+                  {parseDec(a.openingDebit) > 0
+                    ? `${fmtRON(a.openingDebit)} D`
+                    : parseDec(a.openingCredit) > 0
+                      ? `${fmtRON(a.openingCredit)} C`
+                      : "0"}
+                </span>
+              </div>
+              <table className="scr-table">
                 <thead>
-                  <tr style={{ borderBottom: "2px solid var(--rf-border)", textAlign: "left" }}>
-                    <th style={{ padding: "4px 8px" }}>Nr.</th>
-                    <th style={{ padding: "4px 8px" }}>Data</th>
-                    <th style={{ padding: "4px 8px" }}>Document</th>
-                    <th style={{ padding: "4px 8px" }}>Explicații</th>
-                    <th style={{ padding: "4px 8px" }}>Cont D</th>
-                    <th style={{ padding: "4px 8px" }}>Cont C</th>
-                    <th style={{ padding: "4px 8px", textAlign: "right" }}>Sume D</th>
-                    <th style={{ padding: "4px 8px", textAlign: "right" }}>Sume C</th>
+                  <tr>
+                    <th>Data</th><th>Document</th><th>Explicații</th><th>Cont coresp.</th>
+                    <th className="r">Debit</th><th className="r">Credit</th><th className="r">Sold</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {journalReg.rows.map((r) => (
-                    <tr key={r.nrCrt} style={{ borderBottom: "1px solid var(--rf-border)" }}>
-                      <td style={{ padding: "2px 8px" }}>{r.nrCrt}</td>
-                      <td style={{ padding: "2px 8px" }}>{r.date}</td>
-                      <td style={{ padding: "2px 8px" }}>{r.document}</td>
-                      <td style={{ padding: "2px 8px" }}>{r.explanation}</td>
-                      <td className="rf-mono" style={{ padding: "2px 8px" }}>{r.debitAccount || "—"}</td>
-                      <td className="rf-mono" style={{ padding: "2px 8px" }}>{r.creditAccount || "—"}</td>
-                      <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{parseDec(r.debit) === 0 ? "—" : fmtRON(r.debit)}</td>
-                      <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{parseDec(r.credit) === 0 ? "—" : fmtRON(r.credit)}</td>
+                  {a.entries.map((e, i) => (
+                    <tr key={i}>
+                      <td className="num">{fmtD(e.date)}</td>
+                      <td><span className="doc">{e.document || "—"}</span></td>
+                      <td>{e.explanation}</td>
+                      <td>{e.contra ? <span className="doc">{e.contra}</span> : <span className="muted">—</span>}</td>
+                      <td className="r num">{cellAmt(e.debit)}</td>
+                      <td className="r num">{cellAmt(e.credit)}</td>
+                      <td className="r num">{fmtRON(e.balance)} {e.balanceSide}</td>
                     </tr>
                   ))}
-                </tbody>
-                <tfoot>
-                  <tr style={{ borderTop: "2px solid var(--rf-border)", fontWeight: 700 }}>
-                    <td colSpan={6} style={{ padding: "4px 8px" }}>TOTAL</td>
-                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(journalReg.totalDebit)}</td>
-                    <td className="rf-mono" style={{ padding: "4px 8px", textAlign: "right" }}>{fmtRON(journalReg.totalCredit)}</td>
+                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                    <td colSpan={4}>Rulaj / sold final</td>
+                    <td className="r num">{fmtRON(a.totalDebit)}</td>
+                    <td className="r num">{fmtRON(a.totalCredit)}</td>
+                    <td className="r num">
+                      {parseDec(a.closingDebit) > 0
+                        ? `${fmtRON(a.closingDebit)} D`
+                        : parseDec(a.closingCredit) > 0
+                          ? `${fmtRON(a.closingCredit)} C`
+                          : "0"}
+                    </td>
                   </tr>
-                </tfoot>
+                </tbody>
               </table>
             </div>
-          </SectionCard>
+          ))
         )}
+      </div>
 
-        {/* ── Cartea mare ──────────────────────────────────────────────────── */}
-        {ledger && (
-          <SectionCard icon="ledger" title="Cartea mare (cod 14-1-3)">
-            <div style={{ padding: "8px 16px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
-              {ledger.length === 0 && (
-                <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>Nicio mișcare contabilă în perioadă.</span>
-              )}
-              {ledger.map((a) => (
-                <div key={a.accountCode} style={{ border: "1px solid var(--rf-border)", borderRadius: 6 }}>
-                  <div style={{ padding: "6px 10px", background: "var(--rf-surface-2, transparent)", display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 13 }}>
-                    <span><span className="rf-mono">{a.accountCode}</span> · {a.accountName}</span>
-                    <span style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
-                      sold inițial {parseDec(a.openingDebit) > 0 ? `${fmtRON(a.openingDebit)} D` : parseDec(a.openingCredit) > 0 ? `${fmtRON(a.openingCredit)} C` : "0"}
-                    </span>
-                  </div>
-                  <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                      <thead>
-                        <tr style={{ borderBottom: "1px solid var(--rf-border)", textAlign: "left", color: "var(--rf-text-muted)" }}>
-                          <th style={{ padding: "2px 8px" }}>Data</th>
-                          <th style={{ padding: "2px 8px" }}>Document</th>
-                          <th style={{ padding: "2px 8px" }}>Cont coresp.</th>
-                          <th style={{ padding: "2px 8px", textAlign: "right" }}>Debit</th>
-                          <th style={{ padding: "2px 8px", textAlign: "right" }}>Credit</th>
-                          <th style={{ padding: "2px 8px", textAlign: "right" }}>Sold</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {a.entries.map((e, i) => (
-                          <tr key={i} style={{ borderBottom: "1px solid var(--rf-border-subtle, var(--rf-border))" }}>
-                            <td style={{ padding: "2px 8px" }}>{e.date}</td>
-                            <td style={{ padding: "2px 8px" }}>{e.document}</td>
-                            <td className="rf-mono" style={{ padding: "2px 8px" }}>{e.contra || "—"}</td>
-                            <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{parseDec(e.debit) === 0 ? "—" : fmtRON(e.debit)}</td>
-                            <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{parseDec(e.credit) === 0 ? "—" : fmtRON(e.credit)}</td>
-                            <td className="rf-mono" style={{ padding: "2px 8px", textAlign: "right" }}>{fmtRON(e.balance)} {e.balanceSide}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      <tfoot>
-                        <tr style={{ borderTop: "1px solid var(--rf-border)", fontWeight: 600 }}>
-                          <td colSpan={3} style={{ padding: "3px 8px" }}>Rulaj / sold final</td>
-                          <td className="rf-mono" style={{ padding: "3px 8px", textAlign: "right" }}>{fmtRON(a.totalDebit)}</td>
-                          <td className="rf-mono" style={{ padding: "3px 8px", textAlign: "right" }}>{fmtRON(a.totalCredit)}</td>
-                          <td className="rf-mono" style={{ padding: "3px 8px", textAlign: "right" }}>
-                            {parseDec(a.closingDebit) > 0 ? `${fmtRON(a.closingDebit)} D` : parseDec(a.closingCredit) > 0 ? `${fmtRON(a.closingCredit)} C` : "0"}
-                          </td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-        )}
-
-        {/* ── Reconciliere GL ↔ D300 ───────────────────────────────────────── */}
-        {reconcileReport && (
-          <SectionCard icon="reports" title="Raport reconciliere GL ↔ D300">
-            <div style={{ padding: "12px 16px 0" }}>
-              {/* Balanced badge */}
-              <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-                <Badge variant={reconcileReport.balanced ? "success" : "error"}>
-                  {reconcileReport.balanced ? "Balansat ✓" : "Dezechilibrat ✗"}
-                </Badge>
-                {reconcileReport.discrepancies.length === 0 ? (
-                  <Badge variant="success">Nicio discrepanță</Badge>
-                ) : (
-                  <Badge variant="warning">
-                    {reconcileReport.discrepancies.length}{" "}
-                    {reconcileReport.discrepancies.length === 1 ? "discrepanță" : "discrepanțe"}
-                  </Badge>
-                )}
-              </div>
-
-              {/* Debit / Credit totals */}
-              <div className="rf-grid-2" style={{ gap: 16, marginBottom: 16 }}>
-                <div style={{ background: "var(--rf-surface-2)", borderRadius: "var(--rf-radius)", padding: "12px 16px" }}>
-                  <div style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Σ Debit total</div>
-                  <div className="rf-mono" style={{ fontSize: 18, fontWeight: 700 }}>{fmtRON(parseDec(reconcileReport.totalDebit))} RON</div>
-                </div>
-                <div style={{ background: "var(--rf-surface-2)", borderRadius: "var(--rf-radius)", padding: "12px 16px" }}>
-                  <div style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Σ Credit total</div>
-                  <div className="rf-mono" style={{ fontSize: 18, fontWeight: 700 }}>{fmtRON(parseDec(reconcileReport.totalCredit))} RON</div>
-                </div>
-              </div>
-
-              {/* TVA 4427 / 4426 GL vs D300 */}
-              <div className="rf-grid-2" style={{ gap: 16, marginBottom: 16 }}>
-                <div style={{ background: "var(--rf-surface-2)", borderRadius: "var(--rf-radius)", padding: "12px 16px" }}>
-                  <div style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>TVA colectată (4427)</div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
-                    <span style={{ color: "var(--rf-text-muted)" }}>GL (credit 4427):</span>
-                    <span className="rf-mono" style={{ fontWeight: 600 }}>{fmtRON(parseDec(reconcileReport.vatCollectedGl))} RON</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 4 }}>
-                    <span style={{ color: "var(--rf-text-muted)" }}>D300:</span>
-                    <span className="rf-mono" style={{ fontWeight: 600 }}>{fmtRON(parseDec(reconcileReport.vatCollectedD300))} RON</span>
-                  </div>
-                </div>
-                <div style={{ background: "var(--rf-surface-2)", borderRadius: "var(--rf-radius)", padding: "12px 16px" }}>
-                  <div style={{ fontSize: 11.5, color: "var(--rf-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>TVA deductibilă (4426)</div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
-                    <span style={{ color: "var(--rf-text-muted)" }}>GL (debit 4426):</span>
-                    <span className="rf-mono" style={{ fontWeight: 600 }}>{fmtRON(parseDec(reconcileReport.vatDeductibleGl))} RON</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginTop: 4 }}>
-                    <span style={{ color: "var(--rf-text-muted)" }}>D300:</span>
-                    <span className="rf-mono" style={{ fontWeight: 600 }}>{fmtRON(parseDec(reconcileReport.vatDeductibleD300))} RON</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Discrepancies */}
-            {reconcileReport.discrepancies.length > 0 && (
-              <div style={{ padding: "0 16px 16px" }}>
-                <Banner variant="error">
-                  <div style={{ fontWeight: 600, marginBottom: 8 }}>
-                    Discrepanțe ({reconcileReport.discrepancies.length}):
-                  </div>
-                  <ul style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 4 }}>
-                    {reconcileReport.discrepancies.map((d, i) => (
-                      <li key={i} style={{ fontSize: 12.5 }}>{d}</li>
-                    ))}
-                  </ul>
-                </Banner>
-              </div>
+      {/* ── 7. PROFIT ȘI PIERDERE (real feature, restyled) ─────────────────── */}
+      <div className={`panel${tab === 6 ? " show" : ""}`}>
+        <div className="scr-card">
+          <div className="scr-toolbar">
+            <div className="tt">Cont de profit și pierdere — {periodLabel}</div>
+            <div className="spacer" />
+            <span className="muted" style={{ fontSize: 12 }}>
+              {pnl
+                ? pnl.taxRegime === "micro" ? "regim: microîntreprindere (1%)" : "regim: impozit pe profit (16%)"
+                : ""}{pnl ? " · OMFP 1802/2014" : ""}
+            </span>
+            {pnl && (
+              parseDec(pnl.netResult) >= 0
+                ? <ChipPaid label={`Rezultat net +${fmtRON(pnl.netResult)}`} />
+                : <ChipLate label={`Rezultat net ${fmtRON(pnl.netResult)}`} />
             )}
-          </SectionCard>
-        )}
-
-        {/* Empty state */}
-        {!postResult && !reconcileReport && (
-          <SectionCard icon="ledger" title="Jurnal contabil">
-            <div style={{ padding: "24px 16px", textAlign: "center", color: "var(--rf-text-muted)", fontSize: 13 }}>
-              Selectați perioada și apăsați «Generează note contabile» pentru a genera GL-ul,
-              apoi «Reconciliază cu D300» pentru a verifica corectitudinea.
+          </div>
+          {loadingPnl ? (
+            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          ) : !pnl ? (
+            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+              Nicio mișcare pe conturile de venituri/cheltuieli în perioadă.
             </div>
-          </SectionCard>
-        )}
+          ) : (
+            <>
+              <table className="scr-table">
+                <tbody>
+                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                    <td>Venituri (clasa 7)</td>
+                    <td className="r num">{fmtRON(pnl.totalRevenue)}</td>
+                  </tr>
+                  {pnl.revenueLines.map((l) => (
+                    <tr key={l.code}>
+                      <td style={{ paddingLeft: 32 }}><span className="doc">{l.code}</span> {l.name}</td>
+                      <td className="r num">{fmtRON(l.amount)}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                    <td>Cheltuieli (clasa 6, fără impozit pe venit/profit)</td>
+                    <td className="r num">{fmtRON(pnl.totalExpense)}</td>
+                  </tr>
+                  {pnl.expenseLines.map((l) => (
+                    <tr key={l.code}>
+                      <td style={{ paddingLeft: 32 }}><span className="doc">{l.code}</span> {l.name}</td>
+                      <td className="r num">{fmtRON(l.amount)}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ fontWeight: 600 }}>
+                    <td>Rezultat brut (venituri − cheltuieli)</td>
+                    <td className="r num">{fmtRON(pnl.grossResult)}</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      Impozit pe {pnl.taxRegime === "micro" ? "venit" : "profit"}
+                      {pnl.incomeTaxEstimated ? " (estimat)" : " (înregistrat)"}
+                    </td>
+                    <td className="r num">{fmtRON(pnl.incomeTax)}</td>
+                  </tr>
+                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                    <td>Rezultat net</td>
+                    <td className={`r num ${parseDec(pnl.netResult) >= 0 ? "pos" : "neg"}`}>
+                      {fmtRON(pnl.netResult)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              {pnl.incomeTaxEstimated && (
+                <div className="pager">
+                  <span>
+                    Impozitul este estimat ({pnl.taxRegime === "micro" ? "1% × venituri" : "16% × rezultat brut pozitiv"});
+                    pentru profit, ajustările fiscale (cheltuieli nedeductibile, venituri neimpozabile) nu sunt
+                    incluse. Notele de închidere (D 7xx / C 121, D 121 / C 6xx) sunt pregătite
+                    ({pnl.closingEntries.length} rânduri).
+                  </span>
+                  <span></span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {showBilantExport && (
         <BilantExportModal
+          year={selectedYear}
           onClose={() => setShowBilantExport(false)}
           onExport={runBilantExport}
         />
@@ -952,12 +1302,15 @@ export function GlLedgerPage() {
   );
 }
 
+// ─── BilantExportModal — design .modal-back/.modal with .fgrid fields ─────────
 /** Bilanț XML export dialog — CAEN + nr. mediu salariați + alegerea formei (auto / UU / BS / BL),
  *  înlocuiește window.prompt (care nu funcționează în WebView-ul Tauri). */
 function BilantExportModal({
+  year,
   onClose,
   onExport,
 }: {
+  year: number;
   onClose: () => void;
   onExport: (
     caen: string, avgEmployees: number | null, formOverride: string | null, priorYearForm: string | null,
@@ -984,49 +1337,87 @@ function BilantExportModal({
     }
   };
 
-  return (
-    <Modal open onOpenChange={(o) => { if (!o) onClose(); }} title="Export bilanț XML (ANAF)" width={460}
-      footer={
-        <>
-          <Btn variant="secondary" onClick={onClose} disabled={busy}>Anulează</Btn>
-          <Btn variant="primary" icon="declaration" disabled={busy} onClick={() => void submit()}>
-            {busy ? "Se exportă…" : "Exportă"}
-          </Btn>
-        </>
-      }
+  return createPortal(
+    <div
+      className="modal-back show"
+      style={{ position: "fixed" }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <Banner variant="info">
-          Forma (microîntreprindere S1005 / mică S1003 / mare S1002) se alege după criteriile OMFP
-          (2 din 3: active, cifra de afaceri, nr. salariați). Conform OMFP 1802/2014 pct. 13(2),
-          categoria se schimbă doar dacă criteriile sunt depășite în <b>două exerciții consecutive</b>
-          — o singură depășire păstrează forma anului precedent. Forțați forma la al 2-lea an.
-        </Banner>
-        <Field label="Cod CAEN (4 cifre)" required>
-          <Input className="mono" placeholder="6201" value={caen} onChange={(e) => setCaen(e.target.value)} autoFocus />
-        </Field>
-        <Field label="Nr. mediu de salariați (criteriu de mărime)">
-          <Input inputMode="numeric" placeholder="ex. 8" value={emp} onChange={(e) => setEmp(e.target.value)} />
-        </Field>
-        <div className="rf-grid-2">
-          <Field label="Forma anului precedent">
-            <select className="rf-input" value={priorForm} onChange={(e) => setPriorForm(e.target.value)}>
-              <option value="">Necunoscută</option>
-              <option value="UU">Microîntreprindere (S1005)</option>
-              <option value="BS">Entitate mică (S1003)</option>
-              <option value="BL">Entitate mare/mijlocie (S1002)</option>
-            </select>
-          </Field>
-          <Field label="Forma (acest an)">
-            <select className="rf-input" value={form} onChange={(e) => setForm(e.target.value)}>
-              <option value="auto">Automat (2 din 3 + regula 2 ani)</option>
-              <option value="UU">Microîntreprindere (S1005)</option>
-              <option value="BS">Entitate mică (S1003)</option>
-              <option value="BL">Entitate mare/mijlocie (S1002)</option>
-            </select>
-          </Field>
+      <div className="modal">
+        <div className="modal-head">
+          <div>
+            <div className="mt">Generează bilanț XML — exercițiul {year}</div>
+            <div className="ms">Confirmați datele de identificare pentru XML</div>
+          </div>
+          <button className="modal-x" onClick={onClose} aria-label="Închide">
+            <Ic name="xMark" />
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="banner" style={{ marginBottom: 14 }}>
+            <InlineIc path={CIRCLE_CHECK} />
+            <span>
+              Forma (microîntreprindere <b>S1005</b> / mică <b>S1003</b> / mare <b>S1002</b>) se alege
+              după criteriile OMFP (2 din 3: active, cifra de afaceri, nr. salariați). Conform OMFP
+              1802/2014 pct. 13(2), categoria se schimbă doar dacă criteriile sunt depășite în{" "}
+              <b>două exerciții consecutive</b> — o singură depășire păstrează forma anului precedent.
+            </span>
+          </div>
+          <div className="fgrid">
+            <div className="field">
+              <label>Cod CAEN principal <span className="req">*</span></label>
+              <input
+                className="input num"
+                type="text"
+                placeholder="6201"
+                value={caen}
+                onChange={(e) => setCaen(e.target.value)}
+                autoFocus
+              />
+              <span className="hint">4 cifre — activitatea principală</span>
+            </div>
+            <div className="field">
+              <label>Număr mediu de salariați</label>
+              <input
+                className="input num"
+                type="text"
+                inputMode="numeric"
+                placeholder="ex. 8"
+                value={emp}
+                onChange={(e) => setEmp(e.target.value)}
+              />
+              <span className="hint">criteriu de mărime OMFP</span>
+            </div>
+            <div className="field span2">
+              <label>Formular (suprascriere automată)</label>
+              <select className="select" value={form} onChange={(e) => setForm(e.target.value)}>
+                <option value="auto">Auto — încadrare după criterii (2 din 3 + regula 2 ani)</option>
+                <option value="UU">S1005 — Microentitate</option>
+                <option value="BS">S1003 — Entitate mică</option>
+                <option value="BL">S1002 — Entitate mijlocie / mare</option>
+              </select>
+            </div>
+            <div className="field span2">
+              <label>Forma depusă pentru anul precedent ({year - 1})</label>
+              <select className="select" value={priorForm} onChange={(e) => setPriorForm(e.target.value)}>
+                <option value="">Necunoscută</option>
+                <option value="UU">S1005 — Microentitate</option>
+                <option value="BS">S1003 — Entitate mică</option>
+                <option value="BL">S1002 — Entitate mijlocie / mare</option>
+              </select>
+              <span className="hint">schimbarea categoriei se face doar după 2 ani consecutivi de depășire / încadrare</span>
+            </div>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <span className="left">Se generează XML F10 + F20 (import în PDF inteligent ANAF)</span>
+          <button className="pill-btn" onClick={onClose} disabled={busy}>Renunță</button>
+          <button className="btn-dark" disabled={busy} onClick={() => void submit()}>
+            <Ic name="dl" />{busy ? "Se exportă…" : "Generează XML"}
+          </button>
         </div>
       </div>
-    </Modal>
+    </div>,
+    document.body,
   );
 }

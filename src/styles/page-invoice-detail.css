@@ -1,0 +1,24 @@
+/* imported-by: globals.css (wired centrally) */
+/* Factură detaliu — verbatim rules from the prototype's inline <style>
+   ("Factura detaliu.html") that the shared clarito sheets lack:
+   breadcrumb, head title row, SPV event log, payment rows, sold line. */
+.crumb{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--dim);margin-bottom:6px}
+.crumb a{color:var(--text-2);text-decoration:none}
+.crumb a:hover{color:var(--text)}
+.crumb .sep{font-size:11px}
+.head-title{display:flex;align-items:center;gap:10px}
+.spv-log{padding:4px 6px 8px}
+.spv-ev{display:flex;gap:11px;padding:9px 10px;border-radius:9px}
+.spv-ev:hover{background:var(--fill)}
+.spv-ev .act-ic{width:28px;height:28px}
+.spv-ev .e1{font-size:12.5px}
+.spv-ev .e1 b{font-weight:600}
+.spv-ev .e2{font-size:11.5px;color:var(--dim);margin-top:2px}
+.spv-ev .e2 .doc{font-size:11px}
+.pay-row{display:flex;align-items:center;gap:11px;padding:11px 14px;border-bottom:1px solid var(--line)}
+.pay-row:last-child{border-bottom:0}
+.pay-row .p1{font-size:12.5px;font-weight:500}
+.pay-row .p2{font-size:11.5px;color:var(--dim);margin-top:1px}
+.pay-row .amt{margin-left:auto;font-size:13px;font-weight:600}
+.sold-line{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:#FCFCFD;border-top:1px solid var(--line);font-size:12.5px;color:var(--text-2)}
+.sold-line b{font-size:15px;font-weight:600;color:var(--text);letter-spacing:-.01em}

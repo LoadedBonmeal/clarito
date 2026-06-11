@@ -1,0 +1,19 @@
+/* imported-by: globals.css (wired centrally) */
+/* Factură nouă — verbatim rules from the prototype "Factura noua.html" inline
+   <style> (only the ones missing from clarito-shell.css / clarito-pages.css).
+   .lines-head/.line rules from the prototype are intentionally omitted: the
+   line items are rendered by the kept LineItemsEditor component. */
+.inv-grid{display:grid;grid-template-columns:1fr 320px;gap:14px;align-items:start}
+.tot-row{display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;font-size:12.5px;color:var(--text-2)}
+.tot-row .tv{color:var(--text);font-weight:500}
+.tot-row.grand{border-top:1px solid var(--line);margin-top:6px;padding-top:12px;font-size:13px}
+.tot-row.grand .tv{font-size:19px;font-weight:600;letter-spacing:-.02em}
+.vld{display:flex;gap:9px;padding:9px 0;font-size:12.5px;line-height:1.4;align-items:flex-start}
+.vld+.vld{border-top:1px solid var(--line)}
+.vld .sic{width:15px;height:15px;flex:none;margin-top:1px;stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.vld.ok .sic{stroke:var(--green)}
+.vld.bad .sic{stroke:var(--red)}
+.vld.warn .sic{stroke:var(--amber)}
+.vld .vt{color:var(--text)}
+.vld .vs{color:var(--dim);font-size:11.5px;margin-top:1px}
+.vld code{font-family:var(--mono);font-size:11px;color:var(--text-2);background:var(--fill);border-radius:5px;padding:1px 5px}

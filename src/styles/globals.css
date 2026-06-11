@@ -30,6 +30,10 @@
 @import "./page-payroll.css";
 @import "./page-declarations.css";
 @import "./page-etransport.css";
+@import "./page-gl-ledger.css";
+@import "./page-settings.css";
+@import "./page-invoice-new.css";
+@import "./page-invoice-detail.css";
 
 @custom-variant dark (&:is(.dark *));
 

@@ -1,10 +1,23 @@
 /**
- * Detaliu factură emisă — re-skinned to rf kit (Wave 2).
- * Preserves ALL wiring: api.invoices.get, api.companies.get, api.contacts.get,
- * api.payments.summary, api.anaf.*, api.ubl.*, api.invoices.duplicate/storno,
- * api.recurring.create, api.integrations.smartbillPush, openUrl mailto,
- * writeText clipboard, window.print. Both modals preserved (storno, template).
- * Right panel layout: Actions → Payments → Status ANAF → Events → Attachments.
+ * Factură detaliu — verbatim port of the design "Factura detaliu.html":
+ *   .page-head (.crumb "Facturi emise › nr" · .head-title h1+chip · sub
+ *   "client · emisă · scadență" · .head-actions PDF / XML / Storno /
+ *   btn-dark "Înregistrează plata" + "···" pop with the real extra actions) →
+ *   .scr-card .steps timeline (Schiță → Trimisă → Validată → Încasată) →
+ *   .cols-2: left = Linii factură (.scr-table + .sold-line totals) + Status
+ *   ANAF · evenimente (.spv-log index încărcare/index ANAF + jurnal complet),
+ *   right = Client (.kv fișă) + Detalii (real metadata the prototype lacks) +
+ *   Plăți încasate (.pay-row + .sold-line sold rămas) →
+ *   .modal-back/.modal storno + înregistrează plata + șablon recurent.
+ *
+ * ALL wiring preserved: api.invoices.get, api.companies.get, api.contacts.get,
+ * api.payments.summary, api.anaf.isAuthenticated/authorize/submitInvoice/
+ * checkStatus (test mode), api.ubl.generatePdf (openPath) / generateXml,
+ * api.invoices.duplicate/storno, api.recurring.create (șablon recurent),
+ * api.integrations.smartbillPush, mailto email client, copy-XML clipboard,
+ * window.print, storno-DRAFT guidance banner, e-Factura 5-day deadline banner.
+ * Payment registration wired for real: api.payments.add (+ exchangeRate for
+ * FX invoices) and api.payments.delete on the listed receipts.
  */
 
 import { useState, useEffect } from "react";
@@ -13,20 +26,57 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 
-import { Icon } from "@/components/shared/Icon";
-import { StatusBadge } from "@/components/shared/StatusBadge";
+import { Ic } from "@/components/shared/Ic";
 import { notify } from "@/lib/toasts";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import type { AddPaymentArgs, Payment } from "@/lib/tauri";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { formatError } from "@/lib/error-mapper";
-import type { AppErrorPayload } from "@/types";
+import type { AppErrorPayload, InvoiceStatus } from "@/types";
 import { useAppStore } from "@/lib/store";
 import { fmtShortcut } from "@/lib/platform";
 import { efacturaDeadline, deadlineDaysLeft, formatDeadline } from "@/lib/efacturaDeadline";
-import {
-  PageHeader, Btn, SectionCard, Card, Modal, Banner,
-} from "@/components/rf";
+
+const RO_MON = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
+const fmtRoDate = (iso: string | null | undefined) => {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  return `${d} ${RO_MON[Number(m) - 1] ?? m} ${y}`;
+};
+/** Unix seconds → "30 mai 2026, 10:44" (prototype .sd/.e2 format). */
+const fmtRoDateTime = (unixSec: number | null | undefined) => {
+  if (!unixSec) return "—";
+  const d = new Date(unixSec * 1000);
+  return `${String(d.getDate()).padStart(2, "0")} ${RO_MON[d.getMonth()]} ${d.getFullYear()}, ${String(
+    d.getHours(),
+  ).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
+/** "Banchero Media SRL" → "BM" (prototype .cli-ava initials). */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "—";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+// Status → design chip (.chip variants + icon + label) — head .head-title chip.
+const STATUS_CHIP: Record<InvoiceStatus, { cls: string; icon: string; label: string }> = {
+  DRAFT:     { cls: "sent", icon: "docText", label: "Schiță" },
+  QUEUED:    { cls: "wait", icon: "clock",   label: "În coadă" },
+  SUBMITTED: { cls: "sent", icon: "send",    label: "Trimisă" },
+  VALIDATED: { cls: "paid", icon: "checkC",  label: "Validată ANAF" },
+  REJECTED:  { cls: "late", icon: "xMark",   label: "Respinsă" },
+  STORNED:   { cls: "wait", icon: "undo",    label: "Stornată" },
+};
+
+const METHOD_LABELS: Record<string, string> = {
+  transfer: "Transfer bancar",
+  cash: "Numerar",
+  card: "Card",
+  other: "Altele",
+};
 
 export function InvoiceDetailPage() {
   const navigate = useNavigate();
@@ -45,11 +95,31 @@ export function InvoiceDetailPage() {
   const [showStornoModal, setShowStornoModal] = useState(false);
   const [stornoReason, setStornoReason] = useState("");
   const [xmlCopied, setXmlCopied] = useState(false);
+  const [openPop, setOpenPop] = useState<"" | "more">("");
+
+  // Pay modal (design payModal) — real api.payments.add wiring
+  const [showPayModal, setShowPayModal] = useState(false);
+  const [payForm, setPayForm] = useState({
+    amount: "",
+    paidAt: new Date().toISOString().slice(0, 10),
+    method: "transfer",
+    reference: "",
+    notes: "",
+    exchangeRate: "",
+  });
 
   // Save-as-recurring-template state
   const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false);
   const [templateFrequency, setTemplateFrequency] = useState("monthly");
   const [templateName, setTemplateName] = useState("");
+
+  // Close head "···" pop on outside click (design .pop pattern)
+  useEffect(() => {
+    if (!openPop) return;
+    const h = () => setOpenPop("");
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [openPop]);
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.invoices.detail(id),
@@ -96,6 +166,7 @@ export function InvoiceDetailPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
       setActionError(null);
+      notify.success("XML UBL generat.");
     },
     onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare generare XML."),
   });
@@ -193,6 +264,29 @@ export function InvoiceDetailPage() {
     onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare trimitere SmartBill."),
   });
 
+  const addPayment = useMutation({
+    mutationFn: (args: AddPaymentArgs) => api.payments.add(args),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.payments.summary(id, data?.invoice.companyId ?? "") });
+      void queryClient.invalidateQueries({ queryKey: ["payments"] });
+      void queryClient.invalidateQueries({ queryKey: ["payment_summaries"] });
+      notify.success("Plată înregistrată.");
+      setShowPayModal(false);
+    },
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut înregistra plata.")),
+  });
+
+  const deletePayment = useMutation({
+    mutationFn: (paymentId: string) => api.payments.delete(paymentId, data!.invoice.companyId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.payments.summary(id, data?.invoice.companyId ?? "") });
+      void queryClient.invalidateQueries({ queryKey: ["payments"] });
+      void queryClient.invalidateQueries({ queryKey: ["payment_summaries"] });
+      notify.success("Plată ștearsă.");
+    },
+    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge plata.")),
+  });
+
   const saveAsTemplateMutation = useMutation({
     mutationFn: (args: Parameters<typeof api.recurring.create>[0]) => api.recurring.create(args),
     onSuccess: () => {
@@ -236,152 +330,231 @@ export function InvoiceDetailPage() {
     });
   }
 
+  async function handleCopyXml() {
+    if (!data?.invoice.xmlPath) return;
+    try {
+      const { readTextFile } = await import("@tauri-apps/plugin-fs");
+      const content = await readTextFile(data.invoice.xmlPath);
+      await writeText(content);
+      setXmlCopied(true);
+      setTimeout(() => setXmlCopied(false), 2000);
+    } catch {
+      setActionError("Nu s-a putut copia XML-ul în clipboard.");
+    }
+  }
+
+  if (!activeCompanyId) {
+    return (
+      <div className="main-inner wide">
+        <div className="page-head"><div><h1>Factură</h1></div></div>
+        <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
+          Selectați o companie activă pentru a vedea factura.
+        </div>
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
-      <div style={{ padding: 32, fontSize: 13, color: "var(--rf-text-muted)" }}>Se încarcă…</div>
+      <div className="main-inner wide">
+        <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>Se încarcă…</div>
+      </div>
     );
   }
 
   if (!data) {
     return (
-      <div style={{ padding: 32, fontSize: 13, color: "var(--rf-text-muted)" }}>
-        Factura nu a fost găsită.
+      <div className="main-inner wide">
+        <div className="page-head"><div><h1>Factură</h1></div></div>
+        <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
+          Factura nu a fost găsită.
+        </div>
       </div>
     );
   }
 
   const { invoice, lines, events } = data;
+  const chip = STATUS_CHIP[invoice.status] ?? STATUS_CHIP.DRAFT;
+
+  // ── payments / timeline derived state ──────────────────────────────────────
+  const total = parseDec(invoice.totalAmount);
+  const paid = parseDec(paymentSummary?.paidAmount ?? "0");
+  const remaining = Math.max(0, total - paid);
+  const payStatus = paymentSummary?.paymentStatus ?? "UNPAID";
+  const payChip = payStatus === "PAID"
+    ? { cls: "paid", icon: "check", label: "Încasată" }
+    : payStatus === "PARTIAL"
+      ? { cls: "wait", icon: "clock", label: "Parțial" }
+      : { cls: "sent", icon: "dot", label: "Neîncasată" };
+  const payments: Payment[] = paymentSummary?.payments ?? [];
+  const isFx = invoice.currency !== "RON";
+
+  // Reached stage: 0 Schiță · 1 Trimisă · 2 Validată · 3 Încasată integral.
+  const rejected = invoice.status === "REJECTED";
+  const reached = payStatus === "PAID"
+    ? 3
+    : invoice.anafValidatedAt || invoice.status === "VALIDATED" || invoice.status === "STORNED"
+      ? 2
+      : invoice.anafSubmittedAt || invoice.status === "SUBMITTED" || invoice.status === "QUEUED"
+        ? 1
+        : 0;
+  const stepCls = (idx: number) =>
+    idx < reached ? "step done" : idx === reached ? "step curr" : "step todo";
+
+  const payAmountNum = parseFloat(payForm.amount);
+  const paySaveDisabled = addPayment.isPending || !payForm.amount || !payForm.paidAt;
+
+  const canStorno = invoice.status === "VALIDATED" && invoice.stornoOfInvoiceId === null;
+  const canSubmit = !!invoice.xmlPath && invoice.status === "DRAFT";
+  const canCheckStatus = invoice.status === "SUBMITTED" || invoice.status === "QUEUED" || !!invoice.anafIndex;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--rf-app-bg)" }}>
-      {/* Page header */}
-      <PageHeader
-        screen="Facturi emise › Detaliu"
-        title={
-          <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {invoice.fullNumber}
-            <StatusBadge status={invoice.status} />
-          </span>
-        }
-        actions={
-          <>
-            <Btn variant="ghost" icon="chevLeft" onClick={() => navigate({ to: "/invoices" })}>
-              Înapoi
-            </Btn>
-            {invoice.status === "DRAFT" && (
-              <Btn
-                variant="secondary"
-                icon="pen"
-                onClick={() => navigate({ to: "/invoices/$id/edit", params: { id } })}
-              >
-                Editează
-              </Btn>
-            )}
-            <Btn
-              variant="secondary"
-              icon="copy"
-              onClick={() => duplicateInvoice.mutate()}
-              disabled={duplicateInvoice.isPending}
-            >
-              {duplicateInvoice.isPending ? "Duplicare…" : "Duplicare"}
-            </Btn>
-            {invoice.status === "VALIDATED" && invoice.stornoOfInvoiceId === null && (
-              <Btn
-                variant="secondary"
-                icon="storno"
-                disabled={stornoInvoice.isPending}
-                onClick={() => setShowStornoModal(true)}
-              >
-                Storno
-              </Btn>
-            )}
-            <Btn
-              variant="secondary"
-              icon="printer"
-              onClick={() => window.print()}
-              title={`Tipărește (${fmtShortcut("Ctrl+P")})`}
-            >
-              Tipărește
-            </Btn>
-            <Btn
-              variant="secondary"
-              icon="refresh"
-              onClick={() => {
-                setTemplateName(`Șablon din ${invoice.fullNumber}`);
-                setTemplateFrequency("monthly");
-                setShowSaveAsTemplate(true);
-              }}
-            >
-              Șablon recurent
-            </Btn>
-          </>
-        }
-      />
+    <div className="main-inner wide">
 
-      {/* Error / status banners */}
-      {actionError && (
-        <div
-          style={{
-            margin: "0 32px 4px",
-            padding: "8px 12px",
-            background: "var(--rf-error-bg)",
-            border: "1px solid var(--rf-error-bd)",
-            borderRadius: 8,
-            fontSize: 12,
-            color: "var(--rf-error)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <span>{actionError}</span>
-          <button
-            type="button"
-            style={{ border: "none", background: "none", color: "var(--rf-error)", cursor: "pointer" }}
-            onClick={() => setActionError(null)}
-          >
-            ✕
+      {/* page head */}
+      <div className="page-head">
+        <div>
+          <div className="crumb">
+            <a onClick={() => void navigate({ to: "/invoices" })} style={{ cursor: "pointer" }}>Facturi emise</a>
+            <span className="sep">›</span>
+            <span className="num">{invoice.fullNumber}</span>
+          </div>
+          <div className="head-title">
+            <h1 className="num">{invoice.fullNumber}</h1>
+            <span className={`chip ${chip.cls}`}><Ic name={chip.icon} cls="sic" />{chip.label}</span>
+          </div>
+          <p className="sub">
+            {contact?.legalName ?? "—"} · emisă {fmtRoDate(invoice.issueDate)} · scadență {fmtRoDate(invoice.dueDate)}
+          </p>
+        </div>
+        <div className="head-actions">
+          <button className="pill-btn" disabled={generatePdf.isPending} onClick={() => generatePdf.mutate()}>
+            <Ic name="dl" />{generatePdf.isPending ? "PDF…" : "PDF"}
           </button>
+          <button className="pill-btn" disabled={generateXml.isPending} onClick={() => generateXml.mutate()}>
+            <Ic name="code" />{generateXml.isPending ? "XML…" : invoice.xmlPath ? "XML" : "Generează XML"}
+          </button>
+          {canStorno && (
+            <button
+              className="pill-btn"
+              style={{ color: "var(--amber)" }}
+              onClick={() => setShowStornoModal(true)}
+            >
+              <svg className="ic" viewBox="0 0 24 24" style={{ stroke: "var(--amber)" }} aria-hidden="true">
+                <path d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
+              </svg>
+              Storno
+            </button>
+          )}
+          {invoice.status !== "DRAFT" && invoice.status !== "STORNED" && (
+            <button className="btn-dark" onClick={() => {
+              setPayForm({
+                amount: remaining > 0 ? remaining.toFixed(2) : "",
+                paidAt: new Date().toISOString().slice(0, 10),
+                method: "transfer",
+                reference: "",
+                notes: "",
+                exchangeRate: "",
+              });
+              setShowPayModal(true);
+            }}>
+              <Ic name="card" />Înregistrează plata
+            </button>
+          )}
+
+          {/* more-actions pop — real features the prototype lacks */}
+          <div className="nou-wrap" style={{ position: "relative" }}>
+            <button
+              className="sq-btn"
+              title="Mai multe acțiuni"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => setOpenPop(openPop === "more" ? "" : "more")}
+            >
+              <Ic name="dots" />
+            </button>
+            {openPop === "more" && (
+              <div className="pop show" style={{ right: 0, top: 40, width: 230 }} onMouseDown={(e) => e.stopPropagation()}>
+                <div className="col-title">Acțiuni factură</div>
+                {invoice.status === "DRAFT" && (
+                  <button className="pop-item" onClick={() => { setOpenPop(""); void navigate({ to: "/invoices/$id/edit", params: { id } }); }}>
+                    <Ic name="pen" />Editează
+                  </button>
+                )}
+                <button className="pop-item" disabled={duplicateInvoice.isPending} onClick={() => { setOpenPop(""); duplicateInvoice.mutate(); }}>
+                  <Ic name="copy" />{duplicateInvoice.isPending ? "Duplicare…" : "Duplică"}
+                </button>
+                <button className="pop-item" title={`Tipărește (${fmtShortcut("Ctrl+P")})`} onClick={() => { setOpenPop(""); window.print(); }}>
+                  <Ic name="printer" />Tipărește
+                </button>
+                <button
+                  className="pop-item"
+                  onClick={() => {
+                    setOpenPop("");
+                    setTemplateName(`Șablon din ${invoice.fullNumber}`);
+                    setTemplateFrequency("monthly");
+                    setShowSaveAsTemplate(true);
+                  }}
+                >
+                  <Ic name="loop" />Șablon recurent
+                </button>
+                <div className="pop-div" />
+                <div className="col-title">Trimitere</div>
+                {contact?.email && (
+                  <button
+                    className="pop-item"
+                    onClick={() => {
+                      setOpenPop("");
+                      const subject = encodeURIComponent(`Factură ${invoice.fullNumber}`);
+                      const body = encodeURIComponent(
+                        `Bună ziua,\n\nVă transmitem factura ${invoice.fullNumber} din data ${invoice.issueDate}, în valoare de ${fmtRON(invoice.totalAmount)} ${invoice.currency}.\n\nCu stimă`,
+                      );
+                      void openUrl(`mailto:${encodeURIComponent(contact.email ?? "")}?subject=${subject}&body=${body}`);
+                    }}
+                  >
+                    <Ic name="mail" />Email către client
+                  </button>
+                )}
+                <button className="pop-item" disabled={pushSmartbill.isPending} onClick={() => { setOpenPop(""); pushSmartbill.mutate(); }}>
+                  <Ic name="docUp" />{pushSmartbill.isPending ? "SmartBill…" : "Trimite în SmartBill"}
+                </button>
+                {invoice.xmlPath && (
+                  <button className="pop-item" onClick={() => { setOpenPop(""); void handleCopyXml(); }}>
+                    <Ic name="copy" />{xmlCopied ? "Copiat ✓" : "Copiază XML"}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* error / status banners (design .banner) */}
+      {actionError && (
+        <div className="banner danger">
+          <Ic name="xMark" />
+          <div><b>Eroare.</b> {actionError}</div>
+          <span className="bx" onClick={() => setActionError(null)}>✕</span>
         </div>
       )}
       {statusMessage && !actionError && (
-        <div
-          style={{
-            margin: "0 32px 4px",
-            padding: "8px 12px",
-            background: "var(--rf-success-bg)",
-            border: "1px solid var(--rf-success-bd)",
-            borderRadius: 8,
-            fontSize: 12,
-            color: "var(--rf-success)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <span>{statusMessage}</span>
-          <button
-            type="button"
-            style={{ border: "none", background: "none", color: "var(--rf-success)", cursor: "pointer" }}
-            onClick={() => setStatusMessage(null)}
-          >
-            ✕
-          </button>
+        <div className="banner ok">
+          <Ic name="check" />
+          <div>{statusMessage}</div>
+          <span className="bx" onClick={() => setStatusMessage(null)}>✕</span>
         </div>
       )}
 
-      {/* REG-STORNO: sticky guidance banner for DRAFT credit notes.
+      {/* REG-STORNO: guidance banner for DRAFT credit notes.
           A storno credit note that is still DRAFT has NOT been sent to ANAF yet
-          and therefore has NOT fiscally cancelled the original invoice. The accountant
-          must generate the XML and submit it to complete the cancellation. */}
+          and therefore has NOT fiscally cancelled the original invoice. */}
       {invoice.status === "DRAFT" && invoice.stornoOfInvoiceId !== null && (
-        <div style={{ margin: "0 32px 8px" }}>
-          <Banner variant="warning" title="Factură storno — acțiune necesară">
-            Această factură storno trebuie generată (XML) și trimisă la ANAF pentru a
-            anula fiscal factura originală. Până la validarea de către ANAF, anularea
-            fiscală <strong>nu este efectivă</strong> și factura originală continuă să
-            apară în declarații.
-          </Banner>
+        <div className="banner warn">
+          <Ic name="undo" />
+          <div>
+            <b>Factură storno — acțiune necesară.</b> Această factură storno trebuie generată (XML) și
+            trimisă la ANAF pentru a anula fiscal factura originală. Până la validarea de către ANAF,
+            anularea fiscală <b>nu este efectivă</b> și factura originală continuă să apară în declarații.
+          </div>
         </div>
       )}
 
@@ -395,696 +568,572 @@ export function InvoiceDetailPage() {
           const overdue = left < 0;
           const n = Math.abs(left);
           return (
-            <div style={{ margin: "0 32px 8px" }}>
-              <Banner variant={overdue ? "error" : left <= 1 ? "warning" : "info"}>
-                e-Factura: de trimis până la <strong>{formatDeadline(dl)}</strong>{" "}
+            <div className={`banner${overdue ? " danger" : left <= 1 ? " warn" : ""}`}>
+              <Ic name="calendar" />
+              <div>
+                e-Factura: de trimis până la <b>{formatDeadline(dl)}</b>{" "}
                 {overdue
                   ? `— termen depășit cu ${n} ${n === 1 ? "zi" : "zile"}.`
                   : `(${left} ${left === 1 ? "zi" : "zile"} rămase). Termen legal: 5 zile lucrătoare de la emitere.`}
-              </Banner>
+              </div>
             </div>
           );
         })()}
 
-      {/* Main split layout */}
-      <div
-        style={{
-          flex: 1,
-          overflow: "auto",
-          display: "grid",
-          gridTemplateColumns: "1fr 340px",
-          gap: 20,
-          padding: "0 32px 32px",
-          alignItems: "start",
-        }}
-      >
-        {/* LEFT — invoice document preview */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          <Card pad>
-            {/* Header */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
-              <div>
-                <h1 style={{ fontSize: 20, fontWeight: 700, margin: "0 0 4px" }}>Factură fiscală</h1>
-                <div style={{ fontSize: 12, color: "var(--rf-text-dim)" }}>
-                  {invoice.fullNumber} · {invoice.issueDate}
-                </div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                {invoice.status === "VALIDATED" && (
-                  <div
-                    style={{
-                      background: "var(--rf-success-bg)",
-                      color: "var(--rf-success)",
-                      border: "1px solid var(--rf-success-bd)",
-                      borderRadius: 6,
-                      padding: "4px 12px",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      letterSpacing: "0.05em",
-                    }}
-                  >
-                    e-Factura · validată
-                  </div>
-                )}
-                {invoice.anafIndex && (
-                  <div style={{ fontSize: 11, color: "var(--rf-text-dim)", marginTop: 4 }}>
-                    Index ANAF:{" "}
-                    <span style={{ fontFamily: "var(--rf-mono)" }}>{invoice.anafIndex}</span>
-                  </div>
-                )}
+      {/* timeline */}
+      <div className="scr-card" style={{ marginBottom: 14 }}>
+        <div className="card-pad" style={{ padding: "20px 28px 18px" }}>
+          <div className="steps">
+            <div className={stepCls(0)}>
+              <div className="dot">{reached >= 0 && <Ic name="check" cls="sic" />}</div>
+              <div className="sl">Schiță</div>
+              <div className="sd num">{fmtRoDateTime(invoice.createdAt)}</div>
+            </div>
+            <div className={stepCls(1)}>
+              <div className="dot">{reached >= 1 && <Ic name="check" cls="sic" />}</div>
+              <div className="sl">Trimisă la ANAF</div>
+              <div className="sd num">
+                {invoice.anafSubmittedAt
+                  ? fmtRoDateTime(invoice.anafSubmittedAt)
+                  : invoice.status === "QUEUED" ? "în coadă" : "—"}
               </div>
             </div>
-
-            {/* Parties */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 24,
-                padding: "16px 0",
-                borderTop: "1px solid var(--rf-border)",
-                borderBottom: "1px solid var(--rf-border)",
-                marginBottom: 16,
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--rf-text-dim)", marginBottom: 6 }}>
-                  Furnizor
-                </div>
-                {company ? (
-                  <>
-                    <div style={{ fontWeight: 600 }}>{company.legalName}</div>
-                    <div style={{ fontSize: 12, color: "var(--rf-text-muted)", fontFamily: "var(--rf-mono)" }}>
-                      CUI: {company.cui}
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
-                      {[company.address, company.city, company.county].filter(Boolean).join(", ")}
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ fontSize: 12, color: "var(--rf-text-dim)" }}>ID: {invoice.companyId}</div>
-                )}
+            <div className={rejected ? "step fail" : stepCls(2)}>
+              <div className="dot">
+                {rejected ? <Ic name="xMark" cls="sic" /> : reached >= 2 ? <Ic name="check" cls="sic" /> : null}
               </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--rf-text-dim)", marginBottom: 6 }}>
-                  Cumpărător
-                </div>
-                {contact ? (
-                  <>
-                    <div style={{ fontWeight: 600 }}>{contact.legalName}</div>
-                    {contact.cui && (
-                      <div style={{ fontSize: 12, color: "var(--rf-text-muted)", fontFamily: "var(--rf-mono)" }}>
-                        CUI: {contact.cui}
-                      </div>
-                    )}
-                    <div style={{ fontSize: 12, color: "var(--rf-text-muted)" }}>
-                      {[contact.address, contact.city, contact.county].filter(Boolean).join(", ")}
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ fontSize: 12, color: "var(--rf-text-dim)" }}>ID: {invoice.contactId}</div>
-                )}
+              <div className="sl">{rejected ? "Respinsă ANAF" : "Validată ANAF"}</div>
+              <div className="sd num">
+                {rejected
+                  ? fmtRoDateTime(invoice.anafRejectedAt)
+                  : invoice.anafValidatedAt ? fmtRoDateTime(invoice.anafValidatedAt) : "—"}
               </div>
             </div>
-
-            {/* Meta row */}
-            <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 16 }}>
-              {[
-                ["Data emiterii", invoice.issueDate],
-                ["Data scadenței", invoice.dueDate],
-                ["Monedă", invoice.currency],
-              ].map(([k, v]) => (
-                <div key={k}>
-                  <div style={{ fontSize: 11, color: "var(--rf-text-dim)" }}>{k}</div>
-                  <div style={{ fontSize: 13, fontWeight: 500, marginTop: 2 }}>{v}</div>
-                </div>
-              ))}
-              {invoice.exchangeRate && (
-                <div>
-                  <div style={{ fontSize: 11, color: "var(--rf-text-dim)" }}>Curs valutar</div>
-                  <div style={{ fontSize: 13, fontWeight: 500, marginTop: 2, fontFamily: "var(--rf-mono)" }}>
-                    {invoice.exchangeRate}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Line items */}
-            {lines.length > 0 && (
-              <table className="rf-tbl" style={{ marginBottom: 16 }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: 24 }}>#</th>
-                    <th>Descriere</th>
-                    <th style={{ width: 60 }} className="right">UM</th>
-                    <th style={{ width: 60 }} className="right">Cant.</th>
-                    <th style={{ width: 90 }} className="right">Preț</th>
-                    <th style={{ width: 50 }} className="right">TVA</th>
-                    <th style={{ width: 100 }} className="right">Valoare</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((l, i) => (
-                    <tr key={l.id}>
-                      <td style={{ color: "var(--rf-text-dim)" }}>{i + 1}</td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{l.name}</div>
-                        {l.description && (
-                          <div style={{ fontSize: 11, color: "var(--rf-text-muted)" }}>{l.description}</div>
-                        )}
-                      </td>
-                      <td className="right" style={{ fontFamily: "var(--rf-mono)" }}>{l.unit}</td>
-                      <td className="right" style={{ fontFamily: "var(--rf-mono)" }}>{l.quantity}</td>
-                      <td className="right" style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(l.unitPrice)}</td>
-                      <td className="right" style={{ fontFamily: "var(--rf-mono)" }}>{l.vatRate}%</td>
-                      <td className="right" style={{ fontFamily: "var(--rf-mono)", fontWeight: 700 }}>
-                        {fmtRON(l.subtotalAmount)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td colSpan={6} className="right" style={{ fontWeight: 400, fontSize: 12 }}>Total net</td>
-                    <td className="right" style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(invoice.subtotalAmount)} {invoice.currency}</td>
-                  </tr>
-                  <tr>
-                    <td colSpan={6} className="right" style={{ fontWeight: 400, fontSize: 12 }}>Total TVA</td>
-                    <td className="right" style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(invoice.vatAmount)} {invoice.currency}</td>
-                  </tr>
-                  <tr>
-                    <td colSpan={6} className="right">Total de plată</td>
-                    <td className="right" style={{ fontFamily: "var(--rf-mono)", color: "var(--rf-accent)", fontSize: 16, fontWeight: 700 }}>
-                      {fmtRON(invoice.totalAmount)} {invoice.currency}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            )}
-
-            {invoice.notes && (
-              <div
-                style={{
-                  marginTop: 12,
-                  fontSize: 12,
-                  color: "var(--rf-text-muted)",
-                  borderTop: "1px solid var(--rf-border)",
-                  paddingTop: 10,
-                }}
-              >
-                {invoice.notes.startsWith("STORNO_OF:")
-                  ? invoice.notes.replace(/^STORNO_OF:[^|]*\|?/, "")
-                  : invoice.notes}
-              </div>
-            )}
-          </Card>
-        </div>
-
-        {/* RIGHT — actions + meta cards */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16, position: "sticky", top: 0 }}>
-
-          {/* Actions card */}
-          <SectionCard icon="send" title="Acțiuni">
-            <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-              {/* Generate/Regenerate XML */}
-              <Btn
-                variant={!invoice.xmlPath ? "primary" : "secondary"}
-                icon={invoice.xmlPath ? "refresh" : "file"}
-                block
-                disabled={generateXml.isPending}
-                onClick={() => generateXml.mutate()}
-              >
-                {generateXml.isPending ? "Generare…" : invoice.xmlPath ? "Regenerează XML" : "Generează XML UBL"}
-              </Btn>
-
-              {/* Generate/Regenerate PDF */}
-              <Btn
-                variant="secondary"
-                icon={invoice.pdfPath ? "refresh" : "file"}
-                block
-                disabled={generatePdf.isPending}
-                onClick={() => generatePdf.mutate()}
-              >
-                {generatePdf.isPending ? "Generare…" : invoice.pdfPath ? "Regenerează PDF" : "Generează PDF"}
-              </Btn>
-
-              {/* Download PDF */}
-              {invoice.pdfPath && (
-                <Btn
-                  variant="secondary"
-                  icon="download"
-                  block
-                  disabled={generatePdf.isPending}
-                  onClick={() => generatePdf.mutate()}
-                >
-                  Descarcă PDF
-                </Btn>
-              )}
-
-              {/* Send to ANAF */}
-              {invoice.xmlPath && invoice.status === "DRAFT" && (
-                <Btn
-                  variant={invoice.anafUploadId || invoice.anafIndex ? "secondary" : "primary"}
-                  icon="cloudUp"
-                  block
-                  disabled={submitInvoice.isPending || authorizeAnaf.isPending}
-                  onClick={() => submitInvoice.mutate()}
-                >
-                  {authorizeAnaf.isPending ? "Autorizare ANAF…" : submitInvoice.isPending ? "Trimitere…" : "Trimite la ANAF"}
-                </Btn>
-              )}
-
-              {/* Check ANAF status */}
-              {(invoice.status === "SUBMITTED" || !!invoice.anafIndex) && (
-                <Btn
-                  variant="secondary"
-                  icon="refresh"
-                  block
-                  disabled={checkStatus.isPending}
-                  onClick={() => checkStatus.mutate()}
-                >
-                  {checkStatus.isPending ? "Verificare…" : "Verifică status ANAF"}
-                </Btn>
-              )}
-
-              {/* SmartBill */}
-              <Btn
-                variant="secondary"
-                icon="cloudUp"
-                block
-                disabled={pushSmartbill.isPending}
-                onClick={() => pushSmartbill.mutate()}
-              >
-                {pushSmartbill.isPending ? "SmartBill…" : "SmartBill"}
-              </Btn>
-
-              {/* Email */}
-              {contact?.email && (
-                <Btn
-                  variant="secondary"
-                  icon="mail"
-                  block
-                  onClick={() => {
-                    const subject = encodeURIComponent(`Factură ${invoice.fullNumber}`);
-                    const body = encodeURIComponent(
-                      `Bună ziua,\n\nVă transmitem factura ${invoice.fullNumber} din data ${invoice.issueDate}, în valoare de ${fmtRON(invoice.totalAmount)} ${invoice.currency}.\n\nCu stimă`
-                    );
-                    void openUrl(`mailto:${encodeURIComponent(contact.email ?? "")}?subject=${subject}&body=${body}`);
-                  }}
-                >
-                  Email
-                </Btn>
-              )}
-
-              {/* Copy XML */}
-              {invoice.xmlPath && (
-                <Btn
-                  variant="secondary"
-                  icon="copy"
-                  block
-                  onClick={async () => {
-                    try {
-                      const { readTextFile } = await import("@tauri-apps/plugin-fs");
-                      const content = await readTextFile(invoice.xmlPath!);
-                      await writeText(content);
-                      setXmlCopied(true);
-                      setTimeout(() => setXmlCopied(false), 2000);
-                    } catch {
-                      setActionError("Nu s-a putut copia XML-ul în clipboard.");
-                    }
-                  }}
-                >
-                  {xmlCopied ? "Copiat ✓" : "Copiază XML"}
-                </Btn>
-              )}
-
-              {/* ANAF auth indicator */}
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, paddingTop: 4 }}>
-                {isAnafAuth ? (
-                  <span style={{ color: "var(--rf-success)", display: "flex", alignItems: "center", gap: 4 }}>
-                    <Icon name="check" size={12} /> Autentificat ANAF
-                  </span>
-                ) : (
-                  <span style={{ color: "var(--rf-text-muted)", display: "flex", alignItems: "center", gap: 4 }}>
-                    <Icon name="warning" size={12} /> Neautentificat ANAF
-                    {data?.invoice.companyId && (
-                      <button
-                        type="button"
-                        style={{ background: "none", border: "none", color: "var(--rf-accent)", cursor: "pointer", textDecoration: "underline", fontSize: 12, padding: 0 }}
-                        disabled={authorizeAnaf.isPending}
-                        onClick={() => authorizeAnaf.mutate()}
-                      >
-                        {authorizeAnaf.isPending ? "Se autorizează…" : "Autorizează"}
-                      </button>
-                    )}
-                  </span>
-                )}
+            <div className={stepCls(3)}>
+              <div className="dot">{reached >= 3 && <Ic name="check" cls="sic" />}</div>
+              <div className="sl">Încasată integral</div>
+              <div className="sd">
+                {payStatus === "PAID"
+                  ? <span className="num">încasată integral</span>
+                  : <>sold rămas <span className="num">{fmtRON(remaining)} {invoice.currency}</span></>}
               </div>
             </div>
-          </SectionCard>
-
-          {/* Payments card */}
-          <SectionCard icon="bank" title="Plăți">
-            <div style={{ padding: "0 16px 16px" }}>
-              {(() => {
-                const total = parseDec(invoice.totalAmount);
-                const paid = parseDec(paymentSummary?.paidAmount ?? "0");
-                const remaining = total - paid;
-                const pStatus = paymentSummary?.paymentStatus ?? "UNPAID";
-                return (
-                  <>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                      <StatusBadge status={pStatus} />
-                      <span style={{ fontFamily: "var(--rf-mono)", fontSize: 12 }}>
-                        {fmtRON(paid)} / {fmtRON(total)} {invoice.currency}
-                      </span>
-                    </div>
-                    {/* Progress bar */}
-                    <div style={{ height: 6, background: "var(--rf-neutral-bg)", borderRadius: 999, marginBottom: 12 }}>
-                      <div
-                        style={{
-                          width: `${total > 0 ? Math.min(100, (paid / total) * 100) : 0}%`,
-                          height: "100%",
-                          background: remaining <= 0 ? "var(--rf-success)" : "var(--rf-warning)",
-                          borderRadius: 999,
-                          transition: "width .3s",
-                        }}
-                      />
-                    </div>
-                    <dl
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr auto",
-                        rowGap: 4,
-                        fontSize: 12,
-                        marginBottom: 12,
-                      }}
-                    >
-                      <dt style={{ color: "var(--rf-text-muted)" }}>Total factură</dt>
-                      <dd style={{ fontFamily: "var(--rf-mono)", textAlign: "right", margin: 0 }}>
-                        {fmtRON(total)} {invoice.currency}
-                      </dd>
-                      <dt style={{ color: "var(--rf-text-muted)" }}>Total plătit</dt>
-                      <dd style={{ fontFamily: "var(--rf-mono)", textAlign: "right", margin: 0 }}>
-                        {fmtRON(paid)} {invoice.currency}
-                      </dd>
-                      <dt style={{ color: "var(--rf-text-muted)" }}>Rest de plată</dt>
-                      <dd
-                        style={{
-                          fontFamily: "var(--rf-mono)", textAlign: "right", margin: 0,
-                          fontWeight: 700, color: remaining > 0 ? "var(--rf-error)" : "var(--rf-success)",
-                        }}
-                      >
-                        {fmtRON(remaining)} {invoice.currency}
-                      </dd>
-                    </dl>
-                    {paymentSummary && paymentSummary.payments.length > 0 && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
-                        {paymentSummary.payments.map((p) => (
-                          <div
-                            key={p.id}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 8,
-                              padding: "6px 8px",
-                              border: "1px solid var(--rf-border)",
-                              borderRadius: 6,
-                              fontSize: 12,
-                            }}
-                          >
-                            <span style={{ flex: 1 }}>
-                              <b style={{ fontFamily: "var(--rf-mono)" }}>{fmtRON(p.amount)} {p.currency}</b>
-                              <span style={{ color: "var(--rf-text-muted)" }}> · {p.paidAt}</span>
-                            </span>
-                            <span style={{ fontSize: 11, color: "var(--rf-text-dim)" }}>
-                              {p.method}{p.reference ? ` · ${p.reference}` : ""}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      className="rf-btn rf-btn--secondary rf-btn--sm rf-btn--block"
-                      onClick={() => navigate({ to: "/payments" })}
-                    >
-                      <Icon name="plus" size={13} /> Adaugă plată
-                    </button>
-                  </>
-                );
-              })()}
-            </div>
-          </SectionCard>
-
-          {/* Status ANAF card */}
-          <SectionCard icon="anaf" title="Status ANAF">
-            <div style={{ padding: "0 16px 16px" }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
-                <StatusBadge status={invoice.status} />
-                {invoice.anafIndex && (
-                  <span style={{ fontFamily: "var(--rf-mono)", color: "var(--rf-text-dim)", fontSize: 11 }}>
-                    {invoice.anafIndex}
-                  </span>
-                )}
-              </div>
-              <dl
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "auto 1fr",
-                  columnGap: 12,
-                  rowGap: 4,
-                  fontSize: 12,
-                }}
-              >
-                {invoice.anafSubmittedAt && (
-                  <>
-                    <dt style={{ color: "var(--rf-text-muted)" }}>Trimisă la</dt>
-                    <dd style={{ fontFamily: "var(--rf-mono)", margin: 0 }}>
-                      {new Date(invoice.anafSubmittedAt * 1000).toLocaleString("ro-RO")}
-                    </dd>
-                  </>
-                )}
-                {invoice.anafValidatedAt && (
-                  <>
-                    <dt style={{ color: "var(--rf-text-muted)" }}>Validată la</dt>
-                    <dd style={{ fontFamily: "var(--rf-mono)", margin: 0 }}>
-                      {new Date(invoice.anafValidatedAt * 1000).toLocaleString("ro-RO")}
-                    </dd>
-                  </>
-                )}
-                {invoice.anafRejectedAt && (
-                  <>
-                    <dt style={{ color: "var(--rf-text-muted)" }}>Respinsă la</dt>
-                    <dd style={{ fontFamily: "var(--rf-mono)", color: "var(--rf-error)", margin: 0 }}>
-                      {new Date(invoice.anafRejectedAt * 1000).toLocaleString("ro-RO")}
-                    </dd>
-                  </>
-                )}
-                {invoice.rejectionReason && (
-                  <>
-                    <dt style={{ color: "var(--rf-text-muted)" }}>Motiv respingere</dt>
-                    <dd style={{ color: "var(--rf-error)", fontSize: 11, margin: 0 }}>{invoice.rejectionReason}</dd>
-                  </>
-                )}
-              </dl>
-            </div>
-          </SectionCard>
-
-          {/* Events timeline */}
-          {events.length > 0 && (
-            <SectionCard icon="clock" title="Evenimente · jurnal">
-              <div style={{ padding: "4px 0 8px" }}>
-                {events.map((e, i) => (
-                  <div key={e.id} style={{ display: "flex", gap: 12, padding: "8px 16px" }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                      <span
-                        style={{
-                          width: 24, height: 24, borderRadius: "50%", display: "grid", placeItems: "center",
-                          background: "var(--rf-info-bg)", color: "var(--rf-info)", flexShrink: 0,
-                        }}
-                      >
-                        <Icon name="file" size={12} />
-                      </span>
-                      {i < events.length - 1 && (
-                        <span style={{ width: 1.5, flex: 1, background: "var(--rf-border)", marginTop: 3 }} />
-                      )}
-                    </div>
-                    <div style={{ paddingBottom: 4 }}>
-                      <div style={{ fontSize: 12.5, lineHeight: 1.4 }}>{e.message}</div>
-                      <div style={{ fontSize: 11, color: "var(--rf-text-dim)", marginTop: 1 }}>
-                        {new Date(e.createdAt * 1000).toLocaleString("ro-RO")}
-                        <span style={{ color: "var(--rf-text-dim)", marginLeft: 6 }}>{e.eventType}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </SectionCard>
-          )}
-
-          {/* Attachments */}
-          <SectionCard icon="file" title="Atașamente">
-            <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
-              {invoice.xmlPath ? (
-                <div
-                  style={{
-                    display: "flex", alignItems: "center", gap: 8, padding: "7px 10px",
-                    border: "1px solid var(--rf-border)", borderRadius: 8, fontSize: 12,
-                  }}
-                >
-                  <Icon name="file" size={14} style={{ color: "var(--rf-text-muted)" }} />
-                  <span style={{ flex: 1 }}>{invoice.fullNumber}.xml</span>
-                  <span style={{ fontSize: 11, color: "var(--rf-text-dim)" }}>UBL 2.1 CIUS-RO</span>
-                </div>
-              ) : null}
-              {invoice.pdfPath ? (
-                <div
-                  style={{
-                    display: "flex", alignItems: "center", gap: 8, padding: "7px 10px",
-                    border: "1px solid var(--rf-border)", borderRadius: 8, fontSize: 12,
-                  }}
-                >
-                  <Icon name="file" size={14} style={{ color: "var(--rf-text-muted)" }} />
-                  <span style={{ flex: 1 }}>{invoice.fullNumber}.pdf</span>
-                  <span style={{ fontSize: 11, color: "var(--rf-text-dim)" }}>PDF A4</span>
-                </div>
-              ) : null}
-              {!invoice.xmlPath && !invoice.pdfPath && (
-                <span style={{ fontSize: 12, color: "var(--rf-text-dim)" }}>
-                  Niciun atașament. Generați XML-ul mai întâi.
-                </span>
-              )}
-            </div>
-          </SectionCard>
-
-          {/* Metadate */}
-          <SectionCard icon="info" title="Metadate factură">
-            <div style={{ padding: "0 16px 16px" }}>
-              <dl
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "auto 1fr",
-                  columnGap: 16,
-                  rowGap: 4,
-                  fontSize: 12,
-                }}
-              >
-                <dt style={{ color: "var(--rf-text-muted)" }}>Număr</dt>
-                <dd style={{ fontFamily: "var(--rf-mono)", fontWeight: 700, margin: 0 }}>{invoice.fullNumber}</dd>
-                <dt style={{ color: "var(--rf-text-muted)" }}>Serie</dt>
-                <dd style={{ fontFamily: "var(--rf-mono)", margin: 0 }}>{invoice.series}</dd>
-                <dt style={{ color: "var(--rf-text-muted)" }}>Data emiterii</dt>
-                <dd style={{ margin: 0 }}>{invoice.issueDate}</dd>
-                <dt style={{ color: "var(--rf-text-muted)" }}>Data scadenței</dt>
-                <dd style={{ margin: 0 }}>{invoice.dueDate}</dd>
-                <dt style={{ color: "var(--rf-text-muted)" }}>Monedă</dt>
-                <dd style={{ fontFamily: "var(--rf-mono)", margin: 0 }}>{invoice.currency}</dd>
-                {invoice.exchangeRate && (
-                  <>
-                    <dt style={{ color: "var(--rf-text-muted)" }}>Curs valutar</dt>
-                    <dd style={{ fontFamily: "var(--rf-mono)", margin: 0 }}>{invoice.exchangeRate}</dd>
-                  </>
-                )}
-              </dl>
-            </div>
-          </SectionCard>
-
+          </div>
         </div>
       </div>
 
-      {/* Save-as-recurring-template modal (rf Modal) */}
-      <Modal
-        open={showSaveAsTemplate}
-        onOpenChange={(open) => { if (!open) setShowSaveAsTemplate(false); }}
-        title="Salvează ca șablon recurent"
-        footer={
-          <>
-            <button className="rf-btn rf-btn--secondary" onClick={() => setShowSaveAsTemplate(false)}>
-              Anulează
-            </button>
-            <button
-              className="rf-btn rf-btn--primary"
-              disabled={saveAsTemplateMutation.isPending}
-              onClick={handleSaveAsTemplate}
-            >
-              {saveAsTemplateMutation.isPending ? "Se salvează…" : "Creează șablon"}
-            </button>
-          </>
-        }
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div className="rf-field">
-            <label>Nume șablon *</label>
-            <input
-              className="rf-input"
-              value={templateName}
-              onChange={(e) => setTemplateName(e.target.value)}
-              autoFocus
-            />
-          </div>
-          <div className="rf-field">
-            <label>Frecvență</label>
-            <div className="rf-select-wrap">
-              <select
-                className="rf-select"
-                value={templateFrequency}
-                onChange={(e) => setTemplateFrequency(e.target.value)}
-              >
-                <option value="monthly">Lunar</option>
-                <option value="quarterly">Trimestrial</option>
-                <option value="annual">Anual</option>
-              </select>
-              <Icon name="chevDown" size={14} className="rf-chev" />
+      <div className="cols-2">
+        <div>
+          {/* linii */}
+          <div className="scr-card" style={{ marginBottom: 14 }}>
+            <div className="scr-toolbar">
+              <div className="tt">Linii factură</div>
+              <div className="spacer" />
+              <span className="muted num" style={{ fontSize: 12 }}>{invoice.currency}</span>
+            </div>
+            {lines.length === 0 ? (
+              <div style={{ padding: "30px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+                Nicio linie pe factură.
+              </div>
+            ) : (
+              <table className="scr-table">
+                <thead>
+                  <tr><th>Articol</th><th className="r">Cant.</th><th>UM</th><th className="r">Preț unitar</th><th>TVA</th><th className="r">Valoare</th></tr>
+                </thead>
+                <tbody>
+                  {lines.map((l) => (
+                    <tr key={l.id}>
+                      <td>
+                        {l.name}
+                        {l.description && (
+                          <div style={{ fontSize: 11.5, color: "var(--text-2)", marginTop: 1 }}>{l.description}</div>
+                        )}
+                      </td>
+                      <td className="r num">{l.quantity}</td>
+                      <td>{l.unit}</td>
+                      <td className="r num">{fmtRON(l.unitPrice)}</td>
+                      <td><span className="doc">{parseDec(l.vatRate)}% · {l.vatCategory}</span></td>
+                      <td className="r num">{fmtRON(l.subtotalAmount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className="sold-line" style={{ borderTop: "1px solid var(--line)", background: "#fff" }}>
+              <span>
+                Subtotal <span className="num">{fmtRON(invoice.subtotalAmount)}</span> · TVA{" "}
+                <span className="num">{fmtRON(invoice.vatAmount)}</span>
+              </span>
+              <b className="num">Total {fmtRON(invoice.totalAmount)} {invoice.currency}</b>
             </div>
           </div>
-          <div style={{ fontSize: 11.5, color: "var(--rf-text-muted)" }}>
-            Prima emitere: luna viitoare · seria: {invoice.series} · {lines.length} articol(e) din factură
-          </div>
-        </div>
-      </Modal>
 
-      {/* Storno modal (rf Modal) */}
-      <Modal
-        open={showStornoModal}
-        onOpenChange={(open) => { if (!open) { setShowStornoModal(false); setStornoReason(""); } }}
-        title={`Stornare factură ${invoice.fullNumber}`}
-        footer={
-          <>
-            <button
-              className="rf-btn rf-btn--secondary"
-              onClick={() => { setShowStornoModal(false); setStornoReason(""); }}
-            >
-              Anulează
-            </button>
-            <button
-              className="rf-btn rf-btn--danger"
-              disabled={!stornoReason.trim() || stornoInvoice.isPending}
-              onClick={() => {
-                stornoInvoice.mutate(stornoReason.trim());
-                setShowStornoModal(false);
-                setStornoReason("");
-              }}
-            >
-              {stornoInvoice.isPending ? "Se stornează…" : "Stornează factura"}
-            </button>
-          </>
-        }
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ fontSize: 13, color: "var(--rf-text-muted)" }}>
-            Această acțiune marchează factura ca anulată. Introduceți motivul stornării:
+          {/* istoric SPV + jurnal */}
+          <div className="scr-card" style={{ marginBottom: 14 }}>
+            <div className="scr-toolbar">
+              <div className="tt">Status ANAF · evenimente</div>
+              <div className="spacer" />
+              <span className="muted" style={{ fontSize: 12 }}>
+                e-Factura · {testMode ? "mediul de test" : "mediul de producție"}
+              </span>
+              {canSubmit && (
+                <button
+                  className="pill-btn send-btn"
+                  disabled={submitInvoice.isPending || authorizeAnaf.isPending}
+                  onClick={() => submitInvoice.mutate()}
+                >
+                  <Ic name="send" />
+                  {authorizeAnaf.isPending ? "Autorizare…" : submitInvoice.isPending ? "Trimitere…" : "Trimite la ANAF"}
+                </button>
+              )}
+              {canCheckStatus && (
+                <button
+                  className="sq-btn spin-btn"
+                  title="Verifică status ANAF"
+                  disabled={checkStatus.isPending}
+                  onClick={() => checkStatus.mutate()}
+                >
+                  <Ic name="sync" />
+                </button>
+              )}
+            </div>
+            <div className="spv-log">
+              {/* SPV milestones — index încărcare / index ANAF (real values) */}
+              {invoice.anafSubmittedAt && (
+                <div className="spv-ev">
+                  <div className="act-ic"><Ic name="send" /></div>
+                  <div>
+                    <div className="e1"><b>XML trimis la SPV</b></div>
+                    <div className="e2 num">
+                      {fmtRoDateTime(invoice.anafSubmittedAt)}
+                      {invoice.anafUploadId && <> · index încărcare <span className="doc">{invoice.anafUploadId}</span></>}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {invoice.anafValidatedAt && (
+                <div className="spv-ev">
+                  <div className="act-ic"><Ic name="checkC" /></div>
+                  <div>
+                    <div className="e1"><b>Validată de ANAF</b> — fără erori</div>
+                    <div className="e2 num">
+                      {fmtRoDateTime(invoice.anafValidatedAt)}
+                      {invoice.anafIndex && <> · index ANAF <span className="doc">{invoice.anafIndex}</span></>}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {invoice.anafRejectedAt && (
+                <div className="spv-ev">
+                  <div className="act-ic"><Ic name="xMark" /></div>
+                  <div>
+                    <div className="e1"><b style={{ color: "var(--red)" }}>Respinsă de ANAF</b>{invoice.rejectionCode ? ` · cod ${invoice.rejectionCode}` : ""}</div>
+                    <div className="e2 num">
+                      {fmtRoDateTime(invoice.anafRejectedAt)}
+                      {invoice.rejectionReason && <> · {invoice.rejectionReason}</>}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {!invoice.anafSubmittedAt && !invoice.anafValidatedAt && !invoice.anafRejectedAt && (
+                <div className="spv-ev">
+                  <div className="act-ic"><Ic name="clock" /></div>
+                  <div>
+                    <div className="e1"><b>Netrimisă la SPV</b></div>
+                    <div className="e2">
+                      {invoice.xmlPath ? "XML generat — gata de trimitere." : "Generați XML-ul UBL, apoi trimiteți la ANAF."}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* full event journal — real feature the prototype lacks */}
+              {events.length > 0 && (
+                <>
+                  <div className="pop-div" style={{ margin: "6px 10px" }} />
+                  <div className="col-title">Jurnal complet</div>
+                  {events.map((e) => (
+                    <div className="spv-ev" key={e.id}>
+                      <div className="act-ic"><Ic name="docText" /></div>
+                      <div>
+                        <div className="e1"><b>{e.message}</b></div>
+                        <div className="e2 num">{fmtRoDateTime(e.createdAt)} · {e.eventType}</div>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+            {/* ANAF auth indicator — real feature the prototype lacks */}
+            <div className="sold-line">
+              {isAnafAuth ? (
+                <span style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--green)" }}>
+                  <Ic name="check" cls="sic" />Autentificat ANAF
+                </span>
+              ) : (
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  Neautentificat ANAF ·
+                  <a
+                    className="link"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => { if (!authorizeAnaf.isPending) authorizeAnaf.mutate(); }}
+                  >
+                    {authorizeAnaf.isPending ? "se autorizează…" : "Autorizează"}
+                  </a>
+                </span>
+              )}
+              <span className="muted" style={{ fontSize: 11.5 }}>arhivă XML + PDF · păstrare legală</span>
+            </div>
           </div>
-          <textarea
-            value={stornoReason}
-            onChange={(e) => setStornoReason(e.target.value)}
-            placeholder="Ex: Eroare de preț, anulare comandă..."
-            className="rf-textarea"
-            style={{ minHeight: 72 }}
-            autoFocus
-          />
         </div>
-      </Modal>
+
+        <div>
+          {/* client */}
+          <div className="scr-card" style={{ marginBottom: 14 }}>
+            <div className="scr-toolbar">
+              <div className="tt">Client</div>
+              <div className="spacer" />
+              <a
+                className="see-all"
+                style={{ height: "auto", padding: 0, cursor: "pointer" }}
+                onClick={() => void navigate({ to: "/contacts" })}
+              >
+                Vezi fișa<Ic name="chevR" />
+              </a>
+            </div>
+            <div className="card-pad">
+              {contact ? (
+                <>
+                  <div className="cli" style={{ marginBottom: 12 }}>
+                    <span className="cli-ava">{initials(contact.legalName)}</span>
+                    <b style={{ fontSize: 13.5 }}>{contact.legalName}</b>
+                  </div>
+                  <dl className="kv" style={{ gridTemplateColumns: "110px 1fr", fontSize: 12.5 }}>
+                    <dt>CUI</dt><dd className="num">{contact.cui ?? "—"}</dd>
+                    <dt>Adresă</dt>
+                    <dd>{[contact.address, contact.city, contact.county].filter(Boolean).join(", ") || "—"}</dd>
+                    <dt>Email</dt><dd>{contact.email ?? "—"}</dd>
+                    <dt>Telefon</dt><dd className="num">{contact.phone ?? "—"}</dd>
+                    <dt>TVA</dt>
+                    <dd>{contact.vatPayer ? "Plătitor" : "Neplătitor"} · TVA la încasare: {contact.cashVat ? "Da" : "Nu"}</dd>
+                  </dl>
+                </>
+              ) : (
+                <div style={{ fontSize: 12.5, color: "var(--text-2)" }}>ID client: {invoice.contactId}</div>
+              )}
+            </div>
+          </div>
+
+          {/* detalii factură — real metadata the prototype lacks */}
+          <div className="scr-card" style={{ marginBottom: 14 }}>
+            <div className="scr-toolbar"><div className="tt">Detalii factură</div></div>
+            <div className="card-pad">
+              <dl className="kv" style={{ gridTemplateColumns: "110px 1fr", fontSize: 12.5 }}>
+                <dt>Serie</dt><dd className="num">{invoice.series}</dd>
+                <dt>Furnizor</dt>
+                <dd>{company ? <>{company.legalName} <span className="num">· {company.cui}</span></> : invoice.companyId}</dd>
+                <dt>Monedă</dt><dd className="num">{invoice.currency}</dd>
+                {invoice.exchangeRate !== null && (
+                  <><dt>Curs valutar</dt><dd className="num">{invoice.exchangeRate}</dd></>
+                )}
+                <dt>Atașamente</dt>
+                <dd>
+                  {invoice.xmlPath || invoice.pdfPath ? (
+                    <>
+                      {invoice.xmlPath && <span className="doc">{invoice.fullNumber}.xml · UBL 2.1 CIUS-RO</span>}
+                      {invoice.xmlPath && invoice.pdfPath && <br />}
+                      {invoice.pdfPath && <span className="doc">{invoice.fullNumber}.pdf · PDF A4</span>}
+                    </>
+                  ) : (
+                    "— generați XML-ul mai întâi"
+                  )}
+                </dd>
+                {invoice.notes && (
+                  <>
+                    <dt>Note</dt>
+                    <dd>
+                      {invoice.notes.startsWith("STORNO_OF:")
+                        ? invoice.notes.replace(/^STORNO_OF:[^|]*\|?/, "")
+                        : invoice.notes}
+                    </dd>
+                  </>
+                )}
+              </dl>
+            </div>
+          </div>
+
+          {/* plăți */}
+          <div className="scr-card">
+            <div className="scr-toolbar">
+              <div className="tt">Plăți încasate</div>
+              <div className="spacer" />
+              <span className={`chip ${payChip.cls}`}><Ic name={payChip.icon} cls="sic" />{payChip.label}</span>
+            </div>
+            {payments.length === 0 ? (
+              <div style={{ padding: "22px 14px", textAlign: "center", fontSize: 12.5, color: "var(--text-2)" }}>
+                Nicio plată înregistrată.
+              </div>
+            ) : (
+              payments.map((p) => (
+                <div className="pay-row" key={p.id}>
+                  <div className="act-ic" style={{ width: 28, height: 28 }}><Ic name="card" /></div>
+                  <div>
+                    <div className="p1">{METHOD_LABELS[p.method] ?? p.method}</div>
+                    <div className="p2 num">{fmtRoDate(p.paidAt)}{p.reference ? ` · ref. ${p.reference}` : ""}</div>
+                  </div>
+                  <span className="amt num">{fmtRON(p.amount)}</span>
+                  <button
+                    className="mini-btn"
+                    title="Șterge plata"
+                    disabled={deletePayment.isPending}
+                    onClick={() => deletePayment.mutate(p.id)}
+                  >
+                    <Ic name="xMark" />
+                  </button>
+                </div>
+              ))
+            )}
+            <div className="sold-line">
+              <span>Sold rămas de încasat</span>
+              <b className="num">{fmtRON(remaining)} {invoice.currency}</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* modal storno */}
+      {showStornoModal && (
+        <div
+          className="modal-back show"
+          style={{ position: "fixed" }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) { setShowStornoModal(false); setStornoReason(""); } }}
+        >
+          <div className="modal">
+            <div className="modal-head">
+              <div>
+                <div className="mt" style={{ color: "var(--red)" }}>Stornare factură</div>
+                <div className="ms num">{invoice.fullNumber} · se creează o notă de credit cu valori negative</div>
+              </div>
+              <button className="modal-x" onClick={() => { setShowStornoModal(false); setStornoReason(""); }}>
+                <Ic name="xMark" />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="field">
+                <label>Motivul stornării <span className="req">*</span></label>
+                <textarea
+                  className="input"
+                  placeholder="Motivul stornării…"
+                  value={stornoReason}
+                  onChange={(e) => setStornoReason(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="modal-foot">
+              <span className="left">Nota de credit se trimite separat la ANAF</span>
+              <button className="pill-btn" onClick={() => { setShowStornoModal(false); setStornoReason(""); }}>
+                Anulează
+              </button>
+              <button
+                className="btn-dark"
+                style={{ background: "var(--red)" }}
+                disabled={!stornoReason.trim() || stornoInvoice.isPending}
+                onClick={() => {
+                  stornoInvoice.mutate(stornoReason.trim());
+                  setShowStornoModal(false);
+                  setStornoReason("");
+                }}
+              >
+                {stornoInvoice.isPending ? "Se stornează…" : "Stornează"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* modal plată */}
+      {showPayModal && (
+        <div
+          className="modal-back show"
+          style={{ position: "fixed" }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowPayModal(false); }}
+        >
+          <div className="modal">
+            <div className="modal-head">
+              <div>
+                <div className="mt">Înregistrează plata</div>
+                <div className="ms num">
+                  {invoice.fullNumber} · {contact?.legalName ?? "—"} · sold {fmtRON(remaining)} {invoice.currency}
+                </div>
+              </div>
+              <button className="modal-x" onClick={() => setShowPayModal(false)}>
+                <Ic name="xMark" />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="fgrid">
+                <div className="field">
+                  <label>Suma încasată ({invoice.currency}) <span className="req">*</span></label>
+                  <input
+                    className="input num"
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    placeholder="0.00"
+                    value={payForm.amount}
+                    onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))}
+                    style={{ textAlign: "right" }}
+                  />
+                </div>
+                <div className="field">
+                  <label>Data încasării</label>
+                  <input
+                    className="input num"
+                    type="date"
+                    value={payForm.paidAt}
+                    onChange={(e) => setPayForm((f) => ({ ...f, paidAt: e.target.value }))}
+                  />
+                </div>
+                {isFx && (
+                  <div className="field">
+                    <label>Curs BNR la data plății (dif. de curs 665/765)</label>
+                    <input
+                      className="input num"
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      placeholder="ex. 4.9750"
+                      value={payForm.exchangeRate}
+                      onChange={(e) => setPayForm((f) => ({ ...f, exchangeRate: e.target.value }))}
+                      style={{ textAlign: "right" }}
+                    />
+                  </div>
+                )}
+                <div className="field">
+                  <label>Metoda</label>
+                  <select
+                    className="select"
+                    value={payForm.method}
+                    onChange={(e) => setPayForm((f) => ({ ...f, method: e.target.value }))}
+                  >
+                    {Object.entries(METHOD_LABELS).map(([v, l]) => (
+                      <option key={v} value={v}>{l}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Referință / nr. chitanță</label>
+                  <input
+                    className="input"
+                    type="text"
+                    placeholder="ex. OP 2247"
+                    value={payForm.reference}
+                    onChange={(e) => setPayForm((f) => ({ ...f, reference: e.target.value }))}
+                  />
+                </div>
+                <div className="field span2">
+                  <label>Notă internă</label>
+                  <textarea
+                    className="input"
+                    placeholder="opțional"
+                    value={payForm.notes}
+                    onChange={(e) => setPayForm((f) => ({ ...f, notes: e.target.value }))}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <span className="left">
+                {Number.isFinite(payAmountNum) && payAmountNum > 0
+                  ? payAmountNum >= remaining
+                    ? "Plata stinge integral soldul facturii"
+                    : `Plată parțială — sold rămas ${fmtRON(remaining - payAmountNum)} ${invoice.currency}`
+                  : ""}
+              </span>
+              <button className="pill-btn" onClick={() => setShowPayModal(false)}>Renunță</button>
+              <button
+                className="btn-dark"
+                disabled={paySaveDisabled}
+                onClick={() => {
+                  const rate = parseFloat(payForm.exchangeRate);
+                  addPayment.mutate({
+                    invoiceId: id,
+                    companyId: invoice.companyId,
+                    amount: payForm.amount,
+                    currency: invoice.currency,
+                    paidAt: payForm.paidAt,
+                    method: payForm.method,
+                    reference: payForm.reference || undefined,
+                    notes: payForm.notes || undefined,
+                    exchangeRate: Number.isFinite(rate) && rate > 0 ? rate : undefined,
+                  });
+                }}
+              >
+                <Ic name="check" />{addPayment.isPending ? "Se salvează…" : "Salvează plata"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* modal șablon recurent — real feature the prototype lacks */}
+      {showSaveAsTemplate && (
+        <div
+          className="modal-back show"
+          style={{ position: "fixed" }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowSaveAsTemplate(false); }}
+        >
+          <div className="modal">
+            <div className="modal-head">
+              <div>
+                <div className="mt">Salvează ca șablon recurent</div>
+                <div className="ms num">{invoice.fullNumber} · seria {invoice.series} · {lines.length} articol(e)</div>
+              </div>
+              <button className="modal-x" onClick={() => setShowSaveAsTemplate(false)}>
+                <Ic name="xMark" />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="fgrid">
+                <div className="field span2">
+                  <label>Nume șablon <span className="req">*</span></label>
+                  <input
+                    className="input"
+                    type="text"
+                    value={templateName}
+                    onChange={(e) => setTemplateName(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+                <div className="field span2">
+                  <label>Frecvență</label>
+                  <select
+                    className="select"
+                    value={templateFrequency}
+                    onChange={(e) => setTemplateFrequency(e.target.value)}
+                  >
+                    <option value="monthly">Lunar</option>
+                    <option value="quarterly">Trimestrial</option>
+                    <option value="annual">Anual</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <span className="left">Prima emitere: luna viitoare</span>
+              <button className="pill-btn" onClick={() => setShowSaveAsTemplate(false)}>Anulează</button>
+              <button
+                className="btn-dark"
+                disabled={saveAsTemplateMutation.isPending}
+                onClick={handleSaveAsTemplate}
+              >
+                {saveAsTemplateMutation.isPending ? "Se salvează…" : "Creează șablon"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

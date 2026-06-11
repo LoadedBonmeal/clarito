@@ -1,0 +1,24 @@
+/* imported-by: globals.css (wired centrally) */
+/* Setări — invoice PDF live mock (verbatim from the prototype's inline <style>
+   in Setari.html). Only rules NOT already in clarito-shell.css/clarito-pages.css. */
+.pdf-sheet{--acc:#000;background:#fff;width:520px;margin:0 auto;padding:30px 34px;font-size:11px;color:#1D1D1F;box-shadow:0 1px 2px rgba(0,0,0,.06);border:1px solid var(--line);line-height:1.5}
+.pdf-top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.pdf-logo{width:42px;height:42px;border-radius:9px;background:var(--fill);border:1px dashed #C9C9CE;display:flex;align-items:center;justify-content:center;font-size:8.5px;color:var(--dim);text-align:center;flex:none}
+.pdf-co{font-size:13px;font-weight:700}
+.pdf-co-meta{color:var(--text-2);font-size:10px;margin-top:2px}
+.pdf-title{font-size:20px;font-weight:700;letter-spacing:-.01em;text-align:right;color:var(--acc)}
+.pdf-sub{text-align:right;font-size:10px;color:var(--text-2);margin-top:2px}
+.pdf-note{font-size:10px;color:var(--text-2);margin-top:6px;white-space:pre-line;text-align:right}
+.pdf-foot-note{font-size:10px;color:var(--text-2);margin-top:14px;padding-top:10px;border-top:1px solid var(--line);white-space:pre-line}
+.pdf-sec{font-size:9px;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:var(--acc);margin:18px 0 6px}
+.pdf-rule{height:1.5px;background:var(--acc);margin:4px 0 0;opacity:.9}
+.pdf-tbl{width:100%;border-collapse:collapse;margin-top:4px}
+.pdf-tbl th{font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-2);text-align:left;padding:5px 6px;border-bottom:1px solid var(--line)}
+.pdf-tbl td{padding:6px;font-size:10.5px;border-bottom:1px solid #F0F0F1}
+.pdf-tbl .r{text-align:right;font-variant-numeric:tabular-nums}
+.pdf-tot{margin-top:12px;margin-left:auto;width:230px}
+.pdf-tot .row{display:flex;justify-content:space-between;font-size:11px;padding:3px 0;color:var(--text-2)}
+.pdf-tot .row b{color:var(--text)}
+.pdf-tot .grand{border-top:1.5px solid var(--acc);margin-top:5px;padding-top:7px;font-size:13px;font-weight:700;color:var(--text)}
+.pdf-words{font-size:10px;font-style:italic;color:var(--text-2);text-align:right;margin-top:4px}
+.modal.pdfwide{width:620px}

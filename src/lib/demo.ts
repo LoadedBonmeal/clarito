@@ -182,6 +182,19 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
   list_companies: () => [company],
   get_company: () => company,
   list_contacts: () => contacts,
+  get_contact: (a) => contacts.find((c) => c.id === a?.id) ?? contacts[0],
+  get_invoice: (a) => {
+    const inv = invoices.find((i) => i.id === a?.id) ?? invoices[0];
+    return {
+      invoice: inv,
+      events: [],
+      payments: [],
+      lines: [
+        { id: "demo-l1", invoiceId: (inv as { id: string }).id, position: 1, name: "Servicii consultanță", description: null, quantity: "10.00", unit: "H87", unitPrice: "100.00", vatRate: "21.00", vatCategory: "S", subtotalAmount: "1000.00", vatAmount: "210.00", totalAmount: "1210.00", cpvCode: null, art331Code: null, revenueKind: "goods" },
+        { id: "demo-l2", invoiceId: (inv as { id: string }).id, position: 2, name: "Materiale tipărite", description: null, quantity: "5.00", unit: "H87", unitPrice: "40.00", vatRate: "11.00", vatCategory: "S", subtotalAmount: "200.00", vatAmount: "22.00", totalAmount: "222.00", cpvCode: null, art331Code: null, revenueKind: "goods" },
+      ],
+    };
+  },
   list_invoices: (a) => paginate(invoices, a),
   list_received_invoices: (a) => paginate(received, a),
   list_notifications: () => notifications,
@@ -208,6 +221,14 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
   list_vat_rates: () => [],
   list_accounts: () => [],
   stock_valuation_ledger: () => [],
+  // GL / contabilitate — minimal valid object shapes (page expects .rows/.entries etc.)
+  journal_register: () => ({ rows: [], totalDebit: "0", totalCredit: "0", balanced: true }),
+  trial_balance: () => ({ rows: [], totalOpeningDebit: "0", totalOpeningCredit: "0", totalPeriodDebit: "0", totalPeriodCredit: "0", totalTotalDebit: "0", totalTotalCredit: "0", totalClosingDebit: "0", totalClosingCredit: "0" }),
+  profit_and_loss: () => ({ periodFrom: "2026-06-01", periodTo: "2026-06-30", taxRegime: "micro", revenueLines: [], expenseLines: [], operatingRevenue: "0", operatingExpense: "0", grossResult: "0", incomeTax: "0", netResult: "0" }),
+  ledger_accounts: () => [],
+  list_certificates: () => [],
+  get_archive_size: () => 0,
+  verify_archive_integrity: () => ({ checked: 0, missing: [], missingUnderRetention: [] }),
 };
 
 export function demoInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
