@@ -22,6 +22,8 @@
 @import "./clarito-shell.css";
 @import "./clarito-pages.css";
 @import "./clarito-anim.css";
+/* per-page design CSS (extracted from each prototype's inline <style>) */
+@import "./page-received.css";
 
 @custom-variant dark (&:is(.dark *));
 

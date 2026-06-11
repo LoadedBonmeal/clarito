@@ -1,0 +1,9 @@
+/* imported-by: globals.css (wired centrally) */
+/* Facturi primite — rules from the prototype's inline <style> that are NOT
+   already in clarito-shell.css / clarito-pages.css (the .scr-table density
+   overrides live in clarito-pages.css). */
+.defal-grid{display:grid;grid-template-columns:1fr 110px 110px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.defal-grid:last-of-type{border-bottom:0}
+.defal-grid .select,.defal-grid .input{height:31px;font-size:12.5px}
+.defal-head{display:grid;grid-template-columns:1fr 110px 110px;gap:8px;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);font-weight:600;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.missing{color:var(--amber);font-weight:700;cursor:help}

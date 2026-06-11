@@ -199,7 +199,15 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
   vat_registration_status: () => ({ applicable: false, level: "ok", ytdTurnoverRon: "0", plafonRon: "395.000", pct: 0 }),
   intrastat_status: () => ({ dispatches: ok, arrivals: ok, thresholdRon: "1.000.000" }),
   list_payments: () => [],
-  list_receipts: (a) => paginate([], a),
+  list_payment_summaries: () => [],
+  list_receipts: () => [],
+  list_products: () => [],
+  list_recurring_invoices: () => [],
+  list_employees: () => [],
+  list_assets: () => [],
+  list_vat_rates: () => [],
+  list_accounts: () => [],
+  stock_valuation_ledger: () => [],
 };
 
 export function demoInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
