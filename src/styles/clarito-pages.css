@@ -52,6 +52,21 @@
 .bar-col .mlab{font-size:11px;color:var(--dim);font-weight:500}
 .bar-col.curr .mlab{color:var(--text);font-weight:600}
 
+/* period calendar (date picker in the dashboard month button) */
+.cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.cal-title{font-size:13px;font-weight:600}
+.cal-nav{width:28px;height:28px;border:0;background:transparent;border-radius:7px;cursor:pointer;color:var(--text-2);display:flex;align-items:center;justify-content:center}
+.cal-nav:hover{background:var(--fill);color:var(--text)}
+.cal-nav svg{width:16px;height:16px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.cal-wd{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:10.5px;color:var(--dim);text-align:center;font-weight:600;margin-bottom:2px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.cal-day{height:32px;display:flex;align-items:center;justify-content:center;font-size:12.5px;border-radius:7px;cursor:pointer;font-variant-numeric:tabular-nums;color:var(--text);border:0;background:transparent;font-family:inherit}
+.cal-day:hover{background:var(--fill)}
+.cal-day.out{color:var(--dim)}
+.cal-day.today{box-shadow:inset 0 0 0 1px var(--line)}
+.cal-day.sel{background:var(--black);color:#fff;font-weight:600}
+.cal-day.sel:hover{background:var(--black)}
+
 /* SPV activity feed */
 .activity{padding:6px 6px 8px}
 .act-item{display:flex;gap:11px;padding:10px 12px;border-radius:9px}

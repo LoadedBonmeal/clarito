@@ -26,7 +26,8 @@ function fmtTime(unix: number): string {
 export function DashboardPage() {
   const navigate  = useNavigate();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
-  const [selectedYM, setSelectedYM] = useState<string>(() => new Date().toISOString().slice(0, 7));
+  const [selDate, setSelDate] = useState<Date>(() => new Date());
+  const [viewYM, setViewYM] = useState<{ y: number; m: number }>(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
   const [refreshing, setRefreshing] = useState(false);
   const [monthPopOpen, setMonthPopOpen] = useState(false);
 
@@ -36,6 +37,8 @@ export function DashboardPage() {
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [monthPopOpen]);
+
+  const selectedYM = `${selDate.getFullYear()}-${String(selDate.getMonth() + 1).padStart(2, "0")}`;
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -220,9 +223,12 @@ export function DashboardPage() {
 
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
   const MONTHS_FULL = ["Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie", "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie"];
-  const [selY, selM] = selectedYM.split("-").map(Number);
-  const periodLabel = `${MONTHS_FULL[selM - 1]} ${selY}`;
-  const headDate = cap(now.toLocaleDateString("ro-RO", { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
+  const selM = selDate.getMonth() + 1;
+  const periodLabel = `${MONTHS_FULL[selDate.getMonth()]} ${selDate.getFullYear()}`;
+  const headDate = cap(selDate.toLocaleDateString("ro-RO", { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
+  const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const WD = ["Du", "Lu", "Ma", "Mi", "Jo", "Vi", "Sâ"];
+  const calStart = new Date(viewYM.y, viewYM.m, 1).getDay();
 
   // De încasat = issued, not-yet-finalized invoices in the period (proxy for outstanding).
   const openInvoices = periodInvoices.filter((i) => ["VALIDATED", "SUBMITTED", "QUEUED"].includes(i.status));
@@ -237,9 +243,6 @@ export function DashboardPage() {
     REJECTED:  { cls: "late", icon: "xMark", label: "Respinsă" },
     STORNED:   { cls: "sent", icon: "undo", label: "Stornată" },
   };
-
-  // 12 months of the selected year (design month picker).
-  const monthOptions = MONTHS_FULL.map((label, i) => ({ ym: `${selY}-${String(i + 1).padStart(2, "0")}`, label: `${label} ${selY}` }));
 
   if (!activeCompanyId) {
     return (
@@ -310,18 +313,37 @@ export function DashboardPage() {
         </div>
         <div className="head-actions">
           <div className="nou-wrap" style={{ position: "relative" }}>
-            <button className="pill-btn" onMouseDown={(e) => e.stopPropagation()} onClick={() => setMonthPopOpen((o) => !o)}>
+            <button
+              className="pill-btn"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => { if (!monthPopOpen) setViewYM({ y: selDate.getFullYear(), m: selDate.getMonth() }); setMonthPopOpen((o) => !o); }}
+            >
               <Ic name="calendar" /><span>{periodLabel}</span><Ic name="chevD" cls="ic" />
             </button>
             {monthPopOpen && (
-              <div className="pop show" style={{ left: 0, top: 42, width: 200, maxHeight: 300, overflowY: "auto" }} onMouseDown={(e) => e.stopPropagation()}>
-                <div className="col-title">Perioadă · {selY}</div>
-                {monthOptions.map((p) => (
-                  <button key={p.ym} className="pop-item" onClick={() => { setSelectedYM(p.ym); setMonthPopOpen(false); }}>
-                    <span style={{ flex: 1 }}>{p.label}</span>
-                    {selectedYM === p.ym && <Ic name="check" cls="co-check" />}
+              <div className="pop show" style={{ left: 0, top: 42, width: 288, padding: 10 }} onMouseDown={(e) => e.stopPropagation()}>
+                <div className="cal-head">
+                  <button className="cal-nav" aria-label="Luna anterioară" onClick={() => setViewYM((v) => { const d = new Date(v.y, v.m - 1, 1); return { y: d.getFullYear(), m: d.getMonth() }; })}>
+                    <svg viewBox="0 0 24 24"><path d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
                   </button>
-                ))}
+                  <div className="cal-title">{MONTHS_FULL[viewYM.m]} {viewYM.y}</div>
+                  <button className="cal-nav" aria-label="Luna următoare" onClick={() => setViewYM((v) => { const d = new Date(v.y, v.m + 1, 1); return { y: d.getFullYear(), m: d.getMonth() }; })}>
+                    <svg viewBox="0 0 24 24"><path d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                  </button>
+                </div>
+                <div className="cal-wd">{WD.map((d) => <span key={d}>{d}</span>)}</div>
+                <div className="cal-grid">
+                  {Array.from({ length: 42 }, (_, i) => {
+                    const cell = new Date(viewYM.y, viewYM.m, i - calStart + 1);
+                    const out = cell.getMonth() !== viewYM.m;
+                    const cls = `cal-day${out ? " out" : ""}${sameDay(cell, now) ? " today" : ""}${sameDay(cell, selDate) ? " sel" : ""}`;
+                    return (
+                      <button key={i} className={cls} onClick={() => { setSelDate(cell); setViewYM({ y: cell.getFullYear(), m: cell.getMonth() }); setMonthPopOpen(false); }}>
+                        {cell.getDate()}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
