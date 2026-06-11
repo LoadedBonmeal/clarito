@@ -30,13 +30,15 @@ export function DashboardPage() {
   const [viewYM, setViewYM] = useState<{ y: number; m: number }>(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
   const [refreshing, setRefreshing] = useState(false);
   const [monthPopOpen, setMonthPopOpen] = useState(false);
+  const [colPopOpen, setColPopOpen] = useState(false);
+  const [hiddenCols, setHiddenCols] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    if (!monthPopOpen) return;
-    const h = () => setMonthPopOpen(false);
+    if (!monthPopOpen && !colPopOpen) return;
+    const h = () => { setMonthPopOpen(false); setColPopOpen(false); };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
-  }, [monthPopOpen]);
+  }, [monthPopOpen, colPopOpen]);
 
   const selectedYM = `${selDate.getFullYear()}-${String(selDate.getMonth() + 1).padStart(2, "0")}`;
 
@@ -170,7 +172,8 @@ export function DashboardPage() {
     const months: { key: string; label: string }[] = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push({ key: `${d.getFullYear()}-${pad(d.getMonth() + 1)}`, label: d.toLocaleDateString("ro-RO", { month: "short" }) });
+      const CAP = ["Ian", "Feb", "Mar", "Apr", "Mai", "Iun", "Iul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      months.push({ key: `${d.getFullYear()}-${pad(d.getMonth() + 1)}`, label: CAP[d.getMonth()] });
     }
     const emiseBy: Record<string, number> = {};
     const primiteBy: Record<string, number> = {};
@@ -215,9 +218,9 @@ export function DashboardPage() {
   const actIcon = (type: string) => {
     const t = type.toUpperCase();
     if (t.includes("REJECT")) return "xMark";
-    if (t.includes("VALID") || t.includes("ACCEPT")) return "checkC";
+    if (t.includes("SENT") || t.includes("SUBMIT") || t.includes("VALID") || t.includes("ACCEPT")) return "send";
     if (t.includes("SYNC")) return "sync";
-    if (t.includes("IMPORT") || t.includes("RECEIV")) return "docDown";
+    if (t.includes("IMPORT") || t.includes("RECEIV")) return "docText";
     return "mail";
   };
 
@@ -239,7 +242,7 @@ export function DashboardPage() {
     DRAFT:     { cls: "sent", icon: "docText", label: "Ciornă" },
     QUEUED:    { cls: "wait", icon: "clock", label: "În coadă" },
     SUBMITTED: { cls: "wait", icon: "send", label: "Trimisă" },
-    VALIDATED: { cls: "paid", icon: "checkC", label: "Validată" },
+    VALIDATED: { cls: "paid", icon: "check", label: "Validată" },
     REJECTED:  { cls: "late", icon: "xMark", label: "Respinsă" },
     STORNED:   { cls: "sent", icon: "undo", label: "Stornată" },
   };
@@ -434,7 +437,7 @@ export function DashboardPage() {
                 <div className="act-ic"><Ic name={actIcon(n.notificationType)} /></div>
                 <div className="act-tx">
                   <div className="a1">{n.title}</div>
-                  <div className="a2">{fmtTime(n.createdAt)}{n.body ? ` · ${n.body}` : ""}</div>
+                  <div className="a2">{n.body || fmtTime(n.createdAt)}</div>
                 </div>
               </div>
             ))}
@@ -448,9 +451,23 @@ export function DashboardPage() {
           <div className="tt">Facturi recente</div>
           <div className="tbar-actions">
             <a className="see-all" style={{ cursor: "pointer" }} onClick={() => void navigate({ to: "/invoices" })}>Vezi toate<Ic name="chevR" /></a>
+            <button className="pill-btn" onMouseDown={(e) => e.stopPropagation()} onClick={() => setColPopOpen((o) => !o)}>
+              <Ic name="columns" />Coloane
+            </button>
+            {colPopOpen && (
+              <div className="pop show" style={{ right: 0, top: 40, width: 230 }} onMouseDown={(e) => e.stopPropagation()}>
+                <div className="col-title">Gestionează coloane</div>
+                <div className="col-row locked"><Ic name="users" /><span className="cl">Client</span><span className="tog on" /></div>
+                {([["doc", "Document", "docText"], ["data", "Data", "calendar"], ["scad", "Scadența", "clock"], ["val", "Valoare", "calc"]] as const).map(([key, label, icon]) => (
+                  <div key={key} className="col-row" onClick={() => setHiddenCols((s) => ({ ...s, [key]: !s[key] }))}>
+                    <Ic name={icon} /><span className="cl">{label}</span><span className={`tog${hiddenCols[key] ? "" : " on"}`} />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
-        <table>
+        <table className={Object.entries(hiddenCols).filter(([, v]) => v).map(([k]) => `hide-${k}`).join(" ")}>
           <thead>
             <tr>
               <th className="c-client">Client</th>
@@ -483,9 +500,6 @@ export function DashboardPage() {
         </table>
       </div>
 
-      <div style={{ fontSize: 11.5, color: "var(--dim)", padding: "4px 0 8px" }}>
-        Datele se actualizează automat la fiecare 60 s. Toate sumele sunt în <b>RON</b>.
-      </div>
     </div>
   );
 }

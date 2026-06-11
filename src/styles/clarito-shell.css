@@ -17,7 +17,10 @@
 }
 
 :root{
-  --bg:var(--rf-content);--text:var(--rf-text);--text-2:var(--rf-text-muted);--dim:var(--rf-text-dim);
+  /* NOTE: --text is NOT aliased here — design.css's legacy `--text` already holds
+     the right ink color per theme, and aliasing it to --rf-text would create a
+     var() cycle (--rf-text: var(--text)) that computes to `invalid`. */
+  --bg:var(--rf-content);--text-2:var(--rf-text-muted);--dim:var(--rf-text-dim);
   --line:var(--rf-border);--fill:var(--rf-neutral-bg);--black:var(--rf-accent);
   --green:var(--rf-success);--red:var(--rf-error);--amber:var(--rf-warning);
   --mono:var(--rf-mono);

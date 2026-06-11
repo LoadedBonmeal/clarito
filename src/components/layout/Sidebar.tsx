@@ -112,6 +112,12 @@ export function Sidebar() {
   );
 
   const toggleLang = () => { void i18n.changeLanguage(i18n.language?.startsWith("en") ? "ro" : "en"); };
+  // Display name = the license email's local part, capitalized ("andrei@…" → "Andrei").
+  const accountName = (() => {
+    const local = (license?.email ?? "").split("@")[0];
+    if (!local) return "Cont Clarito";
+    return local.split(/[._-]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+  })();
   const handleExit = async () => { (await import("@tauri-apps/plugin-process")).exit(0); };
   const handleDocs = async () => { (await import("@tauri-apps/plugin-opener")).openUrl("https://mfinante.gov.ro/ro/web/efactura/informatii-tehnice"); };
   const soon = () => notify.info("În curând.");
@@ -210,7 +216,7 @@ export function Sidebar() {
         >
           <div className="u-ava">{initials(license?.email ?? "Clarito", 2)}</div>
           <div className="meta">
-            <div className="uname">Cont</div>
+            <div className="uname">{accountName}</div>
             <div className="umail">{license?.email ?? "Cont Clarito"}</div>
           </div>
         </button>
@@ -221,7 +227,7 @@ export function Sidebar() {
         <div className="pop show" id="profilePop" onMouseDown={stop}>
           <div className="pop-head">
             <div className="u-ava">{initials(license?.email ?? "Clarito", 2)}</div>
-            <div><div className="pn">Cont</div><div className="pm">{license?.email ?? "Cont Clarito"}</div></div>
+            <div><div className="pn">{accountName}</div><div className="pm">{license?.email ?? "Cont Clarito"}</div></div>
           </div>
           <div className="pop-div" />
           <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/settings" }); }}><Ic name="cog" />Setări</button>

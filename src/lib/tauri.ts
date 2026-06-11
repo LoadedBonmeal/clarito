@@ -10,6 +10,8 @@
 
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 
+import { demoInvoke, isDemoMode } from "@/lib/demo";
+
 import type {
   Account,
   AccountInput,
@@ -76,6 +78,11 @@ export function isTauriContext(): boolean {
 
 /** Folosește direct când ai nevoie de o comandă neacoperită încă. */
 export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  // Dev-only browser harness (?demo=1): serve design-handoff fixtures instead of
+  // Tauri IPC, so the UI can be pixel-verified against the prototypes headlessly.
+  if (isDemoMode()) {
+    return demoInvoke<T>(cmd, args);
+  }
   if (!isTauriContext()) {
     return Promise.reject({
       message:

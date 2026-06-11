@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { queryClient } from "@/lib/queries";
 import { router } from "@/router";
 import { isTauriContext } from "@/lib/tauri";
+import { isDemoMode } from "@/lib/demo";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { isMac } from "@/lib/platform";
 import { useIconPressAnimation } from "@/hooks/use-icon-press";
@@ -62,7 +63,9 @@ function NotTauriScreen() {
 function App() {
   useIconPressAnimation();
   // Guard: dacă rulăm în browser (dev server deschis direct), afișăm un mesaj clar.
-  if (!isTauriContext()) {
+  // Excepție: harness-ul de verificare vizuală (?demo=1, doar în dev) rulează în
+  // browser cu fixtures în loc de IPC — vezi lib/demo.ts.
+  if (!isTauriContext() && !isDemoMode()) {
     return <NotTauriScreen />;
   }
 
