@@ -7,13 +7,7 @@ import { useTranslation } from "react-i18next";
 import { Icon } from "@/components/shared/Icon";
 import { api } from "@/lib/tauri";
 import { formatError } from "@/lib/error-mapper";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import { createPortal } from "react-dom";
 
 interface CsvImportModalProps {
   type: "invoices" | "contacts";
@@ -129,36 +123,23 @@ export function CsvImportModal({
     }
   };
 
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => { if (!open) onClose(); }}
+  return createPortal(
+    <div
+      className="modal-back show"
+      style={{ position: "fixed" }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <DialogContent
-        style={{
-          width: 520,
-          maxWidth: "calc(100% - 2rem)",
-          background: "var(--bg-content)",
-          border: "1px solid var(--border-strong)",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.18)",
-          padding: "20px 24px 18px",
-        }}
-        showCloseButton={false}
-      >
-        {/* Header */}
-        <DialogHeader style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <DialogTitle style={{ fontSize: 14, fontWeight: 700 }}>
-              {t("shared.csvImport.title", { type: typeLabel })}
-            </DialogTitle>
-            <button type="button" className="modal-x" aria-label={t("shared.common.close")} onClick={onClose}>
-              <Icon name="x" size={14} />
-            </button>
+      <div className="modal" style={{ width: 520, maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+        <div className="modal-head">
+          <div>
+            <div className="mt">{t("shared.csvImport.title", { type: typeLabel })}</div>
+            <div className="ms">{t("shared.csvImport.description", { type: typeLabel.toLowerCase() })}</div>
           </div>
-          <DialogDescription className="sr-only">
-            {t("shared.csvImport.description", { type: typeLabel.toLowerCase() })}
-          </DialogDescription>
-        </DialogHeader>
+          <button type="button" className="modal-x" aria-label={t("shared.common.close")} onClick={onClose}>
+            <Icon name="x" size={14} />
+          </button>
+        </div>
+        <div className="modal-body" style={{ overflowY: "auto" }}>
 
         {/* Template download */}
         <div style={{ marginBottom: 12 }}>
@@ -313,7 +294,9 @@ export function CsvImportModal({
             {importing ? t("shared.csvImport.importing") : t("shared.csvImport.importBtn")}
           </button>
         </div>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
