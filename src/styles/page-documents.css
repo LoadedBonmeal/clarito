@@ -1,0 +1,5 @@
+/* imported-by: globals.css (wired centrally) */
+/* Documente — the prototype (clarito-shell.css only) shows the .cli-ava letter
+   badges (F/R/D/P) inside the archive table; the app-wide density override in
+   clarito-pages.css hides .cli-ava inside .scr-table, so re-enable it here. */
+.page-documents .scr-table .cli-ava{display:flex}

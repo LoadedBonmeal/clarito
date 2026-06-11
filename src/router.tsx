@@ -62,6 +62,9 @@ import { AssetsPage } from "@/pages/Assets";
 import { ReportsPage } from "@/pages/Reports";
 import { EtransportPage } from "@/pages/Etransport";
 import { SettingsPage } from "@/pages/Settings";
+import { DocumentsPage } from "@/pages/Documents";
+import { HelpPage } from "@/pages/Help";
+import { AccountPage } from "@/pages/Account";
 import { PaymentsPage } from "@/pages/Payments";
 import { RecurringPage } from "@/pages/Recurring";
 import { ChartOfAccountsPage } from "@/pages/ChartOfAccounts";
@@ -209,6 +212,24 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+const documentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/documents",
+  component: DocumentsPage,
+});
+
+const helpRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/help",
+  component: HelpPage,
+});
+
+const accountRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/account",
+  component: AccountPage,
+});
+
 const paymentsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/payments",
@@ -294,6 +315,9 @@ const routeTree = rootRoute.addChildren([
   accountsRoute,
   reportsRoute,
   settingsRoute,
+  documentsRoute,
+  helpRoute,
+  accountRoute,
   paymentsRoute,
   recurringRoute,
   declarationsRoute,

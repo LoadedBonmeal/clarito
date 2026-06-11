@@ -15,7 +15,6 @@ import { Ic } from "@/components/shared/Ic";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
-import { notify } from "@/lib/toasts";
 
 interface NavLink {
   key: string;
@@ -119,8 +118,6 @@ export function Sidebar() {
     return local.split(/[._-]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
   })();
   const handleExit = async () => { (await import("@tauri-apps/plugin-process")).exit(0); };
-  const handleDocs = async () => { (await import("@tauri-apps/plugin-opener")).openUrl("https://mfinante.gov.ro/ro/web/efactura/informatii-tehnice"); };
-  const soon = () => notify.info("În curând.");
   const langTag = i18n.language?.startsWith("en") ? "EN" : "RO";
 
   return (
@@ -239,9 +236,9 @@ export function Sidebar() {
             <Ic name="bell" />Notificări
             {unreadCount != null && unreadCount > 0 && <span className="pill-new" style={{ marginLeft: "auto", background: "var(--black)" }}>{unreadCount}</span>}
           </button>
-          <button className="pop-item" onClick={() => { setProfileOpen(false); soon(); }}><Ic name="docText" />Documente</button>
-          <button className="pop-item" onClick={() => { setProfileOpen(false); soon(); }}><Ic name="team" />Echipă</button>
-          <button className="pop-item" onClick={() => { setProfileOpen(false); void handleDocs(); }}><Ic name="help" />Ajutor</button>
+          <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/documents" }); }}><Ic name="docText" />Documente</button>
+          <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/account" }); }}><Ic name="team" />Cont & Licență</button>
+          <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/help" }); }}><Ic name="help" />Ajutor</button>
           <div className="pop-div" />
           <button className="pop-item" onClick={() => void handleExit()}><Ic name="exit" />Ieșire</button>
         </div>
