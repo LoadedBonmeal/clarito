@@ -1,0 +1,10 @@
+/* imported-by: globals.css (wired centrally) */
+/* Salarizare — tab panels + mini-chips from the prototype's inline <style>.
+   Scoped under .pg-payroll because legacy design.css still has a `.panel`
+   card rule (background/border/shadow) that must not leak in. */
+.pg-payroll .panel{display:none;background:none;border:none;border-radius:0;box-shadow:none;overflow:visible}
+.pg-payroll .panel.show{display:block}
+.pg-payroll .mini-chip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:10.5px;font-weight:600;border:1px solid var(--line);background:var(--fill);color:var(--text-2);white-space:nowrap}
+.pg-payroll .mini-chip.warn{color:var(--amber);background:rgba(180,83,9,.07);border-color:rgba(180,83,9,.18)}
+.pg-payroll .mini-chip.ok{color:var(--green);background:rgba(4,120,87,.07);border-color:rgba(4,120,87,.18)}
+.pg-payroll .chips{display:flex;gap:5px;flex-wrap:wrap}

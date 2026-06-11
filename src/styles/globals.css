@@ -27,6 +27,9 @@
 @import "./page-payments.css";
 @import "./page-recurring.css";
 @import "./page-companies.css";
+@import "./page-payroll.css";
+@import "./page-declarations.css";
+@import "./page-etransport.css";
 
 @custom-variant dark (&:is(.dark *));
 
