@@ -26,6 +26,7 @@
 @import "./page-received.css";
 @import "./page-payments.css";
 @import "./page-recurring.css";
+@import "./page-companies.css";
 
 @custom-variant dark (&:is(.dark *));
 

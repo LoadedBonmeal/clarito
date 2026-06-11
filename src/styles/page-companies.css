@@ -1,0 +1,11 @@
+/* imported-by: globals.css (wired centrally) */
+/* Companii — plafon-monitor cards (verbatim from design Companii.html inline <style>) */
+.plafon-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.plafon{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}
+.plafon .ph{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.plafon .pt{font-size:13px;font-weight:600;line-height:1.35}
+.plafon .ps{font-size:11.5px;color:var(--dim);margin-top:2px;line-height:1.4}
+.plafon .pv{font-size:21px;font-weight:600;letter-spacing:-.02em;margin-top:14px}
+.plafon .pv .of{font-size:12px;font-weight:500;color:var(--dim)}
+.plafon .meter{margin-top:10px}
+.plafon .pf{display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-2);margin-top:7px}
