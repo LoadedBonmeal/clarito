@@ -1,142 +1,66 @@
 /**
- * Facturi emise — Polish-Wave 5 restructure.
+ * Facturi emise — verbatim port of the design "Facturi emise.html":
+ *   .page-head (title + count sub + btn-dark "Factură nouă" ⌘N)
+ *   .scr-card → .scr-toolbar (.scr-search · .tabs status counts · period pill ·
+ *   Filtre pill · refresh sq-btn · Export/Import pop) → .bulkbar → .scr-table
+ *   (cbx · doc · date · client · net/TVA/total · monedă · status/plată chips ·
+ *   .row-acts eye + "··· " pop) → .tot-foot totals.
  *
- * LAYOUT (matches "Claude Design" reference):
- *   Header  : title + count chip + "+ Factură nouă" only
- *   Toolbar : search | "Toate ▾" status-dropdown | period "mai 2026 ▾" |
- *             "Filtre" (popover: Cu erori + Min/Max) | refresh | Export▾ | Import▾
- *   Columns : NUMĂR · DATA · CLIENT · VALOARE NET · TVA · TOTAL · MONEDĂ · STATUS
- *             + hover action cell (eye / pen / "…" RowMenu)
- *
- * ALL wiring preserved:
- *   api.invoices.list, api.contacts.list, api.anaf.submitInvoice,
- *   api.anaf.checkStatus, api.ubl.generatePdf, api.ubl.generateXml,
- *   api.invoices.duplicate, api.invoices.storno,
- *   api.integrations.exportSagaCsv, api.integrations.exportInvoicesXlsx,
- *   api.importData.invoiceXmlFromFile, CsvImportModal,
- *   multi-select bulk-submit + bulk-print, virtualizer, keyboard nav,
- *   ?view=storned deep-link.
+ * ALL wiring preserved: api.invoices.list, api.contacts.list,
+ * api.anaf.submitInvoice/checkStatus, api.ubl.generatePdf/generateXml,
+ * api.invoices.duplicate/storno, api.payments.listSummaries,
+ * api.integrations.exportSagaCsv/exportInvoicesXlsx,
+ * api.importData.invoiceXmlFromFile, CsvImportModal, bulk submit/print,
+ * ?view=storned deep-link.
  */
 
-import { useMemo, useRef, useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { useTranslation } from "react-i18next";
 
-import { Icon } from "@/components/shared/Icon";
-import { StatusBadge } from "@/components/shared/StatusBadge";
+import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { CsvImportModal } from "@/components/shared/CsvImportModal";
-import { PageHeader, Btn, IconBtn, Badge, Empty, SearchInput } from "@/components/rf";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuLabel,
-} from "@/components/ui/dropdown-menu";
-import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from "@/components/ui/popover";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { formatOptionalRon } from "@/lib/formatters";
 import { formatError } from "@/lib/error-mapper";
-import { fmtShortcut } from "@/lib/platform";
 import { notify } from "@/lib/toasts";
 import type { InvoiceStatus } from "@/types";
 
 type StatusFilter = InvoiceStatus | "all";
-
-// Month filter value: "YYYY-MM" or "all"
 type PeriodFilter = string | "all";
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+const RO_MON = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
+const fmtRoDate = (iso: string) => {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  return `${d} ${RO_MON[Number(m) - 1] ?? m} ${y}`;
+};
 
-/** Returns "mai 2026" style Romanian month label from a YYYY-MM string. */
 function fmtMonth(ym: string): string {
   const [year, month] = ym.split("-");
   const d = new Date(Number(year), Number(month) - 1, 1);
   return d.toLocaleDateString("ro-RO", { month: "long", year: "numeric" });
 }
 
-/** Produce last N month YYYY-MM strings (newest first). */
-function recentMonths(n = 12): string[] {
-  const result: string[] = [];
-  const now = new Date();
-  for (let i = 0; i < n; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    result.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-  }
-  return result;
-}
+/** Render at most this many rows (plain table, no virtualizer — design parity). */
+const MAX_ROWS = 1000;
 
-// ── ToolbarBtn — small button styled with rf tokens ───────────────────────────
+// Status → design chip (.chip variants + icon + label).
+const STATUS_CHIP: Record<InvoiceStatus, { cls: string; icon: string; label: string }> = {
+  DRAFT:     { cls: "sent", icon: "docText", label: "Schiță" },
+  QUEUED:    { cls: "wait", icon: "clock",   label: "În coadă" },
+  SUBMITTED: { cls: "sent", icon: "send",    label: "Trimisă" },
+  VALIDATED: { cls: "paid", icon: "check",   label: "Validată" },
+  REJECTED:  { cls: "late", icon: "xMark",   label: "Respinsă" },
+  STORNED:   { cls: "wait", icon: "undo",    label: "Stornată" },
+};
 
-interface ToolbarBtnProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  active?: boolean;
-  dot?: boolean;
-  children: React.ReactNode;
-}
-
-function ToolbarBtn({ active, dot, children, style, ...rest }: ToolbarBtnProps) {
-  return (
-    <button
-      type="button"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 5,
-        height: 32,
-        padding: "0 10px",
-        border: `1px solid ${active ? "var(--rf-accent)" : "var(--rf-border-strong)"}`,
-        borderRadius: "var(--rf-radius-sm)",
-        background: active ? "var(--rf-accent-bg)" : "var(--rf-content)",
-        color: active ? "var(--rf-accent)" : "var(--rf-text)",
-        fontFamily: "var(--rf-font)",
-        fontSize: 13,
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-        position: "relative",
-        ...style,
-      }}
-      {...rest}
-    >
-      {children}
-      {dot && (
-        <span
-          style={{
-            position: "absolute",
-            top: 4,
-            right: 4,
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            background: "var(--rf-accent)",
-          }}
-        />
-      )}
-    </button>
-  );
-}
-
-// Chevron down tiny icon (inline SVG — no import needed)
-function ChevDown({ size = 10 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 10 10" fill="none" style={{ opacity: 0.6 }}>
-      <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-// ── RowMenu ───────────────────────────────────────────────────────────────────
+// ── RowMenu — design .pop with .pop-item rows (portal-anchored) ───────────────
 
 interface RowMenuProps {
   invoiceId: string;
@@ -158,10 +82,9 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
   });
   const testMode = testModeSetting === "1";
 
-  // Close on outside click — attach only once, clean up both the timer and the exact handler
   useEffect(() => {
     const h = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest(".rf-row-menu")) onClose();
+      if (!(e.target as HTMLElement).closest(".row-menu-pop")) onClose();
     };
     const tid = setTimeout(() => document.addEventListener("click", h), 0);
     window.addEventListener("scroll", onClose, true);
@@ -257,7 +180,6 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
       const stornoInv = await api.invoices.storno(invoiceId, companyId, stornoReason.trim());
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
       notify.success(`Factură storno creată: ${stornoInv.fullNumber}`);
-      // Navigate to the new credit note so the accountant can generate XML and submit.
       void navigate({ to: "/invoices/$id", params: { id: stornoInv.id } });
     } catch (e) {
       notify.error(formatError(e, "Eroare stornare."));
@@ -269,30 +191,31 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
   if (stornoOpen) {
     return createPortal(
       <div
-        className="rf-row-menu rf-card"
-        style={{ ...portalPos(280), padding: 12, boxShadow: "var(--rf-shadow-md)" }}
+        className="row-menu-pop pop show"
+        style={{ ...portalPos(280), padding: 12 }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--rf-error)" }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--red)" }}>
           Stornare factură
         </div>
         <textarea
           value={stornoReason}
           onChange={(e) => setStornoReason(e.target.value)}
           placeholder="Motivul stornării…"
-          className="rf-textarea"
-          style={{ minHeight: 56, marginBottom: 8 }}
+          style={{
+            width: "100%", minHeight: 56, marginBottom: 8, padding: "8px 10px",
+            border: "1px solid var(--line)", borderRadius: 8, font: "inherit",
+            fontSize: 12.5, resize: "vertical",
+          }}
           autoFocus
         />
         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-          <button
-            className="rf-btn rf-btn--secondary rf-btn--sm"
-            onClick={() => { setStornoOpen(false); onClose(); }}
-          >
+          <button className="pill-btn" onClick={() => { setStornoOpen(false); onClose(); }}>
             Anulează
           </button>
           <button
-            className="rf-btn rf-btn--danger rf-btn--sm"
+            className="btn-dark"
+            style={{ height: 34, opacity: stornoReason.trim() ? 1 : 0.5 }}
             disabled={!stornoReason.trim()}
             onClick={handleStorno}
           >
@@ -304,40 +227,31 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
     );
   }
 
-  const items: Array<{ icon: string; label: string; color?: string; action: () => void; show: boolean }> = [
+  const items: Array<{ icon: string; label: string; danger?: boolean; action: () => void; show: boolean }> = [
     { icon: "eye", label: "Vizualizează", action: () => { void navigate({ to: "/invoices/$id", params: { id: invoiceId } }); onClose(); }, show: true },
     { icon: "pen", label: "Editează", action: () => { void navigate({ to: "/invoices/$id/edit", params: { id: invoiceId } }); onClose(); }, show: status === "DRAFT" },
-    { icon: "cloudUp", label: "Trimite la ANAF", action: handleSubmit, show: (status === "DRAFT" || status === "VALIDATED") && hasXml },
-    { icon: "download", label: "Descarcă PDF", action: handlePdf, show: true },
-    { icon: "file", label: "Descarcă XML (UBL)", action: handleXml, show: true },
-    { icon: "storno", label: "Storno", color: "var(--rf-warning)", action: () => setStornoOpen(true), show: status === "VALIDATED" },
+    { icon: "send", label: "Trimite la ANAF", action: handleSubmit, show: (status === "DRAFT" || status === "VALIDATED") && hasXml },
+    { icon: "dl", label: "Descarcă PDF", action: handlePdf, show: true },
+    { icon: "code", label: "Descarcă XML (UBL)", action: handleXml, show: true },
+    { icon: "undo", label: "Storno", danger: true, action: () => setStornoOpen(true), show: status === "VALIDATED" },
     { icon: "copy", label: "Duplică", action: handleDuplicate, show: true },
-    { icon: "refresh", label: "Verifică status ANAF", action: handleCheckStatus, show: status === "SUBMITTED" || status === "QUEUED" },
+    { icon: "sync", label: "Verifică status ANAF", action: handleCheckStatus, show: status === "SUBMITTED" || status === "QUEUED" },
   ];
-
-  const visible = items.filter((i) => i.show);
 
   return createPortal(
     <div
-      className="rf-row-menu rf-card"
-      style={{ ...portalPos(210), padding: 4, boxShadow: "var(--rf-shadow-md)" }}
+      className="row-menu-pop pop show"
+      style={portalPos(210)}
       onClick={(e) => e.stopPropagation()}
     >
-      {visible.map((item) => (
+      {items.filter((i) => i.show).map((item) => (
         <button
           key={item.label}
           type="button"
+          className={`pop-item${item.danger ? " danger" : ""}`}
           onClick={item.action}
-          style={{
-            display: "flex", width: "100%", gap: 10, alignItems: "center",
-            border: "none", background: "transparent", padding: "8px 10px",
-            cursor: "pointer", borderRadius: 6, fontSize: 13,
-            color: item.color ?? "var(--rf-text)", fontFamily: "var(--rf-font)",
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--rf-hover)")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
         >
-          <Icon name={item.icon} size={15} />
+          <Ic name={item.icon} />
           {item.label}
         </button>
       ))}
@@ -353,12 +267,6 @@ export function InvoicesPage() {
   const queryClient = useQueryClient();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const setSelectedInvoiceId = useAppStore((s) => s.setSelectedInvoiceId);
-  const density = useAppStore((s) => s.density);
-
-  // Keep row height in sync with the CSS density values defined in design.css:
-  // comfortable (default) = 42px, compact = 34px, relaxed = 48px.
-  const rowHeight = density === "compact" ? 34 : density === "relaxed" ? 48 : 42;
-  const { t } = useTranslation();
 
   // ?view=storned deep-link
   const { view: viewParam } = useSearch({ from: "/invoices" });
@@ -376,22 +284,33 @@ export function InvoicesPage() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [openPop, setOpenPop] = useState<"" | "period" | "filters" | "export">("");
 
-  // Fetch invoices — guarded: do not fetch when no company is active.
-  // Pass an explicit large limit so realistic single-company data loads fully.
+  // Close toolbar pops on outside click
+  useEffect(() => {
+    if (!openPop) return;
+    const h = () => setOpenPop("");
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [openPop]);
+
   const { data: paged, isLoading, isError: pagedError, error: pagedErr, refetch: refetchPaged } = useQuery({
     queryKey: queryKeys.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
     queryFn: () => api.invoices.list({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
     enabled: !!activeCompanyId,
   });
 
-  // Fetch contacts for client name
   const { data: contacts = [] } = useQuery({
     queryKey: queryKeys.contacts.list({ companyId: activeCompanyId ?? undefined }),
     queryFn: () => api.contacts.list({ companyId: activeCompanyId ?? undefined }),
     enabled: !!activeCompanyId,
   });
+
+  const { data: companies = [] } = useQuery({
+    queryKey: queryKeys.companies.list(),
+    queryFn: () => api.companies.list(),
+  });
+  const activeCompany = companies.find((c) => c.id === activeCompanyId);
 
   const contactMap = useMemo(() => {
     const m = new Map<string, { legalName: string; cui: string | null }>();
@@ -399,8 +318,6 @@ export function InvoicesPage() {
     return m;
   }, [contacts]);
 
-  // Fetch payment status (PAID/PARTIAL/UNPAID) for the period-close view.
-  // Backend list_payment_summaries computes this in 2 queries (no N+1).
   const { data: paymentSummaries = [] } = useQuery({
     queryKey: ["payments", "summaries", activeCompanyId ?? ""],
     queryFn: () => api.payments.listSummaries(activeCompanyId!),
@@ -416,7 +333,6 @@ export function InvoicesPage() {
   const allInvoices = paged?.items ?? [];
   const totalCount = paged?.total ?? 0;
 
-  // Client-side filter
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
     const minVal = amountMin.trim() ? parseFloat(amountMin) : null;
@@ -426,14 +342,7 @@ export function InvoicesPage() {
         if (errorsOnly) return i.status === "REJECTED";
         return filter === "all" || i.status === filter;
       })
-      .filter((i) => {
-        // Period filter: compare YYYY-MM prefix of issueDate
-        if (period !== "all") {
-          const ym = i.issueDate.slice(0, 7);
-          if (ym !== period) return false;
-        }
-        return true;
-      })
+      .filter((i) => period === "all" || i.issueDate.slice(0, 7) === period)
       .filter((i) => {
         if (minVal !== null && !isNaN(minVal) && parseDec(i.totalAmount) < minVal) return false;
         if (maxVal !== null && !isNaN(maxVal) && parseDec(i.totalAmount) > maxVal) return false;
@@ -450,7 +359,6 @@ export function InvoicesPage() {
       });
   }, [allInvoices, filter, period, errorsOnly, amountMin, amountMax, query, contactMap]);
 
-  // Status counts (of all invoices, not filtered)
   const counts = {
     VALIDATED: allInvoices.filter((i) => i.status === "VALIDATED").length,
     SUBMITTED: allInvoices.filter((i) => i.status === "SUBMITTED").length,
@@ -460,14 +368,12 @@ export function InvoicesPage() {
     STORNED:   allInvoices.filter((i) => i.status === "STORNED").length,
   };
 
-  // Totals of filtered list — RON only to avoid mixing currencies.
   const ronList = list.filter((i) => i.currency === "RON");
   const nonRonCount = list.length - ronList.length;
   const totNet   = ronList.reduce((s, i) => s + parseDec(i.subtotalAmount), 0);
   const totVat   = ronList.reduce((s, i) => s + parseDec(i.vatAmount), 0);
   const totTotal = ronList.reduce((s, i) => s + parseDec(i.totalAmount), 0);
 
-  // Active filters count (for Filtre dot)
   const activeFilterCount = (errorsOnly ? 1 : 0) + (amountMin ? 1 : 0) + (amountMax ? 1 : 0);
 
   const toggleOne = (id: string) => {
@@ -476,21 +382,6 @@ export function InvoicesPage() {
     setSelected(next);
   };
 
-  // Virtual scrolling — row height tracks density.
-  const tableBodyRef = useRef<HTMLDivElement>(null);
-  const rowVirtualizer = useVirtualizer({
-    count: list.length,
-    getScrollElement: () => tableBodyRef.current,
-    estimateSize: () => rowHeight,
-    overscan: 10,
-  });
-
-  // Re-measure all rows when density changes so the virtualizer re-lays-out.
-  useEffect(() => {
-    rowVirtualizer.measure();
-  }, [rowHeight]);
-
-  // Bulk submit
   async function handleBulkSubmit() {
     if (!activeCompanyId) return;
     const tms = await api.settings.get("use_anaf_test_env");
@@ -507,7 +398,6 @@ export function InvoicesPage() {
     else notify.success(`${ok} facturi trimise la ANAF`);
   }
 
-  // Export handlers
   async function handleExportSaga() {
     if (!activeCompanyId) return;
     const { save } = await import("@tauri-apps/plugin-dialog");
@@ -536,7 +426,6 @@ export function InvoicesPage() {
     }
   }
 
-  // Import handlers
   async function handleImportXml() {
     if (!activeCompanyId) { notify.warn("Selectați o companie."); return; }
     const { open } = await import("@tauri-apps/plugin-dialog");
@@ -557,22 +446,13 @@ export function InvoicesPage() {
     }
   }
 
-  // Available period months (derived from all invoices, newest first)
   const availableMonths = useMemo(() => {
     const months = new Set<string>();
-    for (const inv of allInvoices) {
-      const ym = inv.issueDate.slice(0, 7);
-      if (ym) months.add(ym);
-    }
-    // Sort descending
-    return Array.from(months).sort((a, b) => b.localeCompare(a));
+    for (const inv of allInvoices) months.add(inv.issueDate.slice(0, 7));
+    return Array.from(months).filter(Boolean).sort((a, b) => b.localeCompare(a));
   }, [allInvoices]);
 
-  // Fallback to recent 12 months if no invoices yet
-  const periodOptions = availableMonths.length > 0 ? availableMonths : recentMonths(12);
-
-  // Status dropdown label
-  const statusOptions: Array<{ value: StatusFilter; label: string; count: number }> = [
+  const tabs: Array<{ value: StatusFilter; label: string; count: number }> = [
     { value: "all",       label: "Toate",    count: totalCount },
     { value: "VALIDATED", label: "Validate", count: counts.VALIDATED },
     { value: "SUBMITTED", label: "Trimise",  count: counts.SUBMITTED },
@@ -581,487 +461,304 @@ export function InvoicesPage() {
     { value: "DRAFT",     label: "Schițe",   count: counts.DRAFT },
     { value: "STORNED",   label: "Stornate", count: counts.STORNED },
   ];
-  const currentStatusLabel = statusOptions.find((o) => o.value === filter)?.label ?? "Toate";
+
+  const visibleRows = list.slice(0, MAX_ROWS);
 
   if (!activeCompanyId) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--rf-app-bg)" }}>
-        <PageHeader title={t("invoices.title")} />
-        <Empty icon="fileOut" title="Selectați o companie activă pentru a vedea facturile emise." />
+      <div className="main-inner wide">
+        <div className="page-head"><div><h1>Facturi emise</h1></div></div>
+        <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
+          Selectați o companie activă pentru a vedea facturile emise.
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--rf-app-bg)" }}>
-
-      {/* ── Header ───────────────────────────────────────────────────────── */}
-      <PageHeader
-        title={t("invoices.title")}
-        sub={
-          <Badge variant="neutral">
+    <div className="main-inner wide">
+      {/* page head */}
+      <div className="page-head">
+        <div>
+          <h1>Facturi emise</h1>
+          <p className="sub">
             {list.length !== totalCount
               ? `${list.length} din ${totalCount.toLocaleString("ro-RO")} facturi`
               : `${totalCount.toLocaleString("ro-RO")} facturi`}
-          </Badge>
-        }
-        actions={
-          <Btn
-            variant="primary"
-            icon="plus"
-            onClick={() => void navigate({ to: "/invoices/new" })}
-          >
-            {t("invoices.newInvoice")}
-            <span
-              style={{
-                marginLeft: 6, background: "rgba(255,255,255,0.18)",
-                border: "1px solid rgba(255,255,255,0.3)", color: "#fff",
-                fontSize: 11, padding: "1px 5px", borderRadius: 4,
-              }}
-            >
-              {fmtShortcut("Ctrl N")}
-            </span>
-          </Btn>
-        }
-      />
-
-      {/* ── Toolbar ──────────────────────────────────────────────────────── */}
-      <div
-        className="rf-toolbar-row"
-        style={{
-          padding: "10px 32px",
-          borderBottom: "1px solid var(--rf-border)",
-          background: "var(--rf-content)",
-          flexWrap: "nowrap",
-          overflowX: "auto",
-        }}
-      >
-        {/* Search */}
-        <SearchInput
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Caută după număr sau client…"
-          style={{ width: 260, flexShrink: 0 }}
-        />
-
-        {/* Status dropdown */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <ToolbarBtn>
-              {currentStatusLabel}
-              <ChevDown />
-            </ToolbarBtn>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" style={{ minWidth: 180 }}>
-            <DropdownMenuLabel style={{ fontSize: 11, color: "var(--rf-text-dim)", padding: "4px 8px" }}>
-              Status factură
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {statusOptions.map((opt) => (
-              <DropdownMenuItem
-                key={opt.value}
-                onClick={() => { setFilter(opt.value); setErrorsOnly(false); }}
-                style={{
-                  fontWeight: filter === opt.value ? 600 : 400,
-                  color: filter === opt.value ? "var(--rf-accent)" : "var(--rf-text)",
-                }}
-              >
-                <span style={{ flex: 1 }}>{opt.label}</span>
-                <span style={{ fontSize: 11, color: "var(--rf-text-dim)", fontVariantNumeric: "tabular-nums" }}>
-                  {opt.count}
-                </span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Period dropdown */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <ToolbarBtn active={period !== "all"}>
-              {period === "all" ? "Toate lunile" : fmtMonth(period)}
-              <ChevDown />
-            </ToolbarBtn>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" style={{ minWidth: 180, maxHeight: 320, overflowY: "auto" }}>
-            <DropdownMenuLabel style={{ fontSize: 11, color: "var(--rf-text-dim)", padding: "4px 8px" }}>
-              Perioadă
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => setPeriod("all")}
-              style={{
-                fontWeight: period === "all" ? 600 : 400,
-                color: period === "all" ? "var(--rf-accent)" : "var(--rf-text)",
-              }}
-            >
-              Toate lunile
-            </DropdownMenuItem>
-            {periodOptions.map((ym) => (
-              <DropdownMenuItem
-                key={ym}
-                onClick={() => setPeriod(ym)}
-                style={{
-                  fontWeight: period === ym ? 600 : 400,
-                  color: period === ym ? "var(--rf-accent)" : "var(--rf-text)",
-                }}
-              >
-                {fmtMonth(ym)}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Filtre popover */}
-        <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
-          <PopoverTrigger asChild>
-            <ToolbarBtn active={activeFilterCount > 0} dot={activeFilterCount > 0} onClick={() => setFiltersOpen((v) => !v)}>
-              <Icon name="filter" size={13} />
-              Filtre
-              {activeFilterCount > 0 && (
-                <span
-                  style={{
-                    marginLeft: 2,
-                    background: "var(--rf-accent)",
-                    color: "#fff",
-                    borderRadius: 10,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    padding: "0 5px",
-                    minWidth: 16,
-                    textAlign: "center",
-                  }}
-                >
-                  {activeFilterCount}
-                </span>
-              )}
-            </ToolbarBtn>
-          </PopoverTrigger>
-          <PopoverContent
-            align="start"
-            sideOffset={6}
-            style={{
-              width: 260,
-              padding: 16,
-              background: "var(--rf-content)",
-              border: "1px solid var(--rf-border)",
-              borderRadius: "var(--rf-radius)",
-              boxShadow: "var(--rf-shadow-md)",
-            }}
-          >
-            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--rf-text-muted)", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Filtre avansate
-            </div>
-
-            {/* Cu erori toggle */}
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: 13,
-                cursor: "pointer",
-                userSelect: "none",
-                marginBottom: 14,
-                color: errorsOnly ? "var(--rf-error)" : "var(--rf-text)",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={errorsOnly}
-                onChange={(e) => {
-                  setErrorsOnly(e.target.checked);
-                  if (e.target.checked) setFilter("all");
-                }}
-                style={{ accentColor: "var(--rf-error)", width: 14, height: 14 }}
-              />
-              Cu erori (respinse ANAF)
-            </label>
-
-            {/* Amount range */}
-            <div style={{ fontSize: 12, color: "var(--rf-text-muted)", marginBottom: 6 }}>Total factură (RON)</div>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="number"
-                placeholder="Min"
-                value={amountMin}
-                onChange={(e) => setAmountMin(e.target.value)}
-                style={{
-                  flex: 1, height: 30, fontSize: 12, padding: "0 8px",
-                  border: "1px solid var(--rf-border-strong)", background: "var(--rf-app-bg)",
-                  color: "var(--rf-text)", borderRadius: "var(--rf-radius-sm)", fontFamily: "var(--rf-mono)",
-                }}
-              />
-              <span style={{ fontSize: 11, color: "var(--rf-text-dim)" }}>–</span>
-              <input
-                type="number"
-                placeholder="Max"
-                value={amountMax}
-                onChange={(e) => setAmountMax(e.target.value)}
-                style={{
-                  flex: 1, height: 30, fontSize: 12, padding: "0 8px",
-                  border: "1px solid var(--rf-border-strong)", background: "var(--rf-app-bg)",
-                  color: "var(--rf-text)", borderRadius: "var(--rf-radius-sm)", fontFamily: "var(--rf-mono)",
-                }}
-              />
-            </div>
-
-            {/* Reset */}
-            {activeFilterCount > 0 && (
-              <button
-                type="button"
-                style={{
-                  marginTop: 14, width: "100%", fontSize: 12, padding: "5px 0",
-                  border: "1px solid var(--rf-border-strong)", borderRadius: "var(--rf-radius-sm)",
-                  background: "transparent", color: "var(--rf-text-muted)", cursor: "pointer",
-                  fontFamily: "var(--rf-font)",
-                }}
-                onClick={() => { setErrorsOnly(false); setAmountMin(""); setAmountMax(""); }}
-              >
-                Resetează filtrele
-              </button>
-            )}
-          </PopoverContent>
-        </Popover>
-
-        {/* Right side: bulk bar or refresh/export/import */}
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
-          {selected.size > 0 && (
-            <>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--rf-text)" }}>
-                {selected.size} selectate
-              </span>
-              <Btn variant="primary" size="sm" icon="cloudUp" onClick={() => void handleBulkSubmit()}>
-                Trimite selecția la ANAF
-              </Btn>
-              <Btn variant="secondary" size="sm" icon="printer" onClick={() => window.print()}>
-                Tipărește
-              </Btn>
-              <Btn variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
-                Deselectează
-              </Btn>
-              <div style={{ width: 1, height: 20, background: "var(--rf-border-strong)" }} />
-            </>
-          )}
-
-          {/* Refresh */}
-          <IconBtn icon="refresh" title="Reîncarcă" onClick={() => void refetchPaged()} />
-
-          {/* Export ▾ (Export + Import sections) */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <ToolbarBtn>
-                Export
-                <ChevDown />
-              </ToolbarBtn>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" style={{ minWidth: 180 }}>
-              <DropdownMenuLabel style={{ fontSize: 11, color: "var(--rf-text-dim)", padding: "4px 8px" }}>
-                Export
-              </DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => void handleExportSaga()}>
-                <Icon name="download" size={14} />
-                SAGA CSV
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void handleExportXlsx()}>
-                <Icon name="table" size={14} />
-                {t("invoices.exportXlsx")}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel style={{ fontSize: 11, color: "var(--rf-text-dim)", padding: "4px 8px" }}>
-                Import
-              </DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => void handleImportXml()}>
-                <Icon name="upload" size={14} />
-                Import XML
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShowImportModal(true)}>
-                <Icon name="upload" size={14} />
-                {t("invoices.importCsv")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </span>
+            {activeCompany ? ` · ${activeCompany.legalName}` : ""}
+          </p>
+        </div>
+        <div className="head-actions">
+          <button className="btn-dark" onClick={() => void navigate({ to: "/invoices/new" })}>
+            <Ic name="plus" />Factură nouă
+            <span className="kbd" style={{ background: "rgba(255,255,255,.15)", borderColor: "rgba(255,255,255,.3)", color: "#fff" }}>⌘ N</span>
+          </button>
+        </div>
       </div>
 
-      {/* ── Truncation warning ───────────────────────────────────────────── */}
-      {paged && paged.total > paged.items.length && (
-        <div
-          style={{
-            padding: "6px 32px",
-            background: "var(--rf-warning-bg, #fffbeb)",
-            borderBottom: "1px solid var(--rf-border)",
-            fontSize: 12,
-            color: "var(--rf-warning, #92400e)",
-          }}
-        >
-          Afișate primele {paged.items.length.toLocaleString("ro-RO")} din {paged.total.toLocaleString("ro-RO")} facturi — restrânge filtrele pentru a vedea toate înregistrările.
-        </div>
-      )}
+      <div className="scr-card">
+        {/* toolbar */}
+        <div className="scr-toolbar">
+          <div className="scr-search">
+            <Ic name="lens" />
+            <input
+              type="text"
+              placeholder="Caută după număr sau client…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className="tabs">
+            {tabs.map((t) => (
+              <div
+                key={t.value}
+                className={`tab${filter === t.value && !errorsOnly ? " active" : ""}`}
+                onClick={() => { setFilter(t.value); setErrorsOnly(false); }}
+              >
+                {t.label}<span className="cnt num">{t.count}</span>
+              </div>
+            ))}
+          </div>
+          <div className="spacer" />
 
-      {/* ── Table container ──────────────────────────────────────────────── */}
-      <div ref={tableBodyRef} style={{ flex: 1, overflowY: "auto" }}>
+          {/* period pill */}
+          <div className="nou-wrap" style={{ position: "relative" }}>
+            <button
+              className="pill-btn"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => setOpenPop(openPop === "period" ? "" : "period")}
+            >
+              <Ic name="calendar" />
+              {period === "all" ? "Toate lunile" : fmtMonth(period)}
+              <Ic name="chevD" cls="ic" />
+            </button>
+            {openPop === "period" && (
+              <div className="pop show" style={{ right: 0, top: 40, width: 210, maxHeight: 300, overflowY: "auto" }} onMouseDown={(e) => e.stopPropagation()}>
+                <div className="col-title">Perioadă</div>
+                <button className="pop-item" onClick={() => { setPeriod("all"); setOpenPop(""); }}>
+                  <span style={{ flex: 1 }}>Toate lunile</span>
+                  {period === "all" && <Ic name="check" cls="co-check" />}
+                </button>
+                {availableMonths.map((ym) => (
+                  <button key={ym} className="pop-item" onClick={() => { setPeriod(ym); setOpenPop(""); }}>
+                    <span style={{ flex: 1 }}>{fmtMonth(ym)}</span>
+                    {period === ym && <Ic name="check" cls="co-check" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* filters pill */}
+          <div className="nou-wrap" style={{ position: "relative" }}>
+            <button
+              className="pill-btn"
+              style={activeFilterCount > 0 ? { borderColor: "var(--black)", color: "var(--text)" } : undefined}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => setOpenPop(openPop === "filters" ? "" : "filters")}
+            >
+              <Ic name="funnel" />Filtre
+              {activeFilterCount > 0 && (
+                <span className="pill-new" style={{ background: "var(--black)" }}>{activeFilterCount}</span>
+              )}
+            </button>
+            {openPop === "filters" && (
+              <div className="pop show" style={{ right: 0, top: 40, width: 250, padding: 10 }} onMouseDown={(e) => e.stopPropagation()}>
+                <div className="col-title">Filtre avansate</div>
+                <label
+                  style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", userSelect: "none", padding: "6px 10px 10px", color: errorsOnly ? "var(--red)" : "var(--text)" }}
+                >
+                  <button
+                    className={`cbx${errorsOnly ? " on" : ""}`}
+                    onClick={(e) => { e.preventDefault(); setErrorsOnly(!errorsOnly); if (!errorsOnly) setFilter("all"); }}
+                  />
+                  Cu erori (respinse ANAF)
+                </label>
+                <div style={{ fontSize: 12, color: "var(--text-2)", padding: "0 10px 6px" }}>Total factură (RON)</div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "0 10px 8px" }}>
+                  <input
+                    type="number" placeholder="Min" value={amountMin}
+                    onChange={(e) => setAmountMin(e.target.value)}
+                    style={{ flex: 1, height: 30, fontSize: 12, padding: "0 8px", border: "1px solid var(--line)", borderRadius: 8, fontFamily: "var(--mono)" }}
+                  />
+                  <span style={{ fontSize: 11, color: "var(--dim)" }}>–</span>
+                  <input
+                    type="number" placeholder="Max" value={amountMax}
+                    onChange={(e) => setAmountMax(e.target.value)}
+                    style={{ flex: 1, height: 30, fontSize: 12, padding: "0 8px", border: "1px solid var(--line)", borderRadius: 8, fontFamily: "var(--mono)" }}
+                  />
+                </div>
+                {activeFilterCount > 0 && (
+                  <button
+                    className="pill-btn"
+                    style={{ margin: "0 10px 8px", width: "calc(100% - 20px)", justifyContent: "center" }}
+                    onClick={() => { setErrorsOnly(false); setAmountMin(""); setAmountMax(""); }}
+                  >
+                    Resetează filtrele
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* refresh */}
+          <button className="sq-btn spin-btn" title="Reîncarcă" onClick={() => void refetchPaged()}>
+            <Ic name="sync" />
+          </button>
+
+          {/* export/import pop */}
+          <div className="nou-wrap" style={{ position: "relative" }}>
+            <button
+              className="pill-btn"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => setOpenPop(openPop === "export" ? "" : "export")}
+            >
+              Export<Ic name="chevD" cls="ic" />
+            </button>
+            {openPop === "export" && (
+              <div className="pop show" style={{ right: 0, top: 40, width: 210 }} onMouseDown={(e) => e.stopPropagation()}>
+                <div className="col-title">Export</div>
+                <button className="pop-item" onClick={() => { setOpenPop(""); void handleExportSaga(); }}>
+                  <Ic name="dl" />SAGA CSV
+                </button>
+                <button className="pop-item" onClick={() => { setOpenPop(""); void handleExportXlsx(); }}>
+                  <Ic name="dl" />Export XLSX
+                </button>
+                <div className="pop-div" />
+                <div className="col-title">Import</div>
+                <button className="pop-item" onClick={() => { setOpenPop(""); void handleImportXml(); }}>
+                  <Ic name="docUp" />Import XML
+                </button>
+                <button className="pop-item" onClick={() => { setOpenPop(""); setShowImportModal(true); }}>
+                  <Ic name="docUp" />Import CSV
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* bulk bar */}
+        <div className={`bulkbar${selected.size > 0 ? " show" : ""}`}>
+          <b>{selected.size} selectate</b>
+          <span className="spacer" />
+          <button className="pill-btn send-btn" onClick={() => void handleBulkSubmit()}>
+            <Ic name="send" />Trimite selecția la ANAF
+          </button>
+          <button className="pill-btn" onClick={() => window.print()}>
+            <Ic name="printer" />Tipărește
+          </button>
+          <button className="pill-btn" onClick={() => setSelected(new Set())}>Deselectează</button>
+        </div>
+
+        {/* truncation note */}
+        {paged && paged.total > paged.items.length && (
+          <div style={{ padding: "6px 16px", borderBottom: "1px solid var(--line)", fontSize: 12, color: "var(--amber)" }}>
+            Afișate primele {paged.items.length.toLocaleString("ro-RO")} din {paged.total.toLocaleString("ro-RO")} facturi.
+          </div>
+        )}
+
+        {/* table */}
         {isLoading ? (
-          <div style={{ padding: 32, fontSize: 13, color: "var(--rf-text-muted)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
         ) : pagedError ? (
           <div style={{ padding: 16 }}>
             <QueryErrorBanner error={pagedErr} label="facturile" onRetry={() => void refetchPaged()} />
           </div>
         ) : list.length === 0 ? (
-          <Empty
-            icon="fileOut"
-            title={allInvoices.length === 0 ? "Nicio factură emisă" : "Nicio înregistrare"}
-          >
+          <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
             {allInvoices.length === 0
-              ? 'Creați prima factură cu butonul "Factură nouă".'
+              ? "Nicio factură emisă. Creați prima factură cu butonul „Factură nouă”."
               : "Nicio înregistrare pentru filtrele aplicate."}
-          </Empty>
+          </div>
         ) : (
-          <div className="rf-tbl-wrap" style={{ minHeight: "100%" }}>
-            <table className="rf-tbl" style={{ width: "100%" }}>
+          <>
+            <table className="scr-table">
               <thead>
                 <tr>
-                  <th style={{ width: 36, paddingLeft: 16 }}>
-                    {selected.size > 0 && (
-                      <input
-                        type="checkbox"
-                        checked={selected.size === list.length && list.length > 0}
-                        onChange={() =>
-                          setSelected(
-                            selected.size === list.length ? new Set() : new Set(list.map((i) => i.id))
-                          )
-                        }
-                        style={{ accentColor: "var(--rf-accent)", width: 14, height: 14 }}
-                      />
-                    )}
+                  <th style={{ width: 36 }}>
+                    <button
+                      className={`cbx${selected.size === list.length && list.length > 0 ? " on" : ""}`}
+                      aria-label="Selectează tot"
+                      onClick={() =>
+                        setSelected(selected.size === list.length ? new Set() : new Set(list.map((i) => i.id)))
+                      }
+                    />
                   </th>
-                  <th style={{ width: 134 }} className="sortable sorted">
-                    {t("invoices.columns.number")}
-                  </th>
-                  <th style={{ width: 100 }}>{t("invoices.columns.date")}</th>
-                  <th>{t("invoices.columns.customer")}</th>
-                  <th className="right" style={{ width: 130 }}>Valoare Net</th>
-                  <th className="right" style={{ width: 100 }}>TVA</th>
-                  <th className="right" style={{ width: 130 }}>{t("invoices.columns.total")}</th>
-                  <th style={{ width: 80 }}>Monedă</th>
-                  <th style={{ width: 130 }}>{t("invoices.columns.status")}</th>
-                  <th style={{ width: 120 }}>Plată</th>
-                  <th style={{ width: 90 }}></th>
+                  <th>Număr</th>
+                  <th>Data</th>
+                  <th>Client</th>
+                  <th className="r">Valoare net</th>
+                  <th className="r">TVA</th>
+                  <th className="r">Total</th>
+                  <th>Monedă</th>
+                  <th>Status</th>
+                  <th>Plată</th>
+                  <th className="r" style={{ width: 64 }}></th>
                 </tr>
               </thead>
-              <tbody
-                style={{
-                  height: `${rowVirtualizer.getTotalSize()}px`,
-                  position: "relative",
-                  display: "block",
-                }}
-              >
-                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                  const inv = list[virtualRow.index];
+              <tbody>
+                {visibleRows.map((inv) => {
                   const client = contactMap.get(inv.contactId);
+                  const chip = STATUS_CHIP[inv.status] ?? STATUS_CHIP.DRAFT;
                   const payApplicable = inv.status !== "DRAFT" && inv.status !== "STORNED";
                   const payStatus = paymentStatusMap.get(inv.id) ?? "UNPAID";
                   const payCfg = payStatus === "PAID"
-                    ? { v: "success" as const, l: "Încasată" }
+                    ? { cls: "paid", icon: "check", label: "Încasată" }
                     : payStatus === "PARTIAL"
-                      ? { v: "warning" as const, l: "Parțial" }
-                      : { v: "neutral" as const, l: "Neîncasată" };
+                      ? { cls: "wait", icon: "clock", label: "Parțial" }
+                      : { cls: "sent", icon: "dot", label: "Neîncasată" };
                   return (
                     <tr
                       key={inv.id}
-                      data-index={virtualRow.index}
-                      ref={rowVirtualizer.measureElement}
                       className={`clickable${selected.has(inv.id) ? " selected" : ""}`}
-                      style={{
-                        cursor: "pointer",
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        transform: `translateY(${virtualRow.start}px)`,
-                        height: rowHeight,
-                      }}
                       onClick={() => {
                         setSelectedInvoiceId(inv.id);
                         void navigate({ to: "/invoices/$id", params: { id: inv.id } });
                       }}
                     >
-                      <td style={{ width: 36 }} onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          className="rf-row-check"
-                          checked={selected.has(inv.id)}
-                          onChange={() => toggleOne(inv.id)}
-                          style={{ accentColor: "var(--rf-accent)", width: 14, height: 14 }}
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <button
+                          className={`cbx row-cbx${selected.has(inv.id) ? " on" : ""}`}
+                          onClick={() => toggleOne(inv.id)}
                         />
                       </td>
-                      <td style={{ fontFamily: "var(--rf-mono)", fontWeight: 700 }}>
-                        {inv.fullNumber}
-                      </td>
-                      <td style={{ color: "var(--rf-text-muted)" }}>{inv.issueDate}</td>
-                      <td style={{ fontWeight: 500 }}>
-                        {client?.legalName ?? <span style={{ color: "var(--rf-text-dim)" }}>—</span>}
-                      </td>
-                      <td
-                        className="right"
-                        style={{ fontFamily: "var(--rf-mono)", color: "var(--rf-text-muted)", fontVariantNumeric: "tabular-nums" }}
-                      >
-                        {fmtRON(inv.subtotalAmount)}
-                      </td>
-                      <td
-                        className="right"
-                        style={{ fontFamily: "var(--rf-mono)", color: "var(--rf-text-dim)", fontVariantNumeric: "tabular-nums" }}
-                      >
-                        {fmtRON(inv.vatAmount)}
-                      </td>
-                      <td
-                        className="right"
-                        style={{ fontFamily: "var(--rf-mono)", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}
-                      >
-                        {fmtRON(inv.totalAmount)}
-                      </td>
-                      <td style={{ color: "var(--rf-text-muted)", fontSize: 12, fontFamily: "var(--rf-mono)" }}>
-                        {inv.currency}
-                      </td>
+                      <td><span className="doc" style={{ fontWeight: 700, color: "var(--text)" }}>{inv.fullNumber}</span></td>
+                      <td className="num">{fmtRoDate(inv.issueDate)}</td>
+                      <td><div className="cli">{client?.legalName ?? "—"}</div></td>
+                      <td className="r num">{fmtRON(inv.subtotalAmount)}</td>
+                      <td className="r num">{fmtRON(inv.vatAmount)}</td>
+                      <td className="r num"><b>{fmtRON(inv.totalAmount)}</b></td>
+                      <td>{inv.currency}</td>
                       <td>
-                        <StatusBadge status={inv.status} />
+                        <span className={`chip ${chip.cls}`}><Ic name={chip.icon} cls="sic" />{chip.label}</span>
                       </td>
                       <td>
                         {payApplicable
-                          ? <Badge variant={payCfg.v}>{payCfg.l}</Badge>
-                          : <span style={{ color: "var(--rf-text-dim)" }}>—</span>}
+                          ? <span className={`chip ${payCfg.cls}`}><Ic name={payCfg.icon} cls="sic" />{payCfg.label}</span>
+                          : <span className="muted">—</span>}
                       </td>
-                      <td
-                        style={{ position: "relative" }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="rf-cell-actions">
-                          <IconBtn
-                            icon="eye"
-                            ghost
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <div className="row-acts">
+                          <button
+                            className="mini-btn"
                             title="Vizualizează"
                             onClick={() => {
                               setSelectedInvoiceId(inv.id);
                               void navigate({ to: "/invoices/$id", params: { id: inv.id } });
                             }}
-                          />
-                          {inv.status === "DRAFT" && (
-                            <IconBtn
-                              icon="pen"
-                              ghost
-                              title="Editează"
-                              onClick={() => void navigate({ to: "/invoices/$id/edit", params: { id: inv.id } })}
-                            />
-                          )}
-                          <IconBtn
-                            icon="more"
-                            ghost
+                          >
+                            <Ic name="eye" />
+                          </button>
+                          <button
+                            className="mini-btn"
                             title="Mai multe"
                             onClick={(e) => {
                               if (menuFor === inv.id) { setMenuFor(null); setMenuAnchor(null); }
                               else { setMenuAnchor(e.currentTarget.getBoundingClientRect()); setMenuFor(inv.id); }
                             }}
-                          />
+                          >
+                            <Ic name="dots" />
+                          </button>
                         </div>
                         {menuFor === inv.id && activeCompanyId && (
                           <RowMenu
@@ -1078,30 +775,22 @@ export function InvoicesPage() {
                   );
                 })}
               </tbody>
-              <tfoot>
-                <tr>
-                  <td colSpan={4}>
-                    {list.length} facturi
-                    {nonRonCount > 0 && (
-                      <span style={{ marginLeft: 6, fontSize: 11, color: "var(--rf-text-dim)", fontWeight: 400 }}>
-                        (+{nonRonCount} în altă monedă, neincluse în total)
-                      </span>
-                    )}
-                  </td>
-                  <td className="right" style={{ fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums" }}>
-                    {fmtRON(totNet)}
-                  </td>
-                  <td className="right" style={{ fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums" }}>
-                    {fmtRON(totVat)}
-                  </td>
-                  <td className="right" style={{ fontFamily: "var(--rf-mono)", fontVariantNumeric: "tabular-nums" }}>
-                    {fmtRON(totTotal)}
-                  </td>
-                  <td colSpan={4} style={{ color: "var(--rf-text-dim)", fontSize: 12, fontWeight: 400 }}>RON</td>
-                </tr>
-              </tfoot>
             </table>
-          </div>
+
+            {/* totals footer */}
+            <div className="tot-foot">
+              <span>Totaluri RON (filtrate): net <b className="num">{fmtRON(totNet)}</b></span>
+              <span>TVA <b className="num">{fmtRON(totVat)}</b></span>
+              <span>total <b className="num">{fmtRON(totTotal)}</b></span>
+              <span className="spacer" style={{ flex: 1 }} />
+              {list.length > MAX_ROWS && (
+                <span className="muted">afișate primele {MAX_ROWS.toLocaleString("ro-RO")} din {list.length.toLocaleString("ro-RO")}</span>
+              )}
+              {nonRonCount > 0 && (
+                <span className="muted">{nonRonCount === 1 ? "1 factură în altă monedă exclusă din totaluri" : `${nonRonCount} facturi în altă monedă excluse din totaluri`}</span>
+              )}
+            </div>
+          </>
         )}
       </div>
 
