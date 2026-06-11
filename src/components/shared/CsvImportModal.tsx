@@ -151,7 +151,7 @@ export function CsvImportModal({
             <DialogTitle style={{ fontSize: 14, fontWeight: 700 }}>
               Import {TYPE_LABELS[type]} din CSV
             </DialogTitle>
-            <button type="button" className="btn-icon" aria-label="Închide" onClick={onClose}>
+            <button type="button" className="modal-x" aria-label="Închide" onClick={onClose}>
               <Icon name="x" size={14} />
             </button>
           </div>
@@ -162,7 +162,7 @@ export function CsvImportModal({
 
         {/* Template download */}
         <div style={{ marginBottom: 12 }}>
-          <button type="button" className="btn" onClick={handleDownloadTemplate}>
+          <button type="button" className="pill-btn" onClick={handleDownloadTemplate}>
             <Icon name="download" size={12} /> Descarcă template CSV
           </button>
           <span style={{ fontSize: 10.5, color: "var(--text-muted)", marginLeft: 10 }}>
@@ -181,7 +181,7 @@ export function CsvImportModal({
           />
           <button
             type="button"
-            className="btn"
+            className="pill-btn"
             onClick={() => fileRef.current?.click()}
           >
             <Icon name="upload" size={12} /> Selectează fișier CSV
@@ -223,7 +223,7 @@ export function CsvImportModal({
           <div style={{ marginBottom: 10 }}>
             <button
               type="button"
-              className="btn"
+              className="pill-btn"
               disabled={previewing}
               onClick={() => void handleDryRun()}
             >
@@ -301,12 +301,12 @@ export function CsvImportModal({
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button type="button" className="btn" onClick={onClose}>
+          <button type="button" className="pill-btn" onClick={onClose}>
             Închide
           </button>
           <button
             type="button"
-            className="btn primary"
+            className="btn-dark"
             disabled={!content || importing}
             onClick={handleImport}
           >
