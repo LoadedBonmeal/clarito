@@ -1,10 +1,12 @@
 /**
  * Sidebar — verbatim port of the design `.sidebar` (clarito-shell.js), wired to
  * real data: company card + switcher pop, grouped nav (with the "Mai multe"
- * drawer), and the user/account card + profile pop. Nav routes + badges are real.
+ * drawer), and the user/account card + profile pop. The pops are direct children
+ * of <aside class="sidebar"> so the design's absolute anchoring (#companyPop
+ * top:54px, #profilePop bottom:70px) lands correctly.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -29,6 +31,8 @@ interface NavGroup {
   items: NavLink[];
 }
 
+const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+
 export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -39,14 +43,10 @@ export function Sidebar() {
   const [companyOpen, setCompanyOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState<Record<string, boolean>>({});
-  const companyRef = useRef<HTMLDivElement>(null);
-  const profileRef = useRef<HTMLDivElement>(null);
 
+  // Any outside mousedown closes the pops (triggers/pops call stopPropagation).
   useEffect(() => {
-    const h = (e: MouseEvent) => {
-      if (companyRef.current && !companyRef.current.contains(e.target as Node)) setCompanyOpen(false);
-      if (profileRef.current && !profileRef.current.contains(e.target as Node)) setProfileOpen(false);
-    };
+    const h = () => { setCompanyOpen(false); setProfileOpen(false); };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, []);
@@ -66,7 +66,8 @@ export function Sidebar() {
   });
 
   const activeCompany = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
-  const initials = (s: string | undefined, n = 2) => (s ?? "AC").replace(/[^A-Za-zĂÂÎȘȚ ]/g, "").split(/\s+/).map((w) => w[0]).join("").slice(0, n).toUpperCase() || "AC";
+  const initials = (s: string | undefined, n = 2) =>
+    (s ?? "AC").replace(/[^A-Za-zĂÂÎȘȚ ]/g, "").split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, n).toUpperCase() || "AC";
 
   // ── Nav model (design NAV → real routes) ───────────────────────────────────
   const NAV: NavGroup[] = [
@@ -110,69 +111,66 @@ export function Sidebar() {
     </Link>
   );
 
-  const switchCompany = (id: string) => { setActiveCompanyId(id); setCompanyOpen(false); };
-  const toggleLang = () => {
-    const next = i18n.language?.startsWith("en") ? "ro" : "en";
-    void i18n.changeLanguage(next);
-  };
+  const toggleLang = () => { void i18n.changeLanguage(i18n.language?.startsWith("en") ? "ro" : "en"); };
   const handleExit = async () => { (await import("@tauri-apps/plugin-process")).exit(0); };
   const handleDocs = async () => { (await import("@tauri-apps/plugin-opener")).openUrl("https://mfinante.gov.ro/ro/web/efactura/informatii-tehnice"); };
   const soon = () => notify.info("În curând.");
-
   const langTag = i18n.language?.startsWith("en") ? "EN" : "RO";
 
   return (
     <aside className="sidebar">
       <div className="side-scroll">
-        {/* Company card + switcher pop */}
-        <div ref={companyRef} style={{ position: "relative" }}>
-          <button className={`company${companyOpen ? " open" : ""}`} onClick={() => setCompanyOpen((o) => !o)}>
-            <div className="co-ava round">{initials(activeCompany?.legalName)}</div>
-            <div className="meta">
-              <div className="name">{activeCompany?.legalName ?? "Nicio companie"}</div>
-              <div className="cui num">{activeCompany?.cui ?? ""}</div>
-            </div>
-            <Ic name="chevUD" cls="ic chev" />
-          </button>
-          {companyOpen && (
-            <div className="pop show" id="companyPop">
-              <div className="col-title">Companie activă</div>
-              {activeCompany && (
-                <div className="co-row sel">
-                  <div className="co-ava">{initials(activeCompany.legalName, 1)}</div>
-                  <div className="co-meta">
-                    <div className="co-name">{activeCompany.legalName}</div>
-                    <div className="co-cui">{activeCompany.cui}</div>
-                  </div>
-                  <Ic name="check" cls="co-check" />
+        {/* Company card */}
+        <button
+          className={`company${companyOpen ? " open" : ""}`}
+          onMouseDown={stop}
+          onClick={() => { setCompanyOpen((o) => !o); setProfileOpen(false); }}
+        >
+          <div className="co-ava round">{initials(activeCompany?.legalName)}</div>
+          <div className="meta">
+            <div className="name">{activeCompany?.legalName ?? "Nicio companie"}</div>
+            <div className="cui num">{activeCompany?.cui ?? ""}</div>
+          </div>
+          <Ic name="chevUD" cls="ic chev" />
+        </button>
+        {companyOpen && (
+          <div className="pop show" id="companyPop" onMouseDown={stop}>
+            <div className="col-title">Companie activă</div>
+            {activeCompany && (
+              <div className="co-row sel">
+                <div className="co-ava">{initials(activeCompany.legalName, 1)}</div>
+                <div className="co-meta">
+                  <div className="co-name">{activeCompany.legalName}</div>
+                  <div className="co-cui">{activeCompany.cui}</div>
                 </div>
-              )}
-              {companies.filter((c) => c.id !== activeCompany?.id).length > 0 && (
-                <>
-                  <div className="pop-div" />
-                  <div className="col-title">Schimbă compania</div>
-                  {companies.filter((c) => c.id !== activeCompany?.id).map((c) => (
-                    <button key={c.id} className="co-row" onClick={() => switchCompany(c.id)}>
-                      <div className="co-ava alt">{initials(c.legalName, 1)}</div>
-                      <div className="co-meta">
-                        <div className="co-name">{c.legalName}</div>
-                        <div className="co-cui">{c.cui}</div>
-                      </div>
-                      <Ic name="check" cls="co-check" />
-                    </button>
-                  ))}
-                </>
-              )}
-              <div className="pop-div" />
-              <button className="pop-item" onClick={() => { setCompanyOpen(false); void navigate({ to: "/companies/new" }); }}>
-                <Ic name="plus" />Adaugă companie
-              </button>
-              <button className="pop-item" onClick={() => { setCompanyOpen(false); void navigate({ to: "/companies" }); }}>
-                <Ic name="cog" />Gestionează companiile
-              </button>
-            </div>
-          )}
-        </div>
+                <Ic name="check" cls="co-check" />
+              </div>
+            )}
+            {companies.filter((c) => c.id !== activeCompany?.id).length > 0 && (
+              <>
+                <div className="pop-div" />
+                <div className="col-title">Schimbă compania</div>
+                {companies.filter((c) => c.id !== activeCompany?.id).map((c) => (
+                  <button key={c.id} className="co-row" onClick={() => { setActiveCompanyId(c.id); setCompanyOpen(false); }}>
+                    <div className="co-ava alt">{initials(c.legalName, 1)}</div>
+                    <div className="co-meta">
+                      <div className="co-name">{c.legalName}</div>
+                      <div className="co-cui">{c.cui}</div>
+                    </div>
+                    <Ic name="check" cls="co-check" />
+                  </button>
+                ))}
+              </>
+            )}
+            <div className="pop-div" />
+            <button className="pop-item" onClick={() => { setCompanyOpen(false); void navigate({ to: "/companies/new" }); }}>
+              <Ic name="plus" />Adaugă companie
+            </button>
+            <button className="pop-item" onClick={() => { setCompanyOpen(false); void navigate({ to: "/companies" }); }}>
+              <Ic name="cog" />Gestionează companiile
+            </button>
+          </div>
+        )}
 
         {/* Nav groups */}
         {NAV.map((g) => {
@@ -203,39 +201,45 @@ export function Sidebar() {
         })}
       </div>
 
-      {/* Footer: user card + profile pop */}
-      <div className="side-foot" ref={profileRef} style={{ position: "relative" }}>
-        <button className={`user-card${profileOpen ? " open" : ""}`} onClick={() => setProfileOpen((o) => !o)}>
+      {/* Footer: user card */}
+      <div className="side-foot">
+        <button
+          className={`user-card${profileOpen ? " open" : ""}`}
+          onMouseDown={stop}
+          onClick={() => { setProfileOpen((o) => !o); setCompanyOpen(false); }}
+        >
           <div className="u-ava">{initials(license?.email ?? "Clarito", 2)}</div>
           <div className="meta">
             <div className="uname">Cont</div>
             <div className="umail">{license?.email ?? "Cont Clarito"}</div>
           </div>
         </button>
-        {profileOpen && (
-          <div className="pop show" id="profilePop">
-            <div className="pop-head">
-              <div className="u-ava">{initials(license?.email ?? "Clarito", 2)}</div>
-              <div><div className="pn">Cont</div><div className="pm">{license?.email ?? "Cont Clarito"}</div></div>
-            </div>
-            <div className="pop-div" />
-            <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/settings" }); }}><Ic name="cog" />Setări</button>
-            <button className="pop-item" onClick={() => { toggleLang(); }}>
-              <Ic name="lang" />Limbă
-              <span className="pill-new" style={{ background: "var(--fill)", color: "var(--text-2)", border: "1px solid var(--line)" }}>{langTag}</span>
-            </button>
-            <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/notifications" }); }}>
-              <Ic name="bell" />Notificări
-              {unreadCount != null && unreadCount > 0 && <span className="pill-new" style={{ background: "var(--black)" }}>{unreadCount}</span>}
-            </button>
-            <button className="pop-item" onClick={() => { setProfileOpen(false); soon(); }}><Ic name="docText" />Documente</button>
-            <button className="pop-item" onClick={() => { setProfileOpen(false); soon(); }}><Ic name="team" />Echipă</button>
-            <button className="pop-item" onClick={() => { setProfileOpen(false); void handleDocs(); }}><Ic name="help" />Ajutor</button>
-            <div className="pop-div" />
-            <button className="pop-item" onClick={() => void handleExit()}><Ic name="exit" />Ieșire</button>
-          </div>
-        )}
       </div>
+
+      {/* Profile pop (anchored to the aside via #profilePop bottom:70px) */}
+      {profileOpen && (
+        <div className="pop show" id="profilePop" onMouseDown={stop}>
+          <div className="pop-head">
+            <div className="u-ava">{initials(license?.email ?? "Clarito", 2)}</div>
+            <div><div className="pn">Cont</div><div className="pm">{license?.email ?? "Cont Clarito"}</div></div>
+          </div>
+          <div className="pop-div" />
+          <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/settings" }); }}><Ic name="cog" />Setări</button>
+          <button className="pop-item" onClick={toggleLang}>
+            <Ic name="lang" />Limbă
+            <span className="pill-new" style={{ marginLeft: "auto", background: "var(--fill)", color: "var(--text-2)", border: "1px solid var(--line)" }}>{langTag}</span>
+          </button>
+          <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/notifications" }); }}>
+            <Ic name="bell" />Notificări
+            {unreadCount != null && unreadCount > 0 && <span className="pill-new" style={{ marginLeft: "auto", background: "var(--black)" }}>{unreadCount}</span>}
+          </button>
+          <button className="pop-item" onClick={() => { setProfileOpen(false); soon(); }}><Ic name="docText" />Documente</button>
+          <button className="pop-item" onClick={() => { setProfileOpen(false); soon(); }}><Ic name="team" />Echipă</button>
+          <button className="pop-item" onClick={() => { setProfileOpen(false); void handleDocs(); }}><Ic name="help" />Ajutor</button>
+          <div className="pop-div" />
+          <button className="pop-item" onClick={() => void handleExit()}><Ic name="exit" />Ieșire</button>
+        </div>
+      )}
     </aside>
   );
 }
