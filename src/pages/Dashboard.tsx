@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 
 import { Banner } from "@/components/shared/Banner";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -37,14 +38,15 @@ function CountUp({ value }: { value: number }) {
   return <>{Math.round(shown).toLocaleString("ro-RO")}</>;
 }
 
-function fmtTime(unix: number): string {
-  return new Date(unix * 1000).toLocaleTimeString("ro-RO", {
+function fmtTime(unix: number, locale: string): string {
+  return new Date(unix * 1000).toLocaleTimeString(locale, {
     hour: "2-digit",
     minute: "2-digit",
   });
 }
 
 export function DashboardPage() {
+  const { t, i18n } = useTranslation();
   const navigate  = useNavigate();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [selDate, setSelDate] = useState<Date>(() => new Date());
@@ -218,11 +220,11 @@ export function DashboardPage() {
     const pad = (n: number) => String(n).padStart(2, "0");
     const prevKey = `${prevD.getFullYear()}-${pad(prevD.getMonth() + 1)}`;
     const prevTotal = monthTotal(prevKey);
-    const label = prevD.toLocaleDateString("ro-RO", { month: "long" });
+    const label = prevD.toLocaleDateString(i18n.language, { month: "long" });
     if (prevTotal <= 0) return { deltaPct: null as number | null, deltaDir: "neutral" as "up" | "down" | "neutral", prevMonthLabel: label };
     const pct = Math.round(((monthTotal(selectedYM) - prevTotal) / prevTotal) * 100);
     return { deltaPct: pct, deltaDir: (pct >= 0 ? "up" : "down") as "up" | "down" | "neutral", prevMonthLabel: label };
-  }, [invoices, selectedYM]);
+  }, [invoices, selectedYM, i18n.language]);
 
   const activeCompany    = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
 
@@ -246,12 +248,21 @@ export function DashboardPage() {
   };
 
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-  const MONTHS_FULL = ["Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie", "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie"];
+  const MONTHS_FULL = [
+    t("dashboard.months.jan"), t("dashboard.months.feb"), t("dashboard.months.mar"),
+    t("dashboard.months.apr"), t("dashboard.months.may"), t("dashboard.months.jun"),
+    t("dashboard.months.jul"), t("dashboard.months.aug"), t("dashboard.months.sep"),
+    t("dashboard.months.oct"), t("dashboard.months.nov"), t("dashboard.months.dec"),
+  ];
   const selM = selDate.getMonth() + 1;
   const periodLabel = `${MONTHS_FULL[selDate.getMonth()]} ${selDate.getFullYear()}`;
-  const headDate = cap(selDate.toLocaleDateString("ro-RO", { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
+  const headDate = cap(selDate.toLocaleDateString(i18n.language, { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
   const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  const WD = ["Du", "Lu", "Ma", "Mi", "Jo", "Vi", "Sâ"];
+  const WD = [
+    t("dashboard.weekdays.su"), t("dashboard.weekdays.mo"), t("dashboard.weekdays.tu"),
+    t("dashboard.weekdays.we"), t("dashboard.weekdays.th"), t("dashboard.weekdays.fr"),
+    t("dashboard.weekdays.sa"),
+  ];
   const calStart = new Date(viewYM.y, viewYM.m, 1).getDay();
 
   // De încasat = issued, not-yet-finalized invoices in the period (proxy for outstanding).
@@ -260,21 +271,21 @@ export function DashboardPage() {
   const receivedSum = receivedItems.reduce((s, r) => s + parseDec(r.totalAmount), 0);
 
   const STATUS_CHIP: Record<string, { cls: string; icon: string; label: string }> = {
-    DRAFT:     { cls: "sent", icon: "docText", label: "Ciornă" },
-    QUEUED:    { cls: "wait", icon: "clock", label: "În coadă" },
-    SUBMITTED: { cls: "wait", icon: "send", label: "Trimisă" },
-    VALIDATED: { cls: "paid", icon: "check", label: "Validată" },
-    REJECTED:  { cls: "late", icon: "xMark", label: "Respinsă" },
-    STORNED:   { cls: "sent", icon: "undo", label: "Stornată" },
+    DRAFT:     { cls: "sent", icon: "docText", label: t("dashboard.status.draft") },
+    QUEUED:    { cls: "wait", icon: "clock", label: t("dashboard.status.queued") },
+    SUBMITTED: { cls: "wait", icon: "send", label: t("dashboard.status.submitted") },
+    VALIDATED: { cls: "paid", icon: "check", label: t("dashboard.status.validated") },
+    REJECTED:  { cls: "late", icon: "xMark", label: t("dashboard.status.rejected") },
+    STORNED:   { cls: "sent", icon: "undo", label: t("dashboard.status.storned") },
   };
 
   if (!activeCompanyId) {
     return (
       <div className="main-inner">
-        <div className="page-head"><div><h1>Privire generală</h1></div></div>
+        <div className="page-head"><div><h1>{t("dashboard.title")}</h1></div></div>
         <div style={{ padding: "48px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          <b style={{ display: "block", marginBottom: 4, color: "var(--text)" }}>Selectați o companie activă pentru a vedea datele din tabloul de bord.</b>
-          Alegeți o companie din setări pentru a continua.
+          <b style={{ display: "block", marginBottom: 4, color: "var(--text)" }}>{t("dashboard.noCompany.title")}</b>
+          {t("dashboard.noCompany.hint")}
         </div>
       </div>
     );
@@ -290,42 +301,42 @@ export function DashboardPage() {
         (intrastat && (intrastat.dispatches.level !== "ok" || intrastat.arrivals.level !== "ok"))) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
           {invoicesError && (
-            <QueryErrorBanner error={invoicesErr} label="facturile" onRetry={() => void refetchInvoices()} />
+            <QueryErrorBanner error={invoicesErr} label={t("dashboard.errors.invoicesLabel")} onRetry={() => void refetchInvoices()} />
           )}
           {lastRejected && (
-            <Banner variant="error" title="Factură respinsă de ANAF"
-              actions={<button className="pill-btn" style={{ color: "var(--red)" }} onClick={() => void navigate({ to: "/invoices/$id", params: { id: lastRejected.id } })}>Vezi factura</button>}>
-              Factura <b className="num">{lastRejected.fullNumber}</b> a fost respinsă de ANAF
+            <Banner variant="error" title={t("dashboard.banners.rejectedTitle")}
+              actions={<button className="pill-btn" style={{ color: "var(--red)" }} onClick={() => void navigate({ to: "/invoices/$id", params: { id: lastRejected.id } })}>{t("dashboard.banners.viewInvoice")}</button>}>
+              {t("dashboard.banners.rejectedPrefix")} <b className="num">{lastRejected.fullNumber}</b> {t("dashboard.banners.rejectedSuffix")}
               {lastRejected.rejectionReason && (<>: <i>{lastRejected.rejectionReason}</i></>)}.
             </Banner>
           )}
           {regimeStatus && (regimeStatus.level === "exceeded" || regimeStatus.level === "approaching") && (
             <Banner variant={regimeStatus.level === "exceeded" ? "error" : "warning"}
-              title={regimeStatus.level === "exceeded" ? "Plafon microîntreprindere depășit" : "Vă apropiați de plafonul de microîntreprindere"}>
-              Cifra de afaceri {currentYear}: <b className="num">{regimeStatus.ytdTurnoverRon}</b> lei ({regimeStatus.pct}% din plafonul ≈ 100.000 EUR la cursul {regimeStatus.eurRate}).
+              title={regimeStatus.level === "exceeded" ? t("dashboard.banners.microExceeded") : t("dashboard.banners.microApproaching")}>
+              {t("dashboard.banners.turnoverPrefix", { year: currentYear })} <b className="num">{regimeStatus.ytdTurnoverRon}</b> {t("dashboard.banners.microBody", { pct: regimeStatus.pct, rate: regimeStatus.eurRate })}
             </Banner>
           )}
           {vatReg && vatReg.applicable && (vatReg.level === "exceeded" || vatReg.level === "approaching") && (
             <Banner variant={vatReg.level === "exceeded" ? "error" : "warning"}
-              title={vatReg.level === "exceeded" ? "Plafon de scutire TVA depășit — înregistrarea în scopuri de TVA e obligatorie" : "Vă apropiați de plafonul de scutire TVA"}>
-              Cifra de afaceri {currentYear}: <b className="num">{vatReg.ytdTurnoverRon}</b> lei ({vatReg.pct}% din {vatReg.plafonRon} lei, art. 310).
+              title={vatReg.level === "exceeded" ? t("dashboard.banners.vatExemptExceeded") : t("dashboard.banners.vatExemptApproaching")}>
+              {t("dashboard.banners.turnoverPrefix", { year: currentYear })} <b className="num">{vatReg.ytdTurnoverRon}</b> {t("dashboard.banners.vatExemptBody", { pct: vatReg.pct, plafon: vatReg.plafonRon })}
             </Banner>
           )}
           {regimeStatus && (regimeStatus.cashVatLevel === "exceeded" || regimeStatus.cashVatLevel === "approaching") && (
             <Banner variant={regimeStatus.cashVatLevel === "exceeded" ? "error" : "warning"}
-              title={regimeStatus.cashVatLevel === "exceeded" ? "Plafon TVA la încasare depășit" : "Vă apropiați de plafonul TVA la încasare"}>
-              Cifra de afaceri {currentYear}: <b className="num">{regimeStatus.ytdTurnoverRon}</b> lei (plafon {regimeStatus.cashVatPlafonRon} lei).
+              title={regimeStatus.cashVatLevel === "exceeded" ? t("dashboard.banners.cashVatExceeded") : t("dashboard.banners.cashVatApproaching")}>
+              {t("dashboard.banners.turnoverPrefix", { year: currentYear })} <b className="num">{regimeStatus.ytdTurnoverRon}</b> {t("dashboard.banners.cashVatBody", { plafon: regimeStatus.cashVatPlafonRon })}
             </Banner>
           )}
           {intrastat && ([
-            { label: "expedieri", f: intrastat.dispatches },
-            { label: "introduceri", f: intrastat.arrivals },
+            { label: t("dashboard.banners.intrastatDispatches"), f: intrastat.dispatches },
+            { label: t("dashboard.banners.intrastatArrivals"), f: intrastat.arrivals },
           ] as const)
             .filter(({ f }) => f.level === "exceeded" || f.level === "approaching")
             .map(({ label, f }) => (
               <Banner key={label} variant={f.level === "exceeded" ? "error" : "warning"}
-                title={f.level === "exceeded" ? `Prag Intrastat depășit (${label}) — declarație lunară obligatorie` : `Vă apropiați de pragul Intrastat (${label})`}>
-                Valoare {label} {currentYear}: <b className="num">{f.ytdRon}</b> lei ({f.pct}% din {intrastat.thresholdRon} lei).
+                title={f.level === "exceeded" ? t("dashboard.banners.intrastatExceeded", { label }) : t("dashboard.banners.intrastatApproaching", { label })}>
+                {t("dashboard.banners.intrastatValuePrefix", { label, year: currentYear })} <b className="num">{f.ytdRon}</b> {t("dashboard.banners.intrastatBody", { pct: f.pct, threshold: intrastat.thresholdRon })}
               </Banner>
             ))}
         </div>
@@ -333,7 +344,7 @@ export function DashboardPage() {
 
       <div className="page-head">
         <div>
-          <h1>Privire generală</h1>
+          <h1>{t("dashboard.title")}</h1>
           <p className="sub">{headDate} · {activeCompany?.legalName ?? ""}</p>
         </div>
         <div className="head-actions">
@@ -348,11 +359,11 @@ export function DashboardPage() {
             {monthPopOpen && (
               <div className="pop show" style={{ left: 0, top: 42, width: 288, padding: 10 }} onMouseDown={(e) => e.stopPropagation()}>
                 <div className="cal-head">
-                  <button className="cal-nav" aria-label="Luna anterioară" onClick={() => setViewYM((v) => { const d = new Date(v.y, v.m - 1, 1); return { y: d.getFullYear(), m: d.getMonth() }; })}>
+                  <button className="cal-nav" aria-label={t("dashboard.actions.prevMonth")} onClick={() => setViewYM((v) => { const d = new Date(v.y, v.m - 1, 1); return { y: d.getFullYear(), m: d.getMonth() }; })}>
                     <svg viewBox="0 0 24 24"><path d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
                   </button>
                   <div className="cal-title">{MONTHS_FULL[viewYM.m]} {viewYM.y}</div>
-                  <button className="cal-nav" aria-label="Luna următoare" onClick={() => setViewYM((v) => { const d = new Date(v.y, v.m + 1, 1); return { y: d.getFullYear(), m: d.getMonth() }; })}>
+                  <button className="cal-nav" aria-label={t("dashboard.actions.nextMonth")} onClick={() => setViewYM((v) => { const d = new Date(v.y, v.m + 1, 1); return { y: d.getFullYear(), m: d.getMonth() }; })}>
                     <svg viewBox="0 0 24 24"><path d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
                   </button>
                 </div>
@@ -374,14 +385,14 @@ export function DashboardPage() {
           </div>
           <button
             className={`sq-btn spin-btn${refreshing ? " spinning" : ""}`}
-            aria-label="Reîmprospătează"
+            aria-label={t("dashboard.actions.refresh")}
             disabled={refreshing}
-            onClick={async () => { setRefreshing(true); try { await queryClient.refetchQueries({ type: "active" }); notify.success("Date actualizate"); } finally { setRefreshing(false); } }}
+            onClick={async () => { setRefreshing(true); try { await queryClient.refetchQueries({ type: "active" }); notify.success(t("dashboard.notify.refreshed")); } finally { setRefreshing(false); } }}
           >
             <Ic name="sync" />
           </button>
           <button className="btn-dark" onClick={() => void navigate({ to: "/invoices/new" })}>
-            <Ic name="plus" />Factură nouă
+            <Ic name="plus" />{t("dashboard.actions.newInvoice")}
           </button>
         </div>
       </div>
@@ -389,28 +400,28 @@ export function DashboardPage() {
       {/* KPIs */}
       <div className="kpis">
         <div className="kpi">
-          <div className="top"><span className="klabel">Total facturat</span><Ic name="docUp" /></div>
+          <div className="top"><span className="klabel">{t("dashboard.kpi.totalInvoiced")}</span><Ic name="docUp" /></div>
           <div className="val num"><CountUp value={totalFacturat} /> <span className="cur">RON</span></div>
           <div className="delta">
             {deltaPct != null
-              ? (<><span className="ar">{deltaDir === "up" ? "↑" : "↓"} {Math.abs(deltaPct)}%</span> față de {prevMonthLabel}</>)
-              : `${periodInvoices.length} facturi · ${fmtInt(totalNet)} net`}
+              ? (<><span className="ar">{deltaDir === "up" ? "↑" : "↓"} {Math.abs(deltaPct)}%</span> {t("dashboard.kpi.vsPrev", { month: prevMonthLabel })}</>)
+              : t("dashboard.kpi.invoicesNet", { count: periodInvoices.length, net: fmtInt(totalNet) })}
           </div>
         </div>
         <div className="kpi">
-          <div className="top"><span className="klabel">De încasat</span><Ic name="incasat" /></div>
+          <div className="top"><span className="klabel">{t("dashboard.kpi.receivable")}</span><Ic name="incasat" /></div>
           <div className="val num"><CountUp value={deIncasat} /> <span className="cur">RON</span></div>
-          <div className="delta">{openInvoices.length} facturi deschise</div>
+          <div className="delta">{t("dashboard.kpi.openInvoices", { count: openInvoices.length })}</div>
         </div>
         <div className="kpi">
-          <div className="top"><span className="klabel">Facturi primite</span><Ic name="docDown" /></div>
+          <div className="top"><span className="klabel">{t("dashboard.kpi.received")}</span><Ic name="docDown" /></div>
           <div className="val num"><CountUp value={receivedSum} /> <span className="cur">RON</span></div>
-          <div className="delta">{receivedTotal} documente</div>
+          <div className="delta">{t("dashboard.kpi.documents", { count: receivedTotal })}</div>
         </div>
         <div className="kpi">
-          <div className="top"><span className="klabel">TVA de colectat</span><Ic name="calc" /></div>
+          <div className="top"><span className="klabel">{t("dashboard.kpi.vatToCollect")}</span><Ic name="calc" /></div>
           <div className="val num"><CountUp value={totalVat} /> <span className="cur">RON</span></div>
-          <div className="delta">scadență 25 {RO_MON[selM % 12]}.</div>
+          <div className="delta">{t("dashboard.kpi.vatDue", { month: RO_MON[selM % 12] })}</div>
         </div>
       </div>
 
@@ -419,12 +430,12 @@ export function DashboardPage() {
         <div className="card">
           <div className="card-head">
             <div>
-              <div className="ct">Facturare lunară</div>
-              <div className="cs">Emise vs. primite · {curChart.label}: <b>{curChart.emise}</b> emise · <b>{curChart.primite}</b> primite</div>
+              <div className="ct">{t("dashboard.chart.title")}</div>
+              <div className="cs">{t("dashboard.chart.sub")} · {curChart.label}: <b>{curChart.emise}</b> {t("dashboard.chart.issuedLc")} · <b>{curChart.primite}</b> {t("dashboard.chart.receivedLc")}</div>
             </div>
             <div className="legend">
-              <span className="lg"><span className="sw" style={{ background: "var(--black)" }} />Emise</span>
-              <span className="lg"><span className="sw" style={{ background: "#D4D4D8" }} />Primite</span>
+              <span className="lg"><span className="sw" style={{ background: "var(--black)" }} />{t("dashboard.chart.issued")}</span>
+              <span className="lg"><span className="sw" style={{ background: "#D4D4D8" }} />{t("dashboard.chart.received")}</span>
             </div>
           </div>
           <div className="chart">
@@ -434,7 +445,7 @@ export function DashboardPage() {
               const pH = Math.max(4, Math.round((d.primite / chartMax) * h));
               return (
                 <div key={d.key} className={`bar-col${d.key === curChart.key ? " curr" : ""}`}>
-                  <div className="bar-tip"><b>{d.label}</b><span><i className="d" />Emise<em className="num">{d.emise}</em></span><span><i className="l" />Primite<em className="num">{d.primite}</em></span></div>
+                  <div className="bar-tip"><b>{d.label}</b><span><i className="d" />{t("dashboard.chart.issued")}<em className="num">{d.emise}</em></span><span><i className="l" />{t("dashboard.chart.received")}<em className="num">{d.primite}</em></span></div>
                   <div className="bar-stack">
                     <div className="bar b-emise anim-bar" style={{ height: eH, animationDelay: `${chartData.indexOf(d) * 40}ms` }} />
                     <div className="bar b-primite anim-bar" style={{ height: pH, animationDelay: `${chartData.indexOf(d) * 40 + 20}ms` }} />
@@ -448,18 +459,18 @@ export function DashboardPage() {
 
         <div className="card">
           <div className="card-head">
-            <div className="ct">Activitate SPV</div>
-            <a className="cs" style={{ textDecoration: "none", cursor: "pointer" }} onClick={() => void navigate({ to: "/notifications" })}>Vezi tot</a>
+            <div className="ct">{t("dashboard.activity.title")}</div>
+            <a className="cs" style={{ textDecoration: "none", cursor: "pointer" }} onClick={() => void navigate({ to: "/notifications" })}>{t("dashboard.activity.seeAll")}</a>
           </div>
           <div className="activity">
             {timelineItems.length === 0 ? (
-              <div style={{ padding: "22px 4px", fontSize: 12.5, color: "var(--text-2)", textAlign: "center" }}>Fără notificări recente</div>
+              <div style={{ padding: "22px 4px", fontSize: 12.5, color: "var(--text-2)", textAlign: "center" }}>{t("dashboard.activity.empty")}</div>
             ) : timelineItems.map((n) => (
               <div key={n.id} className="act-item">
                 <div className="act-ic"><Ic name={actIcon(n.notificationType)} /></div>
                 <div className="act-tx">
                   <div className="a1">{n.title}</div>
-                  <div className="a2">{n.body || fmtTime(n.createdAt)}</div>
+                  <div className="a2">{n.body || fmtTime(n.createdAt, i18n.language)}</div>
                 </div>
               </div>
             ))}
@@ -470,17 +481,17 @@ export function DashboardPage() {
       {/* recent table */}
       <div className="table-wrap">
         <div className="tbar">
-          <div className="tt">Facturi recente</div>
+          <div className="tt">{t("dashboard.table.title")}</div>
           <div className="tbar-actions">
-            <a className="see-all" style={{ cursor: "pointer" }} onClick={() => void navigate({ to: "/invoices" })}>Vezi toate<Ic name="chevR" /></a>
+            <a className="see-all" style={{ cursor: "pointer" }} onClick={() => void navigate({ to: "/invoices" })}>{t("dashboard.table.seeAll")}<Ic name="chevR" /></a>
             <button className="pill-btn" onMouseDown={(e) => e.stopPropagation()} onClick={() => setColPopOpen((o) => !o)}>
-              <Ic name="columns" />Coloane
+              <Ic name="columns" />{t("dashboard.table.columns")}
             </button>
             {colPopOpen && (
               <div className="pop show" style={{ right: 0, top: 40, width: 230 }} onMouseDown={(e) => e.stopPropagation()}>
-                <div className="col-title">Gestionează coloane</div>
-                <div className="col-row locked"><Ic name="users" /><span className="cl">Client</span><span className="tog on" /></div>
-                {([["doc", "Document", "docText"], ["data", "Data", "calendar"], ["scad", "Scadența", "clock"], ["val", "Valoare", "calc"]] as const).map(([key, label, icon]) => (
+                <div className="col-title">{t("dashboard.table.manageColumns")}</div>
+                <div className="col-row locked"><Ic name="users" /><span className="cl">{t("dashboard.table.client")}</span><span className="tog on" /></div>
+                {([["doc", t("dashboard.table.document"), "docText"], ["data", t("dashboard.table.date"), "calendar"], ["scad", t("dashboard.table.due"), "clock"], ["val", t("dashboard.table.amount"), "calc"]] as const).map(([key, label, icon]) => (
                   <div key={key} className="col-row" onClick={() => setHiddenCols((s) => ({ ...s, [key]: !s[key] }))}>
                     <Ic name={icon} /><span className="cl">{label}</span><span className={`tog${hiddenCols[key] ? "" : " on"}`} />
                   </div>
@@ -492,18 +503,18 @@ export function DashboardPage() {
         <table className={Object.entries(hiddenCols).filter(([, v]) => v).map(([k]) => `hide-${k}`).join(" ")}>
           <thead>
             <tr>
-              <th className="c-client">Client</th>
-              <th className="c-doc">Document</th>
-              <th className="c-data">Data</th>
-              <th className="c-scad">Scadența</th>
-              <th className="c-val r">Valoare</th>
-              <th className="c-status">Status ANAF</th>
+              <th className="c-client">{t("dashboard.table.client")}</th>
+              <th className="c-doc">{t("dashboard.table.document")}</th>
+              <th className="c-data">{t("dashboard.table.date")}</th>
+              <th className="c-scad">{t("dashboard.table.due")}</th>
+              <th className="c-val r">{t("dashboard.table.amount")}</th>
+              <th className="c-status">{t("dashboard.table.statusAnaf")}</th>
             </tr>
           </thead>
           <tbody>
             {recentInvoices.length === 0 ? (
               <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: "var(--text-2)" }}>
-                Fără facturi. <button type="button" className="link" onClick={() => void navigate({ to: "/invoices/new" })}>Creează prima factură →</button>
+                {t("dashboard.table.empty")} <button type="button" className="link" onClick={() => void navigate({ to: "/invoices/new" })}>{t("dashboard.table.createFirst")}</button>
               </td></tr>
             ) : recentInvoices.map((inv) => {
               const chip = STATUS_CHIP[inv.status] ?? STATUS_CHIP.DRAFT;

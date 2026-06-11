@@ -1,0 +1,118 @@
+{
+  "dashboard": {
+    "title": "Privire generală",
+    "noCompany": {
+      "title": "Selectați o companie activă pentru a vedea datele din tabloul de bord.",
+      "hint": "Alegeți o companie din setări pentru a continua."
+    },
+    "actions": {
+      "refresh": "Reîmprospătează",
+      "newInvoice": "Factură nouă",
+      "prevMonth": "Luna anterioară",
+      "nextMonth": "Luna următoare"
+    },
+    "notify": {
+      "refreshed": "Date actualizate"
+    },
+    "months": {
+      "jan": "Ianuarie",
+      "feb": "Februarie",
+      "mar": "Martie",
+      "apr": "Aprilie",
+      "may": "Mai",
+      "jun": "Iunie",
+      "jul": "Iulie",
+      "aug": "August",
+      "sep": "Septembrie",
+      "oct": "Octombrie",
+      "nov": "Noiembrie",
+      "dec": "Decembrie"
+    },
+    "weekdays": {
+      "su": "Du",
+      "mo": "Lu",
+      "tu": "Ma",
+      "we": "Mi",
+      "th": "Jo",
+      "fr": "Vi",
+      "sa": "Sâ"
+    },
+    "kpi": {
+      "totalInvoiced": "Total facturat",
+      "vsPrev": "față de {{month}}",
+      "invoicesNet_one": "{{count}} factură · {{net}} net",
+      "invoicesNet_few": "{{count}} facturi · {{net}} net",
+      "invoicesNet_other": "{{count}} de facturi · {{net}} net",
+      "receivable": "De încasat",
+      "openInvoices_one": "{{count}} factură deschisă",
+      "openInvoices_few": "{{count}} facturi deschise",
+      "openInvoices_other": "{{count}} de facturi deschise",
+      "received": "Facturi primite",
+      "documents_one": "{{count}} document",
+      "documents_few": "{{count}} documente",
+      "documents_other": "{{count}} de documente",
+      "vatToCollect": "TVA de colectat",
+      "vatDue": "scadență 25 {{month}}."
+    },
+    "chart": {
+      "title": "Facturare lunară",
+      "sub": "Emise vs. primite",
+      "issued": "Emise",
+      "received": "Primite",
+      "issuedLc": "emise",
+      "receivedLc": "primite"
+    },
+    "activity": {
+      "title": "Activitate SPV",
+      "seeAll": "Vezi tot",
+      "empty": "Fără notificări recente"
+    },
+    "table": {
+      "title": "Facturi recente",
+      "seeAll": "Vezi toate",
+      "columns": "Coloane",
+      "manageColumns": "Gestionează coloane",
+      "client": "Client",
+      "document": "Document",
+      "date": "Data",
+      "due": "Scadența",
+      "amount": "Valoare",
+      "statusAnaf": "Status ANAF",
+      "empty": "Fără facturi.",
+      "createFirst": "Creează prima factură →"
+    },
+    "status": {
+      "draft": "Ciornă",
+      "queued": "În coadă",
+      "submitted": "Trimisă",
+      "validated": "Validată",
+      "rejected": "Respinsă",
+      "storned": "Stornată"
+    },
+    "errors": {
+      "invoicesLabel": "facturile"
+    },
+    "banners": {
+      "rejectedTitle": "Factură respinsă de ANAF",
+      "viewInvoice": "Vezi factura",
+      "rejectedPrefix": "Factura",
+      "rejectedSuffix": "a fost respinsă de ANAF",
+      "turnoverPrefix": "Cifra de afaceri {{year}}:",
+      "microExceeded": "Plafon microîntreprindere depășit",
+      "microApproaching": "Vă apropiați de plafonul de microîntreprindere",
+      "microBody": "lei ({{pct}}% din plafonul ≈ 100.000 EUR la cursul {{rate}}).",
+      "vatExemptExceeded": "Plafon de scutire TVA depășit — înregistrarea în scopuri de TVA e obligatorie",
+      "vatExemptApproaching": "Vă apropiați de plafonul de scutire TVA",
+      "vatExemptBody": "lei ({{pct}}% din {{plafon}} lei, art. 310).",
+      "cashVatExceeded": "Plafon TVA la încasare depășit",
+      "cashVatApproaching": "Vă apropiați de plafonul TVA la încasare",
+      "cashVatBody": "lei (plafon {{plafon}} lei).",
+      "intrastatDispatches": "expedieri",
+      "intrastatArrivals": "introduceri",
+      "intrastatExceeded": "Prag Intrastat depășit ({{label}}) — declarație lunară obligatorie",
+      "intrastatApproaching": "Vă apropiați de pragul Intrastat ({{label}})",
+      "intrastatValuePrefix": "Valoare {{label}} {{year}}:",
+      "intrastatBody": "lei ({{pct}}% din {{threshold}} lei)."
+    }
+  }
+}

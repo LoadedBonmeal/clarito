@@ -1,0 +1,137 @@
+{
+  "invoices": {
+    "title": "Issued invoices",
+    "countTotal": "{{n}} invoices",
+    "countFiltered": "{{shown}} of {{total}} invoices",
+    "newInvoice": "New invoice",
+    "status": {
+      "draft": "Draft",
+      "queued": "Queued",
+      "submitted": "Submitted",
+      "validated": "Validated",
+      "rejected": "Rejected",
+      "storned": "Credited"
+    },
+    "tabs": {
+      "all": "All",
+      "validated": "Validated",
+      "submitted": "Submitted",
+      "queued": "Queued",
+      "rejected": "Rejected",
+      "drafts": "Drafts",
+      "storned": "Credited"
+    },
+    "toolbar": {
+      "searchPlaceholder": "Search by number or client…",
+      "allMonths": "All months",
+      "period": "Period",
+      "filters": "Filters",
+      "advancedFilters": "Advanced filters",
+      "errorsOnly": "With errors (rejected by ANAF)",
+      "totalRon": "Invoice total (RON)",
+      "min": "Min",
+      "max": "Max",
+      "resetFilters": "Reset filters",
+      "refresh": "Reload",
+      "export": "Export",
+      "import": "Import",
+      "exportSaga": "SAGA CSV",
+      "exportXlsx": "Export XLSX",
+      "importXml": "Import XML",
+      "importCsv": "Import CSV"
+    },
+    "bulk": {
+      "selected": "{{n}} selected",
+      "sendSelection": "Send selection to ANAF",
+      "print": "Print",
+      "deselect": "Deselect"
+    },
+    "table": {
+      "number": "Number",
+      "date": "Date",
+      "client": "Client",
+      "net": "Net amount",
+      "vat": "VAT",
+      "total": "Total",
+      "currency": "Currency",
+      "status": "Status",
+      "payment": "Payment",
+      "selectAll": "Select all"
+    },
+    "pay": {
+      "paid": "Collected",
+      "partial": "Partial",
+      "unpaid": "Uncollected"
+    },
+    "rowActions": {
+      "view": "View",
+      "more": "More",
+      "edit": "Edit",
+      "sendAnaf": "Send to ANAF",
+      "downloadPdf": "Download PDF",
+      "downloadXml": "Download XML (UBL)",
+      "storno": "Storno",
+      "duplicate": "Duplicate",
+      "checkStatus": "Check ANAF status"
+    },
+    "stornoModal": {
+      "title": "Credit invoice (storno)",
+      "reasonPlaceholder": "Reason for the storno…",
+      "cancel": "Cancel",
+      "confirm": "Create storno"
+    },
+    "foot": {
+      "totalsNet": "RON totals (filtered): net",
+      "vat": "VAT",
+      "total": "total",
+      "shownFirst": "showing first {{shown}} of {{total}}",
+      "nonRonExcluded_one": "{{count}} invoice in another currency excluded from totals",
+      "nonRonExcluded_other": "{{count}} invoices in another currency excluded from totals"
+    },
+    "states": {
+      "selectCompany": "Select an active company to see issued invoices.",
+      "loading": "Loading…",
+      "emptyAll": "No issued invoices. Create your first invoice with the \"New invoice\" button.",
+      "emptyFiltered": "No records match the applied filters.",
+      "truncated": "Showing the first {{shown}} of {{total}} invoices.",
+      "errorLabel": "the invoices"
+    },
+    "notify": {
+      "sent": "Invoice sent to ANAF.",
+      "sendError": "Error sending to ANAF.",
+      "pdfDone": "PDF generated.",
+      "pdfError": "Error generating PDF.",
+      "xmlSaved": "XML saved: {{path}}",
+      "xmlError": "Error generating XML.",
+      "duplicated": "Invoice duplicated.",
+      "duplicateError": "Error duplicating invoice.",
+      "anafStatus": "ANAF status: {{status}}",
+      "statusError": "Error checking status.",
+      "stornoReasonRequired": "Enter the storno reason.",
+      "stornoCreated": "Storno invoice created: {{number}}",
+      "stornoError": "Error creating storno.",
+      "submitFailed": "Submission failed.",
+      "bulkPartial": "{{ok}} sent, {{errors}} errors: {{details}}",
+      "bulkSent": "{{n}} invoices sent to ANAF",
+      "sagaSaved": "SAGA export saved: {{path}}",
+      "sagaError": "Error exporting SAGA CSV.",
+      "exportSaved": "Export saved: {{path}}",
+      "xlsxError": "Error exporting XLSX.",
+      "selectCompany": "Select a company.",
+      "imported": "Invoice imported: {{number}} — {{supplier}} · {{total}}",
+      "importFailed": "Import failed: {{errors}}",
+      "importXmlError": "Error importing XML."
+    },
+    "stornate": {
+      "breadcrumb": "e-Factura › Credited",
+      "title": "Credited invoices",
+      "count_one": "{{count}} invoice with Credited status",
+      "count_other": "{{count}} invoices with Credited status",
+      "selectCompany": "Select an active company to see credited invoices.",
+      "banner": "A credited invoice keeps its <b>original (positive)</b> amount — the fiscal reversal is carried by the <b>credit note</b> (the storno invoice with negative amounts), issued separately and sent to ANAF from Issued invoices.",
+      "errorLabel": "the credited invoices",
+      "empty": "No credited invoices. Credited invoices will appear here.",
+      "totalStorned": "Credited total"
+    }
+  }
+}

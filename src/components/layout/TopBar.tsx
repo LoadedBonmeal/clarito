@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { useAppStore } from "@/lib/store";
@@ -17,10 +18,10 @@ import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 
 const NOU_ITEMS = [
-  { label: "Factură nouă", icon: "docUp", to: "/invoices/new" },
-  { label: "Chitanță", icon: "receipt", to: "/receipts" },
-  { label: "Client / Furnizor", icon: "users", to: "/contacts" },
-  { label: "Articol", icon: "cube", to: "/products" },
+  { labelKey: "shell.topbar.newInvoice", icon: "docUp", to: "/invoices/new" },
+  { labelKey: "shell.topbar.newReceipt", icon: "receipt", to: "/receipts" },
+  { labelKey: "shell.topbar.newContact", icon: "users", to: "/contacts" },
+  { labelKey: "shell.topbar.newProduct", icon: "cube", to: "/products" },
 ];
 
 /** The design brand mark — white "C" glyph on the near-black `.mark` square. */
@@ -34,6 +35,7 @@ function MarkGlyph() {
 }
 
 export function TopBar() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const setCommandOpen = useAppStore((s) => s.setCommandOpen);
@@ -72,17 +74,17 @@ export function TopBar() {
   });
 
   const handleSyncSpv = async () => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    if (!activeCompanyId) { notify.warn(t("shell.notify.selectCompany")); return; }
     if (syncing) return;
     setSyncing(true);
     try {
       const n = await api.anaf.syncSpv(activeCompanyId, anafTestMode);
       void queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
-      notify[n > 0 ? "success" : "info"](n > 0 ? `${n} mesaje SPV noi descărcate` : "Nicio factură nouă în SPV");
+      notify[n > 0 ? "success" : "info"](n > 0 ? t("shell.notify.spvNew", { count: n }) : t("shell.notify.noNewSpv"));
       void navigate({ to: "/received" });
     } catch (e) {
-      notify.error(formatError(e, "Sincronizarea SPV a eșuat."));
+      notify.error(formatError(e, t("shell.notify.spvSyncFailed")));
     } finally {
       setSyncing(false);
     }
@@ -98,7 +100,7 @@ export function TopBar() {
           <div className="mark"><MarkGlyph /></div>
           <span className="wordmark">Clarito</span>
         </div>
-        <button className="collapse-btn" onClick={toggleSidebar} aria-label="Restrânge meniul">
+        <button className="collapse-btn" onClick={toggleSidebar} aria-label={t("shell.topbar.collapseMenu")}>
           <Ic name="collapse" />
         </button>
       </div>
@@ -107,7 +109,7 @@ export function TopBar() {
       <div className="searchwrap">
         <div className="search" onClick={() => setCommandOpen(true)} role="button" tabIndex={0}>
           <Ic name="lens" />
-          <input type="text" placeholder="Caută facturi, clienți, articole…" readOnly />
+          <input type="text" placeholder={t("shell.topbar.searchPlaceholder")} readOnly />
           <span className="kbd">⌘ K</span>
         </div>
       </div>
@@ -117,14 +119,14 @@ export function TopBar() {
         <div className="spv-pill">
           {connected && <span className="spv-dot" />}
           <Ic name="shield" cls={connected ? "spv-ic" : "spv-ic spv-ic--err"} />
-          SPV: {connected ? "Conectat" : "Neautentificat"}
+          SPV: {connected ? t("shell.topbar.spvConnected") : t("shell.topbar.spvNotAuth")}
           <span className="spv-div" />
           <button
             id="spvSync"
             className={`spv-sync spin-btn${syncing ? " spinning" : ""}`}
             onClick={() => void handleSyncSpv()}
             disabled={syncing}
-            aria-label="Sincronizează SPV"
+            aria-label={t("shell.topbar.syncSpv")}
           >
             <Ic name="sync" />
           </button>
@@ -133,12 +135,12 @@ export function TopBar() {
         <div className="nou-wrap" ref={nouRef}>
           <button id="nouBtn" className={`btn-dark${nouOpen ? " anim-open" : ""}`} onClick={() => setNouOpen((o) => !o)}>
             <Ic name="plus" />
-            Nou
+            {t("shell.topbar.new")}
             <Ic name="chevD" cls="ic chev-sm" />
           </button>
           {nouOpen && (
             <div className="pop show" id="nouPop">
-              <div className="col-title">Creează</div>
+              <div className="col-title">{t("shell.topbar.create")}</div>
               {NOU_ITEMS.map((it) => (
                 <button
                   key={it.to}
@@ -146,7 +148,7 @@ export function TopBar() {
                   onClick={() => { setNouOpen(false); void navigate({ to: it.to as "/" }); }}
                 >
                   <Ic name={it.icon} />
-                  {it.label}
+                  {t(it.labelKey)}
                 </button>
               ))}
               <div className="pop-div" />
@@ -155,14 +157,14 @@ export function TopBar() {
                 onClick={() => { setNouOpen(false); void navigate({ to: "/received" }); }}
               >
                 <Ic name="docDown" />
-                Importă din SPV
+                {t("shell.topbar.importSpv")}
               </button>
             </div>
           )}
         </div>
 
         <div className="bell-wrap">
-          <button id="bellBtn" className="icon-btn" onClick={() => void navigate({ to: "/notifications" })} aria-label="Notificări">
+          <button id="bellBtn" className="icon-btn" onClick={() => void navigate({ to: "/notifications" })} aria-label={t("shell.profile.notifications")}>
             <Ic name="bell" />
             {unreadCount != null && unreadCount > 0 && <span className="bell-dot" />}
           </button>

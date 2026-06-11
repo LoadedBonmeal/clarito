@@ -1,0 +1,139 @@
+{
+  "invoices": {
+    "title": "Facturi emise",
+    "countTotal": "{{n}} facturi",
+    "countFiltered": "{{shown}} din {{total}} facturi",
+    "newInvoice": "Factură nouă",
+    "status": {
+      "draft": "Schiță",
+      "queued": "În coadă",
+      "submitted": "Trimisă",
+      "validated": "Validată",
+      "rejected": "Respinsă",
+      "storned": "Stornată"
+    },
+    "tabs": {
+      "all": "Toate",
+      "validated": "Validate",
+      "submitted": "Trimise",
+      "queued": "În coadă",
+      "rejected": "Respinse",
+      "drafts": "Schițe",
+      "storned": "Stornate"
+    },
+    "toolbar": {
+      "searchPlaceholder": "Caută după număr sau client…",
+      "allMonths": "Toate lunile",
+      "period": "Perioadă",
+      "filters": "Filtre",
+      "advancedFilters": "Filtre avansate",
+      "errorsOnly": "Cu erori (respinse ANAF)",
+      "totalRon": "Total factură (RON)",
+      "min": "Min",
+      "max": "Max",
+      "resetFilters": "Resetează filtrele",
+      "refresh": "Reîncarcă",
+      "export": "Export",
+      "import": "Import",
+      "exportSaga": "SAGA CSV",
+      "exportXlsx": "Export XLSX",
+      "importXml": "Import XML",
+      "importCsv": "Import CSV"
+    },
+    "bulk": {
+      "selected": "{{n}} selectate",
+      "sendSelection": "Trimite selecția la ANAF",
+      "print": "Tipărește",
+      "deselect": "Deselectează"
+    },
+    "table": {
+      "number": "Număr",
+      "date": "Data",
+      "client": "Client",
+      "net": "Valoare net",
+      "vat": "TVA",
+      "total": "Total",
+      "currency": "Monedă",
+      "status": "Status",
+      "payment": "Plată",
+      "selectAll": "Selectează tot"
+    },
+    "pay": {
+      "paid": "Încasată",
+      "partial": "Parțial",
+      "unpaid": "Neîncasată"
+    },
+    "rowActions": {
+      "view": "Vizualizează",
+      "more": "Mai multe",
+      "edit": "Editează",
+      "sendAnaf": "Trimite la ANAF",
+      "downloadPdf": "Descarcă PDF",
+      "downloadXml": "Descarcă XML (UBL)",
+      "storno": "Storno",
+      "duplicate": "Duplică",
+      "checkStatus": "Verifică status ANAF"
+    },
+    "stornoModal": {
+      "title": "Stornare factură",
+      "reasonPlaceholder": "Motivul stornării…",
+      "cancel": "Anulează",
+      "confirm": "Stornează"
+    },
+    "foot": {
+      "totalsNet": "Totaluri RON (filtrate): net",
+      "vat": "TVA",
+      "total": "total",
+      "shownFirst": "afișate primele {{shown}} din {{total}}",
+      "nonRonExcluded_one": "{{count}} factură în altă monedă exclusă din totaluri",
+      "nonRonExcluded_few": "{{count}} facturi în altă monedă excluse din totaluri",
+      "nonRonExcluded_other": "{{count}} de facturi în altă monedă excluse din totaluri"
+    },
+    "states": {
+      "selectCompany": "Selectați o companie activă pentru a vedea facturile emise.",
+      "loading": "Se încarcă…",
+      "emptyAll": "Nicio factură emisă. Creați prima factură cu butonul „Factură nouă”.",
+      "emptyFiltered": "Nicio înregistrare pentru filtrele aplicate.",
+      "truncated": "Afișate primele {{shown}} din {{total}} facturi.",
+      "errorLabel": "facturile"
+    },
+    "notify": {
+      "sent": "Factură trimisă la ANAF.",
+      "sendError": "Eroare trimitere ANAF.",
+      "pdfDone": "PDF generat.",
+      "pdfError": "Eroare generare PDF.",
+      "xmlSaved": "XML salvat: {{path}}",
+      "xmlError": "Eroare generare XML.",
+      "duplicated": "Factură duplicată.",
+      "duplicateError": "Eroare duplicare.",
+      "anafStatus": "Status ANAF: {{status}}",
+      "statusError": "Eroare verificare status.",
+      "stornoReasonRequired": "Introduceți motivul stornării.",
+      "stornoCreated": "Factură storno creată: {{number}}",
+      "stornoError": "Eroare stornare.",
+      "submitFailed": "Trimitere eșuată.",
+      "bulkPartial": "{{ok}} trimise, {{errors}} erori: {{details}}",
+      "bulkSent": "{{n}} facturi trimise la ANAF",
+      "sagaSaved": "Export SAGA salvat: {{path}}",
+      "sagaError": "Eroare export SAGA.",
+      "exportSaved": "Export salvat: {{path}}",
+      "xlsxError": "Eroare export XLSX.",
+      "selectCompany": "Selectați o companie.",
+      "imported": "Factură importată: {{number}} — {{supplier}} · {{total}}",
+      "importFailed": "Import eșuat: {{errors}}",
+      "importXmlError": "Eroare import XML."
+    },
+    "stornate": {
+      "breadcrumb": "e-Factura › Stornate",
+      "title": "Facturi stornate",
+      "count_one": "{{count}} factură cu status Stornată",
+      "count_few": "{{count}} facturi cu status Stornată",
+      "count_other": "{{count}} de facturi cu status Stornată",
+      "selectCompany": "Selectați o companie activă pentru a vedea facturile stornate.",
+      "banner": "Factura stornată își păstrează valoarea <b>originală (pozitivă)</b> — reversarea fiscală este purtată de <b>nota de credit</b> (factura storno cu valori negative), emisă separat și trimisă la ANAF din Facturi emise.",
+      "errorLabel": "facturile stornate",
+      "empty": "Nicio factură stornată. Facturile stornate vor apărea aici.",
+      "totalStorned": "Total stornat"
+    }
+  }
+}

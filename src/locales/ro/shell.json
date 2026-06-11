@@ -1,0 +1,91 @@
+{
+  "shell": {
+    "topbar": {
+      "collapseMenu": "Restrânge meniul",
+      "searchPlaceholder": "Caută facturi, clienți, articole…",
+      "spvConnected": "Conectat",
+      "spvNotAuth": "Neautentificat",
+      "syncSpv": "Sincronizează SPV",
+      "new": "Nou",
+      "create": "Creează",
+      "newInvoice": "Factură nouă",
+      "newReceipt": "Chitanță",
+      "newContact": "Client / Furnizor",
+      "newProduct": "Articol",
+      "importSpv": "Importă din SPV"
+    },
+    "notify": {
+      "selectCompany": "Selectați o companie activă.",
+      "spvNew_one": "{{count}} mesaj SPV nou descărcat",
+      "spvNew_few": "{{count}} mesaje SPV noi descărcate",
+      "spvNew_other": "{{count}} de mesaje SPV noi descărcate",
+      "noNewSpv": "Nicio factură nouă în SPV",
+      "spvSyncFailed": "Sincronizarea SPV a eșuat."
+    },
+    "nav": {
+      "overview": "Privire generală",
+      "invoicesIssued": "Facturi emise",
+      "invoicesReceived": "Facturi primite",
+      "spvMessages": "Mesaje SPV",
+      "credited": "Stornate",
+      "groupOperate": "Operare",
+      "contacts": "Clienți & Furnizori",
+      "receipts": "Chitanțe",
+      "payments": "Urmărire plăți",
+      "payroll": "Salarizare",
+      "products": "Articole & stocuri",
+      "companies": "Companii",
+      "recurring": "Facturi recurente",
+      "assets": "Mijloace fixe",
+      "accounts": "Plan de conturi",
+      "vatRates": "Cote TVA",
+      "groupReporting": "Raportare",
+      "reports": "Rapoarte",
+      "declarations": "Declarații ANAF",
+      "etransport": "e-Transport",
+      "ledger": "Jurnal contabil",
+      "more": "Mai multe",
+      "fewer": "Mai puține"
+    },
+    "company": {
+      "none": "Nicio companie",
+      "active": "Companie activă",
+      "switch": "Schimbă compania",
+      "add": "Adaugă companie",
+      "manage": "Gestionează companiile"
+    },
+    "profile": {
+      "defaultAccount": "Cont Clarito",
+      "settings": "Setări",
+      "language": "Limbă",
+      "notifications": "Notificări",
+      "documents": "Documente",
+      "account": "Cont & Licență",
+      "help": "Ajutor",
+      "exit": "Ieșire"
+    },
+    "palette": {
+      "placeholder": "Caută comenzi, facturi, contacte…",
+      "noResults": "Niciun rezultat pentru „{{query}}\"",
+      "sections": {
+        "navigate": "Navigare",
+        "actions": "Acțiuni",
+        "recent": "Recente"
+      },
+      "dashboard": "Privire generală (Dashboard)",
+      "anafNotifications": "Notificări ANAF",
+      "openContacts": "Deschide lista contacte",
+      "newCompany": "Companie nouă",
+      "toggleThemeLight": "Comută tema (luminoasă)",
+      "toggleThemeDark": "Comută tema (întunecată)",
+      "invoiceItem": "Factură {{n}}",
+      "footNavigate": "navigare",
+      "footRun": "execută",
+      "footClose": "închide"
+    },
+    "banner": {
+      "close": "Închide notificare",
+      "formStale": "Formular ANAF actualizat ({{forms}}) — actualizați aplicația pentru validare corectă."
+    }
+  }
+}

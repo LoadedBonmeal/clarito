@@ -26,6 +26,7 @@ interface NavLink {
   more?: boolean;
 }
 interface NavGroup {
+  id: string;
   sec: string | null;
   items: NavLink[];
 }
@@ -35,7 +36,7 @@ const stop = (e: React.SyntheticEvent) => e.stopPropagation();
 export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const setActiveCompanyId = useAppStore((s) => s.setActiveCompanyId);
 
@@ -70,30 +71,30 @@ export function Sidebar() {
 
   // ── Nav model (design NAV → real routes) ───────────────────────────────────
   const NAV: NavGroup[] = [
-    { sec: null, items: [
-      { key: "privire", label: "Privire generală", icon: "grid", path: "/" },
-      { key: "facturi-emise", label: "Facturi emise", icon: "docUp", path: "/invoices", matchPrefix: "/invoices" },
-      { key: "facturi-primite", label: "Facturi primite", icon: "docDown", path: "/received", matchPrefix: "/received" },
-      { key: "mesaje-spv", label: "Mesaje SPV", icon: "mail", path: "/notifications", badge: unreadCount || undefined },
-      { key: "stornate", label: "Stornate", icon: "undo", path: "/stornate" },
+    { id: "main", sec: null, items: [
+      { key: "privire", label: t("shell.nav.overview"), icon: "grid", path: "/" },
+      { key: "facturi-emise", label: t("shell.nav.invoicesIssued"), icon: "docUp", path: "/invoices", matchPrefix: "/invoices" },
+      { key: "facturi-primite", label: t("shell.nav.invoicesReceived"), icon: "docDown", path: "/received", matchPrefix: "/received" },
+      { key: "mesaje-spv", label: t("shell.nav.spvMessages"), icon: "mail", path: "/notifications", badge: unreadCount || undefined },
+      { key: "stornate", label: t("shell.nav.credited"), icon: "undo", path: "/stornate" },
     ]},
-    { sec: "Operare", items: [
-      { key: "clienti", label: "Clienți & Furnizori", icon: "users", path: "/contacts" },
-      { key: "chitante", label: "Chitanțe", icon: "receipt", path: "/receipts" },
-      { key: "urmarire-plati", label: "Urmărire plăți", icon: "card", path: "/payments" },
-      { key: "salarizare", label: "Salarizare", icon: "idcard", path: "/payroll" },
-      { key: "articole", label: "Articole & stocuri", icon: "cube", path: "/products" },
-      { key: "companii", label: "Companii", icon: "building", path: "/companies", matchPrefix: "/companies", more: true },
-      { key: "facturi-recurente", label: "Facturi recurente", icon: "loop", path: "/recurring", more: true },
-      { key: "mijloace-fixe", label: "Mijloace fixe", icon: "wrench", path: "/assets", more: true },
-      { key: "plan-conturi", label: "Plan de conturi", icon: "book", path: "/accounts", more: true },
-      { key: "cote-tva", label: "Cote TVA", icon: "scale", path: "/vat-rates", more: true },
+    { id: "operare", sec: t("shell.nav.groupOperate"), items: [
+      { key: "clienti", label: t("shell.nav.contacts"), icon: "users", path: "/contacts" },
+      { key: "chitante", label: t("shell.nav.receipts"), icon: "receipt", path: "/receipts" },
+      { key: "urmarire-plati", label: t("shell.nav.payments"), icon: "card", path: "/payments" },
+      { key: "salarizare", label: t("shell.nav.payroll"), icon: "idcard", path: "/payroll" },
+      { key: "articole", label: t("shell.nav.products"), icon: "cube", path: "/products" },
+      { key: "companii", label: t("shell.nav.companies"), icon: "building", path: "/companies", matchPrefix: "/companies", more: true },
+      { key: "facturi-recurente", label: t("shell.nav.recurring"), icon: "loop", path: "/recurring", more: true },
+      { key: "mijloace-fixe", label: t("shell.nav.assets"), icon: "wrench", path: "/assets", more: true },
+      { key: "plan-conturi", label: t("shell.nav.accounts"), icon: "book", path: "/accounts", more: true },
+      { key: "cote-tva", label: t("shell.nav.vatRates"), icon: "scale", path: "/vat-rates", more: true },
     ]},
-    { sec: "Raportare", items: [
-      { key: "rapoarte", label: "Rapoarte", icon: "chart", path: "/reports" },
-      { key: "declaratii", label: "Declarații ANAF", icon: "docText", path: "/declarations" },
-      { key: "etransport", label: "e-Transport", icon: "truck", path: "/etransport" },
-      { key: "contabilitate", label: "Jurnal contabil", icon: "scale", path: "/ledger" },
+    { id: "raportare", sec: t("shell.nav.groupReporting"), items: [
+      { key: "rapoarte", label: t("shell.nav.reports"), icon: "chart", path: "/reports" },
+      { key: "declaratii", label: t("shell.nav.declarations"), icon: "docText", path: "/declarations" },
+      { key: "etransport", label: t("shell.nav.etransport"), icon: "truck", path: "/etransport" },
+      { key: "contabilitate", label: t("shell.nav.ledger"), icon: "scale", path: "/ledger" },
     ]},
   ];
 
@@ -114,7 +115,7 @@ export function Sidebar() {
   // Display name = the license email's local part, capitalized ("andrei@…" → "Andrei").
   const accountName = (() => {
     const local = (license?.email ?? "").split("@")[0];
-    if (!local) return "Cont Clarito";
+    if (!local) return t("shell.profile.defaultAccount");
     return local.split(/[._-]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
   })();
   const handleExit = async () => { (await import("@tauri-apps/plugin-process")).exit(0); };
@@ -131,14 +132,14 @@ export function Sidebar() {
         >
           <div className="co-ava round">{initials(activeCompany?.legalName)}</div>
           <div className="meta">
-            <div className="name">{activeCompany?.legalName ?? "Nicio companie"}</div>
+            <div className="name">{activeCompany?.legalName ?? t("shell.company.none")}</div>
             <div className="cui num">{activeCompany?.cui ?? ""}</div>
           </div>
           <Ic name="chevUD" cls="ic chev" />
         </button>
         {companyOpen && (
           <div className="pop show" id="companyPop" onMouseDown={stop}>
-            <div className="col-title">Companie activă</div>
+            <div className="col-title">{t("shell.company.active")}</div>
             {activeCompany && (
               <div className="co-row sel">
                 <div className="co-ava">{initials(activeCompany.legalName, 1)}</div>
@@ -152,7 +153,7 @@ export function Sidebar() {
             {companies.filter((c) => c.id !== activeCompany?.id).length > 0 && (
               <>
                 <div className="pop-div" />
-                <div className="col-title">Schimbă compania</div>
+                <div className="col-title">{t("shell.company.switch")}</div>
                 {companies.filter((c) => c.id !== activeCompany?.id).map((c) => (
                   <button key={c.id} className="co-row" onClick={() => { setActiveCompanyId(c.id); setCompanyOpen(false); }}>
                     <div className="co-ava alt">{initials(c.legalName, 1)}</div>
@@ -167,10 +168,10 @@ export function Sidebar() {
             )}
             <div className="pop-div" />
             <button className="pop-item" onClick={() => { setCompanyOpen(false); void navigate({ to: "/companies/new" }); }}>
-              <Ic name="plus" />Adaugă companie
+              <Ic name="plus" />{t("shell.company.add")}
             </button>
             <button className="pop-item" onClick={() => { setCompanyOpen(false); void navigate({ to: "/companies" }); }}>
-              <Ic name="cog" />Gestionează companiile
+              <Ic name="cog" />{t("shell.company.manage")}
             </button>
           </div>
         )}
@@ -179,7 +180,7 @@ export function Sidebar() {
         {NAV.map((g) => {
           const prim = g.items.filter((i) => !i.more);
           const extra = g.items.filter((i) => i.more);
-          const gid = g.sec ?? "x";
+          const gid = g.id;
           const open = moreOpen[gid] ?? extra.some(isActive);
           return (
             <div key={gid}>
@@ -193,7 +194,7 @@ export function Sidebar() {
                     </div>
                     <button className={`nav-more${open ? " open" : ""}`} onClick={() => setMoreOpen((s) => ({ ...s, [gid]: !open }))}>
                       <Ic name="chevD" />
-                      <span className="nlabel">{open ? "Mai puține" : "Mai multe"}</span>
+                      <span className="nlabel">{open ? t("shell.nav.fewer") : t("shell.nav.more")}</span>
                       <span className="badge num">{extra.length}</span>
                     </button>
                   </>
@@ -214,7 +215,7 @@ export function Sidebar() {
           <div className="u-ava">{initials(license?.email ?? "Clarito", 2)}</div>
           <div className="meta">
             <div className="uname">{accountName}</div>
-            <div className="umail">{license?.email ?? "Cont Clarito"}</div>
+            <div className="umail">{license?.email ?? t("shell.profile.defaultAccount")}</div>
           </div>
         </button>
       </div>
@@ -224,23 +225,23 @@ export function Sidebar() {
         <div className="pop show" id="profilePop" onMouseDown={stop}>
           <div className="pop-head">
             <div className="u-ava">{initials(license?.email ?? "Clarito", 2)}</div>
-            <div><div className="pn">{accountName}</div><div className="pm">{license?.email ?? "Cont Clarito"}</div></div>
+            <div><div className="pn">{accountName}</div><div className="pm">{license?.email ?? t("shell.profile.defaultAccount")}</div></div>
           </div>
           <div className="pop-div" />
-          <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/settings" }); }}><Ic name="cog" />Setări</button>
+          <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/settings" }); }}><Ic name="cog" />{t("shell.profile.settings")}</button>
           <button className="pop-item" onClick={toggleLang}>
-            <Ic name="lang" />Limbă
+            <Ic name="lang" />{t("shell.profile.language")}
             <span className="pill-new" style={{ marginLeft: "auto", background: "var(--fill)", color: "var(--text-2)", border: "1px solid var(--line)" }}>{langTag}</span>
           </button>
           <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/notifications" }); }}>
-            <Ic name="bell" />Notificări
+            <Ic name="bell" />{t("shell.profile.notifications")}
             {unreadCount != null && unreadCount > 0 && <span className="pill-new" style={{ marginLeft: "auto", background: "var(--black)" }}>{unreadCount}</span>}
           </button>
-          <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/documents" }); }}><Ic name="docText" />Documente</button>
-          <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/account" }); }}><Ic name="team" />Cont & Licență</button>
-          <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/help" }); }}><Ic name="help" />Ajutor</button>
+          <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/documents" }); }}><Ic name="docText" />{t("shell.profile.documents")}</button>
+          <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/account" }); }}><Ic name="team" />{t("shell.profile.account")}</button>
+          <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/help" }); }}><Ic name="help" />{t("shell.profile.help")}</button>
           <div className="pop-div" />
-          <button className="pop-item" onClick={() => void handleExit()}><Ic name="exit" />Ieșire</button>
+          <button className="pop-item" onClick={() => void handleExit()}><Ic name="exit" />{t("shell.profile.exit")}</button>
         </div>
       )}
     </aside>

@@ -1,0 +1,115 @@
+{
+  "dashboard": {
+    "title": "Overview",
+    "noCompany": {
+      "title": "Select an active company to see the dashboard data.",
+      "hint": "Choose a company from settings to continue."
+    },
+    "actions": {
+      "refresh": "Refresh",
+      "newInvoice": "New invoice",
+      "prevMonth": "Previous month",
+      "nextMonth": "Next month"
+    },
+    "notify": {
+      "refreshed": "Data refreshed"
+    },
+    "months": {
+      "jan": "January",
+      "feb": "February",
+      "mar": "March",
+      "apr": "April",
+      "may": "May",
+      "jun": "June",
+      "jul": "July",
+      "aug": "August",
+      "sep": "September",
+      "oct": "October",
+      "nov": "November",
+      "dec": "December"
+    },
+    "weekdays": {
+      "su": "Su",
+      "mo": "Mo",
+      "tu": "Tu",
+      "we": "We",
+      "th": "Th",
+      "fr": "Fr",
+      "sa": "Sa"
+    },
+    "kpi": {
+      "totalInvoiced": "Total invoiced",
+      "vsPrev": "vs {{month}}",
+      "invoicesNet_one": "{{count}} invoice · {{net}} net",
+      "invoicesNet_other": "{{count}} invoices · {{net}} net",
+      "receivable": "To collect",
+      "openInvoices_one": "{{count}} open invoice",
+      "openInvoices_other": "{{count}} open invoices",
+      "received": "Received invoices",
+      "documents_one": "{{count}} document",
+      "documents_other": "{{count}} documents",
+      "vatToCollect": "VAT to collect",
+      "vatDue": "due on the 25th of {{month}}."
+    },
+    "chart": {
+      "title": "Monthly invoicing",
+      "sub": "Issued vs. received",
+      "issued": "Issued",
+      "received": "Received",
+      "issuedLc": "issued",
+      "receivedLc": "received"
+    },
+    "activity": {
+      "title": "SPV activity",
+      "seeAll": "View all",
+      "empty": "No recent notifications"
+    },
+    "table": {
+      "title": "Recent invoices",
+      "seeAll": "View all",
+      "columns": "Columns",
+      "manageColumns": "Manage columns",
+      "client": "Client",
+      "document": "Document",
+      "date": "Date",
+      "due": "Due date",
+      "amount": "Amount",
+      "statusAnaf": "ANAF status",
+      "empty": "No invoices.",
+      "createFirst": "Create your first invoice →"
+    },
+    "status": {
+      "draft": "Draft",
+      "queued": "Queued",
+      "submitted": "Submitted",
+      "validated": "Validated",
+      "rejected": "Rejected",
+      "storned": "Credited"
+    },
+    "errors": {
+      "invoicesLabel": "the invoices"
+    },
+    "banners": {
+      "rejectedTitle": "Invoice rejected by ANAF",
+      "viewInvoice": "View invoice",
+      "rejectedPrefix": "Invoice",
+      "rejectedSuffix": "was rejected by ANAF",
+      "turnoverPrefix": "Turnover {{year}}:",
+      "microExceeded": "Micro-enterprise threshold exceeded",
+      "microApproaching": "You are approaching the micro-enterprise threshold",
+      "microBody": "lei ({{pct}}% of the ≈ EUR 100,000 threshold at rate {{rate}}).",
+      "vatExemptExceeded": "VAT exemption threshold exceeded — VAT registration is mandatory",
+      "vatExemptApproaching": "You are approaching the VAT exemption threshold",
+      "vatExemptBody": "lei ({{pct}}% of {{plafon}} lei, art. 310).",
+      "cashVatExceeded": "Cash-accounting VAT threshold exceeded",
+      "cashVatApproaching": "You are approaching the cash-accounting VAT threshold",
+      "cashVatBody": "lei (threshold {{plafon}} lei).",
+      "intrastatDispatches": "dispatches",
+      "intrastatArrivals": "arrivals",
+      "intrastatExceeded": "Intrastat threshold exceeded ({{label}}) — monthly declaration mandatory",
+      "intrastatApproaching": "You are approaching the Intrastat threshold ({{label}})",
+      "intrastatValuePrefix": "Value of {{label}} {{year}}:",
+      "intrastatBody": "lei ({{pct}}% of {{threshold}} lei)."
+    }
+  }
+}

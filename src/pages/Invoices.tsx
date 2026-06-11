@@ -18,6 +18,7 @@ import { useMemo, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -41,23 +42,23 @@ const fmtRoDate = (iso: string) => {
   return `${d} ${RO_MON[Number(m) - 1] ?? m} ${y}`;
 };
 
-function fmtMonth(ym: string): string {
+function fmtMonth(ym: string, locale: string): string {
   const [year, month] = ym.split("-");
   const d = new Date(Number(year), Number(month) - 1, 1);
-  return d.toLocaleDateString("ro-RO", { month: "long", year: "numeric" });
+  return d.toLocaleDateString(locale, { month: "long", year: "numeric" });
 }
 
 /** Render at most this many rows (plain table, no virtualizer — design parity). */
 const MAX_ROWS = 1000;
 
-// Status → design chip (.chip variants + icon + label).
-const STATUS_CHIP: Record<InvoiceStatus, { cls: string; icon: string; label: string }> = {
-  DRAFT:     { cls: "sent", icon: "docText", label: "Schiță" },
-  QUEUED:    { cls: "wait", icon: "clock",   label: "În coadă" },
-  SUBMITTED: { cls: "sent", icon: "send",    label: "Trimisă" },
-  VALIDATED: { cls: "paid", icon: "check",   label: "Validată" },
-  REJECTED:  { cls: "late", icon: "xMark",   label: "Respinsă" },
-  STORNED:   { cls: "wait", icon: "undo",    label: "Stornată" },
+// Status → design chip (.chip variants + icon + i18n label key).
+const STATUS_CHIP: Record<InvoiceStatus, { cls: string; icon: string; labelKey: string }> = {
+  DRAFT:     { cls: "sent", icon: "docText", labelKey: "invoices.status.draft" },
+  QUEUED:    { cls: "wait", icon: "clock",   labelKey: "invoices.status.queued" },
+  SUBMITTED: { cls: "sent", icon: "send",    labelKey: "invoices.status.submitted" },
+  VALIDATED: { cls: "paid", icon: "check",   labelKey: "invoices.status.validated" },
+  REJECTED:  { cls: "late", icon: "xMark",   labelKey: "invoices.status.rejected" },
+  STORNED:   { cls: "wait", icon: "undo",    labelKey: "invoices.status.storned" },
 };
 
 // ── RowMenu — design .pop with .pop-item rows (portal-anchored) ───────────────
@@ -72,6 +73,7 @@ interface RowMenuProps {
 }
 
 function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowMenuProps) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [stornoOpen, setStornoOpen] = useState(false);
@@ -117,9 +119,9 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
     try {
       await api.anaf.submitInvoice(companyId, invoiceId, testMode);
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
-      notify.success("Factură trimisă la ANAF.");
+      notify.success(t("invoices.notify.sent"));
     } catch (e) {
-      notify.error(formatError(e, "Eroare trimitere ANAF."));
+      notify.error(formatError(e, t("invoices.notify.sendError")));
     }
     onClose();
   }
@@ -130,9 +132,9 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
       const path = await api.ubl.generatePdf(invoiceId, companyId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
       if (path) await openPath(path);
-      notify.success("PDF generat.");
+      notify.success(t("invoices.notify.pdfDone"));
     } catch (e) {
-      notify.error(formatError(e, "Eroare generare PDF."));
+      notify.error(formatError(e, t("invoices.notify.pdfError")));
     }
     onClose();
   }
@@ -144,9 +146,9 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
       if (!path) { onClose(); return; }
       await api.ubl.generateXml(invoiceId, companyId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
-      notify.success(`XML salvat: ${path}`);
+      notify.success(t("invoices.notify.xmlSaved", { path }));
     } catch (e) {
-      notify.error(formatError(e, "Eroare generare XML."));
+      notify.error(formatError(e, t("invoices.notify.xmlError")));
     }
     onClose();
   }
@@ -155,10 +157,10 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
     try {
       const newId = await api.invoices.duplicate(invoiceId, companyId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
-      notify.success("Factură duplicată.");
+      notify.success(t("invoices.notify.duplicated"));
       void navigate({ to: "/invoices/$id", params: { id: newId } });
     } catch (e) {
-      notify.error(formatError(e, "Eroare duplicare."));
+      notify.error(formatError(e, t("invoices.notify.duplicateError")));
     }
     onClose();
   }
@@ -167,22 +169,22 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
     try {
       const stare = await api.anaf.checkStatus(companyId, invoiceId, testMode);
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
-      notify.success(`Status ANAF: ${stare}`);
+      notify.success(t("invoices.notify.anafStatus", { status: stare }));
     } catch (e) {
-      notify.error(formatError(e, "Eroare verificare status."));
+      notify.error(formatError(e, t("invoices.notify.statusError")));
     }
     onClose();
   }
 
   async function handleStorno() {
-    if (!stornoReason.trim()) { notify.warn("Introduceți motivul stornării."); return; }
+    if (!stornoReason.trim()) { notify.warn(t("invoices.notify.stornoReasonRequired")); return; }
     try {
       const stornoInv = await api.invoices.storno(invoiceId, companyId, stornoReason.trim());
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
-      notify.success(`Factură storno creată: ${stornoInv.fullNumber}`);
+      notify.success(t("invoices.notify.stornoCreated", { number: stornoInv.fullNumber }));
       void navigate({ to: "/invoices/$id", params: { id: stornoInv.id } });
     } catch (e) {
-      notify.error(formatError(e, "Eroare stornare."));
+      notify.error(formatError(e, t("invoices.notify.stornoError")));
     }
     setStornoOpen(false);
     onClose();
@@ -196,12 +198,12 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--red)" }}>
-          Stornare factură
+          {t("invoices.stornoModal.title")}
         </div>
         <textarea
           value={stornoReason}
           onChange={(e) => setStornoReason(e.target.value)}
-          placeholder="Motivul stornării…"
+          placeholder={t("invoices.stornoModal.reasonPlaceholder")}
           style={{
             width: "100%", minHeight: 56, marginBottom: 8, padding: "8px 10px",
             border: "1px solid var(--line)", borderRadius: 8, font: "inherit",
@@ -211,7 +213,7 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
         />
         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
           <button className="pill-btn" onClick={() => { setStornoOpen(false); onClose(); }}>
-            Anulează
+            {t("invoices.stornoModal.cancel")}
           </button>
           <button
             className="btn-dark"
@@ -219,7 +221,7 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
             disabled={!stornoReason.trim()}
             onClick={handleStorno}
           >
-            Stornează
+            {t("invoices.stornoModal.confirm")}
           </button>
         </div>
       </div>,
@@ -228,14 +230,14 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
   }
 
   const items: Array<{ icon: string; label: string; danger?: boolean; action: () => void; show: boolean }> = [
-    { icon: "eye", label: "Vizualizează", action: () => { void navigate({ to: "/invoices/$id", params: { id: invoiceId } }); onClose(); }, show: true },
-    { icon: "pen", label: "Editează", action: () => { void navigate({ to: "/invoices/$id/edit", params: { id: invoiceId } }); onClose(); }, show: status === "DRAFT" },
-    { icon: "send", label: "Trimite la ANAF", action: handleSubmit, show: (status === "DRAFT" || status === "VALIDATED") && hasXml },
-    { icon: "dl", label: "Descarcă PDF", action: handlePdf, show: true },
-    { icon: "code", label: "Descarcă XML (UBL)", action: handleXml, show: true },
-    { icon: "undo", label: "Storno", danger: true, action: () => setStornoOpen(true), show: status === "VALIDATED" },
-    { icon: "copy", label: "Duplică", action: handleDuplicate, show: true },
-    { icon: "sync", label: "Verifică status ANAF", action: handleCheckStatus, show: status === "SUBMITTED" || status === "QUEUED" },
+    { icon: "eye", label: t("invoices.rowActions.view"), action: () => { void navigate({ to: "/invoices/$id", params: { id: invoiceId } }); onClose(); }, show: true },
+    { icon: "pen", label: t("invoices.rowActions.edit"), action: () => { void navigate({ to: "/invoices/$id/edit", params: { id: invoiceId } }); onClose(); }, show: status === "DRAFT" },
+    { icon: "send", label: t("invoices.rowActions.sendAnaf"), action: handleSubmit, show: (status === "DRAFT" || status === "VALIDATED") && hasXml },
+    { icon: "dl", label: t("invoices.rowActions.downloadPdf"), action: handlePdf, show: true },
+    { icon: "code", label: t("invoices.rowActions.downloadXml"), action: handleXml, show: true },
+    { icon: "undo", label: t("invoices.rowActions.storno"), danger: true, action: () => setStornoOpen(true), show: status === "VALIDATED" },
+    { icon: "copy", label: t("invoices.rowActions.duplicate"), action: handleDuplicate, show: true },
+    { icon: "sync", label: t("invoices.rowActions.checkStatus"), action: handleCheckStatus, show: status === "SUBMITTED" || status === "QUEUED" },
   ];
 
   return createPortal(
@@ -263,6 +265,7 @@ function RowMenu({ invoiceId, companyId, status, hasXml, onClose, anchor }: RowM
 // ── InvoicesPage ──────────────────────────────────────────────────────────────
 
 export function InvoicesPage() {
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
@@ -390,12 +393,12 @@ export function InvoicesPage() {
     let ok = 0; const errs: string[] = [];
     for (const id of ids) {
       try { await api.anaf.submitInvoice(activeCompanyId, id, testMode); ok++; }
-      catch (e) { errs.push(formatError(e, "Trimitere eșuată.")); }
+      catch (e) { errs.push(formatError(e, t("invoices.notify.submitFailed"))); }
     }
     void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
     setSelected(new Set());
-    if (errs.length) notify.error(`${ok} trimise, ${errs.length} erori: ${errs.slice(0, 3).join("; ")}`);
-    else notify.success(`${ok} facturi trimise la ANAF`);
+    if (errs.length) notify.error(t("invoices.notify.bulkPartial", { ok, errors: errs.length, details: errs.slice(0, 3).join("; ") }));
+    else notify.success(t("invoices.notify.bulkSent", { n: ok }));
   }
 
   async function handleExportSaga() {
@@ -407,27 +410,27 @@ export function InvoicesPage() {
     const yearStart = `${new Date().getFullYear()}-01-01`;
     try {
       await api.integrations.exportSagaCsv(activeCompanyId, yearStart, today, path);
-      notify.success(`Export SAGA salvat: ${path}`);
+      notify.success(t("invoices.notify.sagaSaved", { path }));
     } catch (e) {
-      notify.error(formatError(e, "Eroare export SAGA."));
+      notify.error(formatError(e, t("invoices.notify.sagaError")));
     }
   }
 
   async function handleExportXlsx() {
-    if (!activeCompanyId) { notify.warn("Selectați o companie."); return; }
+    if (!activeCompanyId) { notify.warn(t("invoices.notify.selectCompany")); return; }
     const { save } = await import("@tauri-apps/plugin-dialog");
     const path = await save({ filters: [{ name: "Excel", extensions: ["xlsx"] }], defaultPath: "facturi.xlsx" });
     if (!path) return;
     try {
       await api.integrations.exportInvoicesXlsx({ companyId: activeCompanyId }, path);
-      notify.success(`Export salvat: ${path}`);
+      notify.success(t("invoices.notify.exportSaved", { path }));
     } catch (e) {
-      notify.error(formatError(e, "Eroare export XLSX."));
+      notify.error(formatError(e, t("invoices.notify.xlsxError")));
     }
   }
 
   async function handleImportXml() {
-    if (!activeCompanyId) { notify.warn("Selectați o companie."); return; }
+    if (!activeCompanyId) { notify.warn(t("invoices.notify.selectCompany")); return; }
     const { open } = await import("@tauri-apps/plugin-dialog");
     const filePath = await open({ filters: [{ name: "XML e-Factura", extensions: ["xml"] }] });
     if (!filePath || typeof filePath !== "string") return;
@@ -435,14 +438,18 @@ export function InvoicesPage() {
       const result = await api.importData.invoiceXmlFromFile(filePath, activeCompanyId);
       if (result.imported > 0) {
         notify.success(
-          `Factură importată: ${result.invoiceNumber ?? "?"} — ${result.supplierName ?? "?"} · ${formatOptionalRon(result.totalAmount)}`,
+          t("invoices.notify.imported", {
+            number: result.invoiceNumber ?? "?",
+            supplier: result.supplierName ?? "?",
+            total: formatOptionalRon(result.totalAmount),
+          }),
         );
         void queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
       } else {
-        notify.error(`Import eșuat: ${result.errors.join("; ")}`);
+        notify.error(t("invoices.notify.importFailed", { errors: result.errors.join("; ") }));
       }
     } catch (e) {
-      notify.error(formatError(e, "Eroare import XML."));
+      notify.error(formatError(e, t("invoices.notify.importXmlError")));
     }
   }
 
@@ -453,13 +460,13 @@ export function InvoicesPage() {
   }, [allInvoices]);
 
   const tabs: Array<{ value: StatusFilter; label: string; count: number }> = [
-    { value: "all",       label: "Toate",    count: totalCount },
-    { value: "VALIDATED", label: "Validate", count: counts.VALIDATED },
-    { value: "SUBMITTED", label: "Trimise",  count: counts.SUBMITTED },
-    { value: "QUEUED",    label: "În coadă", count: counts.QUEUED },
-    { value: "REJECTED",  label: "Respinse", count: counts.REJECTED },
-    { value: "DRAFT",     label: "Schițe",   count: counts.DRAFT },
-    { value: "STORNED",   label: "Stornate", count: counts.STORNED },
+    { value: "all",       label: t("invoices.tabs.all"),       count: totalCount },
+    { value: "VALIDATED", label: t("invoices.tabs.validated"), count: counts.VALIDATED },
+    { value: "SUBMITTED", label: t("invoices.tabs.submitted"), count: counts.SUBMITTED },
+    { value: "QUEUED",    label: t("invoices.tabs.queued"),    count: counts.QUEUED },
+    { value: "REJECTED",  label: t("invoices.tabs.rejected"),  count: counts.REJECTED },
+    { value: "DRAFT",     label: t("invoices.tabs.drafts"),    count: counts.DRAFT },
+    { value: "STORNED",   label: t("invoices.tabs.storned"),   count: counts.STORNED },
   ];
 
   const visibleRows = list.slice(0, MAX_ROWS);
@@ -467,9 +474,9 @@ export function InvoicesPage() {
   if (!activeCompanyId) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Facturi emise</h1></div></div>
+        <div className="page-head"><div><h1>{t("invoices.title")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a vedea facturile emise.
+          {t("invoices.states.selectCompany")}
         </div>
       </div>
     );
@@ -480,17 +487,17 @@ export function InvoicesPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Facturi emise</h1>
+          <h1>{t("invoices.title")}</h1>
           <p className="sub">
             {list.length !== totalCount
-              ? `${list.length} din ${totalCount.toLocaleString("ro-RO")} facturi`
-              : `${totalCount.toLocaleString("ro-RO")} facturi`}
+              ? t("invoices.countFiltered", { shown: list.length, total: totalCount.toLocaleString(i18n.language) })
+              : t("invoices.countTotal", { n: totalCount.toLocaleString(i18n.language) })}
             {activeCompany ? ` · ${activeCompany.legalName}` : ""}
           </p>
         </div>
         <div className="head-actions">
           <button className="btn-dark" onClick={() => void navigate({ to: "/invoices/new" })}>
-            <Ic name="plus" />Factură nouă
+            <Ic name="plus" />{t("invoices.newInvoice")}
             <span className="kbd" style={{ background: "rgba(255,255,255,.15)", borderColor: "rgba(255,255,255,.3)", color: "#fff" }}>⌘ N</span>
           </button>
         </div>
@@ -503,7 +510,7 @@ export function InvoicesPage() {
             <Ic name="lens" />
             <input
               type="text"
-              placeholder="Caută după număr sau client…"
+              placeholder={t("invoices.toolbar.searchPlaceholder")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -529,19 +536,19 @@ export function InvoicesPage() {
               onClick={() => setOpenPop(openPop === "period" ? "" : "period")}
             >
               <Ic name="calendar" />
-              {period === "all" ? "Toate lunile" : fmtMonth(period)}
+              {period === "all" ? t("invoices.toolbar.allMonths") : fmtMonth(period, i18n.language)}
               <Ic name="chevD" cls="ic" />
             </button>
             {openPop === "period" && (
               <div className="pop show" style={{ right: 0, top: 40, width: 210, maxHeight: 300, overflowY: "auto" }} onMouseDown={(e) => e.stopPropagation()}>
-                <div className="col-title">Perioadă</div>
+                <div className="col-title">{t("invoices.toolbar.period")}</div>
                 <button className="pop-item" onClick={() => { setPeriod("all"); setOpenPop(""); }}>
-                  <span style={{ flex: 1 }}>Toate lunile</span>
+                  <span style={{ flex: 1 }}>{t("invoices.toolbar.allMonths")}</span>
                   {period === "all" && <Ic name="check" cls="co-check" />}
                 </button>
                 {availableMonths.map((ym) => (
                   <button key={ym} className="pop-item" onClick={() => { setPeriod(ym); setOpenPop(""); }}>
-                    <span style={{ flex: 1 }}>{fmtMonth(ym)}</span>
+                    <span style={{ flex: 1 }}>{fmtMonth(ym, i18n.language)}</span>
                     {period === ym && <Ic name="check" cls="co-check" />}
                   </button>
                 ))}
@@ -557,14 +564,14 @@ export function InvoicesPage() {
               onMouseDown={(e) => e.stopPropagation()}
               onClick={() => setOpenPop(openPop === "filters" ? "" : "filters")}
             >
-              <Ic name="funnel" />Filtre
+              <Ic name="funnel" />{t("invoices.toolbar.filters")}
               {activeFilterCount > 0 && (
                 <span className="pill-new" style={{ background: "var(--black)" }}>{activeFilterCount}</span>
               )}
             </button>
             {openPop === "filters" && (
               <div className="pop show" style={{ right: 0, top: 40, width: 250, padding: 10 }} onMouseDown={(e) => e.stopPropagation()}>
-                <div className="col-title">Filtre avansate</div>
+                <div className="col-title">{t("invoices.toolbar.advancedFilters")}</div>
                 <label
                   style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", userSelect: "none", padding: "6px 10px 10px", color: errorsOnly ? "var(--red)" : "var(--text)" }}
                 >
@@ -572,18 +579,18 @@ export function InvoicesPage() {
                     className={`cbx${errorsOnly ? " on" : ""}`}
                     onClick={(e) => { e.preventDefault(); setErrorsOnly(!errorsOnly); if (!errorsOnly) setFilter("all"); }}
                   />
-                  Cu erori (respinse ANAF)
+                  {t("invoices.toolbar.errorsOnly")}
                 </label>
-                <div style={{ fontSize: 12, color: "var(--text-2)", padding: "0 10px 6px" }}>Total factură (RON)</div>
+                <div style={{ fontSize: 12, color: "var(--text-2)", padding: "0 10px 6px" }}>{t("invoices.toolbar.totalRon")}</div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "0 10px 8px" }}>
                   <input
-                    type="number" placeholder="Min" value={amountMin}
+                    type="number" placeholder={t("invoices.toolbar.min")} value={amountMin}
                     onChange={(e) => setAmountMin(e.target.value)}
                     style={{ flex: 1, height: 30, fontSize: 12, padding: "0 8px", border: "1px solid var(--line)", borderRadius: 8, fontFamily: "var(--mono)" }}
                   />
                   <span style={{ fontSize: 11, color: "var(--dim)" }}>–</span>
                   <input
-                    type="number" placeholder="Max" value={amountMax}
+                    type="number" placeholder={t("invoices.toolbar.max")} value={amountMax}
                     onChange={(e) => setAmountMax(e.target.value)}
                     style={{ flex: 1, height: 30, fontSize: 12, padding: "0 8px", border: "1px solid var(--line)", borderRadius: 8, fontFamily: "var(--mono)" }}
                   />
@@ -594,7 +601,7 @@ export function InvoicesPage() {
                     style={{ margin: "0 10px 8px", width: "calc(100% - 20px)", justifyContent: "center" }}
                     onClick={() => { setErrorsOnly(false); setAmountMin(""); setAmountMax(""); }}
                   >
-                    Resetează filtrele
+                    {t("invoices.toolbar.resetFilters")}
                   </button>
                 )}
               </div>
@@ -602,7 +609,7 @@ export function InvoicesPage() {
           </div>
 
           {/* refresh */}
-          <button className="sq-btn spin-btn" title="Reîncarcă" onClick={() => void refetchPaged()}>
+          <button className="sq-btn spin-btn" title={t("invoices.toolbar.refresh")} onClick={() => void refetchPaged()}>
             <Ic name="sync" />
           </button>
 
@@ -613,24 +620,24 @@ export function InvoicesPage() {
               onMouseDown={(e) => e.stopPropagation()}
               onClick={() => setOpenPop(openPop === "export" ? "" : "export")}
             >
-              Export<Ic name="chevD" cls="ic" />
+              {t("invoices.toolbar.export")}<Ic name="chevD" cls="ic" />
             </button>
             {openPop === "export" && (
               <div className="pop show" style={{ right: 0, top: 40, width: 210 }} onMouseDown={(e) => e.stopPropagation()}>
-                <div className="col-title">Export</div>
+                <div className="col-title">{t("invoices.toolbar.export")}</div>
                 <button className="pop-item" onClick={() => { setOpenPop(""); void handleExportSaga(); }}>
-                  <Ic name="dl" />SAGA CSV
+                  <Ic name="dl" />{t("invoices.toolbar.exportSaga")}
                 </button>
                 <button className="pop-item" onClick={() => { setOpenPop(""); void handleExportXlsx(); }}>
-                  <Ic name="dl" />Export XLSX
+                  <Ic name="dl" />{t("invoices.toolbar.exportXlsx")}
                 </button>
                 <div className="pop-div" />
-                <div className="col-title">Import</div>
+                <div className="col-title">{t("invoices.toolbar.import")}</div>
                 <button className="pop-item" onClick={() => { setOpenPop(""); void handleImportXml(); }}>
-                  <Ic name="docUp" />Import XML
+                  <Ic name="docUp" />{t("invoices.toolbar.importXml")}
                 </button>
                 <button className="pop-item" onClick={() => { setOpenPop(""); setShowImportModal(true); }}>
-                  <Ic name="docUp" />Import CSV
+                  <Ic name="docUp" />{t("invoices.toolbar.importCsv")}
                 </button>
               </div>
             )}
@@ -639,36 +646,36 @@ export function InvoicesPage() {
 
         {/* bulk bar */}
         <div className={`bulkbar${selected.size > 0 ? " show" : ""}`}>
-          <b>{selected.size} selectate</b>
+          <b>{t("invoices.bulk.selected", { n: selected.size })}</b>
           <span className="spacer" />
           <button className="pill-btn send-btn" onClick={() => void handleBulkSubmit()}>
-            <Ic name="send" />Trimite selecția la ANAF
+            <Ic name="send" />{t("invoices.bulk.sendSelection")}
           </button>
           <button className="pill-btn" onClick={() => window.print()}>
-            <Ic name="printer" />Tipărește
+            <Ic name="printer" />{t("invoices.bulk.print")}
           </button>
-          <button className="pill-btn" onClick={() => setSelected(new Set())}>Deselectează</button>
+          <button className="pill-btn" onClick={() => setSelected(new Set())}>{t("invoices.bulk.deselect")}</button>
         </div>
 
         {/* truncation note */}
         {paged && paged.total > paged.items.length && (
           <div style={{ padding: "6px 16px", borderBottom: "1px solid var(--line)", fontSize: 12, color: "var(--amber)" }}>
-            Afișate primele {paged.items.length.toLocaleString("ro-RO")} din {paged.total.toLocaleString("ro-RO")} facturi.
+            {t("invoices.states.truncated", { shown: paged.items.length.toLocaleString(i18n.language), total: paged.total.toLocaleString(i18n.language) })}
           </div>
         )}
 
         {/* table */}
         {isLoading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("invoices.states.loading")}</div>
         ) : pagedError ? (
           <div style={{ padding: 16 }}>
-            <QueryErrorBanner error={pagedErr} label="facturile" onRetry={() => void refetchPaged()} />
+            <QueryErrorBanner error={pagedErr} label={t("invoices.states.errorLabel")} onRetry={() => void refetchPaged()} />
           </div>
         ) : list.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
             {allInvoices.length === 0
-              ? "Nicio factură emisă. Creați prima factură cu butonul „Factură nouă”."
-              : "Nicio înregistrare pentru filtrele aplicate."}
+              ? t("invoices.states.emptyAll")
+              : t("invoices.states.emptyFiltered")}
           </div>
         ) : (
           <>
@@ -678,21 +685,21 @@ export function InvoicesPage() {
                   <th style={{ width: 36 }}>
                     <button
                       className={`cbx${selected.size === list.length && list.length > 0 ? " on" : ""}`}
-                      aria-label="Selectează tot"
+                      aria-label={t("invoices.table.selectAll")}
                       onClick={() =>
                         setSelected(selected.size === list.length ? new Set() : new Set(list.map((i) => i.id)))
                       }
                     />
                   </th>
-                  <th>Număr</th>
-                  <th>Data</th>
-                  <th>Client</th>
-                  <th className="r">Valoare net</th>
-                  <th className="r">TVA</th>
-                  <th className="r">Total</th>
-                  <th>Monedă</th>
-                  <th>Status</th>
-                  <th>Plată</th>
+                  <th>{t("invoices.table.number")}</th>
+                  <th>{t("invoices.table.date")}</th>
+                  <th>{t("invoices.table.client")}</th>
+                  <th className="r">{t("invoices.table.net")}</th>
+                  <th className="r">{t("invoices.table.vat")}</th>
+                  <th className="r">{t("invoices.table.total")}</th>
+                  <th>{t("invoices.table.currency")}</th>
+                  <th>{t("invoices.table.status")}</th>
+                  <th>{t("invoices.table.payment")}</th>
                   <th className="r" style={{ width: 64 }}></th>
                 </tr>
               </thead>
@@ -703,10 +710,10 @@ export function InvoicesPage() {
                   const payApplicable = inv.status !== "DRAFT" && inv.status !== "STORNED";
                   const payStatus = paymentStatusMap.get(inv.id) ?? "UNPAID";
                   const payCfg = payStatus === "PAID"
-                    ? { cls: "paid", icon: "check", label: "Încasată" }
+                    ? { cls: "paid", icon: "check", label: t("invoices.pay.paid") }
                     : payStatus === "PARTIAL"
-                      ? { cls: "wait", icon: "clock", label: "Parțial" }
-                      : { cls: "sent", icon: "dot", label: "Neîncasată" };
+                      ? { cls: "wait", icon: "clock", label: t("invoices.pay.partial") }
+                      : { cls: "sent", icon: "dot", label: t("invoices.pay.unpaid") };
                   return (
                     <tr
                       key={inv.id}
@@ -730,7 +737,7 @@ export function InvoicesPage() {
                       <td className="r num"><b>{fmtRON(inv.totalAmount)}</b></td>
                       <td>{inv.currency}</td>
                       <td>
-                        <span className={`chip ${chip.cls}`}><Ic name={chip.icon} cls="sic" />{chip.label}</span>
+                        <span className={`chip ${chip.cls}`}><Ic name={chip.icon} cls="sic" />{t(chip.labelKey)}</span>
                       </td>
                       <td>
                         {payApplicable
@@ -741,7 +748,7 @@ export function InvoicesPage() {
                         <div className="row-acts">
                           <button
                             className="mini-btn"
-                            title="Vizualizează"
+                            title={t("invoices.rowActions.view")}
                             onClick={() => {
                               setSelectedInvoiceId(inv.id);
                               void navigate({ to: "/invoices/$id", params: { id: inv.id } });
@@ -751,7 +758,7 @@ export function InvoicesPage() {
                           </button>
                           <button
                             className="mini-btn"
-                            title="Mai multe"
+                            title={t("invoices.rowActions.more")}
                             onClick={(e) => {
                               if (menuFor === inv.id) { setMenuFor(null); setMenuAnchor(null); }
                               else { setMenuAnchor(e.currentTarget.getBoundingClientRect()); setMenuFor(inv.id); }
@@ -779,15 +786,15 @@ export function InvoicesPage() {
 
             {/* totals footer */}
             <div className="tot-foot">
-              <span>Totaluri RON (filtrate): net <b className="num">{fmtRON(totNet)}</b></span>
-              <span>TVA <b className="num">{fmtRON(totVat)}</b></span>
-              <span>total <b className="num">{fmtRON(totTotal)}</b></span>
+              <span>{t("invoices.foot.totalsNet")} <b className="num">{fmtRON(totNet)}</b></span>
+              <span>{t("invoices.foot.vat")} <b className="num">{fmtRON(totVat)}</b></span>
+              <span>{t("invoices.foot.total")} <b className="num">{fmtRON(totTotal)}</b></span>
               <span className="spacer" style={{ flex: 1 }} />
               {list.length > MAX_ROWS && (
-                <span className="muted">afișate primele {MAX_ROWS.toLocaleString("ro-RO")} din {list.length.toLocaleString("ro-RO")}</span>
+                <span className="muted">{t("invoices.foot.shownFirst", { shown: MAX_ROWS.toLocaleString(i18n.language), total: list.length.toLocaleString(i18n.language) })}</span>
               )}
               {nonRonCount > 0 && (
-                <span className="muted">{nonRonCount === 1 ? "1 factură în altă monedă exclusă din totaluri" : `${nonRonCount} facturi în altă monedă excluse din totaluri`}</span>
+                <span className="muted">{t("invoices.foot.nonRonExcluded", { count: nonRonCount })}</span>
               )}
             </div>
           </>

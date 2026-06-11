@@ -1,0 +1,90 @@
+{
+  "shell": {
+    "topbar": {
+      "collapseMenu": "Collapse menu",
+      "searchPlaceholder": "Search invoices, clients, items…",
+      "spvConnected": "Connected",
+      "spvNotAuth": "Not authenticated",
+      "syncSpv": "Sync SPV",
+      "new": "New",
+      "create": "Create",
+      "newInvoice": "New invoice",
+      "newReceipt": "Receipt",
+      "newContact": "Client / Supplier",
+      "newProduct": "Item",
+      "importSpv": "Import from SPV"
+    },
+    "notify": {
+      "selectCompany": "Select an active company.",
+      "spvNew_one": "{{count}} new SPV message downloaded",
+      "spvNew_other": "{{count}} new SPV messages downloaded",
+      "noNewSpv": "No new invoices in SPV",
+      "spvSyncFailed": "SPV sync failed."
+    },
+    "nav": {
+      "overview": "Overview",
+      "invoicesIssued": "Issued invoices",
+      "invoicesReceived": "Received invoices",
+      "spvMessages": "SPV messages",
+      "credited": "Storno notes",
+      "groupOperate": "Operations",
+      "contacts": "Clients & Suppliers",
+      "receipts": "Receipts",
+      "payments": "Payment tracking",
+      "payroll": "Payroll",
+      "products": "Items & inventory",
+      "companies": "Companies",
+      "recurring": "Recurring invoices",
+      "assets": "Fixed assets",
+      "accounts": "Chart of accounts",
+      "vatRates": "VAT rates",
+      "groupReporting": "Reporting",
+      "reports": "Reports",
+      "declarations": "ANAF declarations",
+      "etransport": "e-Transport",
+      "ledger": "Accounting journal",
+      "more": "More",
+      "fewer": "Fewer"
+    },
+    "company": {
+      "none": "No company",
+      "active": "Active company",
+      "switch": "Switch company",
+      "add": "Add company",
+      "manage": "Manage companies"
+    },
+    "profile": {
+      "defaultAccount": "Clarito account",
+      "settings": "Settings",
+      "language": "Language",
+      "notifications": "Notifications",
+      "documents": "Documents",
+      "account": "Account & License",
+      "help": "Help",
+      "exit": "Exit"
+    },
+    "palette": {
+      "placeholder": "Search commands, invoices, contacts…",
+      "noResults": "No results for “{{query}}”",
+      "sections": {
+        "navigate": "Navigate",
+        "actions": "Actions",
+        "recent": "Recent"
+      },
+      "dashboard": "Overview (Dashboard)",
+      "anafNotifications": "ANAF notifications",
+      "openContacts": "Open contacts list",
+      "newCompany": "New company",
+      "toggleThemeLight": "Toggle theme (light)",
+      "toggleThemeDark": "Toggle theme (dark)",
+      "invoiceItem": "Invoice {{n}}",
+      "footNavigate": "navigate",
+      "footRun": "run",
+      "footClose": "close"
+    },
+    "banner": {
+      "close": "Close notification",
+      "formStale": "ANAF form updated ({{forms}}) — update the app for correct validation."
+    }
+  }
+}

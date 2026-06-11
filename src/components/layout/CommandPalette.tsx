@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { useAppStore } from "@/lib/store";
@@ -30,6 +31,7 @@ interface Command {
 }
 
 export function CommandPalette() {
+  const { t } = useTranslation();
   const commandOpen = useAppStore((s) => s.commandOpen);
   const setCommandOpen = useAppStore((s) => s.setCommandOpen);
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
@@ -67,97 +69,99 @@ export function CommandPalette() {
   }, [commandOpen]);
 
   // Build commands list (all original commands + "Comută tema")
+  const sectionNav = t("shell.palette.sections.navigate");
+  const sectionActions = t("shell.palette.sections.actions");
   const COMMANDS: Command[] = [
     // Navigare
     {
       id: "nav-dashboard",
-      label: "Privire generală (Dashboard)",
+      label: t("shell.palette.dashboard"),
       hint: "G D",
       icon: "grid",
-      section: "Navigare",
+      section: sectionNav,
       action: () => { navigate({ to: "/" }); close(); },
     },
     {
       id: "nav-invoices",
-      label: "Facturi emise",
+      label: t("shell.nav.invoicesIssued"),
       hint: "G F",
       icon: "docUp",
-      section: "Navigare",
+      section: sectionNav,
       action: () => { navigate({ to: "/invoices" }); close(); },
     },
     {
       id: "nav-received",
-      label: "Facturi primite",
+      label: t("shell.nav.invoicesReceived"),
       hint: "G R",
       icon: "docDown",
-      section: "Navigare",
+      section: sectionNav,
       action: () => { navigate({ to: "/received" }); close(); },
     },
     {
       id: "nav-contacts",
-      label: "Clienți & Furnizori",
+      label: t("shell.nav.contacts"),
       hint: "G C",
       icon: "users",
-      section: "Navigare",
+      section: sectionNav,
       action: () => { navigate({ to: "/contacts" }); close(); },
     },
     {
       id: "nav-companies",
-      label: "Companii",
+      label: t("shell.nav.companies"),
       icon: "building",
-      section: "Navigare",
+      section: sectionNav,
       action: () => { navigate({ to: "/companies" }); close(); },
     },
     {
       id: "nav-reports",
-      label: "Rapoarte",
+      label: t("shell.nav.reports"),
       icon: "chart",
-      section: "Navigare",
+      section: sectionNav,
       action: () => { navigate({ to: "/reports" }); close(); },
     },
     {
       id: "nav-notifications",
-      label: "Notificări ANAF",
+      label: t("shell.palette.anafNotifications"),
       icon: "bell",
-      section: "Navigare",
+      section: sectionNav,
       action: () => { navigate({ to: "/notifications" }); close(); },
     },
     {
       id: "nav-settings",
-      label: "Setări",
+      label: t("shell.profile.settings"),
       icon: "cog",
-      section: "Navigare",
+      section: sectionNav,
       action: () => { navigate({ to: "/settings" }); close(); },
     },
     // Acțiuni
     {
       id: "act-new-invoice",
-      label: "Factură nouă",
+      label: t("shell.topbar.newInvoice"),
       hint: fmtShortcut("Ctrl+N"),
       icon: "plus",
-      section: "Acțiuni",
+      section: sectionActions,
       action: () => { navigate({ to: "/invoices/new" }); close(); },
     },
     {
       id: "act-new-contact",
-      label: "Deschide lista contacte",
+      label: t("shell.palette.openContacts"),
       icon: "users",
-      section: "Acțiuni",
+      section: sectionActions,
       action: () => { navigate({ to: "/contacts" }); close(); },
     },
     {
       id: "act-new-company",
-      label: "Companie nouă",
+      label: t("shell.palette.newCompany"),
       icon: "building",
-      section: "Acțiuni",
+      section: sectionActions,
       action: () => { navigate({ to: "/companies/new" }); close(); },
     },
     // Comută tema
     {
       id: "act-toggle-theme",
-      label: `Comută tema (${theme === "dark" ? "luminoasă" : "întunecată"})`,
+      label: theme === "dark" ? t("shell.palette.toggleThemeLight") : t("shell.palette.toggleThemeDark"),
       icon: "eye",
-      section: "Acțiuni",
+      section: sectionActions,
       action: () => {
         setTheme(theme === "dark" ? "light" : "dark");
         close();
@@ -168,10 +172,10 @@ export function CommandPalette() {
   // Add recent invoices as commands
   const recentCmds: Command[] = (recentInvoices?.items ?? []).map((inv) => ({
     id: `inv-${inv.id}`,
-    label: `Factură ${inv.fullNumber}`,
+    label: t("shell.palette.invoiceItem", { n: inv.fullNumber }),
     hint: inv.issueDate,
     icon: "docUp",
-    section: "Recente",
+    section: t("shell.palette.sections.recent"),
     action: () => {
       navigate({ to: "/invoices/$id", params: { id: inv.id } });
       close();
@@ -236,7 +240,7 @@ export function CommandPalette() {
                 setQuery(e.target.value);
                 setActiveIdx(0);
               }}
-              placeholder="Caută comenzi, facturi, contacte…"
+              placeholder={t("shell.palette.placeholder")}
               autoComplete="off"
             />
             {query && (
@@ -250,7 +254,7 @@ export function CommandPalette() {
         <div className="palette-list">
           {filtered.length === 0 ? (
             <div className="palette-empty">
-              Niciun rezultat pentru „{query}"
+              {t("shell.palette.noResults", { query })}
             </div>
           ) : (
             sections.map((section) => {
@@ -281,9 +285,9 @@ export function CommandPalette() {
         </div>
 
         <div className="palette-foot">
-          <span><span className="kbd">↑↓</span> navigare</span>
-          <span><span className="kbd">↵</span> execută</span>
-          <span><span className="kbd">Esc</span> închide</span>
+          <span><span className="kbd">↑↓</span> {t("shell.palette.footNavigate")}</span>
+          <span><span className="kbd">↵</span> {t("shell.palette.footRun")}</span>
+          <span><span className="kbd">Esc</span> {t("shell.palette.footClose")}</span>
         </div>
       </div>
     </div>

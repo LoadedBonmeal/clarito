@@ -13,6 +13,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate, useLocation } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
 
 import { TopBar } from "./TopBar";
 import { Sidebar } from "./Sidebar";
@@ -31,6 +32,7 @@ interface AppShellProps {
 
 export function AppShell({ children }: AppShellProps) {
   useTheme();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const setCommandOpen = useAppStore((s) => s.setCommandOpen);
@@ -105,11 +107,11 @@ export function AppShell({ children }: AppShellProps) {
                     type="button"
                     onClick={() => setStalenessDismissed(true)}
                     style={{ background: "none", border: "none", cursor: "pointer", padding: "0 4px", lineHeight: 1, color: "var(--rf-text-dim)" }}
-                    aria-label="Închide notificare"
+                    aria-label={t("shell.banner.close")}
                   >×</button>
                 }
               >
-                Formular ANAF actualizat ({stalenessForms.map((f) => f.form).join(", ")}) — actualizați aplicația pentru validare corectă.
+                {t("shell.banner.formStale", { forms: stalenessForms.map((f) => f.form).join(", ") })}
               </Banner>
             </div>
           )}

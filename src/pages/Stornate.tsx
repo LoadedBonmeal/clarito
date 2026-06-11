@@ -12,6 +12,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { Trans, useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -39,6 +40,7 @@ const ini = (name?: string | null) =>
 // ── StornatePage ──────────────────────────────────────────────────────────────
 
 export function StornatePage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const setSelectedInvoiceId = useAppStore((s) => s.setSelectedInvoiceId);
@@ -78,12 +80,12 @@ export function StornatePage() {
       <div className="main-inner wide">
         <div className="page-head">
           <div>
-            <div style={{ fontSize: 12, color: "var(--dim)", marginBottom: 4 }}>e-Factura › Stornate</div>
-            <h1>Facturi stornate</h1>
+            <div style={{ fontSize: 12, color: "var(--dim)", marginBottom: 4 }}>{t("invoices.stornate.breadcrumb")}</div>
+            <h1>{t("invoices.stornate.title")}</h1>
           </div>
         </div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a vedea facturile stornate.
+          {t("invoices.stornate.selectCompany")}
         </div>
       </div>
     );
@@ -94,10 +96,10 @@ export function StornatePage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <div style={{ fontSize: 12, color: "var(--dim)", marginBottom: 4 }}>e-Factura › Stornate</div>
-          <h1>Facturi stornate</h1>
+          <div style={{ fontSize: 12, color: "var(--dim)", marginBottom: 4 }}>{t("invoices.stornate.breadcrumb")}</div>
+          <h1>{t("invoices.stornate.title")}</h1>
           <p className="sub">
-            {storned.length === 1 ? "1 factură cu status Stornată" : `${storned.length} facturi cu status Stornată`}
+            {t("invoices.stornate.count", { count: storned.length })}
             {activeCompany ? ` · ${activeCompany.legalName}` : ""}
           </p>
         </div>
@@ -114,32 +116,30 @@ export function StornatePage() {
           }}
         />
         <span>
-          Factura stornată își păstrează valoarea <b>originală (pozitivă)</b> — reversarea fiscală este
-          purtată de <b>nota de credit</b> (factura storno cu valori negative), emisă separat și trimisă
-          la ANAF din Facturi emise.
+          <Trans i18nKey="invoices.stornate.banner" components={{ b: <b /> }} />
         </span>
       </div>
 
       <div className="scr-card">
         {isLoading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("invoices.states.loading")}</div>
         ) : isError ? (
           <div style={{ padding: 16 }}>
-            <QueryErrorBanner error={error} label="facturile stornate" onRetry={() => void refetch()} />
+            <QueryErrorBanner error={error} label={t("invoices.stornate.errorLabel")} onRetry={() => void refetch()} />
           </div>
         ) : storned.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-            Nicio factură stornată. Facturile stornate vor apărea aici.
+            {t("invoices.stornate.empty")}
           </div>
         ) : (
           <table className="scr-table">
             <thead>
               <tr>
-                <th style={{ width: 170 }}>Număr</th>
-                <th style={{ width: 130 }}>Data</th>
-                <th>Client</th>
-                <th className="r" style={{ width: 160 }}>Total stornat</th>
-                <th style={{ width: 130 }}>Status</th>
+                <th style={{ width: 170 }}>{t("invoices.table.number")}</th>
+                <th style={{ width: 130 }}>{t("invoices.table.date")}</th>
+                <th>{t("invoices.table.client")}</th>
+                <th className="r" style={{ width: 160 }}>{t("invoices.stornate.totalStorned")}</th>
+                <th style={{ width: 130 }}>{t("invoices.table.status")}</th>
               </tr>
             </thead>
             <tbody>
@@ -164,7 +164,7 @@ export function StornatePage() {
                     </td>
                     <td className="r num"><b>{fmtRON(inv.totalAmount)} {inv.currency}</b></td>
                     <td>
-                      <span className="chip wait"><Ic name="undo" cls="sic" />Stornată</span>
+                      <span className="chip wait"><Ic name="undo" cls="sic" />{t("invoices.status.storned")}</span>
                     </td>
                   </tr>
                 );
