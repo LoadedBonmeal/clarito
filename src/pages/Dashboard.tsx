@@ -227,6 +227,7 @@ export function DashboardPage() {
   // De încasat = issued, not-yet-finalized invoices in the period (proxy for outstanding).
   const openInvoices = periodInvoices.filter((i) => ["VALIDATED", "SUBMITTED", "QUEUED"].includes(i.status));
   const deIncasat = openInvoices.reduce((s, i) => s + parseDec(i.totalAmount), 0);
+  const receivedSum = receivedItems.reduce((s, r) => s + parseDec(r.totalAmount), 0);
 
   const STATUS_CHIP: Record<string, { cls: string; icon: string; label: string }> = {
     DRAFT:     { cls: "sent", icon: "docText", label: "Ciornă" },
@@ -356,13 +357,13 @@ export function DashboardPage() {
         </div>
         <div className="kpi">
           <div className="top"><span className="klabel">Facturi primite</span><Ic name="docDown" /></div>
-          <div className="val num">{receivedTotal} <span className="cur">documente</span></div>
-          <div className="delta">sincronizate din SPV</div>
+          <div className="val num">{fmtInt(receivedSum)} <span className="cur">RON</span></div>
+          <div className="delta">{receivedTotal} documente</div>
         </div>
         <div className="kpi">
           <div className="top"><span className="klabel">TVA de colectat</span><Ic name="calc" /></div>
           <div className="val num">{fmtInt(totalVat)} <span className="cur">RON</span></div>
-          <div className="delta">din {periodInvoices.length} facturi</div>
+          <div className="delta">scadență 25 {RO_MON[selM % 12]}.</div>
         </div>
       </div>
 
