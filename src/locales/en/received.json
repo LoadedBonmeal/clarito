@@ -1,0 +1,127 @@
+{
+  "received": {
+    "title": "Received invoices",
+    "subCount": "{{n}} documents synced from SPV",
+    "subCountFiltered": "{{shown}} of {{total}} documents synced from SPV",
+    "selectCompany": "Select an active company to view received invoices.",
+    "missingVatTitle": "Incomplete VAT breakdown from the XML — use \"Recalculate VAT from XML\". Does not contribute to deductible VAT.",
+    "actions": {
+      "reparseVat": "Recalculate VAT from XML",
+      "reparsing": "Recalculating…",
+      "importXml": "Import XML",
+      "exportCsv": "Export CSV",
+      "syncSpv": "Sync SPV",
+      "syncing": "Syncing…"
+    },
+    "banner": {
+      "missing_one": "{{count}} invoice with incomplete VAT breakdown from the XML.",
+      "missing_other": "{{count}} invoices with incomplete VAT breakdown from the XML.",
+      "missingDetail": "They do not contribute to deductible VAT and are skipped when generating GL accounting entries — use \"Recalculate VAT from XML\", then regenerate the journal."
+    },
+    "tabs": {
+      "all": "All",
+      "new": "New",
+      "reviewed": "To review",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "archived": "Archived"
+    },
+    "status": {
+      "new": "New",
+      "reviewed": "Reviewed",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "archived": "Archived"
+    },
+    "toolbar": {
+      "searchPlaceholder": "Search by supplier or CUI…",
+      "refresh": "Refresh"
+    },
+    "bulk": {
+      "selected": "{{n}} selected",
+      "approveAll": "Approve all",
+      "archive": "Archive",
+      "reject": "Reject",
+      "deselect": "Deselect"
+    },
+    "table": {
+      "selectAll": "Select all",
+      "supplier": "Supplier",
+      "cui": "CUI",
+      "seriesNumber": "Series-Number",
+      "date": "Date",
+      "net": "Net",
+      "vat": "VAT",
+      "total": "Total",
+      "currency": "Currency",
+      "status": "Status"
+    },
+    "row": {
+      "approve": "Approve",
+      "reject": "Reject",
+      "reanalyzeVat": "Reanalyze (VAT breakdown)",
+      "archive": "Archive",
+      "reanalyze": "Reanalyze",
+      "view": "View"
+    },
+    "states": {
+      "loading": "Loading…",
+      "errorLabel": "received invoices",
+      "emptyAll": "No received invoices. Download from SPV or import an XML.",
+      "emptyFiltered": "No records for the applied filters.",
+      "truncated": "Showing the first {{shown}} of {{total}} invoices."
+    },
+    "foot": {
+      "invoicesWord_one": "invoice",
+      "invoicesWord_other": "invoices",
+      "net": "net",
+      "vat": "VAT",
+      "total": "total",
+      "toApprove": "To approve:",
+      "shownFirst": "showing the first {{shown}} of {{total}}",
+      "nonRonExcluded_one": "{{count}} invoice in another currency excluded from totals",
+      "nonRonExcluded_other": "{{count}} invoices in another currency excluded from totals",
+      "intraEu": "intra-EU acquisitions: type \"goods\" (R5/R18) or \"services\" (R7/R20) — configurable from the detail view"
+    },
+    "notify": {
+      "noActiveCompany": "No active company.",
+      "statusError": "Could not update the status.",
+      "spvNew_one": "{{count}} new invoice downloaded from SPV.",
+      "spvNew_other": "{{count}} new invoices downloaded from SPV.",
+      "spvNone": "No new invoices in SPV.",
+      "spvError": "SPV sync error.",
+      "reparsed_one": "VAT recalculated for {{count}} invoice.",
+      "reparsed_other": "VAT recalculated for {{count}} invoices.",
+      "reparseError": "VAT recalculation error.",
+      "selectCompanyFirst": "Select a company.",
+      "imported": "Invoice imported: {{number}} — {{supplier}}",
+      "importFailed": "Import failed: {{errors}}",
+      "importError": "XML import error.",
+      "selectForExport": "Select invoices to export.",
+      "exported_one": "{{count}} invoice exported: {{path}}",
+      "exported_other": "{{count}} invoices exported: {{path}}",
+      "exportError": "CSV export failed."
+    },
+    "defal": {
+      "title": "VAT breakdown",
+      "expenseAccount": "Expense account",
+      "vatRate": "VAT rate",
+      "base": "Base",
+      "amountPlaceholder": "0.00",
+      "accounts": {
+        "a626": "626 · Postal and telecommunications expenses",
+        "a628": "628 · Other service expenses",
+        "a604": "604 · Materials expenses",
+        "a605": "605 · Energy and water expenses",
+        "a371": "371 · Merchandise"
+      },
+      "addLine": "Split to another account",
+      "notePre": "Deductible VAT → account 4426. After saving, the invoice enters the",
+      "noteBold": "purchases journal",
+      "notePost": "and the GL accounting entries.",
+      "cancel": "Cancel",
+      "save": "Save breakdown",
+      "soon": "Coming soon."
+    }
+  }
+}

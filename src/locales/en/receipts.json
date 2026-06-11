@@ -1,0 +1,79 @@
+{
+  "receipts": {
+    "title": "Receipts",
+    "sub": {
+      "count": "{{n}} receipts issued",
+      "series": "series {{s}}"
+    },
+    "selectCompany": "Select an active company to view receipts.",
+    "head": {
+      "refresh": "Refresh",
+      "new": "New receipt"
+    },
+    "states": {
+      "loading": "Loading…",
+      "errorLabel": "receipts",
+      "empty": "No receipts. Press \"New receipt\" to issue your first receipt."
+    },
+    "table": {
+      "number": "Number",
+      "date": "Date",
+      "payer": "Payer",
+      "invoice": "Linked invoice",
+      "amount": "Amount",
+      "currency": "Currency"
+    },
+    "row": {
+      "freeText": "(free text)",
+      "invoiceFallback": "invoice",
+      "pdf": "Generate PDF",
+      "delete": "Delete"
+    },
+    "pager": {
+      "showing": "Showing",
+      "of": "of",
+      "receipts": "receipts"
+    },
+    "confirm": {
+      "deleteTitle": "Confirm deletion",
+      "deleteMsg": "Delete receipt \"{{no}}\"? This action cannot be undone."
+    },
+    "notify": {
+      "noActiveCompany": "No active company.",
+      "deleted": "Receipt deleted.",
+      "deleteError": "Could not delete the receipt.",
+      "pdfDone": "PDF generated.",
+      "pdfError": "Could not generate the PDF.",
+      "created": "Receipt issued.",
+      "createError": "Error issuing receipt."
+    },
+    "modal": {
+      "title": "New receipt",
+      "sub": "The number is assigned automatically within the series",
+      "series": "Series",
+      "issueDate": "Issue date",
+      "amount": "Amount",
+      "amountPlaceholder": "0.00",
+      "currency": "Currency",
+      "payerContact": "Payer (contact)",
+      "payerContactPlaceholder": "Search payer (optional)…",
+      "payerFree": "Payer (free text)",
+      "payerFreePlaceholder": "Payer name (if not in contacts)",
+      "invoice": "Linked invoice (optional)",
+      "notes": "Notes",
+      "notesPlaceholder": "optional",
+      "amountPositive": "The amount must be positive.",
+      "dateRequired": "The issue date is required.",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "submit": "Issue receipt"
+    },
+    "combobox": {
+      "placeholder": "Search invoice (number or client)…",
+      "remove": "Remove linked invoice",
+      "searching": "Searching…",
+      "emptyQuery": "No invoice for \"{{q}}\".",
+      "empty": "No invoices found."
+    }
+  }
+}

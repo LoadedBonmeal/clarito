@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm } from "@tauri-apps/plugin-dialog";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { CsvImportModal } from "@/components/shared/CsvImportModal";
@@ -31,12 +32,6 @@ import type { Contact, ContactType, CreateContactInput, UpdateContactInput } fro
 import { COUNTRIES, CURRENCIES } from "@/lib/constants";
 
 type TypeFilter = ContactType | "all";
-
-const TYPE_LABELS: Record<ContactType, string> = {
-  CUSTOMER: "Client",
-  SUPPLIER: "Furnizor",
-  BOTH: "Ambele",
-};
 
 /** Rows per pager page (design .pager parity — client-side). */
 const PAGE_SIZE = 50;
@@ -53,8 +48,15 @@ const ini = (s: string | undefined) =>
   (s ?? "—").replace(/[^A-Za-zĂÂÎȘȚăâîșț ]/g, "").split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "—";
 
 export function ContactsPage() {
+  const { t, i18n } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const queryClient = useQueryClient();
+
+  const typeLabels: Record<ContactType, string> = {
+    CUSTOMER: t("contacts.type.customer"),
+    SUPPLIER: t("contacts.type.supplier"),
+    BOTH: t("contacts.type.both"),
+  };
 
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -123,38 +125,38 @@ export function ContactsPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => {
-      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      if (!activeCompanyId) return Promise.reject(new Error(t("contacts.notify.noActiveCompany")));
       return api.contacts.delete(id, activeCompanyId);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.contacts.all });
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge contactul.")),
+    onError: (e) => notify.error(formatError(e, t("contacts.notify.deleteError"))),
   });
 
   const handleDelete = async (c: Contact) => {
     if (!activeCompanyId) return;
     const ok = await confirm(
-      `Șterge contactul "${c.legalName}"? Această acțiune nu poate fi anulată.`,
-      { title: "Confirmare ștergere", kind: "warning" },
+      t("contacts.confirm.delete", { name: c.legalName }),
+      { title: t("contacts.confirm.deleteTitle"), kind: "warning" },
     );
     if (!ok) return;
     deleteMutation.mutate(c.id);
   };
 
   const tabs: Array<{ value: TypeFilter; label: string; count: number }> = [
-    { value: "all",      label: "Toți",      count: contacts.length },
-    { value: "CUSTOMER", label: "Clienți",   count: counts.CUSTOMER },
-    { value: "SUPPLIER", label: "Furnizori", count: counts.SUPPLIER },
-    { value: "BOTH",     label: "Ambele",    count: counts.BOTH },
+    { value: "all",      label: t("contacts.tabs.all"),       count: contacts.length },
+    { value: "CUSTOMER", label: t("contacts.tabs.customers"), count: counts.CUSTOMER },
+    { value: "SUPPLIER", label: t("contacts.tabs.suppliers"), count: counts.SUPPLIER },
+    { value: "BOTH",     label: t("contacts.tabs.both"),      count: counts.BOTH },
   ];
 
   if (!activeCompanyId) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Clienți &amp; Furnizori</h1></div></div>
+        <div className="page-head"><div><h1>{t("contacts.title")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a vedea contactele.
+          {t("contacts.selectCompany")}
         </div>
       </div>
     );
@@ -165,21 +167,21 @@ export function ContactsPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Clienți &amp; Furnizori</h1>
+          <h1>{t("contacts.title")}</h1>
           <p className="sub">
-            {contacts.length.toLocaleString("ro-RO")} contacte
+            {t("contacts.count", { count: contacts.length })}
             {activeCompany ? ` · ${activeCompany.legalName}` : ""}
           </p>
         </div>
         <div className="head-actions">
-          <button className="sq-btn spin-btn" title="Reîmprospătează" onClick={() => void refetchContacts()}>
+          <button className="sq-btn spin-btn" title={t("contacts.refresh")} onClick={() => void refetchContacts()}>
             <Ic name="sync" />
           </button>
           <button className="pill-btn" onClick={() => setShowImportModal(true)}>
-            <Ic name="docUp" />Import CSV
+            <Ic name="docUp" />{t("contacts.importCsv")}
           </button>
           <button className="btn-dark" onClick={() => setModal("create")}>
-            <Ic name="plus" />Contact nou
+            <Ic name="plus" />{t("contacts.newContact")}
           </button>
         </div>
       </div>
@@ -203,7 +205,7 @@ export function ContactsPage() {
             <Ic name="lens" />
             <input
               type="text"
-              placeholder="Nume sau CUI…"
+              placeholder={t("contacts.searchPlaceholder")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -212,29 +214,29 @@ export function ContactsPage() {
 
         {/* table */}
         {isLoading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("contacts.loading")}</div>
         ) : contactsError ? (
           <div style={{ padding: 16 }}>
-            <QueryErrorBanner error={contactsErr} label="contactele" onRetry={() => void refetchContacts()} />
+            <QueryErrorBanner error={contactsErr} label={t("contacts.errorLabel")} onRetry={() => void refetchContacts()} />
           </div>
         ) : list.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
             {contacts.length === 0
-              ? "Niciun contact. Adăugați primul client sau furnizor cu butonul „Contact nou”."
-              : "Niciun rezultat pentru filtrele aplicate."}
+              ? t("contacts.emptyNone")
+              : t("contacts.emptyFiltered")}
           </div>
         ) : (
           <>
             <table className="scr-table">
               <thead>
                 <tr>
-                  <th style={{ width: 120 }}>CUI</th>
-                  <th>Denumire</th>
-                  <th style={{ width: 110 }}>Tip</th>
-                  <th style={{ width: 140 }}>Localitate</th>
-                  <th style={{ width: 60 }}>Județ</th>
-                  <th style={{ width: 60, textAlign: "center" }}>TVA</th>
-                  <th style={{ width: 200 }}>Email</th>
+                  <th style={{ width: 120 }}>{t("contacts.table.cui")}</th>
+                  <th>{t("contacts.table.name")}</th>
+                  <th style={{ width: 110 }}>{t("contacts.table.type")}</th>
+                  <th style={{ width: 140 }}>{t("contacts.table.city")}</th>
+                  <th style={{ width: 60 }}>{t("contacts.table.county")}</th>
+                  <th style={{ width: 60, textAlign: "center" }}>{t("contacts.table.vat")}</th>
+                  <th style={{ width: 200 }}>{t("contacts.table.email")}</th>
                   <th className="r" style={{ width: 90 }}></th>
                 </tr>
               </thead>
@@ -247,11 +249,11 @@ export function ContactsPage() {
                         <span className="cli-ava">{ini(c.legalName)}</span>
                         {c.legalName}
                         {c.isIndividual && (
-                          <span className="chip sent" style={{ marginLeft: 6 }}>Persoană fizică</span>
+                          <span className="chip sent" style={{ marginLeft: 6 }}>{t("contacts.individualChip")}</span>
                         )}
                       </div>
                     </td>
-                    <td><span className="chip sent">{TYPE_LABELS[c.contactType]}</span></td>
+                    <td><span className="chip sent">{typeLabels[c.contactType]}</span></td>
                     <td>{c.city ?? <span className="muted">—</span>}</td>
                     <td>{c.county ?? <span className="muted">—</span>}</td>
                     <td style={{ textAlign: "center" }}>
@@ -260,10 +262,10 @@ export function ContactsPage() {
                     <td className="muted">{c.email ?? "—"}</td>
                     <td>
                       <div className="row-acts">
-                        <button className="mini-btn" title="Editează" onClick={() => setModal({ edit: c })}>
+                        <button className="mini-btn" title={t("contacts.actions.edit")} onClick={() => setModal({ edit: c })}>
                           <Ic name="pen" />
                         </button>
-                        <button className="mini-btn" title="Șterge" onClick={() => void handleDelete(c)}>
+                        <button className="mini-btn" title={t("contacts.actions.delete")} onClick={() => void handleDelete(c)}>
                           <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: TRASH_PATH }} />
                         </button>
                       </div>
@@ -276,14 +278,14 @@ export function ContactsPage() {
             {/* pager */}
             <div className="pager">
               <span>
-                Afișezi <b>{rangeStart}–{rangeEnd}</b> din <b>{list.length.toLocaleString("ro-RO")}</b> contacte
+                {t("contacts.pager.showing")} <b>{rangeStart}–{rangeEnd}</b> {t("contacts.pager.of")} <b>{list.length.toLocaleString(i18n.language)}</b> {t("contacts.pager.items")}
               </span>
               <div className="pg-btns">
                 <button
                   className="pg-btn"
                   disabled={curPage <= 1}
                   onClick={() => setPage(curPage - 1)}
-                  aria-label="Pagina anterioară"
+                  aria-label={t("contacts.pager.prev")}
                 >
                   {/* chevron-left — not in Ic's set; inlined verbatim */}
                   <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="M15.75 19.5 8.25 12l7.5-7.5"/>' }} />
@@ -301,7 +303,7 @@ export function ContactsPage() {
                   className="pg-btn"
                   disabled={curPage >= totalPages}
                   onClick={() => setPage(curPage + 1)}
-                  aria-label="Pagina următoare"
+                  aria-label={t("contacts.pager.next")}
                 >
                   <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="m8.25 4.5 7.5 7.5-7.5 7.5"/>' }} />
                 </button>
@@ -353,6 +355,7 @@ function ContactModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const isEdit = contact !== null;
   const [currency, setCurrency] = useState<string>(contact?.currency ?? "RON");
   const [form, setForm] = useState<CreateContactInput>({
@@ -391,11 +394,11 @@ function ContactModal({
         cashVat: d.cashVat,
       }));
       setAnafInfo({ inactive: !d.active, cashVat: d.cashVat, efactura: d.efacturaRegistered });
-      notify.success(`Date preluate din ANAF: ${d.legalName}`);
+      notify.success(t("contacts.notify.anafSuccess", { name: d.legalName }));
     },
     onError: () => {
       setAnafInfo(null);
-      notify.error("CUI-ul nu a fost găsit în baza ANAF.");
+      notify.error(t("contacts.notify.anafError"));
     },
   });
 
@@ -411,14 +414,14 @@ function ContactModal({
   const create = useMutation({
     mutationFn: (input: CreateContactInput) => api.contacts.create(input),
     onSuccess: onSaved,
-    onError: (e) => setError(formatError(e, "Eroare la creare.")),
+    onError: (e) => setError(formatError(e, t("contacts.modal.createError"))),
   });
 
   const update = useMutation({
     mutationFn: (input: UpdateContactInput) =>
       api.contacts.update(contact!.id, companyId, input),
     onSuccess: onSaved,
-    onError: (e) => setError(formatError(e, "Eroare la salvare.")),
+    onError: (e) => setError(formatError(e, t("contacts.modal.saveError"))),
   });
 
   const isPending = create.isPending || update.isPending;
@@ -433,13 +436,13 @@ function ContactModal({
     e.preventDefault();
     setError(null);
     if (!form.legalName.trim()) {
-      setError("Denumirea este obligatorie.");
+      setError(t("contacts.modal.nameRequired"));
       return;
     }
     if (form.cui?.trim()) {
       const cuiClean = form.cui.trim().toUpperCase().replace(/^RO/, "");
       if (!/^\d{2,10}$/.test(cuiClean)) {
-        setError("CUI invalid — trebuie să conțină 2-10 cifre (ex: RO12345678 sau 12345678)");
+        setError(t("contacts.modal.cuiInvalid"));
         return;
       }
     }
@@ -477,26 +480,23 @@ function ContactModal({
       <div className="modal lg">
         <div className="modal-head">
           <div>
-            <div className="mt">{isEdit ? `Editează: ${contact.legalName}` : "Contact nou"}</div>
-            <div className="ms">
-              Datele se completează automat din registrul ANAF după CUI (denumire, adresă, TVA,
-              TVA la încasare, stare activă)
-            </div>
+            <div className="mt">{isEdit ? t("contacts.modal.editTitle", { name: contact.legalName }) : t("contacts.newContact")}</div>
+            <div className="ms">{t("contacts.modal.subtitle")}</div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label="Închide">
+          <button className="modal-x" onClick={onClose} aria-label={t("contacts.modal.close")}>
             <Ic name="xMark" />
           </button>
         </div>
         <form id="contact-form" className="modal-body" onSubmit={handleSubmit}>
           <div className="fgrid">
             <div className="field">
-              <label>CUI / CIF</label>
+              <label>{t("contacts.modal.cui")}</label>
               <div style={{ display: "flex", gap: 6 }}>
                 <div className="in-wrap" style={{ flex: 1 }}>
                   <input
                     className={`input num${anafInfo ? " valid" : ""}`}
                     type="text"
-                    placeholder="ex. RO12345678"
+                    placeholder={t("contacts.modal.cuiPlaceholder")}
                     {...field("cui")}
                     onBlur={triggerAnafLookup}
                   />
@@ -509,7 +509,7 @@ function ContactModal({
                   className="pill-btn"
                   style={{ height: 36, flex: "none" }}
                   disabled={anafLookup.isPending || (form.isIndividual as boolean)}
-                  title="Preia datele firmei din ANAF după CUI"
+                  title={t("contacts.modal.anafBtnTitle")}
                   onClick={() => {
                     setLastLookedUp("");
                     triggerAnafLookup();
@@ -520,52 +520,52 @@ function ContactModal({
               </div>
               {anafInfo && (
                 <span className={anafInfo.inactive ? "err" : "okk"} style={anafInfo.inactive ? { fontSize: 11.5, color: "var(--red)" } : undefined}>
-                  Găsit în ANAF · {anafInfo.inactive ? "INACTIV" : "activ"}
-                  {anafInfo.efactura ? " · înregistrat în Registrul RO e-Factura" : ""}
+                  {t("contacts.modal.anafFound")} · {anafInfo.inactive ? t("contacts.modal.anafInactive") : t("contacts.modal.anafActive")}
+                  {anafInfo.efactura ? ` · ${t("contacts.modal.anafEfactura")}` : ""}
                 </span>
               )}
             </div>
             <div className="field">
-              <label>Tip contact</label>
+              <label>{t("contacts.modal.contactType")}</label>
               <select
                 className="select"
                 value={form.contactType}
                 onChange={(e) => setForm((f) => ({ ...f, contactType: e.target.value as ContactType }))}
               >
-                <option value="CUSTOMER">Client</option>
-                <option value="SUPPLIER">Furnizor</option>
-                <option value="BOTH">Ambele</option>
+                <option value="CUSTOMER">{t("contacts.type.customer")}</option>
+                <option value="SUPPLIER">{t("contacts.type.supplier")}</option>
+                <option value="BOTH">{t("contacts.type.both")}</option>
               </select>
             </div>
             <div className="field span2">
-              <label>Denumire <span className="req">*</span></label>
-              <input className="input" type="text" placeholder="S.C. Exemplu S.R.L." {...field("legalName")} autoFocus />
+              <label>{t("contacts.modal.name")} <span className="req">*</span></label>
+              <input className="input" type="text" placeholder={t("contacts.modal.namePlaceholder")} {...field("legalName")} autoFocus />
             </div>
             <div className="field">
-              <label>Persoană fizică (B2C)</label>
+              <label>{t("contacts.modal.individual")}</label>
               <select className="select" {...boolSelect("isIndividual")}>
-                <option value="da">Da</option>
-                <option value="nu">Nu</option>
+                <option value="da">{t("contacts.modal.yes")}</option>
+                <option value="nu">{t("contacts.modal.no")}</option>
               </select>
-              <span className="hint">persoanele fizice nu necesită CUI</span>
+              <span className="hint">{t("contacts.modal.individualHint")}</span>
             </div>
             <div className="field">
-              <label>Plătitor TVA</label>
+              <label>{t("contacts.modal.vatPayer")}</label>
               <select className="select" {...boolSelect("vatPayer")}>
-                <option value="da">Da</option>
-                <option value="nu">Nu</option>
+                <option value="da">{t("contacts.modal.yes")}</option>
+                <option value="nu">{t("contacts.modal.no")}</option>
               </select>
             </div>
             <div className="field">
-              <label>TVA la încasare</label>
+              <label>{t("contacts.modal.cashVat")}</label>
               <select className="select" {...boolSelect("cashVat")}>
-                <option value="da">Da</option>
-                <option value="nu">Nu</option>
+                <option value="da">{t("contacts.modal.yes")}</option>
+                <option value="nu">{t("contacts.modal.no")}</option>
               </select>
-              <span className="hint">preluat din ANAF — amână deducerea până la plată (art. 297)</span>
+              <span className="hint">{t("contacts.modal.cashVatHint")}</span>
             </div>
             <div className="field">
-              <label>Monedă implicită</label>
+              <label>{t("contacts.modal.currency")}</label>
               <select className="select" value={currency} onChange={(e) => setCurrency(e.target.value)}>
                 {CURRENCIES.map((c) => (
                   <option key={c} value={c}>{c}</option>
@@ -573,20 +573,20 @@ function ContactModal({
               </select>
             </div>
             <div className="field span2">
-              <label>Adresă</label>
-              <input className="input" type="text" placeholder="Str. Exemplu nr. 1" {...field("address")} />
+              <label>{t("contacts.modal.address")}</label>
+              <input className="input" type="text" placeholder={t("contacts.modal.addressPlaceholder")} {...field("address")} />
             </div>
             <div className="field">
-              <label>Localitate</label>
-              <input className="input" type="text" placeholder="Cluj-Napoca" {...field("city")} />
+              <label>{t("contacts.table.city")}</label>
+              <input className="input" type="text" placeholder={t("contacts.modal.cityPlaceholder")} {...field("city")} />
             </div>
             <div className="field">
-              <label>Județ</label>
-              <input className="input" type="text" placeholder="CJ" {...field("county")} />
+              <label>{t("contacts.table.county")}</label>
+              <input className="input" type="text" placeholder={t("contacts.modal.countyPlaceholder")} {...field("county")} />
             </div>
             {/* Țară — real field the prototype lacks; kept (design .select) */}
             <div className="field">
-              <label>Țară</label>
+              <label>{t("contacts.modal.country")}</label>
               <select
                 className="select"
                 value={form.country ?? "RO"}
@@ -598,27 +598,24 @@ function ContactModal({
               </select>
             </div>
             <div className="field">
-              <label>Email</label>
-              <input className="input" type="text" placeholder="opțional" {...field("email")} />
+              <label>{t("contacts.table.email")}</label>
+              <input className="input" type="text" placeholder={t("contacts.modal.optional")} {...field("email")} />
             </div>
             <div className="field">
-              <label>Telefon</label>
-              <input className="input num" type="text" placeholder="opțional" {...field("phone")} />
+              <label>{t("contacts.modal.phone")}</label>
+              <input className="input num" type="text" placeholder={t("contacts.modal.optional")} {...field("phone")} />
             </div>
           </div>
 
           {/* ANAF status notes (real functionality — restyled with design tokens) */}
           {anafInfo?.inactive && (
             <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, fontSize: 12.5, color: "var(--red)", background: "rgba(220,38,38,.06)", border: "1px solid rgba(220,38,38,.18)" }}>
-              Contribuabil <b>INACTIV</b> la ANAF — facturile primite au deductibilitate
-              restricționată pentru cheltuieli și TVA (art. 11 Cod fiscal). Verificați înainte de a
-              înregistra achiziții.
+              {t("contacts.modal.inactivePrefix")} <b>{t("contacts.modal.inactiveBold")}</b> {t("contacts.modal.inactiveSuffix")}
             </div>
           )}
           {anafInfo?.cashVat && (
             <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, fontSize: 12.5, color: "var(--amber)", background: "rgba(180,83,9,.07)", border: "1px solid rgba(180,83,9,.18)" }}>
-              Furnizor cu <b>TVA la încasare</b> — TVA deductibilă se amână până la plata facturii
-              (art. 297 Cod fiscal).
+              {t("contacts.modal.cashVatPrefix")} <b>{t("contacts.modal.cashVatBold")}</b> {t("contacts.modal.cashVatSuffix")}
             </div>
           )}
 
@@ -629,7 +626,7 @@ function ContactModal({
           )}
         </form>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={onClose} disabled={isPending}>Renunță</button>
+          <button className="pill-btn" onClick={onClose} disabled={isPending}>{t("contacts.modal.cancel")}</button>
           <button
             className="btn-dark"
             type="submit"
@@ -638,7 +635,7 @@ function ContactModal({
             style={isPending ? { opacity: 0.6 } : undefined}
           >
             <Ic name="check" />
-            {isPending ? "Se salvează…" : "Salvează contact"}
+            {isPending ? t("contacts.modal.saving") : t("contacts.modal.save")}
           </button>
         </div>
       </div>

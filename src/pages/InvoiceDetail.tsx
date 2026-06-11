@@ -21,6 +21,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useParams, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -61,24 +62,25 @@ function initials(name: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-// Status → design chip (.chip variants + icon + label) — head .head-title chip.
-const STATUS_CHIP: Record<InvoiceStatus, { cls: string; icon: string; label: string }> = {
-  DRAFT:     { cls: "sent", icon: "docText", label: "Schiță" },
-  QUEUED:    { cls: "wait", icon: "clock",   label: "În coadă" },
-  SUBMITTED: { cls: "sent", icon: "send",    label: "Trimisă" },
-  VALIDATED: { cls: "paid", icon: "checkC",  label: "Validată ANAF" },
-  REJECTED:  { cls: "late", icon: "xMark",   label: "Respinsă" },
-  STORNED:   { cls: "wait", icon: "undo",    label: "Stornată" },
+// Status → design chip (.chip variants + icon + i18n label key) — head .head-title chip.
+const STATUS_CHIP: Record<InvoiceStatus, { cls: string; icon: string; labelKey: string }> = {
+  DRAFT:     { cls: "sent", icon: "docText", labelKey: "detail.status.draft" },
+  QUEUED:    { cls: "wait", icon: "clock",   labelKey: "detail.status.queued" },
+  SUBMITTED: { cls: "sent", icon: "send",    labelKey: "detail.status.submitted" },
+  VALIDATED: { cls: "paid", icon: "checkC",  labelKey: "detail.status.validatedAnaf" },
+  REJECTED:  { cls: "late", icon: "xMark",   labelKey: "detail.status.rejected" },
+  STORNED:   { cls: "wait", icon: "undo",    labelKey: "detail.status.storned" },
 };
 
-const METHOD_LABELS: Record<string, string> = {
-  transfer: "Transfer bancar",
-  cash: "Numerar",
-  card: "Card",
-  other: "Altele",
+const METHOD_KEYS: Record<string, string> = {
+  transfer: "detail.method.transfer",
+  cash: "detail.method.cash",
+  card: "detail.method.card",
+  other: "detail.method.other",
 };
 
 export function InvoiceDetailPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { id } = useParams({ from: "/invoices/$id" });
@@ -160,38 +162,38 @@ export function InvoiceDetailPage() {
 
   const generateXml = useMutation({
     mutationFn: () => {
-      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      if (!activeCompanyId) return Promise.reject(new Error(t("detail.noActiveCompany")));
       return api.ubl.generateXml(id, activeCompanyId);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
       setActionError(null);
-      notify.success("XML UBL generat.");
+      notify.success(t("detail.notify.xmlGenerated"));
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare generare XML."),
+    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.xmlError")),
   });
 
   const generatePdf = useMutation({
     mutationFn: () => {
-      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      if (!activeCompanyId) return Promise.reject(new Error(t("detail.noActiveCompany")));
       return api.ubl.generatePdf(id, activeCompanyId);
     },
     onSuccess: async (pdfPath) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
       setActionError(null);
-      notify.success("PDF generat.");
+      notify.success(t("detail.notify.pdfGenerated"));
       if (pdfPath) {
         try { await openPath(pdfPath); }
-        catch (e) { notify.error(`Nu pot deschide PDF: ${e}`); }
+        catch (e) { notify.error(t("detail.notify.pdfOpenError", { error: String(e) })); }
       }
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare generare PDF."),
+    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.pdfError")),
   });
 
   const authorizeAnaf = useMutation({
     mutationFn: () => api.anaf.authorize(data!.invoice.companyId),
     onSuccess: () => { void refetchAnafAuth(); },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare autorizare ANAF."),
+    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.anafAuthError")),
   });
 
   const submitInvoice = useMutation({
@@ -201,7 +203,7 @@ export function InvoiceDetailPage() {
       if (!authenticated) {
         await api.anaf.authorize(companyId);
         authenticated = await api.anaf.isAuthenticated(companyId);
-        if (!authenticated) throw new Error("Autorizarea ANAF a eșuat sau a fost anulată.");
+        if (!authenticated) throw new Error(t("detail.notify.anafAuthFailed"));
       }
       return api.anaf.submitInvoice(companyId, id, testMode);
     },
@@ -212,7 +214,7 @@ export function InvoiceDetailPage() {
       setActionError(null);
       setStatusMessage(null);
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare trimitere ANAF."),
+    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.anafSendError")),
   });
 
   const checkStatus = useMutation({
@@ -220,48 +222,48 @@ export function InvoiceDetailPage() {
     onSuccess: (stare) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
       setActionError(null);
-      setStatusMessage(`Status ANAF: ${stare}`);
+      setStatusMessage(t("detail.notify.anafStatus", { status: stare }));
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare verificare status."),
+    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.statusCheckError")),
   });
 
   const duplicateInvoice = useMutation({
     mutationFn: () => {
-      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      if (!activeCompanyId) return Promise.reject(new Error(t("detail.noActiveCompany")));
       return api.invoices.duplicate(id, activeCompanyId);
     },
     onSuccess: (newId) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
-      notify.success("Factură duplicată.");
+      notify.success(t("detail.notify.duplicated"));
       void navigate({ to: "/invoices/$id", params: { id: newId } });
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare duplicare."),
+    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.duplicateError")),
   });
 
   const stornoInvoice = useMutation({
     mutationFn: (reason: string) => {
-      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      if (!activeCompanyId) return Promise.reject(new Error(t("detail.noActiveCompany")));
       return api.invoices.storno(id, activeCompanyId, reason);
     },
     onSuccess: (stornoInv) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
-      setStatusMessage(`Factură storno creată: ${stornoInv.fullNumber}`);
+      setStatusMessage(t("detail.notify.stornoCreated", { nr: stornoInv.fullNumber }));
       setActionError(null);
       // Navigate to the new credit note so the accountant sees the guidance banner
       // and can immediately generate XML + submit to ANAF to complete the cancellation.
       void navigate({ to: "/invoices/$id", params: { id: stornoInv.id } });
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare stornare."),
+    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.stornoError")),
   });
 
   const pushSmartbill = useMutation({
     mutationFn: () => api.integrations.smartbillPush(data!.invoice.companyId, id),
     onSuccess: (result) => {
-      setStatusMessage(`Factură trimisă în SmartBill: ${result}`);
+      setStatusMessage(t("detail.notify.smartbillSent", { result }));
       setActionError(null);
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? "Eroare trimitere SmartBill."),
+    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.smartbillError")),
   });
 
   const addPayment = useMutation({
@@ -270,10 +272,10 @@ export function InvoiceDetailPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.payments.summary(id, data?.invoice.companyId ?? "") });
       void queryClient.invalidateQueries({ queryKey: ["payments"] });
       void queryClient.invalidateQueries({ queryKey: ["payment_summaries"] });
-      notify.success("Plată înregistrată.");
+      notify.success(t("detail.notify.paymentAdded"));
       setShowPayModal(false);
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut înregistra plata.")),
+    onError: (e) => notify.error(formatError(e, t("detail.notify.paymentAddError"))),
   });
 
   const deletePayment = useMutation({
@@ -282,20 +284,20 @@ export function InvoiceDetailPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.payments.summary(id, data?.invoice.companyId ?? "") });
       void queryClient.invalidateQueries({ queryKey: ["payments"] });
       void queryClient.invalidateQueries({ queryKey: ["payment_summaries"] });
-      notify.success("Plată ștearsă.");
+      notify.success(t("detail.notify.paymentDeleted"));
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge plata.")),
+    onError: (e) => notify.error(formatError(e, t("detail.notify.paymentDeleteError"))),
   });
 
   const saveAsTemplateMutation = useMutation({
     mutationFn: (args: Parameters<typeof api.recurring.create>[0]) => api.recurring.create(args),
     onSuccess: () => {
-      notify.success("Șablon recurent creat din factură.");
+      notify.success(t("detail.notify.templateCreated"));
       setShowSaveAsTemplate(false);
       setTemplateName("");
       setTemplateFrequency("monthly");
     },
-    onError: (e) => setActionError(formatError(e, "Nu s-a putut crea șablonul recurent.")),
+    onError: (e) => setActionError(formatError(e, t("detail.notify.templateError"))),
   });
 
   function nextMonthDate(): string {
@@ -307,7 +309,7 @@ export function InvoiceDetailPage() {
   function handleSaveAsTemplate() {
     if (!data) return;
     const { invoice, lines: invoiceLines } = data;
-    if (!templateName.trim()) { notify.warn("Introduceți un nume pentru șablon."); return; }
+    if (!templateName.trim()) { notify.warn(t("detail.notify.templateNameRequired")); return; }
     const recurringLines = invoiceLines.map((l) => ({
       name: l.name,
       quantity: typeof l.quantity === "string" ? Number(l.quantity) : l.quantity,
@@ -339,16 +341,16 @@ export function InvoiceDetailPage() {
       setXmlCopied(true);
       setTimeout(() => setXmlCopied(false), 2000);
     } catch {
-      setActionError("Nu s-a putut copia XML-ul în clipboard.");
+      setActionError(t("detail.notify.copyXmlError"));
     }
   }
 
   if (!activeCompanyId) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Factură</h1></div></div>
+        <div className="page-head"><div><h1>{t("detail.invoiceTitle")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a vedea factura.
+          {t("detail.selectCompany")}
         </div>
       </div>
     );
@@ -357,7 +359,7 @@ export function InvoiceDetailPage() {
   if (isLoading) {
     return (
       <div className="main-inner wide">
-        <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>Se încarcă…</div>
+        <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>{t("detail.loading")}</div>
       </div>
     );
   }
@@ -365,9 +367,9 @@ export function InvoiceDetailPage() {
   if (!data) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Factură</h1></div></div>
+        <div className="page-head"><div><h1>{t("detail.invoiceTitle")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Factura nu a fost găsită.
+          {t("detail.notFound")}
         </div>
       </div>
     );
@@ -382,10 +384,10 @@ export function InvoiceDetailPage() {
   const remaining = Math.max(0, total - paid);
   const payStatus = paymentSummary?.paymentStatus ?? "UNPAID";
   const payChip = payStatus === "PAID"
-    ? { cls: "paid", icon: "check", label: "Încasată" }
+    ? { cls: "paid", icon: "check", label: t("detail.pay.collected") }
     : payStatus === "PARTIAL"
-      ? { cls: "wait", icon: "clock", label: "Parțial" }
-      : { cls: "sent", icon: "dot", label: "Neîncasată" };
+      ? { cls: "wait", icon: "clock", label: t("detail.pay.partial") }
+      : { cls: "sent", icon: "dot", label: t("detail.pay.uncollected") };
   const payments: Payment[] = paymentSummary?.payments ?? [];
   const isFx = invoice.currency !== "RON";
 
@@ -415,16 +417,16 @@ export function InvoiceDetailPage() {
       <div className="page-head">
         <div>
           <div className="crumb">
-            <a onClick={() => void navigate({ to: "/invoices" })} style={{ cursor: "pointer" }}>Facturi emise</a>
+            <a onClick={() => void navigate({ to: "/invoices" })} style={{ cursor: "pointer" }}>{t("detail.crumb.issued")}</a>
             <span className="sep">›</span>
             <span className="num">{invoice.fullNumber}</span>
           </div>
           <div className="head-title">
             <h1 className="num">{invoice.fullNumber}</h1>
-            <span className={`chip ${chip.cls}`}><Ic name={chip.icon} cls="sic" />{chip.label}</span>
+            <span className={`chip ${chip.cls}`}><Ic name={chip.icon} cls="sic" />{t(chip.labelKey)}</span>
           </div>
           <p className="sub">
-            {contact?.legalName ?? "—"} · emisă {fmtRoDate(invoice.issueDate)} · scadență {fmtRoDate(invoice.dueDate)}
+            {contact?.legalName ?? "—"} · {t("detail.head.issuedOn", { date: fmtRoDate(invoice.issueDate) })} · {t("detail.head.dueOn", { date: fmtRoDate(invoice.dueDate) })}
           </p>
         </div>
         <div className="head-actions">
@@ -432,7 +434,7 @@ export function InvoiceDetailPage() {
             <Ic name="dl" />{generatePdf.isPending ? "PDF…" : "PDF"}
           </button>
           <button className="pill-btn" disabled={generateXml.isPending} onClick={() => generateXml.mutate()}>
-            <Ic name="code" />{generateXml.isPending ? "XML…" : invoice.xmlPath ? "XML" : "Generează XML"}
+            <Ic name="code" />{generateXml.isPending ? "XML…" : invoice.xmlPath ? "XML" : t("detail.actions.generateXml")}
           </button>
           {canStorno && (
             <button
@@ -443,7 +445,7 @@ export function InvoiceDetailPage() {
               <svg className="ic" viewBox="0 0 24 24" style={{ stroke: "var(--amber)" }} aria-hidden="true">
                 <path d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
               </svg>
-              Storno
+              {t("detail.actions.storno")}
             </button>
           )}
           {invoice.status !== "DRAFT" && invoice.status !== "STORNED" && (
@@ -458,7 +460,7 @@ export function InvoiceDetailPage() {
               });
               setShowPayModal(true);
             }}>
-              <Ic name="card" />Înregistrează plata
+              <Ic name="card" />{t("detail.actions.recordPayment")}
             </button>
           )}
 
@@ -466,7 +468,7 @@ export function InvoiceDetailPage() {
           <div className="nou-wrap" style={{ position: "relative" }}>
             <button
               className="sq-btn"
-              title="Mai multe acțiuni"
+              title={t("detail.actions.moreTitle")}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={() => setOpenPop(openPop === "more" ? "" : "more")}
             >
@@ -474,52 +476,57 @@ export function InvoiceDetailPage() {
             </button>
             {openPop === "more" && (
               <div className="pop show" style={{ right: 0, top: 40, width: 230 }} onMouseDown={(e) => e.stopPropagation()}>
-                <div className="col-title">Acțiuni factură</div>
+                <div className="col-title">{t("detail.actions.invoiceActions")}</div>
                 {invoice.status === "DRAFT" && (
                   <button className="pop-item" onClick={() => { setOpenPop(""); void navigate({ to: "/invoices/$id/edit", params: { id } }); }}>
-                    <Ic name="pen" />Editează
+                    <Ic name="pen" />{t("detail.actions.edit")}
                   </button>
                 )}
                 <button className="pop-item" disabled={duplicateInvoice.isPending} onClick={() => { setOpenPop(""); duplicateInvoice.mutate(); }}>
-                  <Ic name="copy" />{duplicateInvoice.isPending ? "Duplicare…" : "Duplică"}
+                  <Ic name="copy" />{duplicateInvoice.isPending ? t("detail.actions.duplicating") : t("detail.actions.duplicate")}
                 </button>
-                <button className="pop-item" title={`Tipărește (${fmtShortcut("Ctrl+P")})`} onClick={() => { setOpenPop(""); window.print(); }}>
-                  <Ic name="printer" />Tipărește
+                <button className="pop-item" title={t("detail.actions.printTitle", { shortcut: fmtShortcut("Ctrl+P") })} onClick={() => { setOpenPop(""); window.print(); }}>
+                  <Ic name="printer" />{t("detail.actions.print")}
                 </button>
                 <button
                   className="pop-item"
                   onClick={() => {
                     setOpenPop("");
-                    setTemplateName(`Șablon din ${invoice.fullNumber}`);
+                    setTemplateName(t("detail.templateModal.defaultName", { nr: invoice.fullNumber }));
                     setTemplateFrequency("monthly");
                     setShowSaveAsTemplate(true);
                   }}
                 >
-                  <Ic name="loop" />Șablon recurent
+                  <Ic name="loop" />{t("detail.actions.recurringTemplate")}
                 </button>
                 <div className="pop-div" />
-                <div className="col-title">Trimitere</div>
+                <div className="col-title">{t("detail.actions.sendSection")}</div>
                 {contact?.email && (
                   <button
                     className="pop-item"
                     onClick={() => {
                       setOpenPop("");
-                      const subject = encodeURIComponent(`Factură ${invoice.fullNumber}`);
+                      const subject = encodeURIComponent(t("detail.email.subject", { nr: invoice.fullNumber }));
                       const body = encodeURIComponent(
-                        `Bună ziua,\n\nVă transmitem factura ${invoice.fullNumber} din data ${invoice.issueDate}, în valoare de ${fmtRON(invoice.totalAmount)} ${invoice.currency}.\n\nCu stimă`,
+                        t("detail.email.body", {
+                          nr: invoice.fullNumber,
+                          date: invoice.issueDate,
+                          amount: fmtRON(invoice.totalAmount),
+                          currency: invoice.currency,
+                        }),
                       );
                       void openUrl(`mailto:${encodeURIComponent(contact.email ?? "")}?subject=${subject}&body=${body}`);
                     }}
                   >
-                    <Ic name="mail" />Email către client
+                    <Ic name="mail" />{t("detail.actions.emailToClient")}
                   </button>
                 )}
                 <button className="pop-item" disabled={pushSmartbill.isPending} onClick={() => { setOpenPop(""); pushSmartbill.mutate(); }}>
-                  <Ic name="docUp" />{pushSmartbill.isPending ? "SmartBill…" : "Trimite în SmartBill"}
+                  <Ic name="docUp" />{pushSmartbill.isPending ? "SmartBill…" : t("detail.actions.sendSmartbill")}
                 </button>
                 {invoice.xmlPath && (
                   <button className="pop-item" onClick={() => { setOpenPop(""); void handleCopyXml(); }}>
-                    <Ic name="copy" />{xmlCopied ? "Copiat ✓" : "Copiază XML"}
+                    <Ic name="copy" />{xmlCopied ? t("detail.actions.copied") : t("detail.actions.copyXml")}
                   </button>
                 )}
               </div>
@@ -532,7 +539,7 @@ export function InvoiceDetailPage() {
       {actionError && (
         <div className="banner danger">
           <Ic name="xMark" />
-          <div><b>Eroare.</b> {actionError}</div>
+          <div><b>{t("detail.banner.error")}</b> {actionError}</div>
           <span className="bx" onClick={() => setActionError(null)}>✕</span>
         </div>
       )}
@@ -551,9 +558,8 @@ export function InvoiceDetailPage() {
         <div className="banner warn">
           <Ic name="undo" />
           <div>
-            <b>Factură storno — acțiune necesară.</b> Această factură storno trebuie generată (XML) și
-            trimisă la ANAF pentru a anula fiscal factura originală. Până la validarea de către ANAF,
-            anularea fiscală <b>nu este efectivă</b> și factura originală continuă să apară în declarații.
+            <b>{t("detail.banner.stornoTitle")}</b> {t("detail.banner.stornoBody1")}{" "}
+            <b>{t("detail.banner.stornoBodyEm")}</b> {t("detail.banner.stornoBody2")}
           </div>
         </div>
       )}
@@ -571,10 +577,10 @@ export function InvoiceDetailPage() {
             <div className={`banner${overdue ? " danger" : left <= 1 ? " warn" : ""}`}>
               <Ic name="calendar" />
               <div>
-                e-Factura: de trimis până la <b>{formatDeadline(dl)}</b>{" "}
+                {t("detail.banner.deadlinePrefix")} <b>{formatDeadline(dl)}</b>{" "}
                 {overdue
-                  ? `— termen depășit cu ${n} ${n === 1 ? "zi" : "zile"}.`
-                  : `(${left} ${left === 1 ? "zi" : "zile"} rămase). Termen legal: 5 zile lucrătoare de la emitere.`}
+                  ? t("detail.banner.deadlineOverdue", { count: n })
+                  : t("detail.banner.deadlineLeft", { count: left })}
               </div>
             </div>
           );
@@ -586,23 +592,23 @@ export function InvoiceDetailPage() {
           <div className="steps">
             <div className={stepCls(0)}>
               <div className="dot">{reached >= 0 && <Ic name="check" cls="sic" />}</div>
-              <div className="sl">Schiță</div>
+              <div className="sl">{t("detail.timeline.draft")}</div>
               <div className="sd num">{fmtRoDateTime(invoice.createdAt)}</div>
             </div>
             <div className={stepCls(1)}>
               <div className="dot">{reached >= 1 && <Ic name="check" cls="sic" />}</div>
-              <div className="sl">Trimisă la ANAF</div>
+              <div className="sl">{t("detail.timeline.submitted")}</div>
               <div className="sd num">
                 {invoice.anafSubmittedAt
                   ? fmtRoDateTime(invoice.anafSubmittedAt)
-                  : invoice.status === "QUEUED" ? "în coadă" : "—"}
+                  : invoice.status === "QUEUED" ? t("detail.timeline.queued") : "—"}
               </div>
             </div>
             <div className={rejected ? "step fail" : stepCls(2)}>
               <div className="dot">
                 {rejected ? <Ic name="xMark" cls="sic" /> : reached >= 2 ? <Ic name="check" cls="sic" /> : null}
               </div>
-              <div className="sl">{rejected ? "Respinsă ANAF" : "Validată ANAF"}</div>
+              <div className="sl">{rejected ? t("detail.timeline.rejectedAnaf") : t("detail.timeline.validated")}</div>
               <div className="sd num">
                 {rejected
                   ? fmtRoDateTime(invoice.anafRejectedAt)
@@ -611,11 +617,11 @@ export function InvoiceDetailPage() {
             </div>
             <div className={stepCls(3)}>
               <div className="dot">{reached >= 3 && <Ic name="check" cls="sic" />}</div>
-              <div className="sl">Încasată integral</div>
+              <div className="sl">{t("detail.timeline.collectedFull")}</div>
               <div className="sd">
                 {payStatus === "PAID"
-                  ? <span className="num">încasată integral</span>
-                  : <>sold rămas <span className="num">{fmtRON(remaining)} {invoice.currency}</span></>}
+                  ? <span className="num">{t("detail.timeline.collectedFullLower")}</span>
+                  : <>{t("detail.timeline.remainingBalance")} <span className="num">{fmtRON(remaining)} {invoice.currency}</span></>}
               </div>
             </div>
           </div>
@@ -627,18 +633,18 @@ export function InvoiceDetailPage() {
           {/* linii */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
-              <div className="tt">Linii factură</div>
+              <div className="tt">{t("detail.lines.title")}</div>
               <div className="spacer" />
               <span className="muted num" style={{ fontSize: 12 }}>{invoice.currency}</span>
             </div>
             {lines.length === 0 ? (
               <div style={{ padding: "30px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-                Nicio linie pe factură.
+                {t("detail.lines.empty")}
               </div>
             ) : (
               <table className="scr-table">
                 <thead>
-                  <tr><th>Articol</th><th className="r">Cant.</th><th>UM</th><th className="r">Preț unitar</th><th>TVA</th><th className="r">Valoare</th></tr>
+                  <tr><th>{t("detail.lines.item")}</th><th className="r">{t("detail.lines.qty")}</th><th>{t("detail.lines.unit")}</th><th className="r">{t("detail.lines.unitPrice")}</th><th>{t("detail.lines.vat")}</th><th className="r">{t("detail.lines.amount")}</th></tr>
                 </thead>
                 <tbody>
                   {lines.map((l) => (
@@ -661,20 +667,20 @@ export function InvoiceDetailPage() {
             )}
             <div className="sold-line" style={{ borderTop: "1px solid var(--line)", background: "#fff" }}>
               <span>
-                Subtotal <span className="num">{fmtRON(invoice.subtotalAmount)}</span> · TVA{" "}
+                {t("detail.lines.subtotal")} <span className="num">{fmtRON(invoice.subtotalAmount)}</span> · {t("detail.lines.vat")}{" "}
                 <span className="num">{fmtRON(invoice.vatAmount)}</span>
               </span>
-              <b className="num">Total {fmtRON(invoice.totalAmount)} {invoice.currency}</b>
+              <b className="num">{t("detail.lines.total")} {fmtRON(invoice.totalAmount)} {invoice.currency}</b>
             </div>
           </div>
 
           {/* istoric SPV + jurnal */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
-              <div className="tt">Status ANAF · evenimente</div>
+              <div className="tt">{t("detail.anaf.title")}</div>
               <div className="spacer" />
               <span className="muted" style={{ fontSize: 12 }}>
-                e-Factura · {testMode ? "mediul de test" : "mediul de producție"}
+                e-Factura · {testMode ? t("detail.anaf.testEnv") : t("detail.anaf.prodEnv")}
               </span>
               {canSubmit && (
                 <button
@@ -683,13 +689,13 @@ export function InvoiceDetailPage() {
                   onClick={() => submitInvoice.mutate()}
                 >
                   <Ic name="send" />
-                  {authorizeAnaf.isPending ? "Autorizare…" : submitInvoice.isPending ? "Trimitere…" : "Trimite la ANAF"}
+                  {authorizeAnaf.isPending ? t("detail.anaf.authorizing") : submitInvoice.isPending ? t("detail.anaf.sending") : t("detail.anaf.sendToAnaf")}
                 </button>
               )}
               {canCheckStatus && (
                 <button
                   className="sq-btn spin-btn"
-                  title="Verifică status ANAF"
+                  title={t("detail.anaf.checkStatusTitle")}
                   disabled={checkStatus.isPending}
                   onClick={() => checkStatus.mutate()}
                 >
@@ -703,10 +709,10 @@ export function InvoiceDetailPage() {
                 <div className="spv-ev">
                   <div className="act-ic"><Ic name="send" /></div>
                   <div>
-                    <div className="e1"><b>XML trimis la SPV</b></div>
+                    <div className="e1"><b>{t("detail.anaf.sentToSpv")}</b></div>
                     <div className="e2 num">
                       {fmtRoDateTime(invoice.anafSubmittedAt)}
-                      {invoice.anafUploadId && <> · index încărcare <span className="doc">{invoice.anafUploadId}</span></>}
+                      {invoice.anafUploadId && <> · {t("detail.anaf.uploadIndex")} <span className="doc">{invoice.anafUploadId}</span></>}
                     </div>
                   </div>
                 </div>
@@ -715,10 +721,10 @@ export function InvoiceDetailPage() {
                 <div className="spv-ev">
                   <div className="act-ic"><Ic name="checkC" /></div>
                   <div>
-                    <div className="e1"><b>Validată de ANAF</b> — fără erori</div>
+                    <div className="e1"><b>{t("detail.anaf.validatedBy")}</b> {t("detail.anaf.noErrors")}</div>
                     <div className="e2 num">
                       {fmtRoDateTime(invoice.anafValidatedAt)}
-                      {invoice.anafIndex && <> · index ANAF <span className="doc">{invoice.anafIndex}</span></>}
+                      {invoice.anafIndex && <> · {t("detail.anaf.anafIndex")} <span className="doc">{invoice.anafIndex}</span></>}
                     </div>
                   </div>
                 </div>
@@ -727,7 +733,7 @@ export function InvoiceDetailPage() {
                 <div className="spv-ev">
                   <div className="act-ic"><Ic name="xMark" /></div>
                   <div>
-                    <div className="e1"><b style={{ color: "var(--red)" }}>Respinsă de ANAF</b>{invoice.rejectionCode ? ` · cod ${invoice.rejectionCode}` : ""}</div>
+                    <div className="e1"><b style={{ color: "var(--red)" }}>{t("detail.anaf.rejectedBy")}</b>{invoice.rejectionCode ? ` · ${t("detail.anaf.code", { code: invoice.rejectionCode })}` : ""}</div>
                     <div className="e2 num">
                       {fmtRoDateTime(invoice.anafRejectedAt)}
                       {invoice.rejectionReason && <> · {invoice.rejectionReason}</>}
@@ -739,9 +745,9 @@ export function InvoiceDetailPage() {
                 <div className="spv-ev">
                   <div className="act-ic"><Ic name="clock" /></div>
                   <div>
-                    <div className="e1"><b>Netrimisă la SPV</b></div>
+                    <div className="e1"><b>{t("detail.anaf.notSent")}</b></div>
                     <div className="e2">
-                      {invoice.xmlPath ? "XML generat — gata de trimitere." : "Generați XML-ul UBL, apoi trimiteți la ANAF."}
+                      {invoice.xmlPath ? t("detail.anaf.xmlReady") : t("detail.anaf.generateFirst")}
                     </div>
                   </div>
                 </div>
@@ -751,7 +757,7 @@ export function InvoiceDetailPage() {
               {events.length > 0 && (
                 <>
                   <div className="pop-div" style={{ margin: "6px 10px" }} />
-                  <div className="col-title">Jurnal complet</div>
+                  <div className="col-title">{t("detail.anaf.fullJournal")}</div>
                   {events.map((e) => (
                     <div className="spv-ev" key={e.id}>
                       <div className="act-ic"><Ic name="docText" /></div>
@@ -768,21 +774,21 @@ export function InvoiceDetailPage() {
             <div className="sold-line">
               {isAnafAuth ? (
                 <span style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--green)" }}>
-                  <Ic name="check" cls="sic" />Autentificat ANAF
+                  <Ic name="check" cls="sic" />{t("detail.anaf.authenticated")}
                 </span>
               ) : (
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  Neautentificat ANAF ·
+                  {t("detail.anaf.notAuthenticated")}
                   <a
                     className="link"
                     style={{ cursor: "pointer" }}
                     onClick={() => { if (!authorizeAnaf.isPending) authorizeAnaf.mutate(); }}
                   >
-                    {authorizeAnaf.isPending ? "se autorizează…" : "Autorizează"}
+                    {authorizeAnaf.isPending ? t("detail.anaf.authorizingLower") : t("detail.anaf.authorize")}
                   </a>
                 </span>
               )}
-              <span className="muted" style={{ fontSize: 11.5 }}>arhivă XML + PDF · păstrare legală</span>
+              <span className="muted" style={{ fontSize: 11.5 }}>{t("detail.anaf.archiveNote")}</span>
             </div>
           </div>
         </div>
@@ -791,14 +797,14 @@ export function InvoiceDetailPage() {
           {/* client */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
-              <div className="tt">Client</div>
+              <div className="tt">{t("detail.client.title")}</div>
               <div className="spacer" />
               <a
                 className="see-all"
                 style={{ height: "auto", padding: 0, cursor: "pointer" }}
                 onClick={() => void navigate({ to: "/contacts" })}
               >
-                Vezi fișa<Ic name="chevR" />
+                {t("detail.client.viewProfile")}<Ic name="chevR" />
               </a>
             </div>
             <div className="card-pad">
@@ -810,33 +816,33 @@ export function InvoiceDetailPage() {
                   </div>
                   <dl className="kv" style={{ gridTemplateColumns: "110px 1fr", fontSize: 12.5 }}>
                     <dt>CUI</dt><dd className="num">{contact.cui ?? "—"}</dd>
-                    <dt>Adresă</dt>
+                    <dt>{t("detail.client.address")}</dt>
                     <dd>{[contact.address, contact.city, contact.county].filter(Boolean).join(", ") || "—"}</dd>
-                    <dt>Email</dt><dd>{contact.email ?? "—"}</dd>
-                    <dt>Telefon</dt><dd className="num">{contact.phone ?? "—"}</dd>
-                    <dt>TVA</dt>
-                    <dd>{contact.vatPayer ? "Plătitor" : "Neplătitor"} · TVA la încasare: {contact.cashVat ? "Da" : "Nu"}</dd>
+                    <dt>{t("detail.client.email")}</dt><dd>{contact.email ?? "—"}</dd>
+                    <dt>{t("detail.client.phone")}</dt><dd className="num">{contact.phone ?? "—"}</dd>
+                    <dt>{t("detail.client.vat")}</dt>
+                    <dd>{contact.vatPayer ? t("detail.client.payer") : t("detail.client.nonPayer")} · {t("detail.client.cashVat")} {contact.cashVat ? t("detail.client.yes") : t("detail.client.no")}</dd>
                   </dl>
                 </>
               ) : (
-                <div style={{ fontSize: 12.5, color: "var(--text-2)" }}>ID client: {invoice.contactId}</div>
+                <div style={{ fontSize: 12.5, color: "var(--text-2)" }}>{t("detail.client.clientId")} {invoice.contactId}</div>
               )}
             </div>
           </div>
 
           {/* detalii factură — real metadata the prototype lacks */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
-            <div className="scr-toolbar"><div className="tt">Detalii factură</div></div>
+            <div className="scr-toolbar"><div className="tt">{t("detail.details.title")}</div></div>
             <div className="card-pad">
               <dl className="kv" style={{ gridTemplateColumns: "110px 1fr", fontSize: 12.5 }}>
-                <dt>Serie</dt><dd className="num">{invoice.series}</dd>
-                <dt>Furnizor</dt>
+                <dt>{t("detail.details.series")}</dt><dd className="num">{invoice.series}</dd>
+                <dt>{t("detail.details.supplier")}</dt>
                 <dd>{company ? <>{company.legalName} <span className="num">· {company.cui}</span></> : invoice.companyId}</dd>
-                <dt>Monedă</dt><dd className="num">{invoice.currency}</dd>
+                <dt>{t("detail.details.currency")}</dt><dd className="num">{invoice.currency}</dd>
                 {invoice.exchangeRate !== null && (
-                  <><dt>Curs valutar</dt><dd className="num">{invoice.exchangeRate}</dd></>
+                  <><dt>{t("detail.details.fxRate")}</dt><dd className="num">{invoice.exchangeRate}</dd></>
                 )}
-                <dt>Atașamente</dt>
+                <dt>{t("detail.details.attachments")}</dt>
                 <dd>
                   {invoice.xmlPath || invoice.pdfPath ? (
                     <>
@@ -845,12 +851,12 @@ export function InvoiceDetailPage() {
                       {invoice.pdfPath && <span className="doc">{invoice.fullNumber}.pdf · PDF A4</span>}
                     </>
                   ) : (
-                    "— generați XML-ul mai întâi"
+                    t("detail.details.generateXmlFirst")
                   )}
                 </dd>
                 {invoice.notes && (
                   <>
-                    <dt>Note</dt>
+                    <dt>{t("detail.details.notes")}</dt>
                     <dd>
                       {invoice.notes.startsWith("STORNO_OF:")
                         ? invoice.notes.replace(/^STORNO_OF:[^|]*\|?/, "")
@@ -865,26 +871,26 @@ export function InvoiceDetailPage() {
           {/* plăți */}
           <div className="scr-card">
             <div className="scr-toolbar">
-              <div className="tt">Plăți încasate</div>
+              <div className="tt">{t("detail.payments.title")}</div>
               <div className="spacer" />
               <span className={`chip ${payChip.cls}`}><Ic name={payChip.icon} cls="sic" />{payChip.label}</span>
             </div>
             {payments.length === 0 ? (
               <div style={{ padding: "22px 14px", textAlign: "center", fontSize: 12.5, color: "var(--text-2)" }}>
-                Nicio plată înregistrată.
+                {t("detail.payments.empty")}
               </div>
             ) : (
               payments.map((p) => (
                 <div className="pay-row" key={p.id}>
                   <div className="act-ic" style={{ width: 28, height: 28 }}><Ic name="card" /></div>
                   <div>
-                    <div className="p1">{METHOD_LABELS[p.method] ?? p.method}</div>
-                    <div className="p2 num">{fmtRoDate(p.paidAt)}{p.reference ? ` · ref. ${p.reference}` : ""}</div>
+                    <div className="p1">{METHOD_KEYS[p.method] ? t(METHOD_KEYS[p.method]) : p.method}</div>
+                    <div className="p2 num">{fmtRoDate(p.paidAt)}{p.reference ? ` · ${t("detail.payments.ref", { ref: p.reference })}` : ""}</div>
                   </div>
                   <span className="amt num">{fmtRON(p.amount)}</span>
                   <button
                     className="mini-btn"
-                    title="Șterge plata"
+                    title={t("detail.payments.deleteTitle")}
                     disabled={deletePayment.isPending}
                     onClick={() => deletePayment.mutate(p.id)}
                   >
@@ -894,7 +900,7 @@ export function InvoiceDetailPage() {
               ))
             )}
             <div className="sold-line">
-              <span>Sold rămas de încasat</span>
+              <span>{t("detail.payments.remainingToCollect")}</span>
               <b className="num">{fmtRON(remaining)} {invoice.currency}</b>
             </div>
           </div>
@@ -911,8 +917,8 @@ export function InvoiceDetailPage() {
           <div className="modal">
             <div className="modal-head">
               <div>
-                <div className="mt" style={{ color: "var(--red)" }}>Stornare factură</div>
-                <div className="ms num">{invoice.fullNumber} · se creează o notă de credit cu valori negative</div>
+                <div className="mt" style={{ color: "var(--red)" }}>{t("detail.stornoModal.title")}</div>
+                <div className="ms num">{invoice.fullNumber} · {t("detail.stornoModal.sub")}</div>
               </div>
               <button className="modal-x" onClick={() => { setShowStornoModal(false); setStornoReason(""); }}>
                 <Ic name="xMark" />
@@ -920,10 +926,10 @@ export function InvoiceDetailPage() {
             </div>
             <div className="modal-body">
               <div className="field">
-                <label>Motivul stornării <span className="req">*</span></label>
+                <label>{t("detail.stornoModal.reasonLabel")} <span className="req">*</span></label>
                 <textarea
                   className="input"
-                  placeholder="Motivul stornării…"
+                  placeholder={t("detail.stornoModal.reasonPlaceholder")}
                   value={stornoReason}
                   onChange={(e) => setStornoReason(e.target.value)}
                   autoFocus
@@ -931,9 +937,9 @@ export function InvoiceDetailPage() {
               </div>
             </div>
             <div className="modal-foot">
-              <span className="left">Nota de credit se trimite separat la ANAF</span>
+              <span className="left">{t("detail.stornoModal.footNote")}</span>
               <button className="pill-btn" onClick={() => { setShowStornoModal(false); setStornoReason(""); }}>
-                Anulează
+                {t("detail.stornoModal.cancel")}
               </button>
               <button
                 className="btn-dark"
@@ -945,7 +951,7 @@ export function InvoiceDetailPage() {
                   setStornoReason("");
                 }}
               >
-                {stornoInvoice.isPending ? "Se stornează…" : "Stornează"}
+                {stornoInvoice.isPending ? t("detail.stornoModal.pending") : t("detail.stornoModal.confirm")}
               </button>
             </div>
           </div>
@@ -962,9 +968,9 @@ export function InvoiceDetailPage() {
           <div className="modal">
             <div className="modal-head">
               <div>
-                <div className="mt">Înregistrează plata</div>
+                <div className="mt">{t("detail.actions.recordPayment")}</div>
                 <div className="ms num">
-                  {invoice.fullNumber} · {contact?.legalName ?? "—"} · sold {fmtRON(remaining)} {invoice.currency}
+                  {invoice.fullNumber} · {contact?.legalName ?? "—"} · {t("detail.payModal.balance", { amount: fmtRON(remaining), currency: invoice.currency })}
                 </div>
               </div>
               <button className="modal-x" onClick={() => setShowPayModal(false)}>
@@ -974,7 +980,7 @@ export function InvoiceDetailPage() {
             <div className="modal-body">
               <div className="fgrid">
                 <div className="field">
-                  <label>Suma încasată ({invoice.currency}) <span className="req">*</span></label>
+                  <label>{t("detail.payModal.amountLabel", { currency: invoice.currency })} <span className="req">*</span></label>
                   <input
                     className="input num"
                     type="number"
@@ -987,7 +993,7 @@ export function InvoiceDetailPage() {
                   />
                 </div>
                 <div className="field">
-                  <label>Data încasării</label>
+                  <label>{t("detail.payModal.dateLabel")}</label>
                   <input
                     className="input num"
                     type="date"
@@ -997,13 +1003,13 @@ export function InvoiceDetailPage() {
                 </div>
                 {isFx && (
                   <div className="field">
-                    <label>Curs BNR la data plății (dif. de curs 665/765)</label>
+                    <label>{t("detail.payModal.fxLabel")}</label>
                     <input
                       className="input num"
                       type="number"
                       step="0.0001"
                       min="0"
-                      placeholder="ex. 4.9750"
+                      placeholder={t("detail.payModal.fxPlaceholder")}
                       value={payForm.exchangeRate}
                       onChange={(e) => setPayForm((f) => ({ ...f, exchangeRate: e.target.value }))}
                       style={{ textAlign: "right" }}
@@ -1011,32 +1017,32 @@ export function InvoiceDetailPage() {
                   </div>
                 )}
                 <div className="field">
-                  <label>Metoda</label>
+                  <label>{t("detail.payModal.methodLabel")}</label>
                   <select
                     className="select"
                     value={payForm.method}
                     onChange={(e) => setPayForm((f) => ({ ...f, method: e.target.value }))}
                   >
-                    {Object.entries(METHOD_LABELS).map(([v, l]) => (
-                      <option key={v} value={v}>{l}</option>
+                    {Object.entries(METHOD_KEYS).map(([v, k]) => (
+                      <option key={v} value={v}>{t(k)}</option>
                     ))}
                   </select>
                 </div>
                 <div className="field">
-                  <label>Referință / nr. chitanță</label>
+                  <label>{t("detail.payModal.refLabel")}</label>
                   <input
                     className="input"
                     type="text"
-                    placeholder="ex. OP 2247"
+                    placeholder={t("detail.payModal.refPlaceholder")}
                     value={payForm.reference}
                     onChange={(e) => setPayForm((f) => ({ ...f, reference: e.target.value }))}
                   />
                 </div>
                 <div className="field span2">
-                  <label>Notă internă</label>
+                  <label>{t("detail.payModal.noteLabel")}</label>
                   <textarea
                     className="input"
-                    placeholder="opțional"
+                    placeholder={t("detail.payModal.notePlaceholder")}
                     value={payForm.notes}
                     onChange={(e) => setPayForm((f) => ({ ...f, notes: e.target.value }))}
                   />
@@ -1047,11 +1053,11 @@ export function InvoiceDetailPage() {
               <span className="left">
                 {Number.isFinite(payAmountNum) && payAmountNum > 0
                   ? payAmountNum >= remaining
-                    ? "Plata stinge integral soldul facturii"
-                    : `Plată parțială — sold rămas ${fmtRON(remaining - payAmountNum)} ${invoice.currency}`
+                    ? t("detail.payModal.fullPays")
+                    : t("detail.payModal.partialPays", { amount: fmtRON(remaining - payAmountNum), currency: invoice.currency })
                   : ""}
               </span>
-              <button className="pill-btn" onClick={() => setShowPayModal(false)}>Renunță</button>
+              <button className="pill-btn" onClick={() => setShowPayModal(false)}>{t("detail.payModal.cancel")}</button>
               <button
                 className="btn-dark"
                 disabled={paySaveDisabled}
@@ -1070,7 +1076,7 @@ export function InvoiceDetailPage() {
                   });
                 }}
               >
-                <Ic name="check" />{addPayment.isPending ? "Se salvează…" : "Salvează plata"}
+                <Ic name="check" />{addPayment.isPending ? t("detail.payModal.saving") : t("detail.payModal.save")}
               </button>
             </div>
           </div>
@@ -1087,8 +1093,8 @@ export function InvoiceDetailPage() {
           <div className="modal">
             <div className="modal-head">
               <div>
-                <div className="mt">Salvează ca șablon recurent</div>
-                <div className="ms num">{invoice.fullNumber} · seria {invoice.series} · {lines.length} articol(e)</div>
+                <div className="mt">{t("detail.templateModal.title")}</div>
+                <div className="ms num">{invoice.fullNumber} · {t("detail.templateModal.sub", { series: invoice.series, n: lines.length })}</div>
               </div>
               <button className="modal-x" onClick={() => setShowSaveAsTemplate(false)}>
                 <Ic name="xMark" />
@@ -1097,7 +1103,7 @@ export function InvoiceDetailPage() {
             <div className="modal-body">
               <div className="fgrid">
                 <div className="field span2">
-                  <label>Nume șablon <span className="req">*</span></label>
+                  <label>{t("detail.templateModal.nameLabel")} <span className="req">*</span></label>
                   <input
                     className="input"
                     type="text"
@@ -1107,28 +1113,28 @@ export function InvoiceDetailPage() {
                   />
                 </div>
                 <div className="field span2">
-                  <label>Frecvență</label>
+                  <label>{t("detail.templateModal.freqLabel")}</label>
                   <select
                     className="select"
                     value={templateFrequency}
                     onChange={(e) => setTemplateFrequency(e.target.value)}
                   >
-                    <option value="monthly">Lunar</option>
-                    <option value="quarterly">Trimestrial</option>
-                    <option value="annual">Anual</option>
+                    <option value="monthly">{t("detail.templateModal.monthly")}</option>
+                    <option value="quarterly">{t("detail.templateModal.quarterly")}</option>
+                    <option value="annual">{t("detail.templateModal.annual")}</option>
                   </select>
                 </div>
               </div>
             </div>
             <div className="modal-foot">
-              <span className="left">Prima emitere: luna viitoare</span>
-              <button className="pill-btn" onClick={() => setShowSaveAsTemplate(false)}>Anulează</button>
+              <span className="left">{t("detail.templateModal.firstIssue")}</span>
+              <button className="pill-btn" onClick={() => setShowSaveAsTemplate(false)}>{t("detail.stornoModal.cancel")}</button>
               <button
                 className="btn-dark"
                 disabled={saveAsTemplateMutation.isPending}
                 onClick={handleSaveAsTemplate}
               >
-                {saveAsTemplateMutation.isPending ? "Se salvează…" : "Creează șablon"}
+                {saveAsTemplateMutation.isPending ? t("detail.payModal.saving") : t("detail.templateModal.create")}
               </button>
             </div>
           </div>

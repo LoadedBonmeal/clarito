@@ -1,0 +1,102 @@
+{
+  "contacts": {
+    "title": "Clienți & Furnizori",
+    "count_one": "{{count}} contact",
+    "count_few": "{{count}} contacte",
+    "count_other": "{{count}} de contacte",
+    "selectCompany": "Selectați o companie activă pentru a vedea contactele.",
+    "refresh": "Reîmprospătează",
+    "importCsv": "Import CSV",
+    "newContact": "Contact nou",
+    "tabs": {
+      "all": "Toți",
+      "customers": "Clienți",
+      "suppliers": "Furnizori",
+      "both": "Ambele"
+    },
+    "searchPlaceholder": "Nume sau CUI…",
+    "loading": "Se încarcă…",
+    "errorLabel": "contactele",
+    "emptyNone": "Niciun contact. Adăugați primul client sau furnizor cu butonul „Contact nou”.",
+    "emptyFiltered": "Niciun rezultat pentru filtrele aplicate.",
+    "type": {
+      "customer": "Client",
+      "supplier": "Furnizor",
+      "both": "Ambele"
+    },
+    "individualChip": "Persoană fizică",
+    "table": {
+      "cui": "CUI",
+      "name": "Denumire",
+      "type": "Tip",
+      "city": "Localitate",
+      "county": "Județ",
+      "vat": "TVA",
+      "email": "Email"
+    },
+    "actions": {
+      "edit": "Editează",
+      "delete": "Șterge"
+    },
+    "pager": {
+      "showing": "Afișezi",
+      "of": "din",
+      "items": "contacte",
+      "prev": "Pagina anterioară",
+      "next": "Pagina următoare"
+    },
+    "confirm": {
+      "deleteTitle": "Confirmare ștergere",
+      "delete": "Șterge contactul \"{{name}}\"? Această acțiune nu poate fi anulată."
+    },
+    "notify": {
+      "noActiveCompany": "Nicio companie activă.",
+      "deleteError": "Nu s-a putut șterge contactul.",
+      "anafSuccess": "Date preluate din ANAF: {{name}}",
+      "anafError": "CUI-ul nu a fost găsit în baza ANAF."
+    },
+    "modal": {
+      "editTitle": "Editează: {{name}}",
+      "subtitle": "Datele se completează automat din registrul ANAF după CUI (denumire, adresă, TVA, TVA la încasare, stare activă)",
+      "close": "Închide",
+      "cui": "CUI / CIF",
+      "cuiPlaceholder": "ex. RO12345678",
+      "anafBtnTitle": "Preia datele firmei din ANAF după CUI",
+      "anafFound": "Găsit în ANAF",
+      "anafActive": "activ",
+      "anafInactive": "INACTIV",
+      "anafEfactura": "înregistrat în Registrul RO e-Factura",
+      "contactType": "Tip contact",
+      "name": "Denumire",
+      "namePlaceholder": "S.C. Exemplu S.R.L.",
+      "individual": "Persoană fizică (B2C)",
+      "yes": "Da",
+      "no": "Nu",
+      "individualHint": "persoanele fizice nu necesită CUI",
+      "vatPayer": "Plătitor TVA",
+      "cashVat": "TVA la încasare",
+      "cashVatHint": "preluat din ANAF — amână deducerea până la plată (art. 297)",
+      "currency": "Monedă implicită",
+      "address": "Adresă",
+      "addressPlaceholder": "Str. Exemplu nr. 1",
+      "cityPlaceholder": "Cluj-Napoca",
+      "countyPlaceholder": "CJ",
+      "country": "Țară",
+      "phone": "Telefon",
+      "optional": "opțional",
+      "inactivePrefix": "Contribuabil",
+      "inactiveBold": "INACTIV",
+      "inactiveSuffix": "la ANAF — facturile primite au deductibilitate restricționată pentru cheltuieli și TVA (art. 11 Cod fiscal). Verificați înainte de a înregistra achiziții.",
+      "cashVatPrefix": "Furnizor cu",
+      "cashVatBold": "TVA la încasare",
+      "cashVatSuffix": "— TVA deductibilă se amână până la plata facturii (art. 297 Cod fiscal).",
+      "nameRequired": "Denumirea este obligatorie.",
+      "cuiInvalid": "CUI invalid — trebuie să conțină 2-10 cifre (ex: RO12345678 sau 12345678)",
+      "createError": "Eroare la creare.",
+      "saveError": "Eroare la salvare.",
+      "cancel": "Renunță",
+      "saving": "Se salvează…",
+      "save": "Salvează contact"
+    }
+  }
+}

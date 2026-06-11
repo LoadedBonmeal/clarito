@@ -21,6 +21,7 @@ import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { SpvInbox } from "@/components/shared/SpvInbox";
@@ -61,9 +62,6 @@ function initials(name: string): string {
 /** Defalcare TVA incompletă din XML — nu contribuie la TVA deductibilă. */
 const isMissingVat = (inv: ReceivedInvoice) => inv.netAmount == null || inv.vatAmount == null;
 
-const MISSING_TITLE =
-  "Defalcare TVA incompletă din XML — folosiți «Recalculează TVA din XML». Nu contribuie la TVA deductibilă.";
-
 // Inline SVG paths from the prototype for icons not in Ic.tsx.
 const P_CLIPBOARD =
   "M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008Zm0 2.25h.008v.008H8.25V13.5ZM8.25 6h7.5v2.25h-7.5V6ZM12 2.25c-1.892 0-3.758.11-5.593.322C5.307 2.7 4.5 3.65 4.5 4.757V19.5a2.25 2.25 0 0 0 2.25 2.25h10.5a2.25 2.25 0 0 0 2.25-2.25V4.757c0-1.108-.806-2.057-1.907-2.185A48.507 48.507 0 0 0 12 2.25Z";
@@ -77,13 +75,13 @@ function InlineIc({ d, cls = "ic" }: { d: string; cls?: string }) {
   return <svg className={cls} viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: `<path d="${d}"/>` }} />;
 }
 
-// Status → design chip (.chip variants + icon + label), as in the prototype.
-const STATUS_CHIP: Record<ReceivedStatus, { cls: string; icon: React.ReactNode; label: string }> = {
-  NEW:      { cls: "sent", icon: <Ic name="dot" cls="sic" />,             label: "Nouă" },
-  REVIEWED: { cls: "wait", icon: <Ic name="clock" cls="sic" />,           label: "Revizuită" },
-  APPROVED: { cls: "paid", icon: <InlineIc d={P_CHECK_CIRCLE} cls="sic" />, label: "Aprobată" },
-  REJECTED: { cls: "late", icon: <Ic name="xMark" cls="sic" />,           label: "Respinsă" },
-  ARCHIVED: { cls: "sent", icon: <InlineIc d={P_TRASH} cls="sic" />,      label: "Arhivată" },
+// Status → design chip (.chip variants + icon + label i18n key), as in the prototype.
+const STATUS_CHIP: Record<ReceivedStatus, { cls: string; icon: React.ReactNode; labelKey: string }> = {
+  NEW:      { cls: "sent", icon: <Ic name="dot" cls="sic" />,             labelKey: "received.status.new" },
+  REVIEWED: { cls: "wait", icon: <Ic name="clock" cls="sic" />,           labelKey: "received.status.reviewed" },
+  APPROVED: { cls: "paid", icon: <InlineIc d={P_CHECK_CIRCLE} cls="sic" />, labelKey: "received.status.approved" },
+  REJECTED: { cls: "late", icon: <Ic name="xMark" cls="sic" />,           labelKey: "received.status.rejected" },
+  ARCHIVED: { cls: "sent", icon: <InlineIc d={P_TRASH} cls="sic" />,      labelKey: "received.status.archived" },
 };
 
 // ── DefalModal — design .modal-back/.modal "Defalcare TVA" ───────────────────
@@ -92,24 +90,20 @@ const STATUS_CHIP: Record<ReceivedStatus, { cls: string; icon: React.ReactNode; 
 // XML — butonul „Recalculează TVA din XML"). Modalul replică UX-ul din
 // prototip; „Salvează defalcarea" → notify.info("În curând.").
 
-const DEFAL_ACCOUNTS = [
-  "626 · Cheltuieli poștale și telecomunicații",
-  "628 · Alte cheltuieli cu serviciile",
-  "604 · Cheltuieli privind materialele",
-  "605 · Cheltuieli privind energia și apa",
-  "371 · Mărfuri",
-];
+const DEFAL_ACCOUNT_KEYS = ["a626", "a628", "a604", "a605", "a371"] as const;
 
 function DefalModal({ inv, onClose }: { inv: ReceivedInvoice; onClose: () => void }) {
+  const { t } = useTranslation();
   const [rows, setRows] = useState([0]);
   const docNo = invoiceNo(inv.series, inv.number, inv.anafDownloadId);
+  const accounts = useMemo(() => DEFAL_ACCOUNT_KEYS.map((k) => t(`received.defal.accounts.${k}`)), [t]);
 
   return createPortal(
     <div className="modal-back show" style={{ position: "fixed" }} onMouseDown={onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div>
-            <div className="mt">Defalcare TVA</div>
+            <div className="mt">{t("received.defal.title")}</div>
             <div className="ms num">
               {docNo} · {inv.issuerName} · {fmtRON(inv.totalAmount)} {inv.currency}
             </div>
@@ -120,14 +114,14 @@ function DefalModal({ inv, onClose }: { inv: ReceivedInvoice; onClose: () => voi
         </div>
         <div className="modal-body">
           <div className="defal-head">
-            <span>Cont de cheltuială</span>
-            <span>Cota TVA</span>
-            <span style={{ textAlign: "right" }}>Bază</span>
+            <span>{t("received.defal.expenseAccount")}</span>
+            <span>{t("received.defal.vatRate")}</span>
+            <span style={{ textAlign: "right" }}>{t("received.defal.base")}</span>
           </div>
           {rows.map((key) => (
             <div className="defal-grid" key={key}>
-              <select className="select" defaultValue={DEFAL_ACCOUNTS[0]}>
-                {DEFAL_ACCOUNTS.map((a) => (
+              <select className="select" defaultValue={accounts[0]}>
+                {accounts.map((a) => (
                   <option key={a}>{a}</option>
                 ))}
               </select>
@@ -136,7 +130,7 @@ function DefalModal({ inv, onClose }: { inv: ReceivedInvoice; onClose: () => voi
                 <option>11%</option>
                 <option>0%</option>
               </select>
-              <input className="input num" type="text" placeholder="0,00" style={{ textAlign: "right" }} />
+              <input className="input num" type="text" placeholder={t("received.defal.amountPlaceholder")} style={{ textAlign: "right" }} />
             </div>
           ))}
           <div
@@ -145,25 +139,25 @@ function DefalModal({ inv, onClose }: { inv: ReceivedInvoice; onClose: () => voi
             onClick={() => setRows((r) => [...r, (r[r.length - 1] ?? 0) + 1])}
           >
             <svg className="ic" viewBox="0 0 24 24" style={{ width: 14, height: 14 }} dangerouslySetInnerHTML={{ __html: '<path d="M12 4.5v15m7.5-7.5h-15"/>' }} />
-            Împarte pe alt cont
+            {t("received.defal.addLine")}
           </div>
           <div className="banner ok" style={{ margin: "14px 0 0" }}>
             <InlineIc d={P_CHECK_CIRCLE} />
             <span>
-              TVA deductibilă → cont 4426. După salvare, factura intră în <b>jurnalul de cumpărări</b> și în notele contabile GL.
+              {t("received.defal.notePre")} <b>{t("received.defal.noteBold")}</b> {t("received.defal.notePost")}
             </span>
           </div>
         </div>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={onClose}>Renunță</button>
+          <button className="pill-btn" onClick={onClose}>{t("received.defal.cancel")}</button>
           <button
             className="btn-dark"
             onClick={() => {
-              notify.info("În curând."); // propunere — neimplementat
+              notify.info(t("received.defal.soon")); // propunere — neimplementat
               onClose();
             }}
           >
-            <Ic name="check" />Salvează defalcarea
+            <Ic name="check" />{t("received.defal.save")}
           </button>
         </div>
       </div>
@@ -175,9 +169,11 @@ function DefalModal({ inv, onClose }: { inv: ReceivedInvoice; onClose: () => voi
 // ── ReceivedPage ──────────────────────────────────────────────────────────────
 
 export function ReceivedPage() {
+  const { t, i18n } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const missingTitle = t("received.missingVatTitle");
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("all");
@@ -201,7 +197,7 @@ export function ReceivedPage() {
   // Update status mutation
   const { mutate: updateStatus } = useMutation({
     mutationFn: ({ id, status }: { id: string; status: ReceivedStatus }) => {
-      if (!activeCompanyId) throw new Error("Nicio companie activă.");
+      if (!activeCompanyId) throw new Error(t("received.notify.noActiveCompany"));
       return api.received.updateStatus(id, activeCompanyId, status);
     },
     onSuccess: () => {
@@ -209,7 +205,7 @@ export function ReceivedPage() {
         queryKey: queryKeys.received.list({ companyId: activeCompanyId ?? undefined }),
       });
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut actualiza statusul.")),
+    onError: (e) => notify.error(formatError(e, t("received.notify.statusError"))),
   });
 
   // ANAF test mode
@@ -222,29 +218,29 @@ export function ReceivedPage() {
   // Sync SPV mutation
   const { mutate: syncSpv, isPending: isSyncing } = useMutation({
     mutationFn: () => {
-      if (!activeCompanyId) throw new Error("Nicio companie activă.");
+      if (!activeCompanyId) throw new Error(t("received.notify.noActiveCompany"));
       return api.anaf.syncSpv(activeCompanyId, testMode);
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
-      if (count > 0) notify.success(`${count} facturi noi descărcate din SPV.`);
-      else notify.info("Nicio factură nouă în SPV.");
+      if (count > 0) notify.success(t("received.notify.spvNew", { count }));
+      else notify.info(t("received.notify.spvNone"));
     },
-    onError: (e) => notify.error(formatError(e, "Eroare sincronizare SPV.")),
+    onError: (e) => notify.error(formatError(e, t("received.notify.spvError"))),
   });
 
   // Reparse VAT mutation
   const { mutate: reparseVat, isPending: isReparsing } = useMutation({
     mutationFn: () => {
-      if (!activeCompanyId) throw new Error("Nicio companie activă.");
+      if (!activeCompanyId) throw new Error(t("received.notify.noActiveCompany"));
       return api.received.reparseVat(activeCompanyId);
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
-      notify.success(`TVA recalculat pentru ${count} facturi.`);
+      notify.success(t("received.notify.reparsed", { count }));
     },
-    onError: (e) => notify.error(formatError(e, "Eroare recalculare TVA.")),
+    onError: (e) => notify.error(formatError(e, t("received.notify.reparseError"))),
   });
 
   const allInvoices = paged?.items ?? [];
@@ -285,12 +281,12 @@ export function ReceivedPage() {
   const missingVatCount = allInvoices.filter(isMissingVat).length;
 
   const tabs: Array<{ value: StatusFilter; label: string; count: number }> = [
-    { value: "all",      label: "Toate",       count: counts.all },
-    { value: "NEW",      label: "Noi",         count: counts.NEW },
-    { value: "REVIEWED", label: "De revizuit", count: counts.REVIEWED },
-    { value: "APPROVED", label: "Aprobate",    count: counts.APPROVED },
-    { value: "REJECTED", label: "Respinse",    count: counts.REJECTED },
-    { value: "ARCHIVED", label: "Arhivate",    count: counts.ARCHIVED },
+    { value: "all",      label: t("received.tabs.all"),      count: counts.all },
+    { value: "NEW",      label: t("received.tabs.new"),      count: counts.NEW },
+    { value: "REVIEWED", label: t("received.tabs.reviewed"), count: counts.REVIEWED },
+    { value: "APPROVED", label: t("received.tabs.approved"), count: counts.APPROVED },
+    { value: "REJECTED", label: t("received.tabs.rejected"), count: counts.REJECTED },
+    { value: "ARCHIVED", label: t("received.tabs.archived"), count: counts.ARCHIVED },
   ];
 
   const toggleOne = (id: string) => {
@@ -305,26 +301,26 @@ export function ReceivedPage() {
   };
 
   async function handleImportXml() {
-    if (!activeCompanyId) { notify.warn("Selectați o companie."); return; }
+    if (!activeCompanyId) { notify.warn(t("received.notify.selectCompanyFirst")); return; }
     const { open } = await import("@tauri-apps/plugin-dialog");
     const filePath = await open({ filters: [{ name: "XML e-Factura", extensions: ["xml"] }] });
     if (!filePath || typeof filePath !== "string") return;
     try {
       const result = await api.importData.invoiceXmlFromFile(filePath, activeCompanyId);
       if (result.imported > 0) {
-        notify.success(`Factură importată: ${result.invoiceNumber ?? "?"} — ${result.supplierName ?? "?"}`);
+        notify.success(t("received.notify.imported", { number: result.invoiceNumber ?? "?", supplier: result.supplierName ?? "?" }));
         void queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
       } else {
-        notify.error(`Import eșuat: ${result.errors.join("; ")}`);
+        notify.error(t("received.notify.importFailed", { errors: result.errors.join("; ") }));
       }
     } catch (e) {
-      notify.error(formatError(e, "Eroare import XML."));
+      notify.error(formatError(e, t("received.notify.importError")));
     }
   }
 
   async function handleExportCsv() {
-    if (selected.size === 0) { notify.warn("Selectați facturi pentru export."); return; }
-    if (!activeCompanyId) { notify.warn("Selectați o companie."); return; }
+    if (selected.size === 0) { notify.warn(t("received.notify.selectForExport")); return; }
+    if (!activeCompanyId) { notify.warn(t("received.notify.selectCompanyFirst")); return; }
     const { save } = await import("@tauri-apps/plugin-dialog");
     const path = await save({ filters: [{ name: "CSV", extensions: ["csv"] }], defaultPath: "facturi-primite-selectie.csv" });
     if (!path) return;
@@ -332,9 +328,9 @@ export function ReceivedPage() {
       const csvText = await api.received.exportCsv(activeCompanyId, Array.from(selected));
       const { writeTextFile } = await import("@tauri-apps/plugin-fs");
       await writeTextFile(path, csvText);
-      notify.success(`${selected.size} facturi exportate: ${path}`);
+      notify.success(t("received.notify.exported", { count: selected.size, path }));
     } catch (e) {
-      notify.error(formatError(e, "Exportul CSV a eșuat."));
+      notify.error(formatError(e, t("received.notify.exportError")));
     }
   }
 
@@ -343,9 +339,9 @@ export function ReceivedPage() {
   if (!activeCompanyId) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Facturi primite</h1></div></div>
+        <div className="page-head"><div><h1>{t("received.title")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a vedea facturile primite.
+          {t("received.selectCompany")}
         </div>
       </div>
     );
@@ -356,11 +352,11 @@ export function ReceivedPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Facturi primite</h1>
+          <h1>{t("received.title")}</h1>
           <p className="sub">
             {list.length !== totalCount
-              ? `${list.length} din ${totalCount.toLocaleString("ro-RO")} documente sincronizate din SPV`
-              : `${totalCount.toLocaleString("ro-RO")} documente sincronizate din SPV`}
+              ? t("received.subCountFiltered", { shown: list.length, total: totalCount.toLocaleString(i18n.language) })
+              : t("received.subCount", { n: totalCount.toLocaleString(i18n.language) })}
             {activeCompany ? ` · ${activeCompany.legalName}` : ""}
           </p>
         </div>
@@ -372,14 +368,14 @@ export function ReceivedPage() {
             onClick={() => reparseVat()}
           >
             <InlineIc d={P_CLIPBOARD} />
-            {isReparsing ? "Recalculare…" : "Recalculează TVA din XML"}
+            {isReparsing ? t("received.actions.reparsing") : t("received.actions.reparseVat")}
           </button>
           {/* Real feature kept (prototype lacks it): Import XML manual */}
           <button className="pill-btn" onClick={() => void handleImportXml()}>
-            <Ic name="docUp" />Import XML
+            <Ic name="docUp" />{t("received.actions.importXml")}
           </button>
           <button className="pill-btn" onClick={() => void handleExportCsv()}>
-            <Ic name="dl" />Export CSV
+            <Ic name="dl" />{t("received.actions.exportCsv")}
           </button>
           <button
             className="btn-dark spin-btn"
@@ -388,7 +384,7 @@ export function ReceivedPage() {
             onClick={() => syncSpv()}
           >
             <Ic name="sync" />
-            {isSyncing ? "Sincronizare…" : "Sincronizează SPV"}
+            {isSyncing ? t("received.actions.syncing") : t("received.actions.syncSpv")}
           </button>
         </div>
       </div>
@@ -398,13 +394,8 @@ export function ReceivedPage() {
         <div className="banner warn">
           <InlineIc d={P_WARN_TRI} />
           <span>
-            <b>
-              {missingVatCount === 1
-                ? "1 factură cu defalcare TVA incompletă din XML."
-                : `${missingVatCount} facturi cu defalcare TVA incompletă din XML.`}
-            </b>{" "}
-            Nu contribuie la TVA deductibilă și sunt sărite la generarea notelor contabile (GL) — folosiți
-            „Recalculează TVA din XML", apoi regenerați jurnalul.
+            <b>{t("received.banner.missing", { count: missingVatCount })}</b>{" "}
+            {t("received.banner.missingDetail")}
           </span>
         </div>
       )}
@@ -428,54 +419,54 @@ export function ReceivedPage() {
             <Ic name="lens" />
             <input
               type="text"
-              placeholder="Caută după furnizor sau CUI…"
+              placeholder={t("received.toolbar.searchPlaceholder")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          <button className="sq-btn spin-btn" title="Reîmprospătează" onClick={() => void refetch()}>
+          <button className="sq-btn spin-btn" title={t("received.toolbar.refresh")} onClick={() => void refetch()}>
             <Ic name="sync" />
           </button>
         </div>
 
         {/* bulk bar — real multi-select actions kept (prototype lacks them) */}
         <div className={`bulkbar${selected.size > 0 ? " show" : ""}`}>
-          <b>{selected.size} selectate</b>
+          <b>{t("received.bulk.selected", { n: selected.size })}</b>
           <span className="spacer" />
           <button className="pill-btn" onClick={() => bulkStatus("APPROVED")}>
-            <Ic name="check" />Aprobă toate
+            <Ic name="check" />{t("received.bulk.approveAll")}
           </button>
           <button className="pill-btn" onClick={() => bulkStatus("ARCHIVED")}>
-            <InlineIc d={P_TRASH} />Arhivează
+            <InlineIc d={P_TRASH} />{t("received.bulk.archive")}
           </button>
           <button className="pill-btn" onClick={() => bulkStatus("REJECTED")}>
-            <Ic name="xMark" />Respinge
+            <Ic name="xMark" />{t("received.bulk.reject")}
           </button>
           <button className="pill-btn" onClick={() => void handleExportCsv()}>
-            <Ic name="dl" />Export CSV
+            <Ic name="dl" />{t("received.actions.exportCsv")}
           </button>
-          <button className="pill-btn" onClick={() => setSelected(new Set())}>Deselectează</button>
+          <button className="pill-btn" onClick={() => setSelected(new Set())}>{t("received.bulk.deselect")}</button>
         </div>
 
         {/* truncation note */}
         {paged && paged.total > paged.items.length && (
           <div style={{ padding: "6px 16px", borderBottom: "1px solid var(--line)", fontSize: 12, color: "var(--amber)" }}>
-            Afișate primele {paged.items.length.toLocaleString("ro-RO")} din {paged.total.toLocaleString("ro-RO")} facturi.
+            {t("received.states.truncated", { shown: paged.items.length.toLocaleString(i18n.language), total: paged.total.toLocaleString(i18n.language) })}
           </div>
         )}
 
         {/* table */}
         {isLoading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("received.states.loading")}</div>
         ) : isError ? (
           <div style={{ padding: 16 }}>
-            <QueryErrorBanner error={error} label="facturile primite" onRetry={() => void refetch()} />
+            <QueryErrorBanner error={error} label={t("received.states.errorLabel")} onRetry={() => void refetch()} />
           </div>
         ) : list.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
             {allInvoices.length === 0
-              ? "Nicio factură primită. Descărcați din SPV sau importați un XML."
-              : "Nicio înregistrare pentru filtrele aplicate."}
+              ? t("received.states.emptyAll")
+              : t("received.states.emptyFiltered")}
           </div>
         ) : (
           <>
@@ -485,21 +476,21 @@ export function ReceivedPage() {
                   <th style={{ width: 36 }}>
                     <button
                       className={`cbx${selected.size === list.length && list.length > 0 ? " on" : ""}`}
-                      aria-label="Selectează tot"
+                      aria-label={t("received.table.selectAll")}
                       onClick={() =>
                         setSelected(selected.size === list.length ? new Set() : new Set(list.map((i) => i.id)))
                       }
                     />
                   </th>
-                  <th>Furnizor</th>
-                  <th>CUI</th>
-                  <th>Serie-Număr</th>
-                  <th>Data</th>
-                  <th className="r">Net</th>
-                  <th className="r">TVA</th>
-                  <th className="r">Total</th>
-                  <th>Monedă</th>
-                  <th>Status</th>
+                  <th>{t("received.table.supplier")}</th>
+                  <th>{t("received.table.cui")}</th>
+                  <th>{t("received.table.seriesNumber")}</th>
+                  <th>{t("received.table.date")}</th>
+                  <th className="r">{t("received.table.net")}</th>
+                  <th className="r">{t("received.table.vat")}</th>
+                  <th className="r">{t("received.table.total")}</th>
+                  <th>{t("received.table.currency")}</th>
+                  <th>{t("received.table.status")}</th>
                   <th className="r" style={{ width: 104 }}></th>
                 </tr>
               </thead>
@@ -532,17 +523,17 @@ export function ReceivedPage() {
                       <td className="r num">
                         {inv.netAmount != null
                           ? fmtRON(inv.netAmount)
-                          : <span className="missing" title={MISSING_TITLE}>—</span>}
+                          : <span className="missing" title={missingTitle}>—</span>}
                       </td>
                       <td className="r num">
                         {inv.vatAmount != null
                           ? fmtRON(inv.vatAmount)
-                          : <span className="missing" title={MISSING_TITLE}>—</span>}
+                          : <span className="missing" title={missingTitle}>—</span>}
                       </td>
                       <td className="r num"><b>{fmtRON(inv.totalAmount)}</b></td>
                       <td>{inv.currency}</td>
                       <td>
-                        <span className={`chip ${chip.cls}`}>{chip.icon}{chip.label}</span>
+                        <span className={`chip ${chip.cls}`}>{chip.icon}{t(chip.labelKey)}</span>
                       </td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <div className="row-acts">
@@ -550,14 +541,14 @@ export function ReceivedPage() {
                             <>
                               <button
                                 className="mini-btn"
-                                title="Aprobă"
+                                title={t("received.row.approve")}
                                 onClick={() => updateStatus({ id: inv.id, status: "APPROVED" })}
                               >
                                 <Ic name="check" />
                               </button>
                               <button
                                 className="mini-btn"
-                                title="Respinge"
+                                title={t("received.row.reject")}
                                 onClick={() => updateStatus({ id: inv.id, status: "REJECTED" })}
                               >
                                 <Ic name="xMark" />
@@ -565,7 +556,7 @@ export function ReceivedPage() {
                               {missing && (
                                 <button
                                   className="mini-btn"
-                                  title="Reanalizează (defalcare TVA)"
+                                  title={t("received.row.reanalyzeVat")}
                                   onClick={() => setDefalFor(inv)}
                                 >
                                   <Ic name="sync" />
@@ -576,7 +567,7 @@ export function ReceivedPage() {
                           {inv.status === "APPROVED" && (
                             <button
                               className="mini-btn"
-                              title="Arhivează"
+                              title={t("received.row.archive")}
                               onClick={() => updateStatus({ id: inv.id, status: "ARCHIVED" })}
                             >
                               <InlineIc d={P_TRASH} />
@@ -585,7 +576,7 @@ export function ReceivedPage() {
                           {inv.status === "REJECTED" && (
                             <button
                               className="mini-btn"
-                              title="Reanalizează"
+                              title={t("received.row.reanalyze")}
                               onClick={() => updateStatus({ id: inv.id, status: "REVIEWED" })}
                             >
                               <Ic name="sync" />
@@ -593,7 +584,7 @@ export function ReceivedPage() {
                           )}
                           <button
                             className="mini-btn"
-                            title="Vizualizează"
+                            title={t("received.row.view")}
                             onClick={() => void navigate({ to: "/received/$id", params: { id: inv.id } })}
                           >
                             <Ic name="eye" />
@@ -608,22 +599,20 @@ export function ReceivedPage() {
 
             {/* totals footer */}
             <div className="tot-foot">
-              <span><b>{list.length}</b> facturi</span>
-              <span>net <b className="num">{fmtRON(totNet)}</b></span>
-              <span>TVA <b className="num">{fmtRON(totVat)}</b></span>
-              <span>total <b className="num">{fmtRON(totTotal)}</b></span>
-              <span>De aprobat: <b>{counts.NEW + counts.REVIEWED}</b></span>
+              <span><b>{list.length}</b> {t("received.foot.invoicesWord", { count: list.length })}</span>
+              <span>{t("received.foot.net")} <b className="num">{fmtRON(totNet)}</b></span>
+              <span>{t("received.foot.vat")} <b className="num">{fmtRON(totVat)}</b></span>
+              <span>{t("received.foot.total")} <b className="num">{fmtRON(totTotal)}</b></span>
+              <span>{t("received.foot.toApprove")} <b>{counts.NEW + counts.REVIEWED}</b></span>
               <span className="spacer" style={{ flex: 1 }} />
               {list.length > MAX_ROWS && (
-                <span className="muted">afișate primele {MAX_ROWS.toLocaleString("ro-RO")} din {list.length.toLocaleString("ro-RO")}</span>
+                <span className="muted">{t("received.foot.shownFirst", { shown: MAX_ROWS.toLocaleString(i18n.language), total: list.length.toLocaleString(i18n.language) })}</span>
               )}
               {nonRonCount > 0 && (
-                <span className="muted">
-                  {nonRonCount === 1 ? "1 factură în altă monedă exclusă din totaluri" : `${nonRonCount} facturi în altă monedă excluse din totaluri`}
-                </span>
+                <span className="muted">{t("received.foot.nonRonExcluded", { count: nonRonCount })}</span>
               )}
               <span className="muted">
-                achiziții intra-UE: tip „bunuri" (R5/R18) sau „servicii" (R7/R20) — setabil din detaliu
+                {t("received.foot.intraEu")}
               </span>
             </div>
           </>

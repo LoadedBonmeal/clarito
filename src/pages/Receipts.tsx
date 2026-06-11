@@ -16,6 +16,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
@@ -54,6 +55,7 @@ const TRASH_PATH =
   '<path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/>';
 
 export function ReceiptsPage() {
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const queryClient = useQueryClient();
@@ -106,37 +108,37 @@ export function ReceiptsPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => {
-      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      if (!activeCompanyId) return Promise.reject(new Error(t("receipts.notify.noActiveCompany")));
       return api.receipts.delete(id, activeCompanyId);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.receipts.all });
-      notify.success("Chitanță ștearsă.");
+      notify.success(t("receipts.notify.deleted"));
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge chitanța.")),
+    onError: (e) => notify.error(formatError(e, t("receipts.notify.deleteError"))),
   });
 
   const pdfMutation = useMutation({
     mutationFn: (id: string) => {
-      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă."));
+      if (!activeCompanyId) return Promise.reject(new Error(t("receipts.notify.noActiveCompany")));
       return api.receipts.generatePdf(id, activeCompanyId);
     },
     onSuccess: async (path) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.receipts.all });
-      notify.success("PDF generat.");
+      notify.success(t("receipts.notify.pdfDone"));
       try {
         await openPath(path);
       } catch {
         /* best-effort reveal */
       }
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut genera PDF-ul.")),
+    onError: (e) => notify.error(formatError(e, t("receipts.notify.pdfError"))),
   });
 
   const handleDelete = async (r: Receipt) => {
     const ok = await confirm(
-      `Șterge chitanța "${r.series}-${r.number}"? Această acțiune nu poate fi anulată.`,
-      { title: "Confirmare ștergere", kind: "warning" },
+      t("receipts.confirm.deleteMsg", { no: `${r.series}-${r.number}` }),
+      { title: t("receipts.confirm.deleteTitle"), kind: "warning" },
     );
     if (!ok) return;
     deleteMutation.mutate(r.id);
@@ -164,16 +166,16 @@ export function ReceiptsPage() {
     return Array.from(s);
   }, [receiptList]);
   const sub =
-    `${receiptList.length.toLocaleString("ro-RO")} chitanțe emise` +
-    (seriesSet.length === 1 ? ` · seria ${seriesSet[0]}` : "") +
+    t("receipts.sub.count", { n: receiptList.length.toLocaleString(i18n.language) }) +
+    (seriesSet.length === 1 ? ` · ${t("receipts.sub.series", { s: seriesSet[0] })}` : "") +
     (activeCompany ? ` · ${activeCompany.legalName}` : "");
 
   if (!activeCompanyId) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Chitanțe</h1></div></div>
+        <div className="page-head"><div><h1>{t("receipts.title")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a vedea chitanțele.
+          {t("receipts.selectCompany")}
         </div>
       </div>
     );
@@ -184,45 +186,45 @@ export function ReceiptsPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Chitanțe</h1>
+          <h1>{t("receipts.title")}</h1>
           <p className="sub">{sub}</p>
         </div>
         <div className="head-actions">
           <button
             className="sq-btn spin-btn"
-            title="Reîmprospătează"
+            title={t("receipts.head.refresh")}
             onClick={() => void queryClient.invalidateQueries({ queryKey: queryKeys.receipts.all })}
           >
             <Ic name="sync" />
           </button>
           <button className="btn-dark" onClick={() => setShowModal(true)}>
-            <Ic name="plus" />Chitanță nouă
+            <Ic name="plus" />{t("receipts.head.new")}
           </button>
         </div>
       </div>
 
       <div className="scr-card">
         {isLoading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("receipts.states.loading")}</div>
         ) : isError ? (
           <div style={{ padding: 16 }}>
-            <QueryErrorBanner error={error} label="chitanțele" onRetry={() => void refetch()} />
+            <QueryErrorBanner error={error} label={t("receipts.states.errorLabel")} onRetry={() => void refetch()} />
           </div>
         ) : receiptList.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-            Nicio chitanță. Apăsați „Chitanță nouă” pentru a emite prima chitanță.
+            {t("receipts.states.empty")}
           </div>
         ) : (
           <>
             <table className="scr-table">
               <thead>
                 <tr>
-                  <th>Număr</th>
-                  <th>Data</th>
-                  <th>Plătitor</th>
-                  <th>Factură asociată</th>
-                  <th className="r">Sumă</th>
-                  <th>Monedă</th>
+                  <th>{t("receipts.table.number")}</th>
+                  <th>{t("receipts.table.date")}</th>
+                  <th>{t("receipts.table.payer")}</th>
+                  <th>{t("receipts.table.invoice")}</th>
+                  <th className="r">{t("receipts.table.amount")}</th>
+                  <th>{t("receipts.table.currency")}</th>
                   <th className="r" style={{ width: 90 }}></th>
                 </tr>
               </thead>
@@ -238,7 +240,7 @@ export function ReceiptsPage() {
                         {contactName ? (
                           <div className="cli"><span className="cli-ava">{ini(contactName)}</span>{contactName}</div>
                         ) : r.payerName ? (
-                          <>{r.payerName} <span className="muted">(text liber)</span></>
+                          <>{r.payerName} <span className="muted">{t("receipts.row.freeText")}</span></>
                         ) : (
                           <span className="muted">—</span>
                         )}
@@ -250,7 +252,7 @@ export function ReceiptsPage() {
                             style={{ fontFamily: "var(--mono)", fontSize: 12 }}
                             onClick={() => void navigate({ to: "/invoices/$id", params: { id: r.invoiceId! } })}
                           >
-                            {invoiceNumber ?? "factură"}
+                            {invoiceNumber ?? t("receipts.row.invoiceFallback")}
                           </a>
                         ) : (
                           <span className="muted">—</span>
@@ -262,7 +264,7 @@ export function ReceiptsPage() {
                         <div className="row-acts">
                           <button
                             className="mini-btn"
-                            title="Generează PDF"
+                            title={t("receipts.row.pdf")}
                             disabled={pdfMutation.isPending}
                             onClick={() => pdfMutation.mutate(r.id)}
                           >
@@ -270,7 +272,7 @@ export function ReceiptsPage() {
                           </button>
                           <button
                             className="mini-btn"
-                            title="Șterge"
+                            title={t("receipts.row.delete")}
                             onClick={() => void handleDelete(r)}
                           >
                             <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: TRASH_PATH }} />
@@ -285,7 +287,7 @@ export function ReceiptsPage() {
 
             {/* pager */}
             <div className="pager">
-              <span>Afișezi <b>{from}–{to}</b> din <b>{receiptList.length.toLocaleString("ro-RO")}</b> chitanțe</span>
+              <span>{t("receipts.pager.showing")} <b>{from}–{to}</b> {t("receipts.pager.of")} <b>{receiptList.length.toLocaleString(i18n.language)}</b> {t("receipts.pager.receipts")}</span>
               <div className="pg-btns">
                 <button
                   className="pg-btn"
@@ -341,6 +343,7 @@ function ReceiptModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState<ReceiptInput>({
     amount: "",
     currency: "RON",
@@ -358,10 +361,10 @@ function ReceiptModal({
   const createMutation = useMutation({
     mutationFn: (input: ReceiptInput) => api.receipts.create(companyId, input),
     onSuccess: () => {
-      notify.success("Chitanță emisă.");
+      notify.success(t("receipts.notify.created"));
       onSaved();
     },
-    onError: (e) => setFormError(formatError(e, "Eroare la emitere.")),
+    onError: (e) => setFormError(formatError(e, t("receipts.notify.createError"))),
   });
 
   // Esc closes the modal.
@@ -375,11 +378,11 @@ function ReceiptModal({
     if (createMutation.isPending) return;
     setFormError(null);
     if (!form.amount?.trim() || parseDec(form.amount) <= 0) {
-      setFormError("Suma trebuie să fie pozitivă.");
+      setFormError(t("receipts.modal.amountPositive"));
       return;
     }
     if (!form.issueDate?.trim()) {
-      setFormError("Data emiterii este obligatorie.");
+      setFormError(t("receipts.modal.dateRequired"));
       return;
     }
     const input: ReceiptInput = {
@@ -405,8 +408,8 @@ function ReceiptModal({
       <div className="modal">
         <div className="modal-head">
           <div>
-            <div className="mt">Chitanță nouă</div>
-            <div className="ms">Numărul se alocă automat în serie</div>
+            <div className="mt">{t("receipts.modal.title")}</div>
+            <div className="ms">{t("receipts.modal.sub")}</div>
           </div>
           <button className="modal-x" onClick={onClose}>
             <Ic name="xMark" />
@@ -415,7 +418,7 @@ function ReceiptModal({
         <div className="modal-body">
           <div className="fgrid">
             <div className="field">
-              <label>Serie</label>
+              <label>{t("receipts.modal.series")}</label>
               <input
                 className="input num"
                 type="text"
@@ -425,7 +428,7 @@ function ReceiptModal({
               />
             </div>
             <div className="field">
-              <label>Data emiterii <span className="req">*</span></label>
+              <label>{t("receipts.modal.issueDate")} <span className="req">*</span></label>
               <input
                 className="input num"
                 type="date"
@@ -434,13 +437,13 @@ function ReceiptModal({
               />
             </div>
             <div className="field">
-              <label>Sumă <span className="req">*</span></label>
+              <label>{t("receipts.modal.amount")} <span className="req">*</span></label>
               <input
                 className="input num"
                 type="number"
                 step="0.01"
                 min="0.01"
-                placeholder="0,00"
+                placeholder={t("receipts.modal.amountPlaceholder")}
                 style={{ textAlign: "right" }}
                 value={form.amount}
                 onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
@@ -448,7 +451,7 @@ function ReceiptModal({
               />
             </div>
             <div className="field">
-              <label>Monedă</label>
+              <label>{t("receipts.modal.currency")}</label>
               <select
                 className="select"
                 value={form.currency ?? "RON"}
@@ -460,27 +463,27 @@ function ReceiptModal({
               </select>
             </div>
             <div className="field span2">
-              <label>Plătitor (contact)</label>
+              <label>{t("receipts.modal.payerContact")}</label>
               <ContactCombobox
                 value={contact}
                 onChange={setContact}
                 companyId={companyId}
-                placeholder="Caută plătitor (opțional)…"
+                placeholder={t("receipts.modal.payerContactPlaceholder")}
                 width="100%"
               />
             </div>
             <div className="field span2">
-              <label>Plătitor (text liber)</label>
+              <label>{t("receipts.modal.payerFree")}</label>
               <input
                 className="input"
                 type="text"
-                placeholder="Nume plătitor (dacă nu e în contacte)"
+                placeholder={t("receipts.modal.payerFreePlaceholder")}
                 value={form.payerName ?? ""}
                 onChange={(e) => setForm((f) => ({ ...f, payerName: e.target.value }))}
               />
             </div>
             <div className="field span2">
-              <label>Factură asociată (opțional)</label>
+              <label>{t("receipts.modal.invoice")}</label>
               <InvoiceCombobox
                 companyId={companyId}
                 value={invoice}
@@ -488,10 +491,10 @@ function ReceiptModal({
               />
             </div>
             <div className="field span2">
-              <label>Observații</label>
+              <label>{t("receipts.modal.notes")}</label>
               <textarea
                 className="input"
-                placeholder="opțional"
+                placeholder={t("receipts.modal.notesPlaceholder")}
                 value={form.notes ?? ""}
                 onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
               />
@@ -508,7 +511,7 @@ function ReceiptModal({
         </div>
         <div className="modal-foot">
           <button className="pill-btn" onClick={onClose} disabled={createMutation.isPending}>
-            Renunță
+            {t("receipts.modal.cancel")}
           </button>
           <button
             className="btn-dark"
@@ -517,7 +520,7 @@ function ReceiptModal({
             onClick={handleSubmit}
           >
             <Ic name="check" />
-            {createMutation.isPending ? "Se salvează…" : "Emite chitanță"}
+            {createMutation.isPending ? t("receipts.modal.saving") : t("receipts.modal.submit")}
           </button>
         </div>
       </div>
@@ -539,6 +542,7 @@ function InvoiceCombobox({
   value: Invoice | null;
   onChange: (inv: Invoice | null) => void;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -660,8 +664,8 @@ function InvoiceCombobox({
           type="button"
           className="mini-btn"
           onClick={handleClear}
-          aria-label="Elimină factura asociată"
-          title="Elimină factura asociată"
+          aria-label={t("receipts.combobox.remove")}
+          title={t("receipts.combobox.remove")}
         >
           <Ic name="xMark" />
         </button>
@@ -686,7 +690,7 @@ function InvoiceCombobox({
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
-        placeholder="Caută factură (număr sau client)…"
+        placeholder={t("receipts.combobox.placeholder")}
         autoComplete="off"
         aria-autocomplete="list"
         aria-expanded={open}
@@ -710,11 +714,11 @@ function InvoiceCombobox({
         >
           {isFetching ? (
             <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-2)" }}>
-              Se caută…
+              {t("receipts.combobox.searching")}
             </div>
           ) : results.length === 0 ? (
             <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-2)" }}>
-              {debouncedQuery ? `Nicio factură pentru „${debouncedQuery}”.` : "Nicio factură găsită."}
+              {debouncedQuery ? t("receipts.combobox.emptyQuery", { q: debouncedQuery }) : t("receipts.combobox.empty")}
             </div>
           ) : (
             results.map((inv, idx) => {

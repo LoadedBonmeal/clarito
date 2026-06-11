@@ -1,0 +1,133 @@
+{
+  "received": {
+    "title": "Facturi primite",
+    "subCount": "{{n}} documente sincronizate din SPV",
+    "subCountFiltered": "{{shown}} din {{total}} documente sincronizate din SPV",
+    "selectCompany": "Selectați o companie activă pentru a vedea facturile primite.",
+    "missingVatTitle": "Defalcare TVA incompletă din XML — folosiți «Recalculează TVA din XML». Nu contribuie la TVA deductibilă.",
+    "actions": {
+      "reparseVat": "Recalculează TVA din XML",
+      "reparsing": "Recalculare…",
+      "importXml": "Import XML",
+      "exportCsv": "Export CSV",
+      "syncSpv": "Sincronizează SPV",
+      "syncing": "Sincronizare…"
+    },
+    "banner": {
+      "missing_one": "{{count}} factură cu defalcare TVA incompletă din XML.",
+      "missing_few": "{{count}} facturi cu defalcare TVA incompletă din XML.",
+      "missing_other": "{{count}} de facturi cu defalcare TVA incompletă din XML.",
+      "missingDetail": "Nu contribuie la TVA deductibilă și sunt sărite la generarea notelor contabile (GL) — folosiți „Recalculează TVA din XML\", apoi regenerați jurnalul."
+    },
+    "tabs": {
+      "all": "Toate",
+      "new": "Noi",
+      "reviewed": "De revizuit",
+      "approved": "Aprobate",
+      "rejected": "Respinse",
+      "archived": "Arhivate"
+    },
+    "status": {
+      "new": "Nouă",
+      "reviewed": "Revizuită",
+      "approved": "Aprobată",
+      "rejected": "Respinsă",
+      "archived": "Arhivată"
+    },
+    "toolbar": {
+      "searchPlaceholder": "Caută după furnizor sau CUI…",
+      "refresh": "Reîmprospătează"
+    },
+    "bulk": {
+      "selected": "{{n}} selectate",
+      "approveAll": "Aprobă toate",
+      "archive": "Arhivează",
+      "reject": "Respinge",
+      "deselect": "Deselectează"
+    },
+    "table": {
+      "selectAll": "Selectează tot",
+      "supplier": "Furnizor",
+      "cui": "CUI",
+      "seriesNumber": "Serie-Număr",
+      "date": "Data",
+      "net": "Net",
+      "vat": "TVA",
+      "total": "Total",
+      "currency": "Monedă",
+      "status": "Status"
+    },
+    "row": {
+      "approve": "Aprobă",
+      "reject": "Respinge",
+      "reanalyzeVat": "Reanalizează (defalcare TVA)",
+      "archive": "Arhivează",
+      "reanalyze": "Reanalizează",
+      "view": "Vizualizează"
+    },
+    "states": {
+      "loading": "Se încarcă…",
+      "errorLabel": "facturile primite",
+      "emptyAll": "Nicio factură primită. Descărcați din SPV sau importați un XML.",
+      "emptyFiltered": "Nicio înregistrare pentru filtrele aplicate.",
+      "truncated": "Afișate primele {{shown}} din {{total}} facturi."
+    },
+    "foot": {
+      "invoicesWord_one": "factură",
+      "invoicesWord_few": "facturi",
+      "invoicesWord_other": "de facturi",
+      "net": "net",
+      "vat": "TVA",
+      "total": "total",
+      "toApprove": "De aprobat:",
+      "shownFirst": "afișate primele {{shown}} din {{total}}",
+      "nonRonExcluded_one": "{{count}} factură în altă monedă exclusă din totaluri",
+      "nonRonExcluded_few": "{{count}} facturi în altă monedă excluse din totaluri",
+      "nonRonExcluded_other": "{{count}} de facturi în altă monedă excluse din totaluri",
+      "intraEu": "achiziții intra-UE: tip „bunuri\" (R5/R18) sau „servicii\" (R7/R20) — setabil din detaliu"
+    },
+    "notify": {
+      "noActiveCompany": "Nicio companie activă.",
+      "statusError": "Nu s-a putut actualiza statusul.",
+      "spvNew_one": "{{count}} factură nouă descărcată din SPV.",
+      "spvNew_few": "{{count}} facturi noi descărcate din SPV.",
+      "spvNew_other": "{{count}} de facturi noi descărcate din SPV.",
+      "spvNone": "Nicio factură nouă în SPV.",
+      "spvError": "Eroare sincronizare SPV.",
+      "reparsed_one": "TVA recalculat pentru {{count}} factură.",
+      "reparsed_few": "TVA recalculat pentru {{count}} facturi.",
+      "reparsed_other": "TVA recalculat pentru {{count}} de facturi.",
+      "reparseError": "Eroare recalculare TVA.",
+      "selectCompanyFirst": "Selectați o companie.",
+      "imported": "Factură importată: {{number}} — {{supplier}}",
+      "importFailed": "Import eșuat: {{errors}}",
+      "importError": "Eroare import XML.",
+      "selectForExport": "Selectați facturi pentru export.",
+      "exported_one": "{{count}} factură exportată: {{path}}",
+      "exported_few": "{{count}} facturi exportate: {{path}}",
+      "exported_other": "{{count}} de facturi exportate: {{path}}",
+      "exportError": "Exportul CSV a eșuat."
+    },
+    "defal": {
+      "title": "Defalcare TVA",
+      "expenseAccount": "Cont de cheltuială",
+      "vatRate": "Cota TVA",
+      "base": "Bază",
+      "amountPlaceholder": "0,00",
+      "accounts": {
+        "a626": "626 · Cheltuieli poștale și telecomunicații",
+        "a628": "628 · Alte cheltuieli cu serviciile",
+        "a604": "604 · Cheltuieli privind materialele",
+        "a605": "605 · Cheltuieli privind energia și apa",
+        "a371": "371 · Mărfuri"
+      },
+      "addLine": "Împarte pe alt cont",
+      "notePre": "TVA deductibilă → cont 4426. După salvare, factura intră în",
+      "noteBold": "jurnalul de cumpărări",
+      "notePost": "și în notele contabile GL.",
+      "cancel": "Renunță",
+      "save": "Salvează defalcarea",
+      "soon": "În curând."
+    }
+  }
+}

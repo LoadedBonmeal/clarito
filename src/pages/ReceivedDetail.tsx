@@ -17,6 +17,7 @@
  */
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useParams, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -63,34 +64,32 @@ function InlineIc({ d, cls = "ic" }: { d: string; cls?: string }) {
   return <svg className={cls} viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: `<path d="${d}"/>` }} />;
 }
 
-// Status → design chip (.chip variants + icon + label) — consistent with Received.tsx.
-const STATUS_CHIP: Record<ReceivedStatus, { cls: string; icon: React.ReactNode; label: string }> = {
-  NEW:      { cls: "sent", icon: <Ic name="dot" cls="sic" />,               label: "Nouă" },
-  REVIEWED: { cls: "wait", icon: <Ic name="clock" cls="sic" />,             label: "Revizuită" },
-  APPROVED: { cls: "paid", icon: <InlineIc d={P_CHECK_CIRCLE} cls="sic" />, label: "Aprobată" },
-  REJECTED: { cls: "late", icon: <Ic name="xMark" cls="sic" />,             label: "Respinsă" },
-  ARCHIVED: { cls: "sent", icon: <InlineIc d={P_TRASH} cls="sic" />,        label: "Arhivată" },
+// Status → design chip (.chip variants + icon + i18n label key) — consistent with Received.tsx.
+const STATUS_CHIP: Record<ReceivedStatus, { cls: string; icon: React.ReactNode; labelKey: string }> = {
+  NEW:      { cls: "sent", icon: <Ic name="dot" cls="sic" />,               labelKey: "detail.status.new" },
+  REVIEWED: { cls: "wait", icon: <Ic name="clock" cls="sic" />,             labelKey: "detail.status.reviewed" },
+  APPROVED: { cls: "paid", icon: <InlineIc d={P_CHECK_CIRCLE} cls="sic" />, labelKey: "detail.status.approved" },
+  REJECTED: { cls: "late", icon: <Ic name="xMark" cls="sic" />,             labelKey: "detail.status.rejected" },
+  ARCHIVED: { cls: "sent", icon: <InlineIc d={P_TRASH} cls="sic" />,        labelKey: "detail.status.archived" },
 };
 
-const STATUS_LABELS: Record<ReceivedStatus, string> = {
-  NEW: "nouă",
-  REVIEWED: "revizuită",
-  APPROVED: "aprobată",
-  REJECTED: "respinsă",
-  ARCHIVED: "arhivată",
+const STATUS_LABEL_KEYS: Record<ReceivedStatus, string> = {
+  NEW: "detail.statusLower.new",
+  REVIEWED: "detail.statusLower.reviewed",
+  APPROVED: "detail.statusLower.approved",
+  REJECTED: "detail.statusLower.rejected",
+  ARCHIVED: "detail.statusLower.archived",
 };
 
-const METHOD_LABELS: Record<string, string> = {
-  transfer: "Transfer bancar",
-  cash: "Numerar",
-  card: "Card",
-  compensare: "Compensare",
+const METHOD_KEYS: Record<string, string> = {
+  transfer: "detail.method.transfer",
+  cash: "detail.method.cash",
+  card: "detail.method.card",
+  compensare: "detail.method.compensare",
 };
-
-const INTERNAL_STATUS_TITLE =
-  "Status intern în evidența locală. Nu trimite niciun răspuns la ANAF/SPV.";
 
 export function ReceivedDetailPage() {
+  const { t } = useTranslation();
   const { id } = useParams({ from: "/received/$id" });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -100,7 +99,7 @@ export function ReceivedDetailPage() {
   const { data: inv, isLoading, isError, error, refetch } = useQuery({
     queryKey: queryKeys.received.detail(id),
     queryFn: () => {
-      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă selectată."));
+      if (!activeCompanyId) return Promise.reject(new Error(t("detail.noActiveCompanySelected")));
       return api.received.get(id, activeCompanyId);
     },
     enabled: !!activeCompanyId,
@@ -109,18 +108,18 @@ export function ReceivedDetailPage() {
   const { mutate: updateStatus, isPending } = useMutation({
     mutationFn: (status: ReceivedStatus) => {
       if (!activeCompanyId) {
-        notify.warn("Nicio companie activă selectată.");
-        return Promise.reject(new Error("Nicio companie activă selectată."));
+        notify.warn(t("detail.noActiveCompanySelected"));
+        return Promise.reject(new Error(t("detail.noActiveCompanySelected")));
       }
       return api.received.updateStatus(id, activeCompanyId, status);
     },
     onSuccess: (_data, status) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.received.detail(id) });
-      setSuccessMsg(`Factura a fost marcată ca ${STATUS_LABELS[status]}.`);
+      setSuccessMsg(t("detail.banner.markedAs", { status: t(STATUS_LABEL_KEYS[status]) }));
       setTimeout(() => setSuccessMsg(null), 3000);
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut actualiza statusul.")),
+    onError: (e) => notify.error(formatError(e, t("detail.notify.statusUpdateError"))),
   });
 
   const { mutate: reparseVat, isPending: isReparsing } = useMutation({
@@ -128,34 +127,34 @@ export function ReceivedDetailPage() {
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.received.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.received.detail(id) });
-      notify.success(`TVA recalculat pentru ${count} facturi.`);
+      notify.success(t("detail.notify.vatRecalced", { count }));
     },
-    onError: (e) => notify.error(formatError(e, "Eroare recalculare TVA.")),
+    onError: (e) => notify.error(formatError(e, t("detail.notify.vatRecalcError"))),
   });
 
   const { mutate: setIntraEuKind, isPending: isSettingKind } = useMutation({
     mutationFn: (kind: "goods" | "services") => {
-      if (!activeCompanyId) return Promise.reject(new Error("Nicio companie activă selectată."));
+      if (!activeCompanyId) return Promise.reject(new Error(t("detail.noActiveCompanySelected")));
       return api.received.setIntraEuKind(id, activeCompanyId, kind);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.received.detail(id) });
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut actualiza tipul achiziției.")),
+    onError: (e) => notify.error(formatError(e, t("detail.notify.intraEuError"))),
   });
 
   async function openFile(path: string | null, label: string) {
-    if (!path) { notify.error(`${label} indisponibil`); return; }
+    if (!path) { notify.error(t("detail.notify.fileUnavailable", { label })); return; }
     try { await openPath(path); }
-    catch (e) { notify.error(formatError(e, `Eroare deschidere ${label}.`)); }
+    catch (e) { notify.error(formatError(e, t("detail.notify.fileOpenError", { label }))); }
   }
 
   if (!activeCompanyId) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Factură primită</h1></div></div>
+        <div className="page-head"><div><h1>{t("detail.receivedTitle")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a vedea factura.
+          {t("detail.selectCompany")}
         </div>
       </div>
     );
@@ -164,7 +163,7 @@ export function ReceivedDetailPage() {
   if (isLoading) {
     return (
       <div className="main-inner wide">
-        <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>Se încarcă…</div>
+        <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>{t("detail.loading")}</div>
       </div>
     );
   }
@@ -172,8 +171,8 @@ export function ReceivedDetailPage() {
   if (isError) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Factură primită</h1></div></div>
-        <QueryErrorBanner error={error} label="factura primită" onRetry={() => void refetch()} />
+        <div className="page-head"><div><h1>{t("detail.receivedTitle")}</h1></div></div>
+        <QueryErrorBanner error={error} label={t("detail.errorLabel")} onRetry={() => void refetch()} />
       </div>
     );
   }
@@ -181,9 +180,9 @@ export function ReceivedDetailPage() {
   if (!inv) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Factură primită</h1></div></div>
+        <div className="page-head"><div><h1>{t("detail.receivedTitle")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Factura nu a fost găsită.
+          {t("detail.notFound")}
         </div>
       </div>
     );
@@ -200,34 +199,34 @@ export function ReceivedDetailPage() {
       <div className="page-head">
         <div>
           <div className="crumb">
-            <a onClick={() => void navigate({ to: "/received" })} style={{ cursor: "pointer" }}>Facturi primite</a>
+            <a onClick={() => void navigate({ to: "/received" })} style={{ cursor: "pointer" }}>{t("detail.crumb.received")}</a>
             <span className="sep">›</span>
             <span className="num">{docNo}</span>
           </div>
           <div className="head-title">
             <h1 className="num">{docNo}</h1>
-            <span className={`chip ${chip.cls}`}>{chip.icon}{chip.label}</span>
+            <span className={`chip ${chip.cls}`}>{chip.icon}{t(chip.labelKey)}</span>
           </div>
           <p className="sub">
-            {inv.issuerName} · CUI <span className="num">{inv.issuerCui}</span> · emisă {fmtRoDate(inv.issueDate)}
+            {inv.issuerName} · CUI <span className="num">{inv.issuerCui}</span> · {t("detail.head.issuedOn", { date: fmtRoDate(inv.issueDate) })}
           </p>
         </div>
         <div className="head-actions">
           <button className="pill-btn" disabled={!inv.xmlPath} onClick={() => void openFile(inv.xmlPath, "XML")}>
-            <Ic name="code" />Deschide XML
+            <Ic name="code" />{t("detail.actions.openXml")}
           </button>
           {inv.pdfPath && (
             <button className="pill-btn" onClick={() => void openFile(inv.pdfPath, "PDF")}>
-              <Ic name="dl" />Deschide PDF
+              <Ic name="dl" />{t("detail.actions.openPdf")}
             </button>
           )}
           <button
             className="pill-btn"
-            title="Re-parsează baza impozabilă și TVA din fișierele XML descărcate."
+            title={t("detail.actions.recalcTitle")}
             disabled={isReparsing}
             onClick={() => reparseVat()}
           >
-            <Ic name="sync" />{isReparsing ? "Recalculare…" : "Recalculează TVA"}
+            <Ic name="sync" />{isReparsing ? t("detail.actions.recalcPending") : t("detail.actions.recalcVat")}
           </button>
 
           {(inv.status === "NEW" || inv.status === "REVIEWED") && (
@@ -235,43 +234,43 @@ export function ReceivedDetailPage() {
               <button
                 className="pill-btn"
                 style={{ color: "var(--red)" }}
-                title={INTERNAL_STATUS_TITLE}
+                title={t("detail.actions.internalStatusTitle")}
                 disabled={isPending}
                 onClick={() => updateStatus("REJECTED")}
               >
                 <svg className="ic" viewBox="0 0 24 24" style={{ stroke: "var(--red)" }} aria-hidden="true">
                   <path d="M6 18 18 6M6 6l12 12" />
                 </svg>
-                Respinge local
+                {t("detail.actions.rejectLocal")}
               </button>
               <button
                 className="btn-dark"
-                title={INTERNAL_STATUS_TITLE}
+                title={t("detail.actions.internalStatusTitle")}
                 disabled={isPending}
                 onClick={() => updateStatus("APPROVED")}
               >
-                <Ic name="check" />Aprobă local
+                <Ic name="check" />{t("detail.actions.approveLocal")}
               </button>
             </>
           )}
           {inv.status === "APPROVED" && (
             <button
               className="pill-btn"
-              title={INTERNAL_STATUS_TITLE}
+              title={t("detail.actions.internalStatusTitle")}
               disabled={isPending}
               onClick={() => updateStatus("ARCHIVED")}
             >
-              <Ic name="book" />Arhivează
+              <Ic name="book" />{t("detail.actions.archive")}
             </button>
           )}
           {inv.status === "REJECTED" && (
             <button
               className="pill-btn"
-              title={INTERNAL_STATUS_TITLE}
+              title={t("detail.actions.internalStatusTitle")}
               disabled={isPending}
               onClick={() => updateStatus("REVIEWED")}
             >
-              <Ic name="undo" />Reanalizează
+              <Ic name="undo" />{t("detail.actions.reanalyze")}
             </button>
           )}
         </div>
@@ -281,7 +280,7 @@ export function ReceivedDetailPage() {
       {successMsg && (
         <div className="banner ok">
           <Ic name="check" />
-          <div>{successMsg} Status intern — nu se trimite răspuns la ANAF/SPV.</div>
+          <div>{successMsg} {t("detail.banner.internalStatusSuffix")}</div>
           <span className="bx" onClick={() => setSuccessMsg(null)}>✕</span>
         </div>
       )}
@@ -291,9 +290,8 @@ export function ReceivedDetailPage() {
         <div className="banner warn">
           <Ic name="receipt" />
           <div>
-            <b>Defalcare TVA indisponibilă.</b> Această factură nu are baza și TVA extrase din XML,
-            deci <b>nu contribuie la TVA deductibilă</b> în D300/D394. Apăsați «Recalculează TVA»
-            (în antet) pentru a re-parsa din fișierul XML.
+            <b>{t("detail.banner.vatMissingTitle")}</b> {t("detail.banner.vatMissingBody1")}{" "}
+            <b>{t("detail.banner.vatMissingBodyEm")}</b> {t("detail.banner.vatMissingBody2")}
           </div>
         </div>
       )}
@@ -303,34 +301,34 @@ export function ReceivedDetailPage() {
           {/* defalcare TVA */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
-              <div className="tt">Defalcare TVA</div>
+              <div className="tt">{t("detail.vat.title")}</div>
               <div className="spacer" />
               {hasVatBreakdown ? (
                 inv.vatAmount != null ? (
-                  <span className="chip paid"><Ic name="checkC" cls="sic" />Parsată din XML</span>
+                  <span className="chip paid"><Ic name="checkC" cls="sic" />{t("detail.vat.parsedChip")}</span>
                 ) : (
-                  <span className="chip late"><Ic name="xMark" cls="sic" />TVA lipsă din XML</span>
+                  <span className="chip late"><Ic name="xMark" cls="sic" />{t("detail.vat.missingChip")}</span>
                 )
               ) : (
-                <span className="chip wait"><Ic name="clock" cls="sic" />Indisponibilă</span>
+                <span className="chip wait"><Ic name="clock" cls="sic" />{t("detail.vat.unavailableChip")}</span>
               )}
             </div>
             <div className="card-pad">
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px 24px" }}>
                 <div>
-                  <div style={{ fontSize: 11.5, color: "var(--dim)", marginBottom: 3 }}>Bază impozabilă</div>
+                  <div style={{ fontSize: 11.5, color: "var(--dim)", marginBottom: 3 }}>{t("detail.vat.base")}</div>
                   <div className="num" style={{ fontSize: 13.5, fontWeight: 600 }}>
                     {inv.netAmount != null ? `${fmtRON(inv.netAmount)} ${inv.currency}` : "—"}
                   </div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 11.5, color: "var(--dim)", marginBottom: 3 }}>TVA</div>
+                  <div style={{ fontSize: 11.5, color: "var(--dim)", marginBottom: 3 }}>{t("detail.vat.vat")}</div>
                   <div className="num" style={{ fontSize: 13.5, fontWeight: 600 }}>
                     {inv.vatAmount != null ? `${fmtRON(inv.vatAmount)} ${inv.currency}` : "—"}
                   </div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 11.5, color: "var(--dim)", marginBottom: 3 }}>Total</div>
+                  <div style={{ fontSize: 11.5, color: "var(--dim)", marginBottom: 3 }}>{t("detail.vat.total")}</div>
                   <div className="num" style={{ fontSize: 13.5, fontWeight: 600 }}>
                     {fmtRON(inv.totalAmount)} {inv.currency}
                   </div>
@@ -341,18 +339,18 @@ export function ReceivedDetailPage() {
               <span>
                 {hasVatBreakdown
                   ? inv.vatAmount != null
-                    ? "Contribuie la TVA deductibilă în D300/D394"
-                    : "TVA lipsă din XML — verificați factura"
-                  : "Nu contribuie la TVA deductibilă în D300/D394"}
+                    ? t("detail.vat.contributes")
+                    : t("detail.vat.missingCheck")
+                  : t("detail.vat.notContributes")}
               </span>
-              <b className="num">Total {fmtRON(inv.totalAmount)} {inv.currency}</b>
+              <b className="num">{t("detail.vat.total")} {fmtRON(inv.totalAmount)} {inv.currency}</b>
             </div>
           </div>
 
           {/* achiziție intra-UE — tip bunuri / servicii pentru D300 */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
-              <div className="tt">Achiziție intra-UE</div>
+              <div className="tt">{t("detail.intraEu.title")}</div>
               <div className="spacer" />
               <div className="tabs">
                 <button
@@ -360,64 +358,64 @@ export function ReceivedDetailPage() {
                   disabled={isSettingKind || inv.intraEuKind === "goods"}
                   onClick={() => setIntraEuKind("goods")}
                 >
-                  Bunuri
+                  {t("detail.intraEu.goods")}
                 </button>
                 <button
                   className={`tab${inv.intraEuKind === "services" ? " active" : ""}`}
                   disabled={isSettingKind || inv.intraEuKind === "services"}
                   onClick={() => setIntraEuKind("services")}
                 >
-                  Servicii
+                  {t("detail.intraEu.services")}
                 </button>
               </div>
             </div>
             <div className="card-pad" style={{ fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.5 }}>
-              Determină rândul D300: <b>Bunuri</b> → R5/R18, <b>Servicii</b> → R7/R20.
-              Relevant numai pentru facturile cu categoria K (achiziții intracomunitare).
+              {t("detail.intraEu.body1")} <b>{t("detail.intraEu.goods")}</b> → R5/R18, <b>{t("detail.intraEu.services")}</b> → R7/R20.{" "}
+              {t("detail.intraEu.body2")}
             </div>
           </div>
 
           {/* istoric document — SPV (design .spv-log) */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
-              <div className="tt">Istoric document · SPV</div>
+              <div className="tt">{t("detail.history.title")}</div>
               <div className="spacer" />
-              <span className="muted" style={{ fontSize: 12 }}>e-Factura · primire</span>
+              <span className="muted" style={{ fontSize: 12 }}>{t("detail.history.receiving")}</span>
             </div>
             <div className="spv-log">
               <div className="spv-ev">
                 <div className="act-ic"><Ic name="docDown" /></div>
                 <div>
-                  <div className="e1"><b>Descărcată din SPV</b></div>
+                  <div className="e1"><b>{t("detail.history.downloaded")}</b></div>
                   <div className="e2 num">
-                    {fmtRoDateTime(inv.downloadedAt)} · ID descărcare <span className="doc">{inv.anafDownloadId}</span>
-                    {inv.anafIndex && <> · index ANAF <span className="doc">{inv.anafIndex}</span></>}
+                    {fmtRoDateTime(inv.downloadedAt)} · {t("detail.history.downloadId")} <span className="doc">{inv.anafDownloadId}</span>
+                    {inv.anafIndex && <> · {t("detail.anaf.anafIndex")} <span className="doc">{inv.anafIndex}</span></>}
                   </div>
                 </div>
               </div>
               <div className="spv-ev">
                 <div className="act-ic"><Ic name="docText" /></div>
                 <div>
-                  <div className="e1"><b>Înregistrată local</b></div>
+                  <div className="e1"><b>{t("detail.history.registeredLocal")}</b></div>
                   <div className="e2 num">{fmtRoDateTime(inv.createdAt)}</div>
                 </div>
               </div>
             </div>
             <div className="sold-line">
               <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <Ic name="shield" cls="sic" />Descărcată automat din SPV
+                <Ic name="shield" cls="sic" />{t("detail.history.autoDownloaded")}
               </span>
-              <span className="muted" style={{ fontSize: 11.5 }}>arhivă XML{inv.pdfPath ? " + PDF" : ""} · păstrare legală</span>
+              <span className="muted" style={{ fontSize: 11.5 }}>{inv.pdfPath ? t("detail.history.archiveXmlPdf") : t("detail.history.archiveXml")}</span>
             </div>
           </div>
 
           {/* fișiere */}
           <div className="scr-card">
-            <div className="scr-toolbar"><div className="tt">Fișiere</div></div>
+            <div className="scr-toolbar"><div className="tt">{t("detail.files.title")}</div></div>
             <div className="pay-row">
               <div className="act-ic" style={{ width: 28, height: 28 }}><Ic name="code" /></div>
               <div style={{ minWidth: 0 }}>
-                <div className="p1">XML e-Factura · UBL 2.1</div>
+                <div className="p1">{t("detail.files.xml")}</div>
                 <div
                   className="p2 num"
                   style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
@@ -432,14 +430,14 @@ export function ReceivedDetailPage() {
                 disabled={!inv.xmlPath}
                 onClick={() => void openFile(inv.xmlPath, "XML")}
               >
-                <Ic name="eye" />Deschide
+                <Ic name="eye" />{t("detail.actions.open")}
               </button>
             </div>
             {inv.pdfPath && (
               <div className="pay-row">
                 <div className="act-ic" style={{ width: 28, height: 28 }}><Ic name="docText" /></div>
                 <div style={{ minWidth: 0 }}>
-                  <div className="p1">PDF factură</div>
+                  <div className="p1">{t("detail.files.pdf")}</div>
                   <div
                     className="p2 num"
                     style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
@@ -453,7 +451,7 @@ export function ReceivedDetailPage() {
                   style={{ marginLeft: "auto" }}
                   onClick={() => void openFile(inv.pdfPath, "PDF")}
                 >
-                  <Ic name="eye" />Deschide
+                  <Ic name="eye" />{t("detail.actions.open")}
                 </button>
               </div>
             )}
@@ -464,14 +462,14 @@ export function ReceivedDetailPage() {
           {/* furnizor */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
-              <div className="tt">Furnizor</div>
+              <div className="tt">{t("detail.supplier.title")}</div>
               <div className="spacer" />
               <a
                 className="see-all"
                 style={{ height: "auto", padding: 0, cursor: "pointer" }}
                 onClick={() => void navigate({ to: "/contacts" })}
               >
-                Vezi contacte<Ic name="chevR" />
+                {t("detail.supplier.viewContacts")}<Ic name="chevR" />
               </a>
             </div>
             <div className="card-pad">
@@ -481,26 +479,26 @@ export function ReceivedDetailPage() {
               </div>
               <dl className="kv" style={{ gridTemplateColumns: "110px 1fr", fontSize: 12.5 }}>
                 <dt>CUI</dt><dd className="num">{inv.issuerCui}</dd>
-                <dt>Tip relație</dt><dd>Furnizor · factură primită prin SPV</dd>
+                <dt>{t("detail.supplier.relType")}</dt><dd>{t("detail.supplier.relValue")}</dd>
               </dl>
             </div>
           </div>
 
           {/* detalii document */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
-            <div className="scr-toolbar"><div className="tt">Detalii document</div></div>
+            <div className="scr-toolbar"><div className="tt">{t("detail.docDetails.title")}</div></div>
             <div className="card-pad">
               <dl className="kv" style={{ gridTemplateColumns: "110px 1fr", fontSize: 12.5 }}>
-                <dt>Nr. document</dt><dd className="num">{docNo}</dd>
-                <dt>Dată emitere</dt><dd>{fmtRoDate(inv.issueDate)}</dd>
-                <dt>Monedă</dt><dd className="num">{inv.currency}</dd>
+                <dt>{t("detail.docDetails.docNo")}</dt><dd className="num">{docNo}</dd>
+                <dt>{t("detail.docDetails.issueDate")}</dt><dd>{fmtRoDate(inv.issueDate)}</dd>
+                <dt>{t("detail.details.currency")}</dt><dd className="num">{inv.currency}</dd>
                 {inv.exchangeRate != null && (
-                  <><dt>Curs valutar</dt><dd className="num">{inv.exchangeRate}</dd></>
+                  <><dt>{t("detail.details.fxRate")}</dt><dd className="num">{inv.exchangeRate}</dd></>
                 )}
-                <dt>Index ANAF</dt><dd className="num">{inv.anafIndex || "—"}</dd>
-                <dt>ID descărcare</dt><dd className="num">{inv.anafDownloadId}</dd>
-                <dt>Descărcat la</dt><dd className="num">{fmtRoDateTime(inv.downloadedAt)}</dd>
-                <dt>Creat la</dt><dd className="num">{fmtRoDateTime(inv.createdAt)}</dd>
+                <dt>{t("detail.docDetails.anafIndex")}</dt><dd className="num">{inv.anafIndex || "—"}</dd>
+                <dt>{t("detail.docDetails.downloadId")}</dt><dd className="num">{inv.anafDownloadId}</dd>
+                <dt>{t("detail.docDetails.downloadedAt")}</dt><dd className="num">{fmtRoDateTime(inv.downloadedAt)}</dd>
+                <dt>{t("detail.docDetails.createdAt")}</dt><dd className="num">{fmtRoDateTime(inv.createdAt)}</dd>
               </dl>
             </div>
           </div>
@@ -531,6 +529,7 @@ function SupplierPaymentsCard({
   companyId: string;
   currency: string;
 }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const today = new Date().toISOString().slice(0, 10);
   const [amount, setAmount] = useState("");
@@ -567,23 +566,23 @@ function SupplierPaymentsCard({
       setAmount("");
       setExchangeRate("");
       invalidate();
-      notify.success("Plată furnizor înregistrată.");
+      notify.success(t("detail.notify.supplierPaymentAdded"));
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut înregistra plata.")),
+    onError: (e) => notify.error(formatError(e, t("detail.notify.paymentAddError"))),
   });
 
   const { mutate: removePayment, isPending: isRemoving } = useMutation({
     mutationFn: (paymentId: string) => api.receivedPayments.delete(paymentId, companyId),
     onSuccess: invalidate,
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge plata.")),
+    onError: (e) => notify.error(formatError(e, t("detail.notify.paymentDeleteError"))),
   });
 
   const payStatus = summary?.paymentStatus ?? "UNPAID";
   const payChip = payStatus === "PAID"
-    ? { cls: "paid", icon: "check", label: "Plătită integral" }
+    ? { cls: "paid", icon: "check", label: t("detail.pay.paidFull") }
     : payStatus === "PARTIAL"
-      ? { cls: "wait", icon: "clock", label: "Parțial plătită" }
-      : { cls: "sent", icon: "dot", label: "Neplătită" };
+      ? { cls: "wait", icon: "clock", label: t("detail.pay.paidPartial") }
+      : { cls: "sent", icon: "dot", label: t("detail.pay.unpaid") };
   const payments = summary?.payments ?? [];
   const total = parseDec(summary?.totalAmount ?? "0");
   const paid = parseDec(summary?.paidAmount ?? "0");
@@ -592,37 +591,36 @@ function SupplierPaymentsCard({
   return (
     <div className="scr-card">
       <div className="scr-toolbar">
-        <div className="tt">Plăți furnizor</div>
+        <div className="tt">{t("detail.supplierPayments.title")}</div>
         <div className="spacer" />
         <span className={`chip ${payChip.cls}`}><Ic name={payChip.icon} cls="sic" />{payChip.label}</span>
       </div>
       <div className="card-pad" style={{ paddingBottom: 10, fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
-        Pentru achiziții cu «TVA la încasare», dreptul de deducere se exercită la{" "}
-        <b>data plății</b> — plățile de aici deduc TVA în perioada plății (D300) și transferă
-        4428 → 4426 în contabilitate.
+        {t("detail.supplierPayments.body1")}{" "}
+        <b>{t("detail.supplierPayments.bodyEm")}</b> {t("detail.supplierPayments.body2")}
       </div>
       {isLoading ? (
         <div style={{ padding: "22px 14px", textAlign: "center", fontSize: 12.5, color: "var(--text-2)" }}>
-          Se încarcă…
+          {t("detail.loading")}
         </div>
       ) : (
         <>
           {payments.length === 0 ? (
             <div style={{ padding: "22px 14px", textAlign: "center", fontSize: 12.5, color: "var(--text-2)" }}>
-              Nicio plată înregistrată.
+              {t("detail.payments.empty")}
             </div>
           ) : (
             payments.map((p) => (
               <div className="pay-row" key={p.id}>
                 <div className="act-ic" style={{ width: 28, height: 28 }}><Ic name="card" /></div>
                 <div>
-                  <div className="p1">{METHOD_LABELS[p.method] ?? p.method}</div>
+                  <div className="p1">{METHOD_KEYS[p.method] ? t(METHOD_KEYS[p.method]) : p.method}</div>
                   <div className="p2 num">{fmtRoDate(p.paidAt)}</div>
                 </div>
                 <span className="amt num">{fmtRON(p.amount)}</span>
                 <button
                   className="mini-btn"
-                  title="Șterge plata"
+                  title={t("detail.payments.deleteTitle")}
                   disabled={isRemoving}
                   onClick={() => removePayment(p.id)}
                 >
@@ -633,15 +631,15 @@ function SupplierPaymentsCard({
           )}
           <div className="sold-line">
             <span>
-              Plătit <span className="num">{fmtRON(summary?.paidAmount ?? "0")}</span> din{" "}
+              {t("detail.supplierPayments.paid")} <span className="num">{fmtRON(summary?.paidAmount ?? "0")}</span> {t("detail.supplierPayments.of")}{" "}
               <span className="num">{fmtRON(summary?.totalAmount ?? "0")}</span>
             </span>
-            <b className="num">Rest {fmtRON(remaining)} {currency}</b>
+            <b className="num">{t("detail.supplierPayments.rest")} {fmtRON(remaining)} {currency}</b>
           </div>
           <div className="card-pad" style={{ borderTop: "1px solid var(--line)" }}>
             <div className="fgrid">
               <div className="field">
-                <label>Sumă (RON) <span className="req">*</span></label>
+                <label>{t("detail.supplierPayments.amountLabel")} <span className="req">*</span></label>
                 <input
                   className="input num"
                   type="text"
@@ -653,7 +651,7 @@ function SupplierPaymentsCard({
                 />
               </div>
               <div className="field">
-                <label>Data plății</label>
+                <label>{t("detail.supplierPayments.dateLabel")}</label>
                 <input
                   className="input num"
                   type="date"
@@ -662,22 +660,22 @@ function SupplierPaymentsCard({
                 />
               </div>
               <div className="field">
-                <label>Metodă</label>
+                <label>{t("detail.supplierPayments.methodLabel")}</label>
                 <select className="select" value={method} onChange={(e) => setMethod(e.target.value)}>
-                  {Object.entries(METHOD_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>{l}</option>
+                  {Object.entries(METHOD_KEYS).map(([v, k]) => (
+                    <option key={v} value={v}>{t(k)}</option>
                   ))}
                 </select>
               </div>
               {currency !== "RON" && (
                 <div className="field">
-                  <label>Curs BNR la plată</label>
+                  <label>{t("detail.supplierPayments.fxLabel")}</label>
                   <input
                     className="input num"
                     type="number"
                     step="0.0001"
                     min="0"
-                    placeholder="ex. 4.9750"
+                    placeholder={t("detail.payModal.fxPlaceholder")}
                     value={exchangeRate}
                     onChange={(e) => setExchangeRate(e.target.value)}
                     style={{ textAlign: "right" }}
@@ -690,7 +688,7 @@ function SupplierPaymentsCard({
                   disabled={isAdding || !amount.trim()}
                   onClick={() => addPayment()}
                 >
-                  <Ic name="plus" />{isAdding ? "Se salvează…" : "Adaugă plată"}
+                  <Ic name="plus" />{isAdding ? t("detail.payModal.saving") : t("detail.supplierPayments.add")}
                 </button>
               </div>
             </div>

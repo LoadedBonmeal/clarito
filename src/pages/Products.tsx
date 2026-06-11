@@ -18,6 +18,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm } from "@tauri-apps/plugin-dialog";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -59,37 +61,22 @@ const SVG_TRASH = '<path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.
 
 // Art. 331 product categories (codPR) — Parameters_v7._listaCodPR
 // Shown only when vatCategory="AE". For tip_partener=1 (default use-case).
-const ART331_CODES: { value: string; label: string }[] = [
-  { value: "22", label: "22 — Deșeuri feroase/neferoase" },
-  { value: "23", label: "23 — Masă lemnoasă și materiale lemnoase" },
-  { value: "24", label: "24 — Certificate CO₂/gaze cu efect de seră" },
-  { value: "25", label: "25 — Energie electrică" },
-  { value: "26", label: "26 — Certificate verzi" },
-  { value: "27", label: "27 — Construcții/terenuri" },
-  { value: "28", label: "28 — Aur de investiții" },
-  { value: "29", label: "29 — Telefoane mobile" },
-  { value: "30", label: "30 — Microprocesoare (circuite integrate)" },
-  { value: "31", label: "31 — Console/tablete/laptopuri" },
-  { value: "36", label: "36 — Gaze naturale" },
-  { value: "1001", label: "1001 — Grâu comun/alac" },
-  { value: "1002", label: "1002 — Secară" },
-  { value: "1003", label: "1003 — Orz" },
-  { value: "1004", label: "1004 — Ovăz" },
-  { value: "1005", label: "1005 — Porumb" },
-  { value: "1201", label: "1201 — Soia" },
-  { value: "1205", label: "1205 — Rapiță" },
-  { value: "120600", label: "120600 — Floarea-soarelui" },
-  { value: "121291", label: "121291 — Sfeclă de zahăr" },
-  { value: "10086000", label: "10086000 — Orez" },
-  { value: "120400", label: "120400 — Semințe de in" },
-];
+// Category names live in the locale files under products.art331Codes.<code>.
+const ART331_VALUES = [
+  "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "36",
+  "1001", "1002", "1003", "1004", "1005", "1201", "1205",
+  "120600", "121291", "10086000", "120400",
+] as const;
 
-const art331Label = (code: string) =>
-  ART331_CODES.find((c) => c.value === code)?.label ?? code;
+const art331Label = (t: TFunction, code: string) =>
+  (ART331_VALUES as readonly string[]).includes(code)
+    ? `${code} — ${t(`products.art331Codes.${code}`)}`
+    : code;
 
 // ─── ProductsPage ─────────────────────────────────────────────────────────────
 
 export function ProductsPage() {
+  const { t, i18n } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const queryClient = useQueryClient();
 
@@ -160,22 +147,22 @@ export function ProductsPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => {
       if (!activeCompanyId)
-        return Promise.reject(new Error("Nicio companie activă."));
+        return Promise.reject(new Error(t("products.notify.noActiveCompany")));
       return api.products.delete(id, activeCompanyId);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
-      notify.success("Articol șters.");
+      notify.success(t("products.notify.deleted"));
     },
     onError: (e) =>
-      notify.error(formatError(e, "Nu s-a putut șterge articolul.")),
+      notify.error(formatError(e, t("products.notify.deleteError"))),
   });
 
   const handleDelete = async (p: Product) => {
     if (!activeCompanyId) return;
     const ok = await confirm(
-      `Șterge articolul "${p.name}"? Această acțiune nu poate fi anulată.`,
-      { title: "Confirmare ștergere", kind: "warning" },
+      t("products.confirm.delete", { name: p.name }),
+      { title: t("products.confirm.deleteTitle"), kind: "warning" },
     );
     if (!ok) return;
     deleteMutation.mutate(p.id);
@@ -184,9 +171,9 @@ export function ProductsPage() {
   if (!activeCompanyId) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Articole</h1></div></div>
+        <div className="page-head"><div><h1>{t("products.title")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a vedea catalogul de articole.
+          {t("products.selectCompany")}
         </div>
       </div>
     );
@@ -197,21 +184,21 @@ export function ProductsPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Articole</h1>
+          <h1>{t("products.title")}</h1>
           <p className="sub">
             {list.length !== allProducts.length
-              ? `${list.length} din ${allProducts.length.toLocaleString("ro-RO")} articole`
-              : `${allProducts.length.toLocaleString("ro-RO")} articole`}
-            {" · evaluare stoc FIFO/CMP per articol"}
+              ? t("products.countFiltered", { shown: list.length, total: allProducts.length.toLocaleString(i18n.language) })
+              : t("products.count", { count: allProducts.length })}
+            {` · ${t("products.subValuation")}`}
             {activeCompany ? ` · ${activeCompany.legalName}` : ""}
           </p>
         </div>
         <div className="head-actions">
-          <button className="sq-btn spin-btn" title="Reîmprospătează" onClick={() => void refetch()}>
+          <button className="sq-btn spin-btn" title={t("products.refresh")} onClick={() => void refetch()}>
             <Ic name="sync" />
           </button>
           <button className="btn-dark" onClick={() => setModal("create")}>
-            <Ic name="plus" />Articol nou
+            <Ic name="plus" />{t("products.newProduct")}
           </button>
         </div>
       </div>
@@ -222,12 +209,10 @@ export function ProductsPage() {
           <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_WARN }} />
           <span>
             <b>
-              Stoc negativ: {negativeStock.slice(0, 3).map((p) => `${p.name} (${fmtQty(p.stockQty)} ${p.unit})`).join(", ")}
-              {negativeStock.length > 3 ? ` și încă ${negativeStock.length - 3}` : ""}.
+              {t("products.banner.negativeStock", { items: negativeStock.slice(0, 3).map((p) => `${p.name} (${fmtQty(p.stockQty)} ${p.unit})`).join(", ") })}
+              {negativeStock.length > 3 ? ` ${t("products.banner.andMore", { n: negativeStock.length - 3 })}` : ""}.
             </b>{" "}
-            Ieșirile depășesc intrările înregistrate — la metoda FIFO descărcarea de gestiune nu se
-            poate calcula pe stoc negativ. Înregistrați recepția lipsă din Gestiune, apoi reluați
-            descărcarea.
+            {t("products.banner.negativeStockBody")}
           </span>
         </div>
       )}
@@ -240,13 +225,13 @@ export function ProductsPage() {
               className={`tab${filter === "all" ? " active" : ""}`}
               onClick={() => setFilter("all")}
             >
-              Toate<span className="cnt num">{allProducts.length}</span>
+              {t("products.tabs.all")}<span className="cnt num">{allProducts.length}</span>
             </div>
             <div
               className={`tab${filter === "active" ? " active" : ""}`}
               onClick={() => setFilter("active")}
             >
-              Active<span className="cnt num">{activeCount}</span>
+              {t("products.tabs.active")}<span className="cnt num">{activeCount}</span>
             </div>
           </div>
           <div className="spacer" />
@@ -254,7 +239,7 @@ export function ProductsPage() {
             <Ic name="lens" />
             <input
               type="text"
-              placeholder="Caută articol sau cod…"
+              placeholder={t("products.searchPlaceholder")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -263,30 +248,30 @@ export function ProductsPage() {
 
         {/* table */}
         {isLoading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("products.loading")}</div>
         ) : isError ? (
           <div style={{ padding: 16 }}>
-            <QueryErrorBanner error={error} label="articolele" onRetry={() => void refetch()} />
+            <QueryErrorBanner error={error} label={t("products.errorLabel")} onRetry={() => void refetch()} />
           </div>
         ) : list.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
             {allProducts.length === 0
-              ? "Niciun articol. Adăugați produse sau servicii cu butonul „Articol nou” — vor apărea ca linii de factură."
-              : "Niciun rezultat pentru filtrele aplicate."}
+              ? t("products.emptyNone")
+              : t("products.emptyFiltered")}
           </div>
         ) : (
           <>
             <table className="scr-table">
               <thead>
                 <tr>
-                  <th>Denumire</th>
-                  <th>Cod</th>
-                  <th>UM</th>
-                  <th className="r">Preț unitar</th>
-                  <th className="r">TVA %</th>
-                  <th>Metodă</th>
-                  <th>Cont stoc</th>
-                  <th className="r">Stoc</th>
+                  <th>{t("products.table.name")}</th>
+                  <th>{t("products.table.code")}</th>
+                  <th>{t("products.table.unit")}</th>
+                  <th className="r">{t("products.table.unitPrice")}</th>
+                  <th className="r">{t("products.table.vat")}</th>
+                  <th>{t("products.table.method")}</th>
+                  <th>{t("products.table.stockAccount")}</th>
+                  <th className="r">{t("products.table.stock")}</th>
                   <th className="r" style={{ width: 92 }}></th>
                 </tr>
               </thead>
@@ -309,11 +294,11 @@ export function ProductsPage() {
                           {p.vatCategory === "AE" && (
                             <span className="chip wait" style={{ marginLeft: 6 }}>
                               <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_REVERSE }} />
-                              art. 331 · {art331Label(p.art331Code || "22")}
+                              {t("products.chips.art331")} · {art331Label(t, p.art331Code || "22")}
                             </span>
                           )}
                           {!p.active && (
-                            <span className="chip sent" style={{ marginLeft: 6 }}>Inactiv</span>
+                            <span className="chip sent" style={{ marginLeft: 6 }}>{t("products.chips.inactive")}</span>
                           )}
                         </div>
                       </td>
@@ -347,21 +332,21 @@ export function ProductsPage() {
                         <div className="row-acts">
                           <button
                             className="mini-btn"
-                            title="Editează"
+                            title={t("products.actions.edit")}
                             onClick={() => setModal({ edit: p })}
                           >
                             <Ic name="pen" />
                           </button>
                           <button
                             className="mini-btn"
-                            title="Gestiune (fișa de magazie)"
+                            title={t("products.actions.stockCard")}
                             onClick={() => setSelectedId(p.id)}
                           >
                             <Ic name="cube" />
                           </button>
                           <button
                             className="mini-btn"
-                            title="Șterge"
+                            title={t("products.actions.delete")}
                             onClick={() => void handleDelete(p)}
                           >
                             <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_TRASH }} />
@@ -377,14 +362,14 @@ export function ProductsPage() {
             {/* pager */}
             <div className="pager">
               <span>
-                Afișezi <b>{((page - 1) * PAGE_SIZE + 1).toLocaleString("ro-RO")}–{Math.min(page * PAGE_SIZE, list.length).toLocaleString("ro-RO")}</b> din <b>{list.length.toLocaleString("ro-RO")}</b> articole
+                {t("products.pager.showing")} <b>{((page - 1) * PAGE_SIZE + 1).toLocaleString(i18n.language)}–{Math.min(page * PAGE_SIZE, list.length).toLocaleString(i18n.language)}</b> {t("products.pager.of")} <b>{list.length.toLocaleString(i18n.language)}</b> {t("products.pager.items")}
               </span>
               <div className="pg-btns">
                 <button
                   className="pg-btn"
                   disabled={page <= 1}
                   onClick={() => setPageRaw(page - 1)}
-                  aria-label="Pagina anterioară"
+                  aria-label={t("products.pager.prev")}
                 >
                   <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_CHEV_L }} />
                 </button>
@@ -401,7 +386,7 @@ export function ProductsPage() {
                   className="pg-btn"
                   disabled={page >= totalPages}
                   onClick={() => setPageRaw(page + 1)}
-                  aria-label="Pagina următoare"
+                  aria-label={t("products.pager.next")}
                 >
                   <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_CHEV_R }} />
                 </button>
@@ -435,6 +420,7 @@ export function ProductsPage() {
 // ─── Fișa de magazie (gestiune: recepție / descărcare / ledger) ───────────────
 
 function FisaMagazieCard({ companyId, product }: { companyId: string; product: Product }) {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [tab, setTab] = useState<"in" | "out">("in");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -453,16 +439,16 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
     mutationFn: (m: string) =>
       api.stockValuation.setValuation(companyId, product.id, m, stockAcct.trim() || "371"),
     onSuccess: () => {
-      notify.success("Metodă de evaluare actualizată — stocul a fost reevaluat.");
+      notify.success(t("products.notify.valuationUpdated"));
       void refetch();
       void qc.invalidateQueries({ queryKey: queryKeys.products.all });
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut schimba metoda de evaluare.")),
+    onError: (e) => notify.error(formatError(e, t("products.notify.valuationError"))),
   });
 
   const mut = useMutation({
     mutationFn: () => {
-      if (!/^\d+(\.\d+)?$/.test(qty.trim())) throw new Error("Cantitate invalidă.");
+      if (!/^\d+(\.\d+)?$/.test(qty.trim())) throw new Error(t("products.ledger.qtyInvalid"));
       const input = {
         companyId, productId: product.id, entryDate: date, qty: qty.trim(),
         unitCost: tab === "in" ? (cost.trim() || "0") : undefined,
@@ -471,13 +457,13 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
       return tab === "in" ? api.stockValuation.recordReceipt(input) : api.stockValuation.recordIssue(input);
     },
     onSuccess: (warning) => {
-      notify.success(tab === "in" ? "Recepție înregistrată." : "Descărcare gestiune înregistrată.");
+      notify.success(tab === "in" ? t("products.notify.receiptRecorded") : t("products.notify.issueRecorded"));
       if (warning) notify.warn(warning);
       setQty(""); setCost(""); setDocRef("");
       void refetch();
       void qc.invalidateQueries({ queryKey: queryKeys.products.all });
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la mișcarea de stoc.")),
+    onError: (e) => notify.error(formatError(e, t("products.notify.movementError"))),
   });
 
   const inputStyle: React.CSSProperties = { height: 32, fontSize: 12.5 };
@@ -485,8 +471,8 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
   return (
     <div className="scr-card">
       <div className="scr-toolbar">
-        <div className="tt">Fișa de magazie (gestiune) — {product.name}</div>
-        <span className="chip sent">{method} · cont stoc {stockAcct.trim() || "371"}</span>
+        <div className="tt">{t("products.ledger.title", { name: product.name })}</div>
+        <span className="chip sent">{t("products.ledger.chip", { method, account: stockAcct.trim() || "371" })}</span>
         <div className="spacer" />
         <select
           className="select num"
@@ -494,9 +480,9 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
           value={method}
           onChange={(e) => { setMethod(e.target.value); valMut.mutate(e.target.value); }}
           disabled={valMut.isPending}
-          title="Metodă de evaluare (OMFP 1802/2014)"
+          title={t("products.ledger.methodTitle")}
         >
-          <option value="CMP">CMP (cost mediu)</option>
+          <option value="CMP">{t("products.ledger.methodCmp")}</option>
           <option value="FIFO">FIFO</option>
         </select>
         <input
@@ -506,11 +492,11 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
           onChange={(e) => setStockAcct(e.target.value)}
           onBlur={() => valMut.mutate(method)}
           placeholder="371"
-          title="Cont stoc (371/301/345…)"
+          title={t("products.ledger.stockAcctTitle")}
         />
         {/* propunere — neimplementat: export fișa de magazie */}
-        <button className="pill-btn" onClick={() => notify.info("În curând.")}>
-          <Ic name="dl" />Export
+        <button className="pill-btn" onClick={() => notify.info(t("products.notify.comingSoon"))}>
+          <Ic name="dl" />{t("products.ledger.export")}
         </button>
       </div>
 
@@ -523,29 +509,29 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
       >
         <div className="tabs">
           <div className={`tab${tab === "in" ? " active" : ""}`} onClick={() => setTab("in")}>
-            Recepție (intrare)
+            {t("products.ledger.tabIn")}
           </div>
           <div className={`tab${tab === "out" ? " active" : ""}`} onClick={() => setTab("out")}>
-            Descărcare (ieșire)
+            {t("products.ledger.tabOut")}
           </div>
         </div>
         <div className="field" style={{ width: 140 }}>
-          <label>Data</label>
+          <label>{t("products.ledger.date")}</label>
           <input className="input num" style={inputStyle} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </div>
         <div className="field" style={{ width: 100 }}>
-          <label>Cantitate</label>
+          <label>{t("products.ledger.qty")}</label>
           <input className="input num" style={inputStyle} inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="10" />
         </div>
         {tab === "in" && (
           <div className="field" style={{ width: 120 }}>
-            <label>Cost unitar (lei)</label>
+            <label>{t("products.ledger.unitCost")}</label>
             <input className="input num" style={inputStyle} inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="5.00" />
           </div>
         )}
         <div className="field" style={{ width: 130 }}>
-          <label>Document</label>
-          <input className="input" style={inputStyle} value={docRef} onChange={(e) => setDocRef(e.target.value)} placeholder={tab === "in" ? "NIR 123" : "BC 45"} />
+          <label>{t("products.ledger.doc")}</label>
+          <input className="input" style={inputStyle} value={docRef} onChange={(e) => setDocRef(e.target.value)} placeholder={tab === "in" ? t("products.ledger.docPlaceholderIn") : t("products.ledger.docPlaceholderOut")} />
         </div>
         <button
           className="btn-dark"
@@ -553,12 +539,10 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
           disabled={mut.isPending}
           onClick={() => mut.mutate()}
         >
-          <Ic name="check" />{mut.isPending ? "Se salvează…" : "Înregistrează"}
+          <Ic name="check" />{mut.isPending ? t("products.ledger.saving") : t("products.ledger.record")}
         </button>
         <span style={{ flexBasis: "100%", fontSize: 11.5, color: "var(--dim)", lineHeight: 1.45 }}>
-          Evaluare stoc OMFP 1802/2014 (FIFO/CMP). Recepția intră la cost; descărcarea e evaluată
-          automat. Nota contabilă (D 371 / C 607 la intrare — reclasă din cheltuiala facturii;
-          D 345 / C 711 la producție; D 6xx / C 371 la ieșire) se postează în jurnal.
+          {t("products.ledger.note")}
         </span>
       </div>
 
@@ -566,20 +550,20 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
       <table className="scr-table">
         <thead>
           <tr>
-            <th>Data</th>
-            <th>Tip</th>
-            <th className="r">Cant.</th>
-            <th className="r">Cost unit.</th>
-            <th className="r">Valoare</th>
-            <th className="r">Sold cant.</th>
-            <th className="r">Sold valoare</th>
+            <th>{t("products.ledger.date")}</th>
+            <th>{t("products.ledger.colType")}</th>
+            <th className="r">{t("products.ledger.colQty")}</th>
+            <th className="r">{t("products.ledger.colUnitCost")}</th>
+            <th className="r">{t("products.ledger.colValue")}</th>
+            <th className="r">{t("products.ledger.colRunQty")}</th>
+            <th className="r">{t("products.ledger.colRunValue")}</th>
           </tr>
         </thead>
         <tbody>
           {ledger.length === 0 ? (
             <tr>
               <td colSpan={7} style={{ textAlign: "center", color: "var(--text-2)", padding: "24px 16px" }}>
-                Nicio mișcare de stoc pentru acest articol.
+                {t("products.ledger.empty")}
               </td>
             </tr>
           ) : (
@@ -590,7 +574,7 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
                 <tr key={r.id}>
                   <td className="num">{fmtRoDate(r.entryDate)}</td>
                   <td>
-                    {isIn ? "Recepție" : "Ieșire"}
+                    {isIn ? t("products.ledger.rowIn") : t("products.ledger.rowOut")}
                     {r.docRef ? <> · <span className="doc">{r.docRef}</span></> : null}
                   </td>
                   <td className={`r num ${isIn ? "pos" : "neg"}`}>
@@ -626,6 +610,7 @@ function ProductModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const isEdit = product !== null;
 
   const [form, setForm] = useState<ProductInput>({
@@ -644,20 +629,20 @@ function ProductModal({
   const create = useMutation({
     mutationFn: (input: ProductInput) => api.products.create(companyId, input),
     onSuccess: () => {
-      notify.success("Articol adăugat.");
+      notify.success(t("products.notify.added"));
       onSaved();
     },
-    onError: (e) => setError(formatError(e, "Eroare la adăugare.")),
+    onError: (e) => setError(formatError(e, t("products.modal.addError"))),
   });
 
   const updateMut = useMutation({
     mutationFn: (input: UpdateProductInput) =>
       api.products.update(product!.id, companyId, input),
     onSuccess: () => {
-      notify.success("Articol salvat.");
+      notify.success(t("products.notify.saved"));
       onSaved();
     },
-    onError: (e) => setError(formatError(e, "Eroare la salvare.")),
+    onError: (e) => setError(formatError(e, t("products.modal.saveError"))),
   });
 
   const isPending = create.isPending || updateMut.isPending;
@@ -674,7 +659,7 @@ function ProductModal({
     if (isPending) return;
     setError(null);
     if (!form.name?.trim()) {
-      setError("Denumirea este obligatorie.");
+      setError(t("products.modal.nameRequired"));
       return;
     }
     const input: ProductInput = {
@@ -705,12 +690,10 @@ function ProductModal({
       <div className="modal">
         <div className="modal-head">
           <div>
-            <div className="mt">{isEdit ? `Editează: ${product.name}` : "Articol nou"}</div>
-            <div className="ms">
-              Articolele apar ca linii de factură; stocul se gestionează din fișa de magazie.
-            </div>
+            <div className="mt">{isEdit ? t("products.modal.editTitle", { name: product.name }) : t("products.newProduct")}</div>
+            <div className="ms">{t("products.modal.subtitle")}</div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label="Închide">
+          <button className="modal-x" onClick={onClose} aria-label={t("products.modal.close")}>
             <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="M6 18 18 6M6 6l12 12"/>' }} />
           </button>
         </div>
@@ -718,10 +701,10 @@ function ProductModal({
           <div className="modal-body">
             <div className="fgrid">
               <div className="field span2">
-                <label>Denumire <span className="req">*</span></label>
+                <label>{t("products.modal.name")} <span className="req">*</span></label>
                 <input
                   className={`input${error && !form.name?.trim() ? " invalid" : ""}`}
-                  placeholder="ex. Servicii consultanță"
+                  placeholder={t("products.modal.namePlaceholder")}
                   autoFocus
                   {...field("name")}
                 />
@@ -733,15 +716,15 @@ function ProductModal({
                 )}
               </div>
               <div className="field">
-                <label>Cod articol</label>
-                <input className="input num" placeholder="ex. SVC-001" {...field("code")} />
+                <label>{t("products.modal.code")}</label>
+                <input className="input num" placeholder={t("products.modal.codePlaceholder")} {...field("code")} />
               </div>
               <div className="field">
-                <label>UM</label>
-                <input className="input" placeholder="buc / oră / kg…" {...field("unit")} />
+                <label>{t("products.modal.unit")}</label>
+                <input className="input" placeholder={t("products.modal.unitPlaceholder")} {...field("unit")} />
               </div>
               <div className="field">
-                <label>Preț unitar (fără TVA)</label>
+                <label>{t("products.modal.price")}</label>
                 <input
                   className="input num"
                   type="number"
@@ -752,7 +735,7 @@ function ProductModal({
                 />
               </div>
               <div className="field">
-                <label>Cotă TVA %</label>
+                <label>{t("products.modal.vatRate")}</label>
                 <select className="select num" {...field("vatRate")}>
                   {VAT_RATES.map((r) => (
                     <option key={r} value={String(r)}>{r}%</option>
@@ -760,7 +743,7 @@ function ProductModal({
                 </select>
               </div>
               <div className="field">
-                <label>Categorie TVA</label>
+                <label>{t("products.modal.vatCategory")}</label>
                 <select className="select" {...field("vatCategory")}>
                   {VAT_CATEGORIES.map((cat) => (
                     <option key={cat} value={cat}>
@@ -770,7 +753,7 @@ function ProductModal({
                 </select>
               </div>
               <div className="field">
-                <label>Stoc (cantitate)</label>
+                <label>{t("products.modal.stockQty")}</label>
                 <input
                   className="input num"
                   type="number"
@@ -779,11 +762,11 @@ function ProductModal({
                   placeholder="—"
                   {...field("stockQty")}
                 />
-                <span className="hint">gol = articol fără gestiune (serviciu)</span>
+                <span className="hint">{t("products.modal.stockHint")}</span>
               </div>
               {form.vatCategory === "AE" && (
                 <div className="field span2">
-                  <label>Cod art. 331 (taxare inversă — D394 codPR)</label>
+                  <label>{t("products.modal.art331")}</label>
                   <select
                     className="select"
                     value={(form.art331Code as string) ?? ""}
@@ -791,9 +774,9 @@ function ProductModal({
                       setForm((f) => ({ ...f, art331Code: e.target.value || undefined }))
                     }
                   >
-                    <option value="">— implicit 22 (Deșeuri feroase/neferoase) —</option>
-                    {ART331_CODES.map((c) => (
-                      <option key={c.value} value={c.value}>{c.label}</option>
+                    <option value="">{t("products.modal.art331Default", { label: t("products.art331Codes.22") })}</option>
+                    {ART331_VALUES.map((v) => (
+                      <option key={v} value={v}>{art331Label(t, v)}</option>
                     ))}
                   </select>
                 </div>
@@ -806,9 +789,9 @@ function ProductModal({
                   type="button"
                   className={`cbx${form.active ? " on" : ""}`}
                   onClick={() => setForm((f) => ({ ...f, active: !f.active }))}
-                  aria-label="Articol activ"
+                  aria-label={t("products.modal.active")}
                 />
-                Articol activ
+                {t("products.modal.active")}
               </label>
             </div>
             {error && form.name?.trim() && (
@@ -820,11 +803,11 @@ function ProductModal({
           </div>
           <div className="modal-foot">
             <button type="button" className="pill-btn" onClick={onClose} disabled={isPending}>
-              Anulează
+              {t("products.modal.cancel")}
             </button>
             <button type="submit" className="btn-dark" disabled={isPending}>
               <Ic name="check" />
-              {isPending ? "Se salvează…" : isEdit ? "Salvează" : "Adaugă"}
+              {isPending ? t("products.modal.saving") : isEdit ? t("products.modal.save") : t("products.modal.add")}
             </button>
           </div>
         </form>

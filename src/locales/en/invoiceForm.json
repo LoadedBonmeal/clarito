@@ -56,6 +56,7 @@
       "ublCode": "UBL payment code",
       "reference": "Reference",
       "referencePlaceholder": "Pay within 30 days of the issue date",
+      "ratePlaceholder": "0.0000",
       "notes": "Notes · clauses · references",
       "optional": "optional"
     },
@@ -100,6 +101,8 @@
       "buyerHintEdit": "select a customer to save the invoice",
       "seriesOk": "Series and number compliant",
       "seriesMissing": "Missing series",
+      "dueOk": "Due date after the issue date",
+      "dueBad": "Due date precedes the issue date",
       "uniqueId": "unique identifier {{number}}",
       "serverError": "validation error",
       "serverWarning": "warning",

@@ -18,6 +18,7 @@ import { useState, useEffect, useRef, useId } from "react";
 import type { ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { ContactCombobox } from "@/components/shared/ContactCombobox";
@@ -98,6 +99,7 @@ function Vld({ kind, title, sub }: { kind: "ok" | "bad" | "warn"; title: ReactNo
 }
 
 export function InvoiceNewPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
 
@@ -153,9 +155,9 @@ export function InvoiceNewPage() {
     try {
       const rate = await api.bnr.fetchRate(currency, issueDate);
       setExchangeRate(String(rate));
-      notify.success(`Curs BNR preluat: ${rate}`);
+      notify.success(t("invoiceForm.notify.bnrFetched", { rate }));
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut prelua cursul BNR."));
+      notify.error(formatError(err, t("invoiceForm.errors.bnrFetch")));
     } finally {
       setBnrLoading(false);
     }
@@ -210,30 +212,30 @@ export function InvoiceNewPage() {
 
   const saveDraftMutation = useMutation({
     mutationFn: () => {
-      if (!activeCompanyId) throw new Error("Nicio companie activă.");
-      if (!selectedContact) throw new Error("Selectați un client.");
-      if (lines.length === 0) throw new Error("Adăugați cel puțin o linie.");
+      if (!activeCompanyId) throw new Error(t("invoiceForm.errors.noActiveCompany"));
+      if (!selectedContact) throw new Error(t("invoiceForm.errors.selectClient"));
+      if (lines.length === 0) throw new Error(t("invoiceForm.errors.addLine"));
       const lineErrors: string[] = [];
       lines.forEach((line, i) => {
-        if (!line.name?.trim()) lineErrors.push(`Linia ${i + 1}: denumirea este obligatorie`);
-        if ((line.quantity ?? 0) <= 0) lineErrors.push(`Linia ${i + 1}: cantitatea trebuie > 0`);
-        if ((line.unitPrice ?? 0) < 0) lineErrors.push(`Linia ${i + 1}: prețul nu poate fi negativ`);
+        if (!line.name?.trim()) lineErrors.push(t("invoiceForm.errors.lineName", { n: i + 1 }));
+        if ((line.quantity ?? 0) <= 0) lineErrors.push(t("invoiceForm.errors.lineQty", { n: i + 1 }));
+        if ((line.unitPrice ?? 0) < 0) lineErrors.push(t("invoiceForm.errors.linePrice", { n: i + 1 }));
         if (![0, 5, 9, 11, 19, 21].includes(line.vatRate ?? 21))
-          lineErrors.push(`Linia ${i + 1}: cotă TVA invalidă`);
+          lineErrors.push(t("invoiceForm.errors.lineVat", { n: i + 1 }));
       });
       if (lineErrors.length > 0) throw new Error(lineErrors.join("\n"));
       if (currency !== "RON") {
         const rate = parseFloat(exchangeRate);
         if (!Number.isFinite(rate) || rate <= 0) {
-          notify.warn("Introduceți un curs valutar pozitiv pentru facturi non-RON.");
-          throw new Error("Cursul valutar lipsește sau este invalid.");
+          notify.warn(t("invoiceForm.errors.exchangeRatePositive"));
+          throw new Error(t("invoiceForm.errors.exchangeRateMissing"));
         }
       }
       const apiLines: CreateLineInput[] = lines.map(({ rowId: _rowId, ...rest }) => rest);
       const extraNotes = [
-        paymentMethod !== "ot" && `Metodă plată: ${paymentMethod}`,
-        paymentIban && `IBAN: ${paymentIban}`,
-        paymentReference && `Ref: ${paymentReference}`,
+        paymentMethod !== "ot" && t("invoiceForm.notes.paymentMethod", { method: paymentMethod }),
+        paymentIban && t("invoiceForm.notes.iban", { iban: paymentIban }),
+        paymentReference && t("invoiceForm.notes.reference", { ref: paymentReference }),
       ].filter(Boolean).join(" | ");
       const finalNotes = extraNotes
         ? (notes ? `${notes}\n${extraNotes}` : extraNotes)
@@ -264,7 +266,7 @@ export function InvoiceNewPage() {
           if (!authenticated) await api.anaf.authorize(created.companyId);
           await api.anaf.submitInvoice(created.companyId, created.id, testMode);
         } catch (e) {
-          setSubmitError((e as unknown as AppErrorPayload).message ?? "Eroare la trimitere ANAF.");
+          setSubmitError((e as unknown as AppErrorPayload).message ?? t("invoiceForm.errors.anafSubmit"));
           navigate({ to: "/invoices/$id", params: { id: created.id } });
           return;
         }
@@ -273,7 +275,7 @@ export function InvoiceNewPage() {
     },
     onError: (e) => {
       submitAfterSaveRef.current = false;
-      setSubmitError((e as unknown as AppErrorPayload).message ?? "Eroare la salvare.");
+      setSubmitError((e as unknown as AppErrorPayload).message ?? t("invoiceForm.errors.save"));
     },
   });
 
@@ -303,9 +305,9 @@ export function InvoiceNewPage() {
   if (!activeCompanyId) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Factură nouă</h1></div></div>
+        <div className="page-head"><div><h1>{t("invoiceForm.head.titleNew")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă din bara laterală pentru a emite o factură.
+          {t("invoiceForm.guard.selectCompanyNew")}
         </div>
       </div>
     );
@@ -321,16 +323,16 @@ export function InvoiceNewPage() {
   const totalErrors = localBad + serverErrors.length;
 
   const vldChip = validating
-    ? { cls: "wait", icon: SIC_WARN, label: "Se validează…" }
+    ? { cls: "wait", icon: SIC_WARN, label: t("invoiceForm.validation.validating") }
     : totalErrors > 0
-      ? { cls: "late", icon: SIC_WARN, label: totalErrors === 1 ? "1 eroare" : `${totalErrors} erori` }
+      ? { cls: "late", icon: SIC_WARN, label: t("invoiceForm.validation.errorCount", { count: totalErrors }) }
       : savedId && validation?.isValid
-        ? { cls: "paid", icon: SIC_OK, label: "Validă" }
-        : { cls: "wait", icon: SIC_WARN, label: "Nevalidată" };
+        ? { cls: "paid", icon: SIC_OK, label: t("invoiceForm.validation.valid") }
+        : { cls: "wait", icon: SIC_WARN, label: t("invoiceForm.validation.notValidated") };
 
   const saveError = submitError ??
     (saveDraftMutation.isError
-      ? (saveDraftMutation.error instanceof Error ? saveDraftMutation.error.message : "Eroare la salvare.")
+      ? (saveDraftMutation.error instanceof Error ? saveDraftMutation.error.message : t("invoiceForm.errors.save"))
       : null);
 
   return (
@@ -338,24 +340,26 @@ export function InvoiceNewPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Factură nouă</h1>
+          <h1>{t("invoiceForm.head.titleNew")}</h1>
           <p className="sub">
-            Seria <span className="num">{activeSeries || "—"}</span> · număr{" "}
-            <span className="num">{String(activeNumber).padStart(4, "0")}</span> generat automat
+            {t("invoiceForm.head.seriesLabel")} <span className="num">{activeSeries || "—"}</span>{" "}
+            {t("invoiceForm.head.numberLabel")}{" "}
+            <span className="num">{String(activeNumber).padStart(4, "0")}</span>{" "}
+            {t("invoiceForm.head.autoGenerated")}
           </p>
         </div>
         <div className="head-actions">
           <button className="pill-btn" onClick={() => void navigate({ to: "/invoices" })}>
-            Renunță<span className="kbd">Esc</span>
+            {t("invoiceForm.actions.cancel")}<span className="kbd">Esc</span>
           </button>
           <button
             className="pill-btn"
             disabled
-            title="În curând"
+            title={t("invoiceForm.actions.comingSoon")}
             style={{ opacity: 0.5, cursor: "default" }}
             onClick={() => window.print()}
           >
-            <Ic name="eye" />Previzualizare PDF
+            <Ic name="eye" />{t("invoiceForm.actions.previewPdf")}
           </button>
           <button
             className="pill-btn"
@@ -363,12 +367,12 @@ export function InvoiceNewPage() {
             onClick={() => saveDraftMutation.mutate()}
           >
             <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: IC_BOOKMARK }} />
-            Salvează ca schiță<span className="kbd">{fmtShortcut("Ctrl+S")}</span>
+            {t("invoiceForm.actions.saveDraft")}<span className="kbd">{fmtShortcut("Ctrl+S")}</span>
           </button>
           <button
             className="btn-dark send-btn"
             disabled={saveDraftMutation.isPending}
-            title={`Salvează și trimite la ANAF (${fmtShortcut("Ctrl+Enter")})`}
+            title={t("invoiceForm.actions.saveAndSendTitle", { shortcut: fmtShortcut("Ctrl+Enter") })}
             onClick={() => {
               submitAfterSaveRef.current = true;
               setSubmitError(null);
@@ -376,7 +380,7 @@ export function InvoiceNewPage() {
             }}
           >
             <Ic name="send" />
-            {saveDraftMutation.isPending ? "Se salvează…" : "Salvează și trimite la ANAF"}
+            {saveDraftMutation.isPending ? t("invoiceForm.actions.saving") : t("invoiceForm.actions.saveAndSend")}
           </button>
         </div>
       </div>
@@ -404,11 +408,11 @@ export function InvoiceNewPage() {
         <div>
           {/* PĂRȚI & DETALII */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
-            <div className="scr-toolbar"><div className="tt">Părți &amp; detalii factură</div></div>
+            <div className="scr-toolbar"><div className="tt">{t("invoiceForm.cards.parties")}</div></div>
             <div className="card-pad">
               <div className="fgrid">
                 <div className="field">
-                  <label htmlFor={companyEmitentId}>Companie emitentă</label>
+                  <label htmlFor={companyEmitentId}>{t("invoiceForm.fields.issuer")}</label>
                   <input
                     className="input"
                     id={companyEmitentId}
@@ -422,7 +426,7 @@ export function InvoiceNewPage() {
                   )}
                 </div>
                 <div className="field">
-                  <label htmlFor={contactInputId}>Cumpărător <span className="req">*</span></label>
+                  <label htmlFor={contactInputId}>{t("invoiceForm.fields.buyer")} <span className="req">*</span></label>
                   <ContactCombobox
                     inputId={contactInputId}
                     value={selectedContact}
@@ -436,14 +440,14 @@ export function InvoiceNewPage() {
                     <span className="hint num">
                       {selectedContact.cui ?? "—"}
                       {selectedContact.vatPayer
-                        ? <span style={{ color: "var(--green)", marginLeft: 8 }}>✓ plătitor TVA</span>
-                        : <span style={{ marginLeft: 8 }}>neplătitor TVA</span>}
+                        ? <span style={{ color: "var(--green)", marginLeft: 8 }}>✓ {t("invoiceForm.fields.vatPayer")}</span>
+                        : <span style={{ marginLeft: 8 }}>{t("invoiceForm.fields.nonVatPayer")}</span>}
                     </span>
                   ) : (
                     <span className="hint">
-                      partener nou cu autocompletare ANAF:{" "}
+                      {t("invoiceForm.fields.newPartnerHint")}{" "}
                       <a className="link" onClick={() => void navigate({ to: "/contacts" })}>
-                        Clienți &amp; Furnizori
+                        {t("invoiceForm.fields.contactsLink")}
                       </a>
                     </span>
                   )}
@@ -451,7 +455,7 @@ export function InvoiceNewPage() {
               </div>
               <div className="fgrid" style={{ gridTemplateColumns: "repeat(5,1fr)", marginTop: 13 }}>
                 <div className="field">
-                  <label htmlFor={seriesId}>Serie</label>
+                  <label htmlFor={seriesId}>{t("invoiceForm.fields.series")}</label>
                   <input
                     className="input num"
                     id={seriesId}
@@ -461,7 +465,7 @@ export function InvoiceNewPage() {
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor={numberId}>Număr</label>
+                  <label htmlFor={numberId}>{t("invoiceForm.fields.number")}</label>
                   <input
                     className="input num"
                     id={numberId}
@@ -470,10 +474,10 @@ export function InvoiceNewPage() {
                     disabled
                     style={{ background: "var(--fill)", color: "var(--text-2)" }}
                   />
-                  <span className="hint">generat automat</span>
+                  <span className="hint">{t("invoiceForm.head.autoGenerated")}</span>
                 </div>
                 <div className="field">
-                  <label htmlFor={currencyId}>Monedă</label>
+                  <label htmlFor={currencyId}>{t("invoiceForm.fields.currency")}</label>
                   <select
                     className="select"
                     id={currencyId}
@@ -486,7 +490,7 @@ export function InvoiceNewPage() {
                   </select>
                 </div>
                 <div className="field">
-                  <label htmlFor={issueDateId}>Data emiterii</label>
+                  <label htmlFor={issueDateId}>{t("invoiceForm.fields.issueDate")}</label>
                   <input
                     className="input num"
                     id={issueDateId}
@@ -496,7 +500,7 @@ export function InvoiceNewPage() {
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor={dueDateId}>Data scadenței</label>
+                  <label htmlFor={dueDateId}>{t("invoiceForm.fields.dueDate")}</label>
                   <input
                     className="input num"
                     id={dueDateId}
@@ -510,7 +514,7 @@ export function InvoiceNewPage() {
                 <div className="fgrid" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 13 }}>
                   <div className="field">
                     <label htmlFor={exchangeRateId}>
-                      Curs valutar <span className="num">{currency}</span>/RON
+                      {t("invoiceForm.fields.exchangeRate")} <span className="num">{currency}</span>/RON
                     </label>
                     <input
                       className="input num"
@@ -520,12 +524,12 @@ export function InvoiceNewPage() {
                       step="0.0001"
                       value={exchangeRate}
                       onChange={(e) => setExchangeRate(e.target.value)}
-                      placeholder="0,0000"
+                      placeholder={t("invoiceForm.fields.ratePlaceholder")}
                       style={{ textAlign: "right" }}
                     />
                     {rateValid && (
                       <span className="hint">
-                        Total RON: <b className="num">{fmtRON(invoiceTotal * parsedRate)}</b>
+                        {t("invoiceForm.fields.totalRon")} <b className="num">{fmtRON(invoiceTotal * parsedRate)}</b>
                       </span>
                     )}
                   </div>
@@ -538,7 +542,7 @@ export function InvoiceNewPage() {
                       onClick={() => void handleFetchBnrRate()}
                     >
                       <Ic name="sync" />
-                      {bnrLoading ? "Se preia…" : "Preia curs BNR"}
+                      {bnrLoading ? t("invoiceForm.actions.fetchingBnr") : t("invoiceForm.actions.fetchBnr")}
                     </button>
                   </div>
                 </div>
@@ -549,10 +553,10 @@ export function InvoiceNewPage() {
           {/* LINII */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
-              <div className="tt">Linii factură</div>
+              <div className="tt">{t("invoiceForm.cards.lines")}</div>
               <div className="spacer" />
               <span className="muted" style={{ fontSize: 12 }}>
-                {lines.length} {lines.length === 1 ? "articol" : "articole"} · categorii S, AE, E, Z, O, K, G
+                {t("invoiceForm.lines.item", { count: lines.length })} · {t("invoiceForm.lines.categories")}
               </span>
             </div>
             <LineItemsEditor
@@ -566,37 +570,37 @@ export function InvoiceNewPage() {
             />
             {rateValid && (
               <div style={{ padding: "10px 16px", borderTop: "1px solid var(--line)", fontSize: 12, color: "var(--text-2)" }}>
-                <b style={{ color: "var(--text)" }}>Echivalent RON (curs {parsedRate.toFixed(4)}):</b>{" "}
-                Net: <span className="num">{fmtRON(invoiceNet * parsedRate)}</span>
+                <b style={{ color: "var(--text)" }}>{t("invoiceForm.lines.ronEquiv", { rate: parsedRate.toFixed(4) })}</b>{" "}
+                {t("invoiceForm.lines.net")} <span className="num">{fmtRON(invoiceNet * parsedRate)}</span>
                 {" · "}
-                TVA: <span className="num">{fmtRON(invoiceVat * parsedRate)}</span>
+                {t("invoiceForm.lines.vat")} <span className="num">{fmtRON(invoiceVat * parsedRate)}</span>
                 {" · "}
-                Total: <b className="num">{fmtRON(invoiceTotal * parsedRate)} RON</b>
+                {t("invoiceForm.lines.total")} <b className="num">{fmtRON(invoiceTotal * parsedRate)} RON</b>
               </div>
             )}
           </div>
 
           {/* MODALITATE DE PLATĂ */}
           <div className="scr-card">
-            <div className="scr-toolbar"><div className="tt">Modalitate de plată</div></div>
+            <div className="scr-toolbar"><div className="tt">{t("invoiceForm.cards.payment")}</div></div>
             <div className="card-pad">
               <div className="fgrid" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
                 <div className="field">
-                  <label htmlFor={paymentMethodId}>Metodă</label>
+                  <label htmlFor={paymentMethodId}>{t("invoiceForm.fields.method")}</label>
                   <select
                     className="select"
                     id={paymentMethodId}
                     value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value)}
                   >
-                    <option value="ot">Ordin de plată (OP)</option>
-                    <option value="cash">Numerar</option>
-                    <option value="card">Card bancar</option>
-                    <option value="comp">Compensare</option>
+                    <option value="ot">{t("invoiceForm.payment.op")}</option>
+                    <option value="cash">{t("invoiceForm.payment.cash")}</option>
+                    <option value="card">{t("invoiceForm.payment.card")}</option>
+                    <option value="comp">{t("invoiceForm.payment.comp")}</option>
                   </select>
                 </div>
                 <div className="field">
-                  <label htmlFor={paymentIbanId}>Cont bancar (IBAN)</label>
+                  <label htmlFor={paymentIbanId}>{t("invoiceForm.fields.iban")}</label>
                   <input
                     className="input num"
                     id={paymentIbanId}
@@ -607,38 +611,38 @@ export function InvoiceNewPage() {
                   {company?.bankName && <span className="hint">{company.bankName}</span>}
                 </div>
                 <div className="field">
-                  <label htmlFor={paymentMeansCodeId}>Cod UBL plată</label>
+                  <label htmlFor={paymentMeansCodeId}>{t("invoiceForm.fields.ublCode")}</label>
                   <select
                     className="select"
                     id={paymentMeansCodeId}
                     value={paymentMeansCode}
                     onChange={(e) => setPaymentMeansCode(e.target.value)}
                   >
-                    <option value="30">Transfer bancar (30)</option>
-                    <option value="10">Numerar (10)</option>
-                    <option value="48">Card (48)</option>
-                    <option value="42">Cont bancar (42)</option>
-                    <option value="58">SEPA (58)</option>
+                    <option value="30">{t("invoiceForm.payment.ubl30")}</option>
+                    <option value="10">{t("invoiceForm.payment.ubl10")}</option>
+                    <option value="48">{t("invoiceForm.payment.ubl48")}</option>
+                    <option value="42">{t("invoiceForm.payment.ubl42")}</option>
+                    <option value="58">{t("invoiceForm.payment.ubl58")}</option>
                   </select>
                 </div>
               </div>
               <div className="field" style={{ marginTop: 13 }}>
-                <label htmlFor={paymentReferenceId}>Referință</label>
+                <label htmlFor={paymentReferenceId}>{t("invoiceForm.fields.reference")}</label>
                 <input
                   className="input"
                   id={paymentReferenceId}
                   type="text"
                   value={paymentReference}
                   onChange={(e) => setPaymentReference(e.target.value)}
-                  placeholder="Plătiți în 30 zile de la data emiterii"
+                  placeholder={t("invoiceForm.fields.referencePlaceholder")}
                 />
               </div>
               <div className="field" style={{ marginTop: 13 }}>
-                <label htmlFor={notesId}>Note · clauze · referințe</label>
+                <label htmlFor={notesId}>{t("invoiceForm.fields.notes")}</label>
                 <textarea
                   className="input"
                   id={notesId}
-                  placeholder="opțional"
+                  placeholder={t("invoiceForm.fields.optional")}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                 />
@@ -651,7 +655,7 @@ export function InvoiceNewPage() {
         <div>
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
-              <div className="tt">Totaluri</div>
+              <div className="tt">{t("invoiceForm.cards.totals")}</div>
               <div className="spacer" />
               <span className="muted num" style={{ fontSize: 12 }}>{currency}</span>
             </div>
@@ -659,30 +663,30 @@ export function InvoiceNewPage() {
               {vatGroups.map(([rate, g]) => (
                 <div key={rate} style={{ display: "contents" }}>
                   <div className="tot-row">
-                    <span>Baza {rate === 0 ? "0% (AE/scutit)" : `${rate}%`}</span>
+                    <span>{rate === 0 ? t("invoiceForm.totals.baseZero") : t("invoiceForm.totals.base", { rate })}</span>
                     <span className="tv num">{fmtRON(g.base)}</span>
                   </div>
                   <div className="tot-row">
-                    <span>TVA {rate}%</span>
+                    <span>{t("invoiceForm.totals.vatRate", { rate })}</span>
                     <span className="tv num">{fmtRON(g.vat)}</span>
                   </div>
                 </div>
               ))}
               <div className="tot-row">
-                <span>Subtotal fără TVA</span>
+                <span>{t("invoiceForm.totals.subtotal")}</span>
                 <span className="tv num">{fmtRON(invoiceNet)}</span>
               </div>
               <div className="tot-row">
-                <span>Total TVA</span>
+                <span>{t("invoiceForm.totals.totalVat")}</span>
                 <span className="tv num">{fmtRON(invoiceVat)}</span>
               </div>
               <div className="tot-row grand">
-                <span>Total de plată</span>
+                <span>{t("invoiceForm.totals.totalDue")}</span>
                 <span className="tv num">{fmtRON(invoiceTotal)} {currency}</span>
               </div>
               {rateValid && (
                 <div className="tot-row">
-                  <span>Echivalent RON (curs {parsedRate.toFixed(4)})</span>
+                  <span>{t("invoiceForm.totals.ronEquiv", { rate: parsedRate.toFixed(4) })}</span>
                   <span className="tv num">{fmtRON(invoiceTotal * parsedRate)}</span>
                 </div>
               )}
@@ -691,7 +695,7 @@ export function InvoiceNewPage() {
 
           <div className="scr-card">
             <div className="scr-toolbar">
-              <div className="tt">Validare schiță</div>
+              <div className="tt">{t("invoiceForm.cards.validation")}</div>
               <div className="spacer" />
               <span className={`chip ${vldChip.cls}`}>
                 <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: vldChip.icon }} />
@@ -701,48 +705,48 @@ export function InvoiceNewPage() {
             <div className="card-pad" style={{ paddingTop: 6, paddingBottom: 8 }}>
               <Vld
                 kind={buyerOk ? "ok" : "bad"}
-                title={buyerOk ? "Cumpărător valid" : "Cumpărător neselectat"}
+                title={buyerOk ? t("invoiceForm.validation.buyerOk") : t("invoiceForm.validation.buyerMissing")}
                 sub={
                   buyerOk
                     ? `${selectedContact!.legalName}${selectedContact!.cui ? ` · ${selectedContact!.cui}` : ""}`
-                    : "selectați un client pentru a emite factura"
+                    : t("invoiceForm.validation.buyerHintNew")
                 }
               />
               <Vld
                 kind={seriesOk ? "ok" : "bad"}
-                title={seriesOk ? "Serie și număr conforme" : "Serie lipsă"}
-                sub={<><code>BT-1</code> identificator unic {fullNumber}</>}
+                title={seriesOk ? t("invoiceForm.validation.seriesOk") : t("invoiceForm.validation.seriesMissing")}
+                sub={<><code>BT-1</code> {t("invoiceForm.validation.uniqueId", { number: fullNumber })}</>}
               />
               <Vld
                 kind={dueOk ? "ok" : "bad"}
-                title={dueOk ? "Scadență după data emiterii" : "Scadența precede data emiterii"}
+                title={dueOk ? t("invoiceForm.validation.dueOk") : t("invoiceForm.validation.dueBad")}
                 sub={<><code>BT-9</code> {fmtRoDate(dueDate)} ≥ {fmtRoDate(issueDate)}</>}
               />
               {savedId && validation ? (
                 <>
                   {serverErrors.map((msg, i) => (
-                    <Vld key={`e${i}`} kind="bad" title={msg} sub={<><code>CIUS-RO</code> eroare de validare</>} />
+                    <Vld key={`e${i}`} kind="bad" title={msg} sub={<><code>CIUS-RO</code> {t("invoiceForm.validation.serverError")}</>} />
                   ))}
                   {serverWarnings.map((msg, i) => (
-                    <Vld key={`w${i}`} kind="warn" title={msg} sub={<><code>CIUS-RO</code> avertisment</>} />
+                    <Vld key={`w${i}`} kind="warn" title={msg} sub={<><code>CIUS-RO</code> {t("invoiceForm.validation.serverWarning")}</>} />
                   ))}
                   {validation.isValid && serverErrors.length === 0 && (
                     <Vld
                       kind="ok"
-                      title="Factură validă — se poate trimite la ANAF"
-                      sub="toate regulile CIUS-RO sunt respectate"
+                      title={t("invoiceForm.validation.allValid")}
+                      sub={t("invoiceForm.validation.allValidSub")}
                     />
                   )}
                 </>
               ) : (
                 <Vld
                   kind="warn"
-                  title={validating ? "Se validează…" : "Validare CIUS-RO indisponibilă"}
-                  sub={validating ? undefined : "salvați ca schiță pentru validarea completă pe server"}
+                  title={validating ? t("invoiceForm.validation.validating") : t("invoiceForm.validation.unavailable")}
+                  sub={validating ? undefined : t("invoiceForm.validation.unavailableHintNew")}
                 />
               )}
               <div className="hint" style={{ padding: "9px 0 4px", borderTop: "1px solid var(--line)" }}>
-                Schema: <b style={{ color: "var(--text-2)" }}>CIUS-RO 1.0.1</b>
+                {t("invoiceForm.validation.schema")} <b style={{ color: "var(--text-2)" }}>CIUS-RO 1.0.1</b>
               </div>
             </div>
           </div>

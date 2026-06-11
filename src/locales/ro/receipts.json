@@ -1,0 +1,79 @@
+{
+  "receipts": {
+    "title": "Chitanțe",
+    "sub": {
+      "count": "{{n}} chitanțe emise",
+      "series": "seria {{s}}"
+    },
+    "selectCompany": "Selectați o companie activă pentru a vedea chitanțele.",
+    "head": {
+      "refresh": "Reîmprospătează",
+      "new": "Chitanță nouă"
+    },
+    "states": {
+      "loading": "Se încarcă…",
+      "errorLabel": "chitanțele",
+      "empty": "Nicio chitanță. Apăsați „Chitanță nouă” pentru a emite prima chitanță."
+    },
+    "table": {
+      "number": "Număr",
+      "date": "Data",
+      "payer": "Plătitor",
+      "invoice": "Factură asociată",
+      "amount": "Sumă",
+      "currency": "Monedă"
+    },
+    "row": {
+      "freeText": "(text liber)",
+      "invoiceFallback": "factură",
+      "pdf": "Generează PDF",
+      "delete": "Șterge"
+    },
+    "pager": {
+      "showing": "Afișezi",
+      "of": "din",
+      "receipts": "chitanțe"
+    },
+    "confirm": {
+      "deleteTitle": "Confirmare ștergere",
+      "deleteMsg": "Șterge chitanța \"{{no}}\"? Această acțiune nu poate fi anulată."
+    },
+    "notify": {
+      "noActiveCompany": "Nicio companie activă.",
+      "deleted": "Chitanță ștearsă.",
+      "deleteError": "Nu s-a putut șterge chitanța.",
+      "pdfDone": "PDF generat.",
+      "pdfError": "Nu s-a putut genera PDF-ul.",
+      "created": "Chitanță emisă.",
+      "createError": "Eroare la emitere."
+    },
+    "modal": {
+      "title": "Chitanță nouă",
+      "sub": "Numărul se alocă automat în serie",
+      "series": "Serie",
+      "issueDate": "Data emiterii",
+      "amount": "Sumă",
+      "amountPlaceholder": "0,00",
+      "currency": "Monedă",
+      "payerContact": "Plătitor (contact)",
+      "payerContactPlaceholder": "Caută plătitor (opțional)…",
+      "payerFree": "Plătitor (text liber)",
+      "payerFreePlaceholder": "Nume plătitor (dacă nu e în contacte)",
+      "invoice": "Factură asociată (opțional)",
+      "notes": "Observații",
+      "notesPlaceholder": "opțional",
+      "amountPositive": "Suma trebuie să fie pozitivă.",
+      "dateRequired": "Data emiterii este obligatorie.",
+      "cancel": "Renunță",
+      "saving": "Se salvează…",
+      "submit": "Emite chitanță"
+    },
+    "combobox": {
+      "placeholder": "Caută factură (număr sau client)…",
+      "remove": "Elimină factura asociată",
+      "searching": "Se caută…",
+      "emptyQuery": "Nicio factură pentru „{{q}}”.",
+      "empty": "Nicio factură găsită."
+    }
+  }
+}

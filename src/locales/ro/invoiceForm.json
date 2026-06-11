@@ -56,6 +56,7 @@
       "ublCode": "Cod UBL plată",
       "reference": "Referință",
       "referencePlaceholder": "Plătiți în 30 zile de la data emiterii",
+      "ratePlaceholder": "0,0000",
       "notes": "Note · clauze · referințe",
       "optional": "opțional"
     },
@@ -102,6 +103,8 @@
       "buyerHintEdit": "selectați un client pentru a salva factura",
       "seriesOk": "Serie și număr conforme",
       "seriesMissing": "Serie lipsă",
+      "dueOk": "Scadență după data emiterii",
+      "dueBad": "Scadența precede data emiterii",
       "uniqueId": "identificator unic {{number}}",
       "serverError": "eroare de validare",
       "serverWarning": "avertisment",

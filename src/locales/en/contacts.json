@@ -1,0 +1,101 @@
+{
+  "contacts": {
+    "title": "Customers & Suppliers",
+    "count_one": "{{count}} contact",
+    "count_other": "{{count}} contacts",
+    "selectCompany": "Select an active company to see the contacts.",
+    "refresh": "Refresh",
+    "importCsv": "Import CSV",
+    "newContact": "New contact",
+    "tabs": {
+      "all": "All",
+      "customers": "Customers",
+      "suppliers": "Suppliers",
+      "both": "Both"
+    },
+    "searchPlaceholder": "Name or CUI…",
+    "loading": "Loading…",
+    "errorLabel": "the contacts",
+    "emptyNone": "No contacts yet. Add your first customer or supplier with the \"New contact\" button.",
+    "emptyFiltered": "No results for the applied filters.",
+    "type": {
+      "customer": "Customer",
+      "supplier": "Supplier",
+      "both": "Both"
+    },
+    "individualChip": "Natural person",
+    "table": {
+      "cui": "CUI",
+      "name": "Name",
+      "type": "Type",
+      "city": "City",
+      "county": "County",
+      "vat": "VAT",
+      "email": "Email"
+    },
+    "actions": {
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "pager": {
+      "showing": "Showing",
+      "of": "of",
+      "items": "contacts",
+      "prev": "Previous page",
+      "next": "Next page"
+    },
+    "confirm": {
+      "deleteTitle": "Confirm deletion",
+      "delete": "Delete contact \"{{name}}\"? This action cannot be undone."
+    },
+    "notify": {
+      "noActiveCompany": "No active company.",
+      "deleteError": "Could not delete the contact.",
+      "anafSuccess": "Data retrieved from ANAF: {{name}}",
+      "anafError": "The CUI was not found in the ANAF registry."
+    },
+    "modal": {
+      "editTitle": "Edit: {{name}}",
+      "subtitle": "Fields are filled in automatically from the ANAF registry by CUI (name, address, VAT, cash-accounting VAT, active status)",
+      "close": "Close",
+      "cui": "CUI / CIF",
+      "cuiPlaceholder": "e.g. RO12345678",
+      "anafBtnTitle": "Fetch the company's data from ANAF by CUI",
+      "anafFound": "Found in ANAF",
+      "anafActive": "active",
+      "anafInactive": "INACTIVE",
+      "anafEfactura": "registered in the RO e-Factura Registry",
+      "contactType": "Contact type",
+      "name": "Name",
+      "namePlaceholder": "S.C. Exemplu S.R.L.",
+      "individual": "Natural person (B2C)",
+      "yes": "Yes",
+      "no": "No",
+      "individualHint": "natural persons do not require a CUI",
+      "vatPayer": "VAT payer",
+      "cashVat": "Cash-accounting VAT",
+      "cashVatHint": "retrieved from ANAF — defers the deduction until payment (art. 297)",
+      "currency": "Default currency",
+      "address": "Address",
+      "addressPlaceholder": "Str. Exemplu nr. 1",
+      "cityPlaceholder": "Cluj-Napoca",
+      "countyPlaceholder": "CJ",
+      "country": "Country",
+      "phone": "Phone",
+      "optional": "optional",
+      "inactivePrefix": "Taxpayer",
+      "inactiveBold": "INACTIVE",
+      "inactiveSuffix": "with ANAF — received invoices have restricted deductibility for expenses and VAT (art. 11 of the Fiscal Code). Check before recording purchases.",
+      "cashVatPrefix": "Supplier with",
+      "cashVatBold": "cash-accounting VAT",
+      "cashVatSuffix": "— deductible VAT is deferred until the invoice is paid (art. 297 of the Fiscal Code).",
+      "nameRequired": "The name is required.",
+      "cuiInvalid": "Invalid CUI — it must contain 2-10 digits (e.g. RO12345678 or 12345678)",
+      "createError": "Error creating the contact.",
+      "saveError": "Error saving.",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save": "Save contact"
+    }
+  }
+}
