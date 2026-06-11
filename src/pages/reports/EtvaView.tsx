@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { api } from "@/lib/tauri";
@@ -27,31 +28,32 @@ const IC_WARN =
   '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>';
 
 export function EtvaView({ dateFrom, dateTo }: Props) {
+  const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [collectedVat, setCollectedVat] = useState("");
   const [deductibleVat, setDeductibleVat] = useState("");
 
   const recon = useMutation({
     mutationFn: (): Promise<EtvaReconciliation> => {
-      if (!activeCompanyId) throw new Error("Selectați o companie activă.");
+      if (!activeCompanyId) throw new Error(t("declarations.notify.selectCompany"));
       return api.declarations.reconcileEtva(activeCompanyId, dateFrom, dateTo, {
         collectedVat: collectedVat.trim() || "0",
         deductibleVat: deductibleVat.trim() || "0",
       });
     },
-    onError: (err) => notify.error(formatError(err, "Nu s-a putut reconcilia e-TVA.")),
+    onError: (err) => notify.error(formatError(err, t("declarations.etva.notify.reconcileFailed"))),
   });
 
   // Fetch the precompletat zip from ANAF (an/luna from the period start) → its raw JSON files.
   const fetchP300 = useMutation({
     mutationFn: () => {
-      if (!activeCompanyId) throw new Error("Selectați o companie activă.");
+      if (!activeCompanyId) throw new Error(t("declarations.notify.selectCompany"));
       const an = Number(dateFrom.slice(0, 4));
       const luna = Number(dateFrom.slice(5, 7));
       return api.declarations.fetchEtvaPrecompletat(activeCompanyId, an, luna);
     },
-    onSuccess: (files) => notify.success(`${files.length} fișier(e) e-TVA descărcate din SPV.`),
-    onError: (err) => notify.error(formatError(err, "Nu s-a putut descărca precompletatul din SPV.")),
+    onSuccess: (files) => notify.success(t("declarations.etva.notify.filesDownloaded", { count: files.length })),
+    onError: (err) => notify.error(formatError(err, t("declarations.etva.notify.fetchFailed"))),
   });
 
   const result = recon.data;
@@ -59,26 +61,24 @@ export function EtvaView({ dateFrom, dateTo }: Props) {
   return (
     <div className="scr-card">
       <div className="scr-toolbar">
-        <div className="tt">RO e-TVA — reconciliere decont precompletat (verificare internă)</div>
+        <div className="tt">{t("declarations.etva.title")}</div>
       </div>
 
       <div style={{ padding: "14px 16px 0" }}>
         <div className="banner">
           <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: IC_INFO }} />
           <span>
-            Notificarea de conformare RO e-TVA a fost <b>abrogată</b> (OUG 89/2025 și OUG 13/2026,
-            în vigoare 9 mar. 2026). Decontul precompletat (P300ETVA) rămâne <b>informativ</b> și
-            este disponibil în SPV până pe data de 5 a lunii următoare termenului D300. Această
-            verificare compară D300-ul calculat de aplicație cu valorile pe care le importați din
-            precompletat, <b>înainte</b> de depunerea propriului D300 (singurul cu valoare juridică).
-            Descărcarea automată din SPV nu este disponibilă local.
+            {t("declarations.etva.banner1")} <b>{t("declarations.etva.bannerBold1")}</b>{" "}
+            {t("declarations.etva.banner2")} <b>{t("declarations.etva.bannerBold2")}</b>{" "}
+            {t("declarations.etva.banner3")} <b>{t("declarations.etva.bannerBold3")}</b>{" "}
+            {t("declarations.etva.banner4")}
           </span>
         </div>
       </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", padding: "0 16px 16px", alignItems: "flex-end" }}>
         <div className="field" style={{ width: 220 }}>
-          <label>Precompletat — TVA colectată (lei)</label>
+          <label>{t("declarations.etva.collectedLabel")}</label>
           <input
             className="input"
             inputMode="decimal"
@@ -88,7 +88,7 @@ export function EtvaView({ dateFrom, dateTo }: Props) {
           />
         </div>
         <div className="field" style={{ width: 220 }}>
-          <label>Precompletat — TVA deductibilă (lei)</label>
+          <label>{t("declarations.etva.deductibleLabel")}</label>
           <input
             className="input"
             inputMode="decimal"
@@ -101,10 +101,10 @@ export function EtvaView({ dateFrom, dateTo }: Props) {
           className="pill-btn"
           disabled={fetchP300.isPending || !activeCompanyId}
           onClick={() => fetchP300.mutate()}
-          title="Descarcă decontul precompletat (P300ETVA) din SPV"
+          title={t("declarations.etva.fetchTitle")}
         >
           <Ic name="dl" />
-          {fetchP300.isPending ? "Se descarcă…" : "Solicită din SPV"}
+          {fetchP300.isPending ? t("declarations.etva.fetching") : t("declarations.etva.fetch")}
         </button>
         <button
           className="btn-dark"
@@ -112,14 +112,14 @@ export function EtvaView({ dateFrom, dateTo }: Props) {
           onClick={() => recon.mutate()}
         >
           <Ic name="sync" />
-          {recon.isPending ? "Se reconciliază…" : "Reconciliază"}
+          {recon.isPending ? t("declarations.etva.reconciling") : t("declarations.etva.reconcile")}
         </button>
       </div>
 
       {fetchP300.data && fetchP300.data.length > 0 && (
         <div style={{ padding: "0 16px 16px" }}>
           <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 6 }}>
-            Precompletat din SPV (copiați valorile TVA colectată / deductibilă în câmpurile de mai sus):
+            {t("declarations.etva.filesHint")}
           </div>
           {fetchP300.data.map((f) => (
             <details key={f.name} style={{ marginBottom: 6 }}>
@@ -139,8 +139,8 @@ export function EtvaView({ dateFrom, dateTo }: Props) {
               <div className="banner warn">
                 <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: IC_WARN }} />
                 <span>
-                  Compania aplică <b>TVA la încasare</b> — divergențele față de precompletat (construit
-                  pe datele e-Factura, nu pe încasare) sunt <b>așteptate</b>.
+                  {t("declarations.etva.cash1")} <b>{t("declarations.etva.cashBold1")}</b>{" "}
+                  {t("declarations.etva.cash2")} <b>{t("declarations.etva.cashBold2")}</b>.
                 </span>
               </div>
             </div>
@@ -148,12 +148,12 @@ export function EtvaView({ dateFrom, dateTo }: Props) {
           <table className="scr-table">
             <thead>
               <tr>
-                <th>Linie</th>
-                <th className="r">D300 (calculat)</th>
-                <th className="r">Precompletat</th>
-                <th className="r">Diferență</th>
+                <th>{t("declarations.etva.headers.line")}</th>
+                <th className="r">{t("declarations.etva.headers.computed")}</th>
+                <th className="r">{t("declarations.etva.headers.precompletat")}</th>
+                <th className="r">{t("declarations.etva.headers.diff")}</th>
                 <th className="r">%</th>
-                <th>Stare</th>
+                <th>{t("declarations.etva.headers.state")}</th>
               </tr>
             </thead>
             <tbody>
@@ -168,12 +168,12 @@ export function EtvaView({ dateFrom, dateTo }: Props) {
                     {l.significant ? (
                       <span className="chip late">
                         <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: IC_WARN }} />
-                        Semnificativ
+                        {t("declarations.etva.chipSignificant")}
                       </span>
                     ) : (
                       <span className="chip paid">
                         <Ic name="checkC" cls="sic" />
-                        OK
+                        {t("declarations.etva.chipOk")}
                       </span>
                     )}
                   </td>
@@ -184,8 +184,8 @@ export function EtvaView({ dateFrom, dateTo }: Props) {
           <div className="tot-foot">
             <span>
               {result.anySignificant
-                ? "Există diferențe semnificative (≥20% și ≥5.000 lei). Investigați (factură lipsă, decalaj de perioadă, taxare inversă) înainte de depunere."
-                : "Nicio diferență semnificativă față de pragul de 20% și 5.000 lei."}
+                ? t("declarations.etva.footSignificant")
+                : t("declarations.etva.footOk")}
             </span>
           </div>
         </>

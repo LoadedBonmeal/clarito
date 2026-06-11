@@ -1,0 +1,372 @@
+{
+  "declarations": {
+    "title": "Declarații",
+    "subtitle": "Perioada de raportare {{period}} · D300 se calculează aici; calculele detaliate (e-TVA, D390, D394, D100, D101, D406) sunt și în Rapoarte",
+    "noCompany": "Selectați o companie activă pentru a vedea declarațiile.",
+    "months": {
+      "jan": "Ianuarie",
+      "feb": "Februarie",
+      "mar": "Martie",
+      "apr": "Aprilie",
+      "may": "Mai",
+      "jun": "Iunie",
+      "jul": "Iulie",
+      "aug": "August",
+      "sep": "Septembrie",
+      "oct": "Octombrie",
+      "nov": "Noiembrie",
+      "dec": "Decembrie"
+    },
+    "periodPop": {
+      "year": "An",
+      "month": "Lună"
+    },
+    "head": {
+      "deadlinesCalendar": "Calendar termene",
+      "recalcAll": "Recalculează toate",
+      "recalcing": "Recalculez…"
+    },
+    "common": {
+      "loading": "Se încarcă…",
+      "computing": "Se calculează…",
+      "calc": "Calculează",
+      "calcing": "Calculez…",
+      "exporting": "Export…",
+      "exportXml": "Export XML",
+      "extractXml": "Extract XML",
+      "exportAnyway": "Exportă oricum (ignoră DUK)",
+      "comingSoon": "În curând.",
+      "period": "Perioada",
+      "due": "Termen",
+      "baseWord": "bază",
+      "vat": "TVA"
+    },
+    "notify": {
+      "selectCompany": "Selectați o companie activă.",
+      "noData": "Nu există date pentru perioada selectată.",
+      "computeD300Failed": "Nu s-a putut calcula D300.",
+      "noExportData": "Nu există date de exportat. Calculați mai întâi D300.",
+      "d300Saved": "D300 salvat: {{path}}",
+      "exportD300Failed": "Nu s-a putut exporta D300.",
+      "dukErrors": "DUKIntegrator a găsit erori. Corectați-le sau exportați oricum.",
+      "d300OfficialSavedDuk": "D300 oficial salvat (DUK: valid): {{path}}",
+      "d300OfficialSavedNoDuk": "D300 oficial salvat: {{path}} (validare DUK indisponibilă local)",
+      "exportD300OfficialFailed": "Nu s-a putut exporta D300 oficial.",
+      "intrastatUpdated": "Praguri Intrastat actualizate."
+    },
+    "dialogs": {
+      "saveD300": "Salvează D300 XML",
+      "saveD300Official": "Salvează D300 oficial ANAF (XML)",
+      "saveD390": "Salvează D390 XML",
+      "saveD394Extract": "Salvează D394 XML (extract)",
+      "saveD394Official": "Salvează D394 oficial ANAF (XML)"
+    },
+    "vatCat": {
+      "s": "Standard",
+      "z": "Zero-rated",
+      "e": "Scutit",
+      "ae": "Autolichidare",
+      "k": "Intracomunitar",
+      "g": "Guvernamental",
+      "o": "În afara TVA"
+    },
+    "chips": {
+      "toFile": "De depus",
+      "notComputed": "Necalculat",
+      "dukErrors": "Erori DUK",
+      "estimated": "Estimată",
+      "year": "An {{year}}",
+      "toReconcile": "De reconciliat",
+      "overThreshold": "Peste prag",
+      "nearThreshold": "Aproape de prag",
+      "underThreshold": "Sub prag"
+    },
+    "kv": {
+      "calcExport": "Calcul și export",
+      "inReports": "în Rapoarte → {{view}}",
+      "preflight": "Verificare preflight",
+      "noIssues": "fără probleme",
+      "errors_one": "{{count}} eroare",
+      "errors_few": "{{count}} erori",
+      "errors_other": "{{count}} de erori",
+      "warnings_one": "{{count}} avertisment",
+      "warnings_few": "{{count}} avertismente",
+      "warnings_other": "{{count}} de avertismente",
+      "vatPay": "TVA de plată",
+      "vatRecover": "TVA de recuperat",
+      "quarterPeriod": "T{{q}} {{year}}"
+    },
+    "cards": {
+      "d300": {
+        "title": "Decont de TVA",
+        "desc1": "Rândurile se completează automat din jurnale;",
+        "descBold": "regularizările cote vechi (19%/9%/5%)",
+        "desc2": "se precompletează pe R16/R30 cu suprascriere manuală. Exportul oficial (schema v12) cere datele declarantului, CAEN, banca și trece prin validarea DUKIntegrator.",
+        "extractTitle": "Exportă extras D300 ca fișier XML (document de lucru, nu schema ANAF)",
+        "officialTitle": "Exportă D300 conform schemei oficiale ANAF v12",
+        "exportOfficial": "Export XML oficial"
+      },
+      "d390": {
+        "title": "Declarație recapitulativă VIES",
+        "descIntro": "Operațiuni intracomunitare pe tipuri:",
+        "deliveries": "livrări",
+        "triangular": "triunghiulare",
+        "acquisitions": "achiziții",
+        "services": "prestări",
+        "servicesReceived": "servicii primite",
+        "adjustments": "regularizări",
+        "descOutro": "Partenerii fără cod VIES valid sunt semnalați la calcul."
+      },
+      "d394": {
+        "title": "Livrări și achiziții naționale",
+        "desc": "Declarație informativă per partener, generată din facturile emise și primite cu CIF valid RO. Partenerii se agregă automat la calcul."
+      },
+      "saft": {
+        "title": "SAF-T — fișierul standard de audit",
+        "desc": "Raportare lunară completă: master files, documente sursă, GL. Generarea durează câteva minute; validarea se face cu validatorul DUK SAF-T.",
+        "genValidate": "Generare și validare",
+        "generate": "Generează",
+        "validate": "Validează"
+      },
+      "d100": {
+        "title": "Obligații de plată — impozit",
+        "desc1": "Micro: impozit pe venit la",
+        "pos5": "poziția 5",
+        "desc2": "· Profit: plăți anticipate la",
+        "pos2": "poziția 2",
+        "desc3": ". Pentru T4 la profit, regularizarea anuală se face prin D101."
+      },
+      "d101": {
+        "title": "Impozit pe profit — anual",
+        "desc1": "Pierderea fiscală reportată se recuperează în limita a",
+        "desc2": "din profitul impozabil. Creditul fiscal pentru sponsorizări se aplică în limita legală.",
+        "sheet": "Fișa de calcul",
+        "viewReceipt": "Vezi recipisa",
+        "viewXml": "Vezi XML"
+      },
+      "etva": {
+        "title": "Reconciliere decont precompletat",
+        "desc1": "ANAF transmite decontul precompletat P300ETVA (se descarcă din SPV); diferențele",
+        "descBold": "≥ 5.000 lei și ≥ 20%",
+        "desc2": "sunt semnificative și se justifică prin „Notă justificativă”. La TVA la încasare divergențele sunt așteptate.",
+        "p300": "P300 precompletat",
+        "p300Download": "se descarcă din SPV",
+        "recon": "Reconciliere",
+        "viewRecon": "Vezi reconcilierea",
+        "sendJustification": "Trimite justificare"
+      },
+      "intrastat": {
+        "title": "Statistică schimburi intra-UE",
+        "desc": "Obligație doar la depășirea pragurilor anuale (introduceri 1.000.000 lei / expedieri 1.000.000 lei). Pragurile se monitorizează automat din facturi.",
+        "arrivals": "Introduceri {{year}}",
+        "dispatches": "Expedieri {{year}}",
+        "threshold": "Prag",
+        "checking": "Verific…",
+        "check": "Verifică pragurile",
+        "exportSoon": "Export — în curând",
+        "exportNa": "Export — nu e cazul"
+      }
+    },
+    "detail": {
+      "title": "Detaliu D300 — {{period}}",
+      "table": {
+        "rate": "Cotă",
+        "cat": "Cat.",
+        "base": "Bază",
+        "vat": "TVA"
+      },
+      "collected": {
+        "title": "TVA colectată (vânzări)",
+        "empty": "Nu există facturi VALIDATED în perioada selectată.",
+        "cui": "CUI:",
+        "invoices": "Facturi:",
+        "total": "Total colectată: bază"
+      },
+      "deductible": {
+        "title": "TVA deductibilă (achiziții)",
+        "desc": "TVA deductibilă se calculează din facturile primite procesate. Verificați că toate facturile lunii au fost descărcate și parsate din SPV pentru un decont corect.",
+        "total": "Total deductibilă: bază",
+        "computeFirst": "Calculați D300 pentru a vedea datele.",
+        "noneParsed": "Nicio factură primită parsată în perioadă.",
+        "manualLabel": "Ajustare manuală TVA deductibilă",
+        "manualHint": "· pentru achiziții fără factură SPV parsată",
+        "resetTitle": "Resetează la valoarea calculată automat",
+        "reset": "Resetează la valoarea calculată"
+      },
+      "unparsedVat_one": "{{count}} factură primită nu are încă defalcare TVA",
+      "unparsedVat_few": "{{count}} facturi primite nu au încă defalcare TVA",
+      "unparsedVat_other": "{{count}} de facturi primite nu au încă defalcare TVA",
+      "unparsedRest": "— suma calculată automat poate fi parțială. Introduceți manual valoarea corectă mai jos sau folosiți «Recalculează TVA din XML» în Jurnal cumpărări.",
+      "reg": {
+        "title": "Regularizări cote vechi (19%/9%/5%)",
+        "desc": "Operațiunile la cote vechi sunt raportate automat în rândurile de regularizări (R16 — taxă colectată; R30 — taxă dedusă). Verificați și ajustați dacă este necesar.",
+        "r16": "R16 — Regularizări taxă colectată",
+        "r30": "R30 — Regularizări taxă dedusă",
+        "base": "Bază impozabilă (lei)",
+        "collectedVat": "TVA colectată (lei)",
+        "deductedVat": "TVA dedusă (lei)",
+        "resetTitle": "Resetează la valorile calculate automat",
+        "reset": "Resetează la calculat"
+      },
+      "summary": {
+        "collected": "Colectată",
+        "deductible": "Deductibilă"
+      }
+    },
+    "d390": {
+      "title": "D390 — Declarație recapitulativă (VIES) intra-UE",
+      "exportTitle": "Export XML D390 (declaratie390 v3)",
+      "reportLabel": "raportul D390",
+      "empty": "Nicio operațiune intra-UE (vat_category «K») în perioada selectată.",
+      "types": {
+        "l": "Livrări bunuri (L)",
+        "t": "Triunghiulare (T)",
+        "a": "Achiziții bunuri (A)",
+        "p": "Prestări servicii (P)",
+        "s": "Achiziții servicii (S)",
+        "r": "Regim agricultori (R)"
+      },
+      "dropped_one": "operațiune intra-UE a fost ignorată",
+      "dropped_few": "operațiuni intra-UE au fost ignorate",
+      "dropped_other": "de operațiuni intra-UE au fost ignorate",
+      "droppedRest": "— partener fără cod TVA UE valid (cod lipsă / prefix non-UE) sau bază netă negativă (stornare peste altă perioadă — regularizarea «R» se declară manual; tipurile T/triunghiular și R nu sunt încă generate automat). Completați CUI-ul partenerului sau declarați regularizarea manual pentru a evita sub-raportarea în VIES.",
+      "headers": {
+        "type": "Tip",
+        "country": "Țară",
+        "code": "Cod operator (fără prefix)",
+        "name": "Denumire",
+        "base": "Bază (lei)"
+      },
+      "totalFoot": "TOTAL ({{count}} operatori): bază",
+      "notify": {
+        "noOps": "Nu există operațiuni intra-UE în perioada selectată.",
+        "saved": "D390 salvat: {{path}}",
+        "exportFailed": "Nu s-a putut exporta D390."
+      }
+    },
+    "d394": {
+      "title": "D394 — Declarație informativă livrări / achiziții pe partener",
+      "extractTitle": "Export extract D394 (document de lucru)",
+      "officialTitle": "Export D394 conform schemei oficiale ANAF v5",
+      "exportOfficial": "Export oficial ANAF",
+      "reportLabel": "raportul D394",
+      "emptySales": "Nicio livrare validată în perioada selectată.",
+      "purchasesTitle": "D394 — Achiziții per furnizor",
+      "unparsedRest1": "— lista furnizorilor este parțială. Folosiți",
+      "unparsedAction": "«Recalculează TVA din XML»",
+      "unparsedRest2": "în Jurnal cumpărări pentru a completa datele.",
+      "emptyPurchases": "Nicio factură primită în perioada selectată.",
+      "emptyUnparsed": "Nicio factură primită cu defalcare TVA parsată. Folosiți «Recalculează TVA din XML» în Jurnal cumpărări.",
+      "headers": {
+        "partnerCui": "CUI partener",
+        "supplierCui": "CUI furnizor",
+        "name": "Denumire",
+        "type": "Tip",
+        "invoiceCount": "Nr. facturi",
+        "base": "Bază impozabilă",
+        "vat": "TVA"
+      },
+      "total": "TOTAL:",
+      "totalPurchases": "TOTAL ACHIZIȚII (parsate):",
+      "invoicesWord": "facturi",
+      "notify": {
+        "extractSaved": "D394 extract salvat: {{path}}",
+        "exportFailed": "Nu s-a putut exporta D394.",
+        "officialSavedDuk": "D394 oficial salvat (DUK: valid): {{path}}",
+        "officialSavedNoDuk": "D394 oficial salvat: {{path}} (validare DUK indisponibilă local)",
+        "exportOfficialFailed": "Nu s-a putut exporta D394 oficial."
+      }
+    },
+    "d100": {
+      "title": "D100 — Obligații de plată (trimestrial)",
+      "banner": "Rândul trimestrial pentru perioada selectată (T{{q}} {{year}}): micro → poziția 5 (1% × venituri), profit → poziția 2 (16% × rezultat). Scadența: 25 a lunii următoare trimestrului (profit T4 se regularizează prin D101). Depunerea se face manual prin PDF inteligent ANAF + SPV. Regimul micro (1%) presupune îndeplinirea continuă a condițiilor legale (plafon 100.000 EUR din 2026, salariat, structura veniturilor, asociați) — aplicația nu le verifică pe toate; confirmați eligibilitatea.",
+      "priorLabel": "Plăți anticipate anterioare (lei)",
+      "calc": "Calculează D100",
+      "computeFailed": "Nu s-a putut calcula D100.",
+      "headers": {
+        "code": "Cod obligație",
+        "name": "Denumire",
+        "base": "Bază",
+        "rate": "Cotă",
+        "owed": "Datorat",
+        "toPay": "De plată",
+        "deadline": "Scadență"
+      }
+    },
+    "d101": {
+      "title": "D101 — Impozit pe profit (fișă de calcul)",
+      "banner1": "Doar pentru companiile plătitoare de",
+      "bannerBold": "impozit pe profit",
+      "banner2": "(nu microîntreprinderi). Rezultatul brut și cifra de afaceri se preiau din contul de profit și pierdere al perioadei; introduceți ajustările fiscale. Recuperarea pierderii din anii precedenți e plafonată la 70% din profitul fiscal (OUG 115/2023). Depunerea se face manual prin PDF inteligent ANAF + SPV (termen 25 iunie anul următor pentru exercițiile 2021-2025, ulterior 25 martie). Estimarea nu include toate ajustările posibile.",
+      "calc": "Calculează D101",
+      "computeFailed": "Nu s-a putut calcula D101.",
+      "fields": {
+        "nonDeductibleExpenses": "Cheltuieli nedeductibile (protocol >2%, amenzi, 50% auto…)",
+        "nonTaxableRevenue": "Venituri neimpozabile (dividende primite, reluări provizioane…)",
+        "fiscalDeductions": "Deduceri fiscale (amortizare fiscală, rezervă legală…)",
+        "priorLoss": "Pierdere fiscală de recuperat din anii precedenți",
+        "sponsorship": "Sponsorizare efectuată (credit plafonat)",
+        "anticipatedPayments": "Plăți anticipate / impozit declarat D100"
+      },
+      "rows": {
+        "accountingResult": "Rezultat brut contabil (din P&L)",
+        "nonTaxableRevenue": "− Venituri neimpozabile",
+        "fiscalDeductions": "− Deduceri fiscale",
+        "nonDeductibleExpenses": "+ Cheltuieli nedeductibile",
+        "fiscalResult": "= Rezultat fiscal",
+        "priorLoss": "Pierdere reportată disponibilă",
+        "lossUsed": "− Pierdere recuperată (max 70%)",
+        "taxableProfit": "= Profit impozabil",
+        "tax16": "Impozit 16%",
+        "sponsorshipCap": "Plafon sponsorizare (0,75% CA / 20% impozit)",
+        "sponsorshipCredit": "− Credit sponsorizare",
+        "taxAfterCredits": "= Impozit după credite",
+        "anticipatedPayments": "− Plăți anticipate"
+      },
+      "taxDue": "Impozit de plată: {{amount}} lei",
+      "recoverable": "De recuperat: {{amount}} lei",
+      "zeroBalance": "Sold zero",
+      "lossRemaining": "Pierdere rămasă de reportat:"
+    },
+    "etva": {
+      "title": "RO e-TVA — reconciliere decont precompletat (verificare internă)",
+      "banner1": "Notificarea de conformare RO e-TVA a fost",
+      "bannerBold1": "abrogată",
+      "banner2": "(OUG 89/2025 și OUG 13/2026, în vigoare 9 mar. 2026). Decontul precompletat (P300ETVA) rămâne",
+      "bannerBold2": "informativ",
+      "banner3": "și este disponibil în SPV până pe data de 5 a lunii următoare termenului D300. Această verificare compară D300-ul calculat de aplicație cu valorile pe care le importați din precompletat,",
+      "bannerBold3": "înainte",
+      "banner4": "de depunerea propriului D300 (singurul cu valoare juridică). Descărcarea automată din SPV nu este disponibilă local.",
+      "collectedLabel": "Precompletat — TVA colectată (lei)",
+      "deductibleLabel": "Precompletat — TVA deductibilă (lei)",
+      "fetchTitle": "Descarcă decontul precompletat (P300ETVA) din SPV",
+      "fetching": "Se descarcă…",
+      "fetch": "Solicită din SPV",
+      "reconciling": "Se reconciliază…",
+      "reconcile": "Reconciliază",
+      "filesHint": "Precompletat din SPV (copiați valorile TVA colectată / deductibilă în câmpurile de mai sus):",
+      "cash1": "Compania aplică",
+      "cashBold1": "TVA la încasare",
+      "cash2": "— divergențele față de precompletat (construit pe datele e-Factura, nu pe încasare) sunt",
+      "cashBold2": "așteptate",
+      "headers": {
+        "line": "Linie",
+        "computed": "D300 (calculat)",
+        "precompletat": "Precompletat",
+        "diff": "Diferență",
+        "state": "Stare"
+      },
+      "chipSignificant": "Semnificativ",
+      "chipOk": "OK",
+      "footSignificant": "Există diferențe semnificative (≥20% și ≥5.000 lei). Investigați (factură lipsă, decalaj de perioadă, taxare inversă) înainte de depunere.",
+      "footOk": "Nicio diferență semnificativă față de pragul de 20% și 5.000 lei.",
+      "notify": {
+        "reconcileFailed": "Nu s-a putut reconcilia e-TVA.",
+        "filesDownloaded_one": "{{count}} fișier e-TVA descărcat din SPV.",
+        "filesDownloaded_few": "{{count}} fișiere e-TVA descărcate din SPV.",
+        "filesDownloaded_other": "{{count}} de fișiere e-TVA descărcate din SPV.",
+        "fetchFailed": "Nu s-a putut descărca precompletatul din SPV."
+      }
+    }
+  }
+}

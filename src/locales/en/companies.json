@@ -1,0 +1,249 @@
+{
+  "companies": {
+    "title": "Companies",
+    "loading": "Loading…",
+    "loadingCompany": "Loading company data…",
+    "errorLabel": "the companies",
+    "notFound": {
+      "title": "Company not found",
+      "pre": "The company with ID",
+      "post": "was not found.",
+      "backToList": "Back to the list"
+    },
+    "tiers": {
+      "TRIAL": "Trial",
+      "SOLO": "Solo",
+      "ACCOUNTANT": "Accountant",
+      "FIRM": "Firm"
+    },
+    "head": {
+      "managed_one": "{{count}} company managed",
+      "managed_other": "{{count}} companies managed",
+      "planAllows": "the {{plan}} plan allows {{limit}}",
+      "unlimited": "unlimited",
+      "add": "Add company",
+      "limitTitle": "Your plan limit has been reached"
+    },
+    "banner": {
+      "limitBold": "The {{plan}} plan limit has been reached",
+      "limitCount": "({{n}}/{{limit}} companies).",
+      "limitContact": "Contact us for an upgrade at"
+    },
+    "toolbar": {
+      "title": "All companies",
+      "searchPlaceholder": "Search company…",
+      "refresh": "Reload"
+    },
+    "tabs": {
+      "all": "All",
+      "withSpv": "With SPV",
+      "withoutSpv": "Without SPV"
+    },
+    "empty": {
+      "none": "No companies yet. Add your first company with the \"Add company\" button.",
+      "filtered": "No records for the applied filters."
+    },
+    "table": {
+      "cui": "CUI",
+      "name": "Name",
+      "city": "City",
+      "county": "County",
+      "spv": "SPV",
+      "series": "Series",
+      "regCom": "Trade Reg.",
+      "active": "Active"
+    },
+    "regime": {
+      "micro": "Micro · 1%",
+      "profit": "Profit · 16%"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "actions": {
+      "setActive": "Set as active",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "confirm": {
+      "deleteTitle": "Confirm deletion",
+      "delete": "Delete company \"{{name}}\"? This action cannot be undone."
+    },
+    "notify": {
+      "deleteError": "Error deleting the company.",
+      "limitInfo": "Your plan limit has been reached. Contact us for an upgrade at support@efactura.ro"
+    },
+    "plafon": {
+      "heading": "Threshold monitoring",
+      "ytdRevenue": "· cumulated revenue {{year}}: {{amount}} lei",
+      "of": "/ {{amount}} lei",
+      "level": {
+        "ok": "Within limit",
+        "approaching": "Approaching",
+        "exceeded": "Exceeded",
+        "na": "Not applicable"
+      },
+      "micro": {
+        "title": "Micro-enterprise threshold",
+        "ps": "100,000 EUR (OUG 89/2025) at the BNR rate of 31.12.{{year}} = {{rate}} →",
+        "footNa": "the company is on profit tax",
+        "foot": "when exceeded → 16% profit tax from the following quarter"
+      },
+      "vat": {
+        "title": "VAT registration threshold",
+        "psPrefix": "art. 310 / Law 141/2025 ·",
+        "psSuffix": "— relevant only for non-VAT payers",
+        "footExceeded": "VAT registration is mandatory",
+        "footApproaching": "when exceeded → mandatory VAT registration",
+        "footNa": "the company is already registered for VAT"
+      },
+      "cash": {
+        "title": "Cash-accounting VAT threshold",
+        "psPrefix": "OUG 8/2026 ·",
+        "psSuffix": "turnover — only for companies on cash-accounting VAT",
+        "footNa": "the company does not apply cash-accounting VAT",
+        "footExceeded": "the cash-accounting VAT threshold has been exceeded",
+        "footOk": "below the cash-accounting VAT threshold"
+      },
+      "banner": {
+        "exceeded": "The micro threshold has been exceeded ({{pct}}%).",
+        "approaching": "The micro threshold is approaching ({{pct}}%).",
+        "body1": "When the {{amount}} lei threshold is exceeded, the company switches to",
+        "bodyBold": "16% profit tax",
+        "body2": "starting with the quarter of the exceedance (OUG 89/2025). The monitoring also appears on Overview."
+      }
+    },
+    "form": {
+      "newTitle": "New company",
+      "newSub": "Details are filled in automatically from the ANAF registry by CUI",
+      "editCrumb": "Edit",
+      "editTitle": "Edit: {{name}}",
+      "editLoadingTitle": "Edit company",
+      "subSeries": "series",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saveCompany": "Save company",
+      "saving": "Saving…",
+      "sections": {
+        "identification": "Identification",
+        "address": "Address",
+        "contactBank": "Contact & bank",
+        "billing": "Invoicing & tax regime"
+      },
+      "fields": {
+        "cui": "CUI",
+        "regCom": "Trade Registry No.",
+        "legalName": "Legal name",
+        "tradeName": "Trade name",
+        "vatPayer": "VAT payer",
+        "address": "Address",
+        "city": "City",
+        "county": "County",
+        "postalCode": "Postal code",
+        "email": "Email",
+        "phone": "Phone",
+        "iban": "IBAN",
+        "bank": "Bank",
+        "invoiceSeries": "Invoice series",
+        "taxRegime": "Tax regime"
+      },
+      "yes": "Yes",
+      "no": "No",
+      "placeholders": {
+        "cui": "RO12345678",
+        "regCom": "J40/1234/2020",
+        "legalName": "S.C. Example S.R.L.",
+        "address": "1 Example Street",
+        "city": "Cluj-Napoca",
+        "county": "CJ",
+        "optional": "optional",
+        "iban": "RO49AAAA1B31007593840000",
+        "series": "FACT"
+      },
+      "anaf": {
+        "button": "ANAF ↓",
+        "searching": "Searching…",
+        "tooltip": "Fetch the company details from ANAF by CUI",
+        "found": "Found in ANAF — details filled in automatically",
+        "notFound": "The CUI was not found in the ANAF database.",
+        "filled": "Details filled in from ANAF."
+      },
+      "regime": {
+        "micro": "Micro-enterprise (1% income tax)",
+        "profit": "Profit tax (16%)",
+        "hint": "2026 micro threshold: 100,000 EUR (OUG 89/2025) — when exceeded, the company switches to profit tax from the quarter of the exceedance"
+      },
+      "seriesHint": "appears on all issued invoices (e.g. FACT-0001)",
+      "seriesHintIssued_one": "{{count}} invoice has already been issued with the current series — changing it requires confirmation",
+      "seriesHintIssued_other": "{{count}} invoices have already been issued with the current series — changing it requires confirmation",
+      "cuiLocked": "The CUI cannot be changed",
+      "spvNote": {
+        "bold": "The SPV/ANAF connection and the company logo",
+        "rest": "are configured after saving, from the company page. Logo: PNG or SVG, recommended 400×400 px — it appears on PDF invoices."
+      },
+      "validation": {
+        "cui": "Format: 2-10 digits, optionally prefixed with RO.",
+        "legalName": "Enter the full name.",
+        "address": "The address is required.",
+        "city": "The city is required.",
+        "county": "The county is required.",
+        "email": "Invalid email.",
+        "iban": "Invalid IBAN (wrong checksum or format).",
+        "series": "The series is required."
+      },
+      "confirm": {
+        "seriesTitle": "Invoice series change",
+        "series_one": "The company has already issued {{count}} invoice with the series \"{{oldSeries}}\". Changing the series to \"{{newSeries}}\" may break the numbering continuity. Do you want to continue?",
+        "series_other": "The company has already issued {{count}} invoices with the series \"{{oldSeries}}\". Changing the series to \"{{newSeries}}\" may break the numbering continuity. Do you want to continue?"
+      },
+      "notify": {
+        "createError": "Error creating the company.",
+        "saved": "Company saved.",
+        "saveError": "Error saving the company."
+      }
+    },
+    "detail": {
+      "loadingTitle": "Company",
+      "spvActive": "SPV active",
+      "spvInactive": "SPV inactive",
+      "back": "Back",
+      "sections": {
+        "contactPay": "Contact and payment",
+        "billing": "Invoicing"
+      },
+      "kv": {
+        "country": "Country",
+        "lastNumber": "Last issued number"
+      },
+      "spv": {
+        "title": "ANAF SPV system",
+        "connect": "Connect SPV",
+        "authorizing": "Authorizing…",
+        "connectedTitle": "SPV connected",
+        "connectedDesc": "This company can send electronic invoices directly to ANAF.",
+        "notConnectedTitle": "SPV not connected",
+        "notConnectedDesc": "To send electronic invoices, connect the digital certificate for this company.",
+        "notifyConnected": "SPV connected successfully.",
+        "notifyCancelled": "The SPV authorization was cancelled or failed. Try again.",
+        "notifyFailed": "Connecting to SPV failed."
+      },
+      "certs": {
+        "title": "SPV / ANAF OAuth certificates",
+        "reauth": "Reauthorize SPV",
+        "authorizing": "Authorizing…",
+        "empty": "No active certificate.",
+        "issued": "Issued",
+        "expires": "Expires",
+        "status": "Status",
+        "active": "Active",
+        "inactive": "Inactive",
+        "revoke": "Revoke",
+        "notifyRefreshed": "Certificate reauthorized.",
+        "notifyRefreshError": "The certificate reauthorization failed.",
+        "notifyRevoked": "Certificate revoked.",
+        "notifyRevokeError": "The certificate revocation failed."
+      }
+    }
+  }
+}

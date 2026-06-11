@@ -1,0 +1,115 @@
+{
+  "payments": {
+    "title": "Payment Tracking",
+    "sub": "Payment status per invoice",
+    "selectCompany": "Select an active company to track payments.",
+    "head": {
+      "addPayment": "Add payment"
+    },
+    "kpi": {
+      "due": "Receivables",
+      "dueDelta": "{{n}} unpaid invoices",
+      "overdue": "Overdue",
+      "overdueDelta": "{{n}} overdue invoices",
+      "collected": "Total collected",
+      "collectedDelta": "{{n}} paid invoices"
+    },
+    "tabs": {
+      "all": "All",
+      "unpaid": "Unpaid",
+      "partial": "Partial",
+      "paid": "Paid",
+      "overdue": "Overdue"
+    },
+    "search": "Search client or invoice…",
+    "truncated": "Showing first {{shown}} of {{total}} invoices.",
+    "states": {
+      "loading": "Loading…",
+      "invoicesLabel": "invoices",
+      "paymentsLabel": "payments",
+      "emptyNone": "No invoices issued — payments appear here once invoices are issued.",
+      "emptyFiltered": "No records match the applied filters."
+    },
+    "table": {
+      "number": "Invoice no.",
+      "client": "Client",
+      "issueDate": "Issue date",
+      "dueDate": "Due date",
+      "total": "Total",
+      "paid": "Paid",
+      "rest": "Outstanding",
+      "status": "Payment status"
+    },
+    "chip": {
+      "overdue": "Overdue",
+      "paid": "Paid",
+      "partial": "Partial",
+      "unpaid": "Unpaid"
+    },
+    "row": {
+      "viewPayments": "View payments"
+    },
+    "foot": {
+      "total": "Total:",
+      "invoices": "invoices",
+      "unpaid": "Unpaid:",
+      "overdue": "Overdue:",
+      "shownFirst": "showing first {{shown}} of {{total}}"
+    },
+    "method": {
+      "transfer": "Bank transfer",
+      "cash": "Cash",
+      "card": "Card",
+      "other": "Other"
+    },
+    "modal": {
+      "titleFx": "Add foreign-currency payment",
+      "sub": "{{number}} · {{client}} · outstanding {{amount}} {{cur}}",
+      "subIssuedRate": " (issued at rate {{rate}})",
+      "subPick": "Select the invoice you are recording the payment for",
+      "invoice": "Invoice",
+      "existing": "Recorded payments",
+      "deletePayment": "Delete payment",
+      "amount": "Amount ({{cur}})",
+      "paidAt": "Payment date",
+      "bnrRate": "BNR rate on payment date (FX difference 665/765)",
+      "bnrPlaceholder": "e.g. 4.9750",
+      "bnrHint": "official BNR rate of {{date}}",
+      "bnrFetching": "fetching…",
+      "bnrFetch": "fetch automatically",
+      "ronEquiv": "RON equivalent",
+      "method": "Payment method",
+      "reference": "Reference / receipt no.",
+      "refPlaceholderFx": "e.g. SWIFT 99-2210",
+      "refPlaceholder": "e.g. OP 2248",
+      "fullPay": "This payment settles the invoice in full",
+      "partialPay": "Partial payment — outstanding after payment: {{amount}}",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save": "Save payment"
+    },
+    "fx": {
+      "favorable": "Favorable exchange-rate difference: +{{amount}} RON",
+      "unfavorable": "Unfavorable exchange-rate difference: −{{amount}} RON",
+      "autoRecord": "Recorded automatically as",
+      "incomePre": "financial income in account",
+      "incomeParen": "(unfavorable → expense",
+      "expensePre": "financial expense in account",
+      "expenseParen": "(favorable → income"
+    },
+    "picker": {
+      "clear": "Remove selected invoice",
+      "placeholder": "Search invoice (number or client)…",
+      "searching": "Searching…",
+      "noneFor": "No invoices for “{{q}}”.",
+      "none": "No invoices found."
+    },
+    "notify": {
+      "added": "Payment added successfully",
+      "addError": "Could not add the payment.",
+      "deleted": "Payment deleted",
+      "deleteError": "Could not delete the payment.",
+      "bnrError": "Could not fetch the BNR exchange rate."
+    }
+  }
+}

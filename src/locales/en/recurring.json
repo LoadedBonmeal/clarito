@@ -1,0 +1,103 @@
+{
+  "recurring": {
+    "title": "Recurring Invoices",
+    "selectCompany": "Select an active company to view recurring templates.",
+    "sub": {
+      "templates_one": "{{count}} template",
+      "templates_other": "{{count}} templates",
+      "active": "{{n}} active",
+      "next": "next issue {{date}}"
+    },
+    "head": {
+      "new": "New template"
+    },
+    "tabs": {
+      "all": "All",
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "search": "Search template…",
+    "states": {
+      "loading": "Loading…",
+      "errorLabel": "recurring invoices",
+      "emptyNone": "No recurring templates. Create one with the “New template” button to issue invoices automatically on a schedule.",
+      "emptyFiltered": "No records match the applied filters."
+    },
+    "freq": {
+      "monthlyDay": "Monthly · day {{n}}",
+      "monthly": "Monthly",
+      "quarterly": "Quarterly",
+      "annual": "Annual"
+    },
+    "table": {
+      "name": "Template name",
+      "client": "Client",
+      "frequency": "Frequency",
+      "nextIssue": "Next issue",
+      "series": "Series",
+      "autoAnaf": "Auto ANAF",
+      "active": "Active",
+      "inactive": "inactive"
+    },
+    "row": {
+      "autoAnafAria": "Automatic submission to ANAF",
+      "deactivate": "Deactivate template",
+      "activate": "Activate template",
+      "deleteQ": "Delete?",
+      "confirmDelete": "Confirm deletion",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "cancel": "Cancel",
+    "banner": {
+      "part1": "Recurring invoices are generated automatically as",
+      "drafts": "drafts",
+      "part2": "on the scheduled date. With",
+      "autoAnaf": "Auto ANAF",
+      "part3": "enabled, the generated invoice is submitted automatically to ANAF (per-template setting)."
+    },
+    "modal": {
+      "editTitle": "Edit recurring template",
+      "createTitle": "Recurring invoice template",
+      "sub": "The invoice is generated automatically as a draft on the scheduled date.",
+      "close": "Close",
+      "name": "Template name",
+      "namePlaceholder": "e.g. Monthly hosting subscription",
+      "client": "Client",
+      "clientPick": "— Select client —",
+      "clientLocked": "The client cannot be changed after creation.",
+      "frequency": "Frequency",
+      "dayOfMonth": "Day of month (1–28)",
+      "nextIssue": "First / next issue",
+      "series": "Invoice series",
+      "seriesPlaceholder": "e.g. FCT",
+      "autoSubmit": "Submit automatically to ANAF after issuing",
+      "lines": "Line items",
+      "notes": "Notes (optional)",
+      "notesPlaceholder": "Additional information",
+      "tip": "You can also create a template directly from an existing invoice, via the “Save as template” option.",
+      "saving": "Saving…",
+      "saveChanges": "Save changes",
+      "create": "Create template"
+    },
+    "validate": {
+      "name": "Enter a template name.",
+      "client": "Select a client.",
+      "series": "Enter the invoice series.",
+      "lines": "Add at least one line item.",
+      "lineName": "Line {{n}}: the product/service name is required."
+    },
+    "notify": {
+      "created": "Recurring invoice created successfully",
+      "createError": "Could not create the recurring template.",
+      "updated": "Template updated successfully",
+      "updateError": "Could not update the recurring template.",
+      "deleted": "Template deleted",
+      "deleteError": "Could not delete the template.",
+      "toggled": "Template status updated.",
+      "toggleError": "Could not update the template status.",
+      "autoAnafSaved": "Auto ANAF setting updated.",
+      "autoAnafError": "Could not update the Auto ANAF setting."
+    }
+  }
+}

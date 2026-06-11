@@ -16,6 +16,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
@@ -25,14 +26,8 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
-import { fmtRON, parseDec, MONTHS_RO_SHORT } from "@/lib/utils";
+import { fmtRON, parseDec } from "@/lib/utils";
 import type { Employee, CreateEmployeeInput, PayrollRun, SecondaryOffice } from "@/types";
-
-const MONTHS = MONTHS_RO_SHORT;
-const MONTHS_FULL = [
-  "Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
-  "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie",
-];
 
 const RO_MON = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
 const fmtRoDate = (iso: string) => {
@@ -53,27 +48,12 @@ const fmtRange = (a: string, b: string) => {
 const initials = (name: string) =>
   name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "—";
 
-/** Excepții art. 146 (5⁷) — etichete mini-chip ok (stil prototip). */
-const EXCEPTIE_LABEL: Record<string, string> = {
-  elev_student: "elev_student · art. 146(5⁷)",
-  ucenic: "ucenic · art. 146(5⁷)",
-  dizabilitate: "dizabilități · art. 146(5⁷)",
-  contracte_multiple: "contracte multiple · art. 146(5⁷)",
-};
-
-/** Cod indemnizație CM (D_9) — etichete chip. */
-const COD_CM_LABEL: Record<string, string> = {
-  "01": "boală obișnuită",
-  "06": "sarcină și lăuzie",
-  "09": "îngrijire copil",
-  "15": "risc maternal",
-};
-
 // triunghi avertisment (nu există în Ic)
 const WARN_TRIANGLE =
   '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>';
 
 export function PayrollPage() {
+  const { t } = useTranslation();
   const companyId = useAppStore((s) => s.activeCompanyId);
   const qc = useQueryClient();
   const now = new Date();
@@ -87,6 +67,29 @@ export function PayrollPage() {
   const [showConcediu, setShowConcediu] = useState(false);
   const [run, setRun] = useState<PayrollRun | null>(null);
   const [openPop, setOpenPop] = useState<"" | "period">("");
+
+  const MONTHS_FULL = useMemo(() => [
+    t("payroll.months.jan"), t("payroll.months.feb"), t("payroll.months.mar"),
+    t("payroll.months.apr"), t("payroll.months.may"), t("payroll.months.jun"),
+    t("payroll.months.jul"), t("payroll.months.aug"), t("payroll.months.sep"),
+    t("payroll.months.oct"), t("payroll.months.nov"), t("payroll.months.dec"),
+  ], [t]);
+
+  /** Excepții art. 146 (5⁷) — etichete mini-chip ok (stil prototip). */
+  const EXCEPTIE_LABEL: Record<string, string> = useMemo(() => ({
+    elev_student: t("payroll.emp.chips.exc.elev_student"),
+    ucenic: t("payroll.emp.chips.exc.ucenic"),
+    dizabilitate: t("payroll.emp.chips.exc.dizabilitate"),
+    contracte_multiple: t("payroll.emp.chips.exc.contracte_multiple"),
+  }), [t]);
+
+  /** Cod indemnizație CM (D_9) — etichete chip. */
+  const COD_CM_LABEL: Record<string, string> = useMemo(() => ({
+    "01": t("payroll.cm.codes.c01"),
+    "06": t("payroll.cm.codes.c06"),
+    "09": t("payroll.cm.codes.c09"),
+    "15": t("payroll.cm.codes.c15"),
+  }), [t]);
 
   // închide pop-urile la click în afară (model Invoices)
   useEffect(() => {
@@ -135,28 +138,28 @@ export function PayrollPage() {
     onSuccess: (r) => {
       setRun(r);
       r.posted
-        ? notify.success(`Stat de salarii postat — net total ${r.totalNet} lei.`)
-        : notify.info("Niciun angajat activ — nimic de calculat.");
+        ? notify.success(t("payroll.notify.runPosted", { net: r.totalNet }))
+        : notify.info(t("payroll.stat.noActive"));
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut rula statul de salarii.")),
+    onError: (e) => notify.error(formatError(e, t("payroll.notify.runError"))),
   });
 
   const del = useMutation({
     mutationFn: (id: string) => api.payroll.delete(id, companyId!),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["employees", companyId] }),
-    onError: (e) => notify.error(formatError(e, "Eroare la ștergere.")),
+    onError: (e) => notify.error(formatError(e, t("payroll.notify.deleteError"))),
   });
 
   const delSediu = useMutation({
     mutationFn: (id: string) => api.payroll.deleteSediu(id, companyId!),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["sedii", companyId] }),
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge sediul secundar.")),
+    onError: (e) => notify.error(formatError(e, t("payroll.notify.deleteSediuError"))),
   });
 
   const delConcediu = useMutation({
     mutationFn: (id: string) => api.payroll.deleteConcediu(id, companyId!),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["concedii", companyId, periodYm] }),
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge concediul medical.")),
+    onError: (e) => notify.error(formatError(e, t("payroll.notify.deleteConcediuError"))),
   });
 
   const runD112 = async (caen: string) => {
@@ -164,26 +167,22 @@ export function PayrollPage() {
     // Noul model D112 (Ordin comun 605/95/928/2.314/2026, M.Of. 463/02.06.2026) se aplică
     // veniturilor lunii IULIE 2026+; aplicația emite structura v7 (valabilă ≤ iunie 2026).
     if (year > 2026 || (year === 2026 && month >= 7)) {
-      notify.warn(
-        `Pentru ${MONTHS[month - 1]} ${year} se aplică NOUL model D112 (OPANAF 605/2026), ` +
-        "neimplementat încă — fișierul exportat folosește structura veche (≤ iunie 2026) și " +
-        "poate fi respins de DUKIntegrator. Verificați înainte de depunere.",
-      );
+      notify.warn(t("payroll.notify.newModelWarn", { month: MONTHS_FULL[month - 1], year }));
     }
     const dest = await saveDialog({
-      title: "Salvează D112 (XML)",
+      title: t("payroll.d112.saveTitle"),
       defaultPath: `d112-${year}-${String(month).padStart(2, "0")}.xml`,
       filters: [{ name: "XML", extensions: ["xml"] }],
     });
     if (!dest) return;
     try {
       await api.payroll.exportD112Xml(companyId, year, month, caen, dest);
-      notify.success(`D112 (XML) exportat — antet + obligații angajator + ${employees.filter((e) => e.active).length} ` +
-        `asigurați. Importați-l în aplicația D112 (PDF inteligent), validați (DUKIntegrator) și ` +
-        `completați declarantul + blocurile speciale înainte de depunere.`);
+      notify.success(t("payroll.notify.exported", {
+        insured: t("payroll.d112.insured", { count: employees.filter((e) => e.active).length }),
+      }));
       setShowD112(false);
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut exporta D112."));
+      notify.error(formatError(err, t("payroll.notify.exportError")));
     }
   };
 
@@ -201,19 +200,19 @@ export function PayrollPage() {
   if (!companyId) {
     return (
       <div className="main-inner wide pg-payroll">
-        <div className="page-head"><div><h1>Salarizare</h1></div></div>
+        <div className="page-head"><div><h1>{t("payroll.title")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a gestiona salarizarea.
+          {t("payroll.noCompany")}
         </div>
       </div>
     );
   }
 
   const tabs: Array<{ label: string; count: number | null }> = [
-    { label: "Angajați", count: employees.length },
-    { label: "Stat de salarii", count: null },
-    { label: "Concedii medicale", count: leaves.length },
-    { label: "Sedii secundare", count: sedii.length + 1 },
+    { label: t("payroll.tabs.employees"), count: employees.length },
+    { label: t("payroll.tabs.payslip"), count: null },
+    { label: t("payroll.tabs.medicalLeaves"), count: leaves.length },
+    { label: t("payroll.tabs.offices"), count: sedii.length + 1 },
   ];
 
   return (
@@ -221,9 +220,9 @@ export function PayrollPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Salarizare</h1>
+          <h1>{t("payroll.title")}</h1>
           <p className="sub">
-            {MONTHS_FULL[month - 1]} {year} · {activeEmployees.length === 1 ? "1 angajat activ" : `${activeEmployees.length} angajați activi`} · fond brut {fmtRON(fondBrut)} RON
+            {MONTHS_FULL[month - 1]} {year} · {t("payroll.head.activeEmployees", { count: activeEmployees.length })} · {t("payroll.head.grossFund", { amount: fmtRON(fondBrut) })}
           </p>
         </div>
         <div className="head-actions">
@@ -241,9 +240,9 @@ export function PayrollPage() {
             {openPop === "period" && (
               <div className="pop show" style={{ right: 0, top: 40, width: 220, maxHeight: 320, overflowY: "auto" }} onMouseDown={(e) => e.stopPropagation()}>
                 <div className="col-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <button className="mini-btn" aria-label="Anul precedent" onClick={() => setYear(year - 1)}>‹</button>
+                  <button className="mini-btn" aria-label={t("payroll.actions.prevYear")} onClick={() => setYear(year - 1)}>‹</button>
                   <span className="num">{year}</span>
-                  <button className="mini-btn" aria-label="Anul următor" onClick={() => setYear(year + 1)}>›</button>
+                  <button className="mini-btn" aria-label={t("payroll.actions.nextYear")} onClick={() => setYear(year + 1)}>›</button>
                 </div>
                 {MONTHS_FULL.map((m, i) => (
                   <button key={m} className="pop-item" onClick={() => { setMonth(i + 1); setOpenPop(""); }}>
@@ -255,10 +254,10 @@ export function PayrollPage() {
             )}
           </div>
           <button className="pill-btn" onClick={() => setModal("create")}>
-            <Ic name="plus" />Angajat nou
+            <Ic name="plus" />{t("payroll.actions.newEmployee")}
           </button>
           <button className="btn-dark" onClick={() => setShowD112(true)}>
-            <Ic name="code" />Export D112 (XML)
+            <Ic name="code" />{t("payroll.actions.exportD112")}
           </button>
         </div>
       </div>
@@ -267,18 +266,17 @@ export function PayrollPage() {
       <div className="banner warn">
         <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: WARN_TRIANGLE }} />
         <span>
-          <b>D112 — model nou OPANAF 605/2026</b> se aplică pentru lunile de raportare <b>≥ iulie 2026</b>.
-          Clarito emite deocamdată modelul curent (≤ iunie 2026); pentru iulie 2026+ fișierul exportat
-          folosește încă structura veche — validați în DUKIntegrator înainte de depunere.
+          <b>{t("payroll.banner.strong")}</b> {t("payroll.banner.applies")} <b>{t("payroll.banner.from")}</b>.{" "}
+          {t("payroll.banner.body")}
         </span>
       </div>
 
       {/* tabs */}
       <div className="tabs" style={{ display: "inline-flex", marginBottom: 16 }}>
-        {tabs.map((t, i) => (
-          <div key={t.label} className={`tab${tab === i ? " active" : ""}`} onClick={() => setTab(i)}>
-            {t.label}
-            {t.count !== null && <span className="cnt">{t.count}</span>}
+        {tabs.map((tb, i) => (
+          <div key={tb.label} className={`tab${tab === i ? " active" : ""}`} onClick={() => setTab(i)}>
+            {tb.label}
+            {tb.count !== null && <span className="cnt">{tb.count}</span>}
           </div>
         ))}
       </div>
@@ -287,13 +285,13 @@ export function PayrollPage() {
       <div className={`panel${tab === 0 ? " show" : ""}`}>
         <div className="scr-card">
           <div className="scr-toolbar">
-            <div className="tt">Angajați</div>
+            <div className="tt">{t("payroll.tabs.employees")}</div>
             <div className="spacer" />
             <div className="scr-search" style={{ width: 190 }}>
               <Ic name="lens" />
               <input
                 type="text"
-                placeholder="Caută angajat…"
+                placeholder={t("payroll.emp.searchPlaceholder")}
                 value={empQuery}
                 onChange={(e) => setEmpQuery(e.target.value)}
               />
@@ -302,13 +300,13 @@ export function PayrollPage() {
           {filteredEmployees.length === 0 ? (
             <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
               {employees.length === 0
-                ? "Niciun angajat — adăugați angajați pentru a calcula salariile."
-                : "Niciun angajat pentru căutarea aplicată."}
+                ? t("payroll.emp.emptyNone")
+                : t("payroll.emp.emptySearch")}
             </div>
           ) : (
             <table className="scr-table">
               <thead>
-                <tr><th>Nume</th><th>CNP</th><th className="r">Brut</th><th className="r">Deducere</th><th className="r" style={{ width: 90 }}></th></tr>
+                <tr><th>{t("payroll.emp.th.name")}</th><th>{t("payroll.emp.th.cnp")}</th><th className="r">{t("payroll.emp.th.gross")}</th><th className="r">{t("payroll.emp.th.deduction")}</th><th className="r" style={{ width: 90 }}></th></tr>
               </thead>
               <tbody>
                 {filteredEmployees.map((e) => (
@@ -318,15 +316,15 @@ export function PayrollPage() {
                         <span className="cli-ava">{initials(e.fullName)}</span>
                         {e.fullName}
                         <span className="chips">
-                          <span className="mini-chip">{e.tipContract} · {e.oreNorma}h</span>
+                          <span className="mini-chip">{t("payroll.emp.chips.contractHours", { tip: e.tipContract, hours: e.oreNorma })}</span>
                           {e.exceptieCasMin && EXCEPTIE_LABEL[e.exceptieCasMin] && (
                             <span className="mini-chip ok">{EXCEPTIE_LABEL[e.exceptieCasMin]}</span>
                           )}
-                          {e.pensionar && <span className="mini-chip ok">pensionar · art. 146(5⁷)</span>}
+                          {e.pensionar && <span className="mini-chip ok">{t("payroll.emp.chips.pensioner")}</span>}
                           {e.tipContract !== "N" && !e.exceptieCasMin && !e.pensionar && (
-                            <span className="mini-chip warn">bază minimă CAS/CASS</span>
+                            <span className="mini-chip warn">{t("payroll.emp.chips.minBase")}</span>
                           )}
-                          {!e.active && <span className="mini-chip">inactiv</span>}
+                          {!e.active && <span className="mini-chip">{t("payroll.emp.chips.inactive")}</span>}
                         </span>
                       </div>
                     </td>
@@ -335,14 +333,14 @@ export function PayrollPage() {
                     <td className="r num">{fmtRON(e.personalDeduction)}</td>
                     <td>
                       <div className="row-acts">
-                        <button className="mini-btn" title="Editează" onClick={() => setModal({ edit: e })}>
+                        <button className="mini-btn" title={t("payroll.actions.edit")} onClick={() => setModal({ edit: e })}>
                           <Ic name="pen" />
                         </button>
                         <button
                           className="mini-btn"
-                          title="Șterge"
+                          title={t("payroll.actions.delete")}
                           onClick={async () => {
-                            if (await confirm(`Ștergeți angajatul "${e.fullName}"?`, { kind: "warning" })) del.mutate(e.id);
+                            if (await confirm(t("payroll.emp.confirmDelete", { name: e.fullName }), { kind: "warning" })) del.mutate(e.id);
                           }}
                         >
                           <Ic name="xMark" />
@@ -356,8 +354,7 @@ export function PayrollPage() {
           )}
           <div className="pager">
             <span>
-              Excepții de la baza minimă part-time — art. 146(5⁷): <b>elev/student sub 26 de ani, ucenic
-              sub 18, persoane cu dizabilități, pensionari, contracte multiple însumate ≥ norma întreagă</b>
+              {t("payroll.emp.footnoteLabel")} <b>{t("payroll.emp.footnoteBold")}</b>
             </span>
             <span></span>
           </div>
@@ -368,36 +365,36 @@ export function PayrollPage() {
       <div className={`panel${tab === 1 ? " show" : ""}`}>
         <div className="scr-card">
           <div className="scr-toolbar">
-            <div className="tt">Stat de salarii — {MONTHS_FULL[month - 1]} {year}</div>
+            <div className="tt">{t("payroll.stat.title", { period: `${MONTHS_FULL[month - 1]} ${year}` })}</div>
             <div className="spacer" />
             <button className="pill-btn" disabled={runMut.isPending} onClick={() => runMut.mutate()}>
-              <Ic name="calc" />{runMut.isPending ? "Calculez…" : "Rulează stat salarii"}
+              <Ic name="calc" />{runMut.isPending ? t("payroll.stat.running") : t("payroll.stat.run")}
             </button>
             {/* propunere — neimplementat (prototipul are Export XLSX fără echivalent backend) */}
-            <button className="pill-btn" onClick={() => notify.info("În curând.")}>
-              <Ic name="dl" />Export XLSX
+            <button className="pill-btn" onClick={() => notify.info(t("payroll.notify.soon"))}>
+              <Ic name="dl" />{t("payroll.stat.exportXlsx")}
             </button>
             <button className="pill-btn" onClick={() => window.print()}>
-              <Ic name="printer" />Printează
+              <Ic name="printer" />{t("payroll.stat.print")}
             </button>
           </div>
           {!run ? (
             <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
               {runMut.isPending
-                ? "Se calculează statul de salarii…"
-                : "Apăsați „Rulează stat salarii” pentru a calcula contribuțiile lunii și a posta nota contabilă."}
+                ? t("payroll.stat.calculating")
+                : t("payroll.stat.emptyPrompt")}
             </div>
           ) : run.states.length === 0 ? (
             <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-              Niciun angajat activ — nimic de calculat.
+              {t("payroll.stat.noActive")}
             </div>
           ) : (
             <table className="scr-table">
               <thead>
                 <tr>
-                  <th>Angajat</th><th className="r">Brut</th><th className="r">CAS 25%</th>
-                  <th className="r">CASS 10%</th><th className="r">Impozit 10%</th>
-                  <th className="r">Net</th><th className="r">CAM 2,25%</th>
+                  <th>{t("payroll.stat.th.employee")}</th><th className="r">{t("payroll.emp.th.gross")}</th><th className="r">{t("payroll.stat.th.cas")}</th>
+                  <th className="r">{t("payroll.stat.th.cass")}</th><th className="r">{t("payroll.stat.th.tax")}</th>
+                  <th className="r">{t("payroll.stat.th.net")}</th><th className="r">{t("payroll.stat.th.cam")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -413,7 +410,7 @@ export function PayrollPage() {
                   </tr>
                 ))}
                 <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
-                  <td>Total</td>
+                  <td>{t("payroll.stat.total")}</td>
                   <td className="r num">{fmtRON(run.totalGross)}</td>
                   <td className="r num">{fmtRON(run.totalCas)}</td>
                   <td className="r num">{fmtRON(run.totalCass)}</td>
@@ -426,9 +423,8 @@ export function PayrollPage() {
           )}
           <div className="pager">
             <span>
-              * CAS și CASS calculate la baza salariului minim brut pentru contractele part-time fără
-              excepție — diferența este suportată de angajator conform art. 146(5⁶) Cod fiscal.
-              {run?.posted ? <> Nota contabilă agregată (641/421, 4315, 4316, 444, 646/436) a fost postată în jurnal la <b>{fmtRoDate(run.entryDate)}</b>.</> : null}
+              {t("payroll.stat.footnote")}
+              {run?.posted ? <> {t("payroll.stat.postedNote")} <b>{fmtRoDate(run.entryDate)}</b>.</> : null}
             </span>
             <span></span>
           </div>
@@ -439,23 +435,23 @@ export function PayrollPage() {
       <div className={`panel${tab === 2 ? " show" : ""}`}>
         <div className="scr-card">
           <div className="scr-toolbar">
-            <div className="tt">Concedii medicale — {MONTHS_FULL[month - 1]} {year}</div>
+            <div className="tt">{t("payroll.cm.title", { period: `${MONTHS_FULL[month - 1]} ${year}` })}</div>
             <div className="spacer" />
             <button className="pill-btn" onClick={() => setShowConcediu(true)}>
-              <Ic name="plus" />Adaugă certificat
+              <Ic name="plus" />{t("payroll.cm.add")}
             </button>
           </div>
           {leaves.length === 0 ? (
             <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-              Niciun concediu medical înregistrat pentru {MONTHS_FULL[month - 1]} {year}.
+              {t("payroll.cm.empty", { period: `${MONTHS_FULL[month - 1]} ${year}` })}
             </div>
           ) : (
             <table className="scr-table">
               <thead>
                 <tr>
-                  <th>Angajat</th><th>Certificat</th><th>Cod indemnizație</th><th>Perioada</th>
-                  <th className="r">Zile angajator</th><th className="r">Zile FNUASS</th>
-                  <th className="r">Suma angajator</th><th className="r">Suma FNUASS</th>
+                  <th>{t("payroll.stat.th.employee")}</th><th>{t("payroll.cm.th.certificate")}</th><th>{t("payroll.cm.th.code")}</th><th>{t("payroll.cm.th.period")}</th>
+                  <th className="r">{t("payroll.cm.th.daysEmployer")}</th><th className="r">{t("payroll.cm.th.daysFnuass")}</th>
+                  <th className="r">{t("payroll.cm.th.amountEmployer")}</th><th className="r">{t("payroll.cm.th.amountFnuass")}</th>
                   <th className="r" style={{ width: 50 }}></th>
                 </tr>
               </thead>
@@ -466,7 +462,7 @@ export function PayrollPage() {
                   return (
                     <tr key={l.id}>
                       <td><div className="cli"><span className="cli-ava">{initials(name)}</span>{name}</div></td>
-                      <td><span className="doc">{l.serie || l.numar ? `CM seria ${l.serie || "—"} nr. ${l.numar || "—"}` : "—"}</span></td>
+                      <td><span className="doc">{l.serie || l.numar ? t("payroll.cm.certLabel", { serie: l.serie || "—", numar: l.numar || "—" }) : "—"}</span></td>
                       <td>
                         <span className="chip sent">
                           {l.codIndemnizatie}{COD_CM_LABEL[l.codIndemnizatie] ? ` · ${COD_CM_LABEL[l.codIndemnizatie]}` : ""}
@@ -481,9 +477,9 @@ export function PayrollPage() {
                         <div className="row-acts">
                           <button
                             className="mini-btn"
-                            title="Șterge"
+                            title={t("payroll.actions.delete")}
                             onClick={async () => {
-                              if (await confirm("Ștergeți acest concediu medical?", { kind: "warning" })) delConcediu.mutate(l.id);
+                              if (await confirm(t("payroll.cm.confirmDelete"), { kind: "warning" })) delConcediu.mutate(l.id);
                             }}
                           >
                             <Ic name="xMark" />
@@ -498,8 +494,7 @@ export function PayrollPage() {
           )}
           <div className="pager">
             <span>
-              Indemnizațiile FNUASS se recuperează prin <b>cererea de restituire</b> depusă la CAS după
-              D112 · cod 01: primele 5 zile la angajator, restul din FNUASS · sursa blocului D112 asiguratD
+              {t("payroll.cm.footnote1")} <b>{t("payroll.cm.footnoteBold")}</b> {t("payroll.cm.footnote2")}
             </span>
             <span></span>
           </div>
@@ -510,22 +505,22 @@ export function PayrollPage() {
       <div className={`panel${tab === 3 ? " show" : ""}`}>
         <div className="scr-card">
           <div className="scr-toolbar">
-            <div className="tt">Sedii secundare înregistrate fiscal</div>
+            <div className="tt">{t("payroll.sedii.title")}</div>
             <div className="spacer" />
             <button className="pill-btn" onClick={() => setShowSediu(true)}>
-              <Ic name="plus" />Adaugă sediu
+              <Ic name="plus" />{t("payroll.sedii.add")}
             </button>
           </div>
           <table className="scr-table">
             <thead>
-              <tr><th>Sediu</th><th>CIF sediu</th><th className="r">Angajați repartizați</th><th className="r" style={{ width: 50 }}></th></tr>
+              <tr><th>{t("payroll.sedii.th.office")}</th><th>{t("payroll.sedii.th.cif")}</th><th className="r">{t("payroll.sedii.th.assigned")}</th><th className="r" style={{ width: 50 }}></th></tr>
             </thead>
             <tbody>
               <tr>
                 <td>
                   <div className="cli">
-                    <span className="cli-ava">{activeCompany ? initials(activeCompany.legalName) : "SP"}</span>
-                    <b>Sediu principal{activeCompany ? ` — ${activeCompany.legalName}` : ""}</b>
+                    <span className="cli-ava">{initials(activeCompany ? activeCompany.legalName : t("payroll.sedii.main"))}</span>
+                    <b>{t("payroll.sedii.main")}{activeCompany ? ` — ${activeCompany.legalName}` : ""}</b>
                   </div>
                 </td>
                 <td><span className="doc">{activeCompany?.cui ?? "—"}</span></td>
@@ -536,8 +531,8 @@ export function PayrollPage() {
                 <tr key={s.id}>
                   <td>
                     <div className="cli">
-                      <span className="cli-ava">{initials(s.name || "Punct lucru")}</span>
-                      {s.name || "Punct de lucru"}
+                      <span className="cli-ava">{initials(s.name || t("payroll.sedii.defaultName"))}</span>
+                      {s.name || t("payroll.sedii.defaultName")}
                     </div>
                   </td>
                   <td><span className="doc">{s.cif}</span></td>
@@ -546,9 +541,9 @@ export function PayrollPage() {
                     <div className="row-acts">
                       <button
                         className="mini-btn"
-                        title="Șterge"
+                        title={t("payroll.actions.delete")}
                         onClick={async () => {
-                          if (await confirm(`Ștergeți sediul secundar ${s.cif}?`, { kind: "warning" })) delSediu.mutate(s.id);
+                          if (await confirm(t("payroll.sedii.confirmDelete", { cif: s.cif }), { kind: "warning" })) delSediu.mutate(s.id);
                         }}
                       >
                         <Ic name="xMark" />
@@ -561,8 +556,7 @@ export function PayrollPage() {
           </table>
           <div className="pager">
             <span>
-              Sediile secundare cu <b>minimum 5 salariați</b> au obligația înregistrării fiscale (CIF
-              propriu) și a declarării impozitului pe salarii separat în D112 — secțiunea F.
+              {t("payroll.sedii.footnote1")} <b>{t("payroll.sedii.footnoteBold")}</b> {t("payroll.sedii.footnote2")}
             </span>
             <span></span>
           </div>
@@ -633,6 +627,7 @@ function EmployeeModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const isEdit = employee !== null;
   const [form, setForm] = useState({
     cnp: employee?.cnp ?? "",
@@ -649,7 +644,7 @@ function EmployeeModal({
 
   const save = useMutation({
     mutationFn: () => {
-      if (!form.fullName.trim()) throw new Error("Numele e obligatoriu.");
+      if (!form.fullName.trim()) throw new Error(t("payroll.empModal.nameRequired"));
       const payload = {
         cnp: form.cnp,
         fullName: form.fullName,
@@ -668,7 +663,7 @@ function EmployeeModal({
       return api.payroll.create(input);
     },
     onSuccess: onSaved,
-    onError: (e) => setError(formatError(e, "Eroare la salvare.")),
+    onError: (e) => setError(formatError(e, t("payroll.notify.saveError"))),
   });
 
   type StrKey = "cnp" | "fullName" | "grossSalary" | "personalDeduction" | "oreNorma";
@@ -686,85 +681,81 @@ function EmployeeModal({
       <div className="modal lg">
         <div className="modal-head">
           <div>
-            <div className="mt">{isEdit ? `Editează: ${employee.fullName}` : "Angajat nou"}</div>
-            <div className="ms">Datele alimentează statul de salarii și D112</div>
+            <div className="mt">{isEdit ? t("payroll.empModal.editTitle", { name: employee.fullName }) : t("payroll.actions.newEmployee")}</div>
+            <div className="ms">{t("payroll.empModal.subtitle")}</div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label="Închide">
+          <button className="modal-x" onClick={onClose} aria-label={t("payroll.common.close")}>
             <Ic name="xMark" />
           </button>
         </div>
         <div className="modal-body">
           <div className="fgrid">
             <div className="field">
-              <label>Nume complet <span className="req">*</span></label>
-              <input className="input" type="text" placeholder="Ion Popescu" {...field("fullName")} autoFocus />
+              <label>{t("payroll.empModal.fullName")} <span className="req">*</span></label>
+              <input className="input" type="text" placeholder={t("payroll.empModal.namePlaceholder")} {...field("fullName")} autoFocus />
             </div>
             <div className="field">
-              <label>CNP</label>
+              <label>{t("payroll.empModal.cnp")}</label>
               <input className="input num" type="text" placeholder="1900101…" {...field("cnp")} />
             </div>
             <div className="field">
-              <label>Salariu brut <span className="req">*</span></label>
+              <label>{t("payroll.empModal.gross")} <span className="req">*</span></label>
               <input className="input num" type="text" inputMode="decimal" placeholder="5000" style={{ textAlign: "right" }} {...field("grossSalary")} />
             </div>
             <div className="field">
-              <label>Deducere personală</label>
+              <label>{t("payroll.empModal.deduction")}</label>
               <input className="input num" type="text" inputMode="decimal" placeholder="0" style={{ textAlign: "right" }} {...field("personalDeduction")} />
             </div>
             <div className="field">
-              <label>Tip contract</label>
+              <label>{t("payroll.empModal.contractType")}</label>
               <select
                 className="select"
                 value={form.tipContract}
                 onChange={(e) => setForm((f) => ({ ...f, tipContract: e.target.value }))}
               >
-                <option value="N">N — normă întreagă</option>
-                <option value="P1">P1 — part-time 1h</option>
-                <option value="P2">P2 — part-time 2h</option>
-                <option value="P3">P3 — part-time 3h</option>
-                <option value="P4">P4 — part-time 4h</option>
-                <option value="P5">P5 — part-time 5h</option>
-                <option value="P6">P6 — part-time 6h</option>
-                <option value="P7">P7 — part-time 7h</option>
+                <option value="N">{t("payroll.empModal.contractFull")}</option>
+                {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+                  <option key={n} value={`P${n}`}>{t("payroll.empModal.contractPart", { n })}</option>
+                ))}
               </select>
             </div>
             <div className="field">
-              <label>Ore normă / zi</label>
+              <label>{t("payroll.empModal.hoursPerDay")}</label>
               <input className="input num" type="text" inputMode="numeric" placeholder="8" {...field("oreNorma")} />
             </div>
             <div className="field">
-              <label>Pensionar (D112 A_2)</label>
+              <label>{t("payroll.empModal.pensioner")}</label>
               <select
                 className="select"
                 value={form.pensionar ? "da" : "nu"}
                 onChange={(e) => setForm((f) => ({ ...f, pensionar: e.target.value === "da" }))}
               >
-                <option value="da">Da</option>
-                <option value="nu">Nu</option>
+                <option value="da">{t("payroll.common.yes")}</option>
+                <option value="nu">{t("payroll.common.no")}</option>
               </select>
             </div>
             <div className="field">
-              <label>Excepție bază minimă — art. 146(5⁷)</label>
+              <label>{t("payroll.empModal.exception")}</label>
               <select
                 className="select"
                 value={form.exceptieCasMin}
                 onChange={(e) => setForm((f) => ({ ...f, exceptieCasMin: e.target.value }))}
               >
-                <option value="">— fără excepție —</option>
-                <option value="elev_student">Elev / student până la 26 de ani (lit. a)</option>
-                <option value="ucenic">Ucenic până la 18 ani (lit. b)</option>
-                <option value="dizabilitate">Persoană cu dizabilități / &lt; 8h/zi (lit. c)</option>
-                <option value="contracte_multiple">Contracte multiple ≥ salariul minim (lit. e)</option>
+                <option value="">{t("payroll.empModal.excNone")}</option>
+                <option value="elev_student">{t("payroll.empModal.excElevStudent")}</option>
+                <option value="ucenic">{t("payroll.empModal.excUcenic")}</option>
+                <option value="dizabilitate">{t("payroll.empModal.excDizabilitate")}</option>
+                <option value="contracte_multiple">{t("payroll.empModal.excContracteMultiple")}</option>
               </select>
             </div>
             <div className="field span2">
-              <label>Sediu (CIF) — D112 angajatorF2</label>
+              <label>{t("payroll.empModal.office")}</label>
               <select
                 className="select"
                 value={form.sediuCif}
                 onChange={(e) => setForm((f) => ({ ...f, sediuCif: e.target.value }))}
               >
-                <option value="">Sediu principal{mainCui ? ` · ${mainCui}` : ""}</option>
+                <option value="">{t("payroll.sedii.main")}{mainCui ? ` · ${mainCui}` : ""}</option>
                 {sedii.map((s) => (
                   <option key={s.id} value={s.cif}>{s.name ? `${s.name} · ${s.cif}` : s.cif}</option>
                 ))}
@@ -781,9 +772,9 @@ function EmployeeModal({
           </div>
         </div>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={onClose} disabled={save.isPending}>Renunță</button>
+          <button className="pill-btn" onClick={onClose} disabled={save.isPending}>{t("payroll.common.cancel")}</button>
           <button className="btn-dark" disabled={save.isPending} onClick={() => save.mutate()}>
-            <Ic name="check" />{save.isPending ? "Se salvează…" : "Salvează angajat"}
+            <Ic name="check" />{save.isPending ? t("payroll.common.saving") : t("payroll.empModal.save")}
           </button>
         </div>
       </div>
@@ -804,6 +795,7 @@ function ConcediuModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const [f, setF] = useState({
     employeeId: "", serie: "", numar: "", codIndemnizatie: "01",
     dataInceput: "", dataSfarsit: "", zileAngajator: "", zileFnuass: "",
@@ -813,7 +805,7 @@ function ConcediuModal({
 
   const add = useMutation({
     mutationFn: () => {
-      if (!f.employeeId) throw new Error("Selectați angajatul.");
+      if (!f.employeeId) throw new Error(t("payroll.cmModal.selectRequired"));
       return api.payroll.createConcediu({
         companyId, employeeId: f.employeeId, periodYm,
         serie: f.serie, numar: f.numar, codIndemnizatie: f.codIndemnizatie,
@@ -823,7 +815,7 @@ function ConcediuModal({
       });
     },
     onSuccess: onSaved,
-    onError: (e) => setError(formatError(e, "Nu s-a putut adăuga concediul medical.")),
+    onError: (e) => setError(formatError(e, t("payroll.notify.addConcediuError"))),
   });
 
   const num = (k: keyof typeof f) => ({
@@ -840,71 +832,71 @@ function ConcediuModal({
       <div className="modal lg">
         <div className="modal-head">
           <div>
-            <div className="mt">Adaugă certificat de concediu medical</div>
-            <div className="ms">{monthLabel} · OUG 158/2005 — sursa blocului D112 asiguratD</div>
+            <div className="mt">{t("payroll.cmModal.title")}</div>
+            <div className="ms">{t("payroll.cmModal.subtitle", { month: monthLabel })}</div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label="Închide">
+          <button className="modal-x" onClick={onClose} aria-label={t("payroll.common.close")}>
             <Ic name="xMark" />
           </button>
         </div>
         <div className="modal-body">
           <div className="fgrid">
             <div className="field span2">
-              <label>Angajat <span className="req">*</span></label>
+              <label>{t("payroll.stat.th.employee")} <span className="req">*</span></label>
               <select
                 className="select"
                 value={f.employeeId}
                 onChange={(e) => setF((s) => ({ ...s, employeeId: e.target.value }))}
                 autoFocus
               >
-                <option value="">— selectați angajatul —</option>
+                <option value="">{t("payroll.cmModal.selectEmployee")}</option>
                 {employees.map((e) => <option key={e.id} value={e.id}>{e.fullName}</option>)}
               </select>
             </div>
             <div className="field">
-              <label>Serie certificat</label>
+              <label>{t("payroll.cmModal.serie")}</label>
               <input className="input num" type="text" placeholder="CCMAH" {...num("serie")} />
             </div>
             <div className="field">
-              <label>Număr certificat</label>
+              <label>{t("payroll.cmModal.numar")}</label>
               <input className="input num" type="text" placeholder="8841220" {...num("numar")} />
             </div>
             <div className="field span2">
-              <label>Cod indemnizație (D_9)</label>
+              <label>{t("payroll.cmModal.code")}</label>
               <select
                 className="select"
                 value={f.codIndemnizatie}
                 onChange={(e) => setF((s) => ({ ...s, codIndemnizatie: e.target.value }))}
               >
-                <option value="01">01 — boală obișnuită</option>
-                <option value="06">06 — sarcină și lăuzie</option>
-                <option value="09">09 — îngrijire copil</option>
-                <option value="15">15 — risc maternal</option>
+                <option value="01">01 — {t("payroll.cm.codes.c01")}</option>
+                <option value="06">06 — {t("payroll.cm.codes.c06")}</option>
+                <option value="09">09 — {t("payroll.cm.codes.c09")}</option>
+                <option value="15">15 — {t("payroll.cm.codes.c15")}</option>
               </select>
             </div>
             <div className="field">
-              <label>Data început</label>
+              <label>{t("payroll.cmModal.dateStart")}</label>
               <input className="input num" type="date" {...num("dataInceput")} />
             </div>
             <div className="field">
-              <label>Data sfârșit</label>
+              <label>{t("payroll.cmModal.dateEnd")}</label>
               <input className="input num" type="date" {...num("dataSfarsit")} />
             </div>
             <div className="field">
-              <label>Zile angajator</label>
+              <label>{t("payroll.cm.th.daysEmployer")}</label>
               <input className="input num" type="text" inputMode="numeric" placeholder="5" style={{ textAlign: "right" }} {...num("zileAngajator")} />
             </div>
             <div className="field">
-              <label>Zile FNUASS</label>
+              <label>{t("payroll.cm.th.daysFnuass")}</label>
               <input className="input num" type="text" inputMode="numeric" placeholder="0" style={{ textAlign: "right" }} {...num("zileFnuass")} />
             </div>
             <div className="field">
-              <label>Indemnizație angajator</label>
-              <input className="input num" type="text" inputMode="decimal" placeholder="0,00" style={{ textAlign: "right" }} {...num("sumaAngajator")} />
+              <label>{t("payroll.cmModal.amountEmployer")}</label>
+              <input className="input num" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} style={{ textAlign: "right" }} {...num("sumaAngajator")} />
             </div>
             <div className="field">
-              <label>Indemnizație FNUASS</label>
-              <input className="input num" type="text" inputMode="decimal" placeholder="0,00" style={{ textAlign: "right" }} {...num("sumaFnuass")} />
+              <label>{t("payroll.cmModal.amountFnuass")}</label>
+              <input className="input num" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} style={{ textAlign: "right" }} {...num("sumaFnuass")} />
             </div>
             {error && (
               <div className="field span2">
@@ -917,10 +909,10 @@ function ConcediuModal({
           </div>
         </div>
         <div className="modal-foot">
-          <span className="left">cod 01: primele 5 zile la angajator, restul din FNUASS</span>
-          <button className="pill-btn" onClick={onClose} disabled={add.isPending}>Renunță</button>
+          <span className="left">{t("payroll.cm.cod01Note")}</span>
+          <button className="pill-btn" onClick={onClose} disabled={add.isPending}>{t("payroll.common.cancel")}</button>
           <button className="btn-dark" disabled={add.isPending || !f.employeeId} onClick={() => add.mutate()}>
-            <Ic name="check" />{add.isPending ? "Se salvează…" : "Salvează certificat"}
+            <Ic name="check" />{add.isPending ? t("payroll.common.saving") : t("payroll.cmModal.save")}
           </button>
         </div>
       </div>
@@ -938,6 +930,7 @@ function SediuModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const [cif, setCif] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -945,7 +938,7 @@ function SediuModal({
   const add = useMutation({
     mutationFn: () => api.payroll.createSediu(companyId, cif.trim(), name.trim()),
     onSuccess: onSaved,
-    onError: (e) => setError(formatError(e, "Nu s-a putut adăuga sediul secundar.")),
+    onError: (e) => setError(formatError(e, t("payroll.notify.addSediuError"))),
   });
 
   return createPortal(
@@ -957,22 +950,22 @@ function SediuModal({
       <div className="modal">
         <div className="modal-head">
           <div>
-            <div className="mt">Adaugă sediu secundar</div>
-            <div className="ms">CIF propriu (doar cifre, unic per companie) — D112 angajatorF2 / secțiunea F</div>
+            <div className="mt">{t("payroll.sediuModal.title")}</div>
+            <div className="ms">{t("payroll.sediuModal.subtitle")}</div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label="Închide">
+          <button className="modal-x" onClick={onClose} aria-label={t("payroll.common.close")}>
             <Ic name="xMark" />
           </button>
         </div>
         <div className="modal-body">
           <div className="fgrid">
             <div className="field">
-              <label>CIF sediu <span className="req">*</span></label>
+              <label>{t("payroll.sediuModal.cif")} <span className="req">*</span></label>
               <input className="input num" type="text" placeholder="49102337" value={cif} onChange={(e) => setCif(e.target.value)} autoFocus />
             </div>
             <div className="field">
-              <label>Denumire (opțional)</label>
-              <input className="input" type="text" placeholder="Punct de lucru Cluj-Napoca" value={name} onChange={(e) => setName(e.target.value)} />
+              <label>{t("payroll.sediuModal.name")}</label>
+              <input className="input" type="text" placeholder={t("payroll.sediuModal.namePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             {error && (
               <div className="field span2">
@@ -985,9 +978,9 @@ function SediuModal({
           </div>
         </div>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={onClose} disabled={add.isPending}>Renunță</button>
+          <button className="pill-btn" onClick={onClose} disabled={add.isPending}>{t("payroll.common.cancel")}</button>
           <button className="btn-dark" disabled={add.isPending || !cif.trim()} onClick={() => add.mutate()}>
-            <Ic name="check" />{add.isPending ? "Se salvează…" : "Salvează sediu"}
+            <Ic name="check" />{add.isPending ? t("payroll.common.saving") : t("payroll.sediuModal.save")}
           </button>
         </div>
       </div>
@@ -1006,11 +999,12 @@ function D112Modal({
   onClose: () => void;
   onExport: (caen: string) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [caen, setCaen] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    if (!/^\d{4}$/.test(caen.trim())) { notify.error("Cod CAEN invalid — 4 cifre (ex. 6201)."); return; }
+    if (!/^\d{4}$/.test(caen.trim())) { notify.error(t("payroll.d112.invalidCaen")); return; }
     setBusy(true);
     try {
       await onExport(caen.trim());
@@ -1028,21 +1022,21 @@ function D112Modal({
       <div className="modal">
         <div className="modal-head">
           <div>
-            <div className="mt">Export D112 (XML)</div>
+            <div className="mt">{t("payroll.actions.exportD112")}</div>
             <div className="ms">
               {monthLabel} · {newModel
-                ? "se aplică modelul nou OPANAF 605/2026 — exportul folosește încă structura veche (verificați în DUKIntegrator)"
-                : "modelul curent; modelul nou OPANAF 605/2026 se aplică de la luna de raportare iulie 2026"}
+                ? t("payroll.d112.subNew")
+                : t("payroll.d112.subOld")}
             </div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label="Închide">
+          <button className="modal-x" onClick={onClose} aria-label={t("payroll.common.close")}>
             <Ic name="xMark" />
           </button>
         </div>
         <div className="modal-body">
           <div className="fgrid">
             <div className="field">
-              <label>Cod CAEN <span className="req">*</span></label>
+              <label>{t("payroll.d112.caen")} <span className="req">*</span></label>
               <input
                 className="input num"
                 type="text"
@@ -1051,10 +1045,10 @@ function D112Modal({
                 onChange={(e) => setCaen(e.target.value)}
                 autoFocus
               />
-              <span className="hint">4 cifre — activitatea principală a angajatorului</span>
+              <span className="hint">{t("payroll.d112.caenHint")}</span>
             </div>
             <div className="field">
-              <label>Luna de raportare</label>
+              <label>{t("payroll.d112.reportMonth")}</label>
               <input
                 className="input num"
                 type="text"
@@ -1066,10 +1060,10 @@ function D112Modal({
           </div>
         </div>
         <div className="modal-foot">
-          <span className="left">Include secțiunea F (sedii secundare) și asiguratD (concedii medicale)</span>
-          <button className="pill-btn" onClick={onClose} disabled={busy}>Renunță</button>
+          <span className="left">{t("payroll.d112.foot")}</span>
+          <button className="pill-btn" onClick={onClose} disabled={busy}>{t("payroll.common.cancel")}</button>
           <button className="btn-dark" disabled={busy} onClick={() => void submit()}>
-            <Ic name="code" />{busy ? "Se exportă…" : "Generează XML"}
+            <Ic name="code" />{busy ? t("payroll.d112.exporting") : t("payroll.d112.generate")}
           </button>
         </div>
       </div>

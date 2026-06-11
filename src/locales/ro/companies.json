@@ -1,0 +1,252 @@
+{
+  "companies": {
+    "title": "Companii",
+    "loading": "Se încarcă…",
+    "loadingCompany": "Se încarcă datele companiei…",
+    "errorLabel": "companiile",
+    "notFound": {
+      "title": "Companie inexistentă",
+      "pre": "Compania cu ID-ul",
+      "post": "nu a fost găsită.",
+      "backToList": "Înapoi la listă"
+    },
+    "tiers": {
+      "TRIAL": "Trial",
+      "SOLO": "Solo",
+      "ACCOUNTANT": "Contabil",
+      "FIRM": "Firmă"
+    },
+    "head": {
+      "managed_one": "{{count}} companie administrată",
+      "managed_few": "{{count}} companii administrate",
+      "managed_other": "{{count}} de companii administrate",
+      "planAllows": "planul {{plan}} permite {{limit}}",
+      "unlimited": "nelimitat",
+      "add": "Adaugă companie",
+      "limitTitle": "Limita planului dumneavoastră este atinsă"
+    },
+    "banner": {
+      "limitBold": "Limita planului {{plan}} este atinsă",
+      "limitCount": "({{n}}/{{limit}} companii).",
+      "limitContact": "Contactați-ne pentru upgrade la"
+    },
+    "toolbar": {
+      "title": "Toate companiile",
+      "searchPlaceholder": "Caută companie…",
+      "refresh": "Reîncarcă"
+    },
+    "tabs": {
+      "all": "Toate",
+      "withSpv": "Cu SPV",
+      "withoutSpv": "Fără SPV"
+    },
+    "empty": {
+      "none": "Nicio companie. Adăugați prima companie cu butonul „Adaugă companie”.",
+      "filtered": "Nicio înregistrare pentru filtrele aplicate."
+    },
+    "table": {
+      "cui": "CUI",
+      "name": "Denumire",
+      "city": "Localitate",
+      "county": "Județ",
+      "spv": "SPV",
+      "series": "Serie",
+      "regCom": "Reg. Com.",
+      "active": "Activă"
+    },
+    "regime": {
+      "micro": "Micro · 1%",
+      "profit": "Profit · 16%"
+    },
+    "status": {
+      "active": "Activă",
+      "inactive": "Inactivă"
+    },
+    "actions": {
+      "setActive": "Setează ca activă",
+      "edit": "Editează",
+      "delete": "Șterge"
+    },
+    "confirm": {
+      "deleteTitle": "Confirmare ștergere",
+      "delete": "Ștergeți compania \"{{name}}\"? Această acțiune nu poate fi anulată."
+    },
+    "notify": {
+      "deleteError": "Eroare la ștergerea companiei.",
+      "limitInfo": "Limita planului este atinsă. Contactați-ne pentru upgrade la support@efactura.ro"
+    },
+    "plafon": {
+      "heading": "Monitorizare plafoane",
+      "ytdRevenue": "· venituri cumulate {{year}}: {{amount}} lei",
+      "of": "/ {{amount}} lei",
+      "level": {
+        "ok": "În limită",
+        "approaching": "Se apropie",
+        "exceeded": "Depășit",
+        "na": "Nu se aplică"
+      },
+      "micro": {
+        "title": "Plafon micro­întreprindere",
+        "ps": "100.000 EUR (OUG 89/2025) la curs BNR 31.12.{{year}} = {{rate}} →",
+        "footNa": "compania este pe impozit pe profit",
+        "foot": "la depășire → impozit pe profit 16% din trimestrul următor"
+      },
+      "vat": {
+        "title": "Plafon înregistrare TVA",
+        "psPrefix": "art. 310 / Legea 141/2025 ·",
+        "psSuffix": "— relevant doar pentru neplătitori de TVA",
+        "footExceeded": "înregistrarea în scopuri de TVA este obligatorie",
+        "footApproaching": "la depășire → înregistrare obligatorie în scopuri de TVA",
+        "footNa": "compania este deja înregistrată în scopuri de TVA"
+      },
+      "cash": {
+        "title": "Plafon TVA la încasare",
+        "psPrefix": "OUG 8/2026 ·",
+        "psSuffix": "cifră de afaceri — doar pentru companii pe TVA la încasare",
+        "footNa": "compania nu aplică TVA la încasare",
+        "footExceeded": "plafonul TVA la încasare a fost depășit",
+        "footOk": "sub plafonul TVA la încasare"
+      },
+      "banner": {
+        "exceeded": "Plafonul micro a fost depășit ({{pct}}%).",
+        "approaching": "Plafonul micro se apropie ({{pct}}%).",
+        "body1": "La depășirea plafonului de {{amount}} lei compania trece la",
+        "bodyBold": "impozit pe profit 16%",
+        "body2": "începând cu trimestrul depășirii (OUG 89/2025). Monitorizarea apare și pe Privire generală."
+      }
+    },
+    "form": {
+      "newTitle": "Companie nouă",
+      "newSub": "Datele se completează automat din registrul ANAF după CUI",
+      "editCrumb": "Editează",
+      "editTitle": "Editează: {{name}}",
+      "editLoadingTitle": "Editare companie",
+      "subSeries": "serie",
+      "cancel": "Renunță",
+      "save": "Salvează",
+      "saveCompany": "Salvează compania",
+      "saving": "Se salvează…",
+      "sections": {
+        "identification": "Identificare",
+        "address": "Adresă",
+        "contactBank": "Contact & bancă",
+        "billing": "Facturare & regim fiscal"
+      },
+      "fields": {
+        "cui": "CUI",
+        "regCom": "Nr. Reg. Comerțului",
+        "legalName": "Denumire legală",
+        "tradeName": "Denumire comercială",
+        "vatPayer": "Plătitor TVA",
+        "address": "Adresă",
+        "city": "Localitate",
+        "county": "Județ",
+        "postalCode": "Cod poștal",
+        "email": "Email",
+        "phone": "Telefon",
+        "iban": "IBAN",
+        "bank": "Bancă",
+        "invoiceSeries": "Serie facturi",
+        "taxRegime": "Regim fiscal"
+      },
+      "yes": "Da",
+      "no": "Nu",
+      "placeholders": {
+        "cui": "RO12345678",
+        "regCom": "J40/1234/2020",
+        "legalName": "S.C. Exemplu S.R.L.",
+        "address": "Str. Exemplu nr. 1",
+        "city": "Cluj-Napoca",
+        "county": "CJ",
+        "optional": "opțional",
+        "iban": "RO49AAAA1B31007593840000",
+        "series": "FACT"
+      },
+      "anaf": {
+        "button": "ANAF ↓",
+        "searching": "Se caută…",
+        "tooltip": "Preia datele firmei din ANAF după CUI",
+        "found": "Găsit în ANAF — date completate automat",
+        "notFound": "CUI-ul nu a fost găsit în baza ANAF.",
+        "filled": "Date completate din ANAF."
+      },
+      "regime": {
+        "micro": "Microîntreprindere (impozit pe venit 1%)",
+        "profit": "Impozit pe profit (16%)",
+        "hint": "plafon micro 2026: 100.000 EUR (OUG 89/2025) — la depășire se trece la impozit pe profit din trimestrul depășirii"
+      },
+      "seriesHint": "apare pe toate facturile emise (ex. FACT-0001)",
+      "seriesHintIssued_one": "s-a emis deja {{count}} factură cu seria curentă — schimbarea cere confirmare",
+      "seriesHintIssued_few": "s-au emis deja {{count}} facturi cu seria curentă — schimbarea cere confirmare",
+      "seriesHintIssued_other": "s-au emis deja {{count}} de facturi cu seria curentă — schimbarea cere confirmare",
+      "cuiLocked": "CUI-ul nu poate fi modificat",
+      "spvNote": {
+        "bold": "Conexiunea SPV/ANAF și logo-ul companiei",
+        "rest": "se configurează după salvare, din pagina companiei. Logo: PNG sau SVG, recomandat 400×400 px — apare pe facturile PDF."
+      },
+      "validation": {
+        "cui": "Format: 2-10 cifre, opțional cu RO.",
+        "legalName": "Introduceți numele complet.",
+        "address": "Adresa e obligatorie.",
+        "city": "Localitatea e obligatorie.",
+        "county": "Județul e obligatoriu.",
+        "email": "Email invalid.",
+        "iban": "IBAN invalid (checksum incorect sau format greșit).",
+        "series": "Seria e obligatorie."
+      },
+      "confirm": {
+        "seriesTitle": "Schimbare serie facturi",
+        "series_one": "Compania a emis deja {{count}} factură cu seria \"{{oldSeries}}\". Schimbarea seriei la \"{{newSeries}}\" poate întrerupe continuitatea numerotării. Doriți să continuați?",
+        "series_few": "Compania a emis deja {{count}} facturi cu seria \"{{oldSeries}}\". Schimbarea seriei la \"{{newSeries}}\" poate întrerupe continuitatea numerotării. Doriți să continuați?",
+        "series_other": "Compania a emis deja {{count}} de facturi cu seria \"{{oldSeries}}\". Schimbarea seriei la \"{{newSeries}}\" poate întrerupe continuitatea numerotării. Doriți să continuați?"
+      },
+      "notify": {
+        "createError": "Eroare la crearea companiei.",
+        "saved": "Companie salvată.",
+        "saveError": "Eroare la salvarea companiei."
+      }
+    },
+    "detail": {
+      "loadingTitle": "Companie",
+      "spvActive": "SPV activ",
+      "spvInactive": "SPV inactiv",
+      "back": "Înapoi",
+      "sections": {
+        "contactPay": "Contact și plată",
+        "billing": "Facturare"
+      },
+      "kv": {
+        "country": "Țară",
+        "lastNumber": "Ultimul număr emis"
+      },
+      "spv": {
+        "title": "Sistem ANAF SPV",
+        "connect": "Conectează SPV",
+        "authorizing": "Se autorizează…",
+        "connectedTitle": "SPV conectat",
+        "connectedDesc": "Această companie poate trimite facturi electronice direct către ANAF.",
+        "notConnectedTitle": "SPV neconectat",
+        "notConnectedDesc": "Pentru a trimite facturi electronice, conectați certificatul digital pentru această companie.",
+        "notifyConnected": "SPV conectat cu succes.",
+        "notifyCancelled": "Autorizarea SPV a fost anulată sau a eșuat. Reîncercați.",
+        "notifyFailed": "Conectarea la SPV a eșuat."
+      },
+      "certs": {
+        "title": "Certificate SPV / ANAF OAuth",
+        "reauth": "Reautorizare SPV",
+        "authorizing": "Autorizare…",
+        "empty": "Niciun certificat activ.",
+        "issued": "Emis",
+        "expires": "Expiră",
+        "status": "Status",
+        "active": "Activ",
+        "inactive": "Inactiv",
+        "revoke": "Revocă",
+        "notifyRefreshed": "Certificat reautorizat.",
+        "notifyRefreshError": "Reautorizarea certificatului a eșuat.",
+        "notifyRevoked": "Certificat revocat.",
+        "notifyRevokeError": "Revocarea certificatului a eșuat."
+      }
+    }
+  }
+}

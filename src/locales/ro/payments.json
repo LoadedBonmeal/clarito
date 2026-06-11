@@ -1,0 +1,115 @@
+{
+  "payments": {
+    "title": "Urmărire Plăți",
+    "sub": "Stare plăți pe factură",
+    "selectCompany": "Selectați o companie activă pentru a urmări plățile.",
+    "head": {
+      "addPayment": "Adaugă plată"
+    },
+    "kpi": {
+      "due": "De încasat",
+      "dueDelta": "{{n}} facturi neachitate",
+      "overdue": "Restante",
+      "overdueDelta": "{{n}} facturi depășite",
+      "collected": "Total încasat",
+      "collectedDelta": "{{n}} facturi achitate"
+    },
+    "tabs": {
+      "all": "Toate",
+      "unpaid": "Neplătite",
+      "partial": "Parțiale",
+      "paid": "Plătite",
+      "overdue": "Restanțe"
+    },
+    "search": "Caută client sau factură…",
+    "truncated": "Afișate primele {{shown}} din {{total}} facturi.",
+    "states": {
+      "loading": "Se încarcă…",
+      "invoicesLabel": "facturile",
+      "paymentsLabel": "plățile",
+      "emptyNone": "Nicio factură emisă — plățile apar aici după emiterea facturilor.",
+      "emptyFiltered": "Nicio înregistrare pentru filtrele aplicate."
+    },
+    "table": {
+      "number": "Nr. Factură",
+      "client": "Client",
+      "issueDate": "Data emitere",
+      "dueDate": "Scadență",
+      "total": "Total",
+      "paid": "Plătit",
+      "rest": "Rest",
+      "status": "Status plată"
+    },
+    "chip": {
+      "overdue": "Restanță",
+      "paid": "Plătită",
+      "partial": "Parțial",
+      "unpaid": "Neplătită"
+    },
+    "row": {
+      "viewPayments": "Vezi plățile"
+    },
+    "foot": {
+      "total": "Total:",
+      "invoices": "facturi",
+      "unpaid": "Neplătite:",
+      "overdue": "Restante:",
+      "shownFirst": "afișate primele {{shown}} din {{total}}"
+    },
+    "method": {
+      "transfer": "Transfer bancar",
+      "cash": "Numerar",
+      "card": "Card",
+      "other": "Altele"
+    },
+    "modal": {
+      "titleFx": "Adaugă plată în valută",
+      "sub": "{{number}} · {{client}} · rest {{amount}} {{cur}}",
+      "subIssuedRate": " (emisă la curs {{rate}})",
+      "subPick": "Selectați factura pentru care înregistrați plata",
+      "invoice": "Factura",
+      "existing": "Plăți înregistrate",
+      "deletePayment": "Șterge plata",
+      "amount": "Suma ({{cur}})",
+      "paidAt": "Data plății",
+      "bnrRate": "Curs BNR la data plății (dif. de curs 665/765)",
+      "bnrPlaceholder": "ex. 4.9750",
+      "bnrHint": "curs oficial BNR din {{date}}",
+      "bnrFetching": "se preia…",
+      "bnrFetch": "preia automat",
+      "ronEquiv": "Echivalent RON",
+      "method": "Metoda de plată",
+      "reference": "Referință / nr. chitanță",
+      "refPlaceholderFx": "ex. SWIFT 99-2210",
+      "refPlaceholder": "ex. OP 2248",
+      "fullPay": "Plata stinge integral restul facturii",
+      "partialPay": "Plată parțială — rest după plată: {{amount}}",
+      "cancel": "Renunță",
+      "saving": "Se salvează…",
+      "save": "Salvează plata"
+    },
+    "fx": {
+      "favorable": "Diferență de curs favorabilă: +{{amount}} RON",
+      "unfavorable": "Diferență de curs nefavorabilă: −{{amount}} RON",
+      "autoRecord": "Se înregistrează automat ca",
+      "incomePre": "venit financiar în contul",
+      "incomeParen": "(nefavorabilă → cheltuială",
+      "expensePre": "cheltuială financiară în contul",
+      "expenseParen": "(favorabilă → venit"
+    },
+    "picker": {
+      "clear": "Elimină factura selectată",
+      "placeholder": "Caută factură (număr sau client)…",
+      "searching": "Se caută…",
+      "noneFor": "Nicio factură pentru „{{q}}”.",
+      "none": "Nicio factură găsită."
+    },
+    "notify": {
+      "added": "Plată adăugată cu succes",
+      "addError": "Nu s-a putut adăuga plata.",
+      "deleted": "Plată ștearsă",
+      "deleteError": "Nu s-a putut șterge plata.",
+      "bnrError": "Nu s-a putut prelua cursul BNR."
+    }
+  }
+}

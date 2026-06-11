@@ -20,6 +20,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { confirm } from "@tauri-apps/plugin-dialog";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -38,13 +39,6 @@ const TIER_LIMITS: Record<string, number> = {
   FIRM: Infinity,
 };
 
-const TIER_NAMES: Record<string, string> = {
-  TRIAL: "Trial",
-  SOLO: "Solo",
-  ACCOUNTANT: "Contabil",
-  FIRM: "Firmă",
-};
-
 type SpvFilter = "all" | "yes" | "no";
 
 // Prototype icons not in Ic.tsx — inlined verbatim (rule 2).
@@ -57,12 +51,12 @@ const fmtPct = (n: number) =>
   n.toLocaleString("ro-RO", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
 
 // level ("ok" | "approaching" | "exceeded" | "na") → design chip + meter class.
-function levelChip(level: string): { cls: string; bar: string; label: string; svg: string | null; icon: string | null } {
+function levelChip(level: string): { cls: string; bar: string; labelKey: string; svg: string | null; icon: string | null } {
   switch (level) {
-    case "ok":          return { cls: "paid", bar: "ok",   label: "În limită",   svg: SVG_CHECK_CIRCLE,  icon: null };
-    case "approaching": return { cls: "wait", bar: "warn", label: "Se apropie",  svg: SVG_WARN_TRIANGLE, icon: null };
-    case "exceeded":    return { cls: "late", bar: "bad",  label: "Depășit",     svg: SVG_WARN_TRIANGLE, icon: null };
-    default:            return { cls: "sent", bar: "",     label: "Nu se aplică", svg: null,             icon: "dot" };
+    case "ok":          return { cls: "paid", bar: "ok",   labelKey: "companies.plafon.level.ok",          svg: SVG_CHECK_CIRCLE,  icon: null };
+    case "approaching": return { cls: "wait", bar: "warn", labelKey: "companies.plafon.level.approaching", svg: SVG_WARN_TRIANGLE, icon: null };
+    case "exceeded":    return { cls: "late", bar: "bad",  labelKey: "companies.plafon.level.exceeded",    svg: SVG_WARN_TRIANGLE, icon: null };
+    default:            return { cls: "sent", bar: "",     labelKey: "companies.plafon.level.na",          svg: null,              icon: "dot" };
   }
 }
 
@@ -80,6 +74,7 @@ interface PlafonCardProps {
 }
 
 function PlafonCard({ title, ps, level, value, plafon, pct, foot }: PlafonCardProps) {
+  const { t } = useTranslation();
   const chip = levelChip(level);
   const width = pct === null ? 0 : Math.max(0, Math.min(100, pct));
   return (
@@ -95,11 +90,11 @@ function PlafonCard({ title, ps, level, value, plafon, pct, foot }: PlafonCardPr
           ) : (
             <Ic name={chip.icon ?? "dot"} cls="sic" />
           )}
-          {chip.label}
+          {t(chip.labelKey)}
         </span>
       </div>
       <div className="pv num">
-        {value === null ? "—" : fmtLei(value)} <span className="of">/ {fmtLei(plafon)} lei</span>
+        {value === null ? "—" : fmtLei(value)} <span className="of">{t("companies.plafon.of", { amount: fmtLei(plafon) })}</span>
       </div>
       <div className="meter">
         <span className={chip.bar || undefined} style={{ width: `${width}%` }} />
@@ -115,6 +110,7 @@ function PlafonCard({ title, ps, level, value, plafon, pct, foot }: PlafonCardPr
 // ── CompaniesPage ─────────────────────────────────────────────────────────────
 
 export function CompaniesPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const setActiveCompanyId = useAppStore((s) => s.setActiveCompanyId);
@@ -189,8 +185,8 @@ export function CompaniesPage() {
 
   const handleDelete = async (c: Company) => {
     const ok = await confirm(
-      `Ștergeți compania "${c.legalName}"? Această acțiune nu poate fi anulată.`,
-      { title: "Confirmare ștergere", kind: "warning" },
+      t("companies.confirm.delete", { name: c.legalName }),
+      { title: t("companies.confirm.deleteTitle"), kind: "warning" },
     );
     if (!ok) return;
     try {
@@ -199,14 +195,14 @@ export function CompaniesPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
     } catch (err) {
       const payload = err as AppErrorPayload;
-      notify.error(formatError(payload, "Eroare la ștergerea companiei."));
+      notify.error(formatError(payload, t("companies.notify.deleteError")));
     }
   };
 
   const tabs: Array<{ value: SpvFilter; label: string; count: number }> = [
-    { value: "all", label: "Toate",    count: companies.length },
-    { value: "yes", label: "Cu SPV",   count: withSpv },
-    { value: "no",  label: "Fără SPV", count: companies.length - withSpv },
+    { value: "all", label: t("companies.tabs.all"),        count: companies.length },
+    { value: "yes", label: t("companies.tabs.withSpv"),    count: withSpv },
+    { value: "no",  label: t("companies.tabs.withoutSpv"), count: companies.length - withSpv },
   ];
 
   const activeCompany = companies.find((c) => c.id === activeCompanyId);
@@ -225,33 +221,34 @@ export function CompaniesPage() {
   const microLevel = regimeStatus?.level ?? "na";
   const showMicroBanner = microLevel === "approaching" || microLevel === "exceeded";
 
+  const tierName = license ? t(`companies.tiers.${license.tier}`, { defaultValue: license.tier }) : "";
+  const tierLimitLabel = tierLimit === Infinity ? t("companies.head.unlimited") : tierLimit;
+
   return (
     <div className="main-inner wide">
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Companii</h1>
+          <h1>{t("companies.title")}</h1>
           <p className="sub">
-            {companies.length === 1 ? "1 companie administrată" : `${companies.length} companii administrate`}
-            {license
-              ? ` · planul ${TIER_NAMES[license.tier] ?? license.tier} permite ${tierLimit === Infinity ? "nelimitat" : tierLimit}`
-              : ""}
+            {t("companies.head.managed", { count: companies.length })}
+            {license ? ` · ${t("companies.head.planAllows", { plan: tierName, limit: tierLimitLabel })}` : ""}
           </p>
         </div>
         <div className="head-actions">
           <button
             className="btn-dark"
             style={atLimit ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
-            title={atLimit ? "Limita planului dumneavoastră este atinsă" : undefined}
+            title={atLimit ? t("companies.head.limitTitle") : undefined}
             onClick={() => {
               if (atLimit) {
-                notify.info("Limita planului este atinsă. Contactați-ne pentru upgrade la support@efactura.ro");
+                notify.info(t("companies.notify.limitInfo"));
                 return;
               }
               void navigate({ to: "/companies/new" });
             }}
           >
-            <Ic name="plus" />Adaugă companie
+            <Ic name="plus" />{t("companies.head.add")}
           </button>
         </div>
       </div>
@@ -261,8 +258,9 @@ export function CompaniesPage() {
         <div className="banner warn">
           <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_WARN_TRIANGLE }} />
           <span>
-            <b>Limita planului {TIER_NAMES[license.tier] ?? license.tier} este atinsă</b> ({companies.length}/{tierLimit} companii).
-            Contactați-ne pentru upgrade la <b>support@efactura.ro</b>.
+            <b>{t("companies.banner.limitBold", { plan: tierName })}</b>{" "}
+            {t("companies.banner.limitCount", { n: companies.length, limit: tierLimit })}{" "}
+            {t("companies.banner.limitContact")} <b>support@efactura.ro</b>.
           </span>
         </div>
       )}
@@ -270,7 +268,7 @@ export function CompaniesPage() {
       <div className="scr-card" style={{ marginBottom: 18 }}>
         {/* toolbar */}
         <div className="scr-toolbar">
-          <div className="tt">Toate companiile</div>
+          <div className="tt">{t("companies.toolbar.title")}</div>
           <div className="tabs">
             {tabs.map((t) => (
               <div
@@ -287,42 +285,42 @@ export function CompaniesPage() {
             <Ic name="lens" />
             <input
               type="text"
-              placeholder="Caută companie…"
+              placeholder={t("companies.toolbar.searchPlaceholder")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
           {/* refresh — real feature kept (prototype lacks it) */}
-          <button className="sq-btn spin-btn" title="Reîncarcă" onClick={() => void refetchCompanies()}>
+          <button className="sq-btn spin-btn" title={t("companies.toolbar.refresh")} onClick={() => void refetchCompanies()}>
             <Ic name="sync" />
           </button>
         </div>
 
         {/* table */}
         {isLoading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("companies.loading")}</div>
         ) : companiesError ? (
           <div style={{ padding: 16 }}>
-            <QueryErrorBanner error={companiesErr} label="companiile" onRetry={() => void refetchCompanies()} />
+            <QueryErrorBanner error={companiesErr} label={t("companies.errorLabel")} onRetry={() => void refetchCompanies()} />
           </div>
         ) : list.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
             {companies.length === 0
-              ? "Nicio companie. Adăugați prima companie cu butonul „Adaugă companie”."
-              : "Nicio înregistrare pentru filtrele aplicate."}
+              ? t("companies.empty.none")
+              : t("companies.empty.filtered")}
           </div>
         ) : (
           <table className="scr-table">
             <thead>
               <tr>
-                <th>CUI</th>
-                <th>Denumire</th>
-                <th>Localitate</th>
-                <th>Județ</th>
-                <th style={{ textAlign: "center" }}>SPV</th>
-                <th>Serie</th>
-                <th>Reg. Com.</th>
-                <th style={{ textAlign: "center" }}>Activă</th>
+                <th>{t("companies.table.cui")}</th>
+                <th>{t("companies.table.name")}</th>
+                <th>{t("companies.table.city")}</th>
+                <th>{t("companies.table.county")}</th>
+                <th style={{ textAlign: "center" }}>{t("companies.table.spv")}</th>
+                <th>{t("companies.table.series")}</th>
+                <th>{t("companies.table.regCom")}</th>
+                <th style={{ textAlign: "center" }}>{t("companies.table.active")}</th>
                 <th className="r" style={{ width: 96 }}></th>
               </tr>
             </thead>
@@ -350,7 +348,7 @@ export function CompaniesPage() {
                           <span className="muted" style={{ marginLeft: 6, fontSize: 11.5 }}>({c.tradeName})</span>
                         )}
                         <span className="chip sent" style={{ marginLeft: 6 }}>
-                          {c.taxRegime === "profit" ? "Profit · 16%" : "Micro · 1%"}
+                          {c.taxRegime === "profit" ? t("companies.regime.profit") : t("companies.regime.micro")}
                         </span>
                       </div>
                     </td>
@@ -365,28 +363,28 @@ export function CompaniesPage() {
                       {isActive ? (
                         <span className="chip paid">
                           <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_CHECK_CIRCLE }} />
-                          Activă
+                          {t("companies.status.active")}
                         </span>
                       ) : (
-                        <span className="chip sent">Inactivă</span>
+                        <span className="chip sent">{t("companies.status.inactive")}</span>
                       )}
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
                       {/* row actions — real features kept (prototype lacks them) */}
                       <div className="row-acts">
                         {!isActive && (
-                          <button className="mini-btn" title="Setează ca activă" onClick={() => setActiveCompanyId(c.id)}>
+                          <button className="mini-btn" title={t("companies.actions.setActive")} onClick={() => setActiveCompanyId(c.id)}>
                             <Ic name="check" />
                           </button>
                         )}
                         <button
                           className="mini-btn"
-                          title="Editează"
+                          title={t("companies.actions.edit")}
                           onClick={() => void navigate({ to: "/companies/$id/edit", params: { id: c.id } })}
                         >
                           <Ic name="pen" />
                         </button>
-                        <button className="mini-btn" title="Șterge" onClick={() => void handleDelete(c)}>
+                        <button className="mini-btn" title={t("companies.actions.delete")} onClick={() => void handleDelete(c)}>
                           <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_TRASH }} />
                         </button>
                       </div>
@@ -403,21 +401,23 @@ export function CompaniesPage() {
       {activeCompany && (
         <>
           <div className="sec-h" style={{ marginTop: 0 }}>
-            Monitorizare plafoane — {activeCompany.legalName}{" "}
+            {t("companies.plafon.heading")} — {activeCompany.legalName}{" "}
             {microYtd !== null && (
               <span className="muted" style={{ fontWeight: 400, fontSize: 12.5 }}>
-                · venituri cumulate {currentYear}: {fmtLei(microYtd)} lei
+                {t("companies.plafon.ytdRevenue", { year: currentYear, amount: fmtLei(microYtd) })}
               </span>
             )}
           </div>
 
           <div className="plafon-grid">
             <PlafonCard
-              title={<>Plafon micro&shy;întreprindere</>}
+              title={t("companies.plafon.micro.title")}
               ps={
                 <>
-                  100.000 EUR (OUG 89/2025) la curs BNR 31.12.{currentYear - 1} ={" "}
-                  {(regimeStatus?.eurRate ?? OFFICIAL_EOY_EUR[currentYear] ?? 5.0).toLocaleString("ro-RO", { maximumFractionDigits: 4 })} →{" "}
+                  {t("companies.plafon.micro.ps", {
+                    year: currentYear - 1,
+                    rate: (regimeStatus?.eurRate ?? OFFICIAL_EOY_EUR[currentYear] ?? 5.0).toLocaleString("ro-RO", { maximumFractionDigits: 4 }),
+                  })}{" "}
                   <b className="num">{microCeiling !== null ? `${fmtLei(microCeiling)} lei` : "—"}</b>
                 </>
               }
@@ -427,17 +427,17 @@ export function CompaniesPage() {
               pct={microLevel === "na" ? null : (regimeStatus?.pct ?? null)}
               foot={
                 microLevel === "na"
-                  ? (regimeStatus?.note ?? "compania este pe impozit pe profit")
-                  : "la depășire → impozit pe profit 16% din trimestrul următor"
+                  ? (regimeStatus?.note ?? t("companies.plafon.micro.footNa"))
+                  : t("companies.plafon.micro.foot")
               }
             />
 
             <PlafonCard
-              title="Plafon înregistrare TVA"
+              title={t("companies.plafon.vat.title")}
               ps={
                 <>
-                  art. 310 / Legea 141/2025 · <b className="num">{fmtLei(vatPlafon)} lei</b> — relevant doar
-                  pentru neplătitori de TVA
+                  {t("companies.plafon.vat.psPrefix")} <b className="num">{fmtLei(vatPlafon)} lei</b>{" "}
+                  {t("companies.plafon.vat.psSuffix")}
                 </>
               }
               level={vatReg ? (vatReg.applicable ? vatReg.level : "na") : "na"}
@@ -447,18 +447,18 @@ export function CompaniesPage() {
               foot={
                 vatReg?.applicable
                   ? vatReg.level === "exceeded"
-                    ? "înregistrarea în scopuri de TVA este obligatorie"
-                    : "la depășire → înregistrare obligatorie în scopuri de TVA"
-                  : "compania este deja înregistrată în scopuri de TVA"
+                    ? t("companies.plafon.vat.footExceeded")
+                    : t("companies.plafon.vat.footApproaching")
+                  : t("companies.plafon.vat.footNa")
               }
             />
 
             <PlafonCard
-              title="Plafon TVA la încasare"
+              title={t("companies.plafon.cash.title")}
               ps={
                 <>
-                  OUG 8/2026 · <b className="num">{cashPlafon !== null ? fmtLei(cashPlafon) : "5.000.000"} lei</b> cifră
-                  de afaceri — doar pentru companii pe TVA la încasare
+                  {t("companies.plafon.cash.psPrefix")} <b className="num">{cashPlafon !== null ? fmtLei(cashPlafon) : "5.000.000"} lei</b>{" "}
+                  {t("companies.plafon.cash.psSuffix")}
                 </>
               }
               level={regimeStatus?.cashVatLevel ?? "na"}
@@ -467,10 +467,10 @@ export function CompaniesPage() {
               pct={cashPct}
               foot={
                 regimeStatus?.cashVatLevel === "na"
-                  ? (regimeStatus?.cashVatNote ?? "compania nu aplică TVA la încasare")
+                  ? (regimeStatus?.cashVatNote ?? t("companies.plafon.cash.footNa"))
                   : regimeStatus?.cashVatLevel === "exceeded"
-                    ? (regimeStatus?.cashVatNote ?? "plafonul TVA la încasare a fost depășit")
-                    : "sub plafonul TVA la încasare"
+                    ? (regimeStatus?.cashVatNote ?? t("companies.plafon.cash.footExceeded"))
+                    : t("companies.plafon.cash.footOk")
               }
             />
           </div>
@@ -481,12 +481,11 @@ export function CompaniesPage() {
               <span>
                 <b>
                   {microLevel === "exceeded"
-                    ? `Plafonul micro a fost depășit (${fmtPct(regimeStatus.pct)}%).`
-                    : `Plafonul micro se apropie (${fmtPct(regimeStatus.pct)}%).`}
+                    ? t("companies.plafon.banner.exceeded", { pct: fmtPct(regimeStatus.pct) })
+                    : t("companies.plafon.banner.approaching", { pct: fmtPct(regimeStatus.pct) })}
                 </b>{" "}
-                La depășirea plafonului de {fmtLei(microCeiling)} lei compania trece la{" "}
-                <b>impozit pe profit 16%</b> începând cu trimestrul depășirii (OUG 89/2025). Monitorizarea
-                apare și pe Privire generală.
+                {t("companies.plafon.banner.body1", { amount: fmtLei(microCeiling) })}{" "}
+                <b>{t("companies.plafon.banner.bodyBold")}</b> {t("companies.plafon.banner.body2")}
               </span>
             </div>
           )}

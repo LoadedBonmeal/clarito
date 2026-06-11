@@ -1,0 +1,214 @@
+{
+  "payroll": {
+    "title": "Payroll",
+    "noCompany": "Select an active company to manage payroll.",
+    "months": {
+      "jan": "January",
+      "feb": "February",
+      "mar": "March",
+      "apr": "April",
+      "may": "May",
+      "jun": "June",
+      "jul": "July",
+      "aug": "August",
+      "sep": "September",
+      "oct": "October",
+      "nov": "November",
+      "dec": "December"
+    },
+    "head": {
+      "activeEmployees_one": "{{count}} active employee",
+      "activeEmployees_other": "{{count}} active employees",
+      "grossFund": "gross payroll fund {{amount}} RON"
+    },
+    "actions": {
+      "newEmployee": "New employee",
+      "exportD112": "Export D112 (XML)",
+      "prevYear": "Previous year",
+      "nextYear": "Next year",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "banner": {
+      "strong": "D112 — new model OPANAF 605/2026",
+      "applies": "applies to reporting months",
+      "from": "≥ July 2026",
+      "body": "Clarito currently produces the current model (≤ June 2026); for July 2026+ the exported file still uses the old structure — validate it in DUKIntegrator before filing."
+    },
+    "tabs": {
+      "employees": "Employees",
+      "payslip": "Payroll register",
+      "medicalLeaves": "Medical leaves",
+      "offices": "Secondary offices"
+    },
+    "emp": {
+      "searchPlaceholder": "Search employee…",
+      "emptyNone": "No employees — add employees to calculate salaries.",
+      "emptySearch": "No employees match the current search.",
+      "th": {
+        "name": "Name",
+        "cnp": "CNP",
+        "gross": "Gross",
+        "deduction": "Deduction"
+      },
+      "chips": {
+        "contractHours": "{{tip}} · {{hours}}h",
+        "pensioner": "pensioner · art. 146(5⁷)",
+        "minBase": "minimum CAS/CASS base",
+        "inactive": "inactive",
+        "exc": {
+          "elev_student": "pupil/student · art. 146(5⁷)",
+          "ucenic": "apprentice · art. 146(5⁷)",
+          "dizabilitate": "disability · art. 146(5⁷)",
+          "contracte_multiple": "multiple contracts · art. 146(5⁷)"
+        }
+      },
+      "confirmDelete": "Delete employee \"{{name}}\"?",
+      "footnoteLabel": "Part-time minimum base exceptions — art. 146(5⁷):",
+      "footnoteBold": "pupil/student under 26, apprentice under 18, persons with disabilities, pensioners, multiple contracts adding up to ≥ full time"
+    },
+    "stat": {
+      "title": "Payroll register — {{period}}",
+      "run": "Run payroll",
+      "running": "Calculating…",
+      "exportXlsx": "Export XLSX",
+      "print": "Print",
+      "calculating": "Calculating the payroll register…",
+      "emptyPrompt": "Press “Run payroll” to calculate the month's contributions and post the journal entry.",
+      "noActive": "No active employees — nothing to calculate.",
+      "th": {
+        "employee": "Employee",
+        "cas": "CAS 25%",
+        "cass": "CASS 10%",
+        "tax": "Tax 10%",
+        "net": "Net",
+        "cam": "CAM 2.25%"
+      },
+      "total": "Total",
+      "footnote": "* CAS and CASS are calculated on the minimum gross salary base for part-time contracts without an exception — the difference is borne by the employer under art. 146(5⁶) of the Fiscal Code.",
+      "postedNote": "The aggregated journal entry (641/421, 4315, 4316, 444, 646/436) was posted to the journal on"
+    },
+    "cm": {
+      "title": "Medical leaves — {{period}}",
+      "add": "Add certificate",
+      "empty": "No medical leave recorded for {{period}}.",
+      "th": {
+        "certificate": "Certificate",
+        "code": "Indemnity code",
+        "period": "Period",
+        "daysEmployer": "Employer days",
+        "daysFnuass": "FNUASS days",
+        "amountEmployer": "Employer amount",
+        "amountFnuass": "FNUASS amount"
+      },
+      "certLabel": "MC series {{serie}} no. {{numar}}",
+      "codes": {
+        "c01": "common illness",
+        "c06": "pregnancy and confinement",
+        "c09": "child care",
+        "c15": "maternal risk"
+      },
+      "confirmDelete": "Delete this medical leave?",
+      "footnote1": "FNUASS indemnities are recovered through the",
+      "footnoteBold": "reimbursement request",
+      "footnote2": "filed with CAS after D112 · code 01: first 5 days paid by the employer, the rest from FNUASS · source of the D112 asiguratD block",
+      "cod01Note": "code 01: first 5 days paid by the employer, the rest from FNUASS"
+    },
+    "sedii": {
+      "title": "Fiscally registered secondary offices",
+      "add": "Add office",
+      "th": {
+        "office": "Office",
+        "cif": "Office CIF",
+        "assigned": "Assigned employees"
+      },
+      "main": "Main office",
+      "defaultName": "Work point",
+      "confirmDelete": "Delete secondary office {{cif}}?",
+      "footnote1": "Secondary offices with",
+      "footnoteBold": "at least 5 employees",
+      "footnote2": "must register fiscally (own CIF) and declare salary tax separately in D112 — section F."
+    },
+    "empModal": {
+      "editTitle": "Edit: {{name}}",
+      "subtitle": "This data feeds the payroll register and D112",
+      "fullName": "Full name",
+      "namePlaceholder": "John Doe",
+      "cnp": "CNP",
+      "gross": "Gross salary",
+      "deduction": "Personal deduction",
+      "contractType": "Contract type",
+      "contractFull": "N — full-time",
+      "contractPart": "P{{n}} — part-time {{n}}h",
+      "hoursPerDay": "Standard hours / day",
+      "pensioner": "Pensioner (D112 A_2)",
+      "exception": "Minimum base exception — art. 146(5⁷)",
+      "excNone": "— no exception —",
+      "excElevStudent": "Pupil / student up to 26 years old (lit. a)",
+      "excUcenic": "Apprentice up to 18 years old (lit. b)",
+      "excDizabilitate": "Person with disabilities / < 8h/day (lit. c)",
+      "excContracteMultiple": "Multiple contracts ≥ minimum salary (lit. e)",
+      "office": "Office (CIF) — D112 angajatorF2",
+      "nameRequired": "Name is required.",
+      "save": "Save employee"
+    },
+    "cmModal": {
+      "title": "Add medical leave certificate",
+      "subtitle": "{{month}} · OUG 158/2005 — source of the D112 asiguratD block",
+      "selectEmployee": "— select an employee —",
+      "serie": "Certificate series",
+      "numar": "Certificate number",
+      "code": "Indemnity code (D_9)",
+      "dateStart": "Start date",
+      "dateEnd": "End date",
+      "amountEmployer": "Employer indemnity",
+      "amountFnuass": "FNUASS indemnity",
+      "selectRequired": "Select an employee.",
+      "save": "Save certificate"
+    },
+    "sediuModal": {
+      "title": "Add secondary office",
+      "subtitle": "Own CIF (digits only, unique per company) — D112 angajatorF2 / section F",
+      "cif": "Office CIF",
+      "name": "Name (optional)",
+      "namePlaceholder": "Cluj-Napoca work point",
+      "save": "Save office"
+    },
+    "d112": {
+      "subNew": "the new OPANAF 605/2026 model applies — the export still uses the old structure (validate in DUKIntegrator)",
+      "subOld": "current model; the new OPANAF 605/2026 model applies from the July 2026 reporting month",
+      "caen": "CAEN code",
+      "caenHint": "4 digits — the employer's main activity",
+      "reportMonth": "Reporting month",
+      "foot": "Includes section F (secondary offices) and asiguratD (medical leaves)",
+      "generate": "Generate XML",
+      "exporting": "Exporting…",
+      "invalidCaen": "Invalid CAEN code — 4 digits (e.g. 6201).",
+      "saveTitle": "Save D112 (XML)",
+      "insured_one": "{{count}} insured person",
+      "insured_other": "{{count}} insured persons"
+    },
+    "notify": {
+      "soon": "Coming soon.",
+      "runPosted": "Payroll posted — total net {{net}} RON.",
+      "runError": "Could not run the payroll register.",
+      "deleteError": "Error while deleting.",
+      "deleteSediuError": "Could not delete the secondary office.",
+      "deleteConcediuError": "Could not delete the medical leave.",
+      "saveError": "Error while saving.",
+      "addConcediuError": "Could not add the medical leave.",
+      "addSediuError": "Could not add the secondary office.",
+      "exportError": "Could not export D112.",
+      "newModelWarn": "For {{month}} {{year}} the NEW D112 model (OPANAF 605/2026) applies, not yet implemented — the exported file uses the old structure (≤ June 2026) and may be rejected by DUKIntegrator. Check it before filing.",
+      "exported": "D112 (XML) exported — header + employer obligations + {{insured}}. Import it into the D112 application (smart PDF), validate it (DUKIntegrator) and fill in the declarant + special blocks before filing."
+    },
+    "common": {
+      "close": "Close",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "yes": "Yes",
+      "no": "No",
+      "zeroAmount": "0.00"
+    }
+  }
+}

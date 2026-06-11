@@ -15,6 +15,7 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
@@ -23,7 +24,7 @@ import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { D300SubmissionModal } from "@/components/modals/D300SubmissionModal";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
-import { fmtRON, parseDec, MONTHS_RO } from "@/lib/utils";
+import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import { queryKeys } from "@/lib/queries";
@@ -33,7 +34,7 @@ import type { ReportView } from "@/router";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const MONTHS = MONTHS_RO;
+const MONTH_KEYS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"] as const;
 
 const RO_MON = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
 const fmtRoDate = (iso: string) => {
@@ -63,18 +64,9 @@ function periodDateRange(year: number, month: number): { dateFrom: string; dateT
   };
 }
 
-function vatCategoryLabel(cat: string): string {
-  switch (cat) {
-    case "S":  return "Standard";
-    case "Z":  return "Zero-rated";
-    case "E":  return "Scutit";
-    case "AE": return "Autolichidare";
-    case "K":  return "Intracomunitar";
-    case "G":  return "Guvernamental";
-    case "O":  return "În afara TVA";
-    default:   return cat;
-  }
-}
+const VAT_CAT_KEY: Record<string, string> = {
+  S: "s", Z: "z", E: "e", AE: "ae", K: "k", G: "g", O: "o",
+};
 
 // Inline icons NOT in Ic (verbatim from prototype).
 const WARN_PATH = '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>';
@@ -87,8 +79,13 @@ const numInputStyle: React.CSSProperties = {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function DeclarationsPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
+
+  const MONTHS = MONTH_KEYS.map((k) => t(`declarations.months.${k}`));
+  const vatCategoryLabel = (cat: string): string =>
+    VAT_CAT_KEY[cat] ? t(`declarations.vatCat.${VAT_CAT_KEY[cat]}`) : cat;
 
   const now = new Date();
   const [selectedYear, setSelectedYear]   = useState(now.getFullYear());
@@ -172,7 +169,7 @@ export function DeclarationsPage() {
 
   const handleCompute = async () => {
     if (!activeCompanyId) {
-      notify.warn("Selectați o companie activă.");
+      notify.warn(t("declarations.notify.selectCompany"));
       return;
     }
     setComputing(true);
@@ -180,11 +177,11 @@ export function DeclarationsPage() {
     try {
       const result = await api.declarations.compute(activeCompanyId, dateFrom, dateTo);
       if (result.invoiceCount === 0) {
-        notify.info("Nu există date pentru perioada selectată.");
+        notify.info(t("declarations.notify.noData"));
       }
       setReport(result);
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut calcula D300."));
+      notify.error(formatError(err, t("declarations.notify.computeD300Failed")));
     } finally {
       setComputing(false);
     }
@@ -193,15 +190,15 @@ export function DeclarationsPage() {
   // ── Exportă D300 XML ───────────────────────────────────────────────────────
   const handleExport = async () => {
     if (!activeCompanyId) {
-      notify.warn("Selectați o companie activă.");
+      notify.warn(t("declarations.notify.selectCompany"));
       return;
     }
     if (!report || (report.invoiceCount === 0 && report.purchaseInvoiceCount === 0)) {
-      notify.info("Nu există date de exportat. Calculați mai întâi D300.");
+      notify.info(t("declarations.notify.noExportData"));
       return;
     }
     const savePath = await saveDialog({
-      title:       "Salvează D300 XML",
+      title:       t("declarations.dialogs.saveD300"),
       defaultPath: `d300-${dateFrom}-${dateTo}.xml`,
       filters:     [{ name: "XML", extensions: ["xml"] }],
     });
@@ -215,10 +212,10 @@ export function DeclarationsPage() {
         savePath,
         manualDeductible,
       );
-      notify.success(`D300 salvat: ${saved}`);
+      notify.success(t("declarations.notify.d300Saved", { path: saved }));
       try { await openPath(saved); } catch { /* reveal best-effort */ }
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut exporta D300."));
+      notify.error(formatError(err, t("declarations.notify.exportD300Failed")));
     } finally {
       setExporting(false);
     }
@@ -226,10 +223,10 @@ export function DeclarationsPage() {
 
   // ── Exportă D300 oficial ANAF (schema v12) ────────────────────────────────
   const handleExportOfficial = async (submission: D300Submission, override = false) => {
-    if (!activeCompanyId) { notify.warn("Selectați o companie activă."); return; }
+    if (!activeCompanyId) { notify.warn(t("declarations.notify.selectCompany")); return; }
     setLastSubmission(submission);
     const savePath = await saveDialog({
-      title:       "Salvează D300 oficial ANAF (XML)",
+      title:       t("declarations.dialogs.saveD300Official"),
       defaultPath: `d300-${selectedYear}-${String(selectedMonth).padStart(2, "0")}.xml`,
       filters:     [{ name: "XML", extensions: ["xml"] }],
     });
@@ -259,18 +256,18 @@ export function DeclarationsPage() {
       );
       if (!res.written) {
         setDukBlock(res.issues);
-        notify.error("DUKIntegrator a găsit erori. Corectați-le sau exportați oricum.");
+        notify.error(t("declarations.notify.dukErrors"));
         return;
       }
       setDukBlock(null);
       notify.success(
         res.dukAvailable
-          ? `D300 oficial salvat (DUK: valid): ${res.path}`
-          : `D300 oficial salvat: ${res.path} (validare DUK indisponibilă local)`,
+          ? t("declarations.notify.d300OfficialSavedDuk", { path: res.path })
+          : t("declarations.notify.d300OfficialSavedNoDuk", { path: res.path }),
       );
       try { await openPath(res.path); } catch { /* reveal best-effort */ }
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut exporta D300 oficial."));
+      notify.error(formatError(err, t("declarations.notify.exportD300OfficialFailed")));
     } finally {
       setExportingOfficial(false);
     }
@@ -314,9 +311,9 @@ export function DeclarationsPage() {
   if (!activeCompanyId) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Declarații</h1></div></div>
+        <div className="page-head"><div><h1>{t("declarations.title")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a vedea declarațiile.
+          {t("declarations.noCompany")}
         </div>
       </div>
     );
@@ -327,10 +324,9 @@ export function DeclarationsPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Declarații</h1>
+          <h1>{t("declarations.title")}</h1>
           <p className="sub">
-            Perioada de raportare {periodLabel} · D300 se calculează aici; calculele detaliate
-            (e-TVA, D390, D394, D100, D101, D406) sunt și în Rapoarte
+            {t("declarations.subtitle", { period: periodLabel })}
           </p>
         </div>
         <div className="head-actions">
@@ -351,7 +347,7 @@ export function DeclarationsPage() {
                 style={{ right: 0, top: 40, width: 220, maxHeight: 320, overflowY: "auto" }}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                <div className="col-title">An</div>
+                <div className="col-title">{t("declarations.periodPop.year")}</div>
                 {yearOptions.map((y) => (
                   <button
                     key={y}
@@ -363,7 +359,7 @@ export function DeclarationsPage() {
                   </button>
                 ))}
                 <div className="pop-div" />
-                <div className="col-title">Lună</div>
+                <div className="col-title">{t("declarations.periodPop.month")}</div>
                 {MONTHS.map((m, idx) => (
                   <button
                     key={m}
@@ -378,15 +374,15 @@ export function DeclarationsPage() {
             )}
           </div>
           {/* propunere — neimplementat (fără backend pentru calendar termene) */}
-          <button className="pill-btn" onClick={() => notify.info("În curând.")}>
-            <Ic name="calendar" />Calendar termene
+          <button className="pill-btn" onClick={() => notify.info(t("declarations.common.comingSoon"))}>
+            <Ic name="calendar" />{t("declarations.head.deadlinesCalendar")}
           </button>
           <button
             className="btn-dark spin-btn"
             disabled={computing}
             onClick={() => { void handleCompute(); void refetchIntrastat(); }}
           >
-            <Ic name="sync" />{computing ? "Recalculez…" : "Recalculează toate"}
+            <Ic name="sync" />{computing ? t("declarations.head.recalcing") : t("declarations.head.recalcAll")}
           </button>
         </div>
       </div>
@@ -397,65 +393,63 @@ export function DeclarationsPage() {
         <div className="dec">
           <div className="dh">
             <div>
-              <div className="dt"><span className="doc">D300</span>Decont de TVA</div>
+              <div className="dt"><span className="doc">D300</span>{t("declarations.cards.d300.title")}</div>
               <div className="ds">
-                Rândurile se completează automat din jurnale; <b>regularizările cote vechi
-                (19%/9%/5%)</b> se precompletează pe R16/R30 cu suprascriere manuală. Exportul
-                oficial (schema v12) cere datele declarantului, CAEN, banca și trece prin
-                validarea DUKIntegrator.
+                {t("declarations.cards.d300.desc1")} <b>{t("declarations.cards.d300.descBold")}</b>{" "}
+                {t("declarations.cards.d300.desc2")}
               </div>
             </div>
             {dukBlock ? (
               <span className="chip late">
                 <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: WARN_PATH }} />
-                Erori DUK
+                {t("declarations.chips.dukErrors")}
               </span>
             ) : report ? (
-              <span className="chip wait"><Ic name="clock" cls="sic" />De depus</span>
+              <span className="chip wait"><Ic name="clock" cls="sic" />{t("declarations.chips.toFile")}</span>
             ) : (
-              <span className="chip sent"><Ic name="dot" cls="sic" />Necalculat</span>
+              <span className="chip sent"><Ic name="dot" cls="sic" />{t("declarations.chips.notComputed")}</span>
             )}
           </div>
           <div className="dkv">
-            <span>Perioada <b>{periodLabel}</b></span>
-            <span>Termen <b className="num">{fmtRoDate(termenLunar)}</b></span>
+            <span>{t("declarations.common.period")} <b>{periodLabel}</b></span>
+            <span>{t("declarations.common.due")} <b className="num">{fmtRoDate(termenLunar)}</b></span>
             <span>
-              {report && netTvaDePlata < 0 ? "TVA de recuperat" : "TVA de plată"}{" "}
+              {report && netTvaDePlata < 0 ? t("declarations.kv.vatRecover") : t("declarations.kv.vatPay")}{" "}
               <b className="num">{report ? `${fmtRON(Math.abs(netTvaDePlata))} RON` : "—"}</b>
             </span>
             <span>
-              Verificare preflight{" "}
+              {t("declarations.kv.preflight")}{" "}
               {preflightIssues.length === 0
-                ? <b className="pos">fără probleme</b>
+                ? <b className="pos">{t("declarations.kv.noIssues")}</b>
                 : <b className={preflightErrors > 0 ? "neg" : "pos"}>
                     {preflightErrors > 0
-                      ? `${preflightErrors} ${preflightErrors === 1 ? "eroare" : "erori"}`
-                      : `${preflightIssues.length} ${preflightIssues.length === 1 ? "avertisment" : "avertismente"}`}
+                      ? t("declarations.kv.errors", { count: preflightErrors })
+                      : t("declarations.kv.warnings", { count: preflightIssues.length })}
                   </b>}
             </span>
           </div>
           <div className="dfoot">
             <button className="pill-btn spin-btn" disabled={computing} onClick={() => void handleCompute()}>
-              {calcIcon}{computing ? "Calculez…" : "Calculează"}
+              {calcIcon}{computing ? t("declarations.common.calcing") : t("declarations.common.calc")}
             </button>
             <button
               className="pill-btn"
               disabled={exporting || noD300Data}
               style={exporting || noD300Data ? { opacity: 0.5, cursor: "default" } : undefined}
-              title="Exportă extras D300 ca fișier XML (document de lucru, nu schema ANAF)"
+              title={t("declarations.cards.d300.extractTitle")}
               onClick={() => void handleExport()}
             >
-              {exportXmlIcon}{exporting ? "Export…" : "Extract XML"}
+              {exportXmlIcon}{exporting ? t("declarations.common.exporting") : t("declarations.common.extractXml")}
             </button>
             <span className="spacer" />
             <button
               className="btn-dark"
               disabled={exportingOfficial || noD300Data || !activeCompany}
               style={exportingOfficial || noD300Data || !activeCompany ? { opacity: 0.5, cursor: "default" } : undefined}
-              title="Exportă D300 conform schemei oficiale ANAF v12"
+              title={t("declarations.cards.d300.officialTitle")}
               onClick={() => setShowD300Modal(true)}
             >
-              {exportXmlIcon}{exportingOfficial ? "Export…" : "Export XML oficial"}
+              {exportXmlIcon}{exportingOfficial ? t("declarations.common.exporting") : t("declarations.cards.d300.exportOfficial")}
             </button>
           </div>
         </div>
@@ -464,28 +458,30 @@ export function DeclarationsPage() {
         <div className="dec">
           <div className="dh">
             <div>
-              <div className="dt"><span className="doc">D390</span>Declarație recapitulativă VIES</div>
+              <div className="dt"><span className="doc">D390</span>{t("declarations.cards.d390.title")}</div>
               <div className="ds">
-                Operațiuni intracomunitare pe tipuri: <b>L</b> livrări · <b>T</b> triunghiulare ·{" "}
-                <b>A</b> achiziții · <b>P</b> prestări · <b>S</b> servicii primite ·{" "}
-                <b>R</b> regularizări. Partenerii fără cod VIES valid sunt semnalați la calcul.
+                {t("declarations.cards.d390.descIntro")} <b>L</b> {t("declarations.cards.d390.deliveries")} ·{" "}
+                <b>T</b> {t("declarations.cards.d390.triangular")} ·{" "}
+                <b>A</b> {t("declarations.cards.d390.acquisitions")} · <b>P</b> {t("declarations.cards.d390.services")} ·{" "}
+                <b>S</b> {t("declarations.cards.d390.servicesReceived")} ·{" "}
+                <b>R</b> {t("declarations.cards.d390.adjustments")}. {t("declarations.cards.d390.descOutro")}
               </div>
             </div>
-            <span className="chip wait"><Ic name="clock" cls="sic" />De depus</span>
+            <span className="chip wait"><Ic name="clock" cls="sic" />{t("declarations.chips.toFile")}</span>
           </div>
           <div className="dkv">
-            <span>Perioada <b>{periodLabel}</b></span>
-            <span>Termen <b className="num">{fmtRoDate(termenLunar)}</b></span>
-            <span>Calcul și export <b>în Rapoarte → D390</b></span>
+            <span>{t("declarations.common.period")} <b>{periodLabel}</b></span>
+            <span>{t("declarations.common.due")} <b className="num">{fmtRoDate(termenLunar)}</b></span>
+            <span>{t("declarations.kv.calcExport")} <b>{t("declarations.kv.inReports", { view: "D390" })}</b></span>
           </div>
           <div className="dfoot">
             <button className="pill-btn spin-btn" onClick={() => goReports("d390")}>
-              {calcIcon}Calculează
+              {calcIcon}{t("declarations.common.calc")}
             </button>
             <span className="spacer" />
             {/* exportul XML real e în vizualizarea D390 din Rapoarte */}
             <button className="btn-dark" onClick={() => goReports("d390")}>
-              {exportXmlIcon}Export XML
+              {exportXmlIcon}{t("declarations.common.exportXml")}
             </button>
           </div>
         </div>
@@ -494,27 +490,26 @@ export function DeclarationsPage() {
         <div className="dec">
           <div className="dh">
             <div>
-              <div className="dt"><span className="doc">D394</span>Livrări și achiziții naționale</div>
+              <div className="dt"><span className="doc">D394</span>{t("declarations.cards.d394.title")}</div>
               <div className="ds">
-                Declarație informativă per partener, generată din facturile emise și primite cu
-                CIF valid RO. Partenerii se agregă automat la calcul.
+                {t("declarations.cards.d394.desc")}
               </div>
             </div>
-            <span className="chip wait"><Ic name="clock" cls="sic" />De depus</span>
+            <span className="chip wait"><Ic name="clock" cls="sic" />{t("declarations.chips.toFile")}</span>
           </div>
           <div className="dkv">
-            <span>Perioada <b>{periodLabel}</b></span>
-            <span>Termen <b className="num">{fmtRoDate(termenLunar)}</b></span>
-            <span>Calcul și export <b>în Rapoarte → D394</b></span>
+            <span>{t("declarations.common.period")} <b>{periodLabel}</b></span>
+            <span>{t("declarations.common.due")} <b className="num">{fmtRoDate(termenLunar)}</b></span>
+            <span>{t("declarations.kv.calcExport")} <b>{t("declarations.kv.inReports", { view: "D394" })}</b></span>
           </div>
           <div className="dfoot">
             <button className="pill-btn spin-btn" onClick={() => goReports("d394")}>
-              {calcIcon}Calculează
+              {calcIcon}{t("declarations.common.calc")}
             </button>
             <span className="spacer" />
             {/* exportul XML real e în vizualizarea D394 din Rapoarte */}
             <button className="btn-dark" onClick={() => goReports("d394")}>
-              {exportXmlIcon}Export XML
+              {exportXmlIcon}{t("declarations.common.exportXml")}
             </button>
           </div>
         </div>
@@ -523,29 +518,28 @@ export function DeclarationsPage() {
         <div className="dec">
           <div className="dh">
             <div>
-              <div className="dt"><span className="doc">D406</span>SAF-T — fișierul standard de audit</div>
+              <div className="dt"><span className="doc">D406</span>{t("declarations.cards.saft.title")}</div>
               <div className="ds">
-                Raportare lunară completă: master files, documente sursă, GL. Generarea durează
-                câteva minute; validarea se face cu validatorul DUK SAF-T.
+                {t("declarations.cards.saft.desc")}
               </div>
             </div>
-            <span className="chip wait"><Ic name="clock" cls="sic" />De depus</span>
+            <span className="chip wait"><Ic name="clock" cls="sic" />{t("declarations.chips.toFile")}</span>
           </div>
           <div className="dkv">
-            <span>Perioada <b>{periodLabel}</b></span>
-            <span>Termen <b className="num">{fmtRoDate(termenD406)}</b></span>
-            <span>Generare și validare <b>în Rapoarte → D406 SAF-T</b></span>
+            <span>{t("declarations.common.period")} <b>{periodLabel}</b></span>
+            <span>{t("declarations.common.due")} <b className="num">{fmtRoDate(termenD406)}</b></span>
+            <span>{t("declarations.cards.saft.genValidate")} <b>{t("declarations.kv.inReports", { view: "D406 SAF-T" })}</b></span>
           </div>
           <div className="dfoot">
             <button className="pill-btn spin-btn" onClick={() => goReports("saft")}>
-              {calcIcon}Generează
+              {calcIcon}{t("declarations.cards.saft.generate")}
             </button>
             <button className="pill-btn" onClick={() => goReports("saft")}>
-              <Ic name="checkC" />Validează
+              <Ic name="checkC" />{t("declarations.cards.saft.validate")}
             </button>
             <span className="spacer" />
             <button className="btn-dark" onClick={() => goReports("saft")}>
-              {exportXmlIcon}Export XML
+              {exportXmlIcon}{t("declarations.common.exportXml")}
             </button>
           </div>
         </div>
@@ -554,27 +548,28 @@ export function DeclarationsPage() {
         <div className="dec">
           <div className="dh">
             <div>
-              <div className="dt"><span className="doc">D100</span>Obligații de plată — impozit</div>
+              <div className="dt"><span className="doc">D100</span>{t("declarations.cards.d100.title")}</div>
               <div className="ds">
-                Micro: impozit pe venit la <b>poziția 5</b> · Profit: plăți anticipate la{" "}
-                <b>poziția 2</b>. Pentru T4 la profit, regularizarea anuală se face prin D101.
+                {t("declarations.cards.d100.desc1")} <b>{t("declarations.cards.d100.pos5")}</b>{" "}
+                {t("declarations.cards.d100.desc2")}{" "}
+                <b>{t("declarations.cards.d100.pos2")}</b>{t("declarations.cards.d100.desc3")}
               </div>
             </div>
-            <span className="chip wait"><Ic name="clock" cls="sic" />Estimată</span>
+            <span className="chip wait"><Ic name="clock" cls="sic" />{t("declarations.chips.estimated")}</span>
           </div>
           <div className="dkv">
-            <span>Perioada <b>T{quarter} {selectedYear}</b></span>
-            <span>Termen <b className="num">{fmtRoDate(termenD100)}</b></span>
-            <span>Calcul și export <b>în Rapoarte → D100</b></span>
+            <span>{t("declarations.common.period")} <b>{t("declarations.kv.quarterPeriod", { q: quarter, year: selectedYear })}</b></span>
+            <span>{t("declarations.common.due")} <b className="num">{fmtRoDate(termenD100)}</b></span>
+            <span>{t("declarations.kv.calcExport")} <b>{t("declarations.kv.inReports", { view: "D100" })}</b></span>
           </div>
           <div className="dfoot">
             <button className="pill-btn spin-btn" onClick={() => goReports("d100")}>
-              {calcIcon}Calculează
+              {calcIcon}{t("declarations.common.calc")}
             </button>
             <span className="spacer" />
             {/* exportul XML real e în vizualizarea D100 din Rapoarte */}
             <button className="btn-dark" onClick={() => goReports("d100")}>
-              {exportXmlIcon}Export XML
+              {exportXmlIcon}{t("declarations.common.exportXml")}
             </button>
           </div>
         </div>
@@ -583,27 +578,26 @@ export function DeclarationsPage() {
         <div className="dec">
           <div className="dh">
             <div>
-              <div className="dt"><span className="doc">D101</span>Impozit pe profit — anual</div>
+              <div className="dt"><span className="doc">D101</span>{t("declarations.cards.d101.title")}</div>
               <div className="ds">
-                Pierderea fiscală reportată se recuperează în limita a <b>70%</b> din profitul
-                impozabil. Creditul fiscal pentru sponsorizări se aplică în limita legală.
+                {t("declarations.cards.d101.desc1")} <b>70%</b> {t("declarations.cards.d101.desc2")}
               </div>
             </div>
-            <span className="chip sent"><Ic name="docText" cls="sic" />An {selectedYear - 1}</span>
+            <span className="chip sent"><Ic name="docText" cls="sic" />{t("declarations.chips.year", { year: selectedYear - 1 })}</span>
           </div>
           <div className="dkv">
-            <span>Perioada <b>An {selectedYear - 1}</b></span>
-            <span>Termen <b className="num">{fmtRoDate(termenD101)}</b></span>
-            <span>Fișa de calcul <b>în Rapoarte → D101</b></span>
+            <span>{t("declarations.common.period")} <b>{t("declarations.chips.year", { year: selectedYear - 1 })}</b></span>
+            <span>{t("declarations.common.due")} <b className="num">{fmtRoDate(termenD101)}</b></span>
+            <span>{t("declarations.cards.d101.sheet")} <b>{t("declarations.kv.inReports", { view: "D101" })}</b></span>
           </div>
           <div className="dfoot">
             {/* propunere — neimplementat (recipisa ANAF nu are backend) */}
-            <button className="pill-btn" onClick={() => notify.info("În curând.")}>
-              <Ic name="eye" />Vezi recipisa
+            <button className="pill-btn" onClick={() => notify.info(t("declarations.common.comingSoon"))}>
+              <Ic name="eye" />{t("declarations.cards.d101.viewReceipt")}
             </button>
             <span className="spacer" />
             <button className="pill-btn" onClick={() => goReports("d101")}>
-              {exportXmlIcon}Vezi XML
+              {exportXmlIcon}{t("declarations.cards.d101.viewXml")}
             </button>
           </div>
         </div>
@@ -612,28 +606,27 @@ export function DeclarationsPage() {
         <div className="dec">
           <div className="dh">
             <div>
-              <div className="dt"><span className="doc">e-TVA</span>Reconciliere decont precompletat</div>
+              <div className="dt"><span className="doc">e-TVA</span>{t("declarations.cards.etva.title")}</div>
               <div className="ds">
-                ANAF transmite decontul precompletat P300ETVA (se descarcă din SPV); diferențele{" "}
-                <b>≥ 5.000 lei și ≥ 20%</b> sunt semnificative și se justifică prin „Notă
-                justificativă”. La TVA la încasare divergențele sunt așteptate.
+                {t("declarations.cards.etva.desc1")}{" "}
+                <b>{t("declarations.cards.etva.descBold")}</b> {t("declarations.cards.etva.desc2")}
               </div>
             </div>
-            <span className="chip sent"><Ic name="dot" cls="sic" />De reconciliat</span>
+            <span className="chip sent"><Ic name="dot" cls="sic" />{t("declarations.chips.toReconcile")}</span>
           </div>
           <div className="dkv">
-            <span>Perioada <b>{periodLabel}</b></span>
-            <span>P300 precompletat <b>se descarcă din SPV</b></span>
-            <span>Reconciliere <b>în Rapoarte → e-TVA</b></span>
+            <span>{t("declarations.common.period")} <b>{periodLabel}</b></span>
+            <span>{t("declarations.cards.etva.p300")} <b>{t("declarations.cards.etva.p300Download")}</b></span>
+            <span>{t("declarations.cards.etva.recon")} <b>{t("declarations.kv.inReports", { view: "e-TVA" })}</b></span>
           </div>
           <div className="dfoot">
             <button className="pill-btn spin-btn" onClick={() => goReports("etva")}>
-              {calcIcon}Vezi reconcilierea
+              {calcIcon}{t("declarations.cards.etva.viewRecon")}
             </button>
             <span className="spacer" />
             {/* propunere — neimplementat (trimiterea notei justificative nu are backend) */}
-            <button className="btn-dark" onClick={() => notify.info("În curând.")}>
-              <Ic name="send" />Trimite justificare
+            <button className="btn-dark" onClick={() => notify.info(t("declarations.common.comingSoon"))}>
+              <Ic name="send" />{t("declarations.cards.etva.sendJustification")}
             </button>
           </div>
         </div>
@@ -642,34 +635,33 @@ export function DeclarationsPage() {
         <div className="dec">
           <div className="dh">
             <div>
-              <div className="dt"><span className="doc">Intrastat</span>Statistică schimburi intra-UE</div>
+              <div className="dt"><span className="doc">Intrastat</span>{t("declarations.cards.intrastat.title")}</div>
               <div className="ds">
-                Obligație doar la depășirea pragurilor anuale (introduceri 1.000.000 lei /
-                expedieri 1.000.000 lei). Pragurile se monitorizează automat din facturi.
+                {t("declarations.cards.intrastat.desc")}
               </div>
             </div>
             {intrastatLevel === "exceeded" ? (
               <span className="chip late">
                 <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: WARN_PATH }} />
-                Peste prag
+                {t("declarations.chips.overThreshold")}
               </span>
             ) : intrastatLevel === "approaching" ? (
-              <span className="chip wait"><Ic name="clock" cls="sic" />Aproape de prag</span>
+              <span className="chip wait"><Ic name="clock" cls="sic" />{t("declarations.chips.nearThreshold")}</span>
             ) : (
-              <span className="chip sent"><Ic name="dot" cls="sic" />Sub prag</span>
+              <span className="chip sent"><Ic name="dot" cls="sic" />{t("declarations.chips.underThreshold")}</span>
             )}
           </div>
           <div className="dkv">
             <span>
-              Introduceri {currentYear}{" "}
+              {t("declarations.cards.intrastat.arrivals", { year: currentYear })}{" "}
               <b className="num">{intrastat ? `${fmtRON(intrastat.arrivals.ytdRon)} lei` : "—"}</b>
             </span>
             <span>
-              Expedieri {currentYear}{" "}
+              {t("declarations.cards.intrastat.dispatches", { year: currentYear })}{" "}
               <b className="num">{intrastat ? `${fmtRON(intrastat.dispatches.ytdRon)} lei` : "—"}</b>
             </span>
             <span>
-              Prag <b className="num">{intrastat ? `${fmtRON(intrastat.thresholdRon)} lei` : "1.000.000,00 lei"}</b>
+              {t("declarations.cards.intrastat.threshold")} <b className="num">{intrastat ? `${fmtRON(intrastat.thresholdRon)} lei` : "1.000.000,00 lei"}</b>
             </span>
           </div>
           <div className="dfoot">
@@ -677,15 +669,15 @@ export function DeclarationsPage() {
               className="pill-btn spin-btn"
               disabled={intrastatFetching}
               onClick={() => {
-                void refetchIntrastat().then(() => notify.success("Praguri Intrastat actualizate."));
+                void refetchIntrastat().then(() => notify.success(t("declarations.notify.intrastatUpdated")));
               }}
             >
-              {calcIcon}{intrastatFetching ? "Verific…" : "Verifică pragurile"}
+              {calcIcon}{intrastatFetching ? t("declarations.cards.intrastat.checking") : t("declarations.cards.intrastat.check")}
             </button>
             <span className="spacer" />
             {/* propunere — neimplementat (export Intrastat fără backend; sub prag nu e cazul) */}
             <button className="pill-btn" disabled style={{ opacity: 0.5, cursor: "default" }}>
-              {intrastatLevel === "exceeded" ? "Export — în curând" : "Export — nu e cazul"}
+              {intrastatLevel === "exceeded" ? t("declarations.cards.intrastat.exportSoon") : t("declarations.cards.intrastat.exportNa")}
             </button>
           </div>
         </div>
@@ -708,7 +700,7 @@ export function DeclarationsPage() {
             style={{ marginTop: 8, color: "var(--red)", borderColor: "rgba(220,38,38,.4)" }}
             onClick={() => lastSubmission && void handleExportOfficial(lastSubmission, true)}
           >
-            Exportă oricum (ignoră DUK)
+            {t("declarations.common.exportAnyway")}
           </button>
         </div>
       )}
@@ -717,34 +709,34 @@ export function DeclarationsPage() {
       {(computing || report) && (
         <>
           <div className="col-title" style={{ margin: "20px 0 8px", padding: 0 }}>
-            Detaliu D300 — {periodLabel}
+            {t("declarations.detail.title", { period: periodLabel })}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
 
             {/* TVA colectată (vânzări) */}
             <div className="scr-card" style={{ alignSelf: "start" }}>
               <div style={{ padding: "13px 16px 11px", fontSize: 13, fontWeight: 600, borderBottom: "1px solid var(--line)" }}>
-                TVA colectată (vânzări)
+                {t("declarations.detail.collected.title")}
               </div>
               {computing ? (
-                <div style={{ padding: "14px 16px", fontSize: 12.5, color: "var(--text-2)" }}>Se calculează…</div>
+                <div style={{ padding: "14px 16px", fontSize: 12.5, color: "var(--text-2)" }}>{t("declarations.common.computing")}</div>
               ) : !report || report.invoiceCount === 0 ? (
                 <div style={{ padding: "14px 16px", fontSize: 12.5, color: "var(--text-2)" }}>
-                  Nu există facturi VALIDATED în perioada selectată.
+                  {t("declarations.detail.collected.empty")}
                 </div>
               ) : (
                 <>
                   <div style={{ padding: "10px 16px 6px", fontSize: 12, color: "var(--text-2)", display: "flex", gap: 16 }}>
-                    <span>CUI: <b className="num" style={{ color: "var(--text)" }}>{report.companyCui}</b></span>
-                    <span>Facturi: <b className="num" style={{ color: "var(--text)" }}>{report.invoiceCount}</b></span>
+                    <span>{t("declarations.detail.collected.cui")} <b className="num" style={{ color: "var(--text)" }}>{report.companyCui}</b></span>
+                    <span>{t("declarations.detail.collected.invoices")} <b className="num" style={{ color: "var(--text)" }}>{report.invoiceCount}</b></span>
                   </div>
                   <table className="scr-table">
                     <thead>
                       <tr>
-                        <th>Cotă</th>
-                        <th>Cat.</th>
-                        <th className="r">Bază</th>
-                        <th className="r">TVA</th>
+                        <th>{t("declarations.detail.table.rate")}</th>
+                        <th>{t("declarations.detail.table.cat")}</th>
+                        <th className="r">{t("declarations.detail.table.base")}</th>
+                        <th className="r">{t("declarations.detail.table.vat")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -767,8 +759,8 @@ export function DeclarationsPage() {
                     </tbody>
                   </table>
                   <div className="tot-foot">
-                    <span>Total colectată: bază <b className="num">{fmtRON(totalBase)}</b></span>
-                    <span>TVA <b className="num">{fmtRON(totalVat)}</b></span>
+                    <span>{t("declarations.detail.collected.total")} <b className="num">{fmtRON(totalBase)}</b></span>
+                    <span>{t("declarations.common.vat")} <b className="num">{fmtRON(totalVat)}</b></span>
                   </div>
                 </>
               )}
@@ -777,21 +769,20 @@ export function DeclarationsPage() {
             {/* TVA deductibilă (achiziții) */}
             <div className="scr-card" style={{ alignSelf: "start" }}>
               <div style={{ padding: "13px 16px 11px", fontSize: 13, fontWeight: 600, borderBottom: "1px solid var(--line)" }}>
-                TVA deductibilă (achiziții)
+                {t("declarations.detail.deductible.title")}
               </div>
               <div style={{ padding: "10px 16px 0", fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
-                TVA deductibilă se calculează din facturile primite procesate. Verificați că toate
-                facturile lunii au fost descărcate și parsate din SPV pentru un decont corect.
+                {t("declarations.detail.deductible.desc")}
               </div>
               {report && report.purchaseGroups.length > 0 ? (
                 <>
                   <table className="scr-table" style={{ marginTop: 8 }}>
                     <thead>
                       <tr>
-                        <th>Cotă</th>
-                        <th>Cat.</th>
-                        <th className="r">Bază</th>
-                        <th className="r">TVA</th>
+                        <th>{t("declarations.detail.table.rate")}</th>
+                        <th>{t("declarations.detail.table.cat")}</th>
+                        <th className="r">{t("declarations.detail.table.base")}</th>
+                        <th className="r">{t("declarations.detail.table.vat")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -814,17 +805,17 @@ export function DeclarationsPage() {
                     </tbody>
                   </table>
                   <div className="tot-foot">
-                    <span>Total deductibilă: bază <b className="num">{fmtRON(report.totalDeductibleBase)}</b></span>
-                    <span>TVA <b className="num">{fmtRON(report.totalDeductibleVat)}</b></span>
+                    <span>{t("declarations.detail.deductible.total")} <b className="num">{fmtRON(report.totalDeductibleBase)}</b></span>
+                    <span>{t("declarations.common.vat")} <b className="num">{fmtRON(report.totalDeductibleVat)}</b></span>
                   </div>
                 </>
               ) : (
                 <div style={{ padding: "12px 16px", fontSize: 12.5, color: "var(--text-2)" }}>
                   {computing
-                    ? "Se calculează…"
+                    ? t("declarations.common.computing")
                     : !report
-                      ? "Calculați D300 pentru a vedea datele."
-                      : "Nicio factură primită parsată în perioadă."}
+                      ? t("declarations.detail.deductible.computeFirst")
+                      : t("declarations.detail.deductible.noneParsed")}
                 </div>
               )}
 
@@ -832,20 +823,17 @@ export function DeclarationsPage() {
               {report && report.purchaseUnparsedCount > 0 && (
                 <div style={{ margin: "0 16px 4px", padding: "8px 10px", fontSize: 12, color: "var(--amber)", background: "rgba(180,83,9,.07)", border: "1px solid rgba(180,83,9,.18)", borderRadius: 8, lineHeight: 1.5 }}>
                   <b>
-                    {report.purchaseUnparsedCount}{" "}
-                    {report.purchaseUnparsedCount === 1 ? "factură primită nu are" : "facturi primite nu au"}{" "}
-                    încă defalcare TVA
+                    {t("declarations.detail.unparsedVat", { count: report.purchaseUnparsedCount })}
                   </b>{" "}
-                  — suma calculată automat poate fi parțială. Introduceți manual valoarea corectă
-                  mai jos sau folosiți «Recalculează TVA din XML» în Jurnal cumpărări.
+                  {t("declarations.detail.unparsedRest")}
                 </div>
               )}
 
               {/* Manual override input */}
               <div style={{ padding: "8px 16px 16px" }}>
                 <label htmlFor="manual-deductible" style={{ display: "block", fontSize: 12, color: "var(--text-2)", marginBottom: 6 }}>
-                  Ajustare manuală TVA deductibilă{" "}
-                  <span style={{ color: "var(--dim)" }}>· pentru achiziții fără factură SPV parsată</span>
+                  {t("declarations.detail.deductible.manualLabel")}{" "}
+                  <span style={{ color: "var(--dim)" }}>{t("declarations.detail.deductible.manualHint")}</span>
                 </label>
                 <input
                   type="number"
@@ -863,9 +851,9 @@ export function DeclarationsPage() {
                     className="pill-btn"
                     style={{ marginTop: 8, height: 28, fontSize: 12 }}
                     onClick={() => setManualDeductible(report.totalDeductibleVat)}
-                    title="Resetează la valoarea calculată automat"
+                    title={t("declarations.detail.deductible.resetTitle")}
                   >
-                    <Ic name="sync" />Resetează la valoarea calculată
+                    <Ic name="sync" />{t("declarations.detail.deductible.reset")}
                   </button>
                 )}
               </div>
@@ -876,20 +864,19 @@ export function DeclarationsPage() {
           {report && (parseDec(report.regColectataTva) !== 0 || parseDec(report.regDedusaTva) !== 0) && (
             <div className="scr-card" style={{ marginTop: 14 }}>
               <div style={{ padding: "13px 16px 11px", fontSize: 13, fontWeight: 600, borderBottom: "1px solid var(--line)" }}>
-                Regularizări cote vechi (19%/9%/5%)
+                {t("declarations.detail.reg.title")}
               </div>
               <div style={{ padding: "10px 16px 4px", fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.5 }}>
-                Operațiunile la cote vechi sunt raportate automat în rândurile de regularizări
-                (R16 — taxă colectată; R30 — taxă dedusă). Verificați și ajustați dacă este necesar.
+                {t("declarations.detail.reg.desc")}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
                 {/* R16 — regularizări colectată */}
                 <div style={{ padding: "8px 16px 14px", borderRight: "1px solid var(--line)" }}>
                   <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-                    R16 — Regularizări taxă colectată
+                    {t("declarations.detail.reg.r16")}
                   </div>
                   <label htmlFor="reg-colectata-baza" style={{ display: "block", fontSize: 12, color: "var(--text-2)", marginBottom: 4 }}>
-                    Bază impozabilă (lei)
+                    {t("declarations.detail.reg.base")}
                   </label>
                   <input
                     type="number"
@@ -901,7 +888,7 @@ export function DeclarationsPage() {
                     onChange={(e) => setRegColectataBaza(e.target.value)}
                   />
                   <label htmlFor="reg-colectata-tva" style={{ display: "block", fontSize: 12, color: "var(--text-2)", margin: "8px 0 4px" }}>
-                    TVA colectată (lei)
+                    {t("declarations.detail.reg.collectedVat")}
                   </label>
                   <input
                     type="number"
@@ -924,19 +911,19 @@ export function DeclarationsPage() {
                         setRegColectataBaza(String(Math.round(parseDec(report.regColectataBaza))));
                         setRegColectataTva(String(Math.round(parseDec(report.regColectataTva))));
                       }}
-                      title="Resetează la valorile calculate automat"
+                      title={t("declarations.detail.reg.resetTitle")}
                     >
-                      <Ic name="sync" />Resetează la calculat
+                      <Ic name="sync" />{t("declarations.detail.reg.reset")}
                     </button>
                   )}
                 </div>
                 {/* R30 — regularizări dedusă */}
                 <div style={{ padding: "8px 16px 14px" }}>
                   <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-                    R30 — Regularizări taxă dedusă
+                    {t("declarations.detail.reg.r30")}
                   </div>
                   <label htmlFor="reg-dedusa-baza" style={{ display: "block", fontSize: 12, color: "var(--text-2)", marginBottom: 4 }}>
-                    Bază impozabilă (lei)
+                    {t("declarations.detail.reg.base")}
                   </label>
                   <input
                     type="number"
@@ -948,7 +935,7 @@ export function DeclarationsPage() {
                     onChange={(e) => setRegDedusaBaza(e.target.value)}
                   />
                   <label htmlFor="reg-dedusa-tva" style={{ display: "block", fontSize: 12, color: "var(--text-2)", margin: "8px 0 4px" }}>
-                    TVA dedusă (lei)
+                    {t("declarations.detail.reg.deductedVat")}
                   </label>
                   <input
                     type="number"
@@ -971,9 +958,9 @@ export function DeclarationsPage() {
                         setRegDedusaBaza(String(Math.round(parseDec(report.regDedusaBaza))));
                         setRegDedusaTva(String(Math.round(parseDec(report.regDedusaTva))));
                       }}
-                      title="Resetează la valorile calculate automat"
+                      title={t("declarations.detail.reg.resetTitle")}
                     >
-                      <Ic name="sync" />Resetează la calculat
+                      <Ic name="sync" />{t("declarations.detail.reg.reset")}
                     </button>
                   )}
                 </div>
@@ -1005,11 +992,11 @@ export function DeclarationsPage() {
                     letterSpacing: "0.04em",
                   }}
                 >
-                  {netTvaDePlata >= 0 ? "TVA de plată" : "TVA de recuperat"}
+                  {netTvaDePlata >= 0 ? t("declarations.kv.vatPay") : t("declarations.kv.vatRecover")}
                 </div>
                 <div style={{ fontSize: 12.5, color: "var(--text-2)", marginTop: 4 }}>
-                  Colectată <b className="num">{fmtRON(totalVat)}</b> RON −
-                  Deductibilă <b className="num">{fmtRON(deductibleVat)}</b> RON
+                  {t("declarations.detail.summary.collected")} <b className="num">{fmtRON(totalVat)}</b> RON −{" "}
+                  {t("declarations.detail.summary.deductible")} <b className="num">{fmtRON(deductibleVat)}</b> RON
                 </div>
               </div>
               <div

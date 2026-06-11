@@ -17,6 +17,8 @@
 
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -39,10 +41,10 @@ const fmtRoDate = (iso: string) => {
 };
 
 // Frequency → table label (prototype shows "Lunar · ziua 1" for monthly).
-function freqLabel(frequency: string, dayOfMonth: number): string {
-  if (frequency === "monthly") return `Lunar · ziua ${dayOfMonth}`;
-  if (frequency === "quarterly") return "Trimestrial";
-  if (frequency === "annual") return "Anual";
+function freqLabel(frequency: string, dayOfMonth: number, t: TFunction): string {
+  if (frequency === "monthly") return t("recurring.freq.monthlyDay", { n: dayOfMonth });
+  if (frequency === "quarterly") return t("recurring.freq.quarterly");
+  if (frequency === "annual") return t("recurring.freq.annual");
   return frequency;
 }
 
@@ -105,6 +107,7 @@ const EMPTY_FORM = {
 };
 
 export function RecurringPage() {
+  const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const queryClient = useQueryClient();
 
@@ -147,12 +150,12 @@ export function RecurringPage() {
     mutationFn: (args: CreateRecurringArgs) => api.recurring.create(args),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.recurring.list(activeCompanyId!) });
-      notify.success("Factură recurentă creată cu succes");
+      notify.success(t("recurring.notify.created"));
       setShowModal(false);
       setForm({ ...EMPTY_FORM });
       setLines(makeEmptyLines());
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut crea șablonul recurent.")),
+    onError: (e) => notify.error(formatError(e, t("recurring.notify.createError"))),
   });
 
   const updateMutation = useMutation({
@@ -160,23 +163,23 @@ export function RecurringPage() {
       api.recurring.update(args),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.recurring.list(activeCompanyId!) });
-      notify.success("Șablon actualizat cu succes");
+      notify.success(t("recurring.notify.updated"));
       setShowModal(false);
       setEditingId(null);
       setForm({ ...EMPTY_FORM });
       setLines(makeEmptyLines());
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut actualiza șablonul recurent.")),
+    onError: (e) => notify.error(formatError(e, t("recurring.notify.updateError"))),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.recurring.delete(id, activeCompanyId!),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.recurring.list(activeCompanyId!) });
-      notify.success("Șablon șters");
+      notify.success(t("recurring.notify.deleted"));
       setDeleteConfirm(null);
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut șterge șablonul.")),
+    onError: (e) => notify.error(formatError(e, t("recurring.notify.deleteError"))),
   });
 
   const toggleActive = useMutation({
@@ -184,9 +187,9 @@ export function RecurringPage() {
       api.recurring.toggleActive(id, activeCompanyId!, active),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.recurring.list(activeCompanyId!) });
-      notify.success("Status șablon actualizat.");
+      notify.success(t("recurring.notify.toggled"));
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut actualiza statusul șablonului.")),
+    onError: (e) => notify.error(formatError(e, t("recurring.notify.toggleError"))),
   });
 
   // Design table exposes Auto ANAF as a toggle → flip via api.recurring.update.
@@ -207,9 +210,9 @@ export function RecurringPage() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.recurring.list(activeCompanyId!) });
-      notify.success("Setare Auto ANAF actualizată.");
+      notify.success(t("recurring.notify.autoAnafSaved"));
     },
-    onError: (e) => notify.error(formatError(e, "Nu s-a putut actualiza setarea Auto ANAF.")),
+    onError: (e) => notify.error(formatError(e, t("recurring.notify.autoAnafError"))),
   });
 
   const handleOpenModal = () => {
@@ -251,18 +254,18 @@ export function RecurringPage() {
 
   const handleCreate = () => {
     if (!activeCompanyId) return;
-    if (!form.templateName.trim()) { setFormError("Introduceți un nume pentru șablon."); notify.warn("Introduceți un nume pentru șablon."); return; }
-    if (!editingId && !form.clientId) { setFormError("Selectați un client."); notify.warn("Selectați un client."); return; }
-    if (!form.series.trim()) { setFormError("Introduceți seria facturii."); notify.warn("Introduceți seria facturii."); return; }
+    if (!form.templateName.trim()) { setFormError(t("recurring.validate.name")); notify.warn(t("recurring.validate.name")); return; }
+    if (!editingId && !form.clientId) { setFormError(t("recurring.validate.client")); notify.warn(t("recurring.validate.client")); return; }
+    if (!form.series.trim()) { setFormError(t("recurring.validate.series")); notify.warn(t("recurring.validate.series")); return; }
     setFormError(null);
 
     if (lines.length === 0) {
-      setLinesError("Adăugați cel puțin un articol.");
+      setLinesError(t("recurring.validate.lines"));
       return;
     }
     for (const [i, line] of lines.entries()) {
       if (!line.name?.trim()) {
-        setLinesError(`Linia ${i + 1}: denumirea produsului/serviciului este obligatorie.`);
+        setLinesError(t("recurring.validate.lineName", { n: i + 1 }));
         return;
       }
     }
@@ -329,9 +332,9 @@ export function RecurringPage() {
   }, [recurringList, tab, query, contactMap]);
 
   const tabs: Array<{ value: TabFilter; label: string; count: number }> = [
-    { value: "all",      label: "Toate",    count: recurringList.length },
-    { value: "active",   label: "Active",   count: activeCount },
-    { value: "inactive", label: "Inactive", count: inactiveCount },
+    { value: "all",      label: t("recurring.tabs.all"),      count: recurringList.length },
+    { value: "active",   label: t("recurring.tabs.active"),   count: activeCount },
+    { value: "inactive", label: t("recurring.tabs.inactive"), count: inactiveCount },
   ];
 
   const saving = createMutation.isPending || updateMutation.isPending;
@@ -339,9 +342,9 @@ export function RecurringPage() {
   if (!activeCompanyId) {
     return (
       <div className="main-inner wide page-recurring">
-        <div className="page-head"><div><h1>Facturi Recurente</h1></div></div>
+        <div className="page-head"><div><h1>{t("recurring.title")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Selectați o companie activă pentru a vedea șabloanele recurente.
+          {t("recurring.selectCompany")}
         </div>
       </div>
     );
@@ -352,15 +355,15 @@ export function RecurringPage() {
       {/* page head */}
       <div className="page-head">
         <div>
-          <h1>Facturi Recurente</h1>
+          <h1>{t("recurring.title")}</h1>
           <p className="sub">
-            {recurringList.length === 1 ? "1 șablon" : `${recurringList.length} șabloane`} · {activeCount} active
-            {nextEmitere ? ` · următoarea emitere ${fmtRoDate(nextEmitere)}` : ""}
+            {t("recurring.sub.templates", { count: recurringList.length })} · {t("recurring.sub.active", { n: activeCount })}
+            {nextEmitere ? ` · ${t("recurring.sub.next", { date: fmtRoDate(nextEmitere) })}` : ""}
           </p>
         </div>
         <div className="head-actions">
           <button className="btn-dark" onClick={handleOpenModal}>
-            <Ic name="plus" />Șablon nou
+            <Ic name="plus" />{t("recurring.head.new")}
           </button>
         </div>
       </div>
@@ -384,7 +387,7 @@ export function RecurringPage() {
             <Ic name="lens" />
             <input
               type="text"
-              placeholder="Caută șablon…"
+              placeholder={t("recurring.search")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -393,28 +396,28 @@ export function RecurringPage() {
 
         {/* table */}
         {isLoading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("recurring.states.loading")}</div>
         ) : recurringError ? (
           <div style={{ padding: 16 }}>
-            <QueryErrorBanner error={recurringErr} label="facturile recurente" onRetry={() => void refetchRecurring()} />
+            <QueryErrorBanner error={recurringErr} label={t("recurring.states.errorLabel")} onRetry={() => void refetchRecurring()} />
           </div>
         ) : list.length === 0 ? (
           <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
             {recurringList.length === 0
-              ? "Niciun șablon recurent. Creați un șablon cu butonul „Șablon nou” pentru a emite automat facturi periodice."
-              : "Nicio înregistrare pentru filtrele aplicate."}
+              ? t("recurring.states.emptyNone")
+              : t("recurring.states.emptyFiltered")}
           </div>
         ) : (
           <table className="scr-table">
             <thead>
               <tr>
-                <th>Denumire șablon</th>
-                <th>Client</th>
-                <th>Frecvență</th>
-                <th>Urm. emitere</th>
-                <th>Serie</th>
-                <th style={{ textAlign: "center" }}>Auto ANAF</th>
-                <th style={{ textAlign: "center" }}>Activ</th>
+                <th>{t("recurring.table.name")}</th>
+                <th>{t("recurring.table.client")}</th>
+                <th>{t("recurring.table.frequency")}</th>
+                <th>{t("recurring.table.nextIssue")}</th>
+                <th>{t("recurring.table.series")}</th>
+                <th style={{ textAlign: "center" }}>{t("recurring.table.autoAnaf")}</th>
+                <th style={{ textAlign: "center" }}>{t("recurring.table.active")}</th>
                 <th className="r" style={{ width: 120 }}></th>
               </tr>
             </thead>
@@ -435,11 +438,11 @@ export function RecurringPage() {
                     </div>
                   </td>
                   <td>{contactMap.get(r.clientId) ?? r.clientId}</td>
-                  <td>{freqLabel(r.frequency, r.dayOfMonth)}</td>
+                  <td>{freqLabel(r.frequency, r.dayOfMonth, t)}</td>
                   {r.active ? (
                     <td className="num">{fmtRoDate(r.nextIssueDate)}</td>
                   ) : (
-                    <td className="num muted">inactiv</td>
+                    <td className="num muted">{t("recurring.table.inactive")}</td>
                   )}
                   <td><span className="doc">{r.series}</span></td>
                   <td style={{ textAlign: "center" }}>
@@ -447,7 +450,7 @@ export function RecurringPage() {
                       className={`tog${r.autoSubmitAnaf ? " on" : ""}`}
                       role="switch"
                       aria-checked={r.autoSubmitAnaf}
-                      aria-label="Trimitere automată la ANAF"
+                      aria-label={t("recurring.row.autoAnafAria")}
                       style={toggleAutoAnaf.isPending ? { opacity: 0.5, pointerEvents: "none" } : undefined}
                       onClick={() => toggleAutoAnaf.mutate(r)}
                     />
@@ -457,7 +460,7 @@ export function RecurringPage() {
                       className={`tog${r.active ? " on" : ""}`}
                       role="switch"
                       aria-checked={r.active}
-                      aria-label={r.active ? "Dezactivează șablon" : "Activează șablon"}
+                      aria-label={r.active ? t("recurring.row.deactivate") : t("recurring.row.activate")}
                       style={toggleActive.isPending ? { opacity: 0.5, pointerEvents: "none" } : undefined}
                       onClick={() => toggleActive.mutate({ id: r.id, active: !r.active })}
                     />
@@ -465,10 +468,10 @@ export function RecurringPage() {
                   <td>
                     {deleteConfirm === r.id ? (
                       <div className="row-acts" style={{ alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 12, color: "var(--red)", whiteSpace: "nowrap" }}>Ștergeți?</span>
+                        <span style={{ fontSize: 12, color: "var(--red)", whiteSpace: "nowrap" }}>{t("recurring.row.deleteQ")}</span>
                         <button
                           className="mini-btn"
-                          title="Confirmă ștergerea"
+                          title={t("recurring.row.confirmDelete")}
                           style={{ color: "var(--red)", opacity: 1 }}
                           disabled={deleteMutation.isPending}
                           onClick={() => deleteMutation.mutate(r.id)}
@@ -477,7 +480,7 @@ export function RecurringPage() {
                         </button>
                         <button
                           className="mini-btn"
-                          title="Anulează"
+                          title={t("recurring.cancel")}
                           style={{ opacity: 1 }}
                           onClick={() => setDeleteConfirm(null)}
                         >
@@ -486,10 +489,10 @@ export function RecurringPage() {
                       </div>
                     ) : (
                       <div className="row-acts">
-                        <button className="mini-btn" title="Editează" onClick={() => handleOpenEditModal(r)}>
+                        <button className="mini-btn" title={t("recurring.row.edit")} onClick={() => handleOpenEditModal(r)}>
                           <Ic name="pen" />
                         </button>
-                        <button className="mini-btn" title="Șterge" onClick={() => setDeleteConfirm(r.id)}>
+                        <button className="mini-btn" title={t("recurring.row.delete")} onClick={() => setDeleteConfirm(r.id)}>
                           <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_TRASH }} />
                         </button>
                       </div>
@@ -506,8 +509,8 @@ export function RecurringPage() {
       <div className="banner" style={{ marginTop: 14 }}>
         <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_INFO }} />
         <span>
-          Facturile recurente se generează automat ca <b>schițe</b> la data programată. Cu{" "}
-          <b>Auto ANAF</b> activ, factura generată se trimite automat la ANAF (setare per șablon).
+          {t("recurring.banner.part1")} <b>{t("recurring.banner.drafts")}</b> {t("recurring.banner.part2")}{" "}
+          <b>{t("recurring.banner.autoAnaf")}</b> {t("recurring.banner.part3")}
         </span>
       </div>
 
@@ -521,12 +524,12 @@ export function RecurringPage() {
           <div className="modal lg" style={{ width: 720 }}>
             <div className="modal-head">
               <div>
-                <div className="mt">{editingId ? "Editează șablon recurent" : "Șablon factură recurentă"}</div>
+                <div className="mt">{editingId ? t("recurring.modal.editTitle") : t("recurring.modal.createTitle")}</div>
                 <div className="ms">
-                  Factura se generează automat ca schiță la data programată.
+                  {t("recurring.modal.sub")}
                 </div>
               </div>
-              <button className="modal-x" onClick={closeModal} aria-label="Închide">
+              <button className="modal-x" onClick={closeModal} aria-label={t("recurring.modal.close")}>
                 <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_X }} />
               </button>
             </div>
@@ -534,10 +537,10 @@ export function RecurringPage() {
               <div className="fgrid">
                 {/* Template name */}
                 <div className="field span2">
-                  <label>Nume șablon <span className="req">*</span></label>
+                  <label>{t("recurring.modal.name")} <span className="req">*</span></label>
                   <input
                     className={`input${formError && !form.templateName.trim() ? " invalid" : ""}`}
-                    placeholder="ex: Abonament lunar hosting"
+                    placeholder={t("recurring.modal.namePlaceholder")}
                     value={form.templateName}
                     onChange={(e) => setForm((f) => ({ ...f, templateName: e.target.value }))}
                     autoFocus
@@ -546,28 +549,28 @@ export function RecurringPage() {
 
                 {/* Client — read-only in edit mode */}
                 <div className="field span2">
-                  <label>Client <span className="req">*</span></label>
+                  <label>{t("recurring.modal.client")} <span className="req">*</span></label>
                   <select
                     className={`select${formError && !editingId && !form.clientId ? " invalid" : ""}`}
                     value={form.clientId}
                     disabled={!!editingId}
                     onChange={(e) => setForm((f) => ({ ...f, clientId: e.target.value }))}
                   >
-                    <option value="">— Selectați client —</option>
+                    <option value="">{t("recurring.modal.clientPick")}</option>
                     {contacts.map((c) => (
                       <option key={c.id} value={c.id}>{c.legalName}</option>
                     ))}
                   </select>
                   {editingId && (
                     <span style={{ fontSize: 11, color: "var(--text-2)" }}>
-                      Clientul nu poate fi modificat după creare.
+                      {t("recurring.modal.clientLocked")}
                     </span>
                   )}
                 </div>
 
                 {/* Frequency + Day */}
                 <div className="field">
-                  <label>Frecvență <span className="req">*</span></label>
+                  <label>{t("recurring.modal.frequency")} <span className="req">*</span></label>
                   <select
                     className="select"
                     value={form.frequency}
@@ -580,13 +583,13 @@ export function RecurringPage() {
                       }));
                     }}
                   >
-                    <option value="monthly">Lunar</option>
-                    <option value="quarterly">Trimestrial</option>
-                    <option value="annual">Anual</option>
+                    <option value="monthly">{t("recurring.freq.monthly")}</option>
+                    <option value="quarterly">{t("recurring.freq.quarterly")}</option>
+                    <option value="annual">{t("recurring.freq.annual")}</option>
                   </select>
                 </div>
                 <div className="field">
-                  <label>Ziua lunii (1–28)</label>
+                  <label>{t("recurring.modal.dayOfMonth")}</label>
                   <input
                     className="input"
                     type="number"
@@ -606,7 +609,7 @@ export function RecurringPage() {
 
                 {/* Next issue date + Series */}
                 <div className="field">
-                  <label>Prima / urm. emitere</label>
+                  <label>{t("recurring.modal.nextIssue")}</label>
                   <input
                     className="input"
                     type="date"
@@ -615,10 +618,10 @@ export function RecurringPage() {
                   />
                 </div>
                 <div className="field">
-                  <label>Serie factură <span className="req">*</span></label>
+                  <label>{t("recurring.modal.series")} <span className="req">*</span></label>
                   <input
                     className={`input${formError && !form.series.trim() ? " invalid" : ""}`}
-                    placeholder="ex: FCT"
+                    placeholder={t("recurring.modal.seriesPlaceholder")}
                     value={form.series}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, series: e.target.value.toUpperCase() }))
@@ -637,12 +640,12 @@ export function RecurringPage() {
                     aria-checked={form.autoSubmitAnaf}
                     onClick={() => setForm((f) => ({ ...f, autoSubmitAnaf: !f.autoSubmitAnaf }))}
                   />
-                  <span>Trimitere automată la ANAF după emitere</span>
+                  <span>{t("recurring.modal.autoSubmit")}</span>
                 </label>
 
                 {/* Line items */}
                 <div className="field span2">
-                  <label>Articole <span className="req">*</span></label>
+                  <label>{t("recurring.modal.lines")} <span className="req">*</span></label>
                   <LineItemsEditor
                     lines={lines}
                     onChange={(updated) => { setLines(updated); setLinesError(null); }}
@@ -654,10 +657,10 @@ export function RecurringPage() {
 
                 {/* Notes */}
                 <div className="field span2">
-                  <label>Notițe (opțional)</label>
+                  <label>{t("recurring.modal.notes")}</label>
                   <input
                     className="input"
-                    placeholder="Informații suplimentare"
+                    placeholder={t("recurring.modal.notesPlaceholder")}
                     value={form.notes}
                     onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
                   />
@@ -666,18 +669,18 @@ export function RecurringPage() {
                 <div className="banner span2" style={{ marginBottom: 0 }}>
                   <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_INFO }} />
                   <span>
-                    Puteți crea un șablon și direct dintr-o factură existentă, prin opțiunea „Salvează ca șablon”.
+                    {t("recurring.modal.tip")}
                   </span>
                 </div>
               </div>
             </div>
             <div className="modal-foot">
               <button type="button" className="pill-btn" onClick={closeModal} disabled={saving}>
-                Anulează
+                {t("recurring.cancel")}
               </button>
               <button type="button" className="btn-dark" disabled={saving} onClick={handleCreate}>
                 <Ic name="check" />
-                {saving ? "Se salvează…" : editingId ? "Salvează modificările" : "Creează șablon"}
+                {saving ? t("recurring.modal.saving") : editingId ? t("recurring.modal.saveChanges") : t("recurring.modal.create")}
               </button>
             </div>
           </div>

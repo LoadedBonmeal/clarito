@@ -15,11 +15,12 @@
  * comportament identic cu pașii 2–3 ai vechiului wizard).
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, type FieldErrors, type UseFormRegister } from "react-hook-form";
+import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
 import { Ic } from "@/components/shared/Ic";
@@ -60,39 +61,42 @@ function validateIban(raw: string): boolean {
   return remainder === BigInt(1);
 }
 
-const schema = z.object({
-  cui: z.string().regex(CUI_REGEX, "Format: 2-10 cifre, opțional cu RO."),
-  legalName: z.string().min(2, "Introduceți numele complet."),
-  tradeName: z.string().optional(),
-  registryNumber: z.string().optional(),
-  address: z.string().min(2, "Adresa e obligatorie."),
-  city: z.string().min(2, "Localitatea e obligatorie."),
-  county: z.string().min(2, "Județul e obligatoriu."),
-  postalCode: z.string().optional(),
-  email: z.email("Email invalid.").optional().or(z.literal("")),
-  phone: z.string().optional(),
-  iban: z
-    .string()
-    .refine((v) => validateIban(v), "IBAN invalid (checksum incorect sau format greșit).")
-    .optional()
-    .or(z.literal("")),
-  bankName: z.string().optional(),
-  invoiceSeries: z.string().min(1, "Seria e obligatorie."),
-  vatPayer: z.boolean().optional(),
-  taxRegime: z.enum(["micro", "profit"]).optional(),
-});
+const makeSchema = (t: (key: string) => string) =>
+  z.object({
+    cui: z.string().regex(CUI_REGEX, t("companies.form.validation.cui")),
+    legalName: z.string().min(2, t("companies.form.validation.legalName")),
+    tradeName: z.string().optional(),
+    registryNumber: z.string().optional(),
+    address: z.string().min(2, t("companies.form.validation.address")),
+    city: z.string().min(2, t("companies.form.validation.city")),
+    county: z.string().min(2, t("companies.form.validation.county")),
+    postalCode: z.string().optional(),
+    email: z.email(t("companies.form.validation.email")).optional().or(z.literal("")),
+    phone: z.string().optional(),
+    iban: z
+      .string()
+      .refine((v) => validateIban(v), t("companies.form.validation.iban"))
+      .optional()
+      .or(z.literal("")),
+    bankName: z.string().optional(),
+    invoiceSeries: z.string().min(1, t("companies.form.validation.series")),
+    vatPayer: z.boolean().optional(),
+    taxRegime: z.enum(["micro", "profit"]).optional(),
+  });
 
-type FormValues = z.infer<typeof schema>;
+type FormValues = z.infer<ReturnType<typeof makeSchema>>;
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
 export function CompanyNewPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [cuiLookupLoading, setCuiLookupLoading] = useState(false);
   const [cuiLookupError, setCuiLookupError] = useState<string | null>(null);
   const [cuiLookupOk, setCuiLookupOk] = useState(false);
 
+  const schema = useMemo(() => makeSchema(t), [t]);
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -127,10 +131,10 @@ export function CompanyNewPage() {
       form.setValue("county", data.county);
       if (data.registryNumber) form.setValue("registryNumber", data.registryNumber);
       setCuiLookupOk(true);
-      notify.success("Date completate din ANAF.");
+      notify.success(t("companies.form.anaf.filled"));
     } catch {
       setCuiLookupOk(false);
-      setCuiLookupError("CUI-ul nu a fost găsit în baza ANAF.");
+      setCuiLookupError(t("companies.form.anaf.notFound"));
     } finally {
       setCuiLookupLoading(false);
     }
@@ -142,7 +146,7 @@ export function CompanyNewPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
       void navigate({ to: "/companies/$id", params: { id: company.id } });
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la crearea companiei.")),
+    onError: (e) => notify.error(formatError(e, t("companies.form.notify.createError"))),
   });
 
   const onSubmit = (v: FormValues) => {
@@ -173,16 +177,16 @@ export function CompanyNewPage() {
       <div className="page-head">
         <div>
           <div className="crumb">
-            <a onClick={() => void navigate({ to: "/companies" })} style={{ cursor: "pointer" }}>Companii</a>
+            <a onClick={() => void navigate({ to: "/companies" })} style={{ cursor: "pointer" }}>{t("companies.title")}</a>
             <span className="sep">›</span>
-            <span>Companie nouă</span>
+            <span>{t("companies.form.newTitle")}</span>
           </div>
-          <h1>Companie nouă</h1>
-          <p className="sub">Datele se completează automat din registrul ANAF după CUI</p>
+          <h1>{t("companies.form.newTitle")}</h1>
+          <p className="sub">{t("companies.form.newSub")}</p>
         </div>
         <div className="head-actions">
           <button className="pill-btn" onClick={() => void navigate({ to: "/companies" })}>
-            Renunță
+            {t("companies.form.cancel")}
           </button>
           <button
             className="btn-dark"
@@ -192,7 +196,7 @@ export function CompanyNewPage() {
             style={create.isPending ? { opacity: 0.6 } : undefined}
           >
             <Ic name="check" />
-            {create.isPending ? "Se salvează…" : "Salvează compania"}
+            {create.isPending ? t("companies.form.saving") : t("companies.form.saveCompany")}
           </button>
         </div>
       </div>
@@ -200,17 +204,17 @@ export function CompanyNewPage() {
       <form id="company-form" onSubmit={form.handleSubmit(onSubmit)}>
         {/* Identificare */}
         <div className="scr-card" style={{ marginBottom: 14 }}>
-          <div className="scr-toolbar"><div className="tt">Identificare</div></div>
+          <div className="scr-toolbar"><div className="tt">{t("companies.form.sections.identification")}</div></div>
           <div className="card-pad">
             <div className="fgrid">
               <div className="field">
-                <label>CUI <span className="req">*</span></label>
+                <label>{t("companies.form.fields.cui")} <span className="req">*</span></label>
                 <div style={{ display: "flex", gap: 6 }}>
                   <div className="in-wrap" style={{ flex: 1 }}>
                     <input
                       className={`input num${cuiLookupOk ? " valid" : ""}`}
                       type="text"
-                      placeholder="RO12345678"
+                      placeholder={t("companies.form.placeholders.cui")}
                       {...form.register("cui")}
                     />
                     {cuiLookupOk && (
@@ -222,50 +226,50 @@ export function CompanyNewPage() {
                     className="pill-btn"
                     style={{ height: 36, flex: "none" }}
                     disabled={cuiLookupLoading}
-                    title="Preia datele firmei din ANAF după CUI"
+                    title={t("companies.form.anaf.tooltip")}
                     onClick={() => void handleCuiLookup()}
                   >
-                    {cuiLookupLoading ? "Se caută…" : "ANAF ↓"}
+                    {cuiLookupLoading ? t("companies.form.anaf.searching") : t("companies.form.anaf.button")}
                   </button>
                 </div>
                 {errors.cui?.message && <span className="err">{errors.cui.message}</span>}
                 {cuiLookupError && !errors.cui && <span className="err">{cuiLookupError}</span>}
                 {cuiLookupOk && !errors.cui && !cuiLookupError && (
-                  <span className="okk">Găsit în ANAF — date completate automat</span>
+                  <span className="okk">{t("companies.form.anaf.found")}</span>
                 )}
               </div>
               <FormField
                 id="registryNumber"
-                label="Nr. Reg. Comerțului"
-                placeholder="J40/1234/2020"
+                label={t("companies.form.fields.regCom")}
+                placeholder={t("companies.form.placeholders.regCom")}
                 num
                 register={form.register}
                 errors={errors}
               />
               <FormField
                 id="legalName"
-                label="Denumire legală"
+                label={t("companies.form.fields.legalName")}
                 required
                 span2
-                placeholder="S.C. Exemplu S.R.L."
+                placeholder={t("companies.form.placeholders.legalName")}
                 register={form.register}
                 errors={errors}
               />
               <FormField
                 id="tradeName"
-                label="Denumire comercială"
+                label={t("companies.form.fields.tradeName")}
                 register={form.register}
                 errors={errors}
               />
               <div className="field">
-                <label>Plătitor TVA</label>
+                <label>{t("companies.form.fields.vatPayer")}</label>
                 <select
                   className="select"
                   value={vatPayer ? "da" : "nu"}
                   onChange={(e) => form.setValue("vatPayer", e.target.value === "da")}
                 >
-                  <option value="da">Da</option>
-                  <option value="nu">Nu</option>
+                  <option value="da">{t("companies.form.yes")}</option>
+                  <option value="nu">{t("companies.form.no")}</option>
                 </select>
               </div>
             </div>
@@ -274,72 +278,69 @@ export function CompanyNewPage() {
 
         {/* Adresă */}
         <div className="scr-card" style={{ marginBottom: 14 }}>
-          <div className="scr-toolbar"><div className="tt">Adresă</div></div>
+          <div className="scr-toolbar"><div className="tt">{t("companies.form.sections.address")}</div></div>
           <div className="card-pad">
             <div className="fgrid">
               <FormField
                 id="address"
-                label="Adresă"
+                label={t("companies.form.fields.address")}
                 required
                 span2
-                placeholder="Str. Exemplu nr. 1"
+                placeholder={t("companies.form.placeholders.address")}
                 register={form.register}
                 errors={errors}
               />
-              <FormField id="city" label="Localitate" required placeholder="Cluj-Napoca" register={form.register} errors={errors} />
-              <FormField id="county" label="Județ" required placeholder="CJ" register={form.register} errors={errors} />
-              <FormField id="postalCode" label="Cod poștal" num register={form.register} errors={errors} />
+              <FormField id="city" label={t("companies.form.fields.city")} required placeholder={t("companies.form.placeholders.city")} register={form.register} errors={errors} />
+              <FormField id="county" label={t("companies.form.fields.county")} required placeholder={t("companies.form.placeholders.county")} register={form.register} errors={errors} />
+              <FormField id="postalCode" label={t("companies.form.fields.postalCode")} num register={form.register} errors={errors} />
             </div>
           </div>
         </div>
 
         {/* Contact & bancă */}
         <div className="scr-card" style={{ marginBottom: 14 }}>
-          <div className="scr-toolbar"><div className="tt">Contact &amp; bancă</div></div>
+          <div className="scr-toolbar"><div className="tt">{t("companies.form.sections.contactBank")}</div></div>
           <div className="card-pad">
             <div className="fgrid">
-              <FormField id="email" label="Email" type="email" placeholder="opțional" register={form.register} errors={errors} />
-              <FormField id="phone" label="Telefon" num placeholder="opțional" register={form.register} errors={errors} />
+              <FormField id="email" label={t("companies.form.fields.email")} type="email" placeholder={t("companies.form.placeholders.optional")} register={form.register} errors={errors} />
+              <FormField id="phone" label={t("companies.form.fields.phone")} num placeholder={t("companies.form.placeholders.optional")} register={form.register} errors={errors} />
               <FormField
                 id="iban"
-                label="IBAN"
+                label={t("companies.form.fields.iban")}
                 span2
                 num
-                placeholder="RO49AAAA1B31007593840000"
+                placeholder={t("companies.form.placeholders.iban")}
                 register={form.register}
                 errors={errors}
               />
-              <FormField id="bankName" label="Bancă" register={form.register} errors={errors} />
+              <FormField id="bankName" label={t("companies.form.fields.bank")} register={form.register} errors={errors} />
             </div>
           </div>
         </div>
 
         {/* Facturare */}
         <div className="scr-card" style={{ marginBottom: 14 }}>
-          <div className="scr-toolbar"><div className="tt">Facturare &amp; regim fiscal</div></div>
+          <div className="scr-toolbar"><div className="tt">{t("companies.form.sections.billing")}</div></div>
           <div className="card-pad">
             <div className="fgrid">
               <FormField
                 id="invoiceSeries"
-                label="Serie facturi"
+                label={t("companies.form.fields.invoiceSeries")}
                 required
                 num
                 uppercase
-                placeholder="FACT"
-                hint="apare pe toate facturile emise (ex. FACT-0001)"
+                placeholder={t("companies.form.placeholders.series")}
+                hint={t("companies.form.seriesHint")}
                 register={form.register}
                 errors={errors}
               />
               <div className="field">
-                <label>Regim fiscal</label>
+                <label>{t("companies.form.fields.taxRegime")}</label>
                 <select className="select" {...form.register("taxRegime")}>
-                  <option value="micro">Microîntreprindere (impozit pe venit 1%)</option>
-                  <option value="profit">Impozit pe profit (16%)</option>
+                  <option value="micro">{t("companies.form.regime.micro")}</option>
+                  <option value="profit">{t("companies.form.regime.profit")}</option>
                 </select>
-                <span className="hint">
-                  plafon micro 2026: 100.000 EUR (OUG 89/2025) — la depășire se trece la impozit pe
-                  profit din trimestrul depășirii
-                </span>
+                <span className="hint">{t("companies.form.regime.hint")}</span>
               </div>
             </div>
           </div>
@@ -350,22 +351,21 @@ export function CompanyNewPage() {
       <div className="banner">
         <Ic name="shield" />
         <span>
-          <b>Conexiunea SPV/ANAF și logo-ul companiei</b> se configurează după salvare, din pagina
-          companiei. Logo: PNG sau SVG, recomandat 400×400 px — apare pe facturile PDF.
+          <b>{t("companies.form.spvNote.bold")}</b> {t("companies.form.spvNote.rest")}
         </span>
       </div>
 
       {create.isError && (
         <div className="banner danger">
           <Ic name="xMark" />
-          <span>{formatError(create.error, "Eroare la crearea companiei.")}</span>
+          <span>{formatError(create.error, t("companies.form.notify.createError"))}</span>
         </div>
       )}
 
       {/* bottom actions (mirror of head-actions, for long-form ergonomics) */}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <button className="pill-btn" onClick={() => void navigate({ to: "/companies" })}>
-          Renunță
+          {t("companies.form.cancel")}
         </button>
         <button
           className="btn-dark"
@@ -375,7 +375,7 @@ export function CompanyNewPage() {
           style={create.isPending ? { opacity: 0.6 } : undefined}
         >
           <Ic name="check" />
-          {create.isPending ? "Se salvează…" : "Salvează compania"}
+          {create.isPending ? t("companies.form.saving") : t("companies.form.saveCompany")}
         </button>
       </div>
     </div>

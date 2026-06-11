@@ -1,0 +1,216 @@
+{
+  "payroll": {
+    "title": "Salarizare",
+    "noCompany": "Selectați o companie activă pentru a gestiona salarizarea.",
+    "months": {
+      "jan": "Ianuarie",
+      "feb": "Februarie",
+      "mar": "Martie",
+      "apr": "Aprilie",
+      "may": "Mai",
+      "jun": "Iunie",
+      "jul": "Iulie",
+      "aug": "August",
+      "sep": "Septembrie",
+      "oct": "Octombrie",
+      "nov": "Noiembrie",
+      "dec": "Decembrie"
+    },
+    "head": {
+      "activeEmployees_one": "{{count}} angajat activ",
+      "activeEmployees_few": "{{count}} angajați activi",
+      "activeEmployees_other": "{{count}} de angajați activi",
+      "grossFund": "fond brut {{amount}} RON"
+    },
+    "actions": {
+      "newEmployee": "Angajat nou",
+      "exportD112": "Export D112 (XML)",
+      "prevYear": "Anul precedent",
+      "nextYear": "Anul următor",
+      "edit": "Editează",
+      "delete": "Șterge"
+    },
+    "banner": {
+      "strong": "D112 — model nou OPANAF 605/2026",
+      "applies": "se aplică pentru lunile de raportare",
+      "from": "≥ iulie 2026",
+      "body": "Clarito emite deocamdată modelul curent (≤ iunie 2026); pentru iulie 2026+ fișierul exportat folosește încă structura veche — validați în DUKIntegrator înainte de depunere."
+    },
+    "tabs": {
+      "employees": "Angajați",
+      "payslip": "Stat de salarii",
+      "medicalLeaves": "Concedii medicale",
+      "offices": "Sedii secundare"
+    },
+    "emp": {
+      "searchPlaceholder": "Caută angajat…",
+      "emptyNone": "Niciun angajat — adăugați angajați pentru a calcula salariile.",
+      "emptySearch": "Niciun angajat pentru căutarea aplicată.",
+      "th": {
+        "name": "Nume",
+        "cnp": "CNP",
+        "gross": "Brut",
+        "deduction": "Deducere"
+      },
+      "chips": {
+        "contractHours": "{{tip}} · {{hours}}h",
+        "pensioner": "pensionar · art. 146(5⁷)",
+        "minBase": "bază minimă CAS/CASS",
+        "inactive": "inactiv",
+        "exc": {
+          "elev_student": "elev_student · art. 146(5⁷)",
+          "ucenic": "ucenic · art. 146(5⁷)",
+          "dizabilitate": "dizabilități · art. 146(5⁷)",
+          "contracte_multiple": "contracte multiple · art. 146(5⁷)"
+        }
+      },
+      "confirmDelete": "Ștergeți angajatul \"{{name}}\"?",
+      "footnoteLabel": "Excepții de la baza minimă part-time — art. 146(5⁷):",
+      "footnoteBold": "elev/student sub 26 de ani, ucenic sub 18, persoane cu dizabilități, pensionari, contracte multiple însumate ≥ norma întreagă"
+    },
+    "stat": {
+      "title": "Stat de salarii — {{period}}",
+      "run": "Rulează stat salarii",
+      "running": "Calculez…",
+      "exportXlsx": "Export XLSX",
+      "print": "Printează",
+      "calculating": "Se calculează statul de salarii…",
+      "emptyPrompt": "Apăsați „Rulează stat salarii” pentru a calcula contribuțiile lunii și a posta nota contabilă.",
+      "noActive": "Niciun angajat activ — nimic de calculat.",
+      "th": {
+        "employee": "Angajat",
+        "cas": "CAS 25%",
+        "cass": "CASS 10%",
+        "tax": "Impozit 10%",
+        "net": "Net",
+        "cam": "CAM 2,25%"
+      },
+      "total": "Total",
+      "footnote": "* CAS și CASS calculate la baza salariului minim brut pentru contractele part-time fără excepție — diferența este suportată de angajator conform art. 146(5⁶) Cod fiscal.",
+      "postedNote": "Nota contabilă agregată (641/421, 4315, 4316, 444, 646/436) a fost postată în jurnal la"
+    },
+    "cm": {
+      "title": "Concedii medicale — {{period}}",
+      "add": "Adaugă certificat",
+      "empty": "Niciun concediu medical înregistrat pentru {{period}}.",
+      "th": {
+        "certificate": "Certificat",
+        "code": "Cod indemnizație",
+        "period": "Perioada",
+        "daysEmployer": "Zile angajator",
+        "daysFnuass": "Zile FNUASS",
+        "amountEmployer": "Suma angajator",
+        "amountFnuass": "Suma FNUASS"
+      },
+      "certLabel": "CM seria {{serie}} nr. {{numar}}",
+      "codes": {
+        "c01": "boală obișnuită",
+        "c06": "sarcină și lăuzie",
+        "c09": "îngrijire copil",
+        "c15": "risc maternal"
+      },
+      "confirmDelete": "Ștergeți acest concediu medical?",
+      "footnote1": "Indemnizațiile FNUASS se recuperează prin",
+      "footnoteBold": "cererea de restituire",
+      "footnote2": "depusă la CAS după D112 · cod 01: primele 5 zile la angajator, restul din FNUASS · sursa blocului D112 asiguratD",
+      "cod01Note": "cod 01: primele 5 zile la angajator, restul din FNUASS"
+    },
+    "sedii": {
+      "title": "Sedii secundare înregistrate fiscal",
+      "add": "Adaugă sediu",
+      "th": {
+        "office": "Sediu",
+        "cif": "CIF sediu",
+        "assigned": "Angajați repartizați"
+      },
+      "main": "Sediu principal",
+      "defaultName": "Punct de lucru",
+      "confirmDelete": "Ștergeți sediul secundar {{cif}}?",
+      "footnote1": "Sediile secundare cu",
+      "footnoteBold": "minimum 5 salariați",
+      "footnote2": "au obligația înregistrării fiscale (CIF propriu) și a declarării impozitului pe salarii separat în D112 — secțiunea F."
+    },
+    "empModal": {
+      "editTitle": "Editează: {{name}}",
+      "subtitle": "Datele alimentează statul de salarii și D112",
+      "fullName": "Nume complet",
+      "namePlaceholder": "Ion Popescu",
+      "cnp": "CNP",
+      "gross": "Salariu brut",
+      "deduction": "Deducere personală",
+      "contractType": "Tip contract",
+      "contractFull": "N — normă întreagă",
+      "contractPart": "P{{n}} — part-time {{n}}h",
+      "hoursPerDay": "Ore normă / zi",
+      "pensioner": "Pensionar (D112 A_2)",
+      "exception": "Excepție bază minimă — art. 146(5⁷)",
+      "excNone": "— fără excepție —",
+      "excElevStudent": "Elev / student până la 26 de ani (lit. a)",
+      "excUcenic": "Ucenic până la 18 ani (lit. b)",
+      "excDizabilitate": "Persoană cu dizabilități / < 8h/zi (lit. c)",
+      "excContracteMultiple": "Contracte multiple ≥ salariul minim (lit. e)",
+      "office": "Sediu (CIF) — D112 angajatorF2",
+      "nameRequired": "Numele e obligatoriu.",
+      "save": "Salvează angajat"
+    },
+    "cmModal": {
+      "title": "Adaugă certificat de concediu medical",
+      "subtitle": "{{month}} · OUG 158/2005 — sursa blocului D112 asiguratD",
+      "selectEmployee": "— selectați angajatul —",
+      "serie": "Serie certificat",
+      "numar": "Număr certificat",
+      "code": "Cod indemnizație (D_9)",
+      "dateStart": "Data început",
+      "dateEnd": "Data sfârșit",
+      "amountEmployer": "Indemnizație angajator",
+      "amountFnuass": "Indemnizație FNUASS",
+      "selectRequired": "Selectați angajatul.",
+      "save": "Salvează certificat"
+    },
+    "sediuModal": {
+      "title": "Adaugă sediu secundar",
+      "subtitle": "CIF propriu (doar cifre, unic per companie) — D112 angajatorF2 / secțiunea F",
+      "cif": "CIF sediu",
+      "name": "Denumire (opțional)",
+      "namePlaceholder": "Punct de lucru Cluj-Napoca",
+      "save": "Salvează sediu"
+    },
+    "d112": {
+      "subNew": "se aplică modelul nou OPANAF 605/2026 — exportul folosește încă structura veche (verificați în DUKIntegrator)",
+      "subOld": "modelul curent; modelul nou OPANAF 605/2026 se aplică de la luna de raportare iulie 2026",
+      "caen": "Cod CAEN",
+      "caenHint": "4 cifre — activitatea principală a angajatorului",
+      "reportMonth": "Luna de raportare",
+      "foot": "Include secțiunea F (sedii secundare) și asiguratD (concedii medicale)",
+      "generate": "Generează XML",
+      "exporting": "Se exportă…",
+      "invalidCaen": "Cod CAEN invalid — 4 cifre (ex. 6201).",
+      "saveTitle": "Salvează D112 (XML)",
+      "insured_one": "{{count}} asigurat",
+      "insured_few": "{{count}} asigurați",
+      "insured_other": "{{count}} de asigurați"
+    },
+    "notify": {
+      "soon": "În curând.",
+      "runPosted": "Stat de salarii postat — net total {{net}} lei.",
+      "runError": "Nu s-a putut rula statul de salarii.",
+      "deleteError": "Eroare la ștergere.",
+      "deleteSediuError": "Nu s-a putut șterge sediul secundar.",
+      "deleteConcediuError": "Nu s-a putut șterge concediul medical.",
+      "saveError": "Eroare la salvare.",
+      "addConcediuError": "Nu s-a putut adăuga concediul medical.",
+      "addSediuError": "Nu s-a putut adăuga sediul secundar.",
+      "exportError": "Nu s-a putut exporta D112.",
+      "newModelWarn": "Pentru {{month}} {{year}} se aplică NOUL model D112 (OPANAF 605/2026), neimplementat încă — fișierul exportat folosește structura veche (≤ iunie 2026) și poate fi respins de DUKIntegrator. Verificați înainte de depunere.",
+      "exported": "D112 (XML) exportat — antet + obligații angajator + {{insured}}. Importați-l în aplicația D112 (PDF inteligent), validați (DUKIntegrator) și completați declarantul + blocurile speciale înainte de depunere."
+    },
+    "common": {
+      "close": "Închide",
+      "cancel": "Renunță",
+      "saving": "Se salvează…",
+      "yes": "Da",
+      "no": "Nu",
+      "zeroAmount": "0,00"
+    }
+  }
+}

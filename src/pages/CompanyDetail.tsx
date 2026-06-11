@@ -15,6 +15,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useNavigate } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { queryKeys } from "@/lib/queries";
@@ -34,6 +35,7 @@ const fmtRoDateU = (unixSec: number) => {
 const OK_CIRCLE_PATH = '<path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>';
 
 export function CompanyDetailPage() {
+  const { t } = useTranslation();
   const { id } = useParams({ from: "/companies/$id" });
   const navigate = useNavigate();
 
@@ -45,9 +47,9 @@ export function CompanyDetailPage() {
   if (isLoading) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Companie</h1></div></div>
+        <div className="page-head"><div><h1>{t("companies.detail.loadingTitle")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
-          Se încarcă datele companiei…
+          {t("companies.loadingCompany")}
         </div>
       </div>
     );
@@ -56,13 +58,13 @@ export function CompanyDetailPage() {
   if (error || !data) {
     return (
       <div className="main-inner wide">
-        <div className="page-head"><div><h1>Companie inexistentă</h1></div></div>
+        <div className="page-head"><div><h1>{t("companies.notFound.title")}</h1></div></div>
         <div className="banner danger">
           <Ic name="xMark" />
           <span>
-            Compania cu ID-ul <span className="num">{id}</span> nu a fost găsită.{" "}
+            {t("companies.notFound.pre")} <span className="num">{id}</span> {t("companies.notFound.post")}{" "}
             <a className="link" style={{ cursor: "pointer" }} onClick={() => void navigate({ to: "/companies" })}>
-              Înapoi la listă
+              {t("companies.notFound.backToList")}
             </a>
           </span>
         </div>
@@ -76,7 +78,7 @@ export function CompanyDetailPage() {
       <div className="page-head">
         <div>
           <div className="crumb">
-            <a onClick={() => void navigate({ to: "/companies" })} style={{ cursor: "pointer" }}>Companii</a>
+            <a onClick={() => void navigate({ to: "/companies" })} style={{ cursor: "pointer" }}>{t("companies.title")}</a>
             <span className="sep">›</span>
             <span>{data.legalName}</span>
           </div>
@@ -85,29 +87,29 @@ export function CompanyDetailPage() {
             {data.spvEnabled ? (
               <span className="chip paid">
                 <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: OK_CIRCLE_PATH }} />
-                SPV activ
+                {t("companies.detail.spvActive")}
               </span>
             ) : (
-              <span className="chip sent"><Ic name="dot" cls="sic" />SPV inactiv</span>
+              <span className="chip sent"><Ic name="dot" cls="sic" />{t("companies.detail.spvInactive")}</span>
             )}
             <span className="chip sent">
-              {data.taxRegime === "profit" ? "Profit · 16%" : "Micro · 1%"}
+              {data.taxRegime === "profit" ? t("companies.regime.profit") : t("companies.regime.micro")}
             </span>
           </div>
           <p className="sub">
-            <span className="num">{data.cui}</span> · {data.city}, {data.county} · serie{" "}
+            <span className="num">{data.cui}</span> · {data.city}, {data.county} · {t("companies.form.subSeries")}{" "}
             <span className="num">{data.invoiceSeries}-{String(data.lastInvoiceNumber).padStart(4, "0")}</span>
           </p>
         </div>
         <div className="head-actions">
           <button className="pill-btn" onClick={() => void navigate({ to: "/companies" })}>
-            Înapoi
+            {t("companies.detail.back")}
           </button>
           <button
             className="btn-dark"
             onClick={() => void navigate({ to: "/companies/$id/edit", params: { id: data.id } })}
           >
-            <Ic name="pen" />Editează
+            <Ic name="pen" />{t("companies.actions.edit")}
           </button>
         </div>
       </div>
@@ -117,38 +119,38 @@ export function CompanyDetailPage() {
           {/* Identificare */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
-              <div className="tt">Identificare</div>
+              <div className="tt">{t("companies.form.sections.identification")}</div>
               <div className="spacer" />
               <Ic name="building" cls="ic" />
             </div>
             <div className="card-pad">
               <dl className="kv">
-                <dt>CUI</dt><dd className="num">{data.cui}</dd>
-                <dt>Denumire legală</dt><dd>{data.legalName}</dd>
+                <dt>{t("companies.form.fields.cui")}</dt><dd className="num">{data.cui}</dd>
+                <dt>{t("companies.form.fields.legalName")}</dt><dd>{data.legalName}</dd>
                 {data.tradeName && (
-                  <><dt>Denumire comercială</dt><dd>{data.tradeName}</dd></>
+                  <><dt>{t("companies.form.fields.tradeName")}</dt><dd>{data.tradeName}</dd></>
                 )}
-                <dt>Nr. Reg. Comerțului</dt>
+                <dt>{t("companies.form.fields.regCom")}</dt>
                 <dd>{data.registryNumber ? <span className="num">{data.registryNumber}</span> : "—"}</dd>
-                <dt>Plătitor TVA</dt>
-                <dd>{data.vatPayer ? <span className="pos">✓ Da</span> : "Nu"}</dd>
-                <dt>Regim fiscal</dt>
-                <dd>{data.taxRegime === "profit" ? "Impozit pe profit (16%)" : "Microîntreprindere (impozit pe venit 1%)"}</dd>
+                <dt>{t("companies.form.fields.vatPayer")}</dt>
+                <dd>{data.vatPayer ? <span className="pos">✓ {t("companies.form.yes")}</span> : t("companies.form.no")}</dd>
+                <dt>{t("companies.form.fields.taxRegime")}</dt>
+                <dd>{data.taxRegime === "profit" ? t("companies.form.regime.profit") : t("companies.form.regime.micro")}</dd>
               </dl>
             </div>
           </div>
 
           {/* Adresă */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
-            <div className="scr-toolbar"><div className="tt">Adresă</div></div>
+            <div className="scr-toolbar"><div className="tt">{t("companies.form.sections.address")}</div></div>
             <div className="card-pad">
               <dl className="kv">
-                <dt>Adresă</dt><dd>{data.address}</dd>
-                <dt>Localitate</dt><dd>{data.city}</dd>
-                <dt>Județ</dt><dd>{data.county}</dd>
-                <dt>Cod poștal</dt>
+                <dt>{t("companies.form.fields.address")}</dt><dd>{data.address}</dd>
+                <dt>{t("companies.form.fields.city")}</dt><dd>{data.city}</dd>
+                <dt>{t("companies.form.fields.county")}</dt><dd>{data.county}</dd>
+                <dt>{t("companies.form.fields.postalCode")}</dt>
                 <dd>{data.postalCode ? <span className="num">{data.postalCode}</span> : "—"}</dd>
-                <dt>Țară</dt><dd>{data.country}</dd>
+                <dt>{t("companies.detail.kv.country")}</dt><dd>{data.country}</dd>
               </dl>
             </div>
           </div>
@@ -156,18 +158,18 @@ export function CompanyDetailPage() {
           {/* Contact și plată */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
-              <div className="tt">Contact și plată</div>
+              <div className="tt">{t("companies.detail.sections.contactPay")}</div>
               <div className="spacer" />
               <Ic name="mail" cls="ic" />
             </div>
             <div className="card-pad">
               <dl className="kv">
-                <dt>Email</dt><dd>{data.email ?? "—"}</dd>
-                <dt>Telefon</dt>
+                <dt>{t("companies.form.fields.email")}</dt><dd>{data.email ?? "—"}</dd>
+                <dt>{t("companies.form.fields.phone")}</dt>
                 <dd>{data.phone ? <span className="num">{data.phone}</span> : "—"}</dd>
-                <dt>IBAN</dt>
+                <dt>{t("companies.form.fields.iban")}</dt>
                 <dd>{data.iban ? <span className="num">{data.iban}</span> : "—"}</dd>
-                <dt>Bancă</dt><dd>{data.bankName ?? "—"}</dd>
+                <dt>{t("companies.form.fields.bank")}</dt><dd>{data.bankName ?? "—"}</dd>
               </dl>
             </div>
           </div>
@@ -177,14 +179,14 @@ export function CompanyDetailPage() {
           {/* Facturare */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
-              <div className="tt">Facturare</div>
+              <div className="tt">{t("companies.detail.sections.billing")}</div>
               <div className="spacer" />
               <Ic name="docText" cls="ic" />
             </div>
             <div className="card-pad">
               <dl className="kv" style={{ gridTemplateColumns: "130px 1fr", fontSize: 12.5 }}>
-                <dt>Serie facturi</dt><dd className="num">{data.invoiceSeries}</dd>
-                <dt>Ultimul număr emis</dt>
+                <dt>{t("companies.form.fields.invoiceSeries")}</dt><dd className="num">{data.invoiceSeries}</dd>
+                <dt>{t("companies.detail.kv.lastNumber")}</dt>
                 <dd className="num">{String(data.lastInvoiceNumber).padStart(4, "0")}</dd>
               </dl>
             </div>
@@ -204,6 +206,7 @@ export function CompanyDetailPage() {
 // ─── CompanySpvSection — ANAF SPV status + connect (design card) ─────────────
 
 function CompanySpvSection({ company }: { company: Company }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
 
   const connectSpv = useMutation({
@@ -216,18 +219,18 @@ function CompanySpvSection({ company }: { company: Company }) {
         void queryClient.invalidateQueries({
           queryKey: queryKeys.certificates.list(company.id),
         });
-        notify.success("SPV conectat cu succes.");
+        notify.success(t("companies.detail.spv.notifyConnected"));
       } else {
-        notify.error("Autorizarea SPV a fost anulată sau a eșuat. Reîncercați.");
+        notify.error(t("companies.detail.spv.notifyCancelled"));
       }
     },
-    onError: (e) => notify.error(formatError(e, "Conectarea la SPV a eșuat.")),
+    onError: (e) => notify.error(formatError(e, t("companies.detail.spv.notifyFailed"))),
   });
 
   return (
     <div className="scr-card" style={{ marginBottom: 14 }}>
       <div className="scr-toolbar">
-        <div className="tt">Sistem ANAF SPV</div>
+        <div className="tt">{t("companies.detail.spv.title")}</div>
         <div className="spacer" />
         {!company.spvEnabled && (
           <button
@@ -236,7 +239,7 @@ function CompanySpvSection({ company }: { company: Company }) {
             onClick={() => connectSpv.mutate()}
           >
             <Ic name="shield" />
-            {connectSpv.isPending ? "Se autorizează…" : "Conectează SPV"}
+            {connectSpv.isPending ? t("companies.detail.spv.authorizing") : t("companies.detail.spv.connect")}
           </button>
         )}
       </div>
@@ -250,9 +253,9 @@ function CompanySpvSection({ company }: { company: Company }) {
               dangerouslySetInnerHTML={{ __html: OK_CIRCLE_PATH }}
             />
             <div>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>SPV conectat</div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{t("companies.detail.spv.connectedTitle")}</div>
               <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 2 }}>
-                Această companie poate trimite facturi electronice direct către ANAF.
+                {t("companies.detail.spv.connectedDesc")}
               </div>
             </div>
           </div>
@@ -260,10 +263,9 @@ function CompanySpvSection({ company }: { company: Company }) {
           <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
             <Ic name="xMark" cls="ic" />
             <div>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>SPV neconectat</div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{t("companies.detail.spv.notConnectedTitle")}</div>
               <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 2 }}>
-                Pentru a trimite facturi electronice, conectați certificatul digital pentru această
-                companie.
+                {t("companies.detail.spv.notConnectedDesc")}
               </div>
             </div>
           </div>
@@ -276,6 +278,7 @@ function CompanySpvSection({ company }: { company: Company }) {
 // ─── CertificatesSection — certificate SPV/OAuth (design .scr-table) ─────────
 
 function CertificatesSection({ companyId }: { companyId: string }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
 
   const { data: certs = [], isLoading } = useQuery({
@@ -289,10 +292,10 @@ function CertificatesSection({ companyId }: { companyId: string }) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.certificates.list(companyId),
       });
-      notify.success("Certificat reautorizat.");
+      notify.success(t("companies.detail.certs.notifyRefreshed"));
     },
     onError: (e) =>
-      notify.error(formatError(e, "Reautorizarea certificatului a eșuat.")),
+      notify.error(formatError(e, t("companies.detail.certs.notifyRefreshError"))),
   });
 
   const revokeCert = useMutation({
@@ -301,16 +304,16 @@ function CertificatesSection({ companyId }: { companyId: string }) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.certificates.list(companyId),
       });
-      notify.success("Certificat revocat.");
+      notify.success(t("companies.detail.certs.notifyRevoked"));
     },
     onError: (e) =>
-      notify.error(formatError(e, "Revocarea certificatului a eșuat.")),
+      notify.error(formatError(e, t("companies.detail.certs.notifyRevokeError"))),
   });
 
   return (
     <div className="scr-card">
       <div className="scr-toolbar">
-        <div className="tt">Certificate SPV / ANAF OAuth</div>
+        <div className="tt">{t("companies.detail.certs.title")}</div>
         <div className="spacer" />
         <button
           className="pill-btn"
@@ -318,24 +321,24 @@ function CertificatesSection({ companyId }: { companyId: string }) {
           onClick={() => refreshCert.mutate()}
         >
           <Ic name="sync" />
-          {refreshCert.isPending ? "Autorizare…" : "Reautorizare SPV"}
+          {refreshCert.isPending ? t("companies.detail.certs.authorizing") : t("companies.detail.certs.reauth")}
         </button>
       </div>
       {isLoading ? (
         <div style={{ padding: "22px 14px", textAlign: "center", fontSize: 12.5, color: "var(--text-2)" }}>
-          Se încarcă…
+          {t("companies.loading")}
         </div>
       ) : certs.length === 0 ? (
         <div style={{ padding: "22px 14px", textAlign: "center", fontSize: 12.5, color: "var(--text-2)" }}>
-          Niciun certificat activ.
+          {t("companies.detail.certs.empty")}
         </div>
       ) : (
         <table className="scr-table">
           <thead>
             <tr>
-              <th>Emis</th>
-              <th>Expiră</th>
-              <th>Status</th>
+              <th>{t("companies.detail.certs.issued")}</th>
+              <th>{t("companies.detail.certs.expires")}</th>
+              <th>{t("companies.detail.certs.status")}</th>
               <th className="r" style={{ width: 90 }}></th>
             </tr>
           </thead>
@@ -346,9 +349,9 @@ function CertificatesSection({ companyId }: { companyId: string }) {
                 <td className="num">{fmtRoDateU(cert.expiresAt)}</td>
                 <td>
                   {cert.isActive ? (
-                    <span className="chip paid"><Ic name="check" cls="sic" />Activ</span>
+                    <span className="chip paid"><Ic name="check" cls="sic" />{t("companies.detail.certs.active")}</span>
                   ) : (
-                    <span className="chip sent"><Ic name="dot" cls="sic" />Inactiv</span>
+                    <span className="chip sent"><Ic name="dot" cls="sic" />{t("companies.detail.certs.inactive")}</span>
                   )}
                 </td>
                 <td className="r">
@@ -358,7 +361,7 @@ function CertificatesSection({ companyId }: { companyId: string }) {
                     disabled={revokeCert.isPending}
                     onClick={() => revokeCert.mutate(cert.id)}
                   >
-                    Revocă
+                    {t("companies.detail.certs.revoke")}
                   </button>
                 </td>
               </tr>

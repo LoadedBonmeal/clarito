@@ -1,0 +1,367 @@
+{
+  "declarations": {
+    "title": "Declarations",
+    "subtitle": "Reporting period {{period}} · D300 is computed here; detailed computations (e-TVA, D390, D394, D100, D101, D406) are also in Reports",
+    "noCompany": "Select an active company to view the declarations.",
+    "months": {
+      "jan": "January",
+      "feb": "February",
+      "mar": "March",
+      "apr": "April",
+      "may": "May",
+      "jun": "June",
+      "jul": "July",
+      "aug": "August",
+      "sep": "September",
+      "oct": "October",
+      "nov": "November",
+      "dec": "December"
+    },
+    "periodPop": {
+      "year": "Year",
+      "month": "Month"
+    },
+    "head": {
+      "deadlinesCalendar": "Deadline calendar",
+      "recalcAll": "Recalculate all",
+      "recalcing": "Recalculating…"
+    },
+    "common": {
+      "loading": "Loading…",
+      "computing": "Computing…",
+      "calc": "Compute",
+      "calcing": "Computing…",
+      "exporting": "Exporting…",
+      "exportXml": "Export XML",
+      "extractXml": "Extract XML",
+      "exportAnyway": "Export anyway (ignore DUK)",
+      "comingSoon": "Coming soon.",
+      "period": "Period",
+      "due": "Due",
+      "baseWord": "base",
+      "vat": "VAT"
+    },
+    "notify": {
+      "selectCompany": "Select an active company.",
+      "noData": "There is no data for the selected period.",
+      "computeD300Failed": "Could not compute D300.",
+      "noExportData": "There is no data to export. Compute D300 first.",
+      "d300Saved": "D300 saved: {{path}}",
+      "exportD300Failed": "Could not export D300.",
+      "dukErrors": "DUKIntegrator found errors. Fix them or export anyway.",
+      "d300OfficialSavedDuk": "Official D300 saved (DUK: valid): {{path}}",
+      "d300OfficialSavedNoDuk": "Official D300 saved: {{path}} (DUK validation unavailable locally)",
+      "exportD300OfficialFailed": "Could not export the official D300.",
+      "intrastatUpdated": "Intrastat thresholds updated."
+    },
+    "dialogs": {
+      "saveD300": "Save D300 XML",
+      "saveD300Official": "Save official ANAF D300 (XML)",
+      "saveD390": "Save D390 XML",
+      "saveD394Extract": "Save D394 XML (extract)",
+      "saveD394Official": "Save official ANAF D394 (XML)"
+    },
+    "vatCat": {
+      "s": "Standard",
+      "z": "Zero-rated",
+      "e": "Exempt",
+      "ae": "Reverse charge",
+      "k": "Intra-Community",
+      "g": "Government",
+      "o": "Out of VAT scope"
+    },
+    "chips": {
+      "toFile": "To file",
+      "notComputed": "Not computed",
+      "dukErrors": "DUK errors",
+      "estimated": "Estimated",
+      "year": "Year {{year}}",
+      "toReconcile": "To reconcile",
+      "overThreshold": "Over threshold",
+      "nearThreshold": "Near threshold",
+      "underThreshold": "Under threshold"
+    },
+    "kv": {
+      "calcExport": "Compute and export",
+      "inReports": "in Reports → {{view}}",
+      "preflight": "Preflight check",
+      "noIssues": "no issues",
+      "errors_one": "{{count}} error",
+      "errors_other": "{{count}} errors",
+      "warnings_one": "{{count}} warning",
+      "warnings_other": "{{count}} warnings",
+      "vatPay": "VAT payable",
+      "vatRecover": "VAT recoverable",
+      "quarterPeriod": "Q{{q}} {{year}}"
+    },
+    "cards": {
+      "d300": {
+        "title": "VAT return",
+        "desc1": "Rows are filled in automatically from the journals;",
+        "descBold": "old-rate adjustments (19%/9%/5%)",
+        "desc2": "are pre-filled on R16/R30 with manual override. The official export (schema v12) requires the declarant's details, CAEN, the bank, and goes through DUKIntegrator validation.",
+        "extractTitle": "Export a D300 extract as an XML file (working document, not the ANAF schema)",
+        "officialTitle": "Export D300 according to the official ANAF schema v12",
+        "exportOfficial": "Official XML export"
+      },
+      "d390": {
+        "title": "VIES recapitulative statement",
+        "descIntro": "Intra-Community operations by type:",
+        "deliveries": "supplies",
+        "triangular": "triangular",
+        "acquisitions": "acquisitions",
+        "services": "services supplied",
+        "servicesReceived": "services received",
+        "adjustments": "adjustments",
+        "descOutro": "Partners without a valid VIES code are flagged at computation."
+      },
+      "d394": {
+        "title": "Domestic supplies and acquisitions",
+        "desc": "Informative declaration per partner, generated from the issued and received invoices with a valid RO CIF. Partners are aggregated automatically at computation."
+      },
+      "saft": {
+        "title": "SAF-T — the standard audit file",
+        "desc": "Full monthly reporting: master files, source documents, GL. Generation takes a few minutes; validation is done with the DUK SAF-T validator.",
+        "genValidate": "Generation and validation",
+        "generate": "Generate",
+        "validate": "Validate"
+      },
+      "d100": {
+        "title": "Payment obligations — tax",
+        "desc1": "Micro: income tax at",
+        "pos5": "position 5",
+        "desc2": "· Profit: anticipated payments at",
+        "pos2": "position 2",
+        "desc3": ". For Q4 on profit tax, the annual adjustment is done through D101."
+      },
+      "d101": {
+        "title": "Profit tax — annual",
+        "desc1": "The carried-forward fiscal loss is recovered within the limit of",
+        "desc2": "of the taxable profit. The fiscal credit for sponsorships applies within the legal limit.",
+        "sheet": "Computation sheet",
+        "viewReceipt": "View receipt",
+        "viewXml": "View XML"
+      },
+      "etva": {
+        "title": "Pre-filled return reconciliation",
+        "desc1": "ANAF sends the pre-filled return P300ETVA (downloaded from SPV); differences of",
+        "descBold": "≥ 5,000 lei and ≥ 20%",
+        "desc2": "are significant and are justified through a “Justification note”. With cash-accounting VAT, divergences are expected.",
+        "p300": "Pre-filled P300",
+        "p300Download": "is downloaded from SPV",
+        "recon": "Reconciliation",
+        "viewRecon": "View reconciliation",
+        "sendJustification": "Send justification"
+      },
+      "intrastat": {
+        "title": "Intra-EU trade statistics",
+        "desc": "An obligation only when the annual thresholds are exceeded (arrivals 1,000,000 lei / dispatches 1,000,000 lei). Thresholds are monitored automatically from invoices.",
+        "arrivals": "Arrivals {{year}}",
+        "dispatches": "Dispatches {{year}}",
+        "threshold": "Threshold",
+        "checking": "Checking…",
+        "check": "Check thresholds",
+        "exportSoon": "Export — coming soon",
+        "exportNa": "Export — not applicable"
+      }
+    },
+    "detail": {
+      "title": "D300 detail — {{period}}",
+      "table": {
+        "rate": "Rate",
+        "cat": "Cat.",
+        "base": "Base",
+        "vat": "VAT"
+      },
+      "collected": {
+        "title": "Collected VAT (sales)",
+        "empty": "There are no VALIDATED invoices in the selected period.",
+        "cui": "CUI:",
+        "invoices": "Invoices:",
+        "total": "Total collected: base"
+      },
+      "deductible": {
+        "title": "Deductible VAT (purchases)",
+        "desc": "Deductible VAT is computed from the processed received invoices. Check that all of the month's invoices have been downloaded and parsed from SPV for a correct return.",
+        "total": "Total deductible: base",
+        "computeFirst": "Compute D300 to see the data.",
+        "noneParsed": "No received invoice parsed in the period.",
+        "manualLabel": "Manual deductible VAT adjustment",
+        "manualHint": "· for purchases without a parsed SPV invoice",
+        "resetTitle": "Reset to the automatically computed value",
+        "reset": "Reset to computed value"
+      },
+      "unparsedVat_one": "{{count}} received invoice does not yet have a VAT breakdown",
+      "unparsedVat_other": "{{count}} received invoices do not yet have a VAT breakdown",
+      "unparsedRest": "— the automatically computed amount may be partial. Enter the correct value manually below or use “Recompute VAT from XML” in the Purchases journal.",
+      "reg": {
+        "title": "Old-rate adjustments (19%/9%/5%)",
+        "desc": "Operations at old rates are reported automatically in the adjustment rows (R16 — collected tax; R30 — deducted tax). Check and adjust if necessary.",
+        "r16": "R16 — Collected tax adjustments",
+        "r30": "R30 — Deducted tax adjustments",
+        "base": "Taxable base (lei)",
+        "collectedVat": "Collected VAT (lei)",
+        "deductedVat": "Deducted VAT (lei)",
+        "resetTitle": "Reset to the automatically computed values",
+        "reset": "Reset to computed"
+      },
+      "summary": {
+        "collected": "Collected",
+        "deductible": "Deductible"
+      }
+    },
+    "d390": {
+      "title": "D390 — Recapitulative statement (VIES) intra-EU",
+      "exportTitle": "Export D390 XML (declaratie390 v3)",
+      "reportLabel": "the D390 report",
+      "empty": "No intra-EU operation (vat_category «K») in the selected period.",
+      "types": {
+        "l": "Supplies of goods (L)",
+        "t": "Triangular (T)",
+        "a": "Acquisitions of goods (A)",
+        "p": "Services supplied (P)",
+        "s": "Services acquired (S)",
+        "r": "Farmers' scheme (R)"
+      },
+      "dropped_one": "intra-EU operation was ignored",
+      "dropped_other": "intra-EU operations were ignored",
+      "droppedRest": "— partner without a valid EU VAT code (missing code / non-EU prefix) or negative net base (credit note across another period — the «R» adjustment is declared manually; the T/triangular and R types are not yet generated automatically). Fill in the partner's CUI or declare the adjustment manually to avoid under-reporting in VIES.",
+      "headers": {
+        "type": "Type",
+        "country": "Country",
+        "code": "Operator code (without prefix)",
+        "name": "Name",
+        "base": "Base (lei)"
+      },
+      "totalFoot": "TOTAL ({{count}} operators): base",
+      "notify": {
+        "noOps": "There are no intra-EU operations in the selected period.",
+        "saved": "D390 saved: {{path}}",
+        "exportFailed": "Could not export D390."
+      }
+    },
+    "d394": {
+      "title": "D394 — Informative declaration of supplies / acquisitions per partner",
+      "extractTitle": "Export D394 extract (working document)",
+      "officialTitle": "Export D394 according to the official ANAF schema v5",
+      "exportOfficial": "Official ANAF export",
+      "reportLabel": "the D394 report",
+      "emptySales": "No validated supply in the selected period.",
+      "purchasesTitle": "D394 — Acquisitions per supplier",
+      "unparsedRest1": "— the supplier list is partial. Use",
+      "unparsedAction": "«Recompute VAT from XML»",
+      "unparsedRest2": "in the Purchases journal to complete the data.",
+      "emptyPurchases": "No received invoice in the selected period.",
+      "emptyUnparsed": "No received invoice with a parsed VAT breakdown. Use «Recompute VAT from XML» in the Purchases journal.",
+      "headers": {
+        "partnerCui": "Partner CUI",
+        "supplierCui": "Supplier CUI",
+        "name": "Name",
+        "type": "Type",
+        "invoiceCount": "No. of invoices",
+        "base": "Taxable base",
+        "vat": "VAT"
+      },
+      "total": "TOTAL:",
+      "totalPurchases": "TOTAL ACQUISITIONS (parsed):",
+      "invoicesWord": "invoices",
+      "notify": {
+        "extractSaved": "D394 extract saved: {{path}}",
+        "exportFailed": "Could not export D394.",
+        "officialSavedDuk": "Official D394 saved (DUK: valid): {{path}}",
+        "officialSavedNoDuk": "Official D394 saved: {{path}} (DUK validation unavailable locally)",
+        "exportOfficialFailed": "Could not export the official D394."
+      }
+    },
+    "d100": {
+      "title": "D100 — Payment obligations (quarterly)",
+      "banner": "The quarterly row for the selected period (Q{{q}} {{year}}): micro → position 5 (1% × revenue), profit → position 2 (16% × result). Due date: the 25th of the month following the quarter (profit Q4 is adjusted through D101). Filing is done manually through the ANAF smart PDF + SPV. The micro regime (1%) assumes continuous fulfilment of the legal conditions (100,000 EUR threshold from 2026, employee, revenue structure, shareholders) — the app does not check them all; confirm eligibility.",
+      "priorLabel": "Previous anticipated payments (lei)",
+      "calc": "Compute D100",
+      "computeFailed": "Could not compute D100.",
+      "headers": {
+        "code": "Obligation code",
+        "name": "Name",
+        "base": "Base",
+        "rate": "Rate",
+        "owed": "Owed",
+        "toPay": "Payable",
+        "deadline": "Due date"
+      }
+    },
+    "d101": {
+      "title": "D101 — Profit tax (computation sheet)",
+      "banner1": "Only for companies paying",
+      "bannerBold": "profit tax",
+      "banner2": "(not micro-enterprises). The gross result and the turnover are taken from the period's profit and loss statement; enter the fiscal adjustments. Recovery of losses from previous years is capped at 70% of the fiscal profit (OUG 115/2023). Filing is done manually through the ANAF smart PDF + SPV (deadline 25 June of the following year for fiscal years 2021-2025, afterwards 25 March). The estimate does not include all possible adjustments.",
+      "calc": "Compute D101",
+      "computeFailed": "Could not compute D101.",
+      "fields": {
+        "nonDeductibleExpenses": "Non-deductible expenses (protocol >2%, fines, 50% car…)",
+        "nonTaxableRevenue": "Non-taxable revenue (dividends received, provision reversals…)",
+        "fiscalDeductions": "Fiscal deductions (fiscal depreciation, legal reserve…)",
+        "priorLoss": "Fiscal loss to recover from previous years",
+        "sponsorship": "Sponsorship made (capped credit)",
+        "anticipatedPayments": "Anticipated payments / tax declared via D100"
+      },
+      "rows": {
+        "accountingResult": "Gross accounting result (from P&L)",
+        "nonTaxableRevenue": "− Non-taxable revenue",
+        "fiscalDeductions": "− Fiscal deductions",
+        "nonDeductibleExpenses": "+ Non-deductible expenses",
+        "fiscalResult": "= Fiscal result",
+        "priorLoss": "Available carried-forward loss",
+        "lossUsed": "− Loss recovered (max 70%)",
+        "taxableProfit": "= Taxable profit",
+        "tax16": "Tax 16%",
+        "sponsorshipCap": "Sponsorship cap (0.75% turnover / 20% tax)",
+        "sponsorshipCredit": "− Sponsorship credit",
+        "taxAfterCredits": "= Tax after credits",
+        "anticipatedPayments": "− Anticipated payments"
+      },
+      "taxDue": "Tax payable: {{amount}} lei",
+      "recoverable": "Recoverable: {{amount}} lei",
+      "zeroBalance": "Zero balance",
+      "lossRemaining": "Loss remaining to carry forward:"
+    },
+    "etva": {
+      "title": "RO e-TVA — pre-filled return reconciliation (internal check)",
+      "banner1": "The RO e-TVA conformance notification has been",
+      "bannerBold1": "abolished",
+      "banner2": "(OUG 89/2025 and OUG 13/2026, in force 9 Mar 2026). The pre-filled return (P300ETVA) remains",
+      "bannerBold2": "informative",
+      "banner3": "and is available in SPV until the 5th of the month following the D300 deadline. This check compares the app-computed D300 with the values you import from the pre-filled return,",
+      "bannerBold3": "before",
+      "banner4": "filing your own D300 (the only one with legal value). Automatic download from SPV is not available locally.",
+      "collectedLabel": "Pre-filled — collected VAT (lei)",
+      "deductibleLabel": "Pre-filled — deductible VAT (lei)",
+      "fetchTitle": "Download the pre-filled return (P300ETVA) from SPV",
+      "fetching": "Downloading…",
+      "fetch": "Request from SPV",
+      "reconciling": "Reconciling…",
+      "reconcile": "Reconcile",
+      "filesHint": "Pre-filled data from SPV (copy the collected / deductible VAT values into the fields above):",
+      "cash1": "The company applies",
+      "cashBold1": "cash-accounting VAT",
+      "cash2": "— divergences from the pre-filled return (built on e-Factura data, not on collection) are",
+      "cashBold2": "expected",
+      "headers": {
+        "line": "Line",
+        "computed": "D300 (computed)",
+        "precompletat": "Pre-filled",
+        "diff": "Difference",
+        "state": "Status"
+      },
+      "chipSignificant": "Significant",
+      "chipOk": "OK",
+      "footSignificant": "There are significant differences (≥20% and ≥5,000 lei). Investigate (missing invoice, period offset, reverse charge) before filing.",
+      "footOk": "No significant difference against the 20% and 5,000 lei threshold.",
+      "notify": {
+        "reconcileFailed": "Could not reconcile e-TVA.",
+        "filesDownloaded_one": "{{count}} e-TVA file downloaded from SPV.",
+        "filesDownloaded_other": "{{count}} e-TVA files downloaded from SPV.",
+        "fetchFailed": "Could not download the pre-filled return from SPV."
+      }
+    }
+  }
+}

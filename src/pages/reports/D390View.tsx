@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
@@ -21,13 +22,8 @@ interface Props {
   dateTo: string;
 }
 
-const TIP_LABEL: Record<string, string> = {
-  L: "Livrări bunuri (L)",
-  T: "Triunghiulare (T)",
-  A: "Achiziții bunuri (A)",
-  P: "Prestări servicii (P)",
-  S: "Achiziții servicii (S)",
-  R: "Regim agricultori (R)",
+const TIP_KEY: Record<string, string> = {
+  L: "l", T: "t", A: "a", P: "p", S: "s", R: "r",
 };
 
 // Warn triangle — not in the Ic set, inlined verbatim from the prototype.
@@ -37,8 +33,12 @@ const IC_WARN =
 const fmtLei = (n: number) => n.toLocaleString("ro-RO");
 
 export function D390View({ dateFrom, dateTo }: Props) {
+  const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [exporting, setExporting] = useState(false);
+
+  const tipLabel = (tip: string): string =>
+    TIP_KEY[tip] ? t(`declarations.d390.types.${TIP_KEY[tip]}`) : tip;
 
   const {
     data: doc,
@@ -58,15 +58,15 @@ export function D390View({ dateFrom, dateTo }: Props) {
 
   const handleExport = async () => {
     if (!activeCompanyId) {
-      notify.warn("Selectați o companie activă.");
+      notify.warn(t("declarations.notify.selectCompany"));
       return;
     }
     if (ops.length === 0) {
-      notify.info("Nu există operațiuni intra-UE în perioada selectată.");
+      notify.info(t("declarations.d390.notify.noOps"));
       return;
     }
     const savePath = await saveDialog({
-      title: "Salvează D390 XML",
+      title: t("declarations.dialogs.saveD390"),
       defaultPath: `d390-${dateFrom}-${dateTo}.xml`,
       filters: [{ name: "XML", extensions: ["xml"] }],
     });
@@ -74,14 +74,14 @@ export function D390View({ dateFrom, dateTo }: Props) {
     setExporting(true);
     try {
       const saved = await api.d390.export(activeCompanyId, dateFrom, dateTo, savePath);
-      notify.success(`D390 salvat: ${saved}`);
+      notify.success(t("declarations.d390.notify.saved", { path: saved }));
       try {
         await openPath(saved);
       } catch {
         /* reveal best-effort */
       }
     } catch (err) {
-      notify.error(formatError(err, "Nu s-a putut exporta D390."));
+      notify.error(formatError(err, t("declarations.d390.notify.exportFailed")));
     } finally {
       setExporting(false);
     }
@@ -90,28 +90,28 @@ export function D390View({ dateFrom, dateTo }: Props) {
   return (
     <div className="scr-card">
       <div className="scr-toolbar">
-        <div className="tt">D390 — Declarație recapitulativă (VIES) intra-UE</div>
+        <div className="tt">{t("declarations.d390.title")}</div>
         <div className="spacer" />
         <button
           className="btn-dark"
           disabled={exporting || !activeCompanyId || ops.length === 0}
           onClick={() => void handleExport()}
-          title="Export XML D390 (declaratie390 v3)"
+          title={t("declarations.d390.exportTitle")}
         >
           <Ic name="dl" />
-          {exporting ? "Export…" : "Export XML"}
+          {exporting ? t("declarations.common.exporting") : t("declarations.common.exportXml")}
         </button>
       </div>
 
       {isLoading ? (
-        <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>Se încarcă…</div>
+        <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("declarations.common.loading")}</div>
       ) : isError ? (
         <div style={{ padding: 16 }}>
-          <QueryErrorBanner error={error} label="raportul D390" onRetry={() => void refetch()} />
+          <QueryErrorBanner error={error} label={t("declarations.d390.reportLabel")} onRetry={() => void refetch()} />
         </div>
       ) : ops.length === 0 ? (
         <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-          Nicio operațiune intra-UE (vat_category «K») în perioada selectată.
+          {t("declarations.d390.empty")}
         </div>
       ) : (
         <>
@@ -121,11 +121,8 @@ export function D390View({ dateFrom, dateTo }: Props) {
                 <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: IC_WARN }} />
                 <span>
                   <b>{doc!.dropped}</b>{" "}
-                  {doc!.dropped === 1 ? "operațiune intra-UE a fost ignorată" : "operațiuni intra-UE au fost ignorate"}{" "}
-                  — partener fără cod TVA UE valid (cod lipsă / prefix non-UE) sau bază netă negativă
-                  (stornare peste altă perioadă — regularizarea «R» se declară manual; tipurile
-                  T/triunghiular și R nu sunt încă generate automat). Completați CUI-ul partenerului
-                  sau declarați regularizarea manual pentru a evita sub-raportarea în VIES.
+                  {t("declarations.d390.dropped", { count: doc!.dropped })}{" "}
+                  {t("declarations.d390.droppedRest")}
                 </span>
               </div>
             </div>
@@ -133,18 +130,18 @@ export function D390View({ dateFrom, dateTo }: Props) {
           <table className="scr-table">
             <thead>
               <tr>
-                <th>Tip</th>
-                <th>Țară</th>
-                <th>Cod operator (fără prefix)</th>
-                <th>Denumire</th>
-                <th className="r">Bază (lei)</th>
+                <th>{t("declarations.d390.headers.type")}</th>
+                <th>{t("declarations.d390.headers.country")}</th>
+                <th>{t("declarations.d390.headers.code")}</th>
+                <th>{t("declarations.d390.headers.name")}</th>
+                <th className="r">{t("declarations.d390.headers.base")}</th>
               </tr>
             </thead>
             <tbody>
               {ops.map((o, i) => (
                 <tr key={i}>
                   <td>
-                    <span className="chip sent">{TIP_LABEL[o.tip] ?? o.tip}</span>
+                    <span className="chip sent">{tipLabel(o.tip)}</span>
                   </td>
                   <td className="doc">{o.tara}</td>
                   <td className="doc">{o.codO}</td>
@@ -156,7 +153,7 @@ export function D390View({ dateFrom, dateTo }: Props) {
           </table>
           <div className="tot-foot">
             <span>
-              TOTAL ({ops.length} operatori): bază <b className="num">{fmtLei(totalBaza)}</b> lei
+              {t("declarations.d390.totalFoot", { count: ops.length })} <b className="num">{fmtLei(totalBaza)}</b> lei
             </span>
           </div>
         </>

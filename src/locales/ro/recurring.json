@@ -1,0 +1,104 @@
+{
+  "recurring": {
+    "title": "Facturi Recurente",
+    "selectCompany": "Selectați o companie activă pentru a vedea șabloanele recurente.",
+    "sub": {
+      "templates_one": "{{count}} șablon",
+      "templates_few": "{{count}} șabloane",
+      "templates_other": "{{count}} de șabloane",
+      "active": "{{n}} active",
+      "next": "următoarea emitere {{date}}"
+    },
+    "head": {
+      "new": "Șablon nou"
+    },
+    "tabs": {
+      "all": "Toate",
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "search": "Caută șablon…",
+    "states": {
+      "loading": "Se încarcă…",
+      "errorLabel": "facturile recurente",
+      "emptyNone": "Niciun șablon recurent. Creați un șablon cu butonul „Șablon nou” pentru a emite automat facturi periodice.",
+      "emptyFiltered": "Nicio înregistrare pentru filtrele aplicate."
+    },
+    "freq": {
+      "monthlyDay": "Lunar · ziua {{n}}",
+      "monthly": "Lunar",
+      "quarterly": "Trimestrial",
+      "annual": "Anual"
+    },
+    "table": {
+      "name": "Denumire șablon",
+      "client": "Client",
+      "frequency": "Frecvență",
+      "nextIssue": "Urm. emitere",
+      "series": "Serie",
+      "autoAnaf": "Auto ANAF",
+      "active": "Activ",
+      "inactive": "inactiv"
+    },
+    "row": {
+      "autoAnafAria": "Trimitere automată la ANAF",
+      "deactivate": "Dezactivează șablon",
+      "activate": "Activează șablon",
+      "deleteQ": "Ștergeți?",
+      "confirmDelete": "Confirmă ștergerea",
+      "edit": "Editează",
+      "delete": "Șterge"
+    },
+    "cancel": "Anulează",
+    "banner": {
+      "part1": "Facturile recurente se generează automat ca",
+      "drafts": "schițe",
+      "part2": "la data programată. Cu",
+      "autoAnaf": "Auto ANAF",
+      "part3": "activ, factura generată se trimite automat la ANAF (setare per șablon)."
+    },
+    "modal": {
+      "editTitle": "Editează șablon recurent",
+      "createTitle": "Șablon factură recurentă",
+      "sub": "Factura se generează automat ca schiță la data programată.",
+      "close": "Închide",
+      "name": "Nume șablon",
+      "namePlaceholder": "ex: Abonament lunar hosting",
+      "client": "Client",
+      "clientPick": "— Selectați client —",
+      "clientLocked": "Clientul nu poate fi modificat după creare.",
+      "frequency": "Frecvență",
+      "dayOfMonth": "Ziua lunii (1–28)",
+      "nextIssue": "Prima / urm. emitere",
+      "series": "Serie factură",
+      "seriesPlaceholder": "ex: FCT",
+      "autoSubmit": "Trimitere automată la ANAF după emitere",
+      "lines": "Articole",
+      "notes": "Notițe (opțional)",
+      "notesPlaceholder": "Informații suplimentare",
+      "tip": "Puteți crea un șablon și direct dintr-o factură existentă, prin opțiunea „Salvează ca șablon”.",
+      "saving": "Se salvează…",
+      "saveChanges": "Salvează modificările",
+      "create": "Creează șablon"
+    },
+    "validate": {
+      "name": "Introduceți un nume pentru șablon.",
+      "client": "Selectați un client.",
+      "series": "Introduceți seria facturii.",
+      "lines": "Adăugați cel puțin un articol.",
+      "lineName": "Linia {{n}}: denumirea produsului/serviciului este obligatorie."
+    },
+    "notify": {
+      "created": "Factură recurentă creată cu succes",
+      "createError": "Nu s-a putut crea șablonul recurent.",
+      "updated": "Șablon actualizat cu succes",
+      "updateError": "Nu s-a putut actualiza șablonul recurent.",
+      "deleted": "Șablon șters",
+      "deleteError": "Nu s-a putut șterge șablonul.",
+      "toggled": "Status șablon actualizat.",
+      "toggleError": "Nu s-a putut actualiza statusul șablonului.",
+      "autoAnafSaved": "Setare Auto ANAF actualizată.",
+      "autoAnafError": "Nu s-a putut actualiza setarea Auto ANAF."
+    }
+  }
+}
