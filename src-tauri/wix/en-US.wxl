@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Custom WiX localization for the MSI. Identical to Tauri's default en-US set
+  EXCEPT the codepage is 65001 (UTF-8) instead of 1252, so Romanian diacritics
+  (ș/ț/ă in productName, descriptions, file-association labels) link cleanly.
+  WiX light otherwise fails with LGHT0311 ("characters not in code page 1252").
+
+  Referenced loc vars are exactly the 6 the Tauri main.wxs template uses:
+  TauriLanguage, TauriCodepage, DowngradeErrorMessage, PathEnvVarFeature,
+  InstallAppFeature, LaunchApp. Keep this list in sync if Tauri adds new ones.
+-->
+<WixLocalization Culture="en-US" Codepage="65001" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+  <String Id="TauriLanguage">1033</String>
+  <String Id="TauriCodepage">65001</String>
+  <String Id="DowngradeErrorMessage">A newer version of [ProductName] is already installed.</String>
+  <String Id="PathEnvVarFeature">Add to the PATH environment variable.</String>
+  <String Id="InstallAppFeature">Installs [ProductName].</String>
+  <String Id="LaunchApp">Launch [ProductName]</String>
+</WixLocalization>

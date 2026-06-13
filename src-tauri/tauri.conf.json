@@ -79,6 +79,11 @@
         "installMode": "currentUser",
         "headerImage": "resources/nsis-header.bmp",
         "sidebarImage": "resources/nsis-sidebar.bmp"
+      },
+      "wix": {
+        "language": {
+          "en-US": { "localePath": "wix/en-US.wxl" }
+        }
       }
     },
     "fileAssociations": [
