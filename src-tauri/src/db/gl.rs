@@ -2424,9 +2424,40 @@ pub struct PayrollPostResult {
     pub entry_date: String,
 }
 
+/// Agregatul indemnizațiilor de concediu medical (OUG 158/2005) ale lunii, pentru nota GL. Toate
+/// zero ⇒ fără postări de indemnizație (comportamentul standard, fără concediu). CASS apare doar
+/// pentru codurile 01/07/10. `gross`/`cas`/`cass`/`impozit` din [`post_payroll`] rămân partea SALARIALĂ
+/// (lucrată); rețineriile de indemnizație se cumulează cu cele salariale în creditele 4315/4316/444 ⇒
+/// totalul = obligațiile D112 (412/432/602).
+#[derive(Debug, Clone, Default)]
+pub struct IndemnityTotals {
+    /// Σ indemnizație suportată de angajator → D 6458 / C 423.
+    pub employer: Decimal,
+    /// Σ indemnizație suportată din FNUASS (creanță recuperabilă) → D 4382 / C 423.
+    pub fnuass: Decimal,
+    /// CAS 25% reținut din indemnizație → D 423 / C 4315.
+    pub cas: Decimal,
+    /// CASS 10% reținut din indemnizație (doar codurile 01/07/10) → D 423 / C 4316.
+    pub cass: Decimal,
+    /// Impozit 10% reținut din indemnizație impozabilă → D 423 / C 444.
+    pub tax: Decimal,
+}
+
+impl IndemnityTotals {
+    fn is_zero(&self) -> bool {
+        self.employer.is_zero()
+            && self.fnuass.is_zero()
+            && self.cas.is_zero()
+            && self.cass.is_zero()
+            && self.tax.is_zero()
+    }
+}
+
 /// Post the monthly payroll aggregate to the GL (OMFP 1802/2014 monograph): D 641 / C 421 (gross);
 /// D 421 / C 4315 (CAS), C 4316 (CASS), C 444 (impozit) — withholdings; D 646 / C 436 (CAM,
-/// employer). After this, 421 = net payable. Idempotent per `(company,'PAYROLL',period)`.
+/// employer). Concediile medicale (OUG 158/2005) adaugă: D 6458 / C 423 (employer indemnity), D 4382
+/// / C 423 (FNUASS recoverable), D 423 / C 4315/4316/444 (withholdings). After this, 421 = net salary
+/// and 423 = net indemnity payable. Idempotent per `(company,'PAYROLL',period)`.
 #[allow(clippy::too_many_arguments)]
 pub async fn post_payroll(
     pool: &SqlitePool,
@@ -2441,9 +2472,15 @@ pub async fn post_payroll(
     // Part-time minimum-base employer-borne CAS/CASS difference (art. 146 (5^6)). 0 if none.
     cas_diff: Decimal,
     cass_diff: Decimal,
+    // Indemnizații de concediu medical ale lunii (gol ⇒ fără postări de indemnizație).
+    indemn: IndemnityTotals,
 ) -> AppResult<PayrollPostResult> {
     let source_id = format!("{period_from}_{period_to}");
-    let net = gross - cas - cass - impozit;
+    // Net total = net salariu lucrat + net indemnizație.
+    let net = (gross + indemn.employer + indemn.fnuass)
+        - (cas + indemn.cas)
+        - (cass + indemn.cass)
+        - (impozit + indemn.tax);
 
     let mut tx = pool.begin().await?;
     sqlx::query(
@@ -2454,7 +2491,7 @@ pub async fn post_payroll(
     .execute(&mut *tx)
     .await?;
 
-    if gross.is_zero() {
+    if gross.is_zero() && indemn.is_zero() {
         tx.commit().await?;
         return Ok(PayrollPostResult {
             gross: fmt_dec(gross),
@@ -2479,45 +2516,73 @@ pub async fn post_payroll(
         tax_base: None,
         tax_amount: None,
     };
-    let mut entries = vec![
-        mk(1, "641", gross, Decimal::ZERO), // cheltuieli salarii
-        mk(2, "421", Decimal::ZERO, gross), // salarii datorate
-    ];
-    let mut rec = 3;
-    let withholding = cas + cass + impozit;
-    if !withholding.is_zero() {
-        entries.push(mk(rec, "421", withholding, Decimal::ZERO));
+    let mut entries: Vec<GlEntry> = Vec::new();
+    let mut rec = 0i64;
+    let mut add = |entries: &mut Vec<GlEntry>, account: &str, debit: Decimal, credit: Decimal| {
         rec += 1;
-    }
-    if !cas.is_zero() {
-        entries.push(mk(rec, "4315", Decimal::ZERO, cas));
-        rec += 1;
-    }
-    if !cass.is_zero() {
-        entries.push(mk(rec, "4316", Decimal::ZERO, cass));
-        rec += 1;
-    }
-    if !impozit.is_zero() {
-        entries.push(mk(rec, "444", Decimal::ZERO, impozit));
-        rec += 1;
+        entries.push(mk(rec, account, debit, credit));
+    };
+    // Salariul lucrat: D 641 / C 421 (brut), apoi rețineri D 421 / C 4315/4316/444.
+    if !gross.is_zero() {
+        add(&mut entries, "641", gross, Decimal::ZERO); // cheltuieli salarii
+        add(&mut entries, "421", Decimal::ZERO, gross); // salarii datorate
+        let withholding = cas + cass + impozit;
+        if !withholding.is_zero() {
+            add(&mut entries, "421", withholding, Decimal::ZERO);
+        }
+        if !cas.is_zero() {
+            add(&mut entries, "4315", Decimal::ZERO, cas);
+        }
+        if !cass.is_zero() {
+            add(&mut entries, "4316", Decimal::ZERO, cass);
+        }
+        if !impozit.is_zero() {
+            add(&mut entries, "444", Decimal::ZERO, impozit);
+        }
     }
     if !cam.is_zero() {
-        entries.push(mk(rec, "646", cam, Decimal::ZERO)); // cheltuieli CAM (angajator)
-        entries.push(mk(rec + 1, "436", Decimal::ZERO, cam)); // CAM datorată
-        rec += 2;
+        add(&mut entries, "646", cam, Decimal::ZERO); // cheltuieli CAM (angajator)
+        add(&mut entries, "436", Decimal::ZERO, cam); // CAM datorată
     }
     // Part-time minimum-base top-up borne by the employer: D 6458 / C 4315 (CAS) + C 4316 (CASS).
     // Brings 4315/4316 up to the contribution on the minimum base (= what D112 declares).
     let emp_diff = cas_diff + cass_diff;
     if !emp_diff.is_zero() {
-        entries.push(mk(rec, "6458", emp_diff, Decimal::ZERO));
-        rec += 1;
+        add(&mut entries, "6458", emp_diff, Decimal::ZERO);
         if !cas_diff.is_zero() {
-            entries.push(mk(rec, "4315", Decimal::ZERO, cas_diff));
-            rec += 1;
+            add(&mut entries, "4315", Decimal::ZERO, cas_diff);
         }
         if !cass_diff.is_zero() {
-            entries.push(mk(rec, "4316", Decimal::ZERO, cass_diff));
+            add(&mut entries, "4316", Decimal::ZERO, cass_diff);
+        }
+    }
+    // Indemnizații de concediu medical (OUG 158/2005): D 6458 / C 423 (angajator) + D 4382 / C 423
+    // (FNUASS recuperabil); rețineri D 423 / C 4315 (CAS) + C 4316 (CASS, codurile 01/07/10) + C 444
+    // (impozit). 423 rămâne = indemnizația netă de plată; creditele 4315/4316/444 se cumulează cu cele
+    // salariale ⇒ totalul = obligațiile D112 (412/432/602).
+    if !indemn.is_zero() {
+        if !indemn.employer.is_zero() {
+            add(&mut entries, "6458", indemn.employer, Decimal::ZERO);
+        }
+        if !indemn.fnuass.is_zero() {
+            add(&mut entries, "4382", indemn.fnuass, Decimal::ZERO);
+        }
+        let ind_gross = indemn.employer + indemn.fnuass;
+        if !ind_gross.is_zero() {
+            add(&mut entries, "423", Decimal::ZERO, ind_gross);
+        }
+        let ind_wh = indemn.cas + indemn.cass + indemn.tax;
+        if !ind_wh.is_zero() {
+            add(&mut entries, "423", ind_wh, Decimal::ZERO);
+        }
+        if !indemn.cas.is_zero() {
+            add(&mut entries, "4315", Decimal::ZERO, indemn.cas);
+        }
+        if !indemn.cass.is_zero() {
+            add(&mut entries, "4316", Decimal::ZERO, indemn.cass);
+        }
+        if !indemn.tax.is_zero() {
+            add(&mut entries, "444", Decimal::ZERO, indemn.tax);
         }
     }
     assert_balanced(&entries, &source_id)?;

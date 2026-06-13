@@ -226,6 +226,147 @@ pub fn compute_payroll(input: &PayrollInput) -> PayrollResult {
     }
 }
 
+// ─── Calcul salarial cu concediu medical (OUG 158/2005) ──────────────────────
+
+/// Un certificat de concediu medical redus la inputurile de calcul salarial. Tratamentul fiscal
+/// (`cass_due`, `taxable`) e derivat din codul de indemnizație (Nomenclator 9) prin
+/// [`cm_indemn_treatment`].
+#[derive(Debug, Clone)]
+pub struct LeaveCert {
+    /// Indemnizația brută suportată de angajator (D_20).
+    pub indemn_employer: Decimal,
+    /// Indemnizația brută suportată din FNUASS (D_21).
+    pub indemn_fnuass: Decimal,
+    /// Zile lucrătoare de concediu (D_14 + D_15) — scad din zilele lucrate ale lunii.
+    pub leave_working_days: u32,
+    /// CASS 10% se datorează pe indemnizație? (codurile 01/07/10; restul = scutit — structura D112
+    /// CMscutit însumează indemnizațiile pentru coduri ∉{01,07,10}).
+    pub cass_due: bool,
+    /// Indemnizația e impozabilă (impozit 10%)?
+    pub taxable: bool,
+}
+
+/// Inputul calculului salarial al unei luni CU concediu medical.
+#[derive(Debug, Clone)]
+pub struct LeavePayrollInput {
+    /// Salariul de bază lunar (full); se proratează la zilele lucrate.
+    pub gross: Decimal,
+    pub personal_deduction: Decimal,
+    /// Suma netaxabilă (carve-out 300/200), aplicată pe brutul lucrat.
+    pub non_taxable: Decimal,
+    /// Zile lucrătoare în lună (Luni-Vineri).
+    pub working_days: u32,
+    pub certs: Vec<LeaveCert>,
+}
+
+/// Rezultatul calculului salarial al unei luni cu concediu medical.
+#[derive(Debug, Clone)]
+pub struct LeavePayrollResult {
+    /// Zile efectiv lucrate (= zile lucrătoare − zile de concediu).
+    pub worked_days: u32,
+    /// Salariul brut lucrat (proratat la zilele lucrate).
+    pub worked_gross: Decimal,
+    /// Baza CAS/CASS pe partea LUCRATĂ (brut lucrat − suma netaxabilă) — intră în asiguratB2/B4 ale D112.
+    pub worked_base: Decimal,
+    pub indemn_employer: Decimal,
+    pub indemn_fnuass: Decimal,
+    pub indemn_total: Decimal,
+    /// CAS 25% pe (baza lucrată + toată indemnizația).
+    pub cas: Decimal,
+    /// CASS 10% pe (baza lucrată + indemnizația ne-scutită).
+    pub cass: Decimal,
+    /// CAM 2,25% DOAR pe baza lucrată (indemnizația nu e supusă CAM).
+    pub cam: Decimal,
+    /// Impozit 10% pe (venit lucrat + indemnizație impozabilă) − contribuții − deducere − sumă netaxabilă.
+    pub income_tax: Decimal,
+    pub taxable_base: Decimal,
+    /// Net total = (brut lucrat + indemnizație) − CAS − CASS − impozit.
+    pub net: Decimal,
+}
+
+/// Tratamentul contribuțiilor/impozitului pe indemnizația de concediu medical, după codul de
+/// indemnizație (Nomenclator 9, OUG 158/2005). Întoarce `(cass_due, taxable)`.
+///
+/// CASS: datorată (10%) DOAR pentru codurile 01/07/10 (OUG 115/2023, de la 01.01.2024; ANAF
+/// „Precizări CASS concedii medicale”); structura D112 scutește de CASS indemnizațiile pentru codurile
+/// ∉{01,07,10} (regula CMscutit din asiguratB4). CAS 25% se aplică TUTUROR codurilor (Cod fiscal art.
+/// 139 (1) lit. o; B4_7 = bază lucrată + ΣB3_7). Impozit: indemnizația de incapacitate temporară (cod
+/// 01 ș.a.) e impozabilă (10%); NEIMPOZABILE sunt indemnizațiile de maternitate (08), creșterea/
+/// îngrijirea copilului (09/91/92) și risc maternal (15) — Cod fiscal art. 62 lit. c). Implicit =
+/// impozabil.
+pub fn cm_indemn_treatment(cod_indemn: &str) -> (bool, bool) {
+    let cass_due = matches!(cod_indemn, "01" | "07" | "10");
+    // Coduri de indemnizație NEIMPOZABILE (maternitate / îngrijire copil / risc maternal). NU includ
+    // codul 16 (incapacitate temporară) — acela e impozabil.
+    let tax_exempt = matches!(cod_indemn, "08" | "09" | "15" | "91" | "92");
+    (cass_due, !tax_exempt)
+}
+
+/// Calcul salarial cu concediu medical (OUG 158/2005). Salariul de bază se proratează la zilele
+/// lucrate (worked_days/working_days). Indemnizația de CM e supusă CAS 25% + CASS 10% (doar codurile
+/// `cass_due`) — confirmat de reconcilierea B4 din structura D112 v7 (B4_7 = baza lucrată + indemnizație,
+/// B4_8 = ROUND(B4_7×25%)) — dar NU CAM (baza CAM = doar partea lucrată). Impozitul 10% se aplică pe
+/// (venit lucrat + indemnizație impozabilă) − contribuții − deducere − sumă netaxabilă.
+///
+/// Proprietate de consistență: cu `certs` gol, rezultatul coincide cu [`compute_payroll`] (lună întreagă
+/// lucrată) — vezi testul `leave_empty_certs_equals_compute_payroll`.
+pub fn compute_payroll_with_leave(input: &LeavePayrollInput) -> LeavePayrollResult {
+    let z = Decimal::ZERO;
+    let wd = input.working_days.max(1);
+    let leave_days: u32 = input.certs.iter().map(|c| c.leave_working_days).sum();
+    let worked_days = wd.saturating_sub(leave_days);
+    // Salariul lucrat = salariul de bază × zile lucrate / zile lucrătoare, rotunjit la LEU ÎNTREG
+    // (contribuțiile RO se declară în lei întregi; păstrează D112 = GL exact, ca pe calea fără concediu).
+    let worked_gross = (input.gross.max(z) * Decimal::from(worked_days) / Decimal::from(wd))
+        .round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero);
+    let non_taxable = input.non_taxable.max(z).min(worked_gross);
+    let worked_base = (worked_gross - non_taxable).max(z);
+
+    let indemn_employer: Decimal = input.certs.iter().map(|c| c.indemn_employer.max(z)).sum();
+    let indemn_fnuass: Decimal = input.certs.iter().map(|c| c.indemn_fnuass.max(z)).sum();
+    let indemn_total = indemn_employer + indemn_fnuass;
+    let indemn_cass_base: Decimal = input
+        .certs
+        .iter()
+        .filter(|c| c.cass_due)
+        .map(|c| (c.indemn_employer + c.indemn_fnuass).max(z))
+        .sum();
+    let indemn_taxable: Decimal = input
+        .certs
+        .iter()
+        .filter(|c| c.taxable)
+        .map(|c| (c.indemn_employer + c.indemn_fnuass).max(z))
+        .sum();
+
+    // CAS 25% pe (bază lucrată + toată indemnizația); CASS 10% pe (bază lucrată + indemnizația ne-scutită);
+    // CAM 2,25% DOAR pe baza lucrată.
+    let cas = pct(worked_base + indemn_total, CAS_PCT);
+    let cass = pct(worked_base + indemn_cass_base, CASS_PCT);
+    let cam = pct(worked_base, CAM_PCT);
+
+    // Impozit 10% pe (venit lucrat + indemnizație impozabilă) − CAS − CASS − deducere − sumă netaxabilă.
+    let after_contrib = (worked_gross + indemn_taxable) - cas - cass;
+    let deduction = input.personal_deduction.max(z).min(after_contrib.max(z));
+    let taxable_base = (after_contrib - deduction - non_taxable).max(z);
+    let income_tax = pct(taxable_base, INCOME_TAX_PCT);
+    let net = (worked_gross + indemn_total) - cas - cass - income_tax;
+
+    LeavePayrollResult {
+        worked_days,
+        worked_gross,
+        worked_base,
+        indemn_employer,
+        indemn_fnuass,
+        indemn_total,
+        cas,
+        cass,
+        cam,
+        income_tax,
+        taxable_base,
+        net,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,6 +425,99 @@ mod tests {
         assert_eq!(r.net, "2925.00");
         assert_eq!(r.cam, "113.00"); // 5000 × 0.0225 = 112.5 → 113
         assert_eq!(r.total_employer_cost, "5113.00");
+    }
+
+    #[test]
+    fn leave_empty_certs_equals_compute_payroll() {
+        // Proprietate de regresie: fără concediu, calculul cu concediu == compute_payroll (lună întreagă).
+        let base = compute_payroll(&PayrollInput {
+            gross: d("5000"),
+            personal_deduction: d("150"),
+            non_taxable: d("0"),
+        });
+        let lv = compute_payroll_with_leave(&LeavePayrollInput {
+            gross: d("5000"),
+            personal_deduction: d("150"),
+            non_taxable: d("0"),
+            working_days: 21,
+            certs: vec![],
+        });
+        assert_eq!(lv.worked_days, 21);
+        assert_eq!(fmt(lv.worked_gross), base.gross);
+        assert_eq!(fmt(lv.cas), base.cas);
+        assert_eq!(fmt(lv.cass), base.cass);
+        assert_eq!(fmt(lv.cam), base.cam);
+        assert_eq!(fmt(lv.income_tax), base.income_tax);
+        assert_eq!(fmt(lv.net), base.net);
+        assert_eq!(fmt(lv.taxable_base), base.taxable_base);
+    }
+
+    #[test]
+    fn leave_common_illness_prorates_and_taxes_indemnity() {
+        // Brut 5.250, 21 zile lucrătoare, 5 zile concediu boală obișnuită (cod 01) ⇒ 16 zile lucrate,
+        // brut lucrat = 5.250 × 16/21 = 4.000. Indemnizație 508 (suportată de angajator). CAS 25% +
+        // CASS 10% pe (4.000 + 508) = 4.508; impozit 10%. Numerele coincid cu fixtura emitterului D112.
+        let (cass_due, taxable) = cm_indemn_treatment("01");
+        assert!(cass_due && taxable);
+        let r = compute_payroll_with_leave(&LeavePayrollInput {
+            gross: d("5250"),
+            personal_deduction: d("0"),
+            non_taxable: d("0"),
+            working_days: 21,
+            certs: vec![LeaveCert {
+                indemn_employer: d("508"),
+                indemn_fnuass: d("0"),
+                leave_working_days: 5,
+                cass_due,
+                taxable,
+            }],
+        });
+        assert_eq!(r.worked_days, 16);
+        assert_eq!(fmt(r.worked_gross), "4000.00");
+        assert_eq!(fmt(r.worked_base), "4000.00");
+        assert_eq!(fmt(r.cas), "1127.00"); // round(4508 × 25%)
+        assert_eq!(fmt(r.cass), "451.00"); // round(4508 × 10%) = 450.8 → 451
+        assert_eq!(fmt(r.cam), "90.00"); // round(4000 × 2.25%)
+        assert_eq!(fmt(r.income_tax), "293.00"); // round(2930 × 10%)
+        assert_eq!(fmt(r.taxable_base), "2930.00");
+        assert_eq!(fmt(r.net), "2637.00"); // 4508 − 1127 − 451 − 293
+    }
+
+    #[test]
+    fn cm_treatment_per_code() {
+        assert_eq!(cm_indemn_treatment("01"), (true, true)); // boală obișnuită: CASS + impozit
+        assert_eq!(cm_indemn_treatment("07"), (true, true)); // carantină
+        assert_eq!(cm_indemn_treatment("10"), (true, true)); // reducere temporară activitate
+        assert_eq!(cm_indemn_treatment("08"), (false, false)); // sarcină/lăuzie: scutit ambele
+        assert_eq!(cm_indemn_treatment("09"), (false, false)); // îngrijire copil bolnav: scutit
+        assert_eq!(cm_indemn_treatment("15"), (false, false)); // risc maternal: scutit
+        assert_eq!(cm_indemn_treatment("16"), (false, true)); // incapacitate: fără CASS, dar impozabil
+    }
+
+    #[test]
+    fn leave_maternity_indemnity_untaxed_and_cass_exempt() {
+        // Concediu maternitate (cod 08) toată luna: indemnizația NU e impozabilă și NU e supusă CASS;
+        // CAS 25% se aplică totuși (B4_7 include indemnizația). Fără zile lucrate ⇒ brut lucrat 0.
+        let (cass_due, taxable) = cm_indemn_treatment("08");
+        let r = compute_payroll_with_leave(&LeavePayrollInput {
+            gross: d("5000"),
+            personal_deduction: d("0"),
+            non_taxable: d("0"),
+            working_days: 21,
+            certs: vec![LeaveCert {
+                indemn_employer: d("4000"),
+                indemn_fnuass: d("0"),
+                leave_working_days: 21,
+                cass_due,
+                taxable,
+            }],
+        });
+        assert_eq!(r.worked_days, 0);
+        assert_eq!(fmt(r.worked_gross), "0.00");
+        assert_eq!(fmt(r.cas), "1000.00"); // 25% × 4000 (CAS se aplică pe indemnizație)
+        assert_eq!(fmt(r.cass), "0.00"); // scutit de CASS
+        assert_eq!(fmt(r.cam), "0.00"); // fără parte lucrată
+        assert_eq!(fmt(r.income_tax), "0.00"); // neimpozabil
     }
 
     #[test]

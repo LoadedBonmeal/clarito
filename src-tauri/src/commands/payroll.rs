@@ -5,8 +5,11 @@ use rust_decimal::Decimal;
 use std::str::FromStr;
 use tauri::State;
 
-use crate::anaf_decl::d112::{compute_payroll, suma_netaxabila, PayrollInput};
-use crate::anaf_decl::d112_xml::{generate_d112_xml, D112Employee, D112Header};
+use crate::anaf_decl::d112::{
+    cm_indemn_treatment, compute_payroll, compute_payroll_with_leave, suma_netaxabila, LeaveCert,
+    LeavePayrollInput, PayrollInput,
+};
+use crate::anaf_decl::d112_xml::{generate_d112_xml, D112Employee, D112Header, D112MedicalLeave};
 use crate::db::payroll::{self, CreateEmployeeInput, Employee, PayrollRun, UpdateEmployeeInput};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -20,38 +23,7 @@ fn split_name(full: &str) -> (String, String) {
 }
 
 use crate::db::invoices::round2;
-
-/// Day of week (0=Sunday..6=Saturday) via Sakamoto's algorithm.
-fn weekday(y: i32, m: u32, d: u32) -> u32 {
-    let t = [0i32, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
-    let yy = if m < 3 { y - 1 } else { y };
-    (((yy + yy / 4 - yy / 100 + yy / 400 + t[(m - 1) as usize] + d as i32) % 7 + 7) % 7) as u32
-}
-
-fn days_in_month(y: i32, m: u32) -> u32 {
-    match m {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => {
-            if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
-                29
-            } else {
-                28
-            }
-        }
-        _ => 30,
-    }
-}
-
-/// Working days (Mon-Fri) in a month — the D112 NZL used for part-time base proration.
-fn working_days(year: i32, month: u32) -> u32 {
-    (1..=days_in_month(year, month))
-        .filter(|&d| {
-            let w = weekday(year, month, d);
-            w != 0 && w != 6
-        })
-        .count() as u32
-}
+use crate::db::payroll::{leave_working_days_in_month, working_days};
 
 /// Convert an ISO date (YYYY-MM-DD) to the D112 zz.ll.aaaa format; pass other strings through.
 fn ro_date(iso: &str) -> String {
@@ -183,6 +155,19 @@ pub async fn export_d112_xml(
     }
     let company = crate::db::companies::get(&state.db, &company_id).await?;
     let employees = payroll::list(&state.db, &company_id).await?;
+    // Concediile medicale ale lunii → calea B (asiguratD). Grupate pe angajat (gol ⇒ calea A standard).
+    let period_ym = format!("{year:04}-{month:02}");
+    let leaves = crate::db::concedii::list(&state.db, &company_id, &period_ym).await?;
+    let mut leaves_by_emp: std::collections::HashMap<
+        String,
+        Vec<crate::db::concedii::MedicalLeave>,
+    > = std::collections::HashMap::new();
+    for l in leaves {
+        leaves_by_emp
+            .entry(l.employee_id.clone())
+            .or_default()
+            .push(l);
+    }
     let dec = |s: &str| Decimal::from_str(s).unwrap_or(Decimal::ZERO);
     // Whole-lei, COMMERCIAL rounding (MidpointAwayFromZero) — never banker's `.round()`.
     let leid = |d: Decimal| {
@@ -212,6 +197,91 @@ pub async fn export_d112_xml(
             year,
             month,
         );
+
+        // ── Calea B (concediu medical) ──────────────────────────────────────
+        // Salariatul cu ≥1 certificat în lună: salariul se proratează la zilele lucrate, iar
+        // indemnizația de CM intră în baza CAS/CASS (CAS 25% + CASS 10% pe codurile ne-scutite) și în
+        // baza de impozit. `compute_payroll_with_leave` produce numerele lunii; `emit_leave_blocks`
+        // (în d112_xml) reconstruiește identic CAS/CASS din baza lucrată + indemnizație ⇒ D112 = motor.
+        if let Some(emp_leaves) = leaves_by_emp.get(&e.id) {
+            let mut certs = Vec::new();
+            let mut med_leaves = Vec::new();
+            for l in emp_leaves {
+                let (cass_due, taxable) = cm_indemn_treatment(&l.cod_indemnizatie);
+                let emp_amt = lei(&l.suma_angajator); // indemnizație în lei întregi (ca în D112)
+                let fn_amt = lei(&l.suma_fnuass);
+                certs.push(LeaveCert {
+                    indemn_employer: Decimal::from(emp_amt),
+                    indemn_fnuass: Decimal::from(fn_amt),
+                    // Proratarea salariului scade TOATE zilele lucrătoare de concediu (din intervalul
+                    // certificatului), inclusiv prima zi neplătită 2026 — nu doar zilele indemnizate.
+                    leave_working_days: leave_working_days_in_month(
+                        year,
+                        month,
+                        &l.data_inceput,
+                        &l.data_sfarsit,
+                    ),
+                    cass_due,
+                    taxable,
+                });
+                med_leaves.push(D112MedicalLeave {
+                    serie: l.serie.clone(),
+                    numar: l.numar.clone(),
+                    cod_indemn: l.cod_indemnizatie.clone(),
+                    data_acordare: ro_date(&l.data_acordare),
+                    data_inceput: ro_date(&l.data_inceput),
+                    data_sfarsit: ro_date(&l.data_sfarsit),
+                    zile_ang: l.zile_angajator,
+                    zile_fnuass: l.zile_fnuass,
+                    baza_calcul: lei(&l.baza_calcul),
+                    zile_baza: l.zile_baza,
+                    suma_ang: emp_amt,
+                    suma_fnuass: fn_amt,
+                    procent: l.procent,
+                    loc_prescriere: l.loc_prescriere,
+                    cod_boala: l.cod_boala.clone(),
+                });
+            }
+            let lr = compute_payroll_with_leave(&LeavePayrollInput {
+                gross: gross_in,
+                personal_deduction: dec(&e.personal_deduction),
+                non_taxable,
+                working_days: nzl,
+                certs,
+            });
+            let worked_base = leid(lr.worked_base);
+            let (nume, prenume) = split_name(&e.full_name);
+            d112_emps.push(D112Employee {
+                cnp: e.cnp.clone(),
+                nume,
+                prenume,
+                data_ang: e
+                    .employment_date
+                    .as_deref()
+                    .map(ro_date)
+                    .unwrap_or_default(),
+                gross: leid(lr.worked_gross),
+                cas: leid(lr.cas),
+                cass: leid(lr.cass),
+                impozit: leid(lr.income_tax),
+                cam: leid(lr.cam),
+                zile: lr.worked_days,
+                tip_asigurat: e.tip_asigurat.clone(),
+                pensionar: e.pensionar,
+                tip_contract: e.tip_contract.clone(),
+                ore_norma: e.ore_norma.clamp(6, 8) as u32,
+                baza_cas: worked_base,
+                baza_cass: worked_base,
+                baza_cam: worked_base,
+                sal_contract: leid(gross_in),
+                baza_impozit: leid(lr.taxable_base),
+                deducere: lei(&e.personal_deduction),
+                sediu_cif: e.sediu_cif.clone(),
+                med_leaves,
+            });
+            continue;
+        }
+
         let r = compute_payroll(&PayrollInput {
             gross: gross_in,
             personal_deduction: dec(&e.personal_deduction),
