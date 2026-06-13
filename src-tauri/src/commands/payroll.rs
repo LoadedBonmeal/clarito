@@ -209,6 +209,7 @@ pub async fn export_d112_xml(
             e.beneficiar_suma_netaxabila,
             &e.tip_contract,
             gross_in,
+            year,
             month,
         );
         let r = compute_payroll(&PayrollInput {
@@ -228,7 +229,7 @@ pub async fn export_d112_xml(
         let exempt =
             crate::anaf_decl::d112::exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
         if let Some((base, _, _)) =
-            crate::anaf_decl::d112::part_time_min_base(gross, &e.tip_contract, exempt, month)
+            crate::anaf_decl::d112::part_time_min_base(gross, &e.tip_contract, exempt, year, month)
         {
             baza_cas = base;
             baza_cass = base;

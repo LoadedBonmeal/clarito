@@ -100,23 +100,59 @@ pub fn part_time_min_base(
     gross: Decimal,
     tip_contract: &str,
     exempt: bool,
+    year: i32,
     month: u32,
 ) -> Option<(Decimal, Decimal, Decimal)> {
     if tip_contract == "N" || exempt || gross <= Decimal::ZERO {
         return None;
     }
-    // Baza minimă = salariul minim − suma netaxabilă (NU se prorata cu ore/normă).
-    let base = if month <= 6 {
-        Decimal::from(3750) // 4.050 − 300
-    } else {
-        Decimal::from(4125) // 4.325 − 200 (de la 1 iulie 2026, HG 146/2026)
-    };
+    // Baza minimă = salariul minim − suma netaxabilă (NU se prorata cu ore/normă). Derivată din
+    // sursa unică (min_wage_lei − carve_out_lei): 2026 H1 = 4.050−300 = 3.750; H2 = 4.325−200 = 4.125.
+    let base = min_wage_lei(year, month) - carve_out_lei(year, month);
     if gross >= base {
         return None; // venitul realizat ≥ baza minimă → fără majorare.
     }
     let cas_diff = pct(base, CAS_PCT) - pct(gross, CAS_PCT);
     let cass_diff = pct(base, CASS_PCT) - pct(gross, CASS_PCT);
     Some((base, cas_diff, cass_diff))
+}
+
+/// Salariul minim brut pe țară garantat în plată (lei/lună) — SURSĂ UNICĂ, keyed pe (an, lună):
+/// 2026 = 4.050 sem. I (HG 1506/2024) / 4.325 sem. II (HG 146/2026, de la 1 iulie 2026). Pentru un
+/// an neacoperit avertizează și folosește ultima valoare cunoscută — drift guard: altfel un apel
+/// din 2027 ar reutiliza tăcut 4.325. La următorul HG, adăugați aici rândul noului an.
+pub(crate) fn min_wage_lei(year: i32, month: u32) -> Decimal {
+    match (year, month) {
+        (2026, m) if m <= 6 => Decimal::from(4050),
+        (2026, _) => Decimal::from(4325),
+        _ => {
+            tracing::warn!(
+                year,
+                month,
+                "min_wage_lei: an/lună neacoperit(ă) — folosesc 4.325 (2026 sem. II); \
+                 actualizați cu noul salariu minim"
+            );
+            Decimal::from(4325)
+        }
+    }
+}
+
+/// Suma netaxabilă lunară din salariul minim (carve-out art. III OUG 89/2025) — SURSĂ UNICĂ:
+/// 300 lei sem. I 2026 / 200 lei sem. II 2026.
+pub(crate) fn carve_out_lei(year: i32, month: u32) -> Decimal {
+    match (year, month) {
+        (2026, m) if m <= 6 => Decimal::from(300),
+        _ => Decimal::from(200),
+    }
+}
+
+/// Plafonul brutului realizat (inclusiv) până la care se acordă carve-out-ul: 4.300 sem. I /
+/// 4.600 sem. II 2026. Valoare legiferată DISTINCTĂ (nu = salariul minim + carve-out), keyed pe lună.
+fn carve_out_gross_ceiling(year: i32, month: u32) -> Decimal {
+    match (year, month) {
+        (2026, m) if m <= 6 => Decimal::from(4300),
+        _ => Decimal::from(4600),
+    }
 }
 
 /// Suma netaxabilă din salariul minim — art. III OUG 89/2025 (continuă OUG 156/2024 art. LXVI).
@@ -138,16 +174,15 @@ pub fn suma_netaxabila(
     beneficiar: bool,
     tip_contract: &str,
     gross: Decimal,
+    year: i32,
     month: u32,
 ) -> Decimal {
     if !beneficiar || tip_contract != "N" || gross <= Decimal::ZERO {
         return Decimal::ZERO;
     }
-    let (amount, ceiling) = if month <= 6 {
-        (Decimal::from(300), Decimal::from(4300)) // sem. I 2026
-    } else {
-        (Decimal::from(200), Decimal::from(4600)) // sem. II 2026 (HG 146/2026)
-    };
+    // Sumă + plafon din sursa unică keyed pe (an, lună): 300/4.300 sem. I, 200/4.600 sem. II 2026.
+    let amount = carve_out_lei(year, month);
+    let ceiling = carve_out_gross_ceiling(year, month);
     if gross > ceiling {
         return Decimal::ZERO; // peste plafonul brut → întreaga sumă netaxabilă se pierde
     }
@@ -200,19 +235,21 @@ mod tests {
     fn part_time_min_base_full_minimum_not_prorated() {
         // Part-time P1, gross 3.000, H1 (month 3): baza = salariul minim ÎNTREG 3.750 (NU prorata).
         // cas_diff = 938 − 750 = 188 (pct(3750,25%)=937.5→938); cass_diff = 375 − 300 = 75.
-        let r = part_time_min_base(d("3000"), "P1", false, 3);
+        let r = part_time_min_base(d("3000"), "P1", false, 2026, 3);
         assert_eq!(r, Some((d("3750"), d("188"), d("75"))));
         // H2 (month 8): baza 4.125.
         assert_eq!(
-            part_time_min_base(d("3000"), "P1", false, 8).unwrap().0,
+            part_time_min_base(d("3000"), "P1", false, 2026, 8)
+                .unwrap()
+                .0,
             d("4125")
         );
         // Full-time N → fără majorare.
-        assert_eq!(part_time_min_base(d("3000"), "N", false, 3), None);
+        assert_eq!(part_time_min_base(d("3000"), "N", false, 2026, 3), None);
         // Exceptat (art. 146 (5^7)) → baza rămâne venitul realizat.
-        assert_eq!(part_time_min_base(d("3000"), "P1", true, 3), None);
+        assert_eq!(part_time_min_base(d("3000"), "P1", true, 2026, 3), None);
         // Venit ≥ baza minimă → fără majorare.
-        assert_eq!(part_time_min_base(d("4000"), "P1", false, 3), None);
+        assert_eq!(part_time_min_base(d("4000"), "P1", false, 2026, 3), None);
     }
 
     #[test]
@@ -249,19 +286,44 @@ mod tests {
     #[test]
     fn suma_netaxabila_gating() {
         // Sem. I (≤6): 300 lei for a full-time beneficiary; sem. II (≥7): 200 lei.
-        assert_eq!(suma_netaxabila(true, "N", d("4050"), 3), d("300"));
-        assert_eq!(suma_netaxabila(true, "N", d("4325"), 8), d("200"));
+        assert_eq!(suma_netaxabila(true, "N", d("4050"), 2026, 3), d("300"));
+        assert_eq!(suma_netaxabila(true, "N", d("4325"), 2026, 8), d("200"));
         // Not a beneficiary → 0.
-        assert_eq!(suma_netaxabila(false, "N", d("4050"), 3), d("0"));
+        assert_eq!(suma_netaxabila(false, "N", d("4050"), 2026, 3), d("0"));
         // Part-time (Pi) → 0 (measure is full-time only).
-        assert_eq!(suma_netaxabila(true, "P1", d("4050"), 3), d("0"));
+        assert_eq!(suma_netaxabila(true, "P1", d("4050"), 2026, 3), d("0"));
         // Exactly AT the ceiling is INCLUSIVE (≤ 4.300 H1 / 4.600 H2) — boundary lock (TEST-01).
-        assert_eq!(suma_netaxabila(true, "N", d("4300"), 3), d("300"));
-        assert_eq!(suma_netaxabila(true, "N", d("4600"), 8), d("200"));
+        assert_eq!(suma_netaxabila(true, "N", d("4300"), 2026, 3), d("300"));
+        assert_eq!(suma_netaxabila(true, "N", d("4600"), 2026, 8), d("200"));
         // Just OVER the ceiling → whole benefit lost.
-        assert_eq!(suma_netaxabila(true, "N", d("4301"), 3), d("0"));
-        assert_eq!(suma_netaxabila(true, "N", d("4500"), 8), d("200")); // 4500 ≤ 4600 H2
-        assert_eq!(suma_netaxabila(true, "N", d("4601"), 8), d("0"));
+        assert_eq!(suma_netaxabila(true, "N", d("4301"), 2026, 3), d("0"));
+        assert_eq!(suma_netaxabila(true, "N", d("4500"), 2026, 8), d("200")); // 4500 ≤ 4600 H2
+        assert_eq!(suma_netaxabila(true, "N", d("4601"), 2026, 8), d("0"));
+    }
+
+    #[test]
+    fn min_wage_single_source_of_truth_and_drift_guard() {
+        // Wave D: one source for the min wage + carve-out, keyed on (year, month).
+        assert_eq!(min_wage_lei(2026, 3), d("4050"));
+        assert_eq!(min_wage_lei(2026, 7), d("4325"));
+        assert_eq!(carve_out_lei(2026, 3), d("300"));
+        assert_eq!(carve_out_lei(2026, 8), d("200"));
+        // part_time_min_base now DERIVES 3.750 / 4.125 from min_wage − carve_out (not magic numbers).
+        assert_eq!(
+            part_time_min_base(d("1000"), "P1", false, 2026, 3)
+                .unwrap()
+                .0,
+            d("3750")
+        );
+        assert_eq!(
+            part_time_min_base(d("1000"), "P1", false, 2026, 8)
+                .unwrap()
+                .0,
+            d("4125")
+        );
+        // Drift guard: an uncovered future year falls back to the last known value (+ a tracing::warn)
+        // instead of silently mis-deriving — the reminder to add the next HG row.
+        assert_eq!(min_wage_lei(2027, 3), d("4325"));
     }
 
     #[test]
@@ -269,7 +331,8 @@ mod tests {
         // CALC-01/02 lock: for a part-time employee whose CAS/CASS base is lifted to the minimum
         // (art. 146 (5^6)), CAM is NOT lifted — it stays on the REALIZED gross (art. 220^6). The
         // helper returns only (base, cas_diff, cass_diff) — no CAM component — and CAM = pct(gross).
-        let (base, cas_diff, cass_diff) = part_time_min_base(d("2000"), "P1", false, 3).unwrap();
+        let (base, cas_diff, cass_diff) =
+            part_time_min_base(d("2000"), "P1", false, 2026, 3).unwrap();
         assert_eq!(base, d("3750")); // CAS/CASS base lifted to 3.750 (H1)
         assert!(cas_diff > d("0") && cass_diff > d("0")); // employer bears the CAS/CASS top-up
                                                           // CAM is computed on the realized 2.000 (= 45), NOT on the lifted 3.750 (which would be 84).

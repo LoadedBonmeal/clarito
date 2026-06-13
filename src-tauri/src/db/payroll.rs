@@ -342,6 +342,10 @@ pub async fn run_payroll(
         .get(5..7)
         .and_then(|m| m.parse().ok())
         .unwrap_or(1);
+    let year: i32 = period_from
+        .get(0..4)
+        .and_then(|y| y.parse().ok())
+        .unwrap_or(2026);
     let employees = list(pool, company_id).await?;
     let mut states = Vec::new();
     let (mut t_gross, mut t_cas, mut t_cass, mut t_tax, mut t_net, mut t_cam) = (
@@ -360,6 +364,7 @@ pub async fn run_payroll(
             e.beneficiar_suma_netaxabila,
             &e.tip_contract,
             gross,
+            year,
             month,
         );
         let r = compute_payroll(&PayrollInput {
@@ -370,7 +375,7 @@ pub async fn run_payroll(
         let exempt =
             crate::anaf_decl::d112::exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
         if let Some((_, cas_diff, cass_diff)) =
-            crate::anaf_decl::d112::part_time_min_base(gross, &e.tip_contract, exempt, month)
+            crate::anaf_decl::d112::part_time_min_base(gross, &e.tip_contract, exempt, year, month)
         {
             t_cas_diff += cas_diff;
             t_cass_diff += cass_diff;
