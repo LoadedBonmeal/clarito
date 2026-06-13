@@ -51,3 +51,6 @@ src-tauri/resources/duk/*
 # Local SQLite artifacts (test runs / dev) — never commit
 src-tauri/*.db
 src-tauri/*.sqlite
+
+# Stray local SQLite DBs (app data lives in the Tauri app-data dir, not the repo)
+.claude/*.db
