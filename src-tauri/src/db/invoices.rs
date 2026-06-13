@@ -17,6 +17,20 @@ use crate::db::models::{
 };
 use crate::error::{AppError, AppResult};
 
+/// FISCAL-001 (Legea 141/2025): `true` when a line's VAT rate is a pre-reform rate (19% or 5%)
+/// that is no longer valid for an invoice issued on/after the 2025-08-01 reform (they became
+/// 21%/11%). 9% stays valid — it's the transitional housing rate to 2026-07. `issue_date` is an
+/// ISO `YYYY-MM-DD` string (lexicographic compare = chronological); a malformed/empty date does
+/// not trigger the block. Shared by `create` and `update_invoice_draft` so the rule lives once.
+pub(crate) fn old_vat_rate_blocked(issue_date: &str, vat_rate: f64) -> bool {
+    if issue_date < "2025-08-01" {
+        return false;
+    }
+    let rate = Decimal::try_from(vat_rate).unwrap_or(Decimal::ZERO);
+    (rate - Decimal::from(19)).abs() < Decimal::new(1, 3)
+        || (rate - Decimal::from(5)).abs() < Decimal::new(1, 3)
+}
+
 /// Round money to 2 decimals using COMMERCIAL rounding (half away from zero), the Romanian/
 /// EN16931 reference convention for VAT amounts — e.g. 2.50 × 21% = 0.5250 → 0.53. Kept
 /// consistent across line, subtotal and total (and with D300's `ron_to_bani`) so the invoice
@@ -382,6 +396,15 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         {
             return Err(AppError::Validation(format!(
                 "Cotă TVA invalidă: {}%. Valori permise: 0, 5, 9, 11, 19, 21.",
+                line.vat_rate
+            )));
+        }
+        // FISCAL-001 (Legea 141/2025): respinge la sursă o linie 19%/5% pe o factură emisă
+        // ≥ 01.08.2025, ca să nu ajungă date de cotă veche în D300.
+        if old_vat_rate_blocked(&input.issue_date, line.vat_rate) {
+            return Err(AppError::Validation(format!(
+                "Cota TVA {}% nu mai este validă pentru facturi emise de la 01.08.2025 \
+                 (Legea 141/2025) — folosiți 21% sau 11%.",
                 line.vat_rate
             )));
         }
@@ -1196,6 +1219,23 @@ mod tests {
             super::set_xml_path(&pool, "ghost", "/tmp/x.xml").await,
             Err(crate::error::AppError::NotFound)
         ));
+    }
+
+    #[test]
+    fn fiscal001_old_vat_rate_blocked_after_reform() {
+        use super::old_vat_rate_blocked;
+        // Pre-reform (< 2025-08-01): the old 19%/5% are valid.
+        assert!(!old_vat_rate_blocked("2025-07-31", 19.0));
+        assert!(!old_vat_rate_blocked("2025-07-31", 5.0));
+        // On/after the reform: 19%/5% blocked; 21/11/9(transitional)/0 stay valid.
+        assert!(old_vat_rate_blocked("2025-08-01", 19.0));
+        assert!(old_vat_rate_blocked("2026-03-01", 5.0));
+        assert!(!old_vat_rate_blocked("2026-03-01", 21.0));
+        assert!(!old_vat_rate_blocked("2026-03-01", 11.0));
+        assert!(!old_vat_rate_blocked("2026-03-01", 9.0));
+        assert!(!old_vat_rate_blocked("2026-03-01", 0.0));
+        // A malformed/empty issue_date must never block.
+        assert!(!old_vat_rate_blocked("", 19.0));
     }
 
     #[test]

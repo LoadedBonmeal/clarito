@@ -239,6 +239,15 @@ pub async fn update_invoice_draft(
                 line.vat_rate
             )));
         }
+        // FISCAL-001 (Legea 141/2025): 19%/5% nu mai sunt valide pentru facturi emise ≥ 01.08.2025
+        // (au devenit 21%/11%; 9% rămâne tranzitoriu pentru locuințe). Vezi db::invoices.
+        if invoices::old_vat_rate_blocked(&input.issue_date, line.vat_rate) {
+            return Err(AppError::Validation(format!(
+                "Cota TVA {}% nu mai este validă pentru facturi emise de la 01.08.2025 \
+                 (Legea 141/2025) — folosiți 21% sau 11%.",
+                line.vat_rate
+            )));
+        }
         // Cantitățile negative nu au loc pe o ciornă editată — corecțiile trec prin stornare.
         if line.quantity < 0.0 {
             return Err(AppError::Validation(format!(
