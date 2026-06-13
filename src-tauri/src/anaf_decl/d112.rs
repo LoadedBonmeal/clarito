@@ -19,6 +19,10 @@ const CAS_PCT: (i64, u32) = (25, 2); // 0.25
 const CASS_PCT: (i64, u32) = (10, 2); // 0.10
 const INCOME_TAX_PCT: (i64, u32) = (10, 2); // 0.10
 const CAM_PCT: (i64, u32) = (225, 4); // 0.0225
+/// Contribuția pentru concedii și indemnizații de asigurări sociale de sănătate (CCI, OUG 158/2005
+/// art. 4 alin. (2)) — datorată de ANGAJATOR, separat de CAM. 0,85% pe fondul de salarii (venitul
+/// supus CASS). NU a fost inclusă în CAM de reforma 2018 (confirmat 2026).
+const CONCEDII_PCT: (i64, u32) = (85, 4); // 0.0085
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -46,6 +50,9 @@ pub struct PayrollResult {
     pub income_tax: String,
     pub net: String,
     pub cam: String,
+    /// Contribuția pentru concedii și indemnizații 0,85% (angajator, OUG 158/2005). Inclusă în
+    /// total_employer_cost.
+    pub concedii: String,
     pub total_employer_cost: String,
     /// Suma netaxabilă aplicată efectiv (300/200 lei sau 0).
     pub non_taxable: String,
@@ -100,23 +107,62 @@ pub fn part_time_min_base(
     gross: Decimal,
     tip_contract: &str,
     exempt: bool,
+    year: i32,
     month: u32,
 ) -> Option<(Decimal, Decimal, Decimal)> {
     if tip_contract == "N" || exempt || gross <= Decimal::ZERO {
         return None;
     }
-    // Baza minimă = salariul minim − suma netaxabilă (NU se prorata cu ore/normă).
-    let base = if month <= 6 {
-        Decimal::from(3750) // 4.050 − 300
-    } else {
-        Decimal::from(4125) // 4.325 − 200 (de la 1 iulie 2026, HG 146/2026)
-    };
+    // Baza minimă = salariul minim − suma netaxabilă (NU se prorata cu ore/normă). Derivată din
+    // sursa unică (min_wage_lei − carve_out_lei): 2026 H1 = 4.050−300 = 3.750; H2 = 4.325−200 = 4.125.
+    let base = min_wage_lei(year, month) - carve_out_lei(year, month);
     if gross >= base {
         return None; // venitul realizat ≥ baza minimă → fără majorare.
     }
     let cas_diff = pct(base, CAS_PCT) - pct(gross, CAS_PCT);
     let cass_diff = pct(base, CASS_PCT) - pct(gross, CASS_PCT);
     Some((base, cas_diff, cass_diff))
+}
+
+/// Salariul minim brut pe țară garantat în plată (lei/lună) — SURSĂ UNICĂ, keyed pe (an, lună):
+/// 2026 = 4.050 sem. I (HG 1506/2024) / 4.325 sem. II (HG 146/2026, de la 1 iulie 2026). Pentru un
+/// an neacoperit avertizează și folosește ultima valoare cunoscută — drift guard: altfel un apel
+/// din 2027 ar reutiliza tăcut 4.325. La următorul HG, adăugați aici rândul noului an.
+pub(crate) fn min_wage_lei(year: i32, month: u32) -> Decimal {
+    match (year, month) {
+        (2026, m) if m <= 6 => Decimal::from(4050),
+        (2026, _) => Decimal::from(4325),
+        _ => {
+            tracing::warn!(
+                year,
+                month,
+                "min_wage_lei: an/lună neacoperit(ă) — folosesc 4.325 (2026 sem. II); \
+                 actualizați cu noul salariu minim"
+            );
+            Decimal::from(4325)
+        }
+    }
+}
+
+/// Suma netaxabilă lunară din salariul minim (carve-out art. III OUG 89/2025) — SURSĂ UNICĂ:
+/// 300 lei sem. I 2026 / 200 lei sem. II 2026. Drift: pentru un an viitor cade pe valoarea sem. II
+/// (200) FĂRĂ warn propriu — [`min_wage_lei`], apelată mereu împreună (per salariat), emite deja
+/// avertismentul de an neacoperit; un al doilea/treilea warn ar fi doar zgomot.
+pub(crate) fn carve_out_lei(year: i32, month: u32) -> Decimal {
+    match (year, month) {
+        (2026, m) if m <= 6 => Decimal::from(300),
+        _ => Decimal::from(200),
+    }
+}
+
+/// Plafonul brutului realizat (inclusiv) până la care se acordă carve-out-ul: 4.300 sem. I /
+/// 4.600 sem. II 2026. Valoare legiferată DISTINCTĂ (nu = salariul minim + carve-out), keyed pe lună.
+/// Aceeași convenție de drift ca [`carve_out_lei`] — warn-ul de an neacoperit e în [`min_wage_lei`].
+fn carve_out_gross_ceiling(year: i32, month: u32) -> Decimal {
+    match (year, month) {
+        (2026, m) if m <= 6 => Decimal::from(4300),
+        _ => Decimal::from(4600),
+    }
 }
 
 /// Suma netaxabilă din salariul minim — art. III OUG 89/2025 (continuă OUG 156/2024 art. LXVI).
@@ -138,16 +184,15 @@ pub fn suma_netaxabila(
     beneficiar: bool,
     tip_contract: &str,
     gross: Decimal,
+    year: i32,
     month: u32,
 ) -> Decimal {
     if !beneficiar || tip_contract != "N" || gross <= Decimal::ZERO {
         return Decimal::ZERO;
     }
-    let (amount, ceiling) = if month <= 6 {
-        (Decimal::from(300), Decimal::from(4300)) // sem. I 2026
-    } else {
-        (Decimal::from(200), Decimal::from(4600)) // sem. II 2026 (HG 146/2026)
-    };
+    // Sumă + plafon din sursa unică keyed pe (an, lună): 300/4.300 sem. I, 200/4.600 sem. II 2026.
+    let amount = carve_out_lei(year, month);
+    let ceiling = carve_out_gross_ceiling(year, month);
     if gross > ceiling {
         return Decimal::ZERO; // peste plafonul brut → întreaga sumă netaxabilă se pierde
     }
@@ -172,7 +217,10 @@ pub fn compute_payroll(input: &PayrollInput) -> PayrollResult {
     let income_tax = pct(taxable_base, INCOME_TAX_PCT);
     let net = gross - cas - cass - income_tax;
     let cam = pct(contrib_base, CAM_PCT);
-    let total_employer_cost = gross + cam;
+    // CCI 0,85% (angajator) pe aceeași bază ca CAM (venitul supus CASS). Plafonul art. 6(8) (12×
+    // salariul minim/asigurat ≈ 48.600 lei/lună) practic nu se atinge → neaplicat aici.
+    let concedii = pct(contrib_base, CONCEDII_PCT);
+    let total_employer_cost = gross + cam + concedii;
 
     PayrollResult {
         gross: fmt(gross),
@@ -183,8 +231,154 @@ pub fn compute_payroll(input: &PayrollInput) -> PayrollResult {
         income_tax: fmt(income_tax),
         net: fmt(net),
         cam: fmt(cam),
+        concedii: fmt(concedii),
         total_employer_cost: fmt(total_employer_cost),
         non_taxable: fmt(non_taxable),
+    }
+}
+
+// ─── Calcul salarial cu concediu medical (OUG 158/2005) ──────────────────────
+
+/// Un certificat de concediu medical redus la inputurile de calcul salarial. Tratamentul fiscal
+/// (`cass_due`, `taxable`) e derivat din codul de indemnizație (Nomenclator 9) prin
+/// [`cm_indemn_treatment`].
+#[derive(Debug, Clone)]
+pub struct LeaveCert {
+    /// Indemnizația brută suportată de angajator (D_20).
+    pub indemn_employer: Decimal,
+    /// Indemnizația brută suportată din FNUASS (D_21).
+    pub indemn_fnuass: Decimal,
+    /// Zile lucrătoare de concediu (D_14 + D_15) — scad din zilele lucrate ale lunii.
+    pub leave_working_days: u32,
+    /// CASS 10% se datorează pe indemnizație? (codurile 01/07/10; restul = scutit — structura D112
+    /// CMscutit însumează indemnizațiile pentru coduri ∉{01,07,10}).
+    pub cass_due: bool,
+    /// Indemnizația e impozabilă (impozit 10%)?
+    pub taxable: bool,
+}
+
+/// Inputul calculului salarial al unei luni CU concediu medical.
+#[derive(Debug, Clone)]
+pub struct LeavePayrollInput {
+    /// Salariul de bază lunar (full); se proratează la zilele lucrate.
+    pub gross: Decimal,
+    pub personal_deduction: Decimal,
+    /// Suma netaxabilă (carve-out 300/200), aplicată pe brutul lucrat.
+    pub non_taxable: Decimal,
+    /// Zile lucrătoare în lună (Luni-Vineri).
+    pub working_days: u32,
+    pub certs: Vec<LeaveCert>,
+}
+
+/// Rezultatul calculului salarial al unei luni cu concediu medical.
+#[derive(Debug, Clone)]
+pub struct LeavePayrollResult {
+    /// Zile efectiv lucrate (= zile lucrătoare − zile de concediu).
+    pub worked_days: u32,
+    /// Salariul brut lucrat (proratat la zilele lucrate).
+    pub worked_gross: Decimal,
+    /// Baza CAS/CASS pe partea LUCRATĂ (brut lucrat − suma netaxabilă) — intră în asiguratB2/B4 ale D112.
+    pub worked_base: Decimal,
+    pub indemn_employer: Decimal,
+    pub indemn_fnuass: Decimal,
+    pub indemn_total: Decimal,
+    /// CAS 25% pe (baza lucrată + toată indemnizația).
+    pub cas: Decimal,
+    /// CASS 10% pe (baza lucrată + indemnizația ne-scutită).
+    pub cass: Decimal,
+    /// CAM 2,25% DOAR pe baza lucrată (indemnizația nu e supusă CAM).
+    pub cam: Decimal,
+    /// CCI 0,85% (angajator) DOAR pe baza lucrată (ca și CAM).
+    pub concedii: Decimal,
+    /// Impozit 10% pe (venit lucrat + indemnizație impozabilă) − contribuții − deducere − sumă netaxabilă.
+    pub income_tax: Decimal,
+    pub taxable_base: Decimal,
+    /// Net total = (brut lucrat + indemnizație) − CAS − CASS − impozit.
+    pub net: Decimal,
+}
+
+/// Tratamentul contribuțiilor/impozitului pe indemnizația de concediu medical, după codul de
+/// indemnizație (Nomenclator 9, OUG 158/2005). Întoarce `(cass_due, taxable)`.
+///
+/// CASS: datorată (10%) DOAR pentru codurile 01/07/10 (OUG 115/2023, de la 01.01.2024; ANAF
+/// „Precizări CASS concedii medicale”); structura D112 scutește de CASS indemnizațiile pentru codurile
+/// ∉{01,07,10} (regula CMscutit din asiguratB4). CAS 25% se aplică TUTUROR codurilor (Cod fiscal art.
+/// 139 (1) lit. o; B4_7 = bază lucrată + ΣB3_7). Impozit: indemnizația de incapacitate temporară (cod
+/// 01 ș.a.) e impozabilă (10%); NEIMPOZABILE sunt indemnizațiile de maternitate (08), creșterea/
+/// îngrijirea copilului (09/91/92) și risc maternal (15) — Cod fiscal art. 62 lit. c). Implicit =
+/// impozabil.
+pub fn cm_indemn_treatment(cod_indemn: &str) -> (bool, bool) {
+    let cass_due = matches!(cod_indemn, "01" | "07" | "10");
+    // Coduri de indemnizație NEIMPOZABILE (maternitate / îngrijire copil / risc maternal). NU includ
+    // codul 16 (incapacitate temporară) — acela e impozabil.
+    let tax_exempt = matches!(cod_indemn, "08" | "09" | "15" | "91" | "92");
+    (cass_due, !tax_exempt)
+}
+
+/// Calcul salarial cu concediu medical (OUG 158/2005). Salariul de bază se proratează la zilele
+/// lucrate (worked_days/working_days). Indemnizația de CM e supusă CAS 25% + CASS 10% (doar codurile
+/// `cass_due`) — confirmat de reconcilierea B4 din structura D112 v7 (B4_7 = baza lucrată + indemnizație,
+/// B4_8 = ROUND(B4_7×25%)) — dar NU CAM (baza CAM = doar partea lucrată). Impozitul 10% se aplică pe
+/// (venit lucrat + indemnizație impozabilă) − contribuții − deducere − sumă netaxabilă.
+///
+/// Proprietate de consistență: cu `certs` gol, rezultatul coincide cu [`compute_payroll`] (lună întreagă
+/// lucrată) — vezi testul `leave_empty_certs_equals_compute_payroll`.
+pub fn compute_payroll_with_leave(input: &LeavePayrollInput) -> LeavePayrollResult {
+    let z = Decimal::ZERO;
+    let wd = input.working_days.max(1);
+    let leave_days: u32 = input.certs.iter().map(|c| c.leave_working_days).sum();
+    let worked_days = wd.saturating_sub(leave_days);
+    // Salariul lucrat = salariul de bază × zile lucrate / zile lucrătoare, rotunjit la LEU ÎNTREG
+    // (contribuțiile RO se declară în lei întregi; păstrează D112 = GL exact, ca pe calea fără concediu).
+    let worked_gross = (input.gross.max(z) * Decimal::from(worked_days) / Decimal::from(wd))
+        .round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero);
+    let non_taxable = input.non_taxable.max(z).min(worked_gross);
+    let worked_base = (worked_gross - non_taxable).max(z);
+
+    let indemn_employer: Decimal = input.certs.iter().map(|c| c.indemn_employer.max(z)).sum();
+    let indemn_fnuass: Decimal = input.certs.iter().map(|c| c.indemn_fnuass.max(z)).sum();
+    let indemn_total = indemn_employer + indemn_fnuass;
+    let indemn_cass_base: Decimal = input
+        .certs
+        .iter()
+        .filter(|c| c.cass_due)
+        .map(|c| (c.indemn_employer + c.indemn_fnuass).max(z))
+        .sum();
+    let indemn_taxable: Decimal = input
+        .certs
+        .iter()
+        .filter(|c| c.taxable)
+        .map(|c| (c.indemn_employer + c.indemn_fnuass).max(z))
+        .sum();
+
+    // CAS 25% pe (bază lucrată + toată indemnizația); CASS 10% pe (bază lucrată + indemnizația ne-scutită);
+    // CAM 2,25% DOAR pe baza lucrată.
+    let cas = pct(worked_base + indemn_total, CAS_PCT);
+    let cass = pct(worked_base + indemn_cass_base, CASS_PCT);
+    let cam = pct(worked_base, CAM_PCT);
+    let concedii = pct(worked_base, CONCEDII_PCT); // CCI 0,85% pe baza lucrată (ca și CAM)
+
+    // Impozit 10% pe (venit lucrat + indemnizație impozabilă) − CAS − CASS − deducere − sumă netaxabilă.
+    let after_contrib = (worked_gross + indemn_taxable) - cas - cass;
+    let deduction = input.personal_deduction.max(z).min(after_contrib.max(z));
+    let taxable_base = (after_contrib - deduction - non_taxable).max(z);
+    let income_tax = pct(taxable_base, INCOME_TAX_PCT);
+    let net = (worked_gross + indemn_total) - cas - cass - income_tax;
+
+    LeavePayrollResult {
+        worked_days,
+        worked_gross,
+        worked_base,
+        indemn_employer,
+        indemn_fnuass,
+        indemn_total,
+        cas,
+        cass,
+        cam,
+        concedii,
+        income_tax,
+        taxable_base,
+        net,
     }
 }
 
@@ -200,19 +394,21 @@ mod tests {
     fn part_time_min_base_full_minimum_not_prorated() {
         // Part-time P1, gross 3.000, H1 (month 3): baza = salariul minim ÎNTREG 3.750 (NU prorata).
         // cas_diff = 938 − 750 = 188 (pct(3750,25%)=937.5→938); cass_diff = 375 − 300 = 75.
-        let r = part_time_min_base(d("3000"), "P1", false, 3);
+        let r = part_time_min_base(d("3000"), "P1", false, 2026, 3);
         assert_eq!(r, Some((d("3750"), d("188"), d("75"))));
         // H2 (month 8): baza 4.125.
         assert_eq!(
-            part_time_min_base(d("3000"), "P1", false, 8).unwrap().0,
+            part_time_min_base(d("3000"), "P1", false, 2026, 8)
+                .unwrap()
+                .0,
             d("4125")
         );
         // Full-time N → fără majorare.
-        assert_eq!(part_time_min_base(d("3000"), "N", false, 3), None);
+        assert_eq!(part_time_min_base(d("3000"), "N", false, 2026, 3), None);
         // Exceptat (art. 146 (5^7)) → baza rămâne venitul realizat.
-        assert_eq!(part_time_min_base(d("3000"), "P1", true, 3), None);
+        assert_eq!(part_time_min_base(d("3000"), "P1", true, 2026, 3), None);
         // Venit ≥ baza minimă → fără majorare.
-        assert_eq!(part_time_min_base(d("4000"), "P1", false, 3), None);
+        assert_eq!(part_time_min_base(d("4000"), "P1", false, 2026, 3), None);
     }
 
     #[test]
@@ -231,7 +427,8 @@ mod tests {
     fn payroll_2026_rates_gross_to_net() {
         // Gross 5.000, no personal deduction.
         // CAS 25% = 1.250; CASS 10% = 500; base = 5.000 − 1.250 − 500 = 3.250; impozit 10% = 325.
-        // Net = 5.000 − 1.250 − 500 − 325 = 2.925. CAM 2,25% = 113 (rounded). Cost = 5.113.
+        // Net = 5.000 − 1.250 − 500 − 325 = 2.925. CAM 2,25% = 113; CCI 0,85% = 43 (5000 × 0.0085 =
+        // 42.5 → 43). Cost angajator = 5.000 + 113 + 43 = 5.156.
         let r = compute_payroll(&PayrollInput {
             gross: d("5000"),
             personal_deduction: d("0"),
@@ -243,25 +440,157 @@ mod tests {
         assert_eq!(r.income_tax, "325.00");
         assert_eq!(r.net, "2925.00");
         assert_eq!(r.cam, "113.00"); // 5000 × 0.0225 = 112.5 → 113
-        assert_eq!(r.total_employer_cost, "5113.00");
+        assert_eq!(r.concedii, "43.00"); // CCI 0,85%: 5000 × 0.0085 = 42.5 → 43
+        assert_eq!(r.total_employer_cost, "5156.00");
+    }
+
+    #[test]
+    fn concedii_cci_rate_single_source_of_truth() {
+        // Drift guard: rata CCI = 0,85% (OUG 158/2005 art. 4(2)), separată de CAM.
+        assert_eq!(CONCEDII_PCT, (85, 4));
+        // Carve-out exempt de CASS ⇒ și de CCI: brut 4.050 cu 300 netaxabil ⇒ baza 3.750.
+        let r = compute_payroll(&PayrollInput {
+            gross: d("4050"),
+            personal_deduction: d("0"),
+            non_taxable: d("300"),
+        });
+        assert_eq!(r.concedii, "32.00"); // 3750 × 0.0085 = 31.875 → 32
+    }
+
+    #[test]
+    fn leave_empty_certs_equals_compute_payroll() {
+        // Proprietate de regresie: fără concediu, calculul cu concediu == compute_payroll (lună întreagă).
+        let base = compute_payroll(&PayrollInput {
+            gross: d("5000"),
+            personal_deduction: d("150"),
+            non_taxable: d("0"),
+        });
+        let lv = compute_payroll_with_leave(&LeavePayrollInput {
+            gross: d("5000"),
+            personal_deduction: d("150"),
+            non_taxable: d("0"),
+            working_days: 21,
+            certs: vec![],
+        });
+        assert_eq!(lv.worked_days, 21);
+        assert_eq!(fmt(lv.worked_gross), base.gross);
+        assert_eq!(fmt(lv.cas), base.cas);
+        assert_eq!(fmt(lv.cass), base.cass);
+        assert_eq!(fmt(lv.cam), base.cam);
+        assert_eq!(fmt(lv.income_tax), base.income_tax);
+        assert_eq!(fmt(lv.net), base.net);
+        assert_eq!(fmt(lv.taxable_base), base.taxable_base);
+    }
+
+    #[test]
+    fn leave_common_illness_prorates_and_taxes_indemnity() {
+        // Brut 5.250, 21 zile lucrătoare, 5 zile concediu boală obișnuită (cod 01) ⇒ 16 zile lucrate,
+        // brut lucrat = 5.250 × 16/21 = 4.000. Indemnizație 508 (suportată de angajator). CAS 25% +
+        // CASS 10% pe (4.000 + 508) = 4.508; impozit 10%. Numerele coincid cu fixtura emitterului D112.
+        let (cass_due, taxable) = cm_indemn_treatment("01");
+        assert!(cass_due && taxable);
+        let r = compute_payroll_with_leave(&LeavePayrollInput {
+            gross: d("5250"),
+            personal_deduction: d("0"),
+            non_taxable: d("0"),
+            working_days: 21,
+            certs: vec![LeaveCert {
+                indemn_employer: d("508"),
+                indemn_fnuass: d("0"),
+                leave_working_days: 5,
+                cass_due,
+                taxable,
+            }],
+        });
+        assert_eq!(r.worked_days, 16);
+        assert_eq!(fmt(r.worked_gross), "4000.00");
+        assert_eq!(fmt(r.worked_base), "4000.00");
+        assert_eq!(fmt(r.cas), "1127.00"); // round(4508 × 25%)
+        assert_eq!(fmt(r.cass), "451.00"); // round(4508 × 10%) = 450.8 → 451
+        assert_eq!(fmt(r.cam), "90.00"); // round(4000 × 2.25%)
+        assert_eq!(fmt(r.income_tax), "293.00"); // round(2930 × 10%)
+        assert_eq!(fmt(r.taxable_base), "2930.00");
+        assert_eq!(fmt(r.net), "2637.00"); // 4508 − 1127 − 451 − 293
+    }
+
+    #[test]
+    fn cm_treatment_per_code() {
+        assert_eq!(cm_indemn_treatment("01"), (true, true)); // boală obișnuită: CASS + impozit
+        assert_eq!(cm_indemn_treatment("07"), (true, true)); // carantină
+        assert_eq!(cm_indemn_treatment("10"), (true, true)); // reducere temporară activitate
+        assert_eq!(cm_indemn_treatment("08"), (false, false)); // sarcină/lăuzie: scutit ambele
+        assert_eq!(cm_indemn_treatment("09"), (false, false)); // îngrijire copil bolnav: scutit
+        assert_eq!(cm_indemn_treatment("15"), (false, false)); // risc maternal: scutit
+        assert_eq!(cm_indemn_treatment("16"), (false, true)); // incapacitate: fără CASS, dar impozabil
+    }
+
+    #[test]
+    fn leave_maternity_indemnity_untaxed_and_cass_exempt() {
+        // Concediu maternitate (cod 08) toată luna: indemnizația NU e impozabilă și NU e supusă CASS;
+        // CAS 25% se aplică totuși (B4_7 include indemnizația). Fără zile lucrate ⇒ brut lucrat 0.
+        let (cass_due, taxable) = cm_indemn_treatment("08");
+        let r = compute_payroll_with_leave(&LeavePayrollInput {
+            gross: d("5000"),
+            personal_deduction: d("0"),
+            non_taxable: d("0"),
+            working_days: 21,
+            certs: vec![LeaveCert {
+                indemn_employer: d("4000"),
+                indemn_fnuass: d("0"),
+                leave_working_days: 21,
+                cass_due,
+                taxable,
+            }],
+        });
+        assert_eq!(r.worked_days, 0);
+        assert_eq!(fmt(r.worked_gross), "0.00");
+        assert_eq!(fmt(r.cas), "1000.00"); // 25% × 4000 (CAS se aplică pe indemnizație)
+        assert_eq!(fmt(r.cass), "0.00"); // scutit de CASS
+        assert_eq!(fmt(r.cam), "0.00"); // fără parte lucrată
+        assert_eq!(fmt(r.income_tax), "0.00"); // neimpozabil
     }
 
     #[test]
     fn suma_netaxabila_gating() {
         // Sem. I (≤6): 300 lei for a full-time beneficiary; sem. II (≥7): 200 lei.
-        assert_eq!(suma_netaxabila(true, "N", d("4050"), 3), d("300"));
-        assert_eq!(suma_netaxabila(true, "N", d("4325"), 8), d("200"));
+        assert_eq!(suma_netaxabila(true, "N", d("4050"), 2026, 3), d("300"));
+        assert_eq!(suma_netaxabila(true, "N", d("4325"), 2026, 8), d("200"));
         // Not a beneficiary → 0.
-        assert_eq!(suma_netaxabila(false, "N", d("4050"), 3), d("0"));
+        assert_eq!(suma_netaxabila(false, "N", d("4050"), 2026, 3), d("0"));
         // Part-time (Pi) → 0 (measure is full-time only).
-        assert_eq!(suma_netaxabila(true, "P1", d("4050"), 3), d("0"));
+        assert_eq!(suma_netaxabila(true, "P1", d("4050"), 2026, 3), d("0"));
         // Exactly AT the ceiling is INCLUSIVE (≤ 4.300 H1 / 4.600 H2) — boundary lock (TEST-01).
-        assert_eq!(suma_netaxabila(true, "N", d("4300"), 3), d("300"));
-        assert_eq!(suma_netaxabila(true, "N", d("4600"), 8), d("200"));
+        assert_eq!(suma_netaxabila(true, "N", d("4300"), 2026, 3), d("300"));
+        assert_eq!(suma_netaxabila(true, "N", d("4600"), 2026, 8), d("200"));
         // Just OVER the ceiling → whole benefit lost.
-        assert_eq!(suma_netaxabila(true, "N", d("4301"), 3), d("0"));
-        assert_eq!(suma_netaxabila(true, "N", d("4500"), 8), d("200")); // 4500 ≤ 4600 H2
-        assert_eq!(suma_netaxabila(true, "N", d("4601"), 8), d("0"));
+        assert_eq!(suma_netaxabila(true, "N", d("4301"), 2026, 3), d("0"));
+        assert_eq!(suma_netaxabila(true, "N", d("4500"), 2026, 8), d("200")); // 4500 ≤ 4600 H2
+        assert_eq!(suma_netaxabila(true, "N", d("4601"), 2026, 8), d("0"));
+    }
+
+    #[test]
+    fn min_wage_single_source_of_truth_and_drift_guard() {
+        // Wave D: one source for the min wage + carve-out, keyed on (year, month).
+        assert_eq!(min_wage_lei(2026, 3), d("4050"));
+        assert_eq!(min_wage_lei(2026, 7), d("4325"));
+        assert_eq!(carve_out_lei(2026, 3), d("300"));
+        assert_eq!(carve_out_lei(2026, 8), d("200"));
+        // part_time_min_base now DERIVES 3.750 / 4.125 from min_wage − carve_out (not magic numbers).
+        assert_eq!(
+            part_time_min_base(d("1000"), "P1", false, 2026, 3)
+                .unwrap()
+                .0,
+            d("3750")
+        );
+        assert_eq!(
+            part_time_min_base(d("1000"), "P1", false, 2026, 8)
+                .unwrap()
+                .0,
+            d("4125")
+        );
+        // Drift guard: an uncovered future year falls back to the last known value (+ a tracing::warn)
+        // instead of silently mis-deriving — the reminder to add the next HG row.
+        assert_eq!(min_wage_lei(2027, 3), d("4325"));
     }
 
     #[test]
@@ -269,7 +598,8 @@ mod tests {
         // CALC-01/02 lock: for a part-time employee whose CAS/CASS base is lifted to the minimum
         // (art. 146 (5^6)), CAM is NOT lifted — it stays on the REALIZED gross (art. 220^6). The
         // helper returns only (base, cas_diff, cass_diff) — no CAM component — and CAM = pct(gross).
-        let (base, cas_diff, cass_diff) = part_time_min_base(d("2000"), "P1", false, 3).unwrap();
+        let (base, cas_diff, cass_diff) =
+            part_time_min_base(d("2000"), "P1", false, 2026, 3).unwrap();
         assert_eq!(base, d("3750")); // CAS/CASS base lifted to 3.750 (H1)
         assert!(cas_diff > d("0") && cass_diff > d("0")); // employer bears the CAS/CASS top-up
                                                           // CAM is computed on the realized 2.000 (= 45), NOT on the lifted 3.750 (which would be 84).

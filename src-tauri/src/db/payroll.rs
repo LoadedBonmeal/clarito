@@ -9,7 +9,11 @@ use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 use std::str::FromStr;
 
-use crate::anaf_decl::d112::{compute_payroll, PayrollInput};
+use crate::anaf_decl::d112::{
+    cm_indemn_treatment, compute_payroll, compute_payroll_with_leave, exempt_part_time_min_base,
+    part_time_min_base, suma_netaxabila, LeaveCert, LeavePayrollInput, PayrollInput,
+};
+use crate::db::gl::IndemnityTotals;
 use crate::db::models::{new_id, now_unix};
 use crate::error::{AppError, AppResult};
 
@@ -313,6 +317,8 @@ pub struct EmployeeState {
     pub income_tax: String,
     pub net: String,
     pub cam: String,
+    /// CCI 0,85% (concedii și indemnizații, angajator).
+    pub concedii: String,
 }
 
 /// The monthly payroll register + the GL post result.
@@ -326,8 +332,81 @@ pub struct PayrollRun {
     pub total_income_tax: String,
     pub total_net: String,
     pub total_cam: String,
+    /// Contribuția 0,85% pentru concedii și indemnizații (angajator, OUG 158/2005).
+    pub total_concedii: String,
     pub posted: bool,
     pub entry_date: String,
+}
+
+/// Day of week (0=Sunday..6=Saturday) via Sakamoto's algorithm.
+pub fn weekday(y: i32, m: u32, d: u32) -> u32 {
+    let t = [0i32, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let yy = if m < 3 { y - 1 } else { y };
+    (((yy + yy / 4 - yy / 100 + yy / 400 + t[(m - 1) as usize] + d as i32) % 7 + 7) % 7) as u32
+}
+
+pub fn days_in_month(y: i32, m: u32) -> u32 {
+    match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 30,
+    }
+}
+
+/// Working days (Mon-Fri) in a month — the D112 NZL used for proration.
+pub fn working_days(year: i32, month: u32) -> u32 {
+    (1..=days_in_month(year, month))
+        .filter(|&d| {
+            let w = weekday(year, month, d);
+            w != 0 && w != 6
+        })
+        .count() as u32
+}
+
+/// Working days (Mon-Fri) of a medical-leave certificate `[start, end]` that fall WITHIN the given
+/// month. For SALARY proration we count ALL leave working days (the leave suspends the contract, so no
+/// salary), INCLUDING the 2026 first unpaid day (OUG 91/2025: it still counts as medical leave) — not
+/// just the indemnity-paid days `D_14 + D_15`. Dates are ISO `YYYY-MM-DD`; a span crossing the month is
+/// clamped to the month.
+pub fn leave_working_days_in_month(year: i32, month: u32, start_iso: &str, end_iso: &str) -> u32 {
+    let dim = days_in_month(year, month);
+    // In-month day for an ISO date: before the month → `before`, after → `after`, in-month → the day.
+    let day_in_month = |iso: &str, before: u32, after: u32| -> u32 {
+        let p: Vec<&str> = iso.split('-').collect();
+        if p.len() != 3 {
+            return after;
+        }
+        let (y, m, d) = (
+            p[0].parse::<i32>().unwrap_or(year),
+            p[1].parse::<u32>().unwrap_or(month),
+            p[2].parse::<u32>().unwrap_or(0),
+        );
+        if y < year || (y == year && m < month) {
+            before
+        } else if y > year || (y == year && m > month) {
+            after
+        } else {
+            d.clamp(1, dim)
+        }
+    };
+    let s = day_in_month(start_iso, 1, dim + 1); // started after month ⇒ no in-month days
+    let e = day_in_month(end_iso, 0, dim); // ended before month ⇒ no in-month days
+    if s > e {
+        return 0;
+    }
+    (s..=e)
+        .filter(|&d| {
+            let w = weekday(year, month, d);
+            w != 0 && w != 6
+        })
+        .count() as u32
 }
 
 /// Compute the monthly salary states for all active employees and post the aggregate to the GL.
@@ -342,8 +421,37 @@ pub async fn run_payroll(
         .get(5..7)
         .and_then(|m| m.parse().ok())
         .unwrap_or(1);
+    let year: i32 = period_from
+        .get(0..4)
+        .and_then(|y| y.parse().ok())
+        .unwrap_or(2026);
     let employees = list(pool, company_id).await?;
+    // Concedii medicale ale lunii → proratare salariu + indemnizație. Grupate pe angajat.
+    let period_ym = format!("{year:04}-{month:02}");
+    let leaves = crate::db::concedii::list(pool, company_id, &period_ym).await?;
+    let mut leaves_by_emp: std::collections::HashMap<
+        String,
+        Vec<crate::db::concedii::MedicalLeave>,
+    > = std::collections::HashMap::new();
+    for l in leaves {
+        leaves_by_emp
+            .entry(l.employee_id.clone())
+            .or_default()
+            .push(l);
+    }
+    let nzl = working_days(year, month);
+    let leid0 = |d: Decimal| {
+        d.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+    };
+    let f = |d: Decimal| {
+        format!(
+            "{:.2}",
+            d.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+        )
+    };
+
     let mut states = Vec::new();
+    // Worked-salary aggregates (intră în nota GL: 641/421, 4315/4316/444 salariale, 646/436 CAM).
     let (mut t_gross, mut t_cas, mut t_cass, mut t_tax, mut t_net, mut t_cam) = (
         Decimal::ZERO,
         Decimal::ZERO,
@@ -354,23 +462,91 @@ pub async fn run_payroll(
     );
     // Employer-borne part-time minimum-base CAS/CASS difference (art. 146 (5^6)).
     let (mut t_cas_diff, mut t_cass_diff) = (Decimal::ZERO, Decimal::ZERO);
+    // CCI 0,85% (concedii și indemnizații, angajator) — postată separat (6458/4373).
+    let mut t_concedii = Decimal::ZERO;
+    // Indemnizații de concediu medical (postate separat: 6458/4382/423).
+    let mut indemn = IndemnityTotals::default();
+
     for e in employees.iter().filter(|e| e.active) {
         let gross = dec(&e.gross_salary);
-        let non_taxable = crate::anaf_decl::d112::suma_netaxabila(
+        let non_taxable = suma_netaxabila(
             e.beneficiar_suma_netaxabila,
             &e.tip_contract,
             gross,
+            year,
             month,
         );
+
+        // Salariatul cu concediu medical: salariul se proratează la zilele lucrate; indemnizația intră
+        // în baza CAS/CASS și de impozit. GL: partea salarială (lucrată) separat de indemnizație.
+        if let Some(emp_leaves) = leaves_by_emp.get(&e.id) {
+            let certs: Vec<LeaveCert> = emp_leaves
+                .iter()
+                .map(|l| {
+                    let (cass_due, taxable) = cm_indemn_treatment(&l.cod_indemnizatie);
+                    LeaveCert {
+                        indemn_employer: leid0(dec(&l.suma_angajator)),
+                        indemn_fnuass: leid0(dec(&l.suma_fnuass)),
+                        leave_working_days: leave_working_days_in_month(
+                            year,
+                            month,
+                            &l.data_inceput,
+                            &l.data_sfarsit,
+                        ),
+                        cass_due,
+                        taxable,
+                    }
+                })
+                .collect();
+            let lr = compute_payroll_with_leave(&LeavePayrollInput {
+                gross,
+                personal_deduction: dec(&e.personal_deduction),
+                non_taxable,
+                working_days: nzl,
+                certs,
+            });
+            // Partea salarială lucrată (pentru split-ul GL): contribuțiile pe brutul lucrat.
+            let w = compute_payroll(&PayrollInput {
+                gross: lr.worked_gross,
+                personal_deduction: dec(&e.personal_deduction),
+                non_taxable,
+            });
+            let (wcas, wcass, wtax) = (dec(&w.cas), dec(&w.cass), dec(&w.income_tax));
+            t_gross += lr.worked_gross;
+            t_cas += wcas;
+            t_cass += wcass;
+            t_tax += wtax;
+            t_cam += lr.cam;
+            t_concedii += lr.concedii;
+            t_net += lr.net;
+            // Indemnizația = combinat − lucrat (sumează exact la combinat ⇒ creditele = D112).
+            indemn.employer += lr.indemn_employer;
+            indemn.fnuass += lr.indemn_fnuass;
+            indemn.cas += lr.cas - wcas;
+            indemn.cass += lr.cass - wcass;
+            indemn.tax += lr.income_tax - wtax;
+            states.push(EmployeeState {
+                employee_id: e.id.clone(),
+                full_name: e.full_name.clone(),
+                gross: f(lr.worked_gross + lr.indemn_total), // total venit (lucrat + indemnizație)
+                cas: f(lr.cas),
+                cass: f(lr.cass),
+                income_tax: f(lr.income_tax),
+                net: f(lr.net),
+                cam: f(lr.cam),
+                concedii: f(lr.concedii),
+            });
+            continue;
+        }
+
         let r = compute_payroll(&PayrollInput {
             gross,
             personal_deduction: dec(&e.personal_deduction),
             non_taxable,
         });
-        let exempt =
-            crate::anaf_decl::d112::exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
+        let exempt = exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
         if let Some((_, cas_diff, cass_diff)) =
-            crate::anaf_decl::d112::part_time_min_base(gross, &e.tip_contract, exempt, month)
+            part_time_min_base(gross, &e.tip_contract, exempt, year, month)
         {
             t_cas_diff += cas_diff;
             t_cass_diff += cass_diff;
@@ -381,6 +557,7 @@ pub async fn run_payroll(
         t_tax += dec(&r.income_tax);
         t_net += dec(&r.net);
         t_cam += dec(&r.cam);
+        t_concedii += dec(&r.concedii);
         states.push(EmployeeState {
             employee_id: e.id.clone(),
             full_name: e.full_name.clone(),
@@ -390,6 +567,7 @@ pub async fn run_payroll(
             income_tax: r.income_tax,
             net: r.net,
             cam: r.cam,
+            concedii: r.concedii,
         });
     }
 
@@ -403,25 +581,23 @@ pub async fn run_payroll(
         t_cass,
         t_tax,
         t_cam,
+        t_concedii,
         t_cas_diff,
         t_cass_diff,
+        indemn.clone(),
     )
     .await?;
 
-    let f = |d: Decimal| {
-        format!(
-            "{:.2}",
-            d.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
-        )
-    };
     Ok(PayrollRun {
         states,
-        total_gross: f(t_gross),
-        total_cas: f(t_cas),
-        total_cass: f(t_cass),
-        total_income_tax: f(t_tax),
+        // Totaluri de afișare = lucrat + indemnizație (Σ states).
+        total_gross: f(t_gross + indemn.employer + indemn.fnuass),
+        total_cas: f(t_cas + indemn.cas),
+        total_cass: f(t_cass + indemn.cass),
+        total_income_tax: f(t_tax + indemn.tax),
         total_net: f(t_net),
         total_cam: f(t_cam),
+        total_concedii: f(t_concedii),
         posted: post.posted,
         entry_date: post.entry_date,
     })
@@ -497,6 +673,7 @@ mod tests {
         assert_eq!(run.total_income_tax, "650.00");
         assert_eq!(run.total_net, "5850.00");
         assert_eq!(run.total_cam, "226.00");
+        assert_eq!(run.total_concedii, "86.00"); // 2 × pct(5000, 0.85%) = 2 × 43
         assert_eq!(run.states.len(), 2);
         assert!(run.posted);
 
@@ -514,6 +691,97 @@ mod tests {
         assert_eq!(bal("421"), Some(("0.00".into(), "5850.00".into())));
         assert_eq!(bal("4315"), Some(("0.00".into(), "2500.00".into())));
         assert_eq!(bal("646"), Some(("226.00".into(), "0.00".into())));
+        // CCI 0,85%: D 6458 / C 4373 = 86 (fără concediu, 6458 = doar CCI).
+        assert_eq!(bal("6458"), Some(("86.00".into(), "0.00".into())));
+        assert_eq!(bal("4373"), Some(("0.00".into(), "86.00".into())));
         assert!(tb.balanced, "payroll journal balances");
+    }
+
+    #[tokio::test]
+    async fn run_payroll_with_medical_leave_splits_salary_and_indemnity_in_gl() {
+        let pool = setup().await;
+        let emp = create(
+            &pool,
+            CreateEmployeeInput {
+                company_id: "co1".into(),
+                cnp: "1".into(),
+                full_name: "Pop Ion".into(),
+                gross_salary: "5500".into(),
+                personal_deduction: Some("0".into()),
+                employment_date: None,
+                tip_asigurat: None,
+                pensionar: None,
+                tip_contract: None,
+                ore_norma: None,
+                exceptie_cas_min: None,
+                sediu_cif: None,
+                beneficiar_suma_netaxabila: None,
+            },
+        )
+        .await
+        .unwrap();
+        // Certificat boală obișnuită (cod 01), 8-12 iunie 2026 = 5 zile lucrătoare; indemnizație 600.
+        crate::db::concedii::create(
+            &pool,
+            crate::db::concedii::MedicalLeaveInput {
+                company_id: "co1".into(),
+                employee_id: emp.id.clone(),
+                period_ym: "2026-06".into(),
+                serie: Some("AB".into()),
+                numar: Some("123".into()),
+                cod_indemnizatie: Some("01".into()),
+                data_acordare: Some("2026-06-08".into()),
+                data_inceput: Some("2026-06-08".into()),
+                data_sfarsit: Some("2026-06-12".into()),
+                zile_angajator: Some(4),
+                zile_fnuass: Some(0),
+                baza_calcul: Some("24000".into()),
+                zile_baza: Some(130),
+                suma_angajator: Some("600".into()),
+                suma_fnuass: Some("0".into()),
+                procent: Some(75),
+                loc_prescriere: Some(1),
+                cod_boala: Some("A09".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let run = run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        // Iunie 2026 = 22 zile lucrătoare; 5 zile concediu ⇒ 17 lucrate; brut lucrat 5500×17/22 = 4250.
+        // Indemnizație 600. CAS 25%×4850 = 1213, CASS 10%×4850 = 485, impozit 10%×3152 = 315,
+        // CAM 2,25%×4250 = 96, net total 2837.
+        assert_eq!(run.total_gross, "4850.00"); // lucrat 4250 + indemnizație 600
+        assert_eq!(run.total_cas, "1213.00");
+        assert_eq!(run.total_cass, "485.00");
+        assert_eq!(run.total_income_tax, "315.00");
+        assert_eq!(run.total_cam, "96.00");
+        assert_eq!(run.total_concedii, "36.00"); // CCI 0,85% × 4250 = 36.125 → 36
+        assert_eq!(run.total_net, "2837.00");
+
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let bal = |code: &str| {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| (r.closing_debit.clone(), r.closing_credit.clone()))
+        };
+        // Salariul lucrat (641) e separat de indemnizație (6458); 421 = salariu net, 423 = indemniz. netă.
+        assert_eq!(bal("641"), Some(("4250.00".into(), "0.00".into())));
+        // 6458 = 600 indemnizație angajator + 36 CCI 0,85%.
+        assert_eq!(bal("6458"), Some(("636.00".into(), "0.00".into())));
+        assert_eq!(bal("4373"), Some(("0.00".into(), "36.00".into()))); // CCI 0,85% datorată
+        assert_eq!(bal("421"), Some(("0.00".into(), "2486.00".into()))); // 4250 − 1063 − 425 − 276
+        assert_eq!(bal("423"), Some(("0.00".into(), "351.00".into()))); // 600 − 150 − 60 − 39
+                                                                        // Creditele de contribuții = cele combinate (lucrat + indemnizație) = obligațiile D112.
+        assert_eq!(bal("4315"), Some(("0.00".into(), "1213.00".into())));
+        assert_eq!(bal("4316"), Some(("0.00".into(), "485.00".into())));
+        assert_eq!(bal("444"), Some(("0.00".into(), "315.00".into())));
+        assert_eq!(bal("646"), Some(("96.00".into(), "0.00".into())));
+        assert!(tb.balanced, "payroll + indemnity + CCI journal balances");
     }
 }

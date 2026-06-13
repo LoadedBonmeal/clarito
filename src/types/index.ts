@@ -1162,6 +1162,8 @@ export interface MedicalLeave {
   sumaAngajator: string;
   sumaFnuass: string;
   procent: number;
+  locPrescriere: number;
+  codBoala: string;
   createdAt: number;
 }
 
@@ -1182,6 +1184,8 @@ export interface MedicalLeaveInput {
   sumaAngajator?: string;
   sumaFnuass?: string;
   procent?: number;
+  locPrescriere?: number;
+  codBoala?: string;
 }
 
 export interface CreateEmployeeInput {
@@ -1213,6 +1217,7 @@ export interface EmployeeState {
   incomeTax: string;
   net: string;
   cam: string;
+  concedii: string;
 }
 
 export interface PayrollRun {
@@ -1223,6 +1228,7 @@ export interface PayrollRun {
   totalIncomeTax: string;
   totalNet: string;
   totalCam: string;
+  totalConcedii: string;
   posted: boolean;
   entryDate: string;
 }
@@ -1242,6 +1248,7 @@ export interface PayrollResult {
   incomeTax: string;
   net: string;
   cam: string;
+  concedii: string;
   totalEmployerCost: string;
 }
 

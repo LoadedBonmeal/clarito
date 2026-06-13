@@ -234,11 +234,12 @@ export const system = {
   setAutostart: (enabled: boolean) =>
     invoke<void>("set_autostart", { enabled }),
   getAutostart: () => invoke<boolean>("get_autostart"),
-  getActivityLog: () =>
+  getActivityLog: (companyId: string) =>
     invoke<
       Array<{ id: string; entityId: string; metadata: string; createdAt: number }>
-    >("get_activity_log"),
-  exportActivityLogCsv: () => invoke<string>("export_activity_log_csv"),
+    >("get_activity_log", { companyId }),
+  exportActivityLogCsv: (companyId: string) =>
+    invoke<string>("export_activity_log_csv", { companyId }),
   checkFormVersions: () => invoke<FormStaleness[]>("check_form_versions"),
 };
 

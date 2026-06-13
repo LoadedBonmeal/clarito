@@ -100,6 +100,7 @@ pub async fn create_invoice_draft(
         "invoice_created",
         "invoice",
         &new_invoice.id,
+        Some(&new_invoice.company_id),
         None,
     )
     .await;
@@ -115,8 +116,15 @@ pub async fn delete_invoice(
     company_id: String,
 ) -> AppResult<()> {
     invoices::delete_scoped(&state.db, &id, &company_id).await?;
-    let _ =
-        crate::db::audit::log_user_action(&state.db, "invoice_deleted", "invoice", &id, None).await;
+    let _ = crate::db::audit::log_user_action(
+        &state.db,
+        "invoice_deleted",
+        "invoice",
+        &id,
+        Some(&company_id),
+        None,
+    )
+    .await;
     Ok(())
 }
 
@@ -228,6 +236,15 @@ pub async fn update_invoice_draft(
         }) {
             return Err(AppError::Validation(format!(
                 "Cotă TVA invalidă: {}%. Valori permise: 0, 5, 9, 11, 19, 21.",
+                line.vat_rate
+            )));
+        }
+        // FISCAL-001 (Legea 141/2025): 19%/5% nu mai sunt valide pentru facturi emise ≥ 01.08.2025
+        // (au devenit 21%/11%; 9% rămâne tranzitoriu pentru locuințe). Vezi db::invoices.
+        if invoices::old_vat_rate_blocked(&input.issue_date, line.vat_rate) {
+            return Err(AppError::Validation(format!(
+                "Cota TVA {}% nu mai este validă pentru facturi emise de la 01.08.2025 \
+                 (Legea 141/2025) — folosiți 21% sau 11%.",
                 line.vat_rate
             )));
         }
@@ -392,8 +409,15 @@ pub async fn update_invoice_draft(
 
     tx.commit().await?;
 
-    let _ =
-        crate::db::audit::log_user_action(&state.db, "invoice_updated", "invoice", &id, None).await;
+    let _ = crate::db::audit::log_user_action(
+        &state.db,
+        "invoice_updated",
+        "invoice",
+        &id,
+        Some(&company_id),
+        None,
+    )
+    .await;
 
     // 6. Return updated invoice — re-verify ownership on the fetched row so the unscoped
     // invoices::get can never hand a foreign invoice back across the IPC boundary.
@@ -759,6 +783,7 @@ pub async fn storno_invoice(
         "invoice_stornoed",
         "invoice",
         &storno_id,
+        Some(&orig_inv.company_id),
         Some(&orig_inv.full_number),
     )
     .await;
@@ -916,6 +941,7 @@ pub async fn duplicate_invoice(
         "invoice_duplicated",
         "invoice",
         &new_invoice_id,
+        Some(&source.company_id),
         Some(&source.full_number),
     )
     .await;

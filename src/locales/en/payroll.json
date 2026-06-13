@@ -82,7 +82,8 @@
         "cass": "CASS 10%",
         "tax": "Tax 10%",
         "net": "Net",
-        "cam": "CAM 2.25%"
+        "cam": "CAM 2.25%",
+        "cci": "CCI 0.85%"
       },
       "total": "Total",
       "footnote": "* CAS and CASS are calculated on the minimum gross salary base for part-time contracts without an exception — the difference is borne by the employer under art. 146(5⁶) of the Fiscal Code.",
@@ -107,6 +108,12 @@
         "c06": "pregnancy and confinement",
         "c09": "child care",
         "c15": "maternal risk"
+      },
+      "locPrescriere": {
+        "l1": "family doctor",
+        "l2": "hospital",
+        "l3": "outpatient",
+        "l4": "CAS"
       },
       "confirmDelete": "Delete this medical leave?",
       "footnote1": "FNUASS indemnities are recovered through the",
@@ -161,10 +168,16 @@
       "serie": "Certificate series",
       "numar": "Certificate number",
       "code": "Indemnity code (D_9)",
+      "locPrescriere": "Prescription place (D_10)",
+      "codBoala": "Illness code (D_23)",
+      "dateGranted": "Date granted (D_5)",
       "dateStart": "Start date",
       "dateEnd": "End date",
       "amountEmployer": "Employer indemnity",
       "amountFnuass": "FNUASS indemnity",
+      "baza": "6-month base (D_17)",
+      "zileBaza": "Base days (D_18)",
+      "procent": "Percentage (D_28)",
       "selectRequired": "Select an employee.",
       "save": "Save certificate"
     },

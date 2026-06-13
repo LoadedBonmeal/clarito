@@ -83,7 +83,8 @@
         "cass": "CASS 10%",
         "tax": "Impozit 10%",
         "net": "Net",
-        "cam": "CAM 2,25%"
+        "cam": "CAM 2,25%",
+        "cci": "CCI 0,85%"
       },
       "total": "Total",
       "footnote": "* CAS și CASS calculate la baza salariului minim brut pentru contractele part-time fără excepție — diferența este suportată de angajator conform art. 146(5⁶) Cod fiscal.",
@@ -108,6 +109,12 @@
         "c06": "sarcină și lăuzie",
         "c09": "îngrijire copil",
         "c15": "risc maternal"
+      },
+      "locPrescriere": {
+        "l1": "medic de familie",
+        "l2": "spital",
+        "l3": "ambulatoriu",
+        "l4": "CAS"
       },
       "confirmDelete": "Ștergeți acest concediu medical?",
       "footnote1": "Indemnizațiile FNUASS se recuperează prin",
@@ -162,10 +169,16 @@
       "serie": "Serie certificat",
       "numar": "Număr certificat",
       "code": "Cod indemnizație (D_9)",
+      "locPrescriere": "Loc prescriere (D_10)",
+      "codBoala": "Cod boală (D_23)",
+      "dateGranted": "Data acordării (D_5)",
       "dateStart": "Data început",
       "dateEnd": "Data sfârșit",
       "amountEmployer": "Indemnizație angajator",
       "amountFnuass": "Indemnizație FNUASS",
+      "baza": "Bază calcul 6 luni (D_17)",
+      "zileBaza": "Zile bază (D_18)",
+      "procent": "Procent (D_28)",
       "selectRequired": "Selectați angajatul.",
       "save": "Salvează certificat"
     },

@@ -156,8 +156,9 @@ export function SettingsPage() {
   });
 
   const { data: activityLog = [] } = useQuery({
-    queryKey: queryKeys.system.activityLog,
-    queryFn: () => api.system.getActivityLog(),
+    queryKey: [...queryKeys.system.activityLog, activeCompanyId ?? ""],
+    queryFn: () => api.system.getActivityLog(activeCompanyId!),
+    enabled: !!activeCompanyId,
     refetchInterval: 30_000,
   });
 
@@ -1116,7 +1117,8 @@ export function SettingsPage() {
               <button
                 className="pill-btn"
                 onClick={async () => {
-                  const csv = await api.system.exportActivityLogCsv();
+                  if (!activeCompanyId) return;
+                  const csv = await api.system.exportActivityLogCsv(activeCompanyId);
                   const blob = new Blob([csv], { type: "text/csv" });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement("a");

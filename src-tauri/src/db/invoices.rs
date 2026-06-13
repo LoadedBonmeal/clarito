@@ -17,6 +17,20 @@ use crate::db::models::{
 };
 use crate::error::{AppError, AppResult};
 
+/// FISCAL-001 (Legea 141/2025): `true` when a line's VAT rate is a pre-reform rate (19% or 5%)
+/// that is no longer valid for an invoice issued on/after the 2025-08-01 reform (they became
+/// 21%/11%). 9% stays valid — it's the transitional housing rate to 2026-07. `issue_date` is an
+/// ISO `YYYY-MM-DD` string (lexicographic compare = chronological); a malformed/empty date does
+/// not trigger the block. Shared by `create` and `update_invoice_draft` so the rule lives once.
+pub(crate) fn old_vat_rate_blocked(issue_date: &str, vat_rate: f64) -> bool {
+    if issue_date < "2025-08-01" {
+        return false;
+    }
+    let rate = Decimal::try_from(vat_rate).unwrap_or(Decimal::ZERO);
+    (rate - Decimal::from(19)).abs() < Decimal::new(1, 3)
+        || (rate - Decimal::from(5)).abs() < Decimal::new(1, 3)
+}
+
 /// Round money to 2 decimals using COMMERCIAL rounding (half away from zero), the Romanian/
 /// EN16931 reference convention for VAT amounts — e.g. 2.50 × 21% = 0.5250 → 0.53. Kept
 /// consistent across line, subtotal and total (and with D300's `ron_to_bani`) so the invoice
@@ -385,6 +399,15 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
                 line.vat_rate
             )));
         }
+        // FISCAL-001 (Legea 141/2025): respinge la sursă o linie 19%/5% pe o factură emisă
+        // ≥ 01.08.2025, ca să nu ajungă date de cotă veche în D300.
+        if old_vat_rate_blocked(&input.issue_date, line.vat_rate) {
+            return Err(AppError::Validation(format!(
+                "Cota TVA {}% nu mai este validă pentru facturi emise de la 01.08.2025 \
+                 (Legea 141/2025) — folosiți 21% sau 11%.",
+                line.vat_rate
+            )));
+        }
         // O factură (nu storno) nu poate avea cantități negative — ar produce pe ascuns o notă
         // de credit. Stornările au flux separat (storno_invoice), cu linii negative legitime.
         if line.quantity < 0.0 {
@@ -667,13 +690,19 @@ fn file_fingerprint(path: &str) -> Option<(String, i64)> {
 }
 
 pub async fn set_xml_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<()> {
+    // E-002: never record an empty path (it would pass as "generated" yet point nowhere).
+    if path.is_empty() {
+        return Err(AppError::Validation(
+            "Calea fișierului XML nu poate fi goală.".into(),
+        ));
+    }
     let now = now_unix();
     // ROB-22: fingerprint the file we just wrote so tampering/corruption is detectable later.
     let (sha, size) = match file_fingerprint(path) {
         Some((s, n)) => (Some(s), Some(n)),
         None => (None, None),
     };
-    sqlx::query(
+    let result = sqlx::query(
         "UPDATE invoices SET xml_path = ?2, xml_sha256 = ?3, xml_size = ?4, updated_at = ?5 \
          WHERE id = ?1",
     )
@@ -684,6 +713,11 @@ pub async fn set_xml_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<
     .bind(now)
     .execute(pool)
     .await?;
+    // E-001: a no-op UPDATE means the invoice vanished (delete race) — surface it instead of
+    // silently leaving an orphaned file on disk with no DB row pointing at it.
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
     Ok(())
 }
 
@@ -751,13 +785,19 @@ pub async fn list_submitted(pool: &SqlitePool, company_id: &str) -> AppResult<Ve
 }
 
 pub async fn set_pdf_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<()> {
+    // E-002: never record an empty path (see set_xml_path).
+    if path.is_empty() {
+        return Err(AppError::Validation(
+            "Calea fișierului PDF nu poate fi goală.".into(),
+        ));
+    }
     let now = now_unix();
     // ROB-22: fingerprint the PDF we just wrote (see set_xml_path).
     let (sha, size) = match file_fingerprint(path) {
         Some((s, n)) => (Some(s), Some(n)),
         None => (None, None),
     };
-    sqlx::query(
+    let result = sqlx::query(
         "UPDATE invoices SET pdf_path = ?2, pdf_sha256 = ?3, pdf_size = ?4, updated_at = ?5 \
          WHERE id = ?1",
     )
@@ -768,6 +808,10 @@ pub async fn set_pdf_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<
     .bind(now)
     .execute(pool)
     .await?;
+    // E-001: no-op UPDATE → invoice gone (delete race) → NotFound, not a silent orphan.
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
     Ok(())
 }
 
@@ -1156,6 +1200,42 @@ mod tests {
         assert!(super::verify_invoice_integrity(&pool, "inv-i", "comp-2")
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn rob_b_set_path_guards_empty_and_missing_invoice() {
+        let pool = setup_integrity_pool().await;
+        sqlx::query(
+            "INSERT INTO invoices (id, company_id, status) VALUES ('inv-g','comp-1','DRAFT')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // E-002: empty path rejected (both setters).
+        assert!(super::set_xml_path(&pool, "inv-g", "").await.is_err());
+        assert!(super::set_pdf_path(&pool, "inv-g", "").await.is_err());
+        // E-001: a non-existent invoice (delete race) → NotFound, not a silent no-op.
+        assert!(matches!(
+            super::set_xml_path(&pool, "ghost", "/tmp/x.xml").await,
+            Err(crate::error::AppError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn fiscal001_old_vat_rate_blocked_after_reform() {
+        use super::old_vat_rate_blocked;
+        // Pre-reform (< 2025-08-01): the old 19%/5% are valid.
+        assert!(!old_vat_rate_blocked("2025-07-31", 19.0));
+        assert!(!old_vat_rate_blocked("2025-07-31", 5.0));
+        // On/after the reform: 19%/5% blocked; 21/11/9(transitional)/0 stay valid.
+        assert!(old_vat_rate_blocked("2025-08-01", 19.0));
+        assert!(old_vat_rate_blocked("2026-03-01", 5.0));
+        assert!(!old_vat_rate_blocked("2026-03-01", 21.0));
+        assert!(!old_vat_rate_blocked("2026-03-01", 11.0));
+        assert!(!old_vat_rate_blocked("2026-03-01", 9.0));
+        assert!(!old_vat_rate_blocked("2026-03-01", 0.0));
+        // A malformed/empty issue_date must never block.
+        assert!(!old_vat_rate_blocked("", 19.0));
     }
 
     #[test]

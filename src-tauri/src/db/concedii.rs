@@ -1,25 +1,30 @@
 //! Concedii medicale (OUG 158/2005) — registrul certificatelor de concediu medical, sursa blocului
-//! D112 `asiguratD` (per certificat) + rollup-urile `asiguratB3` (B3_12 = Σ indemnizație angajator,
-//! B3_13 = Σ indemnizație FNUASS) și totalul de recuperat din FNUASS (angajatorC2).
+//! D112 `asiguratD` (per certificat) + rollup-ul angajator `angajatorC2` (C2_11 = COUNT, C2_12 = Σ
+//! D_16, C2_13 = Σ D_14, C2_14 = Σ D_15, C2_15 = Σ D_20, C2_16 = Σ D_21; recuperarea din FNUASS).
 //!
 //! Câmpurile derivate determinist (total zile = D_14+D_15; media zilnică = baza/zile_baza) se
 //! calculează aici; sumele indemnizațiilor (D_20/D_21) sunt introduse de utilizator (calculul lor
 //! din media veniturilor pe 6 luni e o extensie ulterioară). Validarea finală se face în
 //! DUKIntegrator înainte de depunere.
 //!
-//! ## De ce NU emitem încă blocul `asiguratD` în XML-ul D112 (blocaj documentat)
-//! Verificând `AsiguratDType` din XSD-ul oficial (`d112_10102024.xsd`), emiterea unui `asiguratD`
-//! valid cere **trei câmpuri obligatorii** pe care modelul/UI-ul de aici NU le captează:
-//!   * `D_5` (data acordării certificatului, `DateSType`, required) — formularul colectează doar
-//!     `data_inceput`/`data_sfarsit`, nu și data acordării.
-//!   * `D_10` (`IntInt1_4SType`, întreg 1–4, required) — fără enumerare/documentație în XSD; sensul
-//!     se ia din structura oficială ANAF.
-//!   * `D_23` (`Str3`, required) — string de max 3 caractere, fără enumerare/documentație în XSD.
+//! ## Starea emiterii `asiguratD` în D112 (actualizat 06/2026)
+//! EMITTER-ul B-path e GATA și trece CURAT validatorul OFICIAL ANAF `D112Validator.jar` (`-v D112`,
+//! `Validare fără erori`): un asigurat cu ≥1 certificat emite calea B — `asiguratB1/B2/B3/B4` +
+//! `asiguratD` (per certificat) + rollup-ul angajator `angajatorC2` (vezi `anaf_decl::d112_xml`,
+//! testul `dump_leave_d112`). Câmpurile mapează direct din [`MedicalLeave`] (D_1..D_28; D_16=D_14+D_15,
+//! D_19=ROUND(D_17/D_18,2)); indemnizația de CM e supusă CAS 25% + CASS 10% (mai puțin codurile scutite
+//! de CASS ∉{01,07,10}), NU CAM — confirmat de reconcilierea B4 din structura v7. (Blocajul vechi „nu
+//! putem valida” e REZOLVAT: validatorul rulează local cu OpenJDK 17.)
 //!
-//! `D_16` (= `D_14`+`D_15`) și `D_19` (= bază/zile_bază) SUNT derivabile, deci nu blochează.
-//! Concluzie: a emite valori ghicite pentru `D_5`/`D_10`/`D_23` ar produce XML respins de ANAF.
-//! Până la (a) definițiile oficiale ale `D_10`/`D_23` și (b) extinderea modelului+UI cu `D_5`,
-//! concediile se completează în PDF-ul inteligent ANAF după import (comportamentul actual, sigur).
+//! CABLAREA LIVE e COMPLETĂ — motorul e conștient de concedii. `compute_payroll_with_leave` (în
+//! `anaf_decl::d112`) proratează salariul la zilele lucrate (intervalul certificatului, inclusiv prima
+//! zi neplătită 2026 OUG 91/2025) și calculează contribuțiile combinate; `run_payroll` +
+//! `gl::post_payroll` postează separat salariul (641/421) de indemnizație (6458=423 angajator,
+//! 4382=423 FNUASS recuperabil, 423=4315/4316/444 rețineri); `export_d112_xml` populează `med_leaves`
+//! din registru ⇒ D112 = Registrul-jurnal = net. Tratamentul fiscal e în `cm_indemn_treatment` (CASS
+//! doar 01/07/10; impozit — maternitate/îngrijire copil/risc maternal scutite). Limitări cunoscute:
+//! contribuția 0,85% concedii (platitor de venit) NU e modelată (ortogonală, pe tot fondul de salarii);
+//! baza minimă part-time nu se aplică simultan cu concediul (combinație rară).
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -49,6 +54,12 @@ pub struct MedicalLeave {
     pub suma_angajator: String,
     pub suma_fnuass: String,
     pub procent: i64,
+    /// D_10 — locul de prescriere a certificatului (Nomenclator 8). Live XSD types it
+    /// `IntInt1_4SType`, so the valid domain is 1–4 (1 medic familie, 2 spital, 3 ambulatoriu, 4 CAS).
+    pub loc_prescriere: i64,
+    /// D_23 — codul de boală (diagnostic) de pe certificat, max 3 caractere; „RM" pentru risc
+    /// maternal (D_9=15). NOTE: structura v7 = D_23, OPANAF 299/2025 = D_22 — confirmat la emitere.
+    pub cod_boala: String,
     pub created_at: i64,
 }
 
@@ -84,11 +95,16 @@ pub struct MedicalLeaveInput {
     pub suma_fnuass: Option<String>,
     #[serde(default)]
     pub procent: Option<i64>,
+    #[serde(default)]
+    pub loc_prescriere: Option<i64>,
+    #[serde(default)]
+    pub cod_boala: Option<String>,
 }
 
 const COLS: &str = "id, company_id, employee_id, period_ym, serie, numar, cod_indemnizatie, \
                     data_acordare, data_inceput, data_sfarsit, zile_angajator, zile_fnuass, \
-                    baza_calcul, zile_baza, suma_angajator, suma_fnuass, procent, created_at";
+                    baza_calcul, zile_baza, suma_angajator, suma_fnuass, procent, \
+                    loc_prescriere, cod_boala, created_at";
 
 fn money(label: &str, s: &str) -> AppResult<String> {
     let d = Decimal::from_str(s.trim()).map_err(|_| {
@@ -170,6 +186,24 @@ fn validate_leave(input: &MedicalLeaveInput) -> AppResult<()> {
             "Numărul de zile pentru baza de calcul trebuie să fie cel puțin 1.".into(),
         ));
     }
+    // D_10 (loc prescriere): XSD `IntInt1_4SType` → domeniul valid e 1–4. Întoarcem eroare doar
+    // pentru o valoare explicit invalidă (None → default 1 la create).
+    if let Some(loc) = input.loc_prescriere {
+        if !(1..=4).contains(&loc) {
+            return Err(AppError::Validation(
+                "Locul de prescriere (D_10) trebuie să fie 1–4 (1 medic, 2 spital, 3 ambulatoriu, 4 CAS)."
+                    .into(),
+            ));
+        }
+    }
+    // D_23 (cod boală): max 3 caractere. „RM" e impus automat pentru D_9=15 (risc maternal) la create.
+    if let Some(cod) = input.cod_boala.as_deref() {
+        if cod.trim().chars().count() > 3 {
+            return Err(AppError::Validation(
+                "Codul de boală (D_23) are maximum 3 caractere.".into(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -205,9 +239,16 @@ pub async fn create(pool: &SqlitePool, input: MedicalLeaveInput) -> AppResult<Me
         input.suma_fnuass.as_deref().unwrap_or("0"),
     )?;
     let id = new_id();
+    let cod_indemnizatie = input.cod_indemnizatie.as_deref().unwrap_or("01");
+    // D_23: forced to "RM" for risc maternal (D_9=15); otherwise the entered diagnosis code.
+    let cod_boala = if cod_indemnizatie == "15" {
+        "RM".to_string()
+    } else {
+        input.cod_boala.as_deref().unwrap_or("").trim().to_string()
+    };
     sqlx::query(&format!(
         "INSERT INTO medical_leaves ({COLS}) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)"
     ))
     .bind(&id)
     .bind(&input.company_id)
@@ -215,7 +256,7 @@ pub async fn create(pool: &SqlitePool, input: MedicalLeaveInput) -> AppResult<Me
     .bind(&input.period_ym)
     .bind(input.serie.as_deref().unwrap_or("").trim())
     .bind(input.numar.as_deref().unwrap_or("").trim())
-    .bind(input.cod_indemnizatie.as_deref().unwrap_or("01"))
+    .bind(cod_indemnizatie)
     .bind(input.data_acordare.as_deref().unwrap_or(""))
     .bind(input.data_inceput.as_deref().unwrap_or(""))
     .bind(input.data_sfarsit.as_deref().unwrap_or(""))
@@ -226,6 +267,8 @@ pub async fn create(pool: &SqlitePool, input: MedicalLeaveInput) -> AppResult<Me
     .bind(&s_ang)
     .bind(&s_fnuass)
     .bind(input.procent.unwrap_or(75))
+    .bind(input.loc_prescriere.unwrap_or(1).clamp(1, 4))
+    .bind(&cod_boala)
     .bind(now_unix())
     .execute(pool)
     .await?;
@@ -291,6 +334,8 @@ mod tests {
                 suma_angajator: Some("1071.43".into()),
                 suma_fnuass: Some("0".into()),
                 procent: Some(75),
+                loc_prescriere: Some(1),
+                cod_boala: Some("01".into()),
             },
         )
         .await
@@ -321,6 +366,8 @@ mod tests {
             suma_angajator: Some("1071.43".into()),
             suma_fnuass: Some("0".into()),
             procent: Some(75),
+            loc_prescriere: Some(1),
+            cod_boala: Some("01".into()),
         }
     }
 
@@ -336,6 +383,45 @@ mod tests {
         )
         .await;
         assert!(r.is_err());
+    }
+
+    #[tokio::test]
+    async fn d10_d23_capture_and_rules() {
+        let pool = pool().await;
+        // D_9=15 (risc maternal) forces D_23 = "RM" regardless of the entered cod_boala.
+        let m = create(
+            &pool,
+            MedicalLeaveInput {
+                cod_indemnizatie: Some("15".into()),
+                cod_boala: Some("xyz".into()),
+                loc_prescriere: Some(2),
+                ..valid_input()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(m.cod_boala, "RM");
+        assert_eq!(m.loc_prescriere, 2);
+        // D_10 out of the XSD's 1..=4 domain → rejected.
+        assert!(create(
+            &pool,
+            MedicalLeaveInput {
+                loc_prescriere: Some(5),
+                ..valid_input()
+            }
+        )
+        .await
+        .is_err());
+        // D_23 longer than 3 chars → rejected.
+        assert!(create(
+            &pool,
+            MedicalLeaveInput {
+                cod_boala: Some("ABCD".into()),
+                ..valid_input()
+            }
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]

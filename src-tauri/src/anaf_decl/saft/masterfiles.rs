@@ -1083,6 +1083,19 @@ mod tests {
     use rust_decimal::Decimal;
 
     #[test]
+    fn canonical_partner_id_edge_cases() {
+        // RO CUI → IDType "00" + the bare digits (RO prefix stripped).
+        assert_eq!(canonical_partner_id("anything", "RO12345678"), "0012345678");
+        assert_eq!(canonical_partner_id("anything", "12345678"), "0012345678");
+        // No CUI but a real internal id → the DUK-accepted anonymized partner id.
+        assert_eq!(canonical_partner_id("contact-7", ""), "080000000000000");
+        // No CUI and no id → genuinely absent partner.
+        assert_eq!(canonical_partner_id("", ""), "0");
+        // Non-numeric CUI (foreign / malformed) → treated as unidentified, not "00<garbage>".
+        assert_eq!(canonical_partner_id("c1", "DE811234"), "080000000000000");
+    }
+
+    #[test]
     fn account_type_class_mapping() {
         assert_eq!(account_type_for_class(1), "Pasiv");
         assert_eq!(account_type_for_class(2), "Activ");

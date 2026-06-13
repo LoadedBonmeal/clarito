@@ -260,6 +260,10 @@ async fn process_recurring_invoices(
                 "Recurring template: all lines failed validation — skipping invoice generation \
                  and NOT advancing next_issue_date"
             );
+            // E-004: don't skip silently — the user's client won't get billed. One alert per
+            // broken template: notify_recurring_skipped COUNT-guards on data before inserting
+            // (the notifications.data UNIQUE index from migration 0010 is the backstop).
+            notify_recurring_skipped(pool, &template.id, &template.template_name).await;
             continue; // tx not yet begun here — nothing to roll back
         }
 

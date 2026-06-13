@@ -27,7 +27,7 @@ import type { LineRow } from "@/components/shared/LineItemsEditor";
 import { useAppStore } from "@/lib/store";
 import { api } from "@/lib/tauri";
 import { queryClient, queryKeys } from "@/lib/queries";
-import type { AppErrorPayload, Contact, CreateLineInput } from "@/types";
+import type { Contact, CreateLineInput } from "@/types";
 import { CURRENCIES } from "@/lib/constants";
 import { fmtShortcut } from "@/lib/platform";
 import { notify } from "@/lib/toasts";
@@ -266,7 +266,7 @@ export function InvoiceNewPage() {
           if (!authenticated) await api.anaf.authorize(created.companyId);
           await api.anaf.submitInvoice(created.companyId, created.id, testMode);
         } catch (e) {
-          setSubmitError((e as unknown as AppErrorPayload).message ?? t("invoiceForm.errors.anafSubmit"));
+          setSubmitError(formatError(e, t("invoiceForm.errors.anafSubmit")));
           navigate({ to: "/invoices/$id", params: { id: created.id } });
           return;
         }
@@ -275,7 +275,7 @@ export function InvoiceNewPage() {
     },
     onError: (e) => {
       submitAfterSaveRef.current = false;
-      setSubmitError((e as unknown as AppErrorPayload).message ?? t("invoiceForm.errors.save"));
+      setSubmitError(formatError(e, t("invoiceForm.errors.save")));
     },
   });
 

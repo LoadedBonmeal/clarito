@@ -1234,6 +1234,26 @@ mod tests {
         assert_eq!(normalize_vat_rate_dec(""), Decimal::ZERO);
     }
 
+    #[test]
+    fn saft_revenue_account_maps_every_kind() {
+        // SAF-T revenue lines must hit the right RO chart account (wrong account = wrong D406).
+        assert_eq!(saft_revenue_account("product"), "701");
+        assert_eq!(saft_revenue_account("service"), "704");
+        assert_eq!(saft_revenue_account("reduction"), "709");
+        assert_eq!(saft_revenue_account("goods"), "707"); // default
+        assert_eq!(saft_revenue_account("anything_else"), "707");
+        assert_eq!(saft_revenue_account(" service "), "704"); // trimmed
+    }
+
+    #[test]
+    fn trunc_is_char_boundary_safe() {
+        // Truncation must cut on CHAR boundaries, never mid-UTF8 (diacritics in RO partner names).
+        assert_eq!(trunc("Societate", 4), "Soci");
+        assert_eq!(trunc("ăîâșț", 3), "ăîâ"); // 3 chars (6 bytes) — not a byte split
+        assert_eq!(trunc("ab", 10), "ab"); // shorter than max → unchanged
+        assert_eq!(trunc("", 5), "");
+    }
+
     /// DEFECT 1 FIX: a purchase invoice with TWO vat_lines (21% + 11%) must
     /// produce TWO InvoiceLines with correct per-line TaxCode/TaxPercentage/TaxBase/TaxAmount,
     /// not a single 19% line.

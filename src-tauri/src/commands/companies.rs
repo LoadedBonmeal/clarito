@@ -159,6 +159,7 @@ pub async fn create_company(
         "company_created",
         "company",
         &new_company.id,
+        Some(&new_company.id),
         Some(&new_company.cui),
     )
     .await;
@@ -172,8 +173,15 @@ pub async fn update_company(
     input: UpdateCompanyInput,
 ) -> AppResult<Company> {
     let updated = companies::update(&state.db, &id, input).await?;
-    let _ =
-        crate::db::audit::log_user_action(&state.db, "company_updated", "company", &id, None).await;
+    let _ = crate::db::audit::log_user_action(
+        &state.db,
+        "company_updated",
+        "company",
+        &id,
+        Some(&id),
+        None,
+    )
+    .await;
     Ok(updated)
 }
 
