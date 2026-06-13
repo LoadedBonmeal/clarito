@@ -105,6 +105,7 @@ pub async fn update_recurring_invoice(
         "recurring_updated",
         "recurring",
         &args.id,
+        Some(&args.company_id),
         None,
     )
     .await;
@@ -124,6 +125,7 @@ pub async fn toggle_recurring_active(
         "recurring_updated",
         "recurring",
         &id,
+        Some(&company_id),
         Some(if active { "activated" } else { "paused" }),
     )
     .await;

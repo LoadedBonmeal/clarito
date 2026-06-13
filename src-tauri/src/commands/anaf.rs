@@ -518,6 +518,7 @@ pub(crate) async fn submit_invoice_inner(
         "invoice_submitted_anaf",
         "invoice",
         invoice_id,
+        Some(&invoice.company_id),
         Some(&upload_id),
     )
     .await;

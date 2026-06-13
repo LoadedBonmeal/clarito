@@ -8,6 +8,19 @@ use crate::db::pool::resolve_db_path;
 use crate::error::AppResult;
 use crate::state::AppState;
 
+/// SEC-07/08: the activity-log filter — the surfaced action set, scoped to one company,
+/// plus the global `background_task_run` maintenance carve-out (visible to every company).
+/// `?1` binds the company_id. Single source of truth for the two read commands + the
+/// isolation test so the scoping predicate can never drift between them.
+const ACTIVITY_LOG_WHERE: &str = "action IN ( \
+         'background_task_run', \
+         'invoice_created', 'invoice_updated', 'invoice_deleted', \
+         'invoice_stornoed', 'invoice_duplicated', 'invoice_submitted_anaf', \
+         'company_created', 'company_updated', \
+         'recurring_updated' \
+     ) \
+     AND (company_id = ?1 OR action = 'background_task_run')";
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppInfo {
@@ -117,20 +130,19 @@ pub async fn dev_seed(state: State<'_, AppState>) -> AppResult<()> {
     crate::db::seed::run_if_empty(&state.db).await
 }
 
-/// Returnează ultimele 50 de înregistrări din audit_log cu action = 'background_task_run'.
+/// Returnează ultimele 50 de înregistrări din audit_log pentru compania curentă.
+/// SEC-07: scoped la `company_id` — un eveniment al altei companii nu mai apare; doar
+/// evenimentele globale de mentenanță (`background_task_run`) sunt vizibile tuturor.
 #[tauri::command]
-pub async fn get_activity_log(state: State<'_, AppState>) -> AppResult<Vec<serde_json::Value>> {
-    let rows = sqlx::query(
+pub async fn get_activity_log(
+    state: State<'_, AppState>,
+    company_id: String,
+) -> AppResult<Vec<serde_json::Value>> {
+    let rows = sqlx::query(&format!(
         "SELECT id, entity_id, metadata, created_at FROM audit_log \
-         WHERE action IN ( \
-             'background_task_run', \
-             'invoice_created', 'invoice_updated', 'invoice_deleted', \
-             'invoice_stornoed', 'invoice_duplicated', 'invoice_submitted_anaf', \
-             'company_created', 'company_updated', \
-             'recurring_updated' \
-         ) \
-         ORDER BY created_at DESC LIMIT 50",
-    )
+         WHERE {ACTIVITY_LOG_WHERE} ORDER BY created_at DESC LIMIT 50"
+    ))
+    .bind(&company_id)
     .fetch_all(&state.db)
     .await
     .map_err(crate::error::AppError::Database)?;
@@ -150,19 +162,17 @@ pub async fn get_activity_log(state: State<'_, AppState>) -> AppResult<Vec<serde
 }
 
 /// Exportă jurnalul de activitate ca CSV și returnează conținutul.
+/// SEC-08: scoped la `company_id` (vezi `get_activity_log`).
 #[tauri::command]
-pub async fn export_activity_log_csv(state: State<'_, AppState>) -> AppResult<String> {
-    let rows = sqlx::query(
+pub async fn export_activity_log_csv(
+    state: State<'_, AppState>,
+    company_id: String,
+) -> AppResult<String> {
+    let rows = sqlx::query(&format!(
         "SELECT id, entity_id, metadata, created_at FROM audit_log \
-         WHERE action IN ( \
-             'background_task_run', \
-             'invoice_created', 'invoice_updated', 'invoice_deleted', \
-             'invoice_stornoed', 'invoice_duplicated', 'invoice_submitted_anaf', \
-             'company_created', 'company_updated', \
-             'recurring_updated' \
-         ) \
-         ORDER BY created_at DESC LIMIT 500",
-    )
+         WHERE {ACTIVITY_LOG_WHERE} ORDER BY created_at DESC LIMIT 500"
+    ))
+    .bind(&company_id)
     .fetch_all(&state.db)
     .await
     .map_err(crate::error::AppError::Database)?;
@@ -262,4 +272,56 @@ pub async fn open_archive_folder(state: State<'_, AppState>, app: AppHandle) -> 
         .open_path(archive_dir.to_string_lossy().to_string(), None::<&str>)
         .map_err(|e| crate::error::AppError::Other(e.to_string()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ACTIVITY_LOG_WHERE;
+    use sqlx::{Row, SqlitePool};
+
+    /// SEC-07/08: the shared activity-log filter must return ONLY the querying company's
+    /// events plus the global background_task_run carve-out — never another company's.
+    #[tokio::test]
+    async fn activity_log_is_company_scoped() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE audit_log (id TEXT PRIMARY KEY, action TEXT NOT NULL, \
+             entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, company_id TEXT, \
+             metadata TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()))",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (id, action, company_id) in [
+            ("a", "invoice_created", Some("comp-1")),
+            ("b", "invoice_submitted_anaf", Some("comp-2")), // foreign — must be hidden
+            ("c", "background_task_run", None),              // global — must be visible
+            ("d", "invoice_deleted", Some("comp-1")),
+        ] {
+            sqlx::query(
+                "INSERT INTO audit_log (id, action, entity_type, entity_id, company_id) \
+                 VALUES (?1, ?2, 'x', 'e', ?3)",
+            )
+            .bind(id)
+            .bind(action)
+            .bind(company_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let ids: Vec<String> = sqlx::query(&format!(
+            "SELECT id FROM audit_log WHERE {ACTIVITY_LOG_WHERE} ORDER BY id"
+        ))
+        .bind("comp-1")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.get::<String, _>("id"))
+        .collect();
+
+        // comp-1's two rows + the global background_task_run; comp-2's row excluded.
+        assert_eq!(ids, vec!["a", "c", "d"], "comp-2 (id=b) must not leak");
+    }
 }
