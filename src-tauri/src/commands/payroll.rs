@@ -274,6 +274,9 @@ pub async fn export_d112_xml(
             baza_cam: leid(baza_cas),
             // A_sal1 salariul de bază brut din contract (brutul realizat al lunii).
             sal_contract: leid(gross_in),
+            // E3_14/E1_6 baza impozit + E3_12/E1_4 deducerea personală (din rezultatul de salarizare).
+            baza_impozit: lei(&r.taxable_base),
+            deducere: lei(&r.personal_deduction),
             sediu_cif: e.sediu_cif.clone(),
         });
     }
