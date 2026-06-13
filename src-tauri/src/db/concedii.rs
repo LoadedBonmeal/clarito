@@ -6,6 +6,20 @@
 //! calculează aici; sumele indemnizațiilor (D_20/D_21) sunt introduse de utilizator (calculul lor
 //! din media veniturilor pe 6 luni e o extensie ulterioară). Validarea finală se face în
 //! DUKIntegrator înainte de depunere.
+//!
+//! ## De ce NU emitem încă blocul `asiguratD` în XML-ul D112 (blocaj documentat)
+//! Verificând `AsiguratDType` din XSD-ul oficial (`d112_10102024.xsd`), emiterea unui `asiguratD`
+//! valid cere **trei câmpuri obligatorii** pe care modelul/UI-ul de aici NU le captează:
+//!   * `D_5` (data acordării certificatului, `DateSType`, required) — formularul colectează doar
+//!     `data_inceput`/`data_sfarsit`, nu și data acordării.
+//!   * `D_10` (`IntInt1_4SType`, întreg 1–4, required) — fără enumerare/documentație în XSD; sensul
+//!     se ia din structura oficială ANAF.
+//!   * `D_23` (`Str3`, required) — string de max 3 caractere, fără enumerare/documentație în XSD.
+//!
+//! `D_16` (= `D_14`+`D_15`) și `D_19` (= bază/zile_bază) SUNT derivabile, deci nu blochează.
+//! Concluzie: a emite valori ghicite pentru `D_5`/`D_10`/`D_23` ar produce XML respins de ANAF.
+//! Până la (a) definițiile oficiale ale `D_10`/`D_23` și (b) extinderea modelului+UI cu `D_5`,
+//! concediile se completează în PDF-ul inteligent ANAF după import (comportamentul actual, sigur).
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -88,6 +102,77 @@ fn money(label: &str, s: &str) -> AppResult<String> {
     Ok(d.to_string())
 }
 
+/// `true` for a well-formed ISO calendar date `YYYY-MM-DD` (month 1–12, day 1–31).
+/// ISO strings also compare lexicographically = chronologically, so `<=` on the raw
+/// strings is a valid ordering check once both are validated here.
+fn valid_iso_date(s: &str) -> bool {
+    let p: Vec<&str> = s.split('-').collect();
+    if p.len() != 3 || p[0].len() != 4 || p[1].len() != 2 || p[2].len() != 2 {
+        return false;
+    }
+    if !p.iter().all(|seg| seg.bytes().all(|b| b.is_ascii_digit())) {
+        return false;
+    }
+    let (m, d) = (
+        p[1].parse::<u32>().unwrap_or(0),
+        p[2].parse::<u32>().unwrap_or(0),
+    );
+    (1..=12).contains(&m) && (1..=31).contains(&d)
+}
+
+/// Baseline data-quality validation for a medical-leave certificate (OUG 158/2005).
+/// Rejects the obviously-unusable rows that would otherwise reach the D112 export /
+/// DUKIntegrator as garbage. Does NOT enforce the deferred `asiguratD` rules (see the
+/// module-level note on the `D_5`/`D_10`/`D_23` blocker).
+fn validate_leave(input: &MedicalLeaveInput) -> AppResult<()> {
+    let serie = input.serie.as_deref().unwrap_or("").trim();
+    let numar = input.numar.as_deref().unwrap_or("").trim();
+    if serie.is_empty() || numar.is_empty() {
+        return Err(AppError::Validation(
+            "Seria și numărul certificatului medical sunt obligatorii.".into(),
+        ));
+    }
+    let inceput = input.data_inceput.as_deref().unwrap_or("").trim();
+    let sfarsit = input.data_sfarsit.as_deref().unwrap_or("").trim();
+    if !valid_iso_date(inceput) || !valid_iso_date(sfarsit) {
+        return Err(AppError::Validation(
+            "Datele de început și sfârșit ale concediului sunt obligatorii și trebuie să fie valide."
+                .into(),
+        ));
+    }
+    if sfarsit < inceput {
+        return Err(AppError::Validation(
+            "Data de sfârșit nu poate fi înainte de data de început.".into(),
+        ));
+    }
+    // data_acordare is optional in the UI; validate ordering only when present.
+    let acordare = input.data_acordare.as_deref().unwrap_or("").trim();
+    if !acordare.is_empty() && (!valid_iso_date(acordare) || acordare > inceput) {
+        return Err(AppError::Validation(
+            "Data acordării trebuie să fie validă și cel mult egală cu data de început.".into(),
+        ));
+    }
+    let total_zile =
+        input.zile_angajator.unwrap_or(0).max(0) + input.zile_fnuass.unwrap_or(0).max(0);
+    if total_zile < 1 {
+        return Err(AppError::Validation(
+            "Certificatul trebuie să acopere cel puțin o zi (angajator sau FNUASS).".into(),
+        ));
+    }
+    // media zilnică (D_19) = bază / zile_bază; o bază nenulă cu zile_bază = 0 ar fi împărțire la 0.
+    let baza_nonzero = input
+        .baza_calcul
+        .as_deref()
+        .and_then(|s| Decimal::from_str(s.trim()).ok())
+        .is_some_and(|d| !d.is_zero());
+    if baza_nonzero && input.zile_baza.unwrap_or(0) < 1 {
+        return Err(AppError::Validation(
+            "Numărul de zile pentru baza de calcul trebuie să fie cel puțin 1.".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// All medical-leave certificates for a company in a reporting month ('YYYY-MM').
 pub async fn list(
     pool: &SqlitePool,
@@ -106,6 +191,7 @@ pub async fn list(
 }
 
 pub async fn create(pool: &SqlitePool, input: MedicalLeaveInput) -> AppResult<MedicalLeave> {
+    validate_leave(&input)?;
     let baza = money(
         "Baza de calcul",
         input.baza_calcul.as_deref().unwrap_or("0"),
@@ -216,31 +302,110 @@ mod tests {
         assert!(list(&pool, "co", "2026-06").await.unwrap().is_empty());
     }
 
+    /// A complete, valid certificate input — the baseline the validation tests mutate.
+    fn valid_input() -> MedicalLeaveInput {
+        MedicalLeaveInput {
+            company_id: "co".into(),
+            employee_id: "e1".into(),
+            period_ym: "2026-06".into(),
+            serie: Some("AB".into()),
+            numar: Some("123".into()),
+            cod_indemnizatie: Some("01".into()),
+            data_acordare: Some("2026-06-01".into()),
+            data_inceput: Some("2026-06-02".into()),
+            data_sfarsit: Some("2026-06-06".into()),
+            zile_angajator: Some(5),
+            zile_fnuass: Some(0),
+            baza_calcul: Some("6000".into()),
+            zile_baza: Some(21),
+            suma_angajator: Some("1071.43".into()),
+            suma_fnuass: Some("0".into()),
+            procent: Some(75),
+        }
+    }
+
     #[tokio::test]
     async fn rejects_negative_amount() {
         let pool = pool().await;
         let r = create(
             &pool,
             MedicalLeaveInput {
-                company_id: "co".into(),
-                employee_id: "e1".into(),
-                period_ym: "2026-06".into(),
                 suma_angajator: Some("-5".into()),
-                serie: None,
-                numar: None,
-                cod_indemnizatie: None,
-                data_acordare: None,
-                data_inceput: None,
-                data_sfarsit: None,
-                zile_angajator: None,
-                zile_fnuass: None,
-                baza_calcul: None,
-                zile_baza: None,
-                suma_fnuass: None,
-                procent: None,
+                ..valid_input()
             },
         )
         .await;
         assert!(r.is_err());
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_serie_or_numar() {
+        let pool = pool().await;
+        assert!(create(
+            &pool,
+            MedicalLeaveInput {
+                serie: Some("  ".into()),
+                ..valid_input()
+            }
+        )
+        .await
+        .is_err());
+        assert!(create(
+            &pool,
+            MedicalLeaveInput {
+                numar: None,
+                ..valid_input()
+            }
+        )
+        .await
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn rejects_end_before_start_and_zero_days() {
+        let pool = pool().await;
+        // sfârșit < început
+        assert!(create(
+            &pool,
+            MedicalLeaveInput {
+                data_inceput: Some("2026-06-10".into()),
+                data_sfarsit: Some("2026-06-05".into()),
+                ..valid_input()
+            }
+        )
+        .await
+        .is_err());
+        // zero zile (angajator + FNUASS)
+        assert!(create(
+            &pool,
+            MedicalLeaveInput {
+                zile_angajator: Some(0),
+                zile_fnuass: Some(0),
+                ..valid_input()
+            }
+        )
+        .await
+        .is_err());
+        // bază nenulă fără zile_bază → ar fi împărțire la 0 pentru media zilnică
+        assert!(create(
+            &pool,
+            MedicalLeaveInput {
+                baza_calcul: Some("6000".into()),
+                zile_baza: Some(0),
+                ..valid_input()
+            }
+        )
+        .await
+        .is_err());
+    }
+
+    #[test]
+    fn iso_date_helper() {
+        assert!(valid_iso_date("2026-06-02"));
+        assert!(!valid_iso_date("2026-13-02")); // luna 13
+        assert!(!valid_iso_date("2026-06-32")); // ziua 32
+        assert!(!valid_iso_date("2026-6-2")); // segmente nepadate
+        assert!(!valid_iso_date("02.06.2026")); // format zz.ll.aaaa, nu ISO
+        assert!(!valid_iso_date(""));
     }
 }
