@@ -1,14 +1,29 @@
-//! D112 — Declarația 112 XML (schema DecUnica.xsd, namespace
-//! `mfp:anaf:dgti:declaratie_unica:declaratie:v1`).
+//! D112 — Declarația 112 XML.
+//!
+//! Namespace `mfp:anaf:dgti:declaratie_unica:declaratie:v6` + root `declaratieUnica`, VERIFICAT
+//! contra XSD-ului D112 OFICIAL `d112_10102024.xsd` (version 1.02, targetNamespace …:v6). ATENȚIE:
+//! NU este `…:v1` — acela e din kit-ul OBSOLET «Declarația Unică 2011» (DecUnica.xsd); fișierul D112
+//! curent declară `:v6` și cere `angajatorB/@B_sal` (use="required").
 //!
 //! Generează structura `declaratieUnica` → `angajator` (rândurile de obligații A + sumarul B +
 //! C6) + câte un `asigurat`/`asiguratA` per angajat, pentru cazul STANDARD (salariat cu normă
-//! întreagă, nepensionar). Numele atributelor + codurile sunt verbatim din XSD (s-a verificat:
-//! angajatorA = A_codOblig/A_codBugetar/A_datorat/A_plata; angajatorB = numere asigurați + fond
-//! salarii; asiguratA = A_1 tip asigurat, A_3 tip contract, bazele + sumele CAS/CASS).
+//! întreagă, nepensionar). Numele atributelor + codurile sunt verbatim din XSD: angajatorA =
+//! A_codOblig/A_codBugetar/A_datorat/A_deductibil/A_plata; angajatorB = numerele de asigurați
+//! (B_cnp/B_sanatate/B_pensie) + B_sal (nr. asigurați cu venituri salariale) + B_brutSalarii;
+//! asiguratA = A_1 tip asigurat, A_3 tip contract, bazele + sumele CAS/CASS.
 //!
 //! Este un DRAFT pentru import în aplicația D112 (PDF inteligent ANAF), unde se rulează validatorul
-//! (DUKIntegrator) și se completează blocurile speciale (concedii, scutiri, sedii secundare).
+//! (DUKIntegrator) și se completează blocurile speciale (concedii, scutiri, sedii secundare). Restul
+//! atributelor opționale (C/D/E) le completează formularul; emitem subsetul standard obligatoriu.
+//!
+//! MODEL IULIE 2026: Ordinul comun 605/95/928/2.314/2026 (MO 463/02.06.2026) introduce un nou model
+//! D112 pentru veniturile din 07/2026 (prima depunere 25.08.2026). Cercetarea surselor oficiale arată
+//! că schimbările sunt la nivel de NOMENCLATOR/instrucțiuni (suma netaxabilă 300→200, relabel tip
+//! asigurat 1.11.2/1.11.3, simplificare concedii medicale) — NU câmpuri XML noi; namespace-ul rămâne
+//! `:v6`. La 2026-06-13 ANAF NU publicase încă structura/XSD/DUKIntegrator pentru noul model, deci NU
+//! se poate emite/valida un model distinct. Calculul H2 (4.325 / bază 200) e deja gestionat în
+//! [`crate::anaf_decl::d112::part_time_min_base`]. RE-VALIDAȚI contra artefactelor oficiale (pagina
+//! 112.html) când apar, înainte de prima depunere 25.08.2026.
 
 /// Antetul + datele angajatorului.
 pub struct D112Header {
@@ -51,7 +66,7 @@ pub struct D112Employee {
     pub sediu_cif: String,
 }
 
-const NS: &str = "mfp:anaf:dgti:declaratie_unica:declaratie:v1";
+const NS: &str = "mfp:anaf:dgti:declaratie_unica:declaratie:v6";
 
 /// D112 employer obligations — each is `(A_codOblig, A_codBugetar)` taken verbatim from Nomenclator 3
 /// of the in-force *structura D112_A7.2.6 (v7), luna 01/2026* (structura_D112_0126_030226.pdf).
@@ -103,9 +118,11 @@ A_datorat=\"{suma}\" A_deductibil=\"0\" A_plata=\"{suma}\"/>\n"
     ang.push_str(&oblig(oblig::CAM, t_cam)); // 480 CAM (asigurătorie pentru muncă)
     let total_plata = t_impozit + t_cas + t_cass + t_cam; // totalPlata_A = Σ obligații angajator.
                                                           // angajatorB — numere asigurați + fond de salarii.
+                                                          // B_sal (use="required" în d112_10102024.xsd) = nr. asigurați cu venituri de natură salarială;
+                                                          // în cazul standard (toți salariați) = numărul de asigurați, ca B_cnp/B_sanatate/B_pensie.
     ang.push_str(&format!(
         "    <angajatorB B_cnp=\"{count}\" B_sanatate=\"{count}\" B_pensie=\"{count}\" \
-B_brutSalarii=\"{t_gross}\"/>\n"
+B_sal=\"{count}\" B_brutSalarii=\"{t_gross}\"/>\n"
     ));
     // angajatorC6 — bază + contribuție (sumar) — completat în aplicație; emis 0 pentru validitate.
     ang.push_str("    <angajatorC6 C6_baza=\"0\" C6_ct=\"0\"/>\n");
@@ -230,9 +247,10 @@ mod tests {
             casa: "CJ".into(),
         };
         let xml = generate_d112_xml(&h, &[emp("1", "A"), emp("2", "B")]);
-        // Root + namespace + header.
+        // Root + namespace + header. Namespace is :v6 (official d112_10102024.xsd), NOT the obsolete
+        // DecUnica :v1.
         assert!(
-            xml.contains("<declaratieUnica xmlns=\"mfp:anaf:dgti:declaratie_unica:declaratie:v1\"")
+            xml.contains("<declaratieUnica xmlns=\"mfp:anaf:dgti:declaratie_unica:declaratie:v6\"")
         );
         assert!(xml.contains("luna_r=\"6\" an_r=\"2026\""));
         assert!(xml.contains("nume_declar=\"Popescu\""));
@@ -245,7 +263,10 @@ mod tests {
         assert!(xml.contains("A_codOblig=\"480\" A_codBugetar=\"20470300XX\" A_datorat=\"226\""));
         // totalPlata_A = 650 + 2500 + 1000 + 226 = 4376.
         assert!(xml.contains("totalPlata_A=\"4376\""));
-        assert!(xml.contains("B_cnp=\"2\" B_sanatate=\"2\" B_pensie=\"2\" B_brutSalarii=\"10000\""));
+        // angajatorB includes the required B_sal (= count for the all-salaried standard case).
+        assert!(xml.contains(
+            "B_cnp=\"2\" B_sanatate=\"2\" B_pensie=\"2\" B_sal=\"2\" B_brutSalarii=\"10000\""
+        ));
         // Two insured persons with asiguratA contributions.
         assert_eq!(xml.matches("<asigurat ").count(), 2);
         assert!(xml.contains("A_1=\"1\" A_2=\"0\" A_3=\"N\" A_4=\"8\""));

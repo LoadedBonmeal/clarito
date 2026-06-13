@@ -163,8 +163,9 @@ pub async fn run_payroll(
     payroll::run_payroll(&state.db, &company_id, &period_from, &period_to).await
 }
 
-/// Exportă D112 (XML, schema DecUnica.xsd) pentru luna dată — antet + obligații angajator + câte un
-/// asigurat per salariat activ (caz standard normă întreagă). Draft pentru import în aplicația D112.
+/// Exportă D112 (XML, namespace …declaratie:v6 — vezi d112_xml.rs) pentru luna dată — antet +
+/// obligații angajator + câte un asigurat per salariat activ (caz standard normă întreagă). Draft
+/// pentru import în aplicația D112.
 #[tauri::command]
 pub async fn export_d112_xml(
     state: State<'_, AppState>,
@@ -262,13 +263,19 @@ pub async fn export_d112_xml(
         den: company.legal_name.chars().take(200).collect(),
         casa,
     };
-    // Modelul NOU D112 (Ordin comun 605/95/928/2.314/2026) se aplică veniturilor lunii iulie 2026+;
-    // structura emisă aici e v7 (≤ iunie 2026). FE avertizează utilizatorul; logăm și aici.
+    // Modelul NOU D112 (Ordin comun 605/95/928/2.314/2026, MO 463/02.06.2026) se aplică veniturilor
+    // din 07/2026 (prima depunere 25.08.2026). Sursele oficiale arată schimbări la nivel de
+    // nomenclator/instrucțiuni (sumă netaxabilă 300→200, relabel tip asigurat 1.11.2/1.11.3,
+    // simplificare concedii) — NU câmpuri XML noi; namespace-ul rămâne :v6, deci structura emisă aici
+    // este corectă STRUCTURAL și pentru H2. La data implementării ANAF nu publicase încă
+    // structura/XSD/DUKIntegrator pentru noul model → RE-VALIDAȚI contra artefactelor oficiale înainte
+    // de depunere. FE avertizează utilizatorul; logăm și aici.
     if year > 2026 || (year == 2026 && month >= 7) {
         tracing::warn!(
             year,
             month,
-            "D112 pentru luni ≥ 07/2026 cere noul model (OPANAF 605/2026) — se emite structura v7"
+            "D112 ≥ 07/2026: model nou (Ordin 605/95/928/2.314/2026) — structura :v6 emisă e \
+conformă structural; re-validați cu artefactele oficiale ANAF înainte de depunere (25.08.2026)"
         );
     }
     let xml = generate_d112_xml(&header, &d112_emps);
