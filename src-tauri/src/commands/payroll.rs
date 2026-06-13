@@ -278,6 +278,8 @@ pub async fn export_d112_xml(
             baza_impozit: lei(&r.taxable_base),
             deducere: lei(&r.personal_deduction),
             sediu_cif: e.sediu_cif.clone(),
+            // Concediile medicale (calea B / asiguratD) se populează mai jos din registrul concedii.
+            med_leaves: vec![],
         });
     }
 

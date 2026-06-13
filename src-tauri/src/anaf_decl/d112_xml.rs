@@ -74,6 +74,40 @@ pub struct D112Employee {
     pub deducere: i64,
     /// CIF-ul sediului secundar la care e repartizat salariatul (D112 angajatorF2); '' = principal.
     pub sediu_cif: String,
+    /// Certificatele de concediu medical ale lunii (OUG 158/2005). GOL ⇒ calea standard `asiguratA`
+    /// (regression-safe). Cu ≥1 certificat ⇒ calea B (`asiguratB1/B2/B3/B4` + `asiguratD`/certificat),
+    /// căci „Secțiunea D nu poate exista concomitent cu secțiunea A” (structura, poz 3502).
+    pub med_leaves: Vec<D112MedicalLeave>,
+}
+
+/// Un certificat de concediu medical (OUG 158/2005) → blocul `asiguratD` (per certificat) + rollup-ul
+/// angajator `angajatorC2`. Sumele/zilele sunt deja calculate (introduse în registrul concedii).
+#[derive(Clone)]
+pub struct D112MedicalLeave {
+    /// D_1 seria, D_2 numărul certificatului.
+    pub serie: String,
+    pub numar: String,
+    /// D_9 cod indemnizație (Nomenclator 9: „01" boală obișnuită, „07" carantină, „08" sarcină/lăuzie,
+    /// „09" îngrijire copil, „15" risc maternal, „17" oncologic …).
+    pub cod_indemn: String,
+    /// D_5 data acordării, D_6 data început, D_7 data sfârșit valabilitate (zz.ll.aaaa).
+    pub data_acordare: String,
+    pub data_inceput: String,
+    pub data_sfarsit: String,
+    /// D_14 zile suportate de angajator, D_15 zile suportate din FNUASS (D_16 = D_14 + D_15).
+    pub zile_ang: i64,
+    pub zile_fnuass: i64,
+    /// D_17 baza (Σ venituri ultimele 6 luni), D_18 nr. zile aferente (D_19 = ROUND(D_17/D_18, 2)).
+    pub baza_calcul: i64,
+    pub zile_baza: i64,
+    /// D_20 indemnizația suportată de angajator, D_21 indemnizația suportată din FNUASS.
+    pub suma_ang: i64,
+    pub suma_fnuass: i64,
+    /// D_28 procent (55/65/75) — doar pentru D_9 = „01"; 0 ⇒ se omite.
+    pub procent: i64,
+    /// D_10 loc prescriere (1-4, Nomenclator 8), D_23 cod boală (max 3 car.; „RM" pt. D_9=„15").
+    pub loc_prescriere: i64,
+    pub cod_boala: String,
 }
 
 // Namespace CONFIRMED against the LIVE ANAF D112Validator (`-v D112`): the current model requires
@@ -108,15 +142,27 @@ use crate::anaf_decl::xml_esc as esc;
 pub fn generate_d112_xml(h: &D112Header, employees: &[D112Employee]) -> String {
     let count = employees.len() as i64;
     let tot = |f: fn(&D112Employee) -> i64| employees.iter().map(f).sum::<i64>();
-    let (t_gross, t_cas, t_cass, t_impozit) = (
-        tot(|e| e.gross),
-        tot(|e| e.cas),
-        tot(|e| e.cass),
-        tot(|e| e.impozit),
-    );
-    // CAM angajator (480) = ROUND(Σ baza_cam × 2,25%) — regula ANAF A21.46/A91b cere rotunjirea bazei
-    // AGREGATE, NU Σ rotunjirilor per-salariat (altfel diferență de 1 leu: 2×113=226 vs
-    // round(10000×2,25%)=225). Aceeași valoare la obligația 480, totalPlata_A, datCAM și C4_ct.
+    // Totaluri pe asigurat (lucrat + indemnizație de concediu medical). `month_totals` e SURSA UNICĂ
+    // pentru obligațiile angajator (412 CAS / 432 CASS / angajatorC1) ȘI pentru detaliul de impozit
+    // E1/E3 — pe luna cu CM, CAS/CASS se aplică pe baza lucrată + indemnizație (vezi `emit_leave_blocks`).
+    // Fără concediu ⇒ valorile pe brutul lucrat (regression-safe, cazul standard neschimbat).
+    let mt: Vec<MonthTotals> = employees.iter().map(month_totals).collect();
+    let t_gross = tot(|e| e.gross);
+    let t_impozit = tot(|e| e.impozit);
+    let t_cas: i64 = mt.iter().map(|m| m.cas).sum();
+    let t_cass: i64 = mt.iter().map(|m| m.cass).sum();
+    // angajatorC1: C1_11 (total venit realizat conditii normale) = Σ baza CAS LUCRATĂ (ΣA_13 + ΣB2_5),
+    // FĂRĂ indemnizație; baza CAS a indemnizației de CM (Σ B3_7) merge separat în C1_12 (regula A29/A36.2).
+    let t_baza_cas: i64 = tot(|e| e.baza_cas);
+    let t_b3_7: i64 = employees
+        .iter()
+        .flat_map(|e| &e.med_leaves)
+        .map(|l| l.suma_ang + l.suma_fnuass)
+        .sum();
+    // CAM angajator (480) = ROUND(Σ baza_cam × 2,25%) pe baza AGREGATĂ (regula A21.46/A91b — NU Σ
+    // rotunjirilor per-salariat; altfel diferență de 1 leu: 2×113=226 vs round(10000×2,25%)=225).
+    // Indemnizația de CM NU e supusă CAM ⇒ baza CAM rămâne partea lucrată. Aceeași valoare la 480,
+    // totalPlata_A, datCAM și C4_ct.
     let t_baza_cam = tot(|e| e.baza_cam);
     let t_cam = (t_baza_cam * 225 + 5000) / 10000;
 
@@ -146,17 +192,20 @@ A_datorat=\"{suma}\" A_deductibil=\"0\" A_scutit=\"0\" A_plata=\"{suma}\"/>\n"
 B_sal=\"{count}\" B_brutSalarii=\"{t_gross}\"/>\n"
     ));
     // NOTE: `angajatorC6` (emis sub :v6) NU există în :v7. Eliminat.
-    // :v7 cere sumarele de reconciliere a contribuțiilor ÎNAINTE de blocurile `asigurat`:
-    // angajatorC1 (detaliu CAS pe condiții de muncă) + angajatorC4 (detaliu CAM). Caz standard
-    // (condiții NORMALE, fără concediu medical / accidente / construcții): C1_11 = C1_T1 = Σ A_13
-    // (baza CAS), restul 0, C1_T3 = 0 (CacasN = 0%); C4_baza = Σ A_5 (baza CAM), C4_ct = Σ CAM.
-    // C2 (recuperări FNUASS) / C3 (accidente) / C5 (CAM construcții) = 0 ocurențe în cazul standard.
-    let t_baza_cas = tot(|e| e.baza_cas);
+    // :v7 cere sumarele de reconciliere a contribuțiilor ÎNAINTE de blocurile `asigurat`, în ordine:
+    // angajatorC1 (detaliu CAS pe condiții de muncă) → C2 (recuperări indemnizații FNUASS) → C4 (CAM).
+    // Caz standard (condiții NORMALE, fără accidente / construcții): C1_11 = C1_T1 = Σ baza CAS (lucrat
+    // + indemnizație CM), restul 0, C1_T3 = 0 (CacasN = 0%); C4_baza = Σ A_5 (baza CAM), C4_ct = Σ CAM.
+    // C2 se emite DOAR când există concediu medical (altfel 0 ocurențe). C3 (accidente) / C5 (CAM
+    // construcții) = 0 ocurențe în cazul standard.
+    // C1_11 = C1_T1 = Σ baza CAS lucrată (condiții normale); C1_12 = C1_T2 = Σ B3_7 (baza CAS a
+    // indemnizației OUG158); restul (deosebite/speciale/scutiri) = 0; C1_T3 = 0 (CacasN = 0%).
     ang.push_str(&format!(
-        "    <angajatorC1 C1_11=\"{t_baza_cas}\" C1_12=\"0\" C1_13=\"0\" C1_21=\"0\" C1_22=\"0\" \
-C1_23=\"0\" C1_31=\"0\" C1_32=\"0\" C1_33=\"0\" C1_T1=\"{t_baza_cas}\" C1_T2=\"0\" C1_T=\"0\" \
-C1_T3=\"0\" C1_5=\"0\"/>\n"
+        "    <angajatorC1 C1_11=\"{t_baza_cas}\" C1_12=\"{t_b3_7}\" C1_13=\"0\" C1_21=\"0\" \
+C1_22=\"0\" C1_23=\"0\" C1_31=\"0\" C1_32=\"0\" C1_33=\"0\" C1_T1=\"{t_baza_cas}\" \
+C1_T2=\"{t_b3_7}\" C1_T=\"0\" C1_T3=\"0\" C1_5=\"0\"/>\n"
     ));
+    ang.push_str(&emit_angajator_c2(employees));
     // C4_ct = ROUND(C4_baza × 2,25%) = t_cam (aceeași regulă de rotunjire agregată ca obligația 480).
     ang.push_str(&format!(
         "    <angajatorC4 C4_baza=\"{t_baza_cam}\" C4_ct=\"{t_cam}\"/>\n"
@@ -187,7 +236,10 @@ F2_suma_ded=\"0\" F2_suma_scut=\"0\" F2_deplata=\"{suma}\"/>\n",
         }
     }
 
-    // asigurat* — câte unul per salariat, cu blocul de contribuții asiguratA (caz standard).
+    // asigurat* — câte unul per salariat. Fără concediu medical ⇒ blocul `asiguratA` (caz standard);
+    // cu ≥1 certificat ⇒ calea B (`asiguratB1/B2/B3/B4` + `asiguratD`/certificat), căci secțiunile A și
+    // B/D se exclud reciproc (structura poz 2496/3502). Detaliul de impozit `asiguratE1/E3` se emite în
+    // AMBELE cazuri (e independent de ruta A/B). Vezi `emit_leave_blocks` pentru calea B.
     let mut asig = String::new();
     for (i, e) in employees.iter().enumerate() {
         let id = i + 1;
@@ -196,47 +248,66 @@ F2_suma_ded=\"0\" F2_suma_scut=\"0\" F2_deplata=\"{suma}\"/>\n",
         } else {
             format!(" dataAng=\"{}\"", esc(&e.data_ang))
         };
-        // :v7: + casaSn (poz 9, DA) = casa de sănătate a angajatorului; A_5 = baza CAM (NU brutul);
-        // A_sal1 (poz 14a) = salariul de bază din contract; A_20 NU există (impozitul e doar în
-        // agregatul angajatorA(602)) — eliminat.
-        // Timp_E3 (asigurat, 9d, DA) = impozitul reținut (Σ se reconciliază cu angajatorA(602)).
-        // asiguratA :v7: A_sal1/A_sal2 (bază contract / venit brut realizat); A_6 ore lucrate efectiv
-        // (>0 dacă baza_AJS=true), A_7 ore suspendate=0; A_9 baza somaj (>0 când baza_AJS=true).
-        let a6 = e.ore_norma * e.zile; // ore lucrate efectiv în lună
-        let e3_9 = e.cas + e.cass; // contribuții sociale obligatorii reținute (CAS + CASS)
-        let net = e.gross - e.cas - e.cass - e.impozit; // suma încasată (E3_16)
+        // Totalurile lunii (lucrat + indemnizație CM) — precalculate în `mt`. Indemnizația de CM e
+        // impozabilă (10%) și intră în baza CAS/CASS conform regulilor B4/CMscutit; e.cas/e.cass/
+        // e.baza_* sunt pe partea LUCRATĂ, iar e.impozit/e.baza_impozit sunt TOTALELE lunii.
+        let m = &mt[i];
+        let t_indemn: i64 = e
+            .med_leaves
+            .iter()
+            .map(|l| l.suma_ang + l.suma_fnuass)
+            .sum();
+        let contrib_block = if e.med_leaves.is_empty() {
+            // calea A — asiguratA (:v7: A_5 = baza CAM (nu brutul), A_sal1/A_sal2, A_6/A_9; fără A_20).
+            let a6 = e.ore_norma * e.zile;
+            format!(
+                "    <asiguratA A_1=\"{a1}\" A_sal1=\"{sal1}\" A_sal2=\"{sal2}\" A_2=\"{a2}\" \
+A_3=\"{a3}\" A_4=\"{a4}\" A_5=\"{cam_base}\" A_6=\"{a6}\" A_7=\"0\" A_8=\"{zile}\" A_9=\"{a9}\" \
+A_11=\"{baza_cass}\" A_12=\"{cass}\" A_13=\"{baza_cas}\" A_14=\"{cas}\"/>\n",
+                a1 = esc(&e.tip_asigurat),
+                sal1 = e.sal_contract,
+                sal2 = e.gross,
+                a2 = if e.pensionar { 1 } else { 0 },
+                a3 = esc(&e.tip_contract),
+                a4 = e.ore_norma,
+                cam_base = e.baza_cam,
+                a9 = e.baza_cas,
+                zile = e.zile,
+                baza_cass = e.baza_cass,
+                cass = e.cass,
+                baza_cas = e.baza_cas,
+                cas = e.cas,
+            )
+        } else {
+            emit_leave_blocks(e)
+        };
+        // asiguratE1/E3 (detaliu impozit pe venit) — comun ambelor căi. Pe luna cu CM, venitul brut
+        // (E3_8) = brut lucrat + indemnizație; contribuțiile (E3_9) = CAS + CASS totale ale lunii.
+        // E3_1 = secțiunea de contribuții ('A' fără CM, 'B' cu CM) — regula S122.2 cere ca tipul din E3
+        // să corespundă secțiunii prezente (A/B/C); E3_2 = tipul asiguratului (= A_1 / B1_1).
+        let (e3_1, e3_2) = if e.med_leaves.is_empty() {
+            ("A", e.tip_asigurat.as_str())
+        } else {
+            ("B", "1") // calea B emite B1_1 = 1 (salariat)
+        };
+        let e3_8 = e.gross + t_indemn;
+        let e3_9 = m.cas + m.cass;
+        let net = e3_8 - m.cas - m.cass - e.impozit; // E3_16 suma încasată
         asig.push_str(&format!(
             "  <asigurat idAsig=\"{id}\" cnpAsig=\"{cnp}\" numeAsig=\"{nume}\" \
 prenAsig=\"{pren}\"{data} casaSn=\"{casa}\" asigCI=\"1\" asigSO=\"1\" Timp_E3=\"{impozit}\">\n\
-    <asiguratA A_1=\"{a1}\" A_sal1=\"{sal1}\" A_sal2=\"{sal2}\" A_2=\"{a2}\" A_3=\"{a3}\" \
-A_4=\"{a4}\" A_5=\"{cam_base}\" A_6=\"{a6}\" A_7=\"0\" A_8=\"{zile}\" A_9=\"{a9}\" \
-A_11=\"{baza_cass}\" A_12=\"{cass}\" A_13=\"{baza_cas}\" A_14=\"{cas}\"/>\n\
-    <asiguratE1 E1_1=\"{gross}\" E1_2=\"{e3_9}\" E1_3=\"0\" E1_4=\"{ded}\" E1_41=\"{ded}\" \
+{contrib_block}\
+    <asiguratE1 E1_1=\"{e3_8}\" E1_2=\"{e3_9}\" E1_3=\"0\" E1_4=\"{ded}\" E1_41=\"{ded}\" \
 E1_42=\"0\" E1_421=\"0\" E1_422=\"0\" E1_5=\"0\" E1_6=\"{base}\" E1_7=\"{impozit}\"/>\n\
-    <asiguratE3 E3_1=\"A\" E3_2=\"{tip}\" E3_3=\"1\" E3_4=\"P\" E3_8=\"{gross}\" E3_9=\"{e3_9}\" \
-E3_12=\"{ded}\" E3_121=\"{ded}\" E3_122=\"0\" E3_14=\"{base}\" E3_15=\"{impozit}\" E3_16=\"{net}\" \
-E3_19=\"0\" E3_23=\"0\"/>\n\
+    <asiguratE3 E3_1=\"{e3_1}\" E3_2=\"{e3_2}\" E3_3=\"1\" E3_4=\"P\" E3_8=\"{e3_8}\" \
+E3_9=\"{e3_9}\" E3_12=\"{ded}\" E3_121=\"{ded}\" E3_122=\"0\" E3_14=\"{base}\" E3_15=\"{impozit}\" \
+E3_16=\"{net}\" E3_19=\"0\" E3_23=\"0\"/>\n\
   </asigurat>\n",
             cnp = esc(&e.cnp),
             nume = esc(&e.nume),
             pren = esc(&e.prenume),
             casa = esc(&h.casa),
             impozit = e.impozit,
-            a1 = esc(&e.tip_asigurat),
-            sal1 = e.sal_contract,
-            sal2 = e.gross,
-            a2 = if e.pensionar { 1 } else { 0 },
-            a3 = esc(&e.tip_contract),
-            a4 = e.ore_norma,
-            cam_base = e.baza_cam,
-            a9 = e.baza_cas,
-            zile = e.zile,
-            baza_cass = e.baza_cass,
-            cass = e.cass,
-            baza_cas = e.baza_cas,
-            cas = e.cas,
-            gross = e.gross,
-            tip = esc(&e.tip_asigurat),
             ded = e.deducere,
             base = e.baza_impozit,
         ));
@@ -268,6 +339,220 @@ datCAM=\"{datcam}\" totalPlata_A=\"{tp}\">\n\
     )
 }
 
+/// ROUND(base × pct%) cu rotunjire comercială la leu întreg (half-up) — ex. 5000 × 2,25% → 113.
+fn round_pct(base: i64, pct_num: i64, pct_den: i64) -> i64 {
+    (base * pct_num + pct_den / 2) / pct_den
+}
+
+/// ROUND(num/den, 2) ca string „n.dd" (N(6.2) din structura). Den 0 ⇒ „0".
+fn round2(num: i64, den: i64) -> String {
+    if den == 0 {
+        return "0".to_string();
+    }
+    let centi = (num * 100 + den / 2) / den;
+    format!("{}.{:02}", centi / 100, centi % 100)
+}
+
+/// Contribuțiile + bazele TOTALE ale lunii pentru un asigurat (lucrat + indemnizație de concediu).
+pub struct MonthTotals {
+    pub cas: i64,
+    pub cass: i64,
+    pub baza_cas: i64,
+    pub baza_cass: i64,
+}
+
+/// Calculează totalurile lunii. Fără concediu ⇒ valorile pe brutul lucrat (cazul standard, neschimbat).
+/// Cu ≥1 certificat ⇒ baza CAS/CASS = baza lucrată + indemnizația de CM (B4_7 / B4_5 din structura):
+/// indemnizația e supusă CAS 25% și CASS 10% (mai puțin codurile scutite de CASS — CMscutit, coduri
+/// ∉ {01,07,10}). Indemnizația NU e supusă CAM. Sursă unică pentru obligațiile angajator + E1/E3.
+fn month_totals(e: &D112Employee) -> MonthTotals {
+    if e.med_leaves.is_empty() {
+        return MonthTotals {
+            cas: e.cas,
+            cass: e.cass,
+            baza_cas: e.baza_cas,
+            baza_cass: e.baza_cass,
+        };
+    }
+    let indemn: i64 = e
+        .med_leaves
+        .iter()
+        .map(|l| l.suma_ang + l.suma_fnuass)
+        .sum();
+    let cm_scutit: i64 = e
+        .med_leaves
+        .iter()
+        .filter(|l| !matches!(l.cod_indemn.as_str(), "01" | "07" | "10"))
+        .map(|l| l.suma_ang + l.suma_fnuass)
+        .sum();
+    let baza_cas = e.baza_cas + indemn;
+    let baza_cass = e.baza_cass + (indemn - cm_scutit);
+    MonthTotals {
+        cas: round_pct(baza_cas, 25, 100),
+        cass: round_pct(baza_cass, 10, 100),
+        baza_cas,
+        baza_cass,
+    }
+}
+
+/// Calea B (concediu medical) a unui asigurat: `asiguratB1` (identitate contract + timp lucrat) +
+/// `asiguratB2` (detaliu venit lucrat, dacă a lucrat) + `asiguratB3` (rollup indemnizații) +
+/// `asiguratB4` (agregat CAS/CASS/CAM) + câte un `asiguratD` per certificat. Reconcilierile sunt cele
+/// din structura D112 v7: B3_6=ΣD_16, B3_12=ΣD_20, B3_13=ΣD_21, B3_7=B3_12+B3_13; B4_7=baza CAS,
+/// B4_8=ROUND(B4_7×25%), B4_5=baza CASS, B4_6=ROUND(B4_5×10%); D_16=D_14+D_15, D_19=ROUND(D_17/D_18,2).
+fn emit_leave_blocks(e: &D112Employee) -> String {
+    let m = month_totals(e);
+    let b3_6: i64 = e
+        .med_leaves
+        .iter()
+        .map(|l| l.zile_ang + l.zile_fnuass)
+        .sum();
+    let b3_12: i64 = e.med_leaves.iter().map(|l| l.suma_ang).sum();
+    let b3_13: i64 = e.med_leaves.iter().map(|l| l.suma_fnuass).sum();
+    let b3_7 = b3_12 + b3_13; // baza CAS indemnizație (B3_7S = 0 pentru salariatul normal)
+    let b1_6 = e.ore_norma * e.zile; // ore lucrate efectiv
+    let b1_10 = e.baza_cas; // baza șomaj = brutul lucrat (indemnizația nu e supusă șomajului)
+
+    // B1 — identitate contract + timp lucrat (B1_1 = 1 salariat; satisface poarta D, structura 3526).
+    let mut s = format!(
+        "    <asiguratB1 B1_1=\"1\" B1_sal1=\"{sal1}\" B1_sal2=\"{gross}\" B1_2=\"{pens}\" \
+B1_3=\"{contract}\" B1_4=\"{ore}\" B1_5=\"{cam}\" B1_6=\"{b1_6}\" B1_7=\"0\" B1_10=\"{b1_10}\" \
+B1_15=\"{zile}\"/>\n",
+        sal1 = e.sal_contract,
+        gross = e.gross,
+        pens = if e.pensionar { 1 } else { 0 },
+        contract = esc(&e.tip_contract),
+        ore = e.ore_norma,
+        cam = e.baza_cam,
+        zile = e.zile,
+    );
+    // B2 — detaliu venit lucrat (condiții normale). Doar dacă a existat timp lucrat în lună.
+    if e.zile > 0 {
+        s.push_str(&format!(
+            "    <asiguratB2 B2_2=\"{zile}\" B2_5=\"{baza_cas}\" B2_5S=\"0\" B2_5C=\"0\" \
+B2_6S=\"0\" B2_6C=\"0\" B2_7S=\"0\" B2_7C=\"0\"/>\n",
+            zile = e.zile,
+            baza_cas = e.baza_cas,
+        ));
+    }
+    // B3 — rollup indemnizații. B3_1 (zile indemnizații condiții normale) = B3_6 (regula V88:
+    // B3_1+B3_2+B3_3 = B3_6+B3_8; condiții normale ⇒ totul în B3_1).
+    s.push_str(&format!(
+        "    <asiguratB3 B3_1=\"{b3_6}\" B3_6=\"{b3_6}\" B3_7=\"{b3_7}\" B3_12=\"{b3_12}\" \
+B3_13=\"{b3_13}\"/>\n"
+    ));
+    // B4 — agregat CAS/CASS/CAM; câmpurile „…P/…S/…C/…D" sunt DA (=0 pentru full-time normă întreagă).
+    s.push_str(&format!(
+        "    <asiguratB4 B4_1=\"{zile}\" B4_3=\"{b1_10}\" B4_5=\"{b4_5}\" B4_6=\"{b4_6}\" \
+B4_7=\"{b4_7}\" B4_8=\"{b4_8}\" B4_7P=\"0\" B4_8P=\"0\" B4_5P=\"0\" B4_6P=\"0\" B4_7S=\"0\" \
+B4_7C=\"0\" B4_8D=\"0\" B4_6D=\"0\" B4_14=\"{cam}\"/>\n",
+        zile = e.zile,
+        b4_5 = m.baza_cass,
+        b4_6 = m.cass,
+        b4_7 = m.baza_cas,
+        b4_8 = m.cas,
+        cam = e.baza_cam,
+    ));
+    // asiguratD — câte unul per certificat.
+    for l in &e.med_leaves {
+        let d16 = l.zile_ang + l.zile_fnuass;
+        let d19 = round2(l.baza_calcul, l.zile_baza);
+        // D_28 (procent) doar pentru boala obișnuită (D_9 = 01); altfel se omite.
+        let d28 = if l.cod_indemn == "01" && l.procent > 0 {
+            format!(" D_28=\"{}\"", l.procent)
+        } else {
+            String::new()
+        };
+        s.push_str(&format!(
+            "    <asiguratD D_1=\"{serie}\" D_2=\"{numar}\" D_5=\"{acord}\" D_6=\"{inc}\" \
+D_7=\"{sf}\" D_9=\"{cod}\" D_10=\"{loc}\" D_14=\"{za}\" D_15=\"{zf}\" D_16=\"{d16}\" \
+D_17=\"{baza}\" D_18=\"{zb}\" D_19=\"{d19}\" D_20=\"{sa}\" D_21=\"{sfn}\" D_23=\"{boala}\"{d28}/>\n",
+            serie = esc(&l.serie),
+            numar = esc(&l.numar),
+            acord = esc(&l.data_acordare),
+            inc = esc(&l.data_inceput),
+            sf = esc(&l.data_sfarsit),
+            cod = esc(&l.cod_indemn),
+            loc = l.loc_prescriere,
+            za = l.zile_ang,
+            zf = l.zile_fnuass,
+            baza = l.baza_calcul,
+            zb = l.zile_baza,
+            sa = l.suma_ang,
+            sfn = l.suma_fnuass,
+            boala = esc(&l.cod_boala),
+        ));
+    }
+    s
+}
+
+/// angajatorC2 — rollup-ul angajator al recuperărilor de indemnizații din FNUASS (peste TOȚI asigurații
+/// cu concediu medical). Se emite doar dacă există certificate. Rd1 = incapacitate temporară de muncă
+/// (COUNT + Σ pe D_16/D_14/D_15/D_20/D_21); sub-rândurile pe procent (Rd1.2/1.3/1.4 = D_9„01" cu
+/// D_28 55/65/75); totaluri Rd6-8 (C2_T6 = Σ recuperat FNUASS, C2_10 = C2_T6, C2_140 = C2_10).
+fn emit_angajator_c2(employees: &[D112Employee]) -> String {
+    let leaves: Vec<&D112MedicalLeave> =
+        employees.iter().flat_map(|e| e.med_leaves.iter()).collect();
+    if leaves.is_empty() {
+        return String::new();
+    }
+    // (COUNT, Σ zile total, Σ zile ang, Σ zile FNUASS, Σ sumă ang, Σ sumă FNUASS) peste un filtru.
+    let agg = |f: &dyn Fn(&D112MedicalLeave) -> bool| -> (i64, i64, i64, i64, i64, i64) {
+        let sel = leaves.iter().filter(|l| f(l));
+        sel.fold((0, 0, 0, 0, 0, 0), |a, l| {
+            (
+                a.0 + 1,
+                a.1 + l.zile_ang + l.zile_fnuass,
+                a.2 + l.zile_ang,
+                a.3 + l.zile_fnuass,
+                a.4 + l.suma_ang,
+                a.5 + l.suma_fnuass,
+            )
+        })
+    };
+    // Rd1 — incapacitate temporară de muncă (boală obișnuită + coduri asimilate).
+    let inc = |l: &D112MedicalLeave| {
+        matches!(
+            l.cod_indemn.as_str(),
+            "01" | "02" | "03" | "04" | "05" | "51" | "06" | "12" | "13" | "14" | "16"
+        )
+    };
+    let r1 = agg(&inc);
+    let mut s = format!(
+        "    <angajatorC2 C2_11=\"{}\" C2_12=\"{}\" C2_13=\"{}\" C2_14=\"{}\" C2_15=\"{}\" \
+C2_16=\"{}\"",
+        r1.0, r1.1, r1.2, r1.3, r1.4, r1.5
+    );
+    // Sub-rândurile pe procent pentru boală obișnuită (D_9 = „01"): 55% / 65% / 75%.
+    for (pct, lo) in [(55u8, "121"), (65, "131"), (75, "141")] {
+        let r = agg(&|l| l.cod_indemn == "01" && l.procent == pct as i64);
+        if r.0 > 0 {
+            let n: i64 = lo.parse().unwrap();
+            s.push_str(&format!(
+                " C2_{}=\"{}\" C2_{}=\"{}\" C2_{}=\"{}\" C2_{}=\"{}\" C2_{}=\"{}\" C2_{}=\"{}\"",
+                n,
+                r.0,
+                n + 1,
+                r.1,
+                n + 2,
+                r.2,
+                n + 3,
+                r.3,
+                n + 4,
+                r.4,
+                n + 5,
+                r.5
+            ));
+        }
+    }
+    // Totaluri FNUASS recuperat: C2_T6 = Σ indemnizații FNUASS, C2_10 = C2_T6, C2_140 = C2_10.
+    let t_fnuass: i64 = leaves.iter().map(|l| l.suma_fnuass).sum();
+    s.push_str(&format!(
+        " C2_T6=\"{t_fnuass}\" C2_10=\"{t_fnuass}\" C2_140=\"{t_fnuass}\"/>\n"
+    ));
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,6 +580,7 @@ mod tests {
             baza_impozit: 3250, // 5000 − 1250 CAS − 500 CASS (deducere 0 la acest venit)
             deducere: 0,
             sediu_cif: "".into(),
+            med_leaves: vec![],
         }
     }
 
@@ -409,6 +695,127 @@ mod tests {
             ],
         );
         let path = std::env::temp_dir().join("d112_std.xml");
+        std::fs::write(&path, &xml).unwrap();
+        eprintln!("WROTE {}", path.display());
+    }
+
+    /// Un salariat cu lună mixtă: 16 zile lucrate (brut 4000) plus un certificat de concediu medical
+    /// de boală obișnuită (D_9=01) de 5 zile suportate de angajator. Indemnizația (508) e supusă CAS
+    /// 25%, CASS 10% și impozit 10% (NU CAM). month_totals: baza CAS/CASS = 4000+508 = 4508 ⇒ CAS
+    /// 1127, CASS 451; brut total E3_8 = 4508; impozit total 293 pe baza 2930.
+    fn leave_emp(cnp: &str, nume: &str) -> D112Employee {
+        D112Employee {
+            cnp: cnp.into(),
+            nume: nume.into(),
+            prenume: "Ion".into(),
+            data_ang: "01.01.2024".into(),
+            gross: 4000, // brut LUCRAT (16 zile)
+            cas: 1000,
+            cass: 400,
+            impozit: 293, // TOTAL (lucrat + indemnizație)
+            cam: 90,
+            zile: 16, // zile lucrate
+            tip_asigurat: "1".into(),
+            pensionar: false,
+            tip_contract: "N".into(),
+            ore_norma: 8,
+            baza_cas: 4000, // baza LUCRATĂ
+            baza_cass: 4000,
+            baza_cam: 4000,
+            sal_contract: 5000,
+            baza_impozit: 2930, // 4508 brut − 1578 (CAS+CASS) − 0 deducere
+            deducere: 0,
+            sediu_cif: "".into(),
+            med_leaves: vec![D112MedicalLeave {
+                serie: "AB".into(),
+                numar: "1234567".into(),
+                cod_indemn: "01".into(),
+                // CM inițial: data acordării (D_5) ≥ data început (D_6) — regula S95.2.
+                data_acordare: "06.06.2026".into(),
+                data_inceput: "06.06.2026".into(),
+                data_sfarsit: "10.06.2026".into(),
+                zile_ang: 5,
+                zile_fnuass: 0,
+                baza_calcul: 24000,
+                zile_baza: 130,
+                suma_ang: 508,
+                suma_fnuass: 0,
+                procent: 55,
+                loc_prescriere: 1,
+                cod_boala: "A09".into(),
+            }],
+        }
+    }
+
+    #[test]
+    fn d112_leave_emits_b_path_not_a() {
+        let h = D112Header {
+            luna: 6,
+            an: 2026,
+            d_rec: 0,
+            nume_declar: "X".into(),
+            prenume_declar: "-".into(),
+            functie_declar: "Adm".into(),
+            cif: "12345678".into(),
+            caen: "6201".into(),
+            den: "T".into(),
+            casa: "CJ".into(),
+        };
+        let xml = generate_d112_xml(&h, &[leave_emp("1", "A")]);
+        // Calea B: B1/B2/B3/B4 + asiguratD, fără asiguratA (se exclud reciproc).
+        assert!(xml.contains("<asiguratB1 B1_1=\"1\""));
+        assert!(xml.contains("<asiguratB2 "));
+        assert!(xml.contains(
+            "<asiguratB3 B3_1=\"5\" B3_6=\"5\" B3_7=\"508\" B3_12=\"508\" B3_13=\"0\"/>"
+        ));
+        // Calea B ⇒ E3_1='B' (regula S122.2: tipul E3 = secțiunea de contribuții prezentă).
+        assert!(xml.contains("E3_1=\"B\" E3_2=\"1\""));
+        // B4: baza CAS/CASS = 4000 + 508 = 4508; CAS 1127, CASS 451; CAM doar pe partea lucrată (4000).
+        assert!(xml.contains("B4_5=\"4508\" B4_6=\"451\" B4_7=\"4508\" B4_8=\"1127\""));
+        assert!(xml.contains("B4_14=\"4000\""));
+        assert!(!xml.contains("<asiguratA "));
+        // asiguratD: D_16 = D_14+D_15 = 5; D_19 = ROUND(24000/130,2) = 184.62; D_28 = 55 (boală 01).
+        assert!(xml.contains("D_1=\"AB\" D_2=\"1234567\""));
+        assert!(xml.contains("D_14=\"5\" D_15=\"0\" D_16=\"5\""));
+        assert!(xml.contains("D_19=\"184.62\""));
+        assert!(xml.contains("D_23=\"A09\" D_28=\"55\""));
+        // angajatorC2 rollup: COUNT=1, Σ zile=5, Σ sumă ang=508; sub-rând 55% prezent.
+        assert!(xml.contains("<angajatorC2 C2_11=\"1\" C2_12=\"5\""));
+        assert!(xml.contains("C2_121=\"1\""));
+        // Obligația angajator 412 CAS = 1127, 432 CASS = 451 (pe baza lucrat + indemnizație).
+        assert!(xml.contains("A_codOblig=\"412\" A_codBugetar=\"5503XXXXXX\" A_datorat=\"1127\""));
+        assert!(xml.contains("A_codOblig=\"432\" A_codBugetar=\"5503XXXXXX\" A_datorat=\"451\""));
+        // Detaliu impozit comun: E3_8 = 4508 (brut + indemnizație), Timp_E3 = 293.
+        assert!(xml.contains("Timp_E3=\"293\""));
+        assert!(xml.contains("E3_8=\"4508\""));
+    }
+
+    /// Dev helper (opt-in): write a WITH-MEDICAL-LEAVE D112 (calea B) for the real ANAF D112Validator.
+    ///   cargo test --lib anaf_decl::d112_xml::tests::dump_leave_d112 -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn dump_leave_d112() {
+        let h = D112Header {
+            luna: 6,
+            an: 2026,
+            d_rec: 0,
+            nume_declar: "Popescu".into(),
+            prenume_declar: "Maria".into(),
+            functie_declar: "Administrator".into(),
+            cif: "13548146".into(),
+            caen: "6201".into(),
+            den: "Test SRL".into(),
+            casa: "CJ".into(),
+        };
+        // Un salariat standard + unul cu concediu medical (acoperă ambele căi în aceeași declarație).
+        let xml = generate_d112_xml(
+            &h,
+            &[
+                emp("1960101410019", "Popescu"),
+                leave_emp("1900101410011", "Ionescu"),
+            ],
+        );
+        let path = std::env::temp_dir().join("d112_leave.xml");
         std::fs::write(&path, &xml).unwrap();
         eprintln!("WROTE {}", path.display());
     }
