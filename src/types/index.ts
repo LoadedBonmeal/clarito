@@ -1162,6 +1162,8 @@ export interface MedicalLeave {
   sumaAngajator: string;
   sumaFnuass: string;
   procent: number;
+  locPrescriere: number;
+  codBoala: string;
   createdAt: number;
 }
 
@@ -1182,6 +1184,8 @@ export interface MedicalLeaveInput {
   sumaAngajator?: string;
   sumaFnuass?: string;
   procent?: number;
+  locPrescriere?: number;
+  codBoala?: string;
 }
 
 export interface CreateEmployeeInput {

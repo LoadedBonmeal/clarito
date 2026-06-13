@@ -52,6 +52,12 @@ pub struct MedicalLeave {
     pub suma_angajator: String,
     pub suma_fnuass: String,
     pub procent: i64,
+    /// D_10 — locul de prescriere a certificatului (Nomenclator 8). Live XSD types it
+    /// `IntInt1_4SType`, so the valid domain is 1–4 (1 medic familie, 2 spital, 3 ambulatoriu, 4 CAS).
+    pub loc_prescriere: i64,
+    /// D_23 — codul de boală (diagnostic) de pe certificat, max 3 caractere; „RM" pentru risc
+    /// maternal (D_9=15). NOTE: structura v7 = D_23, OPANAF 299/2025 = D_22 — confirmat la emitere.
+    pub cod_boala: String,
     pub created_at: i64,
 }
 
@@ -87,11 +93,16 @@ pub struct MedicalLeaveInput {
     pub suma_fnuass: Option<String>,
     #[serde(default)]
     pub procent: Option<i64>,
+    #[serde(default)]
+    pub loc_prescriere: Option<i64>,
+    #[serde(default)]
+    pub cod_boala: Option<String>,
 }
 
 const COLS: &str = "id, company_id, employee_id, period_ym, serie, numar, cod_indemnizatie, \
                     data_acordare, data_inceput, data_sfarsit, zile_angajator, zile_fnuass, \
-                    baza_calcul, zile_baza, suma_angajator, suma_fnuass, procent, created_at";
+                    baza_calcul, zile_baza, suma_angajator, suma_fnuass, procent, \
+                    loc_prescriere, cod_boala, created_at";
 
 fn money(label: &str, s: &str) -> AppResult<String> {
     let d = Decimal::from_str(s.trim()).map_err(|_| {
@@ -173,6 +184,24 @@ fn validate_leave(input: &MedicalLeaveInput) -> AppResult<()> {
             "Numărul de zile pentru baza de calcul trebuie să fie cel puțin 1.".into(),
         ));
     }
+    // D_10 (loc prescriere): XSD `IntInt1_4SType` → domeniul valid e 1–4. Întoarcem eroare doar
+    // pentru o valoare explicit invalidă (None → default 1 la create).
+    if let Some(loc) = input.loc_prescriere {
+        if !(1..=4).contains(&loc) {
+            return Err(AppError::Validation(
+                "Locul de prescriere (D_10) trebuie să fie 1–4 (1 medic, 2 spital, 3 ambulatoriu, 4 CAS)."
+                    .into(),
+            ));
+        }
+    }
+    // D_23 (cod boală): max 3 caractere. „RM" e impus automat pentru D_9=15 (risc maternal) la create.
+    if let Some(cod) = input.cod_boala.as_deref() {
+        if cod.trim().chars().count() > 3 {
+            return Err(AppError::Validation(
+                "Codul de boală (D_23) are maximum 3 caractere.".into(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -208,9 +237,16 @@ pub async fn create(pool: &SqlitePool, input: MedicalLeaveInput) -> AppResult<Me
         input.suma_fnuass.as_deref().unwrap_or("0"),
     )?;
     let id = new_id();
+    let cod_indemnizatie = input.cod_indemnizatie.as_deref().unwrap_or("01");
+    // D_23: forced to "RM" for risc maternal (D_9=15); otherwise the entered diagnosis code.
+    let cod_boala = if cod_indemnizatie == "15" {
+        "RM".to_string()
+    } else {
+        input.cod_boala.as_deref().unwrap_or("").trim().to_string()
+    };
     sqlx::query(&format!(
         "INSERT INTO medical_leaves ({COLS}) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)"
     ))
     .bind(&id)
     .bind(&input.company_id)
@@ -218,7 +254,7 @@ pub async fn create(pool: &SqlitePool, input: MedicalLeaveInput) -> AppResult<Me
     .bind(&input.period_ym)
     .bind(input.serie.as_deref().unwrap_or("").trim())
     .bind(input.numar.as_deref().unwrap_or("").trim())
-    .bind(input.cod_indemnizatie.as_deref().unwrap_or("01"))
+    .bind(cod_indemnizatie)
     .bind(input.data_acordare.as_deref().unwrap_or(""))
     .bind(input.data_inceput.as_deref().unwrap_or(""))
     .bind(input.data_sfarsit.as_deref().unwrap_or(""))
@@ -229,6 +265,8 @@ pub async fn create(pool: &SqlitePool, input: MedicalLeaveInput) -> AppResult<Me
     .bind(&s_ang)
     .bind(&s_fnuass)
     .bind(input.procent.unwrap_or(75))
+    .bind(input.loc_prescriere.unwrap_or(1).clamp(1, 4))
+    .bind(&cod_boala)
     .bind(now_unix())
     .execute(pool)
     .await?;
@@ -294,6 +332,8 @@ mod tests {
                 suma_angajator: Some("1071.43".into()),
                 suma_fnuass: Some("0".into()),
                 procent: Some(75),
+                loc_prescriere: Some(1),
+                cod_boala: Some("01".into()),
             },
         )
         .await
@@ -324,6 +364,8 @@ mod tests {
             suma_angajator: Some("1071.43".into()),
             suma_fnuass: Some("0".into()),
             procent: Some(75),
+            loc_prescriere: Some(1),
+            cod_boala: Some("01".into()),
         }
     }
 
@@ -339,6 +381,45 @@ mod tests {
         )
         .await;
         assert!(r.is_err());
+    }
+
+    #[tokio::test]
+    async fn d10_d23_capture_and_rules() {
+        let pool = pool().await;
+        // D_9=15 (risc maternal) forces D_23 = "RM" regardless of the entered cod_boala.
+        let m = create(
+            &pool,
+            MedicalLeaveInput {
+                cod_indemnizatie: Some("15".into()),
+                cod_boala: Some("xyz".into()),
+                loc_prescriere: Some(2),
+                ..valid_input()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(m.cod_boala, "RM");
+        assert_eq!(m.loc_prescriere, 2);
+        // D_10 out of the XSD's 1..=4 domain → rejected.
+        assert!(create(
+            &pool,
+            MedicalLeaveInput {
+                loc_prescriere: Some(5),
+                ..valid_input()
+            }
+        )
+        .await
+        .is_err());
+        // D_23 longer than 3 chars → rejected.
+        assert!(create(
+            &pool,
+            MedicalLeaveInput {
+                cod_boala: Some("ABCD".into()),
+                ..valid_input()
+            }
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]

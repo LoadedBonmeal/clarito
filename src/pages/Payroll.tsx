@@ -811,10 +811,13 @@ function ConcediuModal({
   const { t } = useTranslation();
   const [f, setF] = useState({
     employeeId: "", serie: "", numar: "", codIndemnizatie: "01",
-    dataInceput: "", dataSfarsit: "", zileAngajator: "", zileFnuass: "",
-    sumaAngajator: "", sumaFnuass: "",
+    dataAcordare: "", dataInceput: "", dataSfarsit: "", zileAngajator: "", zileFnuass: "",
+    bazaCalcul: "", zileBaza: "", sumaAngajator: "", sumaFnuass: "", procent: "75",
+    locPrescriere: "1", codBoala: "",
   });
   const [error, setError] = useState<string | null>(null);
+  // D_23: risc maternal (cod 15) is always "RM" — the input below locks to it.
+  const codBoala = f.codIndemnizatie === "15" ? "RM" : f.codBoala;
 
   const add = useMutation({
     mutationFn: () => {
@@ -822,9 +825,12 @@ function ConcediuModal({
       return api.payroll.createConcediu({
         companyId, employeeId: f.employeeId, periodYm,
         serie: f.serie, numar: f.numar, codIndemnizatie: f.codIndemnizatie,
-        dataInceput: f.dataInceput, dataSfarsit: f.dataSfarsit,
+        dataAcordare: f.dataAcordare, dataInceput: f.dataInceput, dataSfarsit: f.dataSfarsit,
         zileAngajator: Number(f.zileAngajator) || 0, zileFnuass: Number(f.zileFnuass) || 0,
+        bazaCalcul: f.bazaCalcul || "0", zileBaza: Number(f.zileBaza) || 0,
         sumaAngajator: f.sumaAngajator || "0", sumaFnuass: f.sumaFnuass || "0",
+        procent: Number(f.procent) || 75,
+        locPrescriere: Number(f.locPrescriere) || 1, codBoala,
       });
     },
     onSuccess: onSaved,
@@ -888,6 +894,36 @@ function ConcediuModal({
               </select>
             </div>
             <div className="field">
+              <label>{t("payroll.cmModal.locPrescriere")}</label>
+              <select
+                className="select"
+                value={f.locPrescriere}
+                onChange={(e) => setF((s) => ({ ...s, locPrescriere: e.target.value }))}
+              >
+                <option value="1">1 — {t("payroll.cm.locPrescriere.l1")}</option>
+                <option value="2">2 — {t("payroll.cm.locPrescriere.l2")}</option>
+                <option value="3">3 — {t("payroll.cm.locPrescriere.l3")}</option>
+                <option value="4">4 — {t("payroll.cm.locPrescriere.l4")}</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>{t("payroll.cmModal.codBoala")}</label>
+              <input
+                className="input num"
+                type="text"
+                maxLength={3}
+                placeholder="A09"
+                style={{ textTransform: "uppercase" }}
+                value={codBoala}
+                disabled={f.codIndemnizatie === "15"}
+                onChange={(e) => setF((s) => ({ ...s, codBoala: e.target.value.toUpperCase() }))}
+              />
+            </div>
+            <div className="field">
+              <label>{t("payroll.cmModal.dateGranted")}</label>
+              <input className="input num" type="date" {...num("dataAcordare")} />
+            </div>
+            <div className="field">
               <label>{t("payroll.cmModal.dateStart")}</label>
               <input className="input num" type="date" {...num("dataInceput")} />
             </div>
@@ -910,6 +946,18 @@ function ConcediuModal({
             <div className="field">
               <label>{t("payroll.cmModal.amountFnuass")}</label>
               <input className="input num" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} style={{ textAlign: "right" }} {...num("sumaFnuass")} />
+            </div>
+            <div className="field">
+              <label>{t("payroll.cmModal.baza")}</label>
+              <input className="input num" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} style={{ textAlign: "right" }} {...num("bazaCalcul")} />
+            </div>
+            <div className="field">
+              <label>{t("payroll.cmModal.zileBaza")}</label>
+              <input className="input num" type="text" inputMode="numeric" placeholder="0" style={{ textAlign: "right" }} {...num("zileBaza")} />
+            </div>
+            <div className="field">
+              <label>{t("payroll.cmModal.procent")}</label>
+              <input className="input num" type="text" inputMode="numeric" placeholder="75" style={{ textAlign: "right" }} {...num("procent")} />
             </div>
             {error && (
               <div className="field span2">
