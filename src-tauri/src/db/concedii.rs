@@ -7,22 +7,23 @@
 //! din media veniturilor pe 6 luni e o extensie ulterioară). Validarea finală se face în
 //! DUKIntegrator înainte de depunere.
 //!
-//! ## De ce NU emitem încă blocul `asiguratD` în XML-ul D112 (blocaj actualizat 06/2026)
-//! Definițiile câmpurilor sunt acum CUNOSCUTE (structura oficială `structura_D112_0126_030226.pdf`,
-//! v7): `D_5` = data acordării; `D_9` = cod indemnizație (Nomenclator 9, 01–17/51/91/92); `D_10` =
-//! loc prescriere (Nomenclator 8 — dar XSD-ul tipizează `IntInt1_4SType`, deci doar **1–4** sunt
-//! acceptate la validare, nu și „5 CEX”); `D_23` = cod boală (3 car., „RM” când D_9=15); `D_16` =
-//! D_14+D_15, `D_19` = bază/zile_bază (derivabile). Ce BLOCHEAZĂ emiterea NU mai sunt definițiile,
-//! ci IMPOSIBILITATEA DE A VALIDA output-ul înainte de o depunere reală. (a) XSD-ul oficial
-//! `d112_10102024.xsd` e malformat — eroare de sintaxă la linia 439 (`name="A_sal1` fără ghilimea
-//! de închidere) → nu se încarcă în xmllint → fără validare XSD. (b) Kit-ul DUK livrat NU conține
-//! un validator D112 (doar D300/D394/D406) → fără validare de reguli de business. (c) `AsiguratType`
-//! folosește `xs:group` (GrupAsiguratGroup) — relația asiguratA↔asiguratD nu e un simplu „sibling”,
-//! deci structura trebuie confirmată cu Soft J-ul ANAF.
-//! A emite `asiguratD` fără niciun validator ar risca depuneri respinse de ANAF — mai rău decât
-//! comportamentul actual sigur (concediile se completează în PDF-ul inteligent ANAF, care le
-//! validează). De deblocat când ANAF publică D112Validator/Soft J: atunci capturăm D_5 (modelul îl
-//! are deja), D_10 (1–4), D_23 + lărgim selecția D_9, și emitem `asiguratD` + `angajatorC2`.
+//! ## Starea emiterii `asiguratD` în D112 (actualizat 06/2026)
+//! EMITTER-ul B-path e GATA și trece CURAT validatorul OFICIAL ANAF `D112Validator.jar` (`-v D112`,
+//! `Validare fără erori`): un asigurat cu ≥1 certificat emite calea B — `asiguratB1/B2/B3/B4` +
+//! `asiguratD` (per certificat) + rollup-ul angajator `angajatorC2` (vezi `anaf_decl::d112_xml`,
+//! testul `dump_leave_d112`). Câmpurile mapează direct din [`MedicalLeave`] (D_1..D_28; D_16=D_14+D_15,
+//! D_19=ROUND(D_17/D_18,2)); indemnizația de CM e supusă CAS 25% + CASS 10% (mai puțin codurile scutite
+//! de CASS ∉{01,07,10}), NU CAM — confirmat de reconcilierea B4 din structura v7. (Blocajul vechi „nu
+//! putem valida” e REZOLVAT: validatorul rulează local cu OpenJDK 17.)
+//!
+//! Ce RĂMÂNE pentru cablarea LIVE (în `commands/payroll.rs::export_d112_xml`, unde `med_leaves` e încă
+//! gol): un motor de salarizare CONȘTIENT DE CONCEDII. Astăzi `compute_payroll`/`run_payroll`/GL
+//! tratează salariatul ca lună întreagă lucrată — nu proratează salariul la zilele lucrate când există
+//! CM. A popula `med_leaves` fără proratare ar dubla baza (salariu întreg + indemnizație) ⇒ D112
+//! supra-declarat; iar proratarea trebuie făcută în MOTOR (nu doar în export), altfel D112 ar diverge de
+//! Registrul-jurnal (GL) și de salariul net. Deci ultima milă = proratare la zilele lucrate + impozitare
+//! combinată (lucrat + indemnizație) în `compute_payroll`, cu postări GL pentru indemnizație (423/431x).
+//! Până atunci concediile se completează în PDF-ul inteligent ANAF, iar emitterul B-path e gata de cuplat.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
