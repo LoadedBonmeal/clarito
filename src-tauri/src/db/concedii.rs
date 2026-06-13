@@ -16,14 +16,15 @@
 //! de CASS ∉{01,07,10}), NU CAM — confirmat de reconcilierea B4 din structura v7. (Blocajul vechi „nu
 //! putem valida” e REZOLVAT: validatorul rulează local cu OpenJDK 17.)
 //!
-//! Ce RĂMÂNE pentru cablarea LIVE (în `commands/payroll.rs::export_d112_xml`, unde `med_leaves` e încă
-//! gol): un motor de salarizare CONȘTIENT DE CONCEDII. Astăzi `compute_payroll`/`run_payroll`/GL
-//! tratează salariatul ca lună întreagă lucrată — nu proratează salariul la zilele lucrate când există
-//! CM. A popula `med_leaves` fără proratare ar dubla baza (salariu întreg + indemnizație) ⇒ D112
-//! supra-declarat; iar proratarea trebuie făcută în MOTOR (nu doar în export), altfel D112 ar diverge de
-//! Registrul-jurnal (GL) și de salariul net. Deci ultima milă = proratare la zilele lucrate + impozitare
-//! combinată (lucrat + indemnizație) în `compute_payroll`, cu postări GL pentru indemnizație (423/431x).
-//! Până atunci concediile se completează în PDF-ul inteligent ANAF, iar emitterul B-path e gata de cuplat.
+//! CABLAREA LIVE e COMPLETĂ — motorul e conștient de concedii. `compute_payroll_with_leave` (în
+//! `anaf_decl::d112`) proratează salariul la zilele lucrate (intervalul certificatului, inclusiv prima
+//! zi neplătită 2026 OUG 91/2025) și calculează contribuțiile combinate; `run_payroll` +
+//! `gl::post_payroll` postează separat salariul (641/421) de indemnizație (6458=423 angajator,
+//! 4382=423 FNUASS recuperabil, 423=4315/4316/444 rețineri); `export_d112_xml` populează `med_leaves`
+//! din registru ⇒ D112 = Registrul-jurnal = net. Tratamentul fiscal e în `cm_indemn_treatment` (CASS
+//! doar 01/07/10; impozit — maternitate/îngrijire copil/risc maternal scutite). Limitări cunoscute:
+//! contribuția 0,85% concedii (platitor de venit) NU e modelată (ortogonală, pe tot fondul de salarii);
+//! baza minimă part-time nu se aplică simultan cu concediul (combinație rară).
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};

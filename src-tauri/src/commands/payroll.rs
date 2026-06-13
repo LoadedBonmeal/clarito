@@ -135,9 +135,10 @@ pub async fn run_payroll(
     payroll::run_payroll(&state.db, &company_id, &period_from, &period_to).await
 }
 
-/// Exportă D112 (XML, namespace …declaratie:v6 — vezi d112_xml.rs) pentru luna dată — antet +
-/// obligații angajator + câte un asigurat per salariat activ (caz standard normă întreagă). Draft
-/// pentru import în aplicația D112.
+/// Exportă D112 (XML `:v7`, validat cu `D112Validator.jar` — vezi d112_xml.rs) pentru luna dată:
+/// antet + obligații angajator + câte un asigurat per salariat activ. Salariatul cu concediu medical
+/// emite calea B (asiguratB1/B2/B3/B4 + asiguratD) cu salariul proratat + indemnizația, consistent cu
+/// Registrul-jurnal (`run_payroll`). Draft pentru import în aplicația D112.
 #[tauri::command]
 pub async fn export_d112_xml(
     state: State<'_, AppState>,
