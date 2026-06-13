@@ -195,6 +195,13 @@ pub async fn export_d112_xml(
     let nzl = working_days(year, month); // zile lucrătoare în lună (Luni-Vineri)
     let mut d112_emps = Vec::new();
     for e in employees.iter().filter(|e| e.active) {
+        // ROB-17: reject malformed CNP before serializing — DUKIntegrator/ANAF reject it otherwise.
+        if !crate::anaf_decl::valid_cnp(&e.cnp) {
+            return Err(AppError::Validation(format!(
+                "CNP invalid pentru angajatul „{}\" ({}): trebuie 13 cifre cu cifra de control corectă.",
+                e.full_name, e.cnp
+            )));
+        }
         let gross_in = dec(&e.gross_salary);
         // Suma netaxabilă (300/200 lei, art. III OUG 89/2025) — 0 dacă nu se aplică. Scade baza
         // tuturor celor patru prelevări (vezi compute_payroll).
@@ -264,6 +271,15 @@ pub async fn export_d112_xml(
             baza_cass: leid(baza_cass),
             sediu_cif: e.sediu_cif.clone(),
         });
+    }
+
+    // ROB-01: a D112 with zero insured persons is a malformed declaration (B_sal=0, no asigurat) —
+    // ANAF rejects it. Guard with a clear error instead of emitting an empty draft.
+    if d112_emps.is_empty() {
+        return Err(AppError::Validation(
+            "Nu există angajați activi pentru luna selectată — D112 nu poate fi generat gol."
+                .into(),
+        ));
     }
 
     // casaAng: codul județului (București "B" → "_B").

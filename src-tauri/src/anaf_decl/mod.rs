@@ -167,9 +167,39 @@ pub fn cui_check_digit(base: &str) -> u8 {
     ctrl as u8
 }
 
+/// Validate a Romanian CNP (Cod Numeric Personal): exactly 13 digits with the official mod-11
+/// control digit (weights 279146358279; if the weighted-sum mod 11 == 10 the control digit is 1).
+/// ANAF's D112 validator rejects malformed CNPs, so we guard before serializing. An empty string
+/// returns false (a CNP is required for an insured person).
+pub fn valid_cnp(raw: &str) -> bool {
+    let s = raw.trim();
+    if s.len() != 13 || !s.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    let d: Vec<u32> = s.bytes().map(|b| (b - b'0') as u32).collect();
+    const W: [u32; 12] = [2, 7, 9, 1, 4, 6, 3, 5, 8, 2, 7, 9];
+    let sum: u32 = (0..12).map(|i| d[i] * W[i]).sum();
+    let mut ctrl = sum % 11;
+    if ctrl == 10 {
+        ctrl = 1;
+    }
+    ctrl == d[12]
+}
+
 #[cfg(test)]
 mod cui_tests {
     use super::*;
+
+    #[test]
+    fn cnp_validation() {
+        // base 196010141001 → control digit 9 (weighted sum 163, 163 % 11 = 9).
+        assert!(valid_cnp("1960101410019")); // valid control digit
+        assert!(!valid_cnp("1960101410017")); // wrong control digit (7 ≠ 9)
+        assert!(!valid_cnp("196010141001")); // 12 digits (too short)
+        assert!(!valid_cnp("19601014100199")); // 14 digits (too long)
+        assert!(!valid_cnp("196010141001X")); // non-digit
+        assert!(!valid_cnp("")); // empty
+    }
 
     #[test]
     fn known_valid_cuis() {

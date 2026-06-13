@@ -88,6 +88,13 @@ pub fn exempt_part_time_min_base(pensionar: bool, exceptie_cas_min: &str) -> boo
 /// supra-declarare conservatoare (protejează baza de pensie a salariatului). Proratarea pe zile e o
 /// extensie ulterioară.
 ///
+/// CAM (contribuția asigurătorie pentru muncă, art. 220^4-220^7): NU se ridică la baza minimă —
+/// art. 146 alin. (5^6)-(5^9) numește DOAR CAS și CASS, iar baza CAM (art. 220^6) = câștigul brut
+/// REALIZAT. D112 nu are un mecanism de „diferență CAM" suportată de angajator (spre deosebire de
+/// CAS→4315 / CASS→4316 via 6458). Deci CAM rămâne calculată pe brutul realizat (vezi
+/// `compute_payroll`), iar acest helper NU întoarce un `cam_diff`. (Ambiguitate statutară cunoscută
+/// — tăcerea legii e interpretată ca excludere; de confirmat cu ANAF/CECCAR dacă apare îndoială.)
+///
 /// Returnează Some((baza_minimă, cas_diff_angajator, cass_diff_angajator)) când se aplică majorarea.
 pub fn part_time_min_base(
     gross: Decimal,
@@ -248,10 +255,30 @@ mod tests {
         assert_eq!(suma_netaxabila(false, "N", d("4050"), 3), d("0"));
         // Part-time (Pi) → 0 (measure is full-time only).
         assert_eq!(suma_netaxabila(true, "P1", d("4050"), 3), d("0"));
-        // Over the gross ceiling (4.300 H1 / 4.600 H2) → whole benefit lost.
+        // Exactly AT the ceiling is INCLUSIVE (≤ 4.300 H1 / 4.600 H2) — boundary lock (TEST-01).
+        assert_eq!(suma_netaxabila(true, "N", d("4300"), 3), d("300"));
+        assert_eq!(suma_netaxabila(true, "N", d("4600"), 8), d("200"));
+        // Just OVER the ceiling → whole benefit lost.
         assert_eq!(suma_netaxabila(true, "N", d("4301"), 3), d("0"));
         assert_eq!(suma_netaxabila(true, "N", d("4500"), 8), d("200")); // 4500 ≤ 4600 H2
         assert_eq!(suma_netaxabila(true, "N", d("4601"), 8), d("0"));
+    }
+
+    #[test]
+    fn cam_stays_on_realized_gross_for_part_time_min_base() {
+        // CALC-01/02 lock: for a part-time employee whose CAS/CASS base is lifted to the minimum
+        // (art. 146 (5^6)), CAM is NOT lifted — it stays on the REALIZED gross (art. 220^6). The
+        // helper returns only (base, cas_diff, cass_diff) — no CAM component — and CAM = pct(gross).
+        let (base, cas_diff, cass_diff) = part_time_min_base(d("2000"), "P1", false, 3).unwrap();
+        assert_eq!(base, d("3750")); // CAS/CASS base lifted to 3.750 (H1)
+        assert!(cas_diff > d("0") && cass_diff > d("0")); // employer bears the CAS/CASS top-up
+                                                          // CAM is computed on the realized 2.000 (= 45), NOT on the lifted 3.750 (which would be 84).
+        let r = compute_payroll(&PayrollInput {
+            gross: d("2000"),
+            personal_deduction: d("0"),
+            non_taxable: d("0"), // carve-out is full-time-only; part-timers get 0
+        });
+        assert_eq!(r.cam, "45.00"); // 2000 × 2.25% = 45 — on realized gross, not the minimum base
     }
 
     #[test]
