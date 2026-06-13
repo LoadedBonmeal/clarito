@@ -62,13 +62,6 @@ impl From<rust_xlsxwriter::XlsxError> for AppError {
 }
 
 impl AppError {
-    /// Determină dacă eroarea reprezintă "nimic găsit" (vs eroare reală).
-    #[allow(dead_code)]
-    pub fn is_not_found(&self) -> bool {
-        matches!(self, AppError::NotFound)
-            || matches!(self, AppError::Database(sqlx::Error::RowNotFound))
-    }
-
     fn kind(&self) -> &'static str {
         match self {
             AppError::NotFound => "NotFound",

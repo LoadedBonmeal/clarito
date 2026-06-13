@@ -11,6 +11,13 @@ use sqlx::{FromRow, SqlitePool};
 use crate::db::models::{new_id, now_unix};
 use crate::error::{AppError, AppResult};
 
+/// SQL-01: the canonical Company column list — shared by every `SELECT … FROM companies`
+/// so the 23-column projection (and FromRow mapping) lives in exactly one place.
+const COMPANY_SELECT: &str = "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, \
+    cash_vat, address, city, county, postal_code, country, email, phone, iban, bank_name, \
+    is_active, spv_enabled, tax_regime, invoice_series, last_invoice_number, logo_path, \
+    created_at, updated_at FROM companies";
+
 /// 2026 micro-enterprise turnover ceiling in EUR (OUG 89/2025). Above its lei-equivalent (at the
 /// year-end BNR rate) the company owes profit tax (16%) from the quarter the ceiling was exceeded.
 pub const MICRO_CEILING_EUR: i64 = 100_000;
@@ -227,30 +234,20 @@ pub struct UpdateCompanyInput {
 // ─── Queries ───────────────────────────────────────────────────────────────
 
 pub async fn list(pool: &SqlitePool) -> AppResult<Vec<Company>> {
-    let rows = sqlx::query_as::<_, Company>(
-        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, cash_vat, \
-         address, city, county, postal_code, country, email, phone, iban, bank_name, \
-         is_active, spv_enabled, tax_regime, invoice_series, last_invoice_number, logo_path, \
-         created_at, updated_at \
-         FROM companies WHERE is_active = 1 ORDER BY legal_name",
-    )
+    let rows = sqlx::query_as::<_, Company>(&format!(
+        "{COMPANY_SELECT} WHERE is_active = 1 ORDER BY legal_name"
+    ))
     .fetch_all(pool)
     .await?;
     Ok(rows)
 }
 
 pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Company> {
-    let row = sqlx::query_as::<_, Company>(
-        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, cash_vat, \
-         address, city, county, postal_code, country, email, phone, iban, bank_name, \
-         is_active, spv_enabled, tax_regime, invoice_series, last_invoice_number, logo_path, \
-         created_at, updated_at \
-         FROM companies WHERE id = ?1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?
-    .ok_or(AppError::NotFound)?;
+    let row = sqlx::query_as::<_, Company>(&format!("{COMPANY_SELECT} WHERE id = ?1"))
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or(AppError::NotFound)?;
     Ok(row)
 }
 
@@ -259,13 +256,9 @@ pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Company> {
 pub async fn get_by_cui(pool: &SqlitePool, cui: &str) -> AppResult<Option<Company>> {
     // Task 5: only active companies block re-registration of the same CUI.
     // A soft-deleted (is_active = 0) company must not prevent re-adding the same CUI.
-    let row = sqlx::query_as::<_, Company>(
-        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, cash_vat, \
-         address, city, county, postal_code, country, email, phone, iban, bank_name, \
-         is_active, spv_enabled, tax_regime, invoice_series, last_invoice_number, logo_path, \
-         created_at, updated_at \
-         FROM companies WHERE cui = ?1 AND is_active = 1",
-    )
+    let row = sqlx::query_as::<_, Company>(&format!(
+        "{COMPANY_SELECT} WHERE cui = ?1 AND is_active = 1"
+    ))
     .bind(cui)
     .fetch_optional(pool)
     .await?;
@@ -275,16 +268,10 @@ pub async fn get_by_cui(pool: &SqlitePool, cui: &str) -> AppResult<Option<Compan
 /// Look up a company by CUI regardless of is_active status.
 /// Used by `create` to detect soft-deleted rows that can be reactivated.
 async fn get_by_cui_any_status(pool: &SqlitePool, cui: &str) -> AppResult<Option<Company>> {
-    let row = sqlx::query_as::<_, Company>(
-        "SELECT id, cui, legal_name, trade_name, registry_number, vat_payer, cash_vat, \
-         address, city, county, postal_code, country, email, phone, iban, bank_name, \
-         is_active, spv_enabled, tax_regime, invoice_series, last_invoice_number, logo_path, \
-         created_at, updated_at \
-         FROM companies WHERE cui = ?1",
-    )
-    .bind(cui)
-    .fetch_optional(pool)
-    .await?;
+    let row = sqlx::query_as::<_, Company>(&format!("{COMPANY_SELECT} WHERE cui = ?1"))
+        .bind(cui)
+        .fetch_optional(pool)
+        .await?;
     Ok(row)
 }
 

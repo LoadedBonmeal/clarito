@@ -351,6 +351,30 @@ mod tests {
     }
 
     #[test]
+    fn plafon_breach_boundary_and_overflow() {
+        // Exactly AT the plafon is NOT a breach (strict >).
+        assert_eq!(
+            plafon_breach_month(&[("2026-06".into(), 5_000_000)], 5_000_000),
+            None
+        );
+        // One leu over → breach in that month.
+        assert_eq!(
+            plafon_breach_month(&[("2026-06".into(), 5_000_001)], 5_000_000),
+            Some("2026-06".into())
+        );
+        // Empty series → no breach.
+        assert_eq!(plafon_breach_month(&[], 5_000_000), None);
+        // Overflow-large turnover must not panic (saturating_add) and still detects the breach.
+        assert_eq!(
+            plafon_breach_month(
+                &[("2026-01".into(), i64::MAX), ("2026-02".into(), i64::MAX)],
+                5_000_000
+            ),
+            Some("2026-01".into())
+        );
+    }
+
+    #[test]
     fn plafon_breach_detects_first_crossing_month() {
         let months = vec![
             ("2026-01".to_string(), 2_000_000),
