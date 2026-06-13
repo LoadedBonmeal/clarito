@@ -1,8 +1,14 @@
 # Builds the desktop installers on real OS runners:
-#   - Windows → NSIS .exe + .msi   (cannot be cross-compiled from macOS)
+#   - Windows → NSIS .exe   (cannot be cross-compiled from macOS)
 #   - macOS   → .dmg (aarch64)
 # Trigger: manually (workflow_dispatch) or by pushing a tag like v0.7.0.
-# Artifacts are attached to the run (and to a draft GitHub Release on tags).
+#
+# BUNDLED vs UNBUNDLED: a complete build embeds a minimal JRE (jlink) + the ANAF
+# DUKIntegrator validator jars (for LOCAL e-factura XML validation). The jars are
+# proprietary/vendored and fetched from the DUK_JARS_URL repo secret. If that
+# secret is NOT set, the build is UNBUNDLED — the app still runs and submits to
+# ANAF (server-side validation), but local pre-submission validation is absent.
+# These installers are UNSIGNED; signed/notarized releases come from release.yml.
 
 name: Release build
 
@@ -17,13 +23,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows: NSIS .exe only. The MSI (WiX light.exe) bundler chokes on
-          # the large bundled JRE tree, and because tauri.conf lists "msi"
-          # before "nsis" it would abort the run before the .exe is built.
+          # Windows: NSIS .exe only. The MSI (WiX) is built by release.yml; here
+          # NSIS is the reliable single-file installer.
           - platform: windows-latest
             args: "--bundles nsis"
+            java_arch: x64
           - platform: macos-latest
             args: "--target aarch64-apple-darwin --bundles dmg"
+            java_arch: aarch64
 
     runs-on: ${{ matrix.platform }}
 
@@ -45,8 +52,40 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # JDK for jlink — arch matches the target so the minimal JRE is the right ABI.
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          architecture: ${{ matrix.java_arch }}
+
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
+
+      # Vendored ANAF DUKIntegrator jars — only available via the secret.
+      - name: Stage DUK validator jars
+        shell: bash
+        run: |
+          mkdir -p src-tauri/resources/duk src-tauri/resources/jre-min
+          if [ -n "${{ secrets.DUK_JARS_URL }}" ]; then
+            curl -fsSL "${{ secrets.DUK_JARS_URL }}" -o /tmp/duk.zip
+            unzip -q /tmp/duk.zip -d src-tauri/resources/duk
+            echo "DUK_BUNDLED=1" >> "$GITHUB_ENV"
+          else
+            echo "::warning::DUK_JARS_URL not set — building UNBUNDLED (no local DUK validator). Set the secret to ship complete installers."
+            echo "unbundled placeholder" > src-tauri/resources/jre-min/.keep
+            echo "unbundled placeholder" > src-tauri/resources/duk/.keep
+          fi
+
+      - name: Build minimal JRE (jlink)
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.DUK_JARS_URL }}" ]; then
+            JAVA_HOME="$JAVA_HOME" bash scripts/jlink-jre.sh
+          else
+            echo "::warning::Skipping jlink — unbundled build (no DUK_JARS_URL)."
+          fi
 
       - name: Build installers
         uses: tauri-apps/tauri-action@v0
@@ -54,7 +93,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: ${{ matrix.args }}
-          # On tag pushes, attach installers to a draft release:
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('Clarito {0}', github.ref_name) || '' }}
           releaseDraft: true
@@ -63,9 +101,8 @@ jobs:
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
-          name: clarito-${{ matrix.platform }}
+          name: clarito-${{ matrix.platform }}${{ env.DUK_BUNDLED == '1' && '-bundled' || '-unbundled' }}
           path: |
             src-tauri/target/**/release/bundle/nsis/*.exe
-            src-tauri/target/**/release/bundle/msi/*.msi
             src-tauri/target/**/release/bundle/dmg/*.dmg
           if-no-files-found: warn
