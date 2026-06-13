@@ -388,6 +388,66 @@ async fn cash_vat_collected_groups(
     Ok(out)
 }
 
+/// Cash-VAT STORNO collected-VAT correction for `[period_from, period_to]`, per rate_key → Σ
+/// `amount_to_4428`. The issue-date collected query reverses a credit note's FULL "S" VAT (−R), but
+/// under art. 282 alin. (10) only the already-collected part (`amount_to_4427`) may reduce collected
+/// VAT — the still-deferred part (`amount_to_4428`, never reported as collected) must not. Callers
+/// ADD this back, leaving each cross-period cash-VAT storno's net collected contribution at
+/// −`amount_to_4427`. Uses the SAME `cash_vat_storno_split` as the GL postings ⇒ D300 collected ties
+/// to GL net-4427 on reconcile. Empty for same-period / non-deferred storni (issue-date path already
+/// correct there). Only cross-period cash-VAT storni of still-deferred originals contribute.
+async fn cash_vat_storno_collected_correction(
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<BTreeMap<i64, Decimal>> {
+    let storni = sqlx::query(
+        "SELECT id, storno_of_invoice_id, COALESCE(currency,'RON') AS currency, exchange_rate, \
+                issue_date \
+         FROM invoices \
+         WHERE company_id = ?1 AND storno_of_invoice_id IS NOT NULL \
+           AND status IN ('VALIDATED','STORNED') \
+           AND issue_date >= ?2 AND issue_date <= ?3 \
+           AND CAST(total_amount AS REAL) < 0",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    let mut out: BTreeMap<i64, Decimal> = BTreeMap::new();
+    for s in &storni {
+        let sid: String = s.try_get("id").unwrap_or_default();
+        let oid: String = match s.try_get::<Option<String>, _>("storno_of_invoice_id") {
+            Ok(Some(v)) => v,
+            _ => continue,
+        };
+        let sissue: String = s.try_get("issue_date").unwrap_or_default();
+        let sc: String = s.try_get("currency").unwrap_or_else(|_| "RON".to_string());
+        let sfx = parse_rate(s.try_get::<Option<f64>, _>("exchange_rate").unwrap_or(None));
+        let split = crate::db::gl::cash_vat_storno_split(
+            pool,
+            company_id,
+            &sid,
+            &sissue,
+            &sc,
+            sfx,
+            &oid,
+            period_from,
+        )
+        .await?;
+        for (k, (_to4427, to4428)) in &split {
+            if !to4428.is_zero() {
+                *out.entry(*k).or_insert(Decimal::ZERO) += *to4428;
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// True when buyer-side cash-VAT routing could change anything for this company: either the
 /// buyer itself applies cash VAT, or it has at least one supplier (contact) flagged as
 /// applying cash VAT (RPATVAÎ). When false, the deductible side is byte-identical to before.
@@ -654,6 +714,12 @@ pub(crate) async fn d300_vat_totals(
         )
         .await?;
         for (_, _base, vat) in deferred.values() {
+            collected += *vat;
+        }
+        // art. 282: undo the issue-date over-reversal of a cross-period storno's deferred part.
+        let storno_corr =
+            cash_vat_storno_collected_correction(pool, company_id, period_from, period_to).await?;
+        for vat in storno_corr.values() {
             collected += *vat;
         }
     }
@@ -1172,6 +1238,26 @@ pub async fn compute_d300(
                 .or_insert((rate, Decimal::ZERO, Decimal::ZERO));
             e.1 += base;
             e.2 += vat;
+        }
+        // art. 282 storno correction: add back the deferred VAT (+ proportional base, so the rd row
+        // stays vat ≈ base×cotă for DUK) over-reversed at issue date for cross-period cash-VAT storni.
+        let storno_corr =
+            cash_vat_storno_collected_correction(pool, &company_id, &period_from, &period_to)
+                .await?;
+        for (rate_key, vat_corr) in storno_corr {
+            let rate = Decimal::from(rate_key) / Decimal::from(100);
+            let base_corr = if rate_key != 0 {
+                vat_corr * Decimal::from(10000) / Decimal::from(rate_key)
+            } else {
+                Decimal::ZERO
+            };
+            let e = groups.entry((rate_key, "S".to_string())).or_insert((
+                rate,
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ));
+            e.1 += base_corr;
+            e.2 += vat_corr;
         }
     }
 

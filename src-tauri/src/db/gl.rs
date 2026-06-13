@@ -186,7 +186,15 @@ fn post_sales_invoice(
     // invoice date — credit 4428 "TVA neexigibilă" instead of 4427; it transfers to 4427 on
     // collection (see post_payment). Excluded categories (AE/E/Z/K) keep 4427.
     cash_vat_applies: bool,
+    // TVA la încasare — STORNO settlement-aware split (art. 282 alin. (9)/(10)). For a cash-VAT
+    // credit note against an original that was NOT fully collected, the negative "S" VAT must be
+    // routed in two legs per rate: `D 4427` for the already-collected part and `D 4428` for the
+    // still-deferred part (cancelling the original's residual 4428 directly, NOT regenerating its
+    // period). Keyed by `round(rate*100)` → `(to_4427, to_4428)`, both positive, summing to |VAT|.
+    // `None` for fresh sales and the fully-paid case (which keep the single all-to-4427 leg).
+    storno_split: Option<&std::collections::BTreeMap<i64, (Decimal, Decimal)>>,
 ) -> (GlJournal, Vec<GlEntry>) {
+    use rust_decimal::prelude::ToPrimitive;
     // Use canonical partner ID (CUI-based) so it matches MasterFiles and SourceDocuments
     let contact_id = canonical_partner_id(contact_id_raw, partner_cui.unwrap_or(""));
     // Sign is ALWAYS +1: the stored line amounts are already correctly signed (a normal sale is
@@ -284,39 +292,74 @@ fn post_sales_invoice(
         });
         record_id += 1;
 
-        // C 4427 TVA colectată = VAT (only when group has VAT). Under cash VAT the standard
-        // "S" VAT is not yet exigible → 4428 "TVA neexigibilă" (transferred to 4427 on
-        // collection). Excluded categories keep normal exigibility (4427).
-        let vat_account = if cash_vat_applies && category == "S" {
-            "4428"
-        } else {
-            "4427"
-        };
+        // C 4427 TVA colectată = VAT (only when group has VAT). Under cash VAT the standard "S"
+        // VAT is not yet exigible → 4428 "TVA neexigibilă" (transferred to 4427 on collection).
+        // Excluded categories keep normal exigibility (4427). For a cash-VAT STORNO against a
+        // not-fully-collected original, `storno_split` routes the negative "S" VAT in two legs:
+        // `D 4427` (already-collected part C) + `D 4428` (cancel the residual deferred part)
+        // — art. 282 alin. (9)/(10) / Norme pct. 24. The two legs sum to |VAT| so the group balances.
         if *vat_ron != Decimal::ZERO {
-            entries.push(GlEntry {
-                id: new_id(),
-                record_id,
-                account_code: vat_account.to_string(),
-                debit: if vat < Decimal::ZERO {
-                    -vat
+            let split = if category == "S" {
+                storno_split.and_then(|m| {
+                    let key = (*rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
+                    m.get(&key).copied()
+                })
+            } else {
+                None
+            };
+            if let Some((to_4427, to_4428)) = split {
+                // Storno: VAT is negative → both legs are DEBITS reducing 4427 / 4428.
+                for (acc, amt) in [("4427", to_4427), ("4428", to_4428)] {
+                    if amt != Decimal::ZERO {
+                        entries.push(GlEntry {
+                            id: new_id(),
+                            record_id,
+                            account_code: acc.to_string(),
+                            debit: amt,
+                            credit: Decimal::ZERO,
+                            partner_cui: None,
+                            customer_id: None,
+                            supplier_id: None,
+                            tax_type: "300".to_string(),
+                            tax_code: tc.clone(),
+                            tax_percentage: Some(rate_str.clone()),
+                            tax_base: None,
+                            tax_amount: None,
+                        });
+                        record_id += 1;
+                    }
+                }
+            } else {
+                let vat_account = if cash_vat_applies && category == "S" {
+                    "4428"
                 } else {
-                    Decimal::ZERO
-                },
-                credit: if vat > Decimal::ZERO {
-                    vat
-                } else {
-                    Decimal::ZERO
-                },
-                partner_cui: None,
-                customer_id: None,
-                supplier_id: None,
-                tax_type: "300".to_string(),
-                tax_code: tc,
-                tax_percentage: Some(rate_str),
-                tax_base: None,
-                tax_amount: None,
-            });
-            record_id += 1;
+                    "4427"
+                };
+                entries.push(GlEntry {
+                    id: new_id(),
+                    record_id,
+                    account_code: vat_account.to_string(),
+                    debit: if vat < Decimal::ZERO {
+                        -vat
+                    } else {
+                        Decimal::ZERO
+                    },
+                    credit: if vat > Decimal::ZERO {
+                        vat
+                    } else {
+                        Decimal::ZERO
+                    },
+                    partner_cui: None,
+                    customer_id: None,
+                    supplier_id: None,
+                    tax_type: "300".to_string(),
+                    tax_code: tc,
+                    tax_percentage: Some(rate_str),
+                    tax_base: None,
+                    tax_amount: None,
+                });
+                record_id += 1;
+            }
         }
     }
 
@@ -719,6 +762,176 @@ async fn cash_vat_release_for_payment(
         out.push((rate, Decimal::from(rb.vat_bani) / Decimal::from(100)));
     }
     Ok(out)
+}
+
+/// Total standard ("S") output VAT per rate on `invoice_id`, in RON via its own `currency`/`fx`.
+/// This is the original sale's deferred-VAT base for the cash-VAT storno split (art. 282): the
+/// full S-VAT that was booked to 4428 at issue. Rate key = `round(rate*100)` (e.g. 21% → 2100).
+async fn cash_vat_original_s_vat(
+    pool: &SqlitePool,
+    invoice_id: &str,
+    currency: &str,
+    fx: Option<Decimal>,
+) -> AppResult<std::collections::BTreeMap<i64, Decimal>> {
+    use rust_decimal::prelude::ToPrimitive;
+    let rows = sqlx::query(
+        "SELECT vat_category, vat_rate, vat_amount FROM invoice_line_items WHERE invoice_id = ?1",
+    )
+    .bind(invoice_id)
+    .fetch_all(pool)
+    .await?;
+    let mut out: std::collections::BTreeMap<i64, Decimal> = std::collections::BTreeMap::new();
+    for r in &rows {
+        let cat: String = r
+            .try_get("vat_category")
+            .unwrap_or_else(|_| "S".to_string());
+        if cat.trim() != "S" {
+            continue;
+        }
+        let rate_s: String = r.try_get("vat_rate").unwrap_or_default();
+        let vat_s: String = r.try_get("vat_amount").unwrap_or_default();
+        let key = (dec(&rate_s) * Decimal::from(100))
+            .round()
+            .to_i64()
+            .unwrap_or(0);
+        *out.entry(key).or_insert(Decimal::ZERO) += amount_to_ron(dec(&vat_s), currency, fx);
+    }
+    Ok(out)
+}
+
+/// VAT released 4428→4427 on `invoice_id` for collections dated `≤ as_of` (the storno's issue
+/// date), per rate — i.e. the **collected** portion `C` of art. 282. Reuses the canonical
+/// per-payment release math (`cash_vat_release_for_payment`, which reads each payment's
+/// `paid_before` from the DB), summing the incremental releases over the original's payments in
+/// `(paid_at, id)` order. Currency/fx are the ORIGINAL's. Rate key matches `cash_vat_original_s_vat`.
+async fn cash_vat_collected_to_date(
+    pool: &SqlitePool,
+    invoice_id: &str,
+    as_of: &str,
+    currency: &str,
+    fx: Option<Decimal>,
+) -> AppResult<std::collections::BTreeMap<i64, Decimal>> {
+    use rust_decimal::prelude::ToPrimitive;
+    let pays = sqlx::query(
+        "SELECT id, paid_at, amount FROM payments \
+         WHERE invoice_id = ?1 AND substr(paid_at,1,10) <= substr(?2,1,10) \
+         ORDER BY paid_at, id",
+    )
+    .bind(invoice_id)
+    .bind(as_of)
+    .fetch_all(pool)
+    .await?;
+    let mut out: std::collections::BTreeMap<i64, Decimal> = std::collections::BTreeMap::new();
+    for p in &pays {
+        let pid: String = p.try_get("id").unwrap_or_default();
+        let paid_at: String = p.try_get("paid_at").unwrap_or_default();
+        let amt_s: String = p.try_get("amount").unwrap_or_default();
+        let amt = amount_to_ron(dec(&amt_s), currency, fx);
+        if amt <= Decimal::ZERO {
+            continue;
+        }
+        for (rate, vat) in
+            cash_vat_release_for_payment(pool, invoice_id, &pid, &paid_at, currency, fx, amt)
+                .await?
+        {
+            let key = (rate * Decimal::from(100)).round().to_i64().unwrap_or(0);
+            *out.entry(key).or_insert(Decimal::ZERO) += vat;
+        }
+    }
+    Ok(out)
+}
+
+/// Does the original sale `orig_id` currently defer standard VAT to 4428 in the committed GL?
+/// This is the reliable signal for the cash-VAT storno split: the storno command marks EVERY
+/// stornoed original `STORNED` (so status can't distinguish a still-deferred prior-period sale from
+/// one already re-posted to 4427), and a same-transaction regeneration isn't visible through `pool`.
+/// True ⇔ the original's INVOICE journal has a non-zero 4428 credit (a live deferred cash-VAT sale).
+async fn original_defers_s_vat_to_4428(
+    pool: &SqlitePool,
+    company_id: &str,
+    orig_id: &str,
+) -> AppResult<bool> {
+    let n: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
+         WHERE j.company_id = ?1 AND j.source_type = 'INVOICE' AND j.source_id = ?2 \
+           AND e.account_code = '4428' AND CAST(e.credit AS REAL) > 0",
+    )
+    .bind(company_id)
+    .bind(orig_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(n > 0)
+}
+
+/// Cash-VAT STORNO settlement-aware split (art. 282 alin. (9)/(10)) for ONE credit note
+/// `storno_id` (issued `storno_issue`, its own `storno_currency`/`storno_fx`) against original
+/// `orig_id`, within a generation/declaration period starting `period_from`. Returns
+/// `rate_key → (to_4427, to_4428)` (both ≥0, summing to |storno S-VAT| per rate). Non-empty ONLY for
+/// the cross-period deferred case: the original is in a STRICTLY-PRIOR period AND still defers S-VAT
+/// to 4428. Otherwise empty (caller uses the normal single 4427-leg reversal). Per rate: R=|storno
+/// VAT|, C=collected-to-storno-date, D=total−C, to_4428=min(max(R−C,0),D), to_4427=R−to_4428.
+/// SHARED by the GL posting (the two reversal legs) and the D300 collected correction (Σ to_4428),
+/// so GL net-4427 and D300 collected always agree on reconcile.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn cash_vat_storno_split(
+    pool: &SqlitePool,
+    company_id: &str,
+    storno_id: &str,
+    storno_issue: &str,
+    storno_currency: &str,
+    storno_fx: Option<Decimal>,
+    orig_id: &str,
+    period_from: &str,
+) -> AppResult<std::collections::BTreeMap<i64, (Decimal, Decimal)>> {
+    let mut split: std::collections::BTreeMap<i64, (Decimal, Decimal)> =
+        std::collections::BTreeMap::new();
+    let orig_row = match sqlx::query(
+        "SELECT issue_date, COALESCE(currency,'RON') AS currency, exchange_rate \
+         FROM invoices WHERE id = ?1",
+    )
+    .bind(orig_id)
+    .fetch_optional(pool)
+    .await?
+    {
+        Some(r) => r,
+        None => return Ok(split),
+    };
+    let orig_issue: String = orig_row.try_get("issue_date").unwrap_or_default();
+    // Cross-period AND still-deferred (committed GL credits 4428) — see `original_defers...` for why
+    // the GL is the only reliable signal (the storno command marks every original STORNED).
+    if !(orig_issue.as_str() < period_from
+        && original_defers_s_vat_to_4428(pool, company_id, orig_id).await?)
+    {
+        return Ok(split);
+    }
+    let oc: String = orig_row
+        .try_get("currency")
+        .unwrap_or_else(|_| "RON".to_string());
+    let ofx = parse_rate(
+        orig_row
+            .try_get::<Option<f64>, _>("exchange_rate")
+            .unwrap_or(None),
+    );
+    let totals = cash_vat_original_s_vat(pool, orig_id, &oc, ofx).await?;
+    let collected = cash_vat_collected_to_date(pool, orig_id, storno_issue, &oc, ofx).await?;
+    // The storno's own S-VAT per rate (negative lines → take magnitude as R).
+    let r_by_rate = cash_vat_original_s_vat(pool, storno_id, storno_currency, storno_fx).await?;
+    for (key, r_signed) in &r_by_rate {
+        let r = r_signed.abs();
+        if r.is_zero() {
+            continue;
+        }
+        let total = totals.get(key).copied().unwrap_or(Decimal::ZERO);
+        if total.is_zero() {
+            continue; // original had no deferred S-VAT at this rate
+        }
+        let c = collected.get(key).copied().unwrap_or(Decimal::ZERO);
+        let d = (total - c).max(Decimal::ZERO); // residual still on 4428
+        let to_4428 = (r - c).max(Decimal::ZERO).min(d);
+        let to_4427 = r - to_4428;
+        split.insert(*key, (to_4427, to_4428));
+    }
+    Ok(split)
 }
 
 /// Buyer-side analogue of `cash_vat_release_for_payment`: the per-rate input VAT `(rate,
@@ -1218,32 +1431,35 @@ pub async fn generate_gl_entries(
         // 4428→4427 release for STORNED, and D300 counts it as collected at issue) — keeping the
         // three sides consistent. (Credit-note 4428/4427 reversal under cash VAT is deferred — see
         // CASH_VAT_DESIGN.md TODO 5.)
-        //
-        // ATENȚIE cross-period: dacă originalul stă într-o PERIOADĂ ANTERIOARĂ generată înainte de
-        // stornare, jurnalul lui vechi a creditat 4428; reclasificarea (STORNED → 4427) se face
-        // doar la REGENERAREA acelei perioade. Avertizăm ca utilizatorul să regenereze și perioada
-        // originalului, altfel 4428 rămâne blocat cu TVA neexigibilă a unei vânzări anulate.
         let cash_vat_applies = !is_storno && status != "STORNED" && in_cash_vat_window(&issue_date);
-        if is_storno && company_cash_vat {
-            if let Some(orig_id) = storno_ref.as_deref() {
-                let orig_issue: Option<String> =
-                    sqlx::query_scalar("SELECT issue_date FROM invoices WHERE id = ?1")
-                        .bind(orig_id)
-                        .fetch_optional(pool)
-                        .await
-                        .unwrap_or(None);
-                if let Some(oi) = orig_issue {
-                    if oi.as_str() < period_from && in_cash_vat_window(&oi) {
-                        tracing::warn!(
-                            storno = %full_number, original_issue = %oi,
-                            "TVA la încasare: originalul stornat e într-o perioadă anterioară — \
-                             regenerați și acea perioadă, altfel 4428 rămâne cu TVA neexigibilă \
-                             a unei vânzări anulate"
-                        );
+
+        // TVA la încasare — STORNO settlement-aware split (art. 282 alin. (9)/(10), Norme pct. 24):
+        // for a cross-period cash-VAT credit note, reverse the collected part via 4427 and cancel the
+        // still-deferred residual directly off 4428 (in the storno period — we do NOT regenerate the
+        // original's period). The shared `cash_vat_storno_split` is also used by the D300 collected
+        // correction, so GL net-4427 and D300 always agree. Empty ⇒ normal single 4427-leg reversal.
+        let storno_split: Option<std::collections::BTreeMap<i64, (Decimal, Decimal)>> =
+            match (is_storno && company_cash_vat, storno_ref.as_deref()) {
+                (true, Some(orig_id)) => {
+                    let s = cash_vat_storno_split(
+                        pool,
+                        company_id,
+                        &inv_id,
+                        &issue_date,
+                        &currency,
+                        fx,
+                        orig_id,
+                        period_from,
+                    )
+                    .await?;
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s)
                     }
                 }
-            }
-        }
+                _ => None,
+            };
 
         let (journal, entries) = post_sales_invoice(
             company_id,
@@ -1255,6 +1471,7 @@ pub async fn generate_gl_entries(
             &vat_groups,
             is_storno,
             cash_vat_applies,
+            storno_split.as_ref(),
         );
 
         // FIX 2: Balance guard — reject before writing.
@@ -4038,6 +4255,86 @@ mod tests {
         .expect("insert line item");
     }
 
+    /// Like `insert_invoice` but with an explicit `issue_date` (for cross-period cash-VAT tests).
+    /// Single S/19 line; due_date = issue_date + ~1 month is irrelevant to GL, so reuse issue_date.
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_invoice_on(
+        pool: &SqlitePool,
+        company_id: &str,
+        inv_id: &str,
+        contact_id: &str,
+        status: &str,
+        net: &str,
+        vat: &str,
+        gross: &str,
+        storno_of: Option<&str>,
+        issue_date: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, currency, subtotal_amount, vat_amount, total_amount, \
+              status, payment_means_code, storno_of_invoice_id, created_at, updated_at) \
+             VALUES (?1,?2,?3,?10,1,?10,?4,?4,'RON',?5,?6,?7,?8,'42',?9,1,1)",
+        )
+        .bind(inv_id)
+        .bind(company_id)
+        .bind(contact_id)
+        .bind(issue_date)
+        .bind(net)
+        .bind(vat)
+        .bind(gross)
+        .bind(status)
+        .bind(storno_of)
+        .bind(inv_id)
+        .execute(pool)
+        .await
+        .expect("insert invoice");
+
+        sqlx::query(
+            "INSERT INTO invoice_line_items \
+             (id, invoice_id, position, name, quantity, unit, unit_price, \
+              vat_rate, vat_category, subtotal_amount, vat_amount, total_amount) \
+             VALUES (?1,?2,'1','Produs','1','buc','1000','19','S',?3,?4,?5)",
+        )
+        .bind(format!("line-{inv_id}"))
+        .bind(inv_id)
+        .bind(net)
+        .bind(vat)
+        .bind(gross)
+        .execute(pool)
+        .await
+        .expect("insert line item");
+    }
+
+    /// (Σdebit, Σcredit) for an account restricted to ONE source document's journal — isolates a
+    /// single invoice/credit-note's postings (vs `account_balance` which sums the whole company).
+    async fn source_account(
+        pool: &SqlitePool,
+        company: &str,
+        source_id: &str,
+        account: &str,
+    ) -> (Decimal, Decimal) {
+        let rows = sqlx::query(
+            "SELECT e.debit, e.credit FROM gl_entry e \
+             JOIN gl_journal j ON j.id = e.journal_pk \
+             WHERE j.company_id = ?1 AND j.source_id = ?2 AND e.account_code = ?3",
+        )
+        .bind(company)
+        .bind(source_id)
+        .bind(account)
+        .fetch_all(pool)
+        .await
+        .unwrap();
+        let mut d = Decimal::ZERO;
+        let mut c = Decimal::ZERO;
+        for r in &rows {
+            d += dec(&r.try_get::<String, _>("debit").unwrap_or_default());
+            c += dec(&r.try_get::<String, _>("credit").unwrap_or_default());
+        }
+        (d, c)
+    }
+
     // ── Helper: inserează factură primită cu linii VAT ────────────────────────
     // `gross_override`: dacă None, gross = net + vat (cazul normal).
     //                   dacă Some(v), gross = v  (folosit pentru AE unde gross = net).
@@ -5129,6 +5426,265 @@ mod tests {
         let (_, c4427) = account_balance(&pool, "co", "4427").await;
         assert_eq!(c4427, dec("95"), "half the VAT exigible");
         assert_eq!(c4428 - d4428, dec("95"), "the other half stays neexigibilă");
+    }
+
+    // ── Cash-VAT STORNO settlement-aware split (art. 282) — cross-period matrix ──────────────
+    // A credit note for a prior-period cash-VAT sale must reverse the already-collected VAT off
+    // 4427 and cancel the still-deferred residual off 4428 (NOT dump the whole reversal on 4427,
+    // which strands the deferred part — the bug). The storno command marks the original STORNED;
+    // we deliberately do NOT regenerate the original's (prior) period.
+
+    #[tokio::test]
+    async fn cash_vat_storno_unpaid_cross_period_cancels_4428_not_4427() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        enable_cash_vat(&pool, "co", "2026-01-01").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        // January: live cash-VAT sale → S-VAT deferred to 4428. Never collected.
+        insert_invoice_on(
+            &pool,
+            "co",
+            "o",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+            "2026-01-15",
+        )
+        .await;
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31")
+            .await
+            .unwrap();
+        // Issuing the credit note marks the original STORNED (real flow); prior period NOT regenerated.
+        sqlx::query("UPDATE invoices SET status='STORNED' WHERE id='o'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        // February: credit note for the uncollected sale.
+        insert_invoice_on(
+            &pool,
+            "co",
+            "cn",
+            "ct",
+            "VALIDATED",
+            "-1000",
+            "-190",
+            "-1190",
+            Some("o"),
+            "2026-02-10",
+        )
+        .await;
+        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28")
+            .await
+            .unwrap();
+
+        // The whole reversal cancels the still-deferred 4428 — 4427 untouched (nothing collected).
+        let (d_cn_4428, _) = source_account(&pool, "co", "cn", "4428").await;
+        let (d_cn_4427, _) = source_account(&pool, "co", "cn", "4427").await;
+        assert_eq!(
+            d_cn_4428,
+            dec("190"),
+            "credit note cancels deferred VAT off 4428"
+        );
+        assert_eq!(
+            d_cn_4427,
+            Decimal::ZERO,
+            "nothing collected → 4427 untouched"
+        );
+        // Nothing stranded: old bug left 4428=+190 (credit) and 4427=−190 (debit).
+        let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
+        let (d4427, c4427) = account_balance(&pool, "co", "4427").await;
+        assert_eq!(c4428 - d4428, Decimal::ZERO, "no VAT stranded in 4428");
+        assert_eq!(c4427 - d4427, Decimal::ZERO, "no phantom reversal in 4427");
+        // GL net-4427 (0) must tie to D300 collected (0) — the D300 correction undoes the issue-date
+        // query's full −190 reversal. Without it, D300 would show −190 ≠ GL 0 and reconcile fails.
+        let rec = reconcile(&pool, "co", "2026-02-01", "2026-02-28")
+            .await
+            .unwrap();
+        assert!(
+            rec.discrepancies.is_empty(),
+            "GL↔D300 must reconcile in the storno period: {:?}",
+            rec.discrepancies
+        );
+    }
+
+    #[tokio::test]
+    async fn cash_vat_storno_partial_cross_period_splits_4427_and_4428() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        enable_cash_vat(&pool, "co", "2026-01-01").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice_on(
+            &pool,
+            "co",
+            "o",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+            "2026-01-15",
+        )
+        .await;
+        // Collect half in January (595 of 1190) → 95 released to 4427, 95 left deferred on 4428.
+        insert_pay(&pool, "co", "o", "p1", "595", "2026-01-20").await;
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE invoices SET status='STORNED' WHERE id='o'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        insert_invoice_on(
+            &pool,
+            "co",
+            "cn",
+            "ct",
+            "VALIDATED",
+            "-1000",
+            "-190",
+            "-1190",
+            Some("o"),
+            "2026-02-10",
+        )
+        .await;
+        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28")
+            .await
+            .unwrap();
+
+        // Split: collected 95 reversed via 4427, deferred residual 95 cancelled via 4428.
+        let (d_cn_4427, _) = source_account(&pool, "co", "cn", "4427").await;
+        let (d_cn_4428, _) = source_account(&pool, "co", "cn", "4428").await;
+        assert_eq!(d_cn_4427, dec("95"), "collected portion reverses via 4427");
+        assert_eq!(d_cn_4428, dec("95"), "deferred residual cancels via 4428");
+        // Everything nets to zero across both periods.
+        let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
+        let (d4427, c4427) = account_balance(&pool, "co", "4427").await;
+        assert_eq!(c4428 - d4428, Decimal::ZERO, "4428 fully cleared");
+        assert_eq!(c4427 - d4427, Decimal::ZERO, "4427 fully cleared");
+        // GL net-4427 in February (−95) must tie to D300 collected (−95): issue-date −190 + correction
+        // +95. Without the correction, D300 = −190 ≠ GL −95 and reconcile fails.
+        let rec = reconcile(&pool, "co", "2026-02-01", "2026-02-28")
+            .await
+            .unwrap();
+        assert!(
+            rec.discrepancies.is_empty(),
+            "GL↔D300 must reconcile in the storno period: {:?}",
+            rec.discrepancies
+        );
+    }
+
+    #[tokio::test]
+    async fn cash_vat_storno_fully_paid_cross_period_reverses_4427_only() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        enable_cash_vat(&pool, "co", "2026-01-01").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice_on(
+            &pool,
+            "co",
+            "o",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+            "2026-01-15",
+        )
+        .await;
+        insert_pay(&pool, "co", "o", "p1", "1190", "2026-01-20").await; // fully collected → all on 4427
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE invoices SET status='STORNED' WHERE id='o'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        insert_invoice_on(
+            &pool,
+            "co",
+            "cn",
+            "ct",
+            "VALIDATED",
+            "-1000",
+            "-190",
+            "-1190",
+            Some("o"),
+            "2026-02-10",
+        )
+        .await;
+        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28")
+            .await
+            .unwrap();
+
+        // Fully collected → reverse all off 4427; 4428 untouched (residual was already zero).
+        let (d_cn_4427, _) = source_account(&pool, "co", "cn", "4427").await;
+        let (d_cn_4428, _) = source_account(&pool, "co", "cn", "4428").await;
+        assert_eq!(d_cn_4427, dec("190"), "collected VAT reverses via 4427");
+        assert_eq!(
+            d_cn_4428,
+            Decimal::ZERO,
+            "no deferred residual → 4428 untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn cash_vat_storno_partial_credit_note_cross_period_unpaid() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        enable_cash_vat(&pool, "co", "2026-01-01").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        // Unpaid live sale 1000+190 → 4428 += 190. Original stays VALIDATED (partial credit note).
+        insert_invoice_on(
+            &pool,
+            "co",
+            "o",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+            "2026-01-15",
+        )
+        .await;
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31")
+            .await
+            .unwrap();
+        // Partial credit note: only 500+95 reversed (R=95 < original 190), still unpaid.
+        insert_invoice_on(
+            &pool,
+            "co",
+            "cn",
+            "ct",
+            "VALIDATED",
+            "-500",
+            "-95",
+            "-595",
+            Some("o"),
+            "2026-02-10",
+        )
+        .await;
+        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28")
+            .await
+            .unwrap();
+
+        // R=95 unpaid → all 95 cancels off 4428; 4427 untouched. Residual 95 stays deferred.
+        let (d_cn_4428, _) = source_account(&pool, "co", "cn", "4428").await;
+        let (d_cn_4427, _) = source_account(&pool, "co", "cn", "4427").await;
+        assert_eq!(d_cn_4428, dec("95"), "partial reversal cancels 95 off 4428");
+        assert_eq!(
+            d_cn_4427,
+            Decimal::ZERO,
+            "nothing collected → 4427 untouched"
+        );
+        // 4428 keeps the un-credited half (190 − 95 = 95) still deferred.
+        let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
+        assert_eq!(c4428 - d4428, dec("95"), "residual 95 remains neexigibilă");
     }
 
     #[tokio::test]

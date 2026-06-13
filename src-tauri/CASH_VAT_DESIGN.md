@@ -125,8 +125,15 @@ present, no Java runtime). Install a JRE (`brew install temurin`) to run it.
   credit notes stay on the issue-date path); SQL `TRIM(vat_category)` symmetry; half-away
   `ron_to_bani`; date-only `paid_at`; payment converted in invoice currency.
 - **TODO 4d** — DUKIntegrator on a cash-VAT fixture (needs Java; can't run locally).
-- **TODO 5** — GL 4428.colectat/.deductibil postings + **proportional** storno-against-settlement
-  (4b does only accrual-style storno reversal; reconcile still diverges for cash-VAT until 5).
+- **TODO 5** — ✅ DONE (branch `cash-vat-storno-282`). Settlement-aware storno split per art. 282
+  alin. (9)/(10): a cross-period cash-VAT credit note reverses the already-collected part via 4427
+  and cancels the still-deferred residual directly off 4428 — in the storno period, without
+  regenerating the original's period. Per rate `R=|storno VAT|`, `C=`collected-to-date,
+  `to_4428=min(max(R−C,0), total−C)`, `to_4427=R−to_4428`. The shared `gl::cash_vat_storno_split`
+  feeds BOTH the GL legs and the D300 collected correction (`+Σ to_4428` undoes the issue-date
+  query's full reversal), so GL net-4427 ↔ D300 collected reconcile. Gate: the cross-period GL
+  matrix (unpaid/partial/fully-paid/partial-storno) + reconcile assertions. The same-period full
+  storno keeps its existing single-4427-leg path (still correct + tested).
 - **TODO 6** — invoice "TVA la încasare" mention. **TODO 7** — buyer-side (needs payments-out on
   received invoices). **TODO 8** — plafon monitor + 097.
 
