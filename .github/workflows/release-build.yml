@@ -23,10 +23,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows: NSIS .exe only. The MSI (WiX) is built by release.yml; here
-          # NSIS is the reliable single-file installer.
+          # Windows: NSIS .exe (single-file installer) + MSI (Group Policy / IT
+          # deployment). MSI links cleanly now that installer-metadata strings
+          # are ASCII (WiX CP-1252 / ANSI-summary constraint — see tauri.conf).
           - platform: windows-latest
-            args: "--bundles nsis"
+            args: "--bundles nsis,msi"
             java_arch: x64
           - platform: macos-latest
             args: "--target aarch64-apple-darwin --bundles dmg"
@@ -104,5 +105,6 @@ jobs:
           name: clarito-${{ matrix.platform }}${{ env.DUK_BUNDLED == '1' && '-bundled' || '-unbundled' }}
           path: |
             src-tauri/target/**/release/bundle/nsis/*.exe
+            src-tauri/target/**/release/bundle/msi/*.msi
             src-tauri/target/**/release/bundle/dmg/*.dmg
           if-no-files-found: warn
