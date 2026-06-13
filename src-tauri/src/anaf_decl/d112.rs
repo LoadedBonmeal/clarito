@@ -19,6 +19,10 @@ const CAS_PCT: (i64, u32) = (25, 2); // 0.25
 const CASS_PCT: (i64, u32) = (10, 2); // 0.10
 const INCOME_TAX_PCT: (i64, u32) = (10, 2); // 0.10
 const CAM_PCT: (i64, u32) = (225, 4); // 0.0225
+/// Contribuția pentru concedii și indemnizații de asigurări sociale de sănătate (CCI, OUG 158/2005
+/// art. 4 alin. (2)) — datorată de ANGAJATOR, separat de CAM. 0,85% pe fondul de salarii (venitul
+/// supus CASS). NU a fost inclusă în CAM de reforma 2018 (confirmat 2026).
+const CONCEDII_PCT: (i64, u32) = (85, 4); // 0.0085
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -46,6 +50,9 @@ pub struct PayrollResult {
     pub income_tax: String,
     pub net: String,
     pub cam: String,
+    /// Contribuția pentru concedii și indemnizații 0,85% (angajator, OUG 158/2005). Inclusă în
+    /// total_employer_cost.
+    pub concedii: String,
     pub total_employer_cost: String,
     /// Suma netaxabilă aplicată efectiv (300/200 lei sau 0).
     pub non_taxable: String,
@@ -210,7 +217,10 @@ pub fn compute_payroll(input: &PayrollInput) -> PayrollResult {
     let income_tax = pct(taxable_base, INCOME_TAX_PCT);
     let net = gross - cas - cass - income_tax;
     let cam = pct(contrib_base, CAM_PCT);
-    let total_employer_cost = gross + cam;
+    // CCI 0,85% (angajator) pe aceeași bază ca CAM (venitul supus CASS). Plafonul art. 6(8) (12×
+    // salariul minim/asigurat ≈ 48.600 lei/lună) practic nu se atinge → neaplicat aici.
+    let concedii = pct(contrib_base, CONCEDII_PCT);
+    let total_employer_cost = gross + cam + concedii;
 
     PayrollResult {
         gross: fmt(gross),
@@ -221,6 +231,7 @@ pub fn compute_payroll(input: &PayrollInput) -> PayrollResult {
         income_tax: fmt(income_tax),
         net: fmt(net),
         cam: fmt(cam),
+        concedii: fmt(concedii),
         total_employer_cost: fmt(total_employer_cost),
         non_taxable: fmt(non_taxable),
     }
@@ -277,6 +288,8 @@ pub struct LeavePayrollResult {
     pub cass: Decimal,
     /// CAM 2,25% DOAR pe baza lucrată (indemnizația nu e supusă CAM).
     pub cam: Decimal,
+    /// CCI 0,85% (angajator) DOAR pe baza lucrată (ca și CAM).
+    pub concedii: Decimal,
     /// Impozit 10% pe (venit lucrat + indemnizație impozabilă) − contribuții − deducere − sumă netaxabilă.
     pub income_tax: Decimal,
     pub taxable_base: Decimal,
@@ -343,6 +356,7 @@ pub fn compute_payroll_with_leave(input: &LeavePayrollInput) -> LeavePayrollResu
     let cas = pct(worked_base + indemn_total, CAS_PCT);
     let cass = pct(worked_base + indemn_cass_base, CASS_PCT);
     let cam = pct(worked_base, CAM_PCT);
+    let concedii = pct(worked_base, CONCEDII_PCT); // CCI 0,85% pe baza lucrată (ca și CAM)
 
     // Impozit 10% pe (venit lucrat + indemnizație impozabilă) − CAS − CASS − deducere − sumă netaxabilă.
     let after_contrib = (worked_gross + indemn_taxable) - cas - cass;
@@ -361,6 +375,7 @@ pub fn compute_payroll_with_leave(input: &LeavePayrollInput) -> LeavePayrollResu
         cas,
         cass,
         cam,
+        concedii,
         income_tax,
         taxable_base,
         net,
@@ -412,7 +427,8 @@ mod tests {
     fn payroll_2026_rates_gross_to_net() {
         // Gross 5.000, no personal deduction.
         // CAS 25% = 1.250; CASS 10% = 500; base = 5.000 − 1.250 − 500 = 3.250; impozit 10% = 325.
-        // Net = 5.000 − 1.250 − 500 − 325 = 2.925. CAM 2,25% = 113 (rounded). Cost = 5.113.
+        // Net = 5.000 − 1.250 − 500 − 325 = 2.925. CAM 2,25% = 113; CCI 0,85% = 43 (5000 × 0.0085 =
+        // 42.5 → 43). Cost angajator = 5.000 + 113 + 43 = 5.156.
         let r = compute_payroll(&PayrollInput {
             gross: d("5000"),
             personal_deduction: d("0"),
@@ -424,7 +440,21 @@ mod tests {
         assert_eq!(r.income_tax, "325.00");
         assert_eq!(r.net, "2925.00");
         assert_eq!(r.cam, "113.00"); // 5000 × 0.0225 = 112.5 → 113
-        assert_eq!(r.total_employer_cost, "5113.00");
+        assert_eq!(r.concedii, "43.00"); // CCI 0,85%: 5000 × 0.0085 = 42.5 → 43
+        assert_eq!(r.total_employer_cost, "5156.00");
+    }
+
+    #[test]
+    fn concedii_cci_rate_single_source_of_truth() {
+        // Drift guard: rata CCI = 0,85% (OUG 158/2005 art. 4(2)), separată de CAM.
+        assert_eq!(CONCEDII_PCT, (85, 4));
+        // Carve-out exempt de CASS ⇒ și de CCI: brut 4.050 cu 300 netaxabil ⇒ baza 3.750.
+        let r = compute_payroll(&PayrollInput {
+            gross: d("4050"),
+            personal_deduction: d("0"),
+            non_taxable: d("300"),
+        });
+        assert_eq!(r.concedii, "32.00"); // 3750 × 0.0085 = 31.875 → 32
     }
 
     #[test]

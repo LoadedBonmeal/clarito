@@ -2469,6 +2469,8 @@ pub async fn post_payroll(
     cass: Decimal,
     impozit: Decimal,
     cam: Decimal,
+    // Contribuția 0,85% pentru concedii și indemnizații (angajator, OUG 158/2005). 0 if none.
+    concedii: Decimal,
     // Part-time minimum-base employer-borne CAS/CASS difference (art. 146 (5^6)). 0 if none.
     cas_diff: Decimal,
     cass_diff: Decimal,
@@ -2491,7 +2493,7 @@ pub async fn post_payroll(
     .execute(&mut *tx)
     .await?;
 
-    if gross.is_zero() && indemn.is_zero() {
+    if gross.is_zero() && indemn.is_zero() && concedii.is_zero() {
         tx.commit().await?;
         return Ok(PayrollPostResult {
             gross: fmt_dec(gross),
@@ -2543,6 +2545,12 @@ pub async fn post_payroll(
     if !cam.is_zero() {
         add(&mut entries, "646", cam, Decimal::ZERO); // cheltuieli CAM (angajator)
         add(&mut entries, "436", Decimal::ZERO, cam); // CAM datorată
+    }
+    // CCI 0,85% (contribuția pentru concedii și indemnizații, OUG 158/2005): D 6458 / C 4373. Se achită
+    // net de indemnizațiile recuperate din FNUASS (4382), dar acreditarea e neschimbată.
+    if !concedii.is_zero() {
+        add(&mut entries, "6458", concedii, Decimal::ZERO); // cheltuieli CCI (angajator)
+        add(&mut entries, "4373", Decimal::ZERO, concedii); // contribuția concedii datorată
     }
     // Part-time minimum-base top-up borne by the employer: D 6458 / C 4315 (CAS) + C 4316 (CASS).
     // Brings 4315/4316 up to the contribution on the minimum base (= what D112 declares).

@@ -317,6 +317,8 @@ pub struct EmployeeState {
     pub income_tax: String,
     pub net: String,
     pub cam: String,
+    /// CCI 0,85% (concedii și indemnizații, angajator).
+    pub concedii: String,
 }
 
 /// The monthly payroll register + the GL post result.
@@ -330,6 +332,8 @@ pub struct PayrollRun {
     pub total_income_tax: String,
     pub total_net: String,
     pub total_cam: String,
+    /// Contribuția 0,85% pentru concedii și indemnizații (angajator, OUG 158/2005).
+    pub total_concedii: String,
     pub posted: bool,
     pub entry_date: String,
 }
@@ -458,6 +462,8 @@ pub async fn run_payroll(
     );
     // Employer-borne part-time minimum-base CAS/CASS difference (art. 146 (5^6)).
     let (mut t_cas_diff, mut t_cass_diff) = (Decimal::ZERO, Decimal::ZERO);
+    // CCI 0,85% (concedii și indemnizații, angajator) — postată separat (6458/4373).
+    let mut t_concedii = Decimal::ZERO;
     // Indemnizații de concediu medical (postate separat: 6458/4382/423).
     let mut indemn = IndemnityTotals::default();
 
@@ -511,6 +517,7 @@ pub async fn run_payroll(
             t_cass += wcass;
             t_tax += wtax;
             t_cam += lr.cam;
+            t_concedii += lr.concedii;
             t_net += lr.net;
             // Indemnizația = combinat − lucrat (sumează exact la combinat ⇒ creditele = D112).
             indemn.employer += lr.indemn_employer;
@@ -527,6 +534,7 @@ pub async fn run_payroll(
                 income_tax: f(lr.income_tax),
                 net: f(lr.net),
                 cam: f(lr.cam),
+                concedii: f(lr.concedii),
             });
             continue;
         }
@@ -549,6 +557,7 @@ pub async fn run_payroll(
         t_tax += dec(&r.income_tax);
         t_net += dec(&r.net);
         t_cam += dec(&r.cam);
+        t_concedii += dec(&r.concedii);
         states.push(EmployeeState {
             employee_id: e.id.clone(),
             full_name: e.full_name.clone(),
@@ -558,6 +567,7 @@ pub async fn run_payroll(
             income_tax: r.income_tax,
             net: r.net,
             cam: r.cam,
+            concedii: r.concedii,
         });
     }
 
@@ -571,6 +581,7 @@ pub async fn run_payroll(
         t_cass,
         t_tax,
         t_cam,
+        t_concedii,
         t_cas_diff,
         t_cass_diff,
         indemn.clone(),
@@ -586,6 +597,7 @@ pub async fn run_payroll(
         total_income_tax: f(t_tax + indemn.tax),
         total_net: f(t_net),
         total_cam: f(t_cam),
+        total_concedii: f(t_concedii),
         posted: post.posted,
         entry_date: post.entry_date,
     })
@@ -661,6 +673,7 @@ mod tests {
         assert_eq!(run.total_income_tax, "650.00");
         assert_eq!(run.total_net, "5850.00");
         assert_eq!(run.total_cam, "226.00");
+        assert_eq!(run.total_concedii, "86.00"); // 2 × pct(5000, 0.85%) = 2 × 43
         assert_eq!(run.states.len(), 2);
         assert!(run.posted);
 
@@ -678,6 +691,9 @@ mod tests {
         assert_eq!(bal("421"), Some(("0.00".into(), "5850.00".into())));
         assert_eq!(bal("4315"), Some(("0.00".into(), "2500.00".into())));
         assert_eq!(bal("646"), Some(("226.00".into(), "0.00".into())));
+        // CCI 0,85%: D 6458 / C 4373 = 86 (fără concediu, 6458 = doar CCI).
+        assert_eq!(bal("6458"), Some(("86.00".into(), "0.00".into())));
+        assert_eq!(bal("4373"), Some(("0.00".into(), "86.00".into())));
         assert!(tb.balanced, "payroll journal balances");
     }
 
@@ -742,6 +758,7 @@ mod tests {
         assert_eq!(run.total_cass, "485.00");
         assert_eq!(run.total_income_tax, "315.00");
         assert_eq!(run.total_cam, "96.00");
+        assert_eq!(run.total_concedii, "36.00"); // CCI 0,85% × 4250 = 36.125 → 36
         assert_eq!(run.total_net, "2837.00");
 
         let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
@@ -755,7 +772,9 @@ mod tests {
         };
         // Salariul lucrat (641) e separat de indemnizație (6458); 421 = salariu net, 423 = indemniz. netă.
         assert_eq!(bal("641"), Some(("4250.00".into(), "0.00".into())));
-        assert_eq!(bal("6458"), Some(("600.00".into(), "0.00".into())));
+        // 6458 = 600 indemnizație angajator + 36 CCI 0,85%.
+        assert_eq!(bal("6458"), Some(("636.00".into(), "0.00".into())));
+        assert_eq!(bal("4373"), Some(("0.00".into(), "36.00".into()))); // CCI 0,85% datorată
         assert_eq!(bal("421"), Some(("0.00".into(), "2486.00".into()))); // 4250 − 1063 − 425 − 276
         assert_eq!(bal("423"), Some(("0.00".into(), "351.00".into()))); // 600 − 150 − 60 − 39
                                                                         // Creditele de contribuții = cele combinate (lucrat + indemnizație) = obligațiile D112.
@@ -763,6 +782,6 @@ mod tests {
         assert_eq!(bal("4316"), Some(("0.00".into(), "485.00".into())));
         assert_eq!(bal("444"), Some(("0.00".into(), "315.00".into())));
         assert_eq!(bal("646"), Some(("96.00".into(), "0.00".into())));
-        assert!(tb.balanced, "payroll + indemnity journal balances");
+        assert!(tb.balanced, "payroll + indemnity + CCI journal balances");
     }
 }

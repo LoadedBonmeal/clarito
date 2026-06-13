@@ -1217,6 +1217,7 @@ export interface EmployeeState {
   incomeTax: string;
   net: string;
   cam: string;
+  concedii: string;
 }
 
 export interface PayrollRun {
@@ -1227,6 +1228,7 @@ export interface PayrollRun {
   totalIncomeTax: string;
   totalNet: string;
   totalCam: string;
+  totalConcedii: string;
   posted: boolean;
   entryDate: string;
 }
@@ -1246,6 +1248,7 @@ export interface PayrollResult {
   incomeTax: string;
   net: string;
   cam: string;
+  concedii: string;
   totalEmployerCost: string;
 }
 

@@ -395,6 +395,7 @@ export function PayrollPage() {
                   <th>{t("payroll.stat.th.employee")}</th><th className="r">{t("payroll.emp.th.gross")}</th><th className="r">{t("payroll.stat.th.cas")}</th>
                   <th className="r">{t("payroll.stat.th.cass")}</th><th className="r">{t("payroll.stat.th.tax")}</th>
                   <th className="r">{t("payroll.stat.th.net")}</th><th className="r">{t("payroll.stat.th.cam")}</th>
+                  <th className="r">{t("payroll.stat.th.cci")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -407,6 +408,7 @@ export function PayrollPage() {
                     <td className="r num">{fmtRON(s.incomeTax)}</td>
                     <td className="r num"><b>{fmtRON(s.net)}</b></td>
                     <td className="r num">{fmtRON(s.cam)}</td>
+                    <td className="r num">{fmtRON(s.concedii)}</td>
                   </tr>
                 ))}
                 <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
@@ -417,6 +419,7 @@ export function PayrollPage() {
                   <td className="r num">{fmtRON(run.totalIncomeTax)}</td>
                   <td className="r num">{fmtRON(run.totalNet)}</td>
                   <td className="r num">{fmtRON(run.totalCam)}</td>
+                  <td className="r num">{fmtRON(run.totalConcedii)}</td>
                 </tr>
               </tbody>
             </table>

@@ -83,7 +83,8 @@
         "cass": "CASS 10%",
         "tax": "Impozit 10%",
         "net": "Net",
-        "cam": "CAM 2,25%"
+        "cam": "CAM 2,25%",
+        "cci": "CCI 0,85%"
       },
       "total": "Total",
       "footnote": "* CAS și CASS calculate la baza salariului minim brut pentru contractele part-time fără excepție — diferența este suportată de angajator conform art. 146(5⁶) Cod fiscal.",
