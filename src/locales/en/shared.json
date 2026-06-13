@@ -14,8 +14,20 @@
       "openExternalError": "Could not open externally: {{error}}",
       "zoomIn": "Zoom in",
       "zoomOut": "Zoom out",
+      "zoomLevel": "Zoom level",
       "close": "Close",
-      "previewTitle": "Template preview"
+      "previewTitle": "Template preview",
+      "thumbnails": "Thumbnails",
+      "pageOf": "Page {{cur}} of {{total}}",
+      "prevPage": "Previous page",
+      "nextPage": "Next page",
+      "rotateLeft": "Rotate left",
+      "rotateRight": "Rotate right",
+      "search": "Search document",
+      "searchPlaceholder": "Search in document…",
+      "noMatches": "No matches",
+      "prevMatch": "Previous match",
+      "nextMatch": "Next match"
     },
     "queryError": {
       "message": "Could not load {{label}}. {{message}}",

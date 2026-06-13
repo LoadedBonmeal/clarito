@@ -1,35 +1,54 @@
 /* In-app PDF viewer modal (PdfViewerModal.tsx + EmbedPDF).
-   Extends the design .modal chrome to a large document surface. */
+   Extends the design .modal chrome to a full document workspace:
+   toolbar (page nav · rotate · zoom · search) + thumbnail rail + page surface. */
 
 .modal.pdfv {
-  width: min(960px, 92vw);
-  max-width: 92vw;
-  height: 88vh;
-  max-height: 88vh;
+  width: min(1120px, 95vw);
+  max-width: 95vw;
+  height: 90vh;
+  max-height: 90vh;
 }
 
-/* Toolbar */
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
 .pdfv-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 11px 14px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--line);
   flex: none;
+}
+.pdfv-bar-l,
+.pdfv-bar-c,
+.pdfv-bar-r {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pdfv-bar-l {
+  min-width: 0;
+  flex: 1;
+}
+.pdfv-bar-c {
+  flex: none;
+}
+.pdfv-bar-r {
+  flex: 1;
+  justify-content: flex-end;
 }
 .pdfv-title {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   min-width: 0;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--text);
 }
 .pdfv-title .ic {
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
   stroke: var(--text-2);
   flex: none;
 }
@@ -38,22 +57,143 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pdfv-actions {
+.pdfv-bar .sq-btn {
+  width: 32px;
+  height: 32px;
+}
+.pdfv-bar .sq-btn.is-on {
+  background: var(--fill);
+  border-color: var(--text-3, #c9c9cf);
+}
+.pdfv-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--line);
+  margin: 0 2px;
+}
+
+/* page nav */
+.pdfv-pagenav {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex: none;
+  gap: 4px;
 }
+.pdfv-pageind {
+  font-size: 12.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+  padding: 0 4px;
+  min-width: 96px;
+  text-align: center;
+}
+
+/* zoom */
 .pdfv-zoom {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-right: 2px;
+  gap: 4px;
+}
+.pdfv-zoomsel {
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12.5px;
+  color: var(--text);
+  padding: 0 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.pdfv-zoomsel:hover {
+  background: var(--fill);
 }
 
-/* Document surface */
+/* find-in-document bar */
+.pdfv-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--fill);
+  flex: none;
+}
+.pdfv-search > .ic {
+  width: 15px;
+  height: 15px;
+  stroke: var(--text-2);
+  flex: none;
+}
+.pdfv-searchinput {
+  flex: 1;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+}
+.pdfv-searchinput:focus {
+  outline: none;
+  border-color: var(--text-3, #c9c9cf);
+}
+.pdfv-searchcount {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+  min-width: 48px;
+  text-align: right;
+}
+.pdfv-search .sq-btn {
+  width: 30px;
+  height: 30px;
+}
+
+/* ── Body: thumbnail rail + page surface ─────────────────────────────────── */
+.pdfv-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.pdfv-thumbs {
+  flex: none;
+  width: 168px;
+  height: 100%;
+  position: relative;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background: #fff;
+  padding: 8px 0;
+}
+.pdfv-thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 6px 0;
+}
+.pdfv-thumb-img {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 2px 6px -3px rgba(0, 0, 0, 0.2);
+  transition: border-color 0.12s;
+}
+.pdfv-thumb:hover .pdfv-thumb-img {
+  border-color: var(--text-3, #b8b8be);
+}
+.pdfv-thumb-n {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
 .pdfv-body {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   background: var(--fill);
   overflow: hidden;
@@ -69,9 +209,10 @@
   box-shadow: 0 6px 22px -8px rgba(0, 0, 0, 0.28);
   border-radius: 2px;
   overflow: hidden;
+  position: relative;
 }
 
-/* Loading / error states */
+/* loading / error */
 .pdfv-status {
   display: flex;
   align-items: center;

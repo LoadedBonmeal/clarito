@@ -14,8 +14,20 @@
       "openExternalError": "Nu s-a putut deschide extern: {{error}}",
       "zoomIn": "Mărește",
       "zoomOut": "Micșorează",
+      "zoomLevel": "Nivel zoom",
       "close": "Închide",
-      "previewTitle": "Previzualizare șablon"
+      "previewTitle": "Previzualizare șablon",
+      "thumbnails": "Miniaturi",
+      "pageOf": "Pagina {{cur}} din {{total}}",
+      "prevPage": "Pagina anterioară",
+      "nextPage": "Pagina următoare",
+      "rotateLeft": "Rotește la stânga",
+      "rotateRight": "Rotește la dreapta",
+      "search": "Caută în document",
+      "searchPlaceholder": "Caută în document…",
+      "noMatches": "Niciun rezultat",
+      "prevMatch": "Rezultatul anterior",
+      "nextMatch": "Rezultatul următor"
     },
     "queryError": {
       "message": "Nu s-au putut încărca {{label}}. {{message}}",
