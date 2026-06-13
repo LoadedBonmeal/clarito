@@ -5,6 +5,10 @@ name: MSI debug
 
 on:
   workflow_dispatch:
+  # Runs automatically on the throwaway diagnostic branch (workflow_dispatch
+  # would require this file to exist on the default branch first).
+  push:
+    branches: ["ci/msi-debug"]
 
 jobs:
   msi:
