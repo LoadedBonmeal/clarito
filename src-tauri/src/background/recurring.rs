@@ -2,6 +2,37 @@
 
 use tauri::{AppHandle, Emitter, Manager};
 
+/// ROB-13: tell the user (idempotently) that a recurring template was skipped because its
+/// lines are missing/invalid — otherwise the invoice silently never generates and they only
+/// notice when a client doesn't get billed. Keyed on the template id in `data`, which carries
+/// a UNIQUE index (migration 0010): exactly one alert per broken template persists until the
+/// user clears it. We pre-check existence (any read state) so the INSERT never trips the index.
+async fn notify_recurring_skipped(pool: &sqlx::SqlitePool, template_id: &str, template_name: &str) {
+    let dup: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM notifications \
+         WHERE notification_type = 'recurring_skipped' AND data = ?1",
+    )
+    .bind(template_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+    if dup == 0 {
+        let _ = crate::db::notifications::create(
+            pool,
+            crate::db::notifications::CreateNotificationInput {
+                notification_type: "recurring_skipped".into(),
+                title: "Factură recurentă negenerată".into(),
+                body: format!(
+                    "Șablonul recurent „{template_name}” nu a putut genera factura: nu are linii \
+                     valide. Editați șablonul pentru a relua generarea automată."
+                ),
+                data: Some(template_id.to_string()),
+            },
+        )
+        .await;
+    }
+}
+
 /// Generate invoices for all active recurring templates whose next_issue_date is today or earlier.
 /// One invoice is created per template per run (even if multiple periods were missed).
 /// next_issue_date is advanced through ALL missed periods so it lands in the future.
@@ -37,12 +68,14 @@ async fn process_recurring_invoices(
                     template_id = %template.id,
                     "Failed to parse lines_json for recurring template — skipping"
                 );
+                notify_recurring_skipped(pool, &template.id, &template.template_name).await;
                 continue;
             }
         };
 
         if lines.is_empty() {
             tracing::warn!(template_id = %template.id, "Recurring template has no lines — skipping");
+            notify_recurring_skipped(pool, &template.id, &template.template_name).await;
             continue;
         }
 
@@ -654,6 +687,48 @@ mod tests {
         assert!(
             next_date.as_str() > today,
             "next_date {next_date} should be after today {today}"
+        );
+    }
+
+    /// ROB-13: skipping a line-less template alerts the user exactly once per template.
+    /// The UNIQUE index on notifications.data (migration 0010) makes the alert persist
+    /// until cleared — re-running the skip does NOT duplicate, and does NOT trip the index.
+    #[tokio::test]
+    async fn rob13_skipped_template_notifies_once_per_template() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+        let total = || async {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM notifications WHERE notification_type = 'recurring_skipped'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        };
+
+        super::notify_recurring_skipped(&pool, "tmpl-1", "Chirie lunară").await;
+        super::notify_recurring_skipped(&pool, "tmpl-1", "Chirie lunară").await;
+        assert_eq!(
+            total().await,
+            1,
+            "repeated skips of the same template must not duplicate"
+        );
+
+        // A different template gets its own alert.
+        super::notify_recurring_skipped(&pool, "tmpl-2", "Mentenanță").await;
+        assert_eq!(total().await, 2);
+
+        // Even after the user reads it, re-skipping must not error on the UNIQUE(data) index.
+        sqlx::query("UPDATE notifications SET is_read = 1 WHERE data = 'tmpl-1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        super::notify_recurring_skipped(&pool, "tmpl-1", "Chirie lunară").await;
+        assert_eq!(
+            total().await,
+            2,
+            "no duplicate row and no UNIQUE-index violation"
         );
     }
 }
