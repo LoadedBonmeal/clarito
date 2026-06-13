@@ -85,6 +85,27 @@ echo ""
 # D300_XSD_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/D300_v12.xsd"
 # curl -fL --progress-bar -o "$TOOLS_DIR/D300_v12.xsd" "$D300_XSD_URL"
 
+# ── D112 validator (medical-leave / asiguratD emission gate) ─────────────────
+# D112 is NOT covered by the generic DUKIntegrator.jar above — it ships a dedicated
+# business-rule validator. Index: https://static.anaf.ro/static/10/Anaf/Declaratii_R/112.html
+# Manifest (authoritative latest version, survives ANAF's ~biannual bumps):
+#   https://static.anaf.ro/static/10/Anaf/update5/versiuni.xml   (lists D112_<ver>/D112Validator.jar)
+# As of 2026-04: D112_209/D112Validator.jar (~12 MB, J26.0.3, schema v6 / 01-2026).
+# Java-6 bytecode → runs on the bundled JRE 17 via the same `-v D112` harness as D300/D394/D406
+# (run_java_validator in src-tauri/src/anaf_decl/validation.rs). REQUIRED for the asiguratD
+# emission gate: build the XML, then `java -jar D112Validator.jar -v D112 <xml> <result>` must
+# return "fără erori" before a clean medical-leave declaration can be claimed.
+D112_VALIDATOR_URL="https://static.anaf.ro/static/10/Anaf/update5/D112_209/D112Validator.jar"
+D112_VALIDATOR_PATH="$TOOLS_DIR/D112Validator.jar"
+
+echo "▶ Downloading D112 validator (asiguratD/concedii gate) ..."
+echo "  URL: $D112_VALIDATOR_URL"
+curl -fL --progress-bar -o "$D112_VALIDATOR_PATH" "$D112_VALIDATOR_URL" || {
+    echo "  WARNING: D112Validator.jar download failed — check the version in update5/versiuni.xml."
+    echo "  The D112 asiguratD emission test stays skipped until the validator is vendored."
+}
+echo ""
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo "══════════════════════════════════════════════════════"
 echo "  Validators fetched. To enable the DUKIntegrator gate:"
