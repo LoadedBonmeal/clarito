@@ -221,11 +221,33 @@ pub(crate) async fn refresh_expiring_certificates(pool: &sqlx::SqlitePool, app: 
 
 pub(crate) async fn cleanup_audit_log(pool: sqlx::SqlitePool) {
     let two_years_ago = chrono::Utc::now().timestamp() - (2 * 365 * 24 * 3600);
-    let _ = sqlx::query("DELETE FROM audit_log WHERE created_at < ?1")
-        .bind(two_years_ago)
-        .execute(&pool)
-        .await;
-    tracing::info!("Audit log cleanup done");
+    // ROB-24: archive the expiring rows into audit_archive BEFORE deleting them from the
+    // live table — the audit trail is retention-sensitive, so the >2y purge must not lose it.
+    // INSERT OR IGNORE keeps the move idempotent if a prior run archived but didn't delete.
+    let archived = sqlx::query(
+        "INSERT OR IGNORE INTO audit_archive (id, action, entity_type, entity_id, metadata, created_at) \
+         SELECT id, action, entity_type, entity_id, metadata, created_at FROM audit_log \
+         WHERE created_at < ?1",
+    )
+    .bind(two_years_ago)
+    .execute(&pool)
+    .await;
+    match archived {
+        Ok(res) => {
+            let _ = sqlx::query("DELETE FROM audit_log WHERE created_at < ?1")
+                .bind(two_years_ago)
+                .execute(&pool)
+                .await;
+            tracing::info!(
+                archived = res.rows_affected(),
+                "Audit log cleanup done (rows archived before purge)"
+            );
+        }
+        // If archival failed, do NOT delete — never lose audit rows to a failed archive.
+        Err(e) => {
+            tracing::warn!(error = ?e, "Audit archive failed — skipping purge to avoid data loss")
+        }
+    }
 }
 
 pub(crate) async fn archive_check(pool: sqlx::SqlitePool, app: AppHandle) {
@@ -251,5 +273,63 @@ pub(crate) async fn archive_check(pool: sqlx::SqlitePool, app: AppHandle) {
     if !missing.is_empty() {
         let body = format!("{} fișiere XML lipsesc din arhivă.", missing.len());
         crate::notifications::notify(&app, "Verificare arhivă", &body).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::SqlitePool;
+
+    async fn pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    async fn insert_audit(pool: &SqlitePool, id: &str, created_at: i64) {
+        sqlx::query(
+            "INSERT INTO audit_log (id, action, entity_type, entity_id, created_at) \
+             VALUES (?1, 'act', 'invoice', 'e1', ?2)",
+        )
+        .bind(id)
+        .bind(created_at)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn rob24_cleanup_archives_old_rows_before_purge() {
+        let pool = pool().await;
+        let now = chrono::Utc::now().timestamp();
+        let old = now - (3 * 365 * 24 * 3600); // 3 ani — expirat
+        let recent = now - (30 * 24 * 3600); // 30 zile — păstrat
+        insert_audit(&pool, "old-1", old).await;
+        insert_audit(&pool, "old-2", old).await;
+        insert_audit(&pool, "recent-1", recent).await;
+
+        super::cleanup_audit_log(pool.clone()).await;
+
+        // Live table: only the recent row remains.
+        let live: Vec<String> = sqlx::query_scalar("SELECT id FROM audit_log ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(live, vec!["recent-1".to_string()]);
+
+        // Archive: the two expired rows were preserved, not lost.
+        let archived: Vec<String> = sqlx::query_scalar("SELECT id FROM audit_archive ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(archived, vec!["old-1".to_string(), "old-2".to_string()]);
+
+        // Idempotent: a second run with no new expirees doesn't duplicate or error.
+        super::cleanup_audit_log(pool.clone()).await;
+        let archive_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_archive")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(archive_count, 2);
     }
 }
