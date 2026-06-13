@@ -117,9 +117,16 @@ async fn process_recurring_invoices(
             let unit = line["unit"].as_str().unwrap_or("BUC").to_string();
             let vat_category = line["vatCategory"].as_str().unwrap_or("S").to_string();
 
+            // ROB-14: parse as a string first (exact Decimal), fall back to f64 only for legacy
+            // numeric JSON — mirrors the unitPrice handling below; avoids sub-cent float loss.
             let qty = line["quantity"]
-                .as_f64()
-                .and_then(|v| Decimal::try_from(v).ok())
+                .as_str()
+                .and_then(|s| s.parse::<Decimal>().ok())
+                .or_else(|| {
+                    line["quantity"]
+                        .as_f64()
+                        .and_then(|v| Decimal::try_from(v).ok())
+                })
                 .unwrap_or(Decimal::ONE);
             let price = line["unitPrice"]
                 .as_str()

@@ -136,7 +136,15 @@ pub async fn import_invoices_csv(
 
     let mut valid_rows: Vec<ValidRow> = Vec::new();
 
+    // SEC-10: cap the row count so an accidentally-huge / malformed CSV can't exhaust memory.
+    const MAX_CSV_ROWS: usize = 50_000;
+
     for (idx, result) in reader.records().enumerate() {
+        if idx >= MAX_CSV_ROWS {
+            return Err(AppError::Validation(format!(
+                "Fișier CSV prea mare (peste {MAX_CSV_ROWS} de rânduri) — împărțiți-l în fișiere mai mici."
+            )));
+        }
         let row_num = idx + 2;
         let record = match result {
             Ok(r) => r,
@@ -972,18 +980,13 @@ async fn import_invoice_xml_inner(
             // DB insert succeeded — now write the XML archive file.
             // If the file write fails the DB record still has all invoice data;
             // the archive copy is just missing. Log the error but still report success.
+            // ROB-12: archive write is best-effort (the DB record holds all invoice data); a
+            // failure leaves the archive copy missing. Log via tracing (level-respecting,
+            // structured) rather than raw stdout so the failure is actually surfaced in logs.
             if let Err(e) = tokio::fs::create_dir_all(&archive_dir).await {
-                eprintln!(
-                    "WARN: impossibil de creat directorul arhivă {}: {}",
-                    archive_dir.display(),
-                    e
-                );
+                tracing::warn!(dir = %archive_dir.display(), error = %e, "nu s-a putut crea directorul arhivă XML");
             } else if let Err(e) = tokio::fs::write(&xml_path, xml_str.as_bytes()).await {
-                eprintln!(
-                    "WARN: imposibil de scris fișierul XML arhivă {}: {}",
-                    xml_path.display(),
-                    e
-                );
+                tracing::warn!(path = %xml_path.display(), error = %e, "nu s-a putut scrie fișierul XML arhivă");
             }
             Ok(XmlImportResult {
                 imported: 1,
