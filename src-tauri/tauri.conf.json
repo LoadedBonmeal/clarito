@@ -51,8 +51,8 @@
       "icons/icon.ico"
     ],
     "category": "Business",
-    "shortDescription": "Aplicație desktop pentru e-Factura ANAF",
-    "longDescription": "Clarito — Aplicație desktop pentru gestionarea facturilor electronice prin sistemul ANAF SPV. Multi-companie, validare RO_CIUS, arhivare locală.",
+    "shortDescription": "Aplicatie desktop pentru e-Factura ANAF",
+    "longDescription": "Clarito - Aplicatie desktop pentru gestionarea facturilor electronice prin sistemul ANAF SPV. Multi-companie, validare RO_CIUS, arhivare locala.",
     "macOS": {
       "entitlements": "entitlements.plist",
       "minimumSystemVersion": "12.0",
@@ -79,17 +79,12 @@
         "installMode": "currentUser",
         "headerImage": "resources/nsis-header.bmp",
         "sidebarImage": "resources/nsis-sidebar.bmp"
-      },
-      "wix": {
-        "language": {
-          "en-US": { "localePath": "wix/en-US.wxl" }
-        }
       }
     },
     "fileAssociations": [
       {
-        "name": "RO e-Factură XML",
-        "description": "Fișier factură electronică RO",
+        "name": "RO e-Factura XML",
+        "description": "Fisier factura electronica RO",
         "ext": ["xml"],
         "mimeType": "application/xml"
       }
