@@ -1,25 +1,28 @@
 //! Concedii medicale (OUG 158/2005) — registrul certificatelor de concediu medical, sursa blocului
-//! D112 `asiguratD` (per certificat) + rollup-urile `asiguratB3` (B3_12 = Σ indemnizație angajator,
-//! B3_13 = Σ indemnizație FNUASS) și totalul de recuperat din FNUASS (angajatorC2).
+//! D112 `asiguratD` (per certificat) + rollup-ul angajator `angajatorC2` (C2_11 = COUNT, C2_12 = Σ
+//! D_16, C2_13 = Σ D_14, C2_14 = Σ D_15, C2_15 = Σ D_20, C2_16 = Σ D_21; recuperarea din FNUASS).
 //!
 //! Câmpurile derivate determinist (total zile = D_14+D_15; media zilnică = baza/zile_baza) se
 //! calculează aici; sumele indemnizațiilor (D_20/D_21) sunt introduse de utilizator (calculul lor
 //! din media veniturilor pe 6 luni e o extensie ulterioară). Validarea finală se face în
 //! DUKIntegrator înainte de depunere.
 //!
-//! ## De ce NU emitem încă blocul `asiguratD` în XML-ul D112 (blocaj documentat)
-//! Verificând `AsiguratDType` din XSD-ul oficial (`d112_10102024.xsd`), emiterea unui `asiguratD`
-//! valid cere **trei câmpuri obligatorii** pe care modelul/UI-ul de aici NU le captează:
-//!   * `D_5` (data acordării certificatului, `DateSType`, required) — formularul colectează doar
-//!     `data_inceput`/`data_sfarsit`, nu și data acordării.
-//!   * `D_10` (`IntInt1_4SType`, întreg 1–4, required) — fără enumerare/documentație în XSD; sensul
-//!     se ia din structura oficială ANAF.
-//!   * `D_23` (`Str3`, required) — string de max 3 caractere, fără enumerare/documentație în XSD.
-//!
-//! `D_16` (= `D_14`+`D_15`) și `D_19` (= bază/zile_bază) SUNT derivabile, deci nu blochează.
-//! Concluzie: a emite valori ghicite pentru `D_5`/`D_10`/`D_23` ar produce XML respins de ANAF.
-//! Până la (a) definițiile oficiale ale `D_10`/`D_23` și (b) extinderea modelului+UI cu `D_5`,
-//! concediile se completează în PDF-ul inteligent ANAF după import (comportamentul actual, sigur).
+//! ## De ce NU emitem încă blocul `asiguratD` în XML-ul D112 (blocaj actualizat 06/2026)
+//! Definițiile câmpurilor sunt acum CUNOSCUTE (structura oficială `structura_D112_0126_030226.pdf`,
+//! v7): `D_5` = data acordării; `D_9` = cod indemnizație (Nomenclator 9, 01–17/51/91/92); `D_10` =
+//! loc prescriere (Nomenclator 8 — dar XSD-ul tipizează `IntInt1_4SType`, deci doar **1–4** sunt
+//! acceptate la validare, nu și „5 CEX”); `D_23` = cod boală (3 car., „RM” când D_9=15); `D_16` =
+//! D_14+D_15, `D_19` = bază/zile_bază (derivabile). Ce BLOCHEAZĂ emiterea NU mai sunt definițiile,
+//! ci IMPOSIBILITATEA DE A VALIDA output-ul înainte de o depunere reală. (a) XSD-ul oficial
+//! `d112_10102024.xsd` e malformat — eroare de sintaxă la linia 439 (`name="A_sal1` fără ghilimea
+//! de închidere) → nu se încarcă în xmllint → fără validare XSD. (b) Kit-ul DUK livrat NU conține
+//! un validator D112 (doar D300/D394/D406) → fără validare de reguli de business. (c) `AsiguratType`
+//! folosește `xs:group` (GrupAsiguratGroup) — relația asiguratA↔asiguratD nu e un simplu „sibling”,
+//! deci structura trebuie confirmată cu Soft J-ul ANAF.
+//! A emite `asiguratD` fără niciun validator ar risca depuneri respinse de ANAF — mai rău decât
+//! comportamentul actual sigur (concediile se completează în PDF-ul inteligent ANAF, care le
+//! validează). De deblocat când ANAF publică D112Validator/Soft J: atunci capturăm D_5 (modelul îl
+//! are deja), D_10 (1–4), D_23 + lărgim selecția D_9, și emitem `asiguratD` + `angajatorC2`.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
