@@ -655,14 +655,35 @@ pub async fn mark_submitted(pool: &SqlitePool, id: &str, upload_id: &str) -> App
     Ok(())
 }
 
+/// ROB-22: SHA-256 (hex) + byte size of a file on disk, or `None` if it can't be read.
+/// Best-effort — a hashing failure must never block recording the path (the artifact
+/// still exists; it just won't have an integrity fingerprint).
+fn file_fingerprint(path: &str) -> Option<(String, i64)> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path).ok()?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    Some((format!("{:x}", hasher.finalize()), bytes.len() as i64))
+}
+
 pub async fn set_xml_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<()> {
     let now = now_unix();
-    sqlx::query("UPDATE invoices SET xml_path = ?2, updated_at = ?3 WHERE id = ?1")
-        .bind(id)
-        .bind(path)
-        .bind(now)
-        .execute(pool)
-        .await?;
+    // ROB-22: fingerprint the file we just wrote so tampering/corruption is detectable later.
+    let (sha, size) = match file_fingerprint(path) {
+        Some((s, n)) => (Some(s), Some(n)),
+        None => (None, None),
+    };
+    sqlx::query(
+        "UPDATE invoices SET xml_path = ?2, xml_sha256 = ?3, xml_size = ?4, updated_at = ?5 \
+         WHERE id = ?1",
+    )
+    .bind(id)
+    .bind(path)
+    .bind(sha)
+    .bind(size)
+    .bind(now)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -731,13 +752,95 @@ pub async fn list_submitted(pool: &SqlitePool, company_id: &str) -> AppResult<Ve
 
 pub async fn set_pdf_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<()> {
     let now = now_unix();
-    sqlx::query("UPDATE invoices SET pdf_path = ?2, updated_at = ?3 WHERE id = ?1")
-        .bind(id)
-        .bind(path)
-        .bind(now)
-        .execute(pool)
-        .await?;
+    // ROB-22: fingerprint the PDF we just wrote (see set_xml_path).
+    let (sha, size) = match file_fingerprint(path) {
+        Some((s, n)) => (Some(s), Some(n)),
+        None => (None, None),
+    };
+    sqlx::query(
+        "UPDATE invoices SET pdf_path = ?2, pdf_sha256 = ?3, pdf_size = ?4, updated_at = ?5 \
+         WHERE id = ?1",
+    )
+    .bind(id)
+    .bind(path)
+    .bind(sha)
+    .bind(size)
+    .bind(now)
+    .execute(pool)
+    .await?;
     Ok(())
+}
+
+/// ROB-22: integrity verdict for one archived artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileIntegrity {
+    /// No path recorded — nothing to verify (e.g. PDF never generated).
+    NotApplicable,
+    /// Path recorded but no fingerprint (legacy row, or hashing failed at write time).
+    NotFingerprinted,
+    /// File present and its SHA-256 + size match what was stored.
+    Ok,
+    /// Path recorded but the file is gone (deleted/moved).
+    Missing,
+    /// File present but its bytes differ from the stored fingerprint (edited/truncated).
+    Corrupted,
+}
+
+/// Verify a single artifact against its stored fingerprint.
+fn verify_one(path: Option<&str>, sha: Option<&str>, size: Option<i64>) -> FileIntegrity {
+    let Some(path) = path.filter(|p| !p.is_empty()) else {
+        return FileIntegrity::NotApplicable;
+    };
+    let (Some(sha), Some(size)) = (sha, size) else {
+        return FileIntegrity::NotFingerprinted;
+    };
+    match file_fingerprint(path) {
+        None => FileIntegrity::Missing,
+        Some((cur_sha, cur_size)) if cur_sha == sha && cur_size == size => FileIntegrity::Ok,
+        Some(_) => FileIntegrity::Corrupted,
+    }
+}
+
+/// The stored path + fingerprint for an invoice's two archived artifacts.
+#[derive(FromRow)]
+struct IntegrityRow {
+    xml_path: Option<String>,
+    xml_sha256: Option<String>,
+    xml_size: Option<i64>,
+    pdf_path: Option<String>,
+    pdf_sha256: Option<String>,
+    pdf_size: Option<i64>,
+}
+
+/// ROB-22: re-hash an invoice's archived XML + PDF and report whether each still matches the
+/// fingerprint stored at write time. Scoped to `company_id` (multi-tenant; reuses `get_scoped`).
+pub async fn verify_invoice_integrity(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+) -> AppResult<(FileIntegrity, FileIntegrity)> {
+    // Ensure the invoice belongs to the caller's company before touching its files.
+    get_scoped(pool, id, company_id).await?;
+    let row: IntegrityRow = sqlx::query_as(
+        "SELECT xml_path, xml_sha256, xml_size, pdf_path, pdf_sha256, pdf_size \
+         FROM invoices WHERE id = ?1 AND company_id = ?2",
+    )
+    .bind(id)
+    .bind(company_id)
+    .fetch_one(pool)
+    .await?;
+    let xml = verify_one(
+        row.xml_path.as_deref(),
+        row.xml_sha256.as_deref(),
+        row.xml_size,
+    );
+    let pdf = verify_one(
+        row.pdf_path.as_deref(),
+        row.pdf_sha256.as_deref(),
+        row.pdf_size,
+    );
+    Ok((xml, pdf))
 }
 
 /// R13 Wave G: user-facing delete scoped to a specific company.
@@ -991,6 +1094,68 @@ mod tests {
             Some("UPLOAD-002"),
             "upload_id MUST be persisted even on partial failure to block duplicate filing"
         );
+    }
+
+    // ── ROB-22: file-integrity fingerprint round-trip ───────────────────────────
+    /// Minimal schema WITH the integrity columns (mirrors migration 0044).
+    async fn setup_integrity_pool() -> sqlx::SqlitePool {
+        let pool = setup_mark_submitted_pool().await;
+        for col in [
+            "xml_sha256 TEXT",
+            "xml_size INTEGER",
+            "pdf_sha256 TEXT",
+            "pdf_size INTEGER",
+        ] {
+            sqlx::query(&format!("ALTER TABLE invoices ADD COLUMN {col}"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        pool
+    }
+
+    #[tokio::test]
+    async fn rob22_integrity_ok_then_corrupted_then_missing() {
+        use super::FileIntegrity;
+        let pool = setup_integrity_pool().await;
+        sqlx::query(
+            "INSERT INTO invoices (id, company_id, status) VALUES ('inv-i','comp-1','DRAFT')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let xml = dir.path().join("inv.xml");
+        std::fs::write(&xml, b"<Invoice>hello</Invoice>").unwrap();
+        let path = xml.to_str().unwrap();
+
+        // Fingerprint on write, then verify → Ok. PDF was never set → NotApplicable.
+        super::set_xml_path(&pool, "inv-i", path).await.unwrap();
+        let (x, p) = super::verify_invoice_integrity(&pool, "inv-i", "comp-1")
+            .await
+            .unwrap();
+        assert_eq!(x, FileIntegrity::Ok);
+        assert_eq!(p, FileIntegrity::NotApplicable);
+
+        // Edit the file in place → bytes differ from the stored hash → Corrupted.
+        std::fs::write(&xml, b"<Invoice>TAMPERED</Invoice>").unwrap();
+        let (x, _) = super::verify_invoice_integrity(&pool, "inv-i", "comp-1")
+            .await
+            .unwrap();
+        assert_eq!(x, FileIntegrity::Corrupted);
+
+        // Delete the file → Missing.
+        std::fs::remove_file(&xml).unwrap();
+        let (x, _) = super::verify_invoice_integrity(&pool, "inv-i", "comp-1")
+            .await
+            .unwrap();
+        assert_eq!(x, FileIntegrity::Missing);
+
+        // Wrong company can't even verify (scoped) → NotFound.
+        assert!(super::verify_invoice_integrity(&pool, "inv-i", "comp-2")
+            .await
+            .is_err());
     }
 
     #[test]

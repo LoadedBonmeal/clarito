@@ -923,6 +923,27 @@ pub async fn duplicate_invoice(
     Ok(new_invoice_id)
 }
 
+/// ROB-22: report on the integrity of an invoice's archived artifacts.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvoiceIntegrityReport {
+    pub xml: crate::db::invoices::FileIntegrity,
+    pub pdf: crate::db::invoices::FileIntegrity,
+}
+
+/// ROB-22: re-hash an invoice's archived XML + PDF and report whether each still matches
+/// the fingerprint stored at write time (`ok` / `missing` / `corrupted` / `not_applicable`
+/// / `not_fingerprinted`). Scoped to `company_id` — a foreign id returns `NotFound`.
+#[tauri::command]
+pub async fn verify_invoice_files(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+) -> AppResult<InvoiceIntegrityReport> {
+    let (xml, pdf) = invoices::verify_invoice_integrity(&state.db, &id, &company_id).await?;
+    Ok(InvoiceIntegrityReport { xml, pdf })
+}
+
 #[cfg(test)]
 mod tests {
     use super::is_allowed_status_transition;

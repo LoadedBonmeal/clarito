@@ -300,6 +300,7 @@ pub fn run() {
             commands::invoices::set_invoice_status,
             commands::invoices::update_invoice_draft,
             commands::invoices::validate_invoice_draft,
+            commands::invoices::verify_invoice_files,
             commands::invoices::storno_invoice,
             commands::invoices::duplicate_invoice,
             // received
