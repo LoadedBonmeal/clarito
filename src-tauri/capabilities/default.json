@@ -13,9 +13,6 @@
         { "path": "$APPDATA/**" },
         { "path": "$APPLOCALDATA/**" },
         { "path": "$APPCONFIG/**" },
-        { "path": "$DOWNLOAD/**" },
-        { "path": "$DOCUMENT/**" },
-        { "path": "$DESKTOP/**" },
         { "path": "$TEMP/**" }
       ]
     },

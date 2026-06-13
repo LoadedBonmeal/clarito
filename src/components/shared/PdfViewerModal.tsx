@@ -147,13 +147,17 @@ function ViewerShell({ payload, onClose }: { payload: PdfViewerPayload; onClose:
   const { activeDocumentId } = useActiveDocument();
   const [showThumbs, setShowThumbs] = useState(true);
   const [showSearch, setShowSearch] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     const cap = dm.provides;
     if (!cap) return;
+    setLoadError(false);
     const buffer = payload.bytes.slice().buffer;
     const task = cap.openDocumentBuffer({ buffer, name: payload.name, autoActivate: true });
-    void task.toPromise().catch(() => {});
+    // ROB-06: a corrupt-but-magic-valid PDF rejects here — surface an error instead of
+    // spinning on "loading" forever.
+    void task.toPromise().catch(() => setLoadError(true));
   }, [dm.provides, payload]);
 
   return (
@@ -216,7 +220,9 @@ function ViewerShell({ payload, onClose }: { payload: PdfViewerPayload; onClose:
           </aside>
         )}
         <div className="pdfv-body">
-          {activeDocumentId ? (
+          {loadError ? (
+            <div className="pdfv-status pdfv-status--err">{t("shared.pdfViewer.loadError")}</div>
+          ) : activeDocumentId ? (
             <DocumentContent documentId={activeDocumentId}>
               {({ isLoaded }) =>
                 isLoaded ? (

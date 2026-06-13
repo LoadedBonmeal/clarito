@@ -7,6 +7,7 @@
     "pdfViewer": {
       "loading": "Loading document…",
       "engineError": "The PDF viewer failed to start.",
+      "loadError": "The PDF could not be loaded (corrupt or invalid file).",
       "save": "Save",
       "saved": "PDF saved.",
       "saveError": "Save failed: {{error}}",

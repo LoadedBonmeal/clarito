@@ -26,6 +26,15 @@ export function useOpenPdf() {
         const { readFile } = await import("@tauri-apps/plugin-fs");
         bytes = await readFile(path);
       }
+      // ROB-06: guard the PDFium WASM against bad input — reject empty/oversized files and
+      // anything that isn't a PDF (magic bytes "%PDF") before handing bytes to the viewer.
+      const MAX_BYTES = 100 * 1024 * 1024; // 100 MB
+      if (bytes.length === 0 || bytes.length > MAX_BYTES) {
+        throw new Error("Fișier PDF invalid (gol sau peste 100 MB).");
+      }
+      if (!(bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46)) {
+        throw new Error("Fișierul nu este un PDF valid (lipsește semnătura %PDF).");
+      }
       open({ bytes, name, externalPath: path });
     },
     [open],
