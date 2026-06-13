@@ -270,6 +270,10 @@ pub async fn export_d112_xml(
             ore_norma: e.ore_norma.clamp(6, 8) as u32,
             baza_cas: leid(baza_cas),
             baza_cass: leid(baza_cass),
+            // A_5 baza CAM = baza CAS/CASS pentru salariatul normal (brut − sumă netaxabilă).
+            baza_cam: leid(baza_cas),
+            // A_sal1 salariul de bază brut din contract (brutul realizat al lunii).
+            sal_contract: leid(gross_in),
             sediu_cif: e.sediu_cif.clone(),
         });
     }
@@ -292,6 +296,7 @@ pub async fn export_d112_xml(
     let header = D112Header {
         luna: month,
         an: year,
+        d_rec: 0, // declarație inițială
         // Declarantul (persoană) se completează în aplicație; folosim denumirea ca substituent.
         nume_declar: company.legal_name.chars().take(75).collect(),
         prenume_declar: "-".into(),
