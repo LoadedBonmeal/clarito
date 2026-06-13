@@ -1161,43 +1161,48 @@ pub async fn generate_gl_entries(
                 .unwrap_or(None),
         );
 
-        // FIX 1: Fetch per-(vat_category, vat_rate) groups from invoice_line_items.
-        // This mirrors the purchase per-rate approach and correctly handles mixed-rate invoices.
-        let group_rows = sqlx::query(
-            "SELECT vat_category, vat_rate, \
-                    COALESCE(revenue_kind,'goods') AS revenue_kind, \
-                    COALESCE(SUM(CAST(subtotal_amount AS REAL)),0.0) as net_sum, \
-                    COALESCE(SUM(CAST(vat_amount AS REAL)),0.0) as vat_sum \
-             FROM invoice_line_items \
-             WHERE invoice_id = ?1 \
-             GROUP BY vat_category, vat_rate, revenue_kind",
+        // FIX 1: per-(vat_category, vat_rate, revenue_kind) groups from invoice_line_items —
+        // correctly handles mixed-rate invoices.
+        // MONEY-008: aggregate the stored TEXT amounts directly as Decimal (via dec()), NOT through
+        // SQL CAST(... AS REAL) → f64 → Decimal::try_from. The float round-trip injects sub-cent
+        // error that flows into the GL (and downstream D300/D394). Mirrors the TEXT→Decimal sums in
+        // cash_vat_release_for_payment. BTreeMap also makes the group order deterministic (vs
+        // SQLite's arbitrary GROUP BY order); GL correctness is order-independent.
+        let line_rows = sqlx::query(
+            "SELECT vat_category, vat_rate, COALESCE(revenue_kind,'goods') AS revenue_kind, \
+                    subtotal_amount, vat_amount \
+             FROM invoice_line_items WHERE invoice_id = ?1",
         )
         .bind(&inv_id)
         .fetch_all(pool)
         .await?;
 
-        let vat_groups: Vec<(Decimal, Decimal, String, Decimal, String)> = group_rows
-            .iter()
-            .map(|r| {
-                let cat: String = r
-                    .try_get("vat_category")
-                    .unwrap_or_else(|_| "S".to_string());
-                let rate_s: String = r.try_get("vat_rate").unwrap_or_else(|_| "19".to_string());
-                let revenue_kind: String = r
-                    .try_get("revenue_kind")
-                    .unwrap_or_else(|_| "goods".to_string());
-                let net_f: f64 = r.try_get("net_sum").unwrap_or(0.0);
-                let vat_f: f64 = r.try_get("vat_sum").unwrap_or(0.0);
-                let net = amount_to_ron(
-                    Decimal::try_from(net_f).unwrap_or(Decimal::ZERO),
-                    &currency,
-                    fx,
-                );
-                let vat = amount_to_ron(
-                    Decimal::try_from(vat_f).unwrap_or(Decimal::ZERO),
-                    &currency,
-                    fx,
-                );
+        let mut group_acc: std::collections::BTreeMap<
+            (String, String, String),
+            (Decimal, Decimal),
+        > = std::collections::BTreeMap::new();
+        for r in &line_rows {
+            let cat: String = r
+                .try_get("vat_category")
+                .unwrap_or_else(|_| "S".to_string());
+            let rate_s: String = r.try_get("vat_rate").unwrap_or_else(|_| "19".to_string());
+            let revenue_kind: String = r
+                .try_get("revenue_kind")
+                .unwrap_or_else(|_| "goods".to_string());
+            let net_s: String = r.try_get("subtotal_amount").unwrap_or_default();
+            let vat_s: String = r.try_get("vat_amount").unwrap_or_default();
+            let e = group_acc
+                .entry((cat, rate_s, revenue_kind))
+                .or_insert((Decimal::ZERO, Decimal::ZERO));
+            e.0 += dec(&net_s);
+            e.1 += dec(&vat_s);
+        }
+
+        let vat_groups: Vec<(Decimal, Decimal, String, Decimal, String)> = group_acc
+            .into_iter()
+            .map(|((cat, rate_s, revenue_kind), (net_sum, vat_sum))| {
+                let net = amount_to_ron(net_sum, &currency, fx);
+                let vat = amount_to_ron(vat_sum, &currency, fx);
                 (net, vat, cat, dec(&rate_s), revenue_kind)
             })
             .collect();

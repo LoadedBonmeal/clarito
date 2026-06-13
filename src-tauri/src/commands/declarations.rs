@@ -54,12 +54,29 @@ pub async fn compute_d100(
         &period_to,
     )
     .await?;
+    // `prior_payments` is user-supplied (free-text). A silent `.unwrap_or(ZERO)` would zero an
+    // unparseable value (e.g. a ro-RO "1.234,56"), understating prior payments → an overstated
+    // "sumă de plată". Reject it so the user corrects the input instead of filing a wrong figure.
+    // (revenue/result come from profit_and_loss → fmt_dec, a canonical Decimal literal that always
+    // re-parses, so their `.parse()` cannot fail.)
+    let prior = {
+        let raw = prior_payments.trim();
+        if raw.is_empty() {
+            Decimal::ZERO
+        } else {
+            Decimal::from_str(raw).map_err(|_| {
+                AppError::Validation(
+                    "Plăți anterioare invalide — folosiți formatul 1234.56.".into(),
+                )
+            })?
+        }
+    };
     let input = D100Input {
         quarter,
         year,
         revenue: pnl.total_revenue.parse().unwrap_or(Decimal::ZERO),
         result: pnl.gross_result.parse().unwrap_or(Decimal::ZERO),
-        prior_payments: prior_payments.parse().unwrap_or(Decimal::ZERO),
+        prior_payments: prior,
     };
     Ok(compute_d100_fn(&company.tax_regime, &input))
 }

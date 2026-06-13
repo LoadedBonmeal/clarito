@@ -723,7 +723,19 @@ pub fn generate_bilant_xml(
     f20: &HashMap<String, i64>,
     form: &str,
 ) -> String {
-    let total_plata = f10.get("F10_0492").copied().unwrap_or(0); // control sum = total capitaluri.
+    // Control sum (totalPlata_A) = total capitaluri proprii. The prescurtat F10 (UU/BS) carries it
+    // in F10_0492 (rd.49); the DEVELOPED F10 (BL, entitate mare/mijlocie) never inserts F10_0492 —
+    // its total is rd.100 → F10_1002. Hard-coding F10_0492 made EVERY BL bilanț emit
+    // totalPlata_A="0" (control-sum mismatch → ANAF reject). Pick the key by form.
+    let cap_key = if form == "BL" { "F10_1002" } else { "F10_0492" };
+    let total_plata = f10.get(cap_key).copied().unwrap_or_else(|| {
+        tracing::warn!(
+            form,
+            cap_key,
+            "bilanț: total capitaluri proprii lipsește din F10 — totalPlata_A=0"
+        );
+        0
+    });
     let cod_tt = county_code(&h.county);
     let an_caen = 2025; // Str_coduriCaen2024_2025 / IntInt2024_2025.
                         // bifa_art27 (IntInt0_0, must be 0) is required by ALL three schemas (s1005/s1003/s1002), so it
@@ -931,6 +943,14 @@ mod tests {
         let xml = generate_bilant_xml(&h, &f10, &f20, "BL");
         assert!(xml.contains("<Bilant1002"));
         assert!(xml.contains("F10_0172=\"40000\""));
+        // The BL control sum must come from the developed total capitaluri (rd.100 → F10_1002),
+        // NOT the prescurtat F10_0492 (absent in the developed layout → would emit "0").
+        let cap = f10["F10_1002"];
+        assert_ne!(cap, 0, "developed BL total capitaluri must be non-zero");
+        assert!(
+            xml.contains(&format!("totalPlata_A=\"{cap}\"")),
+            "BL totalPlata_A must equal F10_1002 ({cap}), not 0"
+        );
         // Write for external `xmllint --schema s1002.xsd` validation.
         let _ = std::fs::write("/tmp/bl-generated.xml", &xml);
     }
