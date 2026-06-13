@@ -149,6 +149,8 @@
       "excDizabilitate": "Person with disabilities / < 8h/day (lit. c)",
       "excContracteMultiple": "Multiple contracts ≥ minimum salary (lit. e)",
       "office": "Office (CIF) — D112 angajatorF2",
+      "beneficiar200": "Min-wage non-taxable amount beneficiary (300/200 lei)",
+      "beneficiar200Hint": "Art. III OUG 89/2025: full-time employee, base salary = minimum wage, not cut during 2026. 300 lei (Jan–Jun) / 200 lei (Jul–Dec) free of income tax + CAS/CASS/CAM. Tick only if all conditions are met.",
       "nameRequired": "Name is required.",
       "save": "Save employee"
     },

@@ -28,6 +28,11 @@ pub struct PayrollInput {
     /// Deducerea personală (din tabelul ANAF, în funcție de venit + persoane în întreținere).
     #[serde(default)]
     pub personal_deduction: Decimal,
+    /// Suma netaxabilă (art. III OUG 89/2025): 300 lei sem. I / 200 lei sem. II 2026, scutită de
+    /// impozit ȘI de CAS/CASS/CAM. Se rezolvă cu [`suma_netaxabila`] (0 dacă nu se aplică). Scăzută
+    /// din baza de calcul ÎNAINTE de toate cele patru prelevări.
+    #[serde(default)]
+    pub non_taxable: Decimal,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -42,6 +47,8 @@ pub struct PayrollResult {
     pub net: String,
     pub cam: String,
     pub total_employer_cost: String,
+    /// Suma netaxabilă aplicată efectiv (300/200 lei sau 0).
+    pub non_taxable: String,
 }
 
 fn pct(d: Decimal, (n, s): (i64, u32)) -> Decimal {
@@ -105,18 +112,59 @@ pub fn part_time_min_base(
     Some((base, cas_diff, cass_diff))
 }
 
+/// Suma netaxabilă din salariul minim — art. III OUG 89/2025 (continuă OUG 156/2024 art. LXVI).
+/// 300 lei/lună sem. I 2026 / 200 lei/lună sem. II 2026, scutită de impozit pe venit ȘI de
+/// CAS/CASS/CAM (derogare art. 78/139(1)/140/157(1)/220^4(1) Cod fiscal).
+///
+/// Condiții CUMULATIVE: (a) salariat cu normă întreagă pe CIM (tip_contract "N"); (b) salariul de
+/// bază contractual = salariul minim brut în vigoare (4.050 sem. I / 4.325 sem. II); (c) venitul brut
+/// realizat (fără tichete/vouchere) ≤ 4.300 sem. I / 4.600 sem. II inclusiv; (d) angajatorul nu a
+/// diminuat salariul de bază între 01.01.2026 și 31.12.2026.
+///
+/// `beneficiar` este ATESTAREA contabilului că (b)+(d) sunt îndeplinite (aplicația nu modelează
+/// salariul de bază contractual separat de brut, nici istoricul diminuărilor). Aici aplicăm automat
+/// (a) normă întreagă + (c) plafonul brut; restul țin de flag. Întoarce 0 dacă nu se aplică.
+///
+/// Limitare cunoscută: nu se prorata pe zile pentru luni parțiale (angajare/încetare la mijlocul
+/// lunii) — se aplică suma întreagă (conservator), aliniat cu [`part_time_min_base`].
+pub fn suma_netaxabila(
+    beneficiar: bool,
+    tip_contract: &str,
+    gross: Decimal,
+    month: u32,
+) -> Decimal {
+    if !beneficiar || tip_contract != "N" || gross <= Decimal::ZERO {
+        return Decimal::ZERO;
+    }
+    let (amount, ceiling) = if month <= 6 {
+        (Decimal::from(300), Decimal::from(4300)) // sem. I 2026
+    } else {
+        (Decimal::from(200), Decimal::from(4600)) // sem. II 2026 (HG 146/2026)
+    };
+    if gross > ceiling {
+        return Decimal::ZERO; // peste plafonul brut → întreaga sumă netaxabilă se pierde
+    }
+    amount.min(gross)
+}
+
 /// Compute one monthly salary state from the gross + personal deduction (2026 rates).
+/// `input.non_taxable` (resolved by [`suma_netaxabila`]) is carved out of the base BEFORE CAS, CASS,
+/// CAM and income tax (art. III OUG 89/2025).
 pub fn compute_payroll(input: &PayrollInput) -> PayrollResult {
     let z = Decimal::ZERO;
     let gross = input.gross.max(z);
-    let cas = pct(gross, CAS_PCT);
-    let cass = pct(gross, CASS_PCT);
+    let non_taxable = input.non_taxable.max(z).min(gross);
+    // Contribution base = gross − suma netaxabilă; CAS/CASS/CAM all computed on it.
+    let contrib_base = (gross - non_taxable).max(z);
+    let cas = pct(contrib_base, CAS_PCT);
+    let cass = pct(contrib_base, CASS_PCT);
     let after_contrib = gross - cas - cass;
     let deduction = input.personal_deduction.max(z).min(after_contrib.max(z));
-    let taxable_base = (after_contrib - deduction).max(z);
+    // Income-tax base = venit net − deducere personală − suma netaxabilă (Baza_impozit, FGO/Cod fiscal).
+    let taxable_base = (after_contrib - deduction - non_taxable).max(z);
     let income_tax = pct(taxable_base, INCOME_TAX_PCT);
     let net = gross - cas - cass - income_tax;
-    let cam = pct(gross, CAM_PCT);
+    let cam = pct(contrib_base, CAM_PCT);
     let total_employer_cost = gross + cam;
 
     PayrollResult {
@@ -129,6 +177,7 @@ pub fn compute_payroll(input: &PayrollInput) -> PayrollResult {
         net: fmt(net),
         cam: fmt(cam),
         total_employer_cost: fmt(total_employer_cost),
+        non_taxable: fmt(non_taxable),
     }
 }
 
@@ -179,6 +228,7 @@ mod tests {
         let r = compute_payroll(&PayrollInput {
             gross: d("5000"),
             personal_deduction: d("0"),
+            non_taxable: d("0"),
         });
         assert_eq!(r.cas, "1250.00");
         assert_eq!(r.cass, "500.00");
@@ -190,6 +240,51 @@ mod tests {
     }
 
     #[test]
+    fn suma_netaxabila_gating() {
+        // Sem. I (≤6): 300 lei for a full-time beneficiary; sem. II (≥7): 200 lei.
+        assert_eq!(suma_netaxabila(true, "N", d("4050"), 3), d("300"));
+        assert_eq!(suma_netaxabila(true, "N", d("4325"), 8), d("200"));
+        // Not a beneficiary → 0.
+        assert_eq!(suma_netaxabila(false, "N", d("4050"), 3), d("0"));
+        // Part-time (Pi) → 0 (measure is full-time only).
+        assert_eq!(suma_netaxabila(true, "P1", d("4050"), 3), d("0"));
+        // Over the gross ceiling (4.300 H1 / 4.600 H2) → whole benefit lost.
+        assert_eq!(suma_netaxabila(true, "N", d("4301"), 3), d("0"));
+        assert_eq!(suma_netaxabila(true, "N", d("4500"), 8), d("200")); // 4500 ≤ 4600 H2
+        assert_eq!(suma_netaxabila(true, "N", d("4601"), 8), d("0"));
+    }
+
+    #[test]
+    fn carveout_reduces_all_four_levies() {
+        // Full-time min-wage beneficiary, H1: gross 4.050, carve-out 300 → base 3.750.
+        // CAS 25%·3750 = 938 (937.5→938); CASS 10%·3750 = 375; CAM 2.25%·3750 = 84 (84.375→84).
+        // venit net = 4050 − 938 − 375 = 2737; with deducere 807: base = 2737 − 807 − 300 = 1630;
+        // impozit 10% = 163; net = 2737 − 163 = 2574.
+        let r = compute_payroll(&PayrollInput {
+            gross: d("4050"),
+            personal_deduction: d("807"),
+            non_taxable: d("300"),
+        });
+        assert_eq!(r.non_taxable, "300.00");
+        assert_eq!(r.cas, "938.00");
+        assert_eq!(r.cass, "375.00");
+        assert_eq!(r.cam, "84.00"); // on the reduced base 3.750, NOT 4.050
+        assert_eq!(r.taxable_base, "1630.00");
+        assert_eq!(r.income_tax, "163.00");
+        assert_eq!(r.net, "2574.00");
+        // Same gross WITHOUT the carve-out over-declares: CAS on full 4.050 = 1013 (> 938).
+        let no = compute_payroll(&PayrollInput {
+            gross: d("4050"),
+            personal_deduction: d("807"),
+            non_taxable: d("0"),
+        });
+        // Without the carve-out CAS is on the full 4.050 (1013 > 938) and tax is higher (183 > 163) —
+        // i.e. the missing carve-out OVER-declares. (Compare numerically, not as strings.)
+        assert_eq!(no.cas, "1013.00");
+        assert_eq!(no.income_tax, "183.00");
+    }
+
+    #[test]
     fn personal_deduction_reduces_the_income_tax_base() {
         // Gross 4.050 (min wage H1), deduction 700.
         // CAS 1.013 (4050×0.25=1012.5→1013); CASS 405; after = 4050−1013−405 = 2632.
@@ -197,6 +292,7 @@ mod tests {
         let r = compute_payroll(&PayrollInput {
             gross: d("4050"),
             personal_deduction: d("700"),
+            non_taxable: d("0"),
         });
         assert_eq!(r.cas, "1013.00");
         assert_eq!(r.cass, "405.00");

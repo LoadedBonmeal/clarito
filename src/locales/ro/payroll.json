@@ -150,6 +150,8 @@
       "excDizabilitate": "Persoană cu dizabilități / < 8h/zi (lit. c)",
       "excContracteMultiple": "Contracte multiple ≥ salariul minim (lit. e)",
       "office": "Sediu (CIF) — D112 angajatorF2",
+      "beneficiar200": "Beneficiar sumă netaxabilă din salariul minim (300/200 lei)",
+      "beneficiar200Hint": "Art. III OUG 89/2025: salariat cu normă întreagă, salariu de bază = salariul minim, fără diminuare în 2026. 300 lei (ian-iun) / 200 lei (iul-dec) scutiți de impozit + CAS/CASS/CAM. Bifați doar dacă toate condițiile sunt îndeplinite.",
       "nameRequired": "Numele e obligatoriu.",
       "save": "Salvează angajat"
     },

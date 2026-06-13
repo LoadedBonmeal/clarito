@@ -1127,6 +1127,9 @@ export interface Employee {
   exceptieCasMin: string;
   /** CIF-ul sediului secundar la care e repartizat (D112 angajatorF2); '' = sediu principal. */
   sediuCif: string;
+  /** Beneficiar al sumei netaxabile din salariul minim (art. III OUG 89/2025): normă întreagă,
+   *  salariu de bază = salariul minim, fără diminuare în 2026 → carve-out 300/200 lei. */
+  beneficiarSumaNetaxabila: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -1194,6 +1197,7 @@ export interface CreateEmployeeInput {
   oreNorma?: number;
   exceptieCasMin?: string;
   sediuCif?: string;
+  beneficiarSumaNetaxabila?: boolean;
 }
 
 export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, "companyId">> & {

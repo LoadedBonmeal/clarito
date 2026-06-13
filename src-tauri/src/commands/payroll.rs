@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 use std::str::FromStr;
 use tauri::State;
 
-use crate::anaf_decl::d112::{compute_payroll, PayrollInput};
+use crate::anaf_decl::d112::{compute_payroll, suma_netaxabila, PayrollInput};
 use crate::anaf_decl::d112_xml::{generate_d112_xml, D112Employee, D112Header};
 use crate::db::payroll::{self, CreateEmployeeInput, Employee, PayrollRun, UpdateEmployeeInput};
 use crate::error::{AppError, AppResult};
@@ -195,13 +195,24 @@ pub async fn export_d112_xml(
     let nzl = working_days(year, month); // zile lucrătoare în lună (Luni-Vineri)
     let mut d112_emps = Vec::new();
     for e in employees.iter().filter(|e| e.active) {
+        let gross_in = dec(&e.gross_salary);
+        // Suma netaxabilă (300/200 lei, art. III OUG 89/2025) — 0 dacă nu se aplică. Scade baza
+        // tuturor celor patru prelevări (vezi compute_payroll).
+        let non_taxable = suma_netaxabila(
+            e.beneficiar_suma_netaxabila,
+            &e.tip_contract,
+            gross_in,
+            month,
+        );
         let r = compute_payroll(&PayrollInput {
-            gross: dec(&e.gross_salary),
+            gross: gross_in,
             personal_deduction: dec(&e.personal_deduction),
+            non_taxable,
         });
         let gross = dec(&r.gross);
-        let mut baza_cas = gross;
-        let mut baza_cass = gross;
+        // Baza CAS/CASS = brut − suma netaxabilă (carve-out). Pentru ne-beneficiari nt=0 → baza = brut.
+        let mut baza_cas = gross - non_taxable;
+        let mut baza_cass = gross - non_taxable;
         let mut cas = dec(&r.cas);
         let mut cass = dec(&r.cass);
         // Part-time (contract Pi): baza CAS/CASS = salariul minim întreg (NU prorata cu norma orară),
@@ -217,6 +228,16 @@ pub async fn export_d112_xml(
             cas = round2(base * Decimal::new(25, 2));
             cass = round2(base * Decimal::new(10, 2));
         }
+        // Tip asigurat: beneficiarii sumei netaxabile, de la 07/2026 (modelul Ordin 605/95/928/
+        // 2.314/2026), folosesc codul 1.11.2 (Nomenclator 5). Pentru ≤06/2026 sau ne-beneficiari se
+        // păstrează codul configurat pe angajat. (1.11.3 — sistem propriu de pensii — necesită
+        // tratament CAS distinct, neimplementat; nu se emite automat.)
+        let tip_asigurat =
+            if non_taxable > Decimal::ZERO && (year > 2026 || (year == 2026 && month >= 7)) {
+                "1.11.2".to_string()
+            } else {
+                e.tip_asigurat.clone()
+            };
         let (nume, prenume) = split_name(&e.full_name);
         d112_emps.push(D112Employee {
             cnp: e.cnp.clone(),
@@ -233,7 +254,7 @@ pub async fn export_d112_xml(
             impozit: lei(&r.income_tax),
             cam: lei(&r.cam),
             zile: nzl,
-            tip_asigurat: e.tip_asigurat.clone(),
+            tip_asigurat,
             pensionar: e.pensionar,
             tip_contract: e.tip_contract.clone(),
             // A_4 ore normă zilnică must be 6/7/8 (the position's daily norm); part-time is captured

@@ -36,6 +36,10 @@ pub struct Employee {
     /// CIF-ul sediului secundar la care e repartizat salariatul (D112 angajatorF2); '' = sediu
     /// principal.
     pub sediu_cif: String,
+    /// Beneficiar al sumei netaxabile din salariul minim (art. III OUG 89/2025): atestarea că
+    /// salariatul e cu normă întreagă, salariul de bază = salariul minim și nu a fost diminuat în
+    /// 2026. Activează carve-out-ul (300/200 lei) în [`crate::anaf_decl::d112::suma_netaxabila`].
+    pub beneficiar_suma_netaxabila: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -62,6 +66,8 @@ pub struct CreateEmployeeInput {
     pub exceptie_cas_min: Option<String>,
     #[serde(default)]
     pub sediu_cif: Option<String>,
+    #[serde(default)]
+    pub beneficiar_suma_netaxabila: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -79,11 +85,12 @@ pub struct UpdateEmployeeInput {
     pub ore_norma: Option<i64>,
     pub exceptie_cas_min: Option<String>,
     pub sediu_cif: Option<String>,
+    pub beneficiar_suma_netaxabila: Option<bool>,
 }
 
 const COLS: &str = "id, company_id, cnp, full_name, gross_salary, personal_deduction, \
                     employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
-                    exceptie_cas_min, sediu_cif, created_at, updated_at";
+                    exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, created_at, updated_at";
 
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Employee>> {
     let q = format!(
@@ -135,8 +142,8 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     sqlx::query(
         "INSERT INTO employees (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
          employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
-         exceptie_cas_min, sediu_cif, created_at, updated_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11,?12,?13,?14,?14)",
+         exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, created_at, updated_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11,?12,?13,?14,?15,?15)",
     )
     .bind(&id)
     .bind(&input.company_id)
@@ -151,6 +158,7 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     .bind(input.ore_norma.unwrap_or(8))
     .bind(input.exceptie_cas_min.as_deref().unwrap_or(""))
     .bind(input.sediu_cif.as_deref().unwrap_or("").trim())
+    .bind(input.beneficiar_suma_netaxabila.unwrap_or(false))
     .bind(now)
     .execute(pool)
     .await?;
@@ -176,7 +184,8 @@ pub async fn update(
     sqlx::query(
         "UPDATE employees SET cnp=?3, full_name=?4, gross_salary=?5, personal_deduction=?6, \
          employment_date=?7, active=?8, tip_asigurat=?9, pensionar=?10, tip_contract=?11, \
-         ore_norma=?12, exceptie_cas_min=?13, sediu_cif=?14, updated_at=?15 \
+         ore_norma=?12, exceptie_cas_min=?13, sediu_cif=?14, beneficiar_suma_netaxabila=?15, \
+         updated_at=?16 \
          WHERE id=?1 AND company_id=?2",
     )
     .bind(id)
@@ -198,6 +207,11 @@ pub async fn update(
             .unwrap_or(&cur.exceptie_cas_min),
     )
     .bind(input.sediu_cif.as_deref().unwrap_or(&cur.sediu_cif))
+    .bind(
+        input
+            .beneficiar_suma_netaxabila
+            .unwrap_or(cur.beneficiar_suma_netaxabila),
+    )
     .bind(now_unix())
     .execute(pool)
     .await?;
@@ -342,9 +356,16 @@ pub async fn run_payroll(
     let (mut t_cas_diff, mut t_cass_diff) = (Decimal::ZERO, Decimal::ZERO);
     for e in employees.iter().filter(|e| e.active) {
         let gross = dec(&e.gross_salary);
+        let non_taxable = crate::anaf_decl::d112::suma_netaxabila(
+            e.beneficiar_suma_netaxabila,
+            &e.tip_contract,
+            gross,
+            month,
+        );
         let r = compute_payroll(&PayrollInput {
             gross,
             personal_deduction: dec(&e.personal_deduction),
+            non_taxable,
         });
         let exempt =
             crate::anaf_decl::d112::exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
@@ -460,6 +481,7 @@ mod tests {
                     ore_norma: None,
                     exceptie_cas_min: None,
                     sediu_cif: None,
+                    beneficiar_suma_netaxabila: None,
                 },
             )
             .await

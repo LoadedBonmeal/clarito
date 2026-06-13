@@ -639,6 +639,7 @@ function EmployeeModal({
     pensionar: employee?.pensionar ?? false,
     exceptieCasMin: employee?.exceptieCasMin ?? "",
     sediuCif: employee?.sediuCif ?? "",
+    beneficiarSumaNetaxabila: employee?.beneficiarSumaNetaxabila ?? false,
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -655,6 +656,7 @@ function EmployeeModal({
         pensionar: form.pensionar,
         exceptieCasMin: form.exceptieCasMin,
         sediuCif: form.sediuCif,
+        beneficiarSumaNetaxabila: form.beneficiarSumaNetaxabila,
       };
       if (isEdit) {
         return api.payroll.update(employee!.id, companyId, payload);
@@ -760,6 +762,17 @@ function EmployeeModal({
                   <option key={s.id} value={s.cif}>{s.name ? `${s.name} · ${s.cif}` : s.cif}</option>
                 ))}
               </select>
+            </div>
+            <div className="field span2">
+              <label className="cbx">
+                <input
+                  type="checkbox"
+                  checked={form.beneficiarSumaNetaxabila}
+                  onChange={(e) => setForm((f) => ({ ...f, beneficiarSumaNetaxabila: e.target.checked }))}
+                />
+                <span>{t("payroll.empModal.beneficiar200")}</span>
+              </label>
+              <div className="hint">{t("payroll.empModal.beneficiar200Hint")}</div>
             </div>
             {error && (
               <div className="field span2">
