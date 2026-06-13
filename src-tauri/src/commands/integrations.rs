@@ -157,11 +157,11 @@ pub async fn smartbill_push_invoice(
         ));
     }
 
-    // 2. Load invoice with lines
-    let invoice_bundle = crate::db::invoices::get_with_lines(&state.db, &invoice_id).await?;
-    // G1: verify the invoice belongs to the requested company — prevents pushing a
-    // foreign company's invoice to a different company's SmartBill account.
-    crate::commands::invoices::check_invoice_ownership(&invoice_bundle.invoice, &company_id)?;
+    // 2. Load invoice with lines — SEC-06: scoped la company_id (filtru în query) —
+    // prevents pushing a foreign company's invoice to a different company's SmartBill
+    // account, with no manual ownership comparison to forget.
+    let invoice_bundle =
+        crate::db::invoices::get_with_lines_scoped(&state.db, &invoice_id, &company_id).await?;
     let invoice = &invoice_bundle.invoice;
     let lines = &invoice_bundle.lines;
 

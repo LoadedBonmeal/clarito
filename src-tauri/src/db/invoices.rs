@@ -302,6 +302,45 @@ pub async fn get_with_lines(pool: &SqlitePool, id: &str) -> AppResult<InvoiceWit
     })
 }
 
+/// SEC-06 (multi-tenant defense-in-depth): fetch an invoice scoped to its owner at the
+/// QUERY level — the `company_id` filter is in the `WHERE`, so a non-owned id yields
+/// `NotFound` before any row is read. Prefer this over `get` + a manual `company_id`
+/// comparison: a forgotten comparison at a call site can leak another tenant's invoice,
+/// but a scoped query cannot.
+pub async fn get_scoped(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Invoice> {
+    sqlx::query_as::<_, Invoice>(
+        "SELECT id, company_id, contact_id, series, number, full_number, \
+         issue_date, due_date, currency, exchange_rate, subtotal_amount, vat_amount, total_amount, \
+         status, anaf_upload_id, anaf_index, anaf_submitted_at, anaf_validated_at, anaf_rejected_at, \
+         xml_path, pdf_path, signature_xml_path, rejection_reason, rejection_code, notes, \
+         payment_means_code, storno_of_invoice_id, created_at, updated_at \
+         FROM invoices WHERE id = ?1 AND company_id = ?2",
+    )
+    .bind(id)
+    .bind(company_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
+}
+
+/// `get_with_lines`, scoped to the owning company (SEC-06). The invoice ownership is
+/// enforced by `get_scoped` BEFORE lines/events are read, so a cross-company id never
+/// fetches (let alone returns) another tenant's line data.
+pub async fn get_with_lines_scoped(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+) -> AppResult<InvoiceWithLines> {
+    let invoice = get_scoped(pool, id, company_id).await?;
+    let lines = list_lines(pool, id).await?;
+    let events = list_events(pool, id).await?;
+    Ok(InvoiceWithLines {
+        invoice,
+        lines,
+        events,
+    })
+}
+
 async fn list_lines(pool: &SqlitePool, invoice_id: &str) -> AppResult<Vec<LineItem>> {
     Ok(sqlx::query_as::<_, LineItem>(
         "SELECT id, invoice_id, position, name, description, quantity, unit, \

@@ -19,12 +19,8 @@ pub async fn generate_invoice_xml(
     invoice_id: String,
     company_id: String,
 ) -> AppResult<String> {
-    // 1. Încarcă factura cu linii
-    let with_lines = invoices::get_with_lines(&state.db, &invoice_id).await?;
-    // R14 Wave E: ownership check — cross-company XML generation returns NotFound.
-    if with_lines.invoice.company_id != company_id {
-        return Err(AppError::NotFound);
-    }
+    // 1. Încarcă factura cu linii — SEC-06: scoped la company_id (filtru în query).
+    let with_lines = invoices::get_with_lines_scoped(&state.db, &invoice_id, &company_id).await?;
     let inv = with_lines.invoice;
     let lines = with_lines.lines;
 
@@ -72,12 +68,8 @@ pub async fn generate_invoice_pdf(
     invoice_id: String,
     company_id: String,
 ) -> AppResult<String> {
-    // 1. Încarcă factura cu linii
-    let with_lines = invoices::get_with_lines(&state.db, &invoice_id).await?;
-    // R14 Wave E: ownership check — cross-company PDF generation returns NotFound.
-    if with_lines.invoice.company_id != company_id {
-        return Err(AppError::NotFound);
-    }
+    // 1. Încarcă factura cu linii — SEC-06: scoped la company_id (filtru în query).
+    let with_lines = invoices::get_with_lines_scoped(&state.db, &invoice_id, &company_id).await?;
     let inv = with_lines.invoice;
     let lines = with_lines.lines;
 
@@ -197,12 +189,8 @@ pub async fn validate_invoice_xml(
     invoice_id: String,
     company_id: String,
 ) -> AppResult<ValidationResult> {
-    // 1. Obţine calea XML din DB
-    let with_lines = invoices::get_with_lines(&state.db, &invoice_id).await?;
-    // R14 Wave E: ownership check — cross-company XML validation returns NotFound.
-    if with_lines.invoice.company_id != company_id {
-        return Err(AppError::NotFound);
-    }
+    // 1. Obţine calea XML din DB — SEC-06: scoped la company_id (filtru în query).
+    let with_lines = invoices::get_with_lines_scoped(&state.db, &invoice_id, &company_id).await?;
     let xml_path = with_lines.invoice.xml_path.ok_or_else(|| {
         AppError::Validation("XML nu a fost generat încă pentru această factură.".to_string())
     })?;
@@ -214,13 +202,14 @@ pub async fn validate_invoice_xml(
     Ok(validate_ubl(&xml))
 }
 
-// ─── R14 Wave E: cross-company isolation tests ───────────────────────────────
+// ─── R14 Wave E / SEC-06: cross-company isolation tests ──────────────────────
 //
-// The three commands above use verify-after-fetch: they call get_with_lines
-// (unscoped) and then reject if invoice.company_id != company_id.
-// These tests exercise the REAL db fetch + ownership comparison by setting up
-// an in-memory SQLite, inserting an invoice for comp-1, and asserting that
-// fetching with comp-2 returns NotFound — not by re-implementing the predicate.
+// The three commands above now use `get_with_lines_scoped`, which filters on
+// company_id IN THE QUERY (SEC-06 defense-in-depth) — a non-owned id yields
+// NotFound before any row is read, with no separate manual comparison to forget.
+// These tests exercise the REAL scoped fetch by setting up an in-memory SQLite,
+// inserting an invoice for comp-1, and asserting that fetching with comp-2
+// returns NotFound — not by re-implementing the predicate.
 
 #[cfg(test)]
 mod tests {
@@ -326,25 +315,23 @@ mod tests {
         pool
     }
 
-    /// Helper that runs the ownership guard logic used by all three UBL commands:
-    /// fetch the invoice via the real `get_with_lines`, then compare company_id.
-    /// Returns Err(AppError::NotFound) on mismatch — exactly what the commands do.
+    /// Helper that runs the exact data-layer call all three UBL commands now use:
+    /// `get_with_lines_scoped`, which enforces company ownership at the query level.
+    /// Returns Err(AppError::NotFound) for a non-owned/nonexistent id — exactly what
+    /// the commands surface to the caller.
     async fn check_ubl_ownership(
         pool: &sqlx::SqlitePool,
         invoice_id: &str,
         company_id: &str,
     ) -> crate::error::AppResult<()> {
-        let with_lines = db_inv::get_with_lines(pool, invoice_id).await?;
-        if with_lines.invoice.company_id != company_id {
-            return Err(AppError::NotFound);
-        }
+        db_inv::get_with_lines_scoped(pool, invoice_id, company_id).await?;
         Ok(())
     }
 
     // ── generate_invoice_xml / generate_invoice_pdf / validate_invoice_xml ────
-    // All three commands share the same verify-after-fetch pattern.
+    // All three commands share the same `get_with_lines_scoped` call (SEC-06).
     // One test per direction (wrong-company → NotFound, right-company → Ok)
-    // is sufficient: the shared helper exercises the REAL get_with_lines path.
+    // is sufficient: the helper exercises the REAL scoped-query path.
 
     #[tokio::test]
     async fn wave_e_ubl_wrong_company_returns_not_found() {

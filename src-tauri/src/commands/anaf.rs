@@ -318,16 +318,13 @@ pub(crate) async fn submit_invoice_inner(
         }
     };
 
-    // 2. Încarcă factura + liniile din DB (acum cu status QUEUED)
-    let invoice_with_lines = db_invoices::get_with_lines(pool, invoice_id).await?;
+    // 2. Încarcă factura + liniile din DB (acum cu status QUEUED) — SEC-06: scoped la
+    // company_id (filtru în query). Even if the claim SQL above has a bug, a foreign
+    // invoice can't be fetched, let alone submitted.
+    let invoice_with_lines =
+        db_invoices::get_with_lines_scoped(pool, invoice_id, company_id).await?;
     let invoice = invoice_with_lines.invoice;
     let lines = invoice_with_lines.lines;
-
-    // G2 defence-in-depth: verify ownership after fetch — mirrors anaf_check_invoice_status
-    // (~L500). Even if the claim SQL above has a bug, a foreign invoice cannot proceed.
-    if invoice.company_id.as_str() != company_id {
-        return Err(AppError::NotFound);
-    }
 
     // 2. Încarcă compania + contactul din DB
     let company = companies::get(pool, company_id).await?;
