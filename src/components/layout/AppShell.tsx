@@ -21,6 +21,7 @@ import { CommandPalette } from "./CommandPalette";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
 import { Banner } from "@/components/shared/Banner";
 import { ShortcutsDialog } from "@/components/shared/ShortcutsDialog";
+import { PdfViewerModal } from "@/components/shared/PdfViewerModal";
 import { useTheme } from "@/hooks/use-theme";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
@@ -119,6 +120,7 @@ export function AppShell({ children }: AppShellProps) {
         </main>
         <CommandPalette />
         <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+        <PdfViewerModal />
       </div>
     </OnboardingGate>
   );

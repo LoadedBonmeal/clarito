@@ -4,6 +4,19 @@
       "close": "Închide",
       "cancel": "Anulează"
     },
+    "pdfViewer": {
+      "loading": "Se încarcă documentul…",
+      "engineError": "Vizualizatorul PDF nu a putut porni.",
+      "save": "Salvează",
+      "saved": "PDF salvat.",
+      "saveError": "Salvarea a eșuat: {{error}}",
+      "openExternal": "Deschide extern",
+      "openExternalError": "Nu s-a putut deschide extern: {{error}}",
+      "zoomIn": "Mărește",
+      "zoomOut": "Micșorează",
+      "close": "Închide",
+      "previewTitle": "Previzualizare șablon"
+    },
     "queryError": {
       "message": "Nu s-au putut încărca {{label}}. {{message}}",
       "defaultLabel": "date",

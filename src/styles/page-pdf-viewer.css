@@ -1,0 +1,85 @@
+/* In-app PDF viewer modal (PdfViewerModal.tsx + EmbedPDF).
+   Extends the design .modal chrome to a large document surface. */
+
+.modal.pdfv {
+  width: min(960px, 92vw);
+  max-width: 92vw;
+  height: 88vh;
+  max-height: 88vh;
+}
+
+/* Toolbar */
+.pdfv-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.pdfv-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.pdfv-title .ic {
+  width: 17px;
+  height: 17px;
+  stroke: var(--text-2);
+  flex: none;
+}
+.pdfv-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdfv-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.pdfv-zoom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 2px;
+}
+
+/* Document surface */
+.pdfv-body {
+  flex: 1;
+  min-height: 0;
+  background: var(--fill);
+  overflow: hidden;
+  position: relative;
+}
+.pdfv-viewport {
+  width: 100%;
+  height: 100%;
+}
+.pdfv-page {
+  margin: 16px auto;
+  background: #fff;
+  box-shadow: 0 6px 22px -8px rgba(0, 0, 0, 0.28);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+/* Loading / error states */
+.pdfv-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.pdfv-status--err {
+  color: var(--danger, #dc2626);
+}

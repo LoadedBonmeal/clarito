@@ -18,6 +18,14 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@embedpdf/core": "2.14.4",
+    "@embedpdf/engines": "2.14.4",
+    "@embedpdf/pdfium": "2.14.4",
+    "@embedpdf/plugin-document-manager": "2.14.4",
+    "@embedpdf/plugin-render": "2.14.4",
+    "@embedpdf/plugin-scroll": "2.14.4",
+    "@embedpdf/plugin-viewport": "2.14.4",
+    "@embedpdf/plugin-zoom": "2.14.4",
     "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@hookform/resolvers": "^5.2.2",

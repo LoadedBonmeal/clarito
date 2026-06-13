@@ -18,7 +18,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { confirm } from "@tauri-apps/plugin-dialog";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { useOpenPdf } from "@/hooks/use-open-pdf";
 
 import { Ic } from "@/components/shared/Ic";
 import { ContactCombobox } from "@/components/shared/ContactCombobox";
@@ -59,6 +59,7 @@ export function ReceiptsPage() {
   const navigate = useNavigate();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const queryClient = useQueryClient();
+  const openPdf = useOpenPdf();
 
   const [showModal, setShowModal] = useState(false);
   const [page, setPage] = useState(1);
@@ -123,11 +124,12 @@ export function ReceiptsPage() {
       if (!activeCompanyId) return Promise.reject(new Error(t("receipts.notify.noActiveCompany")));
       return api.receipts.generatePdf(id, activeCompanyId);
     },
-    onSuccess: async (path) => {
+    onSuccess: async (path, id) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.receipts.all });
       notify.success(t("receipts.notify.pdfDone"));
+      const r = receiptList.find((x) => x.id === id);
       try {
-        await openPath(path);
+        await openPdf(path, r ? `${r.series}-${r.number}.pdf` : "chitanta.pdf");
       } catch {
         /* best-effort reveal */
       }

@@ -25,9 +25,10 @@ import { useTranslation } from "react-i18next";
 import { useParams, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { Ic } from "@/components/shared/Ic";
+import { useOpenPdf } from "@/hooks/use-open-pdf";
 import { notify } from "@/lib/toasts";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
@@ -123,6 +124,8 @@ export function InvoiceDetailPage() {
     return () => document.removeEventListener("mousedown", h);
   }, [openPop]);
 
+  const openPdf = useOpenPdf();
+
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.invoices.detail(id),
     queryFn: () => api.invoices.get(id, activeCompanyId ?? ""),
@@ -183,7 +186,7 @@ export function InvoiceDetailPage() {
       setActionError(null);
       notify.success(t("detail.notify.pdfGenerated"));
       if (pdfPath) {
-        try { await openPath(pdfPath); }
+        try { await openPdf(pdfPath, `${data?.invoice.fullNumber ?? "factura"}.pdf`); }
         catch (e) { notify.error(t("detail.notify.pdfOpenError", { error: String(e) })); }
       }
     },

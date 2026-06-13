@@ -4,6 +4,19 @@
       "close": "Close",
       "cancel": "Cancel"
     },
+    "pdfViewer": {
+      "loading": "Loading document…",
+      "engineError": "The PDF viewer failed to start.",
+      "save": "Save",
+      "saved": "PDF saved.",
+      "saveError": "Save failed: {{error}}",
+      "openExternal": "Open externally",
+      "openExternalError": "Could not open externally: {{error}}",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
+      "close": "Close",
+      "previewTitle": "Template preview"
+    },
     "queryError": {
       "message": "Could not load {{label}}. {{message}}",
       "defaultLabel": "data",

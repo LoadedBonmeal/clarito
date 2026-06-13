@@ -24,7 +24,8 @@
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { open, save, confirm } from "@tauri-apps/plugin-dialog";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { useOpenPdf } from "@/hooks/use-open-pdf";
 import { invoke } from "@tauri-apps/api/core";
 import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
@@ -123,6 +124,7 @@ export function SettingsPage() {
   const setDensity = useAppStore((s) => s.setDensity);
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const setActiveCompanyId = useAppStore((s) => s.setActiveCompanyId);
+  const openPdf = useOpenPdf();
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -406,7 +408,7 @@ export function SettingsPage() {
         showWords: templateShowWords,
         showVatDetail: templateShowVatDetail,
       });
-      await openPath(path);
+      await openPdf(path, `${t("shared.pdfViewer.previewTitle")}.pdf`);
     } catch (e) {
       notify.error(formatError(e, t("settings.notify.previewFailed")));
     } finally {

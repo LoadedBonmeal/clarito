@@ -205,6 +205,11 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
   list_notifications: () => notifications,
   unread_notification_count: () => 3,
   fetch_bnr_rate: () => 5.0985,
+  // PDF generation: in the harness there is no filesystem — useOpenPdf detects
+  // demo mode and fetches /sample-invoice.pdf, so the returned path is unused.
+  generate_invoice_pdf: () => "/demo/invoice.pdf",
+  generate_receipt_pdf: () => "/demo/receipt.pdf",
+  preview_invoice_template: () => "/demo/template-preview.pdf",
   mark_notification_read: () => null,
   mark_all_notifications_read: () => null,
   get_license: () => (isFresh() ? null : license),
