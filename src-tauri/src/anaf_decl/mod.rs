@@ -24,13 +24,16 @@ pub mod validation;
 pub mod version;
 pub mod xml;
 
-/// The three official declarations this module targets. `as_duk_type` returns
-/// the token DUKIntegrator's `-v` CLI expects.
+/// The official declarations this module targets. `as_duk_type` returns the
+/// token ANAF's validator CLI expects. NOTE: D300/D394/D406 share the bundled
+/// DUKIntegrator kit; D112 is validated by a SEPARATE validator (D112Validator),
+/// so its harness wiring routes to a distinct jar (see `validation.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeclKind {
     D300,
     D394,
     D406,
+    D112,
 }
 
 impl DeclKind {
@@ -39,6 +42,7 @@ impl DeclKind {
             DeclKind::D300 => "D300",
             DeclKind::D394 => "D394",
             DeclKind::D406 => "D406",
+            DeclKind::D112 => "D112",
         }
     }
 }

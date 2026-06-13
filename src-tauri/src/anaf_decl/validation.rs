@@ -88,6 +88,13 @@ pub fn validate_with_duk(decl: DeclKind, xml_path: &Path) -> AppResult<DukResult
         if l.is_empty() {
             continue;
         }
+        // ANAF "atenționare" lines are advisory warnings — never count them as errors.
+        if lower.contains("atention")
+            || lower.contains("aten\u{021b}ion")
+            || lower.contains("aten\u{0163}ion")
+        {
+            continue;
+        }
         if lower.contains("eroare")
             || lower.contains("erori")
             || lower.contains("invalid")

@@ -6,7 +6,12 @@
 use serde::Serialize;
 
 /// Bundled form versions — MUST be bumped together with the generator + DUK jars.
-const BUNDLED: &[(&str, &str)] = &[("D300", "v12"), ("D394", "v5"), ("D406", "v1")];
+const BUNDLED: &[(&str, &str)] = &[
+    ("D300", "v12"),
+    ("D394", "v5"),
+    ("D406", "v1"),
+    ("D112", "v6"),
+];
 
 const MANIFEST_URL: &str = "https://releases.lucaris.ro/efactura/anaf-forms.json";
 
@@ -69,7 +74,12 @@ mod tests {
     }
     #[test]
     fn no_staleness_when_equal() {
-        let m = mf(&[("D300", "v12"), ("D394", "v5"), ("D406", "v1")]);
+        let m = mf(&[
+            ("D300", "v12"),
+            ("D394", "v5"),
+            ("D406", "v1"),
+            ("D112", "v6"),
+        ]);
         assert!(compute_staleness(BUNDLED, &m).is_empty());
     }
     #[test]

@@ -105,38 +105,57 @@ pub fn run_duk(
 }
 
 /// Parse DUKIntegrator's textual output (result file or stdout) into issues.
-/// Clean marker: output contains "fara erori"/"fără erori". Any line with a DUK
-/// error marker becomes an `error` `PreflightIssue` with code "DUK".
+/// Clean marker: output contains "fara erori"/"fără erori". CRITICAL: ANAF
+/// distinguishes ERORI (blocking) from ATENȚIONĂRI (advisory warnings) — D112
+/// in particular emits many legitimate warnings (hours-vs-days, base-calc) that
+/// must NOT fail validation. We classify each line by severity and only
+/// error-severity issues set `passed = false`; warnings are surfaced but pass.
 pub fn parse_duk_output(raw: &str) -> DukOutcome {
     let mut errors = Vec::new();
     for line in raw.lines() {
         let l = line.trim();
-        if l.is_empty() {
+        if l.is_empty()
+            || l.to_lowercase().contains("fara erori")
+            || l.to_lowercase().contains("fără erori")
+        {
             continue;
         }
         let low = l.to_lowercase();
-        let looks_error = low.contains("eroare")
-            || low.contains("erori")
-            || low.contains("nu se incadreaza")
-            || low.contains("nu se încadrează")
-            || low.contains("invalid")
-            || low.contains("atentionare")
-            || low.contains("atenționare")
-            || low.contains("nu este corect");
-        if looks_error && !low.contains("fara erori") && !low.contains("fără erori") {
+        // Advisory warning (atenționare/atenționări) — must NOT be treated as a blocking error.
+        // Match the stem across ASCII + both ț encodings (U+021B comma, U+0163 cedilla).
+        let is_warning = low.contains("atention")
+            || low.contains("aten\u{021b}ion")
+            || low.contains("aten\u{0163}ion");
+        let is_error = !is_warning
+            && (low.contains("eroare")
+                || low.contains("erori")
+                || low.contains("nu se incadreaza")
+                || low.contains("nu se încadrează")
+                || low.contains("invalid")
+                || low.contains("nu este corect"));
+        if is_error {
             errors.push(PreflightIssue {
                 severity: "error".to_string(),
                 code: "DUK".to_string(),
                 message: l.to_string(),
                 hint: "Eroare raportată de validatorul oficial ANAF (DUKIntegrator).".to_string(),
             });
+        } else if is_warning {
+            errors.push(PreflightIssue {
+                severity: "warning".to_string(),
+                code: "DUK".to_string(),
+                message: l.to_string(),
+                hint: "Atenționare de la validatorul oficial ANAF (informativă, nu blochează depunerea).".to_string(),
+            });
         }
     }
     let lower = raw.to_lowercase();
     let clean =
         lower.contains("fara erori") || lower.contains("fără erori") || lower.trim() == "ok";
+    // Only ERROR-severity issues block; warnings are advisory.
+    let has_errors = errors.iter().any(|e| e.severity == "error");
     DukOutcome {
-        passed: errors.is_empty() && clean,
+        passed: !has_errors && clean,
         errors,
     }
 }
@@ -157,13 +176,21 @@ mod tests {
                    A: validari globale\n TVA(25) nu se incadreaza in 11% +- marja 1%\n";
         let out = parse_duk_output(raw);
         assert!(!out.passed);
-        assert!(!out.errors.is_empty());
-        assert_eq!(out.errors[0].code, "DUK");
-        assert_eq!(out.errors[0].severity, "error");
         assert!(out
             .errors
             .iter()
-            .any(|i| i.message.contains("nu se incadreaza")));
+            .any(|i| i.severity == "error" && i.message.contains("nu se incadreaza")));
+    }
+
+    #[test]
+    fn parser_warnings_do_not_fail_validation() {
+        // ANAF "atenționare" lines are advisory — surfaced as warnings but the file PASSES.
+        let raw = "Validare fara erori fisier: /tmp/x.xml\n\
+                   Atentionare: A_6 (ore lucrate) difera de A_8 * A_4\n";
+        let out = parse_duk_output(raw);
+        assert!(out.passed, "warnings alone must not fail validation");
+        assert!(out.errors.iter().any(|i| i.severity == "warning"));
+        assert!(!out.errors.iter().any(|i| i.severity == "error"));
     }
 
     #[test]

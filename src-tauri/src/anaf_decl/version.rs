@@ -81,6 +81,32 @@ pub fn schema_versions() -> Vec<SchemaVersion> {
             schema_label: "SAF-T RO v2.4.9 (d406:v1)",
             duk_type: "D406",
         },
+        // ── D112 (declarația 112) ──────────────────────────────────────────
+        // Namespace verified against the official XSD d112_10102024.xsd (v1.02):
+        // targetNamespace …declaratie:v6, root declaratieUnica. The July-2026
+        // model (Ordin 605/95/928/2.314/2026) reuses :v6 (nomenclator/rule-level
+        // changes only); we split the window so the period label distinguishes
+        // H1 from H2 and so the July artifacts can be re-vendored without merging
+        // periods. Re-validate against ANAF's separate D112Validator when the
+        // July structura/XSD ship (first filing 2026-08-25).
+        SchemaVersion {
+            decl: DeclKind::D112,
+            valid_from: d(2026, 1, 1),
+            valid_to: Some(d(2026, 6, 30)),
+            namespace: "mfp:anaf:dgti:declaratie_unica:declaratie:v6",
+            root_element: "declaratieUnica",
+            schema_label: "D112 v6 (≤2026-06)",
+            duk_type: "D112",
+        },
+        SchemaVersion {
+            decl: DeclKind::D112,
+            valid_from: d(2026, 7, 1),
+            valid_to: None,
+            namespace: "mfp:anaf:dgti:declaratie_unica:declaratie:v6",
+            root_element: "declaratieUnica",
+            schema_label: "D112 v6 (≥2026-07, model Ordin 605/2026)",
+            duk_type: "D112",
+        },
     ]
 }
 
@@ -150,7 +176,12 @@ mod tests {
             date(2026, 1, 1),
             date(2026, 6, 1),
         ];
-        let all_kinds = [DeclKind::D300, DeclKind::D394, DeclKind::D406];
+        let all_kinds = [
+            DeclKind::D300,
+            DeclKind::D394,
+            DeclKind::D406,
+            DeclKind::D112,
+        ];
 
         for kind in all_kinds {
             for &period in &test_dates {
