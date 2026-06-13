@@ -152,6 +152,25 @@ pub async fn create(
             ));
         }
     }
+    // EDGE-002 — date-quality guard: a malformed acquisition/start-up/disposal date would otherwise
+    // silently make `parse_ym` compute depreciation from year 0. Reject at the input boundary.
+    if !valid_ymd(&input.date_of_acquisition) {
+        return Err(AppError::Validation(
+            "Data achiziției invalidă — folosiți formatul AAAA-LL-ZZ.".into(),
+        ));
+    }
+    for (label, opt) in [
+        ("Data punerii în funcțiune", input.start_up_date.as_deref()),
+        ("Data scoaterii din uz", input.disposal_date.as_deref()),
+    ] {
+        if let Some(d) = opt {
+            if !d.is_empty() && !valid_ymd(d) {
+                return Err(AppError::Validation(format!(
+                    "{label} invalidă — folosiți formatul AAAA-LL-ZZ."
+                )));
+            }
+        }
+    }
     // asset_code must be unique per company
     let existing: Option<String> = sqlx::query_scalar(
         "SELECT id FROM fixed_assets WHERE company_id = ?1 AND asset_code = ?2 LIMIT 1",
@@ -336,15 +355,35 @@ pub fn amort_account_for(asset_account: &str) -> &'static str {
 }
 
 /// Parse YYYY-MM-DD into (year: i64, month: u32). Returns (0, 1) on parse failure.
+/// `true` for a well-formed ISO date `YYYY-MM-DD` (month 1-12, day 1-31). Asset dates feed the
+/// depreciation month math ([`parse_ym`]); a malformed one would otherwise compute from year 0.
+fn valid_ymd(s: &str) -> bool {
+    let p: Vec<&str> = s.split('-').collect();
+    if p.len() != 3 || p[0].len() != 4 || p[1].len() != 2 || p[2].len() != 2 {
+        return false;
+    }
+    if !p.iter().all(|seg| seg.bytes().all(|b| b.is_ascii_digit())) {
+        return false;
+    }
+    let m = p[1].parse::<u32>().unwrap_or(0);
+    let d = p[2].parse::<u32>().unwrap_or(0);
+    (1..=12).contains(&m) && (1..=31).contains(&d)
+}
+
+/// `("YYYY-MM-DD")` → `(year, month)`. Asset dates are guarded by [`valid_ymd`] at create/update, so a
+/// fallback here means a legacy/corrupt row — we WARN (not silently compute depreciation from year 0).
 fn parse_ym(date: &str) -> (i64, u32) {
     let parts: Vec<&str> = date.splitn(3, '-').collect();
     if parts.len() >= 2 {
-        let y = parts[0].parse::<i64>().unwrap_or(0);
-        let m = parts[1].parse::<u32>().unwrap_or(1);
-        (y, m)
-    } else {
-        (0, 1)
+        if let (Ok(y), Ok(m)) = (parts[0].parse::<i64>(), parts[1].parse::<u32>()) {
+            return (y, m);
+        }
     }
+    tracing::warn!(
+        date,
+        "parse_ym: dată invalidă pe un mijloc fix — folosesc (0,1); verificați datele activului"
+    );
+    (0, 1)
 }
 
 // ─── Update + monthly depreciation run + disposal ────────────────────────────
@@ -357,6 +396,24 @@ pub async fn update(
     input: FixedAssetInput,
 ) -> AppResult<FixedAsset> {
     let cur = get(pool, id, company_id).await?;
+    // EDGE-002 — same date-quality guard as create (the UPDATE binds these dates directly).
+    if !valid_ymd(&input.date_of_acquisition) {
+        return Err(AppError::Validation(
+            "Data achiziției invalidă — folosiți formatul AAAA-LL-ZZ.".into(),
+        ));
+    }
+    for (label, opt) in [
+        ("Data punerii în funcțiune", input.start_up_date.as_deref()),
+        ("Data scoaterii din uz", input.disposal_date.as_deref()),
+    ] {
+        if let Some(d) = opt {
+            if !d.is_empty() && !valid_ymd(d) {
+                return Err(AppError::Validation(format!(
+                    "{label} invalidă — folosiți formatul AAAA-LL-ZZ."
+                )));
+            }
+        }
+    }
     let cost = if input.acquisition_cost.trim().is_empty() {
         cur.acquisition_cost.clone()
     } else {
@@ -798,6 +855,38 @@ mod tests {
 
         let fetched = get(&pool, &asset.id, "co-1").await.unwrap();
         assert_eq!(fetched.id, asset.id);
+    }
+
+    #[test]
+    fn valid_ymd_accepts_iso_rejects_garbage() {
+        assert!(valid_ymd("2025-01-15"));
+        assert!(valid_ymd("2026-12-31"));
+        assert!(!valid_ymd("")); // empty
+        assert!(!valid_ymd("2025-1-5")); // not zero-padded
+        assert!(!valid_ymd("15-01-2025")); // wrong order
+        assert!(!valid_ymd("2025-13-01")); // month 13
+        assert!(!valid_ymd("2025-00-10")); // month 0
+        assert!(!valid_ymd("abcd-ef-gh")); // non-numeric
+                                           // parse_ym never silently yields year 0 for a valid date.
+        assert_eq!(parse_ym("2026-06-15"), (2026, 6));
+    }
+
+    #[tokio::test]
+    async fn create_rejects_malformed_acquisition_date() {
+        // EDGE-002: a garbage acquisition date must be rejected, not silently stored (→ year-0 deprec).
+        let pool = setup_asset_pool().await;
+        let mut bad = sample_input();
+        bad.date_of_acquisition = "not-a-date".into();
+        let err = create(&pool, "co-1", bad).await.unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+        // A malformed disposal date is likewise rejected.
+        let mut bad2 = sample_input();
+        bad2.asset_code = "MF-002".into();
+        bad2.disposal_date = Some("2025-99-99".into());
+        assert!(matches!(
+            create(&pool, "co-1", bad2).await.unwrap_err(),
+            AppError::Validation(_)
+        ));
     }
 
     #[tokio::test]
