@@ -27,7 +27,7 @@ import { formatError } from "@/lib/error-mapper";
 import { notify } from "@/lib/toasts";
 import { BrandMark } from "@/components/shared/BrandMark";
 import { Ic } from "@/components/shared/Ic";
-import type { AnafCompanyData, AppErrorPayload, CreateCompanyInput } from "@/types";
+import type { AnafCompanyData, CreateCompanyInput } from "@/types";
 
 // ─── Constants (prototype) ────────────────────────────────────────────────────
 
@@ -184,8 +184,7 @@ export function OnboardingWizard() {
     mutationFn: (email: string) => api.license.startTrial(email),
     onSuccess: handleLicenseActivated,
     onError: (err) => {
-      const payload = err as unknown as AppErrorPayload;
-      setLicenseError(payload?.message ?? t("onboarding.errors.trialFailed"));
+      setLicenseError(formatError(err, t("onboarding.errors.trialFailed")));
     },
   });
 
@@ -194,8 +193,7 @@ export function OnboardingWizard() {
       api.license.activate(key, email),
     onSuccess: handleLicenseActivated,
     onError: (err) => {
-      const payload = err as unknown as AppErrorPayload;
-      setLicenseError(payload?.message ?? t("onboarding.errors.activateFailed"));
+      setLicenseError(formatError(err, t("onboarding.errors.activateFailed")));
     },
   });
 
@@ -232,8 +230,7 @@ export function OnboardingWizard() {
       setStep(3);
     },
     onError: (err) => {
-      const payload = err as unknown as AppErrorPayload;
-      setFormError(payload?.message ?? t("onboarding.errors.unknown"));
+      setFormError(formatError(err, t("onboarding.errors.unknown")));
     },
   });
 

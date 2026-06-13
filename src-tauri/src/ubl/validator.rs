@@ -147,3 +147,80 @@ fn local_name(name: &[u8]) -> &str {
         s
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_ubl, CIUS_RO_ID};
+
+    /// Build a minimal CIUS-RO invoice XML, optionally dropping a required element.
+    fn invoice_xml(customization: &str, id: &str, issue: &str, due: &str, lines: usize) -> String {
+        let mut s = String::from("<Invoice>");
+        if !customization.is_empty() {
+            s.push_str(&format!(
+                "<CustomizationID>{customization}</CustomizationID>"
+            ));
+        }
+        if !id.is_empty() {
+            s.push_str(&format!("<ID>{id}</ID>"));
+        }
+        if !issue.is_empty() {
+            s.push_str(&format!("<IssueDate>{issue}</IssueDate>"));
+        }
+        if !due.is_empty() {
+            s.push_str(&format!("<DueDate>{due}</DueDate>"));
+        }
+        for i in 0..lines {
+            s.push_str(&format!("<InvoiceLine><ID>{i}</ID></InvoiceLine>"));
+        }
+        s.push_str("</Invoice>");
+        s
+    }
+
+    #[test]
+    fn valid_minimal_invoice_passes() {
+        let xml = invoice_xml(CIUS_RO_ID, "FCT-1", "2026-01-01", "2026-01-31", 1);
+        let r = validate_ubl(&xml);
+        assert!(r.valid, "expected valid, errors: {:?}", r.errors);
+        assert!(r.errors.is_empty());
+    }
+
+    #[test]
+    fn missing_customization_id_is_error() {
+        let xml = invoice_xml("", "FCT-1", "2026-01-01", "2026-01-31", 1);
+        let r = validate_ubl(&xml);
+        assert!(!r.valid);
+        assert!(r.errors.iter().any(|e| e.contains("CustomizationID")));
+    }
+
+    #[test]
+    fn wrong_cius_id_is_error() {
+        let xml = invoice_xml("urn:wrong:cius", "FCT-1", "2026-01-01", "2026-01-31", 1);
+        let r = validate_ubl(&xml);
+        assert!(!r.valid);
+        assert!(r.errors.iter().any(|e| e.contains("CIUS-RO")));
+    }
+
+    #[test]
+    fn missing_issue_date_is_error() {
+        let xml = invoice_xml(CIUS_RO_ID, "FCT-1", "", "2026-01-31", 1);
+        let r = validate_ubl(&xml);
+        assert!(!r.valid);
+        assert!(r.errors.iter().any(|e| e.contains("IssueDate")));
+    }
+
+    #[test]
+    fn zero_invoice_lines_is_error() {
+        let xml = invoice_xml(CIUS_RO_ID, "FCT-1", "2026-01-01", "2026-01-31", 0);
+        let r = validate_ubl(&xml);
+        assert!(!r.valid);
+        assert!(r.errors.iter().any(|e| e.contains("InvoiceLine")));
+    }
+
+    #[test]
+    fn malformed_xml_is_caught_not_panicked() {
+        let r = validate_ubl("<Invoice><ID>unclosed");
+        // Must not panic; either a parse error or the missing-element errors — never valid.
+        assert!(!r.valid);
+        assert!(!r.errors.is_empty());
+    }
+}

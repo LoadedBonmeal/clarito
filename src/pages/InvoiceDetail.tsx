@@ -35,7 +35,7 @@ import { api } from "@/lib/tauri";
 import type { AddPaymentArgs, Payment } from "@/lib/tauri";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { formatError } from "@/lib/error-mapper";
-import type { AppErrorPayload, InvoiceStatus } from "@/types";
+import type { InvoiceStatus } from "@/types";
 import { useAppStore } from "@/lib/store";
 import { fmtShortcut } from "@/lib/platform";
 import { efacturaDeadline, deadlineDaysLeft, formatDeadline } from "@/lib/efacturaDeadline";
@@ -173,7 +173,7 @@ export function InvoiceDetailPage() {
       setActionError(null);
       notify.success(t("detail.notify.xmlGenerated"));
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.xmlError")),
+    onError: (e) => setActionError(formatError(e, t("detail.notify.xmlError"))),
   });
 
   const generatePdf = useMutation({
@@ -190,13 +190,13 @@ export function InvoiceDetailPage() {
         catch (e) { notify.error(t("detail.notify.pdfOpenError", { error: String(e) })); }
       }
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.pdfError")),
+    onError: (e) => setActionError(formatError(e, t("detail.notify.pdfError"))),
   });
 
   const authorizeAnaf = useMutation({
     mutationFn: () => api.anaf.authorize(data!.invoice.companyId),
     onSuccess: () => { void refetchAnafAuth(); },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.anafAuthError")),
+    onError: (e) => setActionError(formatError(e, t("detail.notify.anafAuthError"))),
   });
 
   const submitInvoice = useMutation({
@@ -217,7 +217,7 @@ export function InvoiceDetailPage() {
       setActionError(null);
       setStatusMessage(null);
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.anafSendError")),
+    onError: (e) => setActionError(formatError(e, t("detail.notify.anafSendError"))),
   });
 
   const checkStatus = useMutation({
@@ -227,7 +227,7 @@ export function InvoiceDetailPage() {
       setActionError(null);
       setStatusMessage(t("detail.notify.anafStatus", { status: stare }));
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.statusCheckError")),
+    onError: (e) => setActionError(formatError(e, t("detail.notify.statusCheckError"))),
   });
 
   const duplicateInvoice = useMutation({
@@ -240,7 +240,7 @@ export function InvoiceDetailPage() {
       notify.success(t("detail.notify.duplicated"));
       void navigate({ to: "/invoices/$id", params: { id: newId } });
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.duplicateError")),
+    onError: (e) => setActionError(formatError(e, t("detail.notify.duplicateError"))),
   });
 
   const stornoInvoice = useMutation({
@@ -257,7 +257,7 @@ export function InvoiceDetailPage() {
       // and can immediately generate XML + submit to ANAF to complete the cancellation.
       void navigate({ to: "/invoices/$id", params: { id: stornoInv.id } });
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.stornoError")),
+    onError: (e) => setActionError(formatError(e, t("detail.notify.stornoError"))),
   });
 
   const pushSmartbill = useMutation({
@@ -266,7 +266,7 @@ export function InvoiceDetailPage() {
       setStatusMessage(t("detail.notify.smartbillSent", { result }));
       setActionError(null);
     },
-    onError: (e) => setActionError((e as unknown as AppErrorPayload).message ?? t("detail.notify.smartbillError")),
+    onError: (e) => setActionError(formatError(e, t("detail.notify.smartbillError"))),
   });
 
   const addPayment = useMutation({
