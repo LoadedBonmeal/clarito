@@ -667,13 +667,19 @@ fn file_fingerprint(path: &str) -> Option<(String, i64)> {
 }
 
 pub async fn set_xml_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<()> {
+    // E-002: never record an empty path (it would pass as "generated" yet point nowhere).
+    if path.is_empty() {
+        return Err(AppError::Validation(
+            "Calea fișierului XML nu poate fi goală.".into(),
+        ));
+    }
     let now = now_unix();
     // ROB-22: fingerprint the file we just wrote so tampering/corruption is detectable later.
     let (sha, size) = match file_fingerprint(path) {
         Some((s, n)) => (Some(s), Some(n)),
         None => (None, None),
     };
-    sqlx::query(
+    let result = sqlx::query(
         "UPDATE invoices SET xml_path = ?2, xml_sha256 = ?3, xml_size = ?4, updated_at = ?5 \
          WHERE id = ?1",
     )
@@ -684,6 +690,11 @@ pub async fn set_xml_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<
     .bind(now)
     .execute(pool)
     .await?;
+    // E-001: a no-op UPDATE means the invoice vanished (delete race) — surface it instead of
+    // silently leaving an orphaned file on disk with no DB row pointing at it.
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
     Ok(())
 }
 
@@ -751,13 +762,19 @@ pub async fn list_submitted(pool: &SqlitePool, company_id: &str) -> AppResult<Ve
 }
 
 pub async fn set_pdf_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<()> {
+    // E-002: never record an empty path (see set_xml_path).
+    if path.is_empty() {
+        return Err(AppError::Validation(
+            "Calea fișierului PDF nu poate fi goală.".into(),
+        ));
+    }
     let now = now_unix();
     // ROB-22: fingerprint the PDF we just wrote (see set_xml_path).
     let (sha, size) = match file_fingerprint(path) {
         Some((s, n)) => (Some(s), Some(n)),
         None => (None, None),
     };
-    sqlx::query(
+    let result = sqlx::query(
         "UPDATE invoices SET pdf_path = ?2, pdf_sha256 = ?3, pdf_size = ?4, updated_at = ?5 \
          WHERE id = ?1",
     )
@@ -768,6 +785,10 @@ pub async fn set_pdf_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<
     .bind(now)
     .execute(pool)
     .await?;
+    // E-001: no-op UPDATE → invoice gone (delete race) → NotFound, not a silent orphan.
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
     Ok(())
 }
 
@@ -1156,6 +1177,25 @@ mod tests {
         assert!(super::verify_invoice_integrity(&pool, "inv-i", "comp-2")
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn rob_b_set_path_guards_empty_and_missing_invoice() {
+        let pool = setup_integrity_pool().await;
+        sqlx::query(
+            "INSERT INTO invoices (id, company_id, status) VALUES ('inv-g','comp-1','DRAFT')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // E-002: empty path rejected (both setters).
+        assert!(super::set_xml_path(&pool, "inv-g", "").await.is_err());
+        assert!(super::set_pdf_path(&pool, "inv-g", "").await.is_err());
+        // E-001: a non-existent invoice (delete race) → NotFound, not a silent no-op.
+        assert!(matches!(
+            super::set_xml_path(&pool, "ghost", "/tmp/x.xml").await,
+            Err(crate::error::AppError::NotFound)
+        ));
     }
 
     #[test]

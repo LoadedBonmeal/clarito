@@ -155,9 +155,23 @@ function ViewerShell({ payload, onClose }: { payload: PdfViewerPayload; onClose:
     setLoadError(false);
     const buffer = payload.bytes.slice().buffer;
     const task = cap.openDocumentBuffer({ buffer, name: payload.name, autoActivate: true });
-    // ROB-06: a corrupt-but-magic-valid PDF rejects here — surface an error instead of
-    // spinning on "loading" forever.
-    void task.toPromise().catch(() => setLoadError(true));
+    // ROB-06 + E-006: a corrupt-but-magic-valid PDF can either REJECT or HANG inside PDFium.
+    // Race the load against a 10s timeout so we surface an error instead of spinning on
+    // "loading" forever; clear the timer on success/unmount and don't set state after unmount.
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("PDF load timeout")), 10_000);
+    });
+    Promise.race([task.toPromise(), timeout])
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      })
+      .finally(() => clearTimeout(timer));
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [dm.provides, payload]);
 
   return (
