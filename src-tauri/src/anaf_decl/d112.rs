@@ -138,7 +138,9 @@ pub(crate) fn min_wage_lei(year: i32, month: u32) -> Decimal {
 }
 
 /// Suma netaxabilă lunară din salariul minim (carve-out art. III OUG 89/2025) — SURSĂ UNICĂ:
-/// 300 lei sem. I 2026 / 200 lei sem. II 2026.
+/// 300 lei sem. I 2026 / 200 lei sem. II 2026. Drift: pentru un an viitor cade pe valoarea sem. II
+/// (200) FĂRĂ warn propriu — [`min_wage_lei`], apelată mereu împreună (per salariat), emite deja
+/// avertismentul de an neacoperit; un al doilea/treilea warn ar fi doar zgomot.
 pub(crate) fn carve_out_lei(year: i32, month: u32) -> Decimal {
     match (year, month) {
         (2026, m) if m <= 6 => Decimal::from(300),
@@ -148,6 +150,7 @@ pub(crate) fn carve_out_lei(year: i32, month: u32) -> Decimal {
 
 /// Plafonul brutului realizat (inclusiv) până la care se acordă carve-out-ul: 4.300 sem. I /
 /// 4.600 sem. II 2026. Valoare legiferată DISTINCTĂ (nu = salariul minim + carve-out), keyed pe lună.
+/// Aceeași convenție de drift ca [`carve_out_lei`] — warn-ul de an neacoperit e în [`min_wage_lei`].
 fn carve_out_gross_ceiling(year: i32, month: u32) -> Decimal {
     match (year, month) {
         (2026, m) if m <= 6 => Decimal::from(4300),
