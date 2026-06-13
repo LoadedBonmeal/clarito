@@ -148,24 +148,43 @@ pub async fn export_d112_xml(
     caen: String,
     dest_path: String,
 ) -> AppResult<String> {
-    let caen = caen.trim().to_string();
+    let company = crate::db::companies::get(&state.db, &company_id).await?;
+    let employees = payroll::list(&state.db, &company_id).await?;
+    let period_ym = format!("{year:04}-{month:02}");
+    let leaves = crate::db::concedii::list(&state.db, &company_id, &period_ym).await?;
+    let xml = build_d112_xml(&company, &employees, &leaves, year, month, caen.trim())?;
+    // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the IPC
+    // endpoint accepts an arbitrary string.
+    let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
+    std::fs::write(&dest, xml).map_err(|e| AppError::Other(e.to_string()))?;
+    Ok(dest_path)
+}
+
+/// Pure core of the D112 XML build (no Tauri State / filesystem) — maps active employees + the month's
+/// medical-leave certificates to the validated `:v7` XML. Separated from [`export_d112_xml`] so it is
+/// testable end-to-end without IPC/IO. An employee with ≥1 certificate emits the B-path (salary
+/// proration + indemnity, consistent with `run_payroll`/GL); the rest emit the standard `asiguratA` path.
+fn build_d112_xml(
+    company: &crate::db::companies::Company,
+    employees: &[Employee],
+    leaves: &[crate::db::concedii::MedicalLeave],
+    year: i32,
+    month: u32,
+    caen: &str,
+) -> AppResult<String> {
     if caen.len() != 4 || !caen.chars().all(|c| c.is_ascii_digit()) {
         return Err(AppError::Validation(
             "Cod CAEN invalid — introduceți 4 cifre (ex. 6201).".into(),
         ));
     }
-    let company = crate::db::companies::get(&state.db, &company_id).await?;
-    let employees = payroll::list(&state.db, &company_id).await?;
     // Concediile medicale ale lunii → calea B (asiguratD). Grupate pe angajat (gol ⇒ calea A standard).
-    let period_ym = format!("{year:04}-{month:02}");
-    let leaves = crate::db::concedii::list(&state.db, &company_id, &period_ym).await?;
     let mut leaves_by_emp: std::collections::HashMap<
-        String,
-        Vec<crate::db::concedii::MedicalLeave>,
+        &str,
+        Vec<&crate::db::concedii::MedicalLeave>,
     > = std::collections::HashMap::new();
     for l in leaves {
         leaves_by_emp
-            .entry(l.employee_id.clone())
+            .entry(l.employee_id.as_str())
             .or_default()
             .push(l);
     }
@@ -204,7 +223,24 @@ pub async fn export_d112_xml(
         // indemnizația de CM intră în baza CAS/CASS (CAS 25% + CASS 10% pe codurile ne-scutite) și în
         // baza de impozit. `compute_payroll_with_leave` produce numerele lunii; `emit_leave_blocks`
         // (în d112_xml) reconstruiește identic CAS/CASS din baza lucrată + indemnizație ⇒ D112 = motor.
-        if let Some(emp_leaves) = leaves_by_emp.get(&e.id) {
+        if let Some(emp_leaves) = leaves_by_emp.get(e.id.as_str()) {
+            // EDGE: part-time + concediu medical. Baza minimă part-time (art. 146 alin. (5^6)) NU se
+            // aplică pe luna cu concediu — combinație rară + tratament statutar ambiguu (proratarea
+            // bazei minime la zilele active e ea însăși neimplementată). Se avertizează pentru
+            // verificare manuală; vezi nota din `db/concedii.rs`.
+            if e.tip_contract != "N"
+                && !crate::anaf_decl::d112::exempt_part_time_min_base(
+                    e.pensionar,
+                    &e.exceptie_cas_min,
+                )
+            {
+                tracing::warn!(
+                    employee = %e.full_name,
+                    contract = %e.tip_contract,
+                    "D112: salariat part-time cu concediu medical — baza minimă part-time (art. 146 \
+                (5^6)) NU se aplică pe luna cu concediu; verificați manual"
+                );
+            }
             let mut certs = Vec::new();
             let mut med_leaves = Vec::new();
             for l in emp_leaves {
@@ -378,14 +414,14 @@ pub async fn export_d112_xml(
         prenume_declar: "-".into(),
         functie_declar: "Administrator".into(),
         cif: company.cui.clone(),
-        caen,
+        caen: caen.to_string(),
         den: company.legal_name.chars().take(200).collect(),
         casa,
     };
     // Modelul NOU D112 (Ordin comun 605/95/928/2.314/2026, MO 463/02.06.2026) se aplică veniturilor
     // din 07/2026 (prima depunere 25.08.2026). Sursele oficiale arată schimbări la nivel de
     // nomenclator/instrucțiuni (sumă netaxabilă 300→200, relabel tip asigurat 1.11.2/1.11.3,
-    // simplificare concedii) — NU câmpuri XML noi; namespace-ul rămâne :v6, deci structura emisă aici
+    // simplificare concedii) — NU câmpuri XML noi; namespace-ul rămâne :v7, deci structura emisă aici
     // este corectă STRUCTURAL și pentru H2. La data implementării ANAF nu publicase încă
     // structura/XSD/DUKIntegrator pentru noul model → RE-VALIDAȚI contra artefactelor oficiale înainte
     // de depunere. FE avertizează utilizatorul; logăm și aici.
@@ -393,14 +429,178 @@ pub async fn export_d112_xml(
         tracing::warn!(
             year,
             month,
-            "D112 ≥ 07/2026: model nou (Ordin 605/95/928/2.314/2026) — structura :v6 emisă e \
+            "D112 ≥ 07/2026: model nou (Ordin 605/95/928/2.314/2026) — structura :v7 emisă e \
 conformă structural; re-validați cu artefactele oficiale ANAF înainte de depunere (25.08.2026)"
         );
     }
-    let xml = generate_d112_xml(&header, &d112_emps);
-    // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the
-    // IPC endpoint accepts an arbitrary string.
-    let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
-    std::fs::write(&dest, xml).map_err(|e| AppError::Other(e.to_string()))?;
-    Ok(dest_path)
+    Ok(generate_d112_xml(&header, &d112_emps))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::concedii::MedicalLeaveInput;
+    use sqlx::SqlitePool;
+
+    async fn setup() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        // cui mod-11 valid pentru DUKIntegrator; județ CJ.
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co1','13548146','Test SRL','Str 1','Cluj','CJ','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    fn emp_input(cnp: &str, name: &str, gross: &str) -> CreateEmployeeInput {
+        CreateEmployeeInput {
+            company_id: "co1".into(),
+            cnp: cnp.into(),
+            full_name: name.into(),
+            gross_salary: gross.into(),
+            personal_deduction: Some("0".into()),
+            employment_date: Some("2024-01-01".into()),
+            tip_asigurat: None,
+            pensionar: None,
+            tip_contract: None,
+            ore_norma: None,
+            exceptie_cas_min: None,
+            sediu_cif: None,
+            beneficiar_suma_netaxabila: None,
+        }
+    }
+
+    fn leave_input(
+        emp_id: &str,
+        serie: &str,
+        numar: &str,
+        inceput: &str,
+        sfarsit: &str,
+    ) -> MedicalLeaveInput {
+        MedicalLeaveInput {
+            company_id: "co1".into(),
+            employee_id: emp_id.into(),
+            period_ym: "2026-06".into(),
+            serie: Some(serie.into()),
+            numar: Some(numar.into()),
+            cod_indemnizatie: Some("01".into()),
+            data_acordare: Some(inceput.into()),
+            data_inceput: Some(inceput.into()),
+            data_sfarsit: Some(sfarsit.into()),
+            zile_angajator: Some(4),
+            zile_fnuass: Some(0),
+            baza_calcul: Some("24000".into()),
+            zile_baza: Some(130),
+            suma_angajator: Some("600".into()),
+            suma_fnuass: Some("0".into()),
+            procent: Some(75),
+            loc_prescriere: Some(1),
+            cod_boala: Some("A09".into()),
+        }
+    }
+
+    /// End-to-end: DB (company + 2 employees, one with a medical leave) → build_d112_xml. The standard
+    /// employee emits asiguratA; the leave employee emits the B-path (asiguratB1 + asiguratD) + the
+    /// employer angajatorC2 rollup. Exercises the full export command path minus IPC/file IO.
+    #[tokio::test]
+    async fn build_d112_end_to_end_mixed_a_and_b_paths() {
+        let pool = setup().await;
+        crate::db::payroll::create(&pool, emp_input("1960101410019", "Pop Ana", "5000"))
+            .await
+            .unwrap();
+        let b =
+            crate::db::payroll::create(&pool, emp_input("1900101410011", "Ion Gheorghe", "5500"))
+                .await
+                .unwrap();
+        crate::db::concedii::create(
+            &pool,
+            leave_input(&b.id, "AB", "1234567", "2026-06-08", "2026-06-12"),
+        )
+        .await
+        .unwrap();
+
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
+        let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
+            .await
+            .unwrap();
+        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201").unwrap();
+
+        assert!(xml.contains("declaratie:v7"));
+        assert_eq!(xml.matches("<asigurat ").count(), 2); // doi asigurați
+        assert_eq!(xml.matches("<asiguratA ").count(), 1); // doar salariatul standard
+        assert!(xml.contains("<asiguratB1 B1_1=\"1\"")); // calea B pentru cel cu concediu
+        assert!(xml.contains("D_1=\"AB\" D_2=\"1234567\"")); // certificatul
+        assert!(xml.contains("<angajatorC2 C2_11=\"1\"")); // rollup recuperare FNUASS (1 certificat)
+                                                           // CIF-ul firmei + CAEN în antet.
+        assert!(xml.contains("cif=\"13548146\" caen=\"6201\""));
+    }
+
+    /// EDGE: an employee with TWO certificates in the month emits two asiguratD rows and the
+    /// angajatorC2 count/sum aggregate both.
+    #[tokio::test]
+    async fn build_d112_multiple_certificates_one_employee() {
+        let pool = setup().await;
+        let e = crate::db::payroll::create(&pool, emp_input("1960101410019", "Pop Ana", "5500"))
+            .await
+            .unwrap();
+        crate::db::concedii::create(
+            &pool,
+            leave_input(&e.id, "AA", "111", "2026-06-02", "2026-06-04"),
+        )
+        .await
+        .unwrap();
+        crate::db::concedii::create(
+            &pool,
+            leave_input(&e.id, "BB", "222", "2026-06-16", "2026-06-18"),
+        )
+        .await
+        .unwrap();
+
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
+        let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
+            .await
+            .unwrap();
+        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201").unwrap();
+
+        assert_eq!(xml.matches("<asiguratD ").count(), 2); // două certificate
+        assert!(xml.contains("D_1=\"AA\""));
+        assert!(xml.contains("D_1=\"BB\""));
+        assert!(xml.contains("<angajatorC2 C2_11=\"2\"")); // COUNT = 2 certificate
+    }
+
+    /// Dev helper (opt-in): build the D112 from a DB scenario and write it for the real `-v D112`.
+    ///   cargo test --lib commands::payroll::tests::dump_d112_from_db -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn dump_d112_from_db() {
+        let pool = setup().await;
+        crate::db::payroll::create(&pool, emp_input("1960101410019", "Pop Ana", "5000"))
+            .await
+            .unwrap();
+        let b =
+            crate::db::payroll::create(&pool, emp_input("1900101410011", "Ion Gheorghe", "5500"))
+                .await
+                .unwrap();
+        crate::db::concedii::create(
+            &pool,
+            leave_input(&b.id, "AB", "1234567", "2026-06-08", "2026-06-12"),
+        )
+        .await
+        .unwrap();
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
+        let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
+            .await
+            .unwrap();
+        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201").unwrap();
+        let path = std::env::temp_dir().join("d112_from_db.xml");
+        std::fs::write(&path, &xml).unwrap();
+        eprintln!("WROTE {}", path.display());
+    }
 }

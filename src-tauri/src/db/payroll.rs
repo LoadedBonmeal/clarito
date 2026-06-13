@@ -360,13 +360,52 @@ pub fn days_in_month(y: i32, m: u32) -> u32 {
     }
 }
 
-/// Working days (Mon-Fri) in a month — the D112 NZL used for proration.
+/// Romanian legal public holidays (zile libere legale) of the year, as `(month, day)`. ANAF's D112
+/// validator excludes these from the working-day count (NZL) — e.g. June 2026 = 21 working days, not 22
+/// (1 iunie = Ziua Copilului + a doua zi de Rusalii). Hardcoded per year (the movable Orthodox-Easter
+/// dates — Vinerea Mare / Paște / Rusalii — aren't trivially derivable) with a drift guard, like
+/// `min_wage_lei`. UPDATE the table each new year.
+fn ro_holidays(year: i32) -> &'static [(u32, u32)] {
+    match year {
+        2026 => &[
+            (1, 1),
+            (1, 2),
+            (1, 6),
+            (1, 7),
+            (1, 24), // Anul Nou, Boboteaza, Sf. Ion, Unirea Principatelor
+            (4, 10),
+            (4, 12),
+            (4, 13), // Vinerea Mare, Paște (ortodox 12.04.2026), a doua zi de Paște
+            (5, 1),
+            (5, 31),
+            (6, 1), // Ziua Muncii, Rusalii (a doua zi 1.06 = și Ziua Copilului)
+            (8, 15),
+            (11, 30),
+            (12, 1),
+            (12, 25),
+            (12, 26), // Adormirea, Sf. Andrei, Ziua Națională, Crăciun
+        ],
+        _ => {
+            tracing::warn!(
+                year,
+                "ro_holidays: an neacoperit — NZL ignoră sărbătorile legale (poate fi supraevaluat); \
+actualizați tabelul cu zilele libere ale anului"
+            );
+            &[]
+        }
+    }
+}
+
+/// True if `(year, month, day)` is a working day: Mon-Fri AND not a Romanian legal holiday.
+pub fn is_working_day(year: i32, month: u32, day: u32) -> bool {
+    let w = weekday(year, month, day);
+    w != 0 && w != 6 && !ro_holidays(year).contains(&(month, day))
+}
+
+/// Working days in a month — the D112 NZL (Mon-Fri minus legal holidays) used for proration.
 pub fn working_days(year: i32, month: u32) -> u32 {
     (1..=days_in_month(year, month))
-        .filter(|&d| {
-            let w = weekday(year, month, d);
-            w != 0 && w != 6
-        })
+        .filter(|&d| is_working_day(year, month, d))
         .count() as u32
 }
 
@@ -401,12 +440,7 @@ pub fn leave_working_days_in_month(year: i32, month: u32, start_iso: &str, end_i
     if s > e {
         return 0;
     }
-    (s..=e)
-        .filter(|&d| {
-            let w = weekday(year, month, d);
-            w != 0 && w != 6
-        })
-        .count() as u32
+    (s..=e).filter(|&d| is_working_day(year, month, d)).count() as u32
 }
 
 /// Compute the monthly salary states for all active employees and post the aggregate to the GL.
@@ -750,16 +784,16 @@ mod tests {
         let run = run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
             .await
             .unwrap();
-        // Iunie 2026 = 22 zile lucrătoare; 5 zile concediu ⇒ 17 lucrate; brut lucrat 5500×17/22 = 4250.
-        // Indemnizație 600. CAS 25%×4850 = 1213, CASS 10%×4850 = 485, impozit 10%×3152 = 315,
-        // CAM 2,25%×4250 = 96, net total 2837.
-        assert_eq!(run.total_gross, "4850.00"); // lucrat 4250 + indemnizație 600
-        assert_eq!(run.total_cas, "1213.00");
-        assert_eq!(run.total_cass, "485.00");
-        assert_eq!(run.total_income_tax, "315.00");
-        assert_eq!(run.total_cam, "96.00");
-        assert_eq!(run.total_concedii, "36.00"); // CCI 0,85% × 4250 = 36.125 → 36
-        assert_eq!(run.total_net, "2837.00");
+        // Iunie 2026 = 21 zile lucrătoare (1 iunie e sărbătoare legală); 5 zile concediu ⇒ 16 lucrate;
+        // brut lucrat 5500×16/21 = 4190. Indemnizație 600. CAS 25%×4790 = 1198, CASS 10%×4790 = 479,
+        // impozit 10%×3113 = 311, CAM 2,25%×4190 = 94, net total 2802.
+        assert_eq!(run.total_gross, "4790.00"); // lucrat 4190 + indemnizație 600
+        assert_eq!(run.total_cas, "1198.00");
+        assert_eq!(run.total_cass, "479.00");
+        assert_eq!(run.total_income_tax, "311.00");
+        assert_eq!(run.total_cam, "94.00");
+        assert_eq!(run.total_concedii, "36.00"); // CCI 0,85% × 4190 = 35.615 → 36
+        assert_eq!(run.total_net, "2802.00");
 
         let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
             .await
@@ -771,17 +805,26 @@ mod tests {
                 .map(|r| (r.closing_debit.clone(), r.closing_credit.clone()))
         };
         // Salariul lucrat (641) e separat de indemnizație (6458); 421 = salariu net, 423 = indemniz. netă.
-        assert_eq!(bal("641"), Some(("4250.00".into(), "0.00".into())));
+        assert_eq!(bal("641"), Some(("4190.00".into(), "0.00".into())));
         // 6458 = 600 indemnizație angajator + 36 CCI 0,85%.
         assert_eq!(bal("6458"), Some(("636.00".into(), "0.00".into())));
         assert_eq!(bal("4373"), Some(("0.00".into(), "36.00".into()))); // CCI 0,85% datorată
-        assert_eq!(bal("421"), Some(("0.00".into(), "2486.00".into()))); // 4250 − 1063 − 425 − 276
+        assert_eq!(bal("421"), Some(("0.00".into(), "2451.00".into()))); // 4190 − 1048 − 419 − 272
         assert_eq!(bal("423"), Some(("0.00".into(), "351.00".into()))); // 600 − 150 − 60 − 39
                                                                         // Creditele de contribuții = cele combinate (lucrat + indemnizație) = obligațiile D112.
-        assert_eq!(bal("4315"), Some(("0.00".into(), "1213.00".into())));
-        assert_eq!(bal("4316"), Some(("0.00".into(), "485.00".into())));
-        assert_eq!(bal("444"), Some(("0.00".into(), "315.00".into())));
-        assert_eq!(bal("646"), Some(("96.00".into(), "0.00".into())));
+        assert_eq!(bal("4315"), Some(("0.00".into(), "1198.00".into())));
+        assert_eq!(bal("4316"), Some(("0.00".into(), "479.00".into())));
+        assert_eq!(bal("444"), Some(("0.00".into(), "311.00".into())));
+        assert_eq!(bal("646"), Some(("94.00".into(), "0.00".into())));
         assert!(tb.balanced, "payroll + indemnity + CCI journal balances");
+    }
+
+    #[test]
+    fn working_days_excludes_legal_holidays() {
+        // Iunie 2026: 22 zile L-V, dar 1 iunie (luni) e sărbătoare legală ⇒ 21 NZL (ca la validatorul
+        // ANAF — regula S21.1). Fără excluderea sărbătorii ar fi 22 (bug prins de testul e2e).
+        assert_eq!(working_days(2026, 6), 21);
+        // Ianuarie 2026: 1 ian = joi; 22 zile L-V minus 4 sărbători în zile lucrătoare (1,2,6,7) = 18.
+        assert_eq!(working_days(2026, 1), 18);
     }
 }
