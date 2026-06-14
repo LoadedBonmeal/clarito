@@ -50,8 +50,10 @@ that obligation was repealed (OUG 111/2013, after ECJ C-169/12 *TNT Express*). T
 - Purchase from cash-VAT supplier — @invoice: `D 3xx/6xx / C 401`, `D 4428.deductibil`.
   @payment: `D 401 / C 5121`, then `D 4426 / C 4428.deductibil` for the paid share.
 - Excluded lines → straight to 4427/4426 at invoice date.
-- Storno/credit note: target the correct bucket by parent settlement state — unsettled →
-  reverse 4428; settled → adjust 4427/4426; partial → split proportionally.
+- Storno/credit note: target the correct bucket by parent settlement state — **DEFERRED-FIRST**
+  per art. 282 alin. (10) lit. a) pct. 2: cancel the still-neexigibilă 4428 residual first; only
+  the excess of the reversal over the deferred residual (R−D) is exigibilă and reverses 4427.
+  Unsettled → all off 4428; fully settled → all off 4427; partial → 4428 down to zero, remainder 4427.
 
 ## D300 routing — VERIFIED against OPANAF 174/2026 F300 (Anexa 1 form + Anexa 2 instr.)
 Deep-research (4-agent workflow, primary-source read of the official PDF, adversarial pass
@@ -126,14 +128,21 @@ present, no Java runtime). Install a JRE (`brew install temurin`) to run it.
   `ron_to_bani`; date-only `paid_at`; payment converted in invoice currency.
 - **TODO 4d** — DUKIntegrator on a cash-VAT fixture (needs Java; can't run locally).
 - **TODO 5** — ✅ DONE (branch `cash-vat-storno-282`). Settlement-aware storno split per art. 282
-  alin. (9)/(10): a cross-period cash-VAT credit note reverses the already-collected part via 4427
-  and cancels the still-deferred residual directly off 4428 — in the storno period, without
-  regenerating the original's period. Per rate `R=|storno VAT|`, `C=`collected-to-date,
-  `to_4428=min(max(R−C,0), total−C)`, `to_4427=R−to_4428`. The shared `gl::cash_vat_storno_split`
-  feeds BOTH the GL legs and the D300 collected correction (`+Σ to_4428` undoes the issue-date
-  query's full reversal), so GL net-4427 ↔ D300 collected reconcile. Gate: the cross-period GL
-  matrix (unpaid/partial/fully-paid/partial-storno) + reconcile assertions. The same-period full
-  storno keeps its existing single-4427-leg path (still correct + tested).
+  alin. (10) lit. a) pct. 2, **DEFERRED-FIRST**: a cross-period cash-VAT credit note cancels the
+  still-deferred 4428 residual FIRST; only the excess of the reversal over that residual is
+  exigibilă and reverses already-collected 4427 — in the storno period, without regenerating the
+  original's period. Per rate `R=|storno VAT|`, `C=`collected-to-date, `D=total−C` (still-deferred),
+  `to_4428=min(R,D)`, `to_4427=R−to_4428` (`=max(R−D,0)`). For a FULL storno (R=total) this equals
+  `to_4428=D, to_4427=C` (deferred-first and collected-first coincide); they diverge only for a
+  partial credit note (R<total) against a partially-collected original (C>0) — see the test
+  `cash_vat_storno_partial_credit_note_against_partially_collected_is_deferred_first`. The shared
+  `gl::cash_vat_storno_split` feeds BOTH the GL legs and the D300 collected correction (`+Σ to_4428`
+  undoes the issue-date query's full reversal), so GL net-4427 ↔ D300 collected reconcile. Gate: the
+  cross-period GL matrix (unpaid/partial/fully-paid/partial-credit-note/divergent-cell) + reconcile.
+  The same-period full storno keeps its existing single-4427-leg path (still correct + tested).
+  NOTE: the only credit-note path today (`storno_invoice`) does a FULL reversal (R=total) + marks
+  the original STORNED atomically, so partial credit notes are not yet reachable — deferred-first
+  makes the split statute-correct in advance rather than load-bearing on that invariant.
 - **TODO 6** — invoice "TVA la încasare" mention. **TODO 7** — buyer-side (needs payments-out on
   received invoices). **TODO 8** — plafon monitor + 097.
 

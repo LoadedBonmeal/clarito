@@ -868,8 +868,12 @@ async fn original_defers_s_vat_to_4428(
 /// `orig_id`, within a generation/declaration period starting `period_from`. Returns
 /// `rate_key → (to_4427, to_4428)` (both ≥0, summing to |storno S-VAT| per rate). Non-empty ONLY for
 /// the cross-period deferred case: the original is in a STRICTLY-PRIOR period AND still defers S-VAT
-/// to 4428. Otherwise empty (caller uses the normal single 4427-leg reversal). Per rate: R=|storno
-/// VAT|, C=collected-to-storno-date, D=total−C, to_4428=min(max(R−C,0),D), to_4427=R−to_4428.
+/// to 4428. Otherwise empty (caller uses the normal single 4427-leg reversal). Per rate, DEFERRED-
+/// FIRST per art. 282 alin. (10) lit. a) pct. 2: R=|storno VAT|, C=collected-to-storno-date,
+/// D=total−C (still-deferred residual), to_4428=min(R,D), to_4427=R−to_4428 (=max(R−D,0), the excess
+/// over the deferred residual, which becomes exigibilă at cancellation). For a FULL storno (R=total)
+/// this gives to_4428=D, to_4427=C — collected-first and deferred-first coincide there; they diverge
+/// only for a partial credit note (R<total) against a partially-collected original (C>0).
 /// SHARED by the GL posting (the two reversal legs) and the D300 collected correction (Σ to_4428),
 /// so GL net-4427 and D300 collected always agree on reconcile.
 #[allow(clippy::too_many_arguments)]
@@ -926,9 +930,16 @@ pub(crate) async fn cash_vat_storno_split(
             continue; // original had no deferred S-VAT at this rate
         }
         let c = collected.get(key).copied().unwrap_or(Decimal::ZERO);
-        let d = (total - c).max(Decimal::ZERO); // residual still on 4428
-        let to_4428 = (r - c).max(Decimal::ZERO).min(d);
-        let to_4427 = r - to_4428;
+        let d = (total - c).max(Decimal::ZERO); // residual still DEFERRED on 4428 (= total − collected)
+                                                // DEFERRED-FIRST per art. 282 alin. (10) lit. a) pct. 2: "se operează reducerea taxei
+                                                // neexigibile aferente contravalorii pentru care nu a intervenit exigibilitatea taxei, iar
+                                                // în situația în care cuantumul taxei aferente anulării depășește taxa neexigibilă, pentru
+                                                // diferență exigibilitatea taxei intervine la data anulării." → cancel the still-deferred
+                                                // 4428 residual FIRST; only the EXCESS over it (R − D) is exigibilă and reverses collected
+                                                // 4427. (A collected-first split would wrongly debit already-exigibilă 4427 for a partial
+                                                // credit note against a partially-collected sale; for a FULL storno R=total the two coincide.)
+        let to_4428 = r.min(d);
+        let to_4427 = r - to_4428; // = max(R − D, 0)
         split.insert(*key, (to_4427, to_4428));
     }
     Ok(split)
@@ -5685,6 +5696,88 @@ mod tests {
         // 4428 keeps the un-credited half (190 − 95 = 95) still deferred.
         let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
         assert_eq!(c4428 - d4428, dec("95"), "residual 95 remains neexigibilă");
+    }
+
+    // The DIVERGENT cell: a PARTIAL credit note (R<total) against a PARTIALLY-COLLECTED original
+    // (C>0) — the one case where deferred-first (art. 282 alin. (10) lit. a) pct. 2) differs from a
+    // collected-first split. The credited half was NEVER collected (only the OTHER half was), so the
+    // reduction must cancel DEFERRED VAT (4428), leaving the already-exigibilă collected VAT on 4427.
+    // (A collected-first split would instead debit 95 off 4427 and strand 95 on 4428 — wrong.)
+    #[tokio::test]
+    async fn cash_vat_storno_partial_credit_note_against_partially_collected_is_deferred_first() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        enable_cash_vat(&pool, "co", "2026-01-01").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        // January: 1000+190 sale, collect HALF (595/1190) → C=95 on 4427, D=95 left on 4428.
+        insert_invoice_on(
+            &pool,
+            "co",
+            "o",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+            "2026-01-15",
+        )
+        .await;
+        insert_pay(&pool, "co", "o", "p1", "595", "2026-01-20").await;
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31")
+            .await
+            .unwrap();
+        // February: PARTIAL credit note for the OTHER (uncollected) half — net -500, VAT -95 (R=95<total).
+        // Original stays VALIDATED (partial credit, not a full storno).
+        insert_invoice_on(
+            &pool,
+            "co",
+            "cn",
+            "ct",
+            "VALIDATED",
+            "-500",
+            "-95",
+            "-595",
+            Some("o"),
+            "2026-02-10",
+        )
+        .await;
+        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28")
+            .await
+            .unwrap();
+
+        // Deferred-first: the 95 reversal cancels the still-deferred residual off 4428, NOT 4427.
+        let (d_cn_4428, _) = source_account(&pool, "co", "cn", "4428").await;
+        let (d_cn_4427, _) = source_account(&pool, "co", "cn", "4427").await;
+        assert_eq!(
+            d_cn_4428,
+            dec("95"),
+            "deferred-first: cancel 95 off 4428 (the uncollected half)"
+        );
+        assert_eq!(
+            d_cn_4427,
+            Decimal::ZERO,
+            "the already-collected 95 stays exigibilă on 4427 (NOT reversed)"
+        );
+        // End state: 4428 fully cleared (190 issued − 95 released − 95 cancelled); 4427 keeps the
+        // genuinely-collected 95 (the customer paid for half and that half is not credited).
+        let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
+        let (d4427, c4427) = account_balance(&pool, "co", "4427").await;
+        assert_eq!(c4428 - d4428, Decimal::ZERO, "no VAT stranded in 4428");
+        assert_eq!(
+            c4427 - d4427,
+            dec("95"),
+            "collected 95 stays exigibilă on 4427"
+        );
+        // GL net-4427 in Feb (0 — the CN doesn't touch 4427) ties to D300 collected.
+        let rec = reconcile(&pool, "co", "2026-02-01", "2026-02-28")
+            .await
+            .unwrap();
+        assert!(
+            rec.discrepancies.is_empty(),
+            "GL↔D300 must reconcile: {:?}",
+            rec.discrepancies
+        );
     }
 
     #[tokio::test]
