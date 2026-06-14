@@ -212,6 +212,32 @@ fn validate_leave(input: &MedicalLeaveInput) -> AppResult<()> {
             ));
         }
     }
+    // Procentul indemnizației (D_28). Pentru boala obișnuită (cod 01), OUG 91/2025 a introdus scala
+    // GRADUALĂ — 55% (≤7 zile), 65% (8–14 zile), 75% (≥15 zile) după zilele cumulate ale episodului;
+    // admitem DOAR {55,65,75} și cerem o valoare explicită (fără default tăcut de 75%). Verificarea
+    // tier-ului EXACT pe zilele cumulate ale episodului (poate traversa luni/certificate) e o extensie
+    // ulterioară — aici validăm apartenența la set. Pentru orice cod, procentul trebuie 1–100.
+    let cod_ind = input.cod_indemnizatie.as_deref().unwrap_or("01");
+    match input.procent {
+        Some(p) if !(1..=100).contains(&p) => {
+            return Err(AppError::Validation(
+                "Procentul indemnizației trebuie să fie între 1 și 100.".into(),
+            ));
+        }
+        Some(p) if cod_ind == "01" && !matches!(p, 55 | 65 | 75) => {
+            return Err(AppError::Validation(
+                "Boala obișnuită (cod 01): procentul trebuie 55%, 65% sau 75% \
+                 (scala graduală pe zile de episod, OUG 91/2025)."
+                    .into(),
+            ));
+        }
+        None if cod_ind == "01" => {
+            return Err(AppError::Validation(
+                "Boala obișnuită (cod 01): selectați procentul indemnizației (55/65/75%).".into(),
+            ));
+        }
+        _ => {}
+    }
     Ok(())
 }
 
@@ -446,6 +472,48 @@ mod tests {
         );
         // The rightful owner can still delete it.
         assert!(delete(&pool, &m.id, "co").await.is_ok());
+    }
+
+    /// Wave 3 — graduated 55/65/75% tier (OUG 91/2025) for boală obișnuită (cod 01).
+    #[tokio::test]
+    async fn cod01_requires_graduated_percent() {
+        let pool = pool().await;
+        // 70% is not a valid tier for cod 01 → rejected.
+        let bad = create(
+            &pool,
+            MedicalLeaveInput {
+                procent: Some(70),
+                ..valid_input()
+            },
+        )
+        .await;
+        assert!(
+            matches!(bad, Err(AppError::Validation(_))),
+            "70% must be rejected for cod 01"
+        );
+        // No percent for cod 01 → rejected (no silent 75% default).
+        let none = create(
+            &pool,
+            MedicalLeaveInput {
+                procent: None,
+                ..valid_input()
+            },
+        )
+        .await;
+        assert!(
+            matches!(none, Err(AppError::Validation(_))),
+            "missing percent must be rejected for cod 01"
+        );
+        // A valid tier (65%) is accepted.
+        assert!(create(
+            &pool,
+            MedicalLeaveInput {
+                procent: Some(65),
+                ..valid_input()
+            },
+        )
+        .await
+        .is_ok());
     }
 
     #[tokio::test]
