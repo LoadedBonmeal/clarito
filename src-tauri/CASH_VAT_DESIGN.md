@@ -143,6 +143,15 @@ present, no Java runtime). Install a JRE (`brew install temurin`) to run it.
   NOTE: the only credit-note path today (`storno_invoice`) does a FULL reversal (R=total) + marks
   the original STORNED atomically, so partial credit notes are not yet reachable — deferred-first
   makes the split statute-correct in advance rather than load-bearing on that invariant.
+  **VAT-01 RESOLVED (period-independent discriminator):** the split decision no longer keys on the
+  one-sided `orig_issue < period_from` boundary (which coupled it to the caller's window granularity →
+  monthly-GL vs quarterly-D300 disagreed). It now gates on the original's committed-GL 4428 deferral
+  AND a `reposted_in_run` flag = `status=='STORNED' && period_from ≤ orig_issue ≤ period_to` (window
+  membership, BOTH ends → granularity-invariant). `cash_vat_storno_split` gained a `period_to` param;
+  the GL caller and the D300 correction both pass their own window and evaluate the same predicate →
+  GL net-4427 ↔ D300 collected reconcile under ANY monthly/quarterly mix. Proven by the cross-
+  granularity tests `cash_vat_storno_partial_cn_monthly_gl_ties_quarterly_d300` and
+  `cash_vat_storno_full_storno_single_shot_quarterly_gl_strands_nothing`.
 - **TODO 6** — invoice "TVA la încasare" mention. **TODO 7** — buyer-side (needs payments-out on
   received invoices). **TODO 8** — plafon monitor + 097.
 

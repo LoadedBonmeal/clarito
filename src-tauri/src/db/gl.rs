@@ -865,10 +865,12 @@ async fn original_defers_s_vat_to_4428(
 
 /// Cash-VAT STORNO settlement-aware split (art. 282 alin. (9)/(10)) for ONE credit note
 /// `storno_id` (issued `storno_issue`, its own `storno_currency`/`storno_fx`) against original
-/// `orig_id`, within a generation/declaration period starting `period_from`. Returns
-/// `rate_key → (to_4427, to_4428)` (both ≥0, summing to |storno S-VAT| per rate). Non-empty ONLY for
-/// the cross-period deferred case: the original is in a STRICTLY-PRIOR period AND still defers S-VAT
-/// to 4428. Otherwise empty (caller uses the normal single 4427-leg reversal). Per rate, DEFERRED-
+/// `orig_id`, within the generation/declaration window `[period_from, period_to]`. Returns
+/// `rate_key → (to_4427, to_4428)` (both ≥0, summing to |storno S-VAT| per rate). Non-empty ONLY when
+/// the original still defers S-VAT to 4428 in committed GL AND is not being re-posted to 4427 by THIS
+/// run (a STORNED original inside the window) — a PERIOD-INDEPENDENT discriminator (audit VAT-01) so
+/// the GL posting and the D300 correction reconcile under any monthly/quarterly window mix; see the
+/// `reposted_in_run` comment below. Otherwise empty (caller uses the normal single 4427-leg). DEFERRED-
 /// FIRST per art. 282 alin. (10) lit. a) pct. 2: R=|storno VAT|, C=collected-to-storno-date,
 /// D=total−C (still-deferred residual), to_4428=min(R,D), to_4427=R−to_4428 (=max(R−D,0), the excess
 /// over the deferred residual, which becomes exigibilă at cancellation). For a FULL storno (R=total)
@@ -886,11 +888,13 @@ pub(crate) async fn cash_vat_storno_split(
     storno_fx: Option<Decimal>,
     orig_id: &str,
     period_from: &str,
+    period_to: &str,
 ) -> AppResult<std::collections::BTreeMap<i64, (Decimal, Decimal)>> {
     let mut split: std::collections::BTreeMap<i64, (Decimal, Decimal)> =
         std::collections::BTreeMap::new();
     let orig_row = match sqlx::query(
-        "SELECT issue_date, COALESCE(currency,'RON') AS currency, exchange_rate \
+        "SELECT issue_date, COALESCE(status,'') AS status, \
+                COALESCE(currency,'RON') AS currency, exchange_rate \
          FROM invoices WHERE id = ?1",
     )
     .bind(orig_id)
@@ -901,24 +905,24 @@ pub(crate) async fn cash_vat_storno_split(
         None => return Ok(split),
     };
     let orig_issue: String = orig_row.try_get("issue_date").unwrap_or_default();
-    // Cross-period AND still-deferred (committed GL credits 4428) — see `original_defers...` for why
-    // the GL is the only reliable signal (the storno command marks every original STORNED).
-    //
-    // INVARIANT (audit VAT-01): this gate is keyed on `period_from`, so the GL posting and the D300
-    // collected correction MUST be generated for the SAME period window, else they disagree (e.g.
-    // GL booked monthly but D300 filed quarterly would split in the GL but not in the D300 correction
-    // → quarterly D300 under-declares the collected reversal). The shipped UI enforces this — it
-    // passes the SAME single-month window to both `generate_gl_entries` and `d300_vat_totals`/
-    // `compute_d300` (GlLedger.tsx / Declarations.tsx) — so the two always agree in practice.
-    // `orig_issue < period_from` (not in [period_from, period_to], since a storno's original always
-    // precedes it) keeps the same-generation-run re-post invisible to this committed-GL read out of
-    // the split: a same-period STORNED original is re-posted to 4427 in this very tx, so its credit
-    // note reverses 4427 (no split). Full cross-granularity (monthly GL + quarterly D300) support is a
-    // deferred redesign — it needs the split decision to be period-independent without breaking the
-    // same-period in-transaction case, plus cross-granularity reconcile tests.
-    if !(orig_issue.as_str() < period_from
-        && original_defers_s_vat_to_4428(pool, company_id, orig_id).await?)
-    {
+    let orig_status: String = orig_row.try_get("status").unwrap_or_default();
+    // PERIOD-INDEPENDENT discriminator (audit VAT-01). The deferred-first split is needed iff the
+    // original still has a LIVE deferred 4428 credit (committed GL) that THIS run will not itself
+    // reclassify to 4427. The original is reclassified within a `generate_gl_entries` run exactly
+    // when it is a STORNED original whose own issue_date falls INSIDE the window being generated —
+    // then the run re-posts it to 4427 (`cash_vat_applies` is forced false for STORNED) and the
+    // credit note must reverse 4427, not split. We key the re-post flag on the ORIGINAL's window
+    // MEMBERSHIP (BOTH ends → granularity-invariant: a quarterly window containing the original
+    // detects the re-post; a monthly window containing only the credit note does not) AND its STORNED
+    // status — NOT on the one-sided `orig_issue < period_from` boundary, which coupled the decision to
+    // the caller's window granularity (the bug: monthly GL + quarterly D300 disagreed). A partial
+    // credit note leaves the original VALIDATED, so it is never treated as re-posted → the partial
+    // cell is fixed too. The GL caller and the D300 correction both pass their own window and evaluate
+    // this same predicate against the same committed GL → they reconcile under any monthly/quarterly mix.
+    let reposted_in_run = orig_status == "STORNED"
+        && orig_issue.as_str() >= period_from
+        && orig_issue.as_str() <= period_to;
+    if reposted_in_run || !original_defers_s_vat_to_4428(pool, company_id, orig_id).await? {
         return Ok(split);
     }
     let oc: String = orig_row
@@ -1479,6 +1483,7 @@ pub async fn generate_gl_entries(
                         fx,
                         orig_id,
                         period_from,
+                        period_to,
                     )
                     .await?;
                     if s.is_empty() {
@@ -5794,6 +5799,121 @@ mod tests {
         assert!(
             rec.discrepancies.is_empty(),
             "GL↔D300 must reconcile: {:?}",
+            rec.discrepancies
+        );
+    }
+
+    // ── VAT-01 cross-granularity reconcile matrix (the period-independent split, audit VAT-01) ──────
+    // Proof that GL generated at one granularity reconciles with D300 filed at another. These FAIL on
+    // the pre-VAT-01 `orig_issue < period_from` discriminator and pass on the window-membership gate.
+
+    #[tokio::test]
+    async fn cash_vat_storno_partial_cn_monthly_gl_ties_quarterly_d300() {
+        // Q1 cell: GL booked MONTHLY, D300 filed QUARTERLY. A partial credit note (original stays
+        // VALIDATED + deferred) splits in the monthly GL (Feb); the quarterly D300 correction must
+        // ALSO fire — keyed on the original's STORNED-in-window status, period-independently. The old
+        // boundary gate skipped the quarterly correction → D300 collected = −95 ≠ GL 0.
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        enable_cash_vat(&pool, "co", "2026-01-01").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        // January: live cash-VAT sale → 190 deferred to 4428, unpaid, stays VALIDATED.
+        insert_invoice_on(
+            &pool,
+            "co",
+            "o",
+            "ct",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+            "2026-01-15",
+        )
+        .await;
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31")
+            .await
+            .unwrap();
+        // February: PARTIAL credit note (R=95 < 190). Generate GL for FEBRUARY ONLY (monthly).
+        insert_invoice_on(
+            &pool,
+            "co",
+            "cn",
+            "ct",
+            "VALIDATED",
+            "-500",
+            "-95",
+            "-595",
+            Some("o"),
+            "2026-02-10",
+        )
+        .await;
+        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28")
+            .await
+            .unwrap();
+
+        // The reversal cancelled deferred 4428 (not collected 4427).
+        let (d_cn_4428, _) = source_account(&pool, "co", "cn", "4428").await;
+        assert_eq!(d_cn_4428, dec("95"), "partial reversal cancels 95 off 4428");
+        // QUARTERLY D300 over Q1 must tie the monthly-generated GL (both net 0 on 4427).
+        let rec = reconcile(&pool, "co", "2026-01-01", "2026-03-31")
+            .await
+            .unwrap();
+        assert!(
+            rec.discrepancies.is_empty(),
+            "monthly-GL must tie quarterly-D300 (VAT-01): {:?}",
+            rec.discrepancies
+        );
+    }
+
+    #[tokio::test]
+    async fn cash_vat_storno_full_storno_single_shot_quarterly_gl_strands_nothing() {
+        // Q2 cell: a single-shot QUARTERLY GL run (original + full storno both inside the quarter)
+        // must strand nothing — the run re-posts the now-STORNED original to 4427 and the credit note
+        // reverses 4427 (no split), detected by the original's window membership (both ends).
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        enable_cash_vat(&pool, "co", "2026-01-01").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+        insert_invoice_on(
+            &pool,
+            "co",
+            "o",
+            "ct",
+            "STORNED",
+            "1000",
+            "190",
+            "1190",
+            None,
+            "2026-01-15",
+        )
+        .await;
+        insert_invoice_on(
+            &pool,
+            "co",
+            "cn",
+            "ct",
+            "VALIDATED",
+            "-1000",
+            "-190",
+            "-1190",
+            Some("o"),
+            "2026-02-10",
+        )
+        .await;
+        // ONE-SHOT quarterly GL over the whole quarter (original + CN together).
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-03-31")
+            .await
+            .unwrap();
+
+        let (d4428, c4428) = account_balance(&pool, "co", "4428").await;
+        assert_eq!(c4428 - d4428, Decimal::ZERO, "no VAT stranded in 4428");
+        let rec = reconcile(&pool, "co", "2026-01-01", "2026-03-31")
+            .await
+            .unwrap();
+        assert!(
+            rec.discrepancies.is_empty(),
+            "single-shot quarterly must reconcile: {:?}",
             rec.discrepancies
         );
     }

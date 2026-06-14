@@ -462,6 +462,7 @@ async fn cash_vat_storno_collected_correction(
             sfx,
             &oid,
             period_from,
+            period_to,
         )
         .await?;
         for (k, (_to4427, to4428)) in &split {
