@@ -64,11 +64,19 @@ pub async fn compute_d100(
         if raw.is_empty() {
             Decimal::ZERO
         } else {
-            Decimal::from_str(raw).map_err(|_| {
+            let d = Decimal::from_str(raw).map_err(|_| {
                 AppError::Validation(
                     "Plăți anterioare invalide — folosiți formatul 1234.56.".into(),
                 )
-            })?
+            })?;
+            // Negative prior payments would ADD to the tax due (compute_d100_fn clamps only the
+            // final result, not this input) — reject, symmetric with the assets cost guard.
+            if d.is_sign_negative() {
+                return Err(AppError::Validation(
+                    "Plățile anterioare nu pot fi negative.".into(),
+                ));
+            }
+            d
         }
     };
     let input = D100Input {
