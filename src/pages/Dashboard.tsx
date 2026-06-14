@@ -435,7 +435,7 @@ export function DashboardPage() {
             </div>
             <div className="legend">
               <span className="lg"><span className="sw" style={{ background: "var(--black)" }} />{t("dashboard.chart.issued")}</span>
-              <span className="lg"><span className="sw" style={{ background: "#D4D4D8" }} />{t("dashboard.chart.received")}</span>
+              <span className="lg"><span className="sw" style={{ background: "var(--border-strong)" }} />{t("dashboard.chart.received")}</span>
             </div>
           </div>
           <div className="chart">

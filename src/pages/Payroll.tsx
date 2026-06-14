@@ -48,9 +48,6 @@ const fmtRange = (a: string, b: string) => {
 const initials = (name: string) =>
   name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "—";
 
-// triunghi avertisment (nu există în Ic)
-const WARN_TRIANGLE =
-  '<path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>';
 
 export function PayrollPage() {
   const { t } = useTranslation();
@@ -264,7 +261,7 @@ export function PayrollPage() {
 
       {/* banner D112 model nou */}
       <div className="banner warn">
-        <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: WARN_TRIANGLE }} />
+        <Ic name="triangle" />
         <span>
           <b>{t("payroll.banner.strong")}</b> {t("payroll.banner.applies")} <b>{t("payroll.banner.from")}</b>.{" "}
           {t("payroll.banner.body")}
@@ -705,11 +702,11 @@ function EmployeeModal({
             </div>
             <div className="field">
               <label>{t("payroll.empModal.gross")} <span className="req">*</span></label>
-              <input className="input num" type="text" inputMode="decimal" placeholder="5000" {...field("grossSalary")} />
+              <input className="input num num-r" type="text" inputMode="decimal" placeholder="5000" {...field("grossSalary")} />
             </div>
             <div className="field">
               <label>{t("payroll.empModal.deduction")}</label>
-              <input className="input num" type="text" inputMode="decimal" placeholder="0" {...field("personalDeduction")} />
+              <input className="input num num-r" type="text" inputMode="decimal" placeholder="0" {...field("personalDeduction")} />
             </div>
             <div className="field">
               <label>{t("payroll.empModal.contractType")}</label>
@@ -779,8 +776,8 @@ function EmployeeModal({
             </div>
             {error && (
               <div className="field span2">
-                <div className="banner danger" style={{ marginBottom: 0 }}>
-                  <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: WARN_TRIANGLE }} />
+                <div className="banner danger no-mb">
+                  <Ic name="triangle" />
                   <span>{error}</span>
                 </div>
               </div>
@@ -913,11 +910,10 @@ function ConcediuModal({
             <div className="field">
               <label>{t("payroll.cmModal.codBoala")}</label>
               <input
-                className="input num"
+                className="input num uppercase"
                 type="text"
                 maxLength={3}
                 placeholder="A09"
-                style={{ textTransform: "uppercase" }}
                 value={codBoala}
                 disabled={f.codIndemnizatie === "15"}
                 onChange={(e) => setF((s) => ({ ...s, codBoala: e.target.value.toUpperCase() }))}
@@ -937,37 +933,37 @@ function ConcediuModal({
             </div>
             <div className="field">
               <label>{t("payroll.cm.th.daysEmployer")}</label>
-              <input className="input num" type="text" inputMode="numeric" placeholder="5" {...num("zileAngajator")} />
+              <input className="input num num-r" type="text" inputMode="numeric" placeholder="5" {...num("zileAngajator")} />
             </div>
             <div className="field">
               <label>{t("payroll.cm.th.daysFnuass")}</label>
-              <input className="input num" type="text" inputMode="numeric" placeholder="0" {...num("zileFnuass")} />
+              <input className="input num num-r" type="text" inputMode="numeric" placeholder="0" {...num("zileFnuass")} />
             </div>
             <div className="field">
               <label>{t("payroll.cmModal.amountEmployer")}</label>
-              <input className="input num" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} {...num("sumaAngajator")} />
+              <input className="input num num-r" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} {...num("sumaAngajator")} />
             </div>
             <div className="field">
               <label>{t("payroll.cmModal.amountFnuass")}</label>
-              <input className="input num" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} {...num("sumaFnuass")} />
+              <input className="input num num-r" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} {...num("sumaFnuass")} />
             </div>
             <div className="field">
               <label>{t("payroll.cmModal.baza")}</label>
-              <input className="input num" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} {...num("bazaCalcul")} />
+              <input className="input num num-r" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} {...num("bazaCalcul")} />
             </div>
             <div className="field">
               <label>{t("payroll.cmModal.zileBaza")}</label>
-              <input className="input num" type="text" inputMode="numeric" placeholder="0" {...num("zileBaza")} />
+              <input className="input num num-r" type="text" inputMode="numeric" placeholder="0" {...num("zileBaza")} />
             </div>
             <div className="field">
               <label>{t("payroll.cmModal.procent")}</label>
               {/* procent D_28: 55/65/75 per OUG 91/2025 — utilizatorul alege */}
-              <input className="input num" type="text" inputMode="numeric" placeholder="55/65/75" {...num("procent")} />
+              <input className="input num num-r" type="text" inputMode="numeric" placeholder="55/65/75" {...num("procent")} />
             </div>
             {error && (
               <div className="field span2">
-                <div className="banner danger" style={{ marginBottom: 0 }}>
-                  <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: WARN_TRIANGLE }} />
+                <div className="banner danger no-mb">
+                  <Ic name="triangle" />
                   <span>{error}</span>
                 </div>
               </div>
@@ -1035,8 +1031,8 @@ function SediuModal({
             </div>
             {error && (
               <div className="field span2">
-                <div className="banner danger" style={{ marginBottom: 0 }}>
-                  <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: WARN_TRIANGLE }} />
+                <div className="banner danger no-mb">
+                  <Ic name="triangle" />
                   <span>{error}</span>
                 </div>
               </div>
@@ -1116,11 +1112,10 @@ function D112Modal({
             <div className="field">
               <label>{t("payroll.d112.reportMonth")}</label>
               <input
-                className="input num"
+                className="input num display-only"
                 type="text"
                 value={monthLabel}
                 disabled
-                style={{ background: "var(--fill)", color: "var(--text-2)" }}
               />
             </div>
           </div>
