@@ -19,7 +19,9 @@
     },
     "periodPop": {
       "year": "Year",
-      "month": "Month"
+      "month": "Month",
+      "prevYear": "Previous year",
+      "nextYear": "Next year"
     },
     "head": {
       "deadlinesCalendar": "Deadline calendar",

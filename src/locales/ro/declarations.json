@@ -19,7 +19,9 @@
     },
     "periodPop": {
       "year": "An",
-      "month": "Lună"
+      "month": "Lună",
+      "prevYear": "Anul precedent",
+      "nextYear": "Anul următor"
     },
     "head": {
       "deadlinesCalendar": "Calendar termene",

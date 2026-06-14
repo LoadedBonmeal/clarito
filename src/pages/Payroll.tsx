@@ -21,6 +21,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import { Ic } from "@/components/shared/Ic";
+import { MonthPicker } from "@/components/shared/MonthPicker";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -235,19 +236,16 @@ export function PayrollPage() {
               <Ic name="chevD" cls="ic" />
             </button>
             {openPop === "period" && (
-              <div className="pop show period-pop" onMouseDown={(e) => e.stopPropagation()}>
-                <div className="col-title pop-head">
-                  <button className="mini-btn" aria-label={t("payroll.actions.prevYear")} onClick={() => setYear(year - 1)}>‹</button>
-                  <span className="num pop-year">{year}</span>
-                  <button className="mini-btn" aria-label={t("payroll.actions.nextYear")} onClick={() => setYear(year + 1)}>›</button>
-                </div>
-                {MONTHS_FULL.map((m, i) => (
-                  <button key={m} className="pop-item" onClick={() => { setMonth(i + 1); setOpenPop(""); }}>
-                    <span className="pop-month-label">{m} {year}</span>
-                    {month === i + 1 && <Ic name="check" cls="co-check" />}
-                  </button>
-                ))}
-              </div>
+              <MonthPicker
+                year={year}
+                month={month}
+                monthsFull={MONTHS_FULL}
+                prevYearLabel={t("payroll.actions.prevYear")}
+                nextYearLabel={t("payroll.actions.nextYear")}
+                onPrevYear={() => setYear(year - 1)}
+                onNextYear={() => setYear(year + 1)}
+                onPick={(m) => { setMonth(m); setOpenPop(""); }}
+              />
             )}
           </div>
           <button className="pill-btn" onClick={() => setModal("create")}>
@@ -764,7 +762,7 @@ function EmployeeModal({
               </select>
             </div>
             <div className="field span2">
-              <label className="cbx">
+              <label className="chk-row">
                 <input
                   type="checkbox"
                   checked={form.beneficiarSumaNetaxabila}

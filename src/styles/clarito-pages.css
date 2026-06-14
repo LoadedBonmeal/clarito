@@ -5,7 +5,7 @@
 /* ── React adaptation: design .pop-item/.co-row/etc. rendered as <button> need
    the native button chrome reset (the prototype used <a>/<div>). ── */
 button.pop-item, button.co-row, button.company, button.user-card, button.nav-more,
-button.nav-item, button.cal-day, button.tab, button.cbx, button.see-all {
+button.nav-item, button.cal-day, button.cal-mon, button.tab, button.cbx, button.see-all {
   border: 0; background: transparent; width: auto;
   text-align: left; font-family: inherit; font-size: inherit; color: inherit;
 }
@@ -86,6 +86,15 @@ button.cbx { width: 16px; }
 .cal-day.today{box-shadow:inset 0 0 0 1px var(--line)}
 .cal-day.sel{background:var(--black);color:#fff;font-weight:600}
 .cal-day.sel:hover{background:var(--black)}
+
+/* month-grid period picker — same calendar card + header as the day grid, but a
+   3×4 grid of months for fiscal-period selectors (Salarizare, Declarații). */
+.cal-mpop{right:0;top:calc(100% + 6px);left:auto;width:248px;padding:10px}
+.cal-mgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.cal-mon{height:40px;display:flex;align-items:center;justify-content:center;font-size:12.5px;border-radius:8px;cursor:pointer;color:var(--text);border:0;background:transparent;font-family:inherit;font-variant-numeric:tabular-nums}
+.cal-mon:hover{background:var(--fill)}
+.cal-mon.sel{background:var(--black);color:#fff;font-weight:600}
+.cal-mon.sel:hover{background:var(--black)}
 
 /* SPV activity feed */
 .activity{padding:6px 6px 8px}

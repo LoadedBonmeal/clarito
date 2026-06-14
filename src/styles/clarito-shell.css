@@ -254,7 +254,8 @@ tbody tr:hover td{background:#FCFCFD}
 .co-row .co-meta{flex:1;min-width:0}
 .co-row .co-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .co-row .co-cui{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:1px}
-.co-row .co-check{width:16px;height:16px;stroke:var(--text);stroke-width:2;flex:none;opacity:0}
+.co-check{width:16px;height:16px;stroke:var(--text);stroke-width:2;fill:none;flex:none;stroke-linecap:round;stroke-linejoin:round}
+.co-row .co-check{opacity:0}
 .co-row.sel .co-check{opacity:1}
 .app.sidebar-collapsed #profilePop{left:12px;right:auto;width:248px}
 #notifPop{right:0;top:42px;width:300px}
@@ -377,6 +378,9 @@ textarea.input{height:auto;min-height:70px;padding:9px 11px;resize:vertical}
 .cbx.on{background:var(--black);border-color:var(--black)}
 .cbx.on::after{content:"";width:8px;height:4.5px;border-left:1.8px solid #fff;border-bottom:1.8px solid #fff;transform:rotate(-45deg) translate(.5px,-.5px)}
 th .cbx,td .cbx{vertical-align:middle}
+/* labeled checkbox row: real <input type=checkbox> + text (distinct from .cbx, the 16px box) */
+.chk-row{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;line-height:1.4}
+.chk-row>input[type=checkbox]{width:16px;height:16px;flex:none;margin:0;accent-color:var(--black);cursor:pointer}
 
 /* radio-ish segmented already covered by .tabs */
 

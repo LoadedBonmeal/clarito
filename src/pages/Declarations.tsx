@@ -20,6 +20,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
 import { Ic } from "@/components/shared/Ic";
+import { MonthPicker } from "@/components/shared/MonthPicker";
 import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { D300SubmissionModal } from "@/components/modals/D300SubmissionModal";
 import { api } from "@/lib/tauri";
@@ -46,13 +47,6 @@ const fmtRoDate = (iso: string) => {
 /** Date → ISO yyyy-mm-dd (local). */
 function toIso(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function buildYearOptions(): number[] {
-  const current = new Date().getFullYear();
-  const years: number[] = [];
-  for (let y = current; y >= current - 5; y--) years.push(y);
-  return years;
 }
 
 function periodDateRange(year: number, month: number): { dateFrom: string; dateTo: string } {
@@ -135,7 +129,6 @@ export function DeclarationsPage() {
     }
   }, [report]);
 
-  const yearOptions = buildYearOptions();
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
 
   // ── Pre-export validation (preflight) ─────────────────────────────────────
@@ -342,35 +335,16 @@ export function DeclarationsPage() {
               <Ic name="chevD" cls="ic" />
             </button>
             {openPop === "period" && (
-              <div
-                className="pop show"
-                style={{ right: 0, top: 40, width: 220, maxHeight: 320, overflowY: "auto" }}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-                <div className="col-title">{t("declarations.periodPop.year")}</div>
-                {yearOptions.map((y) => (
-                  <button
-                    key={y}
-                    className="pop-item"
-                    onClick={() => { setSelectedYear(y); clearReportState(); }}
-                  >
-                    <span style={{ flex: 1 }} className="num">{y}</span>
-                    {selectedYear === y && <Ic name="check" cls="co-check" />}
-                  </button>
-                ))}
-                <div className="pop-div" />
-                <div className="col-title">{t("declarations.periodPop.month")}</div>
-                {MONTHS.map((m, idx) => (
-                  <button
-                    key={m}
-                    className="pop-item"
-                    onClick={() => { setSelectedMonth(idx + 1); clearReportState(); setOpenPop(""); }}
-                  >
-                    <span style={{ flex: 1 }}>{m}</span>
-                    {selectedMonth === idx + 1 && <Ic name="check" cls="co-check" />}
-                  </button>
-                ))}
-              </div>
+              <MonthPicker
+                year={selectedYear}
+                month={selectedMonth}
+                monthsFull={MONTHS}
+                prevYearLabel={t("declarations.periodPop.prevYear")}
+                nextYearLabel={t("declarations.periodPop.nextYear")}
+                onPrevYear={() => { setSelectedYear(selectedYear - 1); clearReportState(); }}
+                onNextYear={() => { setSelectedYear(selectedYear + 1); clearReportState(); }}
+                onPick={(m) => { setSelectedMonth(m); clearReportState(); setOpenPop(""); }}
+              />
             )}
           </div>
           {/* propunere — neimplementat (fără backend pentru calendar termene) */}
