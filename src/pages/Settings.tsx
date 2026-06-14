@@ -1618,7 +1618,7 @@ export function SettingsPage() {
                 <Ic name="xMark" />
               </button>
             </div>
-            <div className="modal-body" style={{ background: "#F4F4F5" }}>
+            <div className="modal-body" style={{ background: "var(--fill)" }}>
               <div className="pdf-sheet" style={{ "--acc": mockSecAcc } as React.CSSProperties}>
                 <div className="pdf-top">
                   <div style={{ display: "flex", gap: 11 }}>

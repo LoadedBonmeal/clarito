@@ -8,3 +8,45 @@
 .pg-payroll .mini-chip.warn{color:var(--amber);background:rgba(180,83,9,.07);border-color:rgba(180,83,9,.18)}
 .pg-payroll .mini-chip.ok{color:var(--green);background:rgba(4,120,87,.07);border-color:rgba(4,120,87,.18)}
 .pg-payroll .chips{display:flex;gap:5px;flex-wrap:wrap}
+
+/* ── Presentational helpers (moved from inline styles) ── */
+
+/* Tabs row — override shell's full-width flex with inline to shrink-to-content */
+.pg-payroll .tabs{display:inline-flex;margin-bottom:16px}
+
+/* Empty-state placeholder (multiple panels) */
+.pg-payroll .pf-empty{padding:44px 16px;text-align:center;font-size:13px;color:var(--text-2)}
+
+/* No-company placeholder (top-level) */
+.pg-payroll .pf-nocompany{padding:40px 0;text-align:center;color:var(--text-2);font-size:13px}
+
+/* Period popover header row */
+.pg-payroll .pop-head{display:flex;align-items:center;justify-content:space-between}
+.pg-payroll .pop-year{flex:1;text-align:center}
+/* Month item label grows to fill available space */
+.pg-payroll .pop-month-label{flex:1}
+
+/* Period popover panel — position + dimensions */
+.pg-payroll .period-pop{right:0;top:40px;width:220px;max-height:320px;overflow-y:auto}
+
+/* Search box fixed width */
+.pg-payroll .scr-search-sm{width:190px}
+
+/* Column widths */
+.pg-payroll th.w-acts{width:90px}
+.pg-payroll th.w-del{width:50px}
+
+/* Total row */
+.pg-payroll tr.total-row{background:var(--bg-table-header);font-weight:600}
+
+/* Right-aligned numeric inputs */
+.pg-payroll .input.num-r{text-align:right}
+
+/* Disabled display-only input (D112 modal) */
+.pg-payroll .input.display-only{background:var(--fill);color:var(--text-2)}
+
+/* Code input uppercase */
+.pg-payroll .input.uppercase{text-transform:uppercase}
+
+/* Banner inside modal — remove bottom margin */
+.pg-payroll .banner.no-mb{margin-bottom:0}

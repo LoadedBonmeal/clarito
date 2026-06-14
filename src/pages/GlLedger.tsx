@@ -644,7 +644,7 @@ export function GlLedgerPage() {
                     </tr>
                   ))}
                   {!jrQuery && (
-                    <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                    <tr style={{ background: "var(--bg-table-header)", fontWeight: 600 }}>
                       <td colSpan={6}>
                         {t("gl.journal.total")} {journalReg.balanced
                           ? t("gl.journal.balanced")
@@ -719,7 +719,7 @@ export function GlLedgerPage() {
                       ))}
                     </tr>
                   ))}
-                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                  <tr style={{ background: "var(--bg-table-header)", fontWeight: 600 }}>
                     <td>{t("gl.balance.total")}</td>
                     {[trialBal.totalOpeningDebit, trialBal.totalOpeningCredit,
                       trialBal.totalPeriodDebit, trialBal.totalPeriodCredit,
@@ -789,7 +789,7 @@ export function GlLedgerPage() {
                 </b>
               </span>
             </div>
-            <div className="crow" style={{ background: "#FCFCFD" }}>
+            <div className="crow" style={{ background: "var(--bg-table-header)" }}>
               <div className="c2" style={{ margin: 0 }}>
                 <Trans i18nKey="gl.closings.vatNote" components={{ doc: <span className="doc" /> }} />
               </div>
@@ -836,7 +836,7 @@ export function GlLedgerPage() {
                 {pnl ? `${parseDec(pnl.netResult) >= 0 ? "+" : ""}${fmtRON(pnl.netResult)}` : "—"}
               </span>
             </div>
-            <div className="crow" style={{ background: "#FCFCFD" }}>
+            <div className="crow" style={{ background: "var(--bg-table-header)" }}>
               <div className="c2" style={{ margin: 0 }}>
                 <Trans i18nKey="gl.closings.postNote" components={{ doc: <span className="doc" /> }} />
               </div>
@@ -849,7 +849,7 @@ export function GlLedgerPage() {
                 {closingPeriod ? t("gl.closings.closingBtn") : t("gl.closings.closeBtn")}
               </button>
             </div>
-            <div className="crow" style={{ background: "#FCFCFD" }}>
+            <div className="crow" style={{ background: "var(--bg-table-header)" }}>
               <div className="c2" style={{ margin: 0 }}>
                 <Trans i18nKey="gl.closings.annualNote" components={{ doc: <span className="doc" /> }} />
               </div>
@@ -900,7 +900,7 @@ export function GlLedgerPage() {
                 {pnl ? (pnl.taxRegime !== "micro" ? fmtRON(pnl.incomeTax) : "—") : "—"}
               </span>
             </div>
-            <div className="crow" style={{ background: "#FCFCFD" }}>
+            <div className="crow" style={{ background: "var(--bg-table-header)" }}>
               <div className="c2" style={{ margin: 0 }}>
                 <Trans i18nKey="gl.closings.taxNote" components={{ doc: <span className="doc" /> }} />
               </div>
@@ -1104,7 +1104,7 @@ export function GlLedgerPage() {
                       <td className="r num">{cellAmt(v)}</td>
                     </tr>
                   ))}
-                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                  <tr style={{ background: "var(--bg-table-header)", fontWeight: 600 }}>
                     <td>{t("gl.bilant.rows.totalAssets")}</td>
                     <td className="r num">{fmtRON(bilant.totalAssets)}</td>
                   </tr>
@@ -1128,7 +1128,7 @@ export function GlLedgerPage() {
                       <td className="r num">{cellAmt(v)}</td>
                     </tr>
                   ))}
-                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                  <tr style={{ background: "var(--bg-table-header)", fontWeight: 600 }}>
                     <td>{t("gl.bilant.rows.totalEquityLiab")}</td>
                     <td className="r num">{fmtRON(bilant.totalEquityLiabilities)}</td>
                   </tr>
@@ -1185,7 +1185,7 @@ export function GlLedgerPage() {
                       <td className="r num">{fmtRON(e.balance)} {e.balanceSide}</td>
                     </tr>
                   ))}
-                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                  <tr style={{ background: "var(--bg-table-header)", fontWeight: 600 }}>
                     <td colSpan={4}>{t("gl.ledger.totalRow")}</td>
                     <td className="r num">{fmtRON(a.totalDebit)}</td>
                     <td className="r num">{fmtRON(a.totalCredit)}</td>
@@ -1231,7 +1231,7 @@ export function GlLedgerPage() {
             <>
               <table className="scr-table">
                 <tbody>
-                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                  <tr style={{ background: "var(--bg-table-header)", fontWeight: 600 }}>
                     <td>{t("gl.pnl.revenues")}</td>
                     <td className="r num">{fmtRON(pnl.totalRevenue)}</td>
                   </tr>
@@ -1241,7 +1241,7 @@ export function GlLedgerPage() {
                       <td className="r num">{fmtRON(l.amount)}</td>
                     </tr>
                   ))}
-                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                  <tr style={{ background: "var(--bg-table-header)", fontWeight: 600 }}>
                     <td>{t("gl.pnl.expenses")}</td>
                     <td className="r num">{fmtRON(pnl.totalExpense)}</td>
                   </tr>
@@ -1262,7 +1262,7 @@ export function GlLedgerPage() {
                     </td>
                     <td className="r num">{fmtRON(pnl.incomeTax)}</td>
                   </tr>
-                  <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                  <tr style={{ background: "var(--bg-table-header)", fontWeight: 600 }}>
                     <td>{t("gl.pnl.netResult")}</td>
                     <td className={`r num ${parseDec(pnl.netResult) >= 0 ? "pos" : "neg"}`}>
                       {fmtRON(pnl.netResult)}

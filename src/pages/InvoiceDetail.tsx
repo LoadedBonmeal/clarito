@@ -668,7 +668,7 @@ export function InvoiceDetailPage() {
                 </tbody>
               </table>
             )}
-            <div className="sold-line" style={{ borderTop: "1px solid var(--line)", background: "#fff" }}>
+            <div className="sold-line" style={{ borderTop: "1px solid var(--line)", background: "var(--bg-content)" }}>
               <span>
                 {t("detail.lines.subtotal")} <span className="num">{fmtRON(invoice.subtotalAmount)}</span> · {t("detail.lines.vat")}{" "}
                 <span className="num">{fmtRON(invoice.vatAmount)}</span>

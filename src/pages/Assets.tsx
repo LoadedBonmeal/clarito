@@ -484,7 +484,7 @@ export function AssetsPage() {
                   <td><span className="doc">{s.expenseAcct} = {s.amortAcct}</span></td>
                 </tr>
               ))}
-              <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+              <tr style={{ background: "var(--bg-table-header)", fontWeight: 600 }}>
                 <td colSpan={2}>{t("assets.run.total", { period: runLabel })}</td>
                 <td className="r num">{fmtRON(run.totalAmount)}</td>
                 <td className="r num">{fmtRON(runAccumTotal)}</td>
@@ -563,7 +563,7 @@ export function AssetsPage() {
                         <td className="r num">{fmtRON(monthly)}</td>
                       </tr>
                     ))}
-                    <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                    <tr style={{ background: "var(--bg-table-header)", fontWeight: 600 }}>
                       <td colSpan={2}>{t("assets.runModal.total", { month: monthLabel })}</td>
                       <td className="r num">{fmtRON(previewTotal)}</td>
                     </tr>

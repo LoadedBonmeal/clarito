@@ -284,7 +284,7 @@ export function ProductsPage() {
                   return (
                     <tr
                       key={p.id}
-                      style={isSel ? { background: "#FCFCFD" } : undefined}
+                      style={isSel ? { background: "var(--bg-table-header)" } : undefined}
                       onClick={() => setSelectedId(p.id)}
                     >
                       <td>

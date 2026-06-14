@@ -574,6 +574,77 @@ mod tests {
         assert!(xml.contains("<angajatorC2 C2_11=\"2\"")); // COUNT = 2 certificate
     }
 
+    /// Wave 2 — GOLDEN GL ≡ D112. The GL note `run_payroll` posts MUST equal the D112 obligation
+    /// totals for the SAME roster (4315↔412 CAS, 4316↔432 CASS, 444↔602 impozit, 436↔480 CAM), so the
+    /// two independent code paths (GL aggregation vs D112 XML) can never silently drift. Mixed roster:
+    /// one full-time + one medical-leave (B-path) employee — both paths read the same DB leaves.
+    #[tokio::test]
+    async fn gl_payroll_totals_equal_d112_obligations() {
+        use rust_decimal::prelude::ToPrimitive;
+        let pool = setup().await;
+        crate::db::payroll::create(&pool, emp_input("1960101410019", "Pop Ana", "5000"))
+            .await
+            .unwrap();
+        let b =
+            crate::db::payroll::create(&pool, emp_input("1900101410011", "Ion Gheorghe", "5500"))
+                .await
+                .unwrap();
+        crate::db::concedii::create(
+            &pool,
+            leave_input(&b.id, "AB", "1234567", "2026-06-08", "2026-06-12"),
+        )
+        .await
+        .unwrap();
+
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
+        let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
+            .await
+            .unwrap();
+
+        // GL path: run_payroll posts the note; read the credit per account from the trial balance.
+        crate::db::payroll::run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let gl_credit = |code: &str| -> i64 {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| {
+                    Decimal::from_str(&r.closing_credit)
+                        .unwrap_or(Decimal::ZERO)
+                        .round_dp_with_strategy(
+                            0,
+                            rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                        )
+                        .to_i64()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+        };
+
+        // D112 path: parse the `angajatorA` obligation `A_datorat` per code.
+        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201").unwrap();
+        let oblig = |cod: &str| -> i64 {
+            let key = format!("A_codOblig=\"{cod}\"");
+            let i = xml
+                .find(&key)
+                .unwrap_or_else(|| panic!("obligația {cod} lipsește"));
+            let dk = "A_datorat=\"";
+            let j = i + xml[i..].find(dk).expect("A_datorat") + dk.len();
+            let end = xml[j..].find('"').unwrap();
+            xml[j..j + end].parse::<i64>().unwrap()
+        };
+
+        assert_eq!(gl_credit("4315"), oblig("412"), "CAS: GL 4315 ≠ D112 412");
+        assert_eq!(gl_credit("4316"), oblig("432"), "CASS: GL 4316 ≠ D112 432");
+        assert_eq!(gl_credit("444"), oblig("602"), "impozit: GL 444 ≠ D112 602");
+        assert_eq!(gl_credit("436"), oblig("480"), "CAM: GL 436 ≠ D112 480");
+    }
+
     /// Dev helper (opt-in): build the D112 from a DB scenario and write it for the real `-v D112`.
     ///   cargo test --lib commands::payroll::tests::dump_d112_from_db -- --ignored --nocapture
     #[tokio::test]

@@ -55,13 +55,14 @@
 .wiz .btn:disabled{opacity:.45;cursor:default}
 .wiz .btn-dark .ic.arrow{transition:transform .2s var(--ease)}
 .wiz .btn-dark:hover .ic.arrow{transform:translateX(2px)}
+.wiz .ic-flip{display:inline-flex;transform:scaleX(-1)}
 
 .wiz-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:18px 30px 24px;border-top:1px solid var(--line);margin-top:14px}
 
 /* plan / regime selectable cards */
 .wiz .opts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}
 .wiz .opt{border:1px solid var(--line);border-radius:12px;padding:14px 15px;cursor:pointer;position:relative;transition:border-color .15s,background .15s,transform .12s var(--ease);background:#fff}
-.wiz .opt:hover{background:#FCFCFD}
+.wiz .opt:hover{background:var(--fill)}
 .wiz .opt.sel{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
 .wiz .opt .ot{font-size:14px;font-weight:600}
 .wiz .opt .od{font-size:12px;color:var(--text-2);margin-top:3px}
@@ -72,7 +73,7 @@
 .wiz .opts.cols1{grid-template-columns:1fr}
 
 /* ANAF card */
-.wiz .anaf-card{border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:18px;background:#FCFCFD}
+.wiz .anaf-card{border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:18px;background:var(--fill)}
 .wiz .anaf-row{display:flex;align-items:center;gap:11px}
 .wiz .anaf-ic{width:34px;height:34px;border-radius:9px;background:#fff;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;flex:none}
 .wiz .anaf-ic svg{width:18px;height:18px;stroke:var(--ink);stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round}
@@ -82,7 +83,7 @@
 .wiz .chip.ok{color:var(--green);background:rgba(4,120,87,.07);border-color:rgba(4,120,87,.18)}
 .wiz .chip.wait{color:var(--dim);background:var(--fill);border-color:var(--line)}
 
-.wiz .kv{display:grid;grid-template-columns:130px 1fr;gap:8px 12px;margin-top:16px;font-size:12.5px;padding:14px;border:1px solid var(--line);border-radius:11px;background:#FCFCFD}
+.wiz .kv{display:grid;grid-template-columns:130px 1fr;gap:8px 12px;margin-top:16px;font-size:12.5px;padding:14px;border:1px solid var(--line);border-radius:11px;background:var(--fill)}
 .wiz .kv dt{color:var(--dim)}
 .wiz .kv dd{color:var(--ink)}
 .wiz .fetched{font-size:11.5px;color:var(--green);margin-top:8px;display:none;align-items:center;gap:5px}

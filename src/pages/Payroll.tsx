@@ -201,7 +201,7 @@ export function PayrollPage() {
     return (
       <div className="main-inner wide pg-payroll">
         <div className="page-head"><div><h1>{t("payroll.title")}</h1></div></div>
-        <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
+        <div className="pf-nocompany">
           {t("payroll.noCompany")}
         </div>
       </div>
@@ -227,7 +227,7 @@ export function PayrollPage() {
         </div>
         <div className="head-actions">
           {/* perioadă — funcționalitate reală (prototipul are luna fixă) */}
-          <div className="nou-wrap" style={{ position: "relative" }}>
+          <div className="nou-wrap">
             <button
               className="pill-btn"
               onMouseDown={(e) => e.stopPropagation()}
@@ -238,15 +238,15 @@ export function PayrollPage() {
               <Ic name="chevD" cls="ic" />
             </button>
             {openPop === "period" && (
-              <div className="pop show" style={{ right: 0, top: 40, width: 220, maxHeight: 320, overflowY: "auto" }} onMouseDown={(e) => e.stopPropagation()}>
-                <div className="col-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div className="pop show period-pop" onMouseDown={(e) => e.stopPropagation()}>
+                <div className="col-title pop-head">
                   <button className="mini-btn" aria-label={t("payroll.actions.prevYear")} onClick={() => setYear(year - 1)}>‹</button>
-                  <span className="num">{year}</span>
+                  <span className="num pop-year">{year}</span>
                   <button className="mini-btn" aria-label={t("payroll.actions.nextYear")} onClick={() => setYear(year + 1)}>›</button>
                 </div>
                 {MONTHS_FULL.map((m, i) => (
                   <button key={m} className="pop-item" onClick={() => { setMonth(i + 1); setOpenPop(""); }}>
-                    <span style={{ flex: 1 }}>{m} {year}</span>
+                    <span className="pop-month-label">{m} {year}</span>
                     {month === i + 1 && <Ic name="check" cls="co-check" />}
                   </button>
                 ))}
@@ -272,7 +272,7 @@ export function PayrollPage() {
       </div>
 
       {/* tabs */}
-      <div className="tabs" style={{ display: "inline-flex", marginBottom: 16 }}>
+      <div className="tabs">
         {tabs.map((tb, i) => (
           <div key={tb.label} className={`tab${tab === i ? " active" : ""}`} onClick={() => setTab(i)}>
             {tb.label}
@@ -287,7 +287,7 @@ export function PayrollPage() {
           <div className="scr-toolbar">
             <div className="tt">{t("payroll.tabs.employees")}</div>
             <div className="spacer" />
-            <div className="scr-search" style={{ width: 190 }}>
+            <div className="scr-search scr-search-sm">
               <Ic name="lens" />
               <input
                 type="text"
@@ -298,7 +298,7 @@ export function PayrollPage() {
             </div>
           </div>
           {filteredEmployees.length === 0 ? (
-            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+            <div className="pf-empty">
               {employees.length === 0
                 ? t("payroll.emp.emptyNone")
                 : t("payroll.emp.emptySearch")}
@@ -306,7 +306,7 @@ export function PayrollPage() {
           ) : (
             <table className="scr-table">
               <thead>
-                <tr><th>{t("payroll.emp.th.name")}</th><th>{t("payroll.emp.th.cnp")}</th><th className="r">{t("payroll.emp.th.gross")}</th><th className="r">{t("payroll.emp.th.deduction")}</th><th className="r" style={{ width: 90 }}></th></tr>
+                <tr><th>{t("payroll.emp.th.name")}</th><th>{t("payroll.emp.th.cnp")}</th><th className="r">{t("payroll.emp.th.gross")}</th><th className="r">{t("payroll.emp.th.deduction")}</th><th className="r w-acts"></th></tr>
               </thead>
               <tbody>
                 {filteredEmployees.map((e) => (
@@ -379,13 +379,13 @@ export function PayrollPage() {
             </button>
           </div>
           {!run ? (
-            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+            <div className="pf-empty">
               {runMut.isPending
                 ? t("payroll.stat.calculating")
                 : t("payroll.stat.emptyPrompt")}
             </div>
           ) : run.states.length === 0 ? (
-            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+            <div className="pf-empty">
               {t("payroll.stat.noActive")}
             </div>
           ) : (
@@ -411,7 +411,7 @@ export function PayrollPage() {
                     <td className="r num">{fmtRON(s.concedii)}</td>
                   </tr>
                 ))}
-                <tr style={{ background: "#FCFCFD", fontWeight: 600 }}>
+                <tr className="total-row">
                   <td>{t("payroll.stat.total")}</td>
                   <td className="r num">{fmtRON(run.totalGross)}</td>
                   <td className="r num">{fmtRON(run.totalCas)}</td>
@@ -445,7 +445,7 @@ export function PayrollPage() {
             </button>
           </div>
           {leaves.length === 0 ? (
-            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+            <div className="pf-empty">
               {t("payroll.cm.empty", { period: `${MONTHS_FULL[month - 1]} ${year}` })}
             </div>
           ) : (
@@ -455,7 +455,7 @@ export function PayrollPage() {
                   <th>{t("payroll.stat.th.employee")}</th><th>{t("payroll.cm.th.certificate")}</th><th>{t("payroll.cm.th.code")}</th><th>{t("payroll.cm.th.period")}</th>
                   <th className="r">{t("payroll.cm.th.daysEmployer")}</th><th className="r">{t("payroll.cm.th.daysFnuass")}</th>
                   <th className="r">{t("payroll.cm.th.amountEmployer")}</th><th className="r">{t("payroll.cm.th.amountFnuass")}</th>
-                  <th className="r" style={{ width: 50 }}></th>
+                  <th className="r w-del"></th>
                 </tr>
               </thead>
               <tbody>
@@ -516,7 +516,7 @@ export function PayrollPage() {
           </div>
           <table className="scr-table">
             <thead>
-              <tr><th>{t("payroll.sedii.th.office")}</th><th>{t("payroll.sedii.th.cif")}</th><th className="r">{t("payroll.sedii.th.assigned")}</th><th className="r" style={{ width: 50 }}></th></tr>
+              <tr><th>{t("payroll.sedii.th.office")}</th><th>{t("payroll.sedii.th.cif")}</th><th className="r">{t("payroll.sedii.th.assigned")}</th><th className="r w-del"></th></tr>
             </thead>
             <tbody>
               <tr>
@@ -705,11 +705,11 @@ function EmployeeModal({
             </div>
             <div className="field">
               <label>{t("payroll.empModal.gross")} <span className="req">*</span></label>
-              <input className="input num" type="text" inputMode="decimal" placeholder="5000" style={{ textAlign: "right" }} {...field("grossSalary")} />
+              <input className="input num" type="text" inputMode="decimal" placeholder="5000" {...field("grossSalary")} />
             </div>
             <div className="field">
               <label>{t("payroll.empModal.deduction")}</label>
-              <input className="input num" type="text" inputMode="decimal" placeholder="0" style={{ textAlign: "right" }} {...field("personalDeduction")} />
+              <input className="input num" type="text" inputMode="decimal" placeholder="0" {...field("personalDeduction")} />
             </div>
             <div className="field">
               <label>{t("payroll.empModal.contractType")}</label>
@@ -937,32 +937,32 @@ function ConcediuModal({
             </div>
             <div className="field">
               <label>{t("payroll.cm.th.daysEmployer")}</label>
-              <input className="input num" type="text" inputMode="numeric" placeholder="5" style={{ textAlign: "right" }} {...num("zileAngajator")} />
+              <input className="input num" type="text" inputMode="numeric" placeholder="5" {...num("zileAngajator")} />
             </div>
             <div className="field">
               <label>{t("payroll.cm.th.daysFnuass")}</label>
-              <input className="input num" type="text" inputMode="numeric" placeholder="0" style={{ textAlign: "right" }} {...num("zileFnuass")} />
+              <input className="input num" type="text" inputMode="numeric" placeholder="0" {...num("zileFnuass")} />
             </div>
             <div className="field">
               <label>{t("payroll.cmModal.amountEmployer")}</label>
-              <input className="input num" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} style={{ textAlign: "right" }} {...num("sumaAngajator")} />
+              <input className="input num" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} {...num("sumaAngajator")} />
             </div>
             <div className="field">
               <label>{t("payroll.cmModal.amountFnuass")}</label>
-              <input className="input num" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} style={{ textAlign: "right" }} {...num("sumaFnuass")} />
+              <input className="input num" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} {...num("sumaFnuass")} />
             </div>
             <div className="field">
               <label>{t("payroll.cmModal.baza")}</label>
-              <input className="input num" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} style={{ textAlign: "right" }} {...num("bazaCalcul")} />
+              <input className="input num" type="text" inputMode="decimal" placeholder={t("payroll.common.zeroAmount")} {...num("bazaCalcul")} />
             </div>
             <div className="field">
               <label>{t("payroll.cmModal.zileBaza")}</label>
-              <input className="input num" type="text" inputMode="numeric" placeholder="0" style={{ textAlign: "right" }} {...num("zileBaza")} />
+              <input className="input num" type="text" inputMode="numeric" placeholder="0" {...num("zileBaza")} />
             </div>
             <div className="field">
               <label>{t("payroll.cmModal.procent")}</label>
               {/* procent D_28: 55/65/75 per OUG 91/2025 — utilizatorul alege */}
-              <input className="input num" type="text" inputMode="numeric" placeholder="55/65/75" style={{ textAlign: "right" }} {...num("procent")} />
+              <input className="input num" type="text" inputMode="numeric" placeholder="55/65/75" {...num("procent")} />
             </div>
             {error && (
               <div className="field span2">

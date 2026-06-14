@@ -423,7 +423,7 @@ export function RecurringPage() {
             </thead>
             <tbody>
               {list.map((r) => (
-                <tr key={r.id} style={!r.active ? { background: "#FCFCFD" } : undefined}>
+                <tr key={r.id} style={!r.active ? { background: "var(--bg-table-header)" } : undefined}>
                   <td>
                     <div className="cli">
                       <span className="cli-ava">{avaInitials(r.templateName)}</span>

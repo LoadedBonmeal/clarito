@@ -253,7 +253,7 @@ export function AccountPage() {
                       <div className="cli">
                         <span
                           className="cli-ava"
-                          style={isActive ? { background: "var(--black)", color: "#fff", border: 0 } : undefined}
+                          style={isActive ? { background: "var(--black)", color: "var(--on-accent)", border: 0 } : undefined}
                         >
                           {(c.legalName[0] ?? "—").toUpperCase()}
                         </span>

@@ -64,32 +64,7 @@ const tierLabel = (t: TFunction): Record<string, string> => ({
   FIRM: t("onboarding.tiers.firm"),
 });
 
-// Prototype inline icons not in the Ic set (verbatim paths).
-const CheckSvg = () => (
-  <svg viewBox="0 0 24 24">
-    <path d="M4.5 12.75 10 18l9.5-11.5" />
-  </svg>
-);
-const ArrowIc = ({ back }: { back?: boolean }) => (
-  <svg className="ic arrow" viewBox="0 0 24 24" style={back ? { transform: "scaleX(-1)" } : undefined}>
-    <path d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
-  </svg>
-);
-const ExtLinkIc = () => (
-  <svg className="ic" viewBox="0 0 24 24">
-    <path d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-  </svg>
-);
-const HomeIc = () => (
-  <svg className="ic" viewBox="0 0 24 24">
-    <path d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
-  </svg>
-);
-const InfoSvg = () => (
-  <svg viewBox="0 0 24 24">
-    <path d="M11.25 11.25l.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
-  </svg>
-);
+// Local wrappers removed — use shared Ic component instead.
 
 // ─── Company form state ───────────────────────────────────────────────────────
 
@@ -388,7 +363,7 @@ export function OnboardingWizard() {
               <h2>{t("onboarding.welcome.title")}</h2>
               <p className="lead">{t("onboarding.welcome.lead")}</p>
               <div className="toggle-note">
-                <InfoSvg />
+                <Ic name="info" />
                 <span>{t("onboarding.welcome.note")}</span>
               </div>
             </div>
@@ -408,7 +383,7 @@ export function OnboardingWizard() {
                         <div className="at">{TIER_LABEL[existingLicense.tier] ?? existingLicense.tier}</div>
                         <div className="as">{existingLicense.email ?? t("onboarding.license.localLicense")}</div>
                       </div>
-                      <span className="chip ok"><svg className="sic" viewBox="0 0 24 24"><path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>{t("onboarding.license.activeChip")}</span>
+                      <span className="chip ok"><Ic name="checkC" cls="sic" />{t("onboarding.license.activeChip")}</span>
                     </div>
                   </div>
                 </>
@@ -427,7 +402,7 @@ export function OnboardingWizard() {
                       >
                         <div className="ot">{o.ot}</div>
                         <div className="od">{o.od}</div>
-                        <span className="chk"><CheckSvg /></span>
+                        <span className="chk"><Ic name="check" /></span>
                       </div>
                     ))}
                   </div>
@@ -499,7 +474,7 @@ export function OnboardingWizard() {
                 </button>
               </div>
               <div className={"fetched" + (anafData ? " show" : "")}>
-                <CheckSvg />
+                <Ic name="check" />
                 {t("onboarding.company.fetched")}
               </div>
               {cuiLookupError && <p className="werr">{cuiLookupError}</p>}
@@ -619,12 +594,12 @@ export function OnboardingWizard() {
                   </div>
                   {spvConnected ? (
                     <span className="chip ok">
-                      <svg className="sic" viewBox="0 0 24 24"><path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
+                      <Ic name="checkC" cls="sic" />
                       {t("onboarding.spv.connected")}
                     </span>
                   ) : (
                     <span className="chip wait">
-                      <svg className="sic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5" /></svg>
+                      <Ic name="dot" cls="sic" />
                       {t("onboarding.spv.notConnected")}
                     </span>
                   )}
@@ -637,14 +612,14 @@ export function OnboardingWizard() {
                     disabled={isAuthenticating}
                     onClick={() => { void handleAuthorize(); }}
                   >
-                    <ExtLinkIc />
+                    <Ic name="extLink" />
                     {isAuthenticating ? t("onboarding.spv.authorizing") : t("onboarding.spv.connect")}
                   </button>
                 )}
               </div>
               {spvError && <p className="werr">{spvError}</p>}
               <div className="toggle-note">
-                <InfoSvg />
+                <Ic name="info" />
                 <span>{t("onboarding.spv.note")}</span>
               </div>
               {!spvConnected && (
@@ -720,7 +695,7 @@ export function OnboardingWizard() {
           {step === 5 && (
             <div className="step active">
               <div className="done-wrap">
-                <div className="done-ring"><CheckSvg /></div>
+                <div className="done-ring"><Ic name="check" /></div>
                 <h2>{t("onboarding.doneStep.title")}</h2>
                 <p className="lead" style={{ maxWidth: 380, margin: "7px auto 0" }}>
                   {t("onboarding.doneStep.lead")}
@@ -750,7 +725,7 @@ export function OnboardingWizard() {
             disabled={backDisabled}
             onClick={() => setStep((s) => Math.max(0, s - 1))}
           >
-            <ArrowIc back />
+            <span className="ic-flip"><Ic name="arrowR" cls="ic arrow" /></span>
             {t("onboarding.nav.back")}
           </button>
           {!isLast ? (
@@ -760,7 +735,7 @@ export function OnboardingWizard() {
                 : step === 0
                 ? t("onboarding.nav.start")
                 : t("onboarding.nav.next")}
-              <ArrowIc />
+              <Ic name="arrowR" cls="ic arrow" />
             </button>
           ) : (
             <button
@@ -769,7 +744,7 @@ export function OnboardingWizard() {
               disabled={finishing}
               onClick={() => { void handleFinish(); }}
             >
-              <HomeIc />
+              <Ic name="home" />
               {finishing ? t("onboarding.nav.finishing") : t("onboarding.nav.enter")}
             </button>
           )}

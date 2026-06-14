@@ -498,7 +498,7 @@ export function InvoicesPage() {
         <div className="head-actions">
           <button className="btn-dark" onClick={() => void navigate({ to: "/invoices/new" })}>
             <Ic name="plus" />{t("invoices.newInvoice")}
-            <span className="kbd" style={{ background: "rgba(255,255,255,.15)", borderColor: "rgba(255,255,255,.3)", color: "#fff" }}>⌘ N</span>
+            <span className="kbd" style={{ background: "rgba(255,255,255,.15)", borderColor: "rgba(255,255,255,.3)", color: "var(--on-accent)" }}>⌘ N</span>
           </button>
         </div>
       </div>
