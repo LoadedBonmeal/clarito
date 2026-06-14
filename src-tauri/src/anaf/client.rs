@@ -731,7 +731,24 @@ impl AnafClient {
                 ));
             }
 
+            // Cap the body size: a spoofed/MITM'd response or a zip-bomb must not OOM the app. The
+            // file-import path is capped at 10 MiB; the SPV network ingress matches with a 25 MiB cap
+            // (Content-Length first, then the actual buffered length as a backstop).
+            const MAX_SPV_DOWNLOAD: u64 = 25 * 1024 * 1024;
+            if resp
+                .content_length()
+                .is_some_and(|len| len > MAX_SPV_DOWNLOAD)
+            {
+                return Err(
+                    "Răspuns SPV prea mare (peste 25 MiB) — descărcare respinsă.".to_string(),
+                );
+            }
             let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+            if bytes.len() as u64 > MAX_SPV_DOWNLOAD {
+                return Err(
+                    "Răspuns SPV prea mare (peste 25 MiB) — descărcare respinsă.".to_string(),
+                );
+            }
             return Ok(bytes.to_vec());
         }
     }

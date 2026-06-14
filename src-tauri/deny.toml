@@ -1,0 +1,27 @@
+# cargo-deny supply-chain policy for the Clarito backend.
+# Run:  cargo deny check advisories bans sources
+# cargo-deny is NOT bundled with the repo; CI installs it (.github/workflows/audit.yml).
+# Re-run the triage below whenever Cargo.lock changes.
+
+[advisories]
+# RustSec advisory DB; unfixable advisories are recorded in `ignore` with a rationale.
+yanked = "warn"
+ignore = [
+    # rsa 0.9.x — RUSTSEC-2023-0071 "Marvin" timing side-channel in RSA decryption.
+    # No fixed release upstream as of 2026-06. Reachable only via the OAuth/TLS stack
+    # (rustls certificate handling), NOT as an attacker-observable high-frequency RSA
+    # decryption oracle in this LOCAL, single-operator desktop app — so not practically
+    # exploitable here. REVISIT when the `rsa` crate publishes a constant-time fix.
+    "RUSTSEC-2023-0071",
+]
+
+[bans]
+# Flag (don't fail) duplicate crate versions + wildcard deps — pure hygiene signal.
+multiple-versions = "warn"
+wildcards = "warn"
+
+[sources]
+# Only crates.io + no unknown git sources — supply-chain provenance.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

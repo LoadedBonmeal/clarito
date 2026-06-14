@@ -327,11 +327,16 @@ pub async fn create(pool: &SqlitePool, input: MedicalLeaveInput) -> AppResult<Me
 }
 
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
-    sqlx::query("DELETE FROM medical_leaves WHERE id=?1 AND company_id=?2")
+    // Scoped by company_id (data is safe regardless); signal NotFound on a cross-company / missing id
+    // so the behaviour matches every other delete() in db/* (consistency — Wave 0 isolation).
+    let r = sqlx::query("DELETE FROM medical_leaves WHERE id=?1 AND company_id=?2")
         .bind(id)
         .bind(company_id)
         .execute(pool)
         .await?;
+    if r.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
     Ok(())
 }
 
@@ -416,6 +421,31 @@ mod tests {
             loc_prescriere: Some(1),
             cod_boala: Some("01".into()),
         }
+    }
+
+    /// Wave 0 — cross-company data isolation: a medical leave belongs to one company; another
+    /// company's id must NOT delete it, and list() must not surface it. (medical_leaves had no
+    /// isolation test — it is one of the newest scoped entities.)
+    #[tokio::test]
+    async fn cross_company_isolation() {
+        let pool = pool().await;
+        let m = create(&pool, valid_input()).await.unwrap();
+        assert!(
+            matches!(
+                delete(&pool, &m.id, "intrus-co").await,
+                Err(AppError::NotFound)
+            ),
+            "cross-company delete must return NotFound"
+        );
+        assert!(
+            list(&pool, "intrus-co", "2026-06")
+                .await
+                .unwrap()
+                .is_empty(),
+            "cross-company list must be empty"
+        );
+        // The rightful owner can still delete it.
+        assert!(delete(&pool, &m.id, "co").await.is_ok());
     }
 
     #[tokio::test]

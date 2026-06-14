@@ -1,0 +1,21 @@
+name: supply-chain audit
+
+# Dependency-CVE + source/ban gate over src-tauri/Cargo.lock (~766 crates). Policy in
+# src-tauri/deny.toml. Runs on every push/PR + weekly so new advisories surface promptly.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+jobs:
+  cargo-deny:
+    name: cargo-deny (advisories, bans, sources)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check advisories bans sources

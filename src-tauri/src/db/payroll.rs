@@ -685,6 +685,56 @@ mod tests {
         assert!(list_sedii(&pool, "co1").await.unwrap().is_empty());
     }
 
+    /// Wave 0 — cross-company data isolation for employees: get/update/delete with a foreign
+    /// company_id must return NotFound (employees is one of the newest scoped entities; had no test).
+    #[tokio::test]
+    async fn employee_cross_company_isolation() {
+        let pool = setup().await;
+        let e = create(
+            &pool,
+            CreateEmployeeInput {
+                company_id: "co1".into(),
+                cnp: "1900101410011".into(),
+                full_name: "Ion".into(),
+                gross_salary: "5000".into(),
+                personal_deduction: Some("0".into()),
+                employment_date: None,
+                tip_asigurat: None,
+                pensionar: None,
+                tip_contract: None,
+                ore_norma: None,
+                exceptie_cas_min: None,
+                sediu_cif: None,
+                beneficiar_suma_netaxabila: None,
+            },
+        )
+        .await
+        .unwrap();
+        use crate::error::AppError;
+        assert!(
+            matches!(
+                get(&pool, &e.id, "intrus-co").await,
+                Err(AppError::NotFound)
+            ),
+            "get cross-company → NotFound"
+        );
+        assert!(
+            matches!(
+                update(&pool, &e.id, "intrus-co", UpdateEmployeeInput::default()).await,
+                Err(AppError::NotFound)
+            ),
+            "update cross-company → NotFound"
+        );
+        assert!(
+            matches!(
+                delete(&pool, &e.id, "intrus-co").await,
+                Err(AppError::NotFound)
+            ),
+            "delete cross-company → NotFound"
+        );
+        assert!(get(&pool, &e.id, "co1").await.is_ok(), "owner keeps access");
+    }
+
     #[tokio::test]
     async fn run_payroll_aggregates_and_posts_gl() {
         let pool = setup().await;

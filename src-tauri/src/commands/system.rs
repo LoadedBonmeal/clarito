@@ -187,14 +187,36 @@ pub async fn export_activity_log_csv(
         let ts = chrono::DateTime::from_timestamp(created_at, 0)
             .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
             .unwrap_or_else(|| created_at.to_string());
-        // Proper CSV escaping: wrap fields with commas/quotes in double-quotes
-        let meta_safe = metadata.replace('"', "\"\"");
-        csv.push_str(&format!(
-            "{},{},\"{}\",{}\r\n",
-            id, entity_id, meta_safe, ts
-        ));
+        // Neutralize CSV/DDE formula injection on the user-derived fields, then quote-escape.
+        let entity_id = sanitize_csv_field(&entity_id);
+        let meta_safe = sanitize_csv_field(&metadata).replace('"', "\"\"");
+        csv.push_str(&format!("{id},{entity_id},\"{meta_safe}\",{ts}\r\n"));
     }
     Ok(csv)
+}
+
+/// Neutralize CSV/DDE formula injection: a field beginning with `= + - @` (or TAB/CR) is prefixed
+/// with a single quote so a spreadsheet treats it as text, not a formula. Excel/LibreOffice execute
+/// `=cmd()`, `+`, `-`, `@DDE` on open, so any user-derived CSV field must pass through this.
+pub(crate) fn sanitize_csv_field(s: &str) -> String {
+    match s.chars().next() {
+        Some('=' | '+' | '-' | '@' | '\t' | '\r') => format!("'{s}"),
+        _ => s.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod csv_injection_tests {
+    use super::sanitize_csv_field;
+    #[test]
+    fn prefixes_formula_leads_only() {
+        for bad in ["=1+1", "+1", "-1", "@SUM", "\tx", "\rx"] {
+            assert_eq!(sanitize_csv_field(bad), format!("'{bad}"));
+        }
+        for ok in ["FAC-2026-001", "Pop Ana", "123", "a=b"] {
+            assert_eq!(sanitize_csv_field(ok), ok);
+        }
+    }
 }
 
 /// Verifică dacă versiunile formularelor ANAF grupate sunt la zi față de manifesto-ul CDN.
