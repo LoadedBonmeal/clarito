@@ -238,6 +238,36 @@ fn validate_leave(input: &MedicalLeaveInput) -> AppResult<()> {
         }
         _ => {}
     }
+    // Santinelă indemnizație: D_20+D_21 nu pot depăși 100% din media zilnică × zilele acoperite
+    // (procentul ≤ 100%, deci suma legitimă = media × procent × zile ≤ media × zile). Prinde sumele
+    // greșite cu un ordin de mărime fără a respinge valorile corecte; calculul exact rămâne al
+    // utilizatorului. media = ROUND(bază_calcul / zile_bază, 2).
+    if let (Some(baza), Some(zb)) = (
+        input
+            .baza_calcul
+            .as_deref()
+            .and_then(|s| Decimal::from_str(s.trim()).ok())
+            .filter(|d| !d.is_zero()),
+        input.zile_baza.filter(|z| *z > 0),
+    ) {
+        let media = (baza / Decimal::from(zb))
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+        let total_zile =
+            input.zile_angajator.unwrap_or(0).max(0) + input.zile_fnuass.unwrap_or(0).max(0);
+        let cap = media * Decimal::from(total_zile);
+        let parse = |o: &Option<String>| {
+            o.as_deref()
+                .and_then(|s| Decimal::from_str(s.trim()).ok())
+                .unwrap_or_default()
+        };
+        let suma = parse(&input.suma_angajator) + parse(&input.suma_fnuass);
+        if suma > cap + Decimal::ONE {
+            return Err(AppError::Validation(format!(
+                "Indemnizația ({suma} lei) depășește 100% din media zilnică × {total_zile} zile \
+                 ({cap} lei) — verificați sumele D_20/D_21."
+            )));
+        }
+    }
     Ok(())
 }
 

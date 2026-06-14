@@ -73,7 +73,7 @@ pub async fn export_saft_official(
     let dest = validate_export_path(&params.dest_path)?;
 
     let (date_from, date_to) = if let Some(m) = params.month {
-        let last_day = days_in_month(params.year, m as u32);
+        let last_day = crate::db::payroll::days_in_month(params.year, m as u32);
         (
             format!("{}-{:02}-01", params.year, m),
             format!("{}-{:02}-{:02}", params.year, m, last_day),
@@ -151,7 +151,7 @@ pub async fn export_saft_d406(state: State<'_, AppState>, params: SaftParams) ->
 
 async fn generate_saft(pool: &sqlx::SqlitePool, params: SaftParams) -> AppResult<String> {
     let (date_from, date_to) = if let Some(m) = params.month {
-        let last_day = days_in_month(params.year, m as u32);
+        let last_day = crate::db::payroll::days_in_month(params.year, m as u32);
         (
             format!("{}-{:02}-01", params.year, m),
             format!("{}-{:02}-{:02}", params.year, m, last_day),
@@ -540,20 +540,7 @@ fn escape_xml(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-fn days_in_month(year: i32, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => {
-            if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
-                29
-            } else {
-                28
-            }
-        }
-        _ => 30,
-    }
-}
+// `days_in_month` is the canonical `crate::db::payroll::days_in_month` (de-duplicated, Wave 4).
 
 #[cfg(test)]
 mod tests {
