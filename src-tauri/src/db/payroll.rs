@@ -623,15 +623,17 @@ pub async fn run_payroll(
         company_id,
         period_from,
         period_to,
-        t_gross,
-        t_cas,
-        t_cass,
-        t_tax,
-        t_cam,
-        t_concedii,
-        t_cas_diff,
-        t_cass_diff,
-        indemn.clone(),
+        crate::db::gl::PayrollTotals {
+            gross: t_gross,
+            cas: t_cas,
+            cass: t_cass,
+            impozit: t_tax,
+            cam: t_cam,
+            concedii: t_concedii,
+            cas_diff: t_cas_diff,
+            cass_diff: t_cass_diff,
+            indemn: indemn.clone(),
+        },
     )
     .await?;
 

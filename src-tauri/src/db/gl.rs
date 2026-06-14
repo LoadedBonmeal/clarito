@@ -2704,30 +2704,53 @@ impl IndemnityTotals {
     }
 }
 
+/// Aggregated monthly payroll totals fed to [`post_payroll`] (Wave 4 — replaces a 13-positional-arg
+/// signature). All whole-lei (ANAF commercial rounding) except `gross`/`net`-bearing sums.
+#[derive(Debug, Clone)]
+pub struct PayrollTotals {
+    /// Σ brut lucrat (D 641).
+    pub gross: Decimal,
+    /// CAS 25% salarial (C 4315).
+    pub cas: Decimal,
+    /// CASS 10% salarial (C 4316).
+    pub cass: Decimal,
+    /// Impozit 10% (C 444).
+    pub impozit: Decimal,
+    /// CAM 2,25% angajator pe baza agregată (C 436).
+    pub cam: Decimal,
+    /// Contribuția 0,85% concedii și indemnizații, angajator (OUG 158/2005). 0 dacă lipsește.
+    pub concedii: Decimal,
+    /// Diferența CAS bază minimă part-time, suportată de angajator (art. 146 (5^6)). 0 dacă lipsește.
+    pub cas_diff: Decimal,
+    /// Diferența CASS bază minimă part-time, suportată de angajator. 0 dacă lipsește.
+    pub cass_diff: Decimal,
+    /// Indemnizațiile de concediu medical ale lunii (gol ⇒ fără postări de indemnizație).
+    pub indemn: IndemnityTotals,
+}
+
 /// Post the monthly payroll aggregate to the GL (OMFP 1802/2014 monograph): D 641 / C 421 (gross);
 /// D 421 / C 4315 (CAS), C 4316 (CASS), C 444 (impozit) — withholdings; D 646 / C 436 (CAM,
 /// employer). Concediile medicale (OUG 158/2005) adaugă: D 6458 / C 423 (employer indemnity), D 4382
 /// / C 423 (FNUASS recoverable), D 423 / C 4315/4316/444 (withholdings). After this, 421 = net salary
 /// and 423 = net indemnity payable. Idempotent per `(company,'PAYROLL',period)`.
-#[allow(clippy::too_many_arguments)]
 pub async fn post_payroll(
     pool: &SqlitePool,
     company_id: &str,
     period_from: &str,
     period_to: &str,
-    gross: Decimal,
-    cas: Decimal,
-    cass: Decimal,
-    impozit: Decimal,
-    cam: Decimal,
-    // Contribuția 0,85% pentru concedii și indemnizații (angajator, OUG 158/2005). 0 if none.
-    concedii: Decimal,
-    // Part-time minimum-base employer-borne CAS/CASS difference (art. 146 (5^6)). 0 if none.
-    cas_diff: Decimal,
-    cass_diff: Decimal,
-    // Indemnizații de concediu medical ale lunii (gol ⇒ fără postări de indemnizație).
-    indemn: IndemnityTotals,
+    totals: PayrollTotals,
 ) -> AppResult<PayrollPostResult> {
+    let PayrollTotals {
+        gross,
+        cas,
+        cass,
+        impozit,
+        cam,
+        concedii,
+        cas_diff,
+        cass_diff,
+        indemn,
+    } = totals;
     let source_id = format!("{period_from}_{period_to}");
     // Net total = net salariu lucrat + net indemnizație.
     let net = (gross + indemn.employer + indemn.fnuass)
