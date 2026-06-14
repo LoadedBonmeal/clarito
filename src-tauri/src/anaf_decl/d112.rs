@@ -18,11 +18,12 @@ use serde::{Deserialize, Serialize};
 const CAS_PCT: (i64, u32) = (25, 2); // 0.25
 const CASS_PCT: (i64, u32) = (10, 2); // 0.10
 const INCOME_TAX_PCT: (i64, u32) = (10, 2); // 0.10
-const CAM_PCT: (i64, u32) = (225, 4); // 0.0225
+pub(crate) const CAM_PCT: (i64, u32) = (225, 4); // 0.0225
 /// Contribuția pentru concedii și indemnizații de asigurări sociale de sănătate (CCI, OUG 158/2005
-/// art. 4 alin. (2)) — datorată de ANGAJATOR, separat de CAM. 0,85% pe fondul de salarii (venitul
-/// supus CASS). NU a fost inclusă în CAM de reforma 2018 (confirmat 2026).
-const CONCEDII_PCT: (i64, u32) = (85, 4); // 0.0085
+/// art. 4 alin. (2), modificat de Legea 399/2006) — datorată de ANGAJATOR, separat de CAM. 0,85% pe
+/// fondul de salarii (venitul supus CASS), în vigoare din 1 ian. 2007. NU a fost inclusă în CAM de
+/// reforma 2018 (confirmat 2026 — cota 0,85%, nu 0,75% din forma inițială 2005).
+pub(crate) const CONCEDII_PCT: (i64, u32) = (85, 4); // 0.0085
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -58,7 +59,7 @@ pub struct PayrollResult {
     pub non_taxable: String,
 }
 
-fn pct(d: Decimal, (n, s): (i64, u32)) -> Decimal {
+pub(crate) fn pct(d: Decimal, (n, s): (i64, u32)) -> Decimal {
     // Contributions/tax rounded to whole lei with COMMERCIAL rounding (half away from zero), the
     // ANAF convention — e.g. 5.000 × 2,25% = 112,5 → 113 (banker's would give 112).
     (d * Decimal::new(n, s)).round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
@@ -151,7 +152,15 @@ pub(crate) fn min_wage_lei(year: i32, month: u32) -> Decimal {
 pub(crate) fn carve_out_lei(year: i32, month: u32) -> Decimal {
     match (year, month) {
         (2026, m) if m <= 6 => Decimal::from(300),
-        _ => Decimal::from(200),
+        (2026, _) => Decimal::from(200),
+        _ => {
+            tracing::warn!(
+                year,
+                month,
+                "carve_out_lei: an neacoperit — se reutilizează valorile 2026"
+            );
+            Decimal::from(200)
+        }
     }
 }
 
@@ -161,7 +170,15 @@ pub(crate) fn carve_out_lei(year: i32, month: u32) -> Decimal {
 fn carve_out_gross_ceiling(year: i32, month: u32) -> Decimal {
     match (year, month) {
         (2026, m) if m <= 6 => Decimal::from(4300),
-        _ => Decimal::from(4600),
+        (2026, _) => Decimal::from(4600),
+        _ => {
+            tracing::warn!(
+                year,
+                month,
+                "carve_out_gross_ceiling: an neacoperit — se reutilizează valorile 2026"
+            );
+            Decimal::from(4600)
+        }
     }
 }
 

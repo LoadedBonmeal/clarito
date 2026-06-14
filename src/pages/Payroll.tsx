@@ -815,7 +815,8 @@ function ConcediuModal({
   const [f, setF] = useState({
     employeeId: "", serie: "", numar: "", codIndemnizatie: "01",
     dataAcordare: "", dataInceput: "", dataSfarsit: "", zileAngajator: "", zileFnuass: "",
-    bazaCalcul: "", zileBaza: "", sumaAngajator: "", sumaFnuass: "", procent: "75",
+    bazaCalcul: "", zileBaza: "", sumaAngajator: "", sumaFnuass: "", procent: "",
+    // procent (D_28): 55/65/75 per scala OUG 91/2025 — introdus de utilizator
     locPrescriere: "1", codBoala: "",
   });
   const [error, setError] = useState<string | null>(null);
@@ -960,7 +961,8 @@ function ConcediuModal({
             </div>
             <div className="field">
               <label>{t("payroll.cmModal.procent")}</label>
-              <input className="input num" type="text" inputMode="numeric" placeholder="75" style={{ textAlign: "right" }} {...num("procent")} />
+              {/* procent D_28: 55/65/75 per OUG 91/2025 — utilizatorul alege */}
+              <input className="input num" type="text" inputMode="numeric" placeholder="55/65/75" style={{ textAlign: "right" }} {...num("procent")} />
             </div>
             {error && (
               <div className="field span2">

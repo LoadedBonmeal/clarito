@@ -449,6 +449,18 @@ fn standard_accounts() -> Vec<SeedEntry> {
             parent: None,
         },
         SeedEntry {
+            code: "4373",
+            name: "Contribuția pentru concedii și indemnizații",
+            class: 4,
+            parent: None,
+        },
+        SeedEntry {
+            code: "4382",
+            name: "Alte creanțe privind asigurările sociale",
+            class: 4,
+            parent: None,
+        },
+        SeedEntry {
             code: "436",
             name: "Contribuția asiguratorie pentru muncă (CAM)",
             class: 4,

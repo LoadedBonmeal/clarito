@@ -206,11 +206,16 @@ pub async fn create(
 
     let id = new_id();
     let now = now_unix();
+    // Normalize empty strings → None so the fallback (unwrap_or) fires correctly.
+    // Some("") is not the same as None, so we filter it out explicitly (EDGE-002).
     let start_up = input
         .start_up_date
         .as_deref()
+        .filter(|s| !s.trim().is_empty())
         .unwrap_or(&input.date_of_acquisition)
         .to_string();
+    // Store None rather than Some("") for disposal_date so downstream slicing is safe.
+    let disposal_date = input.disposal_date.filter(|s| !s.trim().is_empty());
 
     sqlx::query(
         "INSERT INTO fixed_assets (
@@ -234,7 +239,7 @@ pub async fn create(
     .bind(input.life_months.unwrap_or(60))
     .bind(input.depreciation_method.as_deref().unwrap_or("liniara"))
     .bind(input.depreciation_pct.as_deref().unwrap_or("0.00"))
-    .bind(&input.disposal_date)
+    .bind(&disposal_date)
     .bind(input.active.unwrap_or(true) as i32)
     .bind(now)
     .execute(pool)
@@ -372,23 +377,18 @@ pub fn amort_account_for(asset_account: &str) -> &'static str {
     }
 }
 
-/// Parse YYYY-MM-DD into (year: i64, month: u32). Returns (0, 1) on parse failure.
-/// `true` for a well-formed ISO date `YYYY-MM-DD` (month 1-12, day 1-31). Asset dates feed the
+/// `true` for a well-formed, calendar-valid ISO date `YYYY-MM-DD`. Asset dates feed the
 /// depreciation month math ([`parse_ym`]); a malformed one would otherwise compute from year 0.
+/// Uses `chrono::NaiveDate` so impossible days like 2025-02-31 are also rejected.
 fn valid_ymd(s: &str) -> bool {
-    let p: Vec<&str> = s.split('-').collect();
-    if p.len() != 3 || p[0].len() != 4 || p[1].len() != 2 || p[2].len() != 2 {
-        return false;
-    }
-    if !p.iter().all(|seg| seg.bytes().all(|b| b.is_ascii_digit())) {
-        return false;
-    }
-    let m = p[1].parse::<u32>().unwrap_or(0);
-    let d = p[2].parse::<u32>().unwrap_or(0);
-    (1..=12).contains(&m) && (1..=31).contains(&d)
+    // Strict ISO `YYYY-MM-DD`: chrono's `%Y-%m-%d` accepts non-zero-padded ("2025-1-5"), so also
+    // require length 10 to enforce the AAAA-LL-ZZ promise; chrono rejects impossible calendar days
+    // (e.g. 2025-02-31) and months (13).
+    s.len() == 10 && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
 }
 
-/// `("YYYY-MM-DD")` → `(year, month)`. Asset dates are guarded by [`valid_ymd`] at create/update, so a
+/// Parse YYYY-MM-DD into (year: i64, month: u32). Returns (0, 1) on parse failure.
+/// Asset dates are guarded by [`valid_ymd`] at create/update, so a
 /// fallback here means a legacy/corrupt row — we WARN (not silently compute depreciation from year 0).
 fn parse_ym(date: &str) -> (i64, u32) {
     let parts: Vec<&str> = date.splitn(3, '-').collect();
@@ -442,6 +442,18 @@ pub async fn update(
         }
         d.to_string()
     };
+    // Normalize empty strings → None/fallback so the EDGE-002 guard covers update() too.
+    let start_up_update = input
+        .start_up_date
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(&cur.start_up_date)
+        .to_string();
+    let disposal_date_update = input
+        .disposal_date
+        .filter(|s| !s.trim().is_empty())
+        .or(cur.disposal_date);
+
     sqlx::query(
         "UPDATE fixed_assets SET asset_code=?3, account_id=?4, description=?5, \
          date_of_acquisition=?6, start_up_date=?7, acquisition_cost=?8, life_months=?9, \
@@ -454,7 +466,7 @@ pub async fn update(
     .bind(input.account_id.as_deref().unwrap_or(&cur.account_id))
     .bind(&input.description)
     .bind(&input.date_of_acquisition)
-    .bind(input.start_up_date.as_deref().unwrap_or(&cur.start_up_date))
+    .bind(&start_up_update)
     .bind(&cost)
     .bind(input.life_months.unwrap_or(cur.life_months))
     .bind(
@@ -463,7 +475,7 @@ pub async fn update(
             .as_deref()
             .unwrap_or(&cur.depreciation_method),
     )
-    .bind(input.disposal_date.or(cur.disposal_date))
+    .bind(disposal_date_update)
     .bind(input.active.unwrap_or(cur.active))
     .bind(now_unix())
     .execute(pool)
@@ -507,8 +519,20 @@ pub async fn run_depreciation(
     period_from: &str,
     period_to: &str,
 ) -> AppResult<DepreciationRun> {
+    if !valid_ymd(period_from) {
+        return Err(AppError::Validation(
+            "Data de început a perioadei este invalidă — folosiți AAAA-LL-ZZ.".into(),
+        ));
+    }
+    if !valid_ymd(period_to) {
+        return Err(AppError::Validation(
+            "Data de sfârșit a perioadei este invalidă — folosiți AAAA-LL-ZZ.".into(),
+        ));
+    }
     let period_ym = ym_of(period_from);
-    let period = &period_from[..7]; // YYYY-MM
+    let period = period_from
+        .get(..7)
+        .ok_or_else(|| AppError::Validation("Dată invalidă — folosiți AAAA-LL-ZZ.".into()))?; // YYYY-MM
     let assets = list(pool, company_id).await?;
     let mut states = Vec::new();
     let mut total = Decimal::ZERO;
@@ -599,11 +623,18 @@ pub async fn dispose(
     asset_id: &str,
     disposal_date: &str,
 ) -> AppResult<()> {
+    if !valid_ymd(disposal_date) {
+        return Err(AppError::Validation(
+            "Data scoaterii din uz este invalidă — folosiți AAAA-LL-ZZ.".into(),
+        ));
+    }
     let asset = get(pool, asset_id, company_id).await?;
     let cost = Decimal::from_str(asset.acquisition_cost.trim()).unwrap_or(Decimal::ZERO);
     // Accumulated = Σ register amounts through the disposal month (single source of truth so GL ties).
     // Sum the Decimal-as-TEXT amounts in Rust to avoid f64 precision loss.
-    let disp_ym = &disposal_date[..7];
+    let disp_ym = disposal_date
+        .get(..7)
+        .ok_or_else(|| AppError::Validation("Dată invalidă — folosiți AAAA-LL-ZZ.".into()))?;
     let amounts: Vec<String> = sqlx::query_scalar::<_, String>(
         "SELECT amount FROM asset_depreciation \
          WHERE company_id=?1 AND asset_id=?2 AND period<=?3",
@@ -885,6 +916,9 @@ mod tests {
         assert!(!valid_ymd("2025-13-01")); // month 13
         assert!(!valid_ymd("2025-00-10")); // month 0
         assert!(!valid_ymd("abcd-ef-gh")); // non-numeric
+                                           // Chrono-level calendar check: impossible days must be rejected.
+        assert!(!valid_ymd("2025-02-31")); // Feb 31 doesn't exist
+        assert!(!valid_ymd("2025-13-01")); // month 13 (double-check via chrono)
                                            // parse_ym never silently yields year 0 for a valid date.
         assert_eq!(parse_ym("2026-06-15"), (2026, 6));
     }
@@ -941,6 +975,24 @@ mod tests {
         assert_eq!(
             Decimal::from_str(asset.acquisition_cost.trim()).unwrap(),
             Decimal::from_str("5000.50").unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn create_empty_start_up_date_falls_back_to_acquisition() {
+        // EDGE-002: Some("") must behave like None — start_up_date should fall back to
+        // date_of_acquisition, not be stored as "" (which would make parse_ym compute from year 0).
+        let pool = setup_asset_pool().await;
+        let mut input = sample_input();
+        input.start_up_date = Some("".into());
+        let asset = create(&pool, "co-1", input).await.unwrap();
+        assert_eq!(
+            asset.start_up_date, asset.date_of_acquisition,
+            "empty start_up_date must fall back to date_of_acquisition"
+        );
+        assert!(
+            !asset.start_up_date.is_empty(),
+            "start_up_date must not be stored as empty"
         );
     }
 

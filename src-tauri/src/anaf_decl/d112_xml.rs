@@ -135,6 +135,7 @@ pub mod oblig {
     pub const CAM: (&str, &str) = ("480", "20470300XX");
 }
 
+use crate::anaf_decl::d112::cm_indemn_treatment;
 use crate::anaf_decl::xml_esc as esc;
 
 /// Construiește XML-ul D112 pentru o lună. `employees` sunt deja salariații activi cu contribuțiile
@@ -379,10 +380,12 @@ fn month_totals(e: &D112Employee) -> MonthTotals {
         .iter()
         .map(|l| l.suma_ang + l.suma_fnuass)
         .sum();
+    // [P4 / DRY] Use cm_indemn_treatment (canonical source in d112.rs) instead of repeating the
+    // {01,07,10} literal set. cass_due == false ⇒ CASS-exempt indemnity.
     let cm_scutit: i64 = e
         .med_leaves
         .iter()
-        .filter(|l| !matches!(l.cod_indemn.as_str(), "01" | "07" | "10"))
+        .filter(|l| !cm_indemn_treatment(l.cod_indemn.as_str()).0)
         .map(|l| l.suma_ang + l.suma_fnuass)
         .sum();
     let baza_cas = e.baza_cas + indemn;
@@ -523,7 +526,8 @@ fn emit_angajator_c2(employees: &[D112Employee]) -> String {
 C2_16=\"{}\"",
         r1.0, r1.1, r1.2, r1.3, r1.4, r1.5
     );
-    // Sub-rândurile pe procent pentru boală obișnuită (D_9 = „01"): 55% / 65% / 75%.
+    // Sub-rândurile pe procent pentru boală obișnuită (D_9 = „01"): 55% / 65% / 75%
+    // (scala graduală OUG 91/2025, de la 01.01.2026; procentul este introdus de utilizator).
     for (pct, lo) in [(55u8, "121"), (65, "131"), (75, "141")] {
         let r = agg(&|l| l.cod_indemn == "01" && l.procent == pct as i64);
         if r.0 > 0 {

@@ -903,6 +903,19 @@ pub(crate) async fn cash_vat_storno_split(
     let orig_issue: String = orig_row.try_get("issue_date").unwrap_or_default();
     // Cross-period AND still-deferred (committed GL credits 4428) — see `original_defers...` for why
     // the GL is the only reliable signal (the storno command marks every original STORNED).
+    //
+    // INVARIANT (audit VAT-01): this gate is keyed on `period_from`, so the GL posting and the D300
+    // collected correction MUST be generated for the SAME period window, else they disagree (e.g.
+    // GL booked monthly but D300 filed quarterly would split in the GL but not in the D300 correction
+    // → quarterly D300 under-declares the collected reversal). The shipped UI enforces this — it
+    // passes the SAME single-month window to both `generate_gl_entries` and `d300_vat_totals`/
+    // `compute_d300` (GlLedger.tsx / Declarations.tsx) — so the two always agree in practice.
+    // `orig_issue < period_from` (not in [period_from, period_to], since a storno's original always
+    // precedes it) keeps the same-generation-run re-post invisible to this committed-GL read out of
+    // the split: a same-period STORNED original is re-posted to 4427 in this very tx, so its credit
+    // note reverses 4427 (no split). Full cross-granularity (monthly GL + quarterly D300) support is a
+    // deferred redesign — it needs the split decision to be period-independent without breaking the
+    // same-period in-transaction case, plus cross-granularity reconcile tests.
     if !(orig_issue.as_str() < period_from
         && original_defers_s_vat_to_4428(pool, company_id, orig_id).await?)
     {

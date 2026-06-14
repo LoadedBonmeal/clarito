@@ -11,7 +11,8 @@ use std::str::FromStr;
 
 use crate::anaf_decl::d112::{
     cm_indemn_treatment, compute_payroll, compute_payroll_with_leave, exempt_part_time_min_base,
-    part_time_min_base, suma_netaxabila, LeaveCert, LeavePayrollInput, PayrollInput,
+    part_time_min_base, pct, suma_netaxabila, LeaveCert, LeavePayrollInput, PayrollInput, CAM_PCT,
+    CONCEDII_PCT,
 };
 use crate::db::gl::IndemnityTotals;
 use crate::db::models::{new_id, now_unix};
@@ -486,8 +487,7 @@ pub async fn run_payroll(
 
     let mut states = Vec::new();
     // Worked-salary aggregates (intră în nota GL: 641/421, 4315/4316/444 salariale, 646/436 CAM).
-    let (mut t_gross, mut t_cas, mut t_cass, mut t_tax, mut t_net, mut t_cam) = (
-        Decimal::ZERO,
+    let (mut t_gross, mut t_cas, mut t_cass, mut t_tax, mut t_net) = (
         Decimal::ZERO,
         Decimal::ZERO,
         Decimal::ZERO,
@@ -496,8 +496,11 @@ pub async fn run_payroll(
     );
     // Employer-borne part-time minimum-base CAS/CASS difference (art. 146 (5^6)).
     let (mut t_cas_diff, mut t_cass_diff) = (Decimal::ZERO, Decimal::ZERO);
-    // CCI 0,85% (concedii și indemnizații, angajator) — postată separat (6458/4373).
-    let mut t_concedii = Decimal::ZERO;
+    // CAM (646/436) și CCI (6458/4373) angajator se calculează pe baza AGREGATĂ — ROUND(Σ bază ×
+    // cotă), regula A21.46 — NU ca Σ rotunjirilor per-salariat. Altfel GL (436/4373) ≠ D112 (480) cu
+    // 1 leu când ≥2 salariați rotunjesc în sus. Acumulăm baza (= brut − netaxabil, rotunjită la leu ca
+    // baza_cam din D112) și aplicăm cota O SINGURĂ DATĂ după buclă.
+    let mut t_cam_base = Decimal::ZERO;
     // Indemnizații de concediu medical (postate separat: 6458/4382/423).
     let mut indemn = IndemnityTotals::default();
 
@@ -546,19 +549,25 @@ pub async fn run_payroll(
                 non_taxable,
             });
             let (wcas, wcass, wtax) = (dec(&w.cas), dec(&w.cass), dec(&w.income_tax));
+            // Split impozit 421(salarial)/423(indemnizație): CAS se aplică pe TOATE codurile de
+            // indemnizație (inclusiv cele scutite de impozit, ex. cod 08), deci pentru o indemnizație
+            // neimpozabilă baza combinată de impozit poate coborî SUB baza lucrată ⇒ (lr.tax − wtax)
+            // ar deveni NEGATIVĂ. Indemnizația nu poate purta impozit negativ: o plafonăm la 0 și
+            // lăsăm deducerea personală integral pe partea salarială (421). Suma rămâne lr.tax ⇒
+            // creditul 444 = D112.
+            let indemn_tax = (lr.income_tax - wtax).max(Decimal::ZERO);
             t_gross += lr.worked_gross;
             t_cas += wcas;
             t_cass += wcass;
-            t_tax += wtax;
-            t_cam += lr.cam;
-            t_concedii += lr.concedii;
+            t_tax += lr.income_tax - indemn_tax; // partea salarială = total − indemnizație
+            t_cam_base += leid0(lr.worked_base); // CAM/CCI base = baza lucrată (indemnizația nu e supusă)
             t_net += lr.net;
-            // Indemnizația = combinat − lucrat (sumează exact la combinat ⇒ creditele = D112).
+            // Indemnizația = combinat − lucrat (CAS/CASS ≥ 0 mereu; impozitul plafonat mai sus).
             indemn.employer += lr.indemn_employer;
             indemn.fnuass += lr.indemn_fnuass;
             indemn.cas += lr.cas - wcas;
             indemn.cass += lr.cass - wcass;
-            indemn.tax += lr.income_tax - wtax;
+            indemn.tax += indemn_tax;
             states.push(EmployeeState {
                 employee_id: e.id.clone(),
                 full_name: e.full_name.clone(),
@@ -590,8 +599,7 @@ pub async fn run_payroll(
         t_cass += dec(&r.cass);
         t_tax += dec(&r.income_tax);
         t_net += dec(&r.net);
-        t_cam += dec(&r.cam);
-        t_concedii += dec(&r.concedii);
+        t_cam_base += leid0((gross - non_taxable).max(Decimal::ZERO)); // bază CAM/CCI = brut − netaxabil
         states.push(EmployeeState {
             employee_id: e.id.clone(),
             full_name: e.full_name.clone(),
@@ -604,6 +612,11 @@ pub async fn run_payroll(
             concedii: r.concedii,
         });
     }
+
+    // Aplică cota O SINGURĂ DATĂ pe baza agregată (rotunjire comercială la leu) — GL 436/4373 = D112
+    // (480) la leu, eliminând diferența de reconciliere din Σ rotunjirilor per-salariat.
+    let t_cam = pct(t_cam_base, CAM_PCT);
+    let t_concedii = pct(t_cam_base, CONCEDII_PCT);
 
     let post = crate::db::gl::post_payroll(
         pool,
@@ -700,14 +713,15 @@ mod tests {
         let run = run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
             .await
             .unwrap();
-        // 2 × (gross 5000, CAS 1250, CASS 500, impozit 325, net 2925, CAM 113).
+        // 2 × (gross 5000, CAS 1250, CASS 500, impozit 325, net 2925). CAM/CCI = ROUND(Σ bază × cotă)
+        // pe baza AGREGATĂ (10.000), NU Σ rotunjirilor per-salariat — egal cu D112 (480).
         assert_eq!(run.total_gross, "10000.00");
         assert_eq!(run.total_cas, "2500.00");
         assert_eq!(run.total_cass, "1000.00");
         assert_eq!(run.total_income_tax, "650.00");
         assert_eq!(run.total_net, "5850.00");
-        assert_eq!(run.total_cam, "226.00");
-        assert_eq!(run.total_concedii, "86.00"); // 2 × pct(5000, 0.85%) = 2 × 43
+        assert_eq!(run.total_cam, "225.00"); // ROUND(10.000 × 2,25%) = 225 (NU 2 × round(112,5)=226)
+        assert_eq!(run.total_concedii, "85.00"); // ROUND(10.000 × 0,85%) = 85 (NU 2 × round(42,5)=86)
         assert_eq!(run.states.len(), 2);
         assert!(run.posted);
 
@@ -724,10 +738,10 @@ mod tests {
         assert_eq!(bal("641"), Some(("10000.00".into(), "0.00".into())));
         assert_eq!(bal("421"), Some(("0.00".into(), "5850.00".into())));
         assert_eq!(bal("4315"), Some(("0.00".into(), "2500.00".into())));
-        assert_eq!(bal("646"), Some(("226.00".into(), "0.00".into())));
-        // CCI 0,85%: D 6458 / C 4373 = 86 (fără concediu, 6458 = doar CCI).
-        assert_eq!(bal("6458"), Some(("86.00".into(), "0.00".into())));
-        assert_eq!(bal("4373"), Some(("0.00".into(), "86.00".into())));
+        assert_eq!(bal("646"), Some(("225.00".into(), "0.00".into())));
+        // CCI 0,85%: D 6458 / C 4373 = 85 (fără concediu, 6458 = doar CCI; bază agregată).
+        assert_eq!(bal("6458"), Some(("85.00".into(), "0.00".into())));
+        assert_eq!(bal("4373"), Some(("0.00".into(), "85.00".into())));
         assert!(tb.balanced, "payroll journal balances");
     }
 

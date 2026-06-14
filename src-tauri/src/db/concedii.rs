@@ -163,10 +163,18 @@ fn validate_leave(input: &MedicalLeaveInput) -> AppResult<()> {
     }
     // data_acordare is optional in the UI; validate ordering only when present.
     let acordare = input.data_acordare.as_deref().unwrap_or("").trim();
-    if !acordare.is_empty() && (!valid_iso_date(acordare) || acordare > inceput) {
-        return Err(AppError::Validation(
-            "Data acordării trebuie să fie validă și cel mult egală cu data de început.".into(),
-        ));
+    if !acordare.is_empty() {
+        if !valid_iso_date(acordare) || acordare > inceput {
+            return Err(AppError::Validation(
+                "Data acordării trebuie să fie validă și cel mult egală cu data de început.".into(),
+            ));
+        }
+        // data_acordare must not exceed data_sfarsit (certificate issued after leave ended is invalid).
+        if acordare > sfarsit {
+            return Err(AppError::Validation(
+                "Data acordării nu poate fi după data de sfârșit a concediului.".into(),
+            ));
+        }
     }
     let total_zile =
         input.zile_angajator.unwrap_or(0).max(0) + input.zile_fnuass.unwrap_or(0).max(0);
@@ -226,6 +234,42 @@ pub async fn list(
 
 pub async fn create(pool: &SqlitePool, input: MedicalLeaveInput) -> AppResult<MedicalLeave> {
     validate_leave(&input)?;
+
+    // [P3 / security] Verify that the employee belongs to this company before inserting.
+    let owned: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM employees WHERE id = ?1 AND company_id = ?2")
+            .bind(&input.employee_id)
+            .bind(&input.company_id)
+            .fetch_optional(pool)
+            .await?;
+    if owned.is_none() {
+        return Err(AppError::Validation(
+            "Salariatul nu aparține companiei specificate.".into(),
+        ));
+    }
+
+    // [P2] Reject if the new certificate's interval overlaps an existing one for this employee.
+    // Overlap condition: new.data_inceput <= existing.data_sfarsit AND existing.data_inceput <= new.data_sfarsit.
+    let new_inceput = input.data_inceput.as_deref().unwrap_or("");
+    let new_sfarsit = input.data_sfarsit.as_deref().unwrap_or("");
+    let overlap_count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM medical_leaves \
+         WHERE company_id = ?1 AND employee_id = ?2 \
+           AND data_inceput <= ?4 AND ?3 <= data_sfarsit",
+    )
+    .bind(&input.company_id)
+    .bind(&input.employee_id)
+    .bind(new_inceput)
+    .bind(new_sfarsit)
+    .fetch_one(pool)
+    .await?;
+    if overlap_count.0 > 0 {
+        return Err(AppError::Validation(
+            "Certificatul se suprapune cu un concediu medical existent pentru acest salariat."
+                .into(),
+        ));
+    }
+
     let baza = money(
         "Baza de calcul",
         input.baza_calcul.as_deref().unwrap_or("0"),
@@ -266,6 +310,9 @@ pub async fn create(pool: &SqlitePool, input: MedicalLeaveInput) -> AppResult<Me
     .bind(input.zile_baza.unwrap_or(0).max(0))
     .bind(&s_ang)
     .bind(&s_fnuass)
+    // procent (D_28): rate for cod 01 per OUG 91/2025 is 55/65/75% depending on the case —
+    // the actual value is always entered by the user; 75 is kept here only as a legacy default
+    // when no value is provided.
     .bind(input.procent.unwrap_or(75))
     .bind(input.loc_prescriere.unwrap_or(1).clamp(1, 4))
     .bind(&cod_boala)
@@ -493,5 +540,66 @@ mod tests {
         assert!(!valid_iso_date("2026-6-2")); // segmente nepadate
         assert!(!valid_iso_date("02.06.2026")); // format zz.ll.aaaa, nu ISO
         assert!(!valid_iso_date(""));
+    }
+
+    /// [P2] Overlapping certificates must be rejected; non-overlapping ones accepted.
+    #[tokio::test]
+    async fn rejects_overlapping_certificate_accepts_non_overlapping() {
+        let pool = pool().await;
+
+        // First certificate: 2026-06-02 .. 2026-06-06.
+        let first = create(
+            &pool,
+            MedicalLeaveInput {
+                serie: Some("AB".into()),
+                numar: Some("001".into()),
+                data_inceput: Some("2026-06-02".into()),
+                data_sfarsit: Some("2026-06-06".into()),
+                data_acordare: Some("2026-06-02".into()),
+                ..valid_input()
+            },
+        )
+        .await
+        .expect("first certificate must be accepted");
+        assert_eq!(first.serie, "AB");
+
+        // Second certificate overlapping (2026-06-05 .. 2026-06-10 overlaps 02-06) → rejected.
+        let overlap_result = create(
+            &pool,
+            MedicalLeaveInput {
+                serie: Some("CD".into()),
+                numar: Some("002".into()),
+                data_inceput: Some("2026-06-05".into()),
+                data_sfarsit: Some("2026-06-10".into()),
+                data_acordare: Some("2026-06-05".into()),
+                ..valid_input()
+            },
+        )
+        .await;
+        assert!(
+            overlap_result.is_err(),
+            "overlapping certificate must be rejected"
+        );
+        let err_msg = format!("{:?}", overlap_result.unwrap_err());
+        assert!(
+            err_msg.contains("suprapune"),
+            "error must mention overlap: {err_msg}"
+        );
+
+        // Third certificate NOT overlapping (2026-06-07 .. 2026-06-10 — starts after first ends) → accepted.
+        let non_overlap = create(
+            &pool,
+            MedicalLeaveInput {
+                serie: Some("EF".into()),
+                numar: Some("003".into()),
+                data_inceput: Some("2026-06-07".into()),
+                data_sfarsit: Some("2026-06-10".into()),
+                data_acordare: Some("2026-06-07".into()),
+                ..valid_input()
+            },
+        )
+        .await
+        .expect("non-overlapping certificate must be accepted");
+        assert_eq!(non_overlap.serie, "EF");
     }
 }

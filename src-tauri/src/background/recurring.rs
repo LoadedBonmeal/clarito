@@ -263,8 +263,14 @@ async fn process_recurring_invoices(
             // E-004: don't skip silently — the user's client won't get billed. One alert per
             // broken template: notify_recurring_skipped COUNT-guards on data before inserting
             // (the notifications.data UNIQUE index from migration 0010 is the backstop).
+            // The tx (begun above, holding the single WAL writer since the last_invoice_number
+            // bump) MUST be released first: notify_recurring_skipped INSERTs on a SEPARATE pool
+            // connection and would otherwise deadlock on the writer (~5s busy-timeout → SQLITE_BUSY
+            // → the error is swallowed → no notification, defeating E-004). Dropping the tx rolls it
+            // back, un-bumping the number we never used (no invoice is generated here).
+            drop(tx);
             notify_recurring_skipped(pool, &template.id, &template.template_name).await;
-            continue; // tx not yet begun here — nothing to roll back
+            continue;
         }
 
         let subtotal = crate::db::invoices::round2(subtotal_dec).to_string();
