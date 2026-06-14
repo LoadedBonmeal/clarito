@@ -471,16 +471,24 @@ async fn write_general_ledger_entries(
     Ok(())
 }
 
-/// Parse "YYYY-MM-DD" → (month_u32, year_i32).  Returns (1, 1970) on parse failure.
+/// Parse "YYYY-MM-DD" → (month_u32, year_i32). On a malformed or out-of-range date it WARNS (not
+/// silently) and falls back to (1, 1970): a bad transaction_date in a SAF-T D406 period must be
+/// visible in the logs, not quietly filed as January 1970. (Previously each part defaulted silently
+/// — "2026-13-40" became month 13, and a non-numeric year became 1970, with no signal.)
 fn parse_period(date: &str) -> (u32, i32) {
     let parts: Vec<&str> = date.splitn(3, '-').collect();
     if parts.len() == 3 {
-        let year = parts[0].parse::<i32>().unwrap_or(1970);
-        let month = parts[1].parse::<u32>().unwrap_or(1);
-        (month, year)
-    } else {
-        (1, 1970)
+        if let (Ok(year), Ok(month)) = (parts[0].parse::<i32>(), parts[1].parse::<u32>()) {
+            if (1..=12).contains(&month) && (1900..=9999).contains(&year) {
+                return (month, year);
+            }
+        }
     }
+    tracing::warn!(
+        date,
+        "SAF-T: transaction_date invalid — perioada cade pe (1, 1970)"
+    );
+    (1, 1970)
 }
 
 // ── String helpers ─────────────────────────────────────────────────────────────

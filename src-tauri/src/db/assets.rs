@@ -186,6 +186,24 @@ pub async fn create(
         )));
     }
 
+    // Validate + normalize the cost at the boundary, mirroring update(). Without this, RO-typed
+    // values rust_decimal can't parse ("5.000,00", "5000,50", "5 000") would bind raw, then
+    // compute_depreciation's `from_str(...).unwrap_or(ZERO)` would silently yield ZERO cost → no
+    // depreciation + a false SAF-T D406 acquisition value. Empty → "0" (asset with no cost yet).
+    let acquisition_cost = {
+        let raw = input.acquisition_cost.trim();
+        if raw.is_empty() {
+            "0".to_string()
+        } else {
+            let d = Decimal::from_str(raw)
+                .map_err(|_| AppError::Validation("Cost invalid — folosiți 1234.56.".into()))?;
+            if d.is_sign_negative() {
+                return Err(AppError::Validation("Costul nu poate fi negativ.".into()));
+            }
+            d.to_string()
+        }
+    };
+
     let id = new_id();
     let now = now_unix();
     let start_up = input
@@ -212,7 +230,7 @@ pub async fn create(
     .bind(input.supplier_name.as_deref().unwrap_or(""))
     .bind(&input.date_of_acquisition)
     .bind(&start_up)
-    .bind(&input.acquisition_cost)
+    .bind(&acquisition_cost)
     .bind(input.life_months.unwrap_or(60))
     .bind(input.depreciation_method.as_deref().unwrap_or("liniara"))
     .bind(input.depreciation_pct.as_deref().unwrap_or("0.00"))
@@ -887,6 +905,43 @@ mod tests {
             create(&pool, "co-1", bad2).await.unwrap_err(),
             AppError::Validation(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn create_rejects_unparseable_cost_and_normalizes_valid() {
+        // MONEY-015/017: a RO-typed cost rust_decimal can't parse must be rejected, NOT bound raw and
+        // silently read back as ZERO (→ no depreciation + a false SAF-T acquisition value). Mirrors
+        // the create-side date guard (EDGE-002) and the existing update() cost validation.
+        let pool = setup_asset_pool().await;
+        for bad_cost in ["5.000,00", "5000,50", "abc", "5 000"] {
+            let mut bad = sample_input();
+            bad.asset_code = format!("MF-{bad_cost}");
+            bad.acquisition_cost = bad_cost.into();
+            assert!(
+                matches!(
+                    create(&pool, "co-1", bad).await.unwrap_err(),
+                    AppError::Validation(_)
+                ),
+                "cost {bad_cost:?} must be rejected"
+            );
+        }
+        // A negative cost is rejected too.
+        let mut neg = sample_input();
+        neg.asset_code = "MF-neg".into();
+        neg.acquisition_cost = "-100".into();
+        assert!(matches!(
+            create(&pool, "co-1", neg).await.unwrap_err(),
+            AppError::Validation(_)
+        ));
+        // A valid cost is stored normalized and round-trips to a non-zero Decimal.
+        let mut ok = sample_input();
+        ok.asset_code = "MF-ok".into();
+        ok.acquisition_cost = "5000.50".into();
+        let asset = create(&pool, "co-1", ok).await.unwrap();
+        assert_eq!(
+            Decimal::from_str(asset.acquisition_cost.trim()).unwrap(),
+            Decimal::from_str("5000.50").unwrap()
+        );
     }
 
     #[tokio::test]
