@@ -70,7 +70,10 @@ pub struct Dividend {
     pub shareholder: Option<String>,
     /// CNP-ul beneficiarului (D205 `cifR`, N13 mod-11). Opțional la înregistrare; cerut la exportul D205.
     pub beneficiary_cnp: Option<String>,
-    /// Rezident fiscal RO (D205 `Rezid`; 1 = rezident → D205, 0 = nerezident → D207). Implicit true.
+    /// Rezident fiscal RO (D205 `Rezid`; 1 = rezident → D205, 2 = nerezident → D207). Capitolul
+    /// dividende raportează DOAR rezidenți (filtru în `d205_beneficiaries_for_year`), deci Rezid e
+    /// mereu "1"; ramura "2" e rezervată/neutilizată (validatorul D205 interzice Rezid=2 la
+    /// tip_venit 08). Implicit true.
     pub beneficiary_resident: bool,
     pub note: Option<String>,
     /// Termenul de plată al impozitului (derivat, nu stocat).

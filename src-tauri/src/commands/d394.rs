@@ -118,7 +118,8 @@ pub fn normalize_vat_rate(raw: &str) -> String {
 /// Calculează declarația D394 — livrări (vânzări) grupate pe partener +
 /// achiziții (Wave B) grupate pe furnizor, pentru o companie și o perioadă.
 ///
-/// **Livrări**: doar facturile cu status VALIDATED (BIZ-11).
+/// **Livrări**: facturile cu status VALIDATED sau STORNED (BIZ-11) — stornările intră în D394 cu
+/// semn negativ, deci nu se exclud.
 /// **Achiziții**: received_invoices (status != REJECTED), JOIN cu
 /// received_invoice_vat_lines. Furnizorii fără nicio linie VAT parsată
 /// contribuie la `purchase_unparsed_count` dar NU la `purchase_partners`.

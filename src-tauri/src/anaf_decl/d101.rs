@@ -84,7 +84,9 @@ pub fn compute_d101(input: &D101Input) -> D101Result {
         input.accounting_result - input.non_taxable_revenue - input.fiscal_deductions
             + input.non_deductible_expenses;
     // Recuperarea pierderii fiscale e PLAFONATĂ la 70% din profitul fiscal pozitiv al anului (OUG
-    // 115/2023, art. 31 — în vigoare de la 2024). Diferența rămâne de reportat (max 7 ani).
+    // 115/2023, art. 31 — în vigoare de la 2024). Diferența rămâne de reportat: pierderile de DUPĂ
+    // 2024 se reportează 5 ani consecutivi (art. 31 alin. (1) modificat); cele de până în 2023, 7 ani
+    // (regimul vechi, alin. (7)).
     let loss_cap = r2(fiscal_result.max(z) * Decimal::new(70, 2)); // 70%
     let loss_used = input.prior_loss.max(z).min(loss_cap);
     let loss_remaining = (input.prior_loss.max(z) - loss_used).max(z);
