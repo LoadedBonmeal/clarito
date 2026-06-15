@@ -54,8 +54,6 @@ function XmlViewerBody({ payload, onClose }: { payload: XmlViewerPayload; onClos
   const { t } = useTranslation();
   const [validating, setValidating] = useState(false);
   const [validation, setValidation] = useState<XmlDukValidation | null>(null);
-  // Default to the readable TABLE view; "raw" shows the EXACT generated XML verbatim (read-only).
-  const [viewMode, setViewMode] = useState<"table" | "raw">("table");
 
   const fileName = payload.name.endsWith(".xml") ? payload.name : `${payload.name}.xml`;
 
@@ -114,31 +112,6 @@ function XmlViewerBody({ payload, onClose }: { payload: XmlViewerPayload; onClos
           </div>
         </div>
 
-        <div className="pdfv-bar-c">
-          <div className="xmlv-toggle" role="tablist" aria-label={t("shared.xmlViewer.viewSwitch")}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === "table"}
-              className={viewMode === "table" ? "is-on" : ""}
-              onClick={() => setViewMode("table")}
-            >
-              <Ic name="grid" cls="ic" />
-              {t("shared.xmlViewer.tableView")}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === "raw"}
-              className={viewMode === "raw" ? "is-on" : ""}
-              onClick={() => setViewMode("raw")}
-            >
-              <Ic name="code" cls="ic" />
-              {t("shared.xmlViewer.rawView")}
-            </button>
-          </div>
-        </div>
-
         <div className="pdfv-bar-r">
           {payload.declKind && (
             <button type="button" className="pill-btn" onClick={doRevalidate} disabled={validating}>
@@ -161,12 +134,7 @@ function XmlViewerBody({ payload, onClose }: { payload: XmlViewerPayload; onClos
 
       {validation && <ValidationStrip declKind={payload.declKind} result={validation} />}
 
-      {viewMode === "table" ? (
-        <XmlTableView xml={payload.xml} />
-      ) : (
-        // The EXACT generated XML, verbatim (read-only, selectable, copyable).
-        <pre className="xmlv-raw">{payload.xml}</pre>
-      )}
+      <XmlTableView xml={payload.xml} />
     </>
   );
 }

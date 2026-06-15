@@ -32,9 +32,6 @@
     },
     "xmlViewer": {
       "tableView": "Tabel",
-      "rawView": "XML brut",
-      "codeView": "Cod (XML)",
-      "viewSwitch": "Comută vizualizarea",
       "valueCol": "valoare",
       "parseError": "XML invalid — comutați la „Cod” pentru a-l vedea brut.",
       "find": "Caută (Ctrl/Cmd+F)",

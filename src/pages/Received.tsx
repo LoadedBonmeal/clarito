@@ -402,7 +402,7 @@ export function ReceivedPage() {
         </div>
       )}
 
-      <div className="scr-card">
+      <div className="scr-card" style={{ marginBottom: 16 }}>
         {/* toolbar */}
         <div className="scr-toolbar">
           <div className="tabs">

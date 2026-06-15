@@ -238,8 +238,8 @@ export function Dividends() {
         )}
       </div>
 
-      {/* List */}
-      <div className="card">
+      {/* List — .scr-card (not .card) so the table is clipped to the rounded corners (overflow:hidden). */}
+      <div className="scr-card">
         <table className="scr-table">
           <thead>
             <tr>

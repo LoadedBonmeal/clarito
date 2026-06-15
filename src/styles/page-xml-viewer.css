@@ -103,64 +103,6 @@
   min-width: 56px;
 }
 
-/* ── View toggle (Tabel / Cod) ──────────────────────────────────────────────── */
-.xmlv-toggle {
-  display: inline-flex;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.xmlv-toggle button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 11px;
-  font-size: 12.5px;
-  font-family: inherit;
-  color: var(--text-2);
-  background: #fff;
-  border: none;
-  cursor: pointer;
-}
-.xmlv-toggle button + button {
-  border-left: 1px solid var(--line);
-}
-.xmlv-toggle button .ic {
-  width: 14px;
-  height: 14px;
-  stroke: currentColor;
-}
-.xmlv-toggle button:hover {
-  background: var(--fill);
-}
-.xmlv-toggle button.is-on {
-  background: var(--text);
-  color: #fff;
-}
-
-/* ── Raw XML view (the EXACT generated string, read-only) ───────────────────── */
-.xmlv-raw {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  margin: 0;
-  padding: 14px 16px;
-  background: #fff;
-  color: var(--text);
-  font-family: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12.5px;
-  line-height: 1.55;
-  /* Wrap the (often single-line) generated XML so it's fully readable without horizontal
-     scrolling. Content is byte-exact — only the visual line breaks are added. */
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  tab-size: 2;
-  -moz-tab-size: 2;
-  user-select: text;
-}
-
 /* ── Table (structured) view ────────────────────────────────────────────────── */
 .xmlv-table-scroll {
   flex: 1;

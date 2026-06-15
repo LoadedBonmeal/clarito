@@ -168,7 +168,8 @@ pub fn build_d205_xml(header: &D205Header, beneficiaries: &[D205Beneficiary]) ->
     }
 
     end_elem(&mut w, sv.root_element)?;
-    finish(w)
+    // Pretty-print so the exported/previewed .xml is a readable document (DUK-safe whitespace).
+    Ok(crate::anaf_decl::xml::pretty_print(&finish(w)?))
 }
 
 #[cfg(test)]

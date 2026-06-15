@@ -181,7 +181,10 @@ pub fn generate_d300_xml(rows: &D300Rows, ver: &SchemaVersion) -> AppResult<Stri
     let mut bytes = w.into_inner().into_inner();
     bytes.push(b'\n');
 
-    String::from_utf8(bytes).map_err(|e| AppError::Other(format!("XML utf8 error: {e}")))
+    let xml =
+        String::from_utf8(bytes).map_err(|e| AppError::Other(format!("XML utf8 error: {e}")))?;
+    // Pretty-print so the exported/previewed .xml is a readable document (DUK-safe whitespace).
+    Ok(crate::anaf_decl::xml::pretty_print(&xml))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

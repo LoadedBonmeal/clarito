@@ -23,6 +23,46 @@ pub fn new_writer() -> AppResult<XmlWriter> {
     Ok(w)
 }
 
+/// Pretty-print compact XML into a readable, indented document (2-space) for export/preview, so the
+/// saved `.xml` opens as a structured document instead of one long line. It ONLY inserts line breaks
+/// BETWEEN adjacent tags (`><`) and re-indents by element depth — it never touches text or attribute
+/// values (those never contain a raw `>`/`<`, which are escaped), so element values are byte-for-byte
+/// unchanged. Whitespace between element-only content is XSD-ignorable, so the result stays valid for
+/// ANAF DUK + SPV (D205/D300/D394/D406/D112). Safe on already-indented input and on anything it can't
+/// classify (worst case: a reasonable layout). Never panics.
+pub fn pretty_print(xml: &str) -> String {
+    let with_breaks = xml.replace("><", ">\n<");
+    let mut out = String::with_capacity(with_breaks.len() + with_breaks.len() / 4);
+    let mut depth: i32 = 0;
+    for raw in with_breaks.lines() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let is_closing = line.starts_with("</");
+        // <?xml ?>, <!-- comment -->, <!DOCTYPE>, <![CDATA[ — self-contained, no depth change.
+        let is_special = line.starts_with("<?") || line.starts_with("<!");
+        let is_self_closing = line.ends_with("/>");
+        // An element that opens AND closes on the same line, e.g. "<den1>Popescu</den1>".
+        let opens_and_closes =
+            line.starts_with('<') && !is_closing && !is_special && line.contains("</");
+        let is_opening = line.starts_with('<') && !is_closing && !is_special && !is_self_closing;
+
+        if is_closing {
+            depth = (depth - 1).max(0);
+        }
+        for _ in 0..depth {
+            out.push_str("  ");
+        }
+        out.push_str(line);
+        out.push('\n');
+        if is_opening && !opens_and_closes {
+            depth += 1;
+        }
+    }
+    out
+}
+
 /// `<name>text</name>` (text is auto-escaped).
 pub fn write_text_elem(w: &mut XmlWriter, name: &str, text: &str) -> AppResult<()> {
     w.write_event(Event::Start(BytesStart::new(name)))
@@ -95,6 +135,20 @@ pub fn trunc(s: &str, max_chars: usize) -> String {
 mod tests {
     use super::*;
     use rust_decimal::Decimal;
+
+    #[test]
+    fn pretty_print_indents_by_depth_without_touching_values() {
+        let compact = r#"<?xml version="1.0" encoding="UTF-8"?><declaratie205 cui="40"><sect_II nrben="1"/><benef cifR="196" den1="Popescu Andrei"/></declaratie205>"#;
+        let pretty = pretty_print(compact);
+        let lines: Vec<&str> = pretty.lines().collect();
+        assert_eq!(lines[0], r#"<?xml version="1.0" encoding="UTF-8"?>"#);
+        assert_eq!(lines[1], r#"<declaratie205 cui="40">"#);
+        assert_eq!(lines[2], r#"  <sect_II nrben="1"/>"#); // 2-space indent for children
+        assert_eq!(lines[3], r#"  <benef cifR="196" den1="Popescu Andrei"/>"#); // value untouched
+        assert_eq!(lines[4], "</declaratie205>");
+        // a text-bearing element stays on one line (value never altered)
+        assert!(pretty_print("<a><b>text value</b></a>").contains("<b>text value</b>"));
+    }
 
     #[test]
     fn trunc_is_char_boundary_safe() {

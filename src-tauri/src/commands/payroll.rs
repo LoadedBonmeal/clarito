@@ -517,7 +517,10 @@ fn build_d112_xml(
 conformă structural; re-validați cu artefactele oficiale ANAF înainte de depunere (25.08.2026)"
         );
     }
-    Ok(generate_d112_xml(&header, &d112_emps))
+    // Pretty-print so the exported/previewed .xml is a readable document (DUK-safe whitespace).
+    Ok(crate::anaf_decl::xml::pretty_print(&generate_d112_xml(
+        &header, &d112_emps,
+    )))
 }
 
 #[cfg(test)]

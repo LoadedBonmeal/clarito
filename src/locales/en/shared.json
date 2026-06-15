@@ -32,9 +32,6 @@
     },
     "xmlViewer": {
       "tableView": "Table",
-      "rawView": "Raw XML",
-      "codeView": "Code (XML)",
-      "viewSwitch": "Switch view",
       "valueCol": "value",
       "parseError": "Invalid XML — switch to \"Code\" to see it raw.",
       "find": "Find (Ctrl/Cmd+F)",
