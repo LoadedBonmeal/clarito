@@ -135,27 +135,10 @@ function XmlViewerBody({ payload, onClose }: { payload: XmlViewerPayload; onClos
       }
       return;
     }
-    const fname = `${payload.name.replace(/\.xml$/i, "")}.html`;
-    const { openPath } = await import("@tauri-apps/plugin-opener");
-    const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-    // Preferred: write into the app's own data dir (reliable `fs:allow-app-write-recursive` scope —
-    // the $TEMP scope is unreliable on macOS due to per-app TMPDIR confinement) and open it.
+    // The Rust command writes the HTML to the app cache dir and opens it in the default browser
+    // (opening from Rust bypasses the JS opener's dialog-only path scope).
     try {
-      const { appLocalDataDir, join } = await import("@tauri-apps/api/path");
-      const file = await join(await appLocalDataDir(), fname);
-      await writeTextFile(file, html);
-      await openPath(file);
-      notify.success(t("shared.xmlViewer.printOpened"));
-      return;
-    } catch {
-      // ignore — fall back to letting the user pick a location (the dialog grants fs permission).
-    }
-    try {
-      const { save } = await import("@tauri-apps/plugin-dialog");
-      const dest = await save({ defaultPath: fname, filters: [{ name: "HTML", extensions: ["html"] }] });
-      if (!dest) return;
-      await writeTextFile(dest, html);
-      await openPath(dest);
+      await api.declarations.openDocInBrowser(html, `${payload.name.replace(/\.xml$/i, "")}.html`);
       notify.success(t("shared.xmlViewer.printOpened"));
     } catch (e) {
       notify.error(t("shared.xmlViewer.printError", { error: String(e) }));

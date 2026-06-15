@@ -844,6 +844,10 @@ export const declarations = {
     tables: import("@/lib/xml-to-tables").DeclTable[],
     destPath: string,
   ) => invoke<string>("export_declaration_xlsx", { tables, destPath }),
+  /** Write a print-ready HTML document to the app cache dir and open it in the default browser
+   *  (where window.print() → "Save as PDF" works; the WKWebView can't print). */
+  openDocInBrowser: (html: string, fileName: string) =>
+    invoke<void>("open_doc_in_browser", { html, fileName }),
   /** D101 (impozit pe profit) worksheet: base from the period P&L + the supplied adjustments. */
   computeD101: (
     companyId: string,

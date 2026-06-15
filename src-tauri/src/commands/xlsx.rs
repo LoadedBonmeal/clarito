@@ -525,6 +525,52 @@ pub async fn export_declaration_xlsx(
     .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Write a self-contained, print-ready HTML document to the app cache dir and open it in the system
+/// default browser (where `window.print()` works and "Save as PDF" is available). Used by the XML
+/// viewer's "Printează / Salvează PDF": Tauri's WKWebView can't `window.print()`, and the JS opener
+/// only permits dialog-granted paths — opening from Rust (`open`/`start`/`xdg-open`) bypasses that.
+#[tauri::command]
+pub async fn open_doc_in_browser(
+    app: tauri::AppHandle,
+    html: String,
+    file_name: String,
+) -> AppResult<()> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::Other(format!("app cache dir: {e}")))?;
+    std::fs::create_dir_all(&dir)?;
+    // Sanitize the file name (no traversal / odd chars) and force a .html extension.
+    let mut name: String = file_name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if !name.to_ascii_lowercase().ends_with(".html") {
+        name.push_str(".html");
+    }
+    let path = dir.join(name);
+    std::fs::write(&path, html.as_bytes())?;
+
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open").arg(&path).spawn()?;
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("cmd")
+        .args(["/C", "start", ""])
+        .arg(&path)
+        .spawn()?;
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    std::process::Command::new("xdg-open").arg(&path).spawn()?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::cell_is_number;
