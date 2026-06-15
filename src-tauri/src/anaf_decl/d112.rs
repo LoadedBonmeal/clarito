@@ -85,16 +85,20 @@ pub fn exempt_part_time_min_base(pensionar: bool, exceptie_cas_min: &str) -> boo
 
 /// Part-time (contract Pi) minimum CAS/CASS base override — art. 146 alin. (5^6)-(5^9) + art. 168
 /// alin. (6^1) Cod fiscal (OG 16/2022), cu derogarea sumei netaxabile (OUG 156/2024). Baza CAS/CASS
-/// nu poate fi sub salariul minim ÎNTREG (NU prorata cu fracția de normă orară). 2026: 4.050−300 =
-/// 3.750 lei (sem. I) / 4.325−200 = 4.125 lei (de la 1 iulie, HG 146/2026). Diferența de contribuție
-/// față de cea pe venitul realizat e suportată de ANGAJATOR. `exempt` (art. 146 (5^7), via
+/// nu poate fi sub salariul minim (NU se prorata cu fracția de normă ORARĂ — un part-timer pe 4h/zi
+/// care lucrează toate zilele lunii rămâne la baza întreagă). 2026: 4.050−300 = 3.750 lei (sem. I) /
+/// 4.325−200 = 4.125 lei (de la 1 iulie, HG 146/2026). Diferența de contribuție față de cea pe
+/// venitul realizat e suportată de ANGAJATOR. `exempt` (art. 146 (5^7), via
 /// [`exempt_part_time_min_base`]) sare peste majorare — baza rămâne venitul realizat.
 ///
-/// Limitare cunoscută: art. 146 (5^6) permite proratarea bazei minime la numărul zilelor lucrătoare
-/// din lună în care contractul a fost ACTIV (angajare/încetare la mijlocul lunii). Aplicația nu
-/// urmărește încă data încetării / zilele active, deci se folosește baza minimă ÎNTREAGĂ — o
-/// supra-declarare conservatoare (protejează baza de pensie a salariatului). Proratarea pe zile e o
-/// extensie ulterioară.
+/// PRORATARE PE ZILE (art. 146 alin. (5^6) / OMF 1855/2022): pentru o LUNĂ INCOMPLETĂ (contractul
+/// activ doar o parte din lună — angajare la mijlocul lunii) baza minimă se proratează pe zile:
+/// `baza = ROUND(salariu_minim_net × worked_days / nzl)`, identic cu câmpul A_13P al structurii D112
+/// v7 (`part_time = ROUND(sm × A_8 / NZL)`). `worked_days` TREBUIE să fie EXACT A_8 emis în D112
+/// (zilele active), astfel încât regula DUK „A_13P = ROUND(sm×A_8/NZL)” să coincidă cu această bază —
+/// fără mismatch, fără sub-declarare. Lună întreagă (`worked_days ≥ nzl`) → baza ÎNTREAGĂ (neschimbat).
+/// Încetarea de contract la mijlocul lunii nu e încă urmărită (doar `employment_date`), deci o plecare
+/// mid-month rămâne la baza întreagă — supra-declarare conservatoare (niciodată sub-declarare).
 ///
 /// CAM (contribuția asigurătorie pentru muncă, art. 220^4-220^7): NU se ridică la baza minimă —
 /// art. 146 alin. (5^6)-(5^9) numește DOAR CAS și CASS, iar baza CAM (art. 220^6) = câștigul brut
@@ -103,6 +107,7 @@ pub fn exempt_part_time_min_base(pensionar: bool, exceptie_cas_min: &str) -> boo
 /// `compute_payroll`), iar acest helper NU întoarce un `cam_diff`. (Ambiguitate statutară cunoscută
 /// — tăcerea legii e interpretată ca excludere; de confirmat cu ANAF/CECCAR dacă apare îndoială.)
 ///
+/// `worked_days` = zilele lucrătoare active în lună (A_8); `nzl` = zilele lucrătoare ale lunii (NZL).
 /// Returnează Some((baza_minimă, cas_diff_angajator, cass_diff_angajator)) când se aplică majorarea.
 pub fn part_time_min_base(
     gross: Decimal,
@@ -110,15 +115,25 @@ pub fn part_time_min_base(
     exempt: bool,
     year: i32,
     month: u32,
+    worked_days: u32,
+    nzl: u32,
 ) -> Option<(Decimal, Decimal, Decimal)> {
     if tip_contract == "N" || exempt || gross <= Decimal::ZERO {
         return None;
     }
-    // Baza minimă = salariul minim − suma netaxabilă (NU se prorata cu ore/normă). Derivată din
-    // sursa unică (min_wage_lei − carve_out_lei): 2026 H1 = 4.050−300 = 3.750; H2 = 4.325−200 = 4.125.
-    let base = min_wage_lei(year, month) - carve_out_lei(year, month);
+    // Baza minimă lunară întreagă = salariul minim − suma netaxabilă (sursa unică min_wage_lei −
+    // carve_out_lei): 2026 H1 = 4.050−300 = 3.750; H2 = 4.325−200 = 4.125.
+    let full = min_wage_lei(year, month) - carve_out_lei(year, month);
+    // Proratare pe zilele active (A_8/NZL) pentru luni incomplete: ROUND(full × worked_days / nzl),
+    // rotunjit la leu întreg ca A_13P. Lună întreagă (worked_days ≥ nzl) ⇒ baza întreagă.
+    let base = if nzl > 0 && worked_days < nzl {
+        (full * Decimal::from(worked_days) / Decimal::from(nzl))
+            .round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
+    } else {
+        full
+    };
     if gross >= base {
-        return None; // venitul realizat ≥ baza minimă → fără majorare.
+        return None; // venitul realizat ≥ baza minimă (prorată) → fără majorare.
     }
     let cas_diff = pct(base, CAS_PCT) - pct(gross, CAS_PCT);
     let cass_diff = pct(base, CASS_PCT) - pct(gross, CASS_PCT);
@@ -452,24 +467,53 @@ mod tests {
     }
 
     #[test]
-    fn part_time_min_base_full_minimum_not_prorated() {
-        // Part-time P1, gross 3.000, H1 (month 3): baza = salariul minim ÎNTREG 3.750 (NU prorata).
-        // cas_diff = 938 − 750 = 188 (pct(3750,25%)=937.5→938); cass_diff = 375 − 300 = 75.
-        let r = part_time_min_base(d("3000"), "P1", false, 2026, 3);
+    fn part_time_min_base_full_and_prorated() {
+        // Lună ÎNTREAGĂ (worked_days = nzl = 22): part-time P1, gross 3.000, H1 → baza minimă
+        // ÎNTREAGĂ 3.750. cas_diff = 938 − 750 = 188 (pct(3750,25%)=937.5→938); cass_diff = 375 − 300 = 75.
+        let r = part_time_min_base(d("3000"), "P1", false, 2026, 3, 22, 22);
         assert_eq!(r, Some((d("3750"), d("188"), d("75"))));
-        // H2 (month 8): baza 4.125.
+        // H2 (month 8), lună întreagă: baza 4.125.
         assert_eq!(
-            part_time_min_base(d("3000"), "P1", false, 2026, 8)
+            part_time_min_base(d("3000"), "P1", false, 2026, 8, 23, 23)
                 .unwrap()
                 .0,
             d("4125")
         );
+        // LUNĂ INCOMPLETĂ (angajare la mijloc): 11 din 22 zile ⇒ baza = ROUND(3750 × 11/22) = 1.875
+        // (art. 146 alin. (5^6) / A_13P). gross 1.000 < 1.875 ⇒ majorare la baza prorată.
+        assert_eq!(
+            part_time_min_base(d("1000"), "P1", false, 2026, 3, 11, 22)
+                .unwrap()
+                .0,
+            d("1875")
+        );
+        // Lună incompletă, dar gross ≥ baza prorată ⇒ fără majorare (gross 2.000 ≥ 1.875).
+        assert_eq!(
+            part_time_min_base(d("2000"), "P1", false, 2026, 3, 11, 22),
+            None
+        );
+        // worked_days ≥ nzl ⇒ baza ÎNTREAGĂ (proratarea nu majorează niciodată peste full).
+        assert_eq!(
+            part_time_min_base(d("1000"), "P1", false, 2026, 3, 22, 22)
+                .unwrap()
+                .0,
+            d("3750")
+        );
         // Full-time N → fără majorare.
-        assert_eq!(part_time_min_base(d("3000"), "N", false, 2026, 3), None);
+        assert_eq!(
+            part_time_min_base(d("3000"), "N", false, 2026, 3, 22, 22),
+            None
+        );
         // Exceptat (art. 146 (5^7)) → baza rămâne venitul realizat.
-        assert_eq!(part_time_min_base(d("3000"), "P1", true, 2026, 3), None);
-        // Venit ≥ baza minimă → fără majorare.
-        assert_eq!(part_time_min_base(d("4000"), "P1", false, 2026, 3), None);
+        assert_eq!(
+            part_time_min_base(d("3000"), "P1", true, 2026, 3, 22, 22),
+            None
+        );
+        // Venit ≥ baza minimă întreagă → fără majorare.
+        assert_eq!(
+            part_time_min_base(d("4000"), "P1", false, 2026, 3, 22, 22),
+            None
+        );
     }
 
     #[test]
@@ -636,15 +680,16 @@ mod tests {
         assert_eq!(min_wage_lei(2026, 7), d("4325"));
         assert_eq!(carve_out_lei(2026, 3), d("300"));
         assert_eq!(carve_out_lei(2026, 8), d("200"));
-        // part_time_min_base now DERIVES 3.750 / 4.125 from min_wage − carve_out (not magic numbers).
+        // part_time_min_base now DERIVES 3.750 / 4.125 from min_wage − carve_out (not magic numbers);
+        // lună întreagă (worked_days = nzl) ⇒ baza întreagă.
         assert_eq!(
-            part_time_min_base(d("1000"), "P1", false, 2026, 3)
+            part_time_min_base(d("1000"), "P1", false, 2026, 3, 22, 22)
                 .unwrap()
                 .0,
             d("3750")
         );
         assert_eq!(
-            part_time_min_base(d("1000"), "P1", false, 2026, 8)
+            part_time_min_base(d("1000"), "P1", false, 2026, 8, 23, 23)
                 .unwrap()
                 .0,
             d("4125")
@@ -660,8 +705,8 @@ mod tests {
         // (art. 146 (5^6)), CAM is NOT lifted — it stays on the REALIZED gross (art. 220^6). The
         // helper returns only (base, cas_diff, cass_diff) — no CAM component — and CAM = pct(gross).
         let (base, cas_diff, cass_diff) =
-            part_time_min_base(d("2000"), "P1", false, 2026, 3).unwrap();
-        assert_eq!(base, d("3750")); // CAS/CASS base lifted to 3.750 (H1)
+            part_time_min_base(d("2000"), "P1", false, 2026, 3, 22, 22).unwrap();
+        assert_eq!(base, d("3750")); // CAS/CASS base lifted to 3.750 (H1), lună întreagă
         assert!(cas_diff > d("0") && cass_diff > d("0")); // employer bears the CAS/CASS top-up
                                                           // CAM is computed on the realized 2.000 (= 45), NOT on the lifted 3.750 (which would be 84).
         let r = compute_payroll(&PayrollInput {

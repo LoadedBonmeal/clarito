@@ -444,6 +444,34 @@ pub fn leave_working_days_in_month(year: i32, month: u32, start_iso: &str, end_i
     (s..=e).filter(|&d| is_working_day(year, month, d)).count() as u32
 }
 
+/// Zile lucrătoare în care contractul e ACTIV în lună — A_8 pentru proratarea bazei minime part-time
+/// (art. 146 alin. (5^6) / OMF 1855/2022, câmp D112 A_13P = ROUND(sm × A_8 / NZL)). Angajat la
+/// mijlocul lunii ⇒ se numără doar zilele lucrătoare de la `employment_date` până la sfârșitul lunii;
+/// angajat înainte de lună (sau dată lipsă/invalidă) ⇒ NZL întreg. Încetarea de contract la mijlocul
+/// lunii NU e urmărită (rămâne NZL — supra-declarare conservatoare, niciodată sub-declarare).
+pub fn active_working_days(year: i32, month: u32, employment_date: Option<&str>) -> u32 {
+    let nzl = working_days(year, month);
+    let Some(emp) = employment_date else {
+        return nzl;
+    };
+    let p: Vec<&str> = emp.split('-').collect();
+    if p.len() != 3 {
+        return nzl;
+    }
+    let (ey, em) = (
+        p[0].parse::<i32>().unwrap_or(year),
+        p[1].parse::<u32>().unwrap_or(month),
+    );
+    // Activ toată luna dacă angajarea e dintr-o lună anterioară (sau o lună diferită — angajarea
+    // viitoare nu poate apărea în statul lunii curente); altfel zilele de la angajare la sfârșit.
+    if (ey, em) != (year, month) {
+        return nzl;
+    }
+    let last = days_in_month(year, month);
+    let end = format!("{year:04}-{month:02}-{last:02}");
+    leave_working_days_in_month(year, month, emp, &end)
+}
+
 /// Compute the monthly salary states for all active employees and post the aggregate to the GL.
 pub async fn run_payroll(
     pool: &SqlitePool,
@@ -598,9 +626,18 @@ pub async fn run_payroll(
             non_taxable,
         });
         let exempt = exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
-        if let Some((_, cas_diff, cass_diff)) =
-            part_time_min_base(gross, &e.tip_contract, exempt, year, month)
-        {
+        // Aceeași proratare pe zile active ca în emiterea D112 (commands/payroll.rs) — diferența de
+        // contribuție suportată de angajator din sumar trebuie să coincidă cu D112.
+        let active_days = active_working_days(year, month, e.employment_date.as_deref());
+        if let Some((_, cas_diff, cass_diff)) = part_time_min_base(
+            gross,
+            &e.tip_contract,
+            exempt,
+            year,
+            month,
+            active_days,
+            nzl,
+        ) {
             t_cas_diff += cas_diff;
             t_cass_diff += cass_diff;
         }
@@ -902,5 +939,20 @@ mod tests {
         assert_eq!(working_days(2026, 6), 21);
         // Ianuarie 2026: 1 ian = joi; 22 zile L-V minus 4 sărbători în zile lucrătoare (1,2,6,7) = 18.
         assert_eq!(working_days(2026, 1), 18);
+    }
+
+    #[test]
+    fn active_working_days_prorates_mid_month_hire() {
+        // Martie 2026 are 22 zile lucrătoare (fără sărbători L-V). Angajare înainte de lună sau dată
+        // lipsă ⇒ NZL întreg (contract activ toată luna).
+        assert_eq!(working_days(2026, 3), 22);
+        assert_eq!(active_working_days(2026, 3, None), 22);
+        assert_eq!(active_working_days(2026, 3, Some("2025-11-01")), 22);
+        assert_eq!(active_working_days(2026, 3, Some("2026-03-01")), 22); // angajat în prima zi
+                                                                          // Angajare la mijlocul lunii ⇒ doar zilele lucrătoare de la dată la sfârșit. 16 martie 2026
+                                                                          // = luni; 16→31 conține zilele L-V 16-20 și 23-27 și 30-31 = 12 zile lucrătoare.
+        assert_eq!(active_working_days(2026, 3, Some("2026-03-16")), 12);
+        // Dată invalidă ⇒ NZL (conservator, niciodată sub-declarare).
+        assert_eq!(active_working_days(2026, 3, Some("invalid")), 22);
     }
 }

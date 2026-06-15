@@ -23,7 +23,7 @@ fn split_name(full: &str) -> (String, String) {
 }
 
 use crate::db::invoices::round2;
-use crate::db::payroll::{leave_working_days_in_month, working_days};
+use crate::db::payroll::{active_working_days, leave_working_days_in_month, working_days};
 
 /// Convert an ISO date (YYYY-MM-DD) to the D112 zz.ll.aaaa format; pass other strings through.
 fn ro_date(iso: &str) -> String {
@@ -419,13 +419,25 @@ fn build_d112_xml(
         // baza majorată.
         let exempt =
             crate::anaf_decl::d112::exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
-        if let Some((base, _, _)) =
-            crate::anaf_decl::d112::part_time_min_base(gross, &e.tip_contract, exempt, year, month)
-        {
+        // Zile lucrătoare active în lună (angajare la mijlocul lunii ⇒ < NZL). Folosit ca A_8 emis
+        // ȘI pentru proratarea bazei minime part-time, ca să coincidă cu regula DUK
+        // A_13P = ROUND(sm × A_8 / NZL). Lună întreagă ⇒ active_days = NZL ⇒ baza întreagă (neschimbat).
+        let active_days = active_working_days(year, month, e.employment_date.as_deref());
+        let mut zile_emis = nzl;
+        if let Some((base, _, _)) = crate::anaf_decl::d112::part_time_min_base(
+            gross,
+            &e.tip_contract,
+            exempt,
+            year,
+            month,
+            active_days,
+            nzl,
+        ) {
             baza_cas = base;
             baza_cass = base;
             cas = round2(base * Decimal::new(25, 2));
             cass = round2(base * Decimal::new(10, 2));
+            zile_emis = active_days; // A_8 = zilele active ⇒ A_13P recalculat de DUK = baza prorată
         }
         // Tip asigurat: beneficiarii sumei netaxabile, de la 07/2026 (modelul Ordin 605/95/928/
         // 2.314/2026), folosesc codul 1.11.2 (Nomenclator 5). Pentru ≤06/2026 sau ne-beneficiari se
@@ -452,7 +464,7 @@ fn build_d112_xml(
             cass: leid(cass),
             impozit: lei(&r.income_tax),
             cam: lei(&r.cam),
-            zile: nzl,
+            zile: zile_emis,
             tip_asigurat,
             pensionar: e.pensionar,
             tip_contract: e.tip_contract.clone(),
