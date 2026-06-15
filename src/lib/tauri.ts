@@ -618,7 +618,12 @@ export interface Dividend {
   taxAmount: string;
   netAmount: string;
   interim2025: boolean;
+  /** Numele beneficiarului (reutilizat ca D205 den1). */
   shareholder: string | null;
+  /** CNP-ul beneficiarului (D205 cifR, N13 mod-11) — opțional, cerut la export D205. */
+  beneficiaryCnp: string | null;
+  /** Rezident fiscal RO (D205 Rezid; nerezident → D207). */
+  beneficiaryResident: boolean;
   note: string | null;
   taxDeadline: string;
 }
@@ -629,6 +634,8 @@ export interface DividendInput {
   grossAmount: string;
   interim2025?: boolean;
   shareholder?: string | null;
+  beneficiaryCnp?: string | null;
+  beneficiaryResident?: boolean;
   note?: string | null;
 }
 export const dividends = {

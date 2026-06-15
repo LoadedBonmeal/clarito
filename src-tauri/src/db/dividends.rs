@@ -65,10 +65,19 @@ pub struct Dividend {
     pub tax_amount: String,
     pub net_amount: String,
     pub interim_2025: bool,
+    /// Numele beneficiarului (text liber) — refolosit ca `den1` în D205.
     pub shareholder: Option<String>,
+    /// CNP-ul beneficiarului (D205 `cifR`, N13 mod-11). Opțional la înregistrare; cerut la exportul D205.
+    pub beneficiary_cnp: Option<String>,
+    /// Rezident fiscal RO (D205 `Rezid`; 1 = rezident → D205, 0 = nerezident → D207). Implicit true.
+    pub beneficiary_resident: bool,
     pub note: Option<String>,
     /// Termenul de plată al impozitului (derivat, nu stocat).
     pub tax_deadline: String,
+}
+
+fn default_resident() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -81,6 +90,10 @@ pub struct DividendInput {
     #[serde(default)]
     pub interim_2025: bool,
     pub shareholder: Option<String>,
+    #[serde(default)]
+    pub beneficiary_cnp: Option<String>,
+    #[serde(default = "default_resident")]
+    pub beneficiary_resident: bool,
     pub note: Option<String>,
 }
 
@@ -99,6 +112,8 @@ fn row_to_dividend(r: &sqlx::sqlite::SqliteRow) -> Dividend {
         net_amount: r.get("net_amount"),
         interim_2025: r.get::<i64, _>("interim_2025") != 0,
         shareholder: r.get("shareholder"),
+        beneficiary_cnp: r.get("beneficiary_cnp"),
+        beneficiary_resident: r.get::<i64, _>("beneficiary_resident") != 0,
         note: r.get("note"),
         tax_deadline,
     }
@@ -106,7 +121,8 @@ fn row_to_dividend(r: &sqlx::sqlite::SqliteRow) -> Dividend {
 
 const SELECT: &str =
     "SELECT id, company_id, distribution_date, payment_date, gross_amount, tax_rate, \
-     tax_amount, net_amount, interim_2025, shareholder, note FROM dividends";
+     tax_amount, net_amount, interim_2025, shareholder, beneficiary_cnp, beneficiary_resident, \
+     note FROM dividends";
 
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Dividend>> {
     let rows = sqlx::query(&format!(
@@ -144,6 +160,20 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
             "Suma brută a dividendelor trebuie să fie > 0.".into(),
         ));
     }
+    // CNP beneficiar — opțional la înregistrare (regression-safe), dar dacă e prezent trebuie să fie
+    // valid (D205 `cifR`, N13 mod-11; ANAF respinge un CNP invalid). Cerut la exportul D205.
+    let ben_cnp = input
+        .beneficiary_cnp
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(cnp) = ben_cnp {
+        if !crate::anaf_decl::valid_cnp(cnp) {
+            return Err(AppError::Validation(
+                "CNP beneficiar invalid — 13 cifre cu cifra de control corectă.".into(),
+            ));
+        }
+    }
     let rate = dividend_tax_rate(date, input.interim_2025);
     let tax = round2(gross * Decimal::new(rate, 2));
     let net = gross - tax; // ambele 2dp → diferența e exactă, deci nota e echilibrată
@@ -151,8 +181,9 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
     let id = new_id();
     sqlx::query(
         "INSERT INTO dividends (id, company_id, distribution_date, payment_date, gross_amount, \
-         tax_rate, tax_amount, net_amount, interim_2025, shareholder, note, created_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+         tax_rate, tax_amount, net_amount, interim_2025, shareholder, beneficiary_cnp, \
+         beneficiary_resident, note, created_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
     )
     .bind(&id)
     .bind(&input.company_id)
@@ -170,6 +201,8 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
     .bind(net.to_string())
     .bind(input.interim_2025 as i64)
     .bind(input.shareholder.as_deref())
+    .bind(ben_cnp)
+    .bind(input.beneficiary_resident as i64)
     .bind(input.note.as_deref())
     .bind(now_unix())
     .execute(pool)
@@ -352,6 +385,8 @@ mod tests {
                 gross_amount: "10000".into(),
                 interim_2025: false,
                 shareholder: Some("Asociat A".into()),
+                beneficiary_cnp: Some("1960101410019".into()),
+                beneficiary_resident: true,
                 note: None,
             },
         )
@@ -361,6 +396,8 @@ mod tests {
         assert_eq!(d.tax_amount, "1600.00");
         assert_eq!(d.net_amount, "8400.00");
         assert_eq!(d.tax_deadline, "2026-04-25"); // plătit în martie → 25 aprilie
+        assert_eq!(d.beneficiary_cnp.as_deref(), Some("1960101410019")); // CNP round-trips
+        assert!(d.beneficiary_resident);
 
         // Nota GL: 3 linii (117/457/446), echilibrată, total debit = brutul.
         let row = sqlx::query(
@@ -412,6 +449,8 @@ mod tests {
                     gross_amount: "10000".into(),
                     interim_2025: false,
                     shareholder: Some("Asociat".into()),
+                    beneficiary_cnp: None,
+                    beneficiary_resident: true,
                     note: None,
                 },
             )
@@ -427,6 +466,8 @@ mod tests {
                 gross_amount: "5000".into(),
                 interim_2025: false,
                 shareholder: Some("Asociat".into()),
+                beneficiary_cnp: None,
+                beneficiary_resident: true,
                 note: None,
             },
         )

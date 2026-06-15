@@ -26,6 +26,8 @@ export function Dividends() {
   const [grossAmount, setGrossAmount] = useState("");
   const [interim2025, setInterim2025] = useState(false);
   const [shareholder, setShareholder] = useState("");
+  const [beneficiaryCnp, setBeneficiaryCnp] = useState("");
+  const [beneficiaryResident, setBeneficiaryResident] = useState(true);
 
   const { data: list = [] } = useQuery({
     queryKey: ["dividends", companyId ?? ""],
@@ -43,6 +45,8 @@ export function Dividends() {
         grossAmount: grossAmount || "0",
         interim2025,
         shareholder: shareholder || null,
+        beneficiaryCnp: beneficiaryCnp.trim() || null,
+        beneficiaryResident,
       });
     },
     onSuccess: () => {
@@ -50,6 +54,7 @@ export function Dividends() {
       void qc.invalidateQueries({ queryKey: ["gl"] });
       setGrossAmount("");
       setShareholder("");
+      setBeneficiaryCnp("");
       notify.success(t("dividends.saved"));
     },
     onError: (e) => notify.error(formatError(e, t("dividends.saveFailed"))),
@@ -97,6 +102,25 @@ export function Dividends() {
           <div className="field">
             <label>{t("dividends.shareholder")}</label>
             <input className="input" value={shareholder} onChange={(e) => setShareholder(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t("dividends.beneficiaryCnp")}</label>
+            <input
+              className="input num"
+              inputMode="numeric"
+              maxLength={13}
+              placeholder="1960101410019"
+              value={beneficiaryCnp}
+              onChange={(e) => setBeneficiaryCnp(e.target.value.replace(/\D/g, ""))}
+            />
+            <div className="hint">{t("dividends.beneficiaryCnpHint")}</div>
+          </div>
+          <div className="field span2">
+            <label className="chk-row">
+              <input type="checkbox" checked={beneficiaryResident} onChange={(e) => setBeneficiaryResident(e.target.checked)} />
+              <span>{t("dividends.beneficiaryResident")}</span>
+            </label>
+            <div className="hint">{t("dividends.beneficiaryResidentHint")}</div>
           </div>
           <div className="field span2">
             <label className="chk-row">
