@@ -828,7 +828,10 @@ function ConcediuModal({
         zileAngajator: Number(f.zileAngajator) || 0, zileFnuass: Number(f.zileFnuass) || 0,
         bazaCalcul: f.bazaCalcul || "0", zileBaza: Number(f.zileBaza) || 0,
         sumaAngajator: f.sumaAngajator || "0", sumaFnuass: f.sumaFnuass || "0",
-        procent: Number(f.procent) || 75,
+        // Procentul (D_28) se trimite EXACT cum a fost introdus — fără default tăcut de 75%. Gol → câmp
+        // omis (undefined → None în backend), astfel încât validarea pentru cod 01 (OUG 91/2025) să ceară
+        // o alegere conștientă 55/65/75 în loc să accepte un 75% injectat tăcut.
+        procent: f.procent.trim() === "" ? undefined : Number(f.procent),
         locPrescriere: Number(f.locPrescriere) || 1, codBoala,
       });
     },

@@ -118,22 +118,15 @@ fn money(label: &str, s: &str) -> AppResult<String> {
     Ok(d.to_string())
 }
 
-/// `true` for a well-formed ISO calendar date `YYYY-MM-DD` (month 1–12, day 1–31).
-/// ISO strings also compare lexicographically = chronologically, so `<=` on the raw
-/// strings is a valid ordering check once both are validated here.
+/// `true` for a well-formed ISO **calendar** date `YYYY-MM-DD` — month 1–12 AND a day that actually
+/// exists in that month (leap-year aware). Uses chrono so impossible dates (`2026-02-31`,
+/// `2025-02-29`, `2026-04-31`) are rejected, not just month/day ranges — otherwise they persist and
+/// are emitted verbatim into the D112 `asiguratD` block (D_12/D_13), where DUKIntegrator rejects the
+/// whole declaration at filing time. The `len == 10` guard keeps the strict 2-digit format (chrono's
+/// `%Y-%m-%d` would otherwise accept `2026-2-5`), so ISO strings still compare lexicographically =
+/// chronologically and `<=` on the raw strings stays a valid ordering check once validated here.
 fn valid_iso_date(s: &str) -> bool {
-    let p: Vec<&str> = s.split('-').collect();
-    if p.len() != 3 || p[0].len() != 4 || p[1].len() != 2 || p[2].len() != 2 {
-        return false;
-    }
-    if !p.iter().all(|seg| seg.bytes().all(|b| b.is_ascii_digit())) {
-        return false;
-    }
-    let (m, d) = (
-        p[1].parse::<u32>().unwrap_or(0),
-        p[2].parse::<u32>().unwrap_or(0),
-    );
-    (1..=12).contains(&m) && (1..=31).contains(&d)
+    s.len() == 10 && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
 }
 
 /// Baseline data-quality validation for a medical-leave certificate (OUG 158/2005).
@@ -366,9 +359,10 @@ pub async fn create(pool: &SqlitePool, input: MedicalLeaveInput) -> AppResult<Me
     .bind(input.zile_baza.unwrap_or(0).max(0))
     .bind(&s_ang)
     .bind(&s_fnuass)
-    // procent (D_28): rate for cod 01 per OUG 91/2025 is 55/65/75% depending on the case —
-    // the actual value is always entered by the user; 75 is kept here only as a legacy default
-    // when no value is provided.
+    // procent (D_28): pentru cod 01 (OUG 91/2025) trebuie 55/65/75% — validarea de mai sus respinge
+    // `None` și valorile din afara setului, iar frontend-ul trimite acum `null` la câmp gol (nu mai
+    // injectează tăcut 75). Așadar pe calea cod-01 acest `unwrap_or` nu se mai atinge; rămâne doar ca
+    // fallback defensiv pentru celelalte coduri cu procent omis (caz rar, nu boala obișnuită).
     .bind(input.procent.unwrap_or(75))
     .bind(input.loc_prescriere.unwrap_or(1).clamp(1, 4))
     .bind(&cod_boala)
@@ -663,11 +657,17 @@ mod tests {
     #[test]
     fn iso_date_helper() {
         assert!(valid_iso_date("2026-06-02"));
+        assert!(valid_iso_date("2024-02-29")); // an bisect → 29 feb există
         assert!(!valid_iso_date("2026-13-02")); // luna 13
         assert!(!valid_iso_date("2026-06-32")); // ziua 32
         assert!(!valid_iso_date("2026-6-2")); // segmente nepadate
         assert!(!valid_iso_date("02.06.2026")); // format zz.ll.aaaa, nu ISO
         assert!(!valid_iso_date(""));
+        // Date calendaristice IMPOSIBILE — vechiul validator (zi 1–31) le accepta, chrono le respinge.
+        assert!(!valid_iso_date("2026-02-31")); // februarie nu are 31
+        assert!(!valid_iso_date("2025-02-29")); // 2025 nu e bisect
+        assert!(!valid_iso_date("2026-04-31")); // aprilie are 30
+        assert!(!valid_iso_date("2026-06-31")); // iunie are 30
     }
 
     /// [P2] Overlapping certificates must be rejected; non-overlapping ones accepted.

@@ -6,8 +6,8 @@ use std::str::FromStr;
 use tauri::State;
 
 use crate::anaf_decl::d112::{
-    cm_indemn_treatment, compute_payroll, compute_payroll_with_leave, suma_netaxabila, LeaveCert,
-    LeavePayrollInput, PayrollInput,
+    cm_indemn_treatment, compute_payroll, compute_payroll_with_leave, deducere_plafonata,
+    suma_netaxabila, LeaveCert, LeavePayrollInput, PayrollInput,
 };
 use crate::anaf_decl::d112_xml::{generate_d112_xml, D112Employee, D112Header, D112MedicalLeave};
 use crate::db::payroll::{self, CreateEmployeeInput, Employee, PayrollRun, UpdateEmployeeInput};
@@ -281,7 +281,12 @@ fn build_d112_xml(
             }
             let lr = compute_payroll_with_leave(&LeavePayrollInput {
                 gross: gross_in,
-                personal_deduction: dec(&e.personal_deduction),
+                personal_deduction: deducere_plafonata(
+                    dec(&e.personal_deduction),
+                    gross_in,
+                    year,
+                    month,
+                ),
                 non_taxable,
                 working_days: nzl,
                 certs,
@@ -321,7 +326,12 @@ fn build_d112_xml(
 
         let r = compute_payroll(&PayrollInput {
             gross: gross_in,
-            personal_deduction: dec(&e.personal_deduction),
+            personal_deduction: deducere_plafonata(
+                dec(&e.personal_deduction),
+                gross_in,
+                year,
+                month,
+            ),
             non_taxable,
         });
         let gross = dec(&r.gross);

@@ -216,9 +216,26 @@ pub fn suma_netaxabila(
     amount.min(gross)
 }
 
+/// Plafonarea deducerii personale de bază (art. 77 alin. (2) Cod fiscal): deducerea se acordă DOAR
+/// dacă venitul brut lunar din salarii ≤ **salariul minim + 2.000 lei** (6.050 sem. I / 6.325 sem. II
+/// 2026 — re-ancorat pe 1 iulie odată cu salariul minim 4.050→4.325); peste plafon = 0. Sub plafon
+/// întoarce cuantumul introdus (≥ 0); limitarea ulterioară la venitul net disponibil rămâne în
+/// `compute_payroll` / `compute_payroll_with_leave`. `brut` = venitul brut din salarii al lunii
+/// (la contract întreg = salariul de bază). Deducerea fiind introdusă manual de contabil, acest plafon
+/// previne o deducere ilegală (deci impozit sub-declarat în D112) pentru un salariat peste plafon.
+pub fn deducere_plafonata(entered: Decimal, brut: Decimal, year: i32, month: u32) -> Decimal {
+    let plafond = min_wage_lei(year, month) + Decimal::from(2000);
+    if brut > plafond {
+        Decimal::ZERO
+    } else {
+        entered.max(Decimal::ZERO)
+    }
+}
+
 /// Compute one monthly salary state from the gross + personal deduction (2026 rates).
 /// `input.non_taxable` (resolved by [`suma_netaxabila`]) is carved out of the base BEFORE CAS, CASS,
-/// CAM and income tax (art. III OUG 89/2025).
+/// CAM and income tax (art. III OUG 89/2025). Plafonarea deducerii (art. 77) se aplică în apelant prin
+/// [`deducere_plafonata`] (acolo unde sunt disponibile anul/luna), apoi se limitează la venitul net aici.
 pub fn compute_payroll(input: &PayrollInput) -> PayrollResult {
     let z = Decimal::ZERO;
     let gross = input.gross.max(z);
@@ -405,6 +422,33 @@ mod tests {
     use std::str::FromStr;
     fn d(s: &str) -> Decimal {
         Decimal::from_str(s).unwrap()
+    }
+
+    #[test]
+    fn deducere_plafonata_art77_ceiling() {
+        // Plafon = salariul minim + 2.000: H1 2026 (lună ≤6) = 4.050 + 2.000 = 6.050.
+        // Sub plafon → cuantumul introdus; peste plafon → 0.
+        assert_eq!(deducere_plafonata(d("700"), d("5000"), 2026, 3), d("700"));
+        assert_eq!(deducere_plafonata(d("700"), d("6050"), 2026, 3), d("700")); // exact pe plafon → se acordă
+        assert_eq!(
+            deducere_plafonata(d("700"), d("6051"), 2026, 3),
+            Decimal::ZERO
+        ); // peste → 0
+        assert_eq!(
+            deducere_plafonata(d("700"), d("8000"), 2026, 3),
+            Decimal::ZERO
+        );
+        // H2 2026 (lună ≥7): plafon = 4.325 + 2.000 = 6.325.
+        assert_eq!(deducere_plafonata(d("500"), d("6300"), 2026, 9), d("500"));
+        assert_eq!(
+            deducere_plafonata(d("500"), d("6326"), 2026, 9),
+            Decimal::ZERO
+        );
+        // intrare negativă → 0 (nu poate fi negativă)
+        assert_eq!(
+            deducere_plafonata(d("-10"), d("3000"), 2026, 3),
+            Decimal::ZERO
+        );
     }
 
     #[test]

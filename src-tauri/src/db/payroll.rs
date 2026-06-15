@@ -10,9 +10,9 @@ use sqlx::{FromRow, SqlitePool};
 use std::str::FromStr;
 
 use crate::anaf_decl::d112::{
-    cm_indemn_treatment, compute_payroll, compute_payroll_with_leave, exempt_part_time_min_base,
-    part_time_min_base, pct, suma_netaxabila, LeaveCert, LeavePayrollInput, PayrollInput, CAM_PCT,
-    CONCEDII_PCT,
+    cm_indemn_treatment, compute_payroll, compute_payroll_with_leave, deducere_plafonata,
+    exempt_part_time_min_base, part_time_min_base, pct, suma_netaxabila, LeaveCert,
+    LeavePayrollInput, PayrollInput, CAM_PCT, CONCEDII_PCT,
 };
 use crate::db::gl::IndemnityTotals;
 use crate::db::models::{new_id, now_unix};
@@ -537,7 +537,12 @@ pub async fn run_payroll(
                 .collect();
             let lr = compute_payroll_with_leave(&LeavePayrollInput {
                 gross,
-                personal_deduction: dec(&e.personal_deduction),
+                personal_deduction: deducere_plafonata(
+                    dec(&e.personal_deduction),
+                    gross,
+                    year,
+                    month,
+                ),
                 non_taxable,
                 working_days: nzl,
                 certs,
@@ -545,7 +550,12 @@ pub async fn run_payroll(
             // Partea salarială lucrată (pentru split-ul GL): contribuțiile pe brutul lucrat.
             let w = compute_payroll(&PayrollInput {
                 gross: lr.worked_gross,
-                personal_deduction: dec(&e.personal_deduction),
+                personal_deduction: deducere_plafonata(
+                    dec(&e.personal_deduction),
+                    gross,
+                    year,
+                    month,
+                ),
                 non_taxable,
             });
             let (wcas, wcass, wtax) = (dec(&w.cas), dec(&w.cass), dec(&w.income_tax));
@@ -584,7 +594,7 @@ pub async fn run_payroll(
 
         let r = compute_payroll(&PayrollInput {
             gross,
-            personal_deduction: dec(&e.personal_deduction),
+            personal_deduction: deducere_plafonata(dec(&e.personal_deduction), gross, year, month),
             non_taxable,
         });
         let exempt = exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
