@@ -1,14 +1,45 @@
 # D205 emitter — design document (dividend channel with real DUK validation)
 
-> **Status: DESIGN ONLY — not yet implemented.** This file is the byte-verified spec for a future,
-> focused implementation. The dividend-tax *engine* (rates, deadlines, 117/457/446 GL, the D100
-> informational row) already ships (`src/db/dividends.rs`, `commands/declarations.rs::compute_d100`).
-> What is missing is the **annual D205 emitter** — the only dividend channel ANAF validates with a real
-> DUK validator (`D205Validator.jar`).
+> **Status: ✅ IMPLEMENTED + DUK-VALIDATED (2026-06-15).** The emitter ships in
+> `src/anaf_decl/d205_xml.rs` (`build_d205_xml`) + `commands/dividends.rs::export_d205_official`, gated by
+> the bundled `D205Validator.jar`. A golden D205 validates **clean** against ANAF's own validator
+> (`Validare fără erori`) — see the gated test `d205_xml::tests::duk_validates_d205`.
 >
-> Sources (byte-verified): official XSD `d205_2025_v3.xsd` + `structura_D205_2025_120226.pdf`
-> (OPANAF 102/2025) + the decompiled `D205Validator.jar`. Validator + schema live at
-> `https://static.anaf.ro/static/10/Anaf/update5/D205_36/`.
+> **The schema below (§2) is the ORIGINAL design hypothesis. Several points were WRONG and were corrected
+> by running the real validator (verify-first, 4 rounds) — see the box immediately below for the
+> validator-verified truth. Where they conflict, the box wins.**
+
+## ✅ VALIDATOR-VERIFIED schema (corrections to §2)
+
+Established by running the bundled `java -jar DUKIntegrator.jar -v D205` on golden XML until clean:
+
+- **`D205Validator.jar`**: bundled at `resources/duk/lib/D205Validator.jar`, **349,183 bytes**,
+  sha256 `e8b33294d6fe846315f14bfb0b6b46250e79ad78fe935680aaf02f0e64c7d208`, class
+  `d205validator.Validator`, built 2026-02-24, from
+  `https://static.anaf.ro/static/10/Anaf/update5/D205_36/D205Validator.jar`. The namespace `:v3` maps to
+  the validator's **internal v8 schema** (latest). Validates clean **without** a `versiuniCurente.txt`
+  entry (like D112). There is **no shippable XSD** — the schema is compiled into the jar.
+- **Root `<declaratie205>`**: attrs `xmlns`, `luna="12"`, `an`, `d_rec`, **`cui`** (declarant CUI — NOT
+  `cif`), **`adresa`** (REQUIRED), `den`, `nume_declar`, `prenume_declar`, `functie_declar`,
+  `totalPlata_A`. **There is NO `version` attribute** (the `version="1.0"` in the XML prolog is just the
+  XML declaration). `totalPlata_A = nrben + Tcastig + Tpierd + T_VB + T_GAR + Tbaza + Timp` (the zero
+  totals don't change it → `nrben + Tbaza + Timp` for dividends).
+- **`<sect_II>` is SELF-CLOSING** (a recap, NOT a wrapper around benef). Required attrs: `tip_venit="08"`,
+  `nrben`, **`Tcastig`, `Tpierd`, `T_VB`, `T_GAR`** (all REQUIRED, = `0` for dividends), `Tbaza`, `Timp`.
+- **`<benef>` rows are SIBLINGS** — direct children of `<declaratie205>`, AFTER the `<sect_II>` recap (NOT
+  nested inside it); each self-identifies via `tip_venit1`. Each benef needs **`id_inreg`** (1-based
+  sequential registration id, the unique key — REQUIRED) + `tip_venit1="08"`, `tip_plata="2"`, `Rezid`,
+  `cifR` (CNP), `den1`, `baza1`, `imp1`, `divid_D`, `divid_P`. Money = whole-lei N15 integers.
+- **Canonical clean shape** (verified):
+  ```xml
+  <declaratie205 xmlns="mfp:anaf:dgti:d205:declaratie:v3" luna="12" an="2025" d_rec="0"
+                 cui="13548146" adresa="…" den="…" nume_declar="…" prenume_declar="…"
+                 functie_declar="Administrator" totalPlata_A="11001">
+    <sect_II tip_venit="08" nrben="1" Tcastig="0" Tpierd="0" T_VB="0" T_GAR="0" Tbaza="10000" Timp="1000"/>
+    <benef id_inreg="1" tip_venit1="08" tip_plata="2" Rezid="1" cifR="1900101410011" den1="…"
+           baza1="10000" imp1="1000" divid_D="10000" divid_P="10000"/>
+  </declaratie205>
+  ```
 
 ---
 

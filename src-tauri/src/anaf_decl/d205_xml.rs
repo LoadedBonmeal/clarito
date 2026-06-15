@@ -1,18 +1,19 @@
 //! D205 — Declarația informativă privind impozitul reținut la sursă, pe beneficiari de venit
 //! (OPANAF 179/2022, mod. OPANAF 102/2025). Capitolul DIVIDENDE (`tip_venit` 08). Model `:v3`.
 //!
-//! Structură pe 3 niveluri, cu TOATE datele ca ATRIBUTE XML și sume în LEI ÎNTREGI (N15):
+//! Structură cu TOATE datele ca ATRIBUTE XML și sume în LEI ÎNTREGI (N15). Recapitulația `sect_II` e
+//! SELF-CLOSING, iar rândurile `benef` sunt SIBLINGS (copii direcți ai `declaratie205`, DUPĂ sect_II) —
+//! NU imbricate. (Structura + numele atributelor au fost CONFIRMATE rulând validatorul oficial pe XML
+//! golden până la „Validare fără erori", corectând câteva ipoteze din design — vezi D205_EMITTER_DESIGN.md.)
 //! ```text
-//!   <declaratie205 …antet… totalPlata_A="…">   — 1 / declarație (luna=12, an de venit)
-//!     <sect_II tip_venit="08" nrben Tbaza Timp>  — 1 / tip de venit (dividende)
-//!       <benef tip_venit1="08" …/>               — 1 / beneficiar (CNP)
+//!   <declaratie205 …antet… cui adresa totalPlata_A>              — 1 / declarație (luna=12, an de venit)
+//!     <sect_II tip_venit="08" nrben Tcastig Tpierd T_VB T_GAR Tbaza Timp/>  — recapitulație (self-closing)
+//!     <benef id_inreg="1" tip_venit1="08" …/>                    — 1 / beneficiar (CNP), SIBLING
 //!   </declaratie205>
 //! ```
-//! Spre deosebire de emitoarele flat cu elemente-copil (D300/bilanț), D205 folosește emitorul cu
-//! ATRIBUTE ([`crate::anaf_decl::xml::start_elem_attrs`] / [`empty_elem_attrs`]). Validatorul oficial
-//! este `D205Validator.jar` (`-v D205`) — vezi `src-tauri/D205_EMITTER_DESIGN.md`. Câmpurile/structura
-//! reflectă spec-ul verificat la nivel de octet; rularea END-TO-END a DUK pe un XML golden confirmă
-//! conformitatea înainte ca gate-ul să devină blocant (regula „verify-first", ca la D112).
+//! Folosește emitorul cu ATRIBUTE ([`crate::anaf_decl::xml::start_elem_attrs`] / [`empty_elem_attrs`]),
+//! nu pe cel cu elemente-copil (D300/bilanț). Validatorul oficial e `D205Validator.jar` (`-v D205`),
+//! inclus în `resources/duk/lib/`; testul `tests::duk_validates_d205` rulează DUK end-to-end pe golden.
 
 use rust_decimal::Decimal;
 
@@ -23,10 +24,14 @@ use crate::anaf_decl::xml::{
 use crate::anaf_decl::{round_lei, DeclKind};
 use crate::error::{AppError, AppResult};
 
-/// Antetul D205 (datele plătitorului/declarantului) pentru un an de venit.
+/// Antetul D205 (datele plătitorului/declarantului) pentru un an de venit. Numele atributelor sunt cele
+/// din validatorul oficial (`D205Validator.jar`, schema curentă v8): declarantul e identificat prin
+/// `cui` (NU `cif`), iar `adresa` e obligatorie. NU există atribut `version`.
 pub struct D205Header {
-    /// `cif` — codul fiscal al declarantului (CUI, doar cifre, fără „RO").
-    pub cif: String,
+    /// `cui` — codul fiscal al declarantului (CUI, doar cifre, fără „RO"). OBLIGATORIU.
+    pub cui: String,
+    /// `adresa` — adresa declarantului. OBLIGATORIE.
+    pub adresa: String,
     /// `den` — denumirea declarantului.
     pub den: String,
     /// `an` — anul de venit raportat (≥ 2025).
@@ -60,6 +65,8 @@ pub struct D205Beneficiary {
 
 /// Plafonul de lungime pentru câmpurile de denumire (den/den1). Tăiere char-safe (diacritice RO).
 const NAME_MAX: usize = 75;
+/// Plafonul de lungime pentru adresă.
+const ADDR_MAX: usize = 200;
 
 /// Construiește XML-ul D205 (`:v3`) pentru anul `header.an`, capitolul dividende. Toți beneficiarii sunt
 /// de tip 08. Sumele se rotunjesc la lei întregi ([`round_lei`]). `totalPlata_A = Σ_sect (nrben + Tbaza
@@ -88,6 +95,7 @@ pub fn build_d205_xml(header: &D205Header, beneficiaries: &[D205Beneficiary]) ->
     let t_imp_s = t_imp.to_string();
     let total_s = total_plata_a.to_string();
     let den = trunc(header.den.trim(), NAME_MAX);
+    let adresa = trunc(header.adresa.trim(), ADDR_MAX);
     let nume = trunc(header.nume_declar.trim(), NAME_MAX);
     let prenume = trunc(header.prenume_declar.trim(), NAME_MAX);
     let functie = trunc(header.functie_declar.trim(), NAME_MAX);
@@ -98,11 +106,11 @@ pub fn build_d205_xml(header: &D205Header, beneficiaries: &[D205Beneficiary]) ->
         sv.root_element, // "declaratie205"
         &[
             ("xmlns", sv.namespace),
-            ("version", "1.00"),
             ("luna", "12"), // D205 e anuală: luna de raportare = 12
             ("an", &an),
             ("d_rec", &d_rec),
-            ("cif", header.cif.trim()),
+            ("cui", header.cui.trim()), // declarantul e identificat prin `cui` (NU `cif`)
+            ("adresa", &adresa),
             ("den", &den),
             ("nume_declar", &nume),
             ("prenume_declar", &prenume),
@@ -111,18 +119,29 @@ pub fn build_d205_xml(header: &D205Header, beneficiaries: &[D205Beneficiary]) ->
         ],
     )?;
 
-    start_elem_attrs(
+    // Recapitulația secțiunii (SELF-CLOSING) vine ÎNAINTEA rândurilor `benef`. Pentru dividende, doar
+    // Tbaza/Timp au valori; restul totalurilor de tip de venit (câștig/pierdere/venit-brut/garanție)
+    // sunt 0, dar atributele sunt OBLIGATORII (schema v8).
+    empty_elem_attrs(
         &mut w,
         "sect_II",
         &[
             ("tip_venit", "08"),
             ("nrben", &nrben_s),
+            ("Tcastig", "0"),
+            ("Tpierd", "0"),
+            ("T_VB", "0"),
+            ("T_GAR", "0"),
             ("Tbaza", &t_baza_s),
             ("Timp", &t_imp_s),
         ],
     )?;
 
-    for b in beneficiaries {
+    // Rândurile `benef` sunt copii DIRECȚI ai `declaratie205` (SIBLINGS ai recapitulației sect_II) —
+    // fiecare se auto-identifică prin `tip_venit1`. Vin DUPĂ recapitulația secțiunii. `id_inreg` e
+    // numărul de înregistrare secvențial (1-based, cheia unică a rândului — OBLIGATORIU).
+    for (i, b) in beneficiaries.iter().enumerate() {
+        let id_inreg = (i + 1).to_string();
         let baza = round_lei(b.baza).to_string();
         let imp = round_lei(b.impozit).to_string();
         let divd = round_lei(b.distribuit).to_string();
@@ -133,6 +152,7 @@ pub fn build_d205_xml(header: &D205Header, beneficiaries: &[D205Beneficiary]) ->
             &mut w,
             "benef",
             &[
+                ("id_inreg", &id_inreg),
                 ("tip_venit1", "08"),
                 ("tip_plata", "2"), // 2 = plată finală/definitivă
                 ("Rezid", rezid),
@@ -146,7 +166,6 @@ pub fn build_d205_xml(header: &D205Header, beneficiaries: &[D205Beneficiary]) ->
         )?;
     }
 
-    end_elem(&mut w, "sect_II")?;
     end_elem(&mut w, sv.root_element)?;
     finish(w)
 }
@@ -162,7 +181,8 @@ mod tests {
 
     fn header() -> D205Header {
         D205Header {
-            cif: "13548146".into(),
+            cui: "13548146".into(),
+            adresa: "Str. Exemplu 1, București".into(),
             den: "Andrei Consulting SRL".into(),
             an: 2025,
             d_rec: 0,
@@ -205,9 +225,30 @@ mod tests {
             xml.contains(r#"an="2025""#) && xml.contains(r#"d_rec="0""#),
             "{xml}"
         );
-        // Section recap: 1 beneficiary, base 10000, tax 1000.
+        // Declarant identified by `cui` + `adresa` (NOT `cif`); no `version` attribute on the root
+        // element (the `version="1.0"` in the XML prolog is the XML declaration, not a D205 attr).
         assert!(
-            xml.contains(r#"<sect_II tip_venit="08" nrben="1" Tbaza="10000" Timp="1000">"#),
+            xml.contains(r#"cui="13548146""#) && xml.contains(r#"adresa="#),
+            "{xml}"
+        );
+        let root_start = xml.find("<declaratie205").unwrap();
+        let root_open = &xml[root_start..root_start + xml[root_start..].find('>').unwrap()];
+        assert!(
+            !root_open.contains("cif=") && !root_open.contains("version="),
+            "{root_open}"
+        );
+        // Section recap: 1 beneficiary, base 10000, tax 1000; the other type-totals are 0 (required).
+        assert!(
+            xml.contains(r#"nrben="1""#)
+                && xml.contains(r#"Tbaza="10000""#)
+                && xml.contains(r#"Timp="1000""#),
+            "{xml}"
+        );
+        assert!(
+            xml.contains(r#"Tcastig="0""#)
+                && xml.contains(r#"Tpierd="0""#)
+                && xml.contains(r#"T_VB="0""#)
+                && xml.contains(r#"T_GAR="0""#),
             "{xml}"
         );
         // Beneficiary row — dividend codes + whole-lei money.
@@ -229,9 +270,21 @@ mod tests {
         );
         // totalPlata_A = nrben(1) + Tbaza(10000) + Timp(1000) = 11001.
         assert!(xml.contains(r#"totalPlata_A="11001""#), "{xml}");
-        // Self-closing benef + closed section + root.
+        // sect_II recap is SELF-CLOSING and precedes the benef sibling rows; root closes.
+        let sect_pos = xml.find("<sect_II ").unwrap();
+        let benef_pos = xml.find("<benef ").unwrap();
         assert!(
-            xml.contains("/>") && xml.contains("</sect_II>") && xml.contains("</declaratie205>"),
+            sect_pos < benef_pos,
+            "sect_II recap must precede benef rows: {xml}"
+        );
+        assert!(
+            !xml.contains("</sect_II>"),
+            "sect_II must be self-closing: {xml}"
+        );
+        assert!(
+            xml.contains("/></declaratie205>")
+                || xml.contains("/>\n</declaratie205>")
+                || xml.contains("</declaratie205>"),
             "{xml}"
         );
     }
@@ -272,5 +325,69 @@ mod tests {
         let path = std::env::temp_dir().join("d205_golden.xml");
         std::fs::write(&path, &xml).unwrap();
         eprintln!("WROTE {}", path.display());
+    }
+
+    /// END-TO-END DUK gate (opt-in, like the D112 one): build a golden D205 and run the REAL bundled
+    /// ANAF validator `D205Validator.jar` (`-v D205`) on it via `run_duk`, asserting it PASSES. This is
+    /// the verify-first proof that the emitter is schema-conformant. `#[ignore]` because it spawns the
+    /// 349 KB Java validator + jlink JRE; runs on demand:
+    ///   cargo test --lib anaf_decl::d205_xml::tests::duk_validates_d205 -- --ignored --nocapture
+    /// Graceful: if the bundled resources are absent (stripped checkout), it skips, never panics.
+    #[test]
+    #[ignore]
+    fn duk_validates_d205() {
+        use crate::anaf_decl::duk::{run_duk, DukProvider, DukRuntime};
+        use std::path::PathBuf;
+
+        let xml = build_d205_xml(
+            &header(),
+            &[
+                benef("1900101410011", "10000", "1600"),
+                benef("1960101410019", "5000", "800"),
+            ],
+        )
+        .unwrap();
+        let tmp = std::env::temp_dir().join("d205_duk_gate_test.xml");
+        std::fs::write(&tmp, &xml).unwrap();
+
+        let res = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
+        let java = res.join(if cfg!(windows) {
+            "jre-min/bin/java.exe"
+        } else {
+            "jre-min/bin/java"
+        });
+        let jar_dir = res.join("duk");
+
+        struct LocalBundle {
+            java: PathBuf,
+            jar_dir: PathBuf,
+        }
+        impl DukProvider for LocalBundle {
+            fn resolve(&self) -> Option<DukRuntime> {
+                // Require D205Validator.jar specifically — skip gracefully if it isn't bundled.
+                if self.java.is_file()
+                    && self.jar_dir.join("DUKIntegrator.jar").is_file()
+                    && self.jar_dir.join("lib/D205Validator.jar").is_file()
+                {
+                    Some(DukRuntime {
+                        java: self.java.clone(),
+                        jar_dir: self.jar_dir.clone(),
+                    })
+                } else {
+                    None
+                }
+            }
+        }
+        let provider = LocalBundle { java, jar_dir };
+
+        match run_duk(&provider, DeclKind::D205, &tmp).unwrap() {
+            Some(outcome) => assert!(
+                outcome.passed,
+                "D205Validator reported errors on a standard D205: {:?}",
+                outcome.errors
+            ),
+            None => eprintln!("SKIP: bundled D205 DUK runtime not present — nothing validated"),
+        }
+        let _ = std::fs::remove_file(&tmp);
     }
 }
