@@ -11,6 +11,7 @@ pub mod d100;
 pub mod d101;
 pub mod d112;
 pub mod d112_xml;
+pub mod d205_xml;
 pub mod d300;
 pub mod d390;
 pub mod d394;
@@ -26,14 +27,17 @@ pub mod xml;
 
 /// The official declarations this module targets. `as_duk_type` returns the
 /// token ANAF's validator CLI expects. NOTE: D300/D394/D406 share the bundled
-/// DUKIntegrator kit; D112 is validated by a SEPARATE validator (D112Validator),
-/// so its harness wiring routes to a distinct jar (see `validation.rs`).
+/// DUKIntegrator kit; D112 and D205 are each validated by a SEPARATE validator
+/// (D112Validator / D205Validator), so their harness wiring routes to a distinct
+/// jar (see `validation.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeclKind {
     D300,
     D394,
     D406,
     D112,
+    /// D205 — declarația informativă anuală, pe beneficiar (impozit reținut la sursă; cap. dividende).
+    D205,
 }
 
 impl DeclKind {
@@ -43,6 +47,7 @@ impl DeclKind {
             DeclKind::D394 => "D394",
             DeclKind::D406 => "D406",
             DeclKind::D112 => "D112",
+            DeclKind::D205 => "D205",
         }
     }
 }

@@ -56,6 +56,26 @@ pub fn end_elem(w: &mut XmlWriter, name: &str) -> AppResult<()> {
         .map_err(map_err)
 }
 
+/// Open `<name k1="v1" k2="v2" …>` with attributes (values auto-escaped by quick-xml). Caller writes
+/// children, then `end_elem`. Used by attribute-based declarations like D205 (vs the child-element
+/// emitters D300/bilanț). Empty-string values are emitted as `k=""` (ANAF accepts empty attrs).
+pub fn start_elem_attrs(w: &mut XmlWriter, name: &str, attrs: &[(&str, &str)]) -> AppResult<()> {
+    let mut e = BytesStart::new(name);
+    for (k, v) in attrs {
+        e.push_attribute((*k, *v));
+    }
+    w.write_event(Event::Start(e)).map_err(map_err)
+}
+
+/// Self-closing `<name k1="v1" … />` with attributes (auto-escaped). For leaf rows like D205 `<benef/>`.
+pub fn empty_elem_attrs(w: &mut XmlWriter, name: &str, attrs: &[(&str, &str)]) -> AppResult<()> {
+    let mut e = BytesStart::new(name);
+    for (k, v) in attrs {
+        e.push_attribute((*k, *v));
+    }
+    w.write_event(Event::Empty(e)).map_err(map_err)
+}
+
 /// Consume the writer and return the UTF-8 string.
 pub fn finish(w: XmlWriter) -> AppResult<String> {
     let bytes = w.into_inner().into_inner();
@@ -101,5 +121,28 @@ mod tests {
             xml.contains("<b>12.34</b>"),
             "expected decimal 12.34 in <b>, got: {xml}"
         );
+    }
+
+    #[test]
+    fn attr_helpers_emit_escaped_attributes() {
+        let mut w = new_writer().expect("new_writer");
+        start_elem_attrs(&mut w, "sect", &[("tip", "08"), ("den", "A&B")]).expect("start sect");
+        empty_elem_attrs(
+            &mut w,
+            "benef",
+            &[("cifR", "1960101410019"), ("imp1", "1600")],
+        )
+        .expect("benef");
+        end_elem(&mut w, "sect").expect("end sect");
+        let xml = finish(w).expect("finish");
+        assert!(
+            xml.contains(r#"<sect tip="08" den="A&amp;B">"#),
+            "got: {xml}"
+        );
+        assert!(
+            xml.contains(r#"<benef cifR="1960101410019" imp1="1600"/>"#),
+            "got: {xml}"
+        );
+        assert!(xml.contains("</sect>"), "got: {xml}");
     }
 }

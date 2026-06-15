@@ -643,6 +643,21 @@ export const dividends = {
   create: (input: DividendInput) => invoke<Dividend>("create_dividend", { input }),
   delete: (id: string, companyId: string) =>
     invoke<void>("delete_dividend", { id, companyId }),
+  /**
+   * Exportă D205 (informativă anuală, pe beneficiar) pentru anul de venit `year` — capitolul
+   * dividende, validat cu `D205Validator.jar` (DUK). Returnează `OfficialExportResult` (ca D406/D112);
+   * `written=false` + `issues` dacă DUK raportează erori (re-apelați cu `skipDukOverride=true`).
+   */
+  exportD205Official: (
+    companyId: string,
+    year: number,
+    destPath: string,
+    skipDukOverride = false,
+  ) =>
+    invoke<OfficialExportResult>("export_d205_official", {
+      params: { companyId, year, destPath },
+      skipDukOverride,
+    }),
 };
 
 // ─── GL — Jurnal contabil ──────────────────────────────────────────────────

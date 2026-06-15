@@ -28,6 +28,17 @@
       "net": "Net",
       "deadline": "Tax deadline",
       "shareholder": "Shareholder"
+    },
+    "d205": {
+      "title": "Export D205 — annual informative declaration, per beneficiary",
+      "hint": "Aggregates resident dividends by CNP and emits the D205 XML (dividends chapter), validated with the official ANAF validator (DUK). Non-residents are reported separately in D207. Deadline: the last day of February of the year after the income year.",
+      "year": "Income year",
+      "export": "Export D205 (XML)",
+      "exporting": "Exporting…",
+      "saveTitle": "Save D205 (XML)",
+      "savedDuk": "D205 saved + DUK-validated: {{path}}",
+      "savedNoDuk": "D205 saved (DUK unavailable — validate in the smart PDF): {{path}}",
+      "exportFailed": "D205 export failed."
     }
   }
 }

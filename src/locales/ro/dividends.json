@@ -28,6 +28,17 @@
       "net": "Net",
       "deadline": "Termen impozit",
       "shareholder": "Asociat"
+    },
+    "d205": {
+      "title": "Export D205 — declarația informativă anuală, pe beneficiar",
+      "hint": "Agregă dividendele rezidenților pe CNP și emite XML-ul D205 (cap. dividende), validat cu validatorul oficial ANAF (DUK). Nerezidenții se raportează separat în D207. Termen: ultima zi din februarie a anului următor anului de venit.",
+      "year": "An de venit",
+      "export": "Export D205 (XML)",
+      "exporting": "Se exportă…",
+      "saveTitle": "Salvează D205 (XML)",
+      "savedDuk": "D205 salvat + validat DUK: {{path}}",
+      "savedNoDuk": "D205 salvat (DUK indisponibil — validați în PDF inteligent): {{path}}",
+      "exportFailed": "Exportul D205 a eșuat."
     }
   }
 }

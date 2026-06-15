@@ -5,10 +5,12 @@
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirm, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { Ic } from "@/components/shared/Ic";
+import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { api } from "@/lib/tauri";
+import type { PreflightIssue } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
@@ -28,6 +30,9 @@ export function Dividends() {
   const [shareholder, setShareholder] = useState("");
   const [beneficiaryCnp, setBeneficiaryCnp] = useState("");
   const [beneficiaryResident, setBeneficiaryResident] = useState(true);
+  const [d205Year, setD205Year] = useState(new Date().getFullYear() - 1);
+  const [exportingD205, setExportingD205] = useState(false);
+  const [dukBlock, setDukBlock] = useState<PreflightIssue[] | null>(null);
 
   const { data: list = [] } = useQuery({
     queryKey: ["dividends", companyId ?? ""],
@@ -65,6 +70,36 @@ export function Dividends() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["dividends", companyId ?? ""] }),
     onError: (e) => notify.error(formatError(e, t("dividends.deleteFailed"))),
   });
+
+  /** Export D205 (informativă anuală, pe beneficiar) cu gate DUK + override. */
+  const runD205Export = async (override = false) => {
+    if (!companyId) return;
+    const dest = await saveDialog({
+      title: t("dividends.d205.saveTitle"),
+      defaultPath: `d205-${d205Year}.xml`,
+      filters: [{ name: "XML", extensions: ["xml"] }],
+    });
+    if (!dest) return;
+    setExportingD205(true);
+    try {
+      const res = await api.dividends.exportD205Official(companyId, d205Year, dest, override);
+      if (!res.written) {
+        setDukBlock(res.issues);
+        notify.error(t("declarations.notify.dukErrors"));
+        return;
+      }
+      setDukBlock(null);
+      notify.success(
+        res.dukAvailable
+          ? t("dividends.d205.savedDuk", { path: res.path })
+          : t("dividends.d205.savedNoDuk", { path: res.path }),
+      );
+    } catch (e) {
+      notify.error(formatError(e, t("dividends.d205.exportFailed")));
+    } finally {
+      setExportingD205(false);
+    }
+  };
 
   if (!companyId) {
     return (
@@ -133,6 +168,40 @@ export function Dividends() {
         <button className="btn-dark" style={{ marginTop: 12 }} disabled={add.isPending || !grossAmount} onClick={() => add.mutate()}>
           <Ic name="plus" />{t("dividends.add")}
         </button>
+      </div>
+
+      {/* Export D205 — declarația informativă anuală, pe beneficiar (capitol dividende), validată DUK */}
+      <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{t("dividends.d205.title")}</div>
+        <div className="hint" style={{ marginBottom: 12 }}>{t("dividends.d205.hint")}</div>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+          <div className="field" style={{ width: 140 }}>
+            <label>{t("dividends.d205.year")}</label>
+            <input
+              className="input num"
+              inputMode="numeric"
+              maxLength={4}
+              value={d205Year}
+              onChange={(e) => setD205Year(Number(e.target.value.replace(/\D/g, "")) || d205Year)}
+            />
+          </div>
+          <button className="btn-dark" disabled={exportingD205} onClick={() => void runD205Export()}>
+            <Ic name="code" />{exportingD205 ? t("dividends.d205.exporting") : t("dividends.d205.export")}
+          </button>
+        </div>
+        {dukBlock && (
+          <div style={{ marginTop: 12 }}>
+            <PreflightPanel issues={dukBlock} />
+            <button
+              className="pill-btn"
+              style={{ marginTop: 8, color: "var(--red)", borderColor: "rgba(220,38,38,.35)" }}
+              disabled={exportingD205}
+              onClick={() => void runD205Export(true)}
+            >
+              {t("declarations.common.exportAnyway")}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* List */}

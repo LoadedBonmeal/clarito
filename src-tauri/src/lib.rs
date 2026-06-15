@@ -475,6 +475,7 @@ pub fn run() {
             commands::dividends::list_dividends,
             commands::dividends::create_dividend,
             commands::dividends::delete_dividend,
+            commands::dividends::export_d205_official,
             commands::payroll::list_medical_leaves,
             commands::payroll::create_medical_leave,
             commands::payroll::delete_medical_leave,

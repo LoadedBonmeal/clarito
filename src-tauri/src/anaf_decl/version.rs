@@ -107,6 +107,18 @@ pub fn schema_versions() -> Vec<SchemaVersion> {
             schema_label: "D112 v6 (≥2026-07, model Ordin 605/2026)",
             duk_type: "D112",
         },
+        // ── D205 (informativă anuală, pe beneficiar) ───────────────────────
+        // OPANAF 179/2022 mod. 102/2025. Perioada = ANUL de venit (luna_r=12);
+        // resolve cu data de 31 dec a anului de venit. Schema v3.
+        SchemaVersion {
+            decl: DeclKind::D205,
+            valid_from: d(2025, 1, 1),
+            valid_to: None,
+            namespace: "mfp:anaf:dgti:d205:declaratie:v3",
+            root_element: "declaratie205",
+            schema_label: "D205 v3 (≥2025, OPANAF 102/2025)",
+            duk_type: "D205",
+        },
     ]
 }
 
@@ -181,6 +193,7 @@ mod tests {
             DeclKind::D394,
             DeclKind::D406,
             DeclKind::D112,
+            DeclKind::D205,
         ];
 
         for kind in all_kinds {
