@@ -138,16 +138,42 @@ pub async fn run_payroll(
 /// Exportă D112 (XML `:v7`, validat cu `D112Validator.jar` — vezi d112_xml.rs) pentru luna dată:
 /// antet + obligații angajator + câte un asigurat per salariat activ. Salariatul cu concediu medical
 /// emite calea B (asiguratB1/B2/B3/B4 + asiguratD) cu salariul proratat + indemnizația, consistent cu
-/// Registrul-jurnal (`run_payroll`). Draft pentru import în aplicația D112.
+/// Registrul-jurnal (`run_payroll`).
+///
+/// Layer D (gate DUK): înainte de scriere, XML-ul e validat cu validatorul OFICIAL ANAF `D112Validator.jar`
+/// inclus în aplicație (`-v D112`, prin `run_duk`). Dacă DUK e disponibil și raportează ERORI, fișierul NU
+/// se scrie (decât cu `skip_duk_override`); atenționările (ATT) trec. Dacă runtime-ul DUK nu e disponibil
+/// (ex. dev), se cade grațios pe scriere directă. Aceeași formă ca `export_saft_official` (D406).
+/// Parametrii exportului D112 — grupați într-un struct (ca `SaftOfficialParams`) ca să păstrăm comanda
+/// sub limita clippy de argumente; câmpurile vin flat din JS (`camelCase`).
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct D112ExportParams {
+    pub company_id: String,
+    pub year: i32,
+    pub month: u32,
+    pub caen: String,
+    pub dest_path: String,
+}
+
 #[tauri::command]
 pub async fn export_d112_xml(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
-    company_id: String,
-    year: i32,
-    month: u32,
-    caen: String,
-    dest_path: String,
-) -> AppResult<String> {
+    params: D112ExportParams,
+    skip_duk_override: bool,
+) -> AppResult<crate::commands::declarations::OfficialExportResult> {
+    use crate::anaf_decl::DeclKind;
+    use crate::commands::declarations::duk_gate_allows_write;
+
+    let D112ExportParams {
+        company_id,
+        year,
+        month,
+        caen,
+        dest_path,
+    } = params;
+
     let company = crate::db::companies::get(&state.db, &company_id).await?;
     let employees = payroll::list(&state.db, &company_id).await?;
     let period_ym = format!("{year:04}-{month:02}");
@@ -156,8 +182,37 @@ pub async fn export_d112_xml(
     // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the IPC
     // endpoint accepts an arbitrary string.
     let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
-    std::fs::write(&dest, xml).map_err(|e| AppError::Other(e.to_string()))?;
-    Ok(dest_path)
+
+    // Layer D: validate with the bundled DUK before writing. Graceful: no runtime → proceed.
+    let tmp =
+        std::env::temp_dir().join(format!("d112_official_check_{}.xml", uuid::Uuid::now_v7()));
+    std::fs::write(&tmp, xml.as_bytes())
+        .map_err(|e| AppError::Other(format!("Nu s-a putut scrie temp D112: {e}")))?;
+    let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
+    let duk = crate::anaf_decl::duk::run_duk(&provider, DeclKind::D112, &tmp)?;
+    let _ = std::fs::remove_file(&tmp);
+    let (duk_available, duk_passed, issues) = match &duk {
+        Some(o) => (true, o.passed, o.errors.clone()),
+        None => (false, false, Vec::new()),
+    };
+    if !duk_gate_allows_write(duk_available, duk_passed, skip_duk_override) {
+        return Ok(crate::commands::declarations::OfficialExportResult {
+            path: String::new(),
+            written: false,
+            duk_available,
+            duk_passed,
+            issues,
+        });
+    }
+
+    std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    Ok(crate::commands::declarations::OfficialExportResult {
+        path: dest.to_string_lossy().to_string(),
+        written: true,
+        duk_available,
+        duk_passed,
+        issues,
+    })
 }
 
 /// Pure core of the D112 XML build (no Tauri State / filesystem) — maps active employees + the month's
@@ -683,5 +738,76 @@ mod tests {
         let path = std::env::temp_dir().join("d112_from_db.xml");
         std::fs::write(&path, &xml).unwrap();
         eprintln!("WROTE {}", path.display());
+    }
+
+    /// END-TO-END DUK gate (opt-in, like `dump_d112_from_db`): build a standard D112 and run the REAL
+    /// bundled ANAF validator `D112Validator.jar` (`-v D112`) on it via `run_duk`, asserting it PASSES.
+    /// This is the test the plan calls for — it proves the export gate (`export_d112_xml` → `run_duk`)
+    /// validates clean against ANAF's own tool. `#[ignore]` because it spawns the 12 MB Java validator +
+    /// the jlink JRE (slow, and the resources must be present); runs on demand:
+    ///   cargo test --lib commands::payroll::tests::duk_validates_standard_d112 -- --ignored --nocapture
+    /// Graceful: if the bundled resources are absent (e.g. a stripped checkout), it skips, never panics.
+    #[tokio::test]
+    #[ignore]
+    async fn duk_validates_standard_d112() {
+        use crate::anaf_decl::duk::{run_duk, DukProvider, DukRuntime};
+        use crate::anaf_decl::DeclKind;
+        use std::path::PathBuf;
+
+        // Standard full-time roster only (asiguratA path) — the case verified to validate cleanly.
+        let pool = setup().await;
+        crate::db::payroll::create(&pool, emp_input("1960101410019", "Pop Ana", "5000"))
+            .await
+            .unwrap();
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
+        let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
+            .await
+            .unwrap();
+        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201").unwrap();
+        let tmp = std::env::temp_dir().join("d112_duk_gate_test.xml");
+        std::fs::write(&tmp, &xml).unwrap();
+
+        // Resolve the bundled runtime from the repo resources (CARGO_MANIFEST_DIR = src-tauri).
+        let res = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
+        let java = res.join(if cfg!(windows) {
+            "jre-min/bin/java.exe"
+        } else {
+            "jre-min/bin/java"
+        });
+        let jar_dir = res.join("duk");
+
+        struct LocalBundle {
+            java: PathBuf,
+            jar_dir: PathBuf,
+        }
+        impl DukProvider for LocalBundle {
+            fn resolve(&self) -> Option<DukRuntime> {
+                if self.java.is_file() && self.jar_dir.join("DUKIntegrator.jar").is_file() {
+                    Some(DukRuntime {
+                        java: self.java.clone(),
+                        jar_dir: self.jar_dir.clone(),
+                    })
+                } else {
+                    None
+                }
+            }
+        }
+        let provider = LocalBundle { java, jar_dir };
+
+        match run_duk(&provider, DeclKind::D112, &tmp).unwrap() {
+            Some(outcome) => {
+                // The standard D112 must validate with NO blocking errors against the official validator.
+                assert!(
+                    outcome.passed,
+                    "D112Validator reported errors on a standard D112: {:?}",
+                    outcome.errors
+                );
+            }
+            None => {
+                eprintln!("SKIP: bundled DUK runtime not present — nothing validated");
+            }
+        }
+        let _ = std::fs::remove_file(&tmp);
     }
 }

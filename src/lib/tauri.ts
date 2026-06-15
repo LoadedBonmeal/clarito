@@ -1007,8 +1007,24 @@ export const payroll = {
   run: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<import("@/types").PayrollRun>("run_payroll", { companyId, periodFrom, periodTo }),
   /** Exportă D112 (XML) pentru luna dată la destPath. Returnează calea. */
-  exportD112Xml: (companyId: string, year: number, month: number, caen: string, destPath: string) =>
-    invoke<string>("export_d112_xml", { companyId, year, month, caen, destPath }),
+  /**
+   * Exportă D112 (XML `:v7`) la destPath, cu gate DUK: XML-ul e validat cu validatorul OFICIAL ANAF
+   * `D112Validator.jar` inclus în app (`-v D112`) înainte de scriere. Dacă DUK raportează ERORI,
+   * `written=false` + `issues` (re-apelați cu `skipDukOverride=true` pentru a forța scrierea).
+   * Returnează `OfficialExportResult` (ca D300/D394/D406).
+   */
+  exportD112Xml: (
+    companyId: string,
+    year: number,
+    month: number,
+    caen: string,
+    destPath: string,
+    skipDukOverride = false,
+  ) =>
+    invoke<OfficialExportResult>("export_d112_xml", {
+      params: { companyId, year, month, caen, destPath },
+      skipDukOverride,
+    }),
 };
 
 export const vatRates = {

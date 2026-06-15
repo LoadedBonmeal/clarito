@@ -22,8 +22,10 @@ import { confirm, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import { Ic } from "@/components/shared/Ic";
 import { MonthPicker } from "@/components/shared/MonthPicker";
+import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import type { PreflightIssue } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
@@ -61,6 +63,7 @@ export function PayrollPage() {
   const [empQuery, setEmpQuery] = useState("");
   const [modal, setModal] = useState<"create" | { edit: Employee } | null>(null);
   const [showD112, setShowD112] = useState(false);
+  const [dukBlock, setDukBlock] = useState<PreflightIssue[] | null>(null);
   const [showSediu, setShowSediu] = useState(false);
   const [showConcediu, setShowConcediu] = useState(false);
   const [run, setRun] = useState<PayrollRun | null>(null);
@@ -160,7 +163,7 @@ export function PayrollPage() {
     onError: (e) => notify.error(formatError(e, t("payroll.notify.deleteConcediuError"))),
   });
 
-  const runD112 = async (caen: string) => {
+  const runD112 = async (caen: string, override = false) => {
     if (!companyId) return;
     // Noul model D112 (Ordin comun 605/95/928/2.314/2026, M.Of. 463/02.06.2026) se aplică
     // veniturilor lunii IULIE 2026+; aplicația emite structura v7 (valabilă ≤ iunie 2026).
@@ -174,7 +177,15 @@ export function PayrollPage() {
     });
     if (!dest) return;
     try {
-      await api.payroll.exportD112Xml(companyId, year, month, caen, dest);
+      // Gate DUK: validatorul OFICIAL `D112Validator.jar` rulează înainte de scriere. Dacă raportează
+      // ERORI, fișierul NU se scrie (written=false) — afișăm issues + buton „exportă oricum".
+      const res = await api.payroll.exportD112Xml(companyId, year, month, caen, dest, override);
+      if (!res.written) {
+        setDukBlock(res.issues);
+        notify.error(t("declarations.notify.dukErrors"));
+        return;
+      }
+      setDukBlock(null);
       notify.success(t("payroll.notify.exported", {
         insured: t("payroll.d112.insured", { count: employees.filter((e) => e.active).length }),
       }));
@@ -605,7 +616,8 @@ export function PayrollPage() {
         <D112Modal
           monthLabel={`${MONTHS_FULL[month - 1]} ${year}`}
           newModel={year > 2026 || (year === 2026 && month >= 7)}
-          onClose={() => setShowD112(false)}
+          dukBlock={dukBlock}
+          onClose={() => { setShowD112(false); setDukBlock(null); }}
           onExport={runD112}
         />
       )}
@@ -1055,22 +1067,23 @@ function SediuModal({
 // ─── D112Modal — export XML cu CAEN (înlocuiește window.prompt, no-op în Tauri) ─
 
 function D112Modal({
-  monthLabel, newModel, onClose, onExport,
+  monthLabel, newModel, dukBlock, onClose, onExport,
 }: {
   monthLabel: string;
   newModel: boolean;
+  dukBlock: PreflightIssue[] | null;
   onClose: () => void;
-  onExport: (caen: string) => Promise<void>;
+  onExport: (caen: string, override?: boolean) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [caen, setCaen] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const submit = async () => {
+  const submit = async (override = false) => {
     if (!/^\d{4}$/.test(caen.trim())) { notify.error(t("payroll.d112.invalidCaen")); return; }
     setBusy(true);
     try {
-      await onExport(caen.trim());
+      await onExport(caen.trim(), override);
     } finally {
       setBusy(false);
     }
@@ -1120,6 +1133,21 @@ function D112Modal({
               />
             </div>
           </div>
+
+          {/* DUK block panel — validatorul oficial ANAF a raportat erori; oferă „exportă oricum". */}
+          {dukBlock && (
+            <div style={{ marginTop: 14 }}>
+              <PreflightPanel issues={dukBlock} />
+              <button
+                className="pill-btn"
+                style={{ marginTop: 8, color: "var(--red)", borderColor: "rgba(220,38,38,.35)" }}
+                disabled={busy}
+                onClick={() => void submit(true)}
+              >
+                {t("declarations.common.exportAnyway")}
+              </button>
+            </div>
+          )}
         </div>
         <div className="modal-foot">
           <span className="left">{t("payroll.d112.foot")}</span>
