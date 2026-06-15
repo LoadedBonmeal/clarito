@@ -131,6 +131,30 @@ pub fn trunc(s: &str, max_chars: usize) -> String {
     s.chars().take(max_chars).collect()
 }
 
+/// Test-only: assert an emitter's output is the canonical, professional ANAF format the app
+/// guarantees — exact UTF-8 prolog, LF line endings, and 2-space indentation — so the format can't
+/// drift across the various emitters (pretty_print / quick-xml indent / format!). A leading UTF-8
+/// BOM (only SAF-T D406 emits one, by design) is tolerated. Shared by the per-declaration tests.
+#[cfg(test)]
+pub(crate) fn assert_canonical_xml(xml: &str) {
+    let body = xml.strip_prefix('\u{FEFF}').unwrap_or(xml);
+    assert!(
+        body.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"),
+        "expected the canonical UTF-8 XML prolog on its own line, got: {:?}",
+        &body[..body.len().min(48)]
+    );
+    assert!(!xml.contains('\r'), "expected LF line endings (found a CR)");
+    // Canonical 2-space layout: `pretty_print` is a fixed point on already-canonical XML, so an
+    // emitter's output must equal `pretty_print(output)`. This catches column-0 children (the
+    // bilanț string-continuation bug), 4-space/tab indentation, and one-long-line documents — while
+    // correctly accepting a self-closing attribute-only root (e.g. D300, which has no children).
+    assert_eq!(
+        body,
+        pretty_print(body),
+        "XML is not canonically 2-space-indented (pretty_print would reflow it)"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

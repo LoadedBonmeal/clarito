@@ -1,8 +1,8 @@
 /**
  * xmlToTables — flatten declaration XML into a list of tables for an XLSX export.
  *
- * Mirrors XmlTableView's parsing (DOMParser → attributes + repeating leaf elements), but returns a
- * plain data model `{ title, columns, rows }[]` that the Rust `export_declaration_xlsx` command writes
+ * Parses the XML (DOMParser → attributes + repeating leaf elements) into a plain data model
+ * `{ title, columns, rows }[]` that the Rust `export_declaration_xlsx` command writes
  * to a real spreadsheet. The root/each element's attributes become a key/value table; each group of
  * same-tag leaf children becomes its own table (columns = union of their attributes). Namespace
  * declarations are dropped. Never throws — returns `[]` on a parse error.

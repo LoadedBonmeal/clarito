@@ -603,6 +603,9 @@ mod tests {
             casa: "CJ".into(),
         };
         let xml = generate_d112_xml(&h, &[emp("1", "A"), emp("2", "B")]);
+        // The exported/previewed D112 is pretty_print(generate_d112_xml(..)) — assert that the saved
+        // form is the canonical professional format (UTF-8 prolog + LF + 2-space), like every decl.
+        crate::anaf_decl::xml::assert_canonical_xml(&crate::anaf_decl::xml::pretty_print(&xml));
         // Root + namespace + header. Namespace is :v7 (live ANAF D112Validator), NOT :v6/:v1.
         assert!(
             xml.contains("<declaratieUnica xmlns=\"mfp:anaf:dgti:declaratie_unica:declaratie:v7\"")

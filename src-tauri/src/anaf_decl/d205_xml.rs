@@ -212,6 +212,14 @@ mod tests {
     }
 
     #[test]
+    fn emits_canonical_xml_format() {
+        // Preview ≡ export ≡ saved: the in-app viewer shows exactly this string. Lock the
+        // professional ANAF format (UTF-8 prolog + LF + 2-space indent) against drift.
+        let xml = build_d205_xml(&header(), &[benef("1900101410011", "10000", "1000")]).unwrap();
+        crate::anaf_decl::xml::assert_canonical_xml(&xml);
+    }
+
+    #[test]
     fn builds_one_beneficiary_with_correct_attrs() {
         let xml = build_d205_xml(&header(), &[benef("1900101410011", "10000", "1000")]).unwrap();
         // Root + namespace + annual marker.

@@ -251,6 +251,8 @@ mod tests {
         let rows = minimal_rows();
         let xml = generate_d300_xml(&rows, &ver).expect("generate_d300_xml");
 
+        // Same canonical professional format as every other declaration (UTF-8 prolog + LF + 2-space).
+        crate::anaf_decl::xml::assert_canonical_xml(&xml);
         assert!(
             xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"),
             "must start with XML declaration"

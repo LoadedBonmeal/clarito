@@ -755,7 +755,11 @@ pub fn generate_bilant_xml(
             .join(" ")
     };
 
-    format!(
+    // Pretty-print so the F10/F20/F30 children are 2-space indented like every other declaration.
+    // (The `\` source line-continuations below strip the literal leading spaces, so the raw string
+    // would otherwise emit children at column 0 — the canonical formatter re-indents them; the
+    // inter-element whitespace stays XSD-ignorable / DUK-safe.)
+    let raw = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
 <{root} xmlns=\"{ns}\" \
 luna=\"12\" an=\"{an}\" cui=\"{cui}\" den=\"{den}\" adresa=\"{adr}\" \
@@ -783,7 +787,8 @@ totalPlata_A=\"{tp}\">\n\
         tp = total_plata,
         f10 = attrs(f10),
         f20 = attrs(f20),
-    )
+    );
+    crate::anaf_decl::xml::pretty_print(&raw)
 }
 
 #[cfg(test)]
@@ -880,6 +885,8 @@ mod tests {
         f10.insert("F10_0492".to_string(), 90000i64);
         let f20 = HashMap::new();
         let xml = generate_bilant_xml(&h, &f10, &f20, "UU");
+        // Same canonical professional format as every other declaration (UTF-8 prolog + LF + 2-space).
+        crate::anaf_decl::xml::assert_canonical_xml(&xml);
         assert!(xml.contains("<Bilant1005"));
         assert!(xml.contains("mfp:anaf:dgti:s1005:declaratie:v14"));
         assert!(xml.contains("tipBIL=\"UU\""));

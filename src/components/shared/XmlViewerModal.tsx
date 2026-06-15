@@ -1,18 +1,19 @@
 /**
  * XmlViewerModal — in-app, read-only viewer for the declaration / e-Factura XML the app generates,
- * in the design's .modal-back/.modal chrome. Renders the XML as human-readable TABLES (XmlTableView),
- * never as raw code: element attributes become a key/value header grid and repeating elements
- * (<benef>, <rand_cod_300>, <sect_II>, …) become tables.
+ * in the design's .modal-back/.modal chrome. Renders the EXACT generated XML as a clean,
+ * line-numbered, syntax-highlighted document (XmlCodeView) — what you see is byte-for-byte what
+ * "Salvează" writes, since the backend already pretty-prints to ANAF-canonical 2-space XML.
  *
- * Actions: copy the raw XML · save it as a .xml file · "re-validate with DUK" for declaration XML
- * (D300/D394/D406/D112/D205) via the bundled ANAF validators. Fed from the store (useOpenXml).
+ * Actions: copy the XML · save it as a .xml file · export the same data as an XLSX table ·
+ * "re-validate with DUK" for declaration XML (D300/D394/D406/D112/D205) via the bundled ANAF
+ * validators. Fed from the store (useOpenXml).
  */
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
-import { XmlTableView } from "@/components/shared/XmlTableView";
+import { XmlCodeView } from "@/components/shared/XmlCodeView";
 import { xmlToTables } from "@/lib/xml-to-tables";
 import { useXmlViewerStore, type XmlViewerPayload } from "@/lib/xml-viewer-store";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
@@ -165,7 +166,7 @@ function XmlViewerBody({ payload, onClose }: { payload: XmlViewerPayload; onClos
 
       {validation && <ValidationStrip declKind={payload.declKind} result={validation} />}
 
-      <XmlTableView xml={payload.xml} />
+      <XmlCodeView xml={payload.xml} />
     </>
   );
 }
