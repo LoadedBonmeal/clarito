@@ -52,6 +52,7 @@
     },
     "actions": {
       "generateXml": "Generate XML",
+      "viewXml": "View XML",
       "storno": "Storno",
       "recordPayment": "Record payment",
       "moreTitle": "More actions",

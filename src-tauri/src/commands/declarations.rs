@@ -172,6 +172,77 @@ pub fn duk_gate_allows_write(available: bool, passed: bool, override_: bool) -> 
     !(available && !passed && !override_)
 }
 
+/// Rezultatul re-validării unui șir XML cu DUK (din editorul XML din aplicație).
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct XmlDukValidation {
+    /// A fost disponibil validatorul (jar + runtime Java)? Dacă nu, nu blocăm editarea.
+    pub available: bool,
+    /// A trecut validarea (relevant doar când `available`).
+    pub passed: bool,
+    pub issues: Vec<crate::anaf_decl::preflight::PreflightIssue>,
+}
+
+/// Validează un șir XML ARBITRAR cu validatorul OFICIAL ANAF (DUK) pentru tipul declarației — folosit
+/// de editorul XML din aplicație („re-validează cu DUK"). Acceptă D300/D394/D406/D112/D205. Scrie XML-ul
+/// într-un fișier temporar, rulează `run_duk` (`-v <TIP>`) și întoarce verdictul + erorile. Dacă jar-ul
+/// validatorului lipsește din build (ex. D205 pe unele build-uri) sau runtime-ul Java nu e disponibil,
+/// întoarce `available=false` (NU eroare), ca să nu blocheze vizualizarea/editarea XML-ului.
+#[tauri::command]
+pub async fn validate_declaration_xml(
+    app: tauri::AppHandle,
+    decl_kind: String,
+    xml: String,
+) -> AppResult<XmlDukValidation> {
+    use crate::anaf_decl::DeclKind;
+    let kind = match decl_kind.as_str() {
+        "D300" => DeclKind::D300,
+        "D394" => DeclKind::D394,
+        "D406" => DeclKind::D406,
+        "D112" => DeclKind::D112,
+        "D205" => DeclKind::D205,
+        other => {
+            return Err(AppError::Validation(format!(
+                "Tip de declarație necunoscut pentru validare DUK: {other}"
+            )))
+        }
+    };
+    // Jar-ul validatorului poate lipsi (ex. D205 pe unele build-uri) — verificăm înainte, fiindcă
+    // `run_duk` ar întoarce o eroare „validator neinstalat" în loc de un verdict.
+    let jar = {
+        use tauri::Manager;
+        app.path()
+            .resource_dir()
+            .unwrap_or_default()
+            .join(format!("duk/lib/{}Validator.jar", kind.as_duk_type()))
+    };
+    if !jar.is_file() {
+        return Ok(XmlDukValidation {
+            available: false,
+            passed: false,
+            issues: Vec::new(),
+        });
+    }
+    let tmp = std::env::temp_dir().join(format!("duk_revalidate_{}.xml", uuid::Uuid::now_v7()));
+    std::fs::write(&tmp, xml.as_bytes())
+        .map_err(|e| AppError::Other(format!("Nu s-a putut scrie temp XML: {e}")))?;
+    let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
+    let outcome = crate::anaf_decl::duk::run_duk(&provider, kind, &tmp);
+    let _ = std::fs::remove_file(&tmp);
+    Ok(match outcome? {
+        Some(o) => XmlDukValidation {
+            available: true,
+            passed: o.passed,
+            issues: o.errors,
+        },
+        None => XmlDukValidation {
+            available: false,
+            passed: false,
+            issues: Vec::new(),
+        },
+    })
+}
+
 // ── Structs ───────────────────────────────────────────────────────────────────
 
 /// Un grup de TVA colectat (cotă + categorie).

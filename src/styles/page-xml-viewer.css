@@ -1,0 +1,104 @@
+/* In-app XML viewer/editor modal (XmlViewerModal.tsx + CodeMirror 6).
+   Reuses the PDF viewer's toolbar chrome (.pdfv-bar / .sq-btn / .pill-btn) and adds the editor
+   surface + the DUK re-validation status strip. Monochrome, matching the app. */
+
+.modal.xmlv {
+  width: min(980px, 95vw);
+  max-width: 95vw;
+  height: 88vh;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* unsaved-changes dot in the title */
+.xmlv-dirty {
+  color: var(--accent, #b45309);
+  font-size: 11px;
+  line-height: 1;
+  margin-left: 2px;
+}
+
+/* CodeMirror host fills the remaining height */
+.xmlv-editor {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
+}
+.xmlv-editor .cm-editor {
+  height: 100%;
+}
+
+/* ── DUK re-validation status strip ──────────────────────────────────────────── */
+.xmlv-valid {
+  flex: none;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 34vh;
+  overflow-y: auto;
+}
+.xmlv-valid .ic {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+.xmlv-valid--ok {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  color: #15803d;
+  background: rgba(21, 128, 61, 0.06);
+}
+.xmlv-valid--ok .ic {
+  stroke: #15803d;
+}
+.xmlv-valid--na {
+  color: var(--text-2);
+  background: var(--fill);
+}
+.xmlv-valid--err {
+  color: var(--danger, #dc2626);
+  background: rgba(220, 38, 38, 0.05);
+}
+.xmlv-valid-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+.xmlv-valid-head .ic {
+  stroke: var(--danger, #dc2626);
+}
+.xmlv-issues {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.xmlv-issue {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  padding-left: 22px;
+}
+.xmlv-issue--warning {
+  color: var(--text-2);
+}
+.xmlv-issue-code {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  min-width: 56px;
+}

@@ -15,6 +15,7 @@ import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import { fmtRON } from "@/lib/utils";
+import { useOpenXml } from "@/hooks/use-open-xml";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -74,6 +75,23 @@ export function Dividends() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["dividends", companyId ?? ""] }),
     onError: (e) => notify.error(formatError(e, t("dividends.deleteFailed"))),
   });
+
+  const openXml = useOpenXml();
+  const [previewingD205, setPreviewingD205] = useState(false);
+
+  /** Construiește XML-ul D205 și îl deschide în vizualizatorul/editorul XML (cu re-validare DUK). */
+  const runD205Preview = async () => {
+    if (!companyId) return;
+    setPreviewingD205(true);
+    try {
+      const xml = await api.dividends.previewD205Xml(companyId, d205Year);
+      openXml({ xml, name: `d205-${d205Year}.xml`, declKind: "D205" });
+    } catch (e) {
+      notify.error(formatError(e, t("dividends.d205.previewFailed")));
+    } finally {
+      setPreviewingD205(false);
+    }
+  };
 
   /** Export D205 (informativă anuală, pe beneficiar) cu gate DUK + override. */
   const runD205Export = async (override = false) => {
@@ -191,6 +209,9 @@ export function Dividends() {
           </div>
           <button className="btn-dark" disabled={exportingD205} onClick={() => void runD205Export()}>
             <Ic name="code" />{exportingD205 ? t("dividends.d205.exporting") : t("dividends.d205.export")}
+          </button>
+          <button className="pill-btn" disabled={previewingD205} onClick={() => void runD205Preview()}>
+            <Ic name="eye" />{previewingD205 ? t("dividends.d205.previewing") : t("dividends.d205.preview")}
           </button>
         </div>
         {nonResidentCount > 0 && (

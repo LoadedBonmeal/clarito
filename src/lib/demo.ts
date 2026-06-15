@@ -275,6 +275,25 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
       ],
     };
   },
+  // D205 XML preview for the in-app XML viewer/editor (demo harness has no Rust emitter). Mirrors the
+  // real validator-verified schema: <declaratie205> header attrs → self-closing <sect_II> → <benef> siblings.
+  preview_d205_xml: (a) => {
+    const year = Number(a?.year) || 2025;
+    return [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      `<declaratie205 xmlns="mfp:anaf:dgti:d205:declaratie:v3" luna="12" an="${year}" d_rec="0"` +
+        ' cui="40268319" adresa="Str. Victoriei 10, București, B" den="DEMO Tehnologii SRL"' +
+        ' nume_declar="DEMO Tehnologii SRL" prenume_declar="-" functie_declar="Administrator"' +
+        ' totalPlata_A="6401">',
+      '  <sect_II tip_venit="08" nrben="1" Tcastig="0" Tpierd="0" T_VB="0" T_GAR="0" Tbaza="40000" Timp="6400"/>',
+      '  <benef id_inreg="1" tip_venit1="08" tip_plata="2" Rezid="1" cifR="1960101410014"' +
+        ' den1="Popescu Andrei" baza1="40000" imp1="6400" divid_D="40000" divid_P="40000"/>',
+      "</declaratie205>",
+    ].join("\n");
+  },
+  // Re-validate stub — the demo harness has no Java/DUK runtime; report the happy path so the editor's
+  // "re-validate with DUK" flow can be exercised in ?demo=1.
+  validate_declaration_xml: () => ({ available: true, passed: true, issues: [] }),
 };
 
 export function demoInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

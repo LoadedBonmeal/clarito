@@ -46,34 +46,18 @@ pub struct D205ExportParams {
     pub dest_path: String,
 }
 
-/// Exportă D205 (declarația informativă anuală, pe beneficiar) pentru anul de venit dat — capitolul
-/// dividende. Agregă dividendele REZIDENTE cu CNP pe beneficiar (un `<benef>` per CNP), construiește
-/// XML-ul `:v3` și îl validează cu validatorul OFICIAL ANAF `D205Validator.jar` (`-v D205`, prin
-/// `run_duk`) înainte de scriere — aceeași formă gated ca `export_saft_official` / `export_d112_xml`.
-///
-/// Nerezidenții se raportează SEPARAT în D207 (excluși aici). Dacă există dividende rezidente fără CNP
-/// beneficiar, exportul e BLOCAT (o D205 incompletă = declarație greșită) până la completarea CNP-ului.
-#[tauri::command]
-pub async fn export_d205_official(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    params: D205ExportParams,
-    skip_duk_override: bool,
-) -> AppResult<OfficialExportResult> {
-    let D205ExportParams {
-        company_id,
-        year,
-        dest_path,
-    } = params;
-    let company = crate::db::companies::get(&state.db, &company_id).await?;
-    let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
-
-    // Agregare pe CNP (rezidenți, anul de venit) — vezi `dividends::d205_beneficiaries_for_year`.
-    // Blochează dacă vreun dividend rezident nu are CNP; nerezidenții → D207 (excluși).
-    let beneficiaries = dividends::d205_beneficiaries_for_year(
-        &dividends::list(&state.db, &company_id).await?,
-        year,
-    )?;
+/// Construiește XML-ul D205 (`:v3`) pentru firma + anul de venit date — agregare pe CNP a
+/// dividendelor REZIDENTE (un `<benef>` per CNP); nerezidenții merg în D207 (excluși). Sursa comună
+/// pentru `export_d205_official` (scrie + validează) și `preview_d205_xml` (doar întoarce șirul, pentru
+/// vizualizatorul XML din aplicație). Blochează (eroare) dacă vreun dividend rezident nu are CNP.
+async fn build_d205_xml_for(
+    db: &sqlx::SqlitePool,
+    company_id: &str,
+    year: i32,
+) -> AppResult<String> {
+    let company = crate::db::companies::get(db, company_id).await?;
+    let beneficiaries =
+        dividends::d205_beneficiaries_for_year(&dividends::list(db, company_id).await?, year)?;
 
     // Declarantul: din datele firmei (ca D112 — nume_declar = denumirea, funcția „Administrator").
     // `cui` = CUI fără „RO"; `adresa` = adresa + localitate + județ (ambele obligatorii în D205).
@@ -96,7 +80,44 @@ pub async fn export_d205_official(
     };
 
     // Eroare clară dacă nu există beneficiari (nimic de raportat pentru anul selectat).
-    let xml = build_d205_xml(&header, &beneficiaries)?;
+    build_d205_xml(&header, &beneficiaries)
+}
+
+/// Construiește XML-ul D205 fără a-l scrie pe disc — pentru previzualizare/editare în vizualizatorul
+/// XML din aplicație. Re-validarea cu DUK se face separat prin `validate_declaration_xml`.
+#[tauri::command]
+pub async fn preview_d205_xml(
+    state: State<'_, AppState>,
+    company_id: String,
+    year: i32,
+) -> AppResult<String> {
+    build_d205_xml_for(&state.db, &company_id, year).await
+}
+
+/// Exportă D205 (declarația informativă anuală, pe beneficiar) pentru anul de venit dat — capitolul
+/// dividende. Agregă dividendele REZIDENTE cu CNP pe beneficiar (un `<benef>` per CNP), construiește
+/// XML-ul `:v3` și îl validează cu validatorul OFICIAL ANAF `D205Validator.jar` (`-v D205`, prin
+/// `run_duk`) înainte de scriere — aceeași formă gated ca `export_saft_official` / `export_d112_xml`.
+///
+/// Nerezidenții se raportează SEPARAT în D207 (excluși aici). Dacă există dividende rezidente fără CNP
+/// beneficiar, exportul e BLOCAT (o D205 incompletă = declarație greșită) până la completarea CNP-ului.
+#[tauri::command]
+pub async fn export_d205_official(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    params: D205ExportParams,
+    skip_duk_override: bool,
+) -> AppResult<OfficialExportResult> {
+    let D205ExportParams {
+        company_id,
+        year,
+        dest_path,
+    } = params;
+    let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
+
+    // Agregare pe CNP (rezidenți) + construirea XML-ului — sursă comună cu `preview_d205_xml`.
+    // Blochează dacă vreun dividend rezident nu are CNP; nerezidenții → D207 (excluși).
+    let xml = build_d205_xml_for(&state.db, &company_id, year).await?;
 
     // Layer D: validare cu DUK (D205Validator.jar) înainte de scriere — grațios dacă runtime lipsește.
     let tmp =

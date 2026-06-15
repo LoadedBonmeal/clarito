@@ -658,6 +658,12 @@ export const dividends = {
       params: { companyId, year, destPath },
       skipDukOverride,
     }),
+  /**
+   * Construiește XML-ul D205 (`:v3`) pentru anul de venit `year` FĂRĂ a-l scrie pe disc — pentru
+   * vizualizatorul/editorul XML din aplicație. Re-validarea DUK se face cu `validateDeclarationXml`.
+   */
+  previewD205Xml: (companyId: string, year: number) =>
+    invoke<string>("preview_d205_xml", { companyId, year }),
 };
 
 // ─── GL — Jurnal contabil ──────────────────────────────────────────────────
@@ -733,6 +739,18 @@ export interface PreflightIssue {
   hint: string;
 }
 
+/** Tipuri de declarație pe care le validează DUK (din editorul XML din aplicație). */
+export type XmlDeclKind = "D300" | "D394" | "D406" | "D112" | "D205";
+
+/** Verdictul re-validării cu DUK a unui șir XML (vezi `declarations.validateDeclarationXml`). */
+export interface XmlDukValidation {
+  /** A fost disponibil validatorul (jar + runtime Java)? Dacă nu, nu blocăm editarea. */
+  available: boolean;
+  /** A trecut validarea (relevant doar când `available`). */
+  passed: boolean;
+  issues: PreflightIssue[];
+}
+
 /** Result of an official export attempt — includes DUK gate outcome. */
 export interface OfficialExportResult {
   /** Written file path, or empty string if blocked by DUK. */
@@ -788,6 +806,13 @@ export const declarations = {
     invoke<import("@/types").D100Result>("compute_d100", {
       companyId, periodFrom, periodTo, quarter, year, priorPayments,
     }),
+  /**
+   * Re-validează un șir XML ARBITRAR (posibil editat) cu validatorul OFICIAL ANAF (DUK) pentru tipul
+   * declarației — pentru butonul „re-validează cu DUK" din editorul XML. `available=false` dacă jar-ul
+   * validatorului lipsește din build sau runtime-ul Java nu e disponibil (nu blocăm editarea).
+   */
+  validateDeclarationXml: (declKind: XmlDeclKind, xml: string) =>
+    invoke<XmlDukValidation>("validate_declaration_xml", { declKind, xml }),
   /** D101 (impozit pe profit) worksheet: base from the period P&L + the supplied adjustments. */
   computeD101: (
     companyId: string,

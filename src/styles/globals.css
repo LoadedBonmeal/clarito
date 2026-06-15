@@ -38,6 +38,7 @@
 @import "./page-help.css";
 @import "./page-palette.css";
 @import "./page-pdf-viewer.css";
+@import "./page-xml-viewer.css";
 
 @custom-variant dark (&:is(.dark *));
 

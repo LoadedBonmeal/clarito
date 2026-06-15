@@ -30,6 +30,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Ic } from "@/components/shared/Ic";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { useOpenPdf } from "@/hooks/use-open-pdf";
+import { useOpenXml } from "@/hooks/use-open-xml";
 import { notify } from "@/lib/toasts";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
@@ -137,6 +138,7 @@ export function InvoiceDetailPage() {
   }, [openPop]);
 
   const openPdf = useOpenPdf();
+  const openXml = useOpenXml();
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.invoices.detail(id),
@@ -184,6 +186,21 @@ export function InvoiceDetailPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
       setActionError(null);
       notify.success(t("detail.notify.xmlGenerated"));
+    },
+    onError: (e) => setActionError(formatError(e, t("detail.notify.xmlError"))),
+  });
+
+  // Generează (idempotent) XML-ul e-Factura UBL și îl deschide în vizualizatorul/editorul XML din
+  // aplicație. Fără DUK (UBL se validează cu `validateXml`/xmllint, nu cu validatorii de declarații).
+  const viewXml = useMutation({
+    mutationFn: () => {
+      if (!activeCompanyId) return Promise.reject(new Error(t("detail.noActiveCompany")));
+      return api.ubl.generateXml(id, activeCompanyId);
+    },
+    onSuccess: (xml) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
+      setActionError(null);
+      openXml({ xml, name: `${data?.invoice.fullNumber ?? "factura"}.xml` });
     },
     onError: (e) => setActionError(formatError(e, t("detail.notify.xmlError"))),
   });
@@ -450,6 +467,9 @@ export function InvoiceDetailPage() {
           </button>
           <button className="pill-btn" disabled={generateXml.isPending} onClick={() => generateXml.mutate()}>
             <Ic name="code" />{generateXml.isPending ? "XML…" : invoice.xmlPath ? "XML" : t("detail.actions.generateXml")}
+          </button>
+          <button className="pill-btn" disabled={viewXml.isPending} onClick={() => viewXml.mutate()}>
+            <Ic name="eye" />{viewXml.isPending ? "XML…" : t("detail.actions.viewXml")}
           </button>
           {canStorno && (
             <button

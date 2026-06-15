@@ -52,6 +52,7 @@
     },
     "actions": {
       "generateXml": "Generează XML",
+      "viewXml": "Vezi XML",
       "storno": "Storno",
       "recordPayment": "Înregistrează plata",
       "moreTitle": "Mai multe acțiuni",
