@@ -20,7 +20,7 @@ import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { api, type XmlDukValidation } from "@/lib/tauri";
 import { isDemoMode } from "@/lib/demo";
 import { notify } from "@/lib/toasts";
-import "@/styles/doc-print.css";
+import { buildStandaloneHtml } from "@/lib/doc-render/doc-html";
 
 export function XmlViewerModal() {
   const payload = useXmlViewerStore((s) => s.payload);
@@ -33,13 +33,7 @@ export function XmlViewerModal() {
       if (e.key === "Escape") close();
     };
     window.addEventListener("keydown", h);
-    // Scope the print stylesheet to "viewer open" so printing the document isolates `.docv`
-    // (and printing any other page stays normal).
-    document.body.classList.add("xmlv-open");
-    return () => {
-      window.removeEventListener("keydown", h);
-      document.body.classList.remove("xmlv-open");
-    };
+    return () => window.removeEventListener("keydown", h);
   }, [payload, close]);
 
   if (!payload) return null;
@@ -123,10 +117,35 @@ function XmlViewerBody({ payload, onClose }: { payload: XmlViewerPayload; onClos
     }
   };
 
-  // Print / Save the labeled document as PDF — the print stylesheet (doc-print.css) isolates `.docv`
-  // and lays it out on A4, so the OS print dialog's "Save as PDF" yields the same document.
-  const doPrint = () => {
-    window.print();
+  // Print / Save the labeled document as PDF. Tauri's WKWebView can't window.print(), so we wrap the
+  // rendered `.docv` document in a self-contained HTML file and open it in the default BROWSER, where
+  // it auto-prints and "Save as PDF" works. Demo (browser) mode opens a new tab directly.
+  const doPrint = async () => {
+    const el = document.querySelector(".docv");
+    if (!el) {
+      notify.error(t("shared.xmlViewer.printError", { error: "—" }));
+      return;
+    }
+    const html = buildStandaloneHtml(payload.name, el.outerHTML);
+    try {
+      if (isDemoMode()) {
+        const w = window.open("", "_blank");
+        if (w) {
+          w.document.write(html);
+          w.document.close();
+        }
+        return;
+      }
+      const { tempDir, join } = await import("@tauri-apps/api/path");
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      const { openPath } = await import("@tauri-apps/plugin-opener");
+      const file = await join(await tempDir(), `${payload.name.replace(/\.xml$/i, "")}.html`);
+      await writeTextFile(file, html);
+      await openPath(file);
+      notify.success(t("shared.xmlViewer.printOpened"));
+    } catch (e) {
+      notify.error(t("shared.xmlViewer.printError", { error: String(e) }));
+    }
   };
 
   const doRevalidate = async () => {

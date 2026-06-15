@@ -34,6 +34,8 @@
       "valueCol": "valoare",
       "parseError": "Acest XML nu a putut fi afișat ca tabel.",
       "printPdf": "Printează / Salvează PDF",
+      "printOpened": "Documentul s-a deschis în browser — folosiți „Salvează ca PDF” din dialogul de printare.",
+      "printError": "Nu s-a putut deschide documentul pentru printare: {{error}}",
       "find": "Caută (Ctrl/Cmd+F)",
       "foldAll": "Pliază tot",
       "unfoldAll": "Desfă tot",

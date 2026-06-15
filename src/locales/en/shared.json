@@ -34,6 +34,8 @@
       "valueCol": "value",
       "parseError": "This XML could not be displayed as a table.",
       "printPdf": "Print / Save PDF",
+      "printOpened": "The document opened in your browser — use \"Save as PDF\" from the print dialog.",
+      "printError": "Could not open the document for printing: {{error}}",
       "find": "Find (Ctrl/Cmd+F)",
       "foldAll": "Fold all",
       "unfoldAll": "Unfold all",

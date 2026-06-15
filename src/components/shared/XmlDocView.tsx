@@ -9,8 +9,8 @@
  * (`XmlTableView`), so coverage grows by adding descriptors, never by changing this component.
  *
  * Read-only and non-mutating — it only DOMParses `xml`; the viewer's "Salvează" still writes the
- * byte-clean submission XML verbatim. The whole subtree is wrapped in `.docv` so the print
- * stylesheet (`doc-print.css`) can emit the same document to PDF.
+ * byte-clean submission XML verbatim. The whole subtree is wrapped in `.docv` so the viewer's
+ * "Printează / Salvează PDF" can serialize the same document to a printable HTML.
  */
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -146,6 +146,12 @@ function money(v: string, currency?: string): string {
   return currency ? `${fmtRON(n)} ${currency}` : fmtRON(n);
 }
 
+/** Trim trailing zeros from a UBL quantity ("20.000000" → "20", "5.50" → "5.5"). */
+function trimNum(v: string): string {
+  const s = (v ?? "").trim();
+  return /^\d+\.\d+$/.test(s) ? s.replace(/\.?0+$/, "") : s;
+}
+
 function PartyBlock({ title, p }: { title: string; p: Party }) {
   const cityLine = [p.city, p.county, p.country].filter(Boolean).join(", ");
   return (
@@ -217,7 +223,7 @@ function InvoiceDocView({ doc }: { doc: InvoiceDoc }) {
                       <div className="docv-line-desc">{l.description}</div>
                     )}
                   </td>
-                  <td className="r">{l.quantity}</td>
+                  <td className="r">{trimNum(l.quantity)}</td>
                   <td>{UNIT[l.unit] ?? l.unit}</td>
                   <td className="r">{money(l.unitPrice, cur)}</td>
                   <td>{vatCategoryLabel(l.vatCode, l.vatPercent)}</td>
