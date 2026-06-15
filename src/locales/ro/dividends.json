@@ -27,7 +27,9 @@
       "tax": "Impozit",
       "net": "Net",
       "deadline": "Termen impozit",
-      "shareholder": "Asociat"
+      "shareholder": "Asociat",
+      "nonResident": "D207",
+      "nonResidentTitle": "Beneficiar nerezident — se raportează în D207 (declarație neemisă de aplicație), NU în D205."
     },
     "d205": {
       "title": "Export D205 — declarația informativă anuală, pe beneficiar",
@@ -38,7 +40,8 @@
       "saveTitle": "Salvează D205 (XML)",
       "savedDuk": "D205 salvat + validat DUK: {{path}}",
       "savedNoDuk": "D205 salvat (DUK indisponibil — validați în PDF inteligent): {{path}}",
-      "exportFailed": "Exportul D205 a eșuat."
+      "exportFailed": "Exportul D205 a eșuat.",
+      "nonResidentWarn": "{{count}} dividend(e) către nerezidenți NU intră în D205 — se raportează separat în D207 (declarație neemisă de aplicație, depuneți-o manual)."
     }
   }
 }

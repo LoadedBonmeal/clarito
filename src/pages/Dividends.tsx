@@ -40,6 +40,10 @@ export function Dividends() {
     enabled: !!companyId,
   });
 
+  // Dividendele către NEREZIDENȚI sunt excluse din D205 (se raportează în D207, neemis de aplicație) —
+  // le semnalăm explicit ca să nu fie raportate „tăcut" în nicio declarație.
+  const nonResidentCount = list.filter((d) => !d.beneficiaryResident).length;
+
   const add = useMutation({
     mutationFn: () => {
       if (!companyId) throw new Error(t("dividends.selectCompany"));
@@ -189,6 +193,15 @@ export function Dividends() {
             <Ic name="code" />{exportingD205 ? t("dividends.d205.exporting") : t("dividends.d205.export")}
           </button>
         </div>
+        {nonResidentCount > 0 && (
+          <div
+            className="hint"
+            style={{ marginTop: 10, color: "var(--red)", display: "flex", gap: 6, alignItems: "flex-start" }}
+          >
+            <Ic name="shield" />
+            <span>{t("dividends.d205.nonResidentWarn", { count: nonResidentCount })}</span>
+          </div>
+        )}
         {dukBlock && (
           <div style={{ marginTop: 12 }}>
             <PreflightPanel issues={dukBlock} />
@@ -231,7 +244,26 @@ export function Dividends() {
                   <td className="r num">{fmtRON(d.taxAmount)}</td>
                   <td className="r num">{fmtRON(d.netAmount)}</td>
                   <td>{d.taxDeadline}</td>
-                  <td>{d.shareholder ?? "—"}</td>
+                  <td>
+                    {d.shareholder ?? "—"}
+                    {!d.beneficiaryResident && (
+                      <span
+                        title={t("dividends.col.nonResidentTitle")}
+                        style={{
+                          marginLeft: 6,
+                          fontSize: 10.5,
+                          fontWeight: 600,
+                          color: "var(--red)",
+                          border: "1px solid rgba(220,38,38,.3)",
+                          borderRadius: 999,
+                          padding: "1px 7px",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {t("dividends.col.nonResident")}
+                      </span>
+                    )}
+                  </td>
                   <td className="r w-del">
                     <button
                       className="icon-btn"

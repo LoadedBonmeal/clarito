@@ -27,7 +27,9 @@
       "tax": "Tax",
       "net": "Net",
       "deadline": "Tax deadline",
-      "shareholder": "Shareholder"
+      "shareholder": "Shareholder",
+      "nonResident": "D207",
+      "nonResidentTitle": "Non-resident beneficiary — reported in D207 (a declaration the app does not emit), NOT in D205."
     },
     "d205": {
       "title": "Export D205 — annual informative declaration, per beneficiary",
@@ -38,7 +40,8 @@
       "saveTitle": "Save D205 (XML)",
       "savedDuk": "D205 saved + DUK-validated: {{path}}",
       "savedNoDuk": "D205 saved (DUK unavailable — validate in the smart PDF): {{path}}",
-      "exportFailed": "D205 export failed."
+      "exportFailed": "D205 export failed.",
+      "nonResidentWarn": "{{count}} dividend(s) to non-residents are NOT in D205 — they're reported separately in D207 (a declaration the app doesn't emit; file it manually)."
     }
   }
 }
