@@ -46,6 +46,7 @@ pub struct D205Header {
 /// Un beneficiar de dividende (rând `<benef>`, `tip_venit` 08), cu sumele agregate pe anul de venit.
 /// Sumele sunt `Decimal` (2 zecimale upstream) și se rotunjesc la lei întregi la emitere (regula
 /// A21.46: rotunjirea agregatului, nu per-rând).
+#[derive(Debug, Clone)]
 pub struct D205Beneficiary {
     /// `cifR` — CNP-ul beneficiarului (validat în amonte, N13 mod-11).
     pub cnp: String,

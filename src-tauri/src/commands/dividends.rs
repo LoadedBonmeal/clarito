@@ -3,13 +3,9 @@
 //! Exportul D205 (informativă anuală, pe beneficiar) agregă dividendele rezidenților pe CNP și emite
 //! XML-ul validat cu DUK (`D205Validator.jar`).
 
-use std::collections::BTreeMap;
-use std::str::FromStr;
-
-use rust_decimal::Decimal;
 use tauri::State;
 
-use crate::anaf_decl::d205_xml::{build_d205_xml, D205Beneficiary, D205Header};
+use crate::anaf_decl::d205_xml::{build_d205_xml, D205Header};
 use crate::anaf_decl::DeclKind;
 use crate::commands::declarations::{duk_gate_allows_write, OfficialExportResult};
 use crate::db::dividends::{self, Dividend, DividendInput};
@@ -72,77 +68,12 @@ pub async fn export_d205_official(
     let company = crate::db::companies::get(&state.db, &company_id).await?;
     let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
 
-    // Dividendele cu data distribuirii în anul de venit.
-    let year_str = format!("{year:04}");
-    let in_year: Vec<Dividend> = dividends::list(&state.db, &company_id)
-        .await?
-        .into_iter()
-        .filter(|d| d.distribution_date.starts_with(&year_str))
-        .collect();
-
-    // Nerezidenții → D207 (excluși). Rezidenții TREBUIE să aibă CNP — altfel D205 ar fi incompletă.
-    let residents: Vec<&Dividend> = in_year.iter().filter(|d| d.beneficiary_resident).collect();
-    let missing = residents
-        .iter()
-        .filter(|d| {
-            d.beneficiary_cnp
-                .as_deref()
-                .map(str::trim)
-                .unwrap_or("")
-                .is_empty()
-        })
-        .count();
-    if missing > 0 {
-        return Err(AppError::Validation(format!(
-            "D205 {year}: {missing} dividende rezidente fără CNP beneficiar — completați CNP-ul \
-             înainte de export (nerezidenții se raportează separat în D207)."
-        )));
-    }
-
-    // Agregare pe CNP — un <benef> per beneficiar. `divid_P` = brutul plătit (cu dată de plată).
-    let mut by_cnp: BTreeMap<String, D205Beneficiary> = BTreeMap::new();
-    for d in &residents {
-        let cnp = d
-            .beneficiary_cnp
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        let gross = Decimal::from_str(d.gross_amount.trim()).unwrap_or_default();
-        let tax = Decimal::from_str(d.tax_amount.trim()).unwrap_or_default();
-        let paid = if d
-            .payment_date
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .is_some()
-        {
-            gross
-        } else {
-            Decimal::ZERO
-        };
-        let entry = by_cnp
-            .entry(cnp.clone())
-            .or_insert_with(|| D205Beneficiary {
-                cnp: cnp.clone(),
-                name: String::new(),
-                baza: Decimal::ZERO,
-                impozit: Decimal::ZERO,
-                distribuit: Decimal::ZERO,
-                platit: Decimal::ZERO,
-                resident: true,
-            });
-        entry.baza += gross;
-        entry.impozit += tax;
-        entry.distribuit += gross;
-        entry.platit += paid;
-        if entry.name.is_empty() {
-            if let Some(n) = d.shareholder.as_deref() {
-                entry.name = n.trim().to_string();
-            }
-        }
-    }
-    let beneficiaries: Vec<D205Beneficiary> = by_cnp.into_values().collect();
+    // Agregare pe CNP (rezidenți, anul de venit) — vezi `dividends::d205_beneficiaries_for_year`.
+    // Blochează dacă vreun dividend rezident nu are CNP; nerezidenții → D207 (excluși).
+    let beneficiaries = dividends::d205_beneficiaries_for_year(
+        &dividends::list(&state.db, &company_id).await?,
+        year,
+    )?;
 
     // Declarantul: din datele firmei (ca D112 — nume_declar = denumirea, funcția „Administrator").
     // `cui` = CUI fără „RO"; `adresa` = adresa + localitate + județ (ambele obligatorii în D205).

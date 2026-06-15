@@ -7,6 +7,7 @@
 use rust_decimal::{Decimal, RoundingStrategy};
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use crate::db::models::{new_id, now_unix};
@@ -324,6 +325,85 @@ pub async fn dividend_obligations_in_months(
     Ok(out)
 }
 
+/// Agregă dividendele REZIDENTE cu data distribuirii în anul de venit `year` în rânduri D205 (un
+/// `<benef>` per CNP). Nerezidenții sunt EXCLUȘI (se raportează separat în D207). `baza1`/`divid_D` =
+/// brutul; `divid_P` = brutul plătit (doar cu dată de plată); `imp1` = impozitul. Întoarce Err dacă
+/// vreun dividend rezident NU are CNP (o D205 incompletă = declarație greșită). Sortare deterministă pe
+/// CNP (BTreeMap). Funcție PURĂ (testabilă) — folosită de `commands::dividends::export_d205_official`.
+pub fn d205_beneficiaries_for_year(
+    dividends: &[Dividend],
+    year: i32,
+) -> AppResult<Vec<crate::anaf_decl::d205_xml::D205Beneficiary>> {
+    use crate::anaf_decl::d205_xml::D205Beneficiary;
+
+    let year_str = format!("{year:04}");
+    let residents: Vec<&Dividend> = dividends
+        .iter()
+        .filter(|d| d.distribution_date.starts_with(&year_str) && d.beneficiary_resident)
+        .collect();
+
+    let missing = residents
+        .iter()
+        .filter(|d| {
+            d.beneficiary_cnp
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty()
+        })
+        .count();
+    if missing > 0 {
+        return Err(AppError::Validation(format!(
+            "D205 {year}: {missing} dividende rezidente fără CNP beneficiar — completați CNP-ul \
+             înainte de export (nerezidenții se raportează separat în D207)."
+        )));
+    }
+
+    let mut by_cnp: BTreeMap<String, D205Beneficiary> = BTreeMap::new();
+    for d in &residents {
+        let cnp = d
+            .beneficiary_cnp
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let gross = Decimal::from_str(d.gross_amount.trim()).unwrap_or_default();
+        let tax = Decimal::from_str(d.tax_amount.trim()).unwrap_or_default();
+        let paid = if d
+            .payment_date
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .is_some()
+        {
+            gross
+        } else {
+            Decimal::ZERO
+        };
+        let entry = by_cnp
+            .entry(cnp.clone())
+            .or_insert_with(|| D205Beneficiary {
+                cnp: cnp.clone(),
+                name: String::new(),
+                baza: Decimal::ZERO,
+                impozit: Decimal::ZERO,
+                distribuit: Decimal::ZERO,
+                platit: Decimal::ZERO,
+                resident: true,
+            });
+        entry.baza += gross;
+        entry.impozit += tax;
+        entry.distribuit += gross;
+        entry.platit += paid;
+        if entry.name.is_empty() {
+            if let Some(n) = d.shareholder.as_deref() {
+                entry.name = n.trim().to_string();
+            }
+        }
+    }
+    Ok(by_cnp.into_values().collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,5 +577,134 @@ mod tests {
         assert_eq!(obls[1].deadline, "25.08.2026");
         assert_eq!(obls[1].amount, "800.00");
         assert_eq!(obls[1].count, 1);
+    }
+
+    // ── D205 aggregation (pure) ──────────────────────────────────────────────
+    fn mk_div(
+        cnp: Option<&str>,
+        resident: bool,
+        dist_date: &str,
+        pay_date: Option<&str>,
+        gross: &str,
+        tax: &str,
+    ) -> Dividend {
+        Dividend {
+            id: "x".into(),
+            company_id: "co-1".into(),
+            distribution_date: dist_date.into(),
+            payment_date: pay_date.map(|s| s.into()),
+            gross_amount: gross.into(),
+            tax_rate: 16,
+            tax_amount: tax.into(),
+            net_amount: "0".into(),
+            interim_2025: false,
+            shareholder: Some("Ion Gheorghe".into()),
+            beneficiary_cnp: cnp.map(|s| s.into()),
+            beneficiary_resident: resident,
+            note: None,
+            tax_deadline: "2026-01-25".into(),
+        }
+    }
+
+    #[test]
+    fn d205_aggregates_by_cnp_excludes_nonresidents_and_other_years() {
+        let divs = vec![
+            mk_div(
+                Some("1900101410011"),
+                true,
+                "2025-03-01",
+                Some("2025-03-10"),
+                "10000",
+                "1600",
+            ),
+            mk_div(
+                Some("1900101410011"),
+                true,
+                "2025-06-01",
+                Some("2025-06-10"),
+                "5000",
+                "800",
+            ), // same CNP → merge
+            mk_div(
+                Some("1960101410019"),
+                true,
+                "2025-07-01",
+                None,
+                "4000",
+                "640",
+            ), // diff CNP, UNPAID
+            mk_div(
+                Some("1800101410010"),
+                false,
+                "2025-08-01",
+                Some("2025-08-10"),
+                "9000",
+                "1440",
+            ), // non-resident → D207
+            mk_div(
+                Some("1900101410011"),
+                true,
+                "2024-12-01",
+                Some("2024-12-10"),
+                "999",
+                "159",
+            ), // 2024 → excluded
+        ];
+        let bens = d205_beneficiaries_for_year(&divs, 2025).unwrap();
+        assert_eq!(bens.len(), 2, "two resident CNPs in 2025 (sorted by CNP)");
+        // 1900… first (BTreeMap order): merged 10000+5000.
+        assert_eq!(bens[0].cnp, "1900101410011");
+        assert_eq!(bens[0].baza, Decimal::from_str("15000").unwrap());
+        assert_eq!(bens[0].impozit, Decimal::from_str("2400").unwrap());
+        assert_eq!(bens[0].distribuit, Decimal::from_str("15000").unwrap());
+        assert_eq!(bens[0].platit, Decimal::from_str("15000").unwrap()); // both paid
+                                                                         // 1960… UNPAID → divid_P = 0 but baza/distribuit still the gross.
+        assert_eq!(bens[1].cnp, "1960101410019");
+        assert_eq!(bens[1].baza, Decimal::from_str("4000").unwrap());
+        assert_eq!(bens[1].distribuit, Decimal::from_str("4000").unwrap());
+        assert_eq!(bens[1].platit, Decimal::ZERO);
+    }
+
+    #[test]
+    fn d205_resident_without_cnp_is_blocked() {
+        let divs = vec![
+            mk_div(
+                Some("1900101410011"),
+                true,
+                "2025-03-01",
+                Some("2025-03-10"),
+                "10000",
+                "1600",
+            ),
+            mk_div(None, true, "2025-04-01", Some("2025-04-10"), "5000", "800"), // resident, NO CNP
+        ];
+        match d205_beneficiaries_for_year(&divs, 2025).unwrap_err() {
+            AppError::Validation(m) => assert!(m.contains("fără CNP"), "got: {m}"),
+            other => panic!("expected Validation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn d205_empty_when_no_residents_in_year() {
+        // A non-resident (→ D207) + a resident in the wrong year → no D205 rows, NO error.
+        let divs = vec![
+            mk_div(
+                Some("1800101410010"),
+                false,
+                "2025-08-01",
+                Some("2025-08-10"),
+                "9000",
+                "1440",
+            ),
+            mk_div(
+                Some("1900101410011"),
+                true,
+                "2024-01-01",
+                Some("2024-01-10"),
+                "1000",
+                "160",
+            ),
+        ];
+        assert!(d205_beneficiaries_for_year(&divs, 2025).unwrap().is_empty());
     }
 }
