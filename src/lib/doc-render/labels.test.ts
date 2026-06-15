@@ -44,6 +44,14 @@ describe("resolveField — D112 / D300 (Phase 2)", () => {
     expect(resolveField("D300", "R17_2").label).toContain("TOTAL taxă colectată");
     expect(formatValue("L", resolveField("D300", "tip_decont"))).toBe("Lunar");
   });
+  it("decodes D390 operation codes per OPANAF 705/2020 (P=prestări, S=achiziții servicii, R=agricultori)", () => {
+    const tip = resolveField("D390", "tip");
+    expect(formatValue("L", tip)).toBe("Livrări intracomunitare de bunuri");
+    expect(formatValue("A", tip)).toBe("Achiziții intracomunitare de bunuri");
+    expect(formatValue("P", tip)).toBe("Prestări intracomunitare de servicii");
+    expect(formatValue("S", tip)).toBe("Achiziții intracomunitare de servicii");
+    expect(formatValue("R", tip)).toBe("Livrări intracomunitare de bunuri (regim special agricultori)");
+  });
 });
 
 describe("vatCategoryLabel", () => {
