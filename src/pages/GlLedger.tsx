@@ -21,6 +21,7 @@ import { confirm, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Trans, useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
+import { MonthPicker } from "@/components/shared/MonthPicker";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
@@ -135,18 +136,6 @@ export function GlLedgerPage() {
   /** Numele lunii în interiorul frazelor — minuscul doar în RO. */
   const monthInline = i18n.language.startsWith("ro") ? monthName.toLowerCase() : monthName;
   const periodLabel = `${monthName} ${selectedYear}`;
-
-  // Perioada selectabilă: ultimele 36 de luni.
-  const periodOptions = useMemo(() => {
-    const base = now.getFullYear() * 12 + now.getMonth();
-    const opts: Array<{ y: number; m: number }> = [];
-    for (let i = 0; i < 36; i++) {
-      const t = base - i;
-      opts.push({ y: Math.floor(t / 12), m: (t % 12) + 1 });
-    }
-    return opts;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Close pop on outside click.
   useEffect(() => {
@@ -533,19 +522,16 @@ export function GlLedgerPage() {
               <Ic name="chevD" cls="ic" />
             </button>
             {openPop === "period" && (
-              <div className="pop show" style={{ right: 0, top: 40, width: 210, maxHeight: 300, overflowY: "auto" }} onMouseDown={(e) => e.stopPropagation()}>
-                <div className="col-title">{t("gl.head.period")}</div>
-                {periodOptions.map(({ y, m }) => (
-                  <button
-                    key={`${y}-${m}`}
-                    className="pop-item"
-                    onClick={() => { setSelectedYear(y); setSelectedMonth(m); setOpenPop(""); }}
-                  >
-                    <span style={{ flex: 1 }}>{MONTHS[m - 1]} {y}</span>
-                    {selectedYear === y && selectedMonth === m && <Ic name="check" cls="co-check" />}
-                  </button>
-                ))}
-              </div>
+              <MonthPicker
+                year={selectedYear}
+                month={selectedMonth}
+                monthsFull={MONTHS}
+                prevYearLabel={t("declarations.periodPop.prevYear")}
+                nextYearLabel={t("declarations.periodPop.nextYear")}
+                onPrevYear={() => setSelectedYear(selectedYear - 1)}
+                onNextYear={() => setSelectedYear(selectedYear + 1)}
+                onPick={(m) => { setSelectedMonth(m); setOpenPop(""); }}
+              />
             )}
           </div>
           <button

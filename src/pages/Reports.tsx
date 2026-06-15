@@ -21,6 +21,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
 import { Ic } from "@/components/shared/Ic";
+import { MonthPicker } from "@/components/shared/MonthPicker";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
@@ -59,12 +60,6 @@ function fmtBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function buildYearOptions(): number[] {
-  const current = new Date().getFullYear();
-  const years: number[] = [];
-  for (let y = current; y >= current - 5; y--) years.push(y);
-  return years;
-}
 
 function periodPrefix(year: number, month: number): string {
   const mm = String(month).padStart(2, "0");
@@ -148,7 +143,6 @@ export function ReportsPage() {
     return () => document.removeEventListener("mousedown", h);
   }, [openPop]);
 
-  const yearOptions = buildYearOptions();
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedMonth);
 
   // ── Queries ──────────────────────────────────────────────────────────────
@@ -448,35 +442,16 @@ export function ReportsPage() {
               <Ic name="chevD" cls="ic" />
             </button>
             {openPop === "period" && (
-              <div
-                className="pop show"
-                style={{ right: 0, top: 40, width: 210, maxHeight: 320, overflowY: "auto" }}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-                <div className="col-title">{t("declarations.periodPop.month")}</div>
-                {MONTHS.map((label, idx) => (
-                  <button
-                    key={label}
-                    className="pop-item"
-                    onClick={() => { setSelectedMonth(idx + 1); setOpenPop(""); }}
-                  >
-                    <span style={{ flex: 1 }}>{label}</span>
-                    {selectedMonth === idx + 1 && <Ic name="check" cls="co-check" />}
-                  </button>
-                ))}
-                <div className="pop-div" />
-                <div className="col-title">{t("declarations.periodPop.year")}</div>
-                {yearOptions.map((y) => (
-                  <button
-                    key={y}
-                    className="pop-item"
-                    onClick={() => { setSelectedYear(y); setOpenPop(""); }}
-                  >
-                    <span style={{ flex: 1 }} className="num">{y}</span>
-                    {selectedYear === y && <Ic name="check" cls="co-check" />}
-                  </button>
-                ))}
-              </div>
+              <MonthPicker
+                year={selectedYear}
+                month={selectedMonth}
+                monthsFull={MONTHS}
+                prevYearLabel={t("declarations.periodPop.prevYear")}
+                nextYearLabel={t("declarations.periodPop.nextYear")}
+                onPrevYear={() => setSelectedYear(selectedYear - 1)}
+                onNextYear={() => setSelectedYear(selectedYear + 1)}
+                onPick={(m) => { setSelectedMonth(m); setOpenPop(""); }}
+              />
             )}
           </div>
         </div>
