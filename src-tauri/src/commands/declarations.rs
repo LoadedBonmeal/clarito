@@ -1955,6 +1955,44 @@ pub async fn export_d300_official(
     })
 }
 
+/// Construiește XML-ul D300 fără a-l scrie pe disc și fără gate-ul DUK — pentru previzualizare/editare
+/// în vizualizatorul XML din aplicație. Parcurge EXACT aceiași pași de build ca `export_d300_official`
+/// (resolve ver → company → compute_d300 → map_to_rows → generate_d300_xml), așa că re-validarea cu
+/// DUK (`validate_declaration_xml`) e relevantă. Niciun fișier temporar, niciun `run_duk`, nicio scriere.
+#[tauri::command]
+pub async fn preview_d300_xml(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+    submission: D300Submission,
+) -> AppResult<String> {
+    use crate::anaf_decl::d300::generator::generate_d300_xml;
+    use crate::anaf_decl::d300::rows::map_to_rows;
+
+    // Parse period_from to resolve the schema version and extract luna/an.
+    let period = NaiveDate::parse_from_str(&period_from, "%Y-%m-%d").map_err(|_| {
+        AppError::Validation(format!(
+            "period_from '{period_from}' nu este în formatul YYYY-MM-DD."
+        ))
+    })?;
+
+    // Resolve schema version for the reported period.
+    let ver = resolve(DeclKind::D300, period)?;
+
+    // Fetch the company record (needed for cui/den/adresa) — înainte de a muta `state` în compute_d300.
+    let company = companies::get(&state.db, &company_id).await?;
+
+    // Compute the fiscal aggregates.
+    let report = compute_d300(state, company_id, period_from, period_to).await?;
+
+    // Map to D300Rows (all amounts rounded to lei, totals computed).
+    let rows = map_to_rows(&report, &submission, &company, period)?;
+
+    // Generate XML (fără validare DUK, fără scriere — doar întoarce șirul).
+    generate_d300_xml(&rows, &ver)
+}
+
 /// Pre-export validation — runs pure-Rust checks and returns friendly Romanian
 /// messages for the most common DUKIntegrator-fatal issues.
 ///

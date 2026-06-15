@@ -106,24 +106,19 @@ pub async fn profit_and_loss(
     .await
 }
 
-/// Exportă bilanțul în format XML oficial ANAF (S1005 «UU» micro / S1003 «BS» entitate mică) cu
-/// blocurile F10 (bilanț) + F20 (cont de profit și pierdere) din contabilitate, pentru import în
-/// PDF-ul inteligent ANAF. Header-ul (cod fiscal teritorial, întocmitor, audit) + F30 «Date
-/// informative» se completează în aplicația ANAF după import. Returnează calea fișierului scris.
-#[tauri::command]
+/// Construiește XML-ul bilanțului (F10 + F20 + header) fără a-l scrie pe disc — sursă comună pentru
+/// `export_bilant_xml` (scrie pe disc) și `preview_bilant_xml` (doar întoarce șirul, pentru
+/// vizualizatorul XML din aplicație). Calculează balanța, contul de profit și pierdere (an curent +
+/// comparativ), clasifică forma (2-din-3 + regula celor 2 ani) și apelează `generate_bilant_xml`.
 #[allow(clippy::too_many_arguments)]
-pub async fn export_bilant_xml(
-    state: State<'_, AppState>,
-    company_id: String,
+async fn build_bilant_xml_for(
+    db: &sqlx::SqlitePool,
+    company_id: &str,
     year: i32,
     caen: String,
-    // avg_employees: nr. mediu de salariați (criteriu OMFP de mărime); None/0 dacă necunoscut.
-    // form_override: forțează forma ("UU"|"BS"|"BL"); altfel se clasifică automat (2-din-3).
-    // prior_year_form: forma stabilită anul precedent ("UU"|"BS"|"BL") — regula celor 2 ani.
     avg_employees: Option<i64>,
     form_override: Option<String>,
     prior_year_form: Option<String>,
-    dest_path: String,
 ) -> AppResult<String> {
     use crate::anaf_decl::bilant_xml::{
         compute_f10, compute_f10_developed, compute_f20, compute_f20_full, generate_bilant_xml,
@@ -136,7 +131,7 @@ pub async fn export_bilant_xml(
             "Cod CAEN invalid — introduceți 4 cifre (ex. 6201).".into(),
         ));
     }
-    let company = crate::db::companies::get(&state.db, &company_id).await?;
+    let company = crate::db::companies::get(db, company_id).await?;
     // county_code() falls back to 40 (București) for unknown codes — reject anything that isn't a
     // real 2-letter auto-code (other than the legitimate "B") so codTT isn't silently wrong.
     let county_norm = company.county.trim().to_uppercase();
@@ -148,13 +143,13 @@ pub async fn export_bilant_xml(
     }
     let from = format!("{year}-01-01");
     let to = format!("{year}-12-31");
-    let tb = db_trial_balance(&state.db, &company_id, &from, &to).await?;
-    let pnl = db_profit_and_loss(&state.db, &company_id, &company.tax_regime, &from, &to).await?;
+    let tb = db_trial_balance(db, company_id, &from, &to).await?;
+    let pnl = db_profit_and_loss(db, company_id, &company.tax_regime, &from, &to).await?;
     // Prior-year P&L for the F20 comparative column (best-effort).
     let pyear = year - 1;
     let prior = db_profit_and_loss(
-        &state.db,
-        &company_id,
+        db,
+        company_id,
         &company.tax_regime,
         &format!("{pyear}-01-01"),
         &format!("{pyear}-12-31"),
@@ -166,7 +161,7 @@ pub async fn export_bilant_xml(
     // an entity stays in a size class if it does NOT exceed at least 2 of {total active, cifra de
     // afaceri netă, nr. mediu salariați}. micro = {2.250.000, 4.500.000, 10}; entitate mică =
     // {25.000.000, 50.000.000, 50}; peste = mijlocie/mare.
-    let bil = db_bilant(&state.db, &company_id, &from, &to).await?;
+    let bil = db_bilant(db, company_id, &from, &to).await?;
     let total_assets: f64 = bil.total_assets.parse().unwrap_or(0.0);
     // Criteriul de mărime e CIFRA DE AFACERI NETĂ (clasa 70x), NU operating_revenue (care include
     // 71x variația stocurilor, 72x producția imobilizată, 74x subvenții, 75x alte venituri) — OMFP
@@ -199,8 +194,8 @@ pub async fn export_bilant_xml(
     let (f10, f20) = if form == "BL" {
         // Prior-year trial balance for the F20 comparative column (best-effort).
         let prior_tb = db_trial_balance(
-            &state.db,
-            &company_id,
+            db,
+            company_id,
             &format!("{pyear}-01-01"),
             &format!("{pyear}-12-31"),
         )
@@ -223,12 +218,69 @@ pub async fn export_bilant_xml(
         county: company.county.clone(),
         nume_admin: company.legal_name.clone(),
     };
-    let xml = generate_bilant_xml(&header, &f10, &f20, form);
+    Ok(generate_bilant_xml(&header, &f10, &f20, form))
+}
+
+/// Exportă bilanțul în format XML oficial ANAF (S1005 «UU» micro / S1003 «BS» entitate mică) cu
+/// blocurile F10 (bilanț) + F20 (cont de profit și pierdere) din contabilitate, pentru import în
+/// PDF-ul inteligent ANAF. Header-ul (cod fiscal teritorial, întocmitor, audit) + F30 «Date
+/// informative» se completează în aplicația ANAF după import. Returnează calea fișierului scris.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn export_bilant_xml(
+    state: State<'_, AppState>,
+    company_id: String,
+    year: i32,
+    caen: String,
+    // avg_employees: nr. mediu de salariați (criteriu OMFP de mărime); None/0 dacă necunoscut.
+    // form_override: forțează forma ("UU"|"BS"|"BL"); altfel se clasifică automat (2-din-3).
+    // prior_year_form: forma stabilită anul precedent ("UU"|"BS"|"BL") — regula celor 2 ani.
+    avg_employees: Option<i64>,
+    form_override: Option<String>,
+    prior_year_form: Option<String>,
+    dest_path: String,
+) -> AppResult<String> {
+    let xml = build_bilant_xml_for(
+        &state.db,
+        &company_id,
+        year,
+        caen,
+        avg_employees,
+        form_override,
+        prior_year_form,
+    )
+    .await?;
     // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the
     // IPC endpoint accepts an arbitrary string.
     let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
     std::fs::write(&dest, xml).map_err(|e| AppError::Other(e.to_string()))?;
     Ok(dest_path)
+}
+
+/// Construiește XML-ul bilanțului fără a-l scrie pe disc — pentru previzualizare/editare în
+/// vizualizatorul XML din aplicație. Bilanțul nu are validator DUK (doar import în PDF-ul ANAF),
+/// deci vizualizatorul e doar-citire/editare locală (fără re-validare).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn preview_bilant_xml(
+    state: State<'_, AppState>,
+    company_id: String,
+    year: i32,
+    caen: String,
+    avg_employees: Option<i64>,
+    form_override: Option<String>,
+    prior_year_form: Option<String>,
+) -> AppResult<String> {
+    build_bilant_xml_for(
+        &state.db,
+        &company_id,
+        year,
+        caen,
+        avg_employees,
+        form_override,
+        prior_year_form,
+    )
+    .await
 }
 
 /// Bilanț contabil (balance sheet) pentru perioadă — agregă clasele 1-5 din balanță (active,

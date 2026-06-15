@@ -106,7 +106,10 @@
         "desc2": "se precompletează pe R16/R30 cu suprascriere manuală. Exportul oficial (schema v12) cere datele declarantului, CAEN, banca și trece prin validarea DUKIntegrator.",
         "extractTitle": "Exportă extras D300 ca fișier XML (document de lucru, nu schema ANAF)",
         "officialTitle": "Exportă D300 conform schemei oficiale ANAF v12",
-        "exportOfficial": "Export XML oficial"
+        "exportOfficial": "Export XML oficial",
+        "previewXml": "Vizualizează / Editează XML",
+        "previewing": "Se generează…",
+        "previewFailed": "Nu s-a putut genera XML-ul D300."
       },
       "d390": {
         "title": "Declarație recapitulativă VIES",
@@ -218,6 +221,9 @@
     "d390": {
       "title": "D390 — Declarație recapitulativă (VIES) intra-UE",
       "exportTitle": "Export XML D390 (declaratie390 v3)",
+      "previewXml": "Vizualizează / Editează XML",
+      "previewing": "Se construiește…",
+      "previewFailed": "Nu s-a putut construi XML-ul D390.",
       "reportLabel": "raportul D390",
       "empty": "Nicio operațiune intra-UE (vat_category «K») în perioada selectată.",
       "types": {
@@ -251,6 +257,9 @@
       "extractTitle": "Export extract D394 (document de lucru)",
       "officialTitle": "Export D394 conform schemei oficiale ANAF v5",
       "exportOfficial": "Export oficial ANAF",
+      "previewXml": "Vizualizează / Editează XML",
+      "previewing": "Se generează…",
+      "previewFailed": "Nu s-a putut genera XML-ul D394.",
       "reportLabel": "raportul D394",
       "emptySales": "Nicio livrare validată în perioada selectată.",
       "purchasesTitle": "D394 — Achiziții per furnizor",

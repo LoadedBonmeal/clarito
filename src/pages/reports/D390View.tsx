@@ -16,6 +16,7 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
+import { useOpenXml } from "@/hooks/use-open-xml";
 
 interface Props {
   dateFrom: string;
@@ -36,6 +37,8 @@ export function D390View({ dateFrom, dateTo }: Props) {
   const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [exporting, setExporting] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const openXml = useOpenXml();
 
   const tipLabel = (tip: string): string =>
     TIP_KEY[tip] ? t(`declarations.d390.types.${TIP_KEY[tip]}`) : tip;
@@ -87,6 +90,27 @@ export function D390View({ dateFrom, dateTo }: Props) {
     }
   };
 
+  /** Construiește XML-ul D390 și îl deschide în vizualizatorul/editorul XML (doar citire — fără DUK). */
+  const handlePreview = async () => {
+    if (!activeCompanyId) {
+      notify.warn(t("declarations.notify.selectCompany"));
+      return;
+    }
+    if (ops.length === 0) {
+      notify.info(t("declarations.d390.notify.noOps"));
+      return;
+    }
+    setPreviewing(true);
+    try {
+      const xml = await api.d390.previewD390Xml(activeCompanyId, dateFrom, dateTo);
+      openXml({ xml, name: `d390-${dateFrom}-${dateTo}.xml` });
+    } catch (err) {
+      notify.error(formatError(err, t("declarations.d390.previewFailed")));
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
   return (
     <div className="scr-card">
       <div className="scr-toolbar">
@@ -100,6 +124,15 @@ export function D390View({ dateFrom, dateTo }: Props) {
         >
           <Ic name="dl" />
           {exporting ? t("declarations.common.exporting") : t("declarations.common.exportXml")}
+        </button>
+        <button
+          className="pill-btn"
+          disabled={previewing || !activeCompanyId || ops.length === 0}
+          onClick={() => void handlePreview()}
+          title={t("declarations.d390.previewXml")}
+        >
+          <Ic name="eye" />
+          {previewing ? t("declarations.d390.previewing") : t("declarations.d390.previewXml")}
         </button>
       </div>
 

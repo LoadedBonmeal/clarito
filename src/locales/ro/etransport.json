@@ -64,6 +64,8 @@
       "docDate": "Data",
       "validate": "Validează",
       "generateXml": "Generează XML",
+      "previewXml": "Vizualizează / Editează XML",
+      "previewingXml": "Se generează…",
       "sending": "Se trimite…",
       "sendAnaf": "Trimite la ANAF"
     },

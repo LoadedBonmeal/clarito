@@ -22,6 +22,7 @@ import { confirm, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import { Ic } from "@/components/shared/Ic";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
+import { useOpenXml } from "@/hooks/use-open-xml";
 import { MonthPicker } from "@/components/shared/MonthPicker";
 import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { queryKeys } from "@/lib/queries";
@@ -163,6 +164,23 @@ export function PayrollPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["concedii", companyId, periodYm] }),
     onError: (e) => notify.error(formatError(e, t("payroll.notify.deleteConcediuError"))),
   });
+
+  const openXml = useOpenXml();
+
+  /** Construiește XML-ul D112 al lunii și îl deschide în vizualizatorul/editorul XML (cu re-validare DUK). */
+  const runD112Preview = async (caen: string) => {
+    if (!companyId) return;
+    try {
+      const xml = await api.payroll.previewD112Xml(companyId, year, month, caen);
+      openXml({
+        xml,
+        name: `d112-${year}-${String(month).padStart(2, "0")}.xml`,
+        declKind: "D112",
+      });
+    } catch (err) {
+      notify.error(formatError(err, t("payroll.d112.previewFailed")));
+    }
+  };
 
   const runD112 = async (caen: string, override = false) => {
     if (!companyId) return;
@@ -620,6 +638,7 @@ export function PayrollPage() {
           dukBlock={dukBlock}
           onClose={() => { setShowD112(false); setDukBlock(null); }}
           onExport={runD112}
+          onPreview={runD112Preview}
         />
       )}
     </div>
@@ -1074,17 +1093,19 @@ function SediuModal({
 // ─── D112Modal — export XML cu CAEN (înlocuiește window.prompt, no-op în Tauri) ─
 
 function D112Modal({
-  monthLabel, newModel, dukBlock, onClose, onExport,
+  monthLabel, newModel, dukBlock, onClose, onExport, onPreview,
 }: {
   monthLabel: string;
   newModel: boolean;
   dukBlock: PreflightIssue[] | null;
   onClose: () => void;
   onExport: (caen: string, override?: boolean) => Promise<void>;
+  onPreview: (caen: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [caen, setCaen] = useState("");
   const [busy, setBusy] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
 
   const { closing, close } = useAnimatedClose(onClose);
 
@@ -1095,6 +1116,16 @@ function D112Modal({
       await onExport(caen.trim(), override);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const preview = async () => {
+    if (!/^\d{4}$/.test(caen.trim())) { notify.error(t("payroll.d112.invalidCaen")); return; }
+    setPreviewing(true);
+    try {
+      await onPreview(caen.trim());
+    } finally {
+      setPreviewing(false);
     }
   };
 
@@ -1160,8 +1191,11 @@ function D112Modal({
         </div>
         <div className="modal-foot">
           <span className="left">{t("payroll.d112.foot")}</span>
-          <button className="pill-btn" onClick={close} disabled={busy}>{t("payroll.common.cancel")}</button>
-          <button className="btn-dark" disabled={busy} onClick={() => void submit()}>
+          <button className="pill-btn" onClick={close} disabled={busy || previewing}>{t("payroll.common.cancel")}</button>
+          <button className="pill-btn" disabled={busy || previewing} onClick={() => void preview()}>
+            <Ic name="eye" />{previewing ? t("payroll.d112.previewing") : t("payroll.d112.previewXml")}
+          </button>
+          <button className="btn-dark" disabled={busy || previewing} onClick={() => void submit()}>
             <Ic name="code" />{busy ? t("payroll.d112.exporting") : t("payroll.d112.generate")}
           </button>
         </div>

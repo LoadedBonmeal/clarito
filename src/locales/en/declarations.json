@@ -104,7 +104,10 @@
         "desc2": "are pre-filled on R16/R30 with manual override. The official export (schema v12) requires the declarant's details, CAEN, the bank, and goes through DUKIntegrator validation.",
         "extractTitle": "Export a D300 extract as an XML file (working document, not the ANAF schema)",
         "officialTitle": "Export D300 according to the official ANAF schema v12",
-        "exportOfficial": "Official XML export"
+        "exportOfficial": "Official XML export",
+        "previewXml": "View / Edit XML",
+        "previewing": "Generating…",
+        "previewFailed": "Could not generate the D300 XML."
       },
       "d390": {
         "title": "VIES recapitulative statement",
@@ -215,6 +218,9 @@
     "d390": {
       "title": "D390 — Recapitulative statement (VIES) intra-EU",
       "exportTitle": "Export D390 XML (declaratie390 v3)",
+      "previewXml": "View / Edit XML",
+      "previewing": "Building…",
+      "previewFailed": "Could not build the D390 XML.",
       "reportLabel": "the D390 report",
       "empty": "No intra-EU operation (vat_category «K») in the selected period.",
       "types": {
@@ -247,6 +253,9 @@
       "extractTitle": "Export D394 extract (working document)",
       "officialTitle": "Export D394 according to the official ANAF schema v5",
       "exportOfficial": "Official ANAF export",
+      "previewXml": "View / Edit XML",
+      "previewing": "Generating…",
+      "previewFailed": "Could not generate the D394 XML.",
       "reportLabel": "the D394 report",
       "emptySales": "No validated supply in the selected period.",
       "purchasesTitle": "D394 — Acquisitions per supplier",

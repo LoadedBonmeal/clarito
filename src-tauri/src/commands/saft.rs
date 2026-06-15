@@ -178,6 +178,58 @@ pub async fn export_saft_official(
     })
 }
 
+/// Construiește XML-ul D406 oficial fără a-l scrie pe disc și fără gate DUK — pentru
+/// previzualizarea/editarea în vizualizatorul XML din aplicație. Rulează EXACT aceeași ramură de
+/// generare ca `export_saft_official` (anual profil A vs. lunar/trimestrial profil L), deci re-validarea
+/// cu DUK (`validate_declaration_xml` → D406) este relevantă. Re-folosește `SaftOfficialParams` ca să
+/// păstreze semnătura identică cu cea trimisă de frontend la export (`dest_path` e ignorat aici).
+#[tauri::command]
+pub async fn preview_saft_official_xml(
+    state: State<'_, AppState>,
+    params: SaftOfficialParams,
+) -> AppResult<String> {
+    let (date_from, date_to) = if let Some(q) = params.quarter {
+        if !(1..=4).contains(&q) {
+            return Err(AppError::Validation(
+                "Trimestrul D406 trebuie să fie 1-4.".into(),
+            ));
+        }
+        let first_m = ((q - 1) * 3 + 1) as u32;
+        let last_m = (q * 3) as u32;
+        let last_day = crate::db::payroll::days_in_month(params.year, last_m);
+        (
+            format!("{}-{:02}-01", params.year, first_m),
+            format!("{}-{:02}-{:02}", params.year, last_m, last_day),
+        )
+    } else if let Some(m) = params.month {
+        let last_day = crate::db::payroll::days_in_month(params.year, m as u32);
+        (
+            format!("{}-{:02}-01", params.year, m),
+            format!("{}-{:02}-{:02}", params.year, m, last_day),
+        )
+    } else {
+        (
+            format!("{}-01-01", params.year),
+            format!("{}-12-31", params.year),
+        )
+    };
+
+    let company = companies::get(&state.db, &params.company_id).await?;
+
+    // Aceeași ramură ca `export_saft_official`: anual = nici lună, nici trimestru.
+    let is_annual = params.month.is_none() && params.quarter.is_none();
+
+    let xml = if is_annual {
+        generate_saft_xml_annual(&state.db, &company, &date_from, &date_to).await?
+    } else {
+        crate::db::gl::generate_gl_entries(&state.db, &params.company_id, &date_from, &date_to)
+            .await?;
+        generate_saft_xml(&state.db, &company, &date_from, &date_to).await?
+    };
+
+    Ok(xml)
+}
+
 // ─── Legacy preview command (unchanged) ───────────────────────────────────────
 
 #[tauri::command]

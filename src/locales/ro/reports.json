@@ -183,13 +183,17 @@
       "officialTitle": "Export D406 oficial ANAF (schema completă + GL) pentru {{period}}",
       "exportingOfficial": "Export D406 în curs…",
       "officialBtn": "Export oficial D406 {{period}}",
+      "previewXml": "Vizualizează / Editează XML",
+      "previewing": "Se generează…",
+      "previewXmlTitle": "Vizualizează și editează XML-ul D406 oficial pentru {{period}} (cu re-validare DUK)",
       "notify": {
         "noDataYear": "Nu există date pentru anul {{year}}.",
         "saved": "SAF-T D406 salvat: {{path}}",
         "exportFailed": "Nu s-a putut exporta SAF-T D406.",
         "officialSavedDuk": "D406 oficial salvat (DUK: valid): {{path}}",
         "officialSavedNoDuk": "D406 oficial salvat: {{path}} (validare DUK indisponibilă local)",
-        "exportOfficialFailed": "Nu s-a putut exporta D406 oficial."
+        "exportOfficialFailed": "Nu s-a putut exporta D406 oficial.",
+        "previewFailed": "Nu s-a putut genera XML-ul D406 pentru previzualizare."
       }
     },
     "salesJournal": {

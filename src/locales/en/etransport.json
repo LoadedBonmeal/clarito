@@ -64,6 +64,8 @@
       "docDate": "Date",
       "validate": "Validate",
       "generateXml": "Generate XML",
+      "previewXml": "View / Edit XML",
+      "previewingXml": "Generating…",
       "sending": "Sending…",
       "sendAnaf": "Send to ANAF"
     },

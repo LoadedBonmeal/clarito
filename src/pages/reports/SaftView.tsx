@@ -18,6 +18,7 @@ import type { PreflightIssue } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
+import { useOpenXml } from "@/hooks/use-open-xml";
 
 // SaftView uses legacy export_saft_d406 (returns XML string) + new export_saft_official (writes file, returns path).
 
@@ -35,9 +36,11 @@ interface Props {
 export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Props) {
   const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
-  const [exporting,         setExporting]         = useState(false);
-  const [exportingOfficial, setExportingOfficial] = useState(false);
-  const [dukBlock,          setDukBlock]          = useState<PreflightIssue[] | null>(null);
+  const [exporting,          setExporting]          = useState(false);
+  const [exportingOfficial,  setExportingOfficial]  = useState(false);
+  const [previewingOfficial, setPreviewingOfficial] = useState(false);
+  const [dukBlock,           setDukBlock]           = useState<PreflightIssue[] | null>(null);
+  const openXml = useOpenXml();
   // Cadența D406 = perioada fiscală TVA (OPANAF 1783/2021 Anexa 5): lunar / trimestrial / anual.
   // Trimestrul se derivă din luna selectată în antet.
   const [cadence, setCadence] = useState<"monthly" | "quarterly" | "annual">("monthly");
@@ -140,6 +143,30 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
     }
   };
 
+  // Construiește XML-ul D406 oficial (aceeași ramură ca exportul) și îl deschide în vizualizatorul/
+  // editorul XML din aplicație, cu re-validare DUK (declKind D406). Fără scriere pe disc, fără gate.
+  const handlePreviewXml = async () => {
+    if (!activeCompanyId) { notify.warn(t("declarations.notify.selectCompany")); return; }
+    setPreviewingOfficial(true);
+    try {
+      // Reuse the SAME params as the official export (dest_path is ignored by the preview command).
+      const fileTag =
+        cadence === "monthly" ? mm : cadence === "quarterly" ? `T${quarter}` : "anual";
+      const xml = await api.saft.previewSaftOfficial({
+        companyId: activeCompanyId,
+        year:      selectedYear,
+        month:     cadence === "monthly" ? selectedMonth : null,
+        quarter:   cadence === "quarterly" ? quarter : null,
+        destPath:  "",
+      });
+      openXml({ xml, name: `d406-${selectedYear}-${fileTag}.xml`, declKind: "D406" });
+    } catch (err) {
+      notify.error(formatError(err, t("reports.saft.notify.previewFailed")));
+    } finally {
+      setPreviewingOfficial(false);
+    }
+  };
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, alignItems: "start" }}>
       {/* Info card */}
@@ -229,6 +256,17 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
           >
             <Ic name="shield" />
             {exportingOfficial ? t("reports.saft.exportingOfficial") : t("reports.saft.officialBtn", { period })}
+          </button>
+          {/* In-app XML viewer/editor (re-validare DUK ca D406) — aceeași construcție ca exportul oficial */}
+          <button
+            className="pill-btn"
+            style={{ width: "100%", justifyContent: "center" }}
+            disabled={previewingOfficial || !activeCompanyId}
+            onClick={() => void handlePreviewXml()}
+            title={t("reports.saft.previewXmlTitle", { period })}
+          >
+            <Ic name="eye" />
+            {previewingOfficial ? t("reports.saft.previewing") : t("reports.saft.previewXml")}
           </button>
         </div>
       </div>

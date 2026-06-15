@@ -294,6 +294,57 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
   // Re-validate stub — the demo harness has no Java/DUK runtime; report the happy path so the editor's
   // "re-validate with DUK" flow can be exercised in ?demo=1.
   validate_declaration_xml: () => ({ available: true, passed: true, issues: [] }),
+  // Preview stubs for the XML viewer on every export page (demo harness has no Rust emitters). Each
+  // returns a short, representative sample so the viewer/editor + DUK re-validate can be exercised.
+  preview_d300_xml: () =>
+    [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<declaratie300 xmlns="mfp:anaf:dgti:d300:declaratie:v12" luna="6" an="2026" d_rec="0" cui="40268319" totalPlata_A="1234">',
+      '  <rand_cod_300 cod="1" baza="6500" tva="1235"/>',
+      '  <rand_cod_300 cod="20" baza="4000" tva="760"/>',
+      "</declaratie300>",
+    ].join("\n"),
+  preview_d394_xml: () =>
+    [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<declaratie394 xmlns="mfp:anaf:dgti:d394:declaratie:v5" luna="6" an="2026" cui="40268319">',
+      '  <facturi>',
+      '    <rezumatD>nrFacturi="5" baza="6500" tva="1235"</rezumatD>',
+      "  </facturi>",
+      "</declaratie394>",
+    ].join("\n"),
+  preview_saft_official_xml: () =>
+    [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<AuditFile xmlns="mfp:anaf:dgti:d406:declaratie:v1">',
+      "  <Header><CompanyName>DEMO Tehnologii SRL</CompanyName><TaxRegistrationNumber>40268319</TaxRegistrationNumber></Header>",
+      "  <MasterFiles><!-- conturi, parteneri, produse --></MasterFiles>",
+      "</AuditFile>",
+    ].join("\n"),
+  preview_d112_xml: () =>
+    [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<declaratie113 xmlns="mfp:anaf:dgti:declaratieUnica:v7" luna="6" an="2026">',
+      '  <declaratie113 cui="40268319" caen="6201">',
+      '    <angajati nrAsig="3" totalVenitBruto="26700"/>',
+      "  </declaratie113>",
+      "</declaratie113>",
+    ].join("\n"),
+  preview_d390_xml: () =>
+    [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<declaratie390 xmlns="mfp:anaf:dgti:d390:declaratie:v3" luna="6" an="2026" cui="40268319">',
+      '  <operatiune tip="L" tara="DE" cod="123456789" denumire="Partner GmbH" baza="5000"/>',
+      "</declaratie390>",
+    ].join("\n"),
+  preview_bilant_xml: () =>
+    [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<bilant xmlns="mfp:anaf:dgti:bilant:declaratie:v1" an="2025" cui="40268319" forma="UU">',
+      "  <f10><rand cod=\"F10_350\" valoare=\"125000\"/></f10>",
+      "  <f20><rand cod=\"F20_42\" valoare=\"38000\"/></f20>",
+      "</bilant>",
+    ].join("\n"),
 };
 
 export function demoInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

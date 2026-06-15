@@ -178,13 +178,17 @@
       "officialTitle": "Official ANAF D406 export (full schema + GL) for {{period}}",
       "exportingOfficial": "D406 export in progress…",
       "officialBtn": "Official D406 export {{period}}",
+      "previewXml": "View / Edit XML",
+      "previewing": "Generating…",
+      "previewXmlTitle": "View and edit the official D406 XML for {{period}} (with DUK re-validation)",
       "notify": {
         "noDataYear": "There is no data for {{year}}.",
         "saved": "SAF-T D406 saved: {{path}}",
         "exportFailed": "Could not export SAF-T D406.",
         "officialSavedDuk": "Official D406 saved (DUK: valid): {{path}}",
         "officialSavedNoDuk": "Official D406 saved: {{path}} (DUK validation unavailable locally)",
-        "exportOfficialFailed": "Could not export the official D406."
+        "exportOfficialFailed": "Could not export the official D406.",
+        "previewFailed": "Could not generate the D406 XML for preview."
       }
     },
     "salesJournal": {

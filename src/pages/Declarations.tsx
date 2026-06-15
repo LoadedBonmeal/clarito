@@ -23,6 +23,7 @@ import { Ic } from "@/components/shared/Ic";
 import { MonthPicker } from "@/components/shared/MonthPicker";
 import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { D300SubmissionModal } from "@/components/modals/D300SubmissionModal";
+import { useOpenXml } from "@/hooks/use-open-xml";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
@@ -92,7 +93,10 @@ export function DeclarationsPage() {
   const [showD300Modal,     setShowD300Modal]     = useState(false);
   const [dukBlock,          setDukBlock]          = useState<PreflightIssue[] | null>(null);
   const [lastSubmission,    setLastSubmission]    = useState<D300Submission | null>(null);
+  const [previewingD300,    setPreviewingD300]    = useState(false);
   const [openPop, setOpenPop] = useState<"" | "period">("");
+
+  const openXml = useOpenXml();
 
   // TVA deductibilă — pre-completată din totalDeductibleVat; editabilă manual ca override.
   const [manualDeductible, setManualDeductible] = useState<string>("0.00");
@@ -266,6 +270,39 @@ export function DeclarationsPage() {
     }
   };
 
+  // ── Vizualizează / Editează XML D300 ──────────────────────────────────────
+  // Construiește EXACT același XML ca exportul oficial (aceiași pași de build, fără scriere/DUK gate)
+  // și îl deschide în vizualizatorul/editorul XML din aplicație (cu re-validare DUK).
+  const handlePreviewD300 = async (submission: D300Submission) => {
+    if (!activeCompanyId) { notify.warn(t("declarations.notify.selectCompany")); return; }
+    setLastSubmission(submission);
+    setPreviewingD300(true);
+    try {
+      // Wave 8: aplică regularizările (R16/R30) ca la exportul oficial — doar valorile ne-nule.
+      const regCB = Math.round(parseDec(regColectataBaza));
+      const regCT = Math.round(parseDec(regColectataTva));
+      const regDB = Math.round(parseDec(regDedusaBaza));
+      const regDT = Math.round(parseDec(regDedusaTva));
+      const submissionWithReg: D300Submission = {
+        ...submission,
+        regColectataBaza: regCB !== 0 ? regCB : null,
+        regColectataTva:  regCT !== 0 ? regCT : null,
+        regDedusaBaza:    regDB !== 0 ? regDB : null,
+        regDedusaTva:     regDT !== 0 ? regDT : null,
+      };
+      const xml = await api.declarations.previewD300Xml(activeCompanyId, dateFrom, dateTo, submissionWithReg);
+      openXml({
+        xml,
+        name: `d300-${selectedYear}-${String(selectedMonth).padStart(2, "0")}.xml`,
+        declKind: "D300",
+      });
+    } catch (err) {
+      notify.error(formatError(err, t("declarations.cards.d300.previewFailed")));
+    } finally {
+      setPreviewingD300(false);
+    }
+  };
+
   // ── Derived values ─────────────────────────────────────────────────────────
 
   const totalBase        = report ? parseDec(report.totalBase) : 0;
@@ -416,6 +453,15 @@ export function DeclarationsPage() {
               {exportXmlIcon}{exporting ? t("declarations.common.exporting") : t("declarations.common.extractXml")}
             </button>
             <span className="spacer" />
+            <button
+              className="pill-btn"
+              disabled={previewingD300 || noD300Data || !activeCompany}
+              style={previewingD300 || noD300Data || !activeCompany ? { opacity: 0.5, cursor: "default" } : undefined}
+              onClick={() => setShowD300Modal(true)}
+            >
+              <Ic name="eye" />
+              {previewingD300 ? t("declarations.cards.d300.previewing") : t("declarations.cards.d300.previewXml")}
+            </button>
             <button
               className="btn-dark"
               disabled={exportingOfficial || noD300Data || !activeCompany}
@@ -996,6 +1042,7 @@ export function DeclarationsPage() {
           onOpenChange={setShowD300Modal}
           company={activeCompany}
           onSubmit={(sub) => void handleExportOfficial(sub)}
+          onPreview={(sub) => void handlePreviewD300(sub)}
         />
       )}
     </div>

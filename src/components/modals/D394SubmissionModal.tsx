@@ -31,6 +31,13 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   company: Company;
   onSubmit: (submission: D394Submission) => void;
+  /**
+   * Optional — when provided, a „Vizualizează / Editează XML" button appears in
+   * the footer that builds the OFFICIAL D394 XML from the current submission and
+   * opens it in the in-app viewer/editor (no write, no DUK). The modal stays open.
+   */
+  onPreview?: (submission: D394Submission) => void | Promise<void>;
+  previewing?: boolean;
 }
 
 // ── CheckRow — design .cbx + label, full-row clickable ────────────────────────
@@ -70,7 +77,7 @@ function CheckRow({
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function D394SubmissionModal({ open, onOpenChange, company, onSubmit }: Props) {
+export function D394SubmissionModal({ open, onOpenChange, company, onSubmit, onPreview, previewing }: Props) {
   const { t } = useTranslation();
   const [tipD394,          setTipD394]          = useState("L");
   const [sistemTva,        setSistemTva]        = useState(false);
@@ -108,27 +115,35 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit }: P
 
   // ── Submit ───────────────────────────────────────────────────────────────────
 
+  const buildSubmission = (): D394Submission => ({
+    tipD394,
+    sistemTva,
+    opEfectuate,
+    caen:             caen.trim(),
+    telefon:          telefon.trim(),
+    denR:             denR.trim(),
+    functieReprez:    functieReprez.trim(),
+    adresaR:          adresaR.trim(),
+    tipIntocmit,
+    denIntocmit:      denIntocmit.trim(),
+    cifIntocmit:      Number(cifIntocmit) || 0,
+    calitateIntocmit: tipIntocmit === 0 ? calitateIntocmit.trim() || null : null,
+    optiune,
+    prsAfiliat,
+    solicit,
+  });
+
   const handleSubmit = () => {
     if (!canSubmit) return;
-    const submission: D394Submission = {
-      tipD394,
-      sistemTva,
-      opEfectuate,
-      caen:             caen.trim(),
-      telefon:          telefon.trim(),
-      denR:             denR.trim(),
-      functieReprez:    functieReprez.trim(),
-      adresaR:          adresaR.trim(),
-      tipIntocmit,
-      denIntocmit:      denIntocmit.trim(),
-      cifIntocmit:      Number(cifIntocmit) || 0,
-      calitateIntocmit: tipIntocmit === 0 ? calitateIntocmit.trim() || null : null,
-      optiune,
-      prsAfiliat,
-      solicit,
-    };
-    onSubmit(submission);
+    onSubmit(buildSubmission());
     close();
+  };
+
+  // Build the official XML from the current submission and open it in the in-app
+  // viewer/editor — the modal stays open so the user can tweak + re-preview.
+  const handlePreview = () => {
+    if (!canSubmit || !onPreview) return;
+    void onPreview(buildSubmission());
   };
 
   if (!open) return null;
@@ -306,6 +321,18 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit }: P
           <button className="pill-btn" onClick={() => close()}>
             {t("shared.common.cancel")}
           </button>
+          {onPreview && (
+            <button
+              className="pill-btn"
+              disabled={!canSubmit || previewing}
+              style={!canSubmit || previewing ? { opacity: 0.6, cursor: "default" } : undefined}
+              onClick={handlePreview}
+              title={t("declarations.d394.previewXml")}
+            >
+              <Ic name="eye" />
+              {previewing ? t("declarations.d394.previewing") : t("declarations.d394.previewXml")}
+            </button>
+          )}
           <button
             className="btn-dark"
             disabled={!canSubmit}

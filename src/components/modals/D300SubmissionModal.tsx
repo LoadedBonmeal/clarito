@@ -22,6 +22,8 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   company: Company;
   onSubmit: (submission: D300Submission) => void;
+  /** Optional: deschide XML-ul D300 în vizualizatorul/editorul din aplicație (fără scriere pe disc). */
+  onPreview?: (submission: D300Submission) => void;
 }
 
 // ── CheckRow — design .cbx + label, full-row clickable ────────────────────────
@@ -61,7 +63,7 @@ function CheckRow({
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: Props) {
+export function D300SubmissionModal({ open, onOpenChange, company, onSubmit, onPreview }: Props) {
   const { t } = useTranslation();
   const tipDecontOptions = [
     { value: "L", label: t("shared.declCommon.periodL") },
@@ -106,28 +108,36 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
 
   // ── Submit ───────────────────────────────────────────────────────────────────
 
+  const buildSubmission = (): D300Submission => ({
+    numeDeclar:       numeDeclar.trim(),
+    prenumeDeclar:    prenumeDeclar.trim(),
+    functieDeclar:    functieDeclar.trim(),
+    caen:             caen.trim(),
+    banca:            banca.trim(),
+    cont:             cont.trim(),
+    tipDecont,
+    temei,
+    depusReprezentant,
+    bifaInterne,
+    bifaCereale,
+    bifaMob,
+    bifaDisp,
+    bifaCons,
+    solicitRamb,
+    nrEvid:           nrEvid.trim(),
+    proRata,
+  });
+
   const handleSubmit = () => {
     if (!canSubmit) return;
-    const submission: D300Submission = {
-      numeDeclar:       numeDeclar.trim(),
-      prenumeDeclar:    prenumeDeclar.trim(),
-      functieDeclar:    functieDeclar.trim(),
-      caen:             caen.trim(),
-      banca:            banca.trim(),
-      cont:             cont.trim(),
-      tipDecont,
-      temei,
-      depusReprezentant,
-      bifaInterne,
-      bifaCereale,
-      bifaMob,
-      bifaDisp,
-      bifaCons,
-      solicitRamb,
-      nrEvid:           nrEvid.trim(),
-      proRata,
-    };
-    onSubmit(submission);
+    onSubmit(buildSubmission());
+    close();
+  };
+
+  // Vizualizează / editează XML-ul D300 fără a-l scrie pe disc (re-validare DUK în vizualizator).
+  const handlePreview = () => {
+    if (!canSubmit || !onPreview) return;
+    onPreview(buildSubmission());
     close();
   };
 
@@ -312,6 +322,17 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
           <button className="pill-btn" onClick={() => close()}>
             Anulează
           </button>
+          {onPreview && (
+            <button
+              className="pill-btn"
+              disabled={!canSubmit}
+              style={!canSubmit ? { opacity: 0.6, cursor: "default" } : undefined}
+              onClick={handlePreview}
+            >
+              <Ic name="eye" />
+              {t("declarations.cards.d300.previewXml")}
+            </button>
+          )}
           <button
             className="btn-dark"
             disabled={!canSubmit}

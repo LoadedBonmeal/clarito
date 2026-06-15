@@ -231,6 +231,9 @@
       "s1002": "Medium and large entities — full balance sheet",
       "generateBtn": "Generate balance sheet XML — {{year}}",
       "exportHint": "The XML (F10 + F20) is imported into the ANAF smart PDF and validated with the DUKIntegrator software before filing. Filing deadline: 150 days after the end of the fiscal year.",
+      "previewXml": "View / Edit XML",
+      "previewing": "Generating…",
+      "previewFailed": "XML preview failed.",
       "synthTitle": "Balance sheet (summary) — {{date}}",
       "th": {
         "assets": "Assets",

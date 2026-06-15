@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { useOneShot } from "@/hooks/use-one-shot";
+import { useOpenXml } from "@/hooks/use-open-xml";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
@@ -69,6 +70,8 @@ export function EtransportPage() {
   const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const sendLaunch = useOneShot(); // paper-plane "launch" when sending to ANAF
+  const openXml = useOpenXml();
+  const [previewingXml, setPreviewingXml] = useState(false);
   const { data: company } = useQuery({
     queryKey: queryKeys.companies.detail(activeCompanyId ?? ""),
     queryFn: () => api.companies.get(activeCompanyId!),
@@ -110,6 +113,19 @@ export function EtransportPage() {
     setGoods((g) => g.map((row, j) => (j === i ? { ...row, ...patch } : row)));
   const setDoc = (i: number, patch: Partial<EtransportDoc>) =>
     setDocuments((d) => d.map((row, j) => (j === i ? { ...row, ...patch } : row)));
+
+  /** Construiește XML-ul e-Transport și îl deschide în vizualizatorul/editorul XML (fără re-validare DUK). */
+  const runPreviewXml = async () => {
+    setPreviewingXml(true);
+    try {
+      const xml = await api.etransport.generateXml(build());
+      openXml({ xml, name: `etransport-${nrVehicul || dataTransport || "uit"}.xml` });
+    } catch (e) {
+      notify.error(formatError(e, t("etransport.notify.xmlError")));
+    } finally {
+      setPreviewingXml(false);
+    }
+  };
 
   const validate = useMutation({
     mutationFn: () => api.etransport.validate(build()),
@@ -366,6 +382,10 @@ export function EtransportPage() {
             <button className="pill-btn" type="button" disabled={genXml.isPending} onClick={() => genXml.mutate()}>
               <Ic name="code" />
               {t("etransport.form.generateXml")}
+            </button>
+            <button className="pill-btn" type="button" disabled={previewingXml} onClick={() => void runPreviewXml()}>
+              <Ic name="eye" />
+              {previewingXml ? t("etransport.form.previewingXml") : t("etransport.form.previewXml")}
             </button>
             <button
               className="btn-dark send-btn" type="button"

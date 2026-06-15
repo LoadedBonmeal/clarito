@@ -23,6 +23,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { Ic } from "@/components/shared/Ic";
 import { MonthPicker } from "@/components/shared/MonthPicker";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
+import { useOpenXml } from "@/hooks/use-open-xml";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
@@ -83,6 +84,7 @@ const JR_PAGE_SIZE = 100;
 export function GlLedgerPage() {
   const { t, i18n } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
+  const openXml = useOpenXml();
 
   const MONTHS = [
     t("gl.months.jan"), t("gl.months.feb"), t("gl.months.mar"),
@@ -432,6 +434,20 @@ export function GlLedgerPage() {
       setShowBilantExport(false);
     } catch (err) {
       notify.error(formatError(err, t("gl.notify.exportError")));
+    }
+  };
+
+  // Previzualizare/editare bilanț XML în vizualizatorul din aplicație (fără scriere, fără DUK).
+  const runBilantPreview = async (
+    caen: string, avgEmployees: number | null, formOverride: string | null, priorYearForm: string | null,
+  ) => {
+    if (!activeCompanyId) return;
+    const year = selectedYear;
+    try {
+      const xml = await api.gl.previewBilantXml(activeCompanyId, year, caen, avgEmployees, formOverride, priorYearForm);
+      openXml({ xml, name: `bilant-${year}.xml` });
+    } catch (err) {
+      notify.error(formatError(err, t("gl.bilant.previewFailed")));
     }
   };
 
@@ -1278,6 +1294,7 @@ export function GlLedgerPage() {
           year={selectedYear}
           onClose={() => setShowBilantExport(false)}
           onExport={runBilantExport}
+          onPreview={runBilantPreview}
         />
       )}
     </div>
@@ -1291,10 +1308,14 @@ function BilantExportModal({
   year,
   onClose,
   onExport,
+  onPreview,
 }: {
   year: number;
   onClose: () => void;
   onExport: (
+    caen: string, avgEmployees: number | null, formOverride: string | null, priorYearForm: string | null,
+  ) => Promise<void>;
+  onPreview: (
     caen: string, avgEmployees: number | null, formOverride: string | null, priorYearForm: string | null,
   ) => Promise<void>;
 }) {
@@ -1305,6 +1326,7 @@ function BilantExportModal({
   const [form, setForm] = useState("auto");
   const [priorForm, setPriorForm] = useState("");
   const [busy, setBusy] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
 
   const submit = async () => {
     if (!/^\d{4}$/.test(caen.trim())) { notify.error(t("gl.modal.caenInvalid")); return; }
@@ -1318,6 +1340,21 @@ function BilantExportModal({
       );
     } finally {
       setBusy(false);
+    }
+  };
+
+  const preview = async () => {
+    if (!/^\d{4}$/.test(caen.trim())) { notify.error(t("gl.modal.caenInvalid")); return; }
+    setPreviewing(true);
+    try {
+      await onPreview(
+        caen.trim(),
+        emp.trim() === "" ? null : Number(emp),
+        form === "auto" ? null : form,
+        priorForm === "" ? null : priorForm,
+      );
+    } finally {
+      setPreviewing(false);
     }
   };
 
@@ -1392,8 +1429,11 @@ function BilantExportModal({
         </div>
         <div className="modal-foot">
           <span className="left">{t("gl.modal.footNote")}</span>
-          <button className="pill-btn" onClick={close} disabled={busy}>{t("gl.modal.cancel")}</button>
-          <button className="btn-dark" disabled={busy} onClick={() => void submit()}>
+          <button className="pill-btn" onClick={close} disabled={busy || previewing}>{t("gl.modal.cancel")}</button>
+          <button className="pill-btn" disabled={busy || previewing} onClick={() => void preview()}>
+            <Ic name="eye" />{previewing ? t("gl.bilant.previewing") : t("gl.bilant.previewXml")}
+          </button>
+          <button className="btn-dark" disabled={busy || previewing} onClick={() => void submit()}>
             <Ic name="dl" />{busy ? t("gl.modal.exporting") : t("gl.modal.generate")}
           </button>
         </div>

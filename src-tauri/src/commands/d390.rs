@@ -246,6 +246,29 @@ pub async fn export_d390(
     Ok(path)
 }
 
+/// Construiește XML-ul D390 fără a-l scrie pe disc — pentru previzualizarea/editarea în
+/// vizualizatorul XML din aplicație. Folosește EXACT aceeași sursă ca `export_d390`
+/// (`compute_d390_doc` + `generate_d390_xml`), doar că întoarce șirul în loc să-l salveze.
+/// D390 nu are validator DUW dedicat, deci vizualizatorul se deschide doar pentru citire.
+#[tauri::command]
+pub async fn preview_d390_xml(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+    submission: Option<D390Submission>,
+) -> AppResult<String> {
+    let company = companies::get(&state.db, &company_id).await?;
+    let doc = compute_d390_doc(&state.db, &company_id, &period_from, &period_to).await?;
+    if doc.operations.is_empty() {
+        return Err(AppError::Validation(
+            "Nu există operațiuni intra-UE de raportat în perioada selectată.".into(),
+        ));
+    }
+    let submission = submission.unwrap_or_default();
+    generator::generate_d390_xml(&doc, &submission, &company)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

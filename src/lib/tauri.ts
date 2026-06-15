@@ -604,6 +604,17 @@ export const saft = {
       params: { companyId, year, month, quarter, destPath },
       skipDukOverride,
     }),
+  /**
+   * Construiește XML-ul D406 oficial (SAF-T) FĂRĂ a-l scrie pe disc — pentru vizualizatorul/editorul
+   * XML din aplicație (re-validare DUK separat cu `declarations.validateDeclarationXml("D406", …)`).
+   */
+  previewSaftOfficial: (params: {
+    companyId: string;
+    year: number;
+    month: number | null;
+    quarter: number | null;
+    destPath: string;
+  }) => invoke<string>("preview_saft_official_xml", { params }),
 };
 
 // ─── Dividende (impozit pe dividende, Legea 141/2025) ───────────────────────
@@ -711,6 +722,18 @@ export const gl = {
   ) =>
     invoke<string>("export_bilant_xml", {
       companyId, year, caen, avgEmployees, formOverride, priorYearForm, destPath,
+    }),
+  /** Construiește XML-ul bilanțului fără a-l scrie — pentru vizualizatorul XML (fără DUK). */
+  previewBilantXml: (
+    companyId: string,
+    year: number,
+    caen: string,
+    avgEmployees: number | null,
+    formOverride: string | null,
+    priorYearForm: string | null,
+  ) =>
+    invoke<string>("preview_bilant_xml", {
+      companyId, year, caen, avgEmployees, formOverride, priorYearForm,
     }),
   /** Postează impozitul pe venit/profit (698/691 → 4418/4411); amount = override opțional. */
   postIncomeTax: (companyId: string, periodFrom: string, periodTo: string, amount?: string) =>
@@ -846,6 +869,13 @@ export const declarations = {
       destPath,
       manualDeductibleVat: manualDeductibleVat ?? null,
     }),
+  /** Construiește XML-ul D300 oficial (schema v12) fără a-l scrie — pentru vizualizatorul XML (re-validare DUK separat). */
+  previewD300Xml: (
+    companyId: string,
+    periodFrom: string,
+    periodTo: string,
+    submission: D300Submission,
+  ) => invoke<string>("preview_d300_xml", { companyId, periodFrom, periodTo, submission }),
   /**
    * Exportă XML D300 oficial ANAF (schema v12) la destPath.
    * `submission` conține câmpurile completate de utilizator (declarant, CAEN, bancă etc.).
@@ -927,6 +957,19 @@ export const d390 = {
     submission?: import("@/types").D390Submission,
   ) =>
     invoke<string>("export_d390", { companyId, periodFrom, periodTo, destPath, submission }),
+  /** Construiește XML-ul D390 fără a-l scrie — pentru vizualizatorul XML (D390 nu are validator DUK). */
+  previewD390Xml: (
+    companyId: string,
+    periodFrom: string,
+    periodTo: string,
+    submission?: import("@/types").D390Submission,
+  ) =>
+    invoke<string>("preview_d390_xml", {
+      companyId,
+      periodFrom,
+      periodTo,
+      submission: submission ?? null,
+    }),
 };
 
 // ─── D394 — Declarație informativă livrări/achiziții ─────────────────────
@@ -938,6 +981,13 @@ export const d394 = {
   /** Generează XML D394 și îl salvează la destPath. Returnează calea. */
   export: (companyId: string, periodFrom: string, periodTo: string, destPath: string) =>
     invoke<string>("export_d394", { companyId, periodFrom, periodTo, destPath }),
+  /** Construiește XML-ul D394 oficial fără a-l scrie — pentru vizualizatorul XML (re-validare DUK separat). */
+  previewD394Xml: (
+    companyId: string,
+    periodFrom: string,
+    periodTo: string,
+    submission: D394Submission,
+  ) => invoke<string>("preview_d394_xml", { companyId, periodFrom, periodTo, submission }),
   /**
    * Exportă XML D394 oficial ANAF (schema v5) la destPath.
    * `submission` conține câmpurile completate de utilizator (CAEN, reprezentant etc.).
@@ -1072,6 +1122,9 @@ export const payroll = {
       params: { companyId, year, month, caen, destPath },
       skipDukOverride,
     }),
+  /** Construiește XML-ul D112 (`:v7`) fără a-l scrie — pentru vizualizatorul XML (re-validare DUK separat). */
+  previewD112Xml: (companyId: string, year: number, month: number, caen: string) =>
+    invoke<string>("preview_d112_xml", { companyId, year, month, caen }),
 };
 
 export const vatRates = {

@@ -511,6 +511,46 @@ pub async fn export_d394(
         .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// Construiește XML-ul D394 OFICIAL (aceeași schemă ANAF ca `export_d394_official`)
+/// și îl întoarce ca șir, FĂRĂ a-l scrie pe disc și FĂRĂ gate-ul DUK — pentru
+/// vizualizatorul/editorul XML din aplicație. Re-validarea cu DUK se face separat
+/// prin `validate_declaration_xml` (declKind `D394`). Reutilizează exact aceeași
+/// sursă ca exportul oficial: `compute_d394` → `build_sections` → `generate_d394_xml`.
+#[tauri::command]
+pub async fn preview_d394_xml(
+    state: State<'_, AppState>,
+    company_id: String,
+    period_from: String,
+    period_to: String,
+    submission: crate::anaf_decl::d394::D394Submission,
+) -> AppResult<String> {
+    use crate::anaf_decl::d394::generator::generate_d394_xml;
+    use crate::anaf_decl::d394::sections::build_sections;
+    use crate::anaf_decl::version::resolve;
+    use crate::anaf_decl::DeclKind;
+    use crate::db::companies;
+    use chrono::NaiveDate;
+
+    // Parse period_from to extract luna/an and resolve schema version.
+    let period = NaiveDate::parse_from_str(&period_from, "%Y-%m-%d").map_err(|_| {
+        AppError::Validation(format!(
+            "period_from '{period_from}' nu este în formatul YYYY-MM-DD."
+        ))
+    })?;
+
+    let ver = resolve(DeclKind::D394, period)?;
+
+    // Fetch company record (cui, legal_name, adresa) before `compute_d394` consumes state.
+    let company = companies::get(&state.db, &company_id).await?;
+
+    // Compute aggregates via existing compute_d394 (same source as official export).
+    let report = compute_d394(state, company_id, period_from, period_to).await?;
+
+    // Build the structural D394Doc and generate schema-conformant XML — no write, no DUK.
+    let doc = build_sections(&report, &submission, &company, period)?;
+    generate_d394_xml(&doc, &submission, &company, &ver)
+}
+
 /// Generează fișierul XML D394 oficial (schema ANAF v5) și îl scrie la calea
 /// specificată. Aceasta este comanda de export pentru depunere la ANAF.
 ///

@@ -16,6 +16,7 @@ import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { D394SubmissionModal } from "@/components/modals/D394SubmissionModal";
+import { useOpenXml } from "@/hooks/use-open-xml";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
@@ -37,8 +38,10 @@ const IC_WARN =
 export function D394View({ dateFrom, dateTo }: Props) {
   const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
+  const openXml = useOpenXml();
   const [exporting,         setExporting]         = useState(false);
   const [exportingOfficial, setExportingOfficial] = useState(false);
+  const [previewing,        setPreviewing]        = useState(false);
   const [showD394Modal,     setShowD394Modal]     = useState(false);
   const [dukBlock,          setDukBlock]          = useState<PreflightIssue[] | null>(null);
   const [lastSubmission,    setLastSubmission]    = useState<D394Submission | null>(null);
@@ -136,6 +139,25 @@ export function D394View({ dateFrom, dateTo }: Props) {
     }
   };
 
+  /**
+   * Construiește XML-ul D394 OFICIAL din submission-ul curent (fără scriere pe disc,
+   * fără DUK) și îl deschide în vizualizatorul/editorul XML din aplicație. Re-validarea
+   * cu DUK se face din viewer (declKind „D394"). Modalul rămâne deschis.
+   */
+  const handlePreview = async (submission: D394Submission) => {
+    if (!activeCompanyId) { notify.warn(t("declarations.notify.selectCompany")); return; }
+    setLastSubmission(submission);
+    setPreviewing(true);
+    try {
+      const xml = await api.d394.previewD394Xml(activeCompanyId, periodFrom, periodTo, submission);
+      openXml({ xml, name: `d394-${periodFrom}-${periodTo}.xml`, declKind: "D394" });
+    } catch (err) {
+      notify.error(formatError(err, t("declarations.d394.previewFailed")));
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
   const totalBase         = parseDec(report?.totalBase         ?? "0");
   const totalVat          = parseDec(report?.totalVat          ?? "0");
   const totalPurchaseBase = parseDec(report?.totalPurchaseBase ?? "0");
@@ -182,6 +204,15 @@ export function D394View({ dateFrom, dateTo }: Props) {
           >
             <Ic name="shield" />
             {exportingOfficial ? t("declarations.common.exporting") : t("declarations.d394.exportOfficial")}
+          </button>
+          <button
+            className="pill-btn"
+            disabled={previewing || !activeCompanyId || !activeCompany}
+            onClick={() => setShowD394Modal(true)}
+            title={t("declarations.d394.previewXml")}
+          >
+            <Ic name="eye" />
+            {previewing ? t("declarations.d394.previewing") : t("declarations.d394.previewXml")}
           </button>
         </div>
 
@@ -304,6 +335,8 @@ export function D394View({ dateFrom, dateTo }: Props) {
           onOpenChange={setShowD394Modal}
           company={activeCompany}
           onSubmit={(sub) => void handleExportOfficial(sub)}
+          onPreview={(sub) => void handlePreview(sub)}
+          previewing={previewing}
         />
       )}
     </div>

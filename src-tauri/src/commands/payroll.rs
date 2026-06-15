@@ -215,6 +215,25 @@ pub async fn export_d112_xml(
     })
 }
 
+/// Construiește XML-ul D112 fără a-l scrie pe disc și fără gate-ul DUK — pentru previzualizare/editare în
+/// vizualizatorul XML din aplicație. Face ACELAȘI fetch DB ca [`export_d112_xml`] (firmă + angajați +
+/// concediile lunii) și produce ACELAȘI XML, astfel încât re-validarea cu DUK (`validate_declaration_xml`)
+/// din vizualizator să fie semnificativă. Mirror al perechii `export_d205_official` / `preview_d205_xml`.
+#[tauri::command]
+pub async fn preview_d112_xml(
+    state: State<'_, AppState>,
+    company_id: String,
+    year: i32,
+    month: u32,
+    caen: String,
+) -> AppResult<String> {
+    let company = crate::db::companies::get(&state.db, &company_id).await?;
+    let employees = payroll::list(&state.db, &company_id).await?;
+    let period_ym = format!("{year:04}-{month:02}");
+    let leaves = crate::db::concedii::list(&state.db, &company_id, &period_ym).await?;
+    build_d112_xml(&company, &employees, &leaves, year, month, caen.trim())
+}
+
 /// Pure core of the D112 XML build (no Tauri State / filesystem) — maps active employees + the month's
 /// medical-leave certificates to the validated `:v7` XML. Separated from [`export_d112_xml`] so it is
 /// testable end-to-end without IPC/IO. An employee with ≥1 certificate emits the B-path (salary

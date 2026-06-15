@@ -236,6 +236,9 @@
       "s1002": "Entități mijlocii și mari — bilanț complet",
       "generateBtn": "Generează bilanț XML — {{year}}",
       "exportHint": "XML-ul (F10 + F20) se importă în PDF-ul inteligent ANAF și se validează cu soft-ul DUKIntegrator înainte de depunere. Termenul de depunere: 150 de zile de la închiderea exercițiului.",
+      "previewXml": "Vizualizează / Editează XML",
+      "previewing": "Se generează…",
+      "previewFailed": "Previzualizarea XML a eșuat.",
       "synthTitle": "Bilanț contabil (sinteză) — {{date}}",
       "th": {
         "assets": "Active",
