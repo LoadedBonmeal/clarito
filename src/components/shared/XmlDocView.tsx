@@ -36,12 +36,17 @@ function elementsFor(root: Element, match: string): Element[] {
 
 const isMoney = (fmt?: string) => fmt === "money_lei" || fmt === "money2";
 
-function KvSection({ el, title, docKey }: { el: Element; title: string; docKey: string }) {
-  const attrs = attrsOf(el);
+function KvSection({ el, spec, docKey }: { el: Element; spec: SectionSpec; docKey: string }) {
+  const all = Object.fromEntries(attrsOf(el));
+  // With `attrs`, render only those keys (in order) that are present — lets several sections group
+  // one element's attributes (e.g. D300's root). Without it, render all of the element's attributes.
+  const attrs: [string, string][] = spec.attrs
+    ? spec.attrs.filter((a) => a in all).map((a) => [a, all[a]])
+    : attrsOf(el);
   if (attrs.length === 0) return null;
   return (
     <section className="docv-sec">
-      <h3 className="docv-sec-title">{title}</h3>
+      <h3 className="docv-sec-title">{spec.title}</h3>
       <div className="docv-kv">
         {attrs.map(([k, v]) => {
           const spec = resolveField(docKey, k);
@@ -119,7 +124,7 @@ function GenericDoc({ root, desc }: { root: Element; desc: DocDescriptor }) {
       {desc.sections.map((s, i) => {
         const els = elementsFor(root, s.match);
         if (s.as === "kv") {
-          return els[0] ? <KvSection key={i} el={els[0]} title={s.title} docKey={desc.key} /> : null;
+          return els[0] ? <KvSection key={i} el={els[0]} spec={s} docKey={desc.key} /> : null;
         }
         return <TableSection key={i} els={els} spec={s} docKey={desc.key} />;
       })}

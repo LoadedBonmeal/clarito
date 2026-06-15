@@ -6,13 +6,18 @@ describe("pickDescriptor", () => {
   it("selects by document key (declKind / docKey)", () => {
     expect(pickDescriptor("D205", "declaratie205")?.key).toBe("D205");
     expect(pickDescriptor("INVOICE", "Invoice")?.key).toBe("INVOICE");
+    expect(pickDescriptor("D112", "declaratieUnica")?.key).toBe("D112");
   });
   it("selects by root tag when no key is given", () => {
     expect(pickDescriptor(undefined, "declaratie205")?.key).toBe("D205");
     expect(pickDescriptor(undefined, "Invoice")?.key).toBe("INVOICE");
+    expect(pickDescriptor(undefined, "declaratieUnica")?.key).toBe("D112");
+    expect(pickDescriptor(undefined, "declaratie300")?.key).toBe("D300");
+    expect(pickDescriptor(undefined, "declaratie390")?.key).toBe("D390");
+    expect(pickDescriptor(undefined, "declaratie394")?.key).toBe("D394");
   });
   it("returns null for not-yet-described documents (→ generic table fallback)", () => {
-    expect(pickDescriptor("D300", "declaratie300")).toBeNull(); // Phase 2
+    expect(pickDescriptor("D406", "AuditFile")).toBeNull(); // Phase 4 (SAF-T)
     expect(pickDescriptor(undefined, "habarnam")).toBeNull();
   });
 });

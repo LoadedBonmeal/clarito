@@ -32,6 +32,20 @@ describe("formatValue", () => {
   });
 });
 
+describe("resolveField — D112 / D300 (Phase 2)", () => {
+  it("labels D112 employer + employee fields", () => {
+    expect(resolveField("D112", "cnpAsig").label).toBe("CNP");
+    expect(resolveField("D112", "A_sal2")).toMatchObject({ label: "Venit brut realizat", format: "money_lei" });
+    expect(resolveField("D112", "Timp_E3").label).toBe("Impozit pe venit");
+    expect(formatValue("602", resolveField("D112", "A_codOblig"))).toBe("Impozit pe salarii");
+    expect(formatValue("480", resolveField("D112", "A_codOblig"))).toBe("CAM");
+  });
+  it("labels D300 VAT-return rows and decodes the period", () => {
+    expect(resolveField("D300", "R17_2").label).toContain("TOTAL taxă colectată");
+    expect(formatValue("L", resolveField("D300", "tip_decont"))).toBe("Lunar");
+  });
+});
+
 describe("vatCategoryLabel", () => {
   it("maps CIUS-RO categories like the invoice PDF", () => {
     expect(vatCategoryLabel("S", "21")).toBe("21%");
