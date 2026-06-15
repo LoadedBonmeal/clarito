@@ -151,7 +151,11 @@
   font-family: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px;
   line-height: 1.55;
-  white-space: pre;
+  /* Wrap the (often single-line) generated XML so it's fully readable without horizontal
+     scrolling. Content is byte-exact — only the visual line breaks are added. */
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   tab-size: 2;
   -moz-tab-size: 2;
   user-select: text;
