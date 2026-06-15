@@ -31,6 +31,11 @@
       "nextMatch": "Rezultatul următor"
     },
     "xmlViewer": {
+      "tableView": "Tabel",
+      "codeView": "Cod (XML)",
+      "viewSwitch": "Comută vizualizarea",
+      "valueCol": "valoare",
+      "parseError": "XML invalid — comutați la „Cod” pentru a-l vedea brut.",
       "find": "Caută (Ctrl/Cmd+F)",
       "foldAll": "Pliază tot",
       "unfoldAll": "Desfă tot",

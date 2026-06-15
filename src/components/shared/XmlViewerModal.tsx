@@ -24,6 +24,7 @@ import { xml } from "@codemirror/lang-xml";
 import { tags as ht } from "@lezer/highlight";
 
 import { Ic } from "@/components/shared/Ic";
+import { XmlTableView } from "@/components/shared/XmlTableView";
 import { useXmlViewerStore, type XmlViewerPayload } from "@/lib/xml-viewer-store";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { formatXml } from "@/lib/xml-format";
@@ -129,6 +130,9 @@ function XmlEditor({ payload, onClose }: { payload: XmlViewerPayload; onClose: (
   const [dirty, setDirty] = useState(false);
   const [validating, setValidating] = useState(false);
   const [validation, setValidation] = useState<XmlDukValidation | null>(null);
+  // Default to the human-readable TABLE view; "code" reveals the CodeMirror editor (for editing).
+  const [viewMode, setViewMode] = useState<"table" | "code">(payload.editable ? "code" : "table");
+  const [tableXml, setTableXml] = useState(payload.xml);
 
   // Build the editor once for this modal's lifetime (open→close→open re-mounts it fresh).
   useEffect(() => {
@@ -235,6 +239,14 @@ function XmlEditor({ payload, onClose }: { payload: XmlViewerPayload; onClose: (
     }
   };
 
+  // The table view always reflects the current document; snapshot the editor doc when switching to it.
+  const showTable = () => {
+    setTableXml(doc());
+    setViewMode("table");
+  };
+  const showCode = () => setViewMode("code");
+  const isCode = viewMode === "code";
+
   return (
     <>
       <header className="pdfv-bar">
@@ -251,37 +263,68 @@ function XmlEditor({ payload, onClose }: { payload: XmlViewerPayload; onClose: (
         </div>
 
         <div className="pdfv-bar-c">
-          <button type="button" className="sq-btn" onClick={doFind} aria-label={t("shared.xmlViewer.find")}>
-            <Ic name="lens" cls="ic" />
-          </button>
-          <button type="button" className="sq-btn" onClick={doFold} aria-label={t("shared.xmlViewer.foldAll")}>
-            <Ic name="collapse" cls="ic" />
-          </button>
-          <button
-            type="button"
-            className="sq-btn"
-            onClick={doUnfold}
-            aria-label={t("shared.xmlViewer.unfoldAll")}
-          >
-            <Ic name="chevUD" cls="ic" />
-          </button>
+          <div className="xmlv-toggle" role="tablist" aria-label={t("shared.xmlViewer.viewSwitch")}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!isCode}
+              className={!isCode ? "is-on" : ""}
+              onClick={showTable}
+            >
+              <Ic name="grid" cls="ic" />
+              {t("shared.xmlViewer.tableView")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={isCode}
+              className={isCode ? "is-on" : ""}
+              onClick={showCode}
+            >
+              <Ic name="code" cls="ic" />
+              {t("shared.xmlViewer.codeView")}
+            </button>
+          </div>
+          {isCode && (
+            <>
+              <span className="pdfv-sep" />
+              <button type="button" className="sq-btn" onClick={doFind} aria-label={t("shared.xmlViewer.find")}>
+                <Ic name="lens" cls="ic" />
+              </button>
+              <button type="button" className="sq-btn" onClick={doFold} aria-label={t("shared.xmlViewer.foldAll")}>
+                <Ic name="collapse" cls="ic" />
+              </button>
+              <button
+                type="button"
+                className="sq-btn"
+                onClick={doUnfold}
+                aria-label={t("shared.xmlViewer.unfoldAll")}
+              >
+                <Ic name="chevUD" cls="ic" />
+              </button>
+            </>
+          )}
         </div>
 
         <div className="pdfv-bar-r">
-          <button
-            type="button"
-            className={`sq-btn${editable ? " is-on" : ""}`}
-            onClick={toggleEditable}
-            aria-label={editable ? t("shared.xmlViewer.viewMode") : t("shared.xmlViewer.editMode")}
-            aria-pressed={editable}
-            title={editable ? t("shared.xmlViewer.viewMode") : t("shared.xmlViewer.editMode")}
-          >
-            <Ic name={editable ? "eye" : "pen"} cls="ic" />
-          </button>
-          <button type="button" className="pill-btn" onClick={doFormat}>
-            <Ic name="code" cls="ic" />
-            {t("shared.xmlViewer.format")}
-          </button>
+          {isCode && (
+            <>
+              <button
+                type="button"
+                className={`sq-btn${editable ? " is-on" : ""}`}
+                onClick={toggleEditable}
+                aria-label={editable ? t("shared.xmlViewer.viewMode") : t("shared.xmlViewer.editMode")}
+                aria-pressed={editable}
+                title={editable ? t("shared.xmlViewer.viewMode") : t("shared.xmlViewer.editMode")}
+              >
+                <Ic name={editable ? "eye" : "pen"} cls="ic" />
+              </button>
+              <button type="button" className="pill-btn" onClick={doFormat}>
+                <Ic name="code" cls="ic" />
+                {t("shared.xmlViewer.format")}
+              </button>
+            </>
+          )}
           {payload.declKind && (
             <button type="button" className="pill-btn" onClick={doRevalidate} disabled={validating}>
               <Ic name="shield" cls="ic" />
@@ -303,7 +346,9 @@ function XmlEditor({ payload, onClose }: { payload: XmlViewerPayload; onClose: (
 
       {validation && <ValidationStrip declKind={payload.declKind} result={validation} />}
 
-      <div className="xmlv-editor" ref={hostRef} />
+      {/* CodeMirror stays mounted (hidden in table mode) so edits + the doc are preserved. */}
+      <div className="xmlv-editor" ref={hostRef} style={{ display: isCode ? "block" : "none" }} />
+      {!isCode && <XmlTableView xml={tableXml} />}
     </>
   );
 }

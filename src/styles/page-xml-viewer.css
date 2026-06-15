@@ -102,3 +102,141 @@
   color: var(--text-2);
   min-width: 56px;
 }
+
+/* ── View toggle (Tabel / Cod) ──────────────────────────────────────────────── */
+.xmlv-toggle {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.xmlv-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 11px;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--text-2);
+  background: #fff;
+  border: none;
+  cursor: pointer;
+}
+.xmlv-toggle button + button {
+  border-left: 1px solid var(--line);
+}
+.xmlv-toggle button .ic {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+}
+.xmlv-toggle button:hover {
+  background: var(--fill);
+}
+.xmlv-toggle button.is-on {
+  background: var(--text);
+  color: #fff;
+}
+
+/* ── Table (structured) view ────────────────────────────────────────────────── */
+.xmlv-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: #fff;
+  padding: 14px 16px;
+}
+.xmlv-table-msg {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.xmlv-node {
+  margin-bottom: 18px;
+}
+.xmlv-node-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-3, #a0a0a6);
+  margin: 0 0 6px;
+}
+.xmlv-kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 3px 20px;
+  margin-bottom: 10px;
+}
+.xmlv-kv-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12.5px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--fill);
+}
+.xmlv-kv-k {
+  color: var(--text-2);
+  min-width: 92px;
+  flex: none;
+}
+.xmlv-kv-v {
+  color: var(--text);
+  font-weight: 500;
+  word-break: break-word;
+}
+.xmlv-leaftext {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.xmlv-tablewrap {
+  margin-bottom: 14px;
+}
+.xmlv-tabletag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.xmlv-count {
+  color: var(--text-3, #a0a0a6);
+  font-weight: 500;
+}
+.xmlv-tbl-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.xmlv-tbl {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+}
+.xmlv-tbl th,
+.xmlv-tbl td {
+  text-align: left;
+  padding: 6px 10px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+.xmlv-tbl th {
+  background: var(--fill);
+  color: var(--text-2);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+.xmlv-tbl tr:last-child td {
+  border-bottom: none;
+}
+.xmlv-tbl tbody tr:hover {
+  background: var(--fill);
+}
