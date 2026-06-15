@@ -1,25 +1,26 @@
 /**
  * XmlViewerModal — in-app, read-only viewer for the declaration / e-Factura XML the app generates,
- * in the design's .modal-back/.modal chrome. Renders the XML as human-readable TABLES (XmlTableView),
- * never as raw code: element attributes become a key/value header grid and repeating elements
- * (<benef>, <rand_cod_300>, <sect_II>, …) become tables.
+ * in the design's .modal-back/.modal chrome. Renders the XML as a clean, human-labeled DOCUMENT
+ * (XmlDocView) — titled sections + real Romanian labels (a UBL invoice looks like the ANAF
+ * visualizer; declarations show a declarant block + labeled tables), never as raw code.
  *
- * Actions: copy the raw XML · save it as a .xml file · export the same data as an XLSX table ·
- * "re-validate with DUK" for declaration XML (D300/D394/D406/D112/D205) via the bundled ANAF
- * validators. Fed from the store (useOpenXml).
+ * Actions: print / save as PDF (the same labeled document) · export the data as an XLSX table ·
+ * save the byte-clean submission .xml · copy the XML · "re-validate with DUK" for declaration XML
+ * (D300/D394/D406/D112/D205) via the bundled ANAF validators. Fed from the store (useOpenXml).
  */
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
-import { XmlTableView } from "@/components/shared/XmlTableView";
+import { XmlDocView } from "@/components/shared/XmlDocView";
 import { xmlToTables } from "@/lib/xml-to-tables";
 import { useXmlViewerStore, type XmlViewerPayload } from "@/lib/xml-viewer-store";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { api, type XmlDukValidation } from "@/lib/tauri";
 import { isDemoMode } from "@/lib/demo";
 import { notify } from "@/lib/toasts";
+import "@/styles/doc-print.css";
 
 export function XmlViewerModal() {
   const payload = useXmlViewerStore((s) => s.payload);
@@ -32,7 +33,13 @@ export function XmlViewerModal() {
       if (e.key === "Escape") close();
     };
     window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
+    // Scope the print stylesheet to "viewer open" so printing the document isolates `.docv`
+    // (and printing any other page stays normal).
+    document.body.classList.add("xmlv-open");
+    return () => {
+      window.removeEventListener("keydown", h);
+      document.body.classList.remove("xmlv-open");
+    };
   }, [payload, close]);
 
   if (!payload) return null;
@@ -116,6 +123,12 @@ function XmlViewerBody({ payload, onClose }: { payload: XmlViewerPayload; onClos
     }
   };
 
+  // Print / Save the labeled document as PDF — the print stylesheet (doc-print.css) isolates `.docv`
+  // and lays it out on A4, so the OS print dialog's "Save as PDF" yields the same document.
+  const doPrint = () => {
+    window.print();
+  };
+
   const doRevalidate = async () => {
     if (!payload.declKind) return;
     setValidating(true);
@@ -150,6 +163,10 @@ function XmlViewerBody({ payload, onClose }: { payload: XmlViewerPayload; onClos
           <button type="button" className="sq-btn" onClick={doCopy} aria-label={t("shared.xmlViewer.copy")}>
             <Ic name="copy" cls="ic" />
           </button>
+          <button type="button" className="pill-btn" onClick={doPrint}>
+            <Ic name="printer" cls="ic" />
+            {t("shared.xmlViewer.printPdf")}
+          </button>
           <button type="button" className="pill-btn" onClick={doExportXlsx}>
             <Ic name="grid" cls="ic" />
             {t("shared.xmlViewer.exportTable")}
@@ -166,7 +183,7 @@ function XmlViewerBody({ payload, onClose }: { payload: XmlViewerPayload; onClos
 
       {validation && <ValidationStrip declKind={payload.declKind} result={validation} />}
 
-      <XmlTableView xml={payload.xml} />
+      <XmlDocView payload={payload} />
     </>
   );
 }

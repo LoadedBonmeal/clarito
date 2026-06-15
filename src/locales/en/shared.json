@@ -33,6 +33,7 @@
     "xmlViewer": {
       "valueCol": "value",
       "parseError": "This XML could not be displayed as a table.",
+      "printPdf": "Print / Save PDF",
       "find": "Find (Ctrl/Cmd+F)",
       "foldAll": "Fold all",
       "unfoldAll": "Unfold all",

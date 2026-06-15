@@ -16,6 +16,9 @@ export interface XmlViewerPayload {
   name: string;
   /** When set, enables "re-validate with DUK" for this declaration type (D300/D394/D406/D112/D205). */
   declKind?: XmlDeclKind;
+  /** Explicit document-render key (e.g. "INVOICE") for callers with no `declKind` — selects the
+   *  labeled-document descriptor in `XmlDocView`. Falls back to declKind / root tag when unset. */
+  docKey?: string;
   /** Start in editable mode instead of the read-only viewer (default: false). */
   editable?: boolean;
 }

@@ -1,0 +1,41 @@
+/* Print / Save-as-PDF stylesheet for the in-app labeled document view (XmlDocView, `.docv`).
+   Scoped to `body.xmlv-open` (the class the viewer adds while open) so it ONLY affects printing while
+   the document viewer is open — printing any other page of the app stays completely normal.
+   Isolates `.docv` and lays it out on A4 so the OS print dialog's "Save as PDF" yields the document. */
+@media print {
+  body.xmlv-open * {
+    visibility: hidden !important;
+  }
+  body.xmlv-open .docv,
+  body.xmlv-open .docv * {
+    visibility: visible !important;
+  }
+  body.xmlv-open .docv {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    color: #000;
+    background: #fff;
+    font-size: 11px;
+  }
+  body.xmlv-open .docv-tbl {
+    font-size: 10px;
+  }
+  body.xmlv-open .docv-tbl thead {
+    display: table-header-group; /* repeat headers across printed pages */
+  }
+  body.xmlv-open .docv-tbl tr,
+  body.xmlv-open .docv-sec,
+  body.xmlv-open .docv-party {
+    break-inside: avoid;
+  }
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+}

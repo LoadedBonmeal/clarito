@@ -33,6 +33,7 @@
     "xmlViewer": {
       "valueCol": "valoare",
       "parseError": "Acest XML nu a putut fi afișat ca tabel.",
+      "printPdf": "Printează / Salvează PDF",
       "find": "Caută (Ctrl/Cmd+F)",
       "foldAll": "Pliază tot",
       "unfoldAll": "Desfă tot",

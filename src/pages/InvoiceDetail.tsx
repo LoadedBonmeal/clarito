@@ -200,7 +200,7 @@ export function InvoiceDetailPage() {
     onSuccess: (xml) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
       setActionError(null);
-      openXml({ xml, name: `${data?.invoice.fullNumber ?? "factura"}.xml` });
+      openXml({ xml, name: `${data?.invoice.fullNumber ?? "factura"}.xml`, docKey: "INVOICE" });
     },
     onError: (e) => setActionError(formatError(e, t("detail.notify.xmlError"))),
   });

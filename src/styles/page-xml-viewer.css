@@ -204,3 +204,175 @@
 .xmlv-tbl tbody tr:hover {
   background: var(--fill);
 }
+
+/* ── Labeled document view (XmlDocView) — the professional, human-labeled rendering ──────────────── */
+.docv-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--fill, #f6f6f6);
+  padding: 20px;
+}
+.docv {
+  max-width: 820px;
+  margin: 0 auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 28px 32px;
+  color: var(--text);
+}
+.docv-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 2px;
+  text-align: center;
+}
+.docv-title-sub {
+  color: var(--text-2);
+  font-weight: 500;
+}
+.docv-sec {
+  margin-top: 22px;
+}
+.docv-sec-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3, #a0a0a6);
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.docv-count {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--fill);
+  border-radius: 10px;
+  padding: 1px 7px;
+}
+.docv-kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 6px 28px;
+}
+.docv-kv-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--fill);
+}
+.docv-kv-k {
+  color: var(--text-2);
+}
+.docv-kv-v {
+  color: var(--text);
+  font-weight: 600;
+  text-align: right;
+  word-break: break-word;
+}
+/* Seller / buyer two-up */
+.docv-parties {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: 18px;
+}
+.docv-party {
+  font-size: 12.5px;
+}
+.docv-party-name {
+  font-weight: 700;
+  color: var(--text);
+  margin: 2px 0 4px;
+}
+.docv-party-row {
+  color: var(--text-2);
+  line-height: 1.5;
+}
+/* Tables */
+.docv-tbl-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.docv-tbl {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+.docv-tbl th,
+.docv-tbl td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.docv-tbl th {
+  background: var(--fill);
+  color: var(--text-2);
+  font-weight: 600;
+  font-size: 11px;
+}
+.docv-tbl th.r,
+.docv-tbl td.r {
+  text-align: right;
+}
+.docv-tbl tr:last-child td {
+  border-bottom: none;
+}
+.docv-tbl tbody tr:hover {
+  background: var(--fill);
+}
+.docv-line-desc {
+  color: var(--text-2);
+  font-size: 11px;
+  white-space: normal;
+  margin-top: 2px;
+}
+/* VAT breakdown + totals two-up */
+.docv-cols {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 24px;
+  align-items: start;
+  margin-top: 22px;
+}
+.docv-cols .docv-sec {
+  margin-top: 0;
+}
+.docv-totals {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.docv-tot-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+  padding: 5px 0;
+}
+.docv-tot-grand {
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding-top: 9px;
+  font-weight: 700;
+  font-size: 15px;
+}
+.docv-note {
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+@media (max-width: 620px) {
+  .docv-parties,
+  .docv-cols {
+    grid-template-columns: 1fr;
+  }
+}
