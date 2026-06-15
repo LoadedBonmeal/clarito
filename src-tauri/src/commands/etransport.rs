@@ -5,7 +5,8 @@ use tauri::State;
 
 use crate::anaf::client::{AnafClient, EtransportUploadResponse};
 use crate::anaf_decl::etransport::{
-    generate_etransport_xml, validate_etransport, EtransportDeclaration,
+    generate_etransport_xml, transport_predeclare_window, uit_validity_days, validate_etransport,
+    EtransportDeclaration,
 };
 use crate::db::companies;
 use crate::error::{AppError, AppResult};
@@ -14,13 +15,26 @@ use crate::state::AppState;
 /// Validate an e-Transport declaration; returns the list of problems (empty = valid).
 #[tauri::command]
 pub async fn etransport_validate(declaration: EtransportDeclaration) -> AppResult<Vec<String>> {
-    Ok(validate_etransport(&declaration))
+    let mut errs = validate_etransport(&declaration);
+    if let Some(e) = transport_predeclare_window(
+        &declaration.transport.data_transport,
+        chrono::Local::now().date_naive(),
+    ) {
+        errs.push(e);
+    }
+    Ok(errs)
 }
 
 /// Validate + build the e-Transport XML (schema v2). Errors if the declaration is invalid.
 #[tauri::command]
 pub async fn etransport_generate_xml(declaration: EtransportDeclaration) -> AppResult<String> {
-    let errs = validate_etransport(&declaration);
+    let mut errs = validate_etransport(&declaration);
+    if let Some(e) = transport_predeclare_window(
+        &declaration.transport.data_transport,
+        chrono::Local::now().date_naive(),
+    ) {
+        errs.push(e);
+    }
     if !errs.is_empty() {
         return Err(AppError::Validation(format!(
             "Declarație e-Transport invalidă: {}",
@@ -42,7 +56,13 @@ pub async fn etransport_submit(
     use crate::anaf::client::ERR_UNAUTHORIZED;
     let pool = &state.db;
 
-    let errs = validate_etransport(&declaration);
+    let mut errs = validate_etransport(&declaration);
+    if let Some(e) = transport_predeclare_window(
+        &declaration.transport.data_transport,
+        chrono::Local::now().date_naive(),
+    ) {
+        errs.push(e);
+    }
     if !errs.is_empty() {
         return Err(AppError::Validation(format!(
             "Declarație e-Transport invalidă: {}",
@@ -77,15 +97,11 @@ pub async fn etransport_submit(
     }
     let resp = result.map_err(AppError::Other)?;
 
-    // Evidența UIT (audit r3 W6): codul UIT e valabil 5 zile (transport național, cod 30) sau
-    // 15 zile (operațiuni intracomunitare/import-export) de la transmitere — îl persistăm cu
-    // termenul, ca UI-ul să poată avertiza înainte de expirare. Best-effort: un eșec de inserare
-    // nu invalidează transmiterea (deja acceptată de ANAF).
-    let validity_days: i64 = if declaration.cod_tip_operatiune == "30" {
-        5
-    } else {
-        15
-    };
+    // Evidența UIT: valabilitatea e de 5 zile calendaristice, respectiv 15 zile DOAR pentru
+    // achizițiile intracomunitare de bunuri — cod 10 / 70 (OUG 41/2022 art. 11). Vezi
+    // `uit_validity_days`. Persistăm termenul ca UI-ul să avertizeze înainte de expirare.
+    // Best-effort: un eșec de inserare nu invalidează transmiterea (deja acceptată de ANAF).
+    let validity_days: i64 = uit_validity_days(&declaration.cod_tip_operatiune);
     let now = crate::db::models::now_unix();
     if let Err(e) = sqlx::query(
         "INSERT INTO etransport_declarations \

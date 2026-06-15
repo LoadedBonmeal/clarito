@@ -74,7 +74,7 @@
     },
     "registry": {
       "title": "Declarații transmise (evidența UIT)",
-      "validityNote": "UIT valabil 5 zile (național) / 15 zile (intracomunitar / import-export)",
+      "validityNote": "UIT valabil 5 zile; 15 zile doar pentru achiziții intracomunitare (cod 10/70)",
       "empty": "Nicio declarație transmisă încă. UIT-urile obținute apar aici.",
       "table": {
         "uit": "UIT",

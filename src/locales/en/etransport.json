@@ -74,7 +74,7 @@
     },
     "registry": {
       "title": "Submitted declarations (UIT register)",
-      "validityNote": "UIT valid 5 days (domestic) / 15 days (intra-Community / import-export)",
+      "validityNote": "UIT valid 5 days; 15 days only for intra-Community acquisitions (codes 10/70)",
       "empty": "No declarations submitted yet. Obtained UITs appear here.",
       "table": {
         "uit": "UIT",

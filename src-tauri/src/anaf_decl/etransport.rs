@@ -13,6 +13,7 @@
 //! token as e-Factura. The live upload lives in anaf::client; this module builds + validates the
 //! payload (pure, fully testable) and is the input to that call.
 
+use chrono::NaiveDate;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 use quick_xml::Writer;
 use serde::Deserialize;
@@ -21,6 +22,54 @@ use std::io::Cursor;
 use crate::error::{AppError, AppResult};
 
 pub const NAMESPACE: &str = "mfp:anaf:dgti:eTransport:declaratie:v2";
+
+/// Valabilitatea codului UIT în zile calendaristice (OUG 41/2022 art. 11, ex-art. 9): **15 zile DOAR
+/// pentru achizițiile intracomunitare de bunuri** — cod 10 (achiziție intracomunitară) și cod 70
+/// (transport în cadrul achiziției intracomunitare); **5 zile** pentru toate celelalte operațiuni —
+/// național (30), livrare intracomunitară (20), import (40), export (50), lohn/stocuri/non-transfer
+/// (12/14/22/24/60). Pentru codurile incerte 5 zile este și direcția sigură (subevaluează
+/// valabilitatea → re-declarare timpurie, fără riscul folosirii unui UIT expirat = amendă).
+pub fn uit_validity_days(cod_tip_operatiune: &str) -> i64 {
+    match cod_tip_operatiune.trim() {
+        "10" | "70" => 15,
+        _ => 5,
+    }
+}
+
+/// Fereastra de predeclarare a transportului: data declarată nu poate fi în trecut și nici la mai
+/// mult de 3 zile calendaristice în viitor (OUG 41/2022 art. 11 — codul UIT se obține cu cel mult 3
+/// zile înainte de începerea transportului). `today` se injectează pentru testabilitate. Întoarce
+/// `Some(mesaj)` pentru o dată malformată sau în afara ferestrei; `None` dacă e validă — sau goală,
+/// caz semnalat deja de validarea structurală (`validate_etransport`).
+pub fn transport_predeclare_window(data_transport: &str, today: NaiveDate) -> Option<String> {
+    let s = data_transport.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let d = match NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        Ok(d) if s.len() == 10 => d,
+        _ => {
+            return Some(format!(
+                "Data transportului '{s}' nu este o dată calendaristică validă (format AAAA-LL-ZZ)."
+            ))
+        }
+    };
+    if d < today {
+        return Some(
+            "Data transportului este în trecut — codul UIT se obține înainte de începerea \
+             transportului."
+                .into(),
+        );
+    }
+    if (d - today).num_days() > 3 {
+        return Some(
+            "Data transportului depășește fereastra de 3 zile calendaristice pentru obținerea \
+             codului UIT (OUG 41/2022 art. 11)."
+                .into(),
+        );
+    }
+    None
+}
 
 /// A transported-goods line (`<bunuriTransportate>`).
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -431,6 +480,31 @@ mod tests {
     #[test]
     fn valid_declaration_passes() {
         assert!(validate_etransport(&sample()).is_empty());
+    }
+
+    #[test]
+    fn uit_validity_15_only_for_intracom_acquisition() {
+        // 15 zile DOAR pentru achiziții intracomunitare: cod 10 (AIC) + cod 70 (transport în AIC).
+        assert_eq!(uit_validity_days("10"), 15);
+        assert_eq!(uit_validity_days("70"), 15);
+        // Toate celelalte (inclusiv import/export/livrare intracom., pe care bug-ul le dădea 15) = 5.
+        for c in ["12", "14", "20", "22", "24", "30", "40", "50", "60"] {
+            assert_eq!(uit_validity_days(c), 5, "codul {c} trebuie să fie 5 zile");
+        }
+    }
+
+    #[test]
+    fn predeclare_window_rejects_past_far_and_malformed() {
+        let today = NaiveDate::from_ymd_opt(2026, 6, 8).unwrap();
+        // în trecut / prea departe / dată imposibilă / garbage → eroare
+        assert!(transport_predeclare_window("2026-06-07", today).is_some());
+        assert!(transport_predeclare_window("2026-06-12", today).is_some());
+        assert!(transport_predeclare_window("2026-02-31", today).is_some());
+        assert!(transport_predeclare_window("garbage", today).is_some());
+        // azi / +3 zile → ok ; gol → tratat de validarea structurală (None aici)
+        assert!(transport_predeclare_window("2026-06-08", today).is_none());
+        assert!(transport_predeclare_window("2026-06-11", today).is_none());
+        assert!(transport_predeclare_window("", today).is_none());
     }
 
     #[test]
