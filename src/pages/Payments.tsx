@@ -14,7 +14,7 @@
  * (date-only local), api.bnr.fetchRate for the FX rate.
  */
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
@@ -22,6 +22,7 @@ import type { TFunction } from "i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import type { AddPaymentArgs, Payment } from "@/lib/tauri";
@@ -321,10 +322,12 @@ export function PaymentsPage() {
     });
   }
 
-  function closeModal() {
-    setAddModal(null);
-    setPickedInvoice(null);
-  }
+  const { closing, close: closeModal } = useAnimatedClose(
+    useCallback(() => {
+      setAddModal(null);
+      setPickedInvoice(null);
+    }, []),
+  );
 
   async function handleFetchBnr() {
     if (!modalIsFx || !form.paidAt) return;
@@ -560,7 +563,7 @@ export function PaymentsPage() {
       {/* add-payment modal — design .modal-back/.modal (RON + FX variant) */}
       {addModal && (
         <div
-          className="modal-back show"
+          className={`modal-back ${closing ? "closing" : "show"}`}
           style={{ position: "fixed" }}
           onMouseDown={(e) => { if (e.target === e.currentTarget) closeModal(); }}
         >

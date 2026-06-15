@@ -21,6 +21,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import { Ic } from "@/components/shared/Ic";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { MonthPicker } from "@/components/shared/MonthPicker";
 import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { queryKeys } from "@/lib/queries";
@@ -678,6 +679,8 @@ function EmployeeModal({
     onError: (e) => setError(formatError(e, t("payroll.notify.saveError"))),
   });
 
+  const { closing, close } = useAnimatedClose(onClose);
+
   type StrKey = "cnp" | "fullName" | "grossSalary" | "personalDeduction" | "oreNorma";
   const field = (k: StrKey) => ({
     value: form[k],
@@ -686,9 +689,9 @@ function EmployeeModal({
 
   return createPortal(
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
       <div className="modal lg">
         <div className="modal-head">
@@ -696,7 +699,7 @@ function EmployeeModal({
             <div className="mt">{isEdit ? t("payroll.empModal.editTitle", { name: employee.fullName }) : t("payroll.actions.newEmployee")}</div>
             <div className="ms">{t("payroll.empModal.subtitle")}</div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label={t("payroll.common.close")}>
+          <button className="modal-x" onClick={close} aria-label={t("payroll.common.close")}>
             <Ic name="xMark" />
           </button>
         </div>
@@ -795,7 +798,7 @@ function EmployeeModal({
           </div>
         </div>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={onClose} disabled={save.isPending}>{t("payroll.common.cancel")}</button>
+          <button className="pill-btn" onClick={close} disabled={save.isPending}>{t("payroll.common.cancel")}</button>
           <button className="btn-dark" disabled={save.isPending} onClick={() => save.mutate()}>
             <Ic name="check" />{save.isPending ? t("payroll.common.saving") : t("payroll.empModal.save")}
           </button>
@@ -851,6 +854,8 @@ function ConcediuModal({
     onError: (e) => setError(formatError(e, t("payroll.notify.addConcediuError"))),
   });
 
+  const { closing, close } = useAnimatedClose(onClose);
+
   const num = (k: keyof typeof f) => ({
     value: f[k],
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => setF((s) => ({ ...s, [k]: e.target.value })),
@@ -858,9 +863,9 @@ function ConcediuModal({
 
   return createPortal(
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
       <div className="modal lg">
         <div className="modal-head">
@@ -868,7 +873,7 @@ function ConcediuModal({
             <div className="mt">{t("payroll.cmModal.title")}</div>
             <div className="ms">{t("payroll.cmModal.subtitle", { month: monthLabel })}</div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label={t("payroll.common.close")}>
+          <button className="modal-x" onClick={close} aria-label={t("payroll.common.close")}>
             <Ic name="xMark" />
           </button>
         </div>
@@ -985,7 +990,7 @@ function ConcediuModal({
         </div>
         <div className="modal-foot">
           <span className="left">{t("payroll.cm.cod01Note")}</span>
-          <button className="pill-btn" onClick={onClose} disabled={add.isPending}>{t("payroll.common.cancel")}</button>
+          <button className="pill-btn" onClick={close} disabled={add.isPending}>{t("payroll.common.cancel")}</button>
           <button className="btn-dark" disabled={add.isPending || !f.employeeId} onClick={() => add.mutate()}>
             <Ic name="check" />{add.isPending ? t("payroll.common.saving") : t("payroll.cmModal.save")}
           </button>
@@ -1016,11 +1021,13 @@ function SediuModal({
     onError: (e) => setError(formatError(e, t("payroll.notify.addSediuError"))),
   });
 
+  const { closing, close } = useAnimatedClose(onClose);
+
   return createPortal(
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
       <div className="modal">
         <div className="modal-head">
@@ -1028,7 +1035,7 @@ function SediuModal({
             <div className="mt">{t("payroll.sediuModal.title")}</div>
             <div className="ms">{t("payroll.sediuModal.subtitle")}</div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label={t("payroll.common.close")}>
+          <button className="modal-x" onClick={close} aria-label={t("payroll.common.close")}>
             <Ic name="xMark" />
           </button>
         </div>
@@ -1053,7 +1060,7 @@ function SediuModal({
           </div>
         </div>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={onClose} disabled={add.isPending}>{t("payroll.common.cancel")}</button>
+          <button className="pill-btn" onClick={close} disabled={add.isPending}>{t("payroll.common.cancel")}</button>
           <button className="btn-dark" disabled={add.isPending || !cif.trim()} onClick={() => add.mutate()}>
             <Ic name="check" />{add.isPending ? t("payroll.common.saving") : t("payroll.sediuModal.save")}
           </button>
@@ -1079,6 +1086,8 @@ function D112Modal({
   const [caen, setCaen] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const { closing, close } = useAnimatedClose(onClose);
+
   const submit = async (override = false) => {
     if (!/^\d{4}$/.test(caen.trim())) { notify.error(t("payroll.d112.invalidCaen")); return; }
     setBusy(true);
@@ -1091,9 +1100,9 @@ function D112Modal({
 
   return createPortal(
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
       <div className="modal">
         <div className="modal-head">
@@ -1105,7 +1114,7 @@ function D112Modal({
                 : t("payroll.d112.subOld")}
             </div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label={t("payroll.common.close")}>
+          <button className="modal-x" onClick={close} aria-label={t("payroll.common.close")}>
             <Ic name="xMark" />
           </button>
         </div>
@@ -1151,7 +1160,7 @@ function D112Modal({
         </div>
         <div className="modal-foot">
           <span className="left">{t("payroll.d112.foot")}</span>
-          <button className="pill-btn" onClick={onClose} disabled={busy}>{t("payroll.common.cancel")}</button>
+          <button className="pill-btn" onClick={close} disabled={busy}>{t("payroll.common.cancel")}</button>
           <button className="btn-dark" disabled={busy} onClick={() => void submit()}>
             <Ic name="code" />{busy ? t("payroll.d112.exporting") : t("payroll.d112.generate")}
           </button>

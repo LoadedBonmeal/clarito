@@ -22,7 +22,7 @@
  */
 
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { open, save, confirm } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useOpenPdf } from "@/hooks/use-open-pdf";
@@ -31,6 +31,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore, type ThemeMode, type DensityMode } from "@/lib/store";
@@ -252,6 +253,10 @@ export function SettingsPage() {
   const [gdprOpen, setGdprOpen] = useState(false);
   const [gdprConfirmText, setGdprConfirmText] = useState("");
   const [gdprWiping, setGdprWiping] = useState(false);
+
+  // Animated-exit close handlers for the two inline modals.
+  const { closing: closing1, close: close1 } = useAnimatedClose(useCallback(() => setGdprOpen(false), []));
+  const { closing: closing2, close: close2 } = useAnimatedClose(useCallback(() => setTplPreviewOpen(false), []));
 
   // ── Effects ───────────────────────────────────────────────────────────────────
 
@@ -1547,9 +1552,9 @@ export function SettingsPage() {
       {/* modal GDPR — ștergere totală (type STERGE to confirm) */}
       {gdprOpen && (
         <div
-          className="modal-back show"
+          className={`modal-back ${closing1 ? "closing" : "show"}`}
           style={{ position: "fixed" }}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setGdprOpen(false); }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) close1(); }}
         >
           <div className="modal">
             <div className="modal-head">
@@ -1557,7 +1562,7 @@ export function SettingsPage() {
                 <div className="mt" style={{ color: "var(--red)" }}>{t("settings.gdpr.modal.title")}</div>
                 <div className="ms">{t("settings.gdpr.modal.subtitle")}</div>
               </div>
-              <button className="modal-x" onClick={() => setGdprOpen(false)}>
+              <button className="modal-x" onClick={() => close1()}>
                 <Ic name="xMark" />
               </button>
             </div>
@@ -1582,7 +1587,7 @@ export function SettingsPage() {
               </div>
             </div>
             <div className="modal-foot">
-              <button className="pill-btn" onClick={() => setGdprOpen(false)}>{t("settings.gdpr.modal.cancel")}</button>
+              <button className="pill-btn" onClick={() => close1()}>{t("settings.gdpr.modal.cancel")}</button>
               <button
                 className="btn-dark"
                 style={{
@@ -1602,9 +1607,9 @@ export function SettingsPage() {
       {/* modal previzualizare șablon PDF — mock live (reacționează instant la setări) */}
       {tplPreviewOpen && (
         <div
-          className="modal-back show"
+          className={`modal-back ${closing2 ? "closing" : "show"}`}
           style={{ position: "fixed" }}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setTplPreviewOpen(false); }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) close2(); }}
         >
           <div className="modal pdfwide">
             <div className="modal-head">
@@ -1614,7 +1619,7 @@ export function SettingsPage() {
                   {(activeCompany?.invoiceSeries ?? "FAC") + "-DEMO-0001"} · {t("settings.template.modal.live")}
                 </div>
               </div>
-              <button className="modal-x" onClick={() => setTplPreviewOpen(false)}>
+              <button className="modal-x" onClick={() => close2()}>
                 <Ic name="xMark" />
               </button>
             </div>
@@ -1706,7 +1711,7 @@ export function SettingsPage() {
                 <Ic name="eye" />
                 {previewingTemplate ? t("settings.template.modal.generating") : t("settings.template.modal.openReal")}
               </button>
-              <button className="pill-btn" onClick={() => setTplPreviewOpen(false)}>{t("settings.common.close")}</button>
+              <button className="pill-btn" onClick={() => close2()}>{t("settings.common.close")}</button>
               <button
                 className="btn-dark"
                 disabled={savingTemplate}

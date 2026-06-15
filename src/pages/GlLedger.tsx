@@ -22,6 +22,7 @@ import { Trans, useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { MonthPicker } from "@/components/shared/MonthPicker";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
@@ -1298,6 +1299,7 @@ function BilantExportModal({
   ) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const { closing, close } = useAnimatedClose(onClose);
   const [caen, setCaen] = useState("");
   const [emp, setEmp] = useState("");
   const [form, setForm] = useState("auto");
@@ -1321,9 +1323,9 @@ function BilantExportModal({
 
   return createPortal(
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) close(); }}
     >
       <div className="modal">
         <div className="modal-head">
@@ -1331,7 +1333,7 @@ function BilantExportModal({
             <div className="mt">{t("gl.modal.title", { year })}</div>
             <div className="ms">{t("gl.modal.subtitle")}</div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label={t("gl.modal.close")}>
+          <button className="modal-x" onClick={close} aria-label={t("gl.modal.close")}>
             <Ic name="xMark" />
           </button>
         </div>
@@ -1390,7 +1392,7 @@ function BilantExportModal({
         </div>
         <div className="modal-foot">
           <span className="left">{t("gl.modal.footNote")}</span>
-          <button className="pill-btn" onClick={onClose} disabled={busy}>{t("gl.modal.cancel")}</button>
+          <button className="pill-btn" onClick={close} disabled={busy}>{t("gl.modal.cancel")}</button>
           <button className="btn-dark" disabled={busy} onClick={() => void submit()}>
             <Ic name="dl" />{busy ? t("gl.modal.exporting") : t("gl.modal.generate")}
           </button>

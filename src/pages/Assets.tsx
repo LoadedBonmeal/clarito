@@ -16,13 +16,14 @@
  * (backend-ul rămâne autoritativ la rulare).
  */
 
-import { useMemo, useState, useEffect } from "react";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
@@ -155,6 +156,10 @@ export function AssetsPage() {
   const [amortOpen, setAmortOpen] = useState(false);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
+
+  const { closing: amortClosing, close: amortClose } = useAnimatedClose(
+    useCallback(() => setAmortOpen(false), []),
+  );
 
   const { data: assets = [] } = useQuery({
     queryKey: ["assets", companyId],
@@ -511,9 +516,9 @@ export function AssetsPage() {
       {/* modal rulare amortizare */}
       {amortOpen && (
         <div
-          className="modal-back show"
+          className={`modal-back ${amortClosing ? "closing" : "show"}`}
           style={{ position: "fixed" }}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setAmortOpen(false); }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) amortClose(); }}
         >
           <div className="modal">
             <div className="modal-head">
@@ -523,7 +528,7 @@ export function AssetsPage() {
                   {t("assets.runModal.subtitle")}
                 </div>
               </div>
-              <button className="modal-x" onClick={() => setAmortOpen(false)}>
+              <button className="modal-x" onClick={() => amortClose()}>
                 <Ic name="xMark" />
               </button>
             </div>
@@ -573,7 +578,7 @@ export function AssetsPage() {
             </div>
             <div className="modal-foot">
               <span className="left">{t("assets.runModal.estimateNote")}</span>
-              <button className="pill-btn" onClick={() => setAmortOpen(false)}>{t("assets.runModal.cancel")}</button>
+              <button className="pill-btn" onClick={() => amortClose()}>{t("assets.runModal.cancel")}</button>
               <button
                 className="btn-dark"
                 disabled={runMut.isPending}
@@ -626,12 +631,13 @@ function DisposeModal({
   const { t } = useTranslation();
   const [date, setDate] = useState(defaultDate);
   const valid = /^\d{4}-\d{2}-\d{2}$/.test(date.trim());
+  const { closing, close } = useAnimatedClose(onClose);
 
   return (
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) close(); }}
     >
       <div className="modal" style={{ width: 420 }}>
         <div className="modal-head">
@@ -641,7 +647,7 @@ function DisposeModal({
               {t("assets.disposeModal.subtitle", { desc: asset.description, code: asset.assetCode })}
             </div>
           </div>
-          <button className="modal-x" onClick={onClose}>
+          <button className="modal-x" onClick={close}>
             <Ic name="xMark" />
           </button>
         </div>
@@ -658,7 +664,7 @@ function DisposeModal({
           </div>
         </div>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={onClose} disabled={busy}>{t("assets.disposeModal.cancel")}</button>
+          <button className="pill-btn" onClick={close} disabled={busy}>{t("assets.disposeModal.cancel")}</button>
           <button
             className="btn-dark"
             disabled={busy || !valid}
@@ -719,11 +725,13 @@ function AssetModal({
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value })),
   });
 
+  const { closing, close } = useAnimatedClose(onClose);
+
   return (
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget && !save.isPending) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !save.isPending) close(); }}
     >
       <div className="modal" style={{ width: 520 }}>
         <div className="modal-head">
@@ -731,7 +739,7 @@ function AssetModal({
             <div className="mt">{isEdit ? t("assets.modal.editTitle", { desc: asset.description }) : t("assets.modal.newTitle")}</div>
             <div className="ms">{t("assets.modal.subtitle")}</div>
           </div>
-          <button className="modal-x" onClick={onClose}>
+          <button className="modal-x" onClick={close}>
             <Ic name="xMark" />
           </button>
         </div>
@@ -771,7 +779,7 @@ function AssetModal({
           </div>
         </div>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={onClose} disabled={save.isPending}>{t("assets.modal.cancel")}</button>
+          <button className="pill-btn" onClick={close} disabled={save.isPending}>{t("assets.modal.cancel")}</button>
           <button
             className="btn-dark"
             disabled={save.isPending}

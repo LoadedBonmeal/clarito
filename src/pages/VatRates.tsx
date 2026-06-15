@@ -19,6 +19,7 @@ import { confirm } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
@@ -257,6 +258,8 @@ function VatRateModal({
     onError: (e) => setError(formatError(e, t("vatRates.notify.saveError"))),
   });
 
+  const { closing, close } = useAnimatedClose(onClose);
+
   const isPending = create.isPending || updateMut.isPending;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -288,9 +291,9 @@ function VatRateModal({
 
   return (
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed", zIndex: 80 }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
       <div className="modal" style={{ width: 440 }}>
         <div className="modal-head">
@@ -300,7 +303,7 @@ function VatRateModal({
               {t("vatRates.modal.subtitle")}
             </div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label={t("vatRates.modal.close")}>
+          <button className="modal-x" onClick={close} aria-label={t("vatRates.modal.close")}>
             <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="M6 18 18 6M6 6l12 12"/>' }} />
           </button>
         </div>
@@ -365,7 +368,7 @@ function VatRateModal({
             )}
           </div>
           <div className="modal-foot">
-            <button type="button" className="pill-btn" onClick={onClose} disabled={isPending}>
+            <button type="button" className="pill-btn" onClick={close} disabled={isPending}>
               {t("vatRates.modal.cancel")}
             </button>
             <button type="submit" className="btn-dark" disabled={isPending}>

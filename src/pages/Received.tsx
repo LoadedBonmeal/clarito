@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next";
 import { Ic } from "@/components/shared/Ic";
 import { SpvInbox } from "@/components/shared/SpvInbox";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -97,9 +98,10 @@ function DefalModal({ inv, onClose }: { inv: ReceivedInvoice; onClose: () => voi
   const [rows, setRows] = useState([0]);
   const docNo = invoiceNo(inv.series, inv.number, inv.anafDownloadId);
   const accounts = useMemo(() => DEFAL_ACCOUNT_KEYS.map((k) => t(`received.defal.accounts.${k}`)), [t]);
+  const { closing, close } = useAnimatedClose(onClose);
 
   return createPortal(
-    <div className="modal-back show" style={{ position: "fixed" }} onMouseDown={onClose}>
+    <div className={`modal-back ${closing ? "closing" : "show"}`} style={{ position: "fixed" }} onMouseDown={close}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div>
@@ -108,7 +110,7 @@ function DefalModal({ inv, onClose }: { inv: ReceivedInvoice; onClose: () => voi
               {docNo} · {inv.issuerName} · {fmtRON(inv.totalAmount)} {inv.currency}
             </div>
           </div>
-          <button className="modal-x" onClick={onClose}>
+          <button className="modal-x" onClick={close}>
             <Ic name="xMark" />
           </button>
         </div>
@@ -149,12 +151,12 @@ function DefalModal({ inv, onClose }: { inv: ReceivedInvoice; onClose: () => voi
           </div>
         </div>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={onClose}>{t("received.defal.cancel")}</button>
+          <button className="pill-btn" onClick={close}>{t("received.defal.cancel")}</button>
           <button
             className="btn-dark"
             onClick={() => {
               notify.info(t("received.defal.soon")); // propunere — neimplementat
-              onClose();
+              close();
             }}
           >
             <Ic name="check" />{t("received.defal.save")}

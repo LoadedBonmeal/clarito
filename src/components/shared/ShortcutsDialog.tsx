@@ -6,13 +6,14 @@
  * Open/close is controlled externally via open + onOpenChange props.
  */
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { getShortcutGroups } from "@/lib/shortcuts";
 import { fmtShortcut } from "@/lib/platform";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 
 interface ShortcutsDialogProps {
   open: boolean;
@@ -22,21 +23,22 @@ interface ShortcutsDialogProps {
 export function ShortcutsDialog({ open, onOpenChange }: ShortcutsDialogProps) {
   const { t } = useTranslation();
   const groups = getShortcutGroups(t);
+  const { closing, close } = useAnimatedClose(useCallback(() => onOpenChange(false), [onOpenChange]));
 
   useEffect(() => {
     if (!open) return;
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onOpenChange(false); };
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
     document.addEventListener("keydown", h);
     return () => document.removeEventListener("keydown", h);
-  }, [open, onOpenChange]);
+  }, [open, close]);
 
   if (!open) return null;
 
   return createPortal(
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onOpenChange(false); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
       <div className="modal" style={{ width: 560, maxHeight: "80vh", display: "flex", flexDirection: "column" }}>
         <div className="modal-head">
@@ -44,7 +46,7 @@ export function ShortcutsDialog({ open, onOpenChange }: ShortcutsDialogProps) {
             <div className="mt">{t("shared.shortcuts.title")}</div>
             <div className="ms">{t("shared.shortcuts.description")}</div>
           </div>
-          <button className="modal-x" onClick={() => onOpenChange(false)} aria-label={t("shared.common.close")}>
+          <button className="modal-x" onClick={() => close()} aria-label={t("shared.common.close")}>
             <Ic name="xMark" />
           </button>
         </div>

@@ -5,6 +5,7 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Icon } from "@/components/shared/Icon";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { api } from "@/lib/tauri";
 import { formatError } from "@/lib/error-mapper";
 import { createPortal } from "react-dom";
@@ -42,6 +43,8 @@ export function CsvImportModal({
   const [error, setError] = useState<string | null>(null);
   const [previewResult, setPreviewResult] = useState<{ imported: number; errors: string[] } | null>(null);
   const [previewing, setPreviewing] = useState(false);
+
+  const { closing, close } = useAnimatedClose(onClose);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -125,9 +128,9 @@ export function CsvImportModal({
 
   return createPortal(
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
       <div className="modal" style={{ width: 520, maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
         <div className="modal-head">
@@ -135,7 +138,7 @@ export function CsvImportModal({
             <div className="mt">{t("shared.csvImport.title", { type: typeLabel })}</div>
             <div className="ms">{t("shared.csvImport.description", { type: typeLabel.toLowerCase() })}</div>
           </div>
-          <button type="button" className="modal-x" aria-label={t("shared.common.close")} onClick={onClose}>
+          <button type="button" className="modal-x" aria-label={t("shared.common.close")} onClick={close}>
             <Icon name="x" size={14} />
           </button>
         </div>
@@ -282,7 +285,7 @@ export function CsvImportModal({
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button type="button" className="pill-btn" onClick={onClose}>
+          <button type="button" className="pill-btn" onClick={close}>
             {t("shared.common.close")}
           </button>
           <button

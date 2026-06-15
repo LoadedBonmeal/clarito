@@ -15,6 +15,7 @@
  */
 
 import { useMemo, useState, useEffect } from "react";
+import { useOneShot } from "@/hooks/use-one-shot";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -270,6 +271,7 @@ export function InvoicesPage() {
   const queryClient = useQueryClient();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const setSelectedInvoiceId = useAppStore((s) => s.setSelectedInvoiceId);
+  const sendLaunch = useOneShot(); // paper-plane "launch" on the bulk-send button
 
   // ?view=storned deep-link
   const { view: viewParam } = useSearch({ from: "/invoices" });
@@ -648,8 +650,8 @@ export function InvoicesPage() {
         <div className={`bulkbar${selected.size > 0 ? " show" : ""}`}>
           <b>{t("invoices.bulk.selected", { n: selected.size })}</b>
           <span className="spacer" />
-          <button className="pill-btn send-btn" onClick={() => void handleBulkSubmit()}>
-            <Ic name="send" />{t("invoices.bulk.sendSelection")}
+          <button className="pill-btn send-btn" onClick={() => { sendLaunch.fire(); void handleBulkSubmit(); }}>
+            <Ic name="send" cls={sendLaunch.active ? "ic launch" : "ic"} />{t("invoices.bulk.sendSelection")}
           </button>
           <button className="pill-btn" onClick={() => window.print()}>
             <Ic name="printer" />{t("invoices.bulk.print")}

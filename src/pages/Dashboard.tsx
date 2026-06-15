@@ -525,7 +525,7 @@ export function DashboardPage() {
                   <td className="c-data num">{fmtRoDate(inv.issueDate)}</td>
                   <td className="c-scad num">{fmtRoDate(inv.dueDate)}</td>
                   <td className="c-val r num">{fmtInt(parseDec(inv.totalAmount))} RON</td>
-                  <td className="c-status"><span className={`chip ${chip.cls}`}><Ic name={chip.icon} cls="sic" />{chip.label}</span></td>
+                  <td className="c-status"><span className={`chip chip-anim ${chip.cls}`}><Ic name={chip.icon} cls="sic" />{chip.label}</span></td>
                 </tr>
               );
             })}

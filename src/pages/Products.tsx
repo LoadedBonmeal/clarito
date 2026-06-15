@@ -23,6 +23,7 @@ import type { TFunction } from "i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -681,11 +682,13 @@ function ProductModal({
     }
   };
 
+  const { closing, close } = useAnimatedClose(onClose);
+
   return (
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed", zIndex: 80 }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
       <div className="modal">
         <div className="modal-head">
@@ -693,7 +696,7 @@ function ProductModal({
             <div className="mt">{isEdit ? t("products.modal.editTitle", { name: product.name }) : t("products.newProduct")}</div>
             <div className="ms">{t("products.modal.subtitle")}</div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label={t("products.modal.close")}>
+          <button className="modal-x" onClick={close} aria-label={t("products.modal.close")}>
             <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="M6 18 18 6M6 6l12 12"/>' }} />
           </button>
         </div>
@@ -802,7 +805,7 @@ function ProductModal({
             )}
           </div>
           <div className="modal-foot">
-            <button type="button" className="pill-btn" onClick={onClose} disabled={isPending}>
+            <button type="button" className="pill-btn" onClick={close} disabled={isPending}>
               {t("products.modal.cancel")}
             </button>
             <button type="submit" className="btn-dark" disabled={isPending}>

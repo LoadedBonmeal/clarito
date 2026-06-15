@@ -7,11 +7,12 @@
  * (pattern din src/pages/Receipts.tsx). Toată logica de validare/submit păstrată.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import type { Company, D300Submission } from "@/types";
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -86,13 +87,15 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
   const [nrEvid,           setNrEvid]           = useState("0");
   const [proRata,          setProRata]          = useState(100.0);
 
+  const { closing, close } = useAnimatedClose(useCallback(() => onOpenChange(false), [onOpenChange]));
+
   // Esc closes the modal.
   useEffect(() => {
     if (!open) return;
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onOpenChange(false); };
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
     document.addEventListener("keydown", h);
     return () => document.removeEventListener("keydown", h);
-  }, [open, onOpenChange]);
+  }, [open, close]);
 
   // ── Validation ───────────────────────────────────────────────────────────────
 
@@ -125,16 +128,16 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
       proRata,
     };
     onSubmit(submission);
-    onOpenChange(false);
+    close();
   };
 
   if (!open) return null;
 
   return createPortal(
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onOpenChange(false); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
       <div className="modal" style={{ width: 560 }}>
         <div className="modal-head">
@@ -142,7 +145,7 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
             <div className="mt">{t("shared.d300.title")}</div>
             <div className="ms">{t("shared.d300.subtitle")}</div>
           </div>
-          <button className="modal-x" onClick={() => onOpenChange(false)}>
+          <button className="modal-x" onClick={() => close()}>
             <Ic name="xMark" />
           </button>
         </div>
@@ -306,7 +309,7 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit }: P
           </div>
         </div>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={() => onOpenChange(false)}>
+          <button className="pill-btn" onClick={() => close()}>
             Anulează
           </button>
           <button

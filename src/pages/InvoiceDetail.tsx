@@ -20,7 +20,7 @@
  * FX invoices) and api.payments.delete on the listed receipts.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -28,6 +28,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { Ic } from "@/components/shared/Ic";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { useOpenPdf } from "@/hooks/use-open-pdf";
 import { notify } from "@/lib/toasts";
 import { queryKeys } from "@/lib/queries";
@@ -115,6 +116,17 @@ export function InvoiceDetailPage() {
   const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false);
   const [templateFrequency, setTemplateFrequency] = useState("monthly");
   const [templateName, setTemplateName] = useState("");
+
+  // Animated-exit close handlers (play .modal-back.closing before unmount)
+  const { closing: stornoClosing, close: closeStorno } = useAnimatedClose(
+    useCallback(() => { setShowStornoModal(false); setStornoReason(""); }, []),
+  );
+  const { closing: payClosing, close: closePay } = useAnimatedClose(
+    useCallback(() => setShowPayModal(false), []),
+  );
+  const { closing: templateClosing, close: closeTemplate } = useAnimatedClose(
+    useCallback(() => setShowSaveAsTemplate(false), []),
+  );
 
   // Close head "···" pop on outside click (design .pop pattern)
   useEffect(() => {
@@ -913,9 +925,9 @@ export function InvoiceDetailPage() {
       {/* modal storno */}
       {showStornoModal && (
         <div
-          className="modal-back show"
+          className={`modal-back ${stornoClosing ? "closing" : "show"}`}
           style={{ position: "fixed" }}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) { setShowStornoModal(false); setStornoReason(""); } }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) closeStorno(); }}
         >
           <div className="modal">
             <div className="modal-head">
@@ -923,7 +935,7 @@ export function InvoiceDetailPage() {
                 <div className="mt" style={{ color: "var(--red)" }}>{t("detail.stornoModal.title")}</div>
                 <div className="ms num">{invoice.fullNumber} · {t("detail.stornoModal.sub")}</div>
               </div>
-              <button className="modal-x" onClick={() => { setShowStornoModal(false); setStornoReason(""); }}>
+              <button className="modal-x" onClick={() => closeStorno()}>
                 <Ic name="xMark" />
               </button>
             </div>
@@ -941,7 +953,7 @@ export function InvoiceDetailPage() {
             </div>
             <div className="modal-foot">
               <span className="left">{t("detail.stornoModal.footNote")}</span>
-              <button className="pill-btn" onClick={() => { setShowStornoModal(false); setStornoReason(""); }}>
+              <button className="pill-btn" onClick={() => closeStorno()}>
                 {t("detail.stornoModal.cancel")}
               </button>
               <button
@@ -950,8 +962,7 @@ export function InvoiceDetailPage() {
                 disabled={!stornoReason.trim() || stornoInvoice.isPending}
                 onClick={() => {
                   stornoInvoice.mutate(stornoReason.trim());
-                  setShowStornoModal(false);
-                  setStornoReason("");
+                  closeStorno();
                 }}
               >
                 {stornoInvoice.isPending ? t("detail.stornoModal.pending") : t("detail.stornoModal.confirm")}
@@ -964,9 +975,9 @@ export function InvoiceDetailPage() {
       {/* modal plată */}
       {showPayModal && (
         <div
-          className="modal-back show"
+          className={`modal-back ${payClosing ? "closing" : "show"}`}
           style={{ position: "fixed" }}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowPayModal(false); }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) closePay(); }}
         >
           <div className="modal">
             <div className="modal-head">
@@ -976,7 +987,7 @@ export function InvoiceDetailPage() {
                   {invoice.fullNumber} · {contact?.legalName ?? "—"} · {t("detail.payModal.balance", { amount: fmtRON(remaining), currency: invoice.currency })}
                 </div>
               </div>
-              <button className="modal-x" onClick={() => setShowPayModal(false)}>
+              <button className="modal-x" onClick={() => closePay()}>
                 <Ic name="xMark" />
               </button>
             </div>
@@ -1060,7 +1071,7 @@ export function InvoiceDetailPage() {
                     : t("detail.payModal.partialPays", { amount: fmtRON(remaining - payAmountNum), currency: invoice.currency })
                   : ""}
               </span>
-              <button className="pill-btn" onClick={() => setShowPayModal(false)}>{t("detail.payModal.cancel")}</button>
+              <button className="pill-btn" onClick={() => closePay()}>{t("detail.payModal.cancel")}</button>
               <button
                 className="btn-dark"
                 disabled={paySaveDisabled}
@@ -1089,9 +1100,9 @@ export function InvoiceDetailPage() {
       {/* modal șablon recurent — real feature the prototype lacks */}
       {showSaveAsTemplate && (
         <div
-          className="modal-back show"
+          className={`modal-back ${templateClosing ? "closing" : "show"}`}
           style={{ position: "fixed" }}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowSaveAsTemplate(false); }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) closeTemplate(); }}
         >
           <div className="modal">
             <div className="modal-head">
@@ -1099,7 +1110,7 @@ export function InvoiceDetailPage() {
                 <div className="mt">{t("detail.templateModal.title")}</div>
                 <div className="ms num">{invoice.fullNumber} · {t("detail.templateModal.sub", { series: invoice.series, n: lines.length })}</div>
               </div>
-              <button className="modal-x" onClick={() => setShowSaveAsTemplate(false)}>
+              <button className="modal-x" onClick={() => closeTemplate()}>
                 <Ic name="xMark" />
               </button>
             </div>
@@ -1131,7 +1142,7 @@ export function InvoiceDetailPage() {
             </div>
             <div className="modal-foot">
               <span className="left">{t("detail.templateModal.firstIssue")}</span>
-              <button className="pill-btn" onClick={() => setShowSaveAsTemplate(false)}>{t("detail.stornoModal.cancel")}</button>
+              <button className="pill-btn" onClick={() => closeTemplate()}>{t("detail.stornoModal.cancel")}</button>
               <button
                 className="btn-dark"
                 disabled={saveAsTemplateMutation.isPending}

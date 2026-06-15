@@ -21,6 +21,7 @@ import { confirm } from "@tauri-apps/plugin-dialog";
 import { useOpenPdf } from "@/hooks/use-open-pdf";
 
 import { Ic } from "@/components/shared/Ic";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { ContactCombobox } from "@/components/shared/ContactCombobox";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
@@ -369,12 +370,14 @@ function ReceiptModal({
     onError: (e) => setFormError(formatError(e, t("receipts.notify.createError"))),
   });
 
+  const { closing, close } = useAnimatedClose(onClose);
+
   // Esc closes the modal.
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
     document.addEventListener("keydown", h);
     return () => document.removeEventListener("keydown", h);
-  }, [onClose]);
+  }, [close]);
 
   const handleSubmit = () => {
     if (createMutation.isPending) return;
@@ -403,9 +406,9 @@ function ReceiptModal({
 
   return createPortal(
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
       <div className="modal">
         <div className="modal-head">
@@ -413,7 +416,7 @@ function ReceiptModal({
             <div className="mt">{t("receipts.modal.title")}</div>
             <div className="ms">{t("receipts.modal.sub")}</div>
           </div>
-          <button className="modal-x" onClick={onClose}>
+          <button className="modal-x" onClick={close}>
             <Ic name="xMark" />
           </button>
         </div>
@@ -512,7 +515,7 @@ function ReceiptModal({
           )}
         </div>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={onClose} disabled={createMutation.isPending}>
+          <button className="pill-btn" onClick={close} disabled={createMutation.isPending}>
             {t("receipts.modal.cancel")}
           </button>
           <button

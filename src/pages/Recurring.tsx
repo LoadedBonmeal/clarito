@@ -15,7 +15,7 @@
  * Auto ANAF toggle in table → api.recurring.update (flips autoSubmitAnaf).
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -24,6 +24,7 @@ import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { LineItemsEditor } from "@/components/shared/LineItemsEditor";
 import type { LineRow } from "@/components/shared/LineItemsEditor";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
 import type { CreateRecurringArgs, RecurringInvoice } from "@/lib/tauri";
@@ -247,10 +248,12 @@ export function RecurringPage() {
     setShowModal(true);
   };
 
-  const closeModal = () => {
-    setShowModal(false);
-    setEditingId(null);
-  };
+  const { closing, close: closeModal } = useAnimatedClose(
+    useCallback(() => {
+      setShowModal(false);
+      setEditingId(null);
+    }, []),
+  );
 
   const handleCreate = () => {
     if (!activeCompanyId) return;
@@ -517,7 +520,7 @@ export function RecurringPage() {
       {/* Create / Edit modal — design .modal-back + .modal pattern */}
       {showModal && (
         <div
-          className="modal-back show"
+          className={`modal-back ${closing ? "closing" : "show"}`}
           style={{ position: "fixed", zIndex: 80 }}
           onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) closeModal(); }}
         >

@@ -21,6 +21,7 @@ import { confirm } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
+import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { CsvImportModal } from "@/components/shared/CsvImportModal";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
@@ -426,6 +427,8 @@ function ContactModal({
 
   const isPending = create.isPending || update.isPending;
 
+  const { closing, close } = useAnimatedClose(onClose);
+
   const field = (key: keyof CreateContactInput) => ({
     value: (form[key] as string) ?? "",
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -473,9 +476,9 @@ function ContactModal({
 
   return createPortal(
     <div
-      className="modal-back show"
+      className={`modal-back ${closing ? "closing" : "show"}`}
       style={{ position: "fixed" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
       <div className="modal lg">
         <div className="modal-head">
@@ -483,7 +486,7 @@ function ContactModal({
             <div className="mt">{isEdit ? t("contacts.modal.editTitle", { name: contact.legalName }) : t("contacts.newContact")}</div>
             <div className="ms">{t("contacts.modal.subtitle")}</div>
           </div>
-          <button className="modal-x" onClick={onClose} aria-label={t("contacts.modal.close")}>
+          <button className="modal-x" onClick={close} aria-label={t("contacts.modal.close")}>
             <Ic name="xMark" />
           </button>
         </div>
@@ -626,7 +629,7 @@ function ContactModal({
           )}
         </form>
         <div className="modal-foot">
-          <button className="pill-btn" onClick={onClose} disabled={isPending}>{t("contacts.modal.cancel")}</button>
+          <button className="pill-btn" onClick={close} disabled={isPending}>{t("contacts.modal.cancel")}</button>
           <button
             className="btn-dark"
             type="submit"

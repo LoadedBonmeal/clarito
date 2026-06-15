@@ -17,6 +17,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
+import { useOneShot } from "@/hooks/use-one-shot";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
@@ -67,6 +68,7 @@ const BAN_PATH =
 export function EtransportPage() {
   const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
+  const sendLaunch = useOneShot(); // paper-plane "launch" when sending to ANAF
   const { data: company } = useQuery({
     queryKey: queryKeys.companies.detail(activeCompanyId ?? ""),
     queryFn: () => api.companies.get(activeCompanyId!),
@@ -368,9 +370,9 @@ export function EtransportPage() {
             <button
               className="btn-dark send-btn" type="button"
               disabled={submit.isPending}
-              onClick={() => submit.mutate()}
+              onClick={() => { sendLaunch.fire(); submit.mutate(); }}
             >
-              <Ic name="send" />
+              <Ic name="send" cls={sendLaunch.active ? "ic launch" : "ic"} />
               {submit.isPending ? t("etransport.form.sending") : t("etransport.form.sendAnaf")}
             </button>
           </div>
