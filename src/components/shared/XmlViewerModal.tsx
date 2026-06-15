@@ -99,7 +99,7 @@ function XmlViewerBody({ payload, onClose }: { payload: XmlViewerPayload; onClos
       return;
     }
     try {
-      const tables = xmlToTables(payload.xml);
+      const tables = xmlToTables(payload.xml, payload.docKey ?? payload.declKind);
       if (tables.length === 0) {
         notify.error(t("shared.xmlViewer.tableError", { error: "XML invalid" }));
         return;

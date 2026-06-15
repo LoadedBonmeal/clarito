@@ -1,12 +1,20 @@
 /**
- * xmlToTables — flatten declaration XML into a list of tables for an XLSX export.
+ * xmlToTables — flatten declaration XML into LABELED tables for an XLSX export that matches the
+ * printable document (XmlDocView).
  *
- * Parses the XML (DOMParser → attributes + repeating leaf elements) into a plain data model
- * `{ title, columns, rows }[]` that the Rust `export_declaration_xlsx` command writes
- * to a real spreadsheet. The root/each element's attributes become a key/value table; each group of
- * same-tag leaf children becomes its own table (columns = union of their attributes). Namespace
- * declarations are dropped. Never throws — returns `[]` on a parse error.
+ * Headers and coded values are resolved through the same doc-render dictionary (descriptors + labels)
+ * the PDF uses: attribute names → Romanian labels, coded values → enum text + money/date formatting,
+ * table titles → the descriptor's section titles. A document without a descriptor/dictionary falls
+ * back gracefully to global labels then the raw attribute name (resolveField/formatValue never throw),
+ * so the export is never worse than before and improves wherever a dictionary exists.
+ *
+ * Parses the XML (DOMParser → attributes + repeating leaf elements) into `{ title, columns, rows }[]`
+ * that the Rust `export_declaration_xlsx` command writes to a real spreadsheet. Namespace declarations
+ * are dropped. Never throws — returns `[]` on a parse error.
  */
+import { pickDescriptor, type DocDescriptor } from "@/lib/doc-render/descriptors";
+import { formatValue, resolveField } from "@/lib/doc-render/labels";
+
 export interface DeclTable {
   title: string;
   columns: string[];
@@ -32,40 +40,60 @@ function childGroups(el: Element): [string, Element[]][] {
   return order.map((tag) => [tag, groups.get(tag)!]);
 }
 
-function walk(el: Element, out: DeclTable[]): void {
+/** Human section title for an element: the descriptor title for the root, else the matching section's
+ *  title, else the raw tag (docs without a descriptor). */
+function titleFor(el: Element, desc: DocDescriptor | null): string {
+  if (!desc) return el.tagName;
+  if (el.localName === desc.rootTag) return desc.title;
+  return desc.sections.find((s) => s.match === el.localName)?.title ?? el.tagName;
+}
+
+function walk(el: Element, desc: DocDescriptor | null, key: string, out: DeclTable[]): void {
   const attrs = attrsOf(el);
   if (attrs.length > 0) {
-    // The element's own attributes → a 2-column key/value table titled by the tag.
+    // The element's own attributes → a labeled key/value table.
     out.push({
-      title: el.tagName,
+      title: titleFor(el, desc),
       columns: ["Câmp", "Valoare"],
-      rows: attrs.map(([k, v]) => [k, v]),
+      rows: attrs.map(([k, v]) => {
+        const field = resolveField(key, k);
+        return [field.label, formatValue(v, field)];
+      }),
     });
   }
 
-  for (const [tag, els] of childGroups(el)) {
+  for (const [, els] of childGroups(el)) {
     const allLeaf = els.every((e) => e.children.length === 0);
     if (allLeaf) {
-      const cols = Array.from(new Set(els.flatMap((e) => attrsOf(e).map(([k]) => k))));
+      const rawCols = Array.from(new Set(els.flatMap((e) => attrsOf(e).map(([k]) => k))));
       const hasText = els.some((e) => (e.textContent ?? "").trim() !== "" && e.attributes.length === 0);
-      const columns = hasText ? [...cols, "valoare"] : cols;
+      // Header row: raw attribute names → human labels; the synthetic text column stays "Valoare".
+      const columns = (hasText ? [...rawCols, "valoare"] : rawCols).map((c) =>
+        c === "valoare" ? "Valoare" : resolveField(key, c).label,
+      );
       const rows = els.map((e) => {
         const a = Object.fromEntries(attrsOf(e));
-        const base = cols.map((c) => a[c] ?? "");
+        const base = rawCols.map((c) => {
+          const raw = a[c] ?? "";
+          return raw === "" ? "" : formatValue(raw, resolveField(key, c));
+        });
         return hasText ? [...base, (e.textContent ?? "").trim()] : base;
       });
+      const baseTitle = titleFor(els[0], desc);
       out.push({
-        title: els.length > 1 ? `${tag} (×${els.length})` : tag,
+        title: els.length > 1 ? `${baseTitle} (×${els.length})` : baseTitle,
         columns,
         rows,
       });
     } else {
-      els.forEach((e) => walk(e, out));
+      els.forEach((e) => walk(e, desc, key, out));
     }
   }
 }
 
-export function xmlToTables(xml: string): DeclTable[] {
+/** `docKey` = the declaration kind (declKind/docKey) used to pick the label dictionary, exactly as
+ *  XmlDocView does. Omit it for an unlabeled raw dump (back-compatible behavior via global fallback). */
+export function xmlToTables(xml: string, docKey?: string): DeclTable[] {
   let root: Element | null;
   try {
     const doc = new DOMParser().parseFromString(xml, "application/xml");
@@ -74,7 +102,10 @@ export function xmlToTables(xml: string): DeclTable[] {
     root = null;
   }
   if (!root) return [];
+  // Resolve the descriptor like XmlDocView (docKey/declKind → root tag); `key` drives the labels.
+  const desc = pickDescriptor(docKey, root.localName);
+  const key = desc?.key ?? docKey ?? "";
   const out: DeclTable[] = [];
-  walk(root, out);
+  walk(root, desc, key, out);
   return out;
 }

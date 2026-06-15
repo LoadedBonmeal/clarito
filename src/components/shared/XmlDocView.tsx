@@ -117,7 +117,28 @@ function TableSection({
   );
 }
 
+/** Element groups (by local name) that carry attributes but are NOT consumed by any descriptor
+ *  section nor the root — so they're never silently dropped from the printed document. Order =
+ *  first occurrence in the XML. (Fixes e.g. D112 medical-leave B-path + certificates + F1/F2.) */
+function unconsumedGroups(root: Element, desc: DocDescriptor): [string, Element[]][] {
+  const matched = new Set(desc.sections.map((s) => s.match));
+  matched.add(desc.rootTag);
+  const order: string[] = [];
+  const groups = new Map<string, Element[]>();
+  for (const el of Array.from(root.getElementsByTagName("*"))) {
+    const ln = el.localName;
+    if (matched.has(ln) || attrsOf(el).length === 0) continue;
+    if (!groups.has(ln)) {
+      groups.set(ln, []);
+      order.push(ln);
+    }
+    groups.get(ln)!.push(el);
+  }
+  return order.map((ln) => [ln, groups.get(ln)!]);
+}
+
 function GenericDoc({ root, desc }: { root: Element; desc: DocDescriptor }) {
+  const extras = unconsumedGroups(root, desc);
   return (
     <>
       <h2 className="docv-title">{desc.title}</h2>
@@ -128,6 +149,15 @@ function GenericDoc({ root, desc }: { root: Element; desc: DocDescriptor }) {
         }
         return <TableSection key={i} els={els} spec={s} docKey={desc.key} />;
       })}
+      {/* Safety net: render any element group the descriptor didn't name, so nothing is dropped. */}
+      {extras.map(([tag, els]) => (
+        <TableSection
+          key={`extra-${tag}`}
+          els={els}
+          spec={{ match: tag, title: tag, as: "table" }}
+          docKey={desc.key}
+        />
+      ))}
     </>
   );
 }
