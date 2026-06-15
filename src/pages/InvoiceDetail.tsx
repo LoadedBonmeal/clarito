@@ -193,9 +193,13 @@ export function InvoiceDetailPage() {
   // Generează (idempotent) XML-ul e-Factura UBL și îl deschide în vizualizatorul/editorul XML din
   // aplicație. Fără DUK (UBL se validează cu `validateXml`/xmllint, nu cu validatorii de declarații).
   const viewXml = useMutation({
-    mutationFn: () => {
-      if (!activeCompanyId) return Promise.reject(new Error(t("detail.noActiveCompany")));
-      return api.ubl.generateXml(id, activeCompanyId);
+    mutationFn: async () => {
+      if (!activeCompanyId) throw new Error(t("detail.noActiveCompany"));
+      // `generate_invoice_xml` writes the UBL to disk and returns its PATH — read the file content so
+      // the viewer gets the actual XML (not a path) to render as the labeled invoice document.
+      const path = await api.ubl.generateXml(id, activeCompanyId);
+      const { readTextFile } = await import("@tauri-apps/plugin-fs");
+      return readTextFile(path);
     },
     onSuccess: (xml) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
