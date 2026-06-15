@@ -644,8 +644,19 @@ pub fn map_to_rows(
     // R16_2 is the regularizări colectată for old rates (Wave 8).
     // R7_2 is the collected leg of intra-EU SERVICES (Wave 7)
     let r17_vat = r5_vat + r7_vat + r9_vat + r10_vat + r11_vat + r12_2_total + r16_2_dec;
-    // R17_1 = R5_1 + R7_1 + R9_1 + R10_1 + R11_1 + R12_1 + R16_1 + ...
-    let r17_base = r5_base + r7_base + r9_base + r10_base + r11_base + r12_1_total + r16_1_dec;
+    // R17_1 = R1_1 + R5_1 + R7_1 + R9_1 + R10_1 + R11_1 + R12_1 + R13_1 + R16_1 + ...
+    // (structura D300 v12 rând 67 / OPANAF 174/2026; DUK hard-rule "calcul VAL(17)").
+    // R1_1 (livrări intracom. scutite, art.294) și R13_1 (taxare inversă vânzător, art.331) sunt
+    // bază-only (fără coloană TVA), deci intră DOAR în R17_1, nu și în R17_2.
+    let r17_base = r1_1_base
+        + r5_base
+        + r7_base
+        + r9_base
+        + r10_base
+        + r11_base
+        + r12_1_total
+        + r13_base
+        + r16_1_dec;
 
     // R25 = R12 (DUK V_19/V_20 enforced equality)
     let r25_1_total = r12_1_total;
@@ -1211,6 +1222,39 @@ mod tests {
         assert_eq!(rows.r5_2, Some(210), "R5_2 = 210 (K purchases VAT)");
         assert_eq!(rows.r18_1, Some(1000), "R18_1 = R5_1 = 1000");
         assert_eq!(rows.r18_2, Some(210), "R18_2 = R5_2 = 210");
+    }
+
+    #[test]
+    fn r17_1_total_includes_r1_and_r13() {
+        // Regression for D300-01 (P0): R17_1 (TOTAL TAXĂ COLECTATĂ — bază) trebuie să includă
+        // R1_1 (livrări intracom. scutite, cat. Z, art. 294) și R13_1 (taxare inversă vânzător,
+        // cat. AE cu TVA 0, art. 331) pe lângă livrările taxabile — structura D300 v12 rând 67;
+        // DUK hard-rule "calcul VAL(17)". Înainte de fix, R17_1 le omitea → fișier respins de DUK.
+        let report = make_report(
+            vec![
+                ("0.00", "Z", "2000.00", "0.00"), // → R1_1 (livrare intracom. scutită)
+                ("0.00", "AE", "1500.00", "0.00"), // → R13_1 (taxare inversă vânzător)
+                ("0.21", "S", "1000.00", "210.00"), // → R9 (livrare taxabilă 21%)
+            ],
+            vec![],
+        );
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+
+        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+
+        assert_eq!(rows.r1_1, Some(2000), "R1_1 = 2000 (Z)");
+        assert_eq!(rows.r13_1, Some(1500), "R13_1 = 1500 (AE vânzător)");
+        assert_eq!(rows.r9_1, Some(1000), "R9_1 = 1000 (S)");
+        // R17_1 = R1_1 + R13_1 + livrările taxabile — NU doar rândurile taxabile.
+        assert_eq!(
+            rows.r17_1,
+            Some(4500),
+            "R17_1 = R1_1 + R13_1 + R9_1 = 2000+1500+1000"
+        );
+        // R17_2 e doar TVA: R1_1 și R13_1 nu au coloană TVA, deci rămâne 210.
+        assert_eq!(rows.r17_2, Some(210), "R17_2 = 210 (doar TVA 21%)");
     }
 
     #[test]
