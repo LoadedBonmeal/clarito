@@ -12,7 +12,10 @@
       "newReceipt": "Receipt",
       "newContact": "Client / Supplier",
       "newProduct": "Item",
-      "importSpv": "Import from SPV"
+      "importSpv": "Import from SPV",
+      "notifTitle": "Notifications",
+      "notifSeeAll": "See all",
+      "notifEmpty": "No notifications"
     },
     "notify": {
       "selectCompany": "Select an active company.",

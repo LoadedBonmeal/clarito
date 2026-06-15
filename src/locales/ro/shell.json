@@ -12,7 +12,10 @@
       "newReceipt": "Chitanță",
       "newContact": "Client / Furnizor",
       "newProduct": "Articol",
-      "importSpv": "Importă din SPV"
+      "importSpv": "Importă din SPV",
+      "notifTitle": "Notificări",
+      "notifSeeAll": "Vedeți toate",
+      "notifEmpty": "Nicio notificare"
     },
     "notify": {
       "selectCompany": "Selectați o companie activă.",
