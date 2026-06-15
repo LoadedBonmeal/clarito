@@ -92,6 +92,9 @@ export interface LineItemsEditorProps {
   companyId?: string;
   /** Invoice currency code shown in the totals footer (default "RON"). */
   currency?: string;
+  /** Invoice issue date (ISO YYYY-MM-DD) — used to warn on the transitional 9% housing rate after its
+   *  2026-07-31 sunset. Optional: when absent, the 9% warning is simply not shown. */
+  issueDate?: string;
 }
 
 export function LineItemsEditor({
@@ -102,6 +105,7 @@ export function LineItemsEditor({
   showTotals = true,
   companyId,
   currency = "RON",
+  issueDate,
 }: LineItemsEditorProps) {
   const { t } = useTranslation();
   // Fetch active VAT rates from the global DB catalog.
@@ -254,6 +258,11 @@ export function LineItemsEditor({
   // Legea 141/2025: 19% and 5% are abolished from 01.08.2025 for new operations. Warn if a line
   // still carries one (e.g. auto-filled from an old product), steering to 21% / 11%.
   const hasAbolishedRate = lines.some((l) => l.vatRate === 19 || l.vatRate === 5);
+  // Legea 141/2025 art. III: the transitional 9% housing rate expired 31.07.2026. After that a 9% line
+  // is valid ONLY for regularizări/storno of pre-cutoff deliveries — so this is a non-blocking nudge
+  // (mirrors the backend W04 rule in ubl/rocius_rules.rs), not a hard block.
+  const has9pAfterCutoff =
+    !!issueDate && issueDate > "2026-07-31" && lines.some((l) => l.vatRate === 9);
 
   return (
     <div style={{ overflowX: "auto", borderTop: "1px solid var(--line)" }}>
@@ -265,6 +274,12 @@ export function LineItemsEditor({
             {t("shared.lineItems.abolishedWarn2")} <b>11%</b>{" "}
             {t("shared.lineItems.abolishedWarn3")}
           </span>
+        </div>
+      )}
+      {has9pAfterCutoff && (
+        <div className="banner warn" style={{ margin: "10px 12px", marginBottom: 10 }}>
+          <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_WARN }} />
+          <span>{t("shared.lineItems.housing9Warn")}</span>
         </div>
       )}
       <table className="scr-table">

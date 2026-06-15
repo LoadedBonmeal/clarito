@@ -139,6 +139,7 @@
       "abolishedWarn1": "O linie folosește o cotă TVA abrogată (19% sau 5%, Legea 141/2025, de la 01.08.2025). Pentru operațiuni noi folosiți",
       "abolishedWarn2": "(standard) sau",
       "abolishedWarn3": "(redus).",
+      "housing9Warn": "Cota 9% (locuințe) e tranzitorie și a expirat la 31.07.2026 — validă doar pentru regularizări/storno ale livrărilor dinainte de termen. Pentru livrări noi folosiți 21%.",
       "headers": {
         "code": "Cod",
         "description": "Descriere",

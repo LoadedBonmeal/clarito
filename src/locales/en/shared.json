@@ -134,6 +134,7 @@
       "abolishedWarn1": "A line uses an abolished VAT rate (19% or 5%, Law 141/2025, from 01.08.2025). For new operations use",
       "abolishedWarn2": "(standard) or",
       "abolishedWarn3": "(reduced).",
+      "housing9Warn": "The 9% (housing) rate is transitional and expired on 2026-07-31 — valid only for corrections/credit notes of pre-cutoff deliveries. Use 21% for new supplies.",
       "headers": {
         "code": "Code",
         "description": "Description",

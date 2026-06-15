@@ -246,9 +246,28 @@ async fn fetch_xml(client: &Client, url: &str) -> AppResult<String> {
         )));
     }
 
-    resp.text()
+    // Cap the body so a spoofed/MITM'd BNR response can't OOM the app (the rates XML is normally a few
+    // KB). Mirror the SPV 25 MiB ingress cap: Content-Length first, then the buffered length as backstop.
+    const MAX_BNR_DOWNLOAD: u64 = 25 * 1024 * 1024;
+    if resp
+        .content_length()
+        .is_some_and(|len| len > MAX_BNR_DOWNLOAD)
+    {
+        return Err(AppError::Other(
+            "Răspuns BNR prea mare (peste 25 MiB) — descărcare respinsă.".into(),
+        ));
+    }
+    let bytes = resp
+        .bytes()
         .await
-        .map_err(|e| AppError::Other(format!("Eroare citire răspuns BNR: {e}")))
+        .map_err(|e| AppError::Other(format!("Eroare citire răspuns BNR: {e}")))?;
+    if bytes.len() as u64 > MAX_BNR_DOWNLOAD {
+        return Err(AppError::Other(
+            "Răspuns BNR prea mare (peste 25 MiB) — descărcare respinsă.".into(),
+        ));
+    }
+    String::from_utf8(bytes.to_vec())
+        .map_err(|e| AppError::Other(format!("Răspuns BNR non-UTF-8: {e}")))
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────

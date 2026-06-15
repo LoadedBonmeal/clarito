@@ -577,6 +577,7 @@ export function InvoiceEditPage() {
               showTotals={false}
               companyId={activeCompanyId ?? undefined}
               currency={currency}
+              issueDate={issueDate}
             />
             {rateValid && (
               <div style={{ padding: "10px 16px", borderTop: "1px solid var(--line)", fontSize: 12, color: "var(--text-2)" }}>

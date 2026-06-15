@@ -557,6 +557,25 @@ fn map_purchase_partner(partner: &D394Partner, tip_partener: i64) -> (&'static s
 
 // ── Main builder ──────────────────────────────────────────────────────────────
 
+/// Atributul `luna` din D394 după periodicitatea declarantului (OPANAF 3769/2015, modif. OPANAF
+/// 2194/2025): lunar (`L`) = luna calendaristică; trimestrial (`T`) = ULTIMA lună a trimestrului
+/// (3/6/9/12); semestrial (`S`) = 6 sau 12; anual (`A`) = 12. Înainte se emitea mereu luna
+/// calendaristică a începutului perioadei, inconsistent cu `tip_D394="T"` pentru un plătitor trimestrial.
+fn period_attr_luna(tip_d394: &str, month: u32) -> i32 {
+    match tip_d394 {
+        "T" => (((month - 1) / 3) * 3 + 3) as i32, // 1-3→3, 4-6→6, 7-9→9, 10-12→12
+        "S" => {
+            if month <= 6 {
+                6
+            } else {
+                12
+            }
+        }
+        "A" => 12,
+        _ => month as i32, // "L" lunar (și orice necunoscut → luna calendaristică)
+    }
+}
+
 /// Build the complete `D394Doc` from a `D394Report` + `D394Submission` + `Company`.
 ///
 /// Returns `AppResult<D394Doc>` which the generator will serialize to XML.
@@ -566,7 +585,7 @@ pub fn build_sections(
     _company: &Company,
     period: NaiveDate,
 ) -> AppResult<D394Doc> {
-    let luna = period.month() as i32;
+    let luna = period_attr_luna(&submission.tip_d394, period.month());
     let an = period.year();
 
     // ── Build op1 list ────────────────────────────────────────────────────────
@@ -1239,6 +1258,22 @@ mod tests {
             purchase_invoice_count: 3,
             purchase_unparsed_count: 0,
         }
+    }
+
+    #[test]
+    fn period_attr_luna_by_periodicity() {
+        // Lunar: luna calendaristică.
+        assert_eq!(period_attr_luna("L", 6), 6);
+        // Trimestrial: ultima lună a trimestrului, indiferent de luna aleasă în trimestru.
+        assert_eq!(period_attr_luna("T", 1), 3); // Q1
+        assert_eq!(period_attr_luna("T", 2), 3);
+        assert_eq!(period_attr_luna("T", 4), 6); // Q2
+        assert_eq!(period_attr_luna("T", 9), 9); // Q3
+        assert_eq!(period_attr_luna("T", 11), 12); // Q4
+                                                   // Semestrial + anual.
+        assert_eq!(period_attr_luna("S", 3), 6);
+        assert_eq!(period_attr_luna("S", 8), 12);
+        assert_eq!(period_attr_luna("A", 5), 12);
     }
 
     #[test]
