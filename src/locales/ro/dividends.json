@@ -1,0 +1,29 @@
+{
+  "dividends": {
+    "title": "Dividende",
+    "sub": "Repartizare dividende + impozit pe dividende (16% de la 2026, 10% tranzitoriu) — postează nota 117/457/446 și termenul pentru decl. 100",
+    "selectCompany": "Selectați o companie activă.",
+    "distributionDate": "Data distribuirii",
+    "gross": "Sumă brută (lei)",
+    "paymentDate": "Data plății (opțional)",
+    "shareholder": "Asociat / acționar (opțional)",
+    "interim2025": "Situații financiare interimare 2025 (cota tranzitorie 10%)",
+    "interim2025Hint": "Bifați doar pentru dividende distribuite pe baza situațiilor interimare întocmite în 2025 — cota rămâne 10% chiar dacă plata e în 2026 (Legea 141/2025 art. VII).",
+    "add": "Adaugă dividend",
+    "saved": "Dividend înregistrat + notă contabilă postată.",
+    "saveFailed": "Înregistrarea dividendului a eșuat.",
+    "delete": "Șterge",
+    "deleteFailed": "Ștergerea a eșuat.",
+    "confirmDelete": "Ștergeți acest dividend? Se elimină și nota contabilă asociată.",
+    "empty": "Niciun dividend înregistrat.",
+    "col": {
+      "distribution": "Distribuit",
+      "gross": "Brut",
+      "rate": "Cotă",
+      "tax": "Impozit",
+      "net": "Net",
+      "deadline": "Termen impozit",
+      "shareholder": "Asociat"
+    }
+  }
+}

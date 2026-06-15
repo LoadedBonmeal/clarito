@@ -1290,6 +1290,78 @@ fn assert_balanced(entries: &[GlEntry], source_id: &str) -> AppResult<()> {
     Ok(())
 }
 
+// ─── Manual journal poster (dividende etc.) ─────────────────────────────────────
+
+/// Metadatele unei note contabile manuale (vezi [`post_manual_journal`]).
+pub(crate) struct ManualJournal<'a> {
+    pub company_id: &'a str,
+    pub journal_id: &'a str,
+    pub journal_type: &'a str,
+    pub source_type: &'a str,
+    pub source_id: &'a str,
+    pub date: &'a str,
+    pub description: &'a str,
+}
+
+/// Postează o notă contabilă MANUALĂ (ex. dividende) — idempotentă per
+/// (company_id, source_type, source_id): șterge orice jurnal existent cu aceeași sursă și
+/// reinserează. `lines` = (cont, debit, credit); întreaga notă trebuie să fie echilibrată
+/// (Σdebit == Σcredit, toleranță 0,005). Liniile sunt non-TVA (tax_type "000"). NU este atinsă de
+/// `generate_gl_entries` (care șterge doar propriile source_type), deci persistă la regenerarea perioadei.
+pub(crate) async fn post_manual_journal(
+    pool: &SqlitePool,
+    j: &ManualJournal<'_>,
+    lines: &[(&str, Decimal, Decimal)],
+) -> AppResult<()> {
+    let entries: Vec<GlEntry> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, (acct, d, c))| GlEntry {
+            id: new_id(),
+            record_id: (i + 1) as i64,
+            account_code: (*acct).to_string(),
+            debit: *d,
+            credit: *c,
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "000".to_string(),
+            tax_code: "000000".to_string(),
+            tax_percentage: None,
+            tax_base: None,
+            tax_amount: None,
+        })
+        .collect();
+    assert_balanced(&entries, j.source_id)?;
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM gl_journal WHERE company_id=?1 AND source_type=?2 AND source_id=?3")
+        .bind(j.company_id)
+        .bind(j.source_type)
+        .bind(j.source_id)
+        .execute(&mut *tx)
+        .await?;
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: j.company_id.to_string(),
+        journal_id: j.journal_id.to_string(),
+        journal_type: j.journal_type.to_string(),
+        transaction_id: j.source_id.to_string(),
+        transaction_date: j.date.to_string(),
+        description: Some(j.description.to_string()),
+        source_type: j.source_type.to_string(),
+        source_id: j.source_id.to_string(),
+        customer_id: None,
+        supplier_id: None,
+    };
+    insert_journal(&mut tx, &journal).await?;
+    for e in &entries {
+        insert_entry(&mut tx, &journal.id, e).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 // ─── Main posting function ────────────────────────────────────────────────────
 
 /// Generează (sau re-generează) notele contabile GL pentru o perioadă.

@@ -606,6 +606,38 @@ export const saft = {
     }),
 };
 
+// ─── Dividende (impozit pe dividende, Legea 141/2025) ───────────────────────
+
+export interface Dividend {
+  id: string;
+  companyId: string;
+  distributionDate: string;
+  paymentDate: string | null;
+  grossAmount: string;
+  taxRate: number;
+  taxAmount: string;
+  netAmount: string;
+  interim2025: boolean;
+  shareholder: string | null;
+  note: string | null;
+  taxDeadline: string;
+}
+export interface DividendInput {
+  companyId: string;
+  distributionDate: string;
+  paymentDate?: string | null;
+  grossAmount: string;
+  interim2025?: boolean;
+  shareholder?: string | null;
+  note?: string | null;
+}
+export const dividends = {
+  list: (companyId: string) => invoke<Dividend[]>("list_dividends", { companyId }),
+  create: (input: DividendInput) => invoke<Dividend>("create_dividend", { input }),
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_dividend", { id, companyId }),
+};
+
 // ─── GL — Jurnal contabil ──────────────────────────────────────────────────
 
 export const gl = {
@@ -1098,6 +1130,7 @@ export const api = {
   stockValuation,
   payroll,
   saft,
+  dividends,
   settings,
   system,
   ubl,

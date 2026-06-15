@@ -33,6 +33,7 @@ pub mod contacts;
 pub mod d390;
 pub mod d394;
 pub mod declarations;
+pub mod dividends;
 pub mod etransport;
 pub mod feedback;
 pub mod gdpr;

@@ -89,6 +89,7 @@ export function Sidebar() {
       { key: "mijloace-fixe", label: t("shell.nav.assets"), icon: "wrench", path: "/assets", more: true },
       { key: "plan-conturi", label: t("shell.nav.accounts"), icon: "book", path: "/accounts", more: true },
       { key: "cote-tva", label: t("shell.nav.vatRates"), icon: "scale", path: "/vat-rates", more: true },
+      { key: "dividende", label: t("shell.nav.dividends"), icon: "incasat", path: "/dividends", more: true },
     ]},
     { id: "raportare", sec: t("shell.nav.groupReporting"), items: [
       { key: "rapoarte", label: t("shell.nav.reports"), icon: "chart", path: "/reports" },

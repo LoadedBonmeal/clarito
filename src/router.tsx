@@ -59,6 +59,7 @@ import { NotificationsPage } from "@/pages/Notifications";
 import { ContactsPage } from "@/pages/Contacts";
 import { PayrollPage } from "@/pages/Payroll";
 import { AssetsPage } from "@/pages/Assets";
+import { Dividends } from "@/pages/Dividends";
 import { ReportsPage } from "@/pages/Reports";
 import { EtransportPage } from "@/pages/Etransport";
 import { SettingsPage } from "@/pages/Settings";
@@ -193,6 +194,12 @@ const assetsRoute = createRoute({
   component: AssetsPage,
 });
 
+const dividendsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dividends",
+  component: Dividends,
+});
+
 const reportsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/reports",
@@ -309,6 +316,7 @@ const routeTree = rootRoute.addChildren([
   contactsRoute,
   payrollRoute,
   assetsRoute,
+  dividendsRoute,
   productsRoute,
   receiptsRoute,
   vatRatesRoute,

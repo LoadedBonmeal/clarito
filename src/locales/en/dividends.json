@@ -1,0 +1,29 @@
+{
+  "dividends": {
+    "title": "Dividends",
+    "sub": "Dividend distribution + dividend tax (16% from 2026, 10% transitional) — posts the 117/457/446 entry and the D100 deadline",
+    "selectCompany": "Select an active company.",
+    "distributionDate": "Distribution date",
+    "gross": "Gross amount (lei)",
+    "paymentDate": "Payment date (optional)",
+    "shareholder": "Shareholder (optional)",
+    "interim2025": "2025 interim financial statements (transitional 10% rate)",
+    "interim2025Hint": "Tick only for dividends distributed on 2025 interim statements — the rate stays 10% even if paid in 2026 (Law 141/2025 art. VII).",
+    "add": "Add dividend",
+    "saved": "Dividend recorded + GL entry posted.",
+    "saveFailed": "Recording the dividend failed.",
+    "delete": "Delete",
+    "deleteFailed": "Delete failed.",
+    "confirmDelete": "Delete this dividend? Its GL entry is removed too.",
+    "empty": "No dividends recorded.",
+    "col": {
+      "distribution": "Distributed",
+      "gross": "Gross",
+      "rate": "Rate",
+      "tax": "Tax",
+      "net": "Net",
+      "deadline": "Tax deadline",
+      "shareholder": "Shareholder"
+    }
+  }
+}
