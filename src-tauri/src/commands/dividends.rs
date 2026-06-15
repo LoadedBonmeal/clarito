@@ -130,10 +130,9 @@ pub async fn export_d205_official(
     // Gate-ul DUK se activează automat când jar-ul e prezent în `resources/duk/lib/`.
     let d205_jar = {
         use tauri::Manager;
-        app.path()
-            .resource_dir()
-            .unwrap_or_default()
-            .join("duk/lib/D205Validator.jar")
+        let root =
+            crate::anaf_decl::duk::bundled_res_root(&app.path().resource_dir().unwrap_or_default());
+        root.join("duk/lib/D205Validator.jar")
     };
     let duk = if d205_jar.is_file() {
         crate::anaf_decl::duk::run_duk(&provider, DeclKind::D205, &tmp)?

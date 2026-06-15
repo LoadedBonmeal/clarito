@@ -208,13 +208,13 @@ pub async fn validate_declaration_xml(
         }
     };
     // Jar-ul validatorului poate lipsi (ex. D205 pe unele build-uri) — verificăm înainte, fiindcă
-    // `run_duk` ar întoarce o eroare „validator neinstalat" în loc de un verdict.
+    // `run_duk` ar întoarce o eroare „validator neinstalat" în loc de un verdict. Folosim aceeași
+    // rezolvare ca `BundledProvider` (Tauri păstrează prefixul `resources/` în pachet).
     let jar = {
         use tauri::Manager;
-        app.path()
-            .resource_dir()
-            .unwrap_or_default()
-            .join(format!("duk/lib/{}Validator.jar", kind.as_duk_type()))
+        let root =
+            crate::anaf_decl::duk::bundled_res_root(&app.path().resource_dir().unwrap_or_default());
+        root.join(format!("duk/lib/{}Validator.jar", kind.as_duk_type()))
     };
     if !jar.is_file() {
         return Ok(XmlDukValidation {

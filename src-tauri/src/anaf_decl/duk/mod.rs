@@ -46,6 +46,19 @@ impl DukProvider for EnvProvider {
     }
 }
 
+/// Directory that actually holds the bundled `duk/` + `jre-min/`. Tauri bundles the
+/// `resources/duk/**` + `resources/jre-min/**` globs PRESERVING the `resources/` prefix, so in the
+/// packaged app they live at `<resource_dir>/resources/duk`, not `<resource_dir>/duk`. Prefer the
+/// nested layout when present and fall back to the resource dir itself (covers flat/dev layouts).
+pub fn bundled_res_root(resource_dir: &std::path::Path) -> PathBuf {
+    let nested = resource_dir.join("resources");
+    if nested.join("duk").is_dir() {
+        nested
+    } else {
+        resource_dir.to_path_buf()
+    }
+}
+
 /// Runtime provider: resolves the jlink JRE + DUK jars bundled as Tauri resources.
 pub struct BundledProvider {
     jre_bin: PathBuf,
@@ -55,15 +68,15 @@ pub struct BundledProvider {
 impl BundledProvider {
     pub fn new(app: &tauri::AppHandle) -> Self {
         use tauri::Manager;
-        let res = app.path().resource_dir().unwrap_or_default();
+        let root = bundled_res_root(&app.path().resource_dir().unwrap_or_default());
         let java = if cfg!(windows) {
             "jre-min/bin/java.exe"
         } else {
             "jre-min/bin/java"
         };
         Self {
-            jre_bin: res.join(java),
-            jar_dir: res.join("duk"),
+            jre_bin: root.join(java),
+            jar_dir: root.join("duk"),
         }
     }
 }
