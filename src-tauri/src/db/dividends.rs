@@ -236,6 +236,61 @@ pub async fn dividend_tax_due_in_period(
     Ok(total)
 }
 
+/// Denumirea oficială ANAF a obligației de impozit pe dividende în Declarația 100. NU există un cod 7xx
+/// dedicat — în Nomenclatorul obligațiilor obligația se selectează după DENUMIRE. Modelul curent nu
+/// stochează tipul beneficiarului (persoană fizică vs juridică), deci folosim denumirea combinată
+/// (art. 97 — persoane fizice / art. 43 — persoane juridice, Cod fiscal).
+pub const DIVIDEND_D100_LABEL: &str =
+    "Impozit pe dividende distribuite/plătite persoanelor fizice/juridice (art. 97/43 C.fisc.)";
+
+/// O linie informativă de obligație de impozit pe dividende pentru Declarația 100: denumirea oficială,
+/// suma reținută și scadența (25 a lunii). D100 NU emite XML (se depune prin PDF inteligent + SPV), deci
+/// rândul e pur INFORMATIV — semnalează contribuabilului obligația de a declara impozitul la termen.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DividendObligation {
+    pub label: String,
+    /// Suma impozitului reținut (lei, 2 zecimale — suma exactă din notele 446).
+    pub amount: String,
+    /// Scadența declarării/plății (zz.ll.aaaa) — 25 a lunii următoare plății.
+    pub deadline: String,
+    /// Numărul de distribuiri agregate în această obligație.
+    pub count: u32,
+}
+
+/// Obligațiile de impozit pe dividende cu scadența în lunile date (rânduri informative pentru D100).
+/// `months` = liste de `YYYY-MM` (de regulă cele 3 luni ale trimestrului afișat). Grupează pe lună de
+/// scadență; o linie per lună cu impozit > 0 (sumă + scadența 25.LL.AAAA + numărul de distribuiri).
+/// Datele ISO se compară lexicografic (cf. restul modulului).
+pub async fn dividend_obligations_in_months(
+    pool: &SqlitePool,
+    company_id: &str,
+    months: &[String],
+) -> AppResult<Vec<DividendObligation>> {
+    let all = list(pool, company_id).await?;
+    let mut out = Vec::new();
+    for ym in months {
+        let mut sum = Decimal::ZERO;
+        let mut count = 0u32;
+        for d in &all {
+            if d.tax_deadline.starts_with(ym.as_str()) {
+                sum += Decimal::from_str(d.tax_amount.trim()).unwrap_or(Decimal::ZERO);
+                count += 1;
+            }
+        }
+        if count > 0 {
+            let (y, m) = ym.split_once('-').unwrap_or(("", ""));
+            out.push(DividendObligation {
+                label: DIVIDEND_D100_LABEL.to_string(),
+                amount: round2(sum).to_string(),
+                deadline: format!("25.{m}.{y}"),
+                count,
+            });
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,5 +387,74 @@ mod tests {
                 .unwrap()
                 .get("n");
         assert_eq!(after, 0, "ștergerea dividendului curăță nota GL");
+    }
+
+    #[tokio::test]
+    async fn obligations_grouped_by_deadline_month_for_quarter() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co-1','12345678','Test SRL','Str 1','Bucuresti','B','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Două distribuiri plătite în iunie → ambele scadente 25.07 (deci aceeași lună de scadență,
+        // agregate într-o singură obligație), plus una plătită în iulie → scadentă 25.08.
+        for pay in ["2026-06-10", "2026-06-20"] {
+            create(
+                &pool,
+                DividendInput {
+                    company_id: "co-1".into(),
+                    distribution_date: "2026-06-01".into(),
+                    payment_date: Some(pay.into()),
+                    gross_amount: "10000".into(),
+                    interim_2025: false,
+                    shareholder: Some("Asociat".into()),
+                    note: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        create(
+            &pool,
+            DividendInput {
+                company_id: "co-1".into(),
+                distribution_date: "2026-07-01".into(),
+                payment_date: Some("2026-07-15".into()),
+                gross_amount: "5000".into(),
+                interim_2025: false,
+                shareholder: Some("Asociat".into()),
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Trimestrul III (iul-aug-sep): lunile de scadență 2026-07, 2026-08, 2026-09.
+        let months = vec![
+            "2026-07".to_string(),
+            "2026-08".to_string(),
+            "2026-09".to_string(),
+        ];
+        let obls = dividend_obligations_in_months(&pool, "co-1", &months)
+            .await
+            .unwrap();
+        assert_eq!(
+            obls.len(),
+            2,
+            "două luni de scadență cu impozit (iul + aug)"
+        );
+        // 25.07: 2 × (10000 × 16%) = 2 × 1600 = 3200, count 2.
+        assert_eq!(obls[0].deadline, "25.07.2026");
+        assert_eq!(obls[0].amount, "3200.00");
+        assert_eq!(obls[0].count, 2);
+        assert!(obls[0].label.contains("dividende"));
+        // 25.08: 5000 × 16% = 800, count 1.
+        assert_eq!(obls[1].deadline, "25.08.2026");
+        assert_eq!(obls[1].amount, "800.00");
+        assert_eq!(obls[1].count, 1);
     }
 }

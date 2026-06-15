@@ -33,8 +33,24 @@ pub async fn compute_payroll(input: PayrollInput) -> AppResult<PayrollResult> {
     Ok(compute_payroll_fn(&input))
 }
 
+/// Rezultatul comenzii D100 = rândul de obligație (micro/profit) + obligațiile INFORMATIVE de impozit pe
+/// dividende cu scadența în trimestru. `#[serde(flatten)]` păstrează câmpurile `D100Result` la nivel
+/// superior (compatibil cu frontend-ul existent) și adaugă `dividendObligations`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct D100CommandResult {
+    #[serde(flatten)]
+    pub d100: D100Result,
+    /// Obligații de impozit pe dividende cu scadența în trimestrul afișat (informativ — D100 nu emite
+    /// XML; validarea ANAF se face prin PDF inteligent + SPV). Gol dacă nu există dividende cu scadența
+    /// în perioadă.
+    pub dividend_obligations: Vec<crate::db::dividends::DividendObligation>,
+}
+
 /// D100 (obligații de plată) — rândul trimestrial: micro poziția 5 (1% × venituri) sau profit
 /// poziția 2 (16% × rezultat), din P&L-ul perioadei; suma de plată = datorată − plăți anterioare.
+/// Returnează ȘI obligațiile de impozit pe dividende cu scadența în trimestru (informativ — vezi
+/// `D100CommandResult`).
 #[tauri::command]
 pub async fn compute_d100(
     state: State<'_, AppState>,
@@ -44,7 +60,7 @@ pub async fn compute_d100(
     quarter: u32,
     year: i32,
     prior_payments: String,
-) -> AppResult<D100Result> {
+) -> AppResult<D100CommandResult> {
     let company = companies::get(&state.db, &company_id).await?;
     let pnl = crate::db::gl::profit_and_loss(
         &state.db,
@@ -86,7 +102,24 @@ pub async fn compute_d100(
         result: pnl.gross_result.parse().unwrap_or(Decimal::ZERO),
         prior_payments: prior,
     };
-    Ok(compute_d100_fn(&company.tax_regime, &input))
+    let d100 = compute_d100_fn(&company.tax_regime, &input);
+
+    // Obligațiile INFORMATIVE de impozit pe dividende cu scadența în trimestrul afișat. D100 nu emite
+    // XML, dar impozitul pe dividende SE declară prin D100 (lunar, 25 a lunii următoare plății), așa că
+    // semnalăm contribuabilului obligațiile scadente în cele 3 luni ale trimestrului. `clamp(1,4)` evită
+    // un underflow pe `quarter-1` dacă vine 0 (frontend-ul derivă quarter din dată, deci 1-4).
+    let q = quarter.clamp(1, 4);
+    let months: Vec<String> = (1..=3)
+        .map(|i| format!("{year:04}-{:02}", (q - 1) * 3 + i))
+        .collect();
+    let dividend_obligations =
+        crate::db::dividends::dividend_obligations_in_months(&state.db, &company_id, &months)
+            .await?;
+
+    Ok(D100CommandResult {
+        d100,
+        dividend_obligations,
+    })
 }
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;

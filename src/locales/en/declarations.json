@@ -289,6 +289,12 @@
         "owed": "Owed",
         "toPay": "Payable",
         "deadline": "Due date"
+      },
+      "dividends": {
+        "title": "Dividend tax (informational)",
+        "note": "Dividend-tax obligations due this quarter. The tax is declared via D100, due the 25th of the month after payment. Informational row — D100 has no XML/DUK validation; confirm and file through the ANAF smart PDF + SPV.",
+        "amount": "Tax withheld",
+        "count": "{{count}} distributions"
       }
     },
     "d101": {

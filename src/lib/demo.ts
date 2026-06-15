@@ -239,6 +239,37 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
   list_certificates: () => [],
   get_archive_size: () => 0,
   verify_archive_integrity: () => ({ checked: 0, missing: [], missingUnderRetention: [] }),
+  // D100 (micro) demo row + a sample dividend obligation due in the quarter (informational — D100 has
+  // no XML/DUK; surfaced so the user is reminded to declare it). Quarter/year come from the view.
+  compute_d100: (a) => {
+    const q = Math.min(4, Math.max(1, Number(a?.quarter) || 2));
+    const year = Number(a?.year) || 2026;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const scaMonth = q * 3 + 1;
+    const scadenta = scaMonth > 12 ? `25.01.${year + 1}` : `25.${pad(scaMonth)}.${year}`;
+    const divMonth = (q - 1) * 3 + 2; // a month inside the quarter
+    return {
+      applicable: true,
+      note: null,
+      codOblig: "5",
+      label: "Impozit pe veniturile microîntreprinderilor (1%)",
+      base: "248310",
+      ratePct: "1",
+      sumaDatorata: "2483",
+      priorPayments: "0",
+      sumaDePlata: "2483",
+      scadenta,
+      dividendObligations: [
+        {
+          label:
+            "Impozit pe dividende distribuite/plătite persoanelor fizice/juridice (art. 97/43 C.fisc.)",
+          amount: "3200.00",
+          deadline: `25.${pad(divMonth)}.${year}`,
+          count: 2,
+        },
+      ],
+    };
+  },
 };
 
 export function demoInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

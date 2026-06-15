@@ -121,6 +121,42 @@ export function D100View({ dateFrom, dateTo }: Props) {
           </tbody>
         </table>
       )}
+
+      {/* Obligații de impozit pe dividende cu scadența în trimestru — INFORMATIV (D100 nu emite XML;
+          se depune prin PDF inteligent + SPV). Afișat și când rândul micro/profit nu se aplică (T4 profit). */}
+      {r && r.dividendObligations && r.dividendObligations.length > 0 && (
+        <div style={{ padding: "12px 16px 0" }}>
+          <div className="banner">
+            <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: IC_INFO }} />
+            <span>{t("declarations.d100.dividends.note")}</span>
+          </div>
+          <table className="scr-table" style={{ marginTop: 10 }}>
+            <thead>
+              <tr>
+                <th>{t("declarations.d100.dividends.title")}</th>
+                <th className="r">{t("declarations.d100.dividends.amount")}</th>
+                <th>{t("declarations.d100.headers.deadline")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.dividendObligations.map((o, i) => (
+                <tr key={i}>
+                  <td>
+                    {o.label}
+                    {o.count > 1 && (
+                      <span style={{ color: "var(--text-2)" }}>
+                        {" · "}{t("declarations.d100.dividends.count", { count: o.count })}
+                      </span>
+                    )}
+                  </td>
+                  <td className="r num"><b>{fmtRON(o.amount)}</b></td>
+                  <td className="num">{o.deadline}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

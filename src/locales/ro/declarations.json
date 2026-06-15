@@ -293,6 +293,12 @@
         "owed": "Datorat",
         "toPay": "De plată",
         "deadline": "Scadență"
+      },
+      "dividends": {
+        "title": "Impozit pe dividende (informativ)",
+        "note": "Obligații de impozit pe dividende cu scadența în acest trimestru. Impozitul se declară prin D100, cu termen 25 a lunii următoare plății. Rând informativ — D100 nu are XML/validare DUK; confirmați și depuneți prin PDF inteligent ANAF + SPV.",
+        "amount": "Impozit reținut",
+        "count": "{{count}} distribuiri"
       }
     },
     "d101": {

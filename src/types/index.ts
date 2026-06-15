@@ -1264,7 +1264,18 @@ export interface IntrastatStatus {
   arrivals: IntrastatFlowStatus;
 }
 
-/** D100 (obligații de plată) — quarterly obligation row. */
+/** Obligație informativă de impozit pe dividende în D100 (denumire oficială + sumă + scadență 25 a lunii). */
+export interface DividendObligation {
+  label: string;
+  /** Suma impozitului reținut (lei, 2 zecimale). */
+  amount: string;
+  /** Scadența declarării/plății — zz.ll.aaaa. */
+  deadline: string;
+  /** Numărul de distribuiri agregate. */
+  count: number;
+}
+
+/** D100 (obligații de plată) — quarterly obligation row + dividend obligations due in the quarter. */
 export interface D100Result {
   /** False când D100 nu se aplică (profit, trim. IV → se regularizează prin D101). */
   applicable: boolean;
@@ -1277,6 +1288,8 @@ export interface D100Result {
   priorPayments: string;
   sumaDePlata: string;
   scadenta: string;
+  /** Obligații INFORMATIVE de impozit pe dividende cu scadența în trimestru (D100 nu emite XML). */
+  dividendObligations: DividendObligation[];
 }
 
 /** D101 (impozit pe profit) worksheet adjustments — the user-entered fiscal items. */
