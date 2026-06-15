@@ -727,19 +727,25 @@ pub async fn mark_validated(
     anaf_index: Option<String>,
 ) -> AppResult<()> {
     let now = now_unix();
-    sqlx::query(
+    // Guard the transition like mark_submitted does: only a SUBMITTED invoice (or one stuck QUEUED by
+    // a mark_submitted fallback) may become VALIDATED. A stale/replayed ANAF status callback, or a
+    // since-deleted row, must NOT silently jump an invoice from DRAFT/STORNED/REJECTED/already-VALIDATED.
+    let res = sqlx::query(
         "UPDATE invoices SET
             status           = 'VALIDATED',
             anaf_index       = ?2,
             anaf_validated_at = ?3,
             updated_at        = ?3
-        WHERE id = ?1",
+        WHERE id = ?1 AND status IN ('SUBMITTED', 'QUEUED')",
     )
     .bind(id)
     .bind(anaf_index)
     .bind(now)
     .execute(pool)
     .await?;
+    if res.rows_affected() != 1 {
+        tracing::warn!(%id, "mark_validated: 0 rows (invoice not SUBMITTED/QUEUED) — stale/duplicate ANAF callback or deleted row; status unchanged");
+    }
     Ok(())
 }
 
@@ -750,14 +756,17 @@ pub async fn mark_rejected(
     code: Option<String>,
 ) -> AppResult<()> {
     let now = now_unix();
-    sqlx::query(
+    // Same transition guard as mark_validated: only SUBMITTED (or QUEUED via the mark_submitted
+    // fallback) → REJECTED. Prevents a stale/replayed ANAF callback from mis-transitioning a
+    // DRAFT/STORNED/VALIDATED/deleted invoice.
+    let res = sqlx::query(
         "UPDATE invoices SET
             status           = 'REJECTED',
             rejection_reason = ?2,
             rejection_code   = ?3,
             anaf_rejected_at = ?4,
             updated_at       = ?4
-        WHERE id = ?1",
+        WHERE id = ?1 AND status IN ('SUBMITTED', 'QUEUED')",
     )
     .bind(id)
     .bind(reason)
@@ -765,6 +774,9 @@ pub async fn mark_rejected(
     .bind(now)
     .execute(pool)
     .await?;
+    if res.rows_affected() != 1 {
+        tracing::warn!(%id, "mark_rejected: 0 rows (invoice not SUBMITTED/QUEUED) — stale/duplicate ANAF callback or deleted row; status unchanged");
+    }
     Ok(())
 }
 

@@ -322,8 +322,9 @@ pub async fn import_invoices_csv(
     // bump is skipped (R9 #9 hardening).  If any INSERT fails the whole batch
     // rolls back and no bump happens.
     if !dry_run && !valid_rows.is_empty() {
-        let mut tx = pool.begin().await.map_err(AppError::Database)?;
-
+        // Per-row transaction: a single bad row (e.g. a duplicate series+number) is skipped and
+        // reported in `errors`, NOT rolled back together with the whole batch. last_invoice_number is
+        // bumped once after the loop, over the rows that actually committed.
         for row in &valid_rows {
             let row_num = row.row_num;
 
@@ -339,7 +340,15 @@ pub async fn import_invoices_csv(
             let invoice_id = crate::db::models::new_id();
             let line_id = crate::db::models::new_id();
 
-            // D4: Find or create contact within the transaction.
+            let mut tx = match pool.begin().await {
+                Ok(t) => t,
+                Err(e) => {
+                    errors.push(format!("Linia {row_num}: eroare tranzacție: {e}"));
+                    continue;
+                }
+            };
+
+            // D4: Find or create contact within this row's transaction.
             // Dedup is only done when customer_cui is non-empty — blank CUIs
             // are B2C customers that must NOT be merged across rows (different
             // people can share an empty CUI).  For blank CUI we always insert
@@ -377,8 +386,7 @@ pub async fn import_invoices_csv(
                         Ok(id) => id,
                         Err(e) => {
                             errors.push(format!("Linia {row_num}: eroare DB contact: {e}"));
-                            let _ = tx.rollback().await;
-                            return Ok(ImportResult { imported, errors });
+                            continue;
                         }
                     },
                     Ok(None) => {
@@ -404,15 +412,13 @@ pub async fn import_invoices_csv(
                         .await;
                         if let Err(e) = res {
                             errors.push(format!("Linia {row_num}: eroare creare contact: {e}"));
-                            let _ = tx.rollback().await;
-                            return Ok(ImportResult { imported, errors });
+                            continue;
                         }
                         new_id
                     }
                     Err(e) => {
                         errors.push(format!("Linia {row_num}: eroare DB contact: {e}"));
-                        let _ = tx.rollback().await;
-                        return Ok(ImportResult { imported, errors });
+                        continue;
                     }
                 }
             };
@@ -443,8 +449,7 @@ pub async fn import_invoices_csv(
 
             if let Err(e) = inv_res {
                 errors.push(format!("Linia {row_num}: eroare inserare factură: {e}"));
-                let _ = tx.rollback().await;
-                return Ok(ImportResult { imported, errors });
+                continue;
             }
 
             // Insert line item
@@ -472,33 +477,37 @@ pub async fn import_invoices_csv(
                 errors.push(format!(
                     "Linia {row_num}: eroare inserare linie factură: {e}"
                 ));
-                let _ = tx.rollback().await;
-                return Ok(ImportResult { imported, errors });
+                continue;
             }
 
-            // Track highest number among rows scheduled for this transaction.
+            // Commit THIS row. A failure (e.g. duplicate series+number tripping the UNIQUE index)
+            // is reported and skipped — the rows already committed are kept.
+            if let Err(e) = tx.commit().await {
+                errors.push(format!("Linia {row_num}: eroare salvare factură: {e}"));
+                continue;
+            }
+            imported += 1;
+            // Track the highest committed number to advance the company counter past the import.
             if row.number > max_imported_number {
                 max_imported_number = row.number;
             }
         }
 
-        // ── Advance companies.last_invoice_number inside the same tx ──────
-        // The bump is part of this transaction: either the invoices AND the
-        // number advance commit together, or none do (R9 #9 hardening).
-        // SQLite does not support MAX() in an UPDATE directly; use CASE.
-        sqlx::query(
-            "UPDATE companies SET last_invoice_number = \
-             CASE WHEN last_invoice_number < ?1 THEN ?1 ELSE last_invoice_number END \
-             WHERE id = ?2",
-        )
-        .bind(max_imported_number)
-        .bind(&company_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(AppError::Database)?;
-
-        tx.commit().await.map_err(AppError::Database)?;
-        imported = valid_rows.len() as u32;
+        // ── Advance companies.last_invoice_number once, over the rows that committed ──────
+        // Best-effort: each invoice is already durable; the counter just moves past the imported
+        // numbers so a future manual invoice doesn't collide. SQLite has no MAX() in UPDATE → CASE.
+        if max_imported_number > 0 {
+            sqlx::query(
+                "UPDATE companies SET last_invoice_number = \
+                 CASE WHEN last_invoice_number < ?1 THEN ?1 ELSE last_invoice_number END \
+                 WHERE id = ?2",
+            )
+            .bind(max_imported_number)
+            .bind(&company_id)
+            .execute(pool)
+            .await
+            .map_err(AppError::Database)?;
+        }
     }
 
     Ok(ImportResult { imported, errors })

@@ -332,9 +332,20 @@ pub fn compute_depreciation(
     // "after end month". The final month (n == life_months) absorbs the rounding remainder → cost.
     let (pif_y, pif_m) = parse_ym(&asset.start_up_date);
     let pif = pif_y * 12 + pif_m as i64;
+    // Scoaterea din funcțiune: NU se mai amortizează în luna scoaterii sau după (art. 28 Cod fiscal /
+    // OMFP 1802/2014 — simetric cu „începe în luna următoare PIF"). Ultima lună amortizată = luna
+    // DINAINTEA scoaterii ⇒ indexul-cap = (luna scoaterii) − PIF − 1. Valoarea rămasă neamortizată se
+    // descarcă prin scoatere (câștig/pierdere), nu prin amortizare.
+    let disp_last_index: Option<i64> = asset.disposal_date.as_deref().map(|dd| {
+        let (dy, dm) = parse_ym(dd);
+        (dy * 12 + dm as i64) - pif - 1
+    });
     let acc_after = |as_of: &str| -> Decimal {
         let (y, m) = parse_ym(as_of);
-        let n = (y * 12 + m as i64) - pif; // depreciable-month index at this month
+        let mut n = (y * 12 + m as i64) - pif; // depreciable-month index at this month
+        if let Some(last) = disp_last_index {
+            n = n.min(last); // nu se acumulează în/​după luna scoaterii din funcțiune
+        }
         if n < 1 {
             Decimal::ZERO
         } else if n >= asset.life_months {
@@ -789,6 +800,27 @@ mod tests {
         let calc = compute_depreciation(&asset, "2026-01-01", "2026-12-31");
         assert_eq!(calc.accumulated_end, Decimal::from_str("6000.00").unwrap());
         assert_eq!(calc.book_value_end, Decimal::ZERO);
+    }
+
+    #[test]
+    fn depreciation_stops_in_disposal_month() {
+        // cost=1200, life=12m, PIF Jan 2025 (charges Feb..). Disposed 2025-06-10 → NU se amortizează
+        // în iunie (luna scoaterii); ultima lună amortizată = mai. Σ Feb-Mai = 4×100 = 400.
+        let mut asset = sample_asset("1200.00", 12, "2025-01-01");
+        asset.disposal_date = Some("2025-06-10".into());
+        // mai (a 4-a lună amortizabilă): se încarcă 100.
+        let may = compute_depreciation(&asset, "2025-05-01", "2025-05-31");
+        assert_eq!(may.for_period, Decimal::from_str("100.00").unwrap());
+        assert_eq!(may.accumulated_end, Decimal::from_str("400.00").unwrap());
+        // iunie (luna scoaterii din funcțiune): 0 — înainte de fix se încărca o lună întreagă.
+        let jun = compute_depreciation(&asset, "2025-06-01", "2025-06-30");
+        assert_eq!(jun.for_period, Decimal::ZERO);
+        assert_eq!(jun.accumulated_end, Decimal::from_str("400.00").unwrap());
+        // valoarea rămasă (800) se descarcă prin scoatere, nu prin amortizare.
+        assert_eq!(jun.book_value_end, Decimal::from_str("800.00").unwrap());
+        // după scoatere: tot 0.
+        let jul = compute_depreciation(&asset, "2025-07-01", "2025-07-31");
+        assert_eq!(jul.for_period, Decimal::ZERO);
     }
 
     #[test]
