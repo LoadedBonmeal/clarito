@@ -161,6 +161,12 @@
       "infoText": "The standard audit file for tax (SAF-T) contains the detailed accounting data requested by ANAF: accounts, journals, invoices, stock and assets. Starting with 2025, filing D406 monthly is mandatory for medium and large taxpayers.",
       "banner": "For small companies, the D406 filing deadline has been postponed. Check your company's specific obligation.",
       "selectedPeriod": "Selected period:",
+      "cadence": {
+        "label": "Cadence (= VAT period):",
+        "monthly": "Monthly",
+        "quarterly": "Quarterly",
+        "annual": "Annual"
+      },
       "invoicesAvailable_one": "{{count}} invoice available for {{year}}",
       "invoicesAvailable_other": "{{count}} invoices available for {{year}}",
       "noInvoices": "no invoice available for {{year}}",

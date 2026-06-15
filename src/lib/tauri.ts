@@ -593,12 +593,15 @@ export const saft = {
   exportSaftOfficial: (
     companyId: string,
     year: number,
-    month: number,
+    month: number | null,
     destPath: string,
     skipDukOverride = false,
+    // Trimestrial: pasați quarter (1-4) cu month=null → D406 periodic pe trimestru. month=null +
+    // quarter=null → declarația anuală (profil A).
+    quarter: number | null = null,
   ) =>
     invoke<OfficialExportResult>("export_saft_official", {
-      params: { companyId, year, month, destPath },
+      params: { companyId, year, month, quarter, destPath },
       skipDukOverride,
     }),
 };

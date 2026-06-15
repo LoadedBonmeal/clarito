@@ -38,16 +38,32 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
   const [exporting,         setExporting]         = useState(false);
   const [exportingOfficial, setExportingOfficial] = useState(false);
   const [dukBlock,          setDukBlock]          = useState<PreflightIssue[] | null>(null);
+  // Cadența D406 = perioada fiscală TVA (OPANAF 1783/2021 Anexa 5): lunar / trimestrial / anual.
+  // Trimestrul se derivă din luna selectată în antet.
+  const [cadence, setCadence] = useState<"monthly" | "quarterly" | "annual">("monthly");
+  const quarter = Math.ceil(selectedMonth / 3); // 1-4
 
   const monthKey  = MONTH_KEYS[selectedMonth - 1];
   const monthName = monthKey ? t(`declarations.months.${monthKey}`) : String(selectedMonth);
-  const period    = `${monthName} ${selectedYear}`;
+  const period =
+    cadence === "monthly"
+      ? `${monthName} ${selectedYear}`
+      : cadence === "quarterly"
+        ? `T${quarter} ${selectedYear}`
+        : `${selectedYear}`;
 
-  // Compute period strings for preflight (first→last day of selected month).
+  // Compute period strings for preflight, cadence-aware (first→last day of the reporting period).
   const mm = String(selectedMonth).padStart(2, "0");
   const lastDay = new Date(selectedYear, selectedMonth, 0).getDate();
-  const periodFrom = `${selectedYear}-${mm}-01`;
-  const periodTo   = `${selectedYear}-${mm}-${String(lastDay).padStart(2, "0")}`;
+  const [periodFrom, periodTo] =
+    cadence === "monthly"
+      ? [`${selectedYear}-${mm}-01`, `${selectedYear}-${mm}-${String(lastDay).padStart(2, "0")}`]
+      : cadence === "quarterly"
+        ? [
+            `${selectedYear}-${String((quarter - 1) * 3 + 1).padStart(2, "0")}-01`,
+            `${selectedYear}-${String(quarter * 3).padStart(2, "0")}-${String(new Date(selectedYear, quarter * 3, 0).getDate()).padStart(2, "0")}`,
+          ]
+        : [`${selectedYear}-01-01`, `${selectedYear}-12-31`];
 
   // ── Pre-export validation (preflight) ──────────────────────────────────────
   const { data: preflightIssues = [] } = useQuery({
@@ -86,21 +102,24 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
 
   const handleExportOfficial = async (override = false) => {
     if (!activeCompanyId) { notify.warn(t("declarations.notify.selectCompany")); return; }
+    const fileTag =
+      cadence === "monthly" ? mm : cadence === "quarterly" ? `T${quarter}` : "anual";
     const savePath = await saveDialog({
       title:       t("reports.dialogs.saveSaftOfficial"),
-      defaultPath: `d406-oficial-${selectedYear}-${mm}.xml`,
+      defaultPath: `d406-oficial-${selectedYear}-${fileTag}.xml`,
       filters:     [{ name: "XML", extensions: ["xml"] }],
     });
     if (!savePath) return;
     setExportingOfficial(true);
     try {
-      // export_saft_official takes params wrapper: { companyId, year, month, destPath }
+      // export_saft_official: month (lunar) XOR quarter (trimestrial); both null → anual (profil A).
       const res = await api.saft.exportSaftOfficial(
         activeCompanyId,
         selectedYear,
-        selectedMonth,
+        cadence === "monthly" ? selectedMonth : null,
         savePath,
         override,
+        cadence === "quarterly" ? quarter : null,
       );
       if (!res.written) {
         setDukBlock(res.issues);
@@ -143,6 +162,22 @@ export function SaftView({ selectedYear, selectedMonth, allInvoicesForYear }: Pr
             {allInvoicesForYear.length > 0
               ? ` · ${t("reports.saft.invoicesAvailable", { count: allInvoicesForYear.length, year: selectedYear })}`
               : ` · ${t("reports.saft.noInvoices", { year: selectedYear })}`}
+          </div>
+          {/* Cadența D406 = perioada fiscală TVA (OPANAF 1783/2021 Anexa 5). Trimestrul se derivă din lună. */}
+          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12.5, color: "var(--text-2)" }}>{t("reports.saft.cadence.label")}</span>
+            <div className="tabs" role="tablist">
+              {(["monthly", "quarterly", "annual"] as const).map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={`tab${cadence === c ? " active" : ""}`}
+                  onClick={() => setCadence(c)}
+                >
+                  {t(`reports.saft.cadence.${c}`)}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>

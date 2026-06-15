@@ -165,6 +165,12 @@
       "infoText": "Fișierul standard de audit fiscal (SAF-T) conține datele contabile detaliate solicitate de ANAF: conturi, jurnale, facturi, stocuri și active. Începând cu 2025, depunerea D406 este obligatorie lunar pentru contribuabilii mijlocii și mari.",
       "banner": "Pentru companiile mici, termenul de depunere D406 a fost amânat. Verificați obligația specifică firmei dvs.",
       "selectedPeriod": "Perioadă selectată:",
+      "cadence": {
+        "label": "Cadență (= perioada TVA):",
+        "monthly": "Lunar",
+        "quarterly": "Trimestrial",
+        "annual": "Anual"
+      },
       "invoicesAvailable_one": "{{count}} factură disponibilă pentru {{year}}",
       "invoicesAvailable_few": "{{count}} facturi disponibile pentru {{year}}",
       "invoicesAvailable_other": "{{count}} de facturi disponibile pentru {{year}}",

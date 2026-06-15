@@ -53,7 +53,33 @@ pub struct SaftOfficialParams {
     pub company_id: String,
     pub year: i32,
     pub month: Option<i32>,
+    /// Trimestrul (1-4) pentru un plătitor de TVA trimestrial — produce un D406 PERIODIC pe trimestru
+    /// (OPANAF 1783/2021 Anexa 5: perioada de raportare = perioada fiscală TVA). Are prioritate față de
+    /// `month`. Dacă atât `month` cât și `quarter` sunt None → declarația ANUALĂ (profil A, imobilizări).
+    #[serde(default)]
+    pub quarter: Option<i32>,
     pub dest_path: String,
+}
+
+/// Termenul de depunere D406 (OPANAF 1783/2021 Anexa 5): ultima zi calendaristică a lunii URMĂTOARE
+/// perioadei de raportare, decalată la următoarea zi lucrătoare dacă pică în weekend / sărbătoare
+/// legală RO (inclusiv sărbătorile mobile — `db::payroll::is_working_day` le acoperă). NU e o zi fixă
+/// (ex. „ziua 5"). `period_end_month` = ultima lună a perioadei: luna pentru lunar, 3/6/9/12 pentru
+/// trimestrial. Întoarce data scadentă (poate trece în anul următor pentru decembrie).
+pub fn d406_deadline(year: i32, period_end_month: u32) -> chrono::NaiveDate {
+    use chrono::Datelike;
+    let (dy, dm) = if period_end_month >= 12 {
+        (year + 1, 1)
+    } else {
+        (year, period_end_month + 1)
+    };
+    let last = crate::db::payroll::days_in_month(dy, dm);
+    let mut d = chrono::NaiveDate::from_ymd_opt(dy, dm, last).expect("ultima zi a lunii e validă");
+    // Decalare la următoarea zi lucrătoare (Luni-Vineri, fără sărbători legale RO).
+    while !crate::db::payroll::is_working_day(d.year(), d.month(), d.day()) {
+        d = d.succ_opt().expect("succesorul unei date e valid");
+    }
+    d
 }
 
 /// Generate a complete, schema-conformant SAF-T D406 XML and save it to `dest_path`.
@@ -72,7 +98,21 @@ pub async fn export_saft_official(
 
     let dest = validate_export_path(&params.dest_path)?;
 
-    let (date_from, date_to) = if let Some(m) = params.month {
+    let (date_from, date_to) = if let Some(q) = params.quarter {
+        if !(1..=4).contains(&q) {
+            return Err(AppError::Validation(
+                "Trimestrul D406 trebuie să fie 1-4.".into(),
+            ));
+        }
+        // Trimestru q: lunile (q-1)*3+1 .. q*3 (ex. Q1 = ian-mar).
+        let first_m = ((q - 1) * 3 + 1) as u32;
+        let last_m = (q * 3) as u32;
+        let last_day = crate::db::payroll::days_in_month(params.year, last_m);
+        (
+            format!("{}-{:02}-01", params.year, first_m),
+            format!("{}-{:02}-{:02}", params.year, last_m, last_day),
+        )
+    } else if let Some(m) = params.month {
         let last_day = crate::db::payroll::days_in_month(params.year, m as u32);
         (
             format!("{}-{:02}-01", params.year, m),
@@ -87,9 +127,10 @@ pub async fn export_saft_official(
 
     let company = companies::get(&state.db, &params.company_id).await?;
 
-    // Determine if this is an annual (A-profile) declaration.
-    // Annual = month is None (full-year range was already set above).
-    let is_annual = params.month.is_none();
+    // Annual (A-profile, imobilizări) = neither month nor quarter given. A quarter or a month → the
+    // PERIODIC L-profile generator over that range (a quarterly VAT filer gets a compliant quarterly
+    // D406 — OPANAF 1783/2021 Anexa 5: perioada de raportare = perioada fiscală TVA).
+    let is_annual = params.month.is_none() && params.quarter.is_none();
 
     let xml = if is_annual {
         // Annual A-profile: skip GL auto-post (GLE is empty in A),
@@ -545,6 +586,20 @@ fn escape_xml(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn d406_deadline_2026_calendar() {
+        let ymd = |y, m, d| chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap();
+        // Lunar (OPANAF 1783/2021 Anexa 5: ultima zi a lunii următoare, decalată zi lucrătoare):
+        assert_eq!(d406_deadline(2026, 1), ymd(2026, 3, 2)); // ian → 28 feb (sâmbătă) → 2 mar
+        assert_eq!(d406_deadline(2026, 2), ymd(2026, 3, 31)); // feb → 31 mar (marți)
+        assert_eq!(d406_deadline(2026, 4), ymd(2026, 6, 2)); // apr → 31 mai (Rusalii) → 1 iun (Rusalii) → 2 iun
+        assert_eq!(d406_deadline(2026, 9), ymd(2026, 11, 2)); // sep → 31 oct (sâmbătă) → 2 nov
+        assert_eq!(d406_deadline(2026, 10), ymd(2026, 12, 2)); // oct → 30 nov (Sf. Andrei) → 1 dec (Ziua Națională) → 2 dec
+                                                               // Trimestrial: perioada se încheie în luna 3/6/9/12 → același termen ca luna respectivă.
+        assert_eq!(d406_deadline(2026, 9), d406_deadline(2026, 9)); // Q3 termină în septembrie
+        assert_eq!(d406_deadline(2026, 6), ymd(2026, 7, 31)); // Q2/iun → 31 iul (vineri)
+    }
 
     // ── Fix #3: saft_tax_code maps rates correctly ───────────────────────────
 
