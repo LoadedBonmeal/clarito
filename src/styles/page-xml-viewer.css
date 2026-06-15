@@ -139,6 +139,24 @@
   color: #fff;
 }
 
+/* ── Raw XML view (the EXACT generated string, read-only) ───────────────────── */
+.xmlv-raw {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 14px 16px;
+  background: #fff;
+  color: var(--text);
+  font-family: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre;
+  tab-size: 2;
+  -moz-tab-size: 2;
+  user-select: text;
+}
+
 /* ── Table (structured) view ────────────────────────────────────────────────── */
 .xmlv-table-scroll {
   flex: 1;

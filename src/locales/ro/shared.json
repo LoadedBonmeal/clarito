@@ -32,6 +32,7 @@
     },
     "xmlViewer": {
       "tableView": "Tabel",
+      "rawView": "XML brut",
       "codeView": "Cod (XML)",
       "viewSwitch": "Comută vizualizarea",
       "valueCol": "valoare",
