@@ -492,9 +492,12 @@ fn parse_period(date: &str) -> (u32, i32) {
 }
 
 // ── String helpers ─────────────────────────────────────────────────────────────
+/// Char-safe truncate (shared `xml::trunc`) + a 3-char element-text escape (`& < >`). Kept distinct
+/// from `xml_esc` (which also escapes `"` and filters control chars) to preserve this generator's
+/// exact legacy output.
 fn trunc_esc(s: &str, max_chars: usize) -> String {
-    let t: String = s.chars().take(max_chars).collect();
-    t.replace('&', "&amp;")
+    crate::anaf_decl::xml::trunc(s, max_chars)
+        .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }

@@ -62,10 +62,27 @@ pub fn finish(w: XmlWriter) -> AppResult<String> {
     String::from_utf8(bytes).map_err(|e| AppError::Other(format!("XML utf8 error: {e}")))
 }
 
+/// Char-safe truncation to at most `max_chars` Unicode scalar values — never splits a UTF-8 byte
+/// sequence (RO diacritics in partner names). Shared by the SAF-T MasterFiles / SourceDocuments
+/// field-length caps (was duplicated verbatim across `saft/source_docs.rs` + `saft/masterfiles.rs`).
+/// NB: a HARD cut with no ellipsis — distinct from `ubl/pdf.rs::truncate`, which appends `…` for
+/// human-readable PDF display and must stay separate.
+pub fn trunc(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rust_decimal::Decimal;
+
+    #[test]
+    fn trunc_is_char_boundary_safe() {
+        assert_eq!(trunc("Societate", 4), "Soci");
+        assert_eq!(trunc("ăîâșț", 3), "ăîâ"); // 3 chars (6 bytes) — not a byte split
+        assert_eq!(trunc("ab", 10), "ab"); // shorter than max → unchanged
+        assert_eq!(trunc("", 5), "");
+    }
 
     #[test]
     fn builds_tiny_doc_with_escaping_and_decimal() {

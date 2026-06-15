@@ -224,12 +224,8 @@ fn strip_ro(cui: &str) -> String {
 }
 
 // ── Escape for XML text content ────────────────────────────────────────────────
+use crate::anaf_decl::xml::trunc; // char-safe truncation, shared (anaf_decl::xml)
 use crate::anaf_decl::xml_esc as esc;
-
-// ── Truncate a string to n bytes (UTF-8-safe) ─────────────────────────────────
-fn trunc(s: &str, max_chars: usize) -> String {
-    s.chars().take(max_chars).collect()
-}
 
 // ── AmountStructure helper (RON-only; CurrencyCode=RON, CurrencyAmount=Amount) ─
 pub fn write_amount_structure(w: &mut XmlWriter, elem: &str, amount: Decimal) -> AppResult<()> {

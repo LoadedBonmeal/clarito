@@ -15,16 +15,12 @@ use sqlx::Row;
 use crate::anaf_decl::saft::masterfiles::{
     canonical_partner_id, saft_tax_code_dir, write_amount_structure, TaxDirection,
 };
-use crate::anaf_decl::xml::{end_elem, start_elem, write_text_elem, XmlWriter};
+use crate::anaf_decl::xml::{end_elem, start_elem, trunc, write_text_elem, XmlWriter};
 use crate::error::{AppError, AppResult};
 use crate::ubl::fx::{amount_to_ron, parse_rate};
 
 // ── XML escaping ───────────────────────────────────────────────────────────────
 use crate::anaf_decl::xml_esc as esc;
-
-fn trunc(s: &str, max_chars: usize) -> String {
-    s.chars().take(max_chars).collect()
-}
 
 fn dec(s: &str) -> Decimal {
     Decimal::from_str(s.trim()).unwrap_or_default()
@@ -1243,15 +1239,6 @@ mod tests {
         assert_eq!(saft_revenue_account("goods"), "707"); // default
         assert_eq!(saft_revenue_account("anything_else"), "707");
         assert_eq!(saft_revenue_account(" service "), "704"); // trimmed
-    }
-
-    #[test]
-    fn trunc_is_char_boundary_safe() {
-        // Truncation must cut on CHAR boundaries, never mid-UTF8 (diacritics in RO partner names).
-        assert_eq!(trunc("Societate", 4), "Soci");
-        assert_eq!(trunc("ăîâșț", 3), "ăîâ"); // 3 chars (6 bytes) — not a byte split
-        assert_eq!(trunc("ab", 10), "ab"); // shorter than max → unchanged
-        assert_eq!(trunc("", 5), "");
     }
 
     /// DEFECT 1 FIX: a purchase invoice with TWO vat_lines (21% + 11%) must
