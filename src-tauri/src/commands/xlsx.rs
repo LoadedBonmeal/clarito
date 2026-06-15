@@ -415,3 +415,130 @@ pub async fn export_invoices_xlsx(
 
     Ok(())
 }
+
+// ─── Declaration → table (XLSX) export ───────────────────────────────────────
+//
+// The canonical ANAF `.xml` MUST stay byte-clean for SPV submission, so the file itself can't "be a
+// table" (and the XSLT self-render trick is being removed from browsers in 2026 + risks ANAF
+// rejection). Instead this writes a SEPARATE clean spreadsheet from the SAME declaration: the
+// frontend `xmlToTables()` (mirroring XmlTableView's parse) supplies the header + repeating-row
+// tables and we render them here with rust_xlsxwriter.
+
+#[derive(serde::Deserialize)]
+pub struct DeclTable {
+    pub title: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+}
+
+/// A cell is written as a NUMBER only when it's a short plain number (≤ 11 chars, no leading zero, no
+/// exponent/space) — so amounts (40000, 6400) become real numbers while long IDs (13-digit CNP, IBAN,
+/// CUI) stay TEXT and are never mangled into scientific notation / leading-zero loss.
+fn cell_is_number(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 11
+        && (s == "0" || !s.starts_with('0'))
+        && !s.contains(['e', 'E', '+', ' '])
+        && s.parse::<f64>().is_ok()
+}
+
+/// Render a declaration (already flattened to `{title, columns, rows}` tables by the frontend) into a
+/// clean XLSX — one worksheet stacking each table (header key/value block + repeating-row tables).
+/// Opens by double-click as a real grid in Excel/Numbers/Sheets/LibreOffice.
+#[tauri::command]
+pub async fn export_declaration_xlsx(
+    tables: Vec<DeclTable>,
+    dest_path: String,
+) -> AppResult<String> {
+    let validated = crate::commands::integrations::validate_export_path(&dest_path)?;
+    let dest = validated.to_string_lossy().to_string();
+    if tables.is_empty() {
+        return Err(AppError::Validation(
+            "Nimic de exportat în tabel.".to_string(),
+        ));
+    }
+
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<String> {
+        use rust_xlsxwriter::*;
+
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        ws.set_name("Declarație")?;
+
+        let fmt_title = Format::new()
+            .set_bold()
+            .set_font_size(12)
+            .set_font_color(Color::RGB(0x1E3A5F));
+        let fmt_header = Format::new()
+            .set_bold()
+            .set_font_size(10)
+            .set_font_color(Color::White)
+            .set_background_color(Color::RGB(0x1E3A5F))
+            .set_border(FormatBorder::Thin)
+            .set_border_color(Color::RGB(0x1E3A5F));
+        let fmt_text = Format::new()
+            .set_font_size(10)
+            .set_border(FormatBorder::Hair)
+            .set_border_color(Color::RGB(0xE5E7EB));
+        let fmt_num = Format::new()
+            .set_font_size(10)
+            .set_align(FormatAlign::Right)
+            .set_border(FormatBorder::Hair)
+            .set_border_color(Color::RGB(0xE5E7EB));
+
+        let mut row: u32 = 0;
+        let mut max_cols: u16 = 1;
+        for t in &tables {
+            ws.write_with_format(row, 0, t.title.as_str(), &fmt_title)?;
+            row += 1;
+            for (c, col) in t.columns.iter().enumerate() {
+                ws.write_with_format(row, c as u16, col.as_str(), &fmt_header)?;
+            }
+            max_cols = max_cols.max(t.columns.len() as u16);
+            row += 1;
+            for r in &t.rows {
+                for (c, cell) in r.iter().enumerate() {
+                    if cell_is_number(cell) {
+                        ws.write_number_with_format(
+                            row,
+                            c as u16,
+                            cell.parse::<f64>().unwrap_or(0.0),
+                            &fmt_num,
+                        )?;
+                    } else {
+                        ws.write_string_with_format(row, c as u16, cell.as_str(), &fmt_text)?;
+                    }
+                }
+                row += 1;
+            }
+            row += 1; // blank spacer between tables
+        }
+
+        for c in 0..max_cols {
+            ws.set_column_width(c, 20.0)?;
+        }
+
+        wb.save(&dest).map_err(|e| AppError::Other(e.to_string()))?;
+        Ok(dest)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cell_is_number;
+
+    #[test]
+    fn numbers_vs_text_ids() {
+        assert!(cell_is_number("40000")); // amount → number
+        assert!(cell_is_number("6400"));
+        assert!(cell_is_number("0"));
+        assert!(cell_is_number("2026")); // year
+        assert!(!cell_is_number("1960101410019")); // 13-digit CNP → text (len > 11)
+        assert!(!cell_is_number("RO40268319")); // CUI with prefix → text
+        assert!(!cell_is_number("08")); // leading zero (tip_venit) → text
+        assert!(!cell_is_number("")); // empty → text
+        assert!(!cell_is_number("Popescu Andrei")); // name → text
+    }
+}

@@ -378,6 +378,7 @@ pub fn run() {
             commands::integrations::set_smartbill_credentials,
             commands::integrations::clear_smartbill_credentials,
             commands::xlsx::export_invoices_xlsx,
+            commands::xlsx::export_declaration_xlsx,
             // reports
             commands::reports::generate_vat_report,
             commands::reports::export_report,

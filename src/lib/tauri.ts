@@ -836,6 +836,14 @@ export const declarations = {
    */
   validateDeclarationXml: (declKind: XmlDeclKind, xml: string) =>
     invoke<XmlDukValidation>("validate_declaration_xml", { declKind, xml }),
+  /**
+   * Exportă declarația ca tabel XLSX (citibil în Excel/Numbers) din modelul de tabele produs de
+   * `xmlToTables`. `.xml`-ul canonic rămâne neschimbat (depunere SPV); acesta e un fișier separat.
+   */
+  exportDeclarationXlsx: (
+    tables: import("@/lib/xml-to-tables").DeclTable[],
+    destPath: string,
+  ) => invoke<string>("export_declaration_xlsx", { tables, destPath }),
   /** D101 (impozit pe profit) worksheet: base from the period P&L + the supplied adjustments. */
   computeD101: (
     companyId: string,

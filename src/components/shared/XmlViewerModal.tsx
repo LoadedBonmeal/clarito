@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { XmlTableView } from "@/components/shared/XmlTableView";
+import { xmlToTables } from "@/lib/xml-to-tables";
 import { useXmlViewerStore, type XmlViewerPayload } from "@/lib/xml-viewer-store";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { api, type XmlDukValidation } from "@/lib/tauri";
@@ -88,6 +89,32 @@ function XmlViewerBody({ payload, onClose }: { payload: XmlViewerPayload; onClos
     }
   };
 
+  // Export a clean XLSX TABLE of the same declaration (opens as a real grid in Excel/Numbers). The
+  // canonical .xml (Salvează) stays untouched for ANAF submission.
+  const doExportXlsx = async () => {
+    if (isDemoMode()) {
+      notify.error(t("shared.xmlViewer.tableNativeOnly"));
+      return;
+    }
+    try {
+      const tables = xmlToTables(payload.xml);
+      if (tables.length === 0) {
+        notify.error(t("shared.xmlViewer.tableError", { error: "XML invalid" }));
+        return;
+      }
+      const xlsxName = `${fileName.replace(/\.xml$/i, "")}.xlsx`;
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const dest = await save({ defaultPath: xlsxName, filters: [{ name: "Excel", extensions: ["xlsx"] }] });
+      if (!dest) return;
+      const written = await api.declarations.exportDeclarationXlsx(tables, dest);
+      notify.success(t("shared.xmlViewer.tableSaved"));
+      const { openPath } = await import("@tauri-apps/plugin-opener");
+      await openPath(written).catch(() => {});
+    } catch (e) {
+      notify.error(t("shared.xmlViewer.tableError", { error: String(e) }));
+    }
+  };
+
   const doRevalidate = async () => {
     if (!payload.declKind) return;
     setValidating(true);
@@ -121,6 +148,10 @@ function XmlViewerBody({ payload, onClose }: { payload: XmlViewerPayload; onClos
           )}
           <button type="button" className="sq-btn" onClick={doCopy} aria-label={t("shared.xmlViewer.copy")}>
             <Ic name="copy" cls="ic" />
+          </button>
+          <button type="button" className="pill-btn" onClick={doExportXlsx}>
+            <Ic name="grid" cls="ic" />
+            {t("shared.xmlViewer.exportTable")}
           </button>
           <button type="button" className="pill-btn" onClick={doSave}>
             <Ic name="dl" cls="ic" />
