@@ -1,7 +1,6 @@
-/* In-app XML viewer modal (XmlViewerModal.tsx).
-   Reuses the PDF viewer's toolbar chrome (.pdfv-bar / .sq-btn / .pill-btn) and renders the exact
-   generated XML as a clean, line-numbered, syntax-highlighted document (XmlCodeView) plus the DUK
-   re-validation status strip. Monochrome, matching the app. */
+/* In-app XML viewer/editor modal (XmlViewerModal.tsx + CodeMirror 6).
+   Reuses the PDF viewer's toolbar chrome (.pdfv-bar / .sq-btn / .pill-btn) and adds the editor
+   surface + the DUK re-validation status strip. Monochrome, matching the app. */
 
 .modal.xmlv {
   width: min(980px, 95vw);
@@ -12,6 +11,25 @@
   flex-direction: column;
   padding: 0;
   overflow: hidden;
+}
+
+/* unsaved-changes dot in the title */
+.xmlv-dirty {
+  color: var(--accent, #b45309);
+  font-size: 11px;
+  line-height: 1;
+  margin-left: 2px;
+}
+
+/* CodeMirror host fills the remaining height */
+.xmlv-editor {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
+}
+.xmlv-editor .cm-editor {
+  height: 100%;
 }
 
 /* ── DUK re-validation status strip ──────────────────────────────────────────── */
@@ -79,83 +97,110 @@
 }
 .xmlv-issue-code {
   flex: none;
-  font-family: var(--mono);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   color: var(--text-2);
   min-width: 56px;
 }
 
-/* ── Code (formatted XML document) view ─────────────────────────────────────────
-   Shows payload.xml verbatim — what's displayed equals what "Salvează" writes. */
-.xmlv-code {
+/* ── Table (structured) view ────────────────────────────────────────────────── */
+.xmlv-table-scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
   background: #fff;
-  font-family: var(--mono);
-  font-size: 12.5px;
-  line-height: 1.6;
-  padding: 8px 0;
-  -moz-tab-size: 2;
-  tab-size: 2;
+  padding: 14px 16px;
 }
-.xmlv-code-inner {
-  width: max-content;
-  min-width: 100%;
-}
-.xmlv-ln {
+.xmlv-table-msg {
+  flex: 1;
   display: flex;
-}
-.xmlv-ln:hover {
-  background: var(--fill);
-}
-.xmlv-gutter {
-  flex: 0 0 auto;
-  width: 3.6em;
-  box-sizing: border-box;
-  padding: 0 12px 0 8px;
-  text-align: right;
-  color: var(--text-3, #a0a0a6);
-  user-select: none;
-  -webkit-user-select: none;
-}
-.xmlv-lc {
-  flex: 1 1 auto;
-  white-space: pre;
-  padding-right: 20px;
-  color: var(--text);
-  font-family: inherit;
-}
-/* Monochrome token palette: bold element names, dim attribute names, muted punctuation. */
-.xmlv-lc .xt-tag {
-  color: var(--text);
-  font-weight: 600;
-}
-.xmlv-lc .xt-attr {
+  align-items: center;
+  justify-content: center;
   color: var(--text-2);
+  font-size: 13px;
 }
-.xmlv-lc .xt-val {
-  color: var(--text);
+.xmlv-node {
+  margin-bottom: 18px;
 }
-.xmlv-lc .xt-punct {
+.xmlv-node-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--text-3, #a0a0a6);
+  margin: 0 0 6px;
 }
-.xmlv-lc .xt-text {
-  color: var(--text);
+.xmlv-kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 3px 20px;
+  margin-bottom: 10px;
 }
-.xmlv-lc .xt-prolog,
-.xmlv-lc .xt-comment {
-  color: var(--text-3, #a0a0a6);
-  font-style: italic;
-}
-
-/* Fallback (empty / very large SAF-T / tokenizer error): raw text, still verbatim. */
-.xmlv-raw {
-  margin: 0;
-  padding: 0 16px;
-  white-space: pre;
-  font-family: var(--mono);
+.xmlv-kv-row {
+  display: flex;
+  gap: 8px;
   font-size: 12.5px;
-  line-height: 1.6;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--fill);
+}
+.xmlv-kv-k {
+  color: var(--text-2);
+  min-width: 92px;
+  flex: none;
+}
+.xmlv-kv-v {
   color: var(--text);
+  font-weight: 500;
+  word-break: break-word;
+}
+.xmlv-leaftext {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.xmlv-tablewrap {
+  margin-bottom: 14px;
+}
+.xmlv-tabletag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.xmlv-count {
+  color: var(--text-3, #a0a0a6);
+  font-weight: 500;
+}
+.xmlv-tbl-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.xmlv-tbl {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+}
+.xmlv-tbl th,
+.xmlv-tbl td {
+  text-align: left;
+  padding: 6px 10px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+.xmlv-tbl th {
+  background: var(--fill);
+  color: var(--text-2);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+.xmlv-tbl tr:last-child td {
+  border-bottom: none;
+}
+.xmlv-tbl tbody tr:hover {
+  background: var(--fill);
 }
