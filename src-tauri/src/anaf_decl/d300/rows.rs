@@ -485,43 +485,28 @@ pub fn map_to_rows(
     //   If the app puts AE only in purchase_groups (the more common ledger model),
     //   we use purchase_groups for both legs (self-assessment).
 
-    // Accumulate AE from BOTH sources (groups + purchase_groups); the buyer
-    // enters the AE invoice in both legs. Take whichever is non-zero; if both
-    // exist, prefer groups (collected side) and trust the caller's data model.
+    // R12 (taxă colectată pe taxare inversă, art. 331) = AUTOEVALUAREA CUMPĂRĂTORULUI → se ia DOAR
+    // din achiziții (purchase_groups), care poartă TVA-ul autoevaluat. Vânzările AE (vânzătorul, TVA 0)
+    // merg EXCLUSIV în R13 (baza, fără TVA) — NU în R12. Vechea logică „sales-first, fallback purchase"
+    // punea linia AE de VÂNZARE (cotă 21%, TVA 0) și în R12 ȘI în R13 (dubla baza în R17), iar dacă
+    // firma era și cumpărător, omitea TVA-ul real autoevaluat al achiziției → R12 sub-raportat.
     let mut ae21_base = Decimal::ZERO;
     let mut ae21_vat = Decimal::ZERO;
     let mut ae11_base = Decimal::ZERO;
     let mut ae11_vat = Decimal::ZERO;
 
-    // Collect AE from sales groups first
     accumulate(
-        &report.groups,
+        &report.purchase_groups,
         |g| g.vat_category == "AE" && rate_matches(g, 21),
         &mut ae21_base,
         &mut ae21_vat,
     );
     accumulate(
-        &report.groups,
+        &report.purchase_groups,
         |g| g.vat_category == "AE" && rate_matches(g, 11),
         &mut ae11_base,
         &mut ae11_vat,
     );
-
-    // If groups had no AE, fall back to purchase_groups (buyer ledger model)
-    if ae21_base == Decimal::ZERO && ae11_base == Decimal::ZERO {
-        accumulate(
-            &report.purchase_groups,
-            |g| g.vat_category == "AE" && rate_matches(g, 21),
-            &mut ae21_base,
-            &mut ae21_vat,
-        );
-        accumulate(
-            &report.purchase_groups,
-            |g| g.vat_category == "AE" && rate_matches(g, 11),
-            &mut ae11_base,
-            &mut ae11_vat,
-        );
-    }
 
     // R13_1 — livrări taxare inversă (VÂNZĂTOR / seller side), baza only
     // The SELLER in a domestic reverse-charge transaction reports the base in R13_1.
@@ -1206,6 +1191,35 @@ mod tests {
         assert_eq!(rows.r25_2, rows.r12_2);
         assert_eq!(rows.r25_2_1, rows.r12_2_1);
         assert_eq!(rows.r25_2_2, rows.r12_2_2);
+    }
+
+    #[test]
+    fn reverse_charge_buyer_and_seller_same_cota_dont_collide() {
+        // Firma e ȘI cumpărător (achiziție AE 21%, TVA autoevaluat 210) ȘI vânzător (livrare AE 21%,
+        // TVA 0). R12 (colectată) = DOAR achiziția (1000/210); R13 (bază vânzător) = 500. Înainte de
+        // fix, vânzarea AE intra ȘI în R12 (dubla baza în R17) iar achiziția era omisă din R12.
+        let report = make_report(
+            vec![("0.21", "AE", "500.00", "0.00")], // vânzare AE (vânzător) → R13
+            vec![("0.21", "AE", "1000.00", "210.00")], // achiziție AE (cumpărător) → R12 + R25
+        );
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        assert_eq!(
+            rows.r12_1,
+            Some(1000),
+            "R12_1 = achiziția, NU include vânzarea"
+        );
+        assert_eq!(rows.r12_2, Some(210), "R12_2 = TVA autoevaluat achiziție");
+        assert_eq!(rows.r25_1, rows.r12_1, "R25 = R12 (DUK)");
+        assert_eq!(rows.r13_1, Some(500), "R13_1 = baza vânzător AE");
+        assert_eq!(
+            rows.r17_1,
+            Some(1500),
+            "R17_1 = R12_1 + R13_1 = 1500 (fără dublare)"
+        );
+        assert_eq!(rows.r17_2, Some(210), "R17_2 = R12_2");
     }
 
     #[test]

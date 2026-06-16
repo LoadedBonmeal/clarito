@@ -385,6 +385,79 @@ fn d300_wave4_scenario_a_reverse_charge_ae() {
     }
 }
 
+/// WAVE 4 SCENARIO E: company is BOTH a reverse-charge buyer AND seller on the same cota (21%).
+/// AE purchase (self-assessed VAT) → R12+R25; AE sale (VAT 0) → R13. They must NOT collide:
+/// R12 = the purchase only (1000/210), R13 = the seller base (500), R17_1 = 1500 (no double-count).
+#[test]
+fn d300_wave4_scenario_e_reverse_charge_buyer_and_seller() {
+    let xsd_path = std::path::Path::new("tools/anaf/sample_d300_v12.xml");
+    if !xsd_path.exists() || !efactura_desktop_lib::anaf_decl::validation::xmllint_available() {
+        eprintln!("SKIP scenario E: XSD or xmllint absent");
+        return;
+    }
+    let period = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("date");
+    let ver = resolve(DeclKind::D300, period).expect("version");
+
+    let report = D300Report {
+        company_cui: "RO12345674".to_string(),
+        period_from: "2026-01-01".to_string(),
+        period_to: "2026-01-31".to_string(),
+        groups: vec![D300Group {
+            vat_rate: "0.21".to_string(),
+            vat_category: "AE".to_string(),
+            base: "500.00".to_string(),
+            vat: "0.00".to_string(), // seller leg: VAT 0 → R13
+            intra_eu_kind: None,
+        }],
+        total_base: "500.00".to_string(),
+        total_vat: "0.00".to_string(),
+        invoice_count: 1,
+        purchase_groups: vec![D300Group {
+            vat_rate: "0.21".to_string(),
+            vat_category: "AE".to_string(),
+            base: "1000.00".to_string(),
+            vat: "210.00".to_string(), // buyer leg: self-assessed → R12+R25
+            intra_eu_kind: None,
+        }],
+        total_deductible_base: "1000.00".to_string(),
+        total_deductible_vat: "210.00".to_string(),
+        purchase_invoice_count: 1,
+        purchase_unparsed_count: 0,
+        net_vat: "0.00".to_string(),
+        reg_colectata_baza: "0.00".to_string(),
+        reg_colectata_tva: "0.00".to_string(),
+        reg_dedusa_baza: "0.00".to_string(),
+        reg_dedusa_tva: "0.00".to_string(),
+    };
+
+    let rows =
+        map_to_rows(&report, &test_submission(), &test_company(), period).expect("map_to_rows");
+    assert_eq!(rows.r12_1, Some(1000), "E: R12_1 = purchase only");
+    assert_eq!(rows.r12_2, Some(210), "E: R12_2 = self-assessed VAT");
+    assert_eq!(rows.r13_1, Some(500), "E: R13_1 = seller base");
+    assert_eq!(
+        rows.r17_1,
+        Some(1500),
+        "E: R17_1 = R12_1 + R13_1, no double-count"
+    );
+
+    let xml = generate_d300_xml(&rows, &ver).expect("generate");
+    let tmp = std::env::temp_dir().join("d300_wave4_e.xml");
+    std::fs::write(&tmp, xml.as_bytes()).expect("write tmp");
+    let xsd_result = efactura_desktop_lib::anaf_decl::validation::validate_with_xsd(xsd_path, &tmp)
+        .expect("xmllint");
+    let _ = std::fs::remove_file(&tmp);
+    assert!(
+        xsd_result.passed,
+        "Scenario E must pass XSD: {}",
+        xsd_result.errors.join("; ")
+    );
+    match run_duk(&xml, "scenario_e") {
+        Ok(passed) => assert!(passed, "Scenario E: DUK must validate"),
+        Err(e) => eprintln!("SKIP DUK Scenario E: {e}"),
+    }
+}
+
 /// WAVE 4 SCENARIO B: Intra-EU acquisition (category K, goods).
 ///
 /// K purchase at 21%: base=2000, VAT=420.
