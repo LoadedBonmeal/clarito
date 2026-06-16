@@ -126,8 +126,19 @@ pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Emp
 
 /// Parse a money amount (non-negative), returning its canonical Decimal string. Rejects garbage so a
 /// salary never silently becomes 0 and corrupts the payroll totals / GL postings.
+///
+/// PAY-02: also reject scientific notation (`1e10`, `1E5`). `Decimal::from_str` accepts it and would
+/// store a literal 10_000_000_000 lei from a typo; a fiscal amount is always a plain decimal, so an
+/// `e`/`E` in the input is a data-entry error, not a 10-billion-lei salary. (Infinity/NaN are already
+/// rejected by `from_str` — `Decimal` has no such representation.)
 fn parse_money(label: &str, s: &str) -> AppResult<String> {
-    let d = Decimal::from_str(s.trim()).map_err(|_| {
+    let t = s.trim();
+    if t.contains('e') || t.contains('E') {
+        return Err(AppError::Validation(format!(
+            "{label} invalid — folosiți formatul 1234.56 (fără notație științifică)."
+        )));
+    }
+    let d = Decimal::from_str(t).map_err(|_| {
         AppError::Validation(format!("{label} invalid — folosiți formatul 1234.56."))
     })?;
     if d.is_sign_negative() {
@@ -998,5 +1009,19 @@ mod tests {
         );
         // Încetare în lună ulterioară ⇒ toată luna curentă (neschimbat).
         assert_eq!(active_working_days(2026, 3, None, Some("2026-04-15")), 22);
+    }
+
+    #[test]
+    fn parse_money_accepts_plain_decimals_and_rejects_garbage() {
+        assert_eq!(parse_money("Brut", "4050").unwrap(), "4050");
+        assert_eq!(parse_money("Brut", " 1234.56 ").unwrap(), "1234.56");
+        assert_eq!(parse_money("Brut", "0").unwrap(), "0");
+        // Negative + non-numeric rejected (salariul nu devine niciodată tăcut 0).
+        assert!(parse_money("Brut", "-1").is_err());
+        assert!(parse_money("Brut", "abc").is_err());
+        // PAY-02: notația științifică e respinsă (altfel "1e10" ⇒ 10_000_000_000 lei dintr-o tastare).
+        assert!(parse_money("Brut", "1e10").is_err());
+        assert!(parse_money("Brut", "1E5").is_err());
+        assert!(parse_money("Brut", "-1e3").is_err());
     }
 }

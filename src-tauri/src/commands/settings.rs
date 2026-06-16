@@ -29,8 +29,19 @@ const READONLY_PREFIXES: &[&str] = &[
     "anaf_token_",      // ANAF tokens are in keychain
 ];
 
+// SEC-03: chei care pot fi CITITE din frontend, dar NU scrise prin `set_setting` generic —
+// trebuie scrise DOAR prin comanda dedicată care le validează. `archive_path_override` redirectează
+// unde se scriu backup-urile; comanda `change_archive_location` impune absolut/no-UNC/no-`..`, dar
+// `set_setting` ar fi ocolit acea validare. Blocăm scrierea directă (citirea rămâne permisă pentru ca
+// UI-ul să afișeze calea curentă).
+const WRITE_PROTECTED_KEYS: &[&str] = &[settings::keys::ARCHIVE_PATH_OVERRIDE];
+
 fn is_readonly_key(key: &str) -> bool {
     READONLY_KEYS.contains(&key) || READONLY_PREFIXES.iter().any(|p| key.starts_with(p))
+}
+
+fn is_write_protected_key(key: &str) -> bool {
+    WRITE_PROTECTED_KEYS.contains(&key)
 }
 
 #[tauri::command]
@@ -56,6 +67,11 @@ pub async fn set_setting(state: State<'_, AppState>, key: String, value: String)
             )));
         }
     }
+    if is_write_protected_key(&key) {
+        return Err(AppError::Validation(format!(
+            "Cheia '{key}' nu poate fi scrisă direct; folosiți acțiunea dedicată (validată)."
+        )));
+    }
     settings::set(&state.db, &key, &value).await
 }
 
@@ -66,4 +82,35 @@ pub async fn get_all_settings(state: State<'_, AppState>) -> AppResult<HashMap<S
         .into_iter()
         .filter(|(k, _)| !is_readonly_key(k))
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn archive_path_override_is_write_protected_but_readable() {
+        // SEC-03: must be blocked from the generic set_setting writer …
+        assert!(is_write_protected_key(
+            settings::keys::ARCHIVE_PATH_OVERRIDE
+        ));
+        assert!(is_write_protected_key("archive_path_override"));
+        // … yet still readable (NOT in the readonly/hidden set, so the UI can show the current path).
+        assert!(!is_readonly_key(settings::keys::ARCHIVE_PATH_OVERRIDE));
+    }
+
+    #[test]
+    fn ordinary_keys_are_neither_readonly_nor_write_protected() {
+        for k in ["use_anaf_test_env", "polling_enabled", "quiet_hours"] {
+            assert!(!is_readonly_key(k));
+            assert!(!is_write_protected_key(k));
+        }
+    }
+
+    #[test]
+    fn license_and_token_keys_stay_readonly() {
+        assert!(is_readonly_key("license_key"));
+        assert!(is_readonly_key("anaf_token_abc"));
+        assert!(is_readonly_key("smartbill_token_x"));
+    }
 }

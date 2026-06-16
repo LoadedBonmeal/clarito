@@ -96,8 +96,10 @@ pub fn exempt_part_time_min_base(pensionar: bool, exceptie_cas_min: &str) -> boo
 /// v7 (`part_time = ROUND(sm × A_8 / NZL)`). `worked_days` TREBUIE să fie EXACT A_8 emis în D112
 /// (zilele active), astfel încât regula DUK „A_13P = ROUND(sm×A_8/NZL)” să coincidă cu această bază —
 /// fără mismatch, fără sub-declarare. Lună întreagă (`worked_days ≥ nzl`) → baza ÎNTREAGĂ (neschimbat).
-/// Încetarea de contract la mijlocul lunii nu e încă urmărită (doar `employment_date`), deci o plecare
-/// mid-month rămâne la baza întreagă — supra-declarare conservatoare (niciodată sub-declarare).
+/// Atât ANGAJAREA cât și ÎNCETAREA de contract la mijlocul lunii sunt urmărite: `worked_days` (A_8)
+/// provine din `active_working_days(year, month, employment_date, contract_end_date)`, care proratează
+/// intervalul activ pentru AMBELE capete. O plecare mid-month dă deci o bază minimă proratată pe zilele
+/// active (`A_13P = ROUND(sm × A_8 / NZL)`) — corect fiscal, niciodată sub-declarare.
 ///
 /// CAM (contribuția asigurătorie pentru muncă, art. 220^4-220^7): NU se ridică la baza minimă —
 /// art. 146 alin. (5^6)-(5^9) numește DOAR CAS și CASS, iar baza CAM (art. 220^6) = câștigul brut
