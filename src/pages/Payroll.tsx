@@ -670,6 +670,8 @@ function EmployeeModal({
     exceptieCasMin: employee?.exceptieCasMin ?? "",
     sediuCif: employee?.sediuCif ?? "",
     beneficiarSumaNetaxabila: employee?.beneficiarSumaNetaxabila ?? false,
+    employmentDate: employee?.employmentDate ?? "",
+    contractEndDate: employee?.contractEndDate ?? "",
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -687,6 +689,8 @@ function EmployeeModal({
         exceptieCasMin: form.exceptieCasMin,
         sediuCif: form.sediuCif,
         beneficiarSumaNetaxabila: form.beneficiarSumaNetaxabila,
+        employmentDate: form.employmentDate || undefined,
+        contractEndDate: form.contractEndDate || undefined,
       };
       if (isEdit) {
         return api.payroll.update(employee!.id, companyId, payload);
@@ -756,6 +760,25 @@ function EmployeeModal({
             <div className="field">
               <label>{t("payroll.empModal.hoursPerDay")}</label>
               <input className="input num" type="text" inputMode="numeric" placeholder="8" {...field("oreNorma")} />
+            </div>
+            <div className="field">
+              <label>{t("payroll.empModal.employmentDate")}</label>
+              <input
+                className="input"
+                type="date"
+                value={form.employmentDate}
+                onChange={(e) => setForm((f) => ({ ...f, employmentDate: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label>{t("payroll.empModal.contractEndDate")}</label>
+              <input
+                className="input"
+                type="date"
+                value={form.contractEndDate}
+                onChange={(e) => setForm((f) => ({ ...f, contractEndDate: e.target.value }))}
+              />
+              <div className="hint">{t("payroll.empModal.contractEndDateHint")}</div>
             </div>
             <div className="field">
               <label>{t("payroll.empModal.pensioner")}</label>

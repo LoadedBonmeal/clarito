@@ -1143,6 +1143,8 @@ export interface Employee {
   grossSalary: string;
   personalDeduction: string;
   employmentDate: string | null;
+  /** Data încetării contractului (ISO); null = activ. Prorata baza minimă part-time pe luni incomplete. */
+  contractEndDate: string | null;
   active: boolean;
   tipAsigurat: string;
   pensionar: boolean;
@@ -1221,6 +1223,7 @@ export interface CreateEmployeeInput {
   grossSalary: string;
   personalDeduction?: string;
   employmentDate?: string | null;
+  contractEndDate?: string | null;
   tipAsigurat?: string;
   pensionar?: boolean;
   tipContract?: string;

@@ -28,6 +28,9 @@ pub struct Employee {
     pub gross_salary: String,
     pub personal_deduction: String,
     pub employment_date: Option<String>,
+    /// Data încetării contractului (ISO YYYY-MM-DD), opțional. Lipsă = activ toată luna. Folosit la
+    /// proratarea bazei minime part-time pentru luni incomplete (încetare la mijlocul lunii).
+    pub contract_end_date: Option<String>,
     pub active: bool,
     /// D112 asiguratA fields: A_1 tip asigurat (Nomenclator 5, "1"=salariat), A_2 pensionar (0/1),
     /// A_3 tip contract (Nomenclator 12, "N"=normă întreagă, "P1".."P7"=parțial), A_4 ore normă (6/7/8).
@@ -60,6 +63,8 @@ pub struct CreateEmployeeInput {
     pub personal_deduction: Option<String>,
     pub employment_date: Option<String>,
     #[serde(default)]
+    pub contract_end_date: Option<String>,
+    #[serde(default)]
     pub tip_asigurat: Option<String>,
     #[serde(default)]
     pub pensionar: Option<bool>,
@@ -83,6 +88,7 @@ pub struct UpdateEmployeeInput {
     pub gross_salary: Option<String>,
     pub personal_deduction: Option<String>,
     pub employment_date: Option<String>,
+    pub contract_end_date: Option<String>,
     pub active: Option<bool>,
     pub tip_asigurat: Option<String>,
     pub pensionar: Option<bool>,
@@ -94,8 +100,9 @@ pub struct UpdateEmployeeInput {
 }
 
 const COLS: &str = "id, company_id, cnp, full_name, gross_salary, personal_deduction, \
-                    employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
-                    exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, created_at, updated_at";
+                    employment_date, contract_end_date, active, tip_asigurat, pensionar, \
+                    tip_contract, ore_norma, exceptie_cas_min, sediu_cif, \
+                    beneficiar_suma_netaxabila, created_at, updated_at";
 
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Employee>> {
     let q = format!(
@@ -146,9 +153,9 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     let now = now_unix();
     sqlx::query(
         "INSERT INTO employees (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
-         employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
-         exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, created_at, updated_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11,?12,?13,?14,?15,?15)",
+         employment_date, contract_end_date, active, tip_asigurat, pensionar, tip_contract, \
+         ore_norma, exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, created_at, updated_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,1,?9,?10,?11,?12,?13,?14,?15,?16,?16)",
     )
     .bind(&id)
     .bind(&input.company_id)
@@ -157,6 +164,7 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     .bind(&gross)
     .bind(&ded)
     .bind(&input.employment_date)
+    .bind(&input.contract_end_date)
     .bind(input.tip_asigurat.as_deref().unwrap_or("1"))
     .bind(input.pensionar.unwrap_or(false))
     .bind(input.tip_contract.as_deref().unwrap_or("N"))
@@ -188,9 +196,9 @@ pub async fn update(
     };
     sqlx::query(
         "UPDATE employees SET cnp=?3, full_name=?4, gross_salary=?5, personal_deduction=?6, \
-         employment_date=?7, active=?8, tip_asigurat=?9, pensionar=?10, tip_contract=?11, \
-         ore_norma=?12, exceptie_cas_min=?13, sediu_cif=?14, beneficiar_suma_netaxabila=?15, \
-         updated_at=?16 \
+         employment_date=?7, contract_end_date=?8, active=?9, tip_asigurat=?10, pensionar=?11, \
+         tip_contract=?12, ore_norma=?13, exceptie_cas_min=?14, sediu_cif=?15, \
+         beneficiar_suma_netaxabila=?16, updated_at=?17 \
          WHERE id=?1 AND company_id=?2",
     )
     .bind(id)
@@ -200,6 +208,7 @@ pub async fn update(
     .bind(&gross)
     .bind(&ded)
     .bind(input.employment_date.or(cur.employment_date))
+    .bind(input.contract_end_date.or(cur.contract_end_date))
     .bind(input.active.unwrap_or(cur.active))
     .bind(input.tip_asigurat.as_deref().unwrap_or(&cur.tip_asigurat))
     .bind(input.pensionar.unwrap_or(cur.pensionar))
@@ -445,31 +454,44 @@ pub fn leave_working_days_in_month(year: i32, month: u32, start_iso: &str, end_i
 }
 
 /// Zile lucrătoare în care contractul e ACTIV în lună — A_8 pentru proratarea bazei minime part-time
-/// (art. 146 alin. (5^6) / OMF 1855/2022, câmp D112 A_13P = ROUND(sm × A_8 / NZL)). Angajat la
-/// mijlocul lunii ⇒ se numără doar zilele lucrătoare de la `employment_date` până la sfârșitul lunii;
-/// angajat înainte de lună (sau dată lipsă/invalidă) ⇒ NZL întreg. Încetarea de contract la mijlocul
-/// lunii NU e urmărită (rămâne NZL — supra-declarare conservatoare, niciodată sub-declarare).
-pub fn active_working_days(year: i32, month: u32, employment_date: Option<&str>) -> u32 {
-    let nzl = working_days(year, month);
-    let Some(emp) = employment_date else {
-        return nzl;
+/// (art. 146 alin. (5^6) / OMF 1855/2022, câmp D112 A_13P = ROUND(sm × A_8 / NZL)). Intervalul activ
+/// în lună = [angajare-sau-prima-zi, încetare-sau-ultima-zi]:
+///  - angajare la mijlocul lunii ⇒ se numără din ziua angajării; angajare anterioară/lipsă/invalidă ⇒ ziua 1;
+///  - încetare la mijlocul lunii ⇒ se numără până la ziua încetării; fără încetare / încetare ulterioară ⇒
+///    ultima zi (neschimbat — evită corect supra-declararea, niciodată sub-declarare);
+///  - încetare ÎNAINTE de lună, sau încetare înainte de angajare ⇒ 0 zile (contract inactiv).
+pub fn active_working_days(
+    year: i32,
+    month: u32,
+    employment_date: Option<&str>,
+    contract_end_date: Option<&str>,
+) -> u32 {
+    let dim = days_in_month(year, month);
+    // (an, lună, zi) dintr-o dată ISO; None dacă e invalidă.
+    let parse = |iso: &str| -> Option<(i32, u32, u32)> {
+        let p: Vec<&str> = iso.split('-').collect();
+        if p.len() != 3 {
+            return None;
+        }
+        Some((p[0].parse().ok()?, p[1].parse().ok()?, p[2].parse().ok()?))
     };
-    let p: Vec<&str> = emp.split('-').collect();
-    if p.len() != 3 {
-        return nzl;
+    // Început activ: ziua angajării dacă e în lună; altfel (anterioară/ulterioară/lipsă) ⇒ ziua 1.
+    let start_day = match employment_date.and_then(parse) {
+        Some((ey, em, ed)) if (ey, em) == (year, month) => ed.clamp(1, dim),
+        _ => 1,
+    };
+    // Sfârșit activ: ziua încetării dacă e în lună; încetare ÎNAINTE de lună ⇒ 0; altfel ⇒ ultima zi.
+    let end_day = match contract_end_date.and_then(parse) {
+        Some((ey, em, ed)) if (ey, em) == (year, month) => ed.clamp(1, dim),
+        Some((ey, em, _)) if (ey, em) < (year, month) => return 0,
+        _ => dim,
+    };
+    if start_day > end_day {
+        return 0; // încetare înainte de angajare → 0 (niciodată sub-declarare)
     }
-    let (ey, em) = (
-        p[0].parse::<i32>().unwrap_or(year),
-        p[1].parse::<u32>().unwrap_or(month),
-    );
-    // Activ toată luna dacă angajarea e dintr-o lună anterioară (sau o lună diferită — angajarea
-    // viitoare nu poate apărea în statul lunii curente); altfel zilele de la angajare la sfârșit.
-    if (ey, em) != (year, month) {
-        return nzl;
-    }
-    let last = days_in_month(year, month);
-    let end = format!("{year:04}-{month:02}-{last:02}");
-    leave_working_days_in_month(year, month, emp, &end)
+    let s = format!("{year:04}-{month:02}-{start_day:02}");
+    let e = format!("{year:04}-{month:02}-{end_day:02}");
+    leave_working_days_in_month(year, month, &s, &e)
 }
 
 /// Compute the monthly salary states for all active employees and post the aggregate to the GL.
@@ -628,7 +650,12 @@ pub async fn run_payroll(
         let exempt = exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
         // Aceeași proratare pe zile active ca în emiterea D112 (commands/payroll.rs) — diferența de
         // contribuție suportată de angajator din sumar trebuie să coincidă cu D112.
-        let active_days = active_working_days(year, month, e.employment_date.as_deref());
+        let active_days = active_working_days(
+            year,
+            month,
+            e.employment_date.as_deref(),
+            e.contract_end_date.as_deref(),
+        );
         if let Some((_, cas_diff, cass_diff)) = part_time_min_base(
             gross,
             &e.tip_contract,
@@ -748,6 +775,7 @@ mod tests {
                 gross_salary: "5000".into(),
                 personal_deduction: Some("0".into()),
                 employment_date: None,
+                contract_end_date: None,
                 tip_asigurat: None,
                 pensionar: None,
                 tip_contract: None,
@@ -797,6 +825,7 @@ mod tests {
                     gross_salary: "5000".into(),
                     personal_deduction: Some("0".into()),
                     employment_date: None,
+                    contract_end_date: None,
                     tip_asigurat: None,
                     pensionar: None,
                     tip_contract: None,
@@ -856,6 +885,7 @@ mod tests {
                 gross_salary: "5500".into(),
                 personal_deduction: Some("0".into()),
                 employment_date: None,
+                contract_end_date: None,
                 tip_asigurat: None,
                 pensionar: None,
                 tip_contract: None,
@@ -942,17 +972,31 @@ mod tests {
     }
 
     #[test]
-    fn active_working_days_prorates_mid_month_hire() {
-        // Martie 2026 are 22 zile lucrătoare (fără sărbători L-V). Angajare înainte de lună sau dată
-        // lipsă ⇒ NZL întreg (contract activ toată luna).
+    fn active_working_days_prorates_hire_and_termination() {
+        // Martie 2026 = 22 zile lucrătoare (fără sărbători L-V).
         assert_eq!(working_days(2026, 3), 22);
-        assert_eq!(active_working_days(2026, 3, None), 22);
-        assert_eq!(active_working_days(2026, 3, Some("2025-11-01")), 22);
-        assert_eq!(active_working_days(2026, 3, Some("2026-03-01")), 22); // angajat în prima zi
-                                                                          // Angajare la mijlocul lunii ⇒ doar zilele lucrătoare de la dată la sfârșit. 16 martie 2026
-                                                                          // = luni; 16→31 conține zilele L-V 16-20 și 23-27 și 30-31 = 12 zile lucrătoare.
-        assert_eq!(active_working_days(2026, 3, Some("2026-03-16")), 12);
-        // Dată invalidă ⇒ NZL (conservator, niciodată sub-declarare).
-        assert_eq!(active_working_days(2026, 3, Some("invalid")), 22);
+        // Fără date / angajare anterioară / dată invalidă ⇒ NZL întreg (activ toată luna).
+        assert_eq!(active_working_days(2026, 3, None, None), 22);
+        assert_eq!(active_working_days(2026, 3, Some("2025-11-01"), None), 22);
+        assert_eq!(active_working_days(2026, 3, Some("2026-03-01"), None), 22); // angajat ziua 1
+        assert_eq!(active_working_days(2026, 3, Some("invalid"), None), 22);
+        // Angajare la mijloc (16 mar = luni): 16-20, 23-27, 30-31 = 12 zile lucrătoare.
+        assert_eq!(active_working_days(2026, 3, Some("2026-03-16"), None), 12);
+        // ÎNCETARE la mijloc (20 mar = vineri), fără dată angajare: 2-6, 9-13, 16-20 = 15 zile.
+        assert_eq!(active_working_days(2026, 3, None, Some("2026-03-20")), 15);
+        // Angajare 16 + încetare 20 (același interval scurt): 16-20 = 5 zile lucrătoare.
+        assert_eq!(
+            active_working_days(2026, 3, Some("2026-03-16"), Some("2026-03-20")),
+            5
+        );
+        // Încetare ÎNAINTE de lună ⇒ contract inactiv = 0 zile.
+        assert_eq!(active_working_days(2026, 3, None, Some("2026-02-28")), 0);
+        // Încetare înainte de angajare (date inconsecvente) ⇒ 0 (niciodată sub-declarare).
+        assert_eq!(
+            active_working_days(2026, 3, Some("2026-03-16"), Some("2026-03-10")),
+            0
+        );
+        // Încetare în lună ulterioară ⇒ toată luna curentă (neschimbat).
+        assert_eq!(active_working_days(2026, 3, None, Some("2026-04-15")), 22);
     }
 }

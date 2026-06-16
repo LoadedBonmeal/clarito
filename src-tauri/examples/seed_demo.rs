@@ -303,6 +303,7 @@ async fn seed_firm(
                 gross_salary: (*gross).into(),
                 personal_deduction: None,
                 employment_date: Some("2024-01-15".into()),
+                contract_end_date: None,
                 tip_asigurat: None,
                 pensionar: Some(false),
                 tip_contract: None,

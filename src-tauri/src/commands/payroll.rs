@@ -422,7 +422,12 @@ fn build_d112_xml(
         // Zile lucrătoare active în lună (angajare la mijlocul lunii ⇒ < NZL). Folosit ca A_8 emis
         // ȘI pentru proratarea bazei minime part-time, ca să coincidă cu regula DUK
         // A_13P = ROUND(sm × A_8 / NZL). Lună întreagă ⇒ active_days = NZL ⇒ baza întreagă (neschimbat).
-        let active_days = active_working_days(year, month, e.employment_date.as_deref());
+        let active_days = active_working_days(
+            year,
+            month,
+            e.employment_date.as_deref(),
+            e.contract_end_date.as_deref(),
+        );
         let mut zile_emis = nzl;
         if let Some((base, _, _)) = crate::anaf_decl::d112::part_time_min_base(
             gross,
@@ -563,6 +568,7 @@ mod tests {
             gross_salary: gross.into(),
             personal_deduction: Some("0".into()),
             employment_date: Some("2024-01-01".into()),
+            contract_end_date: None,
             tip_asigurat: None,
             pensionar: None,
             tip_contract: None,
