@@ -572,27 +572,32 @@ pub fn map_to_rows(
     // Override from submission if provided; otherwise use auto-computed prefill
     // values from `report.reg_colectata_*` / `report.reg_dedusa_*`.
     // Both rows are IntNeg15SType — no rate-margin DUK corridor applies.
+    //
+    // D300-R30: clamp the (signed) values to the XSD IntNeg15SType bound (±13 nines) so an
+    // out-of-range manual override can't emit XML that ANAF's validator would reject downstream.
+    const N15_MAX: i64 = 9_999_999_999_999;
+    let clamp_n15 = |v: i64| v.clamp(-N15_MAX, N15_MAX);
 
-    let r16_1_val: i64 = if let Some(ov) = submission.reg_colectata_baza {
+    let r16_1_val: i64 = clamp_n15(if let Some(ov) = submission.reg_colectata_baza {
         ov
     } else {
         round_to_lei(parse_dec(&report.reg_colectata_baza))
-    };
-    let r16_2_val: i64 = if let Some(ov) = submission.reg_colectata_tva {
+    });
+    let r16_2_val: i64 = clamp_n15(if let Some(ov) = submission.reg_colectata_tva {
         ov
     } else {
         round_to_lei(parse_dec(&report.reg_colectata_tva))
-    };
-    let r30_1_val: i64 = if let Some(ov) = submission.reg_dedusa_baza {
+    });
+    let r30_1_val: i64 = clamp_n15(if let Some(ov) = submission.reg_dedusa_baza {
         ov
     } else {
         round_to_lei(parse_dec(&report.reg_dedusa_baza))
-    };
-    let r30_2_val: i64 = if let Some(ov) = submission.reg_dedusa_tva {
+    });
+    let r30_2_val: i64 = clamp_n15(if let Some(ov) = submission.reg_dedusa_tva {
         ov
     } else {
         round_to_lei(parse_dec(&report.reg_dedusa_tva))
-    };
+    });
 
     // ── Margin checks (logged, non-fatal) ─────────────────────────────────────
     // The collected VAT on each rate row should fall within the rate's corridor.
