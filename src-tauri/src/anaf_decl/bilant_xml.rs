@@ -958,8 +958,8 @@ mod tests {
             xml.contains(&format!("totalPlata_A=\"{cap}\"")),
             "BL totalPlata_A must equal F10_1002 ({cap}), not 0"
         );
-        // Write for external `xmllint --schema s1002.xsd` validation.
-        let _ = std::fs::write("/tmp/bl-generated.xml", &xml);
+        // Write for external `xmllint --schema s1002.xsd` validation (CROSS-01: portable temp dir).
+        let _ = std::fs::write(std::env::temp_dir().join("bl-generated.xml"), &xml);
     }
 
     #[test]

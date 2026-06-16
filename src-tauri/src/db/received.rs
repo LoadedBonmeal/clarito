@@ -49,6 +49,15 @@ pub struct ReceivedFilter {
     pub page: Option<Page>,
 }
 
+// CODE-01: single source of truth for the ReceivedInvoice projection (mirrors COMPANY_SELECT in
+// companies.rs). Keep the column order in lock-step with the `ReceivedInvoice` struct fields above so
+// `FromRow` binds positionally; both `list` and `get` build their SQL from this.
+const RECEIVED_SELECT: &str = "SELECT id, company_id, anaf_download_id, anaf_index, issuer_cui, \
+     issuer_name, series, number, total_amount, net_amount, vat_amount, \
+     currency, exchange_rate, issue_date, xml_path, pdf_path, \
+     status, intra_eu_kind, downloaded_at, created_at \
+     FROM received_invoices";
+
 pub async fn list(
     pool: &SqlitePool,
     filter: ReceivedFilter,
@@ -88,12 +97,8 @@ pub async fn list(
         .fetch_one(pool)
         .await?;
 
-    let data_sql = "\
-        SELECT id, company_id, anaf_download_id, anaf_index, issuer_cui, \
-               issuer_name, series, number, total_amount, net_amount, vat_amount, \
-               currency, exchange_rate, issue_date, xml_path, pdf_path, \
-               status, intra_eu_kind, downloaded_at, created_at \
-        FROM received_invoices \
+    let data_sql = format!(
+        "{RECEIVED_SELECT} \
         WHERE (?1 IS NULL OR company_id = ?1) \
           AND (NOT ?2 OR status = CASE WHEN ?3 THEN 'NEW'      ELSE NULL END \
                       OR status = CASE WHEN ?4 THEN 'REVIEWED' ELSE NULL END \
@@ -101,9 +106,10 @@ pub async fn list(
                       OR status = CASE WHEN ?6 THEN 'REJECTED' ELSE NULL END \
                       OR status = CASE WHEN ?7 THEN 'ARCHIVED' ELSE NULL END) \
         ORDER BY issue_date DESC \
-        LIMIT ?8 OFFSET ?9";
+        LIMIT ?8 OFFSET ?9"
+    );
 
-    let items = sqlx::query_as::<_, ReceivedInvoice>(data_sql)
+    let items = sqlx::query_as::<_, ReceivedInvoice>(&data_sql)
         .bind(company_id)
         .bind(has_status_filter as i64)
         .bind(want_new as i64)
@@ -125,13 +131,9 @@ pub async fn list(
 }
 
 pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<ReceivedInvoice> {
-    sqlx::query_as::<_, ReceivedInvoice>(
-        "SELECT id, company_id, anaf_download_id, anaf_index, issuer_cui, \
-         issuer_name, series, number, total_amount, net_amount, vat_amount, \
-         currency, exchange_rate, issue_date, xml_path, pdf_path, \
-         status, intra_eu_kind, downloaded_at, created_at \
-         FROM received_invoices WHERE id = ?1 AND company_id = ?2",
-    )
+    sqlx::query_as::<_, ReceivedInvoice>(&format!(
+        "{RECEIVED_SELECT} WHERE id = ?1 AND company_id = ?2"
+    ))
     .bind(id)
     .bind(company_id)
     .fetch_optional(pool)
