@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { XmlTableView } from "@/components/shared/XmlTableView";
 import { pickDescriptor, type DocDescriptor, type SectionSpec } from "@/lib/doc-render/descriptors";
 import { parseInvoice, type InvoiceDoc, type Party } from "@/lib/doc-render/invoice-model";
+import { parseSaftSummary, type SaftSummary } from "@/lib/doc-render/saft-model";
 import { formatValue, resolveField, vatCategoryLabel } from "@/lib/doc-render/labels";
 import type { XmlViewerPayload } from "@/lib/xml-viewer-store";
 import { fmtRON, formatDate } from "@/lib/utils";
@@ -360,6 +361,8 @@ export function XmlDocView({ payload }: { payload: XmlViewerPayload }) {
       <article className="docv">
         {desc.key === "INVOICE" ? (
           <InvoiceFromXml xml={payload.xml} />
+        ) : desc.key === "D406" ? (
+          <SaftFromXml xml={payload.xml} />
         ) : (
           <GenericDoc root={parsed} desc={desc} />
         )}
@@ -373,4 +376,187 @@ function InvoiceFromXml({ xml }: { xml: string }) {
   const doc = useMemo(() => parseInvoice(xml), [xml]);
   if (!doc) return <XmlTableView xml={xml} />;
   return <InvoiceDocView doc={doc} />;
+}
+
+// ── SAF-T (D406) summary cover page ───────────────────────────────────────────────────────────────
+/** Parse + render the SAF-T summary; fall back to the generic table if it isn't a parseable AuditFile. */
+function SaftFromXml({ xml }: { xml: string }) {
+  const s = useMemo(() => parseSaftSummary(xml), [xml]);
+  if (!s) return <XmlTableView xml={xml} />;
+  return <SaftDocView s={s} />;
+}
+
+const numOf = (v: string): number => {
+  const n = Number((v ?? "").trim());
+  return Number.isFinite(n) ? n : NaN;
+};
+
+function SaftDocView({ s }: { s: SaftSummary }) {
+  const typeLabel =
+    s.declType === "L"
+      ? "D406 lunar/trimestrial"
+      : s.declType === "A"
+        ? "D406 Active (anual)"
+        : "SAF-T";
+  const period =
+    s.periodStart && s.periodEnd ? `${formatDate(s.periodStart)} – ${formatDate(s.periodEnd)}` : "—";
+  const debit = numOf(s.gl.debit);
+  const credit = numOf(s.gl.credit);
+  const diff = Number.isFinite(debit) && Number.isFinite(credit) ? debit - credit : NaN;
+  const balanced = s.gl.present && Number.isFinite(diff) && Math.abs(diff) < 0.01;
+
+  const chips: [string, string, boolean?][] = [
+    ["Versiune schemă", s.version || "—"],
+    ["Țară", s.country || "—", s.country === "RO"],
+    ["Monedă", s.currency || "—", s.currency === "RON"],
+    ["Bază contabilă", s.basis || "—"],
+    ["Generat la", s.dateCreated ? formatDate(s.dateCreated) : "—"],
+    ["Software", s.software || "—"],
+  ];
+
+  const presentSections = s.sections.filter((sec) => sec.present);
+  const presentCounts = s.counts.filter((c) => c.value > 0);
+  const fmtMetric = (label: string, value: string): string => {
+    if (!value) return "—";
+    return /cant/i.test(label) ? trimNum(value) : fmtRON(numOf(value));
+  };
+
+  // Footer verdict (worst state): red blocks, amber warns.
+  const periodOk = !!s.periodStart && !!s.periodEnd && s.periodStart <= s.periodEnd;
+  const red =
+    !s.cui ||
+    s.country !== "RO" ||
+    s.currency !== "RON" ||
+    !periodOk ||
+    (s.gl.present && !balanced);
+  const amber =
+    !red &&
+    ((s.declType === "L" && s.gl.present && numOf(s.gl.entries) === 0) ||
+      (s.declType === "L" &&
+        presentSections.some((x) => x.key === "SalesInvoices" && numOf(x.count) > 0) &&
+        s.counts.find((c) => c.key === "taxCodes")?.value === 0));
+  const verdict = red
+    ? { txt: "Blocant — verificați câmpurile marcate", cls: "xmlv-valid--err" }
+    : amber
+      ? { txt: "De verificat — vezi avertismentele", cls: "xmlv-valid--na" }
+      : { txt: "Gata de depunere", cls: "xmlv-valid--ok" };
+
+  return (
+    <>
+      <h2 className="docv-title">
+        Rezumat pre-depunere SAF-T (D406)
+        <span className="docv-title-sub"> · {typeLabel}</span>
+      </h2>
+
+      <div className="docv-parties">
+        <div className="docv-party">
+          <div className="docv-sec-title">FIRMĂ</div>
+          <div className="docv-party-name">{s.companyName || "—"}</div>
+          <div className="docv-party-row">CUI: {s.cui || "—"}</div>
+          <div className="docv-party-row">
+            {s.vatNumber ? `Cod TVA: ${s.vatNumber}` : "Neplătitor de TVA"}
+          </div>
+          {s.address && <div className="docv-party-row">{s.address}</div>}
+        </div>
+        <div className="docv-party">
+          <div className="docv-sec-title">PERIOADĂ</div>
+          <div className="docv-party-name">{period}</div>
+          <div className="docv-party-row">{typeLabel}</div>
+        </div>
+      </div>
+
+      <section className="docv-sec">
+        <div className="docv-kv">
+          {chips.map(([k, v, ok]) => (
+            <div className="docv-kv-row" key={k}>
+              <span className="docv-kv-k">{k}</span>
+              <span className="docv-kv-v">
+                {v}
+                {ok === false && " ⚠"}
+              </span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="docv-sec">
+        <h3 className="docv-sec-title">Balansare registru jurnal (GL)</h3>
+        {s.gl.present ? (
+          <div className="docv-kv">
+            <div className="docv-kv-row">
+              <span className="docv-kv-k">Nr. linii GL</span>
+              <span className="docv-kv-v">{s.gl.entries || "—"}</span>
+            </div>
+            <div className="docv-kv-row">
+              <span className="docv-kv-k">Total debit</span>
+              <span className="docv-kv-v">{fmtRON(debit)}</span>
+            </div>
+            <div className="docv-kv-row">
+              <span className="docv-kv-k">Total credit</span>
+              <span className="docv-kv-v">{fmtRON(credit)}</span>
+            </div>
+            <div className="docv-kv-row">
+              <span className="docv-kv-k">Diferență</span>
+              <span className="docv-kv-v">
+                {balanced ? "Echilibrat ✓" : `${fmtRON(diff)} ✗`}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="docv-kv-row">
+            <span className="docv-kv-v">Nu se aplică (declarație anuală — fără jurnal GL).</span>
+          </div>
+        )}
+      </section>
+
+      {presentSections.length > 0 && (
+        <section className="docv-sec">
+          <h3 className="docv-sec-title">Totaluri de control pe secțiuni</h3>
+          <div className="docv-tbl-wrap">
+            <table className="docv-tbl">
+              <thead>
+                <tr>
+                  <th>Secțiune</th>
+                  <th className="r">Nr.</th>
+                  <th>Valori</th>
+                </tr>
+              </thead>
+              <tbody>
+                {presentSections.map((sec) => (
+                  <tr key={sec.key}>
+                    <td>{sec.label}</td>
+                    <td className="r">{sec.count || "—"}</td>
+                    <td>
+                      {sec.metrics
+                        .filter((m) => m.value)
+                        .map((m) => `${m.label}: ${fmtMetric(m.label, m.value)}`)
+                        .join(" · ") || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {presentCounts.length > 0 && (
+        <section className="docv-sec">
+          <h3 className="docv-sec-title">Nomenclatoare</h3>
+          <div className="docv-kv">
+            {presentCounts.map((c) => (
+              <div className="docv-kv-row" key={c.key}>
+                <span className="docv-kv-k">{c.label}</span>
+                <span className="docv-kv-v">{c.value}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className={`xmlv-valid ${verdict.cls}`} style={{ marginTop: 12 }}>
+        {verdict.txt}
+      </div>
+    </>
+  );
 }

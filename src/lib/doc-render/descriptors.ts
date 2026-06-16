@@ -121,6 +121,15 @@ export const D394_DESCRIPTOR: DocDescriptor = {
   ],
 };
 
+/** SAF-T (D406) — rendered by the dedicated typed `SaftDocView` (summary cover page), not the
+ *  generic walker. No sections: the renderer parses the AuditFile summary itself. */
+export const D406_DESCRIPTOR: DocDescriptor = {
+  key: "D406",
+  title: "Rezumat pre-depunere SAF-T (D406)",
+  rootTag: "AuditFile",
+  sections: [],
+};
+
 export const DESCRIPTORS: DocDescriptor[] = [
   D205_DESCRIPTOR,
   INVOICE_DESCRIPTOR,
@@ -128,6 +137,7 @@ export const DESCRIPTORS: DocDescriptor[] = [
   D300_DESCRIPTOR,
   D390_DESCRIPTOR,
   D394_DESCRIPTOR,
+  D406_DESCRIPTOR,
 ];
 
 const BY_KEY = new Map(DESCRIPTORS.map((d) => [d.key, d]));

@@ -15,9 +15,12 @@ describe("pickDescriptor", () => {
     expect(pickDescriptor(undefined, "declaratie300")?.key).toBe("D300");
     expect(pickDescriptor(undefined, "declaratie390")?.key).toBe("D390");
     expect(pickDescriptor(undefined, "declaratie394")?.key).toBe("D394");
+    expect(pickDescriptor(undefined, "AuditFile")?.key).toBe("D406"); // SAF-T summary
+  });
+  it("selects the SAF-T summary by declaration key", () => {
+    expect(pickDescriptor("D406", "AuditFile")?.key).toBe("D406");
   });
   it("returns null for not-yet-described documents (→ generic table fallback)", () => {
-    expect(pickDescriptor("D406", "AuditFile")).toBeNull(); // Phase 4 (SAF-T)
     expect(pickDescriptor(undefined, "habarnam")).toBeNull();
   });
 });
