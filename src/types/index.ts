@@ -1264,8 +1264,10 @@ export interface IntrastatStatus {
   arrivals: IntrastatFlowStatus;
 }
 
-/** Obligație informativă de impozit pe dividende în D100 (denumire oficială + sumă + scadență 25 a lunii). */
+/** Obligație informativă de impozit pe dividende în D100 (cod creanță + denumire + sumă + scadență 25 a lunii). */
 export interface DividendObligation {
+  /** Cod de creanță Nomenclator: "604" (persoane fizice, art. 97) sau "150" (persoane juridice, art. 43). */
+  codOblig: string;
   label: string;
   /** Suma impozitului reținut (lei, 2 zecimale). */
   amount: string;

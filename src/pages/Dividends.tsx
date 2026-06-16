@@ -31,6 +31,7 @@ export function Dividends() {
   const [shareholder, setShareholder] = useState("");
   const [beneficiaryCnp, setBeneficiaryCnp] = useState("");
   const [beneficiaryResident, setBeneficiaryResident] = useState(true);
+  const [beneficiaryType, setBeneficiaryType] = useState<"PF" | "PJ">("PF");
   const [d205Year, setD205Year] = useState(new Date().getFullYear() - 1);
   const [exportingD205, setExportingD205] = useState(false);
   const [dukBlock, setDukBlock] = useState<PreflightIssue[] | null>(null);
@@ -57,6 +58,7 @@ export function Dividends() {
         shareholder: shareholder || null,
         beneficiaryCnp: beneficiaryCnp.trim() || null,
         beneficiaryResident,
+        beneficiaryType,
       });
     },
     onSuccess: () => {
@@ -159,6 +161,18 @@ export function Dividends() {
           <div className="field">
             <label>{t("dividends.shareholder")}</label>
             <input className="input" value={shareholder} onChange={(e) => setShareholder(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t("dividends.beneficiaryType")}</label>
+            <select
+              className="input"
+              value={beneficiaryType}
+              onChange={(e) => setBeneficiaryType(e.target.value as "PF" | "PJ")}
+            >
+              <option value="PF">{t("dividends.beneficiaryTypePF")}</option>
+              <option value="PJ">{t("dividends.beneficiaryTypePJ")}</option>
+            </select>
+            <div className="hint">{t("dividends.beneficiaryTypeHint")}</div>
           </div>
           <div className="field">
             <label>{t("dividends.beneficiaryCnp")}</label>

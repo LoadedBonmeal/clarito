@@ -635,6 +635,8 @@ export interface Dividend {
   beneficiaryCnp: string | null;
   /** Rezident fiscal RO (D205 Rezid; nerezident → D207). */
   beneficiaryResident: boolean;
+  /** Tip beneficiar: "PF" (art. 97 → D100 cod 604, intră în D205) sau "PJ" (art. 43 → D100 cod 150). */
+  beneficiaryType: string;
   note: string | null;
   taxDeadline: string;
 }
@@ -647,6 +649,7 @@ export interface DividendInput {
   shareholder?: string | null;
   beneficiaryCnp?: string | null;
   beneficiaryResident?: boolean;
+  beneficiaryType?: "PF" | "PJ";
   note?: string | null;
 }
 export const dividends = {

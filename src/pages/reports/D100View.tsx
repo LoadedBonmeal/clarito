@@ -133,6 +133,7 @@ export function D100View({ dateFrom, dateTo }: Props) {
           <table className="scr-table" style={{ marginTop: 10 }}>
             <thead>
               <tr>
+                <th>{t("declarations.d100.headers.code")}</th>
                 <th>{t("declarations.d100.dividends.title")}</th>
                 <th className="r">{t("declarations.d100.dividends.amount")}</th>
                 <th>{t("declarations.d100.headers.deadline")}</th>
@@ -141,6 +142,7 @@ export function D100View({ dateFrom, dateTo }: Props) {
             <tbody>
               {r.dividendObligations.map((o, i) => (
                 <tr key={i}>
+                  <td className="doc" style={{ fontWeight: 700, color: "var(--text)" }}>{o.codOblig}</td>
                   <td>
                     {o.label}
                     {o.count > 1 && (

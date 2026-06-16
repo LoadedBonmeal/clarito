@@ -266,8 +266,8 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
       scadenta,
       dividendObligations: [
         {
-          label:
-            "Impozit pe dividende distribuite/plătite persoanelor fizice/juridice (art. 97/43 C.fisc.)",
+          codOblig: "604",
+          label: "Impozit pe veniturile din dividende distribuite persoanelor fizice (art. 97 C.fisc.)",
           amount: "3200.00",
           deadline: `25.${pad(divMonth)}.${year}`,
           count: 2,

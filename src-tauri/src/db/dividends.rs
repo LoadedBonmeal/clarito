@@ -75,10 +75,18 @@ pub struct Dividend {
     /// mereu "1"; ramura "2" e rezervată/neutilizată (validatorul D205 interzice Rezid=2 la
     /// tip_venit 08). Implicit true.
     pub beneficiary_resident: bool,
+    /// Tipul beneficiarului: "PF" (persoană fizică, art. 97 → D100 cod 604, intră în D205) sau
+    /// "PJ" (persoană juridică, art. 43 → D100 cod 150, EXCLUS din D205). Implicit "PF".
+    pub beneficiary_type: String,
     pub note: Option<String>,
     /// Termenul de plată al impozitului (derivat, nu stocat).
     pub tax_deadline: String,
 }
+
+/// Persoană fizică (default). Distribuie obligația D100 pe cod 604 (art. 97) și intră în D205.
+pub const BEN_PF: &str = "PF";
+/// Persoană juridică. Distribuie obligația D100 pe cod 150 (art. 43); exclusă din D205.
+pub const BEN_PJ: &str = "PJ";
 
 fn default_resident() -> bool {
     true
@@ -98,6 +106,9 @@ pub struct DividendInput {
     pub beneficiary_cnp: Option<String>,
     #[serde(default = "default_resident")]
     pub beneficiary_resident: bool,
+    /// "PF" (implicit) sau "PJ" — vezi [`Dividend::beneficiary_type`].
+    #[serde(default)]
+    pub beneficiary_type: Option<String>,
     pub note: Option<String>,
 }
 
@@ -118,6 +129,7 @@ fn row_to_dividend(r: &sqlx::sqlite::SqliteRow) -> Dividend {
         shareholder: r.get("shareholder"),
         beneficiary_cnp: r.get("beneficiary_cnp"),
         beneficiary_resident: r.get::<i64, _>("beneficiary_resident") != 0,
+        beneficiary_type: r.get("beneficiary_type"),
         note: r.get("note"),
         tax_deadline,
     }
@@ -126,7 +138,7 @@ fn row_to_dividend(r: &sqlx::sqlite::SqliteRow) -> Dividend {
 const SELECT: &str =
     "SELECT id, company_id, distribution_date, payment_date, gross_amount, tax_rate, \
      tax_amount, net_amount, interim_2025, shareholder, beneficiary_cnp, beneficiary_resident, \
-     note FROM dividends";
+     beneficiary_type, note FROM dividends";
 
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Dividend>> {
     let rows = sqlx::query(&format!(
@@ -182,12 +194,19 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
     let tax = round2(gross * Decimal::new(rate, 2));
     let net = gross - tax; // ambele 2dp → diferența e exactă, deci nota e echilibrată
 
+    // Tip beneficiar: "PJ" doar dacă e cerut explicit; orice altceva → "PF" (implicit, cazul uzual).
+    let ben_type = if input.beneficiary_type.as_deref() == Some(BEN_PJ) {
+        BEN_PJ
+    } else {
+        BEN_PF
+    };
+
     let id = new_id();
     sqlx::query(
         "INSERT INTO dividends (id, company_id, distribution_date, payment_date, gross_amount, \
          tax_rate, tax_amount, net_amount, interim_2025, shareholder, beneficiary_cnp, \
-         beneficiary_resident, note, created_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+         beneficiary_resident, beneficiary_type, note, created_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
     )
     .bind(&id)
     .bind(&input.company_id)
@@ -207,6 +226,7 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
     .bind(input.shareholder.as_deref())
     .bind(ben_cnp)
     .bind(input.beneficiary_resident as i64)
+    .bind(ben_type)
     .bind(input.note.as_deref())
     .bind(now_unix())
     .execute(pool)
@@ -273,19 +293,26 @@ pub async fn dividend_tax_due_in_period(
     Ok(total)
 }
 
-/// Denumirea oficială ANAF a obligației de impozit pe dividende în Declarația 100. NU există un cod 7xx
-/// dedicat — în Nomenclatorul obligațiilor obligația se selectează după DENUMIRE. Modelul curent nu
-/// stochează tipul beneficiarului (persoană fizică vs juridică), deci folosim denumirea combinată
-/// (art. 97 — persoane fizice / art. 43 — persoane juridice, Cod fiscal).
-pub const DIVIDEND_D100_LABEL: &str =
-    "Impozit pe dividende distribuite/plătite persoanelor fizice/juridice (art. 97/43 C.fisc.)";
+/// Obligația D100 pentru dividende către PERSOANE FIZICE (art. 97 Cod fiscal): Nomenclator poziția 6,
+/// cod_oblig 604. Codul se selectează în SPV după această poziție.
+pub const D100_DIVIDEND_PF_COD: &str = "604";
+pub const D100_DIVIDEND_PF_LABEL: &str =
+    "Impozit pe veniturile din dividende distribuite persoanelor fizice (art. 97 C.fisc.)";
+/// Obligația D100 pentru dividende către PERSOANE JURIDICE (art. 43 Cod fiscal): Nomenclator poziția 4,
+/// cod_oblig 150.
+pub const D100_DIVIDEND_PJ_COD: &str = "150";
+pub const D100_DIVIDEND_PJ_LABEL: &str =
+    "Impozit pe dividende distribuite persoanelor juridice (art. 43 C.fisc.)";
 
-/// O linie informativă de obligație de impozit pe dividende pentru Declarația 100: denumirea oficială,
-/// suma reținută și scadența (25 a lunii). D100 NU emite XML (se depune prin PDF inteligent + SPV), deci
-/// rândul e pur INFORMATIV — semnalează contribuabilului obligația de a declara impozitul la termen.
+/// O linie informativă de obligație de impozit pe dividende pentru Declarația 100: codul de creanță
+/// (cod_oblig), denumirea oficială, suma reținută și scadența (25 a lunii). D100 NU emite XML (se depune
+/// prin PDF inteligent + SPV), deci rândul e pur INFORMATIV — semnalează contribuabilului obligația de a
+/// declara impozitul la termen, pe poziția corectă din Nomenclator (604 PF / 150 PJ).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DividendObligation {
+    /// Codul de creanță din Nomenclator (`<cod_oblig>`): "604" (PF) sau "150" (PJ).
+    pub cod_oblig: String,
     pub label: String,
     /// Suma impozitului reținut (lei, 2 zecimale — suma exactă din notele 446).
     pub amount: String,
@@ -296,9 +323,10 @@ pub struct DividendObligation {
 }
 
 /// Obligațiile de impozit pe dividende cu scadența în lunile date (rânduri informative pentru D100).
-/// `months` = liste de `YYYY-MM` (de regulă cele 3 luni ale trimestrului afișat). Grupează pe lună de
-/// scadență; o linie per lună cu impozit > 0 (sumă + scadența 25.LL.AAAA + numărul de distribuiri).
-/// Datele ISO se compară lexicografic (cf. restul modulului).
+/// `months` = liste de `YYYY-MM` (de regulă cele 3 luni ale trimestrului afișat). Grupează pe (lună de
+/// scadență, tip beneficiar): rânduri SEPARATE pentru PF (cod 604, art. 97) și PJ (cod 150, art. 43),
+/// fiindcă sunt creanțe distincte în Nomenclator și se declară pe poziții diferite. O linie per
+/// (lună, tip) cu impozit > 0. Datele ISO se compară lexicografic (cf. restul modulului).
 pub async fn dividend_obligations_in_months(
     pool: &SqlitePool,
     company_id: &str,
@@ -307,22 +335,31 @@ pub async fn dividend_obligations_in_months(
     let all = list(pool, company_id).await?;
     let mut out = Vec::new();
     for ym in months {
-        let mut sum = Decimal::ZERO;
-        let mut count = 0u32;
-        for d in &all {
-            if d.tax_deadline.starts_with(ym.as_str()) {
-                sum += Decimal::from_str(d.tax_amount.trim()).unwrap_or(Decimal::ZERO);
-                count += 1;
+        let (y, m) = ym.split_once('-').unwrap_or(("", ""));
+        // PJ înaintea PF e indiferent; emitem PF apoi PJ pentru o ordine stabilă.
+        for (is_pj, cod, label) in [
+            (false, D100_DIVIDEND_PF_COD, D100_DIVIDEND_PF_LABEL),
+            (true, D100_DIVIDEND_PJ_COD, D100_DIVIDEND_PJ_LABEL),
+        ] {
+            let mut sum = Decimal::ZERO;
+            let mut count = 0u32;
+            for d in &all {
+                if d.tax_deadline.starts_with(ym.as_str())
+                    && (d.beneficiary_type == BEN_PJ) == is_pj
+                {
+                    sum += Decimal::from_str(d.tax_amount.trim()).unwrap_or(Decimal::ZERO);
+                    count += 1;
+                }
             }
-        }
-        if count > 0 {
-            let (y, m) = ym.split_once('-').unwrap_or(("", ""));
-            out.push(DividendObligation {
-                label: DIVIDEND_D100_LABEL.to_string(),
-                amount: round2(sum).to_string(),
-                deadline: format!("25.{m}.{y}"),
-                count,
-            });
+            if count > 0 {
+                out.push(DividendObligation {
+                    cod_oblig: cod.to_string(),
+                    label: label.to_string(),
+                    amount: round2(sum).to_string(),
+                    deadline: format!("25.{m}.{y}"),
+                    count,
+                });
+            }
         }
     }
     Ok(out)
@@ -339,10 +376,16 @@ pub fn d205_beneficiaries_for_year(
 ) -> AppResult<Vec<crate::anaf_decl::d205_xml::D205Beneficiary>> {
     use crate::anaf_decl::d205_xml::D205Beneficiary;
 
+    // D205 raportează DOAR persoane fizice rezidente: nerezidenții → D207, persoanele juridice (art. 43)
+    // nu se raportează în D205 (impozitul lor e pe altă obligație D100, cod 150).
     let year_str = format!("{year:04}");
     let residents: Vec<&Dividend> = dividends
         .iter()
-        .filter(|d| d.distribution_date.starts_with(&year_str) && d.beneficiary_resident)
+        .filter(|d| {
+            d.distribution_date.starts_with(&year_str)
+                && d.beneficiary_resident
+                && d.beneficiary_type != BEN_PJ
+        })
         .collect();
 
     let missing = residents
@@ -470,6 +513,7 @@ mod tests {
                 shareholder: Some("Asociat A".into()),
                 beneficiary_cnp: Some("1960101410019".into()),
                 beneficiary_resident: true,
+                beneficiary_type: None,
                 note: None,
             },
         )
@@ -534,6 +578,7 @@ mod tests {
                     shareholder: Some("Asociat".into()),
                     beneficiary_cnp: None,
                     beneficiary_resident: true,
+                    beneficiary_type: None,
                     note: None,
                 },
             )
@@ -551,6 +596,7 @@ mod tests {
                 shareholder: Some("Asociat".into()),
                 beneficiary_cnp: None,
                 beneficiary_resident: true,
+                beneficiary_type: None,
                 note: None,
             },
         )
@@ -580,6 +626,52 @@ mod tests {
         assert_eq!(obls[1].deadline, "25.08.2026");
         assert_eq!(obls[1].amount, "800.00");
         assert_eq!(obls[1].count, 1);
+        // Toate sunt PF (implicit) → cod 604.
+        assert!(obls.iter().all(|o| o.cod_oblig == "604"));
+    }
+
+    #[tokio::test]
+    async fn obligations_split_pf_604_and_pj_150() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co-1','12345678','Test SRL','Str 1','Bucuresti','B','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // PF + PJ, ambele plătite în iulie → scadență 25.08, dar pe obligații DISTINCTE.
+        for ty in [BEN_PF, BEN_PJ] {
+            create(
+                &pool,
+                DividendInput {
+                    company_id: "co-1".into(),
+                    distribution_date: "2026-07-01".into(),
+                    payment_date: Some("2026-07-10".into()),
+                    gross_amount: "10000".into(),
+                    interim_2025: false,
+                    shareholder: Some("Beneficiar".into()),
+                    beneficiary_cnp: None,
+                    beneficiary_resident: true,
+                    beneficiary_type: Some(ty.into()),
+                    note: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let obls = dividend_obligations_in_months(&pool, "co-1", &["2026-08".to_string()])
+            .await
+            .unwrap();
+        // Două creanțe distincte (PF înaintea PJ), fiecare 10000 × 16% = 1600.
+        assert_eq!(obls.len(), 2, "PF (604) + PJ (150) ca rânduri separate");
+        assert_eq!(obls[0].cod_oblig, "604");
+        assert!(obls[0].label.contains("persoanelor fizice"));
+        assert_eq!(obls[0].amount, "1600.00");
+        assert_eq!(obls[1].cod_oblig, "150");
+        assert!(obls[1].label.contains("persoanelor juridice"));
+        assert_eq!(obls[1].amount, "1600.00");
     }
 
     // ── D205 aggregation (pure) ──────────────────────────────────────────────
@@ -604,6 +696,7 @@ mod tests {
             shareholder: Some("Ion Gheorghe".into()),
             beneficiary_cnp: cnp.map(|s| s.into()),
             beneficiary_resident: resident,
+            beneficiary_type: BEN_PF.into(),
             note: None,
             tax_deadline: "2026-01-25".into(),
         }
@@ -709,5 +802,30 @@ mod tests {
             ),
         ];
         assert!(d205_beneficiaries_for_year(&divs, 2025).unwrap().is_empty());
+    }
+
+    #[test]
+    fn d205_excludes_legal_person_beneficiaries() {
+        // PF rezident → în D205; PJ rezidentă (art. 43) → EXCLUSĂ (impozitul ei e pe D100 cod 150).
+        let pf = mk_div(
+            Some("1900101410011"),
+            true,
+            "2025-03-01",
+            Some("2025-03-10"),
+            "10000",
+            "1600",
+        );
+        let mut pj = mk_div(
+            Some("1900101410011"),
+            true,
+            "2025-04-01",
+            Some("2025-04-10"),
+            "5000",
+            "800",
+        );
+        pj.beneficiary_type = BEN_PJ.into();
+        let bens = d205_beneficiaries_for_year(&[pf, pj], 2025).unwrap();
+        assert_eq!(bens.len(), 1, "doar PF intră în D205");
+        assert_eq!(bens[0].distribuit, Decimal::from(10000)); // PJ (5000) exclusă
     }
 }

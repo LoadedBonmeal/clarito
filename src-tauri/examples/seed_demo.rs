@@ -328,6 +328,7 @@ async fn seed_firm(
             shareholder: Some("Popescu Andrei".into()),
             beneficiary_cnp: Some(cnp("196010141001")),
             beneficiary_resident: true,
+            beneficiary_type: None,
             note: None,
         },
     )
@@ -343,6 +344,7 @@ async fn seed_firm(
             shareholder: Some("John Smith (UK)".into()),
             beneficiary_cnp: None,
             beneficiary_resident: false,
+            beneficiary_type: None,
             note: None,
         },
     )
