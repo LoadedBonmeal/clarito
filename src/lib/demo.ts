@@ -304,6 +304,25 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
       '  <rand_cod_300 cod="20" baza="4000" tva="760"/>',
       "</declaratie300>",
     ].join("\n"),
+  compute_d394: () => ({
+    companyCui: "RO40268319",
+    periodFrom: "2026-06-01",
+    periodTo: "2026-06-30",
+    partners: [
+      { partnerCui: "RO12345674", partnerName: "Client Demo SRL", vatCategory: "S", vatRate: "21", invoiceCount: 4, base: "20000.00", vat: "4200.00" },
+      { partnerCui: "RO98765438", partnerName: "Beta Distribuție SRL", vatCategory: "S", vatRate: "11", invoiceCount: 2, base: "5000.00", vat: "550.00" },
+    ],
+    totalBase: "25000.00",
+    totalVat: "4750.00",
+    invoiceCount: 6,
+    purchasePartners: [
+      { partnerCui: "RO11111110", partnerName: "Furnizor Demo SRL", vatCategory: "S", vatRate: "21", invoiceCount: 3, base: "8000.00", vat: "1680.00" },
+    ],
+    totalPurchaseBase: "8000.00",
+    totalPurchaseVat: "1680.00",
+    purchaseInvoiceCount: 3,
+    purchaseUnparsedCount: 0,
+  }),
   preview_d394_xml: () =>
     [
       '<?xml version="1.0" encoding="UTF-8"?>',

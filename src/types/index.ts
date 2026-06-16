@@ -891,6 +891,32 @@ export interface D394Submission {
   optiune?: boolean;
   prsAfiliat?: boolean;
   solicit?: boolean;
+  // Cartuș G (încasări AMEF) + facturi simplificate — totaluri introduse manual pe cotă.
+  nrBfI1?: number;
+  cashRows?: D394CashRow[];
+}
+
+/**
+ * Un rând per cotă TVA cu totalurile (lei întregi) pentru încasări numerar (Î1/Î2) și facturi
+ * simplificate declarate manual în D394 (cartuș G + I). Mirrors Rust `D394CashRow`.
+ * Sumele-total incasari_i1/i2 se calculează din aceste rânduri (regula DUK) — nu se trimit separat.
+ */
+export interface D394CashRow {
+  cota: number;
+  bazaI1?: number;
+  tvaI1?: number;
+  bazaI2?: number;
+  tvaI2?: number;
+  bazaFsl?: number;
+  tvaFsl?: number;
+  bazaFslCod?: number;
+  tvaFslCod?: number;
+  bazaFsa?: number;
+  tvaFsa?: number;
+  bazaFsai?: number;
+  tvaFsai?: number;
+  bazaBfai?: number;
+  tvaBfai?: number;
 }
 
 // ─── GL — rezultat generare note contabile ────────────────────────────────

@@ -333,22 +333,22 @@ fn emit_rezumat2(w: &mut Writer<Cursor<Vec<u8>>>, r: &Rezumat2) -> AppResult<()>
 
     // Rezumat2 has many required fields with specific names from the XSD.
     // The validator checks nrFacturiL/bazaL/tvaL, nrFacturiA/bazaA/tvaA, nrFacturiAI/bazaAI/tvaAI.
-    // The XSD also requires several "FSL/FSA/FSAI/BFAI" financial-statement fields (all zeros here).
+    // The XSD also requires the "FSL/FSA/FSAI/BFAI" simplified-invoice fields (cartuș I).
     // Required by checkTag: bazaFSLcod, TVAFSLcod, bazaFSL, TVAFSL, bazaFSA, TVAFSA,
     //   bazaFSAI, TVAFSAI, bazaBFAI, TVABFAI, nrFacturiL, bazaL, tvaL,
     //   nrFacturiA, bazaA, tvaA, nrFacturiAI, bazaAI, tvaAI
 
-    // Financial statement aggregates (all zero — no lista/facturi data)
-    elem.push_attribute(("bazaFSLcod", "0"));
-    elem.push_attribute(("TVAFSLcod", "0"));
-    elem.push_attribute(("bazaFSL", "0"));
-    elem.push_attribute(("TVAFSL", "0"));
-    elem.push_attribute(("bazaFSA", "0"));
-    elem.push_attribute(("TVAFSA", "0"));
-    elem.push_attribute(("bazaFSAI", "0"));
-    elem.push_attribute(("TVAFSAI", "0"));
-    elem.push_attribute(("bazaBFAI", "0"));
-    elem.push_attribute(("TVABFAI", "0"));
+    // Facturi simplificate (cartuș I) per cotă — din rândurile numerar introduse manual (0 implicit).
+    elem.push_attribute(("bazaFSLcod", r.baza_fsl_cod.to_string().as_str()));
+    elem.push_attribute(("TVAFSLcod", r.tva_fsl_cod.to_string().as_str()));
+    elem.push_attribute(("bazaFSL", r.baza_fsl.to_string().as_str()));
+    elem.push_attribute(("TVAFSL", r.tva_fsl.to_string().as_str()));
+    elem.push_attribute(("bazaFSA", r.baza_fsa.to_string().as_str()));
+    elem.push_attribute(("TVAFSA", r.tva_fsa.to_string().as_str()));
+    elem.push_attribute(("bazaFSAI", r.baza_fsai.to_string().as_str()));
+    elem.push_attribute(("TVAFSAI", r.tva_fsai.to_string().as_str()));
+    elem.push_attribute(("bazaBFAI", r.baza_bfai.to_string().as_str()));
+    elem.push_attribute(("TVABFAI", r.tva_bfai.to_string().as_str()));
 
     // Op1 aggregates (required by R96-R104)
     elem.push_attribute(("nrFacturiL", r.nr_facturi_l.to_string().as_str()));

@@ -13,7 +13,7 @@ import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
-import type { Company, D394Submission } from "@/types";
+import type { Company, D394CashRow, D394Submission } from "@/types";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -23,6 +23,20 @@ const TIP_D394_KEYS = [
   { value: "S", labelKey: "shared.declCommon.periodS" },
   { value: "A", labelKey: "shared.declCommon.periodA" },
 ];
+
+/** Cotele TVA active 2026 pentru cartuș G/I (9% = tranzitoriu locuințe). */
+const COTE_2026 = [21, 11, 9] as const;
+
+/** Cele 14 sume (lei întregi) introduse manual pe cotă. */
+const CASH_FIELDS = [
+  "bazaI1", "tvaI1", "bazaI2", "tvaI2",
+  "bazaFsl", "tvaFsl", "bazaFslCod", "tvaFslCod",
+  "bazaFsa", "tvaFsa", "bazaFsai", "tvaFsai", "bazaBfai", "tvaBfai",
+] as const;
+type CashField = (typeof CASH_FIELDS)[number];
+type CashRowStr = Record<CashField, string>;
+const emptyCashRow = (): CashRowStr =>
+  Object.fromEntries(CASH_FIELDS.map((f) => [f, ""])) as CashRowStr;
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -97,6 +111,18 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit, onP
   const [optiune,          setOptiune]          = useState(false);
   const [prsAfiliat,       setPrsAfiliat]       = useState(false);
   const [solicit,          setSolicit]          = useState(false);
+  // Cartuș G (încasări AMEF) + facturi simplificate — totaluri manuale pe cotă (opțional).
+  const [showCash,         setShowCash]         = useState(false);
+  const [nrBfI1,           setNrBfI1]           = useState("0");
+  const [cash,             setCash]             = useState<Record<number, CashRowStr>>(
+    () => Object.fromEntries(COTE_2026.map((c) => [c, emptyCashRow()])) as Record<number, CashRowStr>,
+  );
+  const setCashField = (cota: number, f: CashField, v: string) =>
+    setCash((prev) => ({ ...prev, [cota]: { ...prev[cota], [f]: v.replace(/\D/g, "") } }));
+  const cashNum = (cota: number, f: CashField) => Number(cash[cota][f]) || 0;
+  // Sumele-total Î1/Î2 se calculează din rânduri (regula DUK) — afișate pentru reconciliere.
+  const incasariI1 = COTE_2026.reduce((s, c) => s + cashNum(c, "bazaI1") + cashNum(c, "tvaI1"), 0);
+  const incasariI2 = COTE_2026.reduce((s, c) => s + cashNum(c, "bazaI2") + cashNum(c, "tvaI2"), 0);
 
   const { closing, close } = useAnimatedClose(useCallback(() => onOpenChange(false), [onOpenChange]));
 
@@ -131,6 +157,18 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit, onP
     optiune,
     prsAfiliat,
     solicit,
+    nrBfI1: Number(nrBfI1) || 0,
+    // Un rând per cotă cu cel puțin o sumă > 0; cotele goale sunt omise.
+    cashRows: COTE_2026.map((cota): D394CashRow => ({
+      cota,
+      bazaI1: cashNum(cota, "bazaI1"), tvaI1: cashNum(cota, "tvaI1"),
+      bazaI2: cashNum(cota, "bazaI2"), tvaI2: cashNum(cota, "tvaI2"),
+      bazaFsl: cashNum(cota, "bazaFsl"), tvaFsl: cashNum(cota, "tvaFsl"),
+      bazaFslCod: cashNum(cota, "bazaFslCod"), tvaFslCod: cashNum(cota, "tvaFslCod"),
+      bazaFsa: cashNum(cota, "bazaFsa"), tvaFsa: cashNum(cota, "tvaFsa"),
+      bazaFsai: cashNum(cota, "bazaFsai"), tvaFsai: cashNum(cota, "tvaFsai"),
+      bazaBfai: cashNum(cota, "bazaBfai"), tvaBfai: cashNum(cota, "tvaBfai"),
+    })).filter((r) => CASH_FIELDS.some((f) => (r[f] ?? 0) > 0)),
   });
 
   const handleSubmit = () => {
@@ -146,6 +184,42 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit, onP
     void onPreview(buildSubmission());
   };
 
+  // A compact per-cotă table of whole-lei number inputs (cartuș G/I).
+  const cashTable = (title: string, cols: { label: string; f: CashField }[]) => (
+    <div className="span2" style={{ marginTop: 2 }}>
+      <div style={{ fontSize: 11.5, color: "var(--text-2)", margin: "2px 0 4px" }}>{title}</div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr style={{ color: "var(--text-2)" }}>
+            <th style={{ textAlign: "left", fontWeight: 500, padding: "2px 4px" }}>Cotă</th>
+            {cols.map((c) => (
+              <th key={c.f} style={{ textAlign: "right", fontWeight: 500, padding: "2px 4px" }}>{c.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {COTE_2026.map((cota) => (
+            <tr key={cota}>
+              <td style={{ padding: "2px 4px", whiteSpace: "nowrap" }}>{cota}%</td>
+              {cols.map((c) => (
+                <td key={c.f} style={{ padding: "2px 4px", textAlign: "right" }}>
+                  <input
+                    className="input num"
+                    style={{ width: 76, padding: "4px 6px", fontSize: 12 }}
+                    value={cash[cota][c.f]}
+                    onChange={(e) => setCashField(cota, c.f, e.target.value)}
+                    placeholder="0"
+                    inputMode="numeric"
+                  />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
   if (!open) return null;
 
   return createPortal(
@@ -154,7 +228,7 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit, onP
       style={{ position: "fixed" }}
       onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
-      <div className="modal" style={{ width: 580 }}>
+      <div className="modal" style={{ width: 640 }}>
         <div className="modal-head">
           <div>
             <div className="mt">{t("shared.d394.title")}</div>
@@ -315,6 +389,59 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit, onP
                 {t("shared.declCommon.vatRefund")}
               </CheckRow>
             </div>
+
+            {/* Cartuș G (încasări AMEF) + facturi simplificate — opțional, introdus manual pe cotă */}
+            <div className="span2 col-title" style={{ padding: "6px 0 0" }}>
+              {t("shared.d394.cashTitle")}
+            </div>
+            <div className="field span2" style={{ gap: 9 }}>
+              <CheckRow checked={showCash} onChange={setShowCash}>
+                {t("shared.d394.cashToggle")}
+              </CheckRow>
+            </div>
+            {showCash && (
+              <>
+                <div className="field span2">
+                  <span className="hint">{t("shared.d394.cashHint")}</span>
+                </div>
+                <div className="field">
+                  <label>{t("shared.d394.nrBf")}</label>
+                  <input
+                    className="input num"
+                    value={nrBfI1}
+                    onChange={(e) => setNrBfI1(e.target.value.replace(/\D/g, ""))}
+                    placeholder="0"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="field" />
+                {cashTable(t("shared.d394.amefTitle"), [
+                  { label: "Î1 bază", f: "bazaI1" },
+                  { label: "Î1 TVA", f: "tvaI1" },
+                  { label: "Î2 bază", f: "bazaI2" },
+                  { label: "Î2 TVA", f: "tvaI2" },
+                ])}
+                <div className="field span2">
+                  <span className="hint">
+                    {t("shared.d394.amefTotals", { i1: incasariI1, i2: incasariI2 })}
+                  </span>
+                </div>
+                {cashTable(t("shared.d394.fsTitle"), [
+                  { label: "FSL bază", f: "bazaFsl" },
+                  { label: "FSL TVA", f: "tvaFsl" },
+                  { label: "cu cod bază", f: "bazaFslCod" },
+                  { label: "cu cod TVA", f: "tvaFslCod" },
+                ])}
+                {cashTable(t("shared.d394.achTitle"), [
+                  { label: "FSA bază", f: "bazaFsa" },
+                  { label: "FSA TVA", f: "tvaFsa" },
+                  { label: "FSAI bază", f: "bazaFsai" },
+                  { label: "FSAI TVA", f: "tvaFsai" },
+                  { label: "BFAI bază", f: "bazaBfai" },
+                  { label: "BFAI TVA", f: "tvaBfai" },
+                ])}
+              </>
+            )}
           </div>
         </div>
         <div className="modal-foot">

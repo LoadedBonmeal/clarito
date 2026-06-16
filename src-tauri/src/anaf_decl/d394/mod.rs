@@ -81,6 +81,60 @@ pub struct D394Submission {
     /// Solicită rambursare (0/1); reflected in informatii.solicit.
     #[serde(default)]
     pub solicit: bool,
+
+    // ── Cartuș G (încasări AMEF) + facturi simplificate — introduse manual pe cotă ─
+    /// Numărul total de bonuri fiscale Î1 (AMEF). Informativ; fără reconciliere DUK.
+    #[serde(default)]
+    pub nr_bf_i1: i64,
+    /// Totaluri pe cotă pentru încasări numerar + facturi simplificate (cartuș G/I). Sumele-total
+    /// `incasari_i1`/`incasari_i2` se CALCULEAZĂ din aceste rânduri (regula DUK), nu se introduc.
+    #[serde(default)]
+    pub cash_rows: Vec<D394CashRow>,
+}
+
+/// Un rând per cotă TVA cu totalurile (lei întregi) pentru încasări numerar și facturi simplificate
+/// declarate manual în D394 (cartuș G + I). Bonurile pentru care s-a emis factură NU se includ (se
+/// evită dubla raportare); facturile simplificate sunt cele ≤ 100 EUR (art. 319 Cod fiscal).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct D394CashRow {
+    /// Cota TVA (2026: 21 / 11 / 9).
+    pub cota: i64,
+    /// Î1 — încasări prin AMEF (casa de marcat), bază + TVA.
+    #[serde(default)]
+    pub baza_i1: i64,
+    #[serde(default)]
+    pub tva_i1: i64,
+    /// Î2 — încasări din activități exceptate de la AMEF (OUG 28/1999), bază + TVA.
+    #[serde(default)]
+    pub baza_i2: i64,
+    #[serde(default)]
+    pub tva_i2: i64,
+    /// Facturi simplificate emise FĂRĂ codul beneficiarului (FSL), bază + TVA.
+    #[serde(default)]
+    pub baza_fsl: i64,
+    #[serde(default)]
+    pub tva_fsl: i64,
+    /// Facturi simplificate emise CU codul beneficiarului (FSLcod), bază + TVA.
+    #[serde(default)]
+    pub baza_fsl_cod: i64,
+    #[serde(default)]
+    pub tva_fsl_cod: i64,
+    /// Facturi simplificate primite — achiziții (FSA), bază + TVA.
+    #[serde(default)]
+    pub baza_fsa: i64,
+    #[serde(default)]
+    pub tva_fsa: i64,
+    /// Facturi simplificate primite — achiziții intracomunitare (FSAI), bază + TVA.
+    #[serde(default)]
+    pub baza_fsai: i64,
+    #[serde(default)]
+    pub tva_fsai: i64,
+    /// Bonuri fiscale — achiziții intracomunitare (BFAI), bază + TVA.
+    #[serde(default)]
+    pub baza_bfai: i64,
+    #[serde(default)]
+    pub tva_bfai: i64,
 }
 
 impl Default for D394Submission {
@@ -101,6 +155,8 @@ impl Default for D394Submission {
             optiune: false,
             prs_afiliat: false,
             solicit: false,
+            nr_bf_i1: 0,
+            cash_rows: Vec::new(),
         }
     }
 }

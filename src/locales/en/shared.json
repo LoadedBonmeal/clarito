@@ -268,7 +268,15 @@
         "opEfectuate": "Operations with affiliated persons",
         "optiune": "Special regime option",
         "prsAfiliat": "Affiliated persons"
-      }
+      },
+      "cashTitle": "Cash & simplified invoices (sections G/I)",
+      "cashToggle": "I have cash-register collections / simplified invoices",
+      "cashHint": "Period totals, per VAT rate (whole lei). Fiscal receipts for which an invoice was issued are EXCLUDED (avoids double reporting). Simplified invoices: documents ≤ 100 EUR (art. 319).",
+      "nrBf": "No. of fiscal receipts (Î1)",
+      "amefTitle": "AMEF collections — Î1 (cash register) and Î2 (exempt activities, GEO 28/1999)",
+      "amefTotals": "Computed total — Î1: {{i1}} lei · Î2: {{i2}} lei",
+      "fsTitle": "Simplified invoices issued (FSL — without / with beneficiary code)",
+      "achTitle": "Simplified / intra-EU acquisitions (FSA · FSAI · BFAI)"
     },
     "errors": {
       "unexpected": "An unexpected error occurred.",

@@ -78,7 +78,7 @@ use crate::commands::d394::{D394Partner, D394Report};
 use crate::db::companies::Company;
 use crate::error::AppResult;
 
-use super::D394Submission;
+use super::{D394CashRow, D394Submission};
 
 // ── Public output types ───────────────────────────────────────────────────────
 
@@ -221,6 +221,19 @@ pub struct Rezumat2 {
     pub tva_incasari_i1: i64,
     pub baza_incasari_i2: i64,
     pub tva_incasari_i2: i64,
+    // Facturi simplificate (cartuș I) per cotă — emit 0 when no data.
+    // FSL = livrări fără cod beneficiar, FSLcod = livrări cu cod; FSA/FSAI = achiziții (intracom);
+    // BFAI = bonuri fiscale achiziții intracomunitare.
+    pub baza_fsl: i64,
+    pub tva_fsl: i64,
+    pub baza_fsl_cod: i64,
+    pub tva_fsl_cod: i64,
+    pub baza_fsa: i64,
+    pub tva_fsa: i64,
+    pub baza_fsai: i64,
+    pub tva_fsai: i64,
+    pub baza_bfai: i64,
+    pub tva_bfai: i64,
 }
 
 /// A serieFacturi record.
@@ -973,24 +986,68 @@ pub fn build_sections(
         }
     }
 
+    // Încasări numerar + facturi simplificate (cartuș G/I), introduse manual pe cotă. O cotă care are
+    // DOAR date numerar (fără facturi în op1) trebuie totuși să primească un rezumat2 — altfel sumele
+    // ei dispar. Ignorăm cota 0 (i1/i2 se emit doar pentru cota≠24, iar cota 0 nu are sens aici).
+    let cash_map: BTreeMap<i64, &D394CashRow> = submission
+        .cash_rows
+        .iter()
+        .filter(|c| c.cota != 0)
+        .map(|c| (c.cota, c))
+        .collect();
+    for (&cota, c) in &cash_map {
+        let has_data = c.baza_i1 != 0
+            || c.tva_i1 != 0
+            || c.baza_i2 != 0
+            || c.tva_i2 != 0
+            || c.baza_fsl != 0
+            || c.tva_fsl != 0
+            || c.baza_fsl_cod != 0
+            || c.tva_fsl_cod != 0
+            || c.baza_fsa != 0
+            || c.tva_fsa != 0
+            || c.baza_fsai != 0
+            || c.tva_fsai != 0
+            || c.baza_bfai != 0
+            || c.tva_bfai != 0;
+        if has_data {
+            r2_map.entry(cota).or_default();
+        }
+    }
+
     let rezumat2_list: Vec<Rezumat2> = r2_map
         .into_iter()
-        .map(|(cota, acc)| Rezumat2 {
-            cota,
-            nr_facturi_l: acc.nr_l,
-            baza_l: acc.baza_l,
-            tva_l: acc.tva_l,
-            nr_facturi_a: acc.nr_a,
-            baza_a: acc.baza_a,
-            tva_a: acc.tva_a,
-            nr_facturi_ai: acc.nr_ai,
-            baza_ai: acc.baza_ai,
-            tva_ai: acc.tva_ai,
-            // R105-R108: required when cota≠24; 0 when no i1/i2 data
-            baza_incasari_i1: 0,
-            tva_incasari_i1: 0,
-            baza_incasari_i2: 0,
-            tva_incasari_i2: 0,
+        .map(|(cota, acc)| {
+            let c = cash_map.get(&cota);
+            let g = |f: fn(&D394CashRow) -> i64| c.map(|c| f(c)).unwrap_or(0);
+            Rezumat2 {
+                cota,
+                nr_facturi_l: acc.nr_l,
+                baza_l: acc.baza_l,
+                tva_l: acc.tva_l,
+                nr_facturi_a: acc.nr_a,
+                baza_a: acc.baza_a,
+                tva_a: acc.tva_a,
+                nr_facturi_ai: acc.nr_ai,
+                baza_ai: acc.baza_ai,
+                tva_ai: acc.tva_ai,
+                // R105-R108: required when cota≠24; din rândurile numerar (0 când lipsesc).
+                baza_incasari_i1: g(|c| c.baza_i1),
+                tva_incasari_i1: g(|c| c.tva_i1),
+                baza_incasari_i2: g(|c| c.baza_i2),
+                tva_incasari_i2: g(|c| c.tva_i2),
+                // Facturi simplificate (cartuș I) per cotă.
+                baza_fsl: g(|c| c.baza_fsl),
+                tva_fsl: g(|c| c.tva_fsl),
+                baza_fsl_cod: g(|c| c.baza_fsl_cod),
+                tva_fsl_cod: g(|c| c.tva_fsl_cod),
+                baza_fsa: g(|c| c.baza_fsa),
+                tva_fsa: g(|c| c.tva_fsa),
+                baza_fsai: g(|c| c.baza_fsai),
+                tva_fsai: g(|c| c.tva_fsai),
+                baza_bfai: g(|c| c.baza_bfai),
+                tva_bfai: g(|c| c.tva_bfai),
+            }
         })
         .collect();
 
@@ -1102,14 +1159,19 @@ pub fn build_sections(
         }
     };
 
+    // Sumele-total cartuș G se CALCULEAZĂ din rândurile pe cotă (regula DUK
+    // incasari_iN = Σ_cote (baza_iN + tva_iN)) — astfel reconcilierea e garantată prin construcție.
+    let incasari_i1: i64 = cash_map.values().map(|c| c.baza_i1 + c.tva_i1).sum();
+    let incasari_i2: i64 = cash_map.values().map(|c| c.baza_i2 + c.tva_i2).sum();
+
     let informatii = Informatii {
         nr_cui1,
         nr_cui2,
         nr_cui3,
         nr_cui4,
-        nr_bf_i1: 0,
-        incasari_i1: 0,
-        incasari_i2: 0,
+        nr_bf_i1: submission.nr_bf_i1,
+        incasari_i1,
+        incasari_i2,
         nr_facturi_terti: 0,
         nr_facturi_benef: 0,
         nr_facturi,
@@ -1476,6 +1538,65 @@ mod tests {
         assert_eq!(r2.cota, 19);
         assert_eq!(r2.nr_facturi_l, 3);
         assert_eq!(r2.baza_l, 1000);
+    }
+
+    #[test]
+    fn cash_rows_feed_rezumat2_and_compute_incasari_totals() {
+        // Vânzare pe cotă 21 (op1) + rând numerar pe cotă 21; PLUS un rând numerar pe cotă 11 FĂRĂ
+        // facturi (cotă numai-numerar) — trebuie să primească totuși un rezumat2, altfel sumele dispar.
+        let report = make_report(
+            vec![("98765438", "S", "21", 2, "1000.00", "210.00")],
+            vec![],
+        );
+        let mut sub = make_submission();
+        sub.nr_bf_i1 = 37;
+        sub.cash_rows = vec![
+            D394CashRow {
+                cota: 21,
+                baza_i1: 5000,
+                tva_i1: 1050,
+                baza_i2: 200,
+                tva_i2: 42,
+                baza_fsl: 300,
+                tva_fsl: 63,
+                baza_fsl_cod: 100,
+                tva_fsl_cod: 21,
+                ..Default::default()
+            },
+            D394CashRow {
+                cota: 11,
+                baza_i1: 1000,
+                tva_i1: 110,
+                ..Default::default()
+            },
+        ];
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+
+        let doc = build_sections(&report, &sub, &company, period).unwrap();
+
+        let r21 = doc
+            .rezumat2_list
+            .iter()
+            .find(|r| r.cota == 21)
+            .expect("rezumat2 cotă 21");
+        assert_eq!(r21.baza_incasari_i1, 5000);
+        assert_eq!(r21.tva_incasari_i1, 1050);
+        assert_eq!(r21.baza_incasari_i2, 200);
+        assert_eq!(r21.baza_fsl, 300);
+        assert_eq!(r21.baza_fsl_cod, 100);
+        // Cotă 11 e numai-numerar (fără facturi) → rezumat2 generat din rândul numerar.
+        let r11 = doc
+            .rezumat2_list
+            .iter()
+            .find(|r| r.cota == 11)
+            .expect("rezumat2 cotă 11 (numai numerar)");
+        assert_eq!(r11.baza_incasari_i1, 1000);
+        assert_eq!(r11.nr_facturi_l, 0);
+        // Sumele-total cartuș G se CALCULEAZĂ din rânduri (regula DUK incasari = Σ(bază+TVA)).
+        assert_eq!(doc.informatii.nr_bf_i1, 37);
+        assert_eq!(doc.informatii.incasari_i1, 7160); // (5000+1050)+(1000+110)
+        assert_eq!(doc.informatii.incasari_i2, 242); // (200+42)+0
     }
 
     #[test]

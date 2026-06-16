@@ -273,7 +273,15 @@
         "opEfectuate": "Operațiuni cu persoane afiliate",
         "optiune": "Opțiune regim special",
         "prsAfiliat": "Persoane afiliate"
-      }
+      },
+      "cashTitle": "Numerar & facturi simplificate (cartuș G/I)",
+      "cashToggle": "Am încasări prin casa de marcat / facturi simplificate",
+      "cashHint": "Totaluri pe perioadă, pe cotă (lei întregi). Bonurile pentru care s-a emis factură NU se includ (evită dubla raportare). Facturi simplificate: documente ≤ 100 EUR (art. 319 Cod fiscal).",
+      "nrBf": "Nr. bonuri fiscale (Î1)",
+      "amefTitle": "Încasări AMEF — Î1 (casa de marcat) și Î2 (activități exceptate, OUG 28/1999)",
+      "amefTotals": "Total calculat — Î1: {{i1}} lei · Î2: {{i2}} lei",
+      "fsTitle": "Facturi simplificate emise (FSL — fără / cu cod beneficiar)",
+      "achTitle": "Achiziții simplificate / intracom. (FSA · FSAI · BFAI)"
     },
     "errors": {
       "unexpected": "A apărut o eroare neașteptată.",

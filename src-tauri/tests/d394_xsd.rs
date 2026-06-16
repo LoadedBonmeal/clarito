@@ -25,7 +25,7 @@ use std::path::Path;
 
 use efactura_desktop_lib::anaf_decl::d394::generator::generate_d394_xml;
 use efactura_desktop_lib::anaf_decl::d394::sections::build_sections;
-use efactura_desktop_lib::anaf_decl::d394::D394Submission;
+use efactura_desktop_lib::anaf_decl::d394::{D394CashRow, D394Submission};
 use efactura_desktop_lib::anaf_decl::validation::{validate_with_xsd, xmllint_available};
 use efactura_desktop_lib::anaf_decl::version::resolve;
 use efactura_desktop_lib::anaf_decl::DeclKind;
@@ -83,6 +83,8 @@ fn test_submission() -> D394Submission {
         optiune: false,
         prs_afiliat: false,
         solicit: false,
+        nr_bf_i1: 0,
+        cash_rows: Vec::new(),
     }
 }
 
@@ -251,6 +253,86 @@ fn d394_validates_against_official_xsd() {
     assert!(
         result.passed,
         "D394 XML failed XSD validation. Errors:\n{}",
+        result.errors.join("\n")
+    );
+}
+
+/// Cartuș G (încasări AMEF) + facturi simplificate with NONZERO manual totals must still produce
+/// XSD-valid XML, including a rezumat2 for a CASH-ONLY cotă (no invoices). Also asserts the computed
+/// informatii totals (incasari_iN = Σ per-cotă) appear in the XML — the DUK consistency invariant.
+#[test]
+fn d394_with_cash_rows_validates_against_xsd() {
+    let period = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("test date");
+    let ver = resolve(DeclKind::D394, period).expect("schema version");
+
+    let report = test_report();
+    let mut submission = test_submission();
+    submission.nr_bf_i1 = 124;
+    submission.cash_rows = vec![
+        D394CashRow {
+            cota: 21,
+            baza_i1: 10000,
+            tva_i1: 2100,
+            baza_i2: 500,
+            tva_i2: 105,
+            baza_fsl: 800,
+            tva_fsl: 168,
+            baza_fsl_cod: 300,
+            tva_fsl_cod: 63,
+            ..Default::default()
+        },
+        // Cash-only cotă 9 (transitional housing) — no invoices in test_report → rezumat2 from cash.
+        D394CashRow {
+            cota: 9,
+            baza_i1: 2000,
+            tva_i1: 180,
+            ..Default::default()
+        },
+    ];
+    let company = test_company();
+
+    let doc = build_sections(&report, &submission, &company, period)
+        .expect("build_sections must not fail");
+    let xml = generate_d394_xml(&doc, &submission, &company, &ver)
+        .expect("generate_d394_xml must not fail");
+
+    // Computed informatii totals (DUK rule): incasari_i1 = (10000+2100)+(2000+180) = 14280;
+    // incasari_i2 = (500+105) = 605; nr_BF_i1 = 124.
+    assert!(xml.contains("nr_BF_i1=\"124\""), "nr_BF_i1 from submission");
+    assert!(
+        xml.contains("incasari_i1=\"14280\""),
+        "incasari_i1 = Σ(bază+TVA) Î1"
+    );
+    assert!(
+        xml.contains("incasari_i2=\"605\""),
+        "incasari_i2 = Σ(bază+TVA) Î2"
+    );
+    // Per-cotă cartuș G + FSL emitted on rezumat2.
+    assert!(
+        xml.contains("baza_incasari_i1=\"10000\""),
+        "cotă 21 Î1 bază"
+    );
+    assert!(xml.contains("bazaFSL=\"800\""), "cotă 21 FSL bază");
+    assert!(xml.contains("bazaFSLcod=\"300\""), "cotă 21 FSLcod bază");
+    // Cash-only cotă 9 got its own rezumat2 (else the bonuri would vanish).
+    assert!(
+        xml.contains("cota=\"9\"") && xml.contains("baza_incasari_i1=\"2000\""),
+        "cash-only cotă 9 rezumat2"
+    );
+
+    // XSD gate (skips gracefully when the vendored XSD / xmllint are absent).
+    let xsd_path = Path::new("tools/anaf/sample_d394.xml");
+    if !xsd_path.exists() || !xmllint_available() {
+        eprintln!("SKIP d394 cash XSD gate: XSD or xmllint absent.");
+        return;
+    }
+    let tmp = std::env::temp_dir().join("d394_cash_xsd_test.xml");
+    std::fs::write(&tmp, xml.as_bytes()).expect("write temp XML");
+    let result = validate_with_xsd(xsd_path, &tmp).expect("validate_with_xsd must not fail");
+    let _ = std::fs::remove_file(&tmp);
+    assert!(
+        result.passed,
+        "D394-with-cash XML failed XSD validation. Errors:\n{}",
         result.errors.join("\n")
     );
 }
