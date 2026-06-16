@@ -188,8 +188,13 @@ pub(crate) async fn poll_submitted_for_company(
             if let Ok(status_resp) = result {
                 let stare = status_resp.stare.as_str();
                 if stare == "ok" {
-                    if let Err(e) =
-                        db_inv::mark_validated(pool, &invoice.id, status_resp.index_incarcare).await
+                    if let Err(e) = db_inv::mark_validated(
+                        pool,
+                        &invoice.id,
+                        &invoice.company_id,
+                        status_resp.index_incarcare,
+                    )
+                    .await
                     {
                         tracing::error!(
                             invoice_id = %invoice.id,
@@ -232,8 +237,14 @@ pub(crate) async fn poll_submitted_for_company(
                             }),
                         );
                     }
-                    if let Err(e) =
-                        db_inv::mark_rejected(pool, &invoice.id, friendly_reason, None).await
+                    if let Err(e) = db_inv::mark_rejected(
+                        pool,
+                        &invoice.id,
+                        &invoice.company_id,
+                        friendly_reason,
+                        None,
+                    )
+                    .await
                     {
                         tracing::error!(
                             invoice_id = %invoice.id,

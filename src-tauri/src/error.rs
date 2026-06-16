@@ -12,6 +12,10 @@ use thiserror::Error;
 
 pub type AppResult<T> = Result<T, AppError>;
 
+// CLEAN-02: the error taxonomy is intentionally complete — some variants are constructed only on
+// rarely-hit paths (or kept for forthcoming callers), so not every variant has a live constructor at
+// all times. `allow(dead_code)` keeps the full, self-documenting set without clippy churn as call
+// sites come and go.
 #[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum AppError {

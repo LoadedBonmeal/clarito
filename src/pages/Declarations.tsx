@@ -317,7 +317,12 @@ export function DeclarationsPage() {
   const termenD406   = toIso(new Date(selectedYear, selectedMonth + 1, 0));  // ultima zi a lunii următoare
   const quarter      = Math.ceil(selectedMonth / 3);
   const termenD100   = toIso(new Date(selectedYear, quarter * 3, 25));       // 25 a lunii după trimestru
-  const termenD101   = toIso(new Date(selectedYear, 5, 25));                 // 25 iun pentru anul fiscal precedent
+  // Termen D101 (anul fiscal precedent = selectedYear-1): 25 IUNIE pentru exercițiile 2021-2025
+  // (derogarea OUG 153/2020, ultimul an de aplicare = 2025); revine la 25 MARTIE pentru exercițiul
+  // fiscal 2026 și ulterior (art. 42 Cod fiscal). Banner-ul descrie exact această regulă.
+  const termenD101   = (selectedYear - 1) <= 2025
+    ? toIso(new Date(selectedYear, 5, 25))   // 25 iunie (derogare OUG 153/2020)
+    : toIso(new Date(selectedYear, 2, 25));  // 25 martie (general)
 
   const preflightErrors = preflightIssues.filter((i) => i.severity === "error").length;
   const noD300Data = !report || (report.invoiceCount === 0 && report.purchaseInvoiceCount === 0);

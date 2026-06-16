@@ -724,27 +724,31 @@ pub async fn set_xml_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<
 pub async fn mark_validated(
     pool: &SqlitePool,
     id: &str,
+    company_id: &str,
     anaf_index: Option<String>,
 ) -> AppResult<()> {
     let now = now_unix();
     // Guard the transition like mark_submitted does: only a SUBMITTED invoice (or one stuck QUEUED by
     // a mark_submitted fallback) may become VALIDATED. A stale/replayed ANAF status callback, or a
     // since-deleted row, must NOT silently jump an invoice from DRAFT/STORNED/REJECTED/already-VALIDATED.
+    // SEC-01: also scope by company_id at the DB layer (defense-in-depth) — a status-transition setter
+    // can never touch another company's invoice even if a future caller skips the ownership check.
     let res = sqlx::query(
         "UPDATE invoices SET
             status           = 'VALIDATED',
             anaf_index       = ?2,
             anaf_validated_at = ?3,
             updated_at        = ?3
-        WHERE id = ?1 AND status IN ('SUBMITTED', 'QUEUED')",
+        WHERE id = ?1 AND company_id = ?4 AND status IN ('SUBMITTED', 'QUEUED')",
     )
     .bind(id)
     .bind(anaf_index)
     .bind(now)
+    .bind(company_id)
     .execute(pool)
     .await?;
     if res.rows_affected() != 1 {
-        tracing::warn!(%id, "mark_validated: 0 rows (invoice not SUBMITTED/QUEUED) — stale/duplicate ANAF callback or deleted row; status unchanged");
+        tracing::warn!(%id, "mark_validated: 0 rows (invoice not SUBMITTED/QUEUED for this company) — stale/duplicate ANAF callback or deleted row; status unchanged");
     }
     Ok(())
 }
@@ -752,13 +756,14 @@ pub async fn mark_validated(
 pub async fn mark_rejected(
     pool: &SqlitePool,
     id: &str,
+    company_id: &str,
     reason: Option<String>,
     code: Option<String>,
 ) -> AppResult<()> {
     let now = now_unix();
     // Same transition guard as mark_validated: only SUBMITTED (or QUEUED via the mark_submitted
     // fallback) → REJECTED. Prevents a stale/replayed ANAF callback from mis-transitioning a
-    // DRAFT/STORNED/VALIDATED/deleted invoice.
+    // DRAFT/STORNED/VALIDATED/deleted invoice. SEC-01: also company_id-scoped (defense-in-depth).
     let res = sqlx::query(
         "UPDATE invoices SET
             status           = 'REJECTED',
@@ -766,16 +771,17 @@ pub async fn mark_rejected(
             rejection_code   = ?3,
             anaf_rejected_at = ?4,
             updated_at       = ?4
-        WHERE id = ?1 AND status IN ('SUBMITTED', 'QUEUED')",
+        WHERE id = ?1 AND company_id = ?5 AND status IN ('SUBMITTED', 'QUEUED')",
     )
     .bind(id)
     .bind(reason)
     .bind(code)
     .bind(now)
+    .bind(company_id)
     .execute(pool)
     .await?;
     if res.rows_affected() != 1 {
-        tracing::warn!(%id, "mark_rejected: 0 rows (invoice not SUBMITTED/QUEUED) — stale/duplicate ANAF callback or deleted row; status unchanged");
+        tracing::warn!(%id, "mark_rejected: 0 rows (invoice not SUBMITTED/QUEUED for this company) — stale/duplicate ANAF callback or deleted row; status unchanged");
     }
     Ok(())
 }
@@ -1109,6 +1115,55 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(upload_id.as_deref(), Some("UPLOAD-001"));
+    }
+
+    /// SEC-01: mark_validated / mark_rejected are company-scoped at the DB layer — a wrong company_id
+    /// leaves the invoice untouched; only the owning company transitions it.
+    #[tokio::test]
+    async fn mark_validated_rejected_are_company_scoped() {
+        let pool = setup_mark_submitted_pool().await;
+        // Rows default to company_id = 'comp-1' (table default).
+        insert_invoice_with_status(&pool, "inv-v", "SUBMITTED").await;
+        insert_invoice_with_status(&pool, "inv-r", "SUBMITTED").await;
+
+        // Wrong company → no transition (Ok, but 0 rows affected).
+        super::mark_validated(&pool, "inv-v", "comp-2", Some("IDX".into()))
+            .await
+            .unwrap();
+        super::mark_rejected(&pool, "inv-r", "comp-2", Some("nope".into()), None)
+            .await
+            .unwrap();
+        let sv: String = sqlx::query_scalar("SELECT status FROM invoices WHERE id='inv-v'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let sr: String = sqlx::query_scalar("SELECT status FROM invoices WHERE id='inv-r'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            sv, "SUBMITTED",
+            "wrong company must not validate the invoice"
+        );
+        assert_eq!(sr, "SUBMITTED", "wrong company must not reject the invoice");
+
+        // Owning company → transitions.
+        super::mark_validated(&pool, "inv-v", "comp-1", Some("IDX".into()))
+            .await
+            .unwrap();
+        super::mark_rejected(&pool, "inv-r", "comp-1", Some("bad".into()), None)
+            .await
+            .unwrap();
+        let sv: String = sqlx::query_scalar("SELECT status FROM invoices WHERE id='inv-v'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let sr: String = sqlx::query_scalar("SELECT status FROM invoices WHERE id='inv-r'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(sv, "VALIDATED");
+        assert_eq!(sr, "REJECTED");
     }
 
     /// A1: mark_submitted on a non-QUEUED row → returns error AND persists
