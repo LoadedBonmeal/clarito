@@ -112,9 +112,11 @@ pub async fn generate_receipt_pdf(
         None
     };
 
-    // 4. Optionally resolve linked invoice → human full_number.
+    // 4. Optionally resolve linked invoice → human full_number. SCOPED by company: a receipt's
+    //    invoice_id must reference an invoice of the SAME company; the unscoped getter would leak
+    //    another company's full_number into the PDF if invoice_id were tampered (cross-company leak).
     let invoice_full_number: Option<String> = if let Some(ref inv_id) = receipt.invoice_id {
-        invoices::get(&state.db, inv_id)
+        invoices::get_scoped(&state.db, inv_id, &company_id)
             .await
             .ok()
             .map(|inv| inv.full_number)

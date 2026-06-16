@@ -450,6 +450,21 @@ pub fn d205_beneficiaries_for_year(
             }
         }
     }
+    // den1 (numele beneficiarului) e câmp obligatoriu în D205 — un nume gol produce o declarație
+    // respinsă/neconformă. Cerem completarea înainte de export (ca și la CNP).
+    let nameless: Vec<&str> = by_cnp
+        .values()
+        .filter(|b| b.name.trim().is_empty())
+        .map(|b| b.cnp.as_str())
+        .collect();
+    if !nameless.is_empty() {
+        return Err(AppError::Validation(format!(
+            "D205 {year}: {} beneficiar(i) fără nume — completați numele beneficiarului (câmp \
+             obligatoriu) înainte de export. CNP: {}.",
+            nameless.len(),
+            nameless.join(", ")
+        )));
+    }
     Ok(by_cnp.into_values().collect())
 }
 
@@ -798,6 +813,24 @@ mod tests {
         ];
         match d205_beneficiaries_for_year(&divs, 2025).unwrap_err() {
             AppError::Validation(m) => assert!(m.contains("fără CNP"), "got: {m}"),
+            other => panic!("expected Validation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn d205_resident_without_name_is_blocked() {
+        // Rezident cu CNP dar FĂRĂ nume (den1) → blocat (câmp obligatoriu ANAF), nu emis cu nume gol.
+        let mut d = mk_div(
+            Some("1900101410011"),
+            true,
+            "2025-03-01",
+            Some("2025-03-10"),
+            "10000",
+            "1600",
+        );
+        d.shareholder = None;
+        match d205_beneficiaries_for_year(&[d], 2025).unwrap_err() {
+            AppError::Validation(m) => assert!(m.contains("fără nume"), "got: {m}"),
             other => panic!("expected Validation, got {other:?}"),
         }
     }

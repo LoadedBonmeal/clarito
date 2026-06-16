@@ -989,12 +989,29 @@ pub fn build_sections(
     // Încasări numerar + facturi simplificate (cartuș G/I), introduse manual pe cotă. O cotă care are
     // DOAR date numerar (fără facturi în op1) trebuie totuși să primească un rezumat2 — altfel sumele
     // ei dispar. Ignorăm cota 0 (i1/i2 se emit doar pentru cota≠24, iar cota 0 nu are sens aici).
-    let cash_map: BTreeMap<i64, &D394CashRow> = submission
-        .cash_rows
-        .iter()
-        .filter(|c| c.cota != 0)
-        .map(|c| (c.cota, c))
-        .collect();
+    // Agregăm pe cotă SUMÂND rândurile duplicate (mai multe D394CashRow cu aceeași cotă) — altfel un
+    // BTreeMap colectat ar păstra doar ultimul rând și ar pierde tăcut datele celorlalte.
+    let mut cash_map: BTreeMap<i64, D394CashRow> = BTreeMap::new();
+    for c in submission.cash_rows.iter().filter(|c| c.cota != 0) {
+        let e = cash_map.entry(c.cota).or_insert_with(|| D394CashRow {
+            cota: c.cota,
+            ..Default::default()
+        });
+        e.baza_i1 += c.baza_i1;
+        e.tva_i1 += c.tva_i1;
+        e.baza_i2 += c.baza_i2;
+        e.tva_i2 += c.tva_i2;
+        e.baza_fsl += c.baza_fsl;
+        e.tva_fsl += c.tva_fsl;
+        e.baza_fsl_cod += c.baza_fsl_cod;
+        e.tva_fsl_cod += c.tva_fsl_cod;
+        e.baza_fsa += c.baza_fsa;
+        e.tva_fsa += c.tva_fsa;
+        e.baza_fsai += c.baza_fsai;
+        e.tva_fsai += c.tva_fsai;
+        e.baza_bfai += c.baza_bfai;
+        e.tva_bfai += c.tva_bfai;
+    }
     for (&cota, c) in &cash_map {
         let has_data = c.baza_i1 != 0
             || c.tva_i1 != 0
@@ -1019,7 +1036,7 @@ pub fn build_sections(
         .into_iter()
         .map(|(cota, acc)| {
             let c = cash_map.get(&cota);
-            let g = |f: fn(&D394CashRow) -> i64| c.map(|c| f(c)).unwrap_or(0);
+            let g = |f: fn(&D394CashRow) -> i64| c.map(f).unwrap_or(0);
             Rezumat2 {
                 cota,
                 nr_facturi_l: acc.nr_l,
@@ -1597,6 +1614,45 @@ mod tests {
         assert_eq!(doc.informatii.nr_bf_i1, 37);
         assert_eq!(doc.informatii.incasari_i1, 7160); // (5000+1050)+(1000+110)
         assert_eq!(doc.informatii.incasari_i2, 242); // (200+42)+0
+    }
+
+    #[test]
+    fn duplicate_cota_cash_rows_are_summed_not_dropped() {
+        // Două rânduri numerar pe ACEEAȘI cotă (21) trebuie SUMATE, nu păstrat doar ultimul (altfel
+        // datele primului rând s-ar pierde tăcut — DUK D394-002).
+        let report = make_report(
+            vec![("98765438", "S", "21", 1, "1000.00", "210.00")],
+            vec![],
+        );
+        let mut sub = make_submission();
+        sub.cash_rows = vec![
+            D394CashRow {
+                cota: 21,
+                baza_i1: 3000,
+                tva_i1: 630,
+                ..Default::default()
+            },
+            D394CashRow {
+                cota: 21,
+                baza_i1: 2000,
+                tva_i1: 420,
+                baza_fsl: 100,
+                tva_fsl: 21,
+                ..Default::default()
+            },
+        ];
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let doc = build_sections(&report, &sub, &company, period).unwrap();
+        let r21 = doc
+            .rezumat2_list
+            .iter()
+            .find(|r| r.cota == 21)
+            .expect("rezumat2 cotă 21");
+        assert_eq!(r21.baza_incasari_i1, 5000); // 3000 + 2000 (sumate)
+        assert_eq!(r21.tva_incasari_i1, 1050); // 630 + 420
+        assert_eq!(r21.baza_fsl, 100); // doar al 2-lea rând
+        assert_eq!(doc.informatii.incasari_i1, 6050); // Σ(bază+TVA) = 5000 + 1050
     }
 
     #[test]
