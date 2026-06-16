@@ -85,6 +85,8 @@
 .icon-btn:hover{background:var(--fill)}
 .icon-btn .ic{width:18px;height:18px}
 .btn-dark{height:34px;display:flex;align-items:center;gap:7px;padding:0 14px;border-radius:8px;background:var(--black);color:#fff;font-size:13px;font-weight:500;border:0;cursor:pointer;white-space:nowrap;text-decoration:none}
+/* UX-005: a disabled dark button must visibly dim (otherwise it looks identical to an enabled one). */
+.btn-dark:disabled{opacity:.45;cursor:default}
 .btn-dark .ic{stroke:#fff;width:15px;height:15px}
 .bell-dot{position:absolute;top:7px;right:8px;width:6px;height:6px;border-radius:999px;background:var(--red);border:1.5px solid #fff}
 .avatar{width:32px;height:32px;border-radius:999px;background:var(--fill);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--text-2);flex:none}

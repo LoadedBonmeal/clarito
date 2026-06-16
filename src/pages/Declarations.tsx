@@ -846,7 +846,7 @@ export function DeclarationsPage() {
 
               {/* Unparsed note */}
               {report && report.purchaseUnparsedCount > 0 && (
-                <div style={{ margin: "0 16px 4px", padding: "8px 10px", fontSize: 12, color: "var(--amber)", background: "rgba(180,83,9,.07)", border: "1px solid rgba(180,83,9,.18)", borderRadius: 8, lineHeight: 1.5 }}>
+                <div style={{ margin: "0 16px 4px", padding: "8px 10px", fontSize: 12, color: "var(--amber)", background: "var(--rf-warning-bg)", border: "1px solid var(--rf-warning-bd)", borderRadius: 8, lineHeight: 1.5 }}>
                   <b>
                     {t("declarations.detail.unparsedVat", { count: report.purchaseUnparsedCount })}
                   </b>{" "}
@@ -1002,9 +1002,9 @@ export function DeclarationsPage() {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                background: netTvaDePlata > 0 ? "rgba(180,83,9,.07)" : "rgba(4,120,87,.07)",
+                background: netTvaDePlata > 0 ? "var(--rf-warning-bg)" : "var(--rf-success-bg)",
                 borderRadius: 12,
-                border: `1.5px solid ${netTvaDePlata > 0 ? "rgba(180,83,9,.18)" : "rgba(4,120,87,.18)"}`,
+                border: `1.5px solid ${netTvaDePlata > 0 ? "var(--rf-warning-bd)" : "var(--rf-success-bd)"}`,
               }}
             >
               <div>

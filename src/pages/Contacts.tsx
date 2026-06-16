@@ -612,18 +612,18 @@ function ContactModal({
 
           {/* ANAF status notes (real functionality — restyled with design tokens) */}
           {anafInfo?.inactive && (
-            <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, fontSize: 12.5, color: "var(--red)", background: "rgba(220,38,38,.06)", border: "1px solid rgba(220,38,38,.18)" }}>
+            <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, fontSize: 12.5, color: "var(--red)", background: "var(--rf-error-bg)", border: "1px solid var(--rf-error-bd)" }}>
               {t("contacts.modal.inactivePrefix")} <b>{t("contacts.modal.inactiveBold")}</b> {t("contacts.modal.inactiveSuffix")}
             </div>
           )}
           {anafInfo?.cashVat && (
-            <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, fontSize: 12.5, color: "var(--amber)", background: "rgba(180,83,9,.07)", border: "1px solid rgba(180,83,9,.18)" }}>
+            <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, fontSize: 12.5, color: "var(--amber)", background: "var(--rf-warning-bg)", border: "1px solid var(--rf-warning-bd)" }}>
               {t("contacts.modal.cashVatPrefix")} <b>{t("contacts.modal.cashVatBold")}</b> {t("contacts.modal.cashVatSuffix")}
             </div>
           )}
 
           {error && (
-            <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, fontSize: 12.5, color: "var(--red)", background: "rgba(220,38,38,.06)", border: "1px solid rgba(220,38,38,.18)" }}>
+            <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, fontSize: 12.5, color: "var(--red)", background: "var(--rf-error-bg)", border: "1px solid var(--rf-error-bd)" }}>
               {error}
             </div>
           )}
