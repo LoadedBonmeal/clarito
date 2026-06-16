@@ -8,7 +8,7 @@ use tauri::State;
 use crate::anaf_decl::d205_xml::{build_d205_xml, D205Header};
 use crate::anaf_decl::DeclKind;
 use crate::commands::declarations::{duk_gate_allows_write, OfficialExportResult};
-use crate::db::dividends::{self, Dividend, DividendInput};
+use crate::db::dividends::{self, Dividend, DividendBeneficiaryUpdate, DividendInput};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -26,6 +26,17 @@ pub async fn create_dividend(
     input: DividendInput,
 ) -> AppResult<Dividend> {
     dividends::create(&state.db, input).await
+}
+
+/// DIV-01: editează in-place identitatea beneficiarului (CNP, nume, rezidență, tip) + data plății/nota.
+/// NU schimbă sumele (brut/impozit rămân imuabile — postează GL); pentru a corecta un CNP lipsă fără
+/// a șterge înregistrarea (altfel exportul D205 al anului rămâne blocat).
+#[tauri::command]
+pub async fn update_dividend_beneficiary(
+    state: State<'_, AppState>,
+    update: DividendBeneficiaryUpdate,
+) -> AppResult<Dividend> {
+    dividends::update_beneficiary(&state.db, update).await
 }
 
 #[tauri::command]

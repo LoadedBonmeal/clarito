@@ -158,6 +158,17 @@
       "eq4": "Egalitatea 4 · Solduri finale D = C"
     },
     "closings": {
+      "checklistTitle": "Checklist de închidere — {{period}}",
+      "checklistHint": "Ordinea recomandată pentru închiderea lunii/anului. Toți pașii sunt idempotenți (re-rularea recalculează corect), deci dacă ai sărit unul îl poți rula oricând fără să strici nimic.",
+      "checklistOrderWarn": "Ordine importantă: postează impozitul pe profit/venit ÎNAINTE de închiderea perioadei (6/7→121). Altfel impozitul nu intră în rezultatul anului până nu re-rulezi închiderea.",
+      "checklistS1": "Generează notele GL pentru perioadă (din facturi, plăți, salarii, stocuri).",
+      "checklistS2": "Reconciliază GL ↔ D300 (TVA colectată / deductibilă).",
+      "checklistS3": "Verifică facturile primite — completează defalcarea TVA dacă lipsește, apoi regenerează.",
+      "checklistS4": "Închide TVA (4426/4427 → 4423/4424) — pas de prezentare în bilanț.",
+      "checklistS5": "Postează impozitul pe profit/venit (691/698).",
+      "checklistS6": "Închide perioada: 6/7 → 121 (rezultatul exercițiului).",
+      "checklistS7": "Verifică balanța de verificare (debit = credit).",
+      "checklistS8": "La final de an: închidere anuală 121 → 117 (rezultat reportat).",
       "vatTitle": "Închidere TVA — {{period}}",
       "vatCollected": "TVA colectată",
       "vatDeductible": "TVA deductibilă",

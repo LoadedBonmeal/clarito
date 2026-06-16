@@ -23,6 +23,13 @@
     "delete": "Șterge",
     "deleteFailed": "Ștergerea a eșuat.",
     "confirmDelete": "Ștergeți acest dividend? Se elimină și nota contabilă asociată.",
+    "edit": "Editează beneficiarul",
+    "editTitle": "Editează beneficiarul dividendului",
+    "editHint": "Corectează CNP / nume / rezidență / tip / data plății. Sumele (brut, impozit) NU se modifică aici — pentru a le schimba, ștergeți și reînregistrați (se re-postează nota contabilă).",
+    "save": "Salvează",
+    "cancel": "Anulează",
+    "updated": "Beneficiar actualizat.",
+    "updateFailed": "Actualizarea beneficiarului a eșuat.",
     "empty": "Niciun dividend înregistrat.",
     "col": {
       "distribution": "Distribuit",

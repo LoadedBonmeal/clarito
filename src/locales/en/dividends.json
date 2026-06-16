@@ -23,6 +23,13 @@
     "delete": "Delete",
     "deleteFailed": "Delete failed.",
     "confirmDelete": "Delete this dividend? Its GL entry is removed too.",
+    "edit": "Edit beneficiary",
+    "editTitle": "Edit dividend beneficiary",
+    "editHint": "Correct the CNP / name / residency / type / payment date. Amounts (gross, tax) are NOT changed here — to change those, delete and re-record (the GL entry re-posts).",
+    "save": "Save",
+    "cancel": "Cancel",
+    "updated": "Beneficiary updated.",
+    "updateFailed": "Updating the beneficiary failed.",
     "empty": "No dividends recorded.",
     "col": {
       "distribution": "Distributed",

@@ -482,6 +482,7 @@ pub fn run() {
             commands::payroll::delete_secondary_office,
             commands::dividends::list_dividends,
             commands::dividends::create_dividend,
+            commands::dividends::update_dividend_beneficiary,
             commands::dividends::delete_dividend,
             commands::dividends::export_d205_official,
             commands::dividends::preview_d205_xml,

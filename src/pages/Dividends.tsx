@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import { Ic } from "@/components/shared/Ic";
 import { PreflightPanel } from "@/components/shared/PreflightPanel";
 import { api } from "@/lib/tauri";
-import type { PreflightIssue } from "@/lib/tauri";
+import type { Dividend, PreflightIssue } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
@@ -76,6 +76,45 @@ export function Dividends() {
     mutationFn: (id: string) => api.dividends.delete(id, companyId!),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["dividends", companyId ?? ""] }),
     onError: (e) => notify.error(formatError(e, t("dividends.deleteFailed"))),
+  });
+
+  // DIV-01: editare in-place a beneficiarului (CNP/nume/rezidență/tip/dată plată) — fără a atinge
+  // sumele (brut/impozit postează GL). Permite corectarea unui CNP lipsă/greșit fără delete + recreate.
+  const [editing, setEditing] = useState<Dividend | null>(null);
+  const [eName, setEName] = useState("");
+  const [eCnp, setECnp] = useState("");
+  const [eResident, setEResident] = useState(true);
+  const [eType, setEType] = useState<"PF" | "PJ">("PF");
+  const [ePayment, setEPayment] = useState("");
+
+  const startEdit = (d: Dividend) => {
+    setEditing(d);
+    setEName(d.shareholder ?? "");
+    setECnp(d.beneficiaryCnp ?? "");
+    setEResident(d.beneficiaryResident);
+    setEType((d.beneficiaryType as "PF" | "PJ") ?? "PF");
+    setEPayment(d.paymentDate ?? "");
+  };
+
+  const updateBen = useMutation({
+    mutationFn: () => {
+      if (!editing || !companyId) throw new Error(t("dividends.selectCompany"));
+      return api.dividends.updateBeneficiary({
+        id: editing.id,
+        companyId,
+        paymentDate: ePayment || null,
+        shareholder: eName || null,
+        beneficiaryCnp: eCnp.trim() || null,
+        beneficiaryResident: eResident,
+        beneficiaryType: eType,
+      });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["dividends", companyId ?? ""] });
+      setEditing(null);
+      notify.success(t("dividends.updated"));
+    },
+    onError: (e) => notify.error(formatError(e, t("dividends.updateFailed"))),
   });
 
   const openXml = useOpenXml();
@@ -252,6 +291,51 @@ export function Dividends() {
         )}
       </div>
 
+      {/* DIV-01: editor beneficiar in-place (corectare CNP / nume / rezidență / tip / dată plată). */}
+      {editing && (
+        <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+            {t("dividends.editTitle")} — {editing.distributionDate} · {fmtRON(editing.grossAmount)}
+          </div>
+          <div className="hint" style={{ marginBottom: 12 }}>{t("dividends.editHint")}</div>
+          <div className="fgrid">
+            <div className="field">
+              <label>{t("dividends.paymentDate")}</label>
+              <input className="input" type="date" value={ePayment} onChange={(e) => setEPayment(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>{t("dividends.shareholder")}</label>
+              <input className="input" value={eName} onChange={(e) => setEName(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>{t("dividends.beneficiaryType")}</label>
+              <select className="input" value={eType} onChange={(e) => setEType(e.target.value as "PF" | "PJ")}>
+                <option value="PF">{t("dividends.beneficiaryTypePF")}</option>
+                <option value="PJ">{t("dividends.beneficiaryTypePJ")}</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>{t("dividends.beneficiaryCnp")}</label>
+              <input className="input num" inputMode="numeric" maxLength={13} placeholder="1960101410019" value={eCnp} onChange={(e) => setECnp(e.target.value.replace(/\D/g, ""))} />
+            </div>
+            <div className="field span2">
+              <label className="chk-row">
+                <input type="checkbox" checked={eResident} onChange={(e) => setEResident(e.target.checked)} />
+                <span>{t("dividends.beneficiaryResident")}</span>
+              </label>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <button className="btn-dark" disabled={updateBen.isPending} onClick={() => updateBen.mutate()}>
+              <Ic name="check" />{t("dividends.save")}
+            </button>
+            <button className="pill-btn" disabled={updateBen.isPending} onClick={() => setEditing(null)}>
+              {t("dividends.cancel")}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* List — .scr-card (not .card) so the table is clipped to the rounded corners (overflow:hidden). */}
       <div className="scr-card">
         <table className="scr-table">
@@ -300,13 +384,22 @@ export function Dividends() {
                     )}
                   </td>
                   <td className="r w-del">
-                    <button
-                      className="icon-btn"
-                      title={t("dividends.delete")}
-                      onClick={async () => { if (await confirm(t("dividends.confirmDelete"))) del.mutate(d.id); }}
-                    >
-                      <Ic name="xMark" />
-                    </button>
+                    <div style={{ display: "inline-flex", gap: 2 }}>
+                      <button
+                        className="icon-btn"
+                        title={t("dividends.edit")}
+                        onClick={() => startEdit(d)}
+                      >
+                        <Ic name="pen" />
+                      </button>
+                      <button
+                        className="icon-btn"
+                        title={t("dividends.delete")}
+                        onClick={async () => { if (await confirm(t("dividends.confirmDelete"))) del.mutate(d.id); }}
+                      >
+                        <Ic name="xMark" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))

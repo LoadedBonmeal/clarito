@@ -748,6 +748,31 @@ export function GlLedgerPage() {
 
       {/* ── 3. ÎNCHIDERI ───────────────────────────────────────────────────── */}
       <div className={`panel${tab === 2 ? " show" : ""}`}>
+        {/* WF-10 / WF-08: guided close checklist — the recommended ordered sequence + the one hard
+            ordering rule. Steps are idempotent, so this is guidance, not a gate. */}
+        <div className="scr-card" style={{ marginBottom: 12, padding: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+            {t("gl.closings.checklistTitle", { period: periodLabel })}
+          </div>
+          <div className="hint" style={{ marginBottom: 10 }}>{t("gl.closings.checklistHint")}</div>
+          <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.7 }}>
+            <li>{t("gl.closings.checklistS1")}</li>
+            <li>{t("gl.closings.checklistS2")}</li>
+            <li>{t("gl.closings.checklistS3")}</li>
+            <li>{t("gl.closings.checklistS4")}</li>
+            <li>{t("gl.closings.checklistS5")}</li>
+            <li>{t("gl.closings.checklistS6")}</li>
+            <li>{t("gl.closings.checklistS7")}</li>
+            <li>{t("gl.closings.checklistS8")}</li>
+          </ol>
+          <div
+            className="hint"
+            style={{ marginTop: 10, display: "flex", gap: 6, alignItems: "flex-start", color: "var(--red)" }}
+          >
+            <Ic name="triangle" />
+            <span>{t("gl.closings.checklistOrderWarn")}</span>
+          </div>
+        </div>
         <div className="cols-2-even">
           {/* Închidere TVA */}
           <div className="scr-card close-card">

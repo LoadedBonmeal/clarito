@@ -652,9 +652,23 @@ export interface DividendInput {
   beneficiaryType?: "PF" | "PJ";
   note?: string | null;
 }
+/** DIV-01: editare in-place a identității beneficiarului (CNP/nume/rezidență/tip) + dată plată/notă.
+ *  NU schimbă sumele (brut/impozit postează GL); pentru a corecta un CNP fără a șterge înregistrarea. */
+export interface DividendBeneficiaryUpdate {
+  id: string;
+  companyId: string;
+  paymentDate?: string | null;
+  shareholder?: string | null;
+  beneficiaryCnp?: string | null;
+  beneficiaryResident?: boolean;
+  beneficiaryType?: "PF" | "PJ";
+  note?: string | null;
+}
 export const dividends = {
   list: (companyId: string) => invoke<Dividend[]>("list_dividends", { companyId }),
   create: (input: DividendInput) => invoke<Dividend>("create_dividend", { input }),
+  updateBeneficiary: (update: DividendBeneficiaryUpdate) =>
+    invoke<Dividend>("update_dividend_beneficiary", { update }),
   delete: (id: string, companyId: string) =>
     invoke<void>("delete_dividend", { id, companyId }),
   /**

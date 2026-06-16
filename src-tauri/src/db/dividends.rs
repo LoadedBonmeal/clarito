@@ -112,6 +112,26 @@ pub struct DividendInput {
     pub note: Option<String>,
 }
 
+/// DIV-01: câmpurile de IDENTITATE beneficiar (+ data plății / nota) editabile in-place. NU include
+/// sumele (brut/impozit) — acelea postează nota 117/457/446, deci rămân imuabile pe acest drum
+/// (pentru a le schimba: delete + recreate, ca să se re-posteze GL-ul). Permite corectarea unui CNP
+/// lipsă/greșit fără a pierde înregistrarea (altfel exportul D205 al anului ar rămâne blocat).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DividendBeneficiaryUpdate {
+    pub id: String,
+    pub company_id: String,
+    pub payment_date: Option<String>,
+    pub shareholder: Option<String>,
+    #[serde(default)]
+    pub beneficiary_cnp: Option<String>,
+    #[serde(default = "default_resident")]
+    pub beneficiary_resident: bool,
+    #[serde(default)]
+    pub beneficiary_type: Option<String>,
+    pub note: Option<String>,
+}
+
 fn row_to_dividend(r: &sqlx::sqlite::SqliteRow) -> Dividend {
     let distribution_date: String = r.get("distribution_date");
     let payment_date: Option<String> = r.get("payment_date");
@@ -255,6 +275,56 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
     .await?;
 
     get(pool, &id, &input.company_id).await
+}
+
+/// DIV-01: edit a dividend's beneficiary identity (CNP, name, resident, type) + payment_date/note in
+/// place — the D205/D100-relevant fields, none of which touch the financial amounts or the 117/457/446
+/// GL note. Company-scoped; CNP re-validated (mod-11) when present. Returns the refreshed record.
+pub async fn update_beneficiary(
+    pool: &SqlitePool,
+    upd: DividendBeneficiaryUpdate,
+) -> AppResult<Dividend> {
+    let ben_cnp = upd
+        .beneficiary_cnp
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(cnp) = ben_cnp {
+        if !crate::anaf_decl::valid_cnp(cnp) {
+            return Err(AppError::Validation(
+                "CNP beneficiar invalid — 13 cifre cu cifra de control corectă.".into(),
+            ));
+        }
+    }
+    let ben_type = if upd.beneficiary_type.as_deref() == Some(BEN_PJ) {
+        BEN_PJ
+    } else {
+        BEN_PF
+    };
+    let res = sqlx::query(
+        "UPDATE dividends SET payment_date = ?3, shareholder = ?4, beneficiary_cnp = ?5, \
+         beneficiary_resident = ?6, beneficiary_type = ?7, note = ?8 \
+         WHERE id = ?1 AND company_id = ?2",
+    )
+    .bind(&upd.id)
+    .bind(&upd.company_id)
+    .bind(
+        upd.payment_date
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+    )
+    .bind(upd.shareholder.as_deref())
+    .bind(ben_cnp)
+    .bind(upd.beneficiary_resident as i64)
+    .bind(ben_type)
+    .bind(upd.note.as_deref())
+    .execute(pool)
+    .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::NotFound); // cross-company / id inexistent
+    }
+    get(pool, &upd.id, &upd.company_id).await
 }
 
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
@@ -569,6 +639,116 @@ mod tests {
                 .unwrap()
                 .get("n");
         assert_eq!(after, 0, "ștergerea dividendului curăță nota GL");
+    }
+
+    #[tokio::test]
+    async fn update_beneficiary_sets_cnp_in_place_and_unblocks_d205() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co-1','12345678','Test SRL','Str 1','Bucuresti','B','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // DIV-01: dividend rezident creat FĂRĂ CNP — se înregistrează, dar blochează exportul D205.
+        let d = create(
+            &pool,
+            DividendInput {
+                company_id: "co-1".into(),
+                distribution_date: "2026-03-15".into(),
+                payment_date: Some("2026-03-20".into()),
+                gross_amount: "10000".into(),
+                interim_2025: false,
+                shareholder: None,
+                beneficiary_cnp: None,
+                beneficiary_resident: true,
+                beneficiary_type: None,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(d.beneficiary_cnp.is_none());
+        assert!(
+            d205_beneficiaries_for_year(&list(&pool, "co-1").await.unwrap(), 2026).is_err(),
+            "D205 2026 e blocat cât timp rezidentul nu are CNP"
+        );
+
+        // CNP invalid (cifră de control greșită) e respins de update.
+        assert!(update_beneficiary(
+            &pool,
+            DividendBeneficiaryUpdate {
+                id: d.id.clone(),
+                company_id: "co-1".into(),
+                payment_date: Some("2026-03-20".into()),
+                shareholder: Some("Asociat A".into()),
+                beneficiary_cnp: Some("1960101410018".into()),
+                beneficiary_resident: true,
+                beneficiary_type: None,
+                note: None,
+            },
+        )
+        .await
+        .is_err());
+
+        // Corectare in-place: CNP valid + nume.
+        let upd = update_beneficiary(
+            &pool,
+            DividendBeneficiaryUpdate {
+                id: d.id.clone(),
+                company_id: "co-1".into(),
+                payment_date: Some("2026-03-20".into()),
+                shareholder: Some("Asociat A".into()),
+                beneficiary_cnp: Some("1960101410019".into()),
+                beneficiary_resident: true,
+                beneficiary_type: None,
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(upd.beneficiary_cnp.as_deref(), Some("1960101410019"));
+        assert_eq!(upd.shareholder.as_deref(), Some("Asociat A"));
+        // Sumele rămân imuabile pe acest drum (brut/impozit postează GL).
+        assert_eq!(upd.gross_amount, d.gross_amount);
+        assert_eq!(upd.tax_amount, d.tax_amount);
+
+        // D205 2026 acum TRECE (un beneficiar).
+        let bens = d205_beneficiaries_for_year(&list(&pool, "co-1").await.unwrap(), 2026).unwrap();
+        assert_eq!(bens.len(), 1);
+
+        // Nota GL e NESCHIMBATĂ: tot 3 linii, debit total = brutul.
+        let row = sqlx::query(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(CAST(e.debit AS REAL)),0) AS d \
+             FROM gl_entry e JOIN gl_journal j ON e.journal_pk = j.id \
+             WHERE j.company_id='co-1' AND j.source_type='DIVIDEND' AND j.source_id=?1",
+        )
+        .bind(&d.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let (n, sd): (i64, f64) = (row.get("n"), row.get("d"));
+        assert_eq!(n, 3);
+        assert!((sd - 10000.0).abs() < 0.005);
+
+        // Cross-company: id corect, firmă greșită → NotFound (izolare).
+        assert!(update_beneficiary(
+            &pool,
+            DividendBeneficiaryUpdate {
+                id: d.id.clone(),
+                company_id: "other-co".into(),
+                payment_date: None,
+                shareholder: None,
+                beneficiary_cnp: Some("1960101410019".into()),
+                beneficiary_resident: true,
+                beneficiary_type: None,
+                note: None,
+            },
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]

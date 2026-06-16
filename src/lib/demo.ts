@@ -232,6 +232,11 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
     { id: "dv1", companyId: "demo-co", distributionDate: "2025-03-15", paymentDate: "2025-03-20", grossAmount: "10000.00", taxRate: 10, taxAmount: "1000.00", netAmount: "9000.00", interim2025: false, shareholder: "Andrei Popescu", beneficiaryCnp: "1900101410011", beneficiaryResident: true, note: null, taxDeadline: "2025-04-25" },
     { id: "dv2", companyId: "demo-co", distributionDate: "2025-06-10", paymentDate: "2025-06-15", grossAmount: "8000.00", taxRate: 10, taxAmount: "800.00", netAmount: "7200.00", interim2025: false, shareholder: "John Smith", beneficiaryCnp: null, beneficiaryResident: false, note: null, taxDeadline: "2025-07-25" },
   ],
+  // DIV-01: in-place beneficiary edit — echo the update onto a dividend-shaped object (demo is mock).
+  update_dividend_beneficiary: (a) => {
+    const u = (a?.update ?? {}) as Record<string, unknown>;
+    return { id: u.id ?? "dv1", companyId: "demo-co", distributionDate: "2025-03-15", paymentDate: u.paymentDate ?? null, grossAmount: "10000.00", taxRate: 10, taxAmount: "1000.00", netAmount: "9000.00", interim2025: false, shareholder: u.shareholder ?? null, beneficiaryCnp: u.beneficiaryCnp ?? null, beneficiaryResident: u.beneficiaryResident ?? true, beneficiaryType: u.beneficiaryType ?? "PF", note: u.note ?? null, taxDeadline: "2025-04-25" };
+  },
   list_assets: () => [],
   list_vat_rates: () => [],
   list_accounts: () => [],

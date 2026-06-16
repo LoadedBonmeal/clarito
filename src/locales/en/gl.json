@@ -155,6 +155,17 @@
       "eq4": "Equality 4 · Closing balances D = C"
     },
     "closings": {
+      "checklistTitle": "Close checklist — {{period}}",
+      "checklistHint": "The recommended order for closing the month/year. Every step is idempotent (re-running recomputes correctly), so a skipped step can be run anytime without breaking anything.",
+      "checklistOrderWarn": "Order matters: post income/profit tax BEFORE closing the period (6/7→121). Otherwise the tax won't land in the year's result until you re-run the close.",
+      "checklistS1": "Generate the GL entries for the period (from invoices, payments, payroll, stock).",
+      "checklistS2": "Reconcile GL ↔ D300 (VAT collected / deductible).",
+      "checklistS3": "Review received invoices — fill in the VAT breakdown if missing, then regenerate.",
+      "checklistS4": "Close VAT (4426/4427 → 4423/4424) — a balance-sheet presentation step.",
+      "checklistS5": "Post income/profit tax (691/698).",
+      "checklistS6": "Close the period: 6/7 → 121 (result of the year).",
+      "checklistS7": "Check the trial balance (debit = credit).",
+      "checklistS8": "At year end: annual close 121 → 117 (retained earnings).",
       "vatTitle": "VAT closing — {{period}}",
       "vatCollected": "VAT collected",
       "vatDeductible": "VAT deductible",
