@@ -12,6 +12,12 @@ use super::{D390Doc, D390Submission};
 use crate::db::companies::Company;
 use crate::error::{AppError, AppResult};
 
+// Namespace `:v3` CONFIRMED correct per the official ANAF structura D390 (OPANAF 705/11.03.2020,
+// `structura_D390_2020_180320.pdf`): `declaratie:v3` din perioada 02/2020 (`:v2`=2017, `:v1`=<2017),
+// iar `bazaR` (regim agricultori) face parte din structura 2020. NOTĂ: `d390.xsd` de la calea publică
+// `.../AplicatiiDec/d390.xsd` e schema VECHE `:v1` (fără `bazaR`) — de aceea nu există o poartă
+// xmllint pentru D390 (XSD-ul `:v3` nu e publicat standalone, e în pachetul Soft A/DUK al ANAF; D390
+// nu are nici validator DUK dedicat). Verificarea = testul structural de mai jos.
 const NAMESPACE: &str = "mfp:anaf:dgti:d390:declaratie:v3";
 
 fn map_err(e: quick_xml::Error) -> AppError {
@@ -211,6 +217,20 @@ mod tests {
         let xml = generate_d390_xml(&doc(), &D390Submission::default(), &company()).unwrap();
         assert!(xml.contains("<declaratie390 "));
         assert!(xml.contains(&format!("xmlns=\"{NAMESPACE}\"")));
+        // Namespace MUST be the OPANAF 705/2020 `:v3` (NOT the pre-2017 `:v1` of the stale public XSD),
+        // and `bazaR` (regim agricultori) must be present — both confirmed by structura_D390_2020.
+        assert!(
+            xml.contains("d390:declaratie:v3\""),
+            "D390 namespace must be :v3 (OPANAF 705/2020)"
+        );
+        assert!(
+            !xml.contains("d390:declaratie:v1"),
+            "must NOT emit the old :v1 namespace"
+        );
+        assert!(
+            xml.contains("bazaR="),
+            "rezumat must carry the R-code (agricultori) total"
+        );
         assert!(xml.contains("luna=\"3\""));
         assert!(xml.contains("an=\"2026\""));
         assert!(xml.contains("cui=\"12345678\""), "RO prefix stripped");
