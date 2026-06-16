@@ -498,7 +498,11 @@ function SaftDocView({ s }: { s: SaftSummary }) {
             <div className="docv-kv-row">
               <span className="docv-kv-k">Diferență</span>
               <span className="docv-kv-v">
-                {balanced ? "Echilibrat ✓" : `${fmtRON(diff)} ✗`}
+                {balanced
+                  ? "Echilibrat ✓"
+                  : Number.isNaN(diff)
+                    ? "Nevalidă ✗"
+                    : `${fmtRON(diff)} ✗`}
               </span>
             </div>
           </div>

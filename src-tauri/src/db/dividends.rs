@@ -344,7 +344,10 @@ pub async fn dividend_obligations_in_months(
             let mut sum = Decimal::ZERO;
             let mut count = 0u32;
             for d in &all {
+                // Doar rezidenți: impozitul pe dividende către nerezidenți se declară pe altă
+                // obligație (impozit venituri nerezidenți, cod 631) + D207, nu pe 604/150.
                 if d.tax_deadline.starts_with(ym.as_str())
+                    && d.beneficiary_resident
                     && (d.beneficiary_type == BEN_PJ) == is_pj
                 {
                     sum += Decimal::from_str(d.tax_amount.trim()).unwrap_or(Decimal::ZERO);
@@ -661,11 +664,30 @@ mod tests {
             .await
             .unwrap();
         }
+        // Nerezident (PF) plătit aceeași lună → NU intră în obligațiile 604/150 (merge pe cod 631/D207).
+        create(
+            &pool,
+            DividendInput {
+                company_id: "co-1".into(),
+                distribution_date: "2026-07-01".into(),
+                payment_date: Some("2026-07-10".into()),
+                gross_amount: "9000".into(),
+                interim_2025: false,
+                shareholder: Some("Nerezident".into()),
+                beneficiary_cnp: None,
+                beneficiary_resident: false,
+                beneficiary_type: Some(BEN_PF.into()),
+                note: None,
+            },
+        )
+        .await
+        .unwrap();
         let obls = dividend_obligations_in_months(&pool, "co-1", &["2026-08".to_string()])
             .await
             .unwrap();
-        // Două creanțe distincte (PF înaintea PJ), fiecare 10000 × 16% = 1600.
-        assert_eq!(obls.len(), 2, "PF (604) + PJ (150) ca rânduri separate");
+        // Două creanțe distincte (PF înaintea PJ), fiecare 10000 × 16% = 1600. Nerezidentul e exclus
+        // (altfel PF ar fi 1600 + 1440 = 3040).
+        assert_eq!(obls.len(), 2, "PF (604) + PJ (150); nerezidentul exclus");
         assert_eq!(obls[0].cod_oblig, "604");
         assert!(obls[0].label.contains("persoanelor fizice"));
         assert_eq!(obls[0].amount, "1600.00");

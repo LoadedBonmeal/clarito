@@ -39,7 +39,10 @@ pub(crate) async fn resolve_storno_ref(
     inv: &Invoice,
 ) -> AppResult<Option<String>> {
     if let Some(orig_id) = inv.storno_of_invoice_id.as_deref() {
-        match invoices::get(pool, orig_id).await {
+        // Scope by company: a storno can only reference an invoice of the SAME company. Using the
+        // unscoped getter would let a crafted storno_of_invoice_id probe another company's
+        // full_number via the resolved value / error path (cross-company info leak, SEC-01).
+        match invoices::get_scoped(pool, orig_id, &inv.company_id).await {
             Ok(original) => return Ok(Some(original.full_number)),
             // Dacă FK-ul a rămas dangling dintr-un motiv neașteptat, ne
             // întoarcem la legacy parser în loc să eșuăm întreaga validare.
