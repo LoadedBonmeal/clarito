@@ -70,6 +70,23 @@ curl -fL --progress-bar -o "$SAFT_XSD_PATH" "$SAFT_XSD_URL" || {
 }
 echo ""
 
+# ── e-Transport XSD schema (v2) ──────────────────────────────────────────────
+# The OFFICIAL XSD is published only on https://etransport.mfinante.gov.ro/informatii-tehnice,
+# which blocks non-browser downloads (curl/wget get a connection reset). For reproducibility we
+# pull the same schema (schema_ETR_v2.xsd, targetNamespace mfp:anaf:dgti:eTransport:declaratie:v2,
+# version 1.02) from a public mirror that vendors it next to ANAF's official Schematron v2.0.2.
+# Replace with the canonical MF file the moment it can be fetched headlessly (e.g. via a browser).
+# Used by tests/etransport_xsd.rs (skips gracefully when absent).
+ETRANSPORT_XSD_URL="https://raw.githubusercontent.com/stornoro/storno/main/backend/resources/etransport/schema_ETR_v2.xsd"
+ETRANSPORT_XSD_PATH="$TOOLS_DIR/schema_ETR_v2.xsd"
+
+echo "▶ Downloading e-Transport v2 XSD schema ..."
+echo "  URL: $ETRANSPORT_XSD_URL"
+curl -fL --progress-bar -o "$ETRANSPORT_XSD_PATH" "$ETRANSPORT_XSD_URL" || {
+    echo "  WARNING: e-Transport XSD download failed; the etransport_xsd test will skip until vendored."
+}
+echo ""
+
 # ── D300 / D394 assistance programs ─────────────────────────────────────────
 # ANAF distributes declaration-specific validators as part of the assistance
 # program ZIPs. Reference pages (check for latest download links):

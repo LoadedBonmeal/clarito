@@ -521,11 +521,8 @@ mod tests {
         assert!(errs.iter().any(|e| e.contains("document")));
     }
 
-    // Structural conformance test (no xmllint XSD gate): the official e-Transport XSD lives only on
-    // etransport.mfinante.gov.ro, which blocks automated download, and is not published standalone on
-    // static.anaf.ro. The namespace `:v2` is the in-force version (confirmed against multiple
-    // independent production implementations: e-factura-go, flectra l10n_ro_edi_stock, etc.; `:v1` is
-    // the older one). So we assert the full required structure here instead of an XSD round-trip.
+    // Fast in-lib structural check of the required attributes. The full xmllint round-trip against the
+    // OFFICIAL ANAF schema (`schema_ETR_v2.xsd`, namespace `:v2`) is in `tests/etransport_xsd.rs`.
     #[test]
     fn generates_v2_xml() {
         let xml = generate_etransport_xml(&sample()).unwrap();
