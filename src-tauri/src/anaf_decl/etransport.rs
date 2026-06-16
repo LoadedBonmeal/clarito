@@ -521,20 +521,52 @@ mod tests {
         assert!(errs.iter().any(|e| e.contains("document")));
     }
 
+    // Structural conformance test (no xmllint XSD gate): the official e-Transport XSD lives only on
+    // etransport.mfinante.gov.ro, which blocks automated download, and is not published standalone on
+    // static.anaf.ro. The namespace `:v2` is the in-force version (confirmed against multiple
+    // independent production implementations: e-factura-go, flectra l10n_ro_edi_stock, etc.; `:v1` is
+    // the older one). So we assert the full required structure here instead of an XSD round-trip.
     #[test]
     fn generates_v2_xml() {
         let xml = generate_etransport_xml(&sample()).unwrap();
+        // Root + namespace MUST be the in-force :v2 (not the older :v1).
         assert!(xml.contains(&format!("xmlns=\"{NAMESPACE}\"")));
+        assert!(
+            xml.contains("eTransport:declaratie:v2\""),
+            "namespace must be :v2"
+        );
+        assert!(
+            !xml.contains("eTransport:declaratie:v1"),
+            "must NOT emit the old :v1"
+        );
         assert!(xml.contains("<eTransport "));
         assert!(xml.contains("codDeclarant=\"12345678\""));
+        // notificare + required goods attributes.
         assert!(xml.contains("<notificare codTipOperatiune=\"30\""));
+        assert!(xml.contains("codScopOperatiune=\"101\""));
         assert!(xml.contains("denumireMarfa=\"Roșii\""));
-        assert!(xml.contains("greutateBruta=\"1050.00\""));
+        assert!(
+            xml.contains("cantitate=\"1000"),
+            "cantitate present (1000 / 1000.00)"
+        );
         assert!(xml.contains("codUnitateMasura=\"KGM\""));
+        assert!(xml.contains("greutateBruta=\"1050.00\""));
+        // partener + required transport-organizer fields (mandatory in DateTransportType).
         assert!(xml.contains("<partenerComercial codTara=\"RO\""));
+        assert!(xml.contains("denumire=\"Client SRL\""));
         assert!(xml.contains("nrVehicul=\"B100ABC\""));
+        assert!(
+            xml.contains("codTaraOrgTransport="),
+            "codTaraOrgTransport required"
+        );
+        assert!(
+            xml.contains("denumireOrgTransport="),
+            "denumireOrgTransport required"
+        );
+        assert!(xml.contains("dataTransport=\"2026-06-10\""));
         // route start as address (locatie), final as address.
         assert!(xml.contains("<locStartTraseuRutier><locatie codJudet=\"40\""));
+        assert!(xml.contains("<locFinalTraseuRutier>"));
         assert!(xml.contains("tipDocument=\"20\""));
         assert!(xml.contains("</eTransport>"));
     }
