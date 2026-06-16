@@ -5,10 +5,9 @@
 //! CAS+CASS și deducerea personală); CAM (asigurătorie pentru muncă, angajator) 2,25%. Salariu
 //! minim 2026: 4.050 lei (sem. I) / 4.325 lei (de la 1 iulie).
 //!
-//! This module computes ONE salary state (brut → net + contribuții + cost angajator). The full
-//! D112 (evidența nominală a salariaților, stările lunare, exportul XML cu cele două versiuni de
-//! schemă din 2026 și notele GL 641/421, 4315, 4316, 444, 646/436) este o extensie ulterioară —
-//! acesta este nucleul de calcul reutilizabil.
+//! This module computes ONE salary state (brut → net + contribuții + cost angajator) — nucleul de
+//! calcul reutilizabil. Evidența nominală + stările lunare + exportul XML D112 sunt în `d112_xml.rs`,
+//! iar notele GL (641/421, 4315, 4316, 444, 646/436) în `db/payroll.rs` / `db/gl.rs`.
 
 use rust_decimal::Decimal;
 use rust_decimal::RoundingStrategy;

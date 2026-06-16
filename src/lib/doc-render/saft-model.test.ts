@@ -92,4 +92,18 @@ describe("parseSaftSummary", () => {
     expect(parseSaftSummary("not xml <<<")).toBeNull();
     expect(() => parseSaftSummary("")).not.toThrow();
   });
+
+  it("degrades gracefully on a well-formed but partial AuditFile (missing sections)", () => {
+    // Header only — no MasterFiles / GeneralLedgerEntries / SourceDocuments.
+    const s = parseSaftSummary(
+      `<AuditFile xmlns="mfp:anaf:dgti:d406:declaratie:v1"><Header><AuditFileVersion>2.4.9</AuditFileVersion><HeaderComment>A</HeaderComment></Header></AuditFile>`,
+    )!;
+    expect(s).not.toBeNull();
+    expect(s.version).toBe("2.4.9");
+    expect(s.declType).toBe("A");
+    expect(s.companyName).toBe(""); // missing → empty, not a crash
+    expect(s.gl.present).toBe(false); // no GeneralLedgerEntries
+    expect(s.counts.every((c) => c.value === 0)).toBe(true); // empty MasterFiles
+    expect(s.sections.every((x) => !x.present)).toBe(true); // empty SourceDocuments
+  });
 });

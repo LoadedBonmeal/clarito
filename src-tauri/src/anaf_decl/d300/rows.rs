@@ -395,9 +395,11 @@ pub fn map_to_rows(
         }
     }
 
-    let den = company.legal_name.chars().take(200).collect::<String>();
+    // XSD limits: den ≤ Str200, adresa ≤ Str1000.
+    const DEN_MAX: usize = 200;
+    const ADRESA_MAX: usize = 1000;
+    let den = company.legal_name.chars().take(DEN_MAX).collect::<String>();
     let adresa = {
-        // Build address from components; truncate to 1000 chars
         let parts: Vec<&str> = [
             company.address.as_str(),
             company.city.as_str(),
@@ -406,7 +408,11 @@ pub fn map_to_rows(
         .into_iter()
         .filter(|s| !s.is_empty())
         .collect();
-        parts.join(", ").chars().take(1000).collect::<String>()
+        parts
+            .join(", ")
+            .chars()
+            .take(ADRESA_MAX)
+            .collect::<String>()
     };
 
     // ── Sales row accumulation ────────────────────────────────────────────────

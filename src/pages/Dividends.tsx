@@ -152,7 +152,7 @@ export function Dividends() {
           </div>
           <div className="field">
             <label>{t("dividends.gross")}</label>
-            <input className="input num num-r" inputMode="decimal" placeholder="10000" value={grossAmount} onChange={(e) => setGrossAmount(e.target.value)} />
+            <input className="input num num-r" inputMode="decimal" placeholder="10000" value={grossAmount} onChange={(e) => setGrossAmount(e.target.value.replace(/[^0-9.]/g, ""))} />
           </div>
           <div className="field">
             <label>{t("dividends.paymentDate")}</label>

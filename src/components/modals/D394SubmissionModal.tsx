@@ -383,7 +383,7 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit, onP
                 {t("shared.d394.flags.optiune")}
               </CheckRow>
               <CheckRow checked={prsAfiliat} onChange={setPrsAfiliat}>
-                Persoane afiliate
+                {t("shared.d394.flags.prsAfiliat")}
               </CheckRow>
               <CheckRow checked={solicit} onChange={setSolicit}>
                 {t("shared.declCommon.vatRefund")}
