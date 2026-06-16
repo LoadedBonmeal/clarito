@@ -5,8 +5,10 @@
 //! - `oauth`    — flux OAuth2 PKCE (browser redirect + local TCP listener)
 //! - `client`   — client HTTP pentru endpoint-urile ANAF e-Factura
 //! - `errors`   — mapare coduri erori ANAF → mesaje în română
+//! - `pinning`  — observabilitate TLS report-only (loghează amprenta cert. ANAF; nu blochează)
 
 pub mod client;
 pub mod errors;
 pub mod keychain;
 pub mod oauth;
+pub mod pinning;

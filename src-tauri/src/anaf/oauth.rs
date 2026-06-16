@@ -419,6 +419,7 @@ pub async fn refresh_token_bundle_with_client_id(
 ) -> Result<OAuthResult, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
+        .tls_info(true) // report-only TLS observability (see anaf::pinning)
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -595,6 +596,7 @@ async fn exchange_code_for_token(
 ) -> Result<OAuthResult, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
+        .tls_info(true) // report-only TLS observability (see anaf::pinning)
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -619,6 +621,7 @@ async fn exchange_code_for_token(
 }
 
 async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthResult, String> {
+    super::pinning::observe_cert(&resp); // report-only TLS observability (never blocks)
     let status = resp.status();
     let body = resp
         .text()

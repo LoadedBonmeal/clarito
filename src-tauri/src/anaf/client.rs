@@ -184,6 +184,9 @@ impl AnafClient {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(30))
+                // Capture the peer cert so `pinning::observe_cert` can log it (report-only; standard
+                // chain validation is unchanged — this only exposes the cert for observability).
+                .tls_info(true)
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: base.to_string(),
@@ -231,6 +234,8 @@ impl AnafClient {
                 .send()
                 .await
                 .map_err(|e| format!("Upload request eșuat: {e}"))?;
+
+            super::pinning::observe_cert(&resp); // report-only TLS observability (never blocks)
 
             let status = resp.status();
 
