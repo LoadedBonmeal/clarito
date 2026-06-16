@@ -82,29 +82,28 @@ pub fn schema_versions() -> Vec<SchemaVersion> {
             duk_type: "D406",
         },
         // ── D112 (declarația 112) ──────────────────────────────────────────
-        // Namespace verified against the official XSD d112_10102024.xsd (v1.02):
-        // targetNamespace …declaratie:v6, root declaratieUnica. The July-2026
-        // model (Ordin 605/95/928/2.314/2026) reuses :v6 (nomenclator/rule-level
-        // changes only); we split the window so the period label distinguishes
-        // H1 from H2 and so the July artifacts can be re-vendored without merging
-        // periods. Re-validate against ANAF's separate D112Validator when the
-        // July structura/XSD ship (first filing 2026-08-25).
+        // The D112 EMITTER (d112_xml.rs) hardcodes the namespace …declaratie:v7,
+        // CONFIRMED by running the official D112Validator.jar (build 209/Apr-2026):
+        // the in-force model REQUIRES :v7 and REJECTS the older :v6 (d112_10102024.xsd).
+        // This registry entry is metadata only — the D112 path does NOT call resolve()
+        // (the emitter owns its namespace), but we keep it accurate (:v7). The July-2026
+        // model (Ordin 605/95/928/2.314/2026) reuses :v7 (nomenclator/rule-level changes).
         SchemaVersion {
             decl: DeclKind::D112,
             valid_from: d(2026, 1, 1),
             valid_to: Some(d(2026, 6, 30)),
-            namespace: "mfp:anaf:dgti:declaratie_unica:declaratie:v6",
+            namespace: "mfp:anaf:dgti:declaratie_unica:declaratie:v7",
             root_element: "declaratieUnica",
-            schema_label: "D112 v6 (≤2026-06)",
+            schema_label: "D112 v7 (≤2026-06)",
             duk_type: "D112",
         },
         SchemaVersion {
             decl: DeclKind::D112,
             valid_from: d(2026, 7, 1),
             valid_to: None,
-            namespace: "mfp:anaf:dgti:declaratie_unica:declaratie:v6",
+            namespace: "mfp:anaf:dgti:declaratie_unica:declaratie:v7",
             root_element: "declaratieUnica",
-            schema_label: "D112 v6 (≥2026-07, model Ordin 605/2026)",
+            schema_label: "D112 v7 (≥2026-07, model Ordin 605/2026)",
             duk_type: "D112",
         },
         // ── D205 (informativă anuală, pe beneficiar) ───────────────────────

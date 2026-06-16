@@ -13,12 +13,95 @@
  * are dropped. Never throws — returns `[]` on a parse error.
  */
 import { pickDescriptor, type DocDescriptor } from "@/lib/doc-render/descriptors";
-import { formatValue, resolveField } from "@/lib/doc-render/labels";
+import { parseInvoice, type InvoiceDoc } from "@/lib/doc-render/invoice-model";
+import { formatValue, resolveField, vatCategoryLabel } from "@/lib/doc-render/labels";
+import { fmtRON } from "@/lib/utils";
 
 export interface DeclTable {
   title: string;
   columns: string[];
   rows: string[][];
+}
+
+// ── e-Factura (UBL) → labeled spreadsheet from the parsed invoice model ─────────────────────────────
+const INVOICE_TYPE: Record<string, string> = {
+  "380": "Factură",
+  "381": "Notă de credit (storno)",
+  "384": "Factură corectată",
+  "389": "Autofactură",
+};
+const UNIT: Record<string, string> = {
+  C62: "buc", H87: "buc", PCE: "buc", NAR: "buc", XPP: "buc", SET: "set", HUR: "oră",
+  DAY: "zi", MON: "lună", ANN: "an", KGM: "kg", MTR: "m", LTR: "l", MTK: "m²", MTQ: "m³",
+  KWH: "kWh", TNE: "tonă",
+};
+const trimZeros = (v: string): string => {
+  const s = (v ?? "").trim();
+  return /^\d+\.\d+$/.test(s) ? s.replace(/\.?0+$/, "") : s;
+};
+const money = (v: string, cur: string): string => {
+  const n = Number((v ?? "").trim());
+  return Number.isFinite(n) && (v ?? "").trim() !== "" ? `${fmtRON(n)}${cur ? ` ${cur}` : ""}` : (v ?? "");
+};
+function partyRows(p: InvoiceDoc["seller"]): string[][] {
+  const cityLine = [p.city, p.county, p.country].filter(Boolean).join(", ");
+  return [
+    ["Denumire", p.name || "—"],
+    ["CIF / CUI", p.vatId || p.companyId || "—"],
+    ["Adresă", [p.street, cityLine].filter(Boolean).join(", ") || "—"],
+  ];
+}
+/** Build a labeled, human-friendly XLSX from a parsed CIUS-RO invoice (header/seller/buyer/lines/VAT/
+ *  totals). The canonical UBL XML is untouched; this is only the spreadsheet "layout". */
+function invoiceTables(doc: InvoiceDoc): DeclTable[] {
+  const cur = doc.currency;
+  return [
+    {
+      title: "Factură",
+      columns: ["Câmp", "Valoare"],
+      rows: [
+        ["Nr. factură", doc.number || "—"],
+        ["Tip", INVOICE_TYPE[doc.typeCode] ?? doc.typeCode],
+        ["Data emiterii", doc.issueDate || "—"],
+        ["Data scadenței", doc.dueDate || "—"],
+        ["Monedă", cur || "—"],
+      ],
+    },
+    { title: "Vânzător", columns: ["Câmp", "Valoare"], rows: partyRows(doc.seller) },
+    { title: "Cumpărător", columns: ["Câmp", "Valoare"], rows: partyRows(doc.buyer) },
+    {
+      title: "Linii factură",
+      columns: ["Nr.", "Denumire", "Cantitate", "UM", "Preț unitar", "Cotă TVA", "Valoare netă"],
+      rows: doc.lines.map((l, i) => [
+        l.id || String(i + 1),
+        l.name,
+        trimZeros(l.quantity),
+        UNIT[l.unit] ?? l.unit,
+        money(l.unitPrice, cur),
+        vatCategoryLabel(l.vatCode, l.vatPercent),
+        money(l.lineAmount, cur),
+      ]),
+    },
+    {
+      title: "Detalierea TVA",
+      columns: ["Cotă", "Bază", "TVA"],
+      rows: doc.vatSubtotals.map((s) => [
+        vatCategoryLabel(s.code, s.percent),
+        money(s.taxable, cur),
+        money(s.vat, cur),
+      ]),
+    },
+    {
+      title: "Totaluri",
+      columns: ["Câmp", "Valoare"],
+      rows: [
+        ["Total fără TVA", money(doc.taxExclusive, cur)],
+        ["Total TVA", money(doc.totalVat, cur)],
+        ["Total cu TVA", money(doc.taxInclusive, cur)],
+        ["De plată", money(doc.payable, cur)],
+      ],
+    },
+  ];
 }
 
 function attrsOf(el: Element): [string, string][] {
@@ -102,6 +185,12 @@ export function xmlToTables(xml: string, docKey?: string): DeclTable[] {
     root = null;
   }
   if (!root) return [];
+  // e-Factura (UBL): derive the spreadsheet from the parsed invoice model (header/lines/VAT/totals),
+  // not the generic element walker — the canonical UBL XML stays untouched.
+  if (root.localName === "Invoice") {
+    const inv = parseInvoice(xml);
+    if (inv) return invoiceTables(inv);
+  }
   // Resolve the descriptor like XmlDocView (docKey/declKind → root tag); `key` drives the labels.
   const desc = pickDescriptor(docKey, root.localName);
   const key = desc?.key ?? docKey ?? "";

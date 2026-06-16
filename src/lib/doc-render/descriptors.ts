@@ -130,6 +130,46 @@ export const D406_DESCRIPTOR: DocDescriptor = {
   sections: [],
 };
 
+/** RO e-Transport (UIT) — attribute-based XML; sections map the notification + goods + route. */
+export const ETRANSPORT_DESCRIPTOR: DocDescriptor = {
+  key: "ETRANSPORT",
+  title: "Declarație RO e-Transport (UIT)",
+  rootTag: "eTransport",
+  sections: [
+    { match: "eTransport", title: "Declarant", as: "kv" },
+    { match: "notificare", title: "Notificare", as: "kv" },
+    {
+      match: "bunuriTransportate",
+      title: "Bunuri transportate",
+      as: "table",
+      columns: [
+        "codScopOperatiune",
+        "codTarifar",
+        "denumireMarfa",
+        "cantitate",
+        "codUnitateMasura",
+        "greutateNeta",
+        "greutateBruta",
+        "valoareLeiFaraTva",
+      ],
+    },
+    { match: "partenerComercial", title: "Partener comercial", as: "kv" },
+    { match: "dateTransport", title: "Date transport", as: "kv" },
+    {
+      match: "locatie",
+      title: "Locații traseu (start / final)",
+      as: "table",
+      columns: ["codJudet", "denumireStrada", "numar", "codPostal", "alteInfo", "codPtf", "codBirouVamal"],
+    },
+    {
+      match: "documenteTransport",
+      title: "Documente de transport",
+      as: "table",
+      columns: ["tipDocument", "numarDocument", "dataDocument"],
+    },
+  ],
+};
+
 export const DESCRIPTORS: DocDescriptor[] = [
   D205_DESCRIPTOR,
   INVOICE_DESCRIPTOR,
@@ -138,6 +178,7 @@ export const DESCRIPTORS: DocDescriptor[] = [
   D390_DESCRIPTOR,
   D394_DESCRIPTOR,
   D406_DESCRIPTOR,
+  ETRANSPORT_DESCRIPTOR,
 ];
 
 const BY_KEY = new Map(DESCRIPTORS.map((d) => [d.key, d]));

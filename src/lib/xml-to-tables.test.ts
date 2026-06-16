@@ -49,6 +49,49 @@ describe("xmlToTables", () => {
     expect(t!.rows).toEqual([["camp_x", "1"]]); // raw name + raw value
   });
 
+  it("labels e-Transport via the ETRANSPORT dictionary (attribute → RO label)", () => {
+    const xml = `<eTransport xmlns="mfp:anaf:dgti:eTransport:declaratie:v2" codDeclarant="12345678">
+      <notificare codTipOperatiune="30">
+        <bunuriTransportate codScopOperatiune="101" denumireMarfa="Roșii" cantitate="1000" codUnitateMasura="KGM" greutateBruta="1050"/>
+      </notificare>
+    </eTransport>`;
+    const tables = xmlToTables(xml, "ETRANSPORT");
+    const goods = tables.find((t) => t.title === "Bunuri transportate");
+    expect(goods).toBeTruthy();
+    expect(goods!.columns).toContain(resolveField("ETRANSPORT", "denumireMarfa").label); // "Denumire marfă"
+    expect(goods!.columns).not.toContain("denumireMarfa"); // not the raw attr name
+  });
+
+  it("builds a labeled spreadsheet from a CIUS-RO invoice (header + lines + VAT + totals)", () => {
+    const xml = `<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+      <cbc:ID>FCT-0001</cbc:ID>
+      <cbc:IssueDate>2026-06-10</cbc:IssueDate>
+      <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+      <cbc:DocumentCurrencyCode>RON</cbc:DocumentCurrencyCode>
+      <cac:AccountingSupplierParty><cac:Party><cac:PartyLegalEntity><cbc:RegistrationName>VANZATOR SRL</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
+      <cac:AccountingCustomerParty><cac:Party><cac:PartyLegalEntity><cbc:RegistrationName>CUMPARATOR SRL</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingCustomerParty>
+      <cac:LegalMonetaryTotal><cbc:TaxExclusiveAmount>1000.00</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount>1210.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>1210.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+      <cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:InvoicedQuantity unitCode="C62">2</cbc:InvoicedQuantity><cbc:LineExtensionAmount>1000.00</cbc:LineExtensionAmount><cac:Item><cbc:Name>Consultanță</cbc:Name><cac:ClassifiedTaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>21</cbc:Percent></cac:ClassifiedTaxCategory></cac:Item><cac:Price><cbc:PriceAmount>500.00</cbc:PriceAmount></cac:Price></cac:InvoiceLine>
+    </Invoice>`;
+    const tables = xmlToTables(xml, "INVOICE");
+    // Human sections, not raw UBL element names.
+    expect(tables.map((t) => t.title)).toEqual([
+      "Factură",
+      "Vânzător",
+      "Cumpărător",
+      "Linii factură",
+      "Detalierea TVA",
+      "Totaluri",
+    ]);
+    const header = tables[0];
+    expect(header.rows).toContainEqual(["Nr. factură", "FCT-0001"]);
+    expect(tables[1].rows).toContainEqual(["Denumire", "VANZATOR SRL"]);
+    const lines = tables.find((t) => t.title === "Linii factură")!;
+    expect(lines.columns[1]).toBe("Denumire");
+    expect(lines.rows[0][1]).toBe("Consultanță");
+    expect(lines.rows[0][5]).toBe("21%"); // vat category label, not "S"/raw
+  });
+
   it("returns [] for invalid XML and never throws", () => {
     expect(xmlToTables("not xml <<<")).toEqual([]);
     expect(() => xmlToTables("")).not.toThrow();

@@ -16,6 +16,7 @@ describe("pickDescriptor", () => {
     expect(pickDescriptor(undefined, "declaratie390")?.key).toBe("D390");
     expect(pickDescriptor(undefined, "declaratie394")?.key).toBe("D394");
     expect(pickDescriptor(undefined, "AuditFile")?.key).toBe("D406"); // SAF-T summary
+    expect(pickDescriptor(undefined, "eTransport")?.key).toBe("ETRANSPORT"); // e-Transport
   });
   it("selects the SAF-T summary by declaration key", () => {
     expect(pickDescriptor("D406", "AuditFile")?.key).toBe("D406");

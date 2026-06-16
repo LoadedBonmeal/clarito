@@ -378,12 +378,48 @@ export const D394_FIELDS: LabelDict = {
   "tvaPR": { label: "TVA pe cod produs (autotaxare)", format: "money_lei" },
 };
 
+// ── e-Transport (RO e-Transport, UIT) — atribute din generatorul etransport.rs ─────────────────────
+const ETRANSPORT_FIELDS: LabelDict = {
+  "codDeclarant": { label: "CIF declarant", format: "cnp" },
+  "refDeclarant": { label: "Referință internă declarant" },
+  "codTipOperatiune": { label: "Tip operațiune (cod)" },
+  "codScopOperatiune": { label: "Scop operațiune (cod)" },
+  "codTarifar": { label: "Cod tarifar (NC, 8 cifre)" },
+  "denumireMarfa": { label: "Denumire marfă" },
+  "cantitate": { label: "Cantitate" },
+  "codUnitateMasura": { label: "U.M. (cod)" },
+  "greutateNeta": { label: "Greutate netă (kg)" },
+  "greutateBruta": { label: "Greutate brută (kg)" },
+  "valoareLeiFaraTva": { label: "Valoare fără TVA (lei)", format: "money2" },
+  "codTara": { label: "Cod țară partener" },
+  "cod": { label: "Cod fiscal partener" },
+  "denumire": { label: "Denumire partener" },
+  "nrVehicul": { label: "Nr. înmatriculare vehicul" },
+  "nrRemorca1": { label: "Nr. remorcă 1" },
+  "nrRemorca2": { label: "Nr. remorcă 2" },
+  "codTaraOrgTransport": { label: "Cod țară organizator transport" },
+  "codOrgTransport": { label: "Cod organizator transport" },
+  "denumireOrgTransport": { label: "Denumire organizator transport" },
+  "dataTransport": { label: "Data transportului", format: "date" },
+  "codPtf": { label: "Punct trecere frontieră (cod)" },
+  "codBirouVamal": { label: "Birou vamal (cod)" },
+  "codJudet": { label: "Județ (cod)" },
+  "denumireStrada": { label: "Stradă" },
+  "numar": { label: "Număr" },
+  "codPostal": { label: "Cod poștal" },
+  "alteInfo": { label: "Alte informații (localitate etc.)" },
+  "tipDocument": { label: "Tip document transport (cod)" },
+  "numarDocument": { label: "Număr document" },
+  "dataDocument": { label: "Data document", format: "date" },
+};
+
 const DOC_DICTS: Record<string, LabelDict> = {
   D205: D205_FIELDS,
   D112: D112_FIELDS,
   D300: D300_FIELDS,
   D390: D390_FIELDS,
   D394: D394_FIELDS,
+  ETRANSPORT: ETRANSPORT_FIELDS,
 };
 
 /**
