@@ -44,7 +44,7 @@ export function CsvImportModal({
   const [previewResult, setPreviewResult] = useState<{ imported: number; errors: string[] } | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
-  const { closing, close } = useAnimatedClose(onClose);
+  const { closing, close } = useAnimatedClose(onClose, 140, true); // UI-004: Esc closes the modal
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

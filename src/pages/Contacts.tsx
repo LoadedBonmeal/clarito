@@ -427,7 +427,7 @@ function ContactModal({
 
   const isPending = create.isPending || update.isPending;
 
-  const { closing, close } = useAnimatedClose(onClose);
+  const { closing, close } = useAnimatedClose(onClose, 140, true); // UI-005: Esc closes the modal
 
   const field = (key: keyof CreateContactInput) => ({
     value: (form[key] as string) ?? "",
