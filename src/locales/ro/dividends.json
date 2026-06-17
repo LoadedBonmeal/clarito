@@ -15,6 +15,10 @@
     "beneficiaryCnpHint": "Necesar pentru Declarația 205 (informativă anuală, pe beneficiar). 13 cifre, cu cifra de control.",
     "beneficiaryResident": "Beneficiar rezident fiscal în România",
     "beneficiaryResidentHint": "Rezidenții se raportează în D205; nerezidenții în D207. Implicit bifat.",
+    "beneficiaryCountry": "Țara de rezidență (D207)",
+    "beneficiaryCountryHint": "Cod ISO de 2 litere (ex. GB, DE, FR) — câmpul Stat_R din D207. Obligatoriu pentru nerezidenți.",
+    "beneficiaryForeignTaxId": "NIF / cod fiscal străin (D207)",
+    "beneficiaryForeignTaxIdHint": "Numărul de identificare fiscală din țara de rezidență (câmpul cifS din D207). Opțional.",
     "interim2025": "Situații financiare interimare 2025 (cota tranzitorie 10%)",
     "interim2025Hint": "Bifați doar pentru dividende distribuite pe baza situațiilor interimare întocmite în 2025 — cota rămâne 10% chiar dacă plata e în 2026 (Legea 141/2025 art. VII).",
     "add": "Adaugă dividend",
@@ -40,7 +44,7 @@
       "deadline": "Termen impozit",
       "shareholder": "Asociat",
       "nonResident": "D207",
-      "nonResidentTitle": "Beneficiar nerezident — se raportează în D207 (declarație neemisă de aplicație), NU în D205."
+      "nonResidentTitle": "Beneficiar nerezident — se raportează în D207 (emisă mai jos), NU în D205."
     },
     "d205": {
       "title": "Export D205 — declarația informativă anuală, pe beneficiar",
@@ -55,7 +59,20 @@
       "savedDuk": "D205 salvat + validat DUK: {{path}}",
       "savedNoDuk": "D205 salvat (DUK indisponibil — validați în PDF inteligent): {{path}}",
       "exportFailed": "Exportul D205 a eșuat.",
-      "nonResidentWarn": "{{count}} dividend(e) către nerezidenți NU intră în D205 — se raportează separat în D207 (declarație neemisă de aplicație, depuneți-o manual)."
+      "nonResidentWarn": "{{count}} dividend(e) către nerezidenți NU intră în D205 — se raportează separat în D207 (emisă mai jos)."
+    },
+    "d207": {
+      "title": "Export D207 — informativă anuală, venituri nerezidenți",
+      "hint": "Agregă dividendele plătite beneficiarilor nerezidenți pe tip de venit + țară și emite XML-ul D207 (cap. dividende), validat cu schema oficială ANAF (XSD). Necesită țara de rezidență la fiecare beneficiar nerezident. Termen: ultima zi din februarie a anului următor anului de venit.",
+      "year": "An de venit",
+      "export": "Export D207 (XML)",
+      "exporting": "Se exportă…",
+      "preview": "Vizualizează / Editează XML",
+      "previewing": "Se generează…",
+      "previewFailed": "Nu s-a putut genera XML-ul D207 pentru previzualizare.",
+      "saveTitle": "Salvează D207 (XML)",
+      "saved": "D207 salvat (validat XSD ANAF): {{path}}",
+      "exportFailed": "Exportul D207 a eșuat."
     }
   }
 }

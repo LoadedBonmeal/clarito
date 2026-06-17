@@ -227,16 +227,19 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
   list_products: () => [],
   list_recurring_invoices: () => [],
   list_employees: () => [],
-  // Two dividends — one resident (→ D205), one non-resident (→ D207, flagged in the UI).
+  // Two dividends — one resident (→ D205), one non-resident (→ D207, with country + foreign NIF).
   list_dividends: () => [
-    { id: "dv1", companyId: "demo-co", distributionDate: "2025-03-15", paymentDate: "2025-03-20", grossAmount: "10000.00", taxRate: 10, taxAmount: "1000.00", netAmount: "9000.00", interim2025: false, shareholder: "Andrei Popescu", beneficiaryCnp: "1900101410011", beneficiaryResident: true, note: null, taxDeadline: "2025-04-25" },
-    { id: "dv2", companyId: "demo-co", distributionDate: "2025-06-10", paymentDate: "2025-06-15", grossAmount: "8000.00", taxRate: 10, taxAmount: "800.00", netAmount: "7200.00", interim2025: false, shareholder: "John Smith", beneficiaryCnp: null, beneficiaryResident: false, note: null, taxDeadline: "2025-07-25" },
+    { id: "dv1", companyId: "demo-co", distributionDate: "2025-03-15", paymentDate: "2025-03-20", grossAmount: "10000.00", taxRate: 10, taxAmount: "1000.00", netAmount: "9000.00", interim2025: false, shareholder: "Andrei Popescu", beneficiaryCnp: "1900101410011", beneficiaryResident: true, beneficiaryType: "PF", beneficiaryCountry: null, beneficiaryForeignTaxId: null, note: null, taxDeadline: "2025-04-25" },
+    { id: "dv2", companyId: "demo-co", distributionDate: "2025-06-10", paymentDate: "2025-06-15", grossAmount: "8000.00", taxRate: 10, taxAmount: "800.00", netAmount: "7200.00", interim2025: false, shareholder: "John Smith", beneficiaryCnp: null, beneficiaryResident: false, beneficiaryType: "PF", beneficiaryCountry: "GB", beneficiaryForeignTaxId: "GB123456789", note: null, taxDeadline: "2025-07-25" },
   ],
   // DIV-01: in-place beneficiary edit — echo the update onto a dividend-shaped object (demo is mock).
   update_dividend_beneficiary: (a) => {
     const u = (a?.update ?? {}) as Record<string, unknown>;
-    return { id: u.id ?? "dv1", companyId: "demo-co", distributionDate: "2025-03-15", paymentDate: u.paymentDate ?? null, grossAmount: "10000.00", taxRate: 10, taxAmount: "1000.00", netAmount: "9000.00", interim2025: false, shareholder: u.shareholder ?? null, beneficiaryCnp: u.beneficiaryCnp ?? null, beneficiaryResident: u.beneficiaryResident ?? true, beneficiaryType: u.beneficiaryType ?? "PF", note: u.note ?? null, taxDeadline: "2025-04-25" };
+    return { id: u.id ?? "dv1", companyId: "demo-co", distributionDate: "2025-03-15", paymentDate: u.paymentDate ?? null, grossAmount: "10000.00", taxRate: 10, taxAmount: "1000.00", netAmount: "9000.00", interim2025: false, shareholder: u.shareholder ?? null, beneficiaryCnp: u.beneficiaryCnp ?? null, beneficiaryResident: u.beneficiaryResident ?? true, beneficiaryType: u.beneficiaryType ?? "PF", beneficiaryCountry: u.beneficiaryCountry ?? null, beneficiaryForeignTaxId: u.beneficiaryForeignTaxId ?? null, note: u.note ?? null, taxDeadline: "2025-04-25" };
   },
+  // D207 (non-resident dividends) — demo mock.
+  preview_d207_xml: () => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<declaratie207 xmlns=\"mfp:anaf:dgti:d207:declaratie:v2\" luna=\"12\" an=\"2025\" d_rec=\"0\" cui=\"12345678\" den=\"Demo SRL\" adresa=\"București\" nume_declar=\"Demo\" prenume_declar=\"-\" functie_declar=\"Administrator\" totalPlata_A=\"8801\">\n  <sect_II tip_venit=\"01\" nrben=\"1\" Tscutit=\"0\" Tbaza=\"8000\" Timp=\"800\" Timps=\"0\"/>\n  <benef id_inreg=\"1\" tip_venit1=\"01\" den1=\"John Smith\" Stat_R=\"GB\" cifS=\"GB123456789\" baza1=\"8000\" imp1=\"800\" imps1=\"0\" Act_N=\"1\"/>\n</declaratie207>",
+  export_d207_official: () => ({ path: "d207-2025.xml", written: true, dukAvailable: false, dukPassed: false, issues: [] }),
   list_assets: () => [],
   list_vat_rates: () => [],
   list_accounts: () => [],

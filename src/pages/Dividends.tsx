@@ -35,6 +35,10 @@ export function Dividends() {
   const [d205Year, setD205Year] = useState(new Date().getFullYear() - 1);
   const [exportingD205, setExportingD205] = useState(false);
   const [dukBlock, setDukBlock] = useState<PreflightIssue[] | null>(null);
+  // D207 — declarația informativă pentru veniturile nerezidenților (capitol dividende).
+  const [d207Year, setD207Year] = useState(new Date().getFullYear() - 1);
+  const [exportingD207, setExportingD207] = useState(false);
+  const [previewingD207, setPreviewingD207] = useState(false);
 
   const { data: list = [] } = useQuery({
     queryKey: ["dividends", companyId ?? ""],
@@ -42,7 +46,7 @@ export function Dividends() {
     enabled: !!companyId,
   });
 
-  // Dividendele către NEREZIDENȚI sunt excluse din D205 (se raportează în D207, neemis de aplicație) —
+  // Dividendele către NEREZIDENȚI sunt excluse din D205 (se raportează separat în D207, emis mai jos) —
   // le semnalăm explicit ca să nu fie raportate „tăcut" în nicio declarație.
   const nonResidentCount = list.filter((d) => !d.beneficiaryResident).length;
 
@@ -86,6 +90,9 @@ export function Dividends() {
   const [eResident, setEResident] = useState(true);
   const [eType, setEType] = useState<"PF" | "PJ">("PF");
   const [ePayment, setEPayment] = useState("");
+  // D207: pentru beneficiari nerezidenți — țara de rezidență (Stat_R) + NIF-ul fiscal străin (cifS).
+  const [eCountry, setECountry] = useState("");
+  const [eForeign, setEForeign] = useState("");
 
   const startEdit = (d: Dividend) => {
     setEditing(d);
@@ -94,6 +101,8 @@ export function Dividends() {
     setEResident(d.beneficiaryResident);
     setEType((d.beneficiaryType as "PF" | "PJ") ?? "PF");
     setEPayment(d.paymentDate ?? "");
+    setECountry(d.beneficiaryCountry ?? "");
+    setEForeign(d.beneficiaryForeignTaxId ?? "");
   };
 
   const updateBen = useMutation({
@@ -107,6 +116,9 @@ export function Dividends() {
         beneficiaryCnp: eCnp.trim() || null,
         beneficiaryResident: eResident,
         beneficiaryType: eType,
+        // Nerezidenții poartă țara + NIF străin (D207); rezidenții le trimit goale.
+        beneficiaryCountry: eResident ? null : eCountry.trim().toUpperCase() || null,
+        beneficiaryForeignTaxId: eResident ? null : eForeign.trim() || null,
       });
     },
     onSuccess: () => {
@@ -161,6 +173,45 @@ export function Dividends() {
       notify.error(formatError(e, t("dividends.d205.exportFailed")));
     } finally {
       setExportingD205(false);
+    }
+  };
+
+  /** Construiește XML-ul D207 (venituri nerezidenți) și îl deschide în vizualizatorul XML. */
+  const runD207Preview = async () => {
+    if (!companyId) return;
+    setPreviewingD207(true);
+    try {
+      const xml = await api.dividends.previewD207Xml(companyId, d207Year);
+      // D207 nu are validator DUK propriu (validat XSD în backend) → docKey, nu declKind.
+      openXml({ xml, name: `d207-${d207Year}.xml`, docKey: "D207" });
+    } catch (e) {
+      notify.error(formatError(e, t("dividends.d207.previewFailed")));
+    } finally {
+      setPreviewingD207(false);
+    }
+  };
+
+  /** Export D207 (informativă anuală, venituri nerezidenți — validată XSD ANAF). */
+  const runD207Export = async () => {
+    if (!companyId) return;
+    const dest = await saveDialog({
+      title: t("dividends.d207.saveTitle"),
+      defaultPath: `d207-${d207Year}.xml`,
+      filters: [{ name: "XML", extensions: ["xml"] }],
+    });
+    if (!dest) return;
+    setExportingD207(true);
+    try {
+      const res = await api.dividends.exportD207Official(companyId, d207Year, dest);
+      if (!res.written) {
+        notify.error(formatError(res.issues?.[0]?.message ?? "", t("dividends.d207.exportFailed")));
+        return;
+      }
+      notify.success(t("dividends.d207.saved", { path: res.path }));
+    } catch (e) {
+      notify.error(formatError(e, t("dividends.d207.exportFailed")));
+    } finally {
+      setExportingD207(false);
     }
   };
 
@@ -291,6 +342,33 @@ export function Dividends() {
         )}
       </div>
 
+      {/* Export D207 — informativă anuală pentru veniturile nerezidenților (capitol dividende), validată XSD ANAF.
+          Apare doar când există beneficiari nerezidenți (altfel declarația nu se depune). */}
+      {nonResidentCount > 0 && (
+        <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{t("dividends.d207.title")}</div>
+          <div className="hint" style={{ marginBottom: 12 }}>{t("dividends.d207.hint")}</div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+            <div className="field" style={{ width: 140 }}>
+              <label>{t("dividends.d207.year")}</label>
+              <input
+                className="input num"
+                inputMode="numeric"
+                maxLength={4}
+                value={d207Year}
+                onChange={(e) => setD207Year(Number(e.target.value.replace(/\D/g, "")) || d207Year)}
+              />
+            </div>
+            <button className="btn-dark" disabled={exportingD207} onClick={() => void runD207Export()}>
+              <Ic name="code" />{exportingD207 ? t("dividends.d207.exporting") : t("dividends.d207.export")}
+            </button>
+            <button className="pill-btn" disabled={previewingD207} onClick={() => void runD207Preview()}>
+              <Ic name="eye" />{previewingD207 ? t("dividends.d207.previewing") : t("dividends.d207.preview")}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* DIV-01: editor beneficiar in-place (corectare CNP / nume / rezidență / tip / dată plată). */}
       {editing && (
         <div className="card" style={{ padding: 16, marginBottom: 16 }}>
@@ -324,6 +402,21 @@ export function Dividends() {
                 <span>{t("dividends.beneficiaryResident")}</span>
               </label>
             </div>
+            {/* D207: nerezidenții poartă țara de rezidență (Stat_R) + NIF-ul fiscal străin (cifS). */}
+            {!eResident && (
+              <>
+                <div className="field">
+                  <label>{t("dividends.beneficiaryCountry")}</label>
+                  <input className="input" maxLength={2} placeholder="GB" value={eCountry} onChange={(e) => setECountry(e.target.value.replace(/[^a-zA-Z]/g, "").toUpperCase())} />
+                  <div className="hint">{t("dividends.beneficiaryCountryHint")}</div>
+                </div>
+                <div className="field">
+                  <label>{t("dividends.beneficiaryForeignTaxId")}</label>
+                  <input className="input" maxLength={40} placeholder="GB123456789" value={eForeign} onChange={(e) => setEForeign(e.target.value)} />
+                  <div className="hint">{t("dividends.beneficiaryForeignTaxIdHint")}</div>
+                </div>
+              </>
+            )}
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <button className="btn-dark" disabled={updateBen.isPending} onClick={() => updateBen.mutate()}>

@@ -15,6 +15,10 @@
     "beneficiaryCnpHint": "Required for declaration 205 (annual informative, per beneficiary). 13 digits with the check digit.",
     "beneficiaryResident": "Beneficiary is a Romanian tax resident",
     "beneficiaryResidentHint": "Residents are reported in D205; non-residents in D207. Ticked by default.",
+    "beneficiaryCountry": "Country of residence (D207)",
+    "beneficiaryCountryHint": "2-letter ISO code (e.g. GB, DE, FR) — the Stat_R field in D207. Required for non-residents.",
+    "beneficiaryForeignTaxId": "Foreign TIN / tax id (D207)",
+    "beneficiaryForeignTaxIdHint": "The tax identification number from the country of residence (the cifS field in D207). Optional.",
     "interim2025": "2025 interim financial statements (transitional 10% rate)",
     "interim2025Hint": "Tick only for dividends distributed on 2025 interim statements — the rate stays 10% even if paid in 2026 (Law 141/2025 art. VII).",
     "add": "Add dividend",
@@ -40,7 +44,7 @@
       "deadline": "Tax deadline",
       "shareholder": "Shareholder",
       "nonResident": "D207",
-      "nonResidentTitle": "Non-resident beneficiary — reported in D207 (a declaration the app does not emit), NOT in D205."
+      "nonResidentTitle": "Non-resident beneficiary — reported in D207 (emitted below), NOT in D205."
     },
     "d205": {
       "title": "Export D205 — annual informative declaration, per beneficiary",
@@ -55,7 +59,20 @@
       "savedDuk": "D205 saved + DUK-validated: {{path}}",
       "savedNoDuk": "D205 saved (DUK unavailable — validate in the smart PDF): {{path}}",
       "exportFailed": "D205 export failed.",
-      "nonResidentWarn": "{{count}} dividend(s) to non-residents are NOT in D205 — they're reported separately in D207 (a declaration the app doesn't emit; file it manually)."
+      "nonResidentWarn": "{{count}} dividend(s) to non-residents are NOT in D205 — they're reported separately in D207 (emitted below)."
+    },
+    "d207": {
+      "title": "Export D207 — annual informative, non-resident income",
+      "hint": "Aggregates dividends paid to non-resident beneficiaries by income type + country and emits the D207 XML (dividends chapter), validated against the official ANAF schema (XSD). Requires the country of residence on every non-resident beneficiary. Deadline: the last day of February of the year after the income year.",
+      "year": "Income year",
+      "export": "Export D207 (XML)",
+      "exporting": "Exporting…",
+      "preview": "View / Edit XML",
+      "previewing": "Generating…",
+      "previewFailed": "Could not generate the D207 XML for preview.",
+      "saveTitle": "Save D207 (XML)",
+      "saved": "D207 saved (ANAF XSD-validated): {{path}}",
+      "exportFailed": "D207 export failed."
     }
   }
 }

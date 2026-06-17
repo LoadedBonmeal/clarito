@@ -637,6 +637,10 @@ export interface Dividend {
   beneficiaryResident: boolean;
   /** Tip beneficiar: "PF" (art. 97 → D100 cod 604, intră în D205) sau "PJ" (art. 43 → D100 cod 150). */
   beneficiaryType: string;
+  /** D207 (nerezidenți): codul de țară (Stat_R) al beneficiarului nerezident — cerut la export D207. */
+  beneficiaryCountry: string | null;
+  /** D207 (nerezidenți): codul fiscal din străinătate (cifS / NIF). */
+  beneficiaryForeignTaxId: string | null;
   note: string | null;
   taxDeadline: string;
 }
@@ -662,6 +666,9 @@ export interface DividendBeneficiaryUpdate {
   beneficiaryCnp?: string | null;
   beneficiaryResident?: boolean;
   beneficiaryType?: "PF" | "PJ";
+  /** D207 (nerezidenți): țara de rezidență (Stat_R, cod 2 litere) + codul fiscal străin (cifS). */
+  beneficiaryCountry?: string | null;
+  beneficiaryForeignTaxId?: string | null;
   note?: string | null;
 }
 export const dividends = {
@@ -692,6 +699,17 @@ export const dividends = {
    */
   previewD205Xml: (companyId: string, year: number) =>
     invoke<string>("preview_d205_xml", { companyId, year }),
+  /**
+   * Exportă D207 (informativă anuală, beneficiari NEREZIDENȚI) pentru anul de venit `year`. D207 nu
+   * are validator DUK — conformitatea e garantată de XSD-ul oficial. Scrie XML-ul la `destPath`.
+   */
+  exportD207Official: (companyId: string, year: number, destPath: string) =>
+    invoke<OfficialExportResult>("export_d207_official", {
+      params: { companyId, year, destPath },
+    }),
+  /** Construiește XML-ul D207 fără a-l scrie — pentru vizualizatorul XML din aplicație. */
+  previewD207Xml: (companyId: string, year: number) =>
+    invoke<string>("preview_d207_xml", { companyId, year }),
 };
 
 // ─── GL — Jurnal contabil ──────────────────────────────────────────────────
