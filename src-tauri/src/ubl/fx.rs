@@ -109,4 +109,55 @@ mod tests {
         let d = parse_rate(Some(5.0)).expect("5.0 is a valid rate");
         assert_eq!(d, Decimal::new(5, 0));
     }
+
+    // ── Property-based invariants (proptest) for the FX money path ─────────────
+    // Fiscal money is the highest-stakes surface; example tests only cover cases someone thought of.
+    use proptest::prelude::*;
+
+    /// A money amount built from whole bani (2dp), bounded so `amount * rate` never overflows Decimal.
+    fn money() -> impl Strategy<Value = Decimal> {
+        (-1_000_000_000i64..1_000_000_000i64).prop_map(|bani| Decimal::new(bani, 2))
+    }
+    /// A strictly-positive exchange rate in 0.0001 .. 100.0000.
+    fn pos_rate() -> impl Strategy<Value = Decimal> {
+        (1i64..1_000_000i64).prop_map(|r| Decimal::new(r, 4))
+    }
+
+    proptest! {
+        /// A converted (non-RON) amount always has at most 2 decimal places.
+        #[test]
+        fn ron_result_has_at_most_two_decimals(amt in money(), r in pos_rate()) {
+            let out = amount_to_ron(amt, "EUR", Some(r));
+            prop_assert!(out.scale() <= 2, "result {} must have <= 2 dp", out);
+        }
+
+        /// The rounded RON value is within half a ban of the exact product (commercial rounding bound).
+        #[test]
+        fn ron_rounding_within_half_ban(amt in money(), r in pos_rate()) {
+            let out = amount_to_ron(amt, "EUR", Some(r));
+            let diff = (out - amt * r).abs();
+            prop_assert!(diff <= Decimal::new(5, 3), "rounding diff {} must be <= 0.005", diff);
+        }
+
+        /// RON currency is always a passthrough, with or without a rate.
+        #[test]
+        fn ron_currency_is_always_passthrough(amt in money(), r in pos_rate()) {
+            prop_assert_eq!(amount_to_ron(amt, "RON", Some(r)), amt);
+            prop_assert_eq!(amount_to_ron(amt, "ron", None), amt);
+        }
+
+        /// A non-negative amount at a positive rate yields a non-negative RON value (no sign flips).
+        #[test]
+        fn non_negative_in_non_negative_out(bani in 0i64..1_000_000_000i64, r in pos_rate()) {
+            prop_assert!(amount_to_ron(Decimal::new(bani, 2), "EUR", Some(r)) >= Decimal::ZERO);
+        }
+
+        /// parse_rate accepts every clearly-positive rate and rejects every non-positive one.
+        #[test]
+        fn parse_rate_accepts_positive_only(r in 0.001f64..1_000_000.0f64) {
+            prop_assert!(parse_rate(Some(r)).is_some());
+            prop_assert!(parse_rate(Some(-r)).is_none());
+            prop_assert!(parse_rate(Some(0.0)).is_none());
+        }
+    }
 }
