@@ -87,6 +87,20 @@ curl -fL --progress-bar -o "$ETRANSPORT_XSD_PATH" "$ETRANSPORT_XSD_URL" || {
 }
 echo ""
 
+# ── D207 XSD schema (v2) — informativă impozit reținut la sursă, beneficiari NEREZIDENȚI ─────────
+# Official ANAF schema (d207_20025020.xsd, targetNamespace mfp:anaf:dgti:d207:declaratie:v2, version
+# 1.02) — fetches headlessly from static.anaf.ro. D207 has NO DUKIntegrator jar, so this XSD is the
+# authoritative validator. Used by tests/d207_xsd.rs (skips gracefully when absent).
+D207_XSD_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/d207_20025020.xsd"
+D207_XSD_PATH="$REPO_ROOT/src-tauri/tools/anaf/d207.xsd"
+mkdir -p "$(dirname "$D207_XSD_PATH")"
+echo "▶ Downloading D207 v2 XSD schema ..."
+echo "  URL: $D207_XSD_URL"
+curl -fL --progress-bar -o "$D207_XSD_PATH" "$D207_XSD_URL" || {
+    echo "  WARNING: D207 XSD download failed; the d207_xsd test will skip until vendored."
+}
+echo ""
+
 # ── D300 / D394 assistance programs ─────────────────────────────────────────
 # ANAF distributes declaration-specific validators as part of the assistance
 # program ZIPs. Reference pages (check for latest download links):

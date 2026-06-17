@@ -12,6 +12,7 @@ pub mod d101;
 pub mod d112;
 pub mod d112_xml;
 pub mod d205_xml;
+pub mod d207_xml;
 pub mod d300;
 pub mod d390;
 pub mod d394;
