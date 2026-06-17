@@ -56,7 +56,7 @@ pub async fn generate_invoice_xml(
     .map_err(|e| AppError::Other(e.to_string()))??;
 
     // 6. Actualizează DB
-    invoices::set_xml_path(&state.db, &invoice_id, &path_str_result).await?;
+    invoices::set_xml_path(&state.db, &invoice_id, &company_id, &path_str_result).await?;
 
     Ok(path_str_result)
 }
@@ -109,7 +109,7 @@ pub async fn generate_invoice_pdf(
     .map_err(|e| AppError::Pdf(e.to_string()))??;
 
     // 6. Actualizează DB
-    invoices::set_pdf_path(&state.db, &invoice_id, &path_str_result).await?;
+    invoices::set_pdf_path(&state.db, &invoice_id, &company_id, &path_str_result).await?;
 
     Ok(path_str_result)
 }

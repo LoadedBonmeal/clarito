@@ -625,7 +625,12 @@ pub async fn set_status(
     Ok(())
 }
 
-pub async fn mark_submitted(pool: &SqlitePool, id: &str, upload_id: &str) -> AppResult<()> {
+pub async fn mark_submitted(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+    upload_id: &str,
+) -> AppResult<()> {
     let now = now_unix();
 
     // A1 — Anti-duplicate guard: only transition if the row is still QUEUED.
@@ -635,17 +640,19 @@ pub async fn mark_submitted(pool: &SqlitePool, id: &str, upload_id: &str) -> App
     // Strategy: on 0-rows-affected we attempt a minimal fallback that at least
     // persists the upload_id so the recovery predicate (QUEUED AND upload_id IS NULL)
     // no longer matches, preventing the duplicate-filing window.
+    // SEC-01: company_id-scoped (defense-in-depth) — consistent with the other status setters.
     let result = sqlx::query(
         "UPDATE invoices SET
             status            = 'SUBMITTED',
             anaf_upload_id    = ?2,
             anaf_submitted_at = ?3,
             updated_at        = ?3
-        WHERE id = ?1 AND status = 'QUEUED'",
+        WHERE id = ?1 AND company_id = ?4 AND status = 'QUEUED'",
     )
     .bind(id)
     .bind(upload_id)
     .bind(now)
+    .bind(company_id)
     .execute(pool)
     .await?;
 
@@ -661,13 +668,16 @@ pub async fn mark_submitted(pool: &SqlitePool, id: &str, upload_id: &str) -> App
             "mark_submitted: 0 rows updated (invoice not QUEUED) — \
              persisting upload_id to prevent duplicate ANAF filing"
         );
-        let _ =
-            sqlx::query("UPDATE invoices SET anaf_upload_id = ?2, updated_at = ?3 WHERE id = ?1")
-                .bind(id)
-                .bind(upload_id)
-                .bind(now)
-                .execute(pool)
-                .await;
+        let _ = sqlx::query(
+            "UPDATE invoices SET anaf_upload_id = ?2, updated_at = ?3 \
+             WHERE id = ?1 AND company_id = ?4",
+        )
+        .bind(id)
+        .bind(upload_id)
+        .bind(now)
+        .bind(company_id)
+        .execute(pool)
+        .await;
         return Err(AppError::Validation(
             "Factura nu mai este în statusul QUEUED — starea nu a putut fi actualizată la SUBMITTED \
              (upload_id salvat pentru a preveni o depunere duplicată la ANAF)."
@@ -689,7 +699,12 @@ fn file_fingerprint(path: &str) -> Option<(String, i64)> {
     Some((format!("{:x}", hasher.finalize()), bytes.len() as i64))
 }
 
-pub async fn set_xml_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<()> {
+pub async fn set_xml_path(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+    path: &str,
+) -> AppResult<()> {
     // E-002: never record an empty path (it would pass as "generated" yet point nowhere).
     if path.is_empty() {
         return Err(AppError::Validation(
@@ -702,15 +717,17 @@ pub async fn set_xml_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<
         Some((s, n)) => (Some(s), Some(n)),
         None => (None, None),
     };
+    // SEC-01: company_id-scoped (defense-in-depth) — consistent with the status-transition setters.
     let result = sqlx::query(
         "UPDATE invoices SET xml_path = ?2, xml_sha256 = ?3, xml_size = ?4, updated_at = ?5 \
-         WHERE id = ?1",
+         WHERE id = ?1 AND company_id = ?6",
     )
     .bind(id)
     .bind(path)
     .bind(sha)
     .bind(size)
     .bind(now)
+    .bind(company_id)
     .execute(pool)
     .await?;
     // E-001: a no-op UPDATE means the invoice vanished (delete race) — surface it instead of
@@ -802,7 +819,12 @@ pub async fn list_submitted(pool: &SqlitePool, company_id: &str) -> AppResult<Ve
     .await?)
 }
 
-pub async fn set_pdf_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<()> {
+pub async fn set_pdf_path(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+    path: &str,
+) -> AppResult<()> {
     // E-002: never record an empty path (see set_xml_path).
     if path.is_empty() {
         return Err(AppError::Validation(
@@ -815,15 +837,17 @@ pub async fn set_pdf_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<
         Some((s, n)) => (Some(s), Some(n)),
         None => (None, None),
     };
+    // SEC-01: company_id-scoped (defense-in-depth) — consistent with the status-transition setters.
     let result = sqlx::query(
         "UPDATE invoices SET pdf_path = ?2, pdf_sha256 = ?3, pdf_size = ?4, updated_at = ?5 \
-         WHERE id = ?1",
+         WHERE id = ?1 AND company_id = ?6",
     )
     .bind(id)
     .bind(path)
     .bind(sha)
     .bind(size)
     .bind(now)
+    .bind(company_id)
     .execute(pool)
     .await?;
     // E-001: no-op UPDATE → invoice gone (delete race) → NotFound, not a silent orphan.
@@ -1096,7 +1120,7 @@ mod tests {
         let pool = setup_mark_submitted_pool().await;
         insert_invoice_with_status(&pool, "inv-queued", "QUEUED").await;
 
-        let result = super::mark_submitted(&pool, "inv-queued", "UPLOAD-001").await;
+        let result = super::mark_submitted(&pool, "inv-queued", "comp-1", "UPLOAD-001").await;
         assert!(
             result.is_ok(),
             "mark_submitted on QUEUED invoice must succeed"
@@ -1175,7 +1199,7 @@ mod tests {
         // Insert as DRAFT (not QUEUED) to simulate a concurrent status change.
         insert_invoice_with_status(&pool, "inv-draft", "DRAFT").await;
 
-        let result = super::mark_submitted(&pool, "inv-draft", "UPLOAD-002").await;
+        let result = super::mark_submitted(&pool, "inv-draft", "comp-1", "UPLOAD-002").await;
         assert!(
             result.is_err(),
             "mark_submitted on non-QUEUED invoice must return an error"
@@ -1242,7 +1266,9 @@ mod tests {
         let path = xml.to_str().unwrap();
 
         // Fingerprint on write, then verify → Ok. PDF was never set → NotApplicable.
-        super::set_xml_path(&pool, "inv-i", path).await.unwrap();
+        super::set_xml_path(&pool, "inv-i", "comp-1", path)
+            .await
+            .unwrap();
         let (x, p) = super::verify_invoice_integrity(&pool, "inv-i", "comp-1")
             .await
             .unwrap();
@@ -1279,11 +1305,20 @@ mod tests {
         .await
         .unwrap();
         // E-002: empty path rejected (both setters).
-        assert!(super::set_xml_path(&pool, "inv-g", "").await.is_err());
-        assert!(super::set_pdf_path(&pool, "inv-g", "").await.is_err());
+        assert!(super::set_xml_path(&pool, "inv-g", "comp-1", "")
+            .await
+            .is_err());
+        assert!(super::set_pdf_path(&pool, "inv-g", "comp-1", "")
+            .await
+            .is_err());
         // E-001: a non-existent invoice (delete race) → NotFound, not a silent no-op.
         assert!(matches!(
-            super::set_xml_path(&pool, "ghost", "/tmp/x.xml").await,
+            super::set_xml_path(&pool, "ghost", "comp-1", "/tmp/x.xml").await,
+            Err(crate::error::AppError::NotFound)
+        ));
+        // SEC-01: a wrong company_id is also a no-op → NotFound (DB-layer scoping).
+        assert!(matches!(
+            super::set_xml_path(&pool, "inv-g", "comp-2", "/some/p.xml").await,
             Err(crate::error::AppError::NotFound)
         ));
     }

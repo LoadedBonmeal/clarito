@@ -478,7 +478,7 @@ pub(crate) async fn submit_invoice_inner(
     let upload_id = upload_resp.index_incarcare;
 
     // 9. Actualizează DB cu status SUBMITTED + anaf_upload_id
-    db_invoices::mark_submitted(pool, invoice_id, &upload_id).await?;
+    db_invoices::mark_submitted(pool, invoice_id, company_id, &upload_id).await?;
     {
         use tauri::Emitter;
         let _ = app.emit(
