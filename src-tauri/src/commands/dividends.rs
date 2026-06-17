@@ -6,6 +6,7 @@
 use tauri::State;
 
 use crate::anaf_decl::d205_xml::{build_d205_xml, D205Header};
+use crate::anaf_decl::d207_xml::{build_d207_xml, D207Header};
 use crate::anaf_decl::DeclKind;
 use crate::commands::declarations::{duk_gate_allows_write, OfficialExportResult};
 use crate::db::dividends::{self, Dividend, DividendBeneficiaryUpdate, DividendInput};
@@ -172,5 +173,81 @@ pub async fn export_d205_official(
         duk_available,
         duk_passed,
         issues,
+    })
+}
+
+// ─── D207 (dividende către NEREZIDENȚI) ──────────────────────────────────────────────────────────
+
+/// Construiește XML-ul D207 (`:v2`) pentru firma + anul de venit — agregare a dividendelor NEREZIDENTE
+/// pe (țară, identitate). Sursă comună pentru `export_d207_official` și `preview_d207_xml`. Blochează
+/// (eroare) dacă un nerezident nu are nume/țară. Validare = XSD (D207 nu are validator DUK dedicat).
+async fn build_d207_xml_for(
+    db: &sqlx::SqlitePool,
+    company_id: &str,
+    year: i32,
+) -> AppResult<String> {
+    let company = crate::db::companies::get(db, company_id).await?;
+    let benefs =
+        dividends::d207_beneficiaries_for_year(&dividends::list(db, company_id).await?, year)?;
+    let cui: String = company.cui.chars().filter(|c| c.is_ascii_digit()).collect();
+    let adresa = format!(
+        "{}, {}, {}",
+        company.address.trim(),
+        company.city.trim(),
+        company.county.trim()
+    );
+    let header = D207Header {
+        cui,
+        den: company.legal_name.chars().take(200).collect(),
+        adresa,
+        an: year,
+        d_rec: 0,
+        nume_declar: company.legal_name.chars().take(75).collect(),
+        prenume_declar: "-".into(),
+        functie_declar: "Administrator".into(),
+    };
+    build_d207_xml(&header, &benefs)
+}
+
+/// Previzualizează XML-ul D207 (fără scriere) — pentru vizualizatorul XML din aplicație.
+#[tauri::command]
+pub async fn preview_d207_xml(
+    state: State<'_, AppState>,
+    company_id: String,
+    year: i32,
+) -> AppResult<String> {
+    build_d207_xml_for(&state.db, &company_id, year).await
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct D207ExportParams {
+    pub company_id: String,
+    pub year: i32,
+    pub dest_path: String,
+}
+
+/// Exportă D207 (informativă anuală, beneficiari NEREZIDENȚI) pentru anul de venit dat. D207 NU are un
+/// `D207Validator.jar` — validarea oficială e prin XSD (`tools/anaf/d207.xsd`, testată în
+/// `tests/d207_xsd.rs`). Scriem direct XML-ul valid (cu `duk_available = false`, ca la D205 fără jar).
+#[tauri::command]
+pub async fn export_d207_official(
+    state: State<'_, AppState>,
+    params: D207ExportParams,
+) -> AppResult<OfficialExportResult> {
+    let D207ExportParams {
+        company_id,
+        year,
+        dest_path,
+    } = params;
+    let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
+    let xml = build_d207_xml_for(&state.db, &company_id, year).await?;
+    std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    Ok(OfficialExportResult {
+        path: dest.to_string_lossy().to_string(),
+        written: true,
+        duk_available: false, // D207 nu are validator DUK; conformitatea e garantată de XSD
+        duk_passed: false,
+        issues: Vec::new(),
     })
 }

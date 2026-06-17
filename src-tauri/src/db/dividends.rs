@@ -78,6 +78,11 @@ pub struct Dividend {
     /// Tipul beneficiarului: "PF" (persoană fizică, art. 97 → D100 cod 604, intră în D205) sau
     /// "PJ" (persoană juridică, art. 43 → D100 cod 150, EXCLUS din D205). Implicit "PF".
     pub beneficiary_type: String,
+    /// `Stat_R` D207 — codul de țară (2 litere, nomenclator ANAF) al beneficiarului NEREZIDENT.
+    /// Relevant doar când `beneficiary_resident = false`; cerut la exportul D207.
+    pub beneficiary_country: Option<String>,
+    /// `cifS` D207 — codul fiscal din străinătate (NIF) al beneficiarului nerezident (opțional).
+    pub beneficiary_foreign_tax_id: Option<String>,
     pub note: Option<String>,
     /// Termenul de plată al impozitului (derivat, nu stocat).
     pub tax_deadline: String,
@@ -109,6 +114,11 @@ pub struct DividendInput {
     /// "PF" (implicit) sau "PJ" — vezi [`Dividend::beneficiary_type`].
     #[serde(default)]
     pub beneficiary_type: Option<String>,
+    /// D207 (nerezidenți): țara de rezidență (Stat_R) + codul fiscal străin (cifS), opționale la creare.
+    #[serde(default)]
+    pub beneficiary_country: Option<String>,
+    #[serde(default)]
+    pub beneficiary_foreign_tax_id: Option<String>,
     pub note: Option<String>,
 }
 
@@ -129,6 +139,10 @@ pub struct DividendBeneficiaryUpdate {
     pub beneficiary_resident: bool,
     #[serde(default)]
     pub beneficiary_type: Option<String>,
+    #[serde(default)]
+    pub beneficiary_country: Option<String>,
+    #[serde(default)]
+    pub beneficiary_foreign_tax_id: Option<String>,
     pub note: Option<String>,
 }
 
@@ -150,6 +164,8 @@ fn row_to_dividend(r: &sqlx::sqlite::SqliteRow) -> Dividend {
         beneficiary_cnp: r.get("beneficiary_cnp"),
         beneficiary_resident: r.get::<i64, _>("beneficiary_resident") != 0,
         beneficiary_type: r.get("beneficiary_type"),
+        beneficiary_country: r.get("beneficiary_country"),
+        beneficiary_foreign_tax_id: r.get("beneficiary_foreign_tax_id"),
         note: r.get("note"),
         tax_deadline,
     }
@@ -158,7 +174,7 @@ fn row_to_dividend(r: &sqlx::sqlite::SqliteRow) -> Dividend {
 const SELECT: &str =
     "SELECT id, company_id, distribution_date, payment_date, gross_amount, tax_rate, \
      tax_amount, net_amount, interim_2025, shareholder, beneficiary_cnp, beneficiary_resident, \
-     beneficiary_type, note FROM dividends";
+     beneficiary_type, beneficiary_country, beneficiary_foreign_tax_id, note FROM dividends";
 
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Dividend>> {
     let rows = sqlx::query(&format!(
@@ -220,13 +236,24 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
     } else {
         BEN_PF
     };
-
+    // D207 (nerezidenți): țara (Stat_R) + codul fiscal străin (cifS), opționale la creare.
+    let ben_country = input
+        .beneficiary_country
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let ben_foreign = input
+        .beneficiary_foreign_tax_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let id = new_id();
     sqlx::query(
         "INSERT INTO dividends (id, company_id, distribution_date, payment_date, gross_amount, \
          tax_rate, tax_amount, net_amount, interim_2025, shareholder, beneficiary_cnp, \
-         beneficiary_resident, beneficiary_type, note, created_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+         beneficiary_resident, beneficiary_type, beneficiary_country, beneficiary_foreign_tax_id, \
+         note, created_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
     )
     .bind(&id)
     .bind(&input.company_id)
@@ -247,6 +274,8 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
     .bind(ben_cnp)
     .bind(input.beneficiary_resident as i64)
     .bind(ben_type)
+    .bind(ben_country)
+    .bind(ben_foreign)
     .bind(input.note.as_deref())
     .bind(now_unix())
     .execute(pool)
@@ -301,9 +330,20 @@ pub async fn update_beneficiary(
     } else {
         BEN_PF
     };
+    let ben_country = upd
+        .beneficiary_country
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let ben_foreign = upd
+        .beneficiary_foreign_tax_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let res = sqlx::query(
         "UPDATE dividends SET payment_date = ?3, shareholder = ?4, beneficiary_cnp = ?5, \
-         beneficiary_resident = ?6, beneficiary_type = ?7, note = ?8 \
+         beneficiary_resident = ?6, beneficiary_type = ?7, note = ?8, \
+         beneficiary_country = ?9, beneficiary_foreign_tax_id = ?10 \
          WHERE id = ?1 AND company_id = ?2",
     )
     .bind(&upd.id)
@@ -319,6 +359,8 @@ pub async fn update_beneficiary(
     .bind(upd.beneficiary_resident as i64)
     .bind(ben_type)
     .bind(upd.note.as_deref())
+    .bind(ben_country)
+    .bind(ben_foreign)
     .execute(pool)
     .await?;
     if res.rows_affected() == 0 {
@@ -436,6 +478,97 @@ pub async fn dividend_obligations_in_months(
         }
     }
     Ok(out)
+}
+
+/// Agregă dividendele NEREZIDENTE ale anului de venit `year` în rânduri D207 (`<benef>`), grupate pe
+/// (țară de rezidență, identitate). Identitatea = `cifS` (cod fiscal străin), altfel `cifR` (cod RO),
+/// altfel numele. `tip_venit1 = "01"` (dividende impozabile, art. 223), `Act_N = 1` (Cod fiscal) —
+/// cazul intern uzual; varianta cu convenție (22 / Act_N 2) se va selecta când modelul o va captura.
+/// Eroare dacă un nerezident nu are nume (`den1`) sau țară (`Stat_R`). Funcție PURĂ (testabilă).
+pub fn d207_beneficiaries_for_year(
+    dividends: &[Dividend],
+    year: i32,
+) -> AppResult<Vec<crate::anaf_decl::d207_xml::D207Benef>> {
+    use crate::anaf_decl::d207_xml::D207Benef;
+
+    let year_str = format!("{year:04}");
+    struct Acc {
+        name: String,
+        stat_r: String,
+        cif_r: Option<String>,
+        cif_s: Option<String>,
+        baza: Decimal,
+        imp: Decimal,
+    }
+    let mut by: BTreeMap<(String, String), Acc> = BTreeMap::new();
+    for d in dividends
+        .iter()
+        .filter(|d| !d.beneficiary_resident && d.distribution_date.starts_with(&year_str))
+    {
+        let name = d
+            .shareholder
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                AppError::Validation(
+                    "D207: un beneficiar nerezident nu are nume (den1) — completați-l.".into(),
+                )
+            })?
+            .to_string();
+        let stat_r = d
+            .beneficiary_country
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                AppError::Validation(format!(
+                    "D207: beneficiarul nerezident „{name}” nu are țara de rezidență (Stat_R) — \
+                     completați codul de țară (ex. DE, FR, NL)."
+                ))
+            })?
+            .to_uppercase();
+        let cif_s = d
+            .beneficiary_foreign_tax_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let cif_r = d
+            .beneficiary_cnp
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let ident = cif_s
+            .clone()
+            .or_else(|| cif_r.clone())
+            .unwrap_or_else(|| name.clone());
+        let acc = by.entry((stat_r.clone(), ident)).or_insert_with(|| Acc {
+            name: name.clone(),
+            stat_r: stat_r.clone(),
+            cif_r: cif_r.clone(),
+            cif_s: cif_s.clone(),
+            baza: Decimal::ZERO,
+            imp: Decimal::ZERO,
+        });
+        acc.baza += Decimal::from_str(d.gross_amount.trim()).unwrap_or(Decimal::ZERO);
+        acc.imp += Decimal::from_str(d.tax_amount.trim()).unwrap_or(Decimal::ZERO);
+    }
+    Ok(by
+        .into_values()
+        .map(|a| D207Benef {
+            tip_venit: "01".into(),
+            name: a.name,
+            stat_r: a.stat_r,
+            cif_r: a.cif_r,
+            cif_s: a.cif_s,
+            baza: a.baza,
+            impozit: a.imp,
+            impozit_suportat: Decimal::ZERO,
+            act_n: 1,
+        })
+        .collect())
 }
 
 /// Agregă dividendele REZIDENTE cu data distribuirii în anul de venit `year` în rânduri D205 (un
@@ -602,6 +735,8 @@ mod tests {
                 beneficiary_cnp: Some("1960101410019".into()),
                 beneficiary_resident: true,
                 beneficiary_type: None,
+                beneficiary_country: None,
+                beneficiary_foreign_tax_id: None,
                 note: None,
             },
         )
@@ -665,6 +800,8 @@ mod tests {
                 beneficiary_cnp: None,
                 beneficiary_resident: true,
                 beneficiary_type: None,
+                beneficiary_country: None,
+                beneficiary_foreign_tax_id: None,
                 note: None,
             },
         )
@@ -687,6 +824,8 @@ mod tests {
                 beneficiary_cnp: Some("1960101410018".into()),
                 beneficiary_resident: true,
                 beneficiary_type: None,
+                beneficiary_country: None,
+                beneficiary_foreign_tax_id: None,
                 note: None,
             },
         )
@@ -704,6 +843,8 @@ mod tests {
                 beneficiary_cnp: Some("1960101410019".into()),
                 beneficiary_resident: true,
                 beneficiary_type: None,
+                beneficiary_country: None,
+                beneficiary_foreign_tax_id: None,
                 note: None,
             },
         )
@@ -744,6 +885,8 @@ mod tests {
                 beneficiary_cnp: Some("1960101410019".into()),
                 beneficiary_resident: true,
                 beneficiary_type: None,
+                beneficiary_country: None,
+                beneficiary_foreign_tax_id: None,
                 note: None,
             },
         )
@@ -777,6 +920,8 @@ mod tests {
                     beneficiary_cnp: None,
                     beneficiary_resident: true,
                     beneficiary_type: None,
+                    beneficiary_country: None,
+                    beneficiary_foreign_tax_id: None,
                     note: None,
                 },
             )
@@ -795,6 +940,8 @@ mod tests {
                 beneficiary_cnp: None,
                 beneficiary_resident: true,
                 beneficiary_type: None,
+                beneficiary_country: None,
+                beneficiary_foreign_tax_id: None,
                 note: None,
             },
         )
@@ -853,6 +1000,8 @@ mod tests {
                     beneficiary_cnp: None,
                     beneficiary_resident: true,
                     beneficiary_type: Some(ty.into()),
+                    beneficiary_country: None,
+                    beneficiary_foreign_tax_id: None,
                     note: None,
                 },
             )
@@ -872,6 +1021,8 @@ mod tests {
                 beneficiary_cnp: None,
                 beneficiary_resident: false,
                 beneficiary_type: Some(BEN_PF.into()),
+                beneficiary_country: None,
+                beneficiary_foreign_tax_id: None,
                 note: None,
             },
         )
@@ -914,9 +1065,74 @@ mod tests {
             beneficiary_cnp: cnp.map(|s| s.into()),
             beneficiary_resident: resident,
             beneficiary_type: BEN_PF.into(),
+            beneficiary_country: None,
+            beneficiary_foreign_tax_id: None,
             note: None,
             tax_deadline: "2026-01-25".into(),
         }
+    }
+
+    /// A non-resident dividend row for the D207 router tests.
+    fn mk_nonresident(
+        name: &str,
+        country: Option<&str>,
+        dist_date: &str,
+        gross: &str,
+        tax: &str,
+    ) -> Dividend {
+        Dividend {
+            id: "x".into(),
+            company_id: "co-1".into(),
+            distribution_date: dist_date.into(),
+            payment_date: None,
+            gross_amount: gross.into(),
+            tax_rate: 16,
+            tax_amount: tax.into(),
+            net_amount: "0".into(),
+            interim_2025: false,
+            shareholder: Some(name.into()),
+            beneficiary_cnp: None,
+            beneficiary_resident: false,
+            beneficiary_type: BEN_PF.into(),
+            beneficiary_country: country.map(|s| s.into()),
+            beneficiary_foreign_tax_id: None,
+            note: None,
+            tax_deadline: "2026-05-25".into(),
+        }
+    }
+
+    #[test]
+    fn d207_router_filters_non_residents_and_requires_country() {
+        // Nerezident FĂRĂ țară → export D207 blocat (Stat_R e obligatoriu).
+        let no_country = vec![mk_nonresident(
+            "Müller GmbH",
+            None,
+            "2026-04-10",
+            "10000",
+            "1600",
+        )];
+        assert!(d207_beneficiaries_for_year(&no_country, 2026).is_err());
+
+        // Cu țară → câte un rând benef per beneficiar, sumele agregate.
+        let ok = vec![
+            mk_nonresident("Müller GmbH", Some("DE"), "2026-04-10", "10000", "1600"),
+            mk_nonresident("Müller GmbH", Some("de"), "2026-09-10", "2000", "320"), // același benef, sumat
+            mk_nonresident("Dupont SA", Some("FR"), "2026-06-01", "5000", "800"),
+        ];
+        let benefs = d207_beneficiaries_for_year(&ok, 2026).unwrap();
+        assert_eq!(benefs.len(), 2, "doi beneficiari distincți (DE + FR)");
+        let de = benefs.iter().find(|b| b.stat_r == "DE").unwrap();
+        assert_eq!(de.name, "Müller GmbH");
+        assert_eq!(de.baza, Decimal::from_str("12000").unwrap()); // 10000+2000 agregat
+        assert_eq!(de.tip_venit, "01");
+        assert_eq!(de.act_n, 1);
+
+        // Rezidenții sunt EXCLUȘI din D207 (merg în D205).
+        let mut res = mk_nonresident("Ionescu", Some("RO"), "2026-03-01", "3000", "480");
+        res.beneficiary_resident = true;
+        assert!(d207_beneficiaries_for_year(&[res], 2026)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

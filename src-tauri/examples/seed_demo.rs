@@ -330,6 +330,8 @@ async fn seed_firm(
             beneficiary_cnp: Some(cnp("196010141001")),
             beneficiary_resident: true,
             beneficiary_type: None,
+            beneficiary_country: None,
+            beneficiary_foreign_tax_id: None,
             note: None,
         },
     )
@@ -346,6 +348,8 @@ async fn seed_firm(
             beneficiary_cnp: None,
             beneficiary_resident: false,
             beneficiary_type: None,
+            beneficiary_country: Some("GB".into()), // D207: țara de rezidență (Stat_R)
+            beneficiary_foreign_tax_id: Some("GB123456789".into()), // cifS
             note: None,
         },
     )
