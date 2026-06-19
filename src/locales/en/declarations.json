@@ -242,6 +242,8 @@
         "base": "Base (lei)"
       },
       "totalFoot": "TOTAL ({{count}} operators): base",
+      "rectificative": "Rectificative declaration",
+      "rectificativeHint": "Files a correction of an already-submitted declaration for the same period (d_rec=1); it contains the full recomputed dataset.",
       "notify": {
         "noOps": "There are no intra-EU operations in the selected period.",
         "saved": "D390 saved: {{path}}",

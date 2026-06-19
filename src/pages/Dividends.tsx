@@ -35,10 +35,12 @@ export function Dividends() {
   const [d205Year, setD205Year] = useState(new Date().getFullYear() - 1);
   const [exportingD205, setExportingD205] = useState(false);
   const [dukBlock, setDukBlock] = useState<PreflightIssue[] | null>(null);
+  const [d205Rectif, setD205Rectif] = useState(false);
   // D207 — declarația informativă pentru veniturile nerezidenților (capitol dividende).
   const [d207Year, setD207Year] = useState(new Date().getFullYear() - 1);
   const [exportingD207, setExportingD207] = useState(false);
   const [previewingD207, setPreviewingD207] = useState(false);
+  const [d207Rectif, setD207Rectif] = useState(false);
 
   const { data: list = [] } = useQuery({
     queryKey: ["dividends", companyId ?? ""],
@@ -136,7 +138,7 @@ export function Dividends() {
     if (!companyId) return;
     setPreviewingD205(true);
     try {
-      const xml = await api.dividends.previewD205Xml(companyId, d205Year);
+      const xml = await api.dividends.previewD205Xml(companyId, d205Year, d205Rectif);
       openXml({ xml, name: `d205-${d205Year}.xml`, declKind: "D205" });
     } catch (e) {
       notify.error(formatError(e, t("dividends.d205.previewFailed")));
@@ -156,7 +158,7 @@ export function Dividends() {
     if (!dest) return;
     setExportingD205(true);
     try {
-      const res = await api.dividends.exportD205Official(companyId, d205Year, dest, override);
+      const res = await api.dividends.exportD205Official(companyId, d205Year, dest, override, d205Rectif);
       if (!res.written) {
         setDukBlock(res.issues);
         notify.error(t("declarations.notify.dukErrors"));
@@ -180,7 +182,7 @@ export function Dividends() {
     if (!companyId) return;
     setPreviewingD207(true);
     try {
-      const xml = await api.dividends.previewD207Xml(companyId, d207Year);
+      const xml = await api.dividends.previewD207Xml(companyId, d207Year, d207Rectif);
       // D207 nu are validator DUK propriu (validat XSD în backend) → docKey, nu declKind.
       openXml({ xml, name: `d207-${d207Year}.xml`, docKey: "D207" });
     } catch (e) {
@@ -201,7 +203,7 @@ export function Dividends() {
     if (!dest) return;
     setExportingD207(true);
     try {
-      const res = await api.dividends.exportD207Official(companyId, d207Year, dest);
+      const res = await api.dividends.exportD207Official(companyId, d207Year, dest, d207Rectif);
       if (!res.written) {
         notify.error(formatError(res.issues?.[0]?.message ?? "", t("dividends.d207.exportFailed")));
         return;
@@ -317,6 +319,13 @@ export function Dividends() {
             <Ic name="eye" />{previewingD205 ? t("dividends.d205.previewing") : t("dividends.d205.preview")}
           </button>
         </div>
+        <div className="field" style={{ marginTop: 10 }}>
+          <label className="chk-row">
+            <input type="checkbox" checked={d205Rectif} onChange={(e) => setD205Rectif(e.target.checked)} />
+            <span>{t("dividends.d205.rectificative")}</span>
+          </label>
+          <div className="hint">{t("dividends.d205.rectificativeHint")}</div>
+        </div>
         {nonResidentCount > 0 && (
           <div
             className="hint"
@@ -364,6 +373,13 @@ export function Dividends() {
             <button className="pill-btn" disabled={previewingD207} onClick={() => void runD207Preview()}>
               <Ic name="eye" />{previewingD207 ? t("dividends.d207.previewing") : t("dividends.d207.preview")}
             </button>
+          </div>
+          <div className="field" style={{ marginTop: 10 }}>
+            <label className="chk-row">
+              <input type="checkbox" checked={d207Rectif} onChange={(e) => setD207Rectif(e.target.checked)} />
+              <span>{t("dividends.d207.rectificative")}</span>
+            </label>
+            <div className="hint">{t("dividends.d207.rectificativeHint")}</div>
           </div>
           {/* DIV-02: the emitter reports every non-resident dividend as fully taxable at the domestic
               rate (cod venit 01). Treaty-reduced / EU parent-subsidiary-exempt cases aren't modelled yet. */}

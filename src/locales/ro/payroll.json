@@ -209,7 +209,9 @@
       "saveTitle": "Salvează D112 (XML)",
       "insured_one": "{{count}} asigurat",
       "insured_few": "{{count}} asigurați",
-      "insured_other": "{{count}} de asigurați"
+      "insured_other": "{{count}} de asigurați",
+      "rectificative": "Declarație rectificativă",
+      "rectificativeHint": "Depune o corecție a unei declarații deja transmise pentru aceeași perioadă (d_rec=1); conține setul complet de date recalculate."
     },
     "notify": {
       "soon": "În curând.",

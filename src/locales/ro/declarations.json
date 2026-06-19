@@ -246,6 +246,8 @@
         "base": "Bază (lei)"
       },
       "totalFoot": "TOTAL ({{count}} operatori): bază",
+      "rectificative": "Declarație rectificativă",
+      "rectificativeHint": "Depune o corecție a unei declarații deja transmise pentru aceeași perioadă (d_rec=1); conține setul complet de date recalculate.",
       "notify": {
         "noOps": "Nu există operațiuni intra-UE în perioada selectată.",
         "saved": "D390 salvat: {{path}}",

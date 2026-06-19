@@ -154,6 +154,8 @@ pub struct D112ExportParams {
     pub month: u32,
     pub caen: String,
     pub dest_path: String,
+    /// `true` → declarație rectificativă (d_rec=1); `false` (implicit) → declarație inițială.
+    pub is_rectificative: bool,
 }
 
 #[tauri::command]
@@ -172,13 +174,22 @@ pub async fn export_d112_xml(
         month,
         caen,
         dest_path,
+        is_rectificative,
     } = params;
 
     let company = crate::db::companies::get(&state.db, &company_id).await?;
     let employees = payroll::list(&state.db, &company_id).await?;
     let period_ym = format!("{year:04}-{month:02}");
     let leaves = crate::db::concedii::list(&state.db, &company_id, &period_ym).await?;
-    let xml = build_d112_xml(&company, &employees, &leaves, year, month, caen.trim())?;
+    let xml = build_d112_xml(
+        &company,
+        &employees,
+        &leaves,
+        year,
+        month,
+        caen.trim(),
+        is_rectificative,
+    )?;
     // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the IPC
     // endpoint accepts an arbitrary string.
     let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
@@ -226,12 +237,21 @@ pub async fn preview_d112_xml(
     year: i32,
     month: u32,
     caen: String,
+    is_rectificative: bool,
 ) -> AppResult<String> {
     let company = crate::db::companies::get(&state.db, &company_id).await?;
     let employees = payroll::list(&state.db, &company_id).await?;
     let period_ym = format!("{year:04}-{month:02}");
     let leaves = crate::db::concedii::list(&state.db, &company_id, &period_ym).await?;
-    build_d112_xml(&company, &employees, &leaves, year, month, caen.trim())
+    build_d112_xml(
+        &company,
+        &employees,
+        &leaves,
+        year,
+        month,
+        caen.trim(),
+        is_rectificative,
+    )
 }
 
 /// Pure core of the D112 XML build (no Tauri State / filesystem) — maps active employees + the month's
@@ -245,6 +265,7 @@ fn build_d112_xml(
     year: i32,
     month: u32,
     caen: &str,
+    is_rectificative: bool,
 ) -> AppResult<String> {
     if caen.len() != 4 || !caen.chars().all(|c| c.is_ascii_digit()) {
         return Err(AppError::Validation(
@@ -518,7 +539,7 @@ fn build_d112_xml(
     let header = D112Header {
         luna: month,
         an: year,
-        d_rec: 0, // declarație inițială
+        d_rec: u8::from(is_rectificative), // 0 = inițială, 1 = rectificativă
         // Declarantul (persoană) se completează în aplicație; folosim denumirea ca substituent.
         nume_declar: company.legal_name.chars().take(75).collect(),
         prenume_declar: "-".into(),
@@ -642,7 +663,7 @@ mod tests {
         let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
             .await
             .unwrap();
-        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201").unwrap();
+        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201", false).unwrap();
 
         assert!(xml.contains("declaratie:v7"));
         assert_eq!(xml.matches("<asigurat ").count(), 2); // doi asigurați
@@ -680,7 +701,7 @@ mod tests {
         let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
             .await
             .unwrap();
-        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201").unwrap();
+        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201", false).unwrap();
 
         assert_eq!(xml.matches("<asiguratD ").count(), 2); // două certificate
         assert!(xml.contains("D_1=\"AA\""));
@@ -741,7 +762,7 @@ mod tests {
         };
 
         // D112 path: parse the `angajatorA` obligation `A_datorat` per code.
-        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201").unwrap();
+        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201", false).unwrap();
         let oblig = |cod: &str| -> i64 {
             let key = format!("A_codOblig=\"{cod}\"");
             let i = xml
@@ -802,7 +823,7 @@ mod tests {
                 .unwrap_or(0)
         };
 
-        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201").unwrap();
+        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201", false).unwrap();
         let oblig = |cod: &str| -> i64 {
             let key = format!("A_codOblig=\"{cod}\"");
             let i = xml
@@ -846,7 +867,7 @@ mod tests {
 
         let company = crate::db::companies::get(&pool, "co1").await.unwrap();
         let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
-        let xml = build_d112_xml(&company, &employees, &[], 2026, 6, "6201").unwrap();
+        let xml = build_d112_xml(&company, &employees, &[], 2026, 6, "6201", false).unwrap();
 
         let active = crate::db::payroll::active_working_days(2026, 6, Some("2026-06-16"), None);
         let full = crate::db::payroll::working_days(2026, 6);
@@ -884,7 +905,7 @@ mod tests {
         let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
             .await
             .unwrap();
-        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201").unwrap();
+        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201", false).unwrap();
         let path = std::env::temp_dir().join("d112_from_db.xml");
         std::fs::write(&path, &xml).unwrap();
         eprintln!("WROTE {}", path.display());
@@ -914,7 +935,7 @@ mod tests {
         let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
             .await
             .unwrap();
-        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201").unwrap();
+        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201", false).unwrap();
         let tmp = std::env::temp_dir().join("d112_duk_gate_test.xml");
         std::fs::write(&tmp, &xml).unwrap();
 

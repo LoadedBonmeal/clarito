@@ -688,28 +688,29 @@ export const dividends = {
     year: number,
     destPath: string,
     skipDukOverride = false,
+    isRectificative = false,
   ) =>
     invoke<OfficialExportResult>("export_d205_official", {
-      params: { companyId, year, destPath },
+      params: { companyId, year, destPath, isRectificative },
       skipDukOverride,
     }),
   /**
    * Construiește XML-ul D205 (`:v3`) pentru anul de venit `year` FĂRĂ a-l scrie pe disc — pentru
    * vizualizatorul/editorul XML din aplicație. Re-validarea DUK se face cu `validateDeclarationXml`.
    */
-  previewD205Xml: (companyId: string, year: number) =>
-    invoke<string>("preview_d205_xml", { companyId, year }),
+  previewD205Xml: (companyId: string, year: number, isRectificative = false) =>
+    invoke<string>("preview_d205_xml", { companyId, year, isRectificative }),
   /**
    * Exportă D207 (informativă anuală, beneficiari NEREZIDENȚI) pentru anul de venit `year`. D207 nu
    * are validator DUK — conformitatea e garantată de XSD-ul oficial. Scrie XML-ul la `destPath`.
    */
-  exportD207Official: (companyId: string, year: number, destPath: string) =>
+  exportD207Official: (companyId: string, year: number, destPath: string, isRectificative = false) =>
     invoke<OfficialExportResult>("export_d207_official", {
-      params: { companyId, year, destPath },
+      params: { companyId, year, destPath, isRectificative },
     }),
   /** Construiește XML-ul D207 fără a-l scrie — pentru vizualizatorul XML din aplicație. */
-  previewD207Xml: (companyId: string, year: number) =>
-    invoke<string>("preview_d207_xml", { companyId, year }),
+  previewD207Xml: (companyId: string, year: number, isRectificative = false) =>
+    invoke<string>("preview_d207_xml", { companyId, year, isRectificative }),
 };
 
 // ─── GL — Jurnal contabil ──────────────────────────────────────────────────
@@ -1164,14 +1165,15 @@ export const payroll = {
     caen: string,
     destPath: string,
     skipDukOverride = false,
+    isRectificative = false,
   ) =>
     invoke<OfficialExportResult>("export_d112_xml", {
-      params: { companyId, year, month, caen, destPath },
+      params: { companyId, year, month, caen, destPath, isRectificative },
       skipDukOverride,
     }),
   /** Construiește XML-ul D112 (`:v7`) fără a-l scrie — pentru vizualizatorul XML (re-validare DUK separat). */
-  previewD112Xml: (companyId: string, year: number, month: number, caen: string) =>
-    invoke<string>("preview_d112_xml", { companyId, year, month, caen }),
+  previewD112Xml: (companyId: string, year: number, month: number, caen: string, isRectificative = false) =>
+    invoke<string>("preview_d112_xml", { companyId, year, month, caen, isRectificative }),
 };
 
 export const vatRates = {

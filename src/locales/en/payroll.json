@@ -207,7 +207,9 @@
       "invalidCaen": "Invalid CAEN code — 4 digits (e.g. 6201).",
       "saveTitle": "Save D112 (XML)",
       "insured_one": "{{count}} insured person",
-      "insured_other": "{{count}} insured persons"
+      "insured_other": "{{count}} insured persons",
+      "rectificative": "Rectificative declaration",
+      "rectificativeHint": "Files a correction of an already-submitted declaration for the same period (d_rec=1); it contains the full recomputed dataset."
     },
     "notify": {
       "soon": "Coming soon.",

@@ -59,7 +59,9 @@
       "savedDuk": "D205 saved + DUK-validated: {{path}}",
       "savedNoDuk": "D205 saved (DUK unavailable — validate in the smart PDF): {{path}}",
       "exportFailed": "D205 export failed.",
-      "nonResidentWarn": "{{count}} dividend(s) to non-residents are NOT in D205 — they're reported separately in D207 (emitted below)."
+      "nonResidentWarn": "{{count}} dividend(s) to non-residents are NOT in D205 — they're reported separately in D207 (emitted below).",
+      "rectificative": "Rectificative declaration",
+      "rectificativeHint": "Files a correction of an already-submitted declaration for the same income year (d_rec=1); it contains the full recomputed dataset."
     },
     "d207": {
       "title": "Export D207 — annual informative, non-resident income",
@@ -73,7 +75,9 @@
       "saveTitle": "Save D207 (XML)",
       "saved": "D207 saved (ANAF XSD-validated): {{path}}",
       "exportFailed": "D207 export failed.",
-      "treatyNote": "Note: D207 reports every non-resident dividend as fully taxable at the domestic rate (income code 01). Treaty-reduced rates and EU parent-subsidiary exemptions (art. 229) are not modelled yet — adjust the XML manually for those beneficiaries."
+      "treatyNote": "Note: D207 reports every non-resident dividend as fully taxable at the domestic rate (income code 01). Treaty-reduced rates and EU parent-subsidiary exemptions (art. 229) are not modelled yet — adjust the XML manually for those beneficiaries.",
+      "rectificative": "Rectificative declaration",
+      "rectificativeHint": "Files a correction of an already-submitted declaration for the same income year (d_rec=1); it contains the full recomputed dataset."
     }
   }
 }

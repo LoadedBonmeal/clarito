@@ -66,6 +66,7 @@ export function PayrollPage() {
   const [modal, setModal] = useState<"create" | { edit: Employee } | null>(null);
   const [showD112, setShowD112] = useState(false);
   const [dukBlock, setDukBlock] = useState<PreflightIssue[] | null>(null);
+  const [d112Rectif, setD112Rectif] = useState(false);
   const [showSediu, setShowSediu] = useState(false);
   const [showConcediu, setShowConcediu] = useState(false);
   const [run, setRun] = useState<PayrollRun | null>(null);
@@ -168,10 +169,10 @@ export function PayrollPage() {
   const openXml = useOpenXml();
 
   /** Construiește XML-ul D112 al lunii și îl deschide în vizualizatorul/editorul XML (cu re-validare DUK). */
-  const runD112Preview = async (caen: string) => {
+  const runD112Preview = async (caen: string, isRectificative: boolean) => {
     if (!companyId) return;
     try {
-      const xml = await api.payroll.previewD112Xml(companyId, year, month, caen);
+      const xml = await api.payroll.previewD112Xml(companyId, year, month, caen, isRectificative);
       openXml({
         xml,
         name: `d112-${year}-${String(month).padStart(2, "0")}.xml`,
@@ -182,7 +183,7 @@ export function PayrollPage() {
     }
   };
 
-  const runD112 = async (caen: string, override = false) => {
+  const runD112 = async (caen: string, isRectificative: boolean, override = false) => {
     if (!companyId) return;
     // Noul model D112 (Ordin comun 605/95/928/2.314/2026, M.Of. 463/02.06.2026) se aplică
     // veniturilor lunii IULIE 2026+; aplicația emite structura v7 (valabilă ≤ iunie 2026).
@@ -198,7 +199,7 @@ export function PayrollPage() {
     try {
       // Gate DUK: validatorul OFICIAL `D112Validator.jar` rulează înainte de scriere. Dacă raportează
       // ERORI, fișierul NU se scrie (written=false) — afișăm issues + buton „exportă oricum".
-      const res = await api.payroll.exportD112Xml(companyId, year, month, caen, dest, override);
+      const res = await api.payroll.exportD112Xml(companyId, year, month, caen, dest, override, isRectificative);
       if (!res.written) {
         setDukBlock(res.issues);
         notify.error(t("declarations.notify.dukErrors"));
@@ -636,6 +637,8 @@ export function PayrollPage() {
           monthLabel={`${MONTHS_FULL[month - 1]} ${year}`}
           newModel={year > 2026 || (year === 2026 && month >= 7)}
           dukBlock={dukBlock}
+          isRectificative={d112Rectif}
+          onRectificativeChange={setD112Rectif}
           onClose={() => { setShowD112(false); setDukBlock(null); }}
           onExport={runD112}
           onPreview={runD112Preview}
@@ -1116,14 +1119,16 @@ function SediuModal({
 // ─── D112Modal — export XML cu CAEN (înlocuiește window.prompt, no-op în Tauri) ─
 
 function D112Modal({
-  monthLabel, newModel, dukBlock, onClose, onExport, onPreview,
+  monthLabel, newModel, dukBlock, isRectificative, onRectificativeChange, onClose, onExport, onPreview,
 }: {
   monthLabel: string;
   newModel: boolean;
   dukBlock: PreflightIssue[] | null;
+  isRectificative: boolean;
+  onRectificativeChange: (v: boolean) => void;
   onClose: () => void;
-  onExport: (caen: string, override?: boolean) => Promise<void>;
-  onPreview: (caen: string) => Promise<void>;
+  onExport: (caen: string, isRectificative: boolean, override?: boolean) => Promise<void>;
+  onPreview: (caen: string, isRectificative: boolean) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [caen, setCaen] = useState("");
@@ -1136,7 +1141,7 @@ function D112Modal({
     if (!/^\d{4}$/.test(caen.trim())) { notify.error(t("payroll.d112.invalidCaen")); return; }
     setBusy(true);
     try {
-      await onExport(caen.trim(), override);
+      await onExport(caen.trim(), isRectificative, override);
     } finally {
       setBusy(false);
     }
@@ -1146,7 +1151,7 @@ function D112Modal({
     if (!/^\d{4}$/.test(caen.trim())) { notify.error(t("payroll.d112.invalidCaen")); return; }
     setPreviewing(true);
     try {
-      await onPreview(caen.trim());
+      await onPreview(caen.trim(), isRectificative);
     } finally {
       setPreviewing(false);
     }
@@ -1195,6 +1200,19 @@ function D112Modal({
                 disabled
               />
             </div>
+          </div>
+
+          {/* Declarație rectificativă — toggle per export, în aceeași sesiune cu CAEN. */}
+          <div className="field" style={{ marginTop: 14 }}>
+            <label className="chk-row">
+              <input
+                type="checkbox"
+                checked={isRectificative}
+                onChange={(e) => onRectificativeChange(e.target.checked)}
+              />
+              <span>{t("payroll.d112.rectificative")}</span>
+            </label>
+            <div className="hint">{t("payroll.d112.rectificativeHint")}</div>
           </div>
 
           {/* DUK block panel — validatorul oficial ANAF a raportat erori; oferă „exportă oricum". */}

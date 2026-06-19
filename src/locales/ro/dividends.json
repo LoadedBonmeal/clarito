@@ -59,7 +59,9 @@
       "savedDuk": "D205 salvat + validat DUK: {{path}}",
       "savedNoDuk": "D205 salvat (DUK indisponibil — validați în PDF inteligent): {{path}}",
       "exportFailed": "Exportul D205 a eșuat.",
-      "nonResidentWarn": "{{count}} dividend(e) către nerezidenți NU intră în D205 — se raportează separat în D207 (emisă mai jos)."
+      "nonResidentWarn": "{{count}} dividend(e) către nerezidenți NU intră în D205 — se raportează separat în D207 (emisă mai jos).",
+      "rectificative": "Declarație rectificativă",
+      "rectificativeHint": "Depune o corecție a unei declarații deja transmise pentru același an de venit (d_rec=1); conține setul complet de date recalculate."
     },
     "d207": {
       "title": "Export D207 — informativă anuală, venituri nerezidenți",
@@ -73,7 +75,9 @@
       "saveTitle": "Salvează D207 (XML)",
       "saved": "D207 salvat (validat XSD ANAF): {{path}}",
       "exportFailed": "Exportul D207 a eșuat.",
-      "treatyNote": "Atenție: D207 raportează fiecare dividend nerezident ca integral impozabil la cota internă (cod venit 01). Scutirile (filială UE, art. 229) sau cotele reduse prin convenții de evitare a dublei impuneri NU sunt încă modelate — ajustați manual XML-ul pentru acești beneficiari."
+      "treatyNote": "Atenție: D207 raportează fiecare dividend nerezident ca integral impozabil la cota internă (cod venit 01). Scutirile (filială UE, art. 229) sau cotele reduse prin convenții de evitare a dublei impuneri NU sunt încă modelate — ajustați manual XML-ul pentru acești beneficiari.",
+      "rectificative": "Declarație rectificativă",
+      "rectificativeHint": "Depune o corecție a unei declarații deja transmise pentru același an de venit (d_rec=1); conține setul complet de date recalculate."
     }
   }
 }

@@ -56,6 +56,8 @@ pub struct D205ExportParams {
     pub company_id: String,
     pub year: i32,
     pub dest_path: String,
+    /// `true` → declarație rectificativă (d_rec=1); `false` (implicit) → declarație inițială.
+    pub is_rectificative: bool,
 }
 
 /// Construiește XML-ul D205 (`:v3`) pentru firma + anul de venit date — agregare pe CNP a
@@ -66,6 +68,7 @@ async fn build_d205_xml_for(
     db: &sqlx::SqlitePool,
     company_id: &str,
     year: i32,
+    is_rectificative: bool,
 ) -> AppResult<String> {
     let company = crate::db::companies::get(db, company_id).await?;
     let beneficiaries =
@@ -85,7 +88,7 @@ async fn build_d205_xml_for(
         adresa,
         den: company.legal_name.chars().take(75).collect(),
         an: year,
-        d_rec: 0,
+        d_rec: u8::from(is_rectificative), // 0 = inițială, 1 = rectificativă
         nume_declar: company.legal_name.chars().take(75).collect(),
         prenume_declar: "-".into(),
         functie_declar: "Administrator".into(),
@@ -102,8 +105,9 @@ pub async fn preview_d205_xml(
     state: State<'_, AppState>,
     company_id: String,
     year: i32,
+    is_rectificative: bool,
 ) -> AppResult<String> {
-    build_d205_xml_for(&state.db, &company_id, year).await
+    build_d205_xml_for(&state.db, &company_id, year, is_rectificative).await
 }
 
 /// Exportă D205 (declarația informativă anuală, pe beneficiar) pentru anul de venit dat — capitolul
@@ -124,12 +128,13 @@ pub async fn export_d205_official(
         company_id,
         year,
         dest_path,
+        is_rectificative,
     } = params;
     let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
 
     // Agregare pe CNP (rezidenți) + construirea XML-ului — sursă comună cu `preview_d205_xml`.
     // Blochează dacă vreun dividend rezident nu are CNP; nerezidenții → D207 (excluși).
-    let xml = build_d205_xml_for(&state.db, &company_id, year).await?;
+    let xml = build_d205_xml_for(&state.db, &company_id, year, is_rectificative).await?;
 
     // Layer D: validare cu DUK (D205Validator.jar) înainte de scriere — grațios dacă runtime lipsește.
     let tmp =
@@ -185,6 +190,7 @@ async fn build_d207_xml_for(
     db: &sqlx::SqlitePool,
     company_id: &str,
     year: i32,
+    is_rectificative: bool,
 ) -> AppResult<String> {
     let company = crate::db::companies::get(db, company_id).await?;
     let benefs =
@@ -201,7 +207,7 @@ async fn build_d207_xml_for(
         den: company.legal_name.chars().take(200).collect(),
         adresa,
         an: year,
-        d_rec: 0,
+        d_rec: u8::from(is_rectificative), // 0 = inițială, 1 = rectificativă
         nume_declar: company.legal_name.chars().take(75).collect(),
         prenume_declar: "-".into(),
         functie_declar: "Administrator".into(),
@@ -215,8 +221,9 @@ pub async fn preview_d207_xml(
     state: State<'_, AppState>,
     company_id: String,
     year: i32,
+    is_rectificative: bool,
 ) -> AppResult<String> {
-    build_d207_xml_for(&state.db, &company_id, year).await
+    build_d207_xml_for(&state.db, &company_id, year, is_rectificative).await
 }
 
 #[derive(serde::Deserialize)]
@@ -225,6 +232,8 @@ pub struct D207ExportParams {
     pub company_id: String,
     pub year: i32,
     pub dest_path: String,
+    /// `true` → declarație rectificativă (d_rec=1); `false` (implicit) → declarație inițială.
+    pub is_rectificative: bool,
 }
 
 /// Exportă D207 (informativă anuală, beneficiari NEREZIDENȚI) pentru anul de venit dat. D207 NU are un
@@ -239,9 +248,10 @@ pub async fn export_d207_official(
         company_id,
         year,
         dest_path,
+        is_rectificative,
     } = params;
     let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
-    let xml = build_d207_xml_for(&state.db, &company_id, year).await?;
+    let xml = build_d207_xml_for(&state.db, &company_id, year, is_rectificative).await?;
     std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
     Ok(OfficialExportResult {
         path: dest.to_string_lossy().to_string(),

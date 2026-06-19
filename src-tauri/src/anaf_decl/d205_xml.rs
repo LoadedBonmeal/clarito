@@ -324,6 +324,27 @@ mod tests {
         assert_eq!(xml.matches("<benef ").count(), 2);
     }
 
+    /// Rectificativă toggle: d_rec=0 emite `d_rec="0"`, d_rec=1 emite `d_rec="1"`.
+    /// Acoperă și calea `is_rectificative` din `build_d205_xml_for` (conversia `u8::from(bool)`).
+    #[test]
+    fn d_rec_initial_emits_zero_rectificative_emits_one() {
+        let b = benef("1900101410011", "10000", "1600");
+        // Declarație inițială (d_rec=0).
+        let xml_initial = build_d205_xml(&header(), std::slice::from_ref(&b)).unwrap();
+        assert!(
+            xml_initial.contains(r#"d_rec="0""#),
+            "declarație inițială trebuie să emită d_rec=\"0\": {xml_initial}"
+        );
+        // Declarație rectificativă (d_rec=1).
+        let mut hdr = header();
+        hdr.d_rec = 1;
+        let xml_rectif = build_d205_xml(&hdr, std::slice::from_ref(&b)).unwrap();
+        assert!(
+            xml_rectif.contains(r#"d_rec="1""#),
+            "declarație rectificativă trebuie să emită d_rec=\"1\": {xml_rectif}"
+        );
+    }
+
     /// Dev helper (opt-in): dump a golden D205 to a temp file for the real `-v D205` validator run.
     ///   cargo test --lib anaf_decl::d205_xml::tests::dump_d205 -- --ignored --nocapture
     #[test]

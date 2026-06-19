@@ -38,6 +38,7 @@ export function D390View({ dateFrom, dateTo }: Props) {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [exporting, setExporting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [isRectificative, setIsRectificative] = useState(false);
   const openXml = useOpenXml();
 
   const tipLabel = (tip: string): string =>
@@ -76,7 +77,7 @@ export function D390View({ dateFrom, dateTo }: Props) {
     if (!savePath) return;
     setExporting(true);
     try {
-      const saved = await api.d390.export(activeCompanyId, dateFrom, dateTo, savePath);
+      const saved = await api.d390.export(activeCompanyId, dateFrom, dateTo, savePath, { dRec: isRectificative });
       notify.success(t("declarations.d390.notify.saved", { path: saved }));
       try {
         await openPath(saved);
@@ -102,7 +103,7 @@ export function D390View({ dateFrom, dateTo }: Props) {
     }
     setPreviewing(true);
     try {
-      const xml = await api.d390.previewD390Xml(activeCompanyId, dateFrom, dateTo);
+      const xml = await api.d390.previewD390Xml(activeCompanyId, dateFrom, dateTo, { dRec: isRectificative });
       openXml({ xml, name: `d390-${dateFrom}-${dateTo}.xml` });
     } catch (err) {
       notify.error(formatError(err, t("declarations.d390.previewFailed")));
@@ -116,6 +117,15 @@ export function D390View({ dateFrom, dateTo }: Props) {
       <div className="scr-toolbar">
         <div className="tt">{t("declarations.d390.title")}</div>
         <div className="spacer" />
+        {/* Declarație rectificativă — toggle vizibil în toolbar lângă butoanele export/preview. */}
+        <label className="chk-row" style={{ fontSize: 13, userSelect: "none" }} title={t("declarations.d390.rectificativeHint")}>
+          <input
+            type="checkbox"
+            checked={isRectificative}
+            onChange={(e) => setIsRectificative(e.target.checked)}
+          />
+          <span>{t("declarations.d390.rectificative")}</span>
+        </label>
         <button
           className="btn-dark"
           disabled={exporting || !activeCompanyId || ops.length === 0}
