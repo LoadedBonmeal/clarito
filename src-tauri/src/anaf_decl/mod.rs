@@ -67,8 +67,9 @@ pub(crate) fn round_lei(d: rust_decimal::Decimal) -> i64 {
 // ── Shared XML escaping ──────────────────────────────────────────────────────
 
 /// Escape pentru conținut XML (text + atribute): elimină caracterele de control (ILEGALE în
-/// XML 1.0 — un nume cu \u{0b} ar invalida tot fișierul) și escapează & < > ".
-/// Folosit de TOATE generatoarele hand-rolled (d112, bilanț, SAF-T); quick-xml escapează singur.
+/// XML 1.0 — un nume cu \u{0b} ar invalida tot fișierul) și escapează & < > " '.
+/// Folosit de TOATE generatoarele hand-rolled (d112, bilanț, SAF-T, d300, d394); quick-xml
+/// escapează singur.
 pub(crate) fn xml_esc(s: &str) -> String {
     s.chars()
         .filter(|c| !c.is_control())
@@ -77,6 +78,7 @@ pub(crate) fn xml_esc(s: &str) -> String {
             '<' => "&lt;".chars().collect(),
             '>' => "&gt;".chars().collect(),
             '"' => "&quot;".chars().collect(),
+            '\'' => "&apos;".chars().collect(),
             other => vec![other],
         })
         .collect()

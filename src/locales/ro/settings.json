@@ -181,6 +181,7 @@
     "activity": {
       "title": "Jurnal activitate",
       "exportCsv": "Export CSV",
+      "exportFailed": "Export jurnal activitate eșuat.",
       "empty": "Nicio activitate înregistrată.",
       "th": {
         "time": "Timp",

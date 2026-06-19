@@ -67,7 +67,6 @@ export function Dividends() {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["dividends", companyId ?? ""] });
-      void qc.invalidateQueries({ queryKey: ["gl"] });
       setGrossAmount("");
       setShareholder("");
       setBeneficiaryCnp("");

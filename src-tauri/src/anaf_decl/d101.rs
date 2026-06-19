@@ -1,6 +1,7 @@
 //! D101 — Declarația privind impozitul pe profit (Formular 101, OPANAF 206/2025).
 //!
-//! For PROFIT-tax companies (not micro). Annual; deadline 25 March of the following year. This
+//! For PROFIT-tax companies (not micro). Annual; deadline 25 March of the following year (OUG
+//! 153/2020 derogation: deadline extended to 25 June for fiscal years 2021-2025). This
 //! module computes the worksheet (art. 19 Cod fiscal): rezultat fiscal = rezultat contabil −
 //! venituri neimpozabile − deduceri fiscale + cheltuieli nedeductibile − pierdere reportată;
 //! impozit = 16% × profit impozabil; minus the sponsorship credit (the smaller of 0,75% × cifra de

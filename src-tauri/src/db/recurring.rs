@@ -76,16 +76,21 @@ pub async fn create(pool: &SqlitePool, input: CreateRecurringInput) -> AppResult
     .execute(pool)
     .await?;
 
-    get_by_id(pool, &id).await
+    get_by_id(pool, &id, &input.company_id).await
 }
 
-pub async fn get_by_id(pool: &SqlitePool, id: &str) -> AppResult<RecurringInvoice> {
+pub async fn get_by_id(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+) -> AppResult<RecurringInvoice> {
     Ok(sqlx::query_as::<_, RecurringInvoice>(
         "SELECT id, company_id, template_name, client_id, frequency, next_issue_date, \
          day_of_month, auto_submit_anaf, active, series, lines_json, notes, created_at, updated_at \
-         FROM recurring_invoices WHERE id = ?1",
+         FROM recurring_invoices WHERE id = ?1 AND company_id = ?2",
     )
     .bind(id)
+    .bind(company_id)
     .fetch_one(pool)
     .await?)
 }
@@ -331,7 +336,7 @@ mod tests {
         .await
         .unwrap();
 
-        let refreshed = get_by_id(&pool, &created.id).await.unwrap();
+        let refreshed = get_by_id(&pool, &created.id, "comp-1").await.unwrap();
         assert_eq!(refreshed.template_name, "Abonament SaaS");
         assert_eq!(refreshed.frequency, "quarterly");
         assert_eq!(refreshed.day_of_month, 15);
@@ -349,13 +354,13 @@ mod tests {
         set_active(&pool, &created.id, "comp-1", false)
             .await
             .unwrap();
-        let paused = get_by_id(&pool, &created.id).await.unwrap();
+        let paused = get_by_id(&pool, &created.id, "comp-1").await.unwrap();
         assert!(!paused.active);
 
         set_active(&pool, &created.id, "comp-1", true)
             .await
             .unwrap();
-        let resumed = get_by_id(&pool, &created.id).await.unwrap();
+        let resumed = get_by_id(&pool, &created.id, "comp-1").await.unwrap();
         assert!(resumed.active);
     }
 

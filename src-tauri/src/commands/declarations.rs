@@ -24,6 +24,7 @@ use crate::anaf_decl::d101::{compute_d101 as compute_d101_fn, D101Input, D101Res
 use crate::anaf_decl::d112::{compute_payroll as compute_payroll_fn, PayrollInput, PayrollResult};
 use crate::anaf_decl::d300::D300Submission;
 use crate::anaf_decl::version::resolve;
+use crate::anaf_decl::xml_esc as xml_escape;
 use crate::anaf_decl::DeclKind;
 use crate::db::companies;
 
@@ -2019,15 +2020,6 @@ pub async fn preflight_declaration(
         &period_to,
     )
     .await
-}
-
-/// Escapes XML special characters in a string value.
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
 }
 
 // ── RO e-TVA reconciliation (pre-filing self-check) ─────────────────────────────

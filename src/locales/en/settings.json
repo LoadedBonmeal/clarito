@@ -181,6 +181,7 @@
     "activity": {
       "title": "Activity log",
       "exportCsv": "Export CSV",
+      "exportFailed": "Activity log export failed.",
       "empty": "No activity recorded.",
       "th": {
         "time": "Time",

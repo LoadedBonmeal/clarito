@@ -44,13 +44,12 @@ pub fn run_java_validator(
     decl: DeclKind,
     xml_path: &Path,
 ) -> AppResult<String> {
-    let result_path = std::env::temp_dir().join(format!(
-        "duk_result_{}.txt",
-        xml_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("decl")
-    ));
+    let stem = xml_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("decl");
+    let result_path =
+        std::env::temp_dir().join(format!("duk_result_{}_{}.txt", stem, uuid::Uuid::now_v7()));
     let output = std::process::Command::new(java)
         .arg("-jar")
         .arg(jar)

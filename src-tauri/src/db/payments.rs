@@ -100,15 +100,16 @@ pub async fn create(pool: &SqlitePool, input: CreatePaymentInput) -> AppResult<P
     .execute(pool)
     .await?;
 
-    get_by_id(pool, &id).await
+    get_by_id(pool, &id, &input.company_id).await
 }
 
-pub async fn get_by_id(pool: &SqlitePool, id: &str) -> AppResult<Payment> {
+pub async fn get_by_id(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Payment> {
     Ok(sqlx::query_as::<_, Payment>(
         "SELECT id, invoice_id, company_id, amount, currency, paid_at, method, reference, notes, created_at \
-         FROM payments WHERE id = ?1",
+         FROM payments WHERE id = ?1 AND company_id = ?2",
     )
     .bind(id)
+    .bind(company_id)
     .fetch_one(pool)
     .await?)
 }

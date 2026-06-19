@@ -10,7 +10,7 @@ const BUNDLED: &[(&str, &str)] = &[
     ("D300", "v12"),
     ("D394", "v5"),
     ("D406", "v1"),
-    ("D112", "v6"),
+    ("D112", "v7"),
 ];
 
 const MANIFEST_URL: &str = "https://releases.lucaris.ro/efactura/anaf-forms.json";
@@ -78,7 +78,7 @@ mod tests {
             ("D300", "v12"),
             ("D394", "v5"),
             ("D406", "v1"),
-            ("D112", "v6"),
+            ("D112", "v7"),
         ]);
         assert!(compute_staleness(BUNDLED, &m).is_empty());
     }

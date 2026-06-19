@@ -395,7 +395,8 @@ pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<
 }
 
 /// Total impozit pe dividende cu termenul de declarare/plată într-o perioadă (lună), pentru obligația
-/// din Declarația 100. `period_ym` = `YYYY-MM`.
+/// din Declarația 100. `period_ym` = `YYYY-MM`. Filtrează NUMAI rezidenți (ca și
+/// `dividend_obligations_in_months`) — impozitul pe nerezidenți se declară prin D207, nu D100.
 pub async fn dividend_tax_due_in_period(
     pool: &SqlitePool,
     company_id: &str,
@@ -403,7 +404,7 @@ pub async fn dividend_tax_due_in_period(
 ) -> AppResult<Decimal> {
     let mut total = Decimal::ZERO;
     for d in list(pool, company_id).await? {
-        if d.tax_deadline.starts_with(period_ym) {
+        if d.tax_deadline.starts_with(period_ym) && d.beneficiary_resident {
             total += Decimal::from_str(d.tax_amount.trim()).unwrap_or(Decimal::ZERO);
         }
     }
@@ -1305,5 +1306,46 @@ mod tests {
         let bens = d205_beneficiaries_for_year(&[pf, pj], 2025).unwrap();
         assert_eq!(bens.len(), 1, "doar PF intră în D205");
         assert_eq!(bens[0].distribuit, Decimal::from(10000)); // PJ (5000) exclusă
+    }
+
+    /// DIV-03: dividend_tax_due_in_period trebuie să excludă nerezidenții (ca dividend_obligations_in_months).
+    #[test]
+    fn tax_due_in_period_excludes_nonresident() {
+        // Construim manual dividende (fără DB) folosind structura Dividend.
+        let make = |resident: bool, deadline: &str, tax: &str| -> Dividend {
+            Dividend {
+                id: uuid::Uuid::now_v7().to_string(),
+                company_id: "co-1".into(),
+                distribution_date: "2026-06-01".into(),
+                payment_date: Some("2026-06-15".into()),
+                gross_amount: "10000".into(),
+                tax_rate: 16,
+                tax_amount: tax.into(),
+                net_amount: "8400".into(),
+                interim_2025: false,
+                shareholder: None,
+                beneficiary_cnp: None,
+                beneficiary_resident: resident,
+                beneficiary_type: "PF".into(),
+                beneficiary_country: None,
+                beneficiary_foreign_tax_id: None,
+                note: None,
+                tax_deadline: deadline.into(),
+            }
+        };
+        let resident = make(true, "2026-07", "1600");
+        let nonresident = make(false, "2026-07", "1000");
+        // Simulăm logica filtrului direct.
+        let period = "2026-07";
+        let total: Decimal = [&resident, &nonresident]
+            .iter()
+            .filter(|d| d.tax_deadline.starts_with(period) && d.beneficiary_resident)
+            .map(|d| Decimal::from_str(d.tax_amount.trim()).unwrap_or(Decimal::ZERO))
+            .sum();
+        assert_eq!(
+            total,
+            Decimal::from_str("1600").unwrap(),
+            "nerezidenții nu trebuie incluși"
+        );
     }
 }

@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 use tauri::State;
 
+use crate::anaf_decl::xml_esc as xml_escape;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::ubl::fx::{amount_to_ron, parse_rate};
@@ -770,15 +771,6 @@ fn build_and_write_xml(report: D394Report, dest_path: String) -> AppResult<Strin
     std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
 
     Ok(dest_path)
-}
-
-/// Escapes XML special characters in a string value.
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

@@ -109,16 +109,21 @@ pub async fn create(
     .execute(pool)
     .await?;
 
-    get_by_id(pool, &id).await
+    get_by_id(pool, &id, &input.company_id).await
 }
 
-pub async fn get_by_id(pool: &SqlitePool, id: &str) -> AppResult<ReceivedPayment> {
+pub async fn get_by_id(
+    pool: &SqlitePool,
+    id: &str,
+    company_id: &str,
+) -> AppResult<ReceivedPayment> {
     Ok(sqlx::query_as::<_, ReceivedPayment>(
         "SELECT id, received_invoice_id, company_id, amount, currency, paid_at, method, \
                 reference, notes, created_at \
-         FROM received_invoice_payments WHERE id = ?1",
+         FROM received_invoice_payments WHERE id = ?1 AND company_id = ?2",
     )
     .bind(id)
+    .bind(company_id)
     .fetch_one(pool)
     .await?)
 }

@@ -1123,14 +1123,18 @@ export function SettingsPage() {
                 className="pill-btn"
                 onClick={async () => {
                   if (!activeCompanyId) return;
-                  const csv = await api.system.exportActivityLogCsv(activeCompanyId);
-                  const blob = new Blob([csv], { type: "text/csv" });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = "jurnal-activitate.csv";
-                  a.click();
-                  URL.revokeObjectURL(url);
+                  try {
+                    const csv = await api.system.exportActivityLogCsv(activeCompanyId);
+                    const blob = new Blob([csv], { type: "text/csv" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "jurnal-activitate.csv";
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  } catch (err) {
+                    notify.error(formatError(err, t("settings.activity.exportFailed")));
+                  }
                 }}
               >
                 <Ic name="dl" />{t("settings.activity.exportCsv")}

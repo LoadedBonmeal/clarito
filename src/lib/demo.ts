@@ -240,16 +240,16 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
   // D207 (non-resident dividends) — demo mock.
   preview_d207_xml: () => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<declaratie207 xmlns=\"mfp:anaf:dgti:d207:declaratie:v2\" luna=\"12\" an=\"2025\" d_rec=\"0\" cui=\"12345678\" den=\"Demo SRL\" adresa=\"București\" nume_declar=\"Demo\" prenume_declar=\"-\" functie_declar=\"Administrator\" totalPlata_A=\"8801\">\n  <sect_II tip_venit=\"01\" nrben=\"1\" Tscutit=\"0\" Tbaza=\"8000\" Timp=\"800\" Timps=\"0\"/>\n  <benef id_inreg=\"1\" tip_venit1=\"01\" den1=\"John Smith\" Stat_R=\"GB\" cifS=\"GB123456789\" baza1=\"8000\" imp1=\"800\" imps1=\"0\" Act_N=\"1\"/>\n</declaratie207>",
   export_d207_official: () => ({ path: "d207-2025.xml", written: true, dukAvailable: false, dukPassed: false, issues: [] }),
-  list_assets: () => [],
+  list_fixed_assets: () => [],
   list_vat_rates: () => [],
   list_accounts: () => [],
-  stock_valuation_ledger: () => [],
+  stock_ledger: () => [],
   // GL / contabilitate — minimal valid object shapes (page expects .rows/.entries etc.)
   journal_register: () => ({ rows: [], totalDebit: "0", totalCredit: "0", balanced: true }),
   trial_balance: () => ({ rows: [], totalOpeningDebit: "0", totalOpeningCredit: "0", totalPeriodDebit: "0", totalPeriodCredit: "0", totalTotalDebit: "0", totalTotalCredit: "0", totalClosingDebit: "0", totalClosingCredit: "0" }),
   profit_and_loss: () => ({ periodFrom: "2026-06-01", periodTo: "2026-06-30", taxRegime: "micro", revenueLines: [], expenseLines: [], operatingRevenue: "0", operatingExpense: "0", grossResult: "0", incomeTax: "0", netResult: "0" }),
-  ledger_accounts: () => [],
-  list_certificates: () => [],
+  general_ledger: () => [],
+  anaf_get_certificates: () => [],
   get_archive_size: () => 0,
   verify_archive_integrity: () => ({ checked: 0, missing: [], missingUnderRetention: [] }),
   // D100 (micro) demo row + a sample dividend obligation due in the quarter (informational — D100 has

@@ -152,6 +152,16 @@ pub async fn create(
             ));
         }
     }
+    // ASSET-01 — metoda de amortizare: rularea lunară procesează NUMAI activele cu metoda
+    // "liniara"; orice altă metodă ar fi ignorată silențios → nicio amortizare. Respingem
+    // la input; None rămâne acceptabil (implicit "liniara").
+    if let Some(m) = input.depreciation_method.as_deref() {
+        if m.trim() != "liniara" {
+            return Err(AppError::Validation(
+                "Metodă de amortizare nesuportată — în prezent se acceptă doar 'liniara'.".into(),
+            ));
+        }
+    }
     // EDGE-002 — date-quality guard: a malformed acquisition/start-up/disposal date would otherwise
     // silently make `parse_ym` compute depreciation from year 0. Reject at the input boundary.
     if !valid_ymd(&input.date_of_acquisition) {
@@ -425,6 +435,14 @@ pub async fn update(
     input: FixedAssetInput,
 ) -> AppResult<FixedAsset> {
     let cur = get(pool, id, company_id).await?;
+    // ASSET-01 — aceeași validare a metodei de amortizare ca în create().
+    if let Some(m) = input.depreciation_method.as_deref() {
+        if m.trim() != "liniara" {
+            return Err(AppError::Validation(
+                "Metodă de amortizare nesuportată — în prezent se acceptă doar 'liniara'.".into(),
+            ));
+        }
+    }
     // EDGE-002 — same date-quality guard as create (the UPDATE binds these dates directly).
     if !valid_ymd(&input.date_of_acquisition) {
         return Err(AppError::Validation(
@@ -1123,5 +1141,41 @@ mod tests {
         let a = get(&pool, &asset.id, "co-1").await.unwrap();
         assert!(!a.active);
         assert_eq!(a.disposal_date.as_deref(), Some("2026-02-28"));
+    }
+
+    /// ASSET-01: metodă de amortizare != "liniara" trebuie respinsă la create() și update().
+    #[tokio::test]
+    async fn create_rejects_unsupported_depreciation_method() {
+        let pool = setup_asset_pool().await;
+        // Metoda nesuportată → Validation.
+        let mut bad = sample_input();
+        bad.depreciation_method = Some("degresiva".into());
+        assert!(matches!(
+            create(&pool, "co-1", bad).await.unwrap_err(),
+            AppError::Validation(_)
+        ));
+        // None → implicit "liniara" — trebuie acceptat.
+        let mut ok_none = sample_input();
+        ok_none.asset_code = "MF-none-method".into();
+        ok_none.depreciation_method = None;
+        create(&pool, "co-1", ok_none).await.unwrap();
+        // Some("liniara") → trebuie acceptat.
+        let mut ok_lin = sample_input();
+        ok_lin.asset_code = "MF-lin-method".into();
+        ok_lin.depreciation_method = Some("liniara".into());
+        create(&pool, "co-1", ok_lin).await.unwrap();
+    }
+
+    /// ASSET-01: update() trebuie să respingă și el o metodă nesuportată.
+    #[tokio::test]
+    async fn update_rejects_unsupported_depreciation_method() {
+        let pool = setup_asset_pool().await;
+        let asset = create(&pool, "co-1", sample_input()).await.unwrap();
+        let mut bad_upd = sample_input();
+        bad_upd.depreciation_method = Some("accelerata".into());
+        assert!(matches!(
+            update(&pool, &asset.id, "co-1", bad_upd).await.unwrap_err(),
+            AppError::Validation(_)
+        ));
     }
 }
