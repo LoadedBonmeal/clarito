@@ -172,6 +172,18 @@ pub async fn export_d205_official(
     }
 
     std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    // Înregistrează depunerea în istoric (best-effort — erorile sunt înghițite).
+    let _ = crate::db::declaration_filings::record(
+        &state.db,
+        crate::db::declaration_filings::FilingInput {
+            company_id: company_id.clone(),
+            kind: "D205".into(),
+            period: format!("{year:04}"),
+            is_rectificative,
+            file_path: Some(dest.to_string_lossy().to_string()),
+        },
+    )
+    .await;
     Ok(OfficialExportResult {
         path: dest.to_string_lossy().to_string(),
         written: true,
@@ -253,6 +265,18 @@ pub async fn export_d207_official(
     let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
     let xml = build_d207_xml_for(&state.db, &company_id, year, is_rectificative).await?;
     std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    // Înregistrează depunerea în istoric (best-effort — erorile sunt înghițite).
+    let _ = crate::db::declaration_filings::record(
+        &state.db,
+        crate::db::declaration_filings::FilingInput {
+            company_id: company_id.clone(),
+            kind: "D207".into(),
+            period: format!("{year:04}"),
+            is_rectificative,
+            file_path: Some(dest.to_string_lossy().to_string()),
+        },
+    )
+    .await;
     Ok(OfficialExportResult {
         path: dest.to_string_lossy().to_string(),
         written: true,

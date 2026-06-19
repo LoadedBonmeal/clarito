@@ -451,6 +451,14 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
       "  <f20><rand cod=\"F20_42\" valoare=\"38000\"/></f20>",
       "</bilant>",
     ].join("\n"),
+  // Istoricul depunerilor — 3 rânduri demo pentru ?demo=1.
+  list_declaration_filings: () => [
+    { id: "f1", companyId: "demo-co", kind: "D300", period: "2026-05", isRectificative: false, filePath: "/Users/demo/d300-2026-05.xml", anafStatus: "EXPORTED", filedAt: 1748700000 },
+    { id: "f2", companyId: "demo-co", kind: "D112", period: "2026-05", isRectificative: false, filePath: "/Users/demo/d112-2026-05.xml", anafStatus: "EXPORTED", filedAt: 1748786400 },
+    { id: "f3", companyId: "demo-co", kind: "D205", period: "2025", isRectificative: false, filePath: null, anafStatus: "EXPORTED", filedAt: 1735689600 },
+  ],
+  // Ștergere din istoric — no-op în demo.
+  delete_declaration_filing: () => null,
 };
 
 export function demoInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

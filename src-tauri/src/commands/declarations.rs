@@ -1914,6 +1914,8 @@ pub async fn export_d300_official(
 
     // Fetch the company record (needed for cui/den/adresa).
     let company = companies::get(&state.db, &company_id).await?;
+    // Clonăm pool-ul înainte de a muta `state` în compute_d300 — necesar pentru înregistrarea depunerii.
+    let pool = state.db.clone();
 
     // Compute the fiscal aggregates.
     let report = compute_d300(state, company_id, period_from, period_to).await?;
@@ -1947,6 +1949,21 @@ pub async fn export_d300_official(
 
     // Write to disk.
     std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    // Înregistrează depunerea în istoric (best-effort — erorile sunt înghițite).
+    // `period` (NaiveDate) derivat din period_from înainte de a fi mutat în compute_d300.
+    use chrono::Datelike as _;
+    let filing_period = format!("{}-{:02}", period.year(), period.month());
+    let _ = crate::db::declaration_filings::record(
+        &pool,
+        crate::db::declaration_filings::FilingInput {
+            company_id: company.id.clone(),
+            kind: "D300".into(),
+            period: filing_period,
+            is_rectificative: false,
+            file_path: Some(dest.clone()),
+        },
+    )
+    .await;
     Ok(OfficialExportResult {
         path: dest,
         written: true,
@@ -3165,4 +3182,25 @@ mod test_ron_to_bani_overflow {
         assert!(result > 0, "N(15,2) max should convert correctly");
         println!("N(15,2) max result: {}", result);
     }
+}
+
+// ─── Istoricul depunerilor ────────────────────────────────────────────────────
+
+/// Listează depunerile înregistrate pentru o firmă (cele mai recente primele).
+#[tauri::command]
+pub async fn list_declaration_filings(
+    state: State<'_, crate::state::AppState>,
+    company_id: String,
+) -> crate::error::AppResult<Vec<crate::db::declaration_filings::Filing>> {
+    crate::db::declaration_filings::list(&state.db, &company_id).await
+}
+
+/// Șterge o depunere din istoric (company-scoped: nu poate șterge rândul altei firme).
+#[tauri::command]
+pub async fn delete_declaration_filing(
+    state: State<'_, crate::state::AppState>,
+    id: String,
+    company_id: String,
+) -> crate::error::AppResult<()> {
+    crate::db::declaration_filings::delete(&state.db, &id, &company_id).await
 }

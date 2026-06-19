@@ -13,7 +13,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -152,6 +152,27 @@ export function DeclarationsPage() {
     queryFn: () =>
       api.declarations.intrastatStatus(activeCompanyId!, new Date().toISOString().slice(0, 10)),
   });
+
+  // ── Istoricul depunerilor ──────────────────────────────────────────────────
+  const queryClient = useQueryClient();
+  const filingsQueryKey = ["declaration-filings", activeCompanyId ?? ""];
+  const { data: filings = [] } = useQuery({
+    queryKey: filingsQueryKey,
+    queryFn: () => api.declarations.listFilings(activeCompanyId!),
+    enabled: !!activeCompanyId,
+    staleTime: 60_000,
+  });
+
+  const handleDeleteFiling = async (id: string) => {
+    if (!activeCompanyId) return;
+    if (!window.confirm(t("declarations.filings.confirmDelete"))) return;
+    try {
+      await api.declarations.deleteFiling(id, activeCompanyId);
+      await queryClient.invalidateQueries({ queryKey: filingsQueryKey });
+    } catch {
+      notify.error(t("declarations.filings.deleteFailed"));
+    }
+  };
 
   // ── Calculează D300 ────────────────────────────────────────────────────────
   // Invalidate the computed report together with any DUK block + the cached
@@ -1039,6 +1060,129 @@ export function DeclarationsPage() {
           )}
         </>
       )}
+
+      {/* ── Declarații depuse (istoricul exporturilor) ─────────────────────── */}
+      <div style={{ marginTop: 32 }}>
+        <div
+          style={{
+            background: "var(--card)",
+            borderRadius: 14,
+            border: "1px solid var(--line)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              padding: "14px 20px",
+              borderBottom: "1px solid var(--line)",
+              fontWeight: 700,
+              fontSize: 13.5,
+            }}
+          >
+            {t("declarations.filings.title")}
+          </div>
+          {filings.length === 0 ? (
+            <div
+              style={{
+                padding: "28px 20px",
+                textAlign: "center",
+                color: "var(--text-2)",
+                fontSize: 13,
+              }}
+            >
+              {t("declarations.filings.empty")}
+            </div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ background: "var(--surface)", color: "var(--text-2)" }}>
+                  <th style={{ padding: "8px 16px", textAlign: "left", fontWeight: 600 }}>
+                    {t("declarations.filings.colKind")}
+                  </th>
+                  <th style={{ padding: "8px 16px", textAlign: "left", fontWeight: 600 }}>
+                    {t("declarations.filings.colPeriod")}
+                  </th>
+                  <th style={{ padding: "8px 16px", textAlign: "left", fontWeight: 600 }}>
+                    {t("declarations.filings.colFiledAt")}
+                  </th>
+                  <th style={{ padding: "8px 16px", textAlign: "left", fontWeight: 600 }}>
+                    {t("declarations.filings.colRectificative")}
+                  </th>
+                  <th style={{ padding: "8px 16px", textAlign: "left", fontWeight: 600 }}>
+                    {t("declarations.filings.colStatus")}
+                  </th>
+                  <th style={{ padding: "8px 8px", textAlign: "center", fontWeight: 600, width: 40 }} />
+                </tr>
+              </thead>
+              <tbody>
+                {filings.map((f, i) => (
+                  <tr
+                    key={f.id}
+                    style={{
+                      borderTop: i > 0 ? "1px solid var(--line)" : undefined,
+                    }}
+                  >
+                    <td style={{ padding: "9px 16px", fontWeight: 600 }}>{f.kind}</td>
+                    <td style={{ padding: "9px 16px", fontFamily: "var(--mono)" }}>{f.period}</td>
+                    <td style={{ padding: "9px 16px", color: "var(--text-2)" }}>
+                      {new Date(f.filedAt * 1000).toLocaleDateString("ro-RO", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </td>
+                    <td style={{ padding: "9px 16px" }}>
+                      {f.isRectificative && (
+                        <span
+                          style={{
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            background: "var(--amber-bg, #fff3cd)",
+                            color: "var(--amber, #856404)",
+                            borderRadius: 5,
+                            padding: "2px 7px",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.04em",
+                          }}
+                        >
+                          {t("declarations.filings.rectificativeBadge")}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: "9px 16px", color: "var(--text-2)" }}>{f.anafStatus}</td>
+                    <td style={{ padding: "9px 8px", textAlign: "center" }}>
+                      <button
+                        onClick={() => void handleDeleteFiling(f.id)}
+                        title={t("declarations.filings.delete")}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          color: "var(--text-3)",
+                          fontSize: 15,
+                          lineHeight: 1,
+                          padding: "2px 4px",
+                          borderRadius: 4,
+                        }}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.color = "var(--danger, #dc3545)";
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.color = "var(--text-3)";
+                        }}
+                      >
+                        🗑
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
 
       {/* D300 Submission Modal (export oficial) */}
       {activeCompany && (

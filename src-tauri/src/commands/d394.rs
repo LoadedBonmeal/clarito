@@ -594,6 +594,8 @@ pub async fn export_d394_official(
 
     // Fetch company record (cui, legal_name, adresa)
     let company = companies::get(&state.db, &company_id).await?;
+    // Clonăm pool-ul înainte de a muta `state` în compute_d394 — necesar pentru înregistrarea depunerii.
+    let pool = state.db.clone();
 
     // Compute aggregates via existing compute_d394
     let report = compute_d394(state, company_id, period_from, period_to).await?;
@@ -627,6 +629,23 @@ pub async fn export_d394_official(
 
     // Write to disk
     std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    // Înregistrează depunerea în istoric (best-effort — erorile sunt înghițite).
+    // `period` (NaiveDate) derivat din period_from; `company` fetch-uit înainte de consume company_id.
+    {
+        use chrono::Datelike as _;
+        let filing_period = format!("{}-{:02}", period.year(), period.month());
+        let _ = crate::db::declaration_filings::record(
+            &pool,
+            crate::db::declaration_filings::FilingInput {
+                company_id: company.id.clone(),
+                kind: "D394".into(),
+                period: filing_period,
+                is_rectificative: false,
+                file_path: Some(dest.clone()),
+            },
+        )
+        .await;
+    }
     Ok(crate::commands::declarations::OfficialExportResult {
         path: dest,
         written: true,

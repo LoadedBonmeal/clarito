@@ -243,6 +243,21 @@ pub async fn export_d390(
         .await
         .map_err(|e| AppError::Other(format!("join: {e}")))?
         .map_err(|e| AppError::Other(format!("write D390: {e}")))?;
+    // Înregistrează depunerea în istoric (best-effort — erorile sunt înghițite).
+    // period_from are forma YYYY-MM-DD; primele 7 caractere = YYYY-MM.
+    let d390_period = period_from.get(0..7).unwrap_or(&period_from).to_string();
+    let d_rec = submission.d_rec;
+    let _ = crate::db::declaration_filings::record(
+        &state.db,
+        crate::db::declaration_filings::FilingInput {
+            company_id: company_id.clone(),
+            kind: "D390".into(),
+            period: d390_period,
+            is_rectificative: d_rec,
+            file_path: Some(path.clone()),
+        },
+    )
+    .await;
     Ok(path)
 }
 

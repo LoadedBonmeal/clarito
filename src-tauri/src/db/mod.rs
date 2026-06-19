@@ -23,6 +23,7 @@ pub mod settings;
 pub mod accounts;
 pub mod assets;
 pub mod concedii;
+pub mod declaration_filings;
 pub mod dividends;
 pub mod gl;
 pub mod payments;

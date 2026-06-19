@@ -963,6 +963,12 @@ export const declarations = {
       periodFrom,
       periodTo,
     }),
+  /** Listează depunerile înregistrate pentru o firmă (cele mai recente primele). */
+  listFilings: (companyId: string) =>
+    invoke<import("@/types").Filing[]>("list_declaration_filings", { companyId }),
+  /** Șterge o depunere din istoric (company-scoped). */
+  deleteFiling: (id: string, companyId: string) =>
+    invoke<void>("delete_declaration_filing", { id, companyId }),
 };
 
 // ─── e-Transport (UIT) ───────────────────────────────────────────────────

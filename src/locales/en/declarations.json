@@ -381,6 +381,19 @@
         "filesDownloaded_other": "{{count}} e-TVA files downloaded from SPV.",
         "fetchFailed": "Could not download the pre-filled return from SPV."
       }
+    },
+    "filings": {
+      "title": "Filed Declarations",
+      "colKind": "Type",
+      "colPeriod": "Period",
+      "colFiledAt": "Filed on",
+      "colRectificative": "Amended",
+      "colStatus": "Status",
+      "rectificativeBadge": "Amend.",
+      "delete": "Delete",
+      "confirmDelete": "Remove this entry from the history?",
+      "empty": "No declarations exported yet.",
+      "deleteFailed": "Could not delete the entry."
     }
   }
 }

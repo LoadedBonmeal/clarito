@@ -168,6 +168,24 @@ pub async fn export_saft_official(
 
     std::fs::write(&dest, xml.as_bytes())
         .map_err(|e| AppError::Other(format!("Nu s-a putut scrie fișierul D406: {e}")))?;
+    // Înregistrează depunerea în istoric (best-effort — erorile sunt înghițite).
+    // Perioada: lunar / trimestrial → YYYY-MM (prima lună); anual → YYYY.
+    let saft_period = if is_annual {
+        format!("{}", params.year)
+    } else {
+        date_from.get(0..7).unwrap_or(&date_from).to_string()
+    };
+    let _ = crate::db::declaration_filings::record(
+        &state.db,
+        crate::db::declaration_filings::FilingInput {
+            company_id: params.company_id.clone(),
+            kind: "SAFT".into(),
+            period: saft_period,
+            is_rectificative: false,
+            file_path: Some(dest.to_string_lossy().to_string()),
+        },
+    )
+    .await;
 
     Ok(crate::commands::declarations::OfficialExportResult {
         path: dest.to_string_lossy().to_string(),

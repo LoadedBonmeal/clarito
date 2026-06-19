@@ -386,6 +386,19 @@
         "filesDownloaded_other": "{{count}} de fișiere e-TVA descărcate din SPV.",
         "fetchFailed": "Nu s-a putut descărca precompletatul din SPV."
       }
+    },
+    "filings": {
+      "title": "Declarații depuse",
+      "colKind": "Tip",
+      "colPeriod": "Perioadă",
+      "colFiledAt": "Data depunerii",
+      "colRectificative": "Rectificativă",
+      "colStatus": "Status",
+      "rectificativeBadge": "Rectif.",
+      "delete": "Șterge",
+      "confirmDelete": "Ștergeți această înregistrare din istoric?",
+      "empty": "Nicio declarație exportată încă.",
+      "deleteFailed": "Nu s-a putut șterge înregistrarea."
     }
   }
 }

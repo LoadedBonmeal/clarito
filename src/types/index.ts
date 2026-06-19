@@ -1438,3 +1438,19 @@ export interface AppErrorPayload {
     | "Other";
   message: string;
 }
+
+/** Rând din istoricul depunerilor de declarații fiscale. */
+export interface Filing {
+  id: string;
+  companyId: string;
+  /** Tipul declarației: "D300", "D390", "D394", "D112", "D205", "D207", "SAFT", "BILANT". */
+  kind: string;
+  /** Perioada: "YYYY-MM" pentru lunar, "YYYY" pentru anual. */
+  period: string;
+  isRectificative: boolean;
+  filePath: string | null;
+  /** Starea curentă: "EXPORTED" | "SUBMITTED" | "ACCEPTED" | "REJECTED". */
+  anafStatus: string;
+  /** Timestamp Unix (secunde) al momentului exportului. */
+  filedAt: number;
+}

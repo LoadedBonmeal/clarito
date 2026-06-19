@@ -217,6 +217,18 @@ pub async fn export_d112_xml(
     }
 
     std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    // Înregistrează depunerea în istoric (best-effort — erorile sunt înghițite).
+    let _ = crate::db::declaration_filings::record(
+        &state.db,
+        crate::db::declaration_filings::FilingInput {
+            company_id: company_id.clone(),
+            kind: "D112".into(),
+            period: format!("{year:04}-{month:02}"),
+            is_rectificative,
+            file_path: Some(dest.to_string_lossy().to_string()),
+        },
+    )
+    .await;
     Ok(crate::commands::declarations::OfficialExportResult {
         path: dest.to_string_lossy().to_string(),
         written: true,
