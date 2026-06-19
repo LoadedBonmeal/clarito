@@ -412,6 +412,10 @@ fn build_d112_xml(
         // Baza CAS/CASS = brut − suma netaxabilă (carve-out). Pentru ne-beneficiari nt=0 → baza = brut.
         let mut baza_cas = gross - non_taxable;
         let mut baza_cass = gross - non_taxable;
+        // PAY-01: baza CAM (A_5) rămâne ÎNTOTDEAUNA pe brutul REALIZAT (art. 220^6), spre deosebire de
+        // CAS/CASS care se majorează la baza minimă part-time (art. 146 5^6). O fixăm înainte de lift ca
+        // A_5 + obligația 480 să coincidă cu postarea GL 436 (db/payroll.rs: (brut − netaxabil).max(0)).
+        let baza_cam_real = (gross - non_taxable).max(Decimal::ZERO);
         let mut cas = dec(&r.cas);
         let mut cass = dec(&r.cass);
         // Part-time (contract Pi): baza CAS/CASS = salariul minim întreg (NU prorata cu norma orară),
@@ -478,8 +482,9 @@ fn build_d112_xml(
             ore_norma: e.ore_norma.clamp(6, 8) as u32,
             baza_cas: leid(baza_cas),
             baza_cass: leid(baza_cass),
-            // A_5 baza CAM = baza CAS/CASS pentru salariatul normal (brut − sumă netaxabilă).
-            baza_cam: leid(baza_cas),
+            // A_5 baza CAM = brutul realizat (brut − sumă netaxabilă), NU baza CAS/CASS majorată
+            // part-time — CAM nu se majorează la baza minimă (art. 220^6). Vezi PAY-01.
+            baza_cam: leid(baza_cam_real),
             // A_sal1 salariul de bază brut din contract (brutul realizat al lunii).
             sal_contract: leid(gross_in),
             // E3_14/E1_6 baza impozit + E3_12/E1_4 deducerea personală (din rezultatul de salarizare).
@@ -748,6 +753,81 @@ mod tests {
         assert_eq!(gl_credit("4316"), oblig("432"), "CASS: GL 4316 ≠ D112 432");
         assert_eq!(gl_credit("444"), oblig("602"), "impozit: GL 444 ≠ D112 602");
         assert_eq!(gl_credit("436"), oblig("480"), "CAM: GL 436 ≠ D112 480");
+    }
+
+    /// PAY-01 regression: a part-time employee whose CAS/CASS base is lifted to the statutory minimum
+    /// (art. 146 5^7) must STILL declare CAM (480 / A_5) on the REALIZED gross (art. 220^6), matching the
+    /// GL 436 posting. Guards against the lifted CAS base leaking into the CAM base. Part-timer P1 gross
+    /// 2000, June 2026 (full month): CAS/CASS base lifts to 3.750 (CASS = 375), but CAM stays on 2000
+    /// (480 = round(2000 × 2.25%) = 45 = GL 436), NOT on the lifted base (which would over-declare 84).
+    #[tokio::test]
+    async fn part_time_min_base_keeps_cam_on_realized_gross_in_d112() {
+        use rust_decimal::prelude::ToPrimitive;
+        let pool = setup().await;
+        let mut inp = emp_input("1960101410019", "Part Timer", "2000");
+        inp.tip_contract = Some("P1".into());
+        inp.ore_norma = Some(4);
+        crate::db::payroll::create(&pool, inp).await.unwrap();
+
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
+        let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
+            .await
+            .unwrap();
+
+        crate::db::payroll::run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let gl_credit = |code: &str| -> i64 {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| {
+                    Decimal::from_str(&r.closing_credit)
+                        .unwrap_or(Decimal::ZERO)
+                        .round_dp_with_strategy(
+                            0,
+                            rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                        )
+                        .to_i64()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+        };
+
+        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201").unwrap();
+        let oblig = |cod: &str| -> i64 {
+            let key = format!("A_codOblig=\"{cod}\"");
+            let i = xml
+                .find(&key)
+                .unwrap_or_else(|| panic!("obligația {cod} lipsește"));
+            let dk = "A_datorat=\"";
+            let j = i + xml[i..].find(dk).expect("A_datorat") + dk.len();
+            let end = xml[j..].find('"').unwrap();
+            xml[j..j + end].parse::<i64>().unwrap()
+        };
+
+        // Proves the part-time lift FIRED: CASS (432) is on the lifted base 3.750 → 375 (not 200 on 2000).
+        assert_eq!(
+            oblig("432"),
+            375,
+            "CASS trebuie pe baza minimă majorată 3.750"
+        );
+        // CAM (480) stays on the REALIZED gross 2000 → 45, NOT on the lifted base (would be 84). PAY-01.
+        assert_eq!(
+            oblig("480"),
+            45,
+            "CAM trebuie pe brutul realizat (2000 × 2,25% = 45), nu pe baza majorată"
+        );
+        // And the GL≡D112 CAM invariant holds for the part-timer.
+        assert_eq!(
+            gl_credit("436"),
+            oblig("480"),
+            "part-time CAM: GL 436 ≠ D112 480"
+        );
     }
 
     /// Dev helper (opt-in): build the D112 from a DB scenario and write it for the real `-v D112`.

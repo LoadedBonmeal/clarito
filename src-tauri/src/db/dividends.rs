@@ -573,7 +573,8 @@ pub fn d207_beneficiaries_for_year(
 
 /// Agregă dividendele REZIDENTE cu data distribuirii în anul de venit `year` în rânduri D205 (un
 /// `<benef>` per CNP). Nerezidenții sunt EXCLUȘI (se raportează separat în D207). `baza1`/`divid_D` =
-/// brutul; `divid_P` = brutul plătit (doar cu dată de plată); `imp1` = impozitul. Întoarce Err dacă
+/// brutul; `imp1` = impozitul; `divid_P` (dividende plătite = NET) e derivat la emitere ca baza −
+/// impozit (OPANAF 154/2024 — sumele plătite asociatului sunt NETE). Întoarce Err dacă
 /// vreun dividend rezident NU are CNP (o D205 incompletă = declarație greșită). Sortare deterministă pe
 /// CNP (BTreeMap). Funcție PURĂ (testabilă) — folosită de `commands::dividends::export_d205_official`.
 pub fn d205_beneficiaries_for_year(
@@ -621,17 +622,6 @@ pub fn d205_beneficiaries_for_year(
             .to_string();
         let gross = Decimal::from_str(d.gross_amount.trim()).unwrap_or_default();
         let tax = Decimal::from_str(d.tax_amount.trim()).unwrap_or_default();
-        let paid = if d
-            .payment_date
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .is_some()
-        {
-            gross
-        } else {
-            Decimal::ZERO
-        };
         let entry = by_cnp
             .entry(cnp.clone())
             .or_insert_with(|| D205Beneficiary {
@@ -640,13 +630,13 @@ pub fn d205_beneficiaries_for_year(
                 baza: Decimal::ZERO,
                 impozit: Decimal::ZERO,
                 distribuit: Decimal::ZERO,
-                platit: Decimal::ZERO,
                 resident: true,
             });
         entry.baza += gross;
         entry.impozit += tax;
+        // divid_D = brut distribuit. divid_P (dividende plătite = NET) e derivat la emitere ca
+        // baza − impozit (OPANAF 154/2024), deci nu îl mai acumulăm aici pe bază de dată-plată.
         entry.distribuit += gross;
-        entry.platit += paid;
         if entry.name.is_empty() {
             if let Some(n) = d.shareholder.as_deref() {
                 entry.name = n.trim().to_string();
@@ -1186,12 +1176,32 @@ mod tests {
         assert_eq!(bens[0].baza, Decimal::from_str("15000").unwrap());
         assert_eq!(bens[0].impozit, Decimal::from_str("2400").unwrap());
         assert_eq!(bens[0].distribuit, Decimal::from_str("15000").unwrap());
-        assert_eq!(bens[0].platit, Decimal::from_str("15000").unwrap()); // both paid
-                                                                         // 1960… UNPAID → divid_P = 0 but baza/distribuit still the gross.
         assert_eq!(bens[1].cnp, "1960101410019");
         assert_eq!(bens[1].baza, Decimal::from_str("4000").unwrap());
+        assert_eq!(bens[1].impozit, Decimal::from_str("640").unwrap());
         assert_eq!(bens[1].distribuit, Decimal::from_str("4000").unwrap());
-        assert_eq!(bens[1].platit, Decimal::ZERO);
+
+        // divid_P (dividende plătite) = NET = baza − impozit la emitere (OPANAF 154/2024), NU brutul.
+        let header = crate::anaf_decl::d205_xml::D205Header {
+            cui: "13548146".into(),
+            adresa: "Str. Exemplu 1".into(),
+            den: "Demo SRL".into(),
+            an: 2025,
+            d_rec: 0,
+            nume_declar: "A".into(),
+            prenume_declar: "B".into(),
+            functie_declar: "Administrator".into(),
+        };
+        let xml = crate::anaf_decl::d205_xml::build_d205_xml(&header, &bens).unwrap();
+        // divid_D rămâne brut (15000 / 4000); divid_P = NET (15000−2400=12600 / 4000−640=3360).
+        assert!(
+            xml.contains(r#"divid_D="15000""#) && xml.contains(r#"divid_P="12600""#),
+            "{xml}"
+        );
+        assert!(
+            xml.contains(r#"divid_D="4000""#) && xml.contains(r#"divid_P="3360""#),
+            "{xml}"
+        );
     }
 
     #[test]

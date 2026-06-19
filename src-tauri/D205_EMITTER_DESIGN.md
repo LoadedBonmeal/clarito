@@ -37,7 +37,7 @@ Established by running the bundled `java -jar DUKIntegrator.jar -v D205` on gold
                  functie_declar="Administrator" totalPlata_A="11001">
     <sect_II tip_venit="08" nrben="1" Tcastig="0" Tpierd="0" T_VB="0" T_GAR="0" Tbaza="10000" Timp="1000"/>
     <benef id_inreg="1" tip_venit1="08" tip_plata="2" Rezid="1" cifR="1900101410011" den1="…"
-           baza1="10000" imp1="1000" divid_D="10000" divid_P="10000"/>
+           baza1="10000" imp1="1000" divid_D="10000" divid_P="9000"/>
   </declaratie205>
   ```
 
@@ -122,8 +122,8 @@ types and are `0`/absent for dividends.)
 | `den1` | beneficiary name | `trunc` to schema max |
 | `baza1` | tax base | dividend gross attributable to this beneficiary (whole lei) |
 | `imp1` | tax withheld | `baza1 × rate` (whole lei) — see rate note |
-| `divid_D` | dividends **distributed** | whole lei |
-| `divid_P` | dividends **paid** | whole lei |
+| `divid_D` | dividends **distributed** (GROSS) | whole lei (= `baza1`) |
+| `divid_P` | dividends **paid** (NET = gross − tax) | whole lei, derived as **`baza1 − imp1`** — per OPANAF 154/2024 "dividende plătite" are NET sums paid to the shareholder, not gross |
 
 **Rate is NOT a field.** The validator derives the expected rate from `tip_venit=08` + `an`:
 **16 % for 2026**, **10 % for 2025** (and the 2025-interim transitional case), **8 % for 2024**. The
@@ -154,7 +154,7 @@ section is built; the validator recomputes and rejects a mismatch.
   <sect_II tip_venit="08" nrben="1" Tbaza="10000" Timp="1000">
     <benef tip_venit1="08" tip_plata="2" Rezid="1"
            cifR="1900101410011" den1="Ion Gheorghe"
-           baza1="10000" imp1="1000" divid_D="10000" divid_P="10000"/>
+           baza1="10000" imp1="1000" divid_D="10000" divid_P="9000"/>
   </sect_II>
 </declaratie205>
 ```
@@ -264,9 +264,10 @@ Required data-model work before the emitter is viable:
    used by D112; reuse `anaf_decl::d112`'s CNP validation).
 3. **UI** — `src/pages/Dividends.tsx`: add CNP + name (+ resident) fields to the entry form.
 4. **Aggregation** — for a given `an`, group the year's dividends by `beneficiary_cnp`, summing
-   `gross → divid_D`/`divid_P`/`baza1` and `tax_amount → imp1` (rounded to whole lei), producing one
-   `<benef>` per CNP. Distributed-vs-paid (`divid_D` vs `divid_P`) come from `distribution_date` vs
-   `payment_date` being present.
+   `gross → divid_D`/`baza1` and `tax_amount → imp1` (rounded to whole lei), producing one
+   `<benef>` per CNP. `divid_P` (dividends paid) is NOT summed from a stored field — it is the **NET**
+   amount, derived at emit time as `baza1 − imp1` (OPANAF 154/2024: amounts paid to the shareholder are
+   net of the withheld dividend tax), which keeps the document identity `divid_P = baza1 − imp1` exact.
 
 Alternatively introduce a first-class "shareholders" concept (CNP/name/resident) and link dividends to it
 — cleaner long-term, more work. Either way, **`cifR` cannot be synthesized from free text** — this is the

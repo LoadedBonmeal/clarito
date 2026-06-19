@@ -361,14 +361,19 @@ pub async fn update_invoice_draft(
         input.lines.iter().zip(line_rows.iter()).enumerate()
     {
         sqlx::query(
+            // INV-01: persist art331_code + revenue_kind too (mirrors db::invoices::create). Omitting
+            // them silently reset every edited line to revenue_kind='goods' (→ GL 707 instead of
+            // 701/704/709) and art331_code=NULL (→ D394 reverse-charge fallback codPR 22).
             "INSERT INTO invoice_line_items (
                 id, invoice_id, position, name, description,
                 quantity, unit, unit_price, vat_rate, vat_category,
-                subtotal_amount, vat_amount, total_amount, cpv_code
+                subtotal_amount, vat_amount, total_amount, cpv_code,
+                art331_code, revenue_kind
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7, ?8, ?9, ?10,
-                ?11, ?12, ?13, ?14
+                ?11, ?12, ?13, ?14,
+                ?15, ?16
             )",
         )
         .bind(line_id)
@@ -406,6 +411,8 @@ pub async fn update_invoice_draft(
         .bind(line_vat)
         .bind(line_total)
         .bind(&line.cpv_code)
+        .bind(&line.art331_code)
+        .bind(line.revenue_kind.as_deref().unwrap_or("goods"))
         .execute(&mut *tx)
         .await?;
     }
@@ -1629,6 +1636,73 @@ mod tests {
             inv.notes.as_deref(),
             Some("changed"),
             "invoice notes must reflect the correct-company update"
+        );
+    }
+
+    /// INV-01 regression: the draft-edit line re-INSERT MUST persist `art331_code` + `revenue_kind`.
+    /// Previously it omitted both columns, so every draft edit silently reset `revenue_kind`→'goods'
+    /// (→ GL 707 instead of 701/704/709) and `art331_code`→NULL (→ D394 reverse-charge fallback codPR
+    /// 22). This locks the 16-column contract used by `update_invoice_draft` against a service + art.331
+    /// line, and proves the schema default would otherwise lose them (the bug direction).
+    #[tokio::test]
+    async fn inv01_draft_edit_line_insert_persists_art331_and_revenue_kind() {
+        use sqlx::Row;
+        let pool = setup_wave_a_pool().await;
+        insert_wave_g_invoice(&pool, "inv-edit-cols", "DRAFT").await;
+
+        // The exact 16-column re-INSERT shape used by update_invoice_draft (service line + art.331 code).
+        sqlx::query(
+            "INSERT INTO invoice_line_items (
+                id, invoice_id, position, name, description,
+                quantity, unit, unit_price, vat_rate, vat_category,
+                subtotal_amount, vat_amount, total_amount, cpv_code,
+                art331_code, revenue_kind
+            ) VALUES (?1,?2,1,'Consultanță',NULL,'1','C62','100','21','S','100','21','121',NULL,?3,?4)",
+        )
+        .bind("line-svc")
+        .bind("inv-edit-cols")
+        .bind("CodConstr") // art.331 reverse-charge category
+        .bind("service")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let row = sqlx::query(
+            "SELECT art331_code, revenue_kind FROM invoice_line_items WHERE id='line-svc'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            row.get::<Option<String>, _>("art331_code").as_deref(),
+            Some("CodConstr"),
+            "art331_code must persist on draft edit (INV-01)"
+        );
+        assert_eq!(
+            row.get::<String, _>("revenue_kind"),
+            "service",
+            "revenue_kind must persist (not reset to 'goods') on draft edit (INV-01)"
+        );
+
+        // Bug direction: the OLD 14-column INSERT (no art331/revenue_kind) lets the NOT-NULL DEFAULT
+        // silently coerce revenue_kind→'goods' — exactly the corruption the fix prevents.
+        sqlx::query(
+            "INSERT INTO invoice_line_items (
+                id, invoice_id, position, name, quantity, unit, unit_price, vat_rate, vat_category,
+                subtotal_amount, vat_amount, total_amount
+            ) VALUES ('line-old','inv-edit-cols',2,'X','1','C62','100','21','S','100','21','121')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let old = sqlx::query("SELECT revenue_kind FROM invoice_line_items WHERE id='line-old'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            old.get::<String, _>("revenue_kind"),
+            "goods",
+            "sanity: omitting revenue_kind defaults to 'goods' (the dropped-column bug)"
         );
     }
 

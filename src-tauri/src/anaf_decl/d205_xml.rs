@@ -56,10 +56,10 @@ pub struct D205Beneficiary {
     pub baza: Decimal,
     /// `imp1` — impozitul reținut.
     pub impozit: Decimal,
-    /// `divid_D` — dividende distribuite.
+    /// `divid_D` — dividende distribuite (BRUT). `divid_P` (dividende plătite) NU se stochează: e
+    /// derivat la emitere ca `baza − impozit`, fiindcă „dividende plătite" în D205 sunt sume NETE
+    /// (brut plătit − impozit reținut la sursă) — OPANAF 154/2024, instrucțiuni de completare.
     pub distribuit: Decimal,
-    /// `divid_P` — dividende plătite.
-    pub platit: Decimal,
     /// `Rezid` — 1 = rezident fiscal RO (D205); nerezidenții merg pe D207 și NU intră aici.
     pub resident: bool,
 }
@@ -143,10 +143,15 @@ pub fn build_d205_xml(header: &D205Header, beneficiaries: &[D205Beneficiary]) ->
     // numărul de înregistrare secvențial (1-based, cheia unică a rândului — OBLIGATORIU).
     for (i, b) in beneficiaries.iter().enumerate() {
         let id_inreg = (i + 1).to_string();
-        let baza = round_lei(b.baza).to_string();
-        let imp = round_lei(b.impozit).to_string();
+        let baza_lei = round_lei(b.baza);
+        let imp_lei = round_lei(b.impozit);
+        let baza = baza_lei.to_string();
+        let imp = imp_lei.to_string();
         let divd = round_lei(b.distribuit).to_string();
-        let divp = round_lei(b.platit).to_string();
+        // `divid_P` = dividende plătite = sume NETE (brut − impozit reținut la sursă), per OPANAF
+        // 154/2024. Derivat din baza1/imp1 în lei întregi ca să respecte exact identitatea
+        // divid_P = baza1 − imp1 (altfel agregarea + rotunjirea ar putea devia cu 1 leu).
+        let divp = (baza_lei - imp_lei).to_string();
         let name = trunc(b.name.trim(), NAME_MAX);
         let rezid = if b.resident { "1" } else { "2" };
         empty_elem_attrs(
@@ -201,7 +206,6 @@ mod tests {
             baza: d(baza),
             impozit: d(imp),
             distribuit: d(baza),
-            platit: d(baza),
             resident: true,
         }
     }
@@ -274,8 +278,9 @@ mod tests {
             xml.contains(r#"baza1="10000""#) && xml.contains(r#"imp1="1000""#),
             "{xml}"
         );
+        // divid_D = brut distribuit (10000); divid_P = NET plătit = baza1 − imp1 = 9000 (OPANAF 154/2024).
         assert!(
-            xml.contains(r#"divid_D="10000""#) && xml.contains(r#"divid_P="10000""#),
+            xml.contains(r#"divid_D="10000""#) && xml.contains(r#"divid_P="9000""#),
             "{xml}"
         );
         // totalPlata_A = nrben(1) + Tbaza(10000) + Timp(1000) = 11001.

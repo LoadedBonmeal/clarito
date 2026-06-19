@@ -471,13 +471,9 @@ pub async fn import_backup(app: AppHandle, path: String) -> AppResult<()> {
 
             // SEC-ZIP-01: zip-slip guard — build absolute target path and verify it
             // stays inside the expected root after normalisation.
+            //
             let target = guard_root.join(suffix);
-            let canonical_root = guard_root
-                .canonicalize()
-                .unwrap_or_else(|_| guard_root.to_path_buf());
-            // Use clean path normalisation without requiring the file to exist yet.
-            let normalised = normalise_path(&target);
-            if !normalised.starts_with(&canonical_root) {
+            if !target_is_inside_root(guard_root, &target) {
                 return Err(AppError::Other(format!(
                     "Backup invalid: intrarea '{raw_name}' iese din directorul destinație (zip-slip)."
                 )));
@@ -647,6 +643,20 @@ fn normalise_path(path: &std::path::Path) -> std::path::PathBuf {
         }
     }
     out
+}
+
+/// Zip-slip guard: true iff `target` (a path built by joining an untrusted ZIP-entry suffix onto
+/// `root`) stays inside `root` after resolving `.`/`..`.
+///
+/// XPLAT-01: normalises BOTH `root` and `target` with [`normalise_path`] and compares — it must NEVER
+/// `canonicalize()` the root, because on Windows `canonicalize` returns a verbatim `\\?\C:\…` path
+/// (`Prefix::VerbatimDisk`) while `target` keeps a plain `Prefix::Disk`, and `Path::starts_with` treats
+/// those prefixes as unequal — so every legitimate entry was wrongly rejected as zip-slip on Windows
+/// (after the live DB had already been overwritten, leaving a half-restored state). `root` is already
+/// absolute, so symmetric normalisation keeps both sides prefix-comparable while still rejecting any
+/// `..`-escaping entry (`normalise_path` pops `..`, so an out-of-root target fails `starts_with`).
+fn target_is_inside_root(root: &std::path::Path, target: &std::path::Path) -> bool {
+    normalise_path(target).starts_with(normalise_path(root))
 }
 
 // ─── Integrity check ───────────────────────────────────────────────────────
@@ -937,6 +947,38 @@ mod tests {
         let p = std::path::Path::new("/tmp/archive/sent/2026/INV-0001.xml");
         let norm = normalise_path(p);
         assert_eq!(norm, p);
+    }
+
+    // ── target_is_inside_root (XPLAT-01) ─────────────────────────────────────
+    /// A legitimate ZIP entry must stay inside the root, while a `..`-escape is rejected.
+    #[test]
+    fn zip_slip_guard_accepts_legit_and_rejects_escape() {
+        let root = std::path::Path::new("/app/data/archive");
+        assert!(
+            target_is_inside_root(root, &root.join("sent/2026/INV-0001.xml")),
+            "a legitimate entry under the root must be accepted"
+        );
+        assert!(
+            !target_is_inside_root(root, &root.join("../../../etc/passwd")),
+            "a ..-escaping entry must be rejected"
+        );
+    }
+
+    /// XPLAT-01 Windows regression: with a real `C:\…` root (plain `Prefix::Disk`), a legitimate entry
+    /// must pass. Before the fix the root was `canonicalize()`d to a verbatim `\\?\C:\…` prefix that
+    /// `starts_with` never matched, breaking EVERY restore on Windows. Runs only on Windows.
+    #[cfg(windows)]
+    #[test]
+    fn zip_slip_guard_windows_disk_prefix_is_prefix_comparable() {
+        let root = std::path::Path::new(r"C:\app\data\archive");
+        assert!(
+            target_is_inside_root(root, &root.join(r"invoices\comp-1\INV.xml")),
+            "Windows disk-prefixed legit entry must be accepted (XPLAT-01)"
+        );
+        assert!(
+            !target_is_inside_root(root, &root.join(r"..\..\Windows\System32\x")),
+            "Windows ..-escape must still be rejected"
+        );
     }
 
     // ── backup_includes_archive_files ────────────────────────────────────────
