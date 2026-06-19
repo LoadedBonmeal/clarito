@@ -1,8 +1,23 @@
 {
   "bank": {
-    "title": "Bank & Cash",
-    "sub": "Bank statements, cash register and collections reconciliation",
-    "soon": "Coming soon",
-    "desc": "The Bank & Cash module is not available yet. Here you will be able to import bank statements, keep the cash register and automatically reconcile collections with issued invoices."
+    "title": "Cash Register",
+    "sub": "Cash register (cod 14-4-7A) — account 5311 Cash in RON",
+    "account5311": "5311 — Cash in RON",
+    "period": "Period",
+    "soldInitial": "Opening balance",
+    "soldFinal": "Closing balance",
+    "totalZi": "Day total",
+    "colData": "Date",
+    "colDocument": "Document",
+    "colExplicatie": "Explanation",
+    "colContrapartida": "Contra account",
+    "colIncasari": "Receipts (Debit)",
+    "colPlati": "Payments (Credit)",
+    "colSold": "Balance",
+    "empty": "No cash movements (5311) in the selected period.",
+    "print": "Print / Save as PDF",
+    "loadError": "Error loading cash register",
+    "noCompany": "Select a company to view the cash register.",
+    "printError": "Error preparing document for print"
   }
 }

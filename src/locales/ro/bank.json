@@ -1,8 +1,23 @@
 {
   "bank": {
-    "title": "Bancă & Casă",
-    "sub": "Extrase bancare, registru de casă și reconciliere încasări",
-    "soon": "În curând",
-    "desc": "Modulul Bancă & Casă nu este încă disponibil. Aici veți putea importa extrase bancare, ține registrul de casă și reconcilia automat încasările cu facturile emise."
+    "title": "Registru de casă",
+    "sub": "Registru de casă (cod 14-4-7A) — cont 5311 Casa în lei",
+    "account5311": "5311 — Casa în lei",
+    "period": "Perioadă",
+    "soldInitial": "Sold inițial",
+    "soldFinal": "Sold final",
+    "totalZi": "Total zi",
+    "colData": "Data",
+    "colDocument": "Document",
+    "colExplicatie": "Explicație",
+    "colContrapartida": "Contrapartidă",
+    "colIncasari": "Încasări (Debit)",
+    "colPlati": "Plăți (Credit)",
+    "colSold": "Sold",
+    "empty": "Nicio mișcare de numerar (5311) în perioada selectată.",
+    "print": "Printează / Salvează PDF",
+    "loadError": "Eroare la încărcarea registrului de casă",
+    "noCompany": "Selectați o companie pentru a vizualiza registrul de casă.",
+    "printError": "Eroare la pregătirea documentului pentru tipar"
   }
 }
