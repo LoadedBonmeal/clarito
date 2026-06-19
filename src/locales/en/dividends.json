@@ -72,7 +72,8 @@
       "previewFailed": "Could not generate the D207 XML for preview.",
       "saveTitle": "Save D207 (XML)",
       "saved": "D207 saved (ANAF XSD-validated): {{path}}",
-      "exportFailed": "D207 export failed."
+      "exportFailed": "D207 export failed.",
+      "treatyNote": "Note: D207 reports every non-resident dividend as fully taxable at the domestic rate (income code 01). Treaty-reduced rates and EU parent-subsidiary exemptions (art. 229) are not modelled yet — adjust the XML manually for those beneficiaries."
     }
   }
 }

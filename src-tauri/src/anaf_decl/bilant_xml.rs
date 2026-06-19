@@ -299,12 +299,18 @@ pub fn compute_f10_developed(tb: &TrialBalance) -> HashMap<String, i64> {
             && !sw(x, "409"))
             || sw(x, "5187")
     });
+    // GL-01: 4424 «TVA de recuperat» is a DEBIT-balance creanță față de bugetul de stat, but the `442`
+    // exclusion above drops the whole 442x family and rd.052 (datorii) keeps only the CREDIT side — so a
+    // 4424 debit (input-VAT credit, very common for a BL-form entity) would vanish from total active,
+    // breaking the active=pasiv corelație. Compute it SEPARATELY (not by relaxing the predicate, which
+    // would net the 4423/4427 liabilities against the receivable aggregate) and add only its debit part.
+    let (o4424, c4424) = net(tb, |x| sw(x, "4424"));
     // Only keep the net DEBIT part (receivables); credit balances belong to datorii.
     put(
         &mut f,
         "034",
-        o.max(Decimal::ZERO),
-        c.max(Decimal::ZERO),
+        o.max(Decimal::ZERO) + o4424.max(Decimal::ZERO),
+        c.max(Decimal::ZERO) + c4424.max(Decimal::ZERO),
         false,
     );
 
@@ -960,6 +966,34 @@ mod tests {
         );
         // Write for external `xmllint --schema s1002.xsd` validation (CROSS-01: portable temp dir).
         let _ = std::fs::write(std::env::temp_dir().join("bl-generated.xml"), &xml);
+    }
+
+    #[test]
+    fn developed_bl_4424_tva_recuperat_in_creante_keeps_active_equals_pasiv() {
+        // GL-01: a 4424 «TVA de recuperat» DEBIT balance is a receivable. Before the fix the developed
+        // (BL/S1002) form dropped it (the 442x exclusion in rd.034 + rd.052 keeping only credit), so
+        // total active < total pasiv and the ANAF corelație failed. Balanced TB: clienți 30.000 +
+        // 4424 2.000 + bancă 18.000 (debit) = capital 50.000 (credit).
+        let t = tb(vec![
+            tb_row("4111", "0", "0", "30000", "0"),
+            tb_row("4424", "0", "0", "2000", "0"), // TVA de recuperat — debit receivable
+            tb_row("5121", "0", "0", "18000", "0"),
+            tb_row("1012", "0", "0", "0", "50000"),
+        ]);
+        let f = compute_f10_developed(&t);
+        // Creanțe (rd.036) must now include the 4424 debit: 30.000 + 2.000 = 32.000 (was 30.000).
+        assert_eq!(
+            f["F10_0362"], 32000,
+            "GL-01: creanțe must include 4424 TVA de recuperat (30000 + 2000)"
+        );
+        // Total active = total pasiv: active imobilizate + circulante + chelt. avans = capitaluri + datorii.
+        let total_active = f["F10_0252"] + f["F10_0412"] + f["F10_0432"];
+        let total_pasiv = f["F10_1002"] + f["F10_0532"];
+        assert_eq!(
+            total_active, total_pasiv,
+            "GL-01: total active must equal total pasiv (4424 not dropped)"
+        );
+        assert_eq!(total_active, 50000, "balanced sheet totals 50.000");
     }
 
     #[test]

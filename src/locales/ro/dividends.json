@@ -72,7 +72,8 @@
       "previewFailed": "Nu s-a putut genera XML-ul D207 pentru previzualizare.",
       "saveTitle": "Salvează D207 (XML)",
       "saved": "D207 salvat (validat XSD ANAF): {{path}}",
-      "exportFailed": "Exportul D207 a eșuat."
+      "exportFailed": "Exportul D207 a eșuat.",
+      "treatyNote": "Atenție: D207 raportează fiecare dividend nerezident ca integral impozabil la cota internă (cod venit 01). Scutirile (filială UE, art. 229) sau cotele reduse prin convenții de evitare a dublei impuneri NU sunt încă modelate — ajustați manual XML-ul pentru acești beneficiari."
     }
   }
 }

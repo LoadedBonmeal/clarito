@@ -590,6 +590,9 @@ pub async fn storno_invoice(
         vat_rate: String,
         vat_category: String,
         cpv_code: Option<String>,
+        // INV-02: carry the art.331 reverse-charge category so the storno declares under the original
+        // codPR in D394 (not the fallback codPR 22 «deșeuri»).
+        art331_code: Option<String>,
         subtotal: String,
         vat_amount: String,
         total: String,
@@ -623,6 +626,7 @@ pub async fn storno_invoice(
                     .to_string(),
                 vat_category: l.vat_category.clone(),
                 cpv_code: l.cpv_code.clone(),
+                art331_code: l.art331_code.clone(),
                 subtotal: ls.to_string(),
                 vat_amount: lv.to_string(),
                 total: lt.to_string(),
@@ -728,11 +732,11 @@ pub async fn storno_invoice(
             "INSERT INTO invoice_line_items (
                 id, invoice_id, position, name, description,
                 quantity, unit, unit_price, vat_rate, vat_category,
-                subtotal_amount, vat_amount, total_amount, cpv_code, revenue_kind
+                subtotal_amount, vat_amount, total_amount, cpv_code, art331_code, revenue_kind
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7, ?8, ?9, ?10,
-                ?11, ?12, ?13, ?14, ?15
+                ?11, ?12, ?13, ?14, ?15, ?16
             )",
         )
         .bind(&line.id)
@@ -749,6 +753,7 @@ pub async fn storno_invoice(
         .bind(&line.vat_amount)
         .bind(&line.total)
         .bind(&line.cpv_code)
+        .bind(&line.art331_code)
         .bind(&line.revenue_kind)
         .execute(&mut *tx)
         .await
@@ -900,14 +905,16 @@ pub async fn duplicate_invoice(
     for (idx, line) in source_lines.iter().enumerate() {
         let line_id = new_id();
         sqlx::query(
+            // INV-02: preserve art331_code on the duplicate too (else a duplicated art.331 invoice
+            // declares under the D394 fallback codPR 22 instead of the original reverse-charge category).
             "INSERT INTO invoice_line_items (
                 id, invoice_id, position, name, description,
                 quantity, unit, unit_price, vat_rate, vat_category,
-                subtotal_amount, vat_amount, total_amount, cpv_code, revenue_kind
+                subtotal_amount, vat_amount, total_amount, cpv_code, art331_code, revenue_kind
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7, ?8, ?9, ?10,
-                ?11, ?12, ?13, ?14, ?15
+                ?11, ?12, ?13, ?14, ?15, ?16
             )",
         )
         .bind(&line_id)
@@ -924,6 +931,7 @@ pub async fn duplicate_invoice(
         .bind(&line.vat_amount)
         .bind(&line.total_amount)
         .bind(&line.cpv_code)
+        .bind(&line.art331_code)
         .bind(&line.revenue_kind)
         .execute(&mut *tx)
         .await

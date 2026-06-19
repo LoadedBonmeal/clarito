@@ -366,6 +366,15 @@ export function Dividends() {
               <Ic name="eye" />{previewingD207 ? t("dividends.d207.previewing") : t("dividends.d207.preview")}
             </button>
           </div>
+          {/* DIV-02: the emitter reports every non-resident dividend as fully taxable at the domestic
+              rate (cod venit 01). Treaty-reduced / EU parent-subsidiary-exempt cases aren't modelled yet. */}
+          <div
+            className="hint"
+            style={{ marginTop: 10, color: "var(--amber, #b45309)", display: "flex", gap: 6, alignItems: "flex-start" }}
+          >
+            <Ic name="shield" />
+            <span>{t("dividends.d207.treatyNote")}</span>
+          </div>
         </div>
       )}
 

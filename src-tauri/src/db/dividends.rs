@@ -21,10 +21,15 @@ pub fn dividend_tax_rate(distribution_date: &str, interim_2025: bool) -> i64 {
     if interim_2025 {
         return 10;
     }
-    if distribution_date >= "2026-01-01" {
-        16
-    } else {
-        10
+    // DIV-01: cota e bracketată pe data DISTRIBUIRII (comparare lexicografică ISO = cronologică), ca o
+    // distribuire retroactivă (corecție/back-date) să primească cota anului ei, nu fallback-ul 10%:
+    // 16% de la 01.01.2026 (Legea 141/2025); 10% în 2025 (OUG 156/2024); 8% în 2023-2024 (Legea
+    // 142/2022); 5% până în 2022 inclusiv.
+    match distribution_date {
+        d if d >= "2026-01-01" => 16,
+        d if d >= "2025-01-01" => 10,
+        d if d >= "2023-01-01" => 8,
+        _ => 5,
     }
 }
 
@@ -672,6 +677,18 @@ mod tests {
         assert_eq!(dividend_tax_rate("2025-12-31", false), 10); // distribuit în 2025 → 10%
                                                                 // Tranzitoriu: situații interimare 2025, chiar dacă distribuirea/plata e în 2026 → 10%.
         assert_eq!(dividend_tax_rate("2026-03-10", true), 10);
+    }
+
+    #[test]
+    fn rate_brackets_pre_2025_distributions_dx() {
+        // DIV-01: o distribuire retroactivă (corecție/back-date) primește cota anului ei, nu 10% fallback.
+        assert_eq!(dividend_tax_rate("2025-01-01", false), 10); // 2025 → 10% (OUG 156/2024)
+        assert_eq!(dividend_tax_rate("2024-12-31", false), 8); // 2023-2024 → 8% (Legea 142/2022)
+        assert_eq!(dividend_tax_rate("2023-01-01", false), 8);
+        assert_eq!(dividend_tax_rate("2022-12-31", false), 5); // ≤2022 → 5%
+        assert_eq!(dividend_tax_rate("2020-06-01", false), 5);
+        // Tranzitoriul interim-2025 rămâne 10% indiferent de data distribuirii.
+        assert_eq!(dividend_tax_rate("2022-01-01", true), 10);
     }
 
     #[test]

@@ -432,7 +432,12 @@ fn build_d112_xml(
             e.employment_date.as_deref(),
             e.contract_end_date.as_deref(),
         );
-        let mut zile_emis = nzl;
+        // PAY-02: A_8 (zile lucrate) = zilele active din lună pe ORICE cale (nu doar part-time). La o
+        // angajare/încetare la mijlocul lunii, full-time, A_8 trebuie să reflecte intervalul activ, nu
+        // luna întreagă. Lună întreagă ⇒ active_days = NZL (neschimbat). Convenție: `gross_salary` e
+        // brutul REALIZAT al lunii (nu se proratează automat aici — proratarea brutului e o decizie a
+        // contabilului); pentru part-time, A_13P = ROUND(sm × A_8 / NZL) e recalculat de DUK din A_8.
+        let zile_emis = active_days;
         if let Some((base, _, _)) = crate::anaf_decl::d112::part_time_min_base(
             gross,
             &e.tip_contract,
@@ -446,7 +451,6 @@ fn build_d112_xml(
             baza_cass = base;
             cas = round2(base * Decimal::new(25, 2));
             cass = round2(base * Decimal::new(10, 2));
-            zile_emis = active_days; // A_8 = zilele active ⇒ A_13P recalculat de DUK = baza prorată
         }
         // Tip asigurat: beneficiarii sumei netaxabile, de la 07/2026 (modelul Ordin 605/95/928/
         // 2.314/2026), folosesc codul 1.11.2 (Nomenclator 5). Pentru ≤06/2026 sau ne-beneficiari se
@@ -827,6 +831,32 @@ mod tests {
             gl_credit("436"),
             oblig("480"),
             "part-time CAM: GL 436 ≠ D112 480"
+        );
+    }
+
+    /// PAY-02 regression: a FULL-TIME employee hired mid-month must emit A_8 (zile lucrate) = the active
+    /// working days of the interval, NOT the whole month. Before the fix the full-time path emitted nzl
+    /// regardless (active_working_days was computed then discarded for full-timers).
+    #[tokio::test]
+    async fn full_time_mid_month_hire_emits_active_days_as_a8() {
+        let pool = setup().await;
+        let mut inp = emp_input("1960101410019", "Mid Month", "5000");
+        inp.employment_date = Some("2026-06-16".into()); // hired mid-June (full-time, tip_contract N)
+        crate::db::payroll::create(&pool, inp).await.unwrap();
+
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
+        let xml = build_d112_xml(&company, &employees, &[], 2026, 6, "6201").unwrap();
+
+        let active = crate::db::payroll::active_working_days(2026, 6, Some("2026-06-16"), None);
+        let full = crate::db::payroll::working_days(2026, 6);
+        assert!(
+            active < full,
+            "a mid-month hire must have fewer active days ({active}) than the full month ({full})"
+        );
+        assert!(
+            xml.contains(&format!("A_8=\"{active}\"")),
+            "A_8 must be the active working days {active}, not the full month {full}: {xml}"
         );
     }
 
