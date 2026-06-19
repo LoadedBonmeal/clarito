@@ -47,6 +47,7 @@
       "declarations": "ANAF declarations",
       "etransport": "e-Transport",
       "ledger": "Accounting journal",
+      "bank": "Cash register",
       "more": "More",
       "fewer": "Fewer"
     },

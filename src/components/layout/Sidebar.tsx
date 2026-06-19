@@ -96,6 +96,7 @@ export function Sidebar() {
       { key: "declaratii", label: t("shell.nav.declarations"), icon: "docText", path: "/declarations" },
       { key: "etransport", label: t("shell.nav.etransport"), icon: "truck", path: "/etransport" },
       { key: "contabilitate", label: t("shell.nav.ledger"), icon: "scale", path: "/ledger" },
+      { key: "banca-casa", label: t("shell.nav.bank"), icon: "card", path: "/bank" },
     ]},
   ];
 
