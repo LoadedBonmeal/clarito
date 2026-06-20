@@ -331,6 +331,53 @@
       "cancel": "Cancel",
       "exporting": "Exporting…",
       "generate": "Generate XML"
+    },
+    "nc": {
+      "tabLabel": "Journal entries",
+      "newBtn": "New journal entry",
+      "empty": "No manual journal entries in the period.",
+      "loading": "Loading entries…",
+      "th": {
+        "date": "Date",
+        "description": "Description",
+        "accounts": "Accounts",
+        "debit": "Debit",
+        "credit": "Credit",
+        "actions": ""
+      },
+      "deleteConfirm": "Delete the journal entry from {{date}}? This action cannot be undone.",
+      "deleteOk": "Journal entry deleted.",
+      "deleteError": "Could not delete the journal entry.",
+      "createOk": "Journal entry recorded ({{id}}).",
+      "createError": "Could not record the journal entry.",
+      "modal": {
+        "title": "Manual journal entry (form 14-6-2A)",
+        "dateLabel": "Entry date",
+        "descLabel": "Description",
+        "descPlaceholder": "e.g. Exchange rate difference",
+        "linesTitle": "Accounting lines",
+        "th": {
+          "account": "Account",
+          "debit": "Debit",
+          "credit": "Credit",
+          "remove": ""
+        },
+        "accountPlaceholder": "Select account…",
+        "addLine": "+ Add line",
+        "footerDebit": "Σ Debit",
+        "footerCredit": "Σ Credit",
+        "footerDiff": "Difference",
+        "balanced": "Balanced",
+        "unbalanced": "Unbalanced",
+        "cancel": "Cancel",
+        "saving": "Saving…",
+        "save": "Record entry",
+        "errorMinLines": "An entry must have at least 2 lines.",
+        "errorNoAccount": "Select an account for each line.",
+        "errorDebitOrCredit": "Fill in either debit OR credit for each line.",
+        "errorBothSides": "A line cannot have both debit and credit filled in.",
+        "errorUnbalanced": "Entry is not balanced (Σdebit ≠ Σcredit)."
+      }
     }
   }
 }

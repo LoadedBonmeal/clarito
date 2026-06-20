@@ -336,6 +336,53 @@
       "cancel": "Renunță",
       "exporting": "Se exportă…",
       "generate": "Generează XML"
+    },
+    "nc": {
+      "tabLabel": "Note contabile",
+      "newBtn": "Notă contabilă nouă",
+      "empty": "Nicio notă contabilă manuală în perioadă.",
+      "loading": "Se încarcă notele…",
+      "th": {
+        "date": "Data",
+        "description": "Descriere",
+        "accounts": "Conturi",
+        "debit": "Debit",
+        "credit": "Credit",
+        "actions": ""
+      },
+      "deleteConfirm": "Ștergeți nota contabilă din {{date}}? Operațiunea este ireversibilă.",
+      "deleteOk": "Notă contabilă ștearsă.",
+      "deleteError": "Nu s-a putut șterge nota contabilă.",
+      "createOk": "Notă contabilă înregistrată ({{id}}).",
+      "createError": "Nu s-a putut înregistra nota contabilă.",
+      "modal": {
+        "title": "Notă contabilă manuală (cod 14-6-2A)",
+        "dateLabel": "Data notei",
+        "descLabel": "Descriere",
+        "descPlaceholder": "ex. Diferență de curs valutar",
+        "linesTitle": "Linii contabile",
+        "th": {
+          "account": "Cont",
+          "debit": "Debit",
+          "credit": "Credit",
+          "remove": ""
+        },
+        "accountPlaceholder": "Selectați contul…",
+        "addLine": "+ Adaugă linie",
+        "footerDebit": "Σ Debit",
+        "footerCredit": "Σ Credit",
+        "footerDiff": "Diferență",
+        "balanced": "Echilibrat",
+        "unbalanced": "Dezechilibrat",
+        "cancel": "Anulează",
+        "saving": "Se înregistrează…",
+        "save": "Înregistrează nota",
+        "errorMinLines": "Nota trebuie să aibă cel puțin 2 linii.",
+        "errorNoAccount": "Selectați contul pentru fiecare linie.",
+        "errorDebitOrCredit": "Completați suma debit SAU credit pe fiecare linie.",
+        "errorBothSides": "O linie nu poate avea atât debit cât și credit completate.",
+        "errorUnbalanced": "Nota nu este echilibrată (Σdebit ≠ Σcredit)."
+      }
     }
   }
 }

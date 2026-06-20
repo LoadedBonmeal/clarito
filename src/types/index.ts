@@ -1477,3 +1477,33 @@ export interface Filing {
   /** Timestamp Unix (secunde) al momentului exportului. */
   filedAt: number;
 }
+
+// ─── Note contabile manuale (cod 14-6-2A) ────────────────────────────────────
+
+/** O linie dintr-o notă contabilă manuală — trimisă de frontend la create. */
+export interface ManualLineInput {
+  accountCode: string;
+  /** Suma debit ca string (ex. "100.00"); "" sau "0" = zero. */
+  debit: string;
+  /** Suma credit ca string; "" sau "0" = zero. */
+  credit: string;
+}
+
+/** O linie a unei note contabile manuale — returnată de list. */
+export interface ManualJournalLine {
+  accountCode: string;
+  accountName: string | null;
+  debit: string;
+  credit: string;
+}
+
+/** Vizualizare completă a unei note contabile manuale. */
+export interface ManualJournalView {
+  sourceId: string;
+  journalId: string;
+  date: string;
+  description: string;
+  lines: ManualJournalLine[];
+  totalDebit: string;
+  totalCredit: string;
+}

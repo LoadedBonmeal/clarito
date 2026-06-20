@@ -38,7 +38,7 @@
 //!     (înregistrate ca count în GlPostResult.skipped_received).
 
 use rust_decimal::Decimal;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
 
@@ -1360,6 +1360,119 @@ pub(crate) async fn post_manual_journal(
     }
     tx.commit().await?;
     Ok(())
+}
+
+// ─── Manual journal list / delete ────────────────────────────────────────────
+
+/// O linie dintr-o notă contabilă manuală (pentru `ManualJournalView`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManualJournalLine {
+    pub account_code: String,
+    pub account_name: Option<String>,
+    pub debit: String,
+    pub credit: String,
+}
+
+/// Vizualizare completă a unei note contabile manuale (header + linii + totaluri).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManualJournalView {
+    pub source_id: String,
+    pub journal_id: String,
+    pub date: String,
+    pub description: String,
+    pub lines: Vec<ManualJournalLine>,
+    pub total_debit: String,
+    pub total_credit: String,
+}
+
+/// Listează notele contabile manuale (source_type='MANUAL') pentru o perioadă.
+/// Ordonate descrescător după dată.
+pub async fn list_manual_journals(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<Vec<ManualJournalView>> {
+    // Fetch headers.
+    let headers = sqlx::query(
+        "SELECT j.source_id, j.journal_id, j.transaction_date, COALESCE(j.description,'') AS description \
+         FROM gl_journal j \
+         WHERE j.company_id=?1 AND j.source_type='MANUAL' \
+           AND j.transaction_date BETWEEN ?2 AND ?3 \
+         ORDER BY j.transaction_date DESC, j.source_id",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_all(pool)
+    .await?;
+
+    let mut views = Vec::with_capacity(headers.len());
+    for h in &headers {
+        let source_id: String = h.get("source_id");
+        // Fetch lines joined to chart_of_accounts for account name.
+        let lines_raw = sqlx::query(
+            "SELECT e.account_code, a.account_name, e.debit, e.credit \
+             FROM gl_entry e \
+             JOIN gl_journal j ON j.id = e.journal_pk \
+             LEFT JOIN chart_of_accounts a \
+               ON a.company_id = j.company_id AND a.account_code = e.account_code \
+             WHERE j.company_id=?1 AND j.source_type='MANUAL' AND j.source_id=?2 \
+             ORDER BY e.record_id",
+        )
+        .bind(company_id)
+        .bind(&source_id)
+        .fetch_all(pool)
+        .await?;
+
+        let mut total_d = Decimal::ZERO;
+        let mut total_c = Decimal::ZERO;
+        let mut lines = Vec::with_capacity(lines_raw.len());
+        for row in &lines_raw {
+            let d: String = row.get("debit");
+            let c: String = row.get("credit");
+            let d_dec = Decimal::from_str(&d).unwrap_or(Decimal::ZERO);
+            let c_dec = Decimal::from_str(&c).unwrap_or(Decimal::ZERO);
+            total_d += d_dec;
+            total_c += c_dec;
+            lines.push(ManualJournalLine {
+                account_code: row.get("account_code"),
+                account_name: row.get("account_name"),
+                debit: d,
+                credit: c,
+            });
+        }
+
+        views.push(ManualJournalView {
+            source_id,
+            journal_id: h.get("journal_id"),
+            date: h.get("transaction_date"),
+            description: h.get("description"),
+            lines,
+            total_debit: format!("{:.2}", total_d),
+            total_credit: format!("{:.2}", total_c),
+        });
+    }
+    Ok(views)
+}
+
+/// Șterge o notă contabilă manuală (header + intrări via CASCADE).
+/// Protecție: șterge DOAR source_type='MANUAL' — nu poate atinge notele auto-generate.
+pub async fn delete_manual_journal(
+    pool: &SqlitePool,
+    company_id: &str,
+    source_id: &str,
+) -> AppResult<u64> {
+    let res = sqlx::query(
+        "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='MANUAL' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(source_id)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
 }
 
 // ─── Main posting function ────────────────────────────────────────────────────

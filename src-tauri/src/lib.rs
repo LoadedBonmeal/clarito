@@ -508,6 +508,10 @@ pub fn run() {
             commands::gl::journal_register,
             commands::gl::general_ledger,
             commands::gl::partner_ledger,
+            // note contabile manuale (cod 14-6-2A) — P1 Wave 4
+            commands::manual_journal::create_manual_journal,
+            commands::manual_journal::list_manual_journals,
+            commands::manual_journal::delete_manual_journal,
             // stock movements — Phase 6a (SAF-T MovementOfGoods)
             commands::stock::create_stock_movement,
             commands::stock::list_stock_movements,

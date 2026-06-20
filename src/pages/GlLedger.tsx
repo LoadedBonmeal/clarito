@@ -30,9 +30,11 @@ import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import type {
+  Account,
   Contact,
   GlPostResult, ReconcileReport, VatSettlementResult, TrialBalance,
   JournalRegister, LedgerAccount, ProfitLoss, BilantReport,
+  ManualJournalView, ManualLineInput,
 } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -103,6 +105,7 @@ export function GlLedgerPage() {
     t("gl.tabs.ledger"),
     t("gl.tabs.pnl"),
     t("gl.tabs.partner"),
+    t("gl.nc.tabLabel"),
   ];
 
   const now = new Date();
@@ -139,6 +142,12 @@ export function GlLedgerPage() {
   const [partnerLedger,     setPartnerLedger]     = useState<LedgerAccount[] | null>(null);
   const [loadingPartner,    setLoadingPartner]    = useState(false);
 
+  // ── Note contabile manuale ────────────────────────────────────────────────
+  const [ncList,            setNcList]            = useState<ManualJournalView[] | null>(null);
+  const [loadingNc,         setLoadingNc]         = useState(false);
+  const [showNcModal,       setShowNcModal]       = useState(false);
+  const [ncAccounts,        setNcAccounts]        = useState<Account[] | null>(null);
+
   const [refreshTick, setRefreshTick] = useState(0);
   const attempted = useRef<Set<string>>(new Set());
 
@@ -168,6 +177,7 @@ export function GlLedgerPage() {
     setBilant(null);
     setJrPage(1);
     setPartnerLedger(null);
+    setNcList(null);
   };
   const prevCtx = useRef(`${activeCompanyId}|${dateFrom}`);
   useEffect(() => {
@@ -187,6 +197,7 @@ export function GlLedgerPage() {
     setPnl(null);
     setBilant(null);
     setReconcileReport(null);
+    setNcList(null);
     setRefreshTick((t) => t + 1);
   };
 
@@ -263,6 +274,41 @@ export function GlLedgerPage() {
     }
   };
 
+  const loadNcList = async () => {
+    if (!activeCompanyId || loadingNc) return;
+    setLoadingNc(true);
+    try {
+      setNcList(await api.gl.listManualJournals(activeCompanyId, dateFrom, dateTo));
+    } catch (err) {
+      notify.error(formatError(err, t("gl.nc.loading")));
+    } finally {
+      setLoadingNc(false);
+    }
+  };
+
+  const loadNcAccounts = async () => {
+    if (!activeCompanyId || ncAccounts) return;
+    try {
+      setNcAccounts(await api.accounts.list(activeCompanyId));
+    } catch {
+      // non-fatal — account picker stays empty
+    }
+  };
+
+  const handleDeleteNc = async (nc: ManualJournalView) => {
+    if (!activeCompanyId) return;
+    const ok = await confirm(t("gl.nc.deleteConfirm", { date: fmtD(nc.date) }));
+    if (!ok) return;
+    try {
+      await api.gl.deleteManualJournal(activeCompanyId, nc.sourceId);
+      notify.success(t("gl.nc.deleteOk"));
+      invalidateReports();
+      void loadNcList();
+    } catch (err) {
+      notify.error(formatError(err, t("gl.nc.deleteError")));
+    }
+  };
+
   const loadPartnerLedgerForCui = async (cui: string) => {
     if (!activeCompanyId || !cui || loadingPartner) return;
     setLoadingPartner(true);
@@ -307,7 +353,7 @@ export function GlLedgerPage() {
   useEffect(() => {
     if (!activeCompanyId) return;
     const loader = tab === 0 ? "jr" : tab === 1 ? "tb" : tab === 2 || tab === 6 ? "pnl"
-      : tab === 3 ? "rec" : tab === 4 ? "bil" : tab === 7 ? "partner" : "cm";
+      : tab === 3 ? "rec" : tab === 4 ? "bil" : tab === 7 ? "partner" : tab === 8 ? "nc" : "cm";
     const key = `${loader}|${activeCompanyId}|${dateFrom}|${refreshTick}`;
     if (attempted.current.has(key)) return;
     attempted.current.add(key);
@@ -317,6 +363,7 @@ export function GlLedgerPage() {
     else if (loader === "rec") void runReconcile(false);
     else if (loader === "bil") void loadBilant();
     else if (loader === "partner") void loadPartnerContacts();
+    else if (loader === "nc") { void loadNcList(); void loadNcAccounts(); }
     else void loadLedger();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, activeCompanyId, dateFrom, refreshTick]);
@@ -1439,12 +1486,93 @@ export function GlLedgerPage() {
         )}
       </div>
 
+      {/* ── 9. NOTE CONTABILE MANUALE (cod 14-6-2A) ──────────────────────── */}
+      <div className={`panel${tab === 8 ? " show" : ""}`}>
+        <div className="scr-card">
+          <div className="scr-toolbar">
+            <div className="tt">{t("gl.nc.tabLabel")} — {periodLabel}</div>
+            <div className="spacer" />
+            <button
+              className="btn-dark"
+              style={{ height: 30, fontSize: 12.5, flex: "none" }}
+              onClick={() => { void loadNcAccounts(); setShowNcModal(true); }}
+            >
+              <Ic name="plus" />{t("gl.nc.newBtn")}
+            </button>
+          </div>
+          {loadingNc ? (
+            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("gl.nc.loading")}</div>
+          ) : !ncList || ncList.length === 0 ? (
+            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+              {t("gl.nc.empty")}
+            </div>
+          ) : (
+            <table className="scr-table">
+              <thead>
+                <tr>
+                  <th>{t("gl.nc.th.date")}</th>
+                  <th>{t("gl.nc.th.description")}</th>
+                  <th>{t("gl.nc.th.accounts")}</th>
+                  <th className="r">{t("gl.nc.th.debit")}</th>
+                  <th className="r">{t("gl.nc.th.credit")}</th>
+                  <th style={{ width: 36 }}>{t("gl.nc.th.actions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ncList.map((nc) => (
+                  <tr key={nc.sourceId}>
+                    <td className="num">{fmtD(nc.date)}</td>
+                    <td>{nc.description || <span className="muted">—</span>}</td>
+                    <td>
+                      {nc.lines.map((l, i) => (
+                        <span key={i}>
+                          {i > 0 && " · "}
+                          <span className="doc">{l.accountCode}</span>
+                          {l.accountName ? <span className="muted" style={{ fontSize: 11.5 }}> {l.accountName}</span> : null}
+                        </span>
+                      ))}
+                    </td>
+                    <td className="r num">{fmtRON(nc.totalDebit)}</td>
+                    <td className="r num">{fmtRON(nc.totalCredit)}</td>
+                    <td style={{ textAlign: "center" }}>
+                      <button
+                        className="pill-btn"
+                        style={{ padding: "2px 8px", fontSize: 12, color: "var(--danger, #e53e3e)" }}
+                        title={t("gl.nc.deleteConfirm", { date: fmtD(nc.date) })}
+                        onClick={() => void handleDeleteNc(nc)}
+                      >
+                        <Ic name="minus" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
       {showBilantExport && (
         <BilantExportModal
           year={selectedYear}
           onClose={() => setShowBilantExport(false)}
           onExport={runBilantExport}
           onPreview={runBilantPreview}
+        />
+      )}
+
+      {showNcModal && (
+        <ManualJournalModal
+          accounts={ncAccounts ?? []}
+          onClose={() => setShowNcModal(false)}
+          onSave={async (date, description, lines) => {
+            if (!activeCompanyId) return;
+            const id = await api.gl.createManualJournal(activeCompanyId, date, description, lines);
+            notify.success(t("gl.nc.createOk", { id: id.slice(0, 8) }));
+            setShowNcModal(false);
+            invalidateReports();
+            void loadNcList();
+          }}
         />
       )}
     </div>
@@ -1585,6 +1713,266 @@ function BilantExportModal({
           </button>
           <button className="btn-dark" disabled={busy || previewing} onClick={() => void submit()}>
             <Ic name="dl" />{busy ? t("gl.modal.exporting") : t("gl.modal.generate")}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ─── ManualJournalModal — editor de notă contabilă manuală (cod 14-6-2A) ─────
+/**
+ * Modal pentru crearea unei note contabile manuale:
+ * - câmpuri: dată + descriere + linii dinamice debit/credit (minim 2)
+ * - footer live: Σdebit, Σcredit, diferență; buton Save activ doar când nota e echilibrată
+ */
+function ManualJournalModal({
+  accounts,
+  onClose,
+  onSave,
+}: {
+  accounts: Account[];
+  onClose: () => void;
+  onSave: (date: string, description: string, lines: ManualLineInput[]) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const { closing, close } = useAnimatedClose(onClose);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const [date,        setDate]        = useState(today);
+  const [description, setDescription] = useState("");
+  const [lines, setLines] = useState<ManualLineInput[]>([
+    { accountCode: "", debit: "", credit: "" },
+    { accountCode: "", debit: "", credit: "" },
+  ]);
+  const [saving, setSaving] = useState(false);
+  const [clientError, setClientError] = useState<string | null>(null);
+
+  // ── Linie editor helpers ───────────────────────────────────────────────────
+  const setLine = (i: number, patch: Partial<ManualLineInput>) =>
+    setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+
+  const addLine = () =>
+    setLines((ls) => [...ls, { accountCode: "", debit: "", credit: "" }]);
+
+  const removeLine = (i: number) =>
+    setLines((ls) => ls.filter((_, j) => j !== i));
+
+  // ── Live balance ───────────────────────────────────────────────────────────
+  const parseAmt = (s: string) => {
+    const n = parseFloat(s.replace(",", "."));
+    return isNaN(n) || n < 0 ? 0 : n;
+  };
+  const totalD = lines.reduce((s, l) => s + parseAmt(l.debit), 0);
+  const totalC = lines.reduce((s, l) => s + parseAmt(l.credit), 0);
+  const diff   = Math.abs(totalD - totalC);
+  const balanced = diff < 0.005 && totalD > 0;
+
+  // ── Client-side validation (mirrors backend) ───────────────────────────────
+  const validate = (): string | null => {
+    if (!date) return t("gl.nc.modal.errorMinLines");
+    if (lines.length < 2) return t("gl.nc.modal.errorMinLines");
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      if (!l.accountCode) return t("gl.nc.modal.errorNoAccount");
+      const d = parseAmt(l.debit);
+      const c = parseAmt(l.credit);
+      if (d > 0 && c > 0) return t("gl.nc.modal.errorBothSides");
+      if (d === 0 && c === 0) return t("gl.nc.modal.errorDebitOrCredit");
+    }
+    if (!balanced) return t("gl.nc.modal.errorUnbalanced");
+    return null;
+  };
+
+  const canSave = balanced && lines.every((l) => l.accountCode) && !saving;
+
+  const handleSave = async () => {
+    const err = validate();
+    if (err) { setClientError(err); return; }
+    setClientError(null);
+    setSaving(true);
+    try {
+      await onSave(date, description, lines);
+    } catch (e) {
+      setClientError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return createPortal(
+    <div
+      className={`modal-back ${closing ? "closing" : "show"}`}
+      style={{ position: "fixed" }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) close(); }}
+    >
+      <div className="modal" style={{ maxWidth: 740, width: "96vw" }}>
+        <div className="modal-head">
+          <div>
+            <div className="mt">{t("gl.nc.modal.title")}</div>
+          </div>
+          <button className="modal-x" onClick={close} disabled={saving} aria-label={t("gl.nc.modal.cancel")}>
+            <Ic name="xMark" />
+          </button>
+        </div>
+
+        <div className="modal-body">
+          {/* Date + description */}
+          <div className="fgrid" style={{ marginBottom: 16 }}>
+            <div className="field">
+              <label>{t("gl.nc.modal.dateLabel")} <span className="req">*</span></label>
+              <input
+                className="input num"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+              />
+            </div>
+            <div className="field span2">
+              <label>{t("gl.nc.modal.descLabel")}</label>
+              <input
+                className="input"
+                type="text"
+                placeholder={t("gl.nc.modal.descPlaceholder")}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Lines table */}
+          <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 12.5 }}>
+            {t("gl.nc.modal.linesTitle")}
+          </div>
+          <table className="scr-table" style={{ marginBottom: 4 }}>
+            <thead>
+              <tr>
+                <th style={{ width: "45%" }}>{t("gl.nc.modal.th.account")}</th>
+                <th className="r" style={{ width: "22%" }}>{t("gl.nc.modal.th.debit")}</th>
+                <th className="r" style={{ width: "22%" }}>{t("gl.nc.modal.th.credit")}</th>
+                <th style={{ width: 36 }}>{t("gl.nc.modal.th.remove")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((line, i) => (
+                <tr key={i}>
+                  <td>
+                    <select
+                      className="select"
+                      style={{ width: "100%" }}
+                      value={line.accountCode}
+                      onChange={(e) => setLine(i, { accountCode: e.target.value })}
+                    >
+                      <option value="">{t("gl.nc.modal.accountPlaceholder")}</option>
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.accountCode}>
+                          {a.accountCode} — {a.accountName}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      className="input num"
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      style={{ width: "100%", textAlign: "right" }}
+                      value={line.debit}
+                      onChange={(e) => setLine(i, { debit: e.target.value, credit: e.target.value ? line.credit : "" })}
+                      disabled={!!line.credit && parseAmt(line.credit) > 0}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input num"
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      style={{ width: "100%", textAlign: "right" }}
+                      value={line.credit}
+                      onChange={(e) => setLine(i, { credit: e.target.value, debit: e.target.value ? line.debit : "" })}
+                      disabled={!!line.debit && parseAmt(line.debit) > 0}
+                    />
+                  </td>
+                  <td style={{ textAlign: "center" }}>
+                    {lines.length > 2 && (
+                      <button
+                        className="pill-btn"
+                        style={{ padding: "2px 7px", color: "var(--danger, #e53e3e)", fontSize: 12 }}
+                        onClick={() => removeLine(i)}
+                        tabIndex={-1}
+                      >
+                        <Ic name="xMark" />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            {/* Live balance footer */}
+            <tfoot>
+              <tr style={{ background: "var(--bg-table-header)", fontWeight: 600 }}>
+                <td>
+                  <button
+                    className="pill-btn"
+                    style={{ fontSize: 12 }}
+                    onClick={addLine}
+                  >
+                    {t("gl.nc.modal.addLine")}
+                  </button>
+                </td>
+                <td className="r num">
+                  <span style={{ fontSize: 11, color: "var(--text-2)", marginRight: 4 }}>{t("gl.nc.modal.footerDebit")}</span>
+                  {fmtRON(String(totalD.toFixed(2)))}
+                </td>
+                <td className="r num">
+                  <span style={{ fontSize: 11, color: "var(--text-2)", marginRight: 4 }}>{t("gl.nc.modal.footerCredit")}</span>
+                  {fmtRON(String(totalC.toFixed(2)))}
+                </td>
+                <td style={{ textAlign: "center" }}>
+                  {balanced
+                    ? <InlineIc path={CIRCLE_CHECK} style={{ color: "var(--ok, #38a169)" }} />
+                    : <InlineIc path={WARN_TRI} style={{ color: "var(--warn, #d69e2e)" }} />}
+                </td>
+              </tr>
+              {!balanced && totalD > 0 && (
+                <tr style={{ background: "var(--bg-table-header)" }}>
+                  <td colSpan={4} style={{ textAlign: "right", fontSize: 12, color: "var(--warn, #d69e2e)", padding: "2px 10px 6px" }}>
+                    {t("gl.nc.modal.footerDiff")}: {fmtRON(String(diff.toFixed(2)))} — {t("gl.nc.modal.unbalanced")}
+                  </td>
+                </tr>
+              )}
+              {balanced && (
+                <tr style={{ background: "var(--bg-table-header)" }}>
+                  <td colSpan={4} style={{ textAlign: "right", fontSize: 12, color: "var(--ok, #38a169)", padding: "2px 10px 6px" }}>
+                    {t("gl.nc.modal.balanced")} ✓
+                  </td>
+                </tr>
+              )}
+            </tfoot>
+          </table>
+
+          {clientError && (
+            <div className="banner danger" style={{ marginTop: 10 }}>
+              <InlineIc path={WARN_TRI} />
+              <span>{clientError}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="modal-foot">
+          <span className="left" />
+          <button className="pill-btn" onClick={close} disabled={saving}>
+            {t("gl.nc.modal.cancel")}
+          </button>
+          <button
+            className="btn-dark"
+            disabled={!canSave}
+            onClick={() => void handleSave()}
+          >
+            {saving ? t("gl.nc.modal.saving") : t("gl.nc.modal.save")}
           </button>
         </div>
       </div>

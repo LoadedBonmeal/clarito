@@ -36,6 +36,8 @@ import type {
   InvoiceStatus,
   InvoiceWithLines,
   License,
+  ManualJournalView,
+  ManualLineInput,
   Notification,
   Paginated,
   Product,
@@ -841,6 +843,36 @@ export const gl = {
   /** Fișă de cont pe furnizor/client (fișă analitică terți) — filele de cont ale partenerului. */
   partnerLedger: (companyId: string, partnerCui: string, periodFrom: string, periodTo: string) =>
     invoke<LedgerAccount[]>("partner_ledger", { companyId, partnerCui, periodFrom, periodTo }),
+
+  // ── Note contabile manuale (cod 14-6-2A) ─────────────────────────────────────
+
+  /**
+   * Creează o notă contabilă manuală.
+   * Rust command `create_manual_journal`: company_id, date, description, lines.
+   * Returnează source_id-ul (UUID) al notei create.
+   */
+  createManualJournal: (
+    companyId: string,
+    date: string,
+    description: string,
+    lines: ManualLineInput[],
+  ) =>
+    invoke<string>("create_manual_journal", { companyId, date, description, lines }),
+
+  /**
+   * Listează notele contabile manuale dintr-o perioadă.
+   * Rust command `list_manual_journals`: company_id, period_from, period_to.
+   */
+  listManualJournals: (companyId: string, periodFrom: string, periodTo: string) =>
+    invoke<ManualJournalView[]>("list_manual_journals", { companyId, periodFrom, periodTo }),
+
+  /**
+   * Șterge o notă contabilă manuală (ONLY source_type='MANUAL').
+   * Rust command `delete_manual_journal`: company_id, source_id.
+   * Returnează true dacă nota a fost ștearsă, false dacă nu exista.
+   */
+  deleteManualJournal: (companyId: string, sourceId: string) =>
+    invoke<boolean>("delete_manual_journal", { companyId, sourceId }),
 };
 
 // ─── Declarations (D300) ──────────────────────────────────────────────────
