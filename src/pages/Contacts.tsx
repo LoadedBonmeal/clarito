@@ -23,6 +23,7 @@ import { useTranslation } from "react-i18next";
 import { Ic } from "@/components/shared/Ic";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { CsvImportModal } from "@/components/shared/CsvImportModal";
+import { ImportWizardModal } from "@/components/shared/ImportWizardModal";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
@@ -65,6 +66,7 @@ export function ContactsPage() {
   const [page, setPage] = useState(1);
   const [modal, setModal] = useState<"create" | { edit: Contact } | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showImportWizard, setShowImportWizard] = useState(false);
 
   const {
     data: contacts = [],
@@ -181,6 +183,9 @@ export function ContactsPage() {
           </button>
           <button className="pill-btn" onClick={() => setShowImportModal(true)}>
             <Ic name="docUp" />{t("contacts.importCsv")}
+          </button>
+          <button className="pill-btn" onClick={() => setShowImportWizard(true)}>
+            <Ic name="docUp" />{t("contacts.importWizard")}
           </button>
           <button className="btn-dark" onClick={() => setModal("create")}>
             <Ic name="plus" />{t("contacts.newContact")}
@@ -337,6 +342,17 @@ export function ContactsPage() {
           onSuccess={() => {
             void queryClient.invalidateQueries({ queryKey: queryKeys.contacts.all });
             setShowImportModal(false);
+          }}
+        />
+      )}
+
+      {/* Multi-source Import Wizard */}
+      {showImportWizard && activeCompanyId && (
+        <ImportWizardModal
+          companyId={activeCompanyId}
+          onClose={() => setShowImportWizard(false)}
+          onSuccess={() => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.contacts.all });
           }}
         />
       )}

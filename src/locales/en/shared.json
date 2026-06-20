@@ -312,6 +312,92 @@
       "errTitle": "An unexpected error occurred",
       "errUnknown": "Unknown error",
       "errReload": "Reload the app"
+    },
+    "import": {
+      "title": "Import from another program",
+      "subtitle": "Migrate data (contacts, products, accounts, invoices) from SmartBill, SAGA or WinMentor.",
+      "loading": "Processing…",
+      "steps": {
+        "source": "Source",
+        "input": "Files",
+        "columns": "Columns",
+        "preview": "Preview",
+        "confirm": "Confirm"
+      },
+      "nav": {
+        "back": "← Back",
+        "next": "Next →",
+        "commit": "Import now"
+      },
+      "sourceStep": {
+        "prompt": "Choose the data source to import from:"
+      },
+      "sources": {
+        "smartbillXml": {
+          "label": "SmartBill — XML export",
+          "desc": "XML file exported from SmartBill (invoices, partners, products)."
+        },
+        "smartbillRest": {
+          "label": "SmartBill — REST API",
+          "desc": "REST: products/stock only — invoices and partners come from the XML export."
+        },
+        "sagaXml": {
+          "label": "SAGA C. — XML export",
+          "desc": "XML file exported from SAGA (issued/received invoices, partners)."
+        },
+        "sagaDbf": {
+          "label": "SAGA C. — DBF files",
+          "desc": "DBF files directly from the SAGA data folder (Parteneri.dbf, Articole.dbf). Schema varies between versions — a column-confirmation step will be shown."
+        },
+        "winmentorTxt": {
+          "label": "WinMentor — TXT export",
+          "desc": "TXT file exported from WinMentor (partners, products, invoices)."
+        }
+      },
+      "inputStep": {
+        "pickFiles": "Choose file(s)…",
+        "sbHint": "We'll use the SmartBill credentials configured in Settings → Integrations.",
+        "sbCheck": "Check SmartBill credentials",
+        "sbConnected": "Connected as {{user}}"
+      },
+      "columnsStep": {
+        "hint": "The SAGA DBF contains the columns below. Confirm which internal field each column maps to, or choose (skip) to ignore it.",
+        "dbfCol": "DBF column",
+        "sample": "Sample",
+        "mapsTo": "Internal field"
+      },
+      "preview": {
+        "rollupTitle": "Resolution summary (after staging + dedup)",
+        "entity": "Entity",
+        "new": "New",
+        "matched": "Matched",
+        "review": "Review",
+        "error": "Error",
+        "contacts": "Contacts",
+        "products": "Products",
+        "accounts": "Accounts",
+        "invoices": "Invoices",
+        "skipNote": "REVIEW and ERROR rows will be SKIPPED on commit — they remain in staging for manual review."
+      },
+      "commit": {
+        "success": "Import completed successfully.",
+        "created": "Created",
+        "matched": "Matched",
+        "skipped": "Skipped",
+        "errors": "Errors",
+        "draftNote": "Imported issued invoices are created as DRAFT and do not post journal entries. The accountant must review and validate them manually.",
+        "errorList": "Detailed errors:",
+        "moreErrors_one": "…and {{count}} more error.",
+        "moreErrors_other": "…and {{count}} more errors."
+      },
+      "errors": {
+        "filePicker": "Could not open the file picker dialog.",
+        "smartbillNotConfigured": "SmartBill credentials are not configured. Go to Settings → SmartBill Integration.",
+        "smartbillCreds": "Could not read SmartBill credentials.",
+        "detectColumns": "Could not detect DBF columns.",
+        "stage": "The staging step failed.",
+        "commit": "Commit failed."
+      }
     }
   }
 }

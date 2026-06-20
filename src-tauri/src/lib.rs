@@ -372,6 +372,7 @@ pub fn run() {
             commands::import::get_invoices_csv_template,
             commands::import::get_contacts_csv_template,
             // import wave c — multi-source migration importer
+            commands::import_wave_c::commit::import_wave_c_detect_columns,
             commands::import_wave_c::commit::import_wave_c_stage,
             commands::import_wave_c::commit::import_wave_c_preview,
             commands::import_wave_c::commit::import_wave_c_commit,

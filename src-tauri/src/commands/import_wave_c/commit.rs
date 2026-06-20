@@ -1079,16 +1079,57 @@ pub struct PreviewResult {
     pub sample_invoices: Vec<serde_json::Value>,
 }
 
+/// Detect columns in a source file (currently only meaningful for SAGA DBF).
+/// Returns the list of field names + sample values from the first DBF record.
+/// For all other sources this returns an empty vec (schema is fixed/known).
+///
+/// `source` must be one of the `SourceKind` SCREAMING_SNAKE_CASE names.
+#[tauri::command]
+pub async fn import_wave_c_detect_columns(
+    company_id: String,
+    source: String,
+    file_paths: Vec<String>,
+) -> AppResult<Vec<super::DetectedColumn>> {
+    let source_kind: SourceKind = match source.to_uppercase().as_str() {
+        "SMARTBILL_XML" => SourceKind::SmartbillXml,
+        "SMARTBILL_REST" => SourceKind::SmartbillRest,
+        "SAGA_XML" => SourceKind::SagaXml,
+        "SAGA_DBF" => SourceKind::SagaDbf,
+        "WINMENTOR_TXT" => SourceKind::WinmentorTxt,
+        _ => {
+            return Err(AppError::Validation(format!(
+                "Unknown import source: {source}"
+            )))
+        }
+    };
+
+    // Only SAGA DBF has meaningful column detection.
+    match source_kind {
+        SourceKind::SagaDbf => {
+            let bytes = read_first_file(&file_paths).await?;
+            let input = ImportInput::Bytes(bytes);
+            let adapter = super::SagaDbfAdapter;
+            // detect_columns is DB-free, so no state/pool needed.
+            let _ = company_id; // provided for API symmetry
+            adapter.detect_columns(&input)
+        }
+        _ => Ok(vec![]),
+    }
+}
+
 /// Parse files from `file_paths` using the adapter for `source`, stage all rows,
 /// run the resolver, and return the batch_id + resolution counts.
 ///
 /// `source` must be one of the `SourceKind` SCREAMING_SNAKE_CASE names.
+/// `column_map` is optional: when provided it overrides the adapter's default
+/// synonym table (used for SAGA DBF after the user confirms the column mapping).
 #[tauri::command]
 pub async fn import_wave_c_stage(
     state: State<'_, AppState>,
     company_id: String,
     source: String,
     file_paths: Vec<String>,
+    column_map: Option<std::collections::HashMap<String, String>>,
 ) -> AppResult<StageResult> {
     use crate::commands::import_wave_c::ParseCtx;
 
@@ -1113,7 +1154,7 @@ pub async fn import_wave_c_stage(
 
     let ctx = ParseCtx {
         company_cui_canonical: &company_cui_canonical,
-        column_map: None,
+        column_map: column_map.as_ref(),
     };
 
     // Build adapter input and parse.
@@ -1132,9 +1173,9 @@ pub async fn import_wave_c_stage(
             adapter.parse(&input, &ctx)?
         }
         SourceKind::SagaDbf => {
-            let paths: Vec<std::path::PathBuf> =
-                file_paths.iter().map(std::path::PathBuf::from).collect();
-            let input = ImportInput::Files(paths);
+            // SagaDbfAdapter::parse requires ImportInput::Bytes (one file at a time).
+            let bytes = read_first_file(&file_paths).await?;
+            let input = ImportInput::Bytes(bytes);
             let adapter = super::SagaDbfAdapter;
             adapter.parse(&input, &ctx)?
         }
@@ -1166,6 +1207,18 @@ pub async fn import_wave_c_stage(
         staged,
     )
     .await?;
+
+    // Persist the user-confirmed column map (the SAGA DBF mapping step) on the batch — the
+    // import_batch.column_map column exists (migration 0056) and keeps the mapping for audit / re-parse.
+    if let Some(ref map) = column_map {
+        if let Ok(json) = serde_json::to_string(map) {
+            sqlx::query("UPDATE import_batch SET column_map = ?1 WHERE id = ?2")
+                .bind(json)
+                .bind(&batch_id)
+                .execute(pool)
+                .await?;
+        }
+    }
 
     // Run resolver immediately after staging.
     resolve_batch(pool, &batch_id).await?;

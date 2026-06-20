@@ -317,6 +317,92 @@
       "errTitle": "A apărut o eroare neașteptată",
       "errUnknown": "Eroare necunoscută",
       "errReload": "Reîncarcă aplicația"
+    },
+    "import": {
+      "title": "Import din alt program",
+      "subtitle": "Migrați date (contacte, produse, conturi, facturi) din SmartBill, SAGA sau WinMentor.",
+      "loading": "Se procesează…",
+      "steps": {
+        "source": "Sursă",
+        "input": "Fișiere",
+        "columns": "Coloane",
+        "preview": "Previzualizare",
+        "confirm": "Confirmare"
+      },
+      "nav": {
+        "back": "← Înapoi",
+        "next": "Înainte →",
+        "commit": "Importă acum"
+      },
+      "sourceStep": {
+        "prompt": "Alegeți sursa datelor de importat:"
+      },
+      "sources": {
+        "smartbillXml": {
+          "label": "SmartBill — export XML",
+          "desc": "Fișierul XML exportat din SmartBill (facturi, parteneri, produse)."
+        },
+        "smartbillRest": {
+          "label": "SmartBill — API REST",
+          "desc": "REST: doar produse/stocuri — facturile și partenerii din exportul XML."
+        },
+        "sagaXml": {
+          "label": "SAGA C. — export XML",
+          "desc": "Fișier XML exportat din SAGA (facturi emise/primite, parteneri)."
+        },
+        "sagaDbf": {
+          "label": "SAGA C. — fișiere DBF",
+          "desc": "Fișiere DBF direct din folderul de date SAGA (Parteneri.dbf, Articole.dbf). Schema variază între versiuni — va fi prezentată o etapă de confirmare coloane."
+        },
+        "winmentorTxt": {
+          "label": "WinMentor — export TXT",
+          "desc": "Fișier TXT exportat din WinMentor (parteneri, produse, facturi)."
+        }
+      },
+      "inputStep": {
+        "pickFiles": "Alege fișier(e)…",
+        "sbHint": "Verificăm credențialele SmartBill configurate în Setări → Integrări.",
+        "sbCheck": "Verifică credențiale SmartBill",
+        "sbConnected": "Conectat ca {{user}}"
+      },
+      "columnsStep": {
+        "hint": "SAGA DBF-ul conține coloanele de mai jos. Confirmați la ce câmp intern corespunde fiecare coloană sau alegeți (skip) pentru a o ignora.",
+        "dbfCol": "Coloană DBF",
+        "sample": "Exemplu",
+        "mapsTo": "Câmp intern"
+      },
+      "preview": {
+        "rollupTitle": "Rezumat rezoluții (după staging + dedup)",
+        "entity": "Entitate",
+        "new": "Nou",
+        "matched": "Potrivit",
+        "review": "Revizuire",
+        "error": "Eroare",
+        "contacts": "Contacte",
+        "products": "Produse",
+        "accounts": "Conturi",
+        "invoices": "Facturi",
+        "skipNote": "Rândurile REVIEW și ERROR vor fi SĂRITE la commit — vor rămâne în staging pentru revizuire manuală."
+      },
+      "commit": {
+        "success": "Import finalizat cu succes.",
+        "created": "Create",
+        "matched": "Potrivite",
+        "skipped": "Sărite",
+        "errors": "Erori",
+        "draftNote": "Facturile emise importate sunt create ca DRAFT și nu postează înregistrări în jurnal. Contabilul trebuie să le revizuiască și să le valideze manual.",
+        "errorList": "Erori detaliate:",
+        "moreErrors_one": "…și încă {{count}} eroare.",
+        "moreErrors_other": "…și încă {{count}} erori."
+      },
+      "errors": {
+        "filePicker": "Nu s-a putut deschide dialogul de selectare fișiere.",
+        "smartbillNotConfigured": "Credențialele SmartBill nu sunt configurate. Mergeți la Setări → Integrări SmartBill.",
+        "smartbillCreds": "Nu s-au putut citi credențialele SmartBill.",
+        "detectColumns": "Nu s-au putut detecta coloanele DBF.",
+        "stage": "Etapa de staging a eșuat.",
+        "commit": "Commit-ul a eșuat."
+      }
     }
   }
 }

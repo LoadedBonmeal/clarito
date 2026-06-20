@@ -1287,6 +1287,91 @@ export const gdpr = {
     invoke<void>("wipe_all_data", { acknowledgeRetention: acknowledgeRetention ?? null }),
 };
 
+// ─── Import Wave C ────────────────────────────────────────────────────────
+
+/** A discovered column/key name with a sample value (from SAGA DBF header). */
+export interface DetectedColumn {
+  name: string;
+  sample: string;
+}
+
+/** Per-entity resolution counts from the staging resolver. */
+export interface EntityCounts {
+  new: number;
+  matched: number;
+  dupInBatch: number;
+  review: number;
+  error: number;
+}
+
+/** Per-entity rollup returned by stage + preview. */
+export interface BatchCounts {
+  contacts: EntityCounts;
+  products: EntityCounts;
+  accounts: EntityCounts;
+  invoices: EntityCounts;
+}
+
+/** Result of import_wave_c_stage. */
+export interface StageResult {
+  batchId: string;
+  counts: BatchCounts;
+  warnings: string[];
+}
+
+/** Sample rows + counts returned by import_wave_c_preview. */
+export interface PreviewResult {
+  batchId: string;
+  counts: BatchCounts;
+  sampleContacts: Record<string, string | null>[];
+  sampleProducts: Record<string, string | null>[];
+  sampleAccounts: Record<string, string | null>[];
+  sampleInvoices: Record<string, string | null>[];
+}
+
+/** Per-entity breakdown from import_wave_c_commit. */
+export interface EntityReport {
+  created: number;
+  matched: number;
+  skipped: number;
+  errors: number;
+}
+
+/** Full commit result returned by import_wave_c_commit. */
+export interface CommitReport {
+  batchId: string;
+  contacts: EntityReport;
+  products: EntityReport;
+  accounts: EntityReport;
+  invoices: EntityReport;
+  errors: string[];
+}
+
+export const importWaveC = {
+  /** Sniff column names + sample values from the first file (only useful for SAGA DBF). */
+  detectColumns: (companyId: string, source: string, filePaths: string[]) =>
+    invoke<DetectedColumn[]>("import_wave_c_detect_columns", { companyId, source, filePaths }),
+  /** Parse + stage files, run the resolver, return batch_id + counts. */
+  stage: (
+    companyId: string,
+    source: string,
+    filePaths: string[],
+    columnMap?: Record<string, string>,
+  ) =>
+    invoke<StageResult>("import_wave_c_stage", {
+      companyId,
+      source,
+      filePaths,
+      columnMap: columnMap ?? null,
+    }),
+  /** Return resolution counts + sample rows for a staged batch. */
+  preview: (batchId: string) =>
+    invoke<PreviewResult>("import_wave_c_preview", { batchId }),
+  /** Commit all NEW rows in a batch and return the commit report. */
+  commit: (batchId: string) =>
+    invoke<CommitReport>("import_wave_c_commit", { batchId }),
+};
+
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
@@ -1305,6 +1390,7 @@ export const api = {
   gdpr,
   gl,
   importData,
+  importWaveC,
   integrations,
   invoices,
   journals,

@@ -6,6 +6,7 @@
     "selectCompany": "Select an active company to see the contacts.",
     "refresh": "Refresh",
     "importCsv": "Import CSV",
+    "importWizard": "Import from another program",
     "newContact": "New contact",
     "tabs": {
       "all": "All",

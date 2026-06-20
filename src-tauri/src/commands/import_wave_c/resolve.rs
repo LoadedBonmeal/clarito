@@ -49,6 +49,7 @@ pub async fn resolve_batch(pool: &SqlitePool, batch_id: &str) -> AppResult<()> {
 // ─── Counts rollup ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EntityCounts {
     pub new: u32,
     pub matched: u32,
