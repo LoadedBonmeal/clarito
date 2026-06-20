@@ -248,6 +248,16 @@
         "noOps": "There are no intra-EU operations in the selected period.",
         "saved": "D390 saved: {{path}}",
         "exportFailed": "Could not export D390."
+      },
+      "vatCheck": {
+        "warnTitle": "Warning: partners with invalid or missing EU VAT number",
+        "warnHint": "ANAF/DUK may reject the declaration if a partner's VAT code is malformed or missing. Correct the partner's CUI/VAT code before exporting.",
+        "colPartner": "Partner",
+        "colCode": "Declared VAT code",
+        "colIssue": "Issue",
+        "missingCode": "Code missing",
+        "invalidFormat": "Invalid format (must be 2-letter EU prefix + digits)",
+        "verifyVies": "Verify VIES"
       }
     },
     "d394": {

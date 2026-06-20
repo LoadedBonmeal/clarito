@@ -95,6 +95,20 @@ export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<
 
 // ─── Companies ────────────────────────────────────────────────────────────
 
+/** Result returned by the VIES REST check-vat-number endpoint. */
+export interface ViesResult {
+  /** True when the number is registered in VIES. */
+  valid: boolean;
+  /** Legal name — null when the member state masks the data ("---"). */
+  name: string | null;
+  /** Registered address — null when masked. */
+  address: string | null;
+  /** 2-letter country code (always uppercase). */
+  countryCode: string;
+  /** VAT number without the country prefix. */
+  vatNumber: string;
+}
+
 export const companies = {
   list: () => invoke<Company[]>("list_companies"),
   get: (id: string) => invoke<Company>("get_company", { id }),
@@ -107,6 +121,9 @@ export const companies = {
     invoke<number>("get_next_invoice_number", { companyId }),
   fetchAnafData: (cui: string) =>
     invoke<AnafCompanyData>("fetch_anaf_company_data", { cui }),
+  /** Validate an EU VAT number via the VIES REST API (backend — no CORS). */
+  validateVies: (countryCode: string, vatNumber: string) =>
+    invoke<ViesResult>("validate_vies", { countryCode, vatNumber }),
   /** Micro-ceiling status (turnover vs 100.000 EUR) for a company in `year`; `eurRon` = EUR→RON. */
   taxRegimeStatus: (companyId: string, year: number, eurRon: number) =>
     invoke<TaxRegimeStatus>("tax_regime_status", { companyId, year, eurRon }),

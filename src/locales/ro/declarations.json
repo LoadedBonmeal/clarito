@@ -252,6 +252,16 @@
         "noOps": "Nu există operațiuni intra-UE în perioada selectată.",
         "saved": "D390 salvat: {{path}}",
         "exportFailed": "Nu s-a putut exporta D390."
+      },
+      "vatCheck": {
+        "warnTitle": "Atenție: parteneri cu cod TVA UE invalid sau lipsă",
+        "warnHint": "ANAF/DUK poate respinge declarația dacă codul TVA al partenerului este malformat sau lipsă. Corectați codul CUI/TVA al partenerului înainte de export.",
+        "colPartner": "Partener",
+        "colCode": "Cod TVA declarat",
+        "colIssue": "Problemă",
+        "missingCode": "Cod lipsă",
+        "invalidFormat": "Format invalid (trebuie prefix UE 2 litere + cifre)",
+        "verifyVies": "Verifică VIES"
       }
     },
     "d394": {

@@ -26,6 +26,7 @@ import { CsvImportModal } from "@/components/shared/CsvImportModal";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import type { ViesResult } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { formatError } from "@/lib/error-mapper";
 import { notify } from "@/lib/toasts";
@@ -412,6 +413,53 @@ function ContactModal({
     anafLookup.mutate(raw);
   };
 
+  // VIES lookup for non-RO EU partners.
+  const [viesInfo, setViesInfo] = useState<ViesResult | null>(null);
+  const viesLookup = useMutation({
+    mutationFn: ({ cc, num }: { cc: string; num: string }) =>
+      api.companies.validateVies(cc, num),
+    onSuccess: (d) => {
+      setViesInfo(d);
+      if (d.valid) {
+        notify.success(t("contacts.notify.viesValid"));
+        // Auto-fill name/address only when the member state did not mask them.
+        if (d.name || d.address) {
+          setForm((f) => ({
+            ...f,
+            legalName: d.name || f.legalName,
+            address: d.address || f.address,
+          }));
+        }
+      } else {
+        notify.warn(t("contacts.notify.viesInvalid"));
+      }
+    },
+    onError: (e) => {
+      setViesInfo(null);
+      notify.error(formatError(e, t("contacts.notify.viesError")));
+    },
+  });
+
+  /** Parse the country-code + VAT number from the CUI field (or use form.country). */
+  const triggerViesLookup = () => {
+    const raw = (form.cui ?? "").trim().toUpperCase().replace(/\s/g, "");
+    if (!raw) return;
+    // Use form.country (2-letter) as the country code; fall back to the first 2
+    // chars of the VAT id if those are letters (e.g. "DE123456789").
+    const cc =
+      form.country && form.country !== "RO"
+        ? form.country
+        : /^[A-Z]{2}/.test(raw)
+        ? raw.slice(0, 2)
+        : null;
+    if (!cc || cc === "RO") return;
+    const num = raw.startsWith(cc) ? raw.slice(2) : raw;
+    viesLookup.mutate({ cc, num });
+  };
+
+  /** True when the selected country is a non-RO country (show VIES button). */
+  const isNonRo = (form.country ?? "RO") !== "RO";
+
   const create = useMutation({
     mutationFn: (input: CreateContactInput) => api.contacts.create(input),
     onSuccess: onSaved,
@@ -497,34 +545,64 @@ function ContactModal({
               <div style={{ display: "flex", gap: 6 }}>
                 <div className="in-wrap" style={{ flex: 1 }}>
                   <input
-                    className={`input num${anafInfo ? " valid" : ""}`}
+                    className={`input num${anafInfo ? " valid" : viesInfo?.valid ? " valid" : ""}`}
                     type="text"
                     placeholder={t("contacts.modal.cuiPlaceholder")}
                     {...field("cui")}
-                    onBlur={triggerAnafLookup}
+                    onBlur={isNonRo ? triggerViesLookup : triggerAnafLookup}
                   />
-                  {anafInfo && !anafInfo.inactive && (
+                  {(anafInfo && !anafInfo.inactive) && (
+                    <svg className="in-ic ok" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: OK_CIRCLE_PATH }} />
+                  )}
+                  {viesInfo?.valid && (
                     <svg className="in-ic ok" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: OK_CIRCLE_PATH }} />
                   )}
                 </div>
-                <button
-                  type="button"
-                  className="pill-btn"
-                  style={{ height: 36, flex: "none" }}
-                  disabled={anafLookup.isPending || (form.isIndividual as boolean)}
-                  title={t("contacts.modal.anafBtnTitle")}
-                  onClick={() => {
-                    setLastLookedUp("");
-                    triggerAnafLookup();
-                  }}
-                >
-                  {anafLookup.isPending ? "…" : "ANAF ↓"}
-                </button>
+                {/* Show ANAF button for RO partners, VIES button for non-RO EU partners */}
+                {isNonRo ? (
+                  <button
+                    type="button"
+                    className="pill-btn"
+                    style={{ height: 36, flex: "none" }}
+                    disabled={viesLookup.isPending || (form.isIndividual as boolean)}
+                    title={t("contacts.modal.viesBtnTitle")}
+                    onClick={() => triggerViesLookup()}
+                  >
+                    {viesLookup.isPending ? "…" : t("contacts.modal.viesBtn")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="pill-btn"
+                    style={{ height: 36, flex: "none" }}
+                    disabled={anafLookup.isPending || (form.isIndividual as boolean)}
+                    title={t("contacts.modal.anafBtnTitle")}
+                    onClick={() => {
+                      setLastLookedUp("");
+                      triggerAnafLookup();
+                    }}
+                  >
+                    {anafLookup.isPending ? "…" : "ANAF ↓"}
+                  </button>
+                )}
               </div>
               {anafInfo && (
                 <span className={anafInfo.inactive ? "err" : "okk"} style={anafInfo.inactive ? { fontSize: 11.5, color: "var(--red)" } : undefined}>
                   {t("contacts.modal.anafFound")} · {anafInfo.inactive ? t("contacts.modal.anafInactive") : t("contacts.modal.anafActive")}
                   {anafInfo.efactura ? ` · ${t("contacts.modal.anafEfactura")}` : ""}
+                </span>
+              )}
+              {viesInfo && (
+                <span
+                  className={viesInfo.valid ? "okk" : "err"}
+                  style={!viesInfo.valid ? { fontSize: 11.5, color: "var(--red)" } : undefined}
+                >
+                  {viesInfo.valid
+                    ? t("contacts.modal.viesValid")
+                    : t("contacts.modal.viesInvalid")}
+                  {viesInfo.valid && !viesInfo.name && !viesInfo.address
+                    ? ` · ${t("contacts.modal.viesMasked")}`
+                    : ""}
                 </span>
               )}
             </div>

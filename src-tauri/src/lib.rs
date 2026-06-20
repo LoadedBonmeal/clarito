@@ -278,6 +278,7 @@ pub fn run() {
             commands::companies::delete_company,
             commands::companies::get_next_invoice_number,
             commands::companies::fetch_anaf_company_data,
+            commands::companies::validate_vies,
             // contacts
             commands::contacts::list_contacts,
             commands::contacts::get_contact,

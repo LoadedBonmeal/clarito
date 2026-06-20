@@ -53,7 +53,10 @@
       "noActiveCompany": "Nicio companie activă.",
       "deleteError": "Nu s-a putut șterge contactul.",
       "anafSuccess": "Date preluate din ANAF: {{name}}",
-      "anafError": "CUI-ul nu a fost găsit în baza ANAF."
+      "anafError": "CUI-ul nu a fost găsit în baza ANAF.",
+      "viesValid": "Cod TVA UE valid în VIES.",
+      "viesInvalid": "Cod TVA UE NU este valid în VIES.",
+      "viesError": "Nu s-a putut valida codul TVA UE prin VIES."
     },
     "modal": {
       "editTitle": "Editează: {{name}}",
@@ -90,6 +93,11 @@
       "cashVatPrefix": "Furnizor cu",
       "cashVatBold": "TVA la încasare",
       "cashVatSuffix": "— TVA deductibilă se amână până la plata facturii (art. 297 Cod fiscal).",
+      "viesBtn": "Validează VIES",
+      "viesBtnTitle": "Validează codul TVA UE al partenerului prin registrul VIES",
+      "viesValid": "Cod TVA UE VALID în VIES",
+      "viesInvalid": "Cod TVA UE INVALID în VIES",
+      "viesMasked": "datele firmei sunt mascate de statul membru",
       "nameRequired": "Denumirea este obligatorie.",
       "cuiInvalid": "CUI invalid — trebuie să conțină 2-10 cifre (ex: RO12345678 sau 12345678)",
       "createError": "Eroare la creare.",

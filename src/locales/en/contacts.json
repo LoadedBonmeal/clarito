@@ -52,7 +52,10 @@
       "noActiveCompany": "No active company.",
       "deleteError": "Could not delete the contact.",
       "anafSuccess": "Data retrieved from ANAF: {{name}}",
-      "anafError": "The CUI was not found in the ANAF registry."
+      "anafError": "The CUI was not found in the ANAF registry.",
+      "viesValid": "EU VAT number is valid in VIES.",
+      "viesInvalid": "EU VAT number is NOT valid in VIES.",
+      "viesError": "Could not validate the EU VAT number via VIES."
     },
     "modal": {
       "editTitle": "Edit: {{name}}",
@@ -89,6 +92,11 @@
       "cashVatPrefix": "Supplier with",
       "cashVatBold": "cash-accounting VAT",
       "cashVatSuffix": "— deductible VAT is deferred until the invoice is paid (art. 297 of the Fiscal Code).",
+      "viesBtn": "Validate VIES",
+      "viesBtnTitle": "Validate the partner's EU VAT number via the VIES registry",
+      "viesValid": "EU VAT number VALID in VIES",
+      "viesInvalid": "EU VAT number INVALID in VIES",
+      "viesMasked": "company data is masked by the member state",
       "nameRequired": "The name is required.",
       "cuiInvalid": "Invalid CUI — it must contain 2-10 digits (e.g. RO12345678 or 12345678)",
       "createError": "Error creating the contact.",
