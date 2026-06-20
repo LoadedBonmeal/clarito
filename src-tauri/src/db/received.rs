@@ -188,6 +188,115 @@ pub async fn set_status(
     Ok(())
 }
 
+// ─── Imported received invoice ──────────────────────────────────────────────
+
+/// Input for creating a received invoice from the Wave C importer.
+/// Mirrors the required columns of `received_invoices` without the ANAF-specific
+/// `anaf_index` and `xml_path` (the importer fabricates those).
+#[derive(Debug, Clone)]
+pub struct CreateImportedReceivedInput {
+    pub company_id: String,
+    /// The raw JSON representation of the staged invoice (used to derive a
+    /// stable dedup hash so re-importing the same row is idempotent).
+    pub raw_json: String,
+    pub issuer_cui: String,
+    pub issuer_name: String,
+    pub series: Option<String>,
+    pub number: Option<String>,
+    pub total_amount: String,
+    pub net_amount: Option<String>,
+    pub vat_amount: Option<String>,
+    pub currency: String,
+    pub exchange_rate: Option<f64>,
+    pub issue_date: String,
+}
+
+/// Insert a received invoice imported from a third-party source.
+///
+/// The `anaf_download_id` is derived as `"import-" + first-32-hex-chars-of-SHA256(raw_json)`
+/// so the UNIQUE constraint on `anaf_download_id` provides idempotency: importing the
+/// same source row twice will hit the constraint and return the existing id (no duplicate).
+///
+/// Returns the id of the newly created (or existing) row.
+pub async fn create_imported(
+    pool: &SqlitePool,
+    input: CreateImportedReceivedInput,
+) -> AppResult<String> {
+    use crate::db::models::{new_id, now_unix};
+    use sha2::{Digest, Sha256};
+
+    // Derive the dedup key from the raw source JSON.
+    let hash_hex = {
+        let mut h = Sha256::new();
+        h.update(input.raw_json.as_bytes());
+        format!("{:x}", h.finalize())
+    };
+    let anaf_download_id = format!("import-{}", &hash_hex[..32]);
+
+    // Check for existing row (idempotent — same raw_json → same anaf_download_id).
+    let existing: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM received_invoices \
+         WHERE anaf_download_id = ?1 AND company_id = ?2 LIMIT 1",
+    )
+    .bind(&anaf_download_id)
+    .bind(&input.company_id)
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+
+    let id = new_id();
+    let now = now_unix();
+
+    // Use a placeholder xml_path (no file on disk for imported invoices).
+    let xml_path = format!("import:{}", &hash_hex[..16]);
+
+    sqlx::query(
+        "INSERT INTO received_invoices \
+         (id, company_id, anaf_download_id, anaf_index, issuer_cui, issuer_name, \
+          series, number, total_amount, net_amount, vat_amount, \
+          currency, exchange_rate, issue_date, xml_path, \
+          status, intra_eu_kind, downloaded_at, created_at) \
+         VALUES \
+         (?1, ?2, ?3, NULL, ?4, ?5, \
+          ?6, ?7, ?8, ?9, ?10, \
+          ?11, ?12, ?13, ?14, \
+          'NEW', 'goods', ?15, ?15)",
+    )
+    .bind(&id)
+    .bind(&input.company_id)
+    .bind(&anaf_download_id)
+    .bind(&input.issuer_cui)
+    .bind(&input.issuer_name)
+    .bind(&input.series)
+    .bind(&input.number)
+    .bind(&input.total_amount)
+    .bind(&input.net_amount)
+    .bind(&input.vat_amount)
+    .bind(&input.currency)
+    .bind(input.exchange_rate)
+    .bind(&input.issue_date)
+    .bind(&xml_path)
+    .bind(now)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        // UNIQUE constraint on anaf_download_id (race — unlikely but safe to handle).
+        if e.to_string().contains("UNIQUE") {
+            // Re-query for the existing id.
+            AppError::Conflict(format!(
+                "Factură primită importată deja (anaf_download_id = {anaf_download_id})"
+            ))
+        } else {
+            AppError::Database(e)
+        }
+    })?;
+
+    Ok(id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

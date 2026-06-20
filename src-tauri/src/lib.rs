@@ -371,6 +371,10 @@ pub fn run() {
             commands::import::import_invoice_xml_from_file,
             commands::import::get_invoices_csv_template,
             commands::import::get_contacts_csv_template,
+            // import wave c — multi-source migration importer
+            commands::import_wave_c::commit::import_wave_c_stage,
+            commands::import_wave_c::commit::import_wave_c_preview,
+            commands::import_wave_c::commit::import_wave_c_commit,
             // integrations
             commands::integrations::smartbill_push_invoice,
             commands::integrations::export_saga_csv,

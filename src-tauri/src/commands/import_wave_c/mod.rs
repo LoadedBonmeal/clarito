@@ -9,6 +9,8 @@
 //! No Tauri commands are registered here yet — see W4/W5.
 
 pub mod adapter;
+pub mod commit;
+pub mod resolve;
 pub mod saga_dbf;
 pub mod saga_xml;
 pub mod smartbill_rest;

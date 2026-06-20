@@ -379,16 +379,30 @@ async fn list_events(pool: &SqlitePool, invoice_id: &str) -> AppResult<Vec<Invoi
 
 // ─── Create / Update ───────────────────────────────────────────────────────
 
-/// Creează factură + liniile asociate într-o tranzacție. Totalurile sunt
-/// calculate aici (sumă subtotal + VAT din linii).
-pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<Invoice> {
-    if input.lines.is_empty() {
+/// `(subtotal, vat_total, total, per-linie (id, subtotal, tva, total))` — rezultatul rotunjit al
+/// [`validate_and_total_lines`].
+type InvoiceTotals = (
+    String,
+    String,
+    String,
+    Vec<(String, String, String, String)>,
+);
+
+/// Validează liniile (cotă TVA, blocaj cote vechi Legea 141/2025, cantități ne-negative) și
+/// calculează subtotal / TVA / total rotunjite + per-linie `(id, subtotal, tva, total)`.
+/// Partajat de [`create`] și [`create_imported`] ca să aplice IDENTIC validarea fiscală + aritmetica
+/// banilor (Decimal, niciodată f64).
+fn validate_and_total_lines(
+    lines: &[CreateLineInput],
+    issue_date: &str,
+) -> AppResult<InvoiceTotals> {
+    if lines.is_empty() {
         return Err(AppError::Validation(
             "Factura trebuie să aibă cel puțin o linie.".into(),
         ));
     }
 
-    for line in &input.lines {
+    for line in lines {
         let rate = Decimal::try_from(line.vat_rate).unwrap_or(Decimal::ZERO);
         if !VALID_VAT_RATES
             .iter()
@@ -401,7 +415,7 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         }
         // FISCAL-001 (Legea 141/2025): respinge la sursă o linie 19%/5% pe o factură emisă
         // ≥ 01.08.2025, ca să nu ajungă date de cotă veche în D300.
-        if old_vat_rate_blocked(&input.issue_date, line.vat_rate) {
+        if old_vat_rate_blocked(issue_date, line.vat_rate) {
             return Err(AppError::Validation(format!(
                 "Cota TVA {}% nu mai este validă pentru facturi emise de la 01.08.2025 \
                  (Legea 141/2025) — folosiți 21% sau 11%.",
@@ -418,24 +432,11 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
         }
     }
 
-    // U3: validate payment_means_code against the UNCL4461 allow-list.
-    let pmc = input.payment_means_code.as_deref().unwrap_or("30");
-    if !VALID_PAYMENT_MEANS_CODES.contains(&pmc) {
-        return Err(AppError::Validation(format!(
-            "Cod mod de plată invalid: {pmc}"
-        )));
-    }
-
-    let invoice_id = new_id();
-    let now = now_unix();
-
     // Calculăm totaluri cu Decimal pentru precizie (money math — niciodată f64).
     let hundred = Decimal::from(100u32);
-
     let mut subtotal_dec = Decimal::ZERO;
     let mut vat_total_dec = Decimal::ZERO;
-    let line_rows: Vec<(String, String, String, String)> = input
-        .lines
+    let line_rows: Vec<(String, String, String, String)> = lines
         .iter()
         .map(|l| {
             // U4: use 6dp-precise quantity for monetary computation so the
@@ -462,9 +463,31 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
             )
         })
         .collect();
-    let subtotal = round2(subtotal_dec).to_string();
-    let vat_total = round2(vat_total_dec).to_string();
-    let total = round2(subtotal_dec + vat_total_dec).to_string();
+
+    Ok((
+        round2(subtotal_dec).to_string(),
+        round2(vat_total_dec).to_string(),
+        round2(subtotal_dec + vat_total_dec).to_string(),
+        line_rows,
+    ))
+}
+
+/// Creează factură + liniile asociate într-o tranzacție. Totalurile sunt
+/// calculate aici (sumă subtotal + VAT din linii).
+pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<Invoice> {
+    let (subtotal, vat_total, total, line_rows) =
+        validate_and_total_lines(&input.lines, &input.issue_date)?;
+
+    // U3: validate payment_means_code against the UNCL4461 allow-list.
+    let pmc = input.payment_means_code.as_deref().unwrap_or("30");
+    if !VALID_PAYMENT_MEANS_CODES.contains(&pmc) {
+        return Err(AppError::Validation(format!(
+            "Cod mod de plată invalid: {pmc}"
+        )));
+    }
+
+    let invoice_id = new_id();
+    let now = now_unix();
 
     let mut tx = pool.begin().await?;
 
@@ -580,6 +603,183 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
     sqlx::query(
         "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at)
          VALUES (?1, ?2, 'CREATED', 'Factură creată ca ciornă', ?3)",
+    )
+    .bind(new_id())
+    .bind(&invoice_id)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    get(pool, &invoice_id).await
+}
+
+/// Input pentru importul unei facturi EMISE istorice (migrare de date din alt program).
+/// Spre deosebire de [`CreateInvoiceInput`], păstrează `series`+`number` ORIGINALE și NU atinge
+/// `companies.last_invoice_number` (seria de numerotare a aplicației nu e umflată).
+#[derive(Debug, Clone)]
+pub struct CreateImportedInvoiceInput {
+    pub company_id: String,
+    pub contact_id: String,
+    pub series: String,
+    /// Numărul ORIGINAL al facturii (identificator legal — păstrat ca atare).
+    pub number: i64,
+    /// Numărul afișat complet din sursă (ex. "FACT-2024-0153"); dacă lipsește se compune din serie+nr.
+    pub full_number: Option<String>,
+    pub issue_date: String,
+    pub due_date: Option<String>,
+    pub currency: Option<String>,
+    pub exchange_rate: Option<f64>,
+    pub notes: Option<String>,
+    pub payment_means_code: Option<String>,
+    pub lines: Vec<CreateLineInput>,
+}
+
+/// Importă o factură EMISĂ istorică drept CIORNĂ (DRAFT), păstrând `series`+`number` originale.
+///
+/// Diferă esențial de [`create`]:
+/// - NU alocă un număr nou și NU incrementează `companies.last_invoice_number` (seria live rămâne
+///   intactă — facturile istorice nu trebuie să consume numere din numerotarea curentă);
+/// - este IDEMPOTENT: dacă `(company_id, series, number)` există deja, întoarce factura existentă
+///   fără a insera un duplicat (re-importul aceluiași lot nu creează dubluri);
+/// - rămâne în status DRAFT, deci NU este preluată de `generate_gl_entries` (fără dublă înregistrare
+///   față de registrele deja depuse în vechiul program).
+///
+/// Aplică ACEEAȘI validare fiscală + aritmetică de bani ca [`create`] (prin `validate_and_total_lines`),
+/// deci o factură cu cotă veche 19%/5% emisă ≥ 01.08.2025 este respinsă (Legea 141/2025) → linia merge
+/// la ERROR/REVIEW în motorul de import.
+pub async fn create_imported(
+    pool: &SqlitePool,
+    input: CreateImportedInvoiceInput,
+) -> AppResult<Invoice> {
+    // Idempotență: un re-import al aceleiași (company, series, number) întoarce factura existentă.
+    if let Some(existing_id) = sqlx::query_scalar::<_, String>(
+        "SELECT id FROM invoices WHERE company_id = ?1 AND series = ?2 AND number = ?3",
+    )
+    .bind(&input.company_id)
+    .bind(&input.series)
+    .bind(input.number)
+    .fetch_optional(pool)
+    .await?
+    {
+        return get(pool, &existing_id).await;
+    }
+
+    let (subtotal, vat_total, total, line_rows) =
+        validate_and_total_lines(&input.lines, &input.issue_date)?;
+
+    let pmc = input.payment_means_code.as_deref().unwrap_or("30");
+    if !VALID_PAYMENT_MEANS_CODES.contains(&pmc) {
+        return Err(AppError::Validation(format!(
+            "Cod mod de plată invalid: {pmc}"
+        )));
+    }
+
+    let invoice_id = new_id();
+    let now = now_unix();
+    let full_number = input
+        .full_number
+        .clone()
+        .unwrap_or_else(|| format!("{}-{:04}", input.series, input.number));
+    // due_date NOT NULL în schemă → fallback pe data emiterii dacă sursa nu o are.
+    let due_date = input
+        .due_date
+        .clone()
+        .unwrap_or_else(|| input.issue_date.clone());
+
+    let mut tx = pool.begin().await?;
+
+    // NU atinge `companies.last_invoice_number` — păstrăm numărul original al facturii.
+    sqlx::query(
+        "INSERT INTO invoices (
+            id, company_id, contact_id, series, number, full_number,
+            issue_date, due_date, currency, exchange_rate,
+            subtotal_amount, vat_amount, total_amount, status, notes,
+            payment_means_code, storno_of_invoice_id, created_at, updated_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6,
+            ?7, ?8, ?9, ?10,
+            ?11, ?12, ?13, 'DRAFT', ?14,
+            ?15, NULL, ?16, ?16
+        )",
+    )
+    .bind(&invoice_id)
+    .bind(&input.company_id)
+    .bind(&input.contact_id)
+    .bind(&input.series)
+    .bind(input.number)
+    .bind(&full_number)
+    .bind(&input.issue_date)
+    .bind(&due_date)
+    .bind(input.currency.as_deref().unwrap_or("RON"))
+    .bind(input.exchange_rate)
+    .bind(subtotal)
+    .bind(vat_total)
+    .bind(total)
+    .bind(&input.notes)
+    .bind(pmc)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+
+    for (position, (line, (line_id, line_subtotal, line_vat, line_total))) in
+        input.lines.iter().zip(line_rows.iter()).enumerate()
+    {
+        sqlx::query(
+            "INSERT INTO invoice_line_items (
+                id, invoice_id, position, name, description,
+                quantity, unit, unit_price, vat_rate, vat_category,
+                subtotal_amount, vat_amount, total_amount, cpv_code, art331_code,
+                revenue_kind
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5,
+                ?6, ?7, ?8, ?9, ?10,
+                ?11, ?12, ?13, ?14, ?15,
+                ?16
+            )",
+        )
+        .bind(line_id)
+        .bind(&invoice_id)
+        .bind((position as i64) + 1)
+        .bind(&line.name)
+        .bind(&line.description)
+        .bind(
+            Decimal::try_from(line.quantity)
+                .unwrap_or(Decimal::ZERO)
+                .round_dp_with_strategy(6, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                .to_string(),
+        )
+        .bind(&line.unit)
+        .bind(
+            Decimal::try_from(line.unit_price)
+                .unwrap_or(Decimal::ZERO)
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                .to_string(),
+        )
+        .bind({
+            let raw = Decimal::try_from(line.vat_rate).unwrap_or(Decimal::ZERO);
+            let eff = if line.vat_category == "S" {
+                raw
+            } else {
+                Decimal::ZERO
+            };
+            eff.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+                .to_string()
+        })
+        .bind(&line.vat_category)
+        .bind(line_subtotal)
+        .bind(line_vat)
+        .bind(line_total)
+        .bind(&line.cpv_code)
+        .bind(&line.art331_code)
+        .bind(line.revenue_kind.as_deref().unwrap_or("goods"))
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    sqlx::query(
+        "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at)
+         VALUES (?1, ?2, 'CREATED', 'Factură importată ca ciornă', ?3)",
     )
     .bind(new_id())
     .bind(&invoice_id)
