@@ -175,6 +175,8 @@
 .head-actions{display:flex;align-items:center;gap:8px}
 .pill-btn{height:34px;display:flex;align-items:center;gap:7px;padding:0 13px;border-radius:8px;border:1px solid var(--line);background:#fff;font-size:13px;color:var(--text-2);font-weight:500;cursor:pointer;white-space:nowrap;text-decoration:none;font-family:inherit}
 .pill-btn:hover{background:var(--fill)}
+.pill-btn.active{background:var(--text);color:#fff;border-color:var(--text)}
+.pill-group{display:inline-flex;gap:6px}
 .pill-btn .ic{width:15px;height:15px}
 .sq-btn{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
 .sq-btn:hover{background:var(--fill)}

@@ -17,7 +17,8 @@
       "saft": "D406 SAF-T",
       "salesJournal": "Sales journal",
       "purchaseJournal": "Purchase journal",
-      "accountingExport": "Accounting export"
+      "accountingExport": "Accounting export",
+      "aging": "Aged balances"
     },
     "statuses": {
       "draft": "Draft",
@@ -235,6 +236,29 @@
         "employerCost": "Total employer cost"
       },
       "computeFailed": "Could not compute the salary."
+    },
+    "aging": {
+      "title": "Aged balances",
+      "clients": "Clients (receivables)",
+      "suppliers": "Suppliers (payables)",
+      "asOf": "As of:",
+      "exportCsv": "Export CSV",
+      "exporting": "Exporting…",
+      "dialogTitle": "Save aged balance report",
+      "csvSaved": "Aged balance saved: {{path}}",
+      "csvFailed": "Could not export the aged balance report.",
+      "errorLabel": "aged balance report",
+      "loading": "Computing aged balances…",
+      "empty": "No invoices with outstanding balance at the selected date.",
+      "colPartner": "Partner",
+      "colCui": "Tax ID",
+      "colCurrent": "Current",
+      "col130": "1–30 days",
+      "col3160": "31–60 days",
+      "col6190": "61–90 days",
+      "colOver90": ">90 days",
+      "colTotal": "Total outstanding",
+      "totals": "TOTAL"
     }
   }
 }

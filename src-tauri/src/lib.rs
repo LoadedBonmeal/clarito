@@ -389,6 +389,8 @@ pub fn run() {
             // reports
             commands::reports::generate_vat_report,
             commands::reports::export_report,
+            commands::reports::aging_report,
+            commands::reports::export_aging_csv,
             // payments
             commands::payments::add_payment,
             commands::payments::list_payments,

@@ -412,6 +412,30 @@ export const integrations = {
 
 // ─── Reports ──────────────────────────────────────────────────────────────
 
+// ─── Aging report types ────────────────────────────────────────────────────
+
+export type AgingDirection = "RECEIVABLE" | "PAYABLE";
+
+export interface AgingRow {
+  partnerCui: string;
+  partnerName: string;
+  totalOutstanding: string;
+  current: string;
+  d130: string;
+  d3160: string;
+  d6190: string;
+  over90: string;
+}
+
+export interface AgingReport {
+  asOf: string;
+  direction: AgingDirection;
+  rows: AgingRow[];
+  totals: AgingRow;
+}
+
+// ─── Reports ──────────────────────────────────────────────────────────────
+
 export const reports = {
   generateVatReport: (dateFrom: string, dateTo: string, companyId?: string) =>
     invoke<import("@/types").VatReport>("generate_vat_report", {
@@ -426,6 +450,17 @@ export const reports = {
     outputPath: string
   ) =>
     invoke<string>("export_report", { reportType, params, format, outputPath }),
+  /** Balanță cu vechime sold (AR/AP aging report). */
+  aging: (companyId: string, direction: AgingDirection, asOf: string) =>
+    invoke<AgingReport>("aging_report", { companyId, direction, asOf }),
+  /** Exportă raportul de aging ca CSV. Returnează calea salvată. */
+  exportAgingCsv: (
+    companyId: string,
+    direction: AgingDirection,
+    asOf: string,
+    outputPath: string,
+  ) =>
+    invoke<string>("export_aging_csv", { companyId, direction, asOf, outputPath }),
 };
 
 // ─── Payments ─────────────────────────────────────────────────────────────

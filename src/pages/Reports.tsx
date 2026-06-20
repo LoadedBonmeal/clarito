@@ -42,6 +42,7 @@ import { SaftView }            from "./reports/SaftView";
 import { SalesJournalView }    from "./reports/SalesJournalView";
 import { PurchaseJournalView } from "./reports/PurchaseJournalView";
 import { AccountingExportView } from "./reports/AccountingExportView";
+import { AgingView }            from "./reports/AgingView";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -109,6 +110,7 @@ const TABS: { value: ReportView; labelKey: string }[] = [
   { value: "sales-journal",     labelKey: "reports.tabs.salesJournal"     },
   { value: "purchase-journal",  labelKey: "reports.tabs.purchaseJournal"  },
   { value: "accounting-export", labelKey: "reports.tabs.accountingExport" },
+  { value: "aging",             labelKey: "reports.tabs.aging"             },
 ];
 
 // ─── component ───────────────────────────────────────────────────────────────
@@ -927,6 +929,9 @@ export function ReportsPage() {
           />
         </>
       )}
+
+      {/* ── Balanță cu vechime sold (aging) ────────────────────────────────── */}
+      {view === "aging" && <AgingView />}
     </div>
   );
 }

@@ -21,6 +21,7 @@ pub mod received;
 pub mod settings;
 
 pub mod accounts;
+pub mod aging;
 pub mod assets;
 pub mod concedii;
 pub mod declaration_filings;

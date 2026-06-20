@@ -289,6 +289,60 @@ pub async fn export_report(
     }
 }
 
+// ── aging_report command ───────────────────────────────────────────────────────
+
+/// Returnează raportul de balanță cu vechime sold (AR/AP aging report).
+/// `direction`: "RECEIVABLE" (clienți, cont 4111) | "PAYABLE" (furnizori, cont 401)
+/// `as_of`: data de referință în format "YYYY-MM-DD" (default: azi)
+#[tauri::command]
+pub async fn aging_report(
+    state: State<'_, AppState>,
+    company_id: String,
+    direction: String,
+    as_of: String,
+) -> AppResult<crate::db::aging::AgingReport> {
+    if company_id.trim().is_empty() {
+        return Err(AppError::Validation(
+            "Selectați o companie activă.".to_string(),
+        ));
+    }
+    let dir = crate::db::aging::AgingDirection::parse_direction(direction.trim())
+        .ok_or_else(|| AppError::Validation(format!("Direcție invalidă: {direction}")))?;
+
+    crate::db::aging::aging_report(&state.db, &company_id, dir, &as_of).await
+}
+
+/// Exportă raportul de aging ca CSV la calea specificată.
+#[tauri::command]
+pub async fn export_aging_csv(
+    state: State<'_, AppState>,
+    company_id: String,
+    direction: String,
+    as_of: String,
+    output_path: String,
+) -> AppResult<String> {
+    let output_path = crate::commands::integrations::validate_export_path(&output_path)?
+        .to_string_lossy()
+        .to_string();
+
+    if company_id.trim().is_empty() {
+        return Err(AppError::Validation(
+            "Selectați o companie activă.".to_string(),
+        ));
+    }
+    let dir = crate::db::aging::AgingDirection::parse_direction(direction.trim())
+        .ok_or_else(|| AppError::Validation(format!("Direcție invalidă: {direction}")))?;
+
+    let report = crate::db::aging::aging_report(&state.db, &company_id, dir, &as_of).await?;
+    let csv = crate::db::aging::aging_to_csv(&report);
+
+    tokio::fs::write(&output_path, csv.as_bytes())
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?;
+
+    Ok(output_path)
+}
+
 #[cfg(test)]
 mod tests {
     use rust_decimal::Decimal;

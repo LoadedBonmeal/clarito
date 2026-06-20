@@ -18,7 +18,8 @@
       "saft": "D406 SAF-T",
       "salesJournal": "Jurnal vânzări",
       "purchaseJournal": "Jurnal cumpărări",
-      "accountingExport": "Export contabil"
+      "accountingExport": "Export contabil",
+      "aging": "Vechime sold"
     },
     "statuses": {
       "draft": "Schiță",
@@ -240,6 +241,29 @@
         "employerCost": "Cost total angajator"
       },
       "computeFailed": "Nu s-a putut calcula salariul."
+    },
+    "aging": {
+      "title": "Balanță cu vechime sold",
+      "clients": "Clienți (creanțe)",
+      "suppliers": "Furnizori (datorii)",
+      "asOf": "La data:",
+      "exportCsv": "Export CSV",
+      "exporting": "Export…",
+      "dialogTitle": "Salvează balanță cu vechime sold",
+      "csvSaved": "Balanță salvată: {{path}}",
+      "csvFailed": "Nu s-a putut exporta balanța cu vechime sold.",
+      "errorLabel": "balanța cu vechime sold",
+      "loading": "Se calculează balanța…",
+      "empty": "Nicio factură cu sold restant la data selectată.",
+      "colPartner": "Partener",
+      "colCui": "CUI",
+      "colCurrent": "Curent",
+      "col130": "1–30 zile",
+      "col3160": "31–60 zile",
+      "col6190": "61–90 zile",
+      "colOver90": ">90 zile",
+      "colTotal": "Total restant",
+      "totals": "TOTAL"
     }
   }
 }
