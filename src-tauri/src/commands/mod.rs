@@ -27,6 +27,7 @@ pub mod accounts;
 pub mod anaf;
 pub mod archive;
 pub mod assets;
+pub mod bank_import;
 pub mod bnr;
 pub mod companies;
 pub mod contacts;

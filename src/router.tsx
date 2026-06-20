@@ -77,6 +77,7 @@ import { VatRatesPage } from "@/pages/VatRates";
 import { DeclarationsPage } from "@/pages/Declarations";
 import { GlLedgerPage } from "@/pages/GlLedger";
 import { BankPage } from "@/pages/Bank";
+import { BankImportPage } from "@/pages/BankImport";
 import { StornatePage } from "@/pages/Stornate";
 import { InventoryPage } from "@/pages/Inventory";
 import { InventoryRegisterPage } from "@/pages/InventoryRegister";
@@ -289,6 +290,12 @@ const bankRoute = createRoute({
   component: BankPage,
 });
 
+const bankImportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/bank-import",
+  component: BankImportPage,
+});
+
 const stornateRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/stornate",
@@ -347,6 +354,7 @@ const routeTree = rootRoute.addChildren([
   declarationsRoute,
   glLedgerRoute,
   bankRoute,
+  bankImportRoute,
   stornateRoute,
   inventoryRoute,
   inventoryRegisterRoute,

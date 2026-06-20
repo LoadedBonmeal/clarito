@@ -99,6 +99,7 @@ export function Sidebar() {
       { key: "etransport", label: t("shell.nav.etransport"), icon: "truck", path: "/etransport" },
       { key: "contabilitate", label: t("shell.nav.ledger"), icon: "scale", path: "/ledger" },
       { key: "banca-casa", label: t("shell.nav.bank"), icon: "card", path: "/bank" },
+      { key: "extras-bancar", label: t("shell.nav.bankImport"), icon: "dl", path: "/bank-import" },
     ]},
   ];
 

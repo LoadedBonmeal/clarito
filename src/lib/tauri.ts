@@ -1470,11 +1470,124 @@ export const inventory = {
     }),
 };
 
+// ─── Bank statement import (Wave 6) ──────────────────────────────────────────
+
+export interface BankAccount {
+  id: string;
+  companyId: string;
+  iban: string;
+  bankName: string;
+  currency: string;
+  glAccount: string;
+  createdAt: number;
+}
+
+export interface CreateBankAccountArgs {
+  companyId: string;
+  iban: string;
+  bankName: string;
+  currency: string;
+  glAccount?: string;
+}
+
+export interface BankStatement {
+  id: string;
+  companyId: string;
+  bankAccountId: string | null;
+  sourceFormat: string;
+  statementRef: string;
+  openingBalance: string;
+  closingBalance: string;
+  statementDate: string;
+  contentHash: string;
+  createdAt: number;
+}
+
+export type MatchConfidence = "HIGH" | "LOW";
+
+export interface MatchSuggestion {
+  invoiceId: string;
+  invoiceNumber: string | null;
+  partnerName: string | null;
+  outstanding: string;
+  /** "issued" | "received" */
+  direction: string;
+  confidence: MatchConfidence;
+}
+
+export interface BankTransaction {
+  id: string;
+  statementId: string;
+  companyId: string;
+  bookingDate: string;
+  valueDate: string | null;
+  amount: string;
+  currency: string;
+  counterpartyName: string | null;
+  counterpartyIban: string | null;
+  counterpartyCui: string | null;
+  reference: string | null;
+  txnHash: string;
+  status: "UNMATCHED" | "MATCHED" | "IGNORED";
+  matchedInvoiceId: string | null;
+  matchedPaymentId: string | null;
+  suggestions: MatchSuggestion[];
+}
+
+export interface ImportStatementResult {
+  statement: BankStatement;
+  importedTxns: number;
+  duplicate: boolean;
+  warnings: string[];
+  integrityOk: boolean | null;
+}
+
+export interface MatchBankTxnArgs {
+  txnId: string;
+  companyId: string;
+  invoiceId: string;
+  /** "issued" | "received" */
+  direction: string;
+  paidAt?: string;
+}
+
+export const bankImport = {
+  createAccount: (args: CreateBankAccountArgs) =>
+    invoke<BankAccount>("create_bank_account", { args }),
+  listAccounts: (companyId: string) =>
+    invoke<BankAccount[]>("list_bank_accounts", { companyId }),
+  deleteAccount: (id: string, companyId: string) =>
+    invoke<void>("delete_bank_account", { id, companyId }),
+  importStatement: (
+    companyId: string,
+    sourceFormat: string,
+    fileBytes: number[],
+    bankAccountId?: string,
+  ) =>
+    invoke<ImportStatementResult>("import_bank_statement", {
+      companyId,
+      sourceFormat,
+      fileBytes,
+      bankAccountId: bankAccountId ?? null,
+    }),
+  listStatements: (companyId: string) =>
+    invoke<BankStatement[]>("list_bank_statements", { companyId }),
+  listTransactions: (statementId: string, companyId: string) =>
+    invoke<BankTransaction[]>("list_bank_transactions", { statementId, companyId }),
+  matchTxn: (args: MatchBankTxnArgs) =>
+    invoke<void>("match_bank_txn", { args }),
+  unmatchTxn: (txnId: string, companyId: string) =>
+    invoke<void>("unmatch_bank_txn", { txnId, companyId }),
+  ignoreTxn: (txnId: string, companyId: string) =>
+    invoke<void>("ignore_bank_txn", { txnId, companyId }),
+};
+
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
   accounts,
   anaf,
+  bankImport,
   archive,
   bnr,
   certificates,

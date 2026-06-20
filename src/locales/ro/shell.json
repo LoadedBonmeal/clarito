@@ -51,6 +51,7 @@
       "etransport": "e-Transport",
       "ledger": "Jurnal contabil",
       "bank": "Registru de casă",
+      "bankImport": "Import extras bancar",
       "more": "Mai multe",
       "fewer": "Mai puține"
     },

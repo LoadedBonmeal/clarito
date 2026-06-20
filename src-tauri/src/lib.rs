@@ -397,6 +397,16 @@ pub fn run() {
             commands::payments::delete_payment,
             commands::payments::get_payment_summary,
             commands::payments::list_payment_summaries,
+            // bank statement import (Wave 6 — jurnal de bancă)
+            commands::bank_import::commands::create_bank_account,
+            commands::bank_import::commands::list_bank_accounts,
+            commands::bank_import::commands::delete_bank_account,
+            commands::bank_import::commands::import_bank_statement,
+            commands::bank_import::commands::list_bank_statements,
+            commands::bank_import::commands::list_bank_transactions,
+            commands::bank_import::commands::match_bank_txn,
+            commands::bank_import::commands::unmatch_bank_txn,
+            commands::bank_import::commands::ignore_bank_txn,
             // supplier payments (payments-out / buyer-side TVA la încasare)
             commands::received_payments::add_received_payment,
             commands::received_payments::list_received_payments,

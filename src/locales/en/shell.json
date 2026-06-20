@@ -50,6 +50,7 @@
       "etransport": "e-Transport",
       "ledger": "Accounting journal",
       "bank": "Cash register",
+      "bankImport": "Bank statement import",
       "more": "More",
       "fewer": "Fewer"
     },
