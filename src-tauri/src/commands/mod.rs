@@ -41,6 +41,7 @@ pub mod gl;
 pub mod import;
 pub mod import_wave_c;
 pub mod integrations;
+pub mod inventory;
 pub mod invoices;
 pub mod journals;
 pub mod license;

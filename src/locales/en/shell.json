@@ -42,6 +42,8 @@
       "accounts": "Chart of accounts",
       "vatRates": "VAT rates",
       "dividends": "Dividends",
+      "inventory": "Inventory",
+      "inventoryRegister": "Inventory register",
       "groupReporting": "Reporting",
       "reports": "Reports",
       "declarations": "ANAF declarations",

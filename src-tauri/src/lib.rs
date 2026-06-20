@@ -520,6 +520,17 @@ pub fn run() {
             commands::stock::record_stock_issue,
             commands::stock::stock_ledger,
             commands::stock::set_stock_valuation,
+            // inventory — registru-inventar + inventariere (P1 Wave 5)
+            commands::inventory::create_inventory_session,
+            commands::inventory::get_inventory_session,
+            commands::inventory::list_inventory_sessions,
+            commands::inventory::delete_inventory_session,
+            commands::inventory::list_inventory_lines,
+            commands::inventory::update_inventory_line_faptic,
+            commands::inventory::prefill_inventory_session,
+            commands::inventory::finalize_inventory_session,
+            commands::inventory::post_inventory_diffs,
+            commands::inventory::list_registru_inventar,
             // fixed assets — Phase 6b (SAF-T Assets)
             commands::assets::create_fixed_asset,
             commands::assets::list_fixed_assets,

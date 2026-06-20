@@ -1439,6 +1439,37 @@ export const importWaveC = {
     invoke<CommitReport>("import_wave_c_commit", { batchId }),
 };
 
+// ─── Inventariere + Registru-inventar (P1 Wave 5) ────────────────────────────
+
+export const inventory = {
+  createSession: (input: import("@/types").CreateInventorySessionInput) =>
+    invoke<import("@/types").InventorySession>("create_inventory_session", { input }),
+  getSession: (id: string, companyId: string) =>
+    invoke<import("@/types").InventorySession>("get_inventory_session", { id, companyId }),
+  listSessions: (companyId: string, fiscalYear?: number) =>
+    invoke<import("@/types").InventorySession[]>("list_inventory_sessions", {
+      companyId,
+      fiscalYear: fiscalYear ?? null,
+    }),
+  deleteSession: (id: string, companyId: string) =>
+    invoke<void>("delete_inventory_session", { id, companyId }),
+  listLines: (sessionId: string, companyId: string) =>
+    invoke<import("@/types").InventoryLine[]>("list_inventory_lines", { sessionId, companyId }),
+  updateLineFaptic: (input: import("@/types").UpdateInventoryLineFapticInput) =>
+    invoke<import("@/types").InventoryLine>("update_inventory_line_faptic", { input }),
+  prefillSession: (sessionId: string, companyId: string) =>
+    invoke<import("@/types").InventoryLine[]>("prefill_inventory_session", { sessionId, companyId }),
+  finalizeSession: (sessionId: string, companyId: string) =>
+    invoke<import("@/types").InventorySession>("finalize_inventory_session", { sessionId, companyId }),
+  postDiffs: (sessionId: string, companyId: string) =>
+    invoke<void>("post_inventory_diffs", { sessionId, companyId }),
+  listRegistru: (companyId: string, fiscalYear: number) =>
+    invoke<import("@/types").RegistruInventarEntry[]>("list_registru_inventar", {
+      companyId,
+      fiscalYear,
+    }),
+};
+
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
@@ -1458,6 +1489,7 @@ export const api = {
   gl,
   importData,
   importWaveC,
+  inventory,
   integrations,
   invoices,
   journals,

@@ -1,0 +1,84 @@
+{
+  "inventory": {
+    "pageTitle": "Inventariere",
+    "pageSubtitle": "Listă de inventariere cod 14-3-12 (OMFP 2861/2009)",
+    "registerTitle": "Registru-inventar",
+    "registerSubtitle": "Registru-inventar cod 14-1-2 (OMFP 2634/2015)",
+    "newSession": "Sesiune nouă",
+    "prefill": "Pre-completează din stoc",
+    "finalize": "Finalizează sesiunea",
+    "postDiffs": "Postează diferențele în GL",
+    "deleteSession": "Șterge sesiunea",
+    "sessionStatus": {
+      "DRAFT": "Ciornă",
+      "FINALIZED": "Finalizat"
+    },
+    "sessionType": {
+      "ANUAL": "Inventariere anuală",
+      "INCEPERE": "Inventariere la începerea activității",
+      "INCETARE": "Inventariere la încetarea activității",
+      "PREDARE_GESTIUNE": "Predare-primire gestiune",
+      "CALAMITATE": "Inventariere calamitate"
+    },
+    "form": {
+      "referenceDate": "Data de referință",
+      "fiscalYear": "Anul fiscal",
+      "type": "Tip inventariere",
+      "gestiune": "Gestiune (opțional)",
+      "gestiuonePlaceholder": "Ex. Depozit central",
+      "comisieMembers": "Membri comisie de inventariere",
+      "comisieMembersPlaceholder": "Nume separate prin virgulă (ex: Ion Popescu, Maria Ionescu)",
+      "notes": "Observații",
+      "cancel": "Anulează",
+      "create": "Creează sesiunea"
+    },
+    "table": {
+      "account": "Cont",
+      "itemName": "Denumire",
+      "um": "UM",
+      "qtyScriptic": "Qty scriptic",
+      "qtyFaptic": "Qty faptic",
+      "unitPrice": "Preț unitar",
+      "valueContabila": "Valoare contabilă",
+      "valueInventar": "Valoare inventar",
+      "diffValue": "Diferență",
+      "diffCause": "Cauza diferenței"
+    },
+    "diffCause": {
+      "": "—",
+      "perisabilitati": "Perisabilități",
+      "imputabil": "Imputabil gestionar",
+      "neimputabil": "Neimputabil",
+      "depreciere": "Depreciere",
+      "altele": "Altele"
+    },
+    "registru": {
+      "seqNo": "Nr. crt.",
+      "recapText": "Recapitulație",
+      "valueContabila": "Valoare contabilă (RON)",
+      "valueInventar": "Valoare inventar (RON)",
+      "diffValue": "Diferențe (RON)",
+      "diffCause": "Cauze diferențe",
+      "totals": "TOTAL",
+      "noEntries": "Nicio înregistrare în registru pentru acest an.",
+      "yearPicker": "An fiscal"
+    },
+    "messages": {
+      "sessionCreated": "Sesiunea de inventariere a fost creată.",
+      "prefillDone": "Sesiunea a fost pre-completată cu stocul curent.",
+      "finalized": "Sesiunea a fost finalizată și înregistrată în Registrul-inventar.",
+      "glPosted": "Diferențele neimputabile au fost postate în GL (D 607 / stoc).",
+      "deleted": "Sesiunea a fost ștearsă.",
+      "confirmFinalize": "Finalizezi sesiunea? Aceasta va deveni imutabilă și va fi înregistrată în Registrul-inventar.",
+      "confirmPostDiffs": "Postezi diferențele neimputabile în GL? Cazurile imputabile, ajustarea TVA și perisabilitățile se postează manual (Contabilitate → Note manuale).",
+      "confirmDelete": "Ștergi sesiunea de inventariere? Această acțiune nu poate fi anulată.",
+      "noStock": "Niciun produs cu stoc curent găsit pentru pre-completare.",
+      "glDeferredNote": "ATENȚIE: Cazurile imputabile (461/4282 = 7588 + 4427), ajustarea TVA pe lipsă neimputabilă (635 = 4427) și limitele de perisabilități (HG 831/2004) nu sunt auto-postate. Postați-le manual via Contabilitate → Note manuale."
+    },
+    "empty": "Nicio sesiune de inventariere pentru compania selectată.",
+    "noLines": "Nicio linie. Folosiți «Pre-completează din stoc» sau adăugați linii manual.",
+    "sessionOf": "Sesiunea din {{date}}",
+    "imputable": "Imputabil",
+    "notImputable": "Neimputabil"
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "inventory": {
+    "pageTitle": "Inventory",
+    "pageSubtitle": "Inventory list form 14-3-12 (OMFP 2861/2009)",
+    "registerTitle": "Inventory register",
+    "registerSubtitle": "Inventory register form 14-1-2 (OMFP 2634/2015)",
+    "newSession": "New session",
+    "prefill": "Pre-fill from stock",
+    "finalize": "Finalize session",
+    "postDiffs": "Post differences to GL",
+    "deleteSession": "Delete session",
+    "sessionStatus": {
+      "DRAFT": "Draft",
+      "FINALIZED": "Finalized"
+    },
+    "sessionType": {
+      "ANUAL": "Annual inventory",
+      "INCEPERE": "Inventory at start of activity",
+      "INCETARE": "Inventory at end of activity",
+      "PREDARE_GESTIUNE": "Custody handover",
+      "CALAMITATE": "Calamity inventory"
+    },
+    "form": {
+      "referenceDate": "Reference date",
+      "fiscalYear": "Fiscal year",
+      "type": "Inventory type",
+      "gestiune": "Custody/warehouse (optional)",
+      "gestiuonePlaceholder": "E.g. Main warehouse",
+      "comisieMembers": "Inventory committee members",
+      "comisieMembersPlaceholder": "Comma-separated names (e.g. Ion Popescu, Maria Ionescu)",
+      "notes": "Notes",
+      "cancel": "Cancel",
+      "create": "Create session"
+    },
+    "table": {
+      "account": "Account",
+      "itemName": "Description",
+      "um": "Unit",
+      "qtyScriptic": "Book qty",
+      "qtyFaptic": "Physical qty",
+      "unitPrice": "Unit price",
+      "valueContabila": "Book value",
+      "valueInventar": "Inventory value",
+      "diffValue": "Difference",
+      "diffCause": "Cause"
+    },
+    "diffCause": {
+      "": "—",
+      "perisabilitati": "Natural shrinkage",
+      "imputabil": "Imputable to custodian",
+      "neimputabil": "Non-imputable",
+      "depreciere": "Depreciation",
+      "altele": "Other"
+    },
+    "registru": {
+      "seqNo": "No.",
+      "recapText": "Recap",
+      "valueContabila": "Book value (RON)",
+      "valueInventar": "Inventory value (RON)",
+      "diffValue": "Differences (RON)",
+      "diffCause": "Causes",
+      "totals": "TOTAL",
+      "noEntries": "No entries in the register for this year.",
+      "yearPicker": "Fiscal year"
+    },
+    "messages": {
+      "sessionCreated": "Inventory session created.",
+      "prefillDone": "Session pre-filled with current stock.",
+      "finalized": "Session finalized and recorded in the inventory register.",
+      "glPosted": "Non-imputable differences posted to GL (D 607 / stock).",
+      "deleted": "Session deleted.",
+      "confirmFinalize": "Finalize this session? It will become immutable and recorded in the inventory register.",
+      "confirmPostDiffs": "Post non-imputable differences to GL? Imputable, VAT adjustment, and shrinkage cases must be posted manually (Accounting → Manual journals).",
+      "confirmDelete": "Delete this inventory session? This cannot be undone.",
+      "noStock": "No products with current stock found for pre-filling.",
+      "glDeferredNote": "NOTE: Imputable cases (461/4282 = 7588 + 4427), VAT adjustment on non-imputable shortage (635 = 4427), and shrinkage limits (HG 831/2004) are not auto-posted. Post them manually via Accounting → Manual journals."
+    },
+    "empty": "No inventory sessions for the selected company.",
+    "noLines": "No lines. Use «Pre-fill from stock» or add lines manually.",
+    "sessionOf": "Session of {{date}}",
+    "imputable": "Imputable",
+    "notImputable": "Non-imputable"
+  }
+}

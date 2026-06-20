@@ -78,6 +78,8 @@ import { DeclarationsPage } from "@/pages/Declarations";
 import { GlLedgerPage } from "@/pages/GlLedger";
 import { BankPage } from "@/pages/Bank";
 import { StornatePage } from "@/pages/Stornate";
+import { InventoryPage } from "@/pages/Inventory";
+import { InventoryRegisterPage } from "@/pages/InventoryRegister";
 
 // ─── Layout root ──────────────────────────────────────────────────────────
 
@@ -299,6 +301,18 @@ const glLedgerRoute = createRoute({
   component: GlLedgerPage,
 });
 
+const inventoryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/inventory",
+  component: InventoryPage,
+});
+
+const inventoryRegisterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/inventory-register",
+  component: InventoryRegisterPage,
+});
+
 // ─── Build tree + router ──────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -334,6 +348,8 @@ const routeTree = rootRoute.addChildren([
   glLedgerRoute,
   bankRoute,
   stornateRoute,
+  inventoryRoute,
+  inventoryRegisterRoute,
 ]);
 
 export const router = createRouter({

@@ -1507,3 +1507,95 @@ export interface ManualJournalView {
   totalDebit: string;
   totalCredit: string;
 }
+
+// ─── Inventariere + Registru-inventar (P1 Wave 5) ────────────────────────────
+
+/** Tip sesiune de inventariere (OMFP 2861/2009). */
+export type InventorySessionType =
+  | "ANUAL"
+  | "INCEPERE"
+  | "INCETARE"
+  | "PREDARE_GESTIUNE"
+  | "CALAMITATE";
+
+/** Status sesiune inventariere. */
+export type InventorySessionStatus = "DRAFT" | "FINALIZED";
+
+/** Cauza diferenței de inventar. */
+export type InventoryDiffCause =
+  | "perisabilitati"
+  | "imputabil"
+  | "neimputabil"
+  | "depreciere"
+  | "altele";
+
+/** Sesiune de inventariere (Listă de inventariere cod 14-3-12). */
+export interface InventorySession {
+  id: string;
+  companyId: string;
+  referenceDate: string;
+  fiscalYear: number;
+  type: InventorySessionType;
+  gestiune: string | null;
+  status: InventorySessionStatus;
+  comisieMembers: string; // JSON array
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Linie din lista de inventariere. */
+export interface InventoryLine {
+  id: string;
+  sessionId: string;
+  accountCode: string;
+  itemName: string;
+  um: string;
+  qtyScriptic: string;
+  qtyFaptic: string;
+  unitPrice: string;
+  valueContabila: string;
+  valueInventar: string;
+  diffValue: string;
+  diffCause: InventoryDiffCause | null;
+  imputable: number;
+  productId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Input pentru crearea unei sesiuni de inventariere. */
+export interface CreateInventorySessionInput {
+  companyId: string;
+  referenceDate: string;
+  fiscalYear: number;
+  type?: InventorySessionType;
+  gestiune?: string;
+  comisieMembers?: string;
+  notes?: string;
+}
+
+/** Input pentru actualizarea cantității faptice pe o linie. */
+export interface UpdateInventoryLineFapticInput {
+  lineId: string;
+  sessionId: string;
+  companyId: string;
+  qtyFaptic: string;
+  diffCause?: InventoryDiffCause;
+  imputable?: boolean;
+}
+
+/** Rând din Registrul-inventar (cod 14-1-2, OMFP 2634/2015). */
+export interface RegistruInventarEntry {
+  id: string;
+  companyId: string;
+  fiscalYear: number;
+  seqNo: number;
+  recapText: string;
+  valueContabila: string;
+  valueInventar: string;
+  diffValue: string;
+  diffCause: string;
+  sourceSessionId: string | null;
+  createdAt: number;
+}

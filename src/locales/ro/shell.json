@@ -43,6 +43,8 @@
       "accounts": "Plan de conturi",
       "vatRates": "Cote TVA",
       "dividends": "Dividende",
+      "inventory": "Inventariere",
+      "inventoryRegister": "Registru-inventar",
       "groupReporting": "Raportare",
       "reports": "Rapoarte",
       "declarations": "Declarații ANAF",
