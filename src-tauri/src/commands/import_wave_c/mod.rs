@@ -9,10 +9,18 @@
 //! No Tauri commands are registered here yet — see W4/W5.
 
 pub mod adapter;
+pub mod saga_dbf;
 pub mod saga_xml;
+pub mod smartbill_rest;
 pub mod smartbill_xml;
 pub mod winmentor;
 pub mod xml_common;
+
+// W3 re-exports for W4 convenience.
+pub use saga_dbf::SagaDbfAdapter;
+pub use smartbill_rest::{
+    fetch_smartbill, map_stocks_json, SmartBillCreds, SmartBillResource, SmartBillRestAdapter,
+};
 
 // ─── SourceKind ─────────────────────────────────────────────────────────────
 

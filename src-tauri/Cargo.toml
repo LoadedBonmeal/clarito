@@ -109,6 +109,9 @@ csv = "1"
 # Character-encoding conversion (Windows-1250 → UTF-8 for WinMentor TXT files)
 encoding_rs = "0.8"
 
+# DBF (dBase) file reading and writing — used by the SAGA DBF import adapter (W3).
+dbase = "0.7"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # Enable macOS Keychain backend for keyring v3.
 # Without this feature keyring falls back to an in-memory mock store and all
