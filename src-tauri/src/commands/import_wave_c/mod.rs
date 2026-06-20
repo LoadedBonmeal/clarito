@@ -9,7 +9,10 @@
 //! No Tauri commands are registered here yet — see W4/W5.
 
 pub mod adapter;
+pub mod saga_xml;
+pub mod smartbill_xml;
 pub mod winmentor;
+pub mod xml_common;
 
 // ─── SourceKind ─────────────────────────────────────────────────────────────
 
