@@ -1,6 +1,5 @@
 # cargo-deny supply-chain policy for the Clarito backend.
-# Run:  cargo deny check advisories bans sources
-# cargo-deny is NOT bundled with the repo; CI installs it (.github/workflows/audit.yml).
+# Run:  cargo deny check advisories bans sources  (CI: .github/workflows/ci.yml — supply-chain job).
 # Re-run the triage below whenever Cargo.lock changes.
 
 [advisories]
@@ -13,6 +12,24 @@ ignore = [
     # decryption oracle in this LOCAL, single-operator desktop app — so not practically
     # exploitable here. REVISIT when the `rsa` crate publishes a constant-time fix.
     "RUSTSEC-2023-0071",
+
+    # ── Tauri 2 Linux GUI stack: gtk-rs GTK3 bindings, "no longer maintained" ──────────────
+    # Tauri 2 on Linux is built on WebKit2GTK + GTK3, so the whole gtk-rs GTK3 binding family
+    # (atk, gdk, gdk-pixbuf, gdkx11, gdkwayland, gtk, gtk3-macros, atk-sys, gdk-sys, …) is an
+    # UNAVOIDABLE transitive dependency. Upstream archived the GTK3 bindings (GTK4 only now),
+    # so these are flagged `unmaintained` — but there is no alternative while Tauri uses GTK3,
+    # and "unmaintained" is not an exploitable vulnerability. They affect only the Linux build.
+    "RUSTSEC-2024-0411", "RUSTSEC-2024-0412", "RUSTSEC-2024-0413", "RUSTSEC-2024-0414",
+    "RUSTSEC-2024-0415", "RUSTSEC-2024-0416", "RUSTSEC-2024-0417", "RUSTSEC-2024-0418",
+    "RUSTSEC-2024-0419", "RUSTSEC-2024-0420",
+
+    # ── Other transitive `unmaintained` crates (no fix / not attacker-reachable here) ─────────
+    # proc-macro-error (build-time proc-macro helper, pulled by transitive deps) + a handful of
+    # small transitive crates flagged unmaintained in 2025. All build-time or local-only; none
+    # is an exploitable runtime vulnerability for a single-operator desktop app. REVISIT on bump.
+    "RUSTSEC-2024-0370",
+    "RUSTSEC-2025-0075", "RUSTSEC-2025-0080", "RUSTSEC-2025-0081",
+    "RUSTSEC-2025-0098", "RUSTSEC-2025-0100",
 ]
 
 [bans]

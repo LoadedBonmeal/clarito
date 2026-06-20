@@ -54,6 +54,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        with:
+          version: 9 # match pnpm-lock.yaml lockfileVersion 9.0 (action-setup@v4 needs a version)
       - uses: actions/setup-node@v4
         with:
           node-version: 22

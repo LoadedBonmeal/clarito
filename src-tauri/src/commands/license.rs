@@ -201,7 +201,8 @@ fn read_hostname_os() -> Option<String> {
         if trimmed.is_empty() {
             return None;
         }
-        return Some(trimmed.to_string());
+        // Tail of the Linux #[cfg] block — clippy 1.96 (CI/Linux) flags a `return` here as needless.
+        Some(trimmed.to_string())
     }
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]
