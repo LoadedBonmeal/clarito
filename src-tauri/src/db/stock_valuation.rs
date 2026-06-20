@@ -1,4 +1,4 @@
-//! Evaluarea stocurilor (gestiune) — FIFO + CMP (cost mediu ponderat), OMFP 1802/2014 pct. 8.5.
+//! Evaluarea stocurilor (gestiune) — FIFO + CMP (cost mediu ponderat) + LIFO, OMFP 1802/2014 pct. 96.
 //!
 //! Două motoare PURE (testate) operează pe un flux cronologic de evenimente per produs (IN = recepție
 //! la cost de achiziție; OUT = descărcare gestiune). Costul ieșirilor (COGS) nu poate fi atribuit la
@@ -54,6 +54,21 @@ fn q6(d: Decimal) -> Decimal {
 
 /// FIFO (primul intrat – primul ieșit): each OUT consumes the oldest receipt layers at their own cost.
 pub fn fifo_value(events: &[StockEvent]) -> Vec<ValuedEvent> {
+    layered_value(events, false)
+}
+
+/// LIFO (ultimul intrat – primul ieșit): each OUT consumes the NEWEST receipt layers at their own
+/// cost. Permis pentru contabilitatea STATUTARĂ RO (OMFP 1802/2014 pct. 96 alin. (1) — CMP/FIFO/LIFO);
+/// interzis doar pentru entitățile IFRS (IAS 2, din 2005). Motor identic cu FIFO, dar consumă din
+/// coada stivei de loturi (cel mai recent), nu din față.
+pub fn lifo_value(events: &[StockEvent]) -> Vec<ValuedEvent> {
+    layered_value(events, true)
+}
+
+/// Shared layered-cost engine for FIFO / LIFO. `newest_first=false` ⇒ FIFO (consume the oldest IN
+/// layer first); `newest_first=true` ⇒ LIFO (consume the newest IN layer first). Everything else
+/// (rounding, running snapshot, negative-stock fallback to last cost, layer backfill) is identical.
+fn layered_value(events: &[StockEvent], newest_first: bool) -> Vec<ValuedEvent> {
     let mut layers: VecDeque<(usize, Decimal, Decimal)> = VecDeque::new(); // (event_index, remaining, unit_cost)
     let mut out = Vec::with_capacity(events.len());
     let mut run_qty = Decimal::ZERO;
@@ -82,13 +97,23 @@ pub fn fifo_value(events: &[StockEvent]) -> Vec<ValuedEvent> {
                 let mut cogs = Decimal::ZERO;
                 let mut negative = false;
                 while need > Decimal::ZERO {
-                    if let Some(front) = layers.front_mut() {
+                    // FIFO consumes the front (oldest) layer; LIFO the back (newest).
+                    let layer = if newest_first {
+                        layers.back_mut()
+                    } else {
+                        layers.front_mut()
+                    };
+                    if let Some(front) = layer {
                         let take = need.min(front.1);
                         cogs += round2(take * front.2);
                         front.1 -= take;
                         need -= take;
                         if front.1 <= Decimal::ZERO {
-                            layers.pop_front();
+                            if newest_first {
+                                layers.pop_back();
+                            } else {
+                                layers.pop_front();
+                            }
                         }
                     } else {
                         // Stock-out: value the shortfall at the last known cost (or 0).
@@ -344,10 +369,10 @@ pub async fn recompute_product(
         })
         .collect();
 
-    let valued = if method == "FIFO" {
-        fifo_value(&events)
-    } else {
-        cmp_value(&events)
+    let valued = match method.as_str() {
+        "FIFO" => fifo_value(&events),
+        "LIFO" => lifo_value(&events), // OMFP 1802/2014 pct. 96 — statutar; interzis IFRS (IAS 2)
+        _ => cmp_value(&events),       // CMP (cost mediu ponderat) — implicit
     };
 
     let mut tx = pool.begin().await?;
@@ -552,6 +577,41 @@ mod tests {
         assert_eq!(v[2].value, d("85.00"));
         assert_eq!(v[2].run_qty, d("5.000000"));
         assert_eq!(v[2].run_value, d("35.00"));
+    }
+
+    #[test]
+    fn lifo_textbook() {
+        // IN 10@5, IN 10@7, OUT 15 → LIFO consumes newest first: 10@7 + 5@5 = 70 + 25 = 95;
+        // remaining 5@5 = 25. Diverges from FIFO (85 / remaining 35) — the whole point of LIFO.
+        let v = lifo_value(&[
+            ev(Dir::In, "10", "5"),
+            ev(Dir::In, "10", "7"),
+            ev(Dir::Out, "15", "0"),
+        ]);
+        assert_eq!(v[2].value, d("95.00"), "LIFO COGS = 10@7 + 5@5 = 95");
+        assert_eq!(v[2].run_qty, d("5.000000"));
+        assert_eq!(
+            v[2].run_value,
+            d("25.00"),
+            "remaining 5 of the @5 layer = 25"
+        );
+        // LIFO leaves the OLDEST (@5) layer as the on-hand remainder (5 units).
+        assert_eq!(v[0].fifo_remaining, d("5.000000"));
+    }
+
+    #[test]
+    fn fifo_unchanged_after_lifo_refactor() {
+        // Guard: fifo_value (now a wrapper over layered_value) stays identical to the old FIFO.
+        let evs = [
+            ev(Dir::In, "10", "5"),
+            ev(Dir::In, "10", "7"),
+            ev(Dir::Out, "15", "0"),
+        ];
+        let f = fifo_value(&evs);
+        assert_eq!(f[2].value, d("85.00"));
+        assert_eq!(f[2].run_value, d("35.00"));
+        // FIFO leaves the NEWEST (@7) layer as the on-hand remainder (5 units) — opposite of LIFO.
+        assert_eq!(f[1].fifo_remaining, d("5.000000"));
     }
 
     #[test]

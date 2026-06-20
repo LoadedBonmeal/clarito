@@ -3828,6 +3828,34 @@ pub async fn general_ledger(
     period_from: &str,
     period_to: &str,
 ) -> AppResult<Vec<LedgerAccount>> {
+    ledger_for(pool, company_id, period_from, period_to, None).await
+}
+
+/// Fișă de cont pe FURNIZOR/CLIENT (fișă analitică terți): the partner's 401/4111/etc. subledger — the
+/// per-account ledger sheets restricted to the partner's own lines. `partner_cui` is a gl_ENTRY tag
+/// (set only on the terț line, e.g. 4111), so the sheet shows just that partner's account movements;
+/// the offset (707/4427/5121) is folded into the corespondent column. Analitic terți (OMFP 1802/2014).
+pub async fn partner_ledger(
+    pool: &SqlitePool,
+    company_id: &str,
+    partner_cui: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<Vec<LedgerAccount>> {
+    ledger_for(pool, company_id, period_from, period_to, Some(partner_cui)).await
+}
+
+/// Shared body for [`general_ledger`] (sintetică, `partner=None`) and [`partner_ledger`] (analitică
+/// terți, `partner=Some(cui)`). For a partner, the opening + period queries filter on the gl_ENTRY tag
+/// `e.partner_cui`, while the period fetch pulls the FULL journals that touch the partner (so the
+/// corespondent column stays correct) and the sheet loop keeps only the partner's own lines.
+async fn ledger_for(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+    partner_cui: Option<&str>,
+) -> AppResult<Vec<LedgerAccount>> {
     use std::collections::{BTreeMap, HashMap};
 
     // Account names from the chart.
@@ -3844,37 +3872,54 @@ pub async fn general_ledger(
         names.insert(c, n);
     }
 
-    // Opening balance per account (net debit−credit) before the period.
-    let opening_rows = sqlx::query(
+    // Opening balance before the period. `partner_cui` lives on gl_ENTRY (per-line), so the partner
+    // opening sums only the partner-tagged lines (the 401/4111 analytic opening for that partner).
+    let opening_sql = format!(
         "SELECT e.account_code, \
                 COALESCE(SUM(CAST(e.debit AS REAL)-CAST(e.credit AS REAL)),0.0) AS net \
          FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
-         WHERE j.company_id = ?1 AND j.transaction_date < ?2 \
+         WHERE j.company_id = ?1 AND j.transaction_date < ?2{} \
          GROUP BY e.account_code",
-    )
-    .bind(company_id)
-    .bind(period_from)
-    .fetch_all(pool)
-    .await?;
+        if partner_cui.is_some() {
+            " AND e.partner_cui = ?3"
+        } else {
+            ""
+        },
+    );
+    let mut opening_q = sqlx::query(&opening_sql).bind(company_id).bind(period_from);
+    if let Some(p) = partner_cui {
+        opening_q = opening_q.bind(p);
+    }
+    let opening_rows = opening_q.fetch_all(pool).await?;
     let mut opening: HashMap<String, Decimal> = HashMap::new();
     for r in &opening_rows {
         let c: String = r.try_get("account_code").unwrap_or_default();
         opening.insert(c, dec_f(r.try_get::<f64, _>("net").unwrap_or(0.0)));
     }
 
-    // All period entries with their journal, to derive corespondent accounts per journal.
-    let ent_rows = sqlx::query(
+    // All period entries with their journal. In partner mode we pull the FULL journals that touch the
+    // partner (the `journal_pk IN (…)` sub-query) so the corespondent column stays correct, and select
+    // `e.partner_cui` so the sheet loop can keep only the partner's own lines.
+    let ent_sql = format!(
         "SELECT e.journal_pk, j.transaction_date AS d, j.journal_id, j.transaction_id, \
-                j.description, e.account_code, e.debit, e.credit, e.record_id \
+                j.description, e.account_code, e.debit, e.credit, e.record_id, e.partner_cui AS ent_partner \
          FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
-         WHERE j.company_id = ?1 AND j.transaction_date >= ?2 AND j.transaction_date <= ?3 \
+         WHERE j.company_id = ?1 AND j.transaction_date >= ?2 AND j.transaction_date <= ?3{} \
          ORDER BY j.transaction_date, j.transaction_id, e.record_id",
-    )
-    .bind(company_id)
-    .bind(period_from)
-    .bind(period_to)
-    .fetch_all(pool)
-    .await?;
+        if partner_cui.is_some() {
+            " AND e.journal_pk IN (SELECT journal_pk FROM gl_entry WHERE partner_cui = ?4)"
+        } else {
+            ""
+        },
+    );
+    let mut ent_q = sqlx::query(&ent_sql)
+        .bind(company_id)
+        .bind(period_from)
+        .bind(period_to);
+    if let Some(p) = partner_cui {
+        ent_q = ent_q.bind(p);
+    }
+    let ent_rows = ent_q.fetch_all(pool).await?;
 
     // Per journal: the debit-side and credit-side account sets (for corespondent display).
     let mut jrnl_debit: HashMap<String, Vec<String>> = HashMap::new();
@@ -3932,6 +3977,14 @@ pub async fn general_ledger(
     let mut totals: HashMap<String, (Decimal, Decimal)> = HashMap::new();
 
     for r in &ent_rows {
+        // Partner subledger: only the partner's OWN lines appear on the sheet (and feed running/totals);
+        // the journal's offset lines were already folded into the corespondent map above.
+        if let Some(target) = partner_cui {
+            let ent_partner: Option<String> = r.try_get("ent_partner").unwrap_or(None);
+            if ent_partner.as_deref() != Some(target) {
+                continue;
+            }
+        }
         let acc: String = r.try_get("account_code").unwrap_or_default();
         let jpk: String = r.try_get("journal_pk").unwrap_or_default();
         let debit = dec(&r.try_get::<String, _>("debit").unwrap_or_default());
@@ -6570,5 +6623,131 @@ mod tests {
             Decimal::ZERO,
             "receivable fully relieved at invoice rate"
         );
+    }
+
+    // ── partner_ledger: filters to one partner; general_ledger sees both ─────
+    #[tokio::test]
+    async fn partner_ledger_filters_to_one_partner() {
+        let pool = setup_pool().await;
+        let cid = "co";
+        insert_company(&pool, cid).await;
+
+        // Two distinct partners with different CUIs.
+        insert_contact(&pool, cid, "ct_ro111", "RO111").await;
+        insert_contact(&pool, cid, "ct_ro222", "RO222").await;
+
+        // Invoice A for RO111 (net=1000, VAT=190, gross=1190).
+        insert_invoice(
+            &pool,
+            cid,
+            "inv_a",
+            "ct_ro111",
+            "VALIDATED",
+            "1000",
+            "190",
+            "1190",
+            None,
+        )
+        .await;
+        // Invoice B for RO222 (net=2000, VAT=380, gross=2380).
+        insert_invoice(
+            &pool,
+            cid,
+            "inv_b",
+            "ct_ro222",
+            "VALIDATED",
+            "2000",
+            "380",
+            "2380",
+            None,
+        )
+        .await;
+
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+            .await
+            .expect("generate_gl_entries");
+
+        // general_ledger sees both partners — 4111 carries 1190 + 2380 = 3570.
+        let full = general_ledger(&pool, cid, "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        let full_4111 = full
+            .iter()
+            .find(|a| a.account_code == "4111")
+            .expect("4111 in full GL");
+        assert_eq!(
+            dec(&full_4111.total_debit),
+            dec("3570"),
+            "general_ledger sees both partners on 4111"
+        );
+
+        // partner_ledger for RO111 — only inv_a's journals: 4111 D=1190, 707 C=1000, 4427 C=190.
+        let p111 = partner_ledger(&pool, cid, "RO111", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+
+        // 4111 shows only RO111's receivable (1190), NOT RO222's (2380).
+        let p111_4111 = p111
+            .iter()
+            .find(|a| a.account_code == "4111")
+            .expect("4111 in RO111 ledger");
+        assert_eq!(
+            dec(&p111_4111.total_debit),
+            dec("1190"),
+            "partner_ledger(RO111) on 4111 must be 1190, not 3570"
+        );
+        assert_eq!(
+            dec(&p111_4111.total_credit),
+            dec("0"),
+            "no credit movements on 4111 for RO111 (no payment)"
+        );
+
+        // FIȘĂ PE PARTENER = the partner's terț-account subledger (4111) ONLY. The offset lines of the
+        // journal (707 revenue, 4427 VAT) are NOT partner-tagged (post_sales_invoice sets partner_cui
+        // only on the 4111 line), so they must NOT appear as their own sheets in the partner ledger —
+        // they show up as the corespondent ("%") of the 4111 line instead.
+        assert!(
+            p111.iter()
+                .all(|a| a.account_code != "707" && a.account_code != "4427"),
+            "partner ledger must contain only the partner's terț accounts, not 707/4427"
+        );
+        // The 4111 line's corespondent is the offset side (707 + 4427) → "%" (operațiuni diverse).
+        assert_eq!(
+            p111_4111.entries.first().map(|e| e.contra.as_str()),
+            Some("%"),
+            "corespondentul liniei 4111 (din jurnalul complet) = 707+4427 → %"
+        );
+
+        // RO222's amounts are NOT present in RO111's ledger.
+        for a in &p111 {
+            assert!(
+                dec(&a.total_debit) + dec(&a.total_credit) < dec("2380"),
+                "no RO222 movement should appear in RO111 partner ledger (account {})",
+                a.account_code
+            );
+        }
+
+        // Symmetry: partner_ledger for RO222 — 4111 D=2380.
+        let p222 = partner_ledger(&pool, cid, "RO222", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        let p222_4111 = p222
+            .iter()
+            .find(|a| a.account_code == "4111")
+            .expect("4111 in RO222 ledger");
+        assert_eq!(
+            dec(&p222_4111.total_debit),
+            dec("2380"),
+            "partner_ledger(RO222) on 4111 must be 2380"
+        );
+
+        // RO111 accounts must not appear with RO111-only amounts in RO222 ledger.
+        if let Some(a) = p222.iter().find(|a| a.account_code == "4111") {
+            // 4111 debit for RO222 must be exactly 2380.
+            assert!(
+                dec(&a.total_debit) != dec("1190"),
+                "RO111's 1190 must not appear in RO222 ledger"
+            );
+        }
     }
 }

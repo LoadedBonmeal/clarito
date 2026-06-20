@@ -30,7 +30,7 @@ pub struct Product {
     /// Allowed values: cereal NC codes + category codes 22–31,36 (tp=1) / 22,23,32–35 (tp=2).
     /// NULL = use default 22 in D394.
     pub art331_code: Option<String>,
-    /// Stock valuation policy (OMFP 1802): 'FIFO' | 'CMP' (default CMP).
+    /// Stock valuation policy (OMFP 1802/2014 pct. 96): 'FIFO' | 'CMP' | 'LIFO' (default CMP).
     pub valuation_method: Option<String>,
     /// GL stock account for this product (371 mărfuri / 301 materii prime / 345 produse…).
     pub stock_account: Option<String>,

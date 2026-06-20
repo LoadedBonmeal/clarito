@@ -29,7 +29,8 @@
       "reconcile": "Reconciliere D300",
       "bilant": "Bilanț XML",
       "ledger": "Cartea mare",
-      "pnl": "Profit și pierdere"
+      "pnl": "Profit și pierdere",
+      "partner": "Fișă partener"
     },
     "common": {
       "loading": "Se încarcă…",
@@ -286,6 +287,13 @@
         "balance": "Sold"
       },
       "totalRow": "Rulaj / sold final"
+    },
+    "partner": {
+      "selectPlaceholder": "Selectați un partener (furnizor / client)…",
+      "empty": "Niciun partener selectat — alegeți un furnizor sau client din lista de mai sus.",
+      "noMovements": "Nicio mișcare contabilă pentru partenerul selectat în perioadă.",
+      "loading": "Se încarcă fișa partenerului…",
+      "error": "Nu s-a putut încărca fișa partenerului."
     },
     "pnl": {
       "title": "Cont de profit și pierdere — {{period}}",

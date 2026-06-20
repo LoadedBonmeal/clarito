@@ -786,6 +786,9 @@ export const gl = {
   /** Cartea mare (cod 14-1-3) — câte o filă pe cont. */
   generalLedger: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<LedgerAccount[]>("general_ledger", { companyId, periodFrom, periodTo }),
+  /** Fișă de cont pe furnizor/client (fișă analitică terți) — filele de cont ale partenerului. */
+  partnerLedger: (companyId: string, partnerCui: string, periodFrom: string, periodTo: string) =>
+    invoke<LedgerAccount[]>("partner_ledger", { companyId, partnerCui, periodFrom, periodTo }),
 };
 
 // ─── Declarations (D300) ──────────────────────────────────────────────────

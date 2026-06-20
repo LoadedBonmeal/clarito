@@ -30,6 +30,7 @@ import { fmtRON, parseDec } from "@/lib/utils";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import type {
+  Contact,
   GlPostResult, ReconcileReport, VatSettlementResult, TrialBalance,
   JournalRegister, LedgerAccount, ProfitLoss, BilantReport,
 } from "@/types";
@@ -101,6 +102,7 @@ export function GlLedgerPage() {
     t("gl.tabs.bilant"),
     t("gl.tabs.ledger"),
     t("gl.tabs.pnl"),
+    t("gl.tabs.partner"),
   ];
 
   const now = new Date();
@@ -131,6 +133,12 @@ export function GlLedgerPage() {
   const [jrQuery, setJrQuery] = useState("");
   const [jrPage,  setJrPage]  = useState(1);
 
+  // ── Fișă partener ────────────────────────────────────────────────────────
+  const [partnerContacts,   setPartnerContacts]   = useState<Contact[] | null>(null);
+  const [partnerCui,        setPartnerCui]        = useState("");
+  const [partnerLedger,     setPartnerLedger]     = useState<LedgerAccount[] | null>(null);
+  const [loadingPartner,    setLoadingPartner]    = useState(false);
+
   const [refreshTick, setRefreshTick] = useState(0);
   const attempted = useRef<Set<string>>(new Set());
 
@@ -159,6 +167,7 @@ export function GlLedgerPage() {
     setPnl(null);
     setBilant(null);
     setJrPage(1);
+    setPartnerLedger(null);
   };
   const prevCtx = useRef(`${activeCompanyId}|${dateFrom}`);
   useEffect(() => {
@@ -244,6 +253,29 @@ export function GlLedgerPage() {
     }
   };
 
+  const loadPartnerContacts = async () => {
+    if (!activeCompanyId) return;
+    try {
+      const all = await api.contacts.list({ companyId: activeCompanyId });
+      setPartnerContacts(all.filter((c) => c.cui));
+    } catch {
+      // non-fatal — partner selector stays empty
+    }
+  };
+
+  const loadPartnerLedgerForCui = async (cui: string) => {
+    if (!activeCompanyId || !cui || loadingPartner) return;
+    setLoadingPartner(true);
+    setPartnerLedger(null);
+    try {
+      setPartnerLedger(await api.gl.partnerLedger(activeCompanyId, cui, dateFrom, dateTo));
+    } catch (err) {
+      notify.error(formatError(err, t("gl.partner.error")));
+    } finally {
+      setLoadingPartner(false);
+    }
+  };
+
   const runReconcile = async (manual: boolean) => {
     if (!activeCompanyId) {
       if (manual) notify.warn(t("gl.notify.selectCompany"));
@@ -275,7 +307,7 @@ export function GlLedgerPage() {
   useEffect(() => {
     if (!activeCompanyId) return;
     const loader = tab === 0 ? "jr" : tab === 1 ? "tb" : tab === 2 || tab === 6 ? "pnl"
-      : tab === 3 ? "rec" : tab === 4 ? "bil" : "cm";
+      : tab === 3 ? "rec" : tab === 4 ? "bil" : tab === 7 ? "partner" : "cm";
     const key = `${loader}|${activeCompanyId}|${dateFrom}|${refreshTick}`;
     if (attempted.current.has(key)) return;
     attempted.current.add(key);
@@ -284,6 +316,7 @@ export function GlLedgerPage() {
     else if (loader === "pnl") void loadPnl();
     else if (loader === "rec") void runReconcile(false);
     else if (loader === "bil") void loadBilant();
+    else if (loader === "partner") void loadPartnerContacts();
     else void loadLedger();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, activeCompanyId, dateFrom, refreshTick]);
@@ -1312,6 +1345,98 @@ export function GlLedgerPage() {
             </>
           )}
         </div>
+      </div>
+
+      {/* ── 8. FIȘĂ PARTENER ──────────────────────────────────────────────── */}
+      <div className={`panel${tab === 7 ? " show" : ""}`}>
+        <div className="scr-card" style={{ marginBottom: 14, padding: 14 }}>
+          <select
+            className="select"
+            style={{ width: "100%", maxWidth: 480 }}
+            value={partnerCui}
+            onChange={(e) => {
+              const cui = e.target.value;
+              setPartnerCui(cui);
+              if (cui) void loadPartnerLedgerForCui(cui);
+              else setPartnerLedger(null);
+            }}
+          >
+            <option value="">{t("gl.partner.selectPlaceholder")}</option>
+            {(partnerContacts ?? []).map((c) => (
+              <option key={c.id} value={c.cui!}>
+                {c.legalName}{c.cui ? ` (${c.cui})` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {!partnerCui ? (
+          <div className="scr-card">
+            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+              {t("gl.partner.empty")}
+            </div>
+          </div>
+        ) : loadingPartner ? (
+          <div className="scr-card">
+            <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>{t("gl.partner.loading")}</div>
+          </div>
+        ) : !partnerLedger || partnerLedger.length === 0 ? (
+          <div className="scr-card">
+            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+              {t("gl.partner.noMovements")}
+            </div>
+          </div>
+        ) : (
+          partnerLedger.map((a) => (
+            <div key={a.accountCode} className="scr-card" style={{ marginBottom: 14 }}>
+              <div className="scr-toolbar">
+                <div className="tt"><span className="doc">{a.accountCode}</span> {a.accountName}</div>
+                <div className="spacer" />
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {t("gl.ledger.openingBalance")}{" "}
+                  {parseDec(a.openingDebit) > 0
+                    ? `${fmtRON(a.openingDebit)} D`
+                    : parseDec(a.openingCredit) > 0
+                      ? `${fmtRON(a.openingCredit)} C`
+                      : "0"}
+                </span>
+              </div>
+              <table className="scr-table">
+                <thead>
+                  <tr>
+                    <th>{t("gl.ledger.th.date")}</th><th>{t("gl.ledger.th.document")}</th><th>{t("gl.ledger.th.explanation")}</th><th>{t("gl.ledger.th.contra")}</th>
+                    <th className="r">{t("gl.ledger.th.debit")}</th><th className="r">{t("gl.ledger.th.credit")}</th><th className="r">{t("gl.ledger.th.balance")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {a.entries.map((e, i) => (
+                    <tr key={i}>
+                      <td className="num">{fmtD(e.date)}</td>
+                      <td><span className="doc">{e.document || "—"}</span></td>
+                      <td>{e.explanation}</td>
+                      <td>{e.contra ? <span className="doc">{e.contra}</span> : <span className="muted">—</span>}</td>
+                      <td className="r num">{cellAmt(e.debit)}</td>
+                      <td className="r num">{cellAmt(e.credit)}</td>
+                      <td className="r num">{fmtRON(e.balance)} {e.balanceSide}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "var(--bg-table-header)", fontWeight: 600 }}>
+                    <td colSpan={4}>{t("gl.ledger.totalRow")}</td>
+                    <td className="r num">{fmtRON(a.totalDebit)}</td>
+                    <td className="r num">{fmtRON(a.totalCredit)}</td>
+                    <td className="r num">
+                      {parseDec(a.closingDebit) > 0
+                        ? `${fmtRON(a.closingDebit)} D`
+                        : parseDec(a.closingCredit) > 0
+                          ? `${fmtRON(a.closingCredit)} C`
+                          : "0"}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          ))
+        )}
       </div>
 
       {showBilantExport && (

@@ -280,7 +280,8 @@ export function ProductsPage() {
                 {visibleRows.map((p) => {
                   const tracked = p.stockQty != null;
                   const stock = tracked ? parseDec(p.stockQty) : null;
-                  const method = p.valuationMethod === "FIFO" ? "FIFO" : "CMP";
+                  const method =
+                    p.valuationMethod === "FIFO" || p.valuationMethod === "LIFO" ? p.valuationMethod : "CMP";
                   const isSel = selected?.id === p.id;
                   return (
                     <tr
@@ -428,7 +429,9 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
   const [qty, setQty] = useState("");
   const [cost, setCost] = useState("");
   const [docRef, setDocRef] = useState("");
-  const [method, setMethod] = useState(product.valuationMethod === "FIFO" ? "FIFO" : "CMP");
+  const [method, setMethod] = useState(
+    product.valuationMethod === "FIFO" || product.valuationMethod === "LIFO" ? product.valuationMethod : "CMP",
+  );
   const [stockAcct, setStockAcct] = useState(product.stockAccount || "371");
 
   const { data: ledger = [], refetch } = useQuery({
@@ -485,6 +488,7 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
         >
           <option value="CMP">{t("products.ledger.methodCmp")}</option>
           <option value="FIFO">FIFO</option>
+          <option value="LIFO">LIFO</option>
         </select>
         <input
           className="input num"

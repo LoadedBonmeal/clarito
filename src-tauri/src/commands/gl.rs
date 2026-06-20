@@ -374,3 +374,23 @@ pub async fn general_ledger(
 ) -> AppResult<Vec<LedgerAccount>> {
     db_general_ledger(&state.db, &company_id, &period_from, &period_to).await
 }
+
+/// Fișă de cont pe FURNIZOR/CLIENT (fișă analitică terți) — filele de cont restrânse la jurnalele
+/// partenerului (`partner_cui`), adică subregistrul 401/4111 etc. pe partener.
+#[tauri::command]
+pub async fn partner_ledger(
+    state: State<'_, AppState>,
+    company_id: String,
+    partner_cui: String,
+    period_from: String,
+    period_to: String,
+) -> AppResult<Vec<LedgerAccount>> {
+    crate::db::gl::partner_ledger(
+        &state.db,
+        &company_id,
+        partner_cui.trim(),
+        &period_from,
+        &period_to,
+    )
+    .await
+}

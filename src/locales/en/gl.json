@@ -29,7 +29,8 @@
       "reconcile": "D300 reconciliation",
       "bilant": "Balance sheet XML",
       "ledger": "General ledger",
-      "pnl": "Profit and loss"
+      "pnl": "Profit and loss",
+      "partner": "Partner ledger"
     },
     "common": {
       "loading": "Loading…",
@@ -281,6 +282,13 @@
         "balance": "Balance"
       },
       "totalRow": "Turnover / closing balance"
+    },
+    "partner": {
+      "selectPlaceholder": "Select a partner (supplier / customer)…",
+      "empty": "No partner selected — choose a supplier or customer from the list above.",
+      "noMovements": "No accounting movements for the selected partner in the period.",
+      "loading": "Loading partner ledger…",
+      "error": "Could not load the partner ledger."
     },
     "pnl": {
       "title": "Profit and loss statement — {{period}}",
