@@ -39,6 +39,7 @@ pub mod feedback;
 pub mod gdpr;
 pub mod gl;
 pub mod import;
+pub mod import_wave_c;
 pub mod integrations;
 pub mod invoices;
 pub mod journals;

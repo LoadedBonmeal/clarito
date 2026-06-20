@@ -1411,6 +1411,7 @@ dependencies = [
  "chrono",
  "csv",
  "dirs 5.0.1",
+ "encoding_rs",
  "hmac",
  "keyring",
  "log",

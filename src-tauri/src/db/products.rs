@@ -25,6 +25,8 @@ pub struct Product {
     pub vat_rate: String,
     pub vat_category: String,
     pub code: Option<String>,
+    /// EAN-13 / GTIN barcode — preferred cross-system product dedup key (see Wave C importer).
+    pub barcode: Option<String>,
     pub stock_qty: Option<String>,
     /// Art. 331 reverse-charge product category code (D394 op11 codPR).
     /// Allowed values: cereal NC codes + category codes 22–31,36 (tp=1) / 22,23,32–35 (tp=2).
@@ -50,6 +52,8 @@ pub struct ProductInput {
     pub vat_rate: Option<String>,
     pub vat_category: Option<String>,
     pub code: Option<String>,
+    /// EAN-13 / GTIN barcode — set by the Wave C importer; manual UI field is a later wave.
+    pub barcode: Option<String>,
     pub stock_qty: Option<String>,
     /// Art. 331 reverse-charge product category code for D394 codPR.
     pub art331_code: Option<String>,
@@ -65,6 +69,8 @@ pub struct UpdateProductInput {
     pub vat_rate: Option<String>,
     pub vat_category: Option<String>,
     pub code: Option<String>,
+    /// EAN-13 / GTIN barcode.
+    pub barcode: Option<String>,
     pub stock_qty: Option<String>,
     /// Art. 331 reverse-charge product category code for D394 codPR.
     pub art331_code: Option<String>,
@@ -112,7 +118,7 @@ pub async fn list(
     let query_term = query.filter(|s| !s.is_empty());
     let items = sqlx::query_as::<_, Product>(
         "SELECT id, company_id, name, unit, unit_price, vat_rate, vat_category, \
-         code, stock_qty, art331_code, valuation_method, stock_account, active, created_at, updated_at \
+         code, barcode, stock_qty, art331_code, valuation_method, stock_account, active, created_at, updated_at \
          FROM products \
          WHERE company_id = ?1 \
            AND (?2 IS NULL OR name LIKE '%' || ?2 || '%' OR code LIKE '%' || ?2 || '%') \
@@ -129,7 +135,7 @@ pub async fn list(
 pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Product> {
     let product = sqlx::query_as::<_, Product>(
         "SELECT id, company_id, name, unit, unit_price, vat_rate, vat_category, \
-         code, stock_qty, art331_code, valuation_method, stock_account, active, created_at, updated_at \
+         code, barcode, stock_qty, art331_code, valuation_method, stock_account, active, created_at, updated_at \
          FROM products WHERE id = ?1",
     )
     .bind(id)
@@ -183,10 +189,10 @@ pub async fn create(
     sqlx::query(
         "INSERT INTO products (
             id, company_id, name, unit, unit_price, vat_rate, vat_category,
-            code, stock_qty, art331_code, active, created_at, updated_at
+            code, barcode, stock_qty, art331_code, active, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7,
-            ?8, ?9, ?10, ?11, ?12, ?12
+            ?8, ?9, ?10, ?11, ?12, ?13, ?13
         )",
     )
     .bind(&id)
@@ -198,6 +204,7 @@ pub async fn create(
     .bind(input.vat_rate.as_deref().unwrap_or("21"))
     .bind(input.vat_category.as_deref().unwrap_or("S"))
     .bind(&code_trimmed)
+    .bind(&input.barcode)
     .bind(&input.stock_qty)
     .bind(&input.art331_code)
     .bind(input.active.unwrap_or(true))
@@ -255,11 +262,12 @@ pub async fn update(
             vat_rate     = ?5,
             vat_category = ?6,
             code         = ?7,
-            stock_qty    = ?8,
-            art331_code  = ?9,
-            active       = ?10,
-            updated_at   = ?11
-        WHERE id = ?1 AND company_id = ?12",
+            barcode      = ?8,
+            stock_qty    = ?9,
+            art331_code  = ?10,
+            active       = ?11,
+            updated_at   = ?12
+        WHERE id = ?1 AND company_id = ?13",
     )
     .bind(id)
     .bind(input.name.as_deref().unwrap_or(&current.name))
@@ -273,6 +281,7 @@ pub async fn update(
             .unwrap_or(&current.vat_category),
     )
     .bind(input.code.or(current.code))
+    .bind(input.barcode.or(current.barcode))
     .bind(input.stock_qty.or(current.stock_qty))
     .bind(input.art331_code.or(current.art331_code))
     .bind(input.active.unwrap_or(current.active))
@@ -327,6 +336,7 @@ mod tests {
                 vat_rate     TEXT    NOT NULL DEFAULT '19',
                 vat_category TEXT    NOT NULL DEFAULT 'S',
                 code         TEXT,
+                barcode      TEXT,
                 stock_qty    TEXT,
                 art331_code  TEXT,
                 valuation_method TEXT,
@@ -452,6 +462,7 @@ mod tests {
             vat_rate: Some("19".to_string()),
             vat_category: Some("S".to_string()),
             code: Some("SVC-001".to_string()),
+            barcode: None,
             stock_qty: None,
             art331_code: None,
             active: Some(true),
@@ -500,6 +511,7 @@ mod tests {
             vat_rate: Some("19".to_string()),
             vat_category: Some("S".to_string()),
             code: Some("SVC-001".to_string()),
+            barcode: None,
             stock_qty: None,
             art331_code: None,
             active: Some(true),
@@ -515,6 +527,7 @@ mod tests {
             vat_rate: Some("19".to_string()),
             vat_category: Some("S".to_string()),
             code: Some("SVC-001".to_string()),
+            barcode: None,
             stock_qty: None,
             art331_code: None,
             active: Some(true),
@@ -533,6 +546,7 @@ mod tests {
             vat_rate: Some("19".to_string()),
             vat_category: Some("S".to_string()),
             code: Some("SVC-001".to_string()),
+            barcode: None,
             stock_qty: None,
             art331_code: None,
             active: Some(true),
@@ -553,6 +567,7 @@ mod tests {
             vat_rate: None,
             vat_category: None,
             code: None,
+            barcode: None,
             stock_qty: None,
             art331_code: None,
             active: None,
@@ -564,6 +579,7 @@ mod tests {
             vat_rate: None,
             vat_category: None,
             code: None,
+            barcode: None,
             stock_qty: None,
             art331_code: None,
             active: None,

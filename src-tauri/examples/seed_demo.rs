@@ -230,6 +230,7 @@ async fn seed_firm(
                     None
                 },
                 art331_code: None,
+                barcode: None,
                 active: Some(true),
             },
         )
