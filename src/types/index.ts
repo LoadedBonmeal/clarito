@@ -1599,3 +1599,47 @@ export interface RegistruInventarEntry {
   sourceSessionId: string | null;
   createdAt: number;
 }
+
+// ─── Reevaluare valutară (P1 Wave 7) ─────────────────────────────────────────
+
+/** O linie de reevaluare per factură — returnată de `list_fx_revaluations`. */
+export interface FxRevaluationRow {
+  id: string;
+  companyId: string;
+  period: string;
+  invoiceId: string;
+  /** "ISSUED" = creanță 4111 / "RECEIVED" = datorie 401 */
+  invoiceKind: "ISSUED" | "RECEIVED";
+  currency: string;
+  /** Sold valutar deschis (foreign_total - foreign_paid). */
+  foreignOutstanding: string;
+  /** Cursul BNR din ultima zi bancară a perioadei. */
+  monthEndRate: string;
+  /** Cursul anterior (din reevaluarea lunii precedente sau booking rate). */
+  priorRate: string;
+  /** Valoarea în lei la cursul month_end_rate. */
+  revaluedLei: string;
+  /** Valoarea în lei la cursul prior_rate. */
+  priorLei: string;
+  /** Diferența (signed): revalued_lei - prior_lei. Pozitiv = favorabil. */
+  diffLei: string;
+  createdAt: number;
+}
+
+/** Rezultatul rulării `compute_fx_revaluation`. */
+export interface FxRevaluationResult {
+  /** Perioada reevaluată ("YYYY-MM"). */
+  period: string;
+  /** Număr de facturi cu diff ≠ 0 reevaluate. */
+  rowsPosted: number;
+  /** Diferențe totale favorabile (lei) — C 765. */
+  totalFavorable: string;
+  /** Diferențe totale nefavorabile (lei) — D 665. */
+  totalUnfavorable: string;
+  /** Diferența netă (favorabil - nefavorabil). */
+  netDiff: string;
+  /** source_id-ul notei GL postate ("FX_REVAL-YYYY-MM"). */
+  glSourceId: string;
+  /** Ultima zi bancară folosită pentru curs BNR. */
+  monthEndDate: string;
+}

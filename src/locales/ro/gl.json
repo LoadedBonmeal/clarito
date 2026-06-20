@@ -204,6 +204,35 @@
       "taxNote": "Se înregistrează D <doc>698/691</doc> = C <doc>4418/4411</doc> · idempotent per perioadă, înainte de «Închide perioada»",
       "postTaxBtn": "Postează impozitul"
     },
+    "fxReval": {
+      "title": "Reevaluare valutară — {{period}}",
+      "confirmTitle": "Reevaluare valutară",
+      "confirmText": "Rulează reevaluarea valutară pentru {{period}}? Nota GL va fi postată cu source_type='FX_REVAL' (idempotentă — rularea din nou înlocuiește nota existentă).",
+      "chipPosted": "{{n}} facturi reevaluate",
+      "chipNone": "Fără diferențe",
+      "chipNotRun": "Nerulată",
+      "favorable": "Diferențe favorabile",
+      "unfavorable": "Diferențe nefavorabile",
+      "net": "Diferență netă",
+      "netNote": "favorabile − nefavorabile",
+      "note": "Reevaluează creanțele/datoriile valutare la cursul BNR din ultima zi bancară a lunii (art. 322 OMFP 1802/2014). Baza = cursul lunii anterioare, nu cursul de booking.",
+      "run": "Rulează reevaluarea",
+      "runAgain": "Rerulează",
+      "running": "Se calculează…",
+      "notifyNone": "Nicio diferență de curs pentru {{period}} — toate soldurile valutare neschimbate.",
+      "notifyOk": "Reevaluare {{period}}: {{n}} facturi · favorabil +{{fav}} RON · nefavorabil −{{unfav}} RON.",
+      "notifyError": "Eroare la reevaluarea valutară",
+      "th": {
+        "kind": "Cont",
+        "currency": "Valută",
+        "outstanding": "Sold val.",
+        "priorRate": "Curs anterior",
+        "monthEndRate": "Curs lună",
+        "priorLei": "Valoare anterioară",
+        "revaluedLei": "Valoare reevaluată",
+        "diffLei": "Diferență (RON)"
+      }
+    },
     "reconcile": {
       "title": "Reconciliere GL ↔ D300 — {{period}}",
       "rerun": "Rerulează verificarea",

@@ -66,6 +66,8 @@ import type {
   VatRate,
   VatRateInput,
   UpdateVatRateInput,
+  FxRevaluationRow,
+  FxRevaluationResult,
 } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -873,6 +875,23 @@ export const gl = {
    */
   deleteManualJournal: (companyId: string, sourceId: string) =>
     invoke<boolean>("delete_manual_journal", { companyId, sourceId }),
+
+  // ── Reevaluare valutară (P1 Wave 7) ─────────────────────────────────────────
+
+  /**
+   * Calculează și postează reevaluarea valutară pentru luna `period` ("YYYY-MM").
+   * Idempotentă — re-rularea înlocuiește nota GL + rândurile existente.
+   * Rust command: `compute_fx_revaluation`.
+   */
+  computeFxRevaluation: (companyId: string, period: string) =>
+    invoke<FxRevaluationResult>("compute_fx_revaluation", { companyId, period }),
+
+  /**
+   * Listează rândurile de reevaluare per factură pentru o perioadă.
+   * Rust command: `list_fx_revaluations`.
+   */
+  listFxRevaluations: (companyId: string, period: string) =>
+    invoke<FxRevaluationRow[]>("list_fx_revaluations", { companyId, period }),
 };
 
 // ─── Declarations (D300) ──────────────────────────────────────────────────

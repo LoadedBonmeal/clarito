@@ -549,6 +549,9 @@ pub fn run() {
             commands::assets::run_depreciation,
             commands::assets::dispose_asset,
             commands::assets::list_depreciation,
+            // reevaluare valutară lunară — P1 Wave 7
+            commands::fx_revaluation::compute_fx_revaluation,
+            commands::fx_revaluation::list_fx_revaluations,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

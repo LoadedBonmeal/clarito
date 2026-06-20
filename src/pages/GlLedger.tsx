@@ -148,6 +148,11 @@ export function GlLedgerPage() {
   const [showNcModal,       setShowNcModal]       = useState(false);
   const [ncAccounts,        setNcAccounts]        = useState<Account[] | null>(null);
 
+  // ── Reevaluare valutară (P1 Wave 7) ─────────────────────────────────────
+  const [fxRevalRunning,    setFxRevalRunning]    = useState(false);
+  const [fxRevalResult,     setFxRevalResult]     = useState<import("@/types").FxRevaluationResult | null>(null);
+  const [fxRevalRows,       setFxRevalRows]       = useState<import("@/types").FxRevaluationRow[] | null>(null);
+
   const [refreshTick, setRefreshTick] = useState(0);
   const attempted = useRef<Set<string>>(new Set());
 
@@ -178,6 +183,8 @@ export function GlLedgerPage() {
     setJrPage(1);
     setPartnerLedger(null);
     setNcList(null);
+    setFxRevalResult(null);
+    setFxRevalRows(null);
   };
   const prevCtx = useRef(`${activeCompanyId}|${dateFrom}`);
   useEffect(() => {
@@ -492,6 +499,40 @@ export function GlLedgerPage() {
       }
     } catch (err) {
       notify.error(formatError(err, t("gl.notify.annualError")));
+    }
+  };
+
+  // ── Reevaluare valutară ──────────────────────────────────────────────────
+  const period = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`;
+
+  const handleFxReval = async () => {
+    if (!activeCompanyId) { notify.warn(t("gl.notify.selectCompany")); return; }
+    const ok = await confirm(
+      t("gl.fxReval.confirmText", { period }),
+      { title: t("gl.fxReval.confirmTitle"), kind: "warning" },
+    );
+    if (!ok) return;
+    setFxRevalRunning(true);
+    try {
+      const r = await api.gl.computeFxRevaluation(activeCompanyId, period);
+      setFxRevalResult(r);
+      const rows = await api.gl.listFxRevaluations(activeCompanyId, period);
+      setFxRevalRows(rows);
+      if (r.rowsPosted === 0) {
+        notify.info(t("gl.fxReval.notifyNone", { period }));
+      } else {
+        notify.success(t("gl.fxReval.notifyOk", {
+          period,
+          n: r.rowsPosted,
+          fav: r.totalFavorable,
+          unfav: r.totalUnfavorable,
+        }));
+        invalidateReports();
+      }
+    } catch (err) {
+      notify.error(formatError(err, t("gl.fxReval.notifyError")));
+    } finally {
+      setFxRevalRunning(false);
     }
   };
 
@@ -1020,6 +1061,103 @@ export function GlLedgerPage() {
                 {t("gl.closings.postTaxBtn")}
               </button>
             </div>
+          </div>
+
+          {/* Reevaluare valutară (P1 Wave 7) */}
+          <div className="scr-card close-card">
+            <div className="scr-toolbar">
+              <div className="tt">{t("gl.fxReval.title", { period: periodLabel })}</div>
+              <div className="spacer" />
+              {fxRevalResult
+                ? fxRevalResult.rowsPosted > 0
+                  ? <ChipPaid label={t("gl.fxReval.chipPosted", { n: fxRevalResult.rowsPosted })} />
+                  : <ChipWait label={t("gl.fxReval.chipNone")} />
+                : <ChipWait label={t("gl.fxReval.chipNotRun")} />}
+            </div>
+            <div className="crow">
+              <div>
+                <div className="c1">{t("gl.fxReval.favorable")}</div>
+                <div className="c2"><span className="doc">4111</span> / <span className="doc">401</span> → <span className="doc">765</span></div>
+              </div>
+              <span className="amt num pos">
+                {fxRevalResult && fxRevalResult.rowsPosted > 0 ? `+${fmtRON(fxRevalResult.totalFavorable)}` : "—"}
+              </span>
+            </div>
+            <div className="crow">
+              <div>
+                <div className="c1">{t("gl.fxReval.unfavorable")}</div>
+                <div className="c2"><span className="doc">665</span> → <span className="doc">4111</span> / <span className="doc">401</span></div>
+              </div>
+              <span className="amt num neg">
+                {fxRevalResult && fxRevalResult.rowsPosted > 0 ? `-${fmtRON(fxRevalResult.totalUnfavorable)}` : "—"}
+              </span>
+            </div>
+            <div className="crow">
+              <div>
+                <div className="c1">{t("gl.fxReval.net")}</div>
+                <div className="c2">{t("gl.fxReval.netNote")}</div>
+              </div>
+              <span className={`amt num${fxRevalResult && fxRevalResult.rowsPosted > 0
+                ? (parseFloat(fxRevalResult.netDiff) >= 0 ? " pos" : " neg")
+                : ""}`}>
+                {fxRevalResult && fxRevalResult.rowsPosted > 0
+                  ? `${parseFloat(fxRevalResult.netDiff) >= 0 ? "+" : ""}${fmtRON(fxRevalResult.netDiff)}`
+                  : "—"}
+              </span>
+            </div>
+            <div className="crow" style={{ background: "var(--bg-table-header)" }}>
+              <div className="c2" style={{ margin: 0 }}>
+                {t("gl.fxReval.note")}
+              </div>
+              <button
+                className="btn-dark"
+                style={{ marginLeft: "auto", height: 30, fontSize: 12.5, flex: "none" }}
+                disabled={fxRevalRunning}
+                onClick={() => void handleFxReval()}
+              >
+                {fxRevalRunning ? t("gl.fxReval.running") : (fxRevalResult?.rowsPosted ?? 0) > 0 ? t("gl.fxReval.runAgain") : t("gl.fxReval.run")}
+              </button>
+            </div>
+
+            {/* Tabel detaliu per factură */}
+            {fxRevalRows && fxRevalRows.length > 0 && (
+              <div style={{ marginTop: 8, overflowX: "auto" }}>
+                <table className="scr-table" style={{ fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th>{t("gl.fxReval.th.kind")}</th>
+                      <th>{t("gl.fxReval.th.currency")}</th>
+                      <th className="num">{t("gl.fxReval.th.outstanding")}</th>
+                      <th className="num">{t("gl.fxReval.th.priorRate")}</th>
+                      <th className="num">{t("gl.fxReval.th.monthEndRate")}</th>
+                      <th className="num">{t("gl.fxReval.th.priorLei")}</th>
+                      <th className="num">{t("gl.fxReval.th.revaluedLei")}</th>
+                      <th className="num">{t("gl.fxReval.th.diffLei")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fxRevalRows.map((row) => (
+                      <tr key={row.id}>
+                        <td>
+                          <span className="doc">
+                            {row.invoiceKind === "ISSUED" ? "4111" : "401"}
+                          </span>
+                        </td>
+                        <td>{row.currency}</td>
+                        <td className="num">{Number(row.foreignOutstanding).toFixed(2)}</td>
+                        <td className="num">{Number(row.priorRate).toFixed(4)}</td>
+                        <td className="num">{Number(row.monthEndRate).toFixed(4)}</td>
+                        <td className="num">{fmtRON(row.priorLei)}</td>
+                        <td className="num">{fmtRON(row.revaluedLei)}</td>
+                        <td className={`num${parseFloat(row.diffLei) >= 0 ? " pos" : " neg"}`}>
+                          {parseFloat(row.diffLei) >= 0 ? "+" : ""}{fmtRON(row.diffLei)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       </div>

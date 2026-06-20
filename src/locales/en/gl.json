@@ -201,6 +201,35 @@
       "taxNote": "Records D <doc>698/691</doc> = C <doc>4418/4411</doc> · idempotent per period, before \"Close period\"",
       "postTaxBtn": "Post tax"
     },
+    "fxReval": {
+      "title": "FX Revaluation — {{period}}",
+      "confirmTitle": "FX Revaluation",
+      "confirmText": "Run FX revaluation for {{period}}? A GL note will be posted with source_type='FX_REVAL' (idempotent — re-running replaces the existing note).",
+      "chipPosted": "{{n}} invoices revalued",
+      "chipNone": "No differences",
+      "chipNotRun": "Not run",
+      "favorable": "Favorable differences",
+      "unfavorable": "Unfavorable differences",
+      "net": "Net difference",
+      "netNote": "favorable − unfavorable",
+      "note": "Revalues open FX receivables/payables at the BNR rate on the last banking day of the month (art. 322 OMFP 1802/2014). Base = prior month rate, not original booking rate.",
+      "run": "Run revaluation",
+      "runAgain": "Re-run",
+      "running": "Calculating…",
+      "notifyNone": "No FX differences for {{period}} — all open FX balances unchanged.",
+      "notifyOk": "FX revaluation {{period}}: {{n}} invoices · favorable +{{fav}} RON · unfavorable −{{unfav}} RON.",
+      "notifyError": "Error during FX revaluation",
+      "th": {
+        "kind": "Account",
+        "currency": "Currency",
+        "outstanding": "Outstanding",
+        "priorRate": "Prior rate",
+        "monthEndRate": "Month-end rate",
+        "priorLei": "Prior value",
+        "revaluedLei": "Revalued",
+        "diffLei": "Difference (RON)"
+      }
+    },
     "reconcile": {
       "title": "GL ↔ D300 reconciliation — {{period}}",
       "rerun": "Re-run check",
