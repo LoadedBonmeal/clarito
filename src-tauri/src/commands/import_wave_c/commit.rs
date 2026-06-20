@@ -504,6 +504,10 @@ async fn commit_contacts(
                     email,
                     phone,
                     currency: None,
+                    iban: None,
+                    bank_name: None,
+                    swift: None,
+                    payment_term_days: None,
                 };
                 match contacts::create(pool, input).await {
                     Ok(c) => {
@@ -1019,6 +1023,10 @@ async fn find_or_create_partner_placeholder(
         email: None,
         phone: None,
         currency: None,
+        iban: None,
+        bank_name: None,
+        swift: None,
+        payment_term_days: None,
     };
     let c = contacts::create(pool, input).await?;
     Ok(c.id)

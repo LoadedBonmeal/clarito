@@ -174,6 +174,10 @@ async fn seed_firm(
                 email: Some("office@partener.ro".into()),
                 phone: Some("0312 000 111".into()),
                 currency: Some("RON".into()),
+                iban: None,
+                bank_name: None,
+                swift: None,
+                payment_term_days: None,
             },
         )
         .await?;
@@ -200,6 +204,10 @@ async fn seed_firm(
                 email: None,
                 phone: None,
                 currency: Some("RON".into()),
+                iban: None,
+                bank_name: None,
+                swift: None,
+                payment_term_days: None,
             },
         )
         .await?;

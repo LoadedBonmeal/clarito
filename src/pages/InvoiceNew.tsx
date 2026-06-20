@@ -119,6 +119,8 @@ export function InvoiceNewPage() {
   const [series, setSeries] = useState<string>("");
   const [issueDate, setIssueDate] = useState<string>(todayISO());
   const [dueDate, setDueDate] = useState<string>(plusDaysISO(30));
+  /** True once the user has manually edited the due date field. */
+  const [dueDateUserSet, setDueDateUserSet] = useState(false);
   const [currency, setCurrency] = useState<string>("RON");
   const [exchangeRate, setExchangeRate] = useState<string>("");
   const [bnrLoading, setBnrLoading] = useState(false);
@@ -148,6 +150,17 @@ export function InvoiceNewPage() {
   useEffect(() => {
     if (selectedContact?.currency) setCurrency(selectedContact.currency);
   }, [selectedContact]);
+
+  // Auto-prefill due date from contact's paymentTermDays (only if not manually set).
+  useEffect(() => {
+    if (dueDateUserSet) return;
+    if (selectedContact?.paymentTermDays != null && issueDate) {
+      const base = new Date(issueDate + "T00:00:00");
+      base.setDate(base.getDate() + selectedContact.paymentTermDays);
+      setDueDate(localDateISO(base));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedContact, issueDate]);
 
   async function handleFetchBnrRate() {
     if (!currency || !issueDate) return;
@@ -506,7 +519,7 @@ export function InvoiceNewPage() {
                     id={dueDateId}
                     type="date"
                     value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
+                    onChange={(e) => { setDueDate(e.target.value); setDueDateUserSet(true); }}
                   />
                 </div>
               </div>

@@ -40,6 +40,11 @@ pub struct Contact {
 
     pub currency: Option<String>,
 
+    pub iban: Option<String>,
+    pub bank_name: Option<String>,
+    pub swift: Option<String>,
+    pub payment_term_days: Option<i64>,
+
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -67,6 +72,11 @@ pub struct CreateContactInput {
     pub phone: Option<String>,
 
     pub currency: Option<String>,
+
+    pub iban: Option<String>,
+    pub bank_name: Option<String>,
+    pub swift: Option<String>,
+    pub payment_term_days: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -88,6 +98,11 @@ pub struct UpdateContactInput {
     pub phone: Option<String>,
 
     pub currency: Option<String>,
+
+    pub iban: Option<String>,
+    pub bank_name: Option<String>,
+    pub swift: Option<String>,
+    pub payment_term_days: Option<i64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -106,7 +121,8 @@ pub async fn list(pool: &SqlitePool, filter: ContactFilter) -> AppResult<Vec<Con
     // ?1 company_id (Option<&str>), ?2 query_term (Option<&str>)
     let items = sqlx::query_as::<_, Contact>(
         "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, is_individual, cash_vat, \
-         address, city, county, country, email, phone, currency, created_at, updated_at \
+         address, city, county, country, email, phone, currency, \
+         iban, bank_name, swift, payment_term_days, created_at, updated_at \
          FROM contacts \
          WHERE (?1 IS NULL OR company_id = ?1) \
            AND (?2 IS NULL OR legal_name LIKE '%' || ?2 || '%' OR cui LIKE '%' || ?2 || '%') \
@@ -124,7 +140,8 @@ pub async fn list(pool: &SqlitePool, filter: ContactFilter) -> AppResult<Vec<Con
 pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Contact> {
     sqlx::query_as::<_, Contact>(
         "SELECT id, company_id, contact_type, cui, legal_name, vat_payer, is_individual, cash_vat, \
-         address, city, county, country, email, phone, currency, created_at, updated_at \
+         address, city, county, country, email, phone, currency, \
+         iban, bank_name, swift, payment_term_days, created_at, updated_at \
          FROM contacts WHERE id = ?1 AND company_id = ?2",
     )
     .bind(id)
@@ -226,29 +243,35 @@ pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<C
         "INSERT INTO contacts (
             id, company_id, contact_type, cui, legal_name, vat_payer,
             address, city, county, country, email, phone, currency,
-            is_individual, cash_vat, created_at, updated_at
+            is_individual, cash_vat, iban, bank_name, swift, payment_term_days,
+            created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-            ?14, ?16, ?15, ?15
+            ?14, ?16, ?17, ?18, ?19, ?20,
+            ?15, ?15
         )",
     )
-    .bind(&id)
-    .bind(&input.company_id)
-    .bind(&contact_type)
-    .bind(&cui_to_store)
-    .bind(&input.legal_name)
-    .bind(input.vat_payer.unwrap_or(false))
-    .bind(&input.address)
-    .bind(&input.city)
-    .bind(&input.county)
-    .bind(input.country.as_deref().unwrap_or("RO"))
-    .bind(&input.email)
-    .bind(&input.phone)
-    .bind(&input.currency)
-    .bind(input.is_individual.unwrap_or(false))
-    .bind(now)
-    .bind(input.cash_vat.unwrap_or(false))
+    .bind(&id) // ?1
+    .bind(&input.company_id) // ?2
+    .bind(&contact_type) // ?3
+    .bind(&cui_to_store) // ?4
+    .bind(&input.legal_name) // ?5
+    .bind(input.vat_payer.unwrap_or(false)) // ?6
+    .bind(&input.address) // ?7
+    .bind(&input.city) // ?8
+    .bind(&input.county) // ?9
+    .bind(input.country.as_deref().unwrap_or("RO")) // ?10
+    .bind(&input.email) // ?11
+    .bind(&input.phone) // ?12
+    .bind(&input.currency) // ?13
+    .bind(input.is_individual.unwrap_or(false)) // ?14
+    .bind(now) // ?15
+    .bind(input.cash_vat.unwrap_or(false)) // ?16
+    .bind(&input.iban) // ?17
+    .bind(&input.bank_name) // ?18
+    .bind(&input.swift) // ?19
+    .bind(input.payment_term_days) // ?20
     .execute(pool)
     .await?;
 
@@ -319,38 +342,46 @@ pub async fn update(
 
     sqlx::query(
         "UPDATE contacts SET
-            contact_type = ?2,
-            cui          = ?3,
-            legal_name   = ?4,
-            vat_payer    = ?5,
-            address      = ?6,
-            city         = ?7,
-            county       = ?8,
-            country      = ?9,
-            email        = ?10,
-            phone        = ?11,
-            currency     = ?12,
-            is_individual = ?13,
-            cash_vat     = ?16,
-            updated_at   = ?14
+            contact_type      = ?2,
+            cui               = ?3,
+            legal_name        = ?4,
+            vat_payer         = ?5,
+            address           = ?6,
+            city              = ?7,
+            county            = ?8,
+            country           = ?9,
+            email             = ?10,
+            phone             = ?11,
+            currency          = ?12,
+            is_individual     = ?13,
+            cash_vat          = ?16,
+            iban              = ?17,
+            bank_name         = ?18,
+            swift             = ?19,
+            payment_term_days = ?20,
+            updated_at        = ?14
         WHERE id = ?1 AND company_id = ?15",
     )
-    .bind(id)
-    .bind(&contact_type)
-    .bind(input.cui.or(current.cui))
-    .bind(input.legal_name.unwrap_or(current.legal_name))
-    .bind(input.vat_payer.unwrap_or(current.vat_payer))
-    .bind(input.address.or(current.address))
-    .bind(input.city.or(current.city))
-    .bind(input.county.or(current.county))
-    .bind(input.country.unwrap_or(current.country))
-    .bind(input.email.or(current.email))
-    .bind(input.phone.or(current.phone))
-    .bind(input.currency.or(current.currency))
-    .bind(input.is_individual.unwrap_or(current.is_individual))
-    .bind(now)
-    .bind(company_id)
-    .bind(input.cash_vat.unwrap_or(current.cash_vat))
+    .bind(id) // ?1
+    .bind(&contact_type) // ?2
+    .bind(input.cui.or(current.cui)) // ?3
+    .bind(input.legal_name.unwrap_or(current.legal_name)) // ?4
+    .bind(input.vat_payer.unwrap_or(current.vat_payer)) // ?5
+    .bind(input.address.or(current.address)) // ?6
+    .bind(input.city.or(current.city)) // ?7
+    .bind(input.county.or(current.county)) // ?8
+    .bind(input.country.unwrap_or(current.country)) // ?9
+    .bind(input.email.or(current.email)) // ?10
+    .bind(input.phone.or(current.phone)) // ?11
+    .bind(input.currency.or(current.currency)) // ?12
+    .bind(input.is_individual.unwrap_or(current.is_individual)) // ?13
+    .bind(now) // ?14
+    .bind(company_id) // ?15
+    .bind(input.cash_vat.unwrap_or(current.cash_vat)) // ?16
+    .bind(input.iban.or(current.iban)) // ?17
+    .bind(input.bank_name.or(current.bank_name)) // ?18
+    .bind(input.swift.or(current.swift)) // ?19
+    .bind(input.payment_term_days.or(current.payment_term_days)) // ?20
     .execute(pool)
     .await?;
 
@@ -455,6 +486,10 @@ mod tests {
                 email TEXT,
                 phone TEXT,
                 currency TEXT,
+                iban TEXT,
+                bank_name TEXT,
+                swift TEXT,
+                payment_term_days INTEGER,
                 created_at INTEGER NOT NULL DEFAULT (unixepoch()),
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
             )",
@@ -624,6 +659,10 @@ mod tests {
             email: None,
             phone: None,
             currency: None,
+            iban: None,
+            bank_name: None,
+            swift: None,
+            payment_term_days: None,
         };
         let r1 = create(&pool, input1).await;
         assert!(r1.is_ok(), "first contact with this CUI must succeed");
@@ -644,6 +683,10 @@ mod tests {
             email: None,
             phone: None,
             currency: None,
+            iban: None,
+            bank_name: None,
+            swift: None,
+            payment_term_days: None,
         };
         let r2 = create(&pool, input2).await;
         assert!(
@@ -667,6 +710,10 @@ mod tests {
             email: None,
             phone: None,
             currency: None,
+            iban: None,
+            bank_name: None,
+            swift: None,
+            payment_term_days: None,
         };
         let r3 = create(&pool, input3).await;
         assert!(r3.is_ok(), "same CUI for a different company must succeed");
@@ -694,6 +741,10 @@ mod tests {
             email: None,
             phone: None,
             currency: None,
+            iban: None,
+            bank_name: None,
+            swift: None,
+            payment_term_days: None,
         };
         let result = create(&pool, input).await;
         assert!(
@@ -722,8 +773,104 @@ mod tests {
             email: None,
             phone: None,
             currency: None,
+            iban: None,
+            bank_name: None,
+            swift: None,
+            payment_term_days: None,
         };
         let result = create(&pool, input).await;
         assert!(result.is_ok(), "contact with different CUI must be allowed");
+    }
+
+    // ── Bank details + payment terms round-trip ───────────────────────────────
+
+    #[tokio::test]
+    async fn bank_terms_create_get_update_roundtrip() {
+        let pool = setup_contacts_pool().await;
+
+        // Create with IBAN and payment_term_days.
+        // Use a non-RO country so that the RO mod-11 CUI checksum is not enforced;
+        // the test exercises bank-field persistence only, not CUI validation.
+        let input = CreateContactInput {
+            company_id: "comp-1".to_string(),
+            contact_type: ContactType::Customer,
+            cui: Some("DE123456789".to_string()),
+            legal_name: "Banca Test GmbH".to_string(),
+            vat_payer: Some(false),
+            is_individual: None,
+            cash_vat: None,
+            address: None,
+            city: None,
+            county: None,
+            country: Some("DE".to_string()),
+            email: None,
+            phone: None,
+            currency: None,
+            iban: Some("RO49AAAA1B31007593840000".to_string()),
+            bank_name: Some("Banca Exemplu SA".to_string()),
+            swift: Some("AAAARODX".to_string()),
+            payment_term_days: Some(30),
+        };
+        let created = create(&pool, input).await.expect("create must succeed");
+        assert_eq!(
+            created.iban.as_deref(),
+            Some("RO49AAAA1B31007593840000"),
+            "iban must be persisted on create"
+        );
+        assert_eq!(
+            created.bank_name.as_deref(),
+            Some("Banca Exemplu SA"),
+            "bank_name must be persisted on create"
+        );
+        assert_eq!(
+            created.swift.as_deref(),
+            Some("AAAARODX"),
+            "swift must be persisted on create"
+        );
+        assert_eq!(
+            created.payment_term_days,
+            Some(30),
+            "payment_term_days must be persisted on create"
+        );
+
+        // get() returns the same values.
+        let fetched = get(&pool, &created.id, "comp-1")
+            .await
+            .expect("get must succeed");
+        assert_eq!(fetched.iban, created.iban, "get iban must match create");
+        assert_eq!(
+            fetched.payment_term_days,
+            Some(30),
+            "get payment_term_days must be 30"
+        );
+
+        // update() changes payment_term_days; iban/bank/swift carry forward unchanged.
+        let update_input = UpdateContactInput {
+            payment_term_days: Some(15),
+            ..Default::default()
+        };
+        let updated = update(&pool, &created.id, "comp-1", update_input)
+            .await
+            .expect("update must succeed");
+        assert_eq!(
+            updated.payment_term_days,
+            Some(15),
+            "payment_term_days must be updated to 15"
+        );
+        assert_eq!(
+            updated.iban.as_deref(),
+            Some("RO49AAAA1B31007593840000"),
+            "iban must be preserved after update"
+        );
+
+        // Confirm with a final get().
+        let final_get = get(&pool, &created.id, "comp-1")
+            .await
+            .expect("final get must succeed");
+        assert_eq!(
+            final_get.payment_term_days,
+            Some(15),
+            "final get payment_term_days must be 15"
+        );
     }
 }

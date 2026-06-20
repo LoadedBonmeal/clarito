@@ -89,6 +89,10 @@ pub fn sample_preview_input(seller: Company) -> GeneratorInput {
         email: None,
         phone: None,
         currency: None,
+        iban: None,
+        bank_name: None,
+        swift: None,
+        payment_term_days: None,
         created_at: 0,
         updated_at: 0,
     };
@@ -995,6 +999,10 @@ mod tests {
             email: None,
             phone: None,
             currency: None,
+            iban: None,
+            bank_name: None,
+            swift: None,
+            payment_term_days: None,
             created_at: 0,
             updated_at: 0,
         };

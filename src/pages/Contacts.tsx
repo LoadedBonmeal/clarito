@@ -390,6 +390,10 @@ function ContactModal({
     country: contact?.country ?? "RO",
     email: contact?.email ?? "",
     phone: contact?.phone ?? "",
+    iban: contact?.iban ?? "",
+    bankName: contact?.bankName ?? "",
+    swift: contact?.swift ?? "",
+    paymentTermDays: contact?.paymentTermDays ?? undefined,
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -522,6 +526,10 @@ function ContactModal({
       email: form.email?.trim() || undefined,
       phone: form.phone?.trim() || undefined,
       currency: currency || undefined,
+      iban: form.iban?.trim() || undefined,
+      bankName: form.bankName?.trim() || undefined,
+      swift: form.swift?.trim() || undefined,
+      paymentTermDays: form.paymentTermDays ?? undefined,
     };
     if (isEdit) {
       const { companyId: _cid, ...updateInput } = input;
@@ -701,6 +709,35 @@ function ContactModal({
             <div className="field">
               <label>{t("contacts.modal.phone")}</label>
               <input className="input num" type="text" placeholder={t("contacts.modal.optional")} {...field("phone")} />
+            </div>
+            <div className="field span2">
+              <label>{t("contacts.modal.iban")}</label>
+              <input className="input num" type="text" placeholder="RO49AAAA1B31007593840000" {...field("iban")} />
+            </div>
+            <div className="field">
+              <label>{t("contacts.modal.bankName")}</label>
+              <input className="input" type="text" placeholder={t("contacts.modal.optional")} {...field("bankName")} />
+            </div>
+            <div className="field">
+              <label>{t("contacts.modal.swift")}</label>
+              <input className="input num" type="text" placeholder="AAAARODX" {...field("swift")} />
+            </div>
+            <div className="field">
+              <label>{t("contacts.modal.paymentTermDays")}</label>
+              <input
+                className="input num"
+                type="number"
+                min={0}
+                placeholder="30"
+                value={form.paymentTermDays ?? ""}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    paymentTermDays: e.target.value === "" ? undefined : Number(e.target.value),
+                  }))
+                }
+              />
+              <span className="hint">{t("contacts.modal.paymentTermDaysHint")}</span>
             </div>
           </div>
 

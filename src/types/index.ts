@@ -145,6 +145,12 @@ export interface Contact {
   email: string | null;
   phone: string | null;
   currency: string | null;
+  /** IBAN for bank transfers (used for invoice payment instructions and AP/AR matching). */
+  iban: string | null;
+  bankName: string | null;
+  swift: string | null;
+  /** Default payment term in days — auto-fills invoice due date on contact selection. */
+  paymentTermDays: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -165,6 +171,10 @@ export interface CreateContactInput {
   email?: string;
   phone?: string;
   currency?: string;
+  iban?: string;
+  bankName?: string;
+  swift?: string;
+  paymentTermDays?: number;
 }
 
 export type UpdateContactInput = Partial<Omit<CreateContactInput, "companyId">>;

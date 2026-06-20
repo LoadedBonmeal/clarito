@@ -84,6 +84,10 @@ pub async fn run_if_empty(pool: &SqlitePool) -> AppResult<()> {
             email: Some("facturi@clientfrumos.ro".into()),
             phone: None,
             currency: None,
+            iban: None,
+            bank_name: None,
+            swift: None,
+            payment_term_days: None,
         },
     )
     .await?;
@@ -105,6 +109,10 @@ pub async fn run_if_empty(pool: &SqlitePool) -> AppResult<()> {
             email: None,
             phone: None,
             currency: None,
+            iban: None,
+            bank_name: None,
+            swift: None,
+            payment_term_days: None,
         },
     )
     .await?;
