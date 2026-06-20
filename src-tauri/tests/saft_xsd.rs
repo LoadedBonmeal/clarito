@@ -60,12 +60,14 @@ fn test_company() -> Company {
 ///   - One stock movement with one line (Phase 6a)
 ///   - One fixed asset (Phase 6b)
 async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
-    use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::Executor;
+    use sqlx::SqlitePool;
 
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect(":memory:")
+    // generate_gl_entries opens a transaction AND runs a concurrent pool query, so the pool must hand
+    // out ≥2 connections sharing the SAME in-memory DB. `SqlitePool::connect("sqlite::memory:")` (the
+    // form the passing gl.rs tests use) provides that; `max_connections(1).connect(":memory:")`
+    // deadlocked the tx vs the concurrent query → PoolTimedOut after 30 s.
+    let pool = SqlitePool::connect("sqlite::memory:")
         .await
         .expect("in-memory pool");
 
@@ -77,7 +79,8 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
             county TEXT, postal_code TEXT, country TEXT, email TEXT, phone TEXT,
             iban TEXT, bank_name TEXT, is_active INTEGER, spv_enabled INTEGER,
             invoice_series TEXT, last_invoice_number INTEGER, logo_path TEXT,
-            created_at INTEGER, updated_at INTEGER
+            created_at INTEGER, updated_at INTEGER,
+            cash_vat INTEGER DEFAULT 0, cash_vat_start TEXT, cash_vat_end TEXT
         )",
     ))
     .await
@@ -100,7 +103,8 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
             cui TEXT, legal_name TEXT, vat_payer INTEGER,
             address TEXT, city TEXT, county TEXT, country TEXT,
             email TEXT, phone TEXT, currency TEXT,
-            created_at INTEGER, updated_at INTEGER
+            created_at INTEGER, updated_at INTEGER,
+            cash_vat INTEGER DEFAULT 0
         )",
     ))
     .await
@@ -135,7 +139,8 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
             id TEXT PRIMARY KEY, invoice_id TEXT, position INTEGER,
             name TEXT, description TEXT, quantity TEXT, unit TEXT,
             unit_price TEXT, vat_rate TEXT, vat_category TEXT,
-            subtotal_amount TEXT, vat_amount TEXT, total_amount TEXT
+            subtotal_amount TEXT, vat_amount TEXT, total_amount TEXT,
+            cpv_code TEXT, art331_code TEXT, revenue_kind TEXT DEFAULT 'goods'
         )",
     ))
     .await
@@ -160,7 +165,19 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
         "CREATE TABLE payments (
             id TEXT PRIMARY KEY, invoice_id TEXT, company_id TEXT,
             amount TEXT, currency TEXT, paid_at TEXT,
-            method TEXT, reference TEXT, notes TEXT, created_at INTEGER
+            method TEXT, reference TEXT, notes TEXT, created_at INTEGER,
+            exchange_rate TEXT, received_invoice_id TEXT
+        )",
+    ))
+    .await
+    .unwrap();
+
+    // received_invoice_payments (supplier-invoice payments; GL cash-VAT release joins it). No seed rows.
+    pool.execute(sqlx::query(
+        "CREATE TABLE received_invoice_payments (
+            id TEXT PRIMARY KEY, received_invoice_id TEXT, company_id TEXT,
+            amount TEXT, currency TEXT, paid_at TEXT, method TEXT,
+            reference TEXT, notes TEXT, created_at INTEGER, exchange_rate TEXT
         )",
     ))
     .await
@@ -300,7 +317,7 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .unwrap();
 
     // ── Seed company ───────────────────────────────────────────────────────────
-    sqlx::query("INSERT INTO companies VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,'F',5,NULL,0,0)")
+    sqlx::query("INSERT INTO companies VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,'F',5,NULL,0,0,0,NULL,NULL)")
         .bind(&company.id)
         .bind(&company.cui)
         .bind(&company.legal_name)
@@ -347,7 +364,7 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
 
     // ── Seed contacts ──────────────────────────────────────────────────────────
     sqlx::query(
-        "INSERT INTO contacts VALUES ('cust-1',?,'CUSTOMER','RO99887760','FIRMA CLIENT SRL',1,'Str. Test 1','Cluj','CJ','RO',NULL,NULL,'RON',0,0)",
+        "INSERT INTO contacts VALUES ('cust-1',?,'CUSTOMER','RO99887760','FIRMA CLIENT SRL',1,'Str. Test 1','Cluj','CJ','RO',NULL,NULL,'RON',0,0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -355,7 +372,7 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO contacts VALUES ('supp-1',?,'SUPPLIER','RO11223342','FIRMA FURNIZOR SRL',1,'Str. Furnizor 2','Timisoara','TM','RO',NULL,NULL,'RON',0,0)",
+        "INSERT INTO contacts VALUES ('supp-1',?,'SUPPLIER','RO11223342','FIRMA FURNIZOR SRL',1,'Str. Furnizor 2','Timisoara','TM','RO',NULL,NULL,'RON',0,0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -385,7 +402,7 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO invoice_line_items VALUES ('line-1','inv-1',1,'Serviciu consultanta','Serviciu IT','10.000000','ora','100.00','19','S','1000.00','190.00','1190.00')",
+        "INSERT INTO invoice_line_items VALUES ('line-1','inv-1',1,'Serviciu consultanta','Serviciu IT','10.000000','ora','100.00','19','S','1000.00','190.00','1190.00',NULL,NULL,'service')",
     )
     .execute(&pool)
     .await
@@ -400,7 +417,7 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO invoice_line_items VALUES ('line-2','inv-2',1,'Transport','Transport marfa','1.000000','buc','500.00','0','Z','500.00','0.00','500.00')",
+        "INSERT INTO invoice_line_items VALUES ('line-2','inv-2',1,'Transport','Transport marfa','1.000000','buc','500.00','0','Z','500.00','0.00','500.00',NULL,NULL,'goods')",
     )
     .execute(&pool)
     .await
@@ -425,7 +442,7 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
 
     // ── Seed payments ──────────────────────────────────────────────────────────
     sqlx::query(
-        "INSERT INTO payments VALUES ('pay-1','inv-1',?,'1190.00','RON','2025-01-20','transfer','REF-001',NULL,0)",
+        "INSERT INTO payments VALUES ('pay-1','inv-1',?,'1190.00','RON','2025-01-20','transfer','REF-001',NULL,0,NULL,NULL)",
     )
     .bind(&company.id)
     .execute(&pool)

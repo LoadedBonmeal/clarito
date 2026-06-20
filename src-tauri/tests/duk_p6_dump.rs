@@ -41,14 +41,17 @@ fn test_company() -> Company {
 
 #[tokio::test]
 async fn dump_p6_xml_for_duk() {
-    use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::Executor;
+    use sqlx::SqlitePool;
 
     let company = test_company();
 
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect(":memory:")
+    // `generate_gl_entries` opens a transaction (`pool.begin()`) AND runs a concurrent pool query
+    // (`fetch_optional(pool)`), so the pool must hand out ≥2 connections that share the SAME in-memory
+    // DB. `SqlitePool::connect("sqlite::memory:")` (the form the passing gl.rs tests use via
+    // `setup_pool`) does exactly that. The old `max_connections(1).connect(":memory:")` deadlocked the
+    // open transaction against the concurrent query → `PoolTimedOut` after 30 s.
+    let pool = SqlitePool::connect("sqlite::memory:")
         .await
         .expect("in-memory pool");
 
@@ -61,7 +64,9 @@ async fn dump_p6_xml_for_duk() {
             county TEXT, postal_code TEXT, country TEXT, email TEXT, phone TEXT,
             iban TEXT, bank_name TEXT, is_active INTEGER, spv_enabled INTEGER,
             invoice_series TEXT, last_invoice_number INTEGER, logo_path TEXT,
-            created_at INTEGER, updated_at INTEGER
+            created_at INTEGER, updated_at INTEGER,
+            -- cash-VAT (TVA la încasare): read by generate_gl_entries to decide art. 282/297 deferral
+            cash_vat INTEGER DEFAULT 0, cash_vat_start TEXT, cash_vat_end TEXT
         )",
     ))
     .await
@@ -84,7 +89,8 @@ async fn dump_p6_xml_for_duk() {
             cui TEXT, legal_name TEXT, vat_payer INTEGER,
             address TEXT, city TEXT, county TEXT, country TEXT,
             email TEXT, phone TEXT, currency TEXT,
-            created_at INTEGER, updated_at INTEGER
+            created_at INTEGER, updated_at INTEGER,
+            cash_vat INTEGER DEFAULT 0
         )",
     ))
     .await
@@ -119,7 +125,8 @@ async fn dump_p6_xml_for_duk() {
             id TEXT PRIMARY KEY, invoice_id TEXT, position INTEGER,
             name TEXT, description TEXT, quantity TEXT, unit TEXT,
             unit_price TEXT, vat_rate TEXT, vat_category TEXT,
-            subtotal_amount TEXT, vat_amount TEXT, total_amount TEXT
+            subtotal_amount TEXT, vat_amount TEXT, total_amount TEXT,
+            cpv_code TEXT, art331_code TEXT, revenue_kind TEXT DEFAULT 'goods'
         )",
     ))
     .await
@@ -144,7 +151,20 @@ async fn dump_p6_xml_for_duk() {
         "CREATE TABLE payments (
             id TEXT PRIMARY KEY, invoice_id TEXT, company_id TEXT,
             amount TEXT, currency TEXT, paid_at TEXT,
-            method TEXT, reference TEXT, notes TEXT, created_at INTEGER
+            method TEXT, reference TEXT, notes TEXT, created_at INTEGER,
+            exchange_rate TEXT, received_invoice_id TEXT
+        )",
+    ))
+    .await
+    .unwrap();
+
+    // received_invoice_payments (supplier-invoice payments, migration 0027 + later exchange_rate ALTER):
+    // the GL cash-VAT release path joins it. The test seeds no rows, so an empty table satisfies the query.
+    pool.execute(sqlx::query(
+        "CREATE TABLE received_invoice_payments (
+            id TEXT PRIMARY KEY, received_invoice_id TEXT, company_id TEXT,
+            amount TEXT, currency TEXT, paid_at TEXT, method TEXT,
+            reference TEXT, notes TEXT, created_at INTEGER, exchange_rate TEXT
         )",
     ))
     .await
@@ -285,7 +305,7 @@ async fn dump_p6_xml_for_duk() {
 
     // ── Seed ─────────────────────────────────────────────────────────────────
 
-    sqlx::query("INSERT INTO companies VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,'F',5,NULL,0,0)")
+    sqlx::query("INSERT INTO companies VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,'F',5,NULL,0,0,0,NULL,NULL)")
         .bind(&company.id)
         .bind(&company.cui)
         .bind(&company.legal_name)
@@ -334,7 +354,7 @@ async fn dump_p6_xml_for_duk() {
     }
 
     sqlx::query(
-        "INSERT INTO contacts VALUES ('cust-1',?,'CUSTOMER','RO99887766','FIRMA CLIENT SRL',1,'Str. Test 1','Cluj','CJ','RO',NULL,NULL,'RON',0,0)",
+        "INSERT INTO contacts VALUES ('cust-1',?,'CUSTOMER','RO99887766','FIRMA CLIENT SRL',1,'Str. Test 1','Cluj','CJ','RO',NULL,NULL,'RON',0,0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -342,7 +362,7 @@ async fn dump_p6_xml_for_duk() {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO contacts VALUES ('supp-1',?,'SUPPLIER','RO11223344','FIRMA FURNIZOR SRL',1,'Str. Furnizor 2','Timisoara','TM','RO',NULL,NULL,'RON',0,0)",
+        "INSERT INTO contacts VALUES ('supp-1',?,'SUPPLIER','RO11223344','FIRMA FURNIZOR SRL',1,'Str. Furnizor 2','Timisoara','TM','RO',NULL,NULL,'RON',0,0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -366,7 +386,7 @@ async fn dump_p6_xml_for_duk() {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO invoice_line_items VALUES ('line-1','inv-1',1,'Serviciu consultanta','Serviciu IT','10.000000','ora','100.00','19','S','1000.00','190.00','1190.00')",
+        "INSERT INTO invoice_line_items VALUES ('line-1','inv-1',1,'Serviciu consultanta','Serviciu IT','10.000000','ora','100.00','19','S','1000.00','190.00','1190.00',NULL,NULL,'service')",
     )
     .execute(&pool)
     .await
@@ -388,7 +408,7 @@ async fn dump_p6_xml_for_duk() {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO payments VALUES ('pay-1','inv-1',?,'1190.00','RON','2025-01-20','transfer','REF-001',NULL,0)",
+        "INSERT INTO payments VALUES ('pay-1','inv-1',?,'1190.00','RON','2025-01-20','transfer','REF-001',NULL,0,NULL,NULL)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -467,10 +487,13 @@ async fn dump_p6_xml_for_duk() {
         "Asset must NOT be present in periodic XML (DUK L-type rejects it)"
     );
 
-    // Write periodic XML to /tmp/decl/d406_p6.xml for DUK gate
-    let out_path = "/tmp/decl/d406_p6.xml";
-    std::fs::write(out_path, xml_periodic.as_bytes()).expect("write d406_p6.xml");
-    eprintln!("Periodic XML written to {out_path}");
+    // Write periodic XML for an optional manual DUK validator run. Use a portable temp dir (NOT a
+    // hardcoded /tmp/decl, which doesn't exist on Windows and fails if the dir is absent).
+    let dump_dir = std::env::temp_dir().join("decl");
+    let _ = std::fs::create_dir_all(&dump_dir);
+    let out_path = dump_dir.join("d406_p6.xml");
+    std::fs::write(&out_path, xml_periodic.as_bytes()).expect("write d406_p6.xml");
+    eprintln!("Periodic XML written to {}", out_path.display());
 
     // ── Annual (A) declaration: Assets must be populated ─────────────────────
     let xml_annual = generate_saft_xml_annual(&pool, &company, "2025-01-01", "2025-01-31")
@@ -495,10 +518,10 @@ async fn dump_p6_xml_for_duk() {
         "AccumulatedDepreciation must be present in annual XML"
     );
 
-    // Write annual XML for reference
-    let annual_path = "/tmp/decl/d406_p6_annual.xml";
-    std::fs::write(annual_path, xml_annual.as_bytes()).expect("write d406_p6_annual.xml");
-    eprintln!("Annual XML written to {annual_path}");
+    // Write annual XML for reference (same portable temp dir).
+    let annual_path = dump_dir.join("d406_p6_annual.xml");
+    std::fs::write(&annual_path, xml_annual.as_bytes()).expect("write d406_p6_annual.xml");
+    eprintln!("Annual XML written to {}", annual_path.display());
 
     eprintln!("Phase 6 content assertions passed.");
 }
