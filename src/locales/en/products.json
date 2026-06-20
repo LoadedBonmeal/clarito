@@ -112,6 +112,8 @@
       "art331": "Art. 331 code (reverse charge — D394 codPR)",
       "art331Default": "— default 22 ({{label}}) —",
       "active": "Item active",
+      "isService": "Service (non-stocked)",
+      "isServiceHint": "Services have no stock card and do not require inventory. The default revenue account is 704 (services) instead of 707 (goods).",
       "nameRequired": "The name is required.",
       "addError": "Error adding the item.",
       "saveError": "Error saving.",

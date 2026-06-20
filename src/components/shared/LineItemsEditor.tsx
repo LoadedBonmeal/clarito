@@ -194,7 +194,9 @@ export function LineItemsEditor({
 
   /**
    * Fill a line from a product picked from the catalog.
-   * Overwrites name, unit, unitPrice, vatRate, vatCategory, cpvCode.
+   * Overwrites name, unit, unitPrice, vatRate, vatCategory, cpvCode, art331Code.
+   * When the product is marked as a service (isService=true), defaults revenueKind to "service"
+   * so the GL posts to account 704 instead of 707 — the user can still change this.
    * quantity is kept. Manual entry is always fully functional.
    */
   const fillFromProduct = (idx: number, product: Product) => {
@@ -211,6 +213,11 @@ export function LineItemsEditor({
         cpvCode: product.code ?? l.cpvCode,
         // Snapshot the art.331 code from the product for D394 codPR tracking.
         art331Code: product.art331Code ?? undefined,
+        // B4: revenueKind tracks the FILLED product's nature so the GL revenue account is always
+        // correct: service → 704; goods → undefined (backend default "goods" → 707). We reset it on
+        // every product fill (not preserve) so re-picking a goods product after a service one can't
+        // leave the line silently posting to 704 — there is no UI control to override it.
+        revenueKind: product.isService ? "service" : undefined,
       } as LineRow;
     });
     onChange(updated);

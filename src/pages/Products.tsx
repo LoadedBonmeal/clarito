@@ -627,6 +627,7 @@ function ProductModal({
     code: product?.code ?? "",
     stockQty: product?.stockQty ?? "",
     art331Code: product?.art331Code ?? "",
+    isService: product?.isService ?? false,
     active: product?.active ?? true,
   });
   const [error, setError] = useState<string | null>(null);
@@ -667,16 +668,19 @@ function ProductModal({
       setError(t("products.modal.nameRequired"));
       return;
     }
+    const isService = form.isService ?? false;
     const input: ProductInput = {
       ...form,
       name: form.name.trim(),
       code: form.code?.trim() || undefined,
-      stockQty: (form.stockQty as string)?.trim() || undefined,
+      // Services are non-stocabil: clear stockQty so no fișă de magazie is created.
+      stockQty: isService ? undefined : ((form.stockQty as string)?.trim() || undefined),
       art331Code: (form.art331Code as string)?.trim() || undefined,
       unit: form.unit || "buc",
       unitPrice: form.unitPrice || "0.00",
       vatRate: form.vatRate || "21",
       vatCategory: form.vatCategory || "S",
+      isService,
     };
     if (isEdit) {
       const { active, ...rest } = input;
@@ -759,18 +763,36 @@ function ProductModal({
                   ))}
                 </select>
               </div>
-              <div className="field">
-                <label>{t("products.modal.stockQty")}</label>
-                <input
-                  className="input num"
-                  type="number"
-                  step="0.001"
-                  min="0"
-                  placeholder="—"
-                  {...field("stockQty")}
+              {/* is_service checkbox — when checked, hides stock qty and valuation fields */}
+              <label
+                className="span2"
+                style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", userSelect: "none" }}
+              >
+                <button
+                  type="button"
+                  className={`cbx${form.isService ? " on" : ""}`}
+                  onClick={() => setForm((f) => ({ ...f, isService: !f.isService }))}
+                  aria-label={t("products.modal.isService")}
                 />
-                <span className="hint">{t("products.modal.stockHint")}</span>
-              </div>
+                {t("products.modal.isService")}
+                <span className="hint" style={{ marginLeft: 4 }}>{t("products.modal.isServiceHint")}</span>
+              </label>
+
+              {/* Stock qty — hidden for services */}
+              {!form.isService && (
+                <div className="field">
+                  <label>{t("products.modal.stockQty")}</label>
+                  <input
+                    className="input num"
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    placeholder="—"
+                    {...field("stockQty")}
+                  />
+                  <span className="hint">{t("products.modal.stockHint")}</span>
+                </div>
+              )}
               {form.vatCategory === "AE" && (
                 <div className="field span2">
                   <label>{t("products.modal.art331")}</label>

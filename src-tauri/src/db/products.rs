@@ -36,6 +36,9 @@ pub struct Product {
     pub valuation_method: Option<String>,
     /// GL stock account for this product (371 mărfuri / 301 materii prime / 345 produse…).
     pub stock_account: Option<String>,
+    /// True when this product is a service (non-stocabil): no fișă de magazie, no stock qty/valuation.
+    /// GL revenue default: serviciu → account 704; marfă → account 707 (see db/gl.rs revenue_account).
+    pub is_service: bool,
     pub active: bool,
     pub created_at: i64,
     pub updated_at: i64,
@@ -57,6 +60,8 @@ pub struct ProductInput {
     pub stock_qty: Option<String>,
     /// Art. 331 reverse-charge product category code for D394 codPR.
     pub art331_code: Option<String>,
+    /// True when this product is a service (non-stocabil). Defaults to false (goods).
+    pub is_service: Option<bool>,
     pub active: Option<bool>,
 }
 
@@ -74,6 +79,8 @@ pub struct UpdateProductInput {
     pub stock_qty: Option<String>,
     /// Art. 331 reverse-charge product category code for D394 codPR.
     pub art331_code: Option<String>,
+    /// True when this product is a service (non-stocabil). None = leave unchanged (keeps current value).
+    pub is_service: Option<bool>,
     pub active: Option<bool>,
 }
 
@@ -118,7 +125,7 @@ pub async fn list(
     let query_term = query.filter(|s| !s.is_empty());
     let items = sqlx::query_as::<_, Product>(
         "SELECT id, company_id, name, unit, unit_price, vat_rate, vat_category, \
-         code, barcode, stock_qty, art331_code, valuation_method, stock_account, active, created_at, updated_at \
+         code, barcode, stock_qty, art331_code, valuation_method, stock_account, is_service, active, created_at, updated_at \
          FROM products \
          WHERE company_id = ?1 \
            AND (?2 IS NULL OR name LIKE '%' || ?2 || '%' OR code LIKE '%' || ?2 || '%') \
@@ -135,7 +142,7 @@ pub async fn list(
 pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Product> {
     let product = sqlx::query_as::<_, Product>(
         "SELECT id, company_id, name, unit, unit_price, vat_rate, vat_category, \
-         code, barcode, stock_qty, art331_code, valuation_method, stock_account, active, created_at, updated_at \
+         code, barcode, stock_qty, art331_code, valuation_method, stock_account, is_service, active, created_at, updated_at \
          FROM products WHERE id = ?1",
     )
     .bind(id)
@@ -189,26 +196,27 @@ pub async fn create(
     sqlx::query(
         "INSERT INTO products (
             id, company_id, name, unit, unit_price, vat_rate, vat_category,
-            code, barcode, stock_qty, art331_code, active, created_at, updated_at
+            code, barcode, stock_qty, art331_code, is_service, active, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7,
-            ?8, ?9, ?10, ?11, ?12, ?13, ?13
+            ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14
         )",
     )
-    .bind(&id)
-    .bind(company_id)
-    .bind(&input.name)
-    .bind(input.unit.as_deref().unwrap_or("buc"))
-    .bind(input.unit_price.as_deref().unwrap_or("0.00"))
+    .bind(&id) // ?1
+    .bind(company_id) // ?2
+    .bind(&input.name) // ?3
+    .bind(input.unit.as_deref().unwrap_or("buc")) // ?4
+    .bind(input.unit_price.as_deref().unwrap_or("0.00")) // ?5
     // 2026 standard rate (Legea 141/2025) when the caller omits it.
-    .bind(input.vat_rate.as_deref().unwrap_or("21"))
-    .bind(input.vat_category.as_deref().unwrap_or("S"))
-    .bind(&code_trimmed)
-    .bind(&input.barcode)
-    .bind(&input.stock_qty)
-    .bind(&input.art331_code)
-    .bind(input.active.unwrap_or(true))
-    .bind(now)
+    .bind(input.vat_rate.as_deref().unwrap_or("21")) // ?6
+    .bind(input.vat_category.as_deref().unwrap_or("S")) // ?7
+    .bind(&code_trimmed) // ?8
+    .bind(&input.barcode) // ?9
+    .bind(&input.stock_qty) // ?10
+    .bind(&input.art331_code) // ?11
+    .bind(input.is_service.unwrap_or(false) as i64) // ?12
+    .bind(input.active.unwrap_or(true)) // ?13
+    .bind(now) // ?14 (created_at = updated_at)
     .execute(pool)
     .await?;
 
@@ -265,28 +273,31 @@ pub async fn update(
             barcode      = ?8,
             stock_qty    = ?9,
             art331_code  = ?10,
-            active       = ?11,
-            updated_at   = ?12
-        WHERE id = ?1 AND company_id = ?13",
+            is_service   = ?11,
+            active       = ?12,
+            updated_at   = ?13
+        WHERE id = ?1 AND company_id = ?14",
     )
-    .bind(id)
-    .bind(input.name.as_deref().unwrap_or(&current.name))
-    .bind(input.unit.as_deref().unwrap_or(&current.unit))
-    .bind(input.unit_price.as_deref().unwrap_or(&current.unit_price))
-    .bind(input.vat_rate.as_deref().unwrap_or(&current.vat_rate))
+    .bind(id) // ?1
+    .bind(input.name.as_deref().unwrap_or(&current.name)) // ?2
+    .bind(input.unit.as_deref().unwrap_or(&current.unit)) // ?3
+    .bind(input.unit_price.as_deref().unwrap_or(&current.unit_price)) // ?4
+    .bind(input.vat_rate.as_deref().unwrap_or(&current.vat_rate)) // ?5
     .bind(
+        // ?6
         input
             .vat_category
             .as_deref()
             .unwrap_or(&current.vat_category),
     )
-    .bind(input.code.or(current.code))
-    .bind(input.barcode.or(current.barcode))
-    .bind(input.stock_qty.or(current.stock_qty))
-    .bind(input.art331_code.or(current.art331_code))
-    .bind(input.active.unwrap_or(current.active))
-    .bind(now)
-    .bind(company_id)
+    .bind(input.code.or(current.code)) // ?7
+    .bind(input.barcode.or(current.barcode)) // ?8
+    .bind(input.stock_qty.or(current.stock_qty)) // ?9
+    .bind(input.art331_code.or(current.art331_code)) // ?10
+    .bind(input.is_service.unwrap_or(current.is_service) as i64) // ?11
+    .bind(input.active.unwrap_or(current.active)) // ?12
+    .bind(now) // ?13
+    .bind(company_id) // ?14
     .execute(pool)
     .await?;
 
@@ -341,6 +352,7 @@ mod tests {
                 art331_code  TEXT,
                 valuation_method TEXT,
                 stock_account    TEXT,
+                is_service   INTEGER NOT NULL DEFAULT 0,
                 active       INTEGER NOT NULL DEFAULT 1,
                 created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
                 updated_at   INTEGER NOT NULL DEFAULT (unixepoch())
@@ -465,6 +477,7 @@ mod tests {
             barcode: None,
             stock_qty: None,
             art331_code: None,
+            is_service: None,
             active: Some(true),
         };
         let created = create(&pool, "comp-1", input).await.unwrap();
@@ -514,6 +527,7 @@ mod tests {
             barcode: None,
             stock_qty: None,
             art331_code: None,
+            is_service: None,
             active: Some(true),
         };
         let r1 = create(&pool, "comp-1", input1).await;
@@ -530,6 +544,7 @@ mod tests {
             barcode: None,
             stock_qty: None,
             art331_code: None,
+            is_service: None,
             active: Some(true),
         };
         let r2 = create(&pool, "comp-1", input2).await;
@@ -549,6 +564,7 @@ mod tests {
             barcode: None,
             stock_qty: None,
             art331_code: None,
+            is_service: None,
             active: Some(true),
         };
         let r3 = create(&pool, "comp-2", input3).await;
@@ -570,6 +586,7 @@ mod tests {
             barcode: None,
             stock_qty: None,
             art331_code: None,
+            is_service: None,
             active: None,
         };
         let input2 = ProductInput {
@@ -582,11 +599,74 @@ mod tests {
             barcode: None,
             stock_qty: None,
             art331_code: None,
+            is_service: None,
             active: None,
         };
         let r1 = create(&pool, "comp-1", input1).await;
         let r2 = create(&pool, "comp-1", input2).await;
         assert!(r1.is_ok(), "product without code must be allowed");
         assert!(r2.is_ok(), "second product without code must be allowed");
+    }
+
+    // ── is_service round-trip: create → get → update ─────────────────────────
+
+    /// A normal product defaults is_service=false.
+    #[tokio::test]
+    async fn p1b_is_service_default_is_false() {
+        let pool = setup_products_pool().await;
+        // p1 was seeded without explicit is_service → DEFAULT 0 → false
+        let p = get(&pool, "p1", "comp-1").await.unwrap();
+        assert!(
+            !p.is_service,
+            "seeded product must default to is_service=false"
+        );
+    }
+
+    /// create is_service=true → get returns true → update to false → get returns false.
+    #[tokio::test]
+    async fn p1b_is_service_create_get_update_round_trip() {
+        let pool = setup_products_pool().await;
+
+        // 1. Create a service product (is_service = true).
+        let input = ProductInput {
+            name: "Consultanță IT".to_string(),
+            unit: Some("ora".to_string()),
+            unit_price: Some("150.00".to_string()),
+            vat_rate: Some("21".to_string()),
+            vat_category: Some("S".to_string()),
+            code: Some("CONS-IT-01".to_string()),
+            barcode: None,
+            stock_qty: None,
+            art331_code: None,
+            is_service: Some(true),
+            active: Some(true),
+        };
+        let created = create(&pool, "comp-1", input).await.unwrap();
+        assert!(
+            created.is_service,
+            "created product must have is_service=true"
+        );
+
+        // 2. get() must persist the flag.
+        let fetched = get(&pool, &created.id, "comp-1").await.unwrap();
+        assert!(
+            fetched.is_service,
+            "get() after create must return is_service=true"
+        );
+
+        // 3. update() to is_service=false.
+        let upd = UpdateProductInput {
+            is_service: Some(false),
+            ..Default::default()
+        };
+        let updated = update(&pool, &created.id, "comp-1", upd).await.unwrap();
+        assert!(!updated.is_service, "update() must set is_service=false");
+
+        // 4. get() must reflect the change.
+        let refetched = get(&pool, &created.id, "comp-1").await.unwrap();
+        assert!(
+            !refetched.is_service,
+            "get() after update must return is_service=false"
+        );
     }
 }

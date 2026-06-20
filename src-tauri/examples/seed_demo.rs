@@ -239,6 +239,7 @@ async fn seed_firm(
                 },
                 art331_code: None,
                 barcode: None,
+                is_service: Some(kind == "service"),
                 active: Some(true),
             },
         )

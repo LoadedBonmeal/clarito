@@ -547,19 +547,20 @@ async fn commit_products(
     report: &mut CommitReport,
 ) -> AppResult<()> {
     let rows: Vec<(
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
+        String,         // id
+        String,         // resolution
+        Option<String>, // name
+        Option<String>, // unit
+        Option<String>, // unit_price
+        Option<String>, // vat_rate
+        Option<String>, // vat_category
+        Option<String>, // code
+        Option<String>, // barcode
+        Option<String>, // stock_qty
+        Option<i64>,    // is_service (0/1/NULL)
     )> = sqlx::query_as(
         "SELECT id, resolution, name, unit, unit_price, vat_rate, vat_category, \
-         code, barcode, stock_qty \
+         code, barcode, stock_qty, is_service \
          FROM import_staging_product WHERE batch_id = ?1",
     )
     .bind(batch_id)
@@ -577,6 +578,7 @@ async fn commit_products(
         code,
         barcode,
         stock_qty,
+        is_service_raw,
     ) in rows
     {
         match resolution.as_str() {
@@ -608,6 +610,8 @@ async fn commit_products(
                     barcode,
                     stock_qty,
                     art331_code: None,
+                    // Propagate is_service from staging: 1 → true, 0/NULL → false.
+                    is_service: is_service_raw.map(|v| v != 0),
                     active: Some(true),
                 };
                 match products::create(pool, company_id, input).await {

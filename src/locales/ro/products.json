@@ -113,6 +113,8 @@
       "art331": "Cod art. 331 (taxare inversă — D394 codPR)",
       "art331Default": "— implicit 22 ({{label}}) —",
       "active": "Articol activ",
+      "isService": "Serviciu (non-stocabil)",
+      "isServiceHint": "Serviciile nu au fișă de magazie și nu necesită stoc. Contul implicit de venit este 704 (servicii) în loc de 707 (mărfuri).",
       "nameRequired": "Denumirea este obligatorie.",
       "addError": "Eroare la adăugare.",
       "saveError": "Eroare la salvare.",

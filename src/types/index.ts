@@ -265,6 +265,12 @@ export interface CreateLineInput {
   cpvCode?: string;
   /** Art. 331 product category snapshot (from product). Used for D394 codPR. */
   art331Code?: string;
+  /**
+   * Sales-revenue GL nature → 701 (produse finite) | 704 (servicii) | 707 (mărfuri, default) | 709 (reduceri).
+   * Defaults to "goods" (→ 707) when absent. Set to "service" for service products (→ 704).
+   * User can override freely.
+   */
+  revenueKind?: string;
 }
 
 export interface CreateInvoiceInput {
@@ -716,6 +722,9 @@ export interface Product {
   valuationMethod: string | null;
   /** GL stock account (371/301/345…). Null = 371. */
   stockAccount: string | null;
+  /** True when this product is a service (non-stocabil): no fișă de magazie, no stock qty.
+   *  GL revenue default: serviciu → 704; marfă → 707. */
+  isService: boolean;
   active: boolean;
   createdAt: number;
   updatedAt: number;
@@ -731,6 +740,8 @@ export interface ProductInput {
   stockQty?: string;
   /** Art. 331 product category code. Set only when vatCategory="AE". */
   art331Code?: string;
+  /** True when this product is a service (non-stocabil). Defaults to false (goods). */
+  isService?: boolean;
   active?: boolean;
 }
 
@@ -744,6 +755,8 @@ export interface UpdateProductInput {
   stockQty?: string;
   /** Art. 331 product category code. Set only when vatCategory="AE". */
   art331Code?: string;
+  /** True when this product is a service (non-stocabil). None = leave unchanged. */
+  isService?: boolean;
   active?: boolean;
 }
 
