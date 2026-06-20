@@ -316,6 +316,19 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit, onP
                 Construcții
               </CheckRow>
             </div>
+
+            {/* D300 nu are versiune „rectificativă" (verificat vs structura D300 v12 + OPANAF): corecțiile
+                se fac altfel — vezi nota. De aceea aici NU există bifa rectificativă (spre deosebire de
+                D112/D205/D207/D390). */}
+            <div className="field span2">
+              <div
+                className="hint"
+                style={{ display: "flex", gap: 6, alignItems: "flex-start", color: "var(--text-2)" }}
+              >
+                <Ic name="info" cls="sic" />
+                <span>{t("shared.d300.rectificativeNote")}</span>
+              </div>
+            </div>
           </div>
         </div>
         <div className="modal-foot">

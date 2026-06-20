@@ -225,6 +225,7 @@
       "proRataHint": "100 = pro-rata not applied",
       "nrEvid": "No. in the Register of taxable persons",
       "nrEvidHint": "0 if not applicable",
+      "rectificativeNote": "The D300 VAT return has NO rectificative version. Corrections are made via regularization rows (rd. 33) in a later return (art. 301(2) Fiscal Code) or, for material errors, per OMFP 3604/2015 (on a correction request/decision). That is why there is no 'rectificative' checkbox here.",
       "ph": {
         "lastName": "Popescu",
         "firstName": "Ion",

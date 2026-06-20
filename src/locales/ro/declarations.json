@@ -262,6 +262,7 @@
       "previewXml": "Vizualizează / Editează XML",
       "previewing": "Se generează…",
       "previewFailed": "Nu s-a putut genera XML-ul D394.",
+      "rectificativeNote": "D394 NU are versiune rectificativă în XML. Pentru o corecție, re-depuneți declarația COMPLETĂ pentru aceeași perioadă (OPANAF 3769/2015) — ultima declarație depusă o înlocuiește pe cea precedentă.",
       "reportLabel": "raportul D394",
       "emptySales": "Nicio livrare validată în perioada selectată.",
       "purchasesTitle": "D394 — Achiziții per furnizor",

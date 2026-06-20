@@ -505,25 +505,33 @@ fn map_sales_partner(partner: &D394Partner) -> (&'static str, i64, bool) {
     }
 }
 
-/// Map a D394Partner (from achiziții/cumpărări) to (tip, cota, emit_tva),
-/// given the already-determined `tip_partener`.
+/// Map a D394Partner (from achiziții/cumpărări) to `Some((tip, cota, emit_tva))`, given the
+/// already-determined `tip_partener`. Returns `None` when the line must be DROPPED from D394 (the
+/// caller logs a `warn!`).
 ///
-/// Rules enforced:
-///   R215.2: tp=2 only allows L/LS/N — but purchases from tp=2 get LS or L
-///   R215.3: tp=3/4 only allows L/LS/C — so AI is forbidden; use C instead
-///   R217.1/2: C requires cota≠0
-///   R232.1: C/A/AI require tva
-fn map_purchase_partner(partner: &D394Partner, tip_partener: i64) -> (&'static str, i64, bool) {
-    match partner.vat_category.as_str() {
+/// VAT-01 (verified vs OPANAF 3769/2015 + 3281/2020 + structura D394): a TAXABLE purchase (S/SR/AE/K)
+/// from a partner who is NOT a valid RO VAT payer (tip_partener 2/3/4) is anomalous — a deductible-VAT
+/// invoice can only come from a VAT-registered (tp=1) supplier. The old code mislabeled these as
+/// livrare `"L"`, which is a SALES code: downstream it contaminated the collected-VAT (`tvaCol`) and the
+/// `rezumat2` livrări summaries, over-declaring collected VAT. The technically-correct purchase code is
+/// `"N"` (achiziție de la persoană neînregistrată), but `"N"` carries cota 0 / zero deductible VAT and
+/// needs the `tip_N`/`nrN` sub-fields (schema-modelled only for tip_partener 1/2) — out of scope here.
+/// Since such a line means the supplier CUI is simply dirty (re-validate → tp=1 → `"A"`), we DROP it
+/// (+ warn). D394 is informative (no tax liability), so excluding an unreportable line is safe.
+///
+/// Rules: R215.2 tp=2 ⊆ {L/LS/N}; R215.3 tp=3/4 ⊆ {L/LS/C}; R217.2 C requires cota≠0; R232.1 C/A/AI need tva.
+fn map_purchase_partner(
+    partner: &D394Partner,
+    tip_partener: i64,
+) -> Option<(&'static str, i64, bool)> {
+    Some(match partner.vat_category.as_str() {
         "S" | "SR" => {
             let cota = parse_cota_from_rate(&partner.vat_rate);
             let cota = if cota == 0 { 19 } else { cota };
             match tip_partener {
                 1 => ("A", cota, true),
-                // tp=2: only L/LS/N allowed → use L (taxed)
-                2 => ("L", cota, true),
-                // tp=3/4: only L/LS/C → use L
-                _ => ("L", cota, true),
+                // VAT-01: a deductible taxable purchase requires a registered (tp=1) supplier — drop.
+                _ => return None,
             }
         }
         "AE" => {
@@ -532,10 +540,10 @@ fn map_purchase_partner(partner: &D394Partner, tip_partener: i64) -> (&'static s
             let cota = if cota == 0 { 19 } else { cota }; // must be non-zero
             match tip_partener {
                 1 => ("C", cota, true), // self-assessed, needs op11
-                // tp=3/4 → C allowed
+                // tp=3/4 → C allowed (R215.3)
                 3 | 4 => ("C", cota, true),
-                // tp=2 → only L/LS/N; use L (closest match for taxed purchase)
-                _ => ("L", cota, true),
+                // VAT-01: tp=2 reverse-charge purchase with invalid CUI is anomalous (was "L") — drop.
+                _ => return None,
             }
         }
         "K" => {
@@ -546,8 +554,8 @@ fn map_purchase_partner(partner: &D394Partner, tip_partener: i64) -> (&'static s
                 1 => ("AI", cota, true), // AI only valid for tp=1
                 // tp=3/4 → use C (reverse-charge allowed for tp=3/4 per R215.3)
                 3 | 4 => ("C", cota, true),
-                // tp=2 → only L/LS/N; use L
-                _ => ("L", cota, true),
+                // VAT-01: tp=2 intra-EU acquisition with invalid CUI is anomalous (was "L") — drop.
+                _ => return None,
             }
         }
         "E" | "Z" => {
@@ -565,7 +573,7 @@ fn map_purchase_partner(partner: &D394Partner, tip_partener: i64) -> (&'static s
             1 => ("AS", 0, false),
             _ => ("LS", 0, false),
         },
-    }
+    })
 }
 
 // ── Main builder ──────────────────────────────────────────────────────────────
@@ -654,10 +662,22 @@ pub fn build_sections(
         });
     }
 
-    // Purchases (achiziții) → A / C / AI / AS / L / LS
+    // Purchases (achiziții) → A / C / AI / AS / LS  (taxable purchases from non-tp=1 partners are dropped)
     for partner in &report.purchase_partners {
         let tip_p = tip_partener_from_cui(&partner.partner_cui);
-        let (tip, cota, emit_tva) = map_purchase_partner(partner, tip_p);
+        // VAT-01: a taxable purchase from a partner that isn't a valid RO VAT payer (tip_partener 2/3/4)
+        // returns None — exclude it (it was wrongly emitted as livrare "L", inflating collected VAT).
+        let Some((tip, cota, emit_tva)) = map_purchase_partner(partner, tip_p) else {
+            tracing::warn!(
+                tip_partener = tip_p,
+                cui = %partner.partner_cui,
+                categorie = %partner.vat_category,
+                "D394: achiziție impozabilă de la partener neînregistrat/invalid în scopuri de TVA — \
+                 exclusă din D394; re-validați CUI-ul furnizorului (o achiziție cu TVA deductibil \
+                 necesită un furnizor înregistrat în scopuri de TVA)."
+            );
+            continue;
+        };
         let cui_digits = strip_ro(&partner.partner_cui);
         let baza = round_to_lei(parse_dec(&partner.base));
         let tva_val = round_to_lei(parse_dec(&partner.vat));
@@ -1337,6 +1357,57 @@ mod tests {
             purchase_invoice_count: 3,
             purchase_unparsed_count: 0,
         }
+    }
+
+    /// VAT-01: a TAXABLE purchase from a partner that is NOT a valid RO VAT payer (tip_partener 2/3/4)
+    /// must be DROPPED (returns None) — it was wrongly emitted as livrare "L", contaminating the
+    /// collected-VAT (tvaCol) + rezumat2 livrări summaries. A valid registered (tp=1) supplier still maps
+    /// to the correct purchase code ("A"/"C"/"AI").
+    #[test]
+    fn vat01_taxable_purchase_from_nonvat_partner_is_dropped() {
+        let mk = |cat: &str, rate: &str, cui: &str| D394Partner {
+            partner_cui: cui.to_string(),
+            partner_name: "Supplier".to_string(),
+            vat_category: cat.to_string(),
+            vat_rate: rate.to_string(),
+            invoice_count: 1,
+            base: "100.00".to_string(),
+            vat: "21.00".to_string(),
+            art331_code: None,
+        };
+        // Valid RO VAT payer (tp=1) → correct purchase codes.
+        assert_eq!(
+            map_purchase_partner(&mk("S", "21", "RO12345674"), 1),
+            Some(("A", 21, true))
+        );
+        assert_eq!(
+            map_purchase_partner(&mk("AE", "21", "RO12345674"), 1).map(|t| t.0),
+            Some("C")
+        );
+        // tip_partener 2/3/4 taxable purchase → DROPPED (None), no longer mislabeled "L".
+        for tp in [2, 3, 4] {
+            assert_eq!(
+                map_purchase_partner(&mk("S", "21", "INVALID"), tp),
+                None,
+                "S taxable purchase from tp={tp} must be dropped, not emitted as L"
+            );
+        }
+        assert_eq!(map_purchase_partner(&mk("AE", "21", "X"), 2), None);
+        assert_eq!(map_purchase_partner(&mk("K", "21", "X"), 2), None);
+        // AE/K from tp=3/4 stay reverse-charge "C" (not contaminating) — unchanged.
+        assert_eq!(
+            map_purchase_partner(&mk("AE", "21", "X"), 4).map(|t| t.0),
+            Some("C")
+        );
+        assert_eq!(
+            map_purchase_partner(&mk("K", "21", "X"), 3).map(|t| t.0),
+            Some("C")
+        );
+        // Exempt purchases (cota 0) are unaffected — they don't contaminate the VAT summaries.
+        assert_eq!(
+            map_purchase_partner(&mk("E", "0", "X"), 2).map(|t| t.0),
+            Some("LS")
+        );
     }
 
     #[test]

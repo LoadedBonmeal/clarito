@@ -258,6 +258,7 @@
       "previewXml": "View / Edit XML",
       "previewing": "Generating…",
       "previewFailed": "Could not generate the D394 XML.",
+      "rectificativeNote": "D394 has NO rectificative version in the XML. To correct it, re-file the FULL declaration for the same period (OPANAF 3769/2015) — the last filed declaration replaces the previous one.",
       "reportLabel": "the D394 report",
       "emptySales": "No validated supply in the selected period.",
       "purchasesTitle": "D394 — Acquisitions per supplier",

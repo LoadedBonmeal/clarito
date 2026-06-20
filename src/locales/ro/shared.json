@@ -230,6 +230,7 @@
       "proRataHint": "100 = nu se aplică pro-rată",
       "nrEvid": "Nr. din Registrul persoanelor impozabile",
       "nrEvidHint": "0 dacă nu este aplicabil",
+      "rectificativeNote": "Decontul D300 NU are versiune rectificativă. Corecțiile se fac prin regularizări (rd. 33) într-un decont ulterior (art. 301 alin. 2 Cod fiscal) sau, pentru erori materiale, conform OMFP 3604/2015 (pe baza unei cereri/decizii de corectare). De aceea aici nu există o bifă de declarație rectificativă.",
       "ph": {
         "lastName": "Popescu",
         "firstName": "Ion",

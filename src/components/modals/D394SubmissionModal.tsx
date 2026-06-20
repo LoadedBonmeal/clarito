@@ -443,6 +443,16 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit, onP
               </>
             )}
           </div>
+
+          {/* D394 nu are versiune „rectificativă" în XML (verificat vs structura D394 v5 + OPANAF
+              3769/2015): corecția = re-depunerea declarației complete pentru aceeași perioadă. */}
+          <div
+            className="hint"
+            style={{ display: "flex", gap: 6, alignItems: "flex-start", color: "var(--text-2)", marginTop: 10 }}
+          >
+            <Ic name="info" cls="sic" />
+            <span>{t("declarations.d394.rectificativeNote")}</span>
+          </div>
         </div>
         <div className="modal-foot">
           <button className="pill-btn" onClick={() => close()}>

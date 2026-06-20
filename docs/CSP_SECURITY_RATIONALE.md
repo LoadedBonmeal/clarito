@@ -58,6 +58,36 @@ on every page render/scroll, a second WASM/asset load path, and cross-platform W
 `connect-src` is already locked down — so the added complexity and failure surface aren't
 justified. Revisit only if the viewer is ever made to load remote documents.
 
+## `fs` capability write/read globs (SEC-01) — required by the JS save/open dialogs
+
+`src-tauri/capabilities/default.json` grants `fs:allow-write-file` over `$DOCUMENT/**`,
+`$DESKTOP/**`, `$DOWNLOAD/**` plus the app's own `$APPDATA`/`$APPLOCALDATA`/`$APPCONFIG`/`$TEMP`;
+`fs:allow-read-file` is narrower — limited to those app-owned dirs (`$APPDATA`/`$APPLOCALDATA`/
+`$APPCONFIG`/`$TEMP`), since the only JS reads target app-resident files (the cached PDF the viewer
+opens). Reviewed in the 2026 audit (SEC-01) and **accepted, deliberate** — not an oversight.
+
+These globs back the **frontend's direct use of `@tauri-apps/plugin-fs`** for *user-chosen* paths:
+- `XmlViewerModal` writes a previewed declaration XML to a `save`-dialog path (`writeTextFile`).
+- `CsvImportModal` writes the import template to a `save`-dialog path.
+- `PdfViewerModal` saves a generated PDF to a `save`-dialog path (`writeFile`) and reads PDF bytes
+  off disk (`readFile`); `use-open-pdf` reads picked/archived PDFs (`readFile`).
+
+The destinations are paths the **user explicitly selected in a native save/open dialog**, which
+land under Documents / Desktop / Downloads — so the globs cannot be narrowed to a fixed subdirectory
+without breaking "save where I choose". (All *backend* file I/O — official exports, SAF-T, archive,
+DB — already routes through Rust commands that call `validate_export_path`, which blocks `..`, UNC,
+and non-whitelisted extensions.)
+
+Why this is low-risk:
+- The only way to abuse these grants is **injected JS (XSS)**, and the CSP above closes that vector:
+  no remote/inline script (`script-src 'self' 'wasm-unsafe-eval'` — WASM only, no `eval`), and an
+  allow-listed `connect-src`, so there is no realistic path to run attacker JS in the WebView.
+- The app renders no untrusted HTML/markup into the DOM (invoice/PDF content is generated in Rust).
+
+The textbook hardening — route the 4–5 JS `plugin-fs` call sites through Rust commands and drop the
+JS `fs` write capability — is a sizeable refactor for marginal gain given the CSP already neutralises
+the only attack vector. Revisit if the frontend ever renders untrusted HTML or loads remote scripts.
+
 ## Locked-down directives (defense-in-depth)
 
 `object-src 'none'` (no plugins), `base-uri 'none'` (no `<base>` hijack), `frame-ancestors
