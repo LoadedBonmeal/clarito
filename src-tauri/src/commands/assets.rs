@@ -3,7 +3,9 @@
 
 use tauri::State;
 
-use crate::db::assets::{self, AssetDepreciationRow, DepreciationRun, FixedAsset, FixedAssetInput};
+use crate::db::assets::{
+    self, AssetDepreciationRow, DepreciationRun, FiscalScheduleRow, FixedAsset, FixedAssetInput,
+};
 use crate::error::AppResult;
 use crate::state::AppState;
 
@@ -77,4 +79,16 @@ pub async fn list_depreciation(
     period: Option<String>,
 ) -> AppResult<Vec<AssetDepreciationRow>> {
     assets::list_depreciation(&state.db, &company_id, period).await
+}
+
+/// Compute the annual book + fiscal amortization schedule for one asset (for D101.rd.16 reporting).
+/// Returns per-year rows with fiscal_amount, book_amount, and temp_diff (fiscal − book).
+#[tauri::command]
+pub async fn get_asset_fiscal_schedule(
+    state: State<'_, AppState>,
+    company_id: String,
+    asset_id: String,
+) -> AppResult<Vec<FiscalScheduleRow>> {
+    let asset = assets::get(&state.db, &asset_id, &company_id).await?;
+    assets::compute_fiscal_schedule(&asset)
 }

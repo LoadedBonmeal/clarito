@@ -1,9 +1,19 @@
 //! Mijloace fixe (Assets SAF-T MasterFiles section).
 //!
 //! Fiecare mijloc fix aparține unei companii (company_id).
-//! Calculul amortizării liniare este integrat (monthly = cost / life_months).
+//! Calculul amortizării: liniară (implicită), degresivă (AD), accelerată, super-accelerată (OUG
+//! 8/2026). Valorile monetare sunt stocate ca TEXT (convenția Decimal-as-TEXT).
 //!
-//! Valorile monetare sunt stocate ca TEXT (convenția Decimal-as-TEXT).
+//! # Metoda de amortizare (book vs fiscal)
+//! `depreciation_method` = metoda contabilă (dictează nota 6811 = 281x).
+//! `fiscal_method` = metoda fiscală opțională (diferă în general de cea contabilă; alimentează
+//! Registrul de evidență fiscală și D101.rd.16). Dacă NULL, se consideră identică cu cea contabilă.
+//!
+//! # Noi metode adăugate (Cod Fiscal art.28, Legea 15/1994, HG 2139/2004; OUG 8/2026)
+//! - `degresiva` — cotă degresivă (Cd = Cl × k) cu switch la liniară în primul an
+//!   în care amortizarea liniară depășește cea degresivă.
+//! - `accelerata` — 50% în primul an, restul liniar.
+//! - `super_accelerata` — 65% în primul an (numai active NOI, subgrupa 2.1, PIF 2026).
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -36,6 +46,12 @@ pub struct FixedAsset {
     pub active: bool,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Metoda fiscală (diferă de cea contabilă → diferență temporară D101). NULL = identică.
+    pub fiscal_method: Option<String>,
+    /// 1 = activ NOU; 0 = second-hand. Condiție eligibilitate super-accelerată.
+    pub is_new: bool,
+    /// Subgrupa HG 2139/2004 (ex. "2.1"). Condiție eligibilitate super-accelerată.
+    pub subgroup: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -96,40 +112,40 @@ pub struct FixedAssetInput {
     pub depreciation_pct: Option<String>,
     pub disposal_date: Option<String>,
     pub active: Option<bool>,
+    pub fiscal_method: Option<String>,
+    pub is_new: Option<bool>,
+    pub subgroup: Option<String>,
 }
 
 // ─── Queries ───────────────────────────────────────────────────────────────
 
+const ASSET_COLS: &str = "id, company_id, asset_code, account_id, description, valuation_class, \
+     supplier_id, supplier_name, date_of_acquisition, start_up_date, \
+     acquisition_cost, life_months, depreciation_method, depreciation_pct, \
+     disposal_date, active, created_at, updated_at, \
+     fiscal_method, is_new, subgroup";
+
 /// List all active fixed assets for a company.
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<FixedAsset>> {
-    let items = sqlx::query_as::<_, FixedAsset>(
-        "SELECT id, company_id, asset_code, account_id, description, valuation_class, \
-                supplier_id, supplier_name, date_of_acquisition, start_up_date, \
-                acquisition_cost, life_months, depreciation_method, depreciation_pct, \
-                disposal_date, active, created_at, updated_at \
-         FROM fixed_assets \
-         WHERE company_id = ?1 \
-         ORDER BY asset_code ASC",
-    )
-    .bind(company_id)
-    .fetch_all(pool)
-    .await?;
+    let sql = format!(
+        "SELECT {ASSET_COLS} FROM fixed_assets \
+         WHERE company_id = ?1 ORDER BY asset_code ASC"
+    );
+    let items = sqlx::query_as::<_, FixedAsset>(&sql)
+        .bind(company_id)
+        .fetch_all(pool)
+        .await?;
     Ok(items)
 }
 
 /// Fetch a single fixed asset by id; verifies company ownership.
 pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<FixedAsset> {
-    let asset = sqlx::query_as::<_, FixedAsset>(
-        "SELECT id, company_id, asset_code, account_id, description, valuation_class, \
-                supplier_id, supplier_name, date_of_acquisition, start_up_date, \
-                acquisition_cost, life_months, depreciation_method, depreciation_pct, \
-                disposal_date, active, created_at, updated_at \
-         FROM fixed_assets WHERE id = ?1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?
-    .ok_or(AppError::NotFound)?;
+    let sql = format!("SELECT {ASSET_COLS} FROM fixed_assets WHERE id = ?1");
+    let asset = sqlx::query_as::<_, FixedAsset>(&sql)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or(AppError::NotFound)?;
 
     if asset.company_id != company_id {
         return Err(AppError::NotFound);
@@ -152,15 +168,20 @@ pub async fn create(
             ));
         }
     }
-    // ASSET-01 — metoda de amortizare: rularea lunară procesează NUMAI activele cu metoda
-    // "liniara"; orice altă metodă ar fi ignorată silențios → nicio amortizare. Respingem
-    // la input; None rămâne acceptabil (implicit "liniara").
-    if let Some(m) = input.depreciation_method.as_deref() {
-        if m.trim() != "liniara" {
-            return Err(AppError::Validation(
-                "Metodă de amortizare nesuportată — în prezent se acceptă doar 'liniara'.".into(),
-            ));
-        }
+    // Validate + normalize the depreciation method. None → "liniara".
+    let method = input
+        .depreciation_method
+        .as_deref()
+        .unwrap_or("liniara")
+        .trim();
+    validate_method(method)?;
+    let fiscal_method_str = input.fiscal_method.as_deref().unwrap_or("").trim();
+    if !fiscal_method_str.is_empty() {
+        validate_method(fiscal_method_str)?;
+    }
+    // Eligibility: super_accelerata requires a new asset in service in 2026, subgroup 2.1.
+    if method == "super_accelerata" {
+        validate_super_accelerata(&input)?;
     }
     // EDGE-002 — date-quality guard: a malformed acquisition/start-up/disposal date would otherwise
     // silently make `parse_ym` compute depreciation from year 0. Reject at the input boundary.
@@ -227,13 +248,28 @@ pub async fn create(
     // Store None rather than Some("") for disposal_date so downstream slicing is safe.
     let disposal_date = input.disposal_date.filter(|s| !s.trim().is_empty());
 
+    let fiscal_method_stored = {
+        let s = input
+            .fiscal_method
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
+    };
+
     sqlx::query(
         "INSERT INTO fixed_assets (
             id, company_id, asset_code, account_id, description, valuation_class,
             supplier_id, supplier_name, date_of_acquisition, start_up_date,
             acquisition_cost, life_months, depreciation_method, depreciation_pct,
-            disposal_date, active, created_at, updated_at
-        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?17)",
+            disposal_date, active, created_at, updated_at,
+            fiscal_method, is_new, subgroup
+        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?17,?18,?19,?20)",
     )
     .bind(&id)
     .bind(company_id)
@@ -252,6 +288,9 @@ pub async fn create(
     .bind(&disposal_date)
     .bind(input.active.unwrap_or(true) as i32)
     .bind(now)
+    .bind(&fiscal_method_stored)
+    .bind(input.is_new.unwrap_or(true) as i32)
+    .bind(&input.subgroup)
     .execute(pool)
     .await?;
 
@@ -425,6 +464,409 @@ fn parse_ym(date: &str) -> (i64, u32) {
     (0, 1)
 }
 
+// ─── Depreciation schedule helpers ───────────────────────────────────────────
+
+/// Recognized depreciation method strings (book or fiscal).
+pub fn is_recognized_method(m: &str) -> bool {
+    matches!(
+        m,
+        "liniara" | "degresiva" | "accelerata" | "super_accelerata"
+    )
+}
+
+fn validate_method(m: &str) -> AppResult<()> {
+    if !is_recognized_method(m) {
+        return Err(AppError::Validation(format!(
+            "Metodă de amortizare nesuportată: '{m}'. \
+             Valori acceptate: liniara, degresiva, accelerata, super_accelerata."
+        )));
+    }
+    Ok(())
+}
+
+/// Enforce super-accelerată eligibility constraints (OUG 8/2026):
+/// - asset must be new (is_new = true)
+/// - subgroup must be "2.1"
+/// - PIF year must be 2026
+///
+/// Returns `Err(Validation)` if conditions are not met.
+fn validate_super_accelerata(input: &FixedAssetInput) -> AppResult<()> {
+    if !input.is_new.unwrap_or(true) {
+        return Err(AppError::Validation(
+            "Super-accelerată (OUG 8/2026) se aplică doar activelor NOI (is_new = true).".into(),
+        ));
+    }
+    if input.subgroup.as_deref().map(|s| s.trim()) != Some("2.1") {
+        return Err(AppError::Validation(
+            "Super-accelerată (OUG 8/2026) se aplică doar activelor din subgrupa 2.1 \
+             (HG 2139/2004)."
+                .into(),
+        ));
+    }
+    let pif = input
+        .start_up_date
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&input.date_of_acquisition);
+    let (pif_year, _) = parse_ym(pif);
+    if pif_year != 2026 {
+        return Err(AppError::Validation(
+            "Super-accelerată (OUG 8/2026) se aplică doar activelor puse în funcțiune în 2026."
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+// ─── Annual schedule builders ─────────────────────────────────────────────────
+//
+// Each fn returns a Vec of yearly amounts (Decimal), one entry per DNU year.
+// Σ of all entries == VI exactly (last-year absorbs rounding residual).
+//
+// NOTE: "yearly" here means each full calendar year of the depreciation life,
+// starting from the PIF year. Monthly amounts are derived by the run as
+// year_amount / 12 for the first/last year (the on-month logic in run_depreciation
+// handles sub-year starts exactly like the linear path does).
+
+/// Degresivă (AD) per Cod Fiscal art. 28 alin. (7)–(9).
+///
+/// k factor: 2≤DNU≤5 → 1.5; 5<DNU≤10 → 2.0; DNU>10 → 2.5.
+/// DNU<2: degresivă nu se aplică → error (fall back to liniară at call site if needed).
+///
+/// Switch-to-linear: first year where (remaining × Cd) ≤ (remaining / remaining_years).
+pub fn degressive_schedule(vi: Decimal, dnu: i64) -> AppResult<Vec<Decimal>> {
+    if dnu < 2 {
+        return Err(AppError::Validation(
+            "Metoda degresivă nu se aplică pentru DNU < 2 ani.".into(),
+        ));
+    }
+    let r = crate::db::invoices::round2;
+    let cl = r(Decimal::ONE / Decimal::from(dnu)); // linear rate
+    let k = if dnu <= 5 {
+        Decimal::new(15, 1) // 1.5
+    } else if dnu <= 10 {
+        Decimal::TWO // 2.0
+    } else {
+        Decimal::new(25, 1) // 2.5
+    };
+    let cd = r(cl * k); // degressive rate
+
+    let mut schedule: Vec<Decimal> = Vec::with_capacity(dnu as usize);
+    let mut remaining = vi;
+
+    for year in 1..=(dnu as usize) {
+        let remaining_years = Decimal::from((dnu as usize - year + 1) as i64);
+        let degr = r(remaining * cd);
+        let lin = r(remaining / remaining_years);
+        // Switch in first year where linear ≥ degressive.
+        if lin >= degr {
+            // From this year on, spread remaining equally.
+            // We re-enter the same logic: n years remain, divide equally.
+            // We compute all remaining years right here.
+            let n_remaining = (dnu as usize) - year + 1;
+            let per_year = r(remaining / Decimal::from(n_remaining as i64));
+            for i in 0..n_remaining {
+                if i == n_remaining - 1 {
+                    // Last year absorbs residual.
+                    schedule.push(remaining - per_year * Decimal::from((n_remaining - 1) as i64));
+                } else {
+                    schedule.push(per_year);
+                }
+            }
+            remaining = Decimal::ZERO;
+            break;
+        } else {
+            schedule.push(degr);
+            remaining -= degr;
+        }
+    }
+    // Safety: if floating calc leaves tiny non-zero remainder, fold into last entry.
+    if !remaining.is_zero() && !schedule.is_empty() {
+        let last = schedule.len() - 1;
+        schedule[last] += remaining;
+    }
+    Ok(schedule)
+}
+
+/// Accelerată per Cod Fiscal art. 28 alin. (8)(a): 50% în Y1, restul liniar Y2..Yn.
+pub fn accelerated_schedule(vi: Decimal, dnu: i64) -> AppResult<Vec<Decimal>> {
+    if dnu < 1 {
+        return Err(AppError::Validation(
+            "DNU trebuie să fie ≥ 1 an pentru amortizarea accelerată.".into(),
+        ));
+    }
+    let r = crate::db::invoices::round2;
+    let y1 = r(vi * Decimal::new(5, 1)); // 50%
+    let remaining = vi - y1;
+    let mut schedule = vec![y1];
+    if dnu == 1 {
+        // Life = 1 year: everything in year 1 (remaining = 0).
+        if !remaining.is_zero() {
+            schedule[0] += remaining;
+        }
+    } else {
+        let n_remain = dnu - 1;
+        let per_year = r(remaining / Decimal::from(n_remain));
+        for i in 1..=n_remain {
+            if i == n_remain {
+                schedule.push(remaining - per_year * Decimal::from(n_remain - 1));
+            } else {
+                schedule.push(per_year);
+            }
+        }
+    }
+    Ok(schedule)
+}
+
+/// Super-accelerată per OUG 8/2026: 65% în Y1, restul liniar Y2..Yn.
+/// `in_service_year` must be 2026 (enforced at create/update; here it's informational).
+pub fn super_accelerated_schedule(vi: Decimal, dnu: i64) -> AppResult<Vec<Decimal>> {
+    if dnu < 1 {
+        return Err(AppError::Validation(
+            "DNU trebuie să fie ≥ 1 an pentru amortizarea super-accelerată.".into(),
+        ));
+    }
+    let r = crate::db::invoices::round2;
+    let y1 = r(vi * Decimal::new(65, 2)); // 65%
+    let remaining = vi - y1;
+    let mut schedule = vec![y1];
+    if dnu == 1 {
+        if !remaining.is_zero() {
+            schedule[0] += remaining;
+        }
+    } else {
+        let n_remain = dnu - 1;
+        let per_year = r(remaining / Decimal::from(n_remain));
+        for i in 1..=n_remain {
+            if i == n_remain {
+                schedule.push(remaining - per_year * Decimal::from(n_remain - 1));
+            } else {
+                schedule.push(per_year);
+            }
+        }
+    }
+    Ok(schedule)
+}
+
+/// Straight-line (liniară) annual schedule — added for consistency with the other builders.
+pub fn linear_schedule(vi: Decimal, dnu: i64) -> AppResult<Vec<Decimal>> {
+    if dnu < 1 {
+        return Err(AppError::Validation("DNU trebuie să fie ≥ 1 an.".into()));
+    }
+    let r = crate::db::invoices::round2;
+    let per_year = r(vi / Decimal::from(dnu));
+    let mut schedule: Vec<Decimal> = (0..dnu).map(|_| per_year).collect();
+    // Absorb rounding residual in last year.
+    let sum: Decimal = schedule.iter().copied().sum();
+    let diff = vi - sum;
+    if let Some(last) = schedule.last_mut() {
+        *last += diff;
+    }
+    Ok(schedule)
+}
+
+// ─── Monthly dispatch ─────────────────────────────────────────────────────────
+//
+// These functions map from a FixedAsset + a period-month to the monthly charge.
+// They replace the liniară-only `compute_depreciation` for the run loop, but
+// `compute_depreciation` is kept for backward compatibility (external callers).
+
+/// DNU in whole years (ceiling of life_months / 12).
+fn dnu_from_months(life_months: i64) -> i64 {
+    (life_months + 11) / 12
+}
+
+/// Cumulative depreciation accumulated through end-of-month of `as_of_date` (YYYY-MM-DD),
+/// capped at cost. Dispatches by depreciation_method; falls back to liniară on unknown methods.
+fn compute_accumulated(asset: &FixedAsset, as_of_date: &str) -> Decimal {
+    let cost = Decimal::from_str(asset.acquisition_cost.trim()).unwrap_or(Decimal::ZERO);
+    if cost <= Decimal::ZERO || asset.life_months <= 0 {
+        return Decimal::ZERO;
+    }
+    let (pif_y, pif_m) = parse_ym(&asset.start_up_date);
+    let pif = pif_y * 12 + pif_m as i64;
+    let (as_y, as_m) = parse_ym(as_of_date);
+    let as_of = as_y * 12 + as_m as i64;
+
+    // Disposal cap: amortizarea se oprește ÎNAINTE de luna scoaterii din funcțiune.
+    let as_of = if let Some(dd) = &asset.disposal_date {
+        let (dy, dm) = parse_ym(dd);
+        let disp = dy * 12 + dm as i64;
+        as_of.min(disp - 1)
+    } else {
+        as_of
+    };
+
+    let n = as_of - pif; // depreciable months elapsed (1 = first month after PIF)
+    if n < 1 {
+        return Decimal::ZERO;
+    }
+    // Cap: once fully through the depreciation life, accumulated == cost regardless of method.
+    // This guards non-12-multiple life_months (e.g. 18, 30, 42) where the schedule-based path
+    // would otherwise return a partial value at month life_months and over-run past life.
+    if n >= asset.life_months {
+        return cost;
+    }
+
+    let dnu = dnu_from_months(asset.life_months);
+    let n_years_elapsed = n / 12; // complete years elapsed (0-indexed from PIF)
+    let n_months_in_year = n % 12; // additional months in the current year
+
+    match asset.depreciation_method.as_str() {
+        "degresiva" => {
+            let schedule = match degressive_schedule(cost, dnu) {
+                Ok(s) => s,
+                Err(_) => return compute_accumulated_linear(cost, asset.life_months, n),
+            };
+            accumulated_from_schedule(&schedule, n_years_elapsed, n_months_in_year, cost)
+        }
+        "accelerata" => {
+            let schedule = match accelerated_schedule(cost, dnu) {
+                Ok(s) => s,
+                Err(_) => return compute_accumulated_linear(cost, asset.life_months, n),
+            };
+            accumulated_from_schedule(&schedule, n_years_elapsed, n_months_in_year, cost)
+        }
+        "super_accelerata" => {
+            let schedule = match super_accelerated_schedule(cost, dnu) {
+                Ok(s) => s,
+                Err(_) => return compute_accumulated_linear(cost, asset.life_months, n),
+            };
+            accumulated_from_schedule(&schedule, n_years_elapsed, n_months_in_year, cost)
+        }
+        _ => compute_accumulated_linear(cost, asset.life_months, n),
+    }
+}
+
+/// Straight-line accumulated through month n (1-indexed depreciable-month offset).
+fn compute_accumulated_linear(cost: Decimal, life_months: i64, n: i64) -> Decimal {
+    let r = crate::db::invoices::round2;
+    let monthly = r(cost / Decimal::from(life_months));
+    if n >= life_months {
+        cost
+    } else {
+        Decimal::from(n) * monthly
+    }
+}
+
+/// Accumulated through a given year+month offset from a yearly schedule.
+/// `n_years_elapsed` = how many COMPLETE years have passed (0 = still in year 1).
+/// `n_months_in_year` = additional months into the CURRENT year (0 = none).
+fn accumulated_from_schedule(
+    schedule: &[Decimal],
+    n_years_elapsed: i64,
+    n_months_in_year: i64,
+    cost: Decimal,
+) -> Decimal {
+    if schedule.is_empty() {
+        return Decimal::ZERO;
+    }
+    let total_years = schedule.len() as i64;
+    if n_years_elapsed >= total_years {
+        return cost; // fully depreciated
+    }
+    let r = crate::db::invoices::round2;
+    // Sum complete years.
+    let mut acc: Decimal = schedule[..n_years_elapsed as usize].iter().copied().sum();
+    // Add partial current year (n_months_in_year / 12 of that year's charge).
+    if n_months_in_year > 0 {
+        let cur_year_annual = schedule[n_years_elapsed as usize];
+        acc += r(cur_year_annual * Decimal::from(n_months_in_year) / Decimal::from(12));
+    }
+    acc.min(cost)
+}
+
+/// Monthly depreciation charge for the month containing `period_date` (YYYY-MM-DD).
+/// Returns ZERO if the asset has not started, is fully depreciated, or is disposed.
+fn compute_period_charge(asset: &FixedAsset, period_date: &str) -> Decimal {
+    // Month index at period_date.
+    let (py, pm) = parse_ym(period_date);
+    let period_abs = py * 12 + pm as i64;
+
+    // Disposal: not charged in disposal month or after.
+    if let Some(dd) = &asset.disposal_date {
+        let (dy, dm) = parse_ym(dd);
+        if dy * 12 + dm as i64 <= period_abs {
+            return Decimal::ZERO;
+        }
+    }
+
+    // Month BEFORE this period (for "beginning-of-month" accumulated).
+    let prev = format!(
+        "{:04}-{:02}-01",
+        if pm == 1 { py - 1 } else { py },
+        if pm == 1 { 12 } else { pm - 1 }
+    );
+    let acc_before = compute_accumulated(asset, &prev);
+    let acc_after = compute_accumulated(asset, period_date);
+    (acc_after - acc_before).max(Decimal::ZERO)
+}
+
+// ─── Fiscal schedule exposure ─────────────────────────────────────────────────
+
+/// Per-asset fiscal amortization schedule (annual), used for D101.rd.16 computation.
+/// Returns yearly amounts matching the fiscal_method (falls back to depreciation_method).
+/// Also returns the book-vs-fiscal difference per year for temporary-difference reporting.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FiscalScheduleRow {
+    /// 1-based year index.
+    pub year: usize,
+    /// Fiscal amortization for this year (Decimal-as-TEXT).
+    pub fiscal_amount: String,
+    /// Book amortization for this year (Decimal-as-TEXT).
+    pub book_amount: String,
+    /// Temporary difference (fiscal − book). Positive = fiscal deducts more.
+    pub temp_diff: String,
+}
+
+/// Compute the annual fiscal + book schedules for an asset, returning per-year rows.
+///
+/// # D101 wiring note
+/// `fiscal_deductions` (rd.16) should include the EXCESS of fiscal amortization over book
+/// amortization: Σ(fiscal_amount − book_amount) for the tax year. When fiscal == book, diff = 0.
+/// The caller (D101 form) must aggregate this over all assets for the year.
+pub fn compute_fiscal_schedule(asset: &FixedAsset) -> AppResult<Vec<FiscalScheduleRow>> {
+    let cost = Decimal::from_str(asset.acquisition_cost.trim()).unwrap_or(Decimal::ZERO);
+    if cost <= Decimal::ZERO || asset.life_months <= 0 {
+        return Ok(vec![]);
+    }
+    let dnu = dnu_from_months(asset.life_months);
+    let fiscal_m = asset
+        .fiscal_method
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&asset.depreciation_method);
+
+    let book_schedule = schedule_for_method(&asset.depreciation_method, cost, dnu)?;
+    let fiscal_schedule = schedule_for_method(fiscal_m, cost, dnu)?;
+
+    let n = book_schedule.len().max(fiscal_schedule.len());
+    let rows = (0..n)
+        .map(|i| {
+            let book = book_schedule.get(i).copied().unwrap_or(Decimal::ZERO);
+            let fiscal = fiscal_schedule.get(i).copied().unwrap_or(Decimal::ZERO);
+            let diff = fiscal - book;
+            FiscalScheduleRow {
+                year: i + 1,
+                fiscal_amount: format!("{:.2}", fiscal),
+                book_amount: format!("{:.2}", book),
+                temp_diff: format!("{:.2}", diff),
+            }
+        })
+        .collect();
+    Ok(rows)
+}
+
+fn schedule_for_method(method: &str, cost: Decimal, dnu: i64) -> AppResult<Vec<Decimal>> {
+    match method {
+        "degresiva" => degressive_schedule(cost, dnu),
+        "accelerata" => accelerated_schedule(cost, dnu),
+        "super_accelerata" => super_accelerated_schedule(cost, dnu),
+        _ => linear_schedule(cost, dnu),
+    }
+}
+
 // ─── Update + monthly depreciation run + disposal ────────────────────────────
 
 /// Partial update of a fixed asset (mirrors the payroll partial-update + money validation).
@@ -435,12 +877,31 @@ pub async fn update(
     input: FixedAssetInput,
 ) -> AppResult<FixedAsset> {
     let cur = get(pool, id, company_id).await?;
-    // ASSET-01 — aceeași validare a metodei de amortizare ca în create().
+    // Validate method (if provided).
     if let Some(m) = input.depreciation_method.as_deref() {
-        if m.trim() != "liniara" {
-            return Err(AppError::Validation(
-                "Metodă de amortizare nesuportată — în prezent se acceptă doar 'liniara'.".into(),
-            ));
+        validate_method(m.trim())?;
+    }
+    if let Some(fm) = input.fiscal_method.as_deref() {
+        if !fm.trim().is_empty() {
+            validate_method(fm.trim())?;
+        }
+    }
+    let new_method = input
+        .depreciation_method
+        .as_deref()
+        .unwrap_or(&cur.depreciation_method);
+    if new_method == "super_accelerata" {
+        // Only run eligibility validation when the method is being newly set or changed.
+        // A partial update of an already-valid super_accelerata asset (e.g. changing description
+        // while leaving depreciation_method as None in the payload) must not re-validate against
+        // the input's potentially absent/non-2026 date fields.
+        let method_changing = input
+            .depreciation_method
+            .as_deref()
+            .map(|m| m != cur.depreciation_method)
+            .unwrap_or(false);
+        if method_changing || cur.depreciation_method != "super_accelerata" {
+            validate_super_accelerata(&input)?;
         }
     }
     // EDGE-002 — same date-quality guard as create (the UPDATE binds these dates directly).
@@ -483,10 +944,19 @@ pub async fn update(
         .filter(|s| !s.trim().is_empty())
         .or(cur.disposal_date);
 
+    let fiscal_method_update = match &input.fiscal_method {
+        Some(fm) if !fm.trim().is_empty() => Some(fm.trim().to_string()),
+        Some(_) => None, // empty string → clear it
+        None => cur.fiscal_method.clone(),
+    };
+    let is_new_update = input.is_new.unwrap_or(cur.is_new);
+    let subgroup_update = input.subgroup.as_deref().or(cur.subgroup.as_deref());
+
     sqlx::query(
         "UPDATE fixed_assets SET asset_code=?3, account_id=?4, description=?5, \
          date_of_acquisition=?6, start_up_date=?7, acquisition_cost=?8, life_months=?9, \
-         depreciation_method=?10, disposal_date=?11, active=?12, updated_at=?13 \
+         depreciation_method=?10, disposal_date=?11, active=?12, updated_at=?13, \
+         fiscal_method=?14, is_new=?15, subgroup=?16 \
          WHERE id=?1 AND company_id=?2",
     )
     .bind(id)
@@ -507,6 +977,9 @@ pub async fn update(
     .bind(disposal_date_update)
     .bind(input.active.unwrap_or(cur.active))
     .bind(now_unix())
+    .bind(&fiscal_method_update)
+    .bind(is_new_update as i32)
+    .bind(subgroup_update)
     .execute(pool)
     .await?;
     get(pool, id, company_id).await
@@ -579,23 +1052,30 @@ pub async fn run_depreciation(
 
     // Depreciate every asset that is amortizable in THIS period — keyed on the disposal month, not
     // the `active` flag (a disposed asset has active=0 but must still appear in its pre-disposal
-    // months when those months are re-run).
-    for a in assets.iter().filter(|a| a.depreciation_method == "liniara") {
+    // months when those months are re-run). All recognized methods are processed.
+    for a in assets
+        .iter()
+        .filter(|a| is_recognized_method(&a.depreciation_method))
+    {
         // Skip assets disposed before this month.
         if let Some(dd) = &a.disposal_date {
             if ym_of(dd) < period_ym {
                 continue;
             }
         }
-        let calc = compute_depreciation(a, period_from, period_to);
-        if calc.for_period.is_zero() {
+        let for_period = compute_period_charge(a, period_from);
+        if for_period.is_zero() {
             continue;
         }
+        // Re-compute the full accumulated & book-value state for the register.
+        let cost = Decimal::from_str(a.acquisition_cost.trim()).unwrap_or(Decimal::ZERO);
+        let accumulated = compute_accumulated(a, period_from);
+        let book_value = (cost - accumulated).max(Decimal::ZERO);
         let amort = amort_account_for(&a.account_id).to_string();
-        total += calc.for_period;
+        total += for_period;
         *by_pair
             .entry(("6811".to_string(), amort.clone()))
-            .or_default() += calc.for_period;
+            .or_default() += for_period;
 
         // Idempotent UPSERT into the register.
         sqlx::query(
@@ -609,9 +1089,9 @@ pub async fn run_depreciation(
         .bind(company_id)
         .bind(&a.id)
         .bind(period)
-        .bind(format!("{:.2}", calc.for_period))
-        .bind(format!("{:.2}", calc.accumulated_end))
-        .bind(format!("{:.2}", calc.book_value_end))
+        .bind(format!("{:.2}", for_period))
+        .bind(format!("{:.2}", accumulated))
+        .bind(format!("{:.2}", book_value))
         .bind(&amort)
         .bind(now_unix())
         .execute(pool)
@@ -621,9 +1101,9 @@ pub async fn run_depreciation(
             asset_id: a.id.clone(),
             asset_code: a.asset_code.clone(),
             description: a.description.clone(),
-            monthly_charge: format!("{:.2}", calc.for_period),
-            accumulated: format!("{:.2}", calc.accumulated_end),
-            book_value: format!("{:.2}", calc.book_value_end),
+            monthly_charge: format!("{:.2}", for_period),
+            accumulated: format!("{:.2}", accumulated),
+            book_value: format!("{:.2}", book_value),
             expense_acct: "6811".into(),
             amort_acct: amort,
         });
@@ -772,6 +1252,9 @@ mod tests {
             active: true,
             created_at: 0,
             updated_at: 0,
+            fiscal_method: None,
+            is_new: true,
+            subgroup: None,
         }
     }
 
@@ -880,6 +1363,9 @@ mod tests {
             depreciation_pct: None,
             disposal_date: None,
             active: Some(true),
+            fiscal_method: None,
+            is_new: Some(true),
+            subgroup: None,
         }
     }
 
@@ -1081,39 +1567,304 @@ mod tests {
         assert_eq!(a.disposal_date.as_deref(), Some("2026-02-28"));
     }
 
-    /// ASSET-01: metodă de amortizare != "liniara" trebuie respinsă la create() și update().
+    /// Method validation: unknown methods are rejected; all four recognized methods are accepted.
     #[tokio::test]
-    async fn create_rejects_unsupported_depreciation_method() {
+    async fn create_rejects_unknown_depreciation_method() {
         let pool = setup_asset_pool().await;
-        // Metoda nesuportată → Validation.
+        // Unknown method → Validation error.
         let mut bad = sample_input();
-        bad.depreciation_method = Some("degresiva".into());
+        bad.depreciation_method = Some("inventata".into());
         assert!(matches!(
             create(&pool, "co-1", bad).await.unwrap_err(),
             AppError::Validation(_)
         ));
-        // None → implicit "liniara" — trebuie acceptat.
+        // None → implicit "liniara" — accepted.
         let mut ok_none = sample_input();
         ok_none.asset_code = "MF-none-method".into();
         ok_none.depreciation_method = None;
         create(&pool, "co-1", ok_none).await.unwrap();
-        // Some("liniara") → trebuie acceptat.
+        // "liniara" — accepted.
         let mut ok_lin = sample_input();
         ok_lin.asset_code = "MF-lin-method".into();
         ok_lin.depreciation_method = Some("liniara".into());
         create(&pool, "co-1", ok_lin).await.unwrap();
+        // "degresiva" with DNU >= 2 (36 months = 3 yr) — accepted.
+        let mut ok_deg = sample_input();
+        ok_deg.asset_code = "MF-deg-method".into();
+        ok_deg.depreciation_method = Some("degresiva".into());
+        create(&pool, "co-1", ok_deg).await.unwrap();
+        // "accelerata" — accepted.
+        let mut ok_acc = sample_input();
+        ok_acc.asset_code = "MF-acc-method".into();
+        ok_acc.depreciation_method = Some("accelerata".into());
+        create(&pool, "co-1", ok_acc).await.unwrap();
     }
 
-    /// ASSET-01: update() trebuie să respingă și el o metodă nesuportată.
+    /// update() must reject unknown methods but accept all four recognized methods.
     #[tokio::test]
-    async fn update_rejects_unsupported_depreciation_method() {
+    async fn update_rejects_unknown_depreciation_method() {
         let pool = setup_asset_pool().await;
         let asset = create(&pool, "co-1", sample_input()).await.unwrap();
         let mut bad_upd = sample_input();
-        bad_upd.depreciation_method = Some("accelerata".into());
+        bad_upd.depreciation_method = Some("grешita".into());
         assert!(matches!(
             update(&pool, &asset.id, "co-1", bad_upd).await.unwrap_err(),
             AppError::Validation(_)
         ));
+        // "accelerata" must now be accepted on update too.
+        let mut ok_upd = sample_input();
+        ok_upd.depreciation_method = Some("accelerata".into());
+        // No error expected.
+        update(&pool, &asset.id, "co-1", ok_upd).await.unwrap();
+    }
+
+    // ─── Worked examples from spec ────────────────────────────────────────────
+
+    fn d(s: &str) -> Decimal {
+        Decimal::from_str(s).unwrap()
+    }
+
+    /// Degresivă VI=10000, DNU=5 yr.
+    /// Cl=20%, k=1.5 (DNU∈[2,5]), Cd=30%.
+    /// Y1=3000 (rem 7000); Y2=2100 (rem 4900);
+    /// Y3: degr 4900×30%=1470 vs lin 4900/3=1633.33 → switch → Y3=Y4=Y5=4900/3.
+    /// Σ=10000 exactly.
+    #[test]
+    fn degressive_worked_example_5yr() {
+        let schedule = degressive_schedule(d("10000"), 5).unwrap();
+        assert_eq!(schedule.len(), 5);
+        assert_eq!(schedule[0], d("3000.00"), "Y1");
+        assert_eq!(schedule[1], d("2100.00"), "Y2");
+        // Switch at Y3: remaining 4900 / 3 years = 1633.33.
+        // The three switch-years must sum to exactly 4900.
+        let switch_sum: Decimal = schedule[2] + schedule[3] + schedule[4];
+        assert_eq!(
+            switch_sum,
+            d("4900.00"),
+            "Y3+Y4+Y5 must equal remaining 4900"
+        );
+        // Each switch-year should be 1633.33 (except last which absorbs residual).
+        assert_eq!(schedule[2], d("1633.33"), "Y3 after switch");
+        assert_eq!(schedule[3], d("1633.33"), "Y4");
+        assert_eq!(schedule[4], d("1633.34"), "Y5 absorbs residual");
+        // Total = VI exactly.
+        let total: Decimal = schedule.iter().copied().sum();
+        assert_eq!(total, d("10000.00"), "Σ must equal VI");
+    }
+
+    /// Degresivă band selection: k factor for DNU = 4, 8, 15.
+    /// Note: rates are rounded to 2 decimal places (MidpointAwayFromZero) per round2.
+    #[test]
+    fn degressive_k_factor_bands() {
+        // DNU=4 (2≤DNU≤5) → k=1.5, Cl=round2(1/4)=0.25, Cd=round2(0.25×1.5)=round2(0.375)=0.38.
+        // Y1 = 10000 × 0.38 = 3800.
+        let s4 = degressive_schedule(d("10000"), 4).unwrap();
+        assert_eq!(
+            s4[0],
+            d("3800.00"),
+            "DNU=4 Y1: 10000×38% (Cd=round2(0.375)=0.38)"
+        );
+        // DNU=8 (5<DNU≤10) → k=2.0, Cl=round2(1/8)=0.13, Cd=round2(0.13×2.0)=0.26.
+        // Y1 = 10000 × 0.26 = 2600.
+        let s8 = degressive_schedule(d("10000"), 8).unwrap();
+        assert_eq!(
+            s8[0],
+            d("2600.00"),
+            "DNU=8 Y1: 10000×26% (Cd=round2(0.25)=0.25→×2=0.26)"
+        );
+        // DNU=15 (DNU>10) → k=2.5, Cl=round2(1/15)=round2(0.0667)=0.07.
+        // Cd=round2(0.07×2.5)=round2(0.175)=0.18. Y1 = 10000 × 0.18 = 1800.
+        let s15 = degressive_schedule(d("10000"), 15).unwrap();
+        assert_eq!(
+            s15[0],
+            d("1800.00"),
+            "DNU=15 Y1: 10000×18% (Cd=round2(0.175)=0.18)"
+        );
+        // Σ must equal 10000 in all cases.
+        let sum4: Decimal = s4.iter().copied().sum();
+        let sum8: Decimal = s8.iter().copied().sum();
+        let sum15: Decimal = s15.iter().copied().sum();
+        assert_eq!(sum4, d("10000.00"));
+        assert_eq!(sum8, d("10000.00"));
+        assert_eq!(sum15, d("10000.00"));
+    }
+
+    /// Degresivă DNU<2 → error.
+    #[test]
+    fn degressive_dnu_lt2_returns_error() {
+        assert!(degressive_schedule(d("5000"), 1).is_err());
+        assert!(degressive_schedule(d("5000"), 0).is_err());
+    }
+
+    /// Accelerată VI=2000000, DNU=12 yr.
+    /// Y1=1000000 (50%); Y2..Y12 = 1000000/11 = 90909.09/yr.
+    #[test]
+    fn accelerated_worked_example_12yr() {
+        let schedule = accelerated_schedule(d("2000000"), 12).unwrap();
+        assert_eq!(schedule.len(), 12);
+        assert_eq!(schedule[0], d("1000000.00"), "Y1 = 50%");
+        // Remaining 1000000 over 11 years: per year = round2(1000000/11) = 90909.09.
+        // Last year absorbs residual: 1000000 - 90909.09*10 = 1000000 - 909090.90 = 90909.10.
+        for (idx, val) in schedule.iter().enumerate().take(11).skip(1) {
+            assert_eq!(*val, d("90909.09"), "Y{}", idx + 1);
+        }
+        assert_eq!(schedule[11], d("90909.10"), "Y12 absorbs residual");
+        let total: Decimal = schedule.iter().copied().sum();
+        assert_eq!(total, d("2000000.00"), "Σ must equal VI");
+    }
+
+    /// Super-accelerată VI=1000000. Y1=65%; rest liniar.
+    #[test]
+    fn super_accelerated_worked_example() {
+        // DNU unspecified in spec example — use DNU=5 as a concrete test.
+        let schedule = super_accelerated_schedule(d("1000000"), 5).unwrap();
+        assert_eq!(schedule.len(), 5);
+        assert_eq!(schedule[0], d("650000.00"), "Y1 = 65%");
+        // Remaining 350000 / 4 years = 87500 each.
+        assert_eq!(schedule[1], d("87500.00"), "Y2");
+        assert_eq!(schedule[2], d("87500.00"), "Y3");
+        assert_eq!(schedule[3], d("87500.00"), "Y4");
+        assert_eq!(schedule[4], d("87500.00"), "Y5");
+        let total: Decimal = schedule.iter().copied().sum();
+        assert_eq!(total, d("1000000.00"), "Σ must equal VI");
+    }
+
+    /// Liniară schedule: Σ == VI, each year equal (last absorbs residual).
+    #[test]
+    fn linear_schedule_sum_equals_vi() {
+        let schedule = linear_schedule(d("10000"), 3).unwrap();
+        assert_eq!(schedule.len(), 3);
+        let total: Decimal = schedule.iter().copied().sum();
+        assert_eq!(total, d("10000.00"));
+    }
+
+    /// compute_period_charge for degresivă asset: monthly charge in year 1 = Y1_annual/12.
+    #[test]
+    fn degressive_monthly_charge_year1() {
+        // VI=10000, DNU=5yr (life_months=60), PIF 2025-01-01.
+        // Y1 annual = 3000 → monthly = 3000/12 = 250.
+        let mut asset = sample_asset("10000.00", 60, "2025-01-01");
+        asset.depreciation_method = "degresiva".into();
+        // First depreciable month = Feb 2025 (month after PIF).
+        let charge = compute_period_charge(&asset, "2025-02-01");
+        assert_eq!(charge, d("250.00"), "monthly Y1 charge");
+        // Jan 2025 (PIF month): 0.
+        let pif_month = compute_period_charge(&asset, "2025-01-01");
+        assert_eq!(pif_month, Decimal::ZERO, "PIF month = 0");
+    }
+
+    /// compute_period_charge for accelerată asset: first month = Y1_annual/12.
+    #[test]
+    fn accelerated_monthly_charge_year1() {
+        // VI=2000000, DNU=12yr (life=144m), PIF 2025-01-01.
+        // Y1 annual = 1000000 → monthly = 83333.33.
+        let mut asset = sample_asset("2000000.00", 144, "2025-01-01");
+        asset.depreciation_method = "accelerata".into();
+        let charge = compute_period_charge(&asset, "2025-02-01");
+        assert_eq!(charge, d("83333.33"), "monthly Y1 accelerata charge");
+    }
+
+    /// P2 — non-12-multiple life_months: Σ of monthly charges over the asset's actual life
+    /// must equal VI exactly, accumulated at month life_months must equal VI, and there must
+    /// be no over-run past life_months.
+    #[test]
+    fn accelerated_non12_multiple_life_months_no_overrun() {
+        // life_months=18 → DNU=ceil(18/12)=2.  VI=12000.
+        // PIF 2025-01-01 → first depreciable month = Feb 2025.
+        // Months 1..18 are Feb 2025 .. Jul 2026.
+        let vi = d("12000.00");
+        let mut asset = sample_asset("12000.00", 18, "2025-01-01");
+        asset.depreciation_method = "accelerata".into();
+
+        // Sum monthly charges for months 1..18 and assert == VI.
+        let months = [
+            "2025-02-01",
+            "2025-03-01",
+            "2025-04-01",
+            "2025-05-01",
+            "2025-06-01",
+            "2025-07-01",
+            "2025-08-01",
+            "2025-09-01",
+            "2025-10-01",
+            "2025-11-01",
+            "2025-12-01",
+            "2026-01-01",
+            "2026-02-01",
+            "2026-03-01",
+            "2026-04-01",
+            "2026-05-01",
+            "2026-06-01",
+            "2026-07-01",
+        ];
+        let sum: Decimal = months
+            .iter()
+            .map(|m| compute_period_charge(&asset, m))
+            .sum();
+        assert_eq!(sum, vi, "Σ of 18 monthly charges must equal VI");
+
+        // accumulated at month 18 (depreciable month 18 = 2026-07) == VI.
+        let acc_at_18 = compute_accumulated(&asset, "2026-07-01");
+        assert_eq!(acc_at_18, vi, "accumulated at life end must equal VI");
+
+        // No over-run: months 19+ must also return VI.
+        let acc_at_19 = compute_accumulated(&asset, "2026-08-01");
+        assert_eq!(acc_at_19, vi, "accumulated past life must not exceed VI");
+        let acc_at_24 = compute_accumulated(&asset, "2026-12-01");
+        assert_eq!(
+            acc_at_24, vi,
+            "accumulated 6 months past life must equal VI"
+        );
+    }
+
+    /// P2 — degressive with life_months=30 (DNU=3, but life ends at month 30, not 36).
+    #[test]
+    fn degressive_non12_multiple_life_months_no_overrun() {
+        // life_months=30 → DNU=ceil(30/12)=3. VI=9000.
+        // PIF 2025-01-01 → month 30 = 2027-07-01.
+        let vi = d("9000.00");
+        let mut asset = sample_asset("9000.00", 30, "2025-01-01");
+        asset.depreciation_method = "degresiva".into();
+
+        // accumulated at month 30 must == VI.
+        let acc_at_30 = compute_accumulated(&asset, "2027-07-01");
+        assert_eq!(acc_at_30, vi, "accumulated at life_months=30 must equal VI");
+
+        // No over-run at month 31+.
+        let acc_past = compute_accumulated(&asset, "2027-08-01");
+        assert_eq!(acc_past, vi, "no over-run past life_months=30");
+    }
+
+    /// P3b — updating an existing super_accelerata asset's description (without changing method)
+    /// succeeds even when the input's date fields don't satisfy 2026 eligibility on their own.
+    #[tokio::test]
+    async fn update_super_accelerata_description_without_method_change_succeeds() {
+        let pool = setup_asset_pool().await;
+        // Create a valid super_accelerata asset (2026, is_new, subgroup 2.1).
+        let mut inp = sample_input();
+        inp.asset_code = "MF-super".into();
+        inp.depreciation_method = Some("super_accelerata".into());
+        inp.date_of_acquisition = "2026-03-01".into();
+        inp.start_up_date = Some("2026-03-01".into());
+        inp.is_new = Some(true);
+        inp.subgroup = Some("2.1".into());
+        let asset = create(&pool, "co-1", inp).await.unwrap();
+
+        // Partial update: only change description; leave depreciation_method as None
+        // (i.e., don't re-supply it) and don't supply 2026 dates.
+        // The update must succeed without triggering the 2026-PIF eligibility check.
+        let mut upd = sample_input();
+        upd.asset_code = asset.asset_code.clone(); // keep same code
+        upd.description = "Laptop Dell (updated)".into();
+        upd.depreciation_method = None; // not changing method
+                                        // Supply the same dates so date-format validation passes.
+        upd.date_of_acquisition = asset.date_of_acquisition.clone();
+        upd.start_up_date = None; // trigger the stored-fallback path
+        upd.is_new = Some(asset.is_new);
+        upd.subgroup = asset.subgroup.clone();
+        // Must not fail with "puse în funcțiune în 2026" error.
+        let updated = update(&pool, &asset.id, "co-1", upd).await.unwrap();
+        assert_eq!(updated.description, "Laptop Dell (updated)");
+        assert_eq!(updated.depreciation_method, "super_accelerata");
     }
 }

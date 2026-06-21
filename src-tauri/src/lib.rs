@@ -682,6 +682,7 @@ pub fn run() {
                     commands::assets::run_depreciation,
                     commands::assets::dispose_asset,
                     commands::assets::list_depreciation,
+                    commands::assets::get_asset_fiscal_schedule,
                     // reevaluare valutară lunară — P1 Wave 7
                     commands::fx_revaluation::compute_fx_revaluation,
                     commands::fx_revaluation::list_fx_revaluations,

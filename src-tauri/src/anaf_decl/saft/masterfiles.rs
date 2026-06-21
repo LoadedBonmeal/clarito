@@ -910,6 +910,9 @@ pub async fn write_assets(
             active: true,
             created_at: 0,
             updated_at: 0,
+            fiscal_method: None,
+            is_new: true,
+            subgroup: None,
         };
         let depr = crate::db::assets::compute_depreciation(&fake_asset, date_from, date_to);
 

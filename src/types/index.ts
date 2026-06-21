@@ -1241,6 +1241,8 @@ export interface GestiuneInput {
   dispersataTeritorila?: boolean;
 }
 
+export type DepreciationMethod = "liniara" | "degresiva" | "accelerata" | "super_accelerata";
+
 export interface FixedAsset {
   id: string;
   companyId: string;
@@ -1254,12 +1256,18 @@ export interface FixedAsset {
   startUpDate: string;
   acquisitionCost: string;
   lifeMonths: number;
-  depreciationMethod: string;
+  depreciationMethod: DepreciationMethod;
   depreciationPct: string;
   disposalDate: string | null;
   active: boolean;
   createdAt: number;
   updatedAt: number;
+  /** Fiscal amortization method (if different from book; null = same as book). */
+  fiscalMethod: DepreciationMethod | null;
+  /** true = new asset; required for super_accelerata eligibility. */
+  isNew: boolean;
+  /** HG 2139/2004 subgroup (e.g. "2.1"); required for super_accelerata. */
+  subgroup: string | null;
 }
 
 export interface FixedAssetInput {
@@ -1270,9 +1278,19 @@ export interface FixedAssetInput {
   startUpDate?: string;
   acquisitionCost: string;
   lifeMonths?: number;
-  depreciationMethod?: string;
+  depreciationMethod?: DepreciationMethod;
   disposalDate?: string | null;
   active?: boolean;
+  fiscalMethod?: DepreciationMethod | null;
+  isNew?: boolean;
+  subgroup?: string | null;
+}
+
+export interface FiscalScheduleRow {
+  year: number;
+  fiscalAmount: string;
+  bookAmount: string;
+  tempDiff: string;
 }
 
 export interface AssetDepreciationState {

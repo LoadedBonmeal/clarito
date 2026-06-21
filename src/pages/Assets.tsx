@@ -29,7 +29,7 @@ import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import { fmtRON, parseDec } from "@/lib/utils";
-import type { FixedAsset, FixedAssetInput, DepreciationRun } from "@/types";
+import type { FixedAsset, FixedAssetInput, DepreciationRun, DepreciationMethod } from "@/types";
 
 type TabFilter = "active" | "full" | "disposed";
 
@@ -698,8 +698,13 @@ function AssetModal({
     startUpDate: asset?.startUpDate ?? "",
     acquisitionCost: asset?.acquisitionCost ?? "",
     lifeMonths: asset ? String(asset.lifeMonths) : "",
+    depreciationMethod: (asset?.depreciationMethod ?? "liniara") as DepreciationMethod,
+    subgroup: asset?.subgroup ?? "",
+    isNew: asset?.isNew ?? true,
   });
   const [error, setError] = useState<string | null>(null);
+
+  const isSuperAccelerated = form.depreciationMethod === "super_accelerata";
 
   const save = useMutation({
     mutationFn: () => {
@@ -712,7 +717,9 @@ function AssetModal({
         startUpDate: form.startUpDate || form.dateOfAcquisition,
         acquisitionCost: form.acquisitionCost.trim() || "0",
         lifeMonths: Number(form.lifeMonths) || 0,
-        depreciationMethod: "liniara",
+        depreciationMethod: form.depreciationMethod,
+        isNew: form.isNew,
+        subgroup: isSuperAccelerated ? (form.subgroup.trim() || null) : null,
       };
       return isEdit ? api.assets.update(asset!.id, companyId, input) : api.assets.create(companyId, input);
     },
@@ -721,11 +728,18 @@ function AssetModal({
   });
 
   const field = (k: keyof typeof form) => ({
-    value: form[k],
+    value: form[k] as string,
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value })),
   });
 
   const { closing, close } = useAnimatedClose(onClose);
+
+  const DEPR_METHODS: { value: DepreciationMethod; labelKey: string; hint?: string }[] = [
+    { value: "liniara", labelKey: "assets.modal.methodLiniara" },
+    { value: "degresiva", labelKey: "assets.modal.methodDegresiva", hint: t("assets.modal.methodDegresivaHint") },
+    { value: "accelerata", labelKey: "assets.modal.methodAccelerata", hint: t("assets.modal.methodAccelerataHint") },
+    { value: "super_accelerata", labelKey: "assets.modal.methodSuperAccelerata", hint: t("assets.modal.methodSuperAccelerataHint") },
+  ];
 
   return (
     <div
@@ -733,7 +747,7 @@ function AssetModal({
       style={{ position: "fixed" }}
       onMouseDown={(e) => { if (e.target === e.currentTarget && !save.isPending) close(); }}
     >
-      <div className="modal" style={{ width: 520 }}>
+      <div className="modal" style={{ width: 560 }}>
         <div className="modal-head">
           <div>
             <div className="mt">{isEdit ? t("assets.modal.editTitle", { desc: asset.description }) : t("assets.modal.newTitle")}</div>
@@ -773,6 +787,47 @@ function AssetModal({
               <label>{t("assets.modal.lifeLabel")}</label>
               <input className="input num" inputMode="numeric" placeholder="36" {...field("lifeMonths")} />
             </div>
+            {/* Depreciation method selector */}
+            <div className="field span2">
+              <label>{t("assets.modal.methodLabel")}</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {DEPR_METHODS.map(({ value, labelKey, hint }) => (
+                  <label key={value} style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer", fontSize: 13 }}>
+                    <input
+                      type="radio"
+                      name="depreciationMethod"
+                      value={value}
+                      checked={form.depreciationMethod === value}
+                      onChange={() => setForm((f) => ({ ...f, depreciationMethod: value }))}
+                      style={{ marginTop: 2 }}
+                    />
+                    <span>
+                      <span style={{ fontWeight: 500 }}>{t(labelKey)}</span>
+                      {hint && <span style={{ color: "var(--text-sub)", marginLeft: 6 }}>{hint}</span>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            {/* Super-accelerată eligibility fields */}
+            {isSuperAccelerated && (
+              <>
+                <div className="field">
+                  <label>{t("assets.modal.subgroupLabel")}</label>
+                  <input className="input num" placeholder="2.1" {...field("subgroup")} />
+                </div>
+                <div className="field" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={form.isNew}
+                      onChange={(e) => setForm((f) => ({ ...f, isNew: e.target.checked }))}
+                    />
+                    {t("assets.modal.isNewLabel")}
+                  </label>
+                </div>
+              </>
+            )}
             {error && (
               <div className="span2" style={{ fontSize: 12.5, color: "var(--red)" }}>{error}</div>
             )}

@@ -1712,6 +1712,8 @@ export const assets = {
     invoke<import("@/types").DepreciationRun>("run_depreciation", { companyId, periodFrom, periodTo }),
   dispose: (companyId: string, assetId: string, disposalDate: string) =>
     invoke<void>("dispose_asset", { companyId, assetId, disposalDate }),
+  getFiscalSchedule: (companyId: string, assetId: string) =>
+    invoke<import("@/types").FiscalScheduleRow[]>("get_asset_fiscal_schedule", { companyId, assetId }),
 };
 
 export const payroll = {
