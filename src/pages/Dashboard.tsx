@@ -479,16 +479,18 @@ export function DashboardPage() {
   const apScadent30 = apCurrent + apD130;  // scadent în 30 zile
 
   // Widget 4: TVA exigibilă (period columns — NOT closing, which is cumulative)
-  // 4427 colectată: credit period = TVA colectată în perioadă
-  // 4426 deductibilă: debit period = TVA deductibilă în perioadă
+  // 4427 colectată: net = periodCredit - periodDebit (storno legs debit 4427)
+  // 4426 deductibilă: net = periodDebit - periodCredit (storno legs credit 4426)
   // Net = colectată - deductibilă → pozitiv = TVA de plată, negativ = TVA de recuperat
   const tvaPozitie = useMemo(() => {
     if (!trialBal) return null;
-    let colectata = 0;  // 4427 credit period
-    let deductibila = 0; // 4426 debit period
+    let colectata = 0;   // 4427 net: credit − debit (storno-safe)
+    let deductibila = 0; // 4426 net: debit − credit (storno-safe)
     for (const row of trialBal.rows) {
-      if (row.accountCode === "4427") colectata += parseDec(row.periodCredit);
-      if (row.accountCode === "4426") deductibila += parseDec(row.periodDebit);
+      if (row.accountCode === "4427")
+        colectata += parseDec(row.periodCredit) - parseDec(row.periodDebit);
+      if (row.accountCode === "4426")
+        deductibila += parseDec(row.periodDebit) - parseDec(row.periodCredit);
     }
     const net = colectata - deductibila;
     return { colectata, deductibila, net };

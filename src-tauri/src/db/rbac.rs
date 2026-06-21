@@ -113,52 +113,26 @@ pub fn role_allows(role: Role, perm: Perm) -> bool {
 /// Returns `None` for commands that any authenticated user may call (reads).
 /// Returns `Some(Perm)` for sensitive or write commands.
 ///
-/// **Design: DENY-WRITE-BY-DEFAULT.**
-/// The function first checks explicit high-sensitivity perms, then falls back
-/// to `Some(Perm::CreateDraft)` for any command matching a write-operation
-/// name prefix.  Only pure read commands (list_/get_/preview_/compute_
-/// readonly/check_/fetch_/search_/validate_/generate_ PDF+XML views/…) fall
-/// through to `None`.  This ensures that any new write command added in the
-/// future is automatically denied to Viewer and Operator (for GL writes).
+/// **Design: TRUE DENY-BY-DEFAULT.**
+/// The function checks explicit high-sensitivity perms first, then the
+/// ViewReports bucket, then falls through to `is_read_cmd`.  A command is
+/// free-to-read (returns `None`) ONLY when `is_read_cmd` returns `true`.
+/// Everything else — including any future command not explicitly listed here —
+/// falls to `Some(Perm::CreateDraft)`, which Viewer and Operator (for GL)
+/// cannot satisfy.  This means adding a new write command without updating
+/// this file is safe: it will be denied to Viewer by default.
 ///
-/// Explicit PostGl (also includes run_payroll which posts GL):
-///   generate_gl_entries, reconcile_gl, post_income_tax, post_annual_close,
-///   run_depreciation, dispose_asset, compute_fx_revaluation,
-///   post_inventory_diffs, produce, finalize_inventory_session,
-///   record_stock_receipt, record_stock_issue, finalize_nir, transfer_stock,
-///   run_payroll
-///
-/// ClosePeriod:
-///   close_vat_period, close_period
-///
-/// SubmitAnaf:
-///   anaf_submit_invoice, export_d300_official, export_d390, export_d394_official,
-///   export_saft_official, export_d205_official, export_d207_official,
-///   export_bilant_xml, etransport_submit, export_d112_xml
-///
-/// ManageUsers:
-///   list_users, create_user, update_user, reset_password
-///
-/// WriteSettings:
-///   set_setting, set_smartbill_credentials, clear_smartbill_credentials,
-///   anaf_set_oauth_client_secret, anaf_authorize, anaf_revoke_certificate,
-///   set_autostart
-///
-/// Delete:
-///   delete_* commands, wipe_all_data
-///
-/// ViewReports: reports, GL ledger, journals, aging.
-///
-/// Write-prefix fallback → CreateDraft:
-///   Commands starting with create_/update_/set_/add_/save_/upsert_/remove_/
-///   reset_/storno_/duplicate_/import_/match_/unmatch_/record_/finalize_/
-///   produce/transfer_/reconcile_/run_/regenerate_/recompute_/settle_/
-///   toggle_/mark_/stage_/commit_/seed_/export_backup
-///   (catches all current and future write commands not already listed above)
+/// NOTE on official `export_*` commands: `export_d300_official`,
+/// `export_d390`, `export_d394_official`, `export_saft_official`,
+/// `export_d205_official`, `export_d207_official`, `export_bilant_xml`,
+/// `export_d112_xml` are all mapped to `SubmitAnaf` in the explicit map
+/// BEFORE `is_read_cmd` is evaluated, so the `export_` read-prefix in
+/// `is_read_cmd` only applies to non-official CSV/XLSX exports.
 pub fn required_perm(cmd: &str) -> Option<Perm> {
     match cmd {
         // ── PostGl ────────────────────────────────────────────────────────
         // run_payroll posts GL entries — must be PostGl, not just CreateDraft.
+        // dev_seed writes demo data — keep out of Viewer/Operator reach.
         "generate_gl_entries"
         | "reconcile_gl"
         | "post_income_tax"
@@ -173,12 +147,20 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "record_stock_receipt"
         | "record_stock_issue"
         | "finalize_nir"
-        | "transfer_stock" => Some(Perm::PostGl),
+        | "transfer_stock"
+        // preview_saft_official_xml is read-PREFIXED but its month/quarter branch internally calls
+        // generate_gl_entries (a committing GL DELETE+INSERT), so it must be gated like a GL post —
+        // otherwise the preview_ read-prefix would free it to a Viewer who could re-post the ledger.
+        | "preview_saft_official_xml"
+        | "dev_seed" => Some(Perm::PostGl),
 
         // ── ClosePeriod ───────────────────────────────────────────────────
         "close_vat_period" | "close_period" => Some(Perm::ClosePeriod),
 
         // ── SubmitAnaf ────────────────────────────────────────────────────
+        // smartbill_push_invoice is an external outbound submission — same gate.
+        // NOTE: these official export_* commands must stay here (before the
+        // is_read_cmd check) so the `export_` read-prefix does NOT free them.
         "anaf_submit_invoice"
         | "export_d300_official"
         | "export_d390"
@@ -188,12 +170,15 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "export_d207_official"
         | "export_bilant_xml"
         | "etransport_submit"
-        | "export_d112_xml" => Some(Perm::SubmitAnaf),
+        | "export_d112_xml"
+        | "smartbill_push_invoice" => Some(Perm::SubmitAnaf),
 
         // ── ManageUsers ───────────────────────────────────────────────────
         "list_users" | "create_user" | "update_user" | "reset_password" => Some(Perm::ManageUsers),
 
         // ── WriteSettings ─────────────────────────────────────────────────
+        // anaf_logout / anaf_refresh_certificate / change_archive_location
+        // mutate persisted settings and are not safe for Viewer/Operator.
         "set_setting"
         | "set_smartbill_credentials"
         | "clear_smartbill_credentials"
@@ -202,9 +187,14 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         // (a revoke disconnects e-Factura/SPV) — not for viewer/operator.
         | "anaf_authorize"
         | "anaf_revoke_certificate"
+        | "anaf_logout"
+        | "anaf_refresh_certificate"
+        | "change_archive_location"
         | "set_autostart" => Some(Perm::WriteSettings),
 
         // ── Delete ────────────────────────────────────────────────────────
+        // export_backup is listed here (not in the read-prefix branch below)
+        // because it writes a backup archive — not a safe read for Viewer.
         "delete_company"
         | "delete_contact"
         | "delete_product"
@@ -231,7 +221,8 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "delete_fiscal_receipt"
         | "delete_declaration_filing"
         | "wipe_all_data"
-        | "delete_bom" => Some(Perm::Delete),
+        | "delete_bom"
+        | "export_backup" => Some(Perm::Delete),
 
         // ── ViewReports ───────────────────────────────────────────────────
         "generate_vat_report"
@@ -249,68 +240,77 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "export_purchase_journal"
         | "export_saft_d406" => Some(Perm::ViewReports),
 
-        // ── DENY-WRITE-BY-DEFAULT fallback ────────────────────────────────
-        // Any command whose name starts with a write-operation prefix is denied
-        // to Viewer (and to Operator for GL operations already caught above).
-        // This covers all current write commands not listed explicitly above,
-        // AND any future write command added without updating this file.
-        //
-        // Safe: none of the genuine read commands (list_*, get_*, preview_*,
-        // compute_d*, check_*, fetch_*, search_*, validate_*, generate_*PDF/XML,
-        // export_*CSV/XLSX non-official, auth_*, anaf_check_*/anaf_is_*/
-        // anaf_list_*, stock_ledger, stock_on_hand, …) match these prefixes.
-        cmd if is_write_cmd(cmd) => Some(Perm::CreateDraft),
+        // ── TRUE DENY-BY-DEFAULT fallback ─────────────────────────────────
+        // A command is free (None) ONLY when it is a recognized read.
+        // Everything else — including anaf_sync_spv, manual_sync,
+        // reparse_received_vat, and any future mutation — requires at least
+        // CreateDraft, which Viewer cannot satisfy.
+        cmd if is_read_cmd(cmd) => None,
 
-        // Pure reads — any authenticated user (including Viewer) may call.
-        _ => None,
+        // Unknown / unrecognised → deny (requires CreateDraft).
+        _ => Some(Perm::CreateDraft),
     }
 }
 
-/// Returns `true` when `cmd` matches a write-operation name prefix.
+/// Returns `true` when `cmd` is a known read-only command.
 ///
-/// This is the deny-write-by-default classifier.  Only name prefixes that
-/// unambiguously indicate a mutation are included — read prefixes such as
-/// `get_`, `list_`, `preview_`, `compute_` (D-form computations), `check_`,
-/// `fetch_`, `search_`, `validate_`, `generate_` (PDF/XML view helpers),
-/// `export_` (CSV/XLSX reports not covered by SubmitAnaf above) are
-/// intentionally excluded so Viewer retains read access.
+/// A command is a read if EITHER:
+///   (a) its name starts with a well-known read-only prefix, OR
+///   (b) it appears in the explicit allowlist of non-prefixed reads.
+///
+/// This function is the sole gate for `None` in `required_perm`.
+/// Adding a new name here grants Viewer access — review carefully.
 #[inline]
-fn is_write_cmd(cmd: &str) -> bool {
-    // The single explicit non-prefix write command that has no write prefix:
-    if cmd == "export_backup" {
+fn is_read_cmd(cmd: &str) -> bool {
+    // (a) Read-only name prefixes.
+    // NOTE: `export_` only frees non-official exports; official ones are
+    // already mapped to SubmitAnaf above and never reach this check.
+    let read_prefixes = [
+        "get_",
+        "list_",
+        "preview_",
+        "compute_",
+        "export_",
+        "check_",
+        "fetch_",
+        "search_",
+        "validate_",
+        "count_",
+        "load_",
+    ];
+    if read_prefixes.iter().any(|&pfx| cmd.starts_with(pfx)) {
         return true;
     }
-    let write_prefixes = [
-        "create_",
-        "update_",
-        "set_",
-        "add_",
-        "save_",
-        "upsert_",
-        "remove_",
-        "reset_",
-        "storno_",
-        "duplicate_",
-        "import_",
-        "match_",
-        "unmatch_",
-        "record_",
-        "finalize_",
-        "transfer_",
-        "reconcile_",
-        "run_",
-        "regenerate_",
-        "recompute_",
-        "settle_",
-        "toggle_",
-        "mark_",
-        "stage_",
-        "commit_",
-        "seed_",
-        "ignore_",
-        "prefill_",
+
+    // (b) Explicit allowlist — genuine reads that lack a read-only prefix.
+    // Verified against the codebase; extend only for confirmed read commands.
+    const READ_ALLOWLIST: &[&str] = &[
+        "bilant",
+        "profit_and_loss",
+        "trial_balance",
+        "aging_report",
+        "partner_ledger",
+        "general_ledger",
+        "journal_register",
+        "stock_ledger",
+        "stock_on_hand",
+        "tax_regime_status",
+        "vat_registration_status",
+        "intrastat_status",
+        "cash_vat_plafon_status",
+        "vat_rate_note",
+        "unread_notification_count",
+        "preflight_declaration",
+        "verify_archive_integrity",
+        "verify_invoice_files",
+        "gather_diagnostic",
+        "open_archive_folder",
+        "open_doc_in_browser",
+        "resolve_accounts",
+        "etva_fetch_precompletat",
+        "nir_from_received_invoice",
     ];
-    write_prefixes.iter().any(|&pfx| cmd.starts_with(pfx))
+    READ_ALLOWLIST.contains(&cmd)
 }
 
 // ─── Gate decision (pure, unit-testable) ────────────────────────────────────
@@ -704,5 +704,213 @@ mod tests {
                 "Admin must be allowed on write command '{cmd}'"
             );
         }
+    }
+
+    // ── FIX A: True deny-by-default — audit-found leaky commands ────────
+
+    /// The 9 audit-found commands + a made-up future command must all be
+    /// Forbidden for Viewer (deny-by-default).
+    #[test]
+    fn deny_by_default_audit_found_commands_viewer_forbidden() {
+        let cmds = [
+            // Three that previously slipped through (no matching write prefix):
+            "anaf_sync_spv",
+            "manual_sync",
+            "reparse_received_vat",
+            // Six explicitly added in this fix:
+            "smartbill_push_invoice",
+            "change_archive_location",
+            "anaf_logout",
+            "anaf_refresh_certificate",
+            "dev_seed",
+            // Unknown future mutation — must also be denied by default:
+            "frobnicate_widgets",
+        ];
+        for cmd in cmds {
+            assert_eq!(
+                authorize(cmd, true, Some(Role::Viewer)),
+                Decision::Forbidden,
+                "Viewer must be Forbidden on command '{cmd}'"
+            );
+        }
+    }
+
+    /// Read commands from reports, ledgers, and dashboard must remain Allow for Viewer.
+    #[test]
+    fn reads_still_allowed_for_viewer() {
+        let read_cmds = [
+            // Non-prefixed reads in the explicit allowlist:
+            "bilant",
+            "profit_and_loss",
+            "trial_balance",
+            "aging_report",
+            "general_ledger",
+            "partner_ledger",
+            "stock_on_hand",
+            // Prefixed reads:
+            "get_invoice",
+            "list_companies",
+            "preview_bilant_xml",
+            "compute_d300",
+            "check_license_validity",
+            "fetch_bnr_rate",
+            "search_contacts",
+            "validate_invoice",
+            "count_invoices",
+            "load_settings",
+            "export_aging_csv",
+            "export_sales_journal",
+        ];
+        for cmd in read_cmds {
+            assert_eq!(
+                authorize(cmd, true, Some(Role::Viewer)),
+                Decision::Allow,
+                "Viewer must be allowed to call read command '{cmd}'"
+            );
+        }
+    }
+
+    /// smartbill_push_invoice requires SubmitAnaf:
+    ///   Operator → Forbidden; Contabil → Allow.
+    #[test]
+    fn smartbill_push_invoice_requires_submit_anaf() {
+        assert_eq!(
+            required_perm("smartbill_push_invoice"),
+            Some(Perm::SubmitAnaf),
+            "smartbill_push_invoice must require SubmitAnaf"
+        );
+        assert_eq!(
+            authorize("smartbill_push_invoice", true, Some(Role::Operator)),
+            Decision::Forbidden,
+            "Operator must be Forbidden on smartbill_push_invoice"
+        );
+        assert_eq!(
+            authorize("smartbill_push_invoice", true, Some(Role::Contabil)),
+            Decision::Allow,
+            "Contabil must be allowed to call smartbill_push_invoice"
+        );
+    }
+
+    /// anaf_logout requires WriteSettings:
+    ///   Operator → Forbidden; Contabil → Allow.
+    #[test]
+    fn anaf_logout_requires_write_settings() {
+        assert_eq!(
+            required_perm("anaf_logout"),
+            Some(Perm::WriteSettings),
+            "anaf_logout must require WriteSettings"
+        );
+        assert_eq!(
+            authorize("anaf_logout", true, Some(Role::Operator)),
+            Decision::Forbidden,
+            "Operator must be Forbidden on anaf_logout"
+        );
+        assert_eq!(
+            authorize("anaf_logout", true, Some(Role::Contabil)),
+            Decision::Allow,
+            "Contabil must be allowed to call anaf_logout"
+        );
+    }
+
+    /// anaf_refresh_certificate requires WriteSettings.
+    #[test]
+    fn anaf_refresh_certificate_requires_write_settings() {
+        assert_eq!(
+            required_perm("anaf_refresh_certificate"),
+            Some(Perm::WriteSettings),
+            "anaf_refresh_certificate must require WriteSettings"
+        );
+        assert_eq!(
+            authorize("anaf_refresh_certificate", true, Some(Role::Operator)),
+            Decision::Forbidden,
+        );
+        assert_eq!(
+            authorize("anaf_refresh_certificate", true, Some(Role::Contabil)),
+            Decision::Allow,
+        );
+    }
+
+    /// change_archive_location requires WriteSettings.
+    #[test]
+    fn change_archive_location_requires_write_settings() {
+        assert_eq!(
+            required_perm("change_archive_location"),
+            Some(Perm::WriteSettings),
+            "change_archive_location must require WriteSettings"
+        );
+        assert_eq!(
+            authorize("change_archive_location", true, Some(Role::Operator)),
+            Decision::Forbidden,
+        );
+        assert_eq!(
+            authorize("change_archive_location", true, Some(Role::Contabil)),
+            Decision::Allow,
+        );
+    }
+
+    /// dev_seed requires PostGl:
+    ///   Operator → Forbidden; Contabil → Allow.
+    #[test]
+    fn dev_seed_requires_post_gl() {
+        assert_eq!(
+            required_perm("dev_seed"),
+            Some(Perm::PostGl),
+            "dev_seed must require PostGl"
+        );
+        assert_eq!(
+            authorize("dev_seed", true, Some(Role::Operator)),
+            Decision::Forbidden,
+            "Operator must be Forbidden on dev_seed"
+        );
+        assert_eq!(
+            authorize("dev_seed", true, Some(Role::Contabil)),
+            Decision::Allow,
+            "Contabil must be allowed to call dev_seed"
+        );
+    }
+
+    /// preview_saft_official_xml is read-prefixed but internally re-posts GL → must require PostGl,
+    /// NOT be freed by the preview_ read-prefix (the 4th-pass audit leak).
+    #[test]
+    fn preview_saft_official_xml_requires_post_gl() {
+        assert_eq!(
+            required_perm("preview_saft_official_xml"),
+            Some(Perm::PostGl),
+            "preview_saft_official_xml calls generate_gl_entries → must require PostGl, not be a free read"
+        );
+        assert_eq!(
+            authorize("preview_saft_official_xml", true, Some(Role::Viewer)),
+            Decision::Forbidden,
+            "Viewer must NOT be able to re-post GL via the SAF-T preview"
+        );
+        assert_eq!(
+            authorize("preview_saft_official_xml", true, Some(Role::Operator)),
+            Decision::Forbidden,
+            "Operator (no PostGl) must be Forbidden"
+        );
+        assert_eq!(
+            authorize("preview_saft_official_xml", true, Some(Role::Contabil)),
+            Decision::Allow,
+            "Contabil may preview/regenerate the SAF-T"
+        );
+    }
+
+    /// Unknown future command returns CreateDraft from required_perm.
+    #[test]
+    fn unknown_command_requires_create_draft() {
+        assert_eq!(
+            required_perm("frobnicate_widgets"),
+            Some(Perm::CreateDraft),
+            "Unknown commands must default to CreateDraft (deny-by-default)"
+        );
+        // Viewer → Forbidden; Operator → Allow (has CreateDraft).
+        assert_eq!(
+            authorize("frobnicate_widgets", true, Some(Role::Viewer)),
+            Decision::Forbidden,
+        );
+        assert_eq!(
+            authorize("frobnicate_widgets", true, Some(Role::Operator)),
+            Decision::Allow,
+        );
     }
 }

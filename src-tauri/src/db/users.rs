@@ -297,13 +297,17 @@ pub async fn update_user(
         }
     }
 
-    // ── Last-admin guard ──────────────────────────────────────────────────
-    // Fetch the current state of the target user so we can detect whether the
-    // proposed change would strip the last active admin from the system.
     use sqlx::Row as _;
+
+    // ── Last-admin guard + UPDATE — wrapped in a single transaction ───────
+    // Re-checking the admin count *inside* the transaction prevents a TOCTOU
+    // race where two concurrent demote requests both pass the pre-check and
+    // both succeed, leaving the system with zero active admins.
+    let mut tx = pool.begin().await?;
+
     let current = sqlx::query("SELECT role, is_active FROM users WHERE id = ?1")
         .bind(user_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or(AppError::NotFound)?;
 
@@ -318,36 +322,40 @@ pub async fn update_user(
     let deactivating = input.is_active == Some(false);
 
     if currently_active_admin && (demoting || deactivating) {
-        // Count remaining active admins (excluding this user).
+        // Count remaining active admins (excluding this user) inside the tx.
         let other_admins: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1 AND id != ?1",
         )
         .bind(user_id)
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await?;
 
         if other_admins == 0 {
+            tx.rollback().await?;
             return Err(AppError::Validation(
                 "Nu puteți dezactiva/retrograda ultimul administrator activ.".to_string(),
             ));
         }
     }
 
-    // Apply updates.
+    // Apply updates inside the same transaction.
     if let Some(ref role) = input.role {
         sqlx::query("UPDATE users SET role = ?1 WHERE id = ?2")
             .bind(role)
             .bind(user_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(is_active) = input.is_active {
         sqlx::query("UPDATE users SET is_active = ?1 WHERE id = ?2")
             .bind(is_active as i64)
             .bind(user_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
     }
+
+    tx.commit().await?;
+
     let row = sqlx::query_as::<_, UserRow>(
         "SELECT id, username, role, is_active, failed_attempts, locked_until, created_at, last_login
          FROM users WHERE id = ?1",
