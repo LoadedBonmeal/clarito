@@ -79,6 +79,7 @@ import { GlLedgerPage } from "@/pages/GlLedger";
 import { BankPage } from "@/pages/Bank";
 import { BankImportPage } from "@/pages/BankImport";
 import { StornatePage } from "@/pages/Stornate";
+import { GestiuniPage } from "@/pages/Gestiuni";
 import { InventoryPage } from "@/pages/Inventory";
 import { InventoryRegisterPage } from "@/pages/InventoryRegister";
 
@@ -308,6 +309,12 @@ const glLedgerRoute = createRoute({
   component: GlLedgerPage,
 });
 
+const gestiuniRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/gestiuni",
+  component: GestiuniPage,
+});
+
 const inventoryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/inventory",
@@ -356,6 +363,7 @@ const routeTree = rootRoute.addChildren([
   bankRoute,
   bankImportRoute,
   stornateRoute,
+  gestiuniRoute,
   inventoryRoute,
   inventoryRegisterRoute,
 ]);

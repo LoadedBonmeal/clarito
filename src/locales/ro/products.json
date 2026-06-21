@@ -93,6 +93,8 @@
       "colRunValue": "Sold valoare",
       "rowIn": "Recepție",
       "rowOut": "Ieșire",
+      "gestiune": "Gestiune",
+      "gestiunePlaceholder": "— toate gestiunile —",
       "empty": "Nicio mișcare de stoc pentru acest articol."
     },
     "modal": {

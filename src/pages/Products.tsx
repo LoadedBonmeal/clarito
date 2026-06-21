@@ -434,10 +434,16 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
     product.valuationMethod === "FIFO" || product.valuationMethod === "LIFO" ? product.valuationMethod : "CMP",
   );
   const [stockAcct, setStockAcct] = useState(product.stockAccount || "371");
+  const [selectedGestiuneId, setSelectedGestiuneId] = useState<string | undefined>(undefined);
+
+  const { data: gestiuni = [] } = useQuery({
+    queryKey: ["gestiuni", companyId],
+    queryFn: () => api.gestiuni.list(companyId),
+  });
 
   const { data: ledger = [], refetch } = useQuery({
-    queryKey: ["stock-ledger", product.id],
-    queryFn: () => api.stockValuation.ledger(companyId, product.id),
+    queryKey: ["stock-ledger", product.id, selectedGestiuneId],
+    queryFn: () => api.stockValuation.ledger(companyId, product.id, selectedGestiuneId),
   });
 
   const valMut = useMutation({
@@ -458,6 +464,7 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
         companyId, productId: product.id, entryDate: date, qty: qty.trim(),
         unitCost: tab === "in" ? (cost.trim() || "0") : undefined,
         docType: tab === "in" ? "NIR" : "BC", docRef: docRef.trim() || undefined,
+        gestiuneId: selectedGestiuneId,
       };
       return tab === "in" ? api.stockValuation.recordReceipt(input) : api.stockValuation.recordIssue(input);
     },
@@ -500,6 +507,20 @@ function FisaMagazieCard({ companyId, product }: { companyId: string; product: P
           placeholder="371"
           title={t("products.ledger.stockAcctTitle")}
         />
+        {gestiuni.length > 1 && (
+          <select
+            className="select"
+            style={{ width: 160, height: 32, fontSize: 12.5 }}
+            value={selectedGestiuneId ?? ""}
+            onChange={(e) => setSelectedGestiuneId(e.target.value || undefined)}
+            title={t("products.ledger.gestiune")}
+          >
+            <option value="">{t("products.ledger.gestiunePlaceholder")}</option>
+            {gestiuni.map((g) => (
+              <option key={g.id} value={g.id}>{g.cod} — {g.denumire}</option>
+            ))}
+          </select>
+        )}
         {/* propunere — neimplementat: export fișa de magazie */}
         <button className="pill-btn" onClick={() => notify.info(t("products.notify.comingSoon"))}>
           <Ic name="dl" />{t("products.ledger.export")}

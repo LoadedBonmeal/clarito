@@ -92,6 +92,8 @@
       "colRunValue": "Balance value",
       "rowIn": "Receipt",
       "rowOut": "Issue",
+      "gestiune": "Warehouse",
+      "gestiunePlaceholder": "— all warehouses —",
       "empty": "No stock movements for this item."
     },
     "modal": {

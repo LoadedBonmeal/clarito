@@ -538,6 +538,12 @@ pub fn run() {
             commands::stock::record_stock_issue,
             commands::stock::stock_ledger,
             commands::stock::set_stock_valuation,
+            commands::stock::list_gestiuni,
+            commands::stock::create_gestiune,
+            commands::stock::update_gestiune,
+            commands::stock::delete_gestiune,
+            commands::stock::get_default_gestiune_id,
+            commands::stock::stock_on_hand,
             // inventory — registru-inventar + inventariere (P1 Wave 5)
             commands::inventory::create_inventory_session,
             commands::inventory::get_inventory_session,

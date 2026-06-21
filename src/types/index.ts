@@ -1161,6 +1161,7 @@ export interface StockMovementInput {
   unitCost?: string;
   docType?: string;
   docRef?: string;
+  gestiuneId?: string;  // optional; backend resolves to default if omitted
 }
 
 export interface StockLedgerRow {
@@ -1174,6 +1175,32 @@ export interface StockLedgerRow {
   runValue: string;
   docType: string | null;
   docRef: string | null;
+  gestiuneId: string | null;
+}
+
+export interface Gestiune {
+  id: string;
+  companyId: string;
+  cod: string;
+  denumire: string;
+  tip: string;
+  metodaEvaluare: string;
+  contStoc: string;
+  adresa: string | null;
+  dispersataTeritorila: number;
+  isDefault: number;
+  activ: number;
+  createdAt: number;
+}
+
+export interface GestiuneInput {
+  cod: string;
+  denumire: string;
+  tip?: string;
+  metodaEvaluare?: string;
+  contStoc?: string;
+  adresa?: string;
+  dispersataTeritorila?: boolean;
 }
 
 export interface FixedAsset {

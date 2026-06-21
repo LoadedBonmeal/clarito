@@ -5,6 +5,10 @@
 //! inserare (o intrare retroactivă poate ajunge mai devreme), deci la fiecare mutație se RECALCULEAZĂ
 //! întreg fluxul produsului (recompute_product) și se rescrie registrul (stock_ledger) + cache-ul de
 //! pe produs. Banii folosesc round2 (MidpointAwayFromZero); cantitățile 6 zecimale.
+//!
+//! Starting with migration 0064, stock_ledger rows carry a `gestiune_id`. The recompute functions
+//! now operate per-gestiune (each gestiune's layers are isolated); the product cache (stock_qty /
+//! avg_cost / stock_value) is kept as the SUM across all gestiuni.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -65,8 +69,8 @@ pub fn lifo_value(events: &[StockEvent]) -> Vec<ValuedEvent> {
     layered_value(events, true)
 }
 
-/// Shared layered-cost engine for FIFO / LIFO. `newest_first=false` ⇒ FIFO (consume the oldest IN
-/// layer first); `newest_first=true` ⇒ LIFO (consume the newest IN layer first). Everything else
+/// Shared layered-cost engine for FIFO / LIFO. `newest_first=false` => FIFO (consume the oldest IN
+/// layer first); `newest_first=true` => LIFO (consume the newest IN layer first). Everything else
 /// (rounding, running snapshot, negative-stock fallback to last cost, layer backfill) is identical.
 fn layered_value(events: &[StockEvent], newest_first: bool) -> Vec<ValuedEvent> {
     let mut layers: VecDeque<(usize, Decimal, Decimal)> = VecDeque::new(); // (event_index, remaining, unit_cost)
@@ -162,7 +166,7 @@ fn layered_value(events: &[StockEvent], newest_first: bool) -> Vec<ValuedEvent> 
     out
 }
 
-/// CMP (cost mediu ponderat — media mobilă): the average is recomputed on each receipt; OUTs are
+/// CMP (cost mediu ponderat — media mobila): the average is recomputed on each receipt; OUTs are
 /// valued at the current average.
 pub fn cmp_value(events: &[StockEvent]) -> Vec<ValuedEvent> {
     let mut run_qty = Decimal::ZERO;
@@ -217,7 +221,7 @@ pub fn cmp_value(events: &[StockEvent]) -> Vec<ValuedEvent> {
     out
 }
 
-// ─── DB layer ────────────────────────────────────────────────────────────────
+// --- DB layer ----------------------------------------------------------------
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -231,6 +235,9 @@ pub struct StockMovementInput {
     pub unit_cost: Option<String>,
     pub doc_type: Option<String>,
     pub doc_ref: Option<String>,
+    /// Gestiune (warehouse) — if None, resolved to the company's default gestiune at insert time.
+    #[serde(default)]
+    pub gestiune_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -246,14 +253,14 @@ pub struct LedgerRow {
     pub run_value: String,
     pub doc_type: Option<String>,
     pub doc_ref: Option<String>,
+    pub gestiune_id: Option<String>,
 }
 
 fn dec(s: &str) -> Decimal {
     Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO)
 }
 
-/// Verify the product exists AND belongs to the company (multi-tenant guard). NotFound otherwise —
-/// stock operations must never act cross-company via an id-only lookup.
+/// Verify the product exists AND belongs to the company (multi-tenant guard). NotFound otherwise.
 pub async fn assert_product_owned(
     pool: &SqlitePool,
     company_id: &str,
@@ -271,8 +278,8 @@ pub async fn assert_product_owned(
     Ok(())
 }
 
-/// Insert a raw ledger event, then recompute the product's full valued stream. Returns an optional
-/// user-facing warning (gestiune negativă after this movement).
+/// Insert a raw ledger event, then recompute the product's valued stream for the target gestiune.
+/// Returns an optional user-facing warning (gestiune negativa after this movement).
 pub async fn record_movement(
     pool: &SqlitePool,
     input: &StockMovementInput,
@@ -280,19 +287,18 @@ pub async fn record_movement(
 ) -> AppResult<Option<String>> {
     assert_product_owned(pool, &input.company_id, &input.product_id).await?;
     let qty = Decimal::from_str(input.qty.trim())
-        .map_err(|_| AppError::Validation("Cantitate invalidă.".into()))?;
+        .map_err(|_| AppError::Validation("Cantitate invalida.".into()))?;
     if qty <= Decimal::ZERO {
         return Err(AppError::Validation(
-            "Cantitatea trebuie să fie > 0.".into(),
+            "Cantitatea trebuie sa fie > 0.".into(),
         ));
     }
-    // An IN must carry a valid, non-negative unit cost — garbage must NOT silently become 0 (it
-    // would corrupt the valuation and the GL).
+    // An IN must carry a valid, non-negative unit cost.
     let unit_cost = match dir {
         Dir::In => {
             let raw = input.unit_cost.as_deref().unwrap_or("");
             let c = Decimal::from_str(raw.trim()).map_err(|_| {
-                AppError::Validation("Cost unitar invalid — folosiți formatul 12.34.".into())
+                AppError::Validation("Cost unitar invalid - folositi formatul 12.34.".into())
             })?;
             if c.is_sign_negative() {
                 return Err(AppError::Validation(
@@ -303,10 +309,18 @@ pub async fn record_movement(
         }
         Dir::Out => Decimal::ZERO,
     };
+
+    // Resolve gestiune_id — use the provided one or fall back to the company's default.
+    let gestiune_id = match &input.gestiune_id {
+        Some(gid) if !gid.is_empty() => gid.clone(),
+        _ => crate::db::gestiune::default_gestiune_id(pool, &input.company_id).await?,
+    };
+
     sqlx::query(
         "INSERT INTO stock_ledger (id, company_id, product_id, entry_date, seq, direction, qty, \
          unit_cost, value, run_qty, run_value, fifo_remaining, doc_type, doc_ref, source_type, \
-         created_at) VALUES (?1,?2,?3,?4,0,?5,?6,?7,'0.00','0.000000','0.00','0.000000',?8,?9,'MANUAL',?10)",
+         gestiune_id, created_at) \
+         VALUES (?1,?2,?3,?4,0,?5,?6,?7,'0.00','0.000000','0.00','0.000000',?8,?9,'MANUAL',?10,?11)",
     )
     .bind(new_id())
     .bind(&input.company_id)
@@ -317,22 +331,23 @@ pub async fn record_movement(
     .bind(format!("{:.2}", unit_cost))
     .bind(&input.doc_type)
     .bind(&input.doc_ref)
+    .bind(&gestiune_id)
     .bind(now_unix())
     .execute(pool)
     .await?;
 
-    recompute_product(pool, &input.company_id, &input.product_id).await
+    recompute_product_gestiune(pool, &input.company_id, &input.product_id, &gestiune_id).await
 }
 
-/// Replay the product's full event stream with the chosen method and rewrite the ledger + the
-/// product cache (stock_qty / avg_cost / stock_value) in one transaction. Returns a warning string
-/// if any movement drove the stock negative (gestiune negativă — not allowed by OMFP 1802).
-pub async fn recompute_product(
+/// Replay the event stream for a SINGLE gestiune, rewrite those ledger rows + update the product
+/// cache (stock_qty / avg_cost / stock_value) as the SUM across ALL gestiuni.
+pub async fn recompute_product_gestiune(
     pool: &SqlitePool,
     company_id: &str,
     product_id: &str,
+    gestiune_id: &str,
 ) -> AppResult<Option<String>> {
-    // Read the policy with the company scope — never cross-tenant on an id-only lookup.
+    // Read the policy with the company scope.
     let policy: Option<(String, String)> = sqlx::query_as(
         "SELECT COALESCE(valuation_method,'CMP'), COALESCE(stock_account,'371') \
          FROM products WHERE id=?1 AND company_id=?2",
@@ -346,12 +361,15 @@ pub async fn recompute_product(
         None => return Err(AppError::NotFound),
     };
 
+    // Read only this gestiune's rows in chronological order.
     let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
         "SELECT id, direction, qty, unit_cost, entry_date FROM stock_ledger \
-         WHERE company_id=?1 AND product_id=?2 ORDER BY entry_date, seq, created_at",
+         WHERE company_id=?1 AND product_id=?2 AND gestiune_id=?3 \
+         ORDER BY entry_date, seq, created_at",
     )
     .bind(company_id)
     .bind(product_id)
+    .bind(gestiune_id)
     .fetch_all(pool)
     .await?;
 
@@ -371,11 +389,13 @@ pub async fn recompute_product(
 
     let valued = match method.as_str() {
         "FIFO" => fifo_value(&events),
-        "LIFO" => lifo_value(&events), // OMFP 1802/2014 pct. 96 — statutar; interzis IFRS (IAS 2)
-        _ => cmp_value(&events),       // CMP (cost mediu ponderat) — implicit
+        "LIFO" => lifo_value(&events),
+        _ => cmp_value(&events),
     };
 
     let mut tx = pool.begin().await?;
+
+    // Rewrite only this gestiune's ledger rows.
     for v in &valued {
         sqlx::query(
             "UPDATE stock_ledger SET unit_cost=?2, value=?3, run_qty=?4, run_value=?5, \
@@ -391,27 +411,56 @@ pub async fn recompute_product(
         .execute(&mut *tx)
         .await?;
     }
-    let (qty, value) = valued
-        .last()
-        .map(|v| (v.run_qty, v.run_value))
-        .unwrap_or((Decimal::ZERO, Decimal::ZERO));
-    let avg = if qty > Decimal::ZERO {
-        round2(value / qty)
+
+    // Aggregate totals across ALL gestiuni for this product. We need the CHRONOLOGICALLY-last row per
+    // gestiune (the on-hand after the last event in replay order = entry_date, seq, created_at) — NOT
+    // MAX(rowid), which on a BACKDATED movement (earlier entry_date inserted later → higher rowid) would
+    // pick a mid-stream running balance and drift the product cache. NOT EXISTS = "no later row in this
+    // gestiune"; rowid is the final tiebreaker so exactly one row is selected per gestiune.
+    let gestiune_totals: Vec<(String, String)> = sqlx::query_as(
+        "SELECT sl.run_qty, sl.run_value \
+         FROM stock_ledger sl \
+         WHERE sl.company_id=?1 AND sl.product_id=?2 \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM stock_ledger s2 \
+             WHERE s2.company_id=sl.company_id AND s2.product_id=sl.product_id \
+               AND s2.gestiune_id=sl.gestiune_id \
+               AND ( s2.entry_date > sl.entry_date \
+                  OR (s2.entry_date = sl.entry_date AND s2.seq > sl.seq) \
+                  OR (s2.entry_date = sl.entry_date AND s2.seq = sl.seq AND s2.created_at > sl.created_at) \
+                  OR (s2.entry_date = sl.entry_date AND s2.seq = sl.seq AND s2.created_at = sl.created_at AND s2.rowid > sl.rowid) ) \
+           )",
+    )
+    .bind(company_id)
+    .bind(product_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let (total_qty, total_value) = gestiune_totals
+        .iter()
+        .fold((Decimal::ZERO, Decimal::ZERO), |(aq, av), (rq, rv)| {
+            (aq + dec(rq), av + dec(rv))
+        });
+    let avg = if total_qty > Decimal::ZERO {
+        round2(total_value / total_qty)
     } else {
         Decimal::ZERO
     };
-    sqlx::query("UPDATE products SET stock_qty=?2, avg_cost=?3, stock_value=?4 WHERE id=?1 AND company_id=?5")
-        .bind(product_id)
-        .bind(format!("{:.6}", qty))
-        .bind(format!("{:.2}", avg))
-        .bind(format!("{:.2}", value))
-        .bind(company_id)
-        .execute(&mut *tx)
-        .await?;
+
+    sqlx::query(
+        "UPDATE products SET stock_qty=?2, avg_cost=?3, stock_value=?4 WHERE id=?1 AND company_id=?5",
+    )
+    .bind(product_id)
+    .bind(format!("{:.6}", total_qty))
+    .bind(format!("{:.2}", avg))
+    .bind(format!("{:.2}", total_value))
+    .bind(company_id)
+    .execute(&mut *tx)
+    .await?;
+
     tx.commit().await?;
 
-    // Re-post each movement's GL leg from the freshly-valued ledger (idempotent per ledger row, so a
-    // backdated IN that re-values later OUTs re-posts them correctly).
+    // Re-post each movement's GL leg from the freshly-valued ledger.
     for v in &valued {
         let date = dates.get(&v.id).map(String::as_str).unwrap_or("");
         crate::db::gl::post_stock_movement(
@@ -426,32 +475,78 @@ pub async fn recompute_product(
         .await?;
     }
 
-    // Surface gestiune negativă (OMFP 1802 forbids it) — the last event that drove stock < 0.
+    // Surface gestiune negativa (OMFP 1802 forbids it).
     let warning = valued
         .iter()
         .any(|v| v.negative_stock || v.run_qty.is_sign_negative())
         .then(|| {
-            "Atenție: stocul a devenit negativ (gestiune negativă) — verificați recepțiile."
+            "Atentie: stocul a devenit negativ (gestiune negativa) - verificati receptiile."
                 .to_string()
         });
     Ok(warning)
 }
 
-/// The valued stock ledger (fișa de magazie) for a product.
-pub async fn ledger(
+/// Replay ALL gestiuni for a product (backward-compatibility shim — calls recompute_product_gestiune
+/// for each distinct gestiune_id). Returns a warning if any gestiune went negative.
+pub async fn recompute_product(
     pool: &SqlitePool,
     company_id: &str,
     product_id: &str,
-) -> AppResult<Vec<LedgerRow>> {
-    Ok(sqlx::query_as::<_, LedgerRow>(
-        "SELECT id, entry_date, direction, qty, unit_cost, value, run_qty, run_value, doc_type, \
-         doc_ref FROM stock_ledger WHERE company_id=?1 AND product_id=?2 \
-         ORDER BY entry_date, seq, created_at",
+) -> AppResult<Option<String>> {
+    let gestiune_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT COALESCE(gestiune_id, 'gest-default-' || company_id) \
+         FROM stock_ledger WHERE company_id=?1 AND product_id=?2",
     )
     .bind(company_id)
     .bind(product_id)
     .fetch_all(pool)
-    .await?)
+    .await?;
+
+    if gestiune_ids.is_empty() {
+        return Ok(None);
+    }
+
+    let mut any_warning: Option<String> = None;
+    for gid in &gestiune_ids {
+        let w = recompute_product_gestiune(pool, company_id, product_id, gid).await?;
+        if w.is_some() {
+            any_warning = w;
+        }
+    }
+    Ok(any_warning)
+}
+
+/// The valued stock ledger (fisa de magazie) for a product, optionally filtered by gestiune_id.
+pub async fn ledger(
+    pool: &SqlitePool,
+    company_id: &str,
+    product_id: &str,
+    gestiune_id: Option<&str>,
+) -> AppResult<Vec<LedgerRow>> {
+    if let Some(gid) = gestiune_id {
+        Ok(sqlx::query_as::<_, LedgerRow>(
+            "SELECT id, entry_date, direction, qty, unit_cost, value, run_qty, run_value, \
+             doc_type, doc_ref, gestiune_id FROM stock_ledger \
+             WHERE company_id=?1 AND product_id=?2 AND gestiune_id=?3 \
+             ORDER BY entry_date, seq, created_at",
+        )
+        .bind(company_id)
+        .bind(product_id)
+        .bind(gid)
+        .fetch_all(pool)
+        .await?)
+    } else {
+        Ok(sqlx::query_as::<_, LedgerRow>(
+            "SELECT id, entry_date, direction, qty, unit_cost, value, run_qty, run_value, \
+             doc_type, doc_ref, gestiune_id FROM stock_ledger \
+             WHERE company_id=?1 AND product_id=?2 \
+             ORDER BY entry_date, seq, created_at",
+        )
+        .bind(company_id)
+        .bind(product_id)
+        .fetch_all(pool)
+        .await?)
+    }
 }
 
 #[cfg(test)]
@@ -473,7 +568,7 @@ mod tests {
             .await
             .unwrap();
             sqlx::query(
-                "INSERT INTO products (id, company_id, name, unit) VALUES (?1,?2,'Marfă','buc')",
+                "INSERT INTO products (id, company_id, name, unit) VALUES (?1,?2,'Marfa','buc')",
             )
             .bind(pid)
             .bind(cid)
@@ -487,7 +582,6 @@ mod tests {
     #[tokio::test]
     async fn record_movement_rejects_cross_company() {
         let pool = setup().await;
-        // co2 tries to move co1's product p1 → NotFound (multi-tenant guard).
         let input = StockMovementInput {
             company_id: "co2".into(),
             product_id: "p1".into(),
@@ -496,12 +590,12 @@ mod tests {
             unit_cost: Some("10".into()),
             doc_type: None,
             doc_ref: None,
+            gestiune_id: None,
         };
         assert!(matches!(
             record_movement(&pool, &input, Dir::In).await,
             Err(crate::error::AppError::NotFound)
         ));
-        // Own product → ok.
         let own = StockMovementInput {
             company_id: "co1".into(),
             product_id: "p1".into(),
@@ -512,7 +606,6 @@ mod tests {
 
     #[tokio::test]
     async fn stock_in_gl_reclasses_to_stock_account_not_401() {
-        // Receipt 10 @ 5 → D 371 50 / C 607 50 (reclasă din cheltuiala facturii), NOT C 401.
         let pool = setup().await;
         let input = StockMovementInput {
             company_id: "co1".into(),
@@ -522,6 +615,7 @@ mod tests {
             unit_cost: Some("5".into()),
             doc_type: None,
             doc_ref: None,
+            gestiune_id: None,
         };
         record_movement(&pool, &input, Dir::In).await.unwrap();
         let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
@@ -535,7 +629,7 @@ mod tests {
         };
         assert_eq!(bal("371"), Some(("50.00".into(), "0.00".into())));
         assert_eq!(bal("607"), Some(("0.00".into(), "50.00".into())));
-        assert_eq!(bal("401"), None); // no supplier liability fabricated
+        assert_eq!(bal("401"), None);
         assert!(tb.balanced);
     }
 
@@ -550,6 +644,7 @@ mod tests {
             unit_cost: Some("abc".into()),
             doc_type: None,
             doc_ref: None,
+            gestiune_id: None,
         };
         assert!(record_movement(&pool, &bad, Dir::In).await.is_err());
     }
@@ -568,7 +663,6 @@ mod tests {
 
     #[test]
     fn fifo_textbook() {
-        // IN 10@5, IN 10@7, OUT 15 → 10@5 + 5@7 = 50 + 35 = 85; remaining 5@7 = 35.
         let v = fifo_value(&[
             ev(Dir::In, "10", "5"),
             ev(Dir::In, "10", "7"),
@@ -581,8 +675,6 @@ mod tests {
 
     #[test]
     fn lifo_textbook() {
-        // IN 10@5, IN 10@7, OUT 15 → LIFO consumes newest first: 10@7 + 5@5 = 70 + 25 = 95;
-        // remaining 5@5 = 25. Diverges from FIFO (85 / remaining 35) — the whole point of LIFO.
         let v = lifo_value(&[
             ev(Dir::In, "10", "5"),
             ev(Dir::In, "10", "7"),
@@ -595,13 +687,11 @@ mod tests {
             d("25.00"),
             "remaining 5 of the @5 layer = 25"
         );
-        // LIFO leaves the OLDEST (@5) layer as the on-hand remainder (5 units).
         assert_eq!(v[0].fifo_remaining, d("5.000000"));
     }
 
     #[test]
     fn fifo_unchanged_after_lifo_refactor() {
-        // Guard: fifo_value (now a wrapper over layered_value) stays identical to the old FIFO.
         let evs = [
             ev(Dir::In, "10", "5"),
             ev(Dir::In, "10", "7"),
@@ -610,13 +700,11 @@ mod tests {
         let f = fifo_value(&evs);
         assert_eq!(f[2].value, d("85.00"));
         assert_eq!(f[2].run_value, d("35.00"));
-        // FIFO leaves the NEWEST (@7) layer as the on-hand remainder (5 units) — opposite of LIFO.
         assert_eq!(f[1].fifo_remaining, d("5.000000"));
     }
 
     #[test]
     fn cmp_textbook() {
-        // IN 10@5 (val 50), IN 10@7 (val 50+70=120, avg 6), OUT 15 @6 = 90; remaining 5 @6 = 30.
         let v = cmp_value(&[
             ev(Dir::In, "10", "5"),
             ev(Dir::In, "10", "7"),
@@ -630,9 +718,346 @@ mod tests {
 
     #[test]
     fn fifo_stock_out_flags_negative() {
-        // IN 5@4, OUT 8 → 5@4 + 3@4(shortfall) = 32, negative flagged.
         let v = fifo_value(&[ev(Dir::In, "5", "4"), ev(Dir::Out, "8", "0")]);
         assert!(v[1].negative_stock);
         assert_eq!(v[1].run_qty, d("-3.000000"));
+    }
+
+    // -- INVARIANT: single-gestiune replay == old product-level replay ----------
+
+    async fn seed_invariant_pool(method: &str) -> (SqlitePool, String) {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let cid = "inv_co";
+        let pid = format!("inv_p_{method}");
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES (?1,'11111111','Inv SRL','S','C','CJ','RO')",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO products (id, company_id, name, unit, valuation_method) \
+             VALUES (?1,?2,'P','buc',?3)",
+        )
+        .bind(&pid)
+        .bind(cid)
+        .bind(method)
+        .execute(&pool)
+        .await
+        .unwrap();
+        (pool, pid)
+    }
+
+    async fn capture_ledger(
+        pool: &SqlitePool,
+        company_id: &str,
+        product_id: &str,
+    ) -> Vec<(String, String, String, String, String)> {
+        sqlx::query_as::<_, (String, String, String, String, String)>(
+            "SELECT id, run_qty, run_value, unit_cost, fifo_remaining \
+             FROM stock_ledger WHERE company_id=?1 AND product_id=?2 \
+             ORDER BY entry_date, seq, created_at",
+        )
+        .bind(company_id)
+        .bind(product_id)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn run_invariant_for_method(method: &str) {
+        let (pool, pid) = seed_invariant_pool(method).await;
+        let cid = "inv_co";
+
+        let movements: &[(Dir, &str, &str)] = &[
+            (Dir::In, "10", "5.00"),
+            (Dir::In, "10", "7.00"),
+            (Dir::Out, "15", "0.00"),
+            (Dir::In, "5", "8.00"),
+            (Dir::Out, "3", "0.00"),
+        ];
+        for (dir, qty, cost) in movements {
+            let input = StockMovementInput {
+                company_id: cid.into(),
+                product_id: pid.clone(),
+                entry_date: "2026-01-01".into(),
+                qty: qty.to_string(),
+                unit_cost: if *dir == Dir::In {
+                    Some(cost.to_string())
+                } else {
+                    None
+                },
+                doc_type: None,
+                doc_ref: None,
+                gestiune_id: None,
+            };
+            record_movement(&pool, &input, *dir).await.unwrap();
+        }
+
+        let baseline = capture_ledger(&pool, cid, &pid).await;
+        assert!(!baseline.is_empty());
+
+        let default_gid = crate::db::gestiune::default_gestiune_id(&pool, cid)
+            .await
+            .unwrap();
+        recompute_product_gestiune(&pool, cid, &pid, &default_gid)
+            .await
+            .unwrap();
+
+        let after = capture_ledger(&pool, cid, &pid).await;
+        assert_eq!(
+            baseline.len(),
+            after.len(),
+            "row count changed for {method}"
+        );
+        for (i, (b, a)) in baseline.iter().zip(after.iter()).enumerate() {
+            assert_eq!(
+                b.1, a.1,
+                "{method} row {i}: run_qty mismatch {} != {}",
+                b.1, a.1
+            );
+            assert_eq!(
+                b.2, a.2,
+                "{method} row {i}: run_value mismatch {} != {}",
+                b.2, a.2
+            );
+            assert_eq!(
+                b.3, a.3,
+                "{method} row {i}: unit_cost mismatch {} != {}",
+                b.3, a.3
+            );
+            assert_eq!(
+                b.4, a.4,
+                "{method} row {i}: fifo_remaining mismatch {} != {}",
+                b.4, a.4
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn invariant_single_gestiune_fifo_byte_identical() {
+        run_invariant_for_method("FIFO").await;
+    }
+
+    #[tokio::test]
+    async fn invariant_single_gestiune_lifo_byte_identical() {
+        run_invariant_for_method("LIFO").await;
+    }
+
+    #[tokio::test]
+    async fn invariant_single_gestiune_cmp_byte_identical() {
+        run_invariant_for_method("CMP").await;
+    }
+
+    #[tokio::test]
+    async fn per_gestiune_isolation() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+        let cid = "iso_co";
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES (?1,'22222222','Iso SRL','S','C','CJ','RO')",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO products (id, company_id, name, unit, valuation_method) \
+             VALUES ('iso_p',?1,'P','buc','FIFO')",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let g_a = crate::db::gestiune::create(
+            &pool,
+            cid,
+            crate::db::gestiune::GestiuneInput {
+                cod: "A".into(),
+                denumire: "Gest A".into(),
+                tip: None,
+                metoda_evaluare: Some("FIFO".into()),
+                cont_stoc: None,
+                adresa: None,
+                dispersata_teritorial: None,
+            },
+        )
+        .await
+        .unwrap();
+        let g_b = crate::db::gestiune::create(
+            &pool,
+            cid,
+            crate::db::gestiune::GestiuneInput {
+                cod: "B".into(),
+                denumire: "Gest B".into(),
+                tip: None,
+                metoda_evaluare: Some("FIFO".into()),
+                cont_stoc: None,
+                adresa: None,
+                dispersata_teritorial: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let in_a = StockMovementInput {
+            company_id: cid.into(),
+            product_id: "iso_p".into(),
+            entry_date: "2026-01-01".into(),
+            qty: "10".into(),
+            unit_cost: Some("5.00".into()),
+            doc_type: None,
+            doc_ref: None,
+            gestiune_id: Some(g_a.id.clone()),
+        };
+        let in_b = StockMovementInput {
+            company_id: cid.into(),
+            product_id: "iso_p".into(),
+            entry_date: "2026-01-01".into(),
+            qty: "10".into(),
+            unit_cost: Some("7.00".into()),
+            doc_type: None,
+            doc_ref: None,
+            gestiune_id: Some(g_b.id.clone()),
+        };
+        record_movement(&pool, &in_a, Dir::In).await.unwrap();
+        record_movement(&pool, &in_b, Dir::In).await.unwrap();
+
+        let out_a = StockMovementInput {
+            company_id: cid.into(),
+            product_id: "iso_p".into(),
+            entry_date: "2026-01-02".into(),
+            qty: "5".into(),
+            unit_cost: None,
+            doc_type: None,
+            doc_ref: None,
+            gestiune_id: Some(g_a.id.clone()),
+        };
+        record_movement(&pool, &out_a, Dir::Out).await.unwrap();
+
+        let last_a: (String, String, String) = sqlx::query_as(
+            "SELECT run_qty, run_value, unit_cost FROM stock_ledger \
+             WHERE company_id=?1 AND product_id='iso_p' AND gestiune_id=?2 \
+             ORDER BY entry_date DESC, seq DESC, created_at DESC LIMIT 1",
+        )
+        .bind(cid)
+        .bind(&g_a.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(last_a.0, "5.000000", "A: run_qty after OUT should be 5");
+        assert_eq!(last_a.1, "25.00", "A: run_value should be 25 (5@5)");
+        assert_eq!(
+            last_a.2, "5.00",
+            "A: OUT unit_cost should be 5.00 (FIFO from @5 layer)"
+        );
+
+        let last_b: (String, String) = sqlx::query_as(
+            "SELECT run_qty, run_value FROM stock_ledger \
+             WHERE company_id=?1 AND product_id='iso_p' AND gestiune_id=?2 \
+             ORDER BY entry_date DESC, seq DESC, created_at DESC LIMIT 1",
+        )
+        .bind(cid)
+        .bind(&g_b.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            last_b.0, "10.000000",
+            "B: run_qty should be unchanged at 10"
+        );
+        assert_eq!(last_b.1, "70.00", "B: run_value should be 70 (10@7)");
+
+        let total: (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT stock_qty, stock_value FROM products WHERE id='iso_p' AND company_id=?1",
+        )
+        .bind(cid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let tq = total.0.as_deref().unwrap_or("0");
+        let tv = total.1.as_deref().unwrap_or("0");
+        let tq_f: f64 = tq.parse().unwrap_or(0.0);
+        let tv_f: f64 = tv.parse().unwrap_or(0.0);
+        assert!((tq_f - 15.0).abs() < 0.001, "total qty = 15, got {tq}");
+        assert!(
+            (tv_f - 95.0).abs() < 0.01,
+            "total value = 95 (25+70), got {tv}"
+        );
+    }
+
+    #[tokio::test]
+    async fn product_cache_correct_for_backdated_movement() {
+        // Regression: the product-level stock_qty/stock_value/avg_cost aggregation must take the
+        // CHRONOLOGICALLY-last ledger row per gestiune (entry_date, seq, created_at), NOT MAX(rowid).
+        // A backdated IN (earlier entry_date, recorded LAST → highest rowid) would, under MAX(rowid),
+        // make the product cache pick the backdated row's mid-stream running balance (10/80) instead
+        // of the true on-hand (16/98). FIFO makes the value unambiguous.
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let cid = "bd_co";
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES (?1,'33333333','Bd SRL','S','C','CJ','RO')",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO products (id, company_id, name, unit, valuation_method) \
+             VALUES ('bd_p',?1,'P','buc','FIFO')",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mv = |date: &str, qty: &str, cost: Option<&str>| StockMovementInput {
+            company_id: cid.into(),
+            product_id: "bd_p".into(),
+            entry_date: date.into(),
+            qty: qty.into(),
+            unit_cost: cost.map(|c| c.into()),
+            doc_type: None,
+            doc_ref: None,
+            gestiune_id: None, // default gestiune
+        };
+        // Recorded in this order; the third is BACKDATED to before the first two.
+        record_movement(&pool, &mv("2026-03-01", "10", Some("5.00")), Dir::In)
+            .await
+            .unwrap();
+        record_movement(&pool, &mv("2026-03-10", "4", None), Dir::Out)
+            .await
+            .unwrap();
+        record_movement(&pool, &mv("2026-02-01", "10", Some("8.00")), Dir::In)
+            .await
+            .unwrap();
+
+        // FIFO replay in chrono order: 02-01 IN 10@8 (10/80) → 03-01 IN 10@5 (20/130) →
+        // 03-10 OUT 4 from the @8 layer (−32) → on-hand 16 / 98.00. avg = 98/16 → 6.13.
+        let (q, v): (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT stock_qty, stock_value FROM products WHERE id='bd_p' AND company_id=?1",
+        )
+        .bind(cid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let qf: f64 = q.as_deref().unwrap_or("0").parse().unwrap_or(0.0);
+        let vf: f64 = v.as_deref().unwrap_or("0").parse().unwrap_or(0.0);
+        assert!(
+            (qf - 16.0).abs() < 0.001,
+            "stock_qty must be the chrono-last 16, not the backdated row's 10 — got {q:?}"
+        );
+        assert!(
+            (vf - 98.0).abs() < 0.01,
+            "stock_value must be 98.00 (FIFO on-hand), not the backdated row's 80.00 — got {v:?}"
+        );
     }
 }

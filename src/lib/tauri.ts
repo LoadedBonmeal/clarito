@@ -1258,10 +1258,25 @@ export const stockValuation = {
     invoke<string | null>("record_stock_receipt", { input }),
   recordIssue: (input: import("@/types").StockMovementInput) =>
     invoke<string | null>("record_stock_issue", { input }),
-  ledger: (companyId: string, productId: string) =>
-    invoke<import("@/types").StockLedgerRow[]>("stock_ledger", { companyId, productId }),
+  ledger: (companyId: string, productId: string, gestiuneId?: string) =>
+    invoke<import("@/types").StockLedgerRow[]>("stock_ledger", { companyId, productId, gestiuneId: gestiuneId ?? null }),
   setValuation: (companyId: string, productId: string, method: string, stockAccount: string) =>
     invoke<void>("set_stock_valuation", { companyId, productId, method, stockAccount }),
+};
+
+export const gestiuni = {
+  list: (companyId: string) =>
+    invoke<import("@/types").Gestiune[]>("list_gestiuni", { companyId }),
+  create: (companyId: string, input: import("@/types").GestiuneInput) =>
+    invoke<import("@/types").Gestiune>("create_gestiune", { companyId, input }),
+  update: (id: string, companyId: string, input: import("@/types").GestiuneInput) =>
+    invoke<import("@/types").Gestiune>("update_gestiune", { id, companyId, input }),
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_gestiune", { id, companyId }),
+  getDefaultId: (companyId: string) =>
+    invoke<string>("get_default_gestiune_id", { companyId }),
+  stockOnHand: (companyId: string, productId: string, gestiuneId?: string) =>
+    invoke<[string, string]>("stock_on_hand", { companyId, productId, gestiuneId: gestiuneId ?? null }),
 };
 
 export const assets = {
@@ -1658,6 +1673,7 @@ export const api = {
   etransport,
   feedback,
   gdpr,
+  gestiuni,
   gl,
   importData,
   importWaveC,
