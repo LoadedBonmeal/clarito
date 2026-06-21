@@ -530,20 +530,36 @@ pub async fn convert_to_invoice(
     company_id: &str,
     quote_id: &str,
 ) -> AppResult<crate::db::invoices::Invoice> {
-    let qwl = get_with_lines(pool, quote_id, company_id).await?;
-    let quote = &qwl.quote;
+    // Atomic compare-and-set guard: claim the quote for conversion before creating any invoice.
+    // This prevents a double fiscal number if the caller retries after a crash between
+    // invoice creation and the status stamp below.
+    let rows_affected = sqlx::query(
+        "UPDATE quotes SET status = 'invoicing' \
+         WHERE id = ?1 AND company_id = ?2 AND status = 'accepted' AND converted_invoice_id IS NULL",
+    )
+    .bind(quote_id)
+    .bind(company_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
 
-    if quote.status != "accepted" {
+    if rows_affected == 0 {
+        // Either already converting/converted, wrong status, or wrong company.
+        let qwl = get_with_lines(pool, quote_id, company_id).await?;
+        let quote = &qwl.quote;
+        if quote.converted_invoice_id.is_some() || quote.status == "invoiced" {
+            return Err(AppError::Validation(
+                "Oferta/devizul a fost deja convertit(ă) într-o factură.".into(),
+            ));
+        }
         return Err(AppError::Validation(format!(
             "Oferta/devizul trebuie să fie în status 'accepted' pentru conversie (curent: '{}').",
             quote.status
         )));
     }
-    if quote.converted_invoice_id.is_some() {
-        return Err(AppError::Validation(
-            "Oferta/devizul a fost deja convertit(ă) într-o factură.".into(),
-        ));
-    }
+
+    let qwl = get_with_lines(pool, quote_id, company_id).await?;
+    let quote = &qwl.quote;
 
     let issue_date = crate::db::models::now_unix();
     let issue_date_str = chrono::DateTime::from_timestamp(issue_date, 0)
@@ -886,5 +902,38 @@ mod tests {
         assert_eq!(quote.subtotal_amount, expected_sub);
         assert_eq!(quote.vat_amount, expected_vat);
         assert_eq!(quote.total_amount, expected_total);
+    }
+
+    #[tokio::test]
+    async fn convert_in_invoicing_state_is_refused() {
+        // FIX 5: simulate a crash after the compare-and-set claim (status='invoicing')
+        // but before the stamp to 'invoiced'. A retry must be refused — no second invoice.
+        let pool = setup_pool().await;
+
+        let quote = create(&pool, sample_create_input()).await.unwrap();
+        set_status(&pool, &quote.id, "co1", "accepted")
+            .await
+            .unwrap();
+
+        // Manually force the 'invoicing' sentinel (simulates a crash mid-convert).
+        sqlx::query("UPDATE quotes SET status='invoicing' WHERE id=?1")
+            .bind(&quote.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // A retry of convert_to_invoice must be refused — no second invoice minted.
+        let result = convert_to_invoice(&pool, "co1", &quote.id).await;
+        assert!(
+            result.is_err(),
+            "convert must refuse when status is 'invoicing' (FIX 5 — race guard)"
+        );
+
+        // Confirm no invoice was created for this quote.
+        let inv_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM invoices")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(inv_count, 0, "no invoice must have been created");
     }
 }

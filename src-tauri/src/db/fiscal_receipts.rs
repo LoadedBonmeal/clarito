@@ -414,6 +414,13 @@ pub async fn add_invoice_link(
     }
     validate_pay_means(&input.pay_means)?;
 
+    // Validate that the linked invoice belongs to the same company (prevents cross-company link).
+    crate::db::invoices::get_scoped(pool, &input.invoice_id, company_id)
+        .await
+        .map_err(|_| {
+            AppError::Validation("Factura nu aparține companiei curente sau nu există.".to_string())
+        })?;
+
     let id = new_id();
     sqlx::query(
         "INSERT INTO fiscal_receipt_invoice_links \
@@ -575,5 +582,90 @@ mod tests {
     fn fiscal_receipt_validate_pay_means_invalid() {
         assert!(validate_pay_means("TRANSFER").is_err());
         assert!(validate_pay_means("cash").is_err());
+    }
+
+    /// FIX 3: add_invoice_link must refuse to link an invoice from a different company.
+    #[tokio::test]
+    async fn add_invoice_link_rejects_cross_company_invoice() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+        // Seed two companies.
+        for (id, cui, name) in [("co1", "RO1", "Alpha SRL"), ("co2", "RO2", "Beta SRL")] {
+            sqlx::query(
+                "INSERT OR IGNORE INTO companies \
+                 (id, cui, legal_name, address, city, county, country, created_at, updated_at) \
+                 VALUES (?1,?2,?3,'Str.1','Cluj','CJ','RO',0,0)",
+            )
+            .bind(id)
+            .bind(cui)
+            .bind(name)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        // Create a DRAFT receipt for co1.
+        let receipt = create_receipt(
+            &pool,
+            "co1",
+            FiscalReceiptInput {
+                serie_casa: "CS".into(),
+                nr_z: 1,
+                report_date: "2026-06-21".into(),
+                nr_bonuri: Some(1),
+                total: "100.00".into(),
+                numerar: "100.00".into(),
+                card: "0.00".into(),
+                tichete: None,
+                retail_method: None,
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Create a contact + invoice belonging to co2 (different company).
+        let contact_id = crate::db::models::new_id();
+        sqlx::query(
+            "INSERT INTO contacts \
+             (id, company_id, contact_type, legal_name, country, created_at, updated_at) \
+             VALUES (?1,'co2','CUSTOMER','Client Beta','RO',0,0)",
+        )
+        .bind(&contact_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let inv_id = crate::db::models::new_id();
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, issue_date, due_date, \
+              subtotal_amount, vat_amount, total_amount, status, created_at, updated_at) \
+             VALUES (?1,'co2',?2,'FACT',1,'FACT-1','2026-06-21','2026-06-21','82.64','17.36','100.00','DRAFT',0,0)",
+        )
+        .bind(&inv_id)
+        .bind(&contact_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Attempt to link co2's invoice to co1's receipt — must be refused.
+        let result = add_invoice_link(
+            &pool,
+            &receipt.id,
+            "co1",
+            InvoiceLinkInput {
+                invoice_id: inv_id.clone(),
+                amount: "100.00".into(),
+                pay_means: "CASH".into(),
+            },
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "linking another company's invoice must return Err (FIX 3)"
+        );
     }
 }

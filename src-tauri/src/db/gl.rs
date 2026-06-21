@@ -2530,8 +2530,8 @@ pub async fn generate_gl_entries(
          JOIN invoices i ON i.id = p.invoice_id \
          LEFT JOIN contacts c ON c.id = i.contact_id \
          WHERE p.company_id = ?1 \
-           AND p.paid_at >= ?2 \
-           AND p.paid_at <= ?3",
+           AND substr(p.paid_at,1,10) >= ?2 \
+           AND substr(p.paid_at,1,10) <= ?3",
     )
     .bind(company_id)
     .bind(period_from)

@@ -519,20 +519,34 @@ pub async fn convert_to_invoice(
     company_id: &str,
     order_id: &str,
 ) -> AppResult<crate::db::invoices::Invoice> {
-    let owl = get_with_lines(pool, order_id, company_id).await?;
-    let order = &owl.order;
+    // Atomic compare-and-set guard: claim the order for conversion before creating any invoice.
+    // Prevents double fiscal number on crash/retry between invoice creation and status stamp.
+    let rows_affected = sqlx::query(
+        "UPDATE orders SET status = 'invoicing' \
+         WHERE id = ?1 AND company_id = ?2 AND status = 'accepted' AND converted_invoice_id IS NULL",
+    )
+    .bind(order_id)
+    .bind(company_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
 
-    if order.status != "accepted" {
+    if rows_affected == 0 {
+        let owl = get_with_lines(pool, order_id, company_id).await?;
+        let order = &owl.order;
+        if order.converted_invoice_id.is_some() || order.status == "invoiced" {
+            return Err(AppError::Validation(
+                "Comanda a fost deja convertită într-o factură.".into(),
+            ));
+        }
         return Err(AppError::Validation(format!(
             "Comanda trebuie să fie în status 'accepted' pentru conversie (curent: '{}').",
             order.status
         )));
     }
-    if order.converted_invoice_id.is_some() {
-        return Err(AppError::Validation(
-            "Comanda a fost deja convertită într-o factură.".into(),
-        ));
-    }
+
+    let owl = get_with_lines(pool, order_id, company_id).await?;
+    let order = &owl.order;
 
     let now = now_unix();
     let issue_date_str = chrono::DateTime::from_timestamp(now, 0)

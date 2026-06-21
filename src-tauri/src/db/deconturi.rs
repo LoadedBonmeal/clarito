@@ -31,7 +31,7 @@ fn dp(s: &str) -> Decimal {
 }
 
 fn round2(x: Decimal) -> Decimal {
-    x.round_dp(2)
+    x.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
 }
 
 /// Format a Decimal to exactly 2 decimal places (e.g. "200" → "200.00").
@@ -569,14 +569,13 @@ pub async fn delete_report(pool: &SqlitePool, id: &str, company_id: &str) -> App
 /// Approve a decont: post the settlement GL entry and mark as approved.
 ///
 /// Settlement GL (source_type='EXPENSE_REPORT'):
-///   - 625 D = diurna_neimpozabila (non-taxable diurnă only; taxable is flagged not posted)
+///   - 625 D = diurna_neimpozabila (non-taxable diurnă)
+///   - 6458 D = diurna_impozabila (taxable excess — real expense; payroll withholdings deferred)
 ///   - per expense line (non-diurnă): account_code D = amount, 4426 D = vat_amount
 ///   - Total credits: 542 C = advance amount (if any), 5311 C for shortfall/direct reimb
 ///
 /// If advance > total expenses → overshoot → 5311 D for returned excess
 /// If advance < total expenses → underpay → 5311 C for the shortfall (company reimburses)
-///
-/// The taxable diurnă excess is stored on the report and surfaced in UI but NOT posted.
 pub async fn approve_report(
     pool: &SqlitePool,
     id: &str,
@@ -600,10 +599,20 @@ pub async fn approve_report(
         }
     }
 
+    // Taxable diurnă excess → 6458 (Alte cheltuieli privind asigurările și protecția socială).
+    // The employee incurred the full diurnă; the taxable portion is still a real expense
+    // that must settle the advance (542). Payroll CAS/CASS/impozit withholdings are deferred.
+    if let Some(impoz) = full.report.diurna_impozabila.as_deref() {
+        let amt = round2(dp(impoz));
+        if amt > Decimal::ZERO {
+            debit_lines.push(("6458".into(), amt));
+        }
+    }
+
     // Expense lines (non-diurnă categories only to avoid double-counting)
     for line in &full.lines {
         if line.category == "diurna" {
-            // Diurnă is handled via the diurna_neimpozabila computation above
+            // Diurnă (both portions) is handled above
             continue;
         }
         let amt = round2(dp(&line.amount));
@@ -816,6 +825,24 @@ mod tests {
         assert_eq!(c.limit_a_zi, "57.50");
         assert_eq!(c.diurna_neimpozabila, "57.50");
         assert_eq!(c.diurna_impozabila, "0.00");
+    }
+
+    #[test]
+    fn round2_uses_midpoint_away_from_zero() {
+        // FIX 4: round2 must use MidpointAwayFromZero (commercial), not banker's half-even.
+        // 1.005 → 1.01 (away from zero), not 1.00 (banker's rounds to even).
+        let result = round2(Decimal::from_str("1.005").unwrap());
+        assert_eq!(
+            result,
+            Decimal::from_str("1.01").unwrap(),
+            "1.005 must round to 1.01 (midpoint away from zero)"
+        );
+        // 2.005 → 2.01 (both strategies agree here, but verifies positive direction)
+        let result2 = round2(Decimal::from_str("2.005").unwrap());
+        assert_eq!(result2, Decimal::from_str("2.01").unwrap());
+        // -1.005 → -1.01 (away from zero for negative)
+        let result3 = round2(Decimal::from_str("-1.005").unwrap());
+        assert_eq!(result3, Decimal::from_str("-1.01").unwrap());
     }
 
     // ── GL integration tests ──────────────────────────────────────────────────
@@ -1042,12 +1069,17 @@ mod tests {
             "4426 must appear for deductible VAT"
         );
 
-        // 641 must NOT appear — taxable excess is not posted
+        // 6458 must appear — taxable diurnă excess is posted to settle 542 correctly
+        assert!(
+            has_account(&entries, "6458"),
+            "6458 must appear for taxable diurnă excess (FIX 2)"
+        );
+        // 641 must NOT appear — not the right account for diurnă
         assert!(
             !has_account(&entries, "641"),
-            "641 must NOT appear — taxable diurnă excess is flagged, not posted"
+            "641 must NOT appear for diurnă"
         );
-        // 4315/4316/444 must NOT appear — no payroll GL from decont
+        // 4315/4316/444 must NOT appear — no payroll GL from decont (deferred)
         assert!(!has_account(&entries, "4315"), "4315 must NOT appear");
         assert!(!has_account(&entries, "4316"), "4316 must NOT appear");
         assert!(!has_account(&entries, "444"), "444 must NOT appear");
@@ -1056,6 +1088,110 @@ mod tests {
         let sum_d: Decimal = entries.iter().map(|(_, d_val, _)| dp(d_val)).sum();
         let sum_c: Decimal = entries.iter().map(|(_, _, c_val)| dp(c_val)).sum();
         assert_eq!(sum_d, sum_c, "settlement GL must be balanced");
+    }
+
+    #[tokio::test]
+    async fn taxable_diurna_settles_full_advance_via_6458() {
+        // FIX 2: diurnă acordată 500 (non-tax 287.50 + taxable 212.50) funded by advance 600.
+        // Expected: 625 D=287.50, 6458 D=212.50, 542 C=500 (full expense), 5311 D=100 (returned).
+        // NO spurious 5311 return of 212.50; the full 500 settles the advance.
+        let pool = setup().await;
+
+        let adv = create_advance(
+            &pool,
+            CreateAdvanceInput {
+                company_id: "co1".into(),
+                employee_id: None,
+                amount: "600.00".into(),
+                currency: None,
+                granted_date: "2026-06-01".into(),
+                method: None,
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // 5 days, salary 4000, June 2026: cap = 57.50/zi → 287.50 total → taxable = 212.50
+        let full = create_report(
+            &pool,
+            CreateReportInput {
+                company_id: "co1".into(),
+                advance_id: Some(adv.id.clone()),
+                employee_id: None,
+                delegation_from: Some("2026-06-02".into()),
+                delegation_to: Some("2026-06-06".into()),
+                destination: Some("Timișoara".into()),
+                days: Some(5),
+                diurna_acordata: Some("500.00".into()),
+                salariu_baza: Some("4000.00".into()),
+                report_date: "2026-06-07".into(),
+                notes: None,
+                lines: vec![ExpenseLineInput {
+                    category: "diurna".into(),
+                    description: Some("Diurnă 5 zile".into()),
+                    amount: "500.00".into(),
+                    vat_amount: None,
+                    account_code: None,
+                }],
+                diurna_interna: Some("23.00".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            full.report.diurna_neimpozabila.as_deref().unwrap(),
+            "287.50",
+            "non-taxable must be 287.50"
+        );
+        assert_eq!(
+            full.report.diurna_impozabila.as_deref().unwrap(),
+            "212.50",
+            "taxable must be 212.50"
+        );
+
+        approve_report(&pool, &full.report.id, "co1", "2026-06-07")
+            .await
+            .unwrap();
+
+        let entries = gl_entries_for(&pool, "EXPENSE_REPORT", &full.report.id).await;
+
+        // Helper: sum debit for a given account
+        let debit_for = |acct: &str| -> Decimal {
+            entries
+                .iter()
+                .filter(|(a, _, _)| a == acct)
+                .map(|(_, d, _)| dp(d))
+                .sum()
+        };
+        let credit_for = |acct: &str| -> Decimal {
+            entries
+                .iter()
+                .filter(|(a, _, _)| a == acct)
+                .map(|(_, _, c)| dp(c))
+                .sum()
+        };
+
+        assert_eq!(debit_for("625"), dec("287.50"), "625 D must be 287.50");
+        assert_eq!(debit_for("6458"), dec("212.50"), "6458 D must be 212.50");
+        // advance=600, expenses=500 → 542 C = 500 (expense) + 100 (returned excess) = 600
+        assert_eq!(
+            credit_for("542"),
+            dec("600.00"),
+            "542 C must fully settle the advance (500 expense + 100 excess return)"
+        );
+        // excess 100 returned by employee → 5311 D=100
+        assert_eq!(
+            debit_for("5311"),
+            dec("100.00"),
+            "5311 D=100 (employee returns excess cash)"
+        );
+
+        // GL balanced
+        let sum_d: Decimal = entries.iter().map(|(_, d, _)| dp(d)).sum();
+        let sum_c: Decimal = entries.iter().map(|(_, _, c)| dp(c)).sum();
+        assert_eq!(sum_d, sum_c, "GL must be balanced");
     }
 
     #[tokio::test]
