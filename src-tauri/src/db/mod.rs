@@ -42,6 +42,7 @@ pub mod orders;
 pub mod payments;
 pub mod payroll;
 pub mod payroll_config;
+pub mod payroll_diurna;
 pub mod period_locks;
 pub mod productie;
 pub mod products;
@@ -118,6 +119,7 @@ mod no_inline_test_schema {
         "payment_instruments",
         "payments",
         "payroll_config",
+        "payroll_extra_income",
         "period_locks",
         "product_groups",
         "productie_orders",

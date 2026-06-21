@@ -3665,19 +3665,36 @@ impl IndemnityTotals {
 
 /// Aggregated monthly payroll totals fed to [`post_payroll`] (Wave 4 — replaces a 13-positional-arg
 /// signature). All whole-lei (ANAF commercial rounding) except `gross`/`net`-bearing sums.
+///
+/// ## Diurnă excess integration (Wave E, P1 fix)
+/// When employees have taxable diurnă excess (`payroll_extra_income`), the caller
+/// (`run_payroll`) folds the excess into the COMBINED salary+excess base and rounds ONCE — this
+/// is the ANAF convention (single base, single rounding) ensuring GL 4315/4316/444/436 ==
+/// D112 obligations to the leu. The two extra fields below carry the accounting difference:
+///
+/// - `excess_reclass`: Σ excess across all employees with open extra income (lei).
+///   GL: D 641 / C 625 = excess_reclass (reclass travel-expense → salary-expense; the employee
+///   already received the full excess cash via the EXPENSE_REPORT settlement journal).
+/// - `excess_receivable`: Σ excess-attributable withholdings = combined_withholdings − salary_withholdings.
+///   GL: D 4282 / C 421 = excess_receivable (receivable from employees for the charges on their
+///   excess; 421 nets to salary-net only, since the excess-net was already paid cash).
+///
+/// Both are ZERO when no excess exists → the existing salary-only path is byte-identical.
 #[derive(Debug, Clone)]
 pub struct PayrollTotals {
-    /// Σ brut lucrat (D 641).
+    /// Σ brut lucrat (D 641). Does NOT include excess — excess goes via D641/C625 (excess_reclass).
     pub gross: Decimal,
-    /// CAS 25% salarial (C 4315).
+    /// CAS 25% on COMBINED salary+excess base (C 4315). Equals D112 obligation (single rounding).
     pub cas: Decimal,
-    /// CASS 10% salarial (C 4316).
+    /// CASS 10% on COMBINED salary+excess base (C 4316). Equals D112 obligation (single rounding).
     pub cass: Decimal,
-    /// Impozit 10% (C 444).
+    /// Impozit 10% on COMBINED base after CAS/CASS/deductions (C 444). Equals D112 obligation.
     pub impozit: Decimal,
-    /// CAM 2,25% angajator pe baza agregată (C 436).
+    /// CAM 2,25% angajator pe baza COMBINATĂ agregată (C 436). Equals D112 obligation (single rounding).
     pub cam: Decimal,
     /// Contribuția 0,85% concedii și indemnizații, angajator (OUG 158/2005). 0 dacă lipsește.
+    /// NOTE: CCI is on SALARY base only — diurnă excess is out-of-scope for CCI for fiscal sign-off
+    /// (this D112 emitter declares no CCI/4373 for anyone, keeping the model internally consistent).
     pub concedii: Decimal,
     /// Diferența CAS bază minimă part-time, suportată de angajator (art. 146 (5^6)). 0 dacă lipsește.
     pub cas_diff: Decimal,
@@ -3685,6 +3702,12 @@ pub struct PayrollTotals {
     pub cass_diff: Decimal,
     /// Indemnizațiile de concediu medical ale lunii (gol ⇒ fără postări de indemnizație).
     pub indemn: IndemnityTotals,
+    /// Σ diurnă taxable excess reclassed from 625 to 641 (Wave E). 0 when no excess.
+    /// GL: D 641 / C 625 = excess_reclass.
+    pub excess_reclass: Decimal,
+    /// Σ excess-attributable withholdings = combined_withholdings − salary_withholdings (Wave E).
+    /// GL: D 4282 / C 421 = excess_receivable. Makes 421 net to salary-net (not combined net).
+    pub excess_receivable: Decimal,
 }
 
 /// Post the monthly payroll aggregate to the GL (OMFP 1802/2014 monograph): D 641 / C 421 (gross);
@@ -3709,6 +3732,8 @@ pub async fn post_payroll(
         cas_diff,
         cass_diff,
         indemn,
+        excess_reclass,
+        excess_receivable,
     } = totals;
     let cfg = crate::db::payroll_config::get_payroll_config(pool, company_id).await?;
     let source_id = format!("{period_from}_{period_to}");
@@ -3759,9 +3784,27 @@ pub async fn post_payroll(
         entries.push(mk(rec, account, debit, credit));
     };
     // Salariul lucrat: D 641 / C 421 (brut), apoi rețineri D 421 / C 4315/4316/444.
+    // Când există diurnă impozabilă (Wave E, P1), cas/cass/impozit sunt DEJA pe baza combinată
+    // (salariu + excess), rotunjite O SINGURĂ DATĂ — identic cu D112. Excess-ul merge în GL ca:
+    //   D 641 / C 625 = excess_reclass  (reclass cheltuieli deplasare → cheltuieli salariu)
+    //   D 4282 / C 421 = excess_receivable (creanță de la salariat = rețineri pe excess)
+    // Aceasta asigură că 641 = salariu + excess, 625 = DOAR diurna neimpozabilă,
+    // 421 netizează la net salarial (nu net combinat — netul excesului e deja plătit cash),
+    // și 4315/4316/444/436 = obligațiile D112 la leu (fără rounding split).
     if !gross.is_zero() {
-        add(&mut entries, &cfg.cheltuieli_salarii, gross, Decimal::ZERO); // cheltuieli salarii
-        add(&mut entries, &cfg.salarii_datorate, Decimal::ZERO, gross); // salarii datorate
+        add(&mut entries, &cfg.cheltuieli_salarii, gross, Decimal::ZERO); // D 641 (cheltuieli salarii)
+                                                                          // Diurnă excess reclass: D 641 / C 625 (excess_reclass > 0 doar când există payroll_extra_income).
+        if !excess_reclass.is_zero() {
+            add(
+                &mut entries,
+                &cfg.cheltuieli_salarii,
+                excess_reclass,
+                Decimal::ZERO,
+            ); // D 641 (salary expense — excess gross)
+            add(&mut entries, "625", Decimal::ZERO, excess_reclass); // C 625 (reclass from travel)
+        }
+        add(&mut entries, &cfg.salarii_datorate, Decimal::ZERO, gross); // C 421 (salariu brut)
+                                                                        // D 421 = combined withholdings (cas+cass+impozit on salary+excess, single rounding).
         let withholding = cas + cass + impozit;
         if !withholding.is_zero() {
             add(
@@ -3772,13 +3815,26 @@ pub async fn post_payroll(
             );
         }
         if !cas.is_zero() {
-            add(&mut entries, &cfg.cas, Decimal::ZERO, cas);
+            add(&mut entries, &cfg.cas, Decimal::ZERO, cas); // C 4315
         }
         if !cass.is_zero() {
-            add(&mut entries, &cfg.cass, Decimal::ZERO, cass);
+            add(&mut entries, &cfg.cass, Decimal::ZERO, cass); // C 4316
         }
         if !impozit.is_zero() {
-            add(&mut entries, &cfg.impozit, Decimal::ZERO, impozit);
+            add(&mut entries, &cfg.impozit, Decimal::ZERO, impozit); // C 444
+        }
+        // Diurnă excess receivable from employee: D 4282 / C 421 = excess_receivable.
+        // The employee received the full excess cash (via 625→5311/542 settlement); the company must
+        // now remit CAS+CASS+impozit on the excess to ANAF. This records the employee's debt to
+        // the company and restores 421 to salary-net (not combined-net). 421 nets to ZERO after pay.
+        if !excess_receivable.is_zero() {
+            add(&mut entries, "4282", excess_receivable, Decimal::ZERO); // D 4282
+            add(
+                &mut entries,
+                &cfg.salarii_datorate,
+                Decimal::ZERO,
+                excess_receivable,
+            ); // C 421
         }
     }
     if !cam.is_zero() {

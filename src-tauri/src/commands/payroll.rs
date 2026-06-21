@@ -181,6 +181,13 @@ pub async fn export_d112_xml(
     let employees = payroll::list(&state.db, &company_id).await?;
     let period_ym = format!("{year:04}-{month:02}");
     let leaves = crate::db::concedii::list(&state.db, &company_id, &period_ym).await?;
+    let extra_income = crate::db::payroll_diurna::open_extra_income_by_employee(
+        &state.db,
+        &company_id,
+        &period_ym,
+    )
+    .await
+    .unwrap_or_default();
     let xml = build_d112_xml(
         &company,
         &employees,
@@ -189,6 +196,7 @@ pub async fn export_d112_xml(
         month,
         caen.trim(),
         is_rectificative,
+        &extra_income,
     )?;
     // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the IPC
     // endpoint accepts an arbitrary string.
@@ -255,6 +263,13 @@ pub async fn preview_d112_xml(
     let employees = payroll::list(&state.db, &company_id).await?;
     let period_ym = format!("{year:04}-{month:02}");
     let leaves = crate::db::concedii::list(&state.db, &company_id, &period_ym).await?;
+    let extra_income = crate::db::payroll_diurna::open_extra_income_by_employee(
+        &state.db,
+        &company_id,
+        &period_ym,
+    )
+    .await
+    .unwrap_or_default();
     build_d112_xml(
         &company,
         &employees,
@@ -263,6 +278,7 @@ pub async fn preview_d112_xml(
         month,
         caen.trim(),
         is_rectificative,
+        &extra_income,
     )
 }
 
@@ -270,6 +286,9 @@ pub async fn preview_d112_xml(
 /// medical-leave certificates to the validated `:v7` XML. Separated from [`export_d112_xml`] so it is
 /// testable end-to-end without IPC/IO. An employee with ≥1 certificate emits the B-path (salary
 /// proration + indemnity, consistent with `run_payroll`/GL); the rest emit the standard `asiguratA` path.
+/// `extra_income` — map of `employee_id → total excess (Decimal, lei)` from `payroll_extra_income`
+/// for the given period. Folded into the D112 bases (CAS/CASS/CAM/impozit) and E3_23 (rând 8.2.1).
+#[allow(clippy::too_many_arguments)]
 fn build_d112_xml(
     company: &crate::db::companies::Company,
     employees: &[Employee],
@@ -278,6 +297,7 @@ fn build_d112_xml(
     month: u32,
     caen: &str,
     is_rectificative: bool,
+    extra_income: &std::collections::HashMap<String, Decimal>,
 ) -> AppResult<String> {
     if caen.len() != 4 || !caen.chars().all(|c| c.is_ascii_digit()) {
         return Err(AppError::Validation(
@@ -426,6 +446,7 @@ fn build_d112_xml(
                 baza_impozit: leid(lr.taxable_base),
                 deducere: lei(&e.personal_deduction),
                 sediu_cif: e.sediu_cif.clone(),
+                e3_23: 0, // set by Wave-E post-processing below if there is diurnă surplus
                 med_leaves,
             });
             continue;
@@ -528,10 +549,78 @@ fn build_d112_xml(
             baza_impozit: lei(&r.taxable_base),
             deducere: lei(&r.personal_deduction),
             sediu_cif: e.sediu_cif.clone(),
+            e3_23: 0, // set by Wave-E post-processing below if there is diurnă surplus
             // Concediile medicale (calea B / asiguratD) se populează mai jos din registrul concedii.
             med_leaves: vec![],
         });
     }
+
+    // ── Wave E: fold payroll_extra_income (diurnă surplus) into D112 bases ────────────────────
+    // P1 fix: contributions MUST be computed on the COMBINED base (salary + excess) with a SINGLE
+    // rounding — not salary-rounded + excess-rounded separately. This matches run_payroll GL which
+    // also uses single combined-base rounding, so GL 4315/4316/444/436 == D112 412/432/602/480.
+    //
+    // For each employee with open extra income:
+    //   combined_base = gross (employee's salary base) + excess
+    //   combined_cas  = pct(combined_base, 25%)   → replaces de.cas
+    //   combined_cass = pct(combined_base, 10%)   → replaces de.cass
+    //   combined_impozit = pct(combined_base − combined_cas − combined_cass − deduction, 10%)
+    //   → replaces de.impozit (no additional deduction for asimilat venitor, art. 78)
+    //   de.gross and baza_cas/baza_cass/baza_cam are widened by excess_lei.
+    //   E3_23 = excess_lei (informational rând 8.2.1, art.76(2)(k)).
+    //
+    // NOTE: the GL for the excess is handled entirely by run_payroll (D641/C625=excess_reclass;
+    // D4282/C421=excess_receivable). The former DIURNA_ASIMILAT separate journal is NO LONGER
+    // called from approve_report — contributions were computed separately there and caused drift.
+    if !extra_income.is_empty() {
+        // Build a CNP → employee_id map so we can look up by CNP (D112Employee uses CNP as key).
+        let emp_by_cnp: std::collections::HashMap<&str, &Employee> =
+            employees.iter().map(|e| (e.cnp.as_str(), e)).collect();
+
+        for de in d112_emps.iter_mut() {
+            // Find the employee record for this D112 slot.
+            let Some(emp) = emp_by_cnp.get(de.cnp.as_str()) else {
+                continue;
+            };
+            let excess = match extra_income.get(emp.id.as_str()) {
+                Some(&ex) if ex > Decimal::ZERO => ex,
+                _ => continue,
+            };
+            let excess_lei = leid(excess);
+            use crate::anaf_decl::d112::pct;
+            // Combined base (salary + excess) — single rounding matches GL run_payroll.
+            // de.gross (salary gross, lei) is the existing salary base before excess.
+            let sal_gross_dec = Decimal::from(de.gross);
+            let combined = sal_gross_dec + excess;
+            let comb_cas = leid(pct(combined, (25, 2)));
+            let comb_cass = leid(pct(combined, (10, 2)));
+            // impozit base = combined − CAS − CASS − deduction (same deduction as salary path).
+            let ded = de.deducere; // already in lei
+            let comb_impozit_base = (combined
+                - Decimal::from(comb_cas)
+                - Decimal::from(comb_cass)
+                - Decimal::from(ded))
+            .max(Decimal::ZERO);
+            let comb_impozit = leid(pct(comb_impozit_base, (10, 2)));
+
+            // Update D112Employee fields: set combined contributions (not add excess-only).
+            de.gross += excess_lei;
+            de.baza_cas += excess_lei;
+            de.baza_cass += excess_lei;
+            // baza_cam: aggregate CAM = ROUND(Σ baza_cam × 2,25%) in generate_d112_xml.
+            // Include the excess in the CAM base (CAM 2.25% applies per art. 220^6 + art.76(2)(k)).
+            de.baza_cam += excess_lei;
+            // baza_impozit = combined − CAS − CASS − deduction (matches comb_impozit_base).
+            de.baza_impozit = leid(comb_impozit_base);
+            // Set combined contributions (replaces salary-only values with combined-base values).
+            de.cas = comb_cas;
+            de.cass = comb_cass;
+            de.impozit = comb_impozit;
+            // NOTE: de.cam is NOT updated — generate_d112_xml uses baza_cam aggregate, not per-employee cam.
+            de.e3_23 = excess_lei; // rând 8.2.1 informational (diurnă impozabilă asimilată)
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────────────────────────
 
     // ROB-01: a D112 with zero insured persons is a malformed declaration (B_sal=0, no asigurat) —
     // ANAF rejects it. Guard with a clear error instead of emitting an empty draft.
@@ -675,7 +764,17 @@ mod tests {
         let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
             .await
             .unwrap();
-        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201", false).unwrap();
+        let xml = build_d112_xml(
+            &company,
+            &employees,
+            &leaves,
+            2026,
+            6,
+            "6201",
+            false,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
 
         assert!(xml.contains("declaratie:v7"));
         assert_eq!(xml.matches("<asigurat ").count(), 2); // doi asigurați
@@ -713,7 +812,17 @@ mod tests {
         let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
             .await
             .unwrap();
-        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201", false).unwrap();
+        let xml = build_d112_xml(
+            &company,
+            &employees,
+            &leaves,
+            2026,
+            6,
+            "6201",
+            false,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
 
         assert_eq!(xml.matches("<asiguratD ").count(), 2); // două certificate
         assert!(xml.contains("D_1=\"AA\""));
@@ -774,7 +883,17 @@ mod tests {
         };
 
         // D112 path: parse the `angajatorA` obligation `A_datorat` per code.
-        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201", false).unwrap();
+        let xml = build_d112_xml(
+            &company,
+            &employees,
+            &leaves,
+            2026,
+            6,
+            "6201",
+            false,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         let oblig = |cod: &str| -> i64 {
             let key = format!("A_codOblig=\"{cod}\"");
             let i = xml
@@ -790,6 +909,182 @@ mod tests {
         assert_eq!(gl_credit("4316"), oblig("432"), "CASS: GL 4316 ≠ D112 432");
         assert_eq!(gl_credit("444"), oblig("602"), "impozit: GL 444 ≠ D112 602");
         assert_eq!(gl_credit("436"), oblig("480"), "CAM: GL 436 ≠ D112 480");
+    }
+
+    /// P1 GOLDEN TEST — GL≡D112 with diurnă excess (the invariant that broke before the fix).
+    ///
+    /// Scenario: one employee, salary base 1000, diurnă excess 212 RON (per payroll_extra_income).
+    /// Expected: GL 4315/4316/444/436 == D112 412/432/602/480 TO THE LEU — no rounding drift.
+    ///
+    /// Without the fix: round(1000×25%) + round(212×25%) = 250 + 53 = 303 (GL)
+    ///                  vs round(1212×25%) = 303 (D112) → may match here but impozit drifts.
+    ///
+    /// The real risk case: combined base where split rounding diverges. With salary=1000, excess=212:
+    ///   combined CAS = round(1212 × 0.25) = round(303.0) = 303
+    ///   combined CASS = round(1212 × 0.10) = round(121.2) = 121
+    ///   combined impozit_base = 1212 − 303 − 121 = 788; impozit = round(788 × 0.10) = 79
+    ///   combined CAM = round(1212 × 0.0225) = round(27.27) = 27
+    ///
+    /// The TEST asserts exact equality between GL totals and D112 obligations.
+    /// Also checks: 421 nets to zero (salary net balances), 625 reduces to zero (excess reclassed),
+    /// 641 D = salary_gross + excess (1000 + 212 = 1212), 4282 D = excess receivable.
+    #[tokio::test]
+    async fn gl_d112_golden_with_diurna_excess() {
+        use rust_decimal::prelude::ToPrimitive;
+        let pool = setup().await;
+        let emp = crate::db::payroll::create(&pool, emp_input("1960101410019", "Pop Ana", "1000"))
+            .await
+            .unwrap();
+
+        // Insert the excess directly into payroll_extra_income (simulates an approved decont).
+        let excess = rust_decimal::Decimal::from_str("212").unwrap();
+        crate::db::payroll_diurna::upsert_extra_income(
+            &pool,
+            "co1",
+            &emp.id,
+            "2026-06",
+            "dec-p1-test",
+            excess,
+            "open",
+        )
+        .await
+        .unwrap();
+
+        // Run payroll (folds excess into combined base, posts GL with D641/C625 + D4282/C421).
+        crate::db::payroll::run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let gl_credit = |code: &str| -> i64 {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| {
+                    Decimal::from_str(&r.closing_credit)
+                        .unwrap_or(Decimal::ZERO)
+                        .round_dp_with_strategy(
+                            0,
+                            rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                        )
+                        .to_i64()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+        };
+        let gl_debit = |code: &str| -> i64 {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| {
+                    Decimal::from_str(&r.closing_debit)
+                        .unwrap_or(Decimal::ZERO)
+                        .round_dp_with_strategy(
+                            0,
+                            rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                        )
+                        .to_i64()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+        };
+
+        // Build D112 with the same extra_income map.
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
+        let extra_income =
+            crate::db::payroll_diurna::open_extra_income_by_employee(&pool, "co1", "2026-06")
+                .await
+                .unwrap();
+        let xml = build_d112_xml(
+            &company,
+            &employees,
+            &[],
+            2026,
+            6,
+            "6201",
+            false,
+            &extra_income,
+        )
+        .unwrap();
+        let oblig = |cod: &str| -> i64 {
+            let key = format!("A_codOblig=\"{cod}\"");
+            let i = xml
+                .find(&key)
+                .unwrap_or_else(|| panic!("obligația {cod} lipsește"));
+            let dk = "A_datorat=\"";
+            let j = i + xml[i..].find(dk).expect("A_datorat") + dk.len();
+            let end = xml[j..].find('"').unwrap();
+            xml[j..j + end].parse::<i64>().unwrap()
+        };
+
+        // P1 INVARIANT: GL obligations MUST equal D112 obligations (single combined-base rounding).
+        assert_eq!(
+            gl_credit("4315"),
+            oblig("412"),
+            "P1: CAS GL 4315 ≠ D112 412 (rounding drift with excess!)"
+        );
+        assert_eq!(
+            gl_credit("4316"),
+            oblig("432"),
+            "P1: CASS GL 4316 ≠ D112 432 (rounding drift with excess!)"
+        );
+        assert_eq!(
+            gl_credit("444"),
+            oblig("602"),
+            "P1: impozit GL 444 ≠ D112 602 (rounding drift with excess!)"
+        );
+        assert_eq!(
+            gl_credit("436"),
+            oblig("480"),
+            "P1: CAM GL 436 ≠ D112 480 (rounding drift with excess!)"
+        );
+
+        // GL structural checks: 641 D = salary_gross + excess; 625 C = excess (reclassed out);
+        // 4282 D = excess receivable (employee's debt); 421 nets to zero (balance check).
+        let salary_gross = 1000i64;
+        let excess_lei = 212i64;
+        assert_eq!(
+            gl_debit("641"),
+            salary_gross + excess_lei,
+            "641 D must be salary_gross + excess ({} + {} = {})",
+            salary_gross,
+            excess_lei,
+            salary_gross + excess_lei
+        );
+        assert_eq!(
+            gl_credit("625"),
+            excess_lei,
+            "625 C must equal excess (reclassed from travel to salary expense)"
+        );
+        // 421 structural check: after run_payroll (before payment), 421 has a net CREDIT balance
+        // equal to the SALARY net (not the combined-base net), because the D4282/C421 entry offsets
+        // the excess-attributable withholdings back into 421, leaving only the salary-net payable.
+        //
+        // For gross=1000, no deduction, no non-taxable:
+        //   sal_cas = round(1000 × 25%) = 250
+        //   sal_cass = round(1000 × 10%) = 100
+        //   sal_impozit = round((1000−250−100) × 10%) = round(65) = 65
+        //   salary_net = 1000 − 250 − 100 − 65 = 585
+        let salary_net_expected = 1000i64 - 250 - 100 - 65; // = 585
+        let d421 = gl_debit("421");
+        let c421 = gl_credit("421");
+        assert_eq!(
+            d421, 0,
+            "421 closing_debit must be zero (net credit position)"
+        );
+        assert_eq!(
+            c421,
+            salary_net_expected,
+            "421 closing_credit must equal salary_net {salary_net_expected} (not combined-base net; excess net was already paid cash)"
+        );
+        // 4282 D = excess receivable (must be > 0 since excess > 0).
+        assert!(
+            gl_debit("4282") > 0,
+            "4282 D must be > 0 (employee receivable for excess withholdings)"
+        );
+        assert!(tb.balanced, "payroll journal with excess must balance");
     }
 
     /// PAY-01 regression: a part-time employee whose CAS/CASS base is lifted to the statutory minimum
@@ -835,7 +1130,17 @@ mod tests {
                 .unwrap_or(0)
         };
 
-        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201", false).unwrap();
+        let xml = build_d112_xml(
+            &company,
+            &employees,
+            &leaves,
+            2026,
+            6,
+            "6201",
+            false,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         let oblig = |cod: &str| -> i64 {
             let key = format!("A_codOblig=\"{cod}\"");
             let i = xml
@@ -879,7 +1184,17 @@ mod tests {
 
         let company = crate::db::companies::get(&pool, "co1").await.unwrap();
         let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
-        let xml = build_d112_xml(&company, &employees, &[], 2026, 6, "6201", false).unwrap();
+        let xml = build_d112_xml(
+            &company,
+            &employees,
+            &[],
+            2026,
+            6,
+            "6201",
+            false,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
 
         let active = crate::db::payroll::active_working_days(2026, 6, Some("2026-06-16"), None);
         let full = crate::db::payroll::working_days(2026, 6);
@@ -917,7 +1232,17 @@ mod tests {
         let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
             .await
             .unwrap();
-        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201", false).unwrap();
+        let xml = build_d112_xml(
+            &company,
+            &employees,
+            &leaves,
+            2026,
+            6,
+            "6201",
+            false,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         let path = std::env::temp_dir().join("d112_from_db.xml");
         std::fs::write(&path, &xml).unwrap();
         eprintln!("WROTE {}", path.display());
@@ -947,7 +1272,17 @@ mod tests {
         let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
             .await
             .unwrap();
-        let xml = build_d112_xml(&company, &employees, &leaves, 2026, 6, "6201", false).unwrap();
+        let xml = build_d112_xml(
+            &company,
+            &employees,
+            &leaves,
+            2026,
+            6,
+            "6201",
+            false,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         let tmp = std::env::temp_dir().join("d112_duk_gate_test.xml");
         std::fs::write(&tmp, &xml).unwrap();
 

@@ -16,6 +16,7 @@ use crate::anaf_decl::d112::{
 };
 use crate::db::gl::IndemnityTotals;
 use crate::db::models::{new_id, now_unix};
+use crate::db::payroll_diurna::open_extra_income_by_employee;
 use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -546,6 +547,14 @@ pub async fn run_payroll(
         )
     };
 
+    // ── Wave E: load open diurnă extra-income for this period ────────────────
+    // map: employee_id → total taxable excess (Decimal, lei). Empty when no excess exists.
+    // Used INSIDE the employee loop to fold excess into combined contribution bases so
+    // GL 4315/4316/444/436 == D112 obligations (single combined-base rounding, not split rounding).
+    let extra_income = open_extra_income_by_employee(pool, company_id, &period_ym)
+        .await
+        .unwrap_or_default();
+
     let mut states = Vec::new();
     // Worked-salary aggregates (intră în nota GL: 641/421, 4315/4316/444 salariale, 646/436 CAM).
     let (mut t_gross, mut t_cas, mut t_cass, mut t_tax, mut t_net) = (
@@ -564,6 +573,11 @@ pub async fn run_payroll(
     let mut t_cam_base = Decimal::ZERO;
     // Indemnizații de concediu medical (postate separat: 6458/4382/423).
     let mut indemn = IndemnityTotals::default();
+    // Wave E — diurnă excess GL tracking. Both are ZERO when no excess exists (feature off by default).
+    //   t_excess_reclass   = Σ excess amounts → D 641 / C 625 (reclass travel→salary).
+    //   t_excess_receivable = Σ excess withholdings = combined_wh − salary_wh → D 4282 / C 421
+    //                          (receivable from employees for charges on their excess cash).
+    let (mut t_excess_reclass, mut t_excess_receivable) = (Decimal::ZERO, Decimal::ZERO);
 
     for e in employees.iter().filter(|e| e.active) {
         let gross = dec(&e.gross_salary);
@@ -627,17 +641,53 @@ pub async fn run_payroll(
             // lăsăm deducerea personală integral pe partea salarială (421). Suma rămâne lr.tax ⇒
             // creditul 444 = D112.
             let indemn_tax = (lr.income_tax - wtax).max(Decimal::ZERO);
-            t_gross += lr.worked_gross;
-            t_cas += wcas;
-            t_cass += wcass;
-            t_tax += lr.income_tax - indemn_tax; // partea salarială = total − indemnizație
-            t_cam_base += leid0(lr.worked_base); // CAM/CCI base = baza lucrată (indemnizația nu e supusă)
+            // Wave E: fold diurnă excess into the leave employee's combined base (salary+excess).
+            // S (salary base) = lr.worked_gross (prorated salary). Contributions on S+E, single rounding.
+            let sal_cas_leave = wcas;
+            let sal_cass_leave = wcass;
+            let sal_tax_leave = lr.income_tax - indemn_tax;
+            let ded_leave = deducere_plafonata(dec(&e.personal_deduction), gross, year, month);
+            if let Some(&emp_excess) = extra_income.get(&e.id) {
+                if emp_excess > Decimal::ZERO {
+                    // Combined CAS/CASS on (worked_gross + excess); impozit on combined − CAS − CASS − ded.
+                    // No additional deduction applies to asimilat venitor (art. 78).
+                    let combined_base = lr.worked_gross + emp_excess;
+                    let comb_cas = pct(combined_base, (25, 2));
+                    let comb_cass = pct(combined_base, (10, 2));
+                    let comb_impozit_base =
+                        (combined_base - comb_cas - comb_cass - ded_leave).max(Decimal::ZERO);
+                    let comb_sal_impozit = pct(comb_impozit_base, (10, 2));
+                    // Excess receivable = combined withholdings − salary withholdings.
+                    let excess_recv = (comb_cas - sal_cas_leave)
+                        + (comb_cass - sal_cass_leave)
+                        + (comb_sal_impozit - sal_tax_leave);
+                    t_gross += lr.worked_gross;
+                    t_cas += comb_cas;
+                    t_cass += comb_cass;
+                    t_tax += comb_sal_impozit;
+                    t_cam_base += leid0(lr.worked_base) + leid0(emp_excess);
+                    t_excess_reclass += emp_excess;
+                    t_excess_receivable += excess_recv;
+                } else {
+                    t_gross += lr.worked_gross;
+                    t_cas += sal_cas_leave;
+                    t_cass += sal_cass_leave;
+                    t_tax += sal_tax_leave;
+                    t_cam_base += leid0(lr.worked_base);
+                }
+            } else {
+                t_gross += lr.worked_gross;
+                t_cas += sal_cas_leave;
+                t_cass += sal_cass_leave;
+                t_tax += sal_tax_leave;
+                t_cam_base += leid0(lr.worked_base);
+            }
             t_net += lr.net;
             // Indemnizația = combinat − lucrat (CAS/CASS ≥ 0 mereu; impozitul plafonat mai sus).
             indemn.employer += lr.indemn_employer;
             indemn.fnuass += lr.indemn_fnuass;
-            indemn.cas += lr.cas - wcas;
-            indemn.cass += lr.cass - wcass;
+            indemn.cas += lr.cas - sal_cas_leave;
+            indemn.cass += lr.cass - sal_cass_leave;
             indemn.tax += indemn_tax;
             states.push(EmployeeState {
                 employee_id: e.id.clone(),
@@ -679,12 +729,51 @@ pub async fn run_payroll(
             t_cas_diff += cas_diff;
             t_cass_diff += cass_diff;
         }
-        t_gross += dec(&r.gross);
-        t_cas += dec(&r.cas);
-        t_cass += dec(&r.cass);
-        t_tax += dec(&r.income_tax);
-        t_net += dec(&r.net);
-        t_cam_base += leid0((gross - non_taxable).max(Decimal::ZERO)); // bază CAM/CCI = brut − netaxabil
+        // Wave E: fold diurnă excess into combined base for single-rounding contributions.
+        // S = salary gross (dec(&r.gross)). E = excess from payroll_extra_income (or 0).
+        // When E=0 the path is byte-identical to the pre-Wave-E code.
+        let sal_gross = dec(&r.gross);
+        let sal_cas = dec(&r.cas);
+        let sal_cass = dec(&r.cass);
+        let sal_impozit = dec(&r.income_tax);
+        if let Some(&emp_excess) = extra_income.get(&e.id) {
+            if emp_excess > Decimal::ZERO {
+                // Combined base = salary gross + excess (non_taxable already excluded from r.gross via compute_payroll).
+                // For impozit: deduction applies (same deduction as salary path, not doubled).
+                let emp_ded = deducere_plafonata(dec(&e.personal_deduction), gross, year, month);
+                let combined_base = sal_gross + emp_excess;
+                let comb_cas = pct(combined_base, (25, 2));
+                let comb_cass = pct(combined_base, (10, 2));
+                let comb_impozit_base =
+                    (combined_base - comb_cas - comb_cass - emp_ded).max(Decimal::ZERO);
+                let comb_impozit = pct(comb_impozit_base, (10, 2));
+                // Excess receivable = combined withholdings − salary withholdings (employee's debt).
+                let excess_recv =
+                    (comb_cas - sal_cas) + (comb_cass - sal_cass) + (comb_impozit - sal_impozit);
+                t_gross += sal_gross;
+                t_cas += comb_cas; // combined — matches D112 single rounding
+                t_cass += comb_cass;
+                t_tax += comb_impozit;
+                t_net += dec(&r.net); // salary net (excess net was already paid cash)
+                t_cam_base += leid0((gross - non_taxable).max(Decimal::ZERO)) + leid0(emp_excess);
+                t_excess_reclass += emp_excess;
+                t_excess_receivable += excess_recv;
+            } else {
+                t_gross += sal_gross;
+                t_cas += sal_cas;
+                t_cass += sal_cass;
+                t_tax += sal_impozit;
+                t_net += dec(&r.net);
+                t_cam_base += leid0((gross - non_taxable).max(Decimal::ZERO));
+            }
+        } else {
+            t_gross += sal_gross;
+            t_cas += sal_cas;
+            t_cass += sal_cass;
+            t_tax += sal_impozit;
+            t_net += dec(&r.net);
+            t_cam_base += leid0((gross - non_taxable).max(Decimal::ZERO));
+        }
         states.push(EmployeeState {
             employee_id: e.id.clone(),
             full_name: e.full_name.clone(),
@@ -718,6 +807,8 @@ pub async fn run_payroll(
             cas_diff: t_cas_diff,
             cass_diff: t_cass_diff,
             indemn: indemn.clone(),
+            excess_reclass: t_excess_reclass,
+            excess_receivable: t_excess_receivable,
         },
     )
     .await?;

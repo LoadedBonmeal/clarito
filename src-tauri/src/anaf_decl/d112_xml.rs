@@ -74,6 +74,9 @@ pub struct D112Employee {
     pub deducere: i64,
     /// CIF-ul sediului secundar la care e repartizat salariatul (D112 angajatorF2); '' = principal.
     pub sediu_cif: String,
+    /// E3_23 — rând 8.2.1 informațional: diurnă impozabilă (venit asimilat salariului, art.76(2)(k)).
+    /// 0 când angajatul nu are surplus de diurnă în luna respectivă.
+    pub e3_23: i64,
     /// Certificatele de concediu medical ale lunii (OUG 158/2005). GOL ⇒ calea standard `asiguratA`
     /// (regression-safe). Cu ≥1 certificat ⇒ calea B (`asiguratB1/B2/B3/B4` + `asiguratD`/certificat),
     /// căci „Secțiunea D nu poate exista concomitent cu secțiunea A” (structura, poz 3502).
@@ -302,7 +305,7 @@ prenAsig=\"{pren}\"{data} casaSn=\"{casa}\" asigCI=\"1\" asigSO=\"1\" Timp_E3=\"
 E1_42=\"0\" E1_421=\"0\" E1_422=\"0\" E1_5=\"0\" E1_6=\"{base}\" E1_7=\"{impozit}\"/>\n\
     <asiguratE3 E3_1=\"{e3_1}\" E3_2=\"{e3_2}\" E3_3=\"1\" E3_4=\"P\" E3_8=\"{e3_8}\" \
 E3_9=\"{e3_9}\" E3_12=\"{ded}\" E3_121=\"{ded}\" E3_122=\"0\" E3_14=\"{base}\" E3_15=\"{impozit}\" \
-E3_16=\"{net}\" E3_19=\"0\" E3_23=\"0\"/>\n\
+E3_16=\"{net}\" E3_19=\"0\" E3_23=\"{e3_23}\"/>\n\
   </asigurat>\n",
             cnp = esc(&e.cnp),
             nume = esc(&e.nume),
@@ -311,6 +314,7 @@ E3_16=\"{net}\" E3_19=\"0\" E3_23=\"0\"/>\n\
             impozit = e.impozit,
             ded = e.deducere,
             base = e.baza_impozit,
+            e3_23 = e.e3_23,
         ));
     }
 
@@ -584,6 +588,7 @@ mod tests {
             baza_impozit: 3250, // 5000 − 1250 CAS − 500 CASS (deducere 0 la acest venit)
             deducere: 0,
             sediu_cif: "".into(),
+            e3_23: 0,
             med_leaves: vec![],
         }
     }
@@ -733,6 +738,7 @@ mod tests {
             baza_impozit: 2930, // 4508 brut − 1578 (CAS+CASS) − 0 deducere
             deducere: 0,
             sediu_cif: "".into(),
+            e3_23: 0,
             med_leaves: vec![D112MedicalLeave {
                 serie: "AB".into(),
                 numar: "1234567".into(),

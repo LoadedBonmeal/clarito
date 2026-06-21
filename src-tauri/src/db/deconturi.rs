@@ -7,13 +7,16 @@
 //! Total neimpozabil = min(diurna_acordata, min(A,B) × zile_delegare)
 //! Surplus impozabil = max(0, diurna_acordata − neimpozabil)
 //!
-//! INTERN ONLY: surplusul impozabil este CALCULAT + AFIȘAT (flagged), nu postat în GL.
-//! (Extern + auto-feed statul de salarii: DEFERRED.)
+//! Surplusul impozabil este CALCULAT + AFIȘAT + POSTAT în GL via monografia de reclasificare
+//! (source_type='DIURNA_ASIMILAT', db/payroll_diurna.rs) și înregistrat în payroll_extra_income
+//! pentru auto-feed statul de salarii + D112.
 //!
 //! ## Monografie GL (post_manual_journal, idempotent)
 //! Grant (source_type='AVANS_TREZORERIE'):  542 D = 5311/5121 C
 //! Aprobare decont (source_type='EXPENSE_REPORT'): cheltuieli D + 4426 D = 542 C
-//!   — DOAR diurna_neimpozabila în 625; diurna_impozabila NU se postează
+//!   — TOATĂ diurna (neimpozabila + impozabila) în 625; reclasificarea excesului este în
+//!   jurnalul separat DIURNA_ASIMILAT (db/payroll_diurna.rs).
+//! Reclasificare surplus (source_type='DIURNA_ASIMILAT'): 641 D = 625 C + retineri + CAM
 //! Return (source_type='AVANS_RETURN'):    5311/5121 D = 542 C
 
 use rust_decimal::Decimal;
@@ -24,7 +27,26 @@ use std::str::FromStr;
 use crate::db::gl::{post_manual_journal, ManualJournal};
 use crate::db::models::{new_id, now_unix};
 use crate::db::payroll::working_days;
+use crate::db::payroll_diurna::upsert_extra_income;
 use crate::error::{AppError, AppResult};
+
+/// Parse an ISO date string (`YYYY-MM-DD` or `YYYY-M-D`) into a zero-padded `YYYY-MM` period.
+///
+/// P3c: derive the period robustly by parsing the date components and re-formatting as
+/// `format!("{year:04}-{month:02}")` — not by string-slicing — so non-padded months (e.g.
+/// `"2026-6-15"`) produce the correct `"2026-06"` and not a broken lookup key.
+fn parse_date_to_period(date_iso: &str) -> Option<String> {
+    let parts: Vec<&str> = date_iso.split('-').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let year: i32 = parts[0].parse().ok()?;
+    let month: u32 = parts[1].parse().ok()?;
+    if month == 0 || month > 12 {
+        return None;
+    }
+    Some(format!("{year:04}-{month:02}"))
+}
 
 fn dp(s: &str) -> Decimal {
     Decimal::from_str(s).unwrap_or_default()
@@ -49,7 +71,7 @@ pub struct DiurnaCalc {
     pub diurna_acordata: String,
     /// Non-taxable portion (≤ acordată, ≤ cap).
     pub diurna_neimpozabila: String,
-    /// Taxable excess = acordată − neimpozabilă. Flagged, NOT posted to GL.
+    /// Taxable excess = acordată − neimpozabilă. Posted via DIURNA_ASIMILAT journal on approval.
     pub diurna_impozabila: String,
     /// Limit A per day = 2.5 × diurna_interna.
     pub limit_a_zi: String,
@@ -569,10 +591,13 @@ pub async fn delete_report(pool: &SqlitePool, id: &str, company_id: &str) -> App
 /// Approve a decont: post the settlement GL entry and mark as approved.
 ///
 /// Settlement GL (source_type='EXPENSE_REPORT'):
-///   - 625 D = diurna_neimpozabila (non-taxable diurnă)
-///   - 6458 D = diurna_impozabila (taxable excess — real expense; payroll withholdings deferred)
+///   - 625 D = diurna_neimpozabila + diurna_impozabila (FULL diurnă — cash already paid)
 ///   - per expense line (non-diurnă): account_code D = amount, 4426 D = vat_amount
 ///   - Total credits: 542 C = advance amount (if any), 5311 C for shortfall/direct reimb
+///
+/// If diurna_impozabila > 0 AND employee_id is set, additionally:
+///   - post_diurna_asimilat_gl (source_type='DIURNA_ASIMILAT') — reclass journal
+///   - upsert payroll_extra_income for payroll/D112 feed (period-lock checked)
 ///
 /// If advance > total expenses → overshoot → 5311 D for returned excess
 /// If advance < total expenses → underpay → 5311 C for the shortfall (company reimburses)
@@ -591,22 +616,26 @@ pub async fn approve_report(
     // ── Build GL debit lines ────────────────────────────────────────────────
     let mut debit_lines: Vec<(String, Decimal)> = Vec::new(); // (account, amount)
 
-    // Non-taxable diurnă → 625
-    if let Some(neimpoz) = full.report.diurna_neimpozabila.as_deref() {
-        let amt = round2(dp(neimpoz));
-        if amt > Decimal::ZERO {
-            debit_lines.push(("625".into(), amt));
-        }
-    }
-
-    // Taxable diurnă excess → 6458 (Alte cheltuieli privind asigurările și protecția socială).
-    // The employee incurred the full diurnă; the taxable portion is still a real expense
-    // that must settle the advance (542). Payroll CAS/CASS/impozit withholdings are deferred.
-    if let Some(impoz) = full.report.diurna_impozabila.as_deref() {
-        let amt = round2(dp(impoz));
-        if amt > Decimal::ZERO {
-            debit_lines.push(("6458".into(), amt));
-        }
+    // Diurnă acordată (both within-cap and taxable excess) → 625.
+    // The FULL diurnă is debited to 625 because the employee already received the cash.
+    // The taxable excess reclass (641 D = 625 C) is posted in a SEPARATE journal
+    // (source_type='DIURNA_ASIMILAT') so that 625 ends up holding only the within-cap
+    // portion after both journals are posted — no 6458 stopgap.
+    let diurna_neimpozabila = full
+        .report
+        .diurna_neimpozabila
+        .as_deref()
+        .map(|s| round2(dp(s)))
+        .unwrap_or(Decimal::ZERO);
+    let diurna_impozabila = full
+        .report
+        .diurna_impozabila
+        .as_deref()
+        .map(|s| round2(dp(s)))
+        .unwrap_or(Decimal::ZERO);
+    let diurna_total = diurna_neimpozabila + diurna_impozabila;
+    if diurna_total > Decimal::ZERO {
+        debit_lines.push(("625".into(), diurna_total));
     }
 
     // Expense lines (non-diurnă categories only to avoid double-counting)
@@ -727,6 +756,80 @@ pub async fn approve_report(
     .bind(company_id)
     .execute(pool)
     .await?;
+
+    // ── Diurnă excess → payroll feed (Wave E, P1 fix) ─────────────────────────
+    // If the report has an employee_id and a taxable excess, upsert into payroll_extra_income
+    // so the next run_payroll + D112 pick it up.
+    //
+    // P1 FIX: the former post_diurna_asimilat_gl call (DIURNA_ASIMILAT journal) is REMOVED here.
+    // It computed contributions on the excess ALONE (separate rounding), which caused GL 4315/4316/
+    // 444/436 ≠ D112 when added to the separately-rounded salary contributions (round(S×r) +
+    // round(E×r) ≠ round((S+E)×r)). The GL for the excess is now handled entirely by run_payroll
+    // (D641/C625 = excess_reclass; D4282/C421 = excess_receivable; contributions on the COMBINED
+    // base S+E, single rounding), so GL == D112 to the leu.
+    //
+    // The settlement journal (EXPENSE_REPORT) continues to post 625 D for the FULL diurnă
+    // (within-cap + excess) — the excess is reclassified to 641 inside the PAYROLL note.
+    if diurna_impozabila > Decimal::ZERO {
+        if let Some(emp_id) = full.report.employee_id.as_deref() {
+            // P3b: warn if delegation spans multiple calendar months (silent mis-attribution risk).
+            // Full multi-month split is deferred; at minimum we log a warning so it's not silent.
+            let period = if let Some(from) = full.report.delegation_from.as_deref() {
+                // P3c: derive period robustly from parsed date (format!("{year}-{month:02}"))
+                // rather than string-slicing, so a non-padded or malformed month never silently
+                // produces a wrong period (e.g. "2026-6" instead of "2026-06").
+                let from_period = parse_date_to_period(from);
+                if let Some(to) = full.report.delegation_to.as_deref() {
+                    let to_period = parse_date_to_period(to);
+                    if to_period.as_deref() != Some(from_period.as_deref().unwrap_or(""))
+                        && to_period.is_some()
+                        && from_period.is_some()
+                    {
+                        // P3b: delegation spans multiple months — warn, use start month.
+                        tracing::warn!(
+                            report_id = %id,
+                            from = %from,
+                            to = %to,
+                            from_period = ?from_period,
+                            to_period = ?to_period,
+                            "approve_report: delegația acoperă mai multe luni calendaristice; \
+                            excesul impozabil este atribuit integral lunii de start. \
+                            Verificați manual și împărțiți decontul pe luni dacă este necesar."
+                        );
+                    }
+                }
+                from_period.unwrap_or_else(|| {
+                    // Fallback: use approve_date month
+                    approve_date.get(..7).unwrap_or("2026-01").to_string()
+                })
+            } else {
+                approve_date.get(..7).unwrap_or("2026-01").to_string()
+            };
+
+            // Check if the payroll month for this period is already locked.
+            let is_locked =
+                crate::db::period_locks::is_period_locked(pool, company_id, &period).await;
+            let lock_status = if is_locked {
+                "needs_rectificativa"
+            } else {
+                "open"
+            };
+
+            // Upsert into payroll_extra_income (idempotent per source_ref+employee+period).
+            // run_payroll will fold the excess into the combined salary+excess base (single rounding)
+            // and post the GL (D641/C625 + D4282/C421 + combined contributions to 4315/4316/444/436).
+            upsert_extra_income(
+                pool,
+                company_id,
+                emp_id,
+                &period,
+                id, // source_ref = expense_report.id
+                diurna_impozabila,
+                lock_status,
+            )
+            .await?;
+        }
+    }
 
     get_report_full(pool, id, company_id).await
 }
@@ -980,8 +1083,12 @@ mod tests {
         assert_eq!(sum_d, dec("300.00"));
     }
 
+    /// Wave E: The settlement journal (EXPENSE_REPORT) posts 625 for the FULL diurnă
+    /// (neimpozabila + impozabila). The reclass (641/625/withholdings) is in the separate
+    /// DIURNA_ASIMILAT journal. 6458 must NOT appear in EXPENSE_REPORT; the total GL for
+    /// both journals must balance. No employee_id on this report → no DIURNA_ASIMILAT journal.
     #[tokio::test]
-    async fn approval_posts_only_neimpozabila_in_625_not_641() {
+    async fn approval_posts_full_diurna_in_625_no_6458() {
         let pool = setup().await;
 
         // Create advance
@@ -1000,7 +1107,9 @@ mod tests {
         .await
         .unwrap();
 
-        // Create report: 3 days, salary 4000, diurnă 300 (cap = 57.50×3 = 172.50 → 127.50 taxable)
+        // Create report WITHOUT employee_id: 3 days, salary 4000, diurnă 300
+        // (cap = 57.50×3 = 172.50 → 127.50 taxable). No DIURNA_ASIMILAT journal fires
+        // because employee_id is None.
         let full = create_report(
             &pool,
             CreateReportInput {
@@ -1053,11 +1162,18 @@ mod tests {
         let entries = gl_entries_for(&pool, "EXPENSE_REPORT", &full.report.id).await;
         assert!(!entries.is_empty(), "GL must be posted on approval");
 
-        // 625 must appear (non-taxable diurnă)
+        // 625 must appear for the FULL diurnă (172.50 + 127.50 = 300.00)
         assert!(
             has_account(&entries, "625"),
-            "625 must appear for non-taxable diurnă"
+            "625 must appear for full diurnă (Wave E)"
         );
+        let debit_625: Decimal = entries
+            .iter()
+            .filter(|(a, _, _)| a == "625")
+            .map(|(_, d, _)| dp(d))
+            .sum();
+        assert_eq!(debit_625, dec("300.00"), "625 D must be full diurnă 300.00");
+
         // 624 for transport
         assert!(
             has_account(&entries, "624"),
@@ -1069,20 +1185,17 @@ mod tests {
             "4426 must appear for deductible VAT"
         );
 
-        // 6458 must appear — taxable diurnă excess is posted to settle 542 correctly
+        // 6458 must NOT appear in the EXPENSE_REPORT journal (Wave E replaces the stopgap)
         assert!(
-            has_account(&entries, "6458"),
-            "6458 must appear for taxable diurnă excess (FIX 2)"
+            !has_account(&entries, "6458"),
+            "6458 must NOT appear in EXPENSE_REPORT journal (Wave E)"
         );
-        // 641 must NOT appear — not the right account for diurnă
+        // No DIURNA_ASIMILAT journal either (no employee_id)
+        let das_entries = gl_entries_for(&pool, "DIURNA_ASIMILAT", &full.report.id).await;
         assert!(
-            !has_account(&entries, "641"),
-            "641 must NOT appear for diurnă"
+            das_entries.is_empty(),
+            "DIURNA_ASIMILAT journal must NOT fire without employee_id"
         );
-        // 4315/4316/444 must NOT appear — no payroll GL from decont (deferred)
-        assert!(!has_account(&entries, "4315"), "4315 must NOT appear");
-        assert!(!has_account(&entries, "4316"), "4316 must NOT appear");
-        assert!(!has_account(&entries, "444"), "444 must NOT appear");
 
         // GL must be balanced
         let sum_d: Decimal = entries.iter().map(|(_, d_val, _)| dp(d_val)).sum();
@@ -1090,11 +1203,14 @@ mod tests {
         assert_eq!(sum_d, sum_c, "settlement GL must be balanced");
     }
 
+    /// Wave E: diurnă 500 (non-tax 287.50 + taxable 212.50), advance 600.
+    /// EXPENSE_REPORT journal: 625 D=500 (full), 542 C=600, 5311 D=100 (returned by employee).
+    /// 6458 must NOT appear. DIURNA_ASIMILAT does NOT fire (no employee_id).
     #[tokio::test]
-    async fn taxable_diurna_settles_full_advance_via_6458() {
-        // FIX 2: diurnă acordată 500 (non-tax 287.50 + taxable 212.50) funded by advance 600.
-        // Expected: 625 D=287.50, 6458 D=212.50, 542 C=500 (full expense), 5311 D=100 (returned).
-        // NO spurious 5311 return of 212.50; the full 500 settles the advance.
+    async fn taxable_diurna_settles_full_advance_via_625_no_6458() {
+        // Wave E: diurnă acordată 500 (non-tax 287.50 + taxable 212.50) funded by advance 600.
+        // Expected: 625 D=500 (full diurnă), 542 C=600, 5311 D=100 (returned).
+        // 6458 must NOT appear; reclass is in DIURNA_ASIMILAT (not fired here, no emp_id).
         let pool = setup().await;
 
         let adv = create_advance(
@@ -1157,7 +1273,6 @@ mod tests {
 
         let entries = gl_entries_for(&pool, "EXPENSE_REPORT", &full.report.id).await;
 
-        // Helper: sum debit for a given account
         let debit_for = |acct: &str| -> Decimal {
             entries
                 .iter()
@@ -1173,13 +1288,19 @@ mod tests {
                 .sum()
         };
 
-        assert_eq!(debit_for("625"), dec("287.50"), "625 D must be 287.50");
-        assert_eq!(debit_for("6458"), dec("212.50"), "6458 D must be 212.50");
-        // advance=600, expenses=500 → 542 C = 500 (expense) + 100 (returned excess) = 600
+        // Wave E: 625 gets the FULL diurnă (287.50 + 212.50 = 500.00)
+        assert_eq!(debit_for("625"), dec("500.00"), "625 D must be full 500.00");
+        // 6458 must NOT appear (replaced by DIURNA_ASIMILAT journal)
+        assert_eq!(
+            debit_for("6458"),
+            Decimal::ZERO,
+            "6458 must NOT appear in EXPENSE_REPORT"
+        );
+        // advance=600, expenses=500 → 542 C = 600 (full advance settled)
         assert_eq!(
             credit_for("542"),
             dec("600.00"),
-            "542 C must fully settle the advance (500 expense + 100 excess return)"
+            "542 C must fully settle the advance"
         );
         // excess 100 returned by employee → 5311 D=100
         assert_eq!(
