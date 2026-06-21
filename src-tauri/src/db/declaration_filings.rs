@@ -65,6 +65,21 @@ pub async fn record(pool: &SqlitePool, input: FilingInput) -> AppResult<()> {
     .execute(pool)
     .await?;
 
+    // Auto-lock: dacă perioada arată ca YYYY-MM (7 caractere), blochează luna.
+    // Best-effort — erorile sunt înghițite pentru ca depunerea să nu eșueze din cauza blocării.
+    if input.period.len() == 7 && input.period.chars().nth(4) == Some('-') {
+        let source = format!("declaration:{}", input.kind);
+        let _ = crate::db::period_locks::lock_period(
+            pool,
+            &input.company_id,
+            &input.period,
+            &source,
+            None,
+            None,
+        )
+        .await;
+    }
+
     Ok(())
 }
 
@@ -226,5 +241,73 @@ mod tests {
         let a_final = list(&pool, "co-A").await.unwrap();
         assert_eq!(a_final.len(), 1, "după delete rămâne 1 depunere");
         assert_eq!(a_final[0].kind, "D300");
+    }
+
+    #[tokio::test]
+    async fn test_filing_auto_locks_period() {
+        let pool = setup().await;
+
+        // Adăugăm companies + period_locks pentru ca lock_period să funcționeze
+        sqlx::query("CREATE TABLE companies (id TEXT PRIMARY KEY NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO companies VALUES ('co-A')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE period_locks ( \
+              id TEXT PRIMARY KEY NOT NULL, \
+              company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE, \
+              period TEXT NOT NULL, \
+              locked_at INTEGER NOT NULL, \
+              source TEXT NOT NULL, \
+              locked_by TEXT, \
+              note TEXT, \
+              UNIQUE(company_id, period) \
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        record(
+            &pool,
+            FilingInput {
+                company_id: "co-A".into(),
+                kind: "D300".into(),
+                period: "2026-05".into(),
+                is_rectificative: false,
+                file_path: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Perioada YYYY-MM trebuie să fie auto-blocată
+        assert!(
+            crate::db::period_locks::is_period_locked(&pool, "co-A", "2026-05").await,
+            "depunerea D300 trebuie să blocheze automat perioada"
+        );
+
+        // Declarațiile anuale (YYYY) NU trebuie să blocheze perioade lunare
+        record(
+            &pool,
+            FilingInput {
+                company_id: "co-A".into(),
+                kind: "BILANT".into(),
+                period: "2025".into(),
+                is_rectificative: false,
+                file_path: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            !crate::db::period_locks::is_period_locked(&pool, "co-A", "2025").await,
+            "declarația anuală nu trebuie să creeze o blocare lunară"
+        );
     }
 }

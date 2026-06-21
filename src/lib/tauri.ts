@@ -1208,6 +1208,18 @@ export const gl = {
   /** Postează închiderea conturilor 6/7 → 121 (idempotent per perioadă). */
   closePeriod: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<ClosePeriodResult>("close_period", { companyId, periodFrom, periodTo }),
+  /** Listează perioadele blocate pentru o firmă. */
+  listPeriodLocks: (companyId: string) =>
+    invoke<import("@/types").PeriodLock[]>("list_period_locks", { companyId }),
+  /** Verifică dacă o perioadă (YYYY-MM) este blocată. */
+  isPeriodLocked: (companyId: string, period: string) =>
+    invoke<boolean>("is_period_locked", { companyId, period }),
+  /** Blochează manual o perioadă. */
+  lockPeriod: (companyId: string, period: string, note?: string) =>
+    invoke<void>("lock_period", { companyId, period, note }),
+  /** Deblochează o perioadă. */
+  unlockPeriod: (companyId: string, period: string) =>
+    invoke<void>("unlock_period", { companyId, period }),
   /** Registru-jurnal (cod 14-1-1). */
   journalRegister: (companyId: string, periodFrom: string, periodTo: string) =>
     invoke<JournalRegister>("journal_register", { companyId, periodFrom, periodTo }),

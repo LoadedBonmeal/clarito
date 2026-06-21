@@ -458,7 +458,7 @@ async fn dump_p6_xml_for_duk() {
 
     // ── Generate ──────────────────────────────────────────────────────────────
 
-    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31")
+    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31", false)
         .await
         .expect("GL posting must succeed");
 

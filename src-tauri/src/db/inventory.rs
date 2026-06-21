@@ -993,7 +993,7 @@ mod tests {
         post_inventory_diffs(&pool, &s.id, "co1").await.unwrap();
 
         // Run generate_gl_entries — should NOT delete INVENTORY journals.
-        crate::db::gl::generate_gl_entries(&pool, "co1", "2026-01-01", "2026-12-31")
+        crate::db::gl::generate_gl_entries(&pool, "co1", "2026-01-01", "2026-12-31", false)
             .await
             .unwrap();
 

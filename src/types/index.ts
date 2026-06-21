@@ -1613,6 +1613,20 @@ export interface Filing {
   filedAt: number;
 }
 
+/** Rând din lista perioadelor blocate. */
+export interface PeriodLock {
+  id: string;
+  companyId: string;
+  /** Luna blocată: "YYYY-MM". */
+  period: string;
+  /** Unix timestamp (secunde) al blocării. */
+  lockedAt: number;
+  /** Sursa blocării: "declaration:D300" | "declaration:D112" | "manual" | … */
+  source: string;
+  lockedBy: string | null;
+  note: string | null;
+}
+
 // ─── Note contabile manuale (cod 14-6-2A) ────────────────────────────────────
 
 /** O linie dintr-o notă contabilă manuală — trimisă de frontend la create. */

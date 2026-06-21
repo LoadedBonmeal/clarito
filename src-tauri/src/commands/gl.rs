@@ -39,7 +39,7 @@ pub async fn generate_gl_entries(
 ) -> AppResult<GlPostResult> {
     crate::commands::require_valid_date("Data de început", &period_from)?;
     crate::commands::require_valid_date("Data de sfârșit", &period_to)?;
-    db_generate(&state.db, &company_id, &period_from, &period_to).await
+    db_generate(&state.db, &company_id, &period_from, &period_to, false).await
 }
 
 /// Reconciliază GL-ul cu D300 pentru o perioadă.
@@ -393,4 +393,54 @@ pub async fn partner_ledger(
         &period_to,
     )
     .await
+}
+
+// ─── Period-lock commands ─────────────────────────────────────────────────────
+
+/// Lista perioadelor blocate pentru o firmă.
+#[tauri::command]
+pub async fn list_period_locks(
+    state: State<'_, AppState>,
+    company_id: String,
+) -> AppResult<Vec<crate::db::period_locks::PeriodLock>> {
+    crate::db::period_locks::list_period_locks(&state.db, &company_id).await
+}
+
+/// Verifică dacă o perioadă este blocată.
+#[tauri::command]
+pub async fn is_period_locked(
+    state: State<'_, AppState>,
+    company_id: String,
+    period: String,
+) -> AppResult<bool> {
+    Ok(crate::db::period_locks::is_period_locked(&state.db, &company_id, &period).await)
+}
+
+/// Blochează manual o perioadă (admin/contabil).
+#[tauri::command]
+pub async fn lock_period(
+    state: State<'_, AppState>,
+    company_id: String,
+    period: String,
+    note: Option<String>,
+) -> AppResult<()> {
+    crate::db::period_locks::lock_period(
+        &state.db,
+        &company_id,
+        &period,
+        "manual",
+        None,
+        note.as_deref(),
+    )
+    .await
+}
+
+/// Deblochează o perioadă (admin/contabil).
+#[tauri::command]
+pub async fn unlock_period(
+    state: State<'_, AppState>,
+    company_id: String,
+    period: String,
+) -> AppResult<()> {
+    crate::db::period_locks::unlock_period(&state.db, &company_id, &period).await
 }

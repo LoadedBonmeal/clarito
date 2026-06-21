@@ -517,7 +517,7 @@ mod tests {
 
         // generate_gl_entries pe aceeași perioadă (fără documente → 0 jurnale auto).
         // Nu ar trebui să atingă source_type='MANUAL'.
-        let _result = generate_gl_entries(&pool, "co1", "2026-06-01", "2026-06-30")
+        let _result = generate_gl_entries(&pool, "co1", "2026-06-01", "2026-06-30", false)
             .await
             .expect("generate OK");
 

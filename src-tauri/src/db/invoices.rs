@@ -491,6 +491,18 @@ pub async fn create(pool: &SqlitePool, input: CreateInvoiceInput) -> AppResult<I
     let invoice_id = new_id();
     let now = now_unix();
 
+    // Period-lock guard: refuză crearea unei facturi într-o perioadă blocată.
+    let issue_month = input.issue_date.get(..7).unwrap_or("");
+    if !issue_month.is_empty()
+        && crate::db::period_locks::is_period_locked(pool, &input.company_id, issue_month).await
+    {
+        return Err(AppError::Validation(format!(
+            "Factura are data într-o perioadă blocată ({}) — modificarea necesită declarație rectificativă. \
+             Deblocați perioada pentru a continua.",
+            issue_month
+        )));
+    }
+
     let mut tx = pool.begin().await?;
 
     // Alocăm numărul atomic în aceeași tranzacție pentru a evita goluri de numerotare.

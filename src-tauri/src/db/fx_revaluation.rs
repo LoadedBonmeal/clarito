@@ -1316,7 +1316,7 @@ mod tests {
         assert_eq!(cnt2, 1, "un singur rând fx_revaluation după re-rulare");
 
         // generate_gl_entries nu atinge FX_REVAL
-        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31")
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31", false)
             .await
             .unwrap();
         let cnt3: i64 = sqlx::query_scalar(

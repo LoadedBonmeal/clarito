@@ -1596,7 +1596,7 @@ mod tests {
         .unwrap();
 
         // Rulăm generate_gl_entries (șterge INVOICE/PAYMENT etc, NU STOCK)
-        crate::db::gl::generate_gl_entries(&pool, &cid, "2026-06-01", "2026-06-30")
+        crate::db::gl::generate_gl_entries(&pool, &cid, "2026-06-01", "2026-06-30", false)
             .await
             .unwrap();
 

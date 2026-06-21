@@ -165,7 +165,7 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "approve_expense_report" => Some(Perm::PostGl),
 
         // ── ClosePeriod ───────────────────────────────────────────────────
-        "close_vat_period" | "close_period" => Some(Perm::ClosePeriod),
+        "close_vat_period" | "close_period" | "lock_period" | "unlock_period" => Some(Perm::ClosePeriod),
 
         // ── SubmitAnaf ────────────────────────────────────────────────────
         // smartbill_push_invoice is an external outbound submission — same gate.
@@ -330,6 +330,7 @@ fn is_read_cmd(cmd: &str) -> bool {
         "resolve_accounts",
         "etva_fetch_precompletat",
         "nir_from_received_invoice",
+        "is_period_locked",
     ];
     READ_ALLOWLIST.contains(&cmd)
 }

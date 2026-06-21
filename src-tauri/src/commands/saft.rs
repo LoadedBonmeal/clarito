@@ -139,8 +139,14 @@ pub async fn export_saft_official(
     } else {
         // Periodic L-profile: auto-post GL entries (idempotent) before generating
         // so that GeneralLedgerEntries is populated with current period data.
-        crate::db::gl::generate_gl_entries(&state.db, &params.company_id, &date_from, &date_to)
-            .await?;
+        crate::db::gl::generate_gl_entries(
+            &state.db,
+            &params.company_id,
+            &date_from,
+            &date_to,
+            false,
+        )
+        .await?;
         generate_saft_xml(&state.db, &company, &date_from, &date_to).await?
     };
 
@@ -240,8 +246,14 @@ pub async fn preview_saft_official_xml(
     let xml = if is_annual {
         generate_saft_xml_annual(&state.db, &company, &date_from, &date_to).await?
     } else {
-        crate::db::gl::generate_gl_entries(&state.db, &params.company_id, &date_from, &date_to)
-            .await?;
+        crate::db::gl::generate_gl_entries(
+            &state.db,
+            &params.company_id,
+            &date_from,
+            &date_to,
+            false,
+        )
+        .await?;
         generate_saft_xml(&state.db, &company, &date_from, &date_to).await?
     };
 

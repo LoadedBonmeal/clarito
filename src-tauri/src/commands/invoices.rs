@@ -224,6 +224,19 @@ pub async fn update_invoice_draft(
         )));
     }
 
+    // Period-lock guard: refuză editarea unei facturi dacă data emiterii cade
+    // într-o perioadă blocată (declarație depusă).
+    let issue_month = input.issue_date.get(..7).unwrap_or("");
+    if !issue_month.is_empty()
+        && crate::db::period_locks::is_period_locked(&state.db, &company_id, issue_month).await
+    {
+        return Err(AppError::Validation(format!(
+            "Factura are data într-o perioadă blocată ({}) — modificarea necesită declarație rectificativă. \
+             Deblocați perioada pentru a continua.",
+            issue_month
+        )));
+    }
+
     // 2. Calculate totals from new lines
     if input.lines.is_empty() {
         return Err(AppError::Validation(

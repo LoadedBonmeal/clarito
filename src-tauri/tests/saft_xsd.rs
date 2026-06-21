@@ -536,7 +536,7 @@ async fn saft_d406_validates_against_official_xsd() {
     let pool = setup_test_pool(&company).await;
 
     // Auto-post GL entries (idempotent) — populates gl_journal / gl_entry
-    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31")
+    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31", false)
         .await
         .expect("generate_gl_entries must not fail");
 
@@ -789,7 +789,7 @@ async fn saft_d406_gl_entries_populated_and_balanced() {
     let pool = setup_test_pool(&company).await;
 
     // Post GL entries for the seeded data
-    let gl_result = generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31")
+    let gl_result = generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31", false)
         .await
         .expect("generate_gl_entries must succeed");
 
@@ -914,7 +914,7 @@ async fn saft_p6a_movement_of_goods_populated_with_seeded_data() {
     let pool = setup_test_pool(&company).await;
 
     // L-path: MovementOfGoods wrapper must be present (empty) in periodic XML
-    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31")
+    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31", false)
         .await
         .expect("generate_gl_entries must not fail");
 
@@ -1163,7 +1163,7 @@ async fn saft_annual_duk_dump() {
     }
 
     // Monthly regression: confirm periodic L generator still produces valid XML
-    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31")
+    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31", false)
         .await
         .expect("generate_gl_entries must not fail");
     let xml_monthly = generate_saft_xml(&pool, &company, "2025-01-01", "2025-01-31")

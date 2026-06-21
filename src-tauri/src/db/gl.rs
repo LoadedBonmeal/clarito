@@ -2148,10 +2148,29 @@ pub async fn generate_gl_entries(
     company_id: &str,
     period_from: &str,
     period_to: &str,
+    allow_locked: bool,
 ) -> AppResult<GlPostResult> {
     let mut journals_inserted: i64 = 0;
     let mut entries_inserted: i64 = 0;
     let mut journals_replaced: i64 = 0;
+
+    // PERIOD-LOCK guard: refuse re-post if any month in the range is locked (unless overridden).
+    if !allow_locked {
+        let locked = crate::db::period_locks::locked_months_in_range(
+            pool,
+            company_id,
+            period_from,
+            period_to,
+        )
+        .await?;
+        if let Some(first) = locked.first() {
+            return Err(crate::error::AppError::Validation(format!(
+                "Perioada {} este blocată (declarație depusă) — regenerarea ar modifica cifrele declarate. \
+                 Deblocați perioada sau depuneți o declarație rectificativă.",
+                first
+            )));
+        }
+    }
 
     // O SINGURĂ tranzacție pe întregul lot (toate secțiunile 1-4): un eșec oriunde face rollback
     // complet — fără stări pe jumătate postate la crash în mijlocul lotului. Idempotența per
@@ -5545,7 +5564,7 @@ mod tests {
         )
         .await;
 
-        let result = generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+        let result = generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
             .await
             .expect("generate_gl_entries");
         assert_eq!(result.journals_inserted, 1);
@@ -5572,7 +5591,7 @@ mod tests {
         insert_company(&pool, cid).await;
         insert_received(&pool, cid, "ri1", "S", "19", "1000", "190").await;
 
-        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
             .await
             .expect("generate_gl_entries");
 
@@ -5619,7 +5638,7 @@ mod tests {
         .await
         .expect("insert payment");
 
-        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
             .await
             .expect("generate");
 
@@ -5666,7 +5685,7 @@ mod tests {
         .await
         .expect("insert EUR payment");
 
-        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
             .await
             .expect("generate");
 
@@ -5714,7 +5733,7 @@ mod tests {
         .await
         .expect("insert AE vat line");
 
-        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
             .await
             .expect("generate");
 
@@ -5761,7 +5780,7 @@ mod tests {
         )
         .await;
 
-        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
             .await
             .expect("generate");
 
@@ -5837,10 +5856,10 @@ mod tests {
         .await;
 
         // Rulăm de două ori
-        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
             .await
             .expect("first run");
-        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
             .await
             .expect("second run");
 
@@ -5895,7 +5914,7 @@ mod tests {
         // Factură primită: net=500, VAT=95
         insert_received(&pool, cid, "ri7", "S", "19", "500", "95").await;
 
-        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
             .await
             .expect("generate");
 
@@ -5948,7 +5967,7 @@ mod tests {
         // Doar o achiziție cu taxare inversă (AE), net=1000, VAT autolichidat=190.
         insert_received(&pool, cid, "ri7b", "AE", "19", "1000", "190").await;
 
-        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
             .await
             .expect("generate");
 
@@ -5991,7 +6010,7 @@ mod tests {
         )
         .await;
 
-        let result = generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+        let result = generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
             .await
             .expect("generate_gl_entries");
         assert_eq!(result.journals_inserted, 1);
@@ -6119,7 +6138,7 @@ mod tests {
         )
         .await;
 
-        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
             .await
             .expect("should succeed — rounding skew is corrected");
 
@@ -6314,7 +6333,7 @@ mod tests {
         )
         .await;
 
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -6350,7 +6369,7 @@ mod tests {
             Some("o"),
         )
         .await;
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -6393,7 +6412,7 @@ mod tests {
         .await;
         insert_pay(&pool, "co", "inv", "p1", "1190", "2025-01-20").await;
 
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -6428,7 +6447,7 @@ mod tests {
         // Collect half (595 of 1190) → release 595 × 19/119 = 95.
         insert_pay(&pool, "co", "inv", "p1", "595", "2025-01-20").await;
 
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -6464,7 +6483,7 @@ mod tests {
             "2026-01-15",
         )
         .await;
-        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31")
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31", false)
             .await
             .unwrap();
         // Issuing the credit note marks the original STORNED (real flow); prior period NOT regenerated.
@@ -6486,7 +6505,7 @@ mod tests {
             "2026-02-10",
         )
         .await;
-        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28")
+        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28", false)
             .await
             .unwrap();
 
@@ -6541,7 +6560,7 @@ mod tests {
         .await;
         // Collect half in January (595 of 1190) → 95 released to 4427, 95 left deferred on 4428.
         insert_pay(&pool, "co", "o", "p1", "595", "2026-01-20").await;
-        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31")
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31", false)
             .await
             .unwrap();
         sqlx::query("UPDATE invoices SET status='STORNED' WHERE id='o'")
@@ -6561,7 +6580,7 @@ mod tests {
             "2026-02-10",
         )
         .await;
-        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28")
+        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28", false)
             .await
             .unwrap();
 
@@ -6607,7 +6626,7 @@ mod tests {
         )
         .await;
         insert_pay(&pool, "co", "o", "p1", "1190", "2026-01-20").await; // fully collected → all on 4427
-        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31")
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31", false)
             .await
             .unwrap();
         sqlx::query("UPDATE invoices SET status='STORNED' WHERE id='o'")
@@ -6627,7 +6646,7 @@ mod tests {
             "2026-02-10",
         )
         .await;
-        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28")
+        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28", false)
             .await
             .unwrap();
 
@@ -6662,7 +6681,7 @@ mod tests {
             "2026-01-15",
         )
         .await;
-        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31")
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31", false)
             .await
             .unwrap();
         // Partial credit note: only 500+95 reversed (R=95 < original 190), still unpaid.
@@ -6679,7 +6698,7 @@ mod tests {
             "2026-02-10",
         )
         .await;
-        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28")
+        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28", false)
             .await
             .unwrap();
 
@@ -6723,7 +6742,7 @@ mod tests {
         )
         .await;
         insert_pay(&pool, "co", "o", "p1", "595", "2026-01-20").await;
-        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31")
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31", false)
             .await
             .unwrap();
         // February: PARTIAL credit note for the OTHER (uncollected) half — net -500, VAT -95 (R=95<total).
@@ -6741,7 +6760,7 @@ mod tests {
             "2026-02-10",
         )
         .await;
-        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28")
+        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28", false)
             .await
             .unwrap();
 
@@ -6807,7 +6826,7 @@ mod tests {
             "2026-01-15",
         )
         .await;
-        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31")
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-01-31", false)
             .await
             .unwrap();
         // February: PARTIAL credit note (R=95 < 190). Generate GL for FEBRUARY ONLY (monthly).
@@ -6824,7 +6843,7 @@ mod tests {
             "2026-02-10",
         )
         .await;
-        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28")
+        generate_gl_entries(&pool, "co", "2026-02-01", "2026-02-28", false)
             .await
             .unwrap();
 
@@ -6878,7 +6897,7 @@ mod tests {
         )
         .await;
         // ONE-SHOT quarterly GL over the whole quarter (original + CN together).
-        generate_gl_entries(&pool, "co", "2026-01-01", "2026-03-31")
+        generate_gl_entries(&pool, "co", "2026-01-01", "2026-03-31", false)
             .await
             .unwrap();
 
@@ -6913,7 +6932,7 @@ mod tests {
         .await;
         insert_pay(&pool, "co", "inv", "p1", "1190", "2025-01-20").await;
 
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -6970,7 +6989,7 @@ mod tests {
         insert_received(&pool, "co", "ri", "S", "19", "1000", "190").await;
         insert_recv_pay(&pool, "co", "ri", "rp1", "1190", "2025-01-20").await;
 
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -6988,7 +7007,7 @@ mod tests {
         insert_received(&pool, "co", "ri", "S", "19", "1000", "190").await;
         insert_recv_pay(&pool, "co", "ri", "rp1", "1190", "2025-01-20").await;
 
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -7028,7 +7047,7 @@ mod tests {
         .unwrap();
         insert_recv_pay(&pool, "co", "ri", "rp1", "2190", "2025-01-20").await;
 
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -7056,7 +7075,7 @@ mod tests {
             .await
             .unwrap();
 
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -7090,7 +7109,7 @@ mod tests {
         )
         .await;
         insert_received(&pool, "co", "ri", "S", "19", "500", "95").await;
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -7131,7 +7150,7 @@ mod tests {
         )
         .await;
         insert_received(&pool, "co", "ri", "S", "19", "1000", "190").await;
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -7161,7 +7180,7 @@ mod tests {
             None,
         )
         .await;
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -7196,7 +7215,7 @@ mod tests {
             None,
         )
         .await;
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -7232,7 +7251,7 @@ mod tests {
         )
         .await;
         insert_pay(&pool, "co", "inv", "p1", "1190", "2025-01-20").await;
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -7281,7 +7300,7 @@ mod tests {
         )
         .await;
         insert_pay(&pool, "co", "inv", "p1", "1190", "2025-01-20").await;
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -7326,7 +7345,7 @@ mod tests {
         )
         .await;
         insert_pay(&pool, "co", "inv", "p1", "1190", "2025-01-20").await;
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -7378,7 +7397,7 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -7433,7 +7452,7 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
             .await
             .unwrap();
 
@@ -7491,7 +7510,7 @@ mod tests {
         )
         .await;
 
-        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31")
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
             .await
             .expect("generate_gl_entries");
 
@@ -8137,10 +8156,10 @@ mod tests {
         insert_receipt_vat_line(&pool, "z8", "21", "413.22", "86.78").await;
 
         // Run generate_gl_entries twice — must produce identical results (no duplicate)
-        generate_gl_entries(&pool, "c8", "2026-06-01", "2026-06-30")
+        generate_gl_entries(&pool, "c8", "2026-06-01", "2026-06-30", false)
             .await
             .unwrap();
-        generate_gl_entries(&pool, "c8", "2026-06-01", "2026-06-30")
+        generate_gl_entries(&pool, "c8", "2026-06-01", "2026-06-30", false)
             .await
             .unwrap();
 
@@ -8409,5 +8428,46 @@ mod tests {
         );
 
         let _ = pi; // suppress unused
+    }
+
+    #[tokio::test]
+    async fn test_generate_gl_entries_period_lock_guard() {
+        // Folsim setup_pool() care rulează toate migrările (inclusiv 0077_period_locks).
+        let pool = setup_pool().await;
+        let cid = "co1";
+        insert_company(&pool, cid).await;
+
+        // Fără nicio blocare → allow_locked=false → trece (comportament existent neafectat).
+        let result = generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false).await;
+        assert!(
+            result.is_ok(),
+            "fără blocare → trebuie să treacă: {:?}",
+            result.err()
+        );
+
+        // Blocăm 2025-01.
+        crate::db::period_locks::lock_period(&pool, cid, "2025-01", "declaration:D300", None, None)
+            .await
+            .unwrap();
+
+        // allow_locked=false + perioadă blocată → trebuie refuzat.
+        let refused = generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false).await;
+        assert!(
+            refused.is_err(),
+            "perioadă blocată + allow_locked=false → trebuie refuzat"
+        );
+        let msg = refused.unwrap_err().to_string();
+        assert!(
+            msg.contains("2025-01"),
+            "mesajul de eroare trebuie să menționeze luna blocată; got: {msg}"
+        );
+
+        // allow_locked=true → trece (override admin).
+        let allowed = generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", true).await;
+        assert!(
+            allowed.is_ok(),
+            "perioadă blocată + allow_locked=true → trebuie să treacă: {:?}",
+            allowed.err()
+        );
     }
 }
