@@ -11,6 +11,8 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 
 import { demoInvoke, isDemoMode } from "@/lib/demo";
+import { useAuthStore } from "@/lib/auth-store";
+import { queryClient, queryKeys } from "@/lib/queries";
 
 import type {
   Account,
@@ -100,8 +102,48 @@ export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<
         "Porniți Clarito din Finder, Dock sau meniu Start.",
     });
   }
-  return rawInvoke<T>(cmd, args);
+  return rawInvoke<T>(cmd, args).catch((err: unknown) => {
+    // ── Session-expired interception ──────────────────────────────────────────
+    // The Rust gate rejects with a JSON string `{"kind":"SessionExpired","message":"…"}`
+    // when the idle-timeout fires.  Intercept it here (the SOLE invoke chokepoint)
+    // to clear auth state and bounce to the login screen — regardless of which
+    // component called the command.
+    const payload = (() => {
+      if (typeof err === "string") {
+        try {
+          return JSON.parse(err) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      }
+      if (err && typeof err === "object") return err as Record<string, unknown>;
+      return null;
+    })();
+
+    if (payload && (payload as { kind?: string }).kind === "SessionExpired") {
+      // Clear the Zustand store (hides the app immediately behind AuthGate).
+      useAuthStore.getState().clearCurrentUser();
+      // Invalidate the auth status query so AuthGate re-queries auth_status
+      // and transitions to the login screen.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.auth.status });
+      // Mark as idle-expired so LoginScreen can show the notice.
+      sessionExpiredSignal.set(true);
+    }
+
+    return Promise.reject(err) as Promise<T>;
+  });
 }
+
+/**
+ * Simple mutable signal that LoginScreen reads on mount to show the
+ * "Sesiune expirată" notice.  Using a plain mutable object avoids a circular
+ * dependency between tauri.ts → auth-store → tauri.ts.
+ */
+export const sessionExpiredSignal = {
+  _value: false,
+  get(): boolean { return this._value; },
+  set(v: boolean): void { this._value = v; },
+};
 
 // ─── Companies ────────────────────────────────────────────────────────────
 

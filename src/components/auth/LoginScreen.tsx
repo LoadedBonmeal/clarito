@@ -1,13 +1,16 @@
 /**
  * LoginScreen — shown when users exist but no session is active.
  * Calls auth_login (PUBLIC command) then transitions to the app.
+ *
+ * Also shown after an idle-timeout expiry: in that case
+ * `sessionExpiredSignal.get()` is true and a notice banner is rendered.
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import { api } from "@/lib/tauri";
+import { api, sessionExpiredSignal } from "@/lib/tauri";
 import { formatError } from "@/lib/error-mapper";
 import { notify } from "@/lib/toasts";
 
@@ -19,6 +22,15 @@ export function LoginScreen({ onSuccess }: LoginScreenProps) {
   const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [wasSessionExpired, setWasSessionExpired] = useState(false);
+
+  // Consume the session-expired signal on mount so it shows once, then clears.
+  useEffect(() => {
+    if (sessionExpiredSignal.get()) {
+      setWasSessionExpired(true);
+      sessionExpiredSignal.set(false);
+    }
+  }, []);
 
   const mutation = useMutation({
     mutationFn: ({ u, p }: { u: string; p: string }) => api.auth.login(u, p),
@@ -76,6 +88,25 @@ export function LoginScreen({ onSuccess }: LoginScreenProps) {
         >
           C
         </div>
+
+        {/* Session-expired notice — shown once after an idle-timeout expiry */}
+        {wasSessionExpired && (
+          <div
+            style={{
+              padding: "10px 12px",
+              marginBottom: 16,
+              background: "var(--rf-warning-bg, rgba(234,179,8,0.12))",
+              border: "1px solid var(--rf-warning-border, rgba(234,179,8,0.4))",
+              borderRadius: 5,
+              color: "var(--rf-warning-text, #ca8a04)",
+              fontSize: 13,
+              lineHeight: 1.5,
+            }}
+            role="alert"
+          >
+            {t("auth.login.sessionExpiredNotice")}
+          </div>
+        )}
 
         <h1
           style={{

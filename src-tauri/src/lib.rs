@@ -715,11 +715,17 @@ pub fn run() {
             // `Builder::default()` uses `tauri::Wry`; the `inner` closure is the same type.
             move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
                 use crate::db::rbac::{authorize, Decision, PUBLIC_COMMANDS};
+                use crate::error::AppError;
+                use crate::state::{idle_timeout_secs, is_session_expired, now_secs};
                 use std::sync::atomic::Ordering;
 
                 let cmd = invoke.message.command().to_string();
 
-                // Fast path: public commands bypass auth entirely.
+                // Fast path: public commands bypass auth AND idle-timeout.
+                // These commands (login, auth_status, etc.) work even when the
+                // session has expired — they MUST NOT slide the last_activity clock
+                // (polling current_user/auth_status from the login screen must not
+                // keep a dead session alive).
                 if PUBLIC_COMMANDS.contains(&cmd.as_str()) {
                     return inner(invoke);
                 }
@@ -735,6 +741,33 @@ pub fn run() {
 
                 let authenticated = state.authenticated.load(Ordering::Acquire);
                 let role = state.current_role_snapshot();
+
+                // ── Idle-timeout check ─────────────────────────────────────────
+                // Only for authenticated sessions: if the last authenticated-command
+                // activity was more than `idle_timeout_secs()` ago, expire the
+                // session and return a DISTINCT SessionExpired error so the frontend
+                // can redirect to login rather than showing a generic permission error.
+                if authenticated {
+                    let last = state.last_activity.load(Ordering::Acquire);
+                    let now = now_secs();
+                    if is_session_expired(last, now, idle_timeout_secs()) {
+                        // Lock-free expire: clear atomics (async RwLock cleared on next auth_status).
+                        state.clear_session_sync();
+                        let err = AppError::SessionExpired(
+                            "Sesiunea a expirat din cauza inactivității. Vă rugăm să vă autentificați din nou."
+                                .to_string(),
+                        );
+                        // Serialize AppError the same way commands do (`{ kind, message }` JSON).
+                        let payload = serde_json::to_string(&err)
+                            .unwrap_or_else(|_| r#"{"kind":"SessionExpired","message":"Sesiune expirată."}"#.to_string());
+                        invoke.resolver.reject(payload);
+                        return true;
+                    }
+
+                    // Session is alive: slide the last-activity clock BEFORE dispatching
+                    // to the inner handler, so even a slow command counts as activity.
+                    state.last_activity.store(now, Ordering::Release);
+                }
 
                 match authorize(&cmd, authenticated, role) {
                     Decision::Allow => inner(invoke),

@@ -57,6 +57,11 @@ pub enum AppError {
 
     #[error("{0}")]
     Other(String),
+
+    /// Session expired due to inactivity — distinct from a normal permission
+    /// denial so the frontend can redirect to login with a "sesiune expirată" notice.
+    #[error("{0}")]
+    SessionExpired(String),
 }
 
 impl From<rust_xlsxwriter::XlsxError> for AppError {
@@ -81,6 +86,7 @@ impl AppError {
             AppError::Xlsx(_) => "Xlsx",
             AppError::Archive(_) => "Archive",
             AppError::Other(_) => "Other",
+            AppError::SessionExpired(_) => "SessionExpired",
         }
     }
 }

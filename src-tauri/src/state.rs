@@ -8,16 +8,58 @@
 //! - `current_role`: lock-free `AtomicU8` (Role enum ordinal) for gate permission checks.
 //! - `current_user`: `Arc<RwLock<Option<CurrentUser>>>` for full user info in commands.
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
 use std::sync::Arc;
+
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use sqlx::SqlitePool;
 
 use crate::db::rbac::Role;
 use crate::db::users::CurrentUser;
 
+/// Returns the current Unix time in seconds (monotone wall clock).
+/// Saturates to 0 on the (impossible in practice) pre-epoch or overflow case.
+#[inline]
+pub fn now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 /// Sentinel for "no user logged in" in the AtomicU8 role field.
 const ROLE_NONE: u8 = 0xFF;
+
+/// Session idle-timeout in seconds (default: 15 minutes).
+///
+/// After this many seconds of authenticated-command inactivity the gate treats
+/// the session as expired and clears it.  Each successful authenticated command
+/// slides the window.  Pre-auth / PUBLIC commands do NOT slide it.
+///
+/// Override at compile time via the `CLARITO_IDLE_TIMEOUT_SECS` environment
+/// variable (parsed at start-up via `idle_timeout_secs()`), or leave the
+/// constant as the prod default.
+pub const IDLE_TIMEOUT_SECS_DEFAULT: i64 = 900; // 15 minutes
+
+/// Returns the effective idle-timeout (seconds).  Reads the env var
+/// `CLARITO_IDLE_TIMEOUT_SECS` at call time so tests can override it.
+pub fn idle_timeout_secs() -> i64 {
+    std::env::var("CLARITO_IDLE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(IDLE_TIMEOUT_SECS_DEFAULT)
+}
+
+/// Pure, unit-testable idle-expiry check.
+///
+/// Returns `true` when `last_activity` is non-zero and `(now − last_activity)`
+/// exceeds `timeout_secs`.  Returns `false` (not expired) when
+/// `last_activity == 0` (session not set / already cleared).
+pub fn is_session_expired(last_activity: i64, now: i64, timeout_secs: i64) -> bool {
+    last_activity != 0 && (now - last_activity) > timeout_secs
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -60,6 +102,13 @@ pub struct AppState {
     pub current_role_atomic: Arc<AtomicU8>,
     /// Full current-user record. Only accessed from async command handlers.
     pub current_user: Arc<tokio::sync::RwLock<Option<CurrentUser>>>,
+    /// Unix timestamp (seconds) of the last authenticated-command activity.
+    ///
+    /// - `0` = no active session (cleared on logout / idle-expire).
+    /// - Set to `now()` on `set_session` (login); slid forward on each
+    ///   successful authenticated command by the gate.
+    /// - Read lock-free by the sync gate; the gate writes it lock-free too.
+    pub last_activity: Arc<AtomicI64>,
 }
 
 impl AppState {
@@ -70,26 +119,45 @@ impl AppState {
             authenticated: Arc::new(AtomicBool::new(false)),
             current_role_atomic: Arc::new(AtomicU8::new(ROLE_NONE)),
             current_user: Arc::new(tokio::sync::RwLock::new(None)),
+            last_activity: Arc::new(AtomicI64::new(0)),
         }
     }
 
     /// Called by `auth_login` / `auth_setup_admin` after successful authentication.
-    /// Updates all three session fields atomically from an async context.
+    /// Updates all session fields atomically from an async context.
     pub async fn set_session(&self, user: CurrentUser) {
         let role = Role::from_db_str(&user.role)
             .map(|r| r.to_u8())
             .unwrap_or(ROLE_NONE);
+        let now = now_secs();
         self.current_role_atomic.store(role, Ordering::Release);
+        self.last_activity.store(now, Ordering::Release);
         self.authenticated.store(true, Ordering::Release);
         let mut guard = self.current_user.write().await;
         *guard = Some(user);
     }
 
-    /// Called by `auth_logout`. Clears all session fields.
+    /// Called by `auth_logout` (and by the gate on idle-expire).
+    /// Clears all session fields including `last_activity`.
     pub async fn clear_session(&self) {
         let mut guard = self.current_user.write().await;
         *guard = None;
         self.current_role_atomic.store(ROLE_NONE, Ordering::Release);
+        self.last_activity.store(0, Ordering::Release);
+        self.authenticated.store(false, Ordering::Release);
+    }
+
+    /// Synchronous variant of `clear_session` for use in the sync gate closure.
+    /// Only clears the lock-free atomics; `current_user` (async RwLock) is NOT
+    /// cleared here — it will be cleared on the next async interaction (e.g.
+    /// auth_status) because `authenticated` is already `false`.
+    ///
+    /// Background: the sync gate must not block on an async RwLock.  Setting
+    /// `authenticated = false` and `last_activity = 0` is enough to fence
+    /// subsequent commands; `current_user` cleanup happens in the next async ctx.
+    pub fn clear_session_sync(&self) {
+        self.current_role_atomic.store(ROLE_NONE, Ordering::Release);
+        self.last_activity.store(0, Ordering::Release);
         self.authenticated.store(false, Ordering::Release);
     }
 
@@ -129,6 +197,84 @@ mod tests {
         assert!(
             Role::from_u8(ROLE_NONE).is_none(),
             "ROLE_NONE sentinel must not decode to any Role"
+        );
+    }
+
+    // ── Idle-timeout: is_session_expired() unit tests ────────────────────
+
+    /// A session idle for more than the timeout must be considered expired.
+    #[test]
+    fn idle_expired_after_timeout() {
+        let now = 1_000_000_i64;
+        let last_activity = now - 16 * 60; // 16 minutes ago
+        let timeout = 15 * 60; // 15 minute timeout
+        assert!(
+            is_session_expired(last_activity, now, timeout),
+            "session idle 16 min with 15 min timeout must be expired"
+        );
+    }
+
+    /// A session idle for less than the timeout must NOT be expired.
+    #[test]
+    fn idle_valid_within_timeout() {
+        let now = 1_000_000_i64;
+        let last_activity = now - 5 * 60; // 5 minutes ago
+        let timeout = 15 * 60; // 15 minute timeout
+        assert!(
+            !is_session_expired(last_activity, now, timeout),
+            "session idle 5 min with 15 min timeout must NOT be expired"
+        );
+    }
+
+    /// Exactly at the boundary (now − last == timeout) must NOT be expired
+    /// (the check is strictly greater-than).
+    #[test]
+    fn idle_at_exact_boundary_not_expired() {
+        let now = 1_000_000_i64;
+        let timeout = 15 * 60_i64;
+        let last_activity = now - timeout; // exactly at boundary
+        assert!(
+            !is_session_expired(last_activity, now, timeout),
+            "session exactly at timeout boundary must NOT be expired (> not >=)"
+        );
+    }
+
+    /// When `last_activity == 0` (no session set), must NOT be expired
+    /// regardless of the elapsed time.
+    #[test]
+    fn idle_zero_last_activity_never_expired() {
+        let now = 1_000_000_i64;
+        assert!(
+            !is_session_expired(0, now, 900),
+            "last_activity=0 (no session) must never be expired"
+        );
+    }
+
+    /// `now_secs()` must return a plausible timestamp (year 2020+, i.e. > 1_577_836_800).
+    #[test]
+    fn now_secs_is_plausible() {
+        let ts = now_secs();
+        assert!(
+            ts > 1_577_836_800,
+            "now_secs() must return a timestamp after 2020-01-01"
+        );
+    }
+
+    /// `is_session_expired` slides: updating last_activity to `now` makes it valid again.
+    #[test]
+    fn idle_slides_after_activity_update() {
+        let timeout = 15 * 60_i64;
+        let now = 1_000_000_i64;
+        let old_last = now - 16 * 60; // expired
+        assert!(
+            is_session_expired(old_last, now, timeout),
+            "must be expired before slide"
+        );
+        // After slide:
+        let new_last = now; // just acted
+        assert!(
+            !is_session_expired(new_last, now, timeout),
+            "must NOT be expired immediately after activity slide"
         );
     }
 }

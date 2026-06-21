@@ -129,4 +129,20 @@ describe("formatError", () => {
   it("custom fallback is used when provided", () => {
     expect(formatError("direct string", "unused fallback")).toBe("direct string");
   });
+
+  // ── SessionExpired ───────────────────────────────────────────────────
+
+  it("SessionExpired: returns the message from payload directly (user-facing)", () => {
+    const result = formatError({
+      kind: "SessionExpired",
+      message: "Sesiunea a expirat din cauza inactivității. Vă rugăm să vă autentificați din nou.",
+    });
+    expect(result).toContain("expirat");
+    expect(result).not.toBe("A apărut o eroare neașteptată.");
+  });
+
+  it("SessionExpired: falls back to hardcoded RO message when payload message is empty", () => {
+    const result = formatError({ kind: "SessionExpired", message: "" });
+    expect(result).toContain("autentificați");
+  });
 });

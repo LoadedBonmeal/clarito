@@ -40,6 +40,13 @@ export function formatError(e: unknown, fallback = 'A apărut o eroare neaștept
       case 'Other':
         console.error('[app-error]', p);
         return fallback;
+      // ── Session expired ─────────────────────────────────────────────────
+      // The invoke wrapper in tauri.ts already redirects to login, so by the
+      // time formatError is called the user is back on the login screen.
+      // Return the user-facing message directly (no logging needed — this is
+      // expected behaviour, not a bug).
+      case 'SessionExpired':
+        return p.message || 'Sesiunea a expirat. Vă rugăm să vă autentificați din nou.';
       default: {
         // Exhaustiveness sentinel: if a new AppError variant is added in Rust
         // without a matching TS case, this line will fail compilation.

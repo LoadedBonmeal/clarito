@@ -1593,7 +1593,8 @@ export interface AppErrorPayload {
     | "Pdf"
     | "Xlsx"
     | "Archive"
-    | "Other";
+    | "Other"
+    | "SessionExpired";
   message: string;
 }
 
