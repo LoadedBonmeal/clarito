@@ -23,8 +23,8 @@
 //! 4382=423 FNUASS recuperabil, 423=4315/4316/444 rețineri); `export_d112_xml` populează `med_leaves`
 //! din registru ⇒ D112 = Registrul-jurnal = net. Tratamentul fiscal e în `cm_indemn_treatment` (CASS
 //! doar 01/07/10; impozit — maternitate/îngrijire copil/risc maternal scutite). Limitări cunoscute:
-//! contribuția 0,85% concedii (platitor de venit) NU e modelată (ortogonală, pe tot fondul de salarii);
-//! baza minimă part-time nu se aplică simultan cu concediul (combinație rară).
+//! (contribuția 0,85% concedii a fost ABROGATĂ 01.01.2018 prin OUG 79/2017 și inclusă în CAM 2,25% —
+//! nu mai există ca linie separată); baza minimă part-time nu se aplică simultan cu concediul (rar).
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};

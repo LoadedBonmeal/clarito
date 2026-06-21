@@ -442,7 +442,7 @@
         "impozit": "Income tax withheld",
         "cheltuieliCam": "CAM expense (employer)",
         "cam": "CAM payable",
-        "concedii": "Leave contribution payable (4373)",
+        "concedii": "Wage guarantee fund (4373)",
         "cheltuieliConcedii": "Leave/indemnity expense (6458)",
         "netCasa": "Cash (net pay)",
         "netBanca": "Bank (net pay)"
@@ -461,7 +461,7 @@
         "cass": "CASS (health, employee)",
         "impozit": "Income tax",
         "cam": "CAM (work insurance, employer)",
-        "cci": "CCI (leave contribution, employer)",
+        "cci": "CCI (repealed 2018, EGO 79/2017)",
         "salariuMinimH1": "Minimum wage H1 2026",
         "salariuMinimH2": "Minimum wage H2 2026",
         "carveOutH1": "Non-taxable carve-out H1",

@@ -1404,7 +1404,7 @@ export interface EmployeeState {
   incomeTax: string;
   net: string;
   cam: string;
-  concedii: string;
+  // NOTE: concedii (CCI 0,85%) removed — abolished 1 Jan 2018 by OUG 79/2017.
 }
 
 export interface PayrollRun {
@@ -1415,7 +1415,7 @@ export interface PayrollRun {
   totalIncomeTax: string;
   totalNet: string;
   totalCam: string;
-  totalConcedii: string;
+  // NOTE: totalConcedii (CCI 0,85%) removed — abolished 1 Jan 2018 by OUG 79/2017.
   posted: boolean;
   entryDate: string;
 }
@@ -1435,7 +1435,8 @@ export interface PayrollResult {
   incomeTax: string;
   net: string;
   cam: string;
-  concedii: string;
+  // NOTE: concedii (CCI 0,85%) removed — abolished 1 Jan 2018 by OUG 79/2017.
+  // totalEmployerCost = gross + cam (CAM 2,25% only).
   totalEmployerCost: string;
 }
 

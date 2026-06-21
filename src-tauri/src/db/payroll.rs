@@ -12,7 +12,7 @@ use std::str::FromStr;
 use crate::anaf_decl::d112::{
     cm_indemn_treatment, compute_payroll, compute_payroll_with_leave, deducere_plafonata,
     exempt_part_time_min_base, part_time_min_base, pct, suma_netaxabila, LeaveCert,
-    LeavePayrollInput, PayrollInput, CAM_PCT, CONCEDII_PCT,
+    LeavePayrollInput, PayrollInput, CAM_PCT,
 };
 use crate::db::gl::IndemnityTotals;
 use crate::db::models::{new_id, now_unix};
@@ -339,8 +339,9 @@ pub struct EmployeeState {
     pub income_tax: String,
     pub net: String,
     pub cam: String,
-    /// CCI 0,85% (concedii și indemnizații, angajator).
-    pub concedii: String,
+    // NOTE: concedii (CCI 0,85%) field removed — abolished 1 Jan 2018 by OUG 79/2017;
+    // the separate 0,85% contribution has no 2026 legal basis (CF art.220^1, OUG 158/2005
+    // art.6 Abrogat). Only CAM 2,25% (646/436) remains as employer social contribution.
 }
 
 /// The monthly payroll register + the GL post result.
@@ -354,8 +355,7 @@ pub struct PayrollRun {
     pub total_income_tax: String,
     pub total_net: String,
     pub total_cam: String,
-    /// Contribuția 0,85% pentru concedii și indemnizații (angajator, OUG 158/2005).
-    pub total_concedii: String,
+    // NOTE: total_concedii (CCI 0,85%) removed — abolished 1 Jan 2018; no 2026 legal basis.
     pub posted: bool,
     pub entry_date: String,
 }
@@ -566,10 +566,11 @@ pub async fn run_payroll(
     );
     // Employer-borne part-time minimum-base CAS/CASS difference (art. 146 (5^6)).
     let (mut t_cas_diff, mut t_cass_diff) = (Decimal::ZERO, Decimal::ZERO);
-    // CAM (646/436) și CCI (6458/4373) angajator se calculează pe baza AGREGATĂ — ROUND(Σ bază ×
-    // cotă), regula A21.46 — NU ca Σ rotunjirilor per-salariat. Altfel GL (436/4373) ≠ D112 (480) cu
-    // 1 leu când ≥2 salariați rotunjesc în sus. Acumulăm baza (= brut − netaxabil, rotunjită la leu ca
-    // baza_cam din D112) și aplicăm cota O SINGURĂ DATĂ după buclă.
+    // CAM (646/436) angajator se calculează pe baza AGREGATĂ — ROUND(Σ bază × cotă), regula A21.46
+    // — NU ca Σ rotunjirilor per-salariat. Altfel GL (436) ≠ D112 (480) cu 1 leu când ≥2 salariați
+    // rotunjesc în sus. Acumulăm baza (= brut − netaxabil, rotunjită la leu ca baza_cam din D112) și
+    // aplicăm cota O SINGURĂ DATĂ după buclă. CCI (4373) a fost ABROGATĂ; nu se acumulează.
+    // NOTE: CCI 0,85% (OUG 158/2005) abolished 1 Jan 2018 by OUG 79/2017 — no separate contribution.
     let mut t_cam_base = Decimal::ZERO;
     // Indemnizații de concediu medical (postate separat: 6458/4382/423).
     let mut indemn = IndemnityTotals::default();
@@ -698,7 +699,6 @@ pub async fn run_payroll(
                 income_tax: f(lr.income_tax),
                 net: f(lr.net),
                 cam: f(lr.cam),
-                concedii: f(lr.concedii),
             });
             continue;
         }
@@ -783,14 +783,14 @@ pub async fn run_payroll(
             income_tax: r.income_tax,
             net: r.net,
             cam: r.cam,
-            concedii: r.concedii,
         });
     }
 
-    // Aplică cota O SINGURĂ DATĂ pe baza agregată (rotunjire comercială la leu) — GL 436/4373 = D112
+    // Aplică cota O SINGURĂ DATĂ pe baza agregată (rotunjire comercială la leu) — GL 436 = D112
     // (480) la leu, eliminând diferența de reconciliere din Σ rotunjirilor per-salariat.
+    // CAM 2,25% (646/436) = singura contribuție angajator pe fondul de salarii.
+    // CCI 0,85% (4373) a fost ABROGATĂ prin OUG 79/2017 de la 1 ian. 2018 — nu se mai calculează.
     let t_cam = pct(t_cam_base, CAM_PCT);
-    let t_concedii = pct(t_cam_base, CONCEDII_PCT);
 
     let post = crate::db::gl::post_payroll(
         pool,
@@ -803,7 +803,6 @@ pub async fn run_payroll(
             cass: t_cass,
             impozit: t_tax,
             cam: t_cam,
-            concedii: t_concedii,
             cas_diff: t_cas_diff,
             cass_diff: t_cass_diff,
             indemn: indemn.clone(),
@@ -822,7 +821,6 @@ pub async fn run_payroll(
         total_income_tax: f(t_tax + indemn.tax),
         total_net: f(t_net),
         total_cam: f(t_cam),
-        total_concedii: f(t_concedii),
         posted: post.posted,
         entry_date: post.entry_date,
     })
@@ -943,15 +941,16 @@ mod tests {
         let run = run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
             .await
             .unwrap();
-        // 2 × (gross 5000, CAS 1250, CASS 500, impozit 325, net 2925). CAM/CCI = ROUND(Σ bază × cotă)
+        // 2 × (gross 5000, CAS 1250, CASS 500, impozit 325, net 2925). CAM = ROUND(Σ bază × cotă)
         // pe baza AGREGATĂ (10.000), NU Σ rotunjirilor per-salariat — egal cu D112 (480).
+        // GOLDEN: CCI 0,85% REMOVED (abolished OUG 79/2017); ONLY CAM 2,25% remains as employer
+        // social contribution. No total_concedii field, no 4373 posting.
         assert_eq!(run.total_gross, "10000.00");
         assert_eq!(run.total_cas, "2500.00");
         assert_eq!(run.total_cass, "1000.00");
         assert_eq!(run.total_income_tax, "650.00");
         assert_eq!(run.total_net, "5850.00");
         assert_eq!(run.total_cam, "225.00"); // ROUND(10.000 × 2,25%) = 225 (NU 2 × round(112,5)=226)
-        assert_eq!(run.total_concedii, "85.00"); // ROUND(10.000 × 0,85%) = 85 (NU 2 × round(42,5)=86)
         assert_eq!(run.states.len(), 2);
         assert!(run.posted);
 
@@ -969,9 +968,16 @@ mod tests {
         assert_eq!(bal("421"), Some(("0.00".into(), "5850.00".into())));
         assert_eq!(bal("4315"), Some(("0.00".into(), "2500.00".into())));
         assert_eq!(bal("646"), Some(("225.00".into(), "0.00".into())));
-        // CCI 0,85%: D 6458 / C 4373 = 85 (fără concediu, 6458 = doar CCI; bază agregată).
-        assert_eq!(bal("6458"), Some(("85.00".into(), "0.00".into())));
-        assert_eq!(bal("4373"), Some(("0.00".into(), "85.00".into())));
+        // GOLDEN: no phantom CCI — 6458 and 4373 must NOT appear in a pure salary payroll.
+        // Employer cost above gross = CAM 2,25% ONLY (646/436); 4373 is NEVER posted post-2018.
+        assert!(
+            bal("6458").is_none(),
+            "6458 must not appear — no indemnity, no part-time top-up, no phantom CCI"
+        );
+        assert!(
+            bal("4373").is_none(),
+            "4373 must not be posted — CCI abolished OUG 79/2017"
+        );
         assert!(tb.balanced, "payroll journal balances");
     }
 
@@ -1032,12 +1038,12 @@ mod tests {
         // Iunie 2026 = 21 zile lucrătoare (1 iunie e sărbătoare legală); 5 zile concediu ⇒ 16 lucrate;
         // brut lucrat 5500×16/21 = 4190. Indemnizație 600. CAS 25%×4790 = 1198, CASS 10%×4790 = 479,
         // impozit 10%×3113 = 311, CAM 2,25%×4190 = 94, net total 2802.
+        // CCI 0,85% REMOVED (abolished OUG 79/2017) — no total_concedii, no 4373.
         assert_eq!(run.total_gross, "4790.00"); // lucrat 4190 + indemnizație 600
         assert_eq!(run.total_cas, "1198.00");
         assert_eq!(run.total_cass, "479.00");
         assert_eq!(run.total_income_tax, "311.00");
         assert_eq!(run.total_cam, "94.00");
-        assert_eq!(run.total_concedii, "36.00"); // CCI 0,85% × 4190 = 35.615 → 36
         assert_eq!(run.total_net, "2802.00");
 
         let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
@@ -1051,9 +1057,14 @@ mod tests {
         };
         // Salariul lucrat (641) e separat de indemnizație (6458); 421 = salariu net, 423 = indemniz. netă.
         assert_eq!(bal("641"), Some(("4190.00".into(), "0.00".into())));
-        // 6458 = 600 indemnizație angajator + 36 CCI 0,85%.
-        assert_eq!(bal("6458"), Some(("636.00".into(), "0.00".into())));
-        assert_eq!(bal("4373"), Some(("0.00".into(), "36.00".into()))); // CCI 0,85% datorată
+        // 6458 = ONLY the 600 employer indemnity — NO phantom CCI 0,85% (abolished OUG 79/2017).
+        // Before fix: 6458 = 636 (600 indemnity + 36 phantom CCI). After fix: 6458 = 600 (indemnity only).
+        assert_eq!(bal("6458"), Some(("600.00".into(), "0.00".into())));
+        // 4373 must NOT appear — CCI abolished, account no longer posted post-2018.
+        assert!(
+            bal("4373").is_none(),
+            "4373 must not be posted — CCI abolished OUG 79/2017"
+        );
         assert_eq!(bal("421"), Some(("0.00".into(), "2451.00".into()))); // 4190 − 1048 − 419 − 272
         assert_eq!(bal("423"), Some(("0.00".into(), "351.00".into()))); // 600 − 150 − 60 − 39
                                                                         // Creditele de contribuții = cele combinate (lucrat + indemnizație) = obligațiile D112.
@@ -1061,7 +1072,10 @@ mod tests {
         assert_eq!(bal("4316"), Some(("0.00".into(), "479.00".into())));
         assert_eq!(bal("444"), Some(("0.00".into(), "311.00".into())));
         assert_eq!(bal("646"), Some(("94.00".into(), "0.00".into())));
-        assert!(tb.balanced, "payroll + indemnity + CCI journal balances");
+        assert!(
+            tb.balanced,
+            "payroll + indemnity journal balances — indemnity UNCHANGED, phantom CCI removed"
+        );
     }
 
     #[test]

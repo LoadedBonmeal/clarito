@@ -3692,10 +3692,9 @@ pub struct PayrollTotals {
     pub impozit: Decimal,
     /// CAM 2,25% angajator pe baza COMBINATĂ agregată (C 436). Equals D112 obligation (single rounding).
     pub cam: Decimal,
-    /// Contribuția 0,85% concedii și indemnizații, angajator (OUG 158/2005). 0 dacă lipsește.
-    /// NOTE: CCI is on SALARY base only — diurnă excess is out-of-scope for CCI for fiscal sign-off
-    /// (this D112 emitter declares no CCI/4373 for anyone, keeping the model internally consistent).
-    pub concedii: Decimal,
+    // NOTE: concedii (CCI 0,85%, C 4373) field removed — abolished 1 Jan 2018 by OUG 79/2017
+    // (CF art.220^1; OUG 158/2005 art.6 Abrogat). CAM 2,25% is the ONLY employer social contribution
+    // on the salary fund. Account 4373 is now "fond de garantare creanțe salariale" (different purpose).
     /// Diferența CAS bază minimă part-time, suportată de angajator (art. 146 (5^6)). 0 dacă lipsește.
     pub cas_diff: Decimal,
     /// Diferența CASS bază minimă part-time, suportată de angajator. 0 dacă lipsește.
@@ -3728,7 +3727,6 @@ pub async fn post_payroll(
         cass,
         impozit,
         cam,
-        concedii,
         cas_diff,
         cass_diff,
         indemn,
@@ -3752,7 +3750,7 @@ pub async fn post_payroll(
     .execute(&mut *tx)
     .await?;
 
-    if gross.is_zero() && indemn.is_zero() && concedii.is_zero() {
+    if gross.is_zero() && indemn.is_zero() {
         tx.commit().await?;
         return Ok(PayrollPostResult {
             gross: fmt_dec(gross),
@@ -3841,17 +3839,10 @@ pub async fn post_payroll(
         add(&mut entries, &cfg.cheltuieli_cam, cam, Decimal::ZERO); // cheltuieli CAM (angajator)
         add(&mut entries, &cfg.cam, Decimal::ZERO, cam); // CAM datorată
     }
-    // CCI 0,85% (contribuția pentru concedii și indemnizații, OUG 158/2005): D 6458 / C 4373. Se achită
-    // net de indemnizațiile recuperate din FNUASS (4382), dar acreditarea e neschimbată.
-    if !concedii.is_zero() {
-        add(
-            &mut entries,
-            &cfg.cheltuieli_concedii,
-            concedii,
-            Decimal::ZERO,
-        ); // cheltuieli CCI (angajator)
-        add(&mut entries, &cfg.concedii, Decimal::ZERO, concedii); // contribuția concedii datorată
-    }
+    // NOTE: CCI 0,85% (D 6458 / C 4373) REMOVED — abolished 1 Jan 2018 by OUG 79/2017.
+    // Account 4373 ("fond de garantare creanțe salariale") is no longer posted here.
+    // The LEGITIMATE employer-borne indemnity (D 6458 / C 423) is posted below via indemn.employer.
+    //
     // Part-time minimum-base top-up borne by the employer: D 6458 / C 4315 (CAS) + C 4316 (CASS).
     // Brings 4315/4316 up to the contribution on the minimum base (= what D112 declares).
     let emp_diff = cas_diff + cass_diff;

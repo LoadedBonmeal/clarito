@@ -2138,7 +2138,7 @@ function PayrollConfigPanel({ companyId }: { companyId: string }) {
     { label: t("settings.payrollConfig.rates2026.cass"),          value: "10%"             },
     { label: t("settings.payrollConfig.rates2026.impozit"),       value: "10%"             },
     { label: t("settings.payrollConfig.rates2026.cam"),           value: "2,25%"           },
-    { label: t("settings.payrollConfig.rates2026.cci"),           value: "0,85%"           },
+    // CCI 0,85% row removed — abolished OUG 79/2017; folded into CAM 2,25% since 1 Jan 2018.
     { label: t("settings.payrollConfig.rates2026.salariuMinimH1"), value: "4.050 lei"      },
     { label: t("settings.payrollConfig.rates2026.salariuMinimH2"), value: "4.325 lei"      },
     { label: t("settings.payrollConfig.rates2026.carveOutH1"),    value: "300 lei"         },
