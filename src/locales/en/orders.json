@@ -1,0 +1,88 @@
+{
+  "orders": {
+    "title": "Orders",
+    "selectCompany": "Select an active company to view orders.",
+    "head": {
+      "new": "New Order"
+    },
+    "tabs": {
+      "all": "All",
+      "active": "Active",
+      "invoiced": "Invoiced"
+    },
+    "search": "Search order…",
+    "status": {
+      "draft": "Draft",
+      "sent": "Sent",
+      "accepted": "Accepted",
+      "invoiced": "Invoiced",
+      "cancelled": "Cancelled"
+    },
+    "table": {
+      "number": "No.",
+      "date": "Order date",
+      "client": "Client",
+      "delivery": "Est. delivery",
+      "total": "Total",
+      "reserved": "Reserved",
+      "status": "Status"
+    },
+    "states": {
+      "loading": "Loading…",
+      "errorLabel": "orders",
+      "emptyNone": "No orders yet. Create one with the \"New Order\" button.",
+      "emptyFiltered": "No records match the applied filters."
+    },
+    "modal": {
+      "editTitle": "Edit order",
+      "createTitle": "New order",
+      "close": "Close",
+      "client": "Client (optional)",
+      "clientPick": "— Select client —",
+      "orderDate": "Order date",
+      "expectedDelivery": "Expected delivery",
+      "series": "Series",
+      "seriesPlaceholder": "e.g. ORD",
+      "currency": "Currency",
+      "notes": "Notes (optional)",
+      "notesPlaceholder": "Additional information",
+      "lines": "Line items",
+      "saving": "Saving…",
+      "saveChanges": "Save changes",
+      "create": "Create order"
+    },
+    "actions": {
+      "edit": "Edit",
+      "send": "Mark as sent",
+      "accept": "Mark as accepted",
+      "cancel": "Cancel",
+      "convertToInvoice": "Convert to invoice",
+      "delete": "Delete",
+      "deleteQ": "Delete?",
+      "confirmDelete": "Confirm deletion"
+    },
+    "notify": {
+      "created": "Order created successfully",
+      "createError": "Could not create order.",
+      "updated": "Order updated",
+      "updateError": "Could not update order.",
+      "deleted": "Order deleted",
+      "deleteError": "Could not delete order.",
+      "statusUpdated": "Status updated",
+      "statusError": "Could not update status.",
+      "converted": "Invoice created successfully",
+      "convertError": "Could not convert order to invoice."
+    },
+    "validate": {
+      "orderDate": "Enter the order date.",
+      "lines": "Add at least one line item."
+    },
+    "banner": {
+      "info": "Orders are pre-accounting commercial documents. Reserved quantities are informational — they do not affect stock. Stock and GL are updated only when the order is converted to an invoice (or an NIR for purchases)."
+    },
+    "reservation": {
+      "label": "Qty reserved",
+      "tooltip": "Quantity reserved from stock for accepted orders. Informational — does not affect stock."
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "orders": {
+    "title": "Comenzi",
+    "selectCompany": "Selectați o companie activă pentru a vedea comenzile.",
+    "head": {
+      "new": "Comandă nouă"
+    },
+    "tabs": {
+      "all": "Toate",
+      "active": "Active",
+      "invoiced": "Facturate"
+    },
+    "search": "Caută comandă…",
+    "status": {
+      "draft": "Schiță",
+      "sent": "Trimisă",
+      "accepted": "Acceptată",
+      "invoiced": "Facturată",
+      "cancelled": "Anulată"
+    },
+    "table": {
+      "number": "Nr.",
+      "date": "Dată comandă",
+      "client": "Client",
+      "delivery": "Livrare estimată",
+      "total": "Total",
+      "reserved": "Rezervat",
+      "status": "Status"
+    },
+    "states": {
+      "loading": "Se încarcă…",
+      "errorLabel": "comenzile",
+      "emptyNone": "Nicio comandă. Creați o comandă cu butonul „Comandă nouă”.",
+      "emptyFiltered": "Nicio înregistrare pentru filtrele aplicate."
+    },
+    "modal": {
+      "editTitle": "Editează comanda",
+      "createTitle": "Comandă nouă",
+      "close": "Închide",
+      "client": "Client (opțional)",
+      "clientPick": "— Selectați client —",
+      "orderDate": "Data comenzii",
+      "expectedDelivery": "Livrare estimată",
+      "series": "Serie",
+      "seriesPlaceholder": "ex: CMD",
+      "currency": "Monedă",
+      "notes": "Notițe (opțional)",
+      "notesPlaceholder": "Informații suplimentare",
+      "lines": "Articole",
+      "saving": "Se salvează…",
+      "saveChanges": "Salvează modificările",
+      "create": "Creează comanda"
+    },
+    "actions": {
+      "edit": "Editează",
+      "send": "Marchează trimisă",
+      "accept": "Marchează acceptată",
+      "cancel": "Anulează",
+      "convertToInvoice": "Convertește în factură",
+      "delete": "Șterge",
+      "deleteQ": "Ștergeți?",
+      "confirmDelete": "Confirmă ștergerea"
+    },
+    "notify": {
+      "created": "Comandă creată cu succes",
+      "createError": "Nu s-a putut crea comanda.",
+      "updated": "Comandă actualizată",
+      "updateError": "Nu s-a putut actualiza comanda.",
+      "deleted": "Comandă ștearsă",
+      "deleteError": "Nu s-a putut șterge comanda.",
+      "statusUpdated": "Status actualizat",
+      "statusError": "Nu s-a putut actualiza statusul.",
+      "converted": "Factură creată cu succes",
+      "convertError": "Nu s-a putut converti comanda în factură."
+    },
+    "validate": {
+      "orderDate": "Introduceți data comenzii.",
+      "lines": "Adăugați cel puțin un articol."
+    },
+    "banner": {
+      "info": "Comenzile sunt documente comerciale pre-contabile. Cantitățile marcate ca „rezervate” sunt informative — nu modifică stocul. Stocul și GL-ul se actualizează doar când comanda este convertită în factură (sau NIR pentru achiziții)."
+    },
+    "reservation": {
+      "label": "Cant. rezervată",
+      "tooltip": "Cantitate rezervată din stoc pentru comenzile acceptate. Informativ — nu afectează stocul."
+    }
+  }
+}

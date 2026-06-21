@@ -57,6 +57,8 @@
       "ledger": "Jurnal contabil",
       "bank": "Registru de casă",
       "bankImport": "Import extras bancar",
+      "quotes": "Oferte & Devize",
+      "orders": "Comenzi",
       "more": "Mai multe",
       "fewer": "Mai puține"
     },

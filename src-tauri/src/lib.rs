@@ -478,6 +478,22 @@ pub fn run() {
                     commands::recurring::delete_recurring_invoice,
                     commands::recurring::update_recurring_invoice,
                     commands::recurring::toggle_recurring_active,
+                    // quotes (oferte / devize)
+                    commands::quotes::create_quote,
+                    commands::quotes::list_quotes,
+                    commands::quotes::get_quote,
+                    commands::quotes::update_quote,
+                    commands::quotes::delete_quote,
+                    commands::quotes::set_quote_status,
+                    commands::quotes::convert_quote_to_invoice,
+                    // orders (comenzi)
+                    commands::orders::create_order,
+                    commands::orders::list_orders,
+                    commands::orders::get_order,
+                    commands::orders::update_order,
+                    commands::orders::delete_order,
+                    commands::orders::set_order_status,
+                    commands::orders::convert_order_to_invoice,
                     // declarations d300
                     commands::declarations::compute_d300,
                     commands::declarations::cash_vat_plafon_status,

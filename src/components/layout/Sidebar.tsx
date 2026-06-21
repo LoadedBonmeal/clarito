@@ -86,6 +86,8 @@ export function Sidebar() {
       { key: "salarizare", label: t("shell.nav.payroll"), icon: "idcard", path: "/payroll" },
       { key: "articole", label: t("shell.nav.products"), icon: "cube", path: "/products" },
       { key: "companii", label: t("shell.nav.companies"), icon: "building", path: "/companies", matchPrefix: "/companies", more: true },
+      { key: "oferte", label: t("shell.nav.quotes"), icon: "docText", path: "/quotes", matchPrefix: "/quotes", more: true },
+      { key: "comenzi", label: t("shell.nav.orders"), icon: "docUp", path: "/orders", matchPrefix: "/orders", more: true },
       { key: "facturi-recurente", label: t("shell.nav.recurring"), icon: "loop", path: "/recurring", more: true },
       { key: "mijloace-fixe", label: t("shell.nav.assets"), icon: "wrench", path: "/assets", more: true },
       { key: "plan-conturi", label: t("shell.nav.accounts"), icon: "book", path: "/accounts", more: true },

@@ -630,6 +630,211 @@ export const recurring = {
     invoke<void>("toggle_recurring_active", { id, companyId, active }),
 };
 
+// ─── Quotes (oferte / devize) ─────────────────────────────────────────────
+
+export type QuoteStatus = "draft" | "sent" | "accepted" | "invoiced" | "cancelled" | "expired";
+export type QuoteKind = "quote" | "deviz";
+
+export interface Quote {
+  id: string;
+  companyId: string;
+  contactId: string | null;
+  kind: QuoteKind;
+  series: string | null;
+  number: number;
+  fullNumber: string | null;
+  issueDate: string;
+  validUntil: string | null;
+  currency: string;
+  exchangeRate: string | null;
+  subtotalAmount: string;
+  vatAmount: string;
+  totalAmount: string;
+  status: QuoteStatus;
+  notes: string | null;
+  acceptedAt: number | null;
+  convertedInvoiceId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface QuoteLine {
+  id: string;
+  quoteId: string;
+  position: number;
+  name: string;
+  description: string | null;
+  quantity: string;
+  unit: string | null;
+  unitPrice: string;
+  vatRate: string;
+  vatCategory: string | null;
+  subtotalAmount: string;
+  vatAmount: string;
+  totalAmount: string;
+  revenueKind: string | null;
+  costSection: string | null;
+}
+
+export interface QuoteWithLines {
+  quote: Quote;
+  lines: QuoteLine[];
+}
+
+export interface CreateQuoteLineInput {
+  name: string;
+  description?: string;
+  quantity: number;
+  unit?: string;
+  unitPrice: number;
+  vatRate: number;
+  vatCategory: string;
+  revenueKind?: string;
+  costSection?: string;
+}
+
+export interface CreateQuoteInput {
+  companyId: string;
+  contactId?: string | null;
+  kind?: QuoteKind;
+  series?: string | null;
+  issueDate: string;
+  validUntil?: string | null;
+  currency?: string;
+  exchangeRate?: string | null;
+  notes?: string | null;
+  lines: CreateQuoteLineInput[];
+}
+
+export interface UpdateQuoteInput {
+  contactId?: string | null;
+  kind?: QuoteKind;
+  series?: string | null;
+  issueDate: string;
+  validUntil?: string | null;
+  currency?: string;
+  exchangeRate?: string | null;
+  notes?: string | null;
+  lines: CreateQuoteLineInput[];
+}
+
+export const quotes = {
+  create: (args: CreateQuoteInput) =>
+    invoke<Quote>("create_quote", { args }),
+  list: (companyId: string) =>
+    invoke<Quote[]>("list_quotes", { companyId }),
+  get: (id: string, companyId: string) =>
+    invoke<QuoteWithLines>("get_quote", { id, companyId }),
+  update: (id: string, companyId: string, input: UpdateQuoteInput) =>
+    invoke<Quote>("update_quote", { id, companyId, input }),
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_quote", { id, companyId }),
+  setStatus: (id: string, companyId: string, status: string) =>
+    invoke<Quote>("set_quote_status", { id, companyId, status }),
+  convertToInvoice: (companyId: string, quoteId: string) =>
+    invoke<import("@/types").Invoice>("convert_quote_to_invoice", { companyId, quoteId }),
+};
+
+// ─── Orders (comenzi) ─────────────────────────────────────────────────────
+
+export type OrderStatus = "draft" | "sent" | "accepted" | "invoiced" | "cancelled";
+
+export interface Order {
+  id: string;
+  companyId: string;
+  contactId: string | null;
+  series: string | null;
+  number: number;
+  fullNumber: string | null;
+  orderDate: string;
+  expectedDelivery: string | null;
+  currency: string;
+  exchangeRate: string | null;
+  subtotalAmount: string;
+  vatAmount: string;
+  totalAmount: string;
+  status: OrderStatus;
+  notes: string | null;
+  convertedInvoiceId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface OrderLine {
+  id: string;
+  orderId: string;
+  position: number;
+  name: string;
+  description: string | null;
+  quantity: string;
+  unit: string | null;
+  unitPrice: string;
+  vatRate: string;
+  vatCategory: string | null;
+  subtotalAmount: string;
+  vatAmount: string;
+  totalAmount: string;
+  revenueKind: string | null;
+  qtyReserved: string;
+}
+
+export interface OrderWithLines {
+  order: Order;
+  lines: OrderLine[];
+}
+
+export interface CreateOrderLineInput {
+  name: string;
+  description?: string;
+  quantity: number;
+  unit?: string;
+  unitPrice: number;
+  vatRate: number;
+  vatCategory: string;
+  revenueKind?: string;
+  qtyReserved?: number;
+}
+
+export interface CreateOrderInput {
+  companyId: string;
+  contactId?: string | null;
+  series?: string | null;
+  orderDate: string;
+  expectedDelivery?: string | null;
+  currency?: string;
+  exchangeRate?: string | null;
+  notes?: string | null;
+  lines: CreateOrderLineInput[];
+}
+
+export interface UpdateOrderInput {
+  contactId?: string | null;
+  series?: string | null;
+  orderDate: string;
+  expectedDelivery?: string | null;
+  currency?: string;
+  exchangeRate?: string | null;
+  notes?: string | null;
+  lines: CreateOrderLineInput[];
+}
+
+export const orders = {
+  create: (args: CreateOrderInput) =>
+    invoke<Order>("create_order", { args }),
+  list: (companyId: string) =>
+    invoke<Order[]>("list_orders", { companyId }),
+  get: (id: string, companyId: string) =>
+    invoke<OrderWithLines>("get_order", { id, companyId }),
+  update: (id: string, companyId: string, input: UpdateOrderInput) =>
+    invoke<Order>("update_order", { id, companyId, input }),
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_order", { id, companyId }),
+  setStatus: (id: string, companyId: string, status: string) =>
+    invoke<Order>("set_order_status", { id, companyId, status }),
+  convertToInvoice: (companyId: string, orderId: string) =>
+    invoke<import("@/types").Invoice>("convert_order_to_invoice", { companyId, orderId }),
+};
+
 // ─── Feedback ─────────────────────────────────────────────────────────────
 
 export const feedback = {
@@ -1906,6 +2111,8 @@ export const api = {
   receipts,
   received,
   receivedPayments,
+  quotes,
+  orders,
   recurring,
   reports,
   assets,

@@ -381,7 +381,7 @@ async fn list_events(pool: &SqlitePool, invoice_id: &str) -> AppResult<Vec<Invoi
 
 /// `(subtotal, vat_total, total, per-linie (id, subtotal, tva, total))` — rezultatul rotunjit al
 /// [`validate_and_total_lines`].
-type InvoiceTotals = (
+pub(crate) type LineTotals = (
     String,
     String,
     String,
@@ -392,10 +392,12 @@ type InvoiceTotals = (
 /// calculează subtotal / TVA / total rotunjite + per-linie `(id, subtotal, tva, total)`.
 /// Partajat de [`create`] și [`create_imported`] ca să aplice IDENTIC validarea fiscală + aritmetica
 /// banilor (Decimal, niciodată f64).
-fn validate_and_total_lines(
+/// Shared by quotes/orders as well: pass `""` as `issue_date` to bypass fiscal-reform date check
+/// (safe because `old_vat_rate_blocked` returns false for dates < "2025-08-01" and "" < that).
+pub(crate) fn validate_and_total_lines(
     lines: &[CreateLineInput],
     issue_date: &str,
-) -> AppResult<InvoiceTotals> {
+) -> AppResult<LineTotals> {
     if lines.is_empty() {
         return Err(AppError::Validation(
             "Factura trebuie să aibă cel puțin o linie.".into(),

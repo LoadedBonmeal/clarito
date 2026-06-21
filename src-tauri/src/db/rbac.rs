@@ -222,6 +222,8 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "delete_declaration_filing"
         | "wipe_all_data"
         | "delete_bom"
+        | "delete_quote"
+        | "delete_order"
         | "export_backup" => Some(Perm::Delete),
 
         // ── ViewReports ───────────────────────────────────────────────────

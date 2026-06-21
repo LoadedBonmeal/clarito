@@ -1,0 +1,100 @@
+{
+  "quotes": {
+    "title": "Quotes & Estimates",
+    "selectCompany": "Select an active company to view quotes.",
+    "head": {
+      "new": "New Quote"
+    },
+    "tabs": {
+      "all": "All",
+      "active": "Active",
+      "invoiced": "Invoiced"
+    },
+    "search": "Search quote…",
+    "kind": {
+      "quote": "Quote",
+      "deviz": "Estimate"
+    },
+    "status": {
+      "draft": "Draft",
+      "sent": "Sent",
+      "accepted": "Accepted",
+      "invoiced": "Invoiced",
+      "cancelled": "Cancelled",
+      "expired": "Expired"
+    },
+    "costSection": {
+      "label": "Cost section (estimate)",
+      "material": "Materials",
+      "manopera": "Labour",
+      "utilaj": "Equipment",
+      "transport": "Transport"
+    },
+    "table": {
+      "number": "No.",
+      "date": "Date",
+      "client": "Client",
+      "kind": "Type",
+      "validUntil": "Valid until",
+      "total": "Total",
+      "status": "Status"
+    },
+    "states": {
+      "loading": "Loading…",
+      "errorLabel": "quotes",
+      "emptyNone": "No quotes yet. Create one with the \"New Quote\" button.",
+      "emptyFiltered": "No records match the applied filters."
+    },
+    "modal": {
+      "editTitle": "Edit quote",
+      "createTitle": "New quote",
+      "editDevizTitle": "Edit estimate",
+      "createDevizTitle": "New estimate",
+      "close": "Close",
+      "kind": "Document type",
+      "client": "Client (optional)",
+      "clientPick": "— Select client —",
+      "issueDate": "Issue date",
+      "validUntil": "Valid until",
+      "series": "Series",
+      "seriesPlaceholder": "e.g. QT",
+      "currency": "Currency",
+      "notes": "Notes (optional)",
+      "notesPlaceholder": "Additional information",
+      "lines": "Line items",
+      "saving": "Saving…",
+      "saveChanges": "Save changes",
+      "create": "Create quote"
+    },
+    "actions": {
+      "edit": "Edit",
+      "send": "Mark as sent",
+      "accept": "Mark as accepted",
+      "cancel": "Cancel",
+      "expire": "Mark as expired",
+      "convertToInvoice": "Convert to invoice",
+      "delete": "Delete",
+      "deleteQ": "Delete?",
+      "confirmDelete": "Confirm deletion"
+    },
+    "notify": {
+      "created": "Quote created successfully",
+      "createError": "Could not create quote.",
+      "updated": "Quote updated",
+      "updateError": "Could not update quote.",
+      "deleted": "Quote deleted",
+      "deleteError": "Could not delete quote.",
+      "statusUpdated": "Status updated",
+      "statusError": "Could not update status.",
+      "converted": "Invoice created successfully",
+      "convertError": "Could not convert quote to invoice."
+    },
+    "validate": {
+      "issueDate": "Enter the issue date.",
+      "lines": "Add at least one line item."
+    },
+    "banner": {
+      "info": "Quotes and estimates are pre-contractual documents. They do not generate accounting entries. Accounting (GL + VAT) is triggered only when an accepted quote is converted to an invoice."
+    }
+  }
+}

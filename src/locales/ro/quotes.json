@@ -1,0 +1,100 @@
+{
+  "quotes": {
+    "title": "Oferte & Devize",
+    "selectCompany": "Selectați o companie activă pentru a vedea ofertele.",
+    "head": {
+      "new": "Ofertă nouă"
+    },
+    "tabs": {
+      "all": "Toate",
+      "active": "Active",
+      "invoiced": "Convertite"
+    },
+    "search": "Caută ofertă…",
+    "kind": {
+      "quote": "Ofertă",
+      "deviz": "Deviz"
+    },
+    "status": {
+      "draft": "Schiță",
+      "sent": "Trimisă",
+      "accepted": "Acceptată",
+      "invoiced": "Facturată",
+      "cancelled": "Anulată",
+      "expired": "Expirată"
+    },
+    "costSection": {
+      "label": "Secțiune cost (deviz)",
+      "material": "Materiale",
+      "manopera": "Manoperă",
+      "utilaj": "Utilaje",
+      "transport": "Transport"
+    },
+    "table": {
+      "number": "Nr.",
+      "date": "Dată",
+      "client": "Client",
+      "kind": "Tip",
+      "validUntil": "Valabil până",
+      "total": "Total",
+      "status": "Status"
+    },
+    "states": {
+      "loading": "Se încarcă…",
+      "errorLabel": "ofertele",
+      "emptyNone": "Nicio ofertă. Creați o ofertă cu butonul „Ofertă nouă”.",
+      "emptyFiltered": "Nicio înregistrare pentru filtrele aplicate."
+    },
+    "modal": {
+      "editTitle": "Editează oferta",
+      "createTitle": "Ofertă nouă",
+      "editDevizTitle": "Editează deviz",
+      "createDevizTitle": "Deviz nou",
+      "close": "Închide",
+      "kind": "Tip document",
+      "client": "Client (opțional)",
+      "clientPick": "— Selectați client —",
+      "issueDate": "Data emiterii",
+      "validUntil": "Valabil până",
+      "series": "Serie",
+      "seriesPlaceholder": "ex: OFR",
+      "currency": "Monedă",
+      "notes": "Notițe (opțional)",
+      "notesPlaceholder": "Informații suplimentare",
+      "lines": "Articole",
+      "saving": "Se salvează…",
+      "saveChanges": "Salvează modificările",
+      "create": "Creează oferta"
+    },
+    "actions": {
+      "edit": "Editează",
+      "send": "Marchează trimisă",
+      "accept": "Marchează acceptată",
+      "cancel": "Anulează",
+      "expire": "Marchează expirată",
+      "convertToInvoice": "Convertește în factură",
+      "delete": "Șterge",
+      "deleteQ": "Ștergeți?",
+      "confirmDelete": "Confirmă ștergerea"
+    },
+    "notify": {
+      "created": "Ofertă creată cu succes",
+      "createError": "Nu s-a putut crea oferta.",
+      "updated": "Ofertă actualizată",
+      "updateError": "Nu s-a putut actualiza oferta.",
+      "deleted": "Ofertă ștearsă",
+      "deleteError": "Nu s-a putut șterge oferta.",
+      "statusUpdated": "Status actualizat",
+      "statusError": "Nu s-a putut actualiza statusul.",
+      "converted": "Factură creată cu succes",
+      "convertError": "Nu s-a putut converti oferta în factură."
+    },
+    "validate": {
+      "issueDate": "Introduceți data emiterii.",
+      "lines": "Adăugați cel puțin un articol."
+    },
+    "banner": {
+      "info": "Ofertele și devizele sunt documente pre-contractuale. Nu generează înregistrări contabile. Contabilitatea (GL + TVA) se declanșează doar când convertiți oferta acceptată într-o factură."
+    }
+  }
+}

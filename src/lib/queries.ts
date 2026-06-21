@@ -83,6 +83,18 @@ export const queryKeys = {
     list: (companyId: string) => ["recurringInvoices", companyId] as const,
   },
 
+  quotes: {
+    all: ["quotes"] as const,
+    list: (companyId: string) => ["quotes", "list", companyId] as const,
+    detail: (id: string) => ["quotes", "detail", id] as const,
+  },
+
+  orders: {
+    all: ["orders"] as const,
+    list: (companyId: string) => ["orders", "list", companyId] as const,
+    detail: (id: string) => ["orders", "detail", id] as const,
+  },
+
   vatReport: {
     get: (year: number, month: number | string, companyId: string) =>
       ["vatReport", year, month, companyId] as const,
