@@ -2,6 +2,10 @@
 //!
 //! Logging is best-effort: failures are logged at warn level and never
 //! propagate to the caller. The audit log must NEVER block a user action.
+//!
+//! P2 Wave 8: `log_user_action_attributed` adds user_id + user_label columns
+//! (migration 0071). The original `log_user_action` is preserved unchanged so
+//! all existing call sites compile without modification.
 
 use crate::db::models::new_id;
 use crate::error::AppResult;
@@ -48,6 +52,54 @@ pub async fn log_user_action(
     Ok(())
 }
 
+/// P2 Wave 8 variant: same as `log_user_action` but also records which
+/// application user performed the action (user_id + user_label columns added
+/// by migration 0071).
+///
+/// Call this from auth commands (LOGIN/LOGOUT/SETUP_ADMIN) and from any
+/// sensitive mutation where `CurrentUser` is available in the handler.
+/// The original `log_user_action` remains for call sites that have no
+/// session context (background jobs, non-session paths).
+#[allow(clippy::too_many_arguments)]
+pub async fn log_user_action_attributed(
+    pool: &SqlitePool,
+    action: &str,
+    entity_type: &str,
+    entity_id: &str,
+    company_id: Option<&str>,
+    metadata: Option<&str>,
+    user_id: Option<&str>,
+    user_label: Option<&str>,
+) -> AppResult<()> {
+    let id = new_id();
+    let result = sqlx::query(
+        "INSERT INTO audit_log \
+         (id, action, entity_type, entity_id, company_id, metadata, user_id, user_label, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, unixepoch())",
+    )
+    .bind(&id)
+    .bind(action)
+    .bind(entity_type)
+    .bind(entity_id)
+    .bind(company_id)
+    .bind(metadata)
+    .bind(user_id)
+    .bind(user_label)
+    .execute(pool)
+    .await;
+
+    if let Err(e) = result {
+        tracing::warn!(
+            action = %action,
+            entity_type = %entity_type,
+            entity_id = %entity_id,
+            error = ?e,
+            "Failed to write attributed audit_log entry (non-fatal)"
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,6 +119,8 @@ mod tests {
                 entity_id TEXT NOT NULL,
                 company_id TEXT,
                 metadata TEXT,
+                user_id TEXT,
+                user_label TEXT,
                 created_at INTEGER NOT NULL DEFAULT (unixepoch())
             )",
         )

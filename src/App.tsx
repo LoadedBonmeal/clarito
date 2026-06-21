@@ -9,6 +9,7 @@ import { isDemoMode } from "@/lib/demo";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { isMac } from "@/lib/platform";
 import { useIconPressAnimation } from "@/hooks/use-icon-press";
+import { AuthGate } from "@/components/auth/AuthGate";
 
 /** Afișat când utilizatorul deschide URL-ul în browser în loc de aplicația nativă. */
 function NotTauriScreen() {
@@ -72,7 +73,9 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ErrorBoundary>
-        <RouterProvider router={router} />
+        <AuthGate>
+          <RouterProvider router={router} />
+        </AuthGate>
       </ErrorBoundary>
       <Toaster />
     </QueryClientProvider>

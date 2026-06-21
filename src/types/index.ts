@@ -359,6 +359,44 @@ export interface License {
   trialDaysRemaining: number | null;
 }
 
+// ─── Auth / RBAC (P2 Wave 8) ─────────────────────────────────────────────
+
+export type UserRole = "admin" | "contabil" | "operator" | "viewer";
+
+export interface CurrentUser {
+  id: string;
+  username: string;
+  role: UserRole;
+}
+
+export interface AuthStatus {
+  needsSetup: boolean;
+  authenticated: boolean;
+  currentUser: CurrentUser | null;
+}
+
+export interface UserRow {
+  id: string;
+  username: string;
+  role: UserRole;
+  isActive: boolean;
+  failedAttempts: number;
+  lockedUntil: number | null;
+  createdAt: number;
+  lastLogin: number | null;
+}
+
+export interface CreateUserInput {
+  username: string;
+  password: string;
+  role: UserRole;
+}
+
+export interface UpdateUserInput {
+  role?: UserRole;
+  isActive?: boolean;
+}
+
 // ─── System ───────────────────────────────────────────────────────────────
 
 export interface AppInfo {

@@ -1835,6 +1835,40 @@ export const payrollConfig = {
     invoke<PayrollAccountMap>("reset_payroll_config_cmd", { companyId }),
 };
 
+// ─── Auth / RBAC (P2 Wave 8) ─────────────────────────────────────────────
+
+import type {
+  AuthStatus,
+  CurrentUser,
+  UserRow,
+  CreateUserInput,
+  UpdateUserInput,
+} from "@/types";
+
+export const auth = {
+  /** Check login state on startup: needsSetup / authenticated / currentUser. PUBLIC. */
+  status: () => invoke<AuthStatus>("auth_status"),
+  /** Create the first admin (only when no users exist). PUBLIC. */
+  setupAdmin: (username: string, password: string) =>
+    invoke<CurrentUser>("auth_setup_admin", { username, password }),
+  /** Authenticate with username + password. PUBLIC. */
+  login: (username: string, password: string) =>
+    invoke<CurrentUser>("auth_login", { username, password }),
+  /** Clear the current session. PUBLIC. */
+  logout: () => invoke<void>("auth_logout"),
+  /** List all users (admin only). */
+  listUsers: () => invoke<UserRow[]>("list_users"),
+  /** Create a new user (admin only). */
+  createUser: (input: CreateUserInput) =>
+    invoke<UserRow>("create_user", { input }),
+  /** Update a user's role or active status (admin only). */
+  updateUser: (userId: string, input: UpdateUserInput) =>
+    invoke<UserRow>("update_user", { userId, input }),
+  /** Reset a user's password (admin only). */
+  resetPassword: (userId: string, newPassword: string) =>
+    invoke<void>("reset_password", { userId, newPassword }),
+};
+
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
@@ -1885,4 +1919,5 @@ export const api = {
   system,
   ubl,
   vatRates,
+  auth,
 };

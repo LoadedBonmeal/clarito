@@ -124,4 +124,8 @@ export const queryKeys = {
     activityLog: ["activity-log"] as const,
     licenseStatus: ["license-status"] as const,
   },
+  auth: {
+    status: ["auth", "status"] as const,
+    users: ["auth", "users"] as const,
+  },
 } as const;

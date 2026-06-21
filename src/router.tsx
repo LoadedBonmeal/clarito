@@ -86,6 +86,7 @@ import { NirPage } from "@/pages/Nir";
 import { StockTransferPage } from "@/pages/StockTransfer";
 import { ProductiePage } from "@/pages/Productie";
 import { FiscalReceiptsPage } from "@/pages/FiscalReceipts";
+import { UsersPage } from "@/pages/Users";
 
 // ─── Layout root ──────────────────────────────────────────────────────────
 
@@ -355,6 +356,12 @@ const fiscalReceiptsRoute = createRoute({
   component: FiscalReceiptsPage,
 });
 
+const usersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/users",
+  component: UsersPage,
+});
+
 // ─── Build tree + router ──────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -398,6 +405,7 @@ const routeTree = rootRoute.addChildren([
   stockTransferRoute,
   productieRoute,
   fiscalReceiptsRoute,
+  usersRoute,
 ]);
 
 export const router = createRouter({

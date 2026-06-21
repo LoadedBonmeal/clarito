@@ -17,8 +17,10 @@ pub mod contacts;
 pub mod invoices;
 pub mod license;
 pub mod notifications;
+pub mod rbac;
 pub mod received;
 pub mod settings;
+pub mod users;
 
 pub mod accounts;
 pub mod aging;

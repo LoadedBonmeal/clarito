@@ -8,13 +8,14 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
+import { useAuthStore } from "@/lib/auth-store";
 
 interface NavLink {
   key: string;
@@ -130,6 +131,18 @@ export function Sidebar() {
   })();
   const handleExit = async () => { (await import("@tauri-apps/plugin-process")).exit(0); };
   const langTag = i18n.language?.startsWith("en") ? "EN" : "RO";
+
+  // ── Auth session ──────────────────────────────────────────────────────────
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const clearCurrentUser = useAuthStore((s) => s.clearCurrentUser);
+  const queryClient = useQueryClient();
+  const logoutMutation = useMutation({
+    mutationFn: () => api.auth.logout(),
+    onSuccess: () => {
+      clearCurrentUser();
+      void queryClient.invalidateQueries({ queryKey: ["auth", "status"] });
+    },
+  });
 
   return (
     <aside className="sidebar">
@@ -249,8 +262,20 @@ export function Sidebar() {
           </button>
           <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/documents" }); }}><Ic name="docText" />{t("shell.profile.documents")}</button>
           <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/account" }); }}><Ic name="team" />{t("shell.profile.account")}</button>
+          {currentUser?.role === "admin" && (
+            <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/users" }); }}><Ic name="users" />{t("auth.users.title", "Utilizatori")}</button>
+          )}
           <button className="pop-item" onClick={() => { setProfileOpen(false); void navigate({ to: "/help" }); }}><Ic name="help" />{t("shell.profile.help")}</button>
           <div className="pop-div" />
+          {currentUser && (
+            <button
+              className="pop-item"
+              onClick={() => { setProfileOpen(false); logoutMutation.mutate(); }}
+              style={{ color: "var(--rf-danger, #e53e3e)" }}
+            >
+              <Ic name="exit" />{t("auth.logout", "Deconectare")}
+            </button>
+          )}
           <button className="pop-item" onClick={() => void handleExit()}><Ic name="exit" />{t("shell.profile.exit")}</button>
         </div>
       )}
