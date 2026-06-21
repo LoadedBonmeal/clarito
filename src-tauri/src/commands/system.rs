@@ -306,14 +306,7 @@ mod tests {
     #[tokio::test]
     async fn activity_log_is_company_scoped() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::query(
-            "CREATE TABLE audit_log (id TEXT PRIMARY KEY, action TEXT NOT NULL, \
-             entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, company_id TEXT, \
-             metadata TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()))",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
         for (id, action, company_id) in [
             ("a", "invoice_created", Some("comp-1")),
             ("b", "invoice_submitted_anaf", Some("comp-2")), // foreign — must be hidden

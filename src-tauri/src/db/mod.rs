@@ -147,36 +147,9 @@ mod no_inline_test_schema {
     /// sqlx::migrate!.  Keyed as `("src/path/relative/to/src-tauri", "table")`.
     /// Do NOT add new entries here — fix the fixture instead.
     /// Remove entries as those files get converted.
-    const KNOWN_REMAINING: &[(&str, &str)] = &[
-        // ── db/ ──────────────────────────────────────────────────────────────
-        ("src/db/products.rs", "companies"),
-        ("src/db/products.rs", "products"),
-        ("src/db/products.rs", "product_groups"),
-        ("src/db/products.rs", "account_mapping"),
-        ("src/db/vat_rates.rs", "vat_rates"),
-        ("src/db/audit.rs", "audit_log"),
-        ("src/db/contacts.rs", "companies"),
-        ("src/db/contacts.rs", "contacts"),
-        ("src/db/contacts.rs", "invoices"),
-        ("src/db/accounts.rs", "chart_of_accounts"),
-        ("src/db/period_locks.rs", "companies"),
-        ("src/db/period_locks.rs", "period_locks"),
-        ("src/db/declaration_filings.rs", "declaration_filings"),
-        ("src/db/declaration_filings.rs", "companies"),
-        ("src/db/declaration_filings.rs", "period_locks"),
-        ("src/db/invoices.rs", "invoices"),
-        ("src/db/companies.rs", "companies"),
-        ("src/db/assets.rs", "companies"),
-        ("src/db/assets.rs", "fixed_assets"),
-        ("src/db/assets.rs", "asset_transactions"),
-        // ── commands/ ────────────────────────────────────────────────────────
-        ("src/commands/system.rs", "audit_log"),
-        ("src/commands/invoices.rs", "companies"),
-        ("src/commands/invoices.rs", "contacts"),
-        ("src/commands/invoices.rs", "invoices"),
-        ("src/commands/invoices.rs", "invoice_line_items"),
-        ("src/commands/invoices.rs", "invoice_events"),
-    ];
+    // All hand-rolled CREATE TABLE fixtures have been converted to sqlx::migrate!.
+    // KNOWN_REMAINING is empty — no pre-existing violations remain.
+    const KNOWN_REMAINING: &[(&str, &str)] = &[];
 
     #[test]
     fn no_hand_rolled_create_table_in_test_modules() {

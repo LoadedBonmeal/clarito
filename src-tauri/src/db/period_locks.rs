@@ -166,25 +166,12 @@ mod tests {
 
     async fn setup() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::query("CREATE TABLE companies (id TEXT PRIMARY KEY NOT NULL)")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO companies VALUES ('co-A'), ('co-B')")
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        // Seed two companies with valid production-schema columns.
         sqlx::query(
-            "CREATE TABLE period_locks ( \
-              id TEXT PRIMARY KEY NOT NULL, \
-              company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE, \
-              period TEXT NOT NULL, \
-              locked_at INTEGER NOT NULL, \
-              source TEXT NOT NULL, \
-              locked_by TEXT, \
-              note TEXT, \
-              UNIQUE(company_id, period) \
-            )",
+            "INSERT INTO companies (id, cui, legal_name, address, city, county) VALUES \
+             ('co-A', 'RO12345674', 'Firma A SRL', 'Str. A', 'București', 'B'), \
+             ('co-B', 'RO98765438', 'Firma B SRL', 'Str. B', 'Cluj', 'CJ')",
         )
         .execute(&pool)
         .await

@@ -750,8 +750,7 @@ pub async fn list_depreciation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
-    use sqlx::Executor;
+    use sqlx::SqlitePool;
 
     fn sample_asset(cost: &str, life: i64, acquired: &str) -> FixedAsset {
         FixedAsset {
@@ -850,76 +849,15 @@ mod tests {
     }
 
     async fn setup_asset_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
-            .await
-            .unwrap();
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
 
-        pool.execute(sqlx::query(
-            "CREATE TABLE companies (
-                id TEXT PRIMARY KEY, cui TEXT, legal_name TEXT, trade_name TEXT,
-                registry_number TEXT, vat_payer INTEGER, address TEXT, city TEXT,
-                county TEXT, postal_code TEXT, country TEXT, email TEXT, phone TEXT,
-                iban TEXT, bank_name TEXT, is_active INTEGER, spv_enabled INTEGER,
-                invoice_series TEXT, last_invoice_number INTEGER, logo_path TEXT,
-                created_at INTEGER, updated_at INTEGER
-            )",
-        ))
-        .await
-        .unwrap();
-
-        pool.execute(sqlx::query(
-            "INSERT INTO companies (id, cui, legal_name, address, city, county, country, \
-                                   vat_payer, invoice_series, last_invoice_number, \
-                                   is_active, spv_enabled, created_at, updated_at) \
-             VALUES ('co-1','RO1234','Test SRL','Str 1','Buc','B','RO',1,'F',0,1,0,0,0)",
-        ))
-        .await
-        .unwrap();
-
-        pool.execute(sqlx::query(
-            "CREATE TABLE fixed_assets (
-                id TEXT NOT NULL PRIMARY KEY,
-                company_id TEXT NOT NULL,
-                asset_code TEXT NOT NULL,
-                account_id TEXT NOT NULL DEFAULT '213',
-                description TEXT NOT NULL,
-                valuation_class TEXT NOT NULL DEFAULT 'Corporala',
-                supplier_id TEXT NOT NULL DEFAULT '0',
-                supplier_name TEXT NOT NULL DEFAULT '',
-                date_of_acquisition TEXT NOT NULL,
-                start_up_date TEXT NOT NULL,
-                acquisition_cost TEXT NOT NULL DEFAULT '0.00',
-                life_months INTEGER NOT NULL DEFAULT 60,
-                depreciation_method TEXT NOT NULL DEFAULT 'liniara',
-                depreciation_pct TEXT NOT NULL DEFAULT '0.00',
-                disposal_date TEXT,
-                active INTEGER NOT NULL DEFAULT 1,
-                created_at INTEGER NOT NULL DEFAULT 0,
-                updated_at INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(company_id, asset_code)
-            )",
-        ))
-        .await
-        .unwrap();
-
-        pool.execute(sqlx::query(
-            "CREATE TABLE asset_transactions (
-                id TEXT NOT NULL PRIMARY KEY,
-                company_id TEXT NOT NULL,
-                asset_id TEXT NOT NULL,
-                transaction_code TEXT NOT NULL,
-                transaction_type TEXT NOT NULL DEFAULT '10',
-                transaction_date TEXT NOT NULL,
-                description TEXT NOT NULL DEFAULT '',
-                gl_transaction_id TEXT,
-                acq_prod_cost TEXT NOT NULL DEFAULT '0.00',
-                book_value TEXT NOT NULL DEFAULT '0.00',
-                amount TEXT NOT NULL DEFAULT '0.00',
-                created_at INTEGER NOT NULL DEFAULT 0
-            )",
-        ))
+        // Seed one company with valid production-schema columns.
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county) \
+             VALUES ('co-1', 'RO12345674', 'Test SRL', 'Str. 1', 'București', 'B')",
+        )
+        .execute(&pool)
         .await
         .unwrap();
 

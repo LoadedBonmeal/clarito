@@ -1241,7 +1241,6 @@ pub async fn set_status_scoped(
 mod tests {
     use super::round2;
     use rust_decimal::Decimal;
-    use sqlx::sqlite::SqlitePoolOptions;
     use std::str::FromStr;
 
     #[test]
@@ -1271,46 +1270,23 @@ mod tests {
 
     // ── A1: mark_submitted guard tests ────────────────────────────────────────
 
-    /// Minimal in-memory schema for mark_submitted tests.
+    /// Run real migrations + seed one company + one contact.
     async fn setup_mark_submitted_pool() -> sqlx::SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
-            .await
-            .unwrap();
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
 
+        // Seed FK parents (company + contact).
         sqlx::query(
-            "CREATE TABLE invoices (
-                id TEXT PRIMARY KEY NOT NULL,
-                company_id TEXT NOT NULL DEFAULT 'comp-1',
-                contact_id TEXT NOT NULL DEFAULT 'contact-1',
-                series TEXT NOT NULL DEFAULT 'FCT',
-                number INTEGER NOT NULL DEFAULT 1,
-                full_number TEXT NOT NULL DEFAULT 'FCT-0001',
-                issue_date TEXT NOT NULL DEFAULT '2026-01-01',
-                due_date TEXT NOT NULL DEFAULT '2026-01-01',
-                currency TEXT NOT NULL DEFAULT 'RON',
-                exchange_rate REAL,
-                subtotal_amount TEXT NOT NULL DEFAULT '0',
-                vat_amount TEXT NOT NULL DEFAULT '0',
-                total_amount TEXT NOT NULL DEFAULT '0',
-                status TEXT NOT NULL DEFAULT 'DRAFT',
-                anaf_upload_id TEXT,
-                anaf_index TEXT,
-                anaf_submitted_at INTEGER,
-                anaf_validated_at INTEGER,
-                anaf_rejected_at INTEGER,
-                xml_path TEXT,
-                pdf_path TEXT,
-                signature_xml_path TEXT,
-                rejection_reason TEXT,
-                rejection_code TEXT,
-                notes TEXT,
-                payment_means_code TEXT NOT NULL DEFAULT '30',
-                storno_of_invoice_id TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
+            "INSERT INTO companies (id, cui, legal_name, address, city, county) \
+             VALUES ('comp-1', 'RO12345674', 'Firma Test SRL', 'Str. Test 1', 'București', 'B'), \
+                    ('comp-2', 'RO98765438', 'Firma Doi SRL', 'Str. Test 2', 'Cluj', 'CJ')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, contact_type, legal_name) \
+             VALUES ('contact-1', 'comp-1', 'CUSTOMER', 'Client Test SRL')",
         )
         .execute(&pool)
         .await
@@ -1319,13 +1295,31 @@ mod tests {
         pool
     }
 
+    /// Insert a minimal invoice row with required NOT NULL columns.
+    /// Uses `SELECT COALESCE(MAX(number),0)+1` to avoid UNIQUE(company_id, series, number)
+    /// violations when multiple invoices are inserted into the same pool in a single test.
     async fn insert_invoice_with_status(pool: &sqlx::SqlitePool, id: &str, status: &str) {
-        sqlx::query("INSERT INTO invoices (id, status) VALUES (?1, ?2)")
-            .bind(id)
-            .bind(status)
-            .execute(pool)
-            .await
-            .unwrap();
+        // Real schema requires: company_id, contact_id, series, number, full_number,
+        // issue_date, due_date (all NOT NULL, no DB-level defaults on the TEXT fields).
+        // Test-data fix: supply all required columns and use a sequential number per pool.
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, subtotal_amount, vat_amount, total_amount, status) \
+             SELECT ?1, 'comp-1', 'contact-1', 'FCT', \
+                    COALESCE((SELECT MAX(number) FROM invoices \
+                              WHERE company_id='comp-1' AND series='FCT'), 0) + 1, \
+                    'FCT-' || CAST( \
+                        COALESCE((SELECT MAX(number) FROM invoices \
+                                  WHERE company_id='comp-1' AND series='FCT'), 0) + 1 \
+                    AS TEXT), \
+                    '2026-01-01', '2026-01-01', '0', '0', '0', ?2",
+        )
+        .bind(id)
+        .bind(status)
+        .execute(pool)
+        .await
+        .unwrap();
     }
 
     /// A1: mark_submitted with correct QUEUED status → row transitions to SUBMITTED.
@@ -1446,29 +1440,23 @@ mod tests {
     }
 
     // ── ROB-22: file-integrity fingerprint round-trip ───────────────────────────
-    /// Minimal schema WITH the integrity columns (mirrors migration 0044).
+    /// Pool with integrity columns — migration 0044 already adds them, so we
+    /// just reuse the base pool built on the real migrations.
     async fn setup_integrity_pool() -> sqlx::SqlitePool {
-        let pool = setup_mark_submitted_pool().await;
-        for col in [
-            "xml_sha256 TEXT",
-            "xml_size INTEGER",
-            "pdf_sha256 TEXT",
-            "pdf_size INTEGER",
-        ] {
-            sqlx::query(&format!("ALTER TABLE invoices ADD COLUMN {col}"))
-                .execute(&pool)
-                .await
-                .unwrap();
-        }
-        pool
+        setup_mark_submitted_pool().await
     }
 
     #[tokio::test]
     async fn rob22_integrity_ok_then_corrupted_then_missing() {
         use super::FileIntegrity;
         let pool = setup_integrity_pool().await;
+        // Supply all required NOT NULL columns (real schema has no DB-level defaults).
         sqlx::query(
-            "INSERT INTO invoices (id, company_id, status) VALUES ('inv-i','comp-1','DRAFT')",
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, subtotal_amount, vat_amount, total_amount, status) \
+             VALUES ('inv-i','comp-1','contact-1','FCT',1,'FCT-0001', \
+                    '2026-01-01','2026-01-01','0','0','0','DRAFT')",
         )
         .execute(&pool)
         .await
@@ -1513,7 +1501,11 @@ mod tests {
     async fn rob_b_set_path_guards_empty_and_missing_invoice() {
         let pool = setup_integrity_pool().await;
         sqlx::query(
-            "INSERT INTO invoices (id, company_id, status) VALUES ('inv-g','comp-1','DRAFT')",
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, subtotal_amount, vat_amount, total_amount, status) \
+             VALUES ('inv-g','comp-1','contact-1','FCT',1,'FCT-0001', \
+                    '2026-01-01','2026-01-01','0','0','0','DRAFT')",
         )
         .execute(&pool)
         .await

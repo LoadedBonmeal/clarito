@@ -892,35 +892,25 @@ pub async fn seed_standard(pool: &SqlitePool, company_id: &str) -> AppResult<usi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::SqlitePool;
 
-    /// Minimal in-memory schema for accounts Wave 4 tests.
-    async fn setup_accounts_pool() -> sqlx::SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
-            .await
-            .unwrap();
+    /// Run real migrations then seed two companies + one account each.
+    async fn setup_accounts_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
 
+        // Seed two companies with valid production-schema columns.
+        // CUIs: RO12345674 and RO98765438 (mod-11 valid).
         sqlx::query(
-            "CREATE TABLE chart_of_accounts (
-                id           TEXT    PRIMARY KEY NOT NULL,
-                company_id   TEXT    NOT NULL,
-                account_code TEXT    NOT NULL,
-                account_name TEXT    NOT NULL,
-                account_class INTEGER,
-                parent_code  TEXT,
-                active       INTEGER NOT NULL DEFAULT 1,
-                created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at   INTEGER NOT NULL DEFAULT (unixepoch()),
-                UNIQUE (company_id, account_code)
-            )",
+            "INSERT INTO companies (id, cui, legal_name, address, city, county) VALUES \
+             ('comp-1', 'RO12345674', 'Firma Unu SRL', 'Str. Test 1', 'București', 'B'), \
+             ('comp-2', 'RO98765438', 'Firma Doi SRL', 'Str. Test 2', 'Cluj', 'CJ')",
         )
         .execute(&pool)
         .await
         .unwrap();
 
-        // Seed: two companies, one account each.
+        // Seed one account per company.
         sqlx::query(
             "INSERT INTO chart_of_accounts \
              (id, company_id, account_code, account_name, account_class) \
@@ -1066,7 +1056,15 @@ mod tests {
     #[tokio::test]
     async fn wave4_seed_standard_populates_when_empty() {
         let pool = setup_accounts_pool().await;
-        // comp-99 has no accounts.
+        // comp-99 has no accounts — seed the company row first so FK is satisfied.
+        // Test-data fix: real schema enforces REFERENCES companies(id) on chart_of_accounts.
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county) \
+             VALUES ('comp-99', 'RO11198699', 'Firma Nouă SRL', 'Str. Nouă', 'Iași', 'IS')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         let inserted = seed_standard(&pool, "comp-99").await.unwrap();
         assert!(
             inserted > 0,
@@ -1086,6 +1084,15 @@ mod tests {
     #[tokio::test]
     async fn wave4_seed_standard_is_idempotent() {
         let pool = setup_accounts_pool().await;
+        // comp-99 has no accounts — seed the company row first so FK is satisfied.
+        // Test-data fix: real schema enforces REFERENCES companies(id) on chart_of_accounts.
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county) \
+             VALUES ('comp-99', 'RO11198699', 'Firma Nouă SRL', 'Str. Nouă', 'Iași', 'IS')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         // First call seeds.
         let first = seed_standard(&pool, "comp-99").await.unwrap();
         assert!(first > 0);

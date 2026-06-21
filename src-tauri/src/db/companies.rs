@@ -516,7 +516,7 @@ pub fn validate_cui(cui: &str) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::SqlitePool;
     use std::str::FromStr;
 
     #[test]
@@ -623,47 +623,8 @@ mod tests {
     // ── get_by_cui: soft-deleted company does not block re-registration ──────
 
     async fn setup_companies_pool() -> sqlx::SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
-            .await
-            .unwrap();
-
-        // UNIQUE on cui matches the production schema (0001_initial.sql).
-        // This ensures the tests exercise the real DB constraint instead of
-        // a fixture that silently omits it.
-        sqlx::query(
-            "CREATE TABLE companies (
-                id TEXT PRIMARY KEY NOT NULL,
-                cui TEXT NOT NULL UNIQUE,
-                legal_name TEXT NOT NULL DEFAULT '',
-                trade_name TEXT,
-                registry_number TEXT,
-                vat_payer INTEGER NOT NULL DEFAULT 1,
-                cash_vat INTEGER NOT NULL DEFAULT 0,
-                address TEXT NOT NULL DEFAULT '',
-                city TEXT NOT NULL DEFAULT '',
-                county TEXT NOT NULL DEFAULT '',
-                postal_code TEXT,
-                country TEXT NOT NULL DEFAULT 'RO',
-                email TEXT,
-                phone TEXT,
-                iban TEXT,
-                bank_name TEXT,
-                is_active INTEGER NOT NULL DEFAULT 1,
-                spv_enabled INTEGER NOT NULL DEFAULT 0,
-                tax_regime TEXT NOT NULL DEFAULT 'micro',
-                invoice_series TEXT NOT NULL DEFAULT 'FACT',
-                last_invoice_number INTEGER NOT NULL DEFAULT 0,
-                logo_path TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
         pool
     }
 
@@ -758,8 +719,8 @@ mod tests {
         let pool = setup_companies_pool().await;
 
         sqlx::query(
-            "INSERT INTO companies (id, cui, legal_name, is_active) \
-             VALUES ('soft-del', 'RO12345674', 'Old Company', 0)",
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, is_active) \
+             VALUES ('soft-del', 'RO12345674', 'Old Company', 'Str. 1', 'București', 'B', 0)",
         )
         .execute(&pool)
         .await
@@ -778,8 +739,8 @@ mod tests {
         let pool = setup_companies_pool().await;
 
         sqlx::query(
-            "INSERT INTO companies (id, cui, legal_name, is_active) \
-             VALUES ('active-co', 'RO12345674', 'Active Company', 1)",
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, is_active) \
+             VALUES ('active-co', 'RO12345674', 'Active Company', 'Str. 1', 'București', 'B', 1)",
         )
         .execute(&pool)
         .await

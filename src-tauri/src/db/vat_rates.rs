@@ -185,7 +185,7 @@ pub fn vat_rate_note(rate_pct: i64, issue_date: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::SqlitePool;
 
     #[test]
     fn vat_rate_note_flags_abolished_and_transitional_rates() {
@@ -204,42 +204,12 @@ mod tests {
         assert!(vat_rate_note(0, "2026-09-01").is_none());
     }
 
-    /// Build an in-memory SQLite pool with the vat_rates schema and seed rows.
+    /// Run the real migrations to build the vat_rates pool.
+    /// Migration 0014 seeds 6 rows; migration 0030 deactivates vat-19 and vat-5.
+    /// After all migrations: active = {vat-21, vat-11, vat-9, vat-0} (4 rows).
     async fn setup_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
-            .await
-            .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE vat_rates (
-                id         TEXT    PRIMARY KEY,
-                rate       TEXT    NOT NULL,
-                label      TEXT    NOT NULL,
-                active     INTEGER NOT NULL DEFAULT 1,
-                sort_order INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // Mirror the seed rows from migration 0014.
-        sqlx::query(
-            "INSERT INTO vat_rates (id, rate, label, active, sort_order) VALUES \
-             ('vat-19', '19', 'Standard 19%', 1, 0), \
-             ('vat-21', '21', 'Standard 21%', 1, 1), \
-             ('vat-9',  '9',  'Redus 9%',     1, 2), \
-             ('vat-11', '11', 'Redus 11%',    1, 3), \
-             ('vat-5',  '5',  'Redus 5%',     1, 4), \
-             ('vat-0',  '0',  'Cotă zero 0%', 1, 5)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
         pool
     }
 
@@ -249,6 +219,7 @@ mod tests {
     async fn wave2_vat_rates_seed_all_present() {
         let pool = setup_pool().await;
         let rates = list(&pool, false).await.unwrap();
+        // All 6 rows are present (incl. historic ones deactivated by mig 0030).
         assert_eq!(rates.len(), 6, "migration seed must produce exactly 6 rows");
         let ids: Vec<&str> = rates.iter().map(|r| r.id.as_str()).collect();
         for expected in &["vat-0", "vat-5", "vat-9", "vat-11", "vat-19", "vat-21"] {
@@ -273,7 +244,7 @@ mod tests {
         assert!(created.active);
 
         let all = list(&pool, false).await.unwrap();
-        assert_eq!(all.len(), 7, "create must add one row");
+        assert_eq!(all.len(), 7, "create must add one row to the 6 seeded");
         assert!(all.iter().any(|r| r.id == created.id));
     }
 
@@ -282,14 +253,17 @@ mod tests {
     #[tokio::test]
     async fn wave2_vat_rates_active_only_filter() {
         let pool = setup_pool().await;
-        // Deactivate one of the seeded rows.
+        // After migrations: vat-19 and vat-5 are already inactive (mig 0030).
+        // 4 rows are active: vat-21, vat-11, vat-9, vat-0.
+        // Deactivate vat-21 → 3 active remain.
         set_active(&pool, "vat-21", false).await.unwrap();
 
         let active = list(&pool, true).await.unwrap();
         assert_eq!(
             active.len(),
-            5,
-            "active_only must return 5 after deactivating one"
+            3,
+            "active_only must return 3 after deactivating vat-21 \
+             (vat-19 and vat-5 were already inactive per Legea 141/2025)"
         );
         assert!(
             active.iter().all(|r| r.active),

@@ -752,89 +752,25 @@ pub async fn delete_product_group(pool: &SqlitePool, id: &str, company_id: &str)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::SqlitePool;
 
-    /// Minimal in-memory schema for products tests (Wave 1 + P2 Wave 1).
-    async fn setup_products_pool() -> sqlx::SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
-            .await
-            .unwrap();
+    /// Run real migrations then seed two companies + one product each.
+    async fn setup_products_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
 
-        // Fake companies table to satisfy FK constraints (even though SQLite doesn't enforce FKs by default).
+        // Seed two companies with valid production-schema columns.
         sqlx::query(
-            "CREATE TABLE companies (
-                id TEXT PRIMARY KEY NOT NULL,
-                legal_name TEXT NOT NULL DEFAULT ''
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query("INSERT INTO companies (id, legal_name) VALUES ('comp-1', 'Test 1'), ('comp-2', 'Test 2')")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE products (
-                id               TEXT    PRIMARY KEY NOT NULL,
-                company_id       TEXT    NOT NULL,
-                name             TEXT    NOT NULL,
-                unit             TEXT    NOT NULL DEFAULT 'buc',
-                unit_price       TEXT    NOT NULL DEFAULT '0.00',
-                vat_rate         TEXT    NOT NULL DEFAULT '19',
-                vat_category     TEXT    NOT NULL DEFAULT 'S',
-                code             TEXT,
-                barcode          TEXT,
-                stock_qty        TEXT,
-                art331_code      TEXT,
-                valuation_method TEXT,
-                stock_account    TEXT,
-                is_service       INTEGER NOT NULL DEFAULT 0,
-                product_type     TEXT    NOT NULL DEFAULT 'marfa',
-                product_group_id TEXT,
-                active           INTEGER NOT NULL DEFAULT 1,
-                created_at       INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at       INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
+            "INSERT INTO companies (id, cui, legal_name, address, city, county) VALUES \
+             ('comp-1', 'RO12345674', 'Firma Unu SRL', 'Str. Test 1', 'București', 'B'), \
+             ('comp-2', 'RO98765438', 'Firma Doi SRL', 'Str. Test 2', 'Cluj', 'CJ')",
         )
         .execute(&pool)
         .await
         .unwrap();
 
-        sqlx::query(
-            "CREATE TABLE product_groups (
-                id         TEXT    PRIMARY KEY NOT NULL,
-                company_id TEXT    NOT NULL,
-                name       TEXT    NOT NULL,
-                created_at INTEGER NOT NULL
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE account_mapping (
-                id              TEXT    PRIMARY KEY NOT NULL,
-                company_id      TEXT    NOT NULL,
-                product_type    TEXT    NOT NULL,
-                stock_account   TEXT,
-                expense_account TEXT,
-                income_account  TEXT,
-                uses_stock      INTEGER NOT NULL DEFAULT 1,
-                retail_capable  INTEGER NOT NULL DEFAULT 0,
-                updated_at      INTEGER NOT NULL,
-                UNIQUE(company_id, product_type)
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // Seed: two companies, two products — one per company.
+        // Seed one product per company.
+        // vat_rate '19' and '9' are both valid per VALID_VAT_RATES.
         sqlx::query(
             "INSERT INTO products (id, company_id, name, unit_price, vat_rate, vat_category) \
              VALUES ('p1', 'comp-1', 'Produs Comp1', '100.00', '19', 'S'), \

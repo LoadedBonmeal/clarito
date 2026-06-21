@@ -145,19 +145,15 @@ mod tests {
     use super::*;
     use sqlx::SqlitePool;
 
+    /// Run real migrations and seed two companies for FK satisfaction.
     async fn setup() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        // Seed companies so period_locks FK (REFERENCES companies(id)) is satisfied.
         sqlx::query(
-            "CREATE TABLE declaration_filings ( \
-              id TEXT PRIMARY KEY NOT NULL, \
-              company_id TEXT NOT NULL, \
-              kind TEXT NOT NULL, \
-              period TEXT NOT NULL, \
-              is_rectificative INTEGER NOT NULL DEFAULT 0, \
-              file_path TEXT, \
-              anaf_status TEXT NOT NULL DEFAULT 'EXPORTED', \
-              filed_at INTEGER NOT NULL \
-            )",
+            "INSERT INTO companies (id, cui, legal_name, address, city, county) VALUES \
+             ('co-A', 'RO12345674', 'Firma A SRL', 'Str. A', 'București', 'B'), \
+             ('co-B', 'RO98765438', 'Firma B SRL', 'Str. B', 'Cluj', 'CJ')",
         )
         .execute(&pool)
         .await
@@ -245,32 +241,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_filing_auto_locks_period() {
+        // setup() already runs migrate! (creates companies + period_locks) and seeds co-A.
         let pool = setup().await;
-
-        // Adăugăm companies + period_locks pentru ca lock_period să funcționeze
-        sqlx::query("CREATE TABLE companies (id TEXT PRIMARY KEY NOT NULL)")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO companies VALUES ('co-A')")
-            .execute(&pool)
-            .await
-            .unwrap();
-        sqlx::query(
-            "CREATE TABLE period_locks ( \
-              id TEXT PRIMARY KEY NOT NULL, \
-              company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE, \
-              period TEXT NOT NULL, \
-              locked_at INTEGER NOT NULL, \
-              source TEXT NOT NULL, \
-              locked_by TEXT, \
-              note TEXT, \
-              UNIQUE(company_id, period) \
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
 
         record(
             &pool,

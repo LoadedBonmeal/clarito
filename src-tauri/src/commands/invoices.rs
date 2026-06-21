@@ -1078,142 +1078,26 @@ mod tests {
     // ── R13 Wave G: wrong-company isolation tests ──────────────────────────
 
     use crate::db::invoices as db_inv_test;
-    use sqlx::sqlite::SqlitePoolOptions;
 
-    /// Minimal in-memory schema for storno tests (subset of production migrations).
+    /// Run real migrations and seed one company + one contact for storno tests.
     async fn setup_storno_pool() -> sqlx::SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
-            .await
-            .unwrap();
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
 
+        // Seed with valid production-schema columns.
+        // Test-data fix: real schema requires legal_name (not name), address, city, county NOT NULL.
         sqlx::query(
-            "CREATE TABLE companies (
-                id TEXT PRIMARY KEY NOT NULL,
-                name TEXT NOT NULL DEFAULT '',
-                cui TEXT NOT NULL DEFAULT '',
-                reg_com TEXT,
-                address TEXT NOT NULL DEFAULT '',
-                city TEXT NOT NULL DEFAULT '',
-                county TEXT,
-                country TEXT NOT NULL DEFAULT 'RO',
-                iban TEXT,
-                bank TEXT,
-                phone TEXT,
-                email TEXT,
-                spv_enabled INTEGER NOT NULL DEFAULT 0,
-                tax_regime TEXT NOT NULL DEFAULT 'micro',
-                last_invoice_number INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
+            "INSERT INTO companies (id, cui, legal_name, address, city, county) \
+             VALUES ('comp-1', 'RO12345674', 'Test SRL', 'Str. Test 1', 'București', 'B')",
         )
         .execute(&pool)
         .await
         .unwrap();
 
+        // Test-data fix: real contacts schema requires contact_type NOT NULL and legal_name (not name).
         sqlx::query(
-            "CREATE TABLE contacts (
-                id TEXT PRIMARY KEY NOT NULL,
-                company_id TEXT NOT NULL,
-                name TEXT NOT NULL DEFAULT '',
-                cui TEXT,
-                reg_com TEXT,
-                address TEXT,
-                city TEXT,
-                county TEXT,
-                country TEXT,
-                iban TEXT,
-                bank TEXT,
-                email TEXT,
-                phone TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE invoices (
-                id TEXT PRIMARY KEY NOT NULL,
-                company_id TEXT NOT NULL,
-                contact_id TEXT NOT NULL,
-                series TEXT NOT NULL DEFAULT '',
-                number INTEGER NOT NULL DEFAULT 0,
-                full_number TEXT NOT NULL DEFAULT '',
-                issue_date TEXT NOT NULL DEFAULT '',
-                due_date TEXT NOT NULL DEFAULT '',
-                currency TEXT NOT NULL DEFAULT 'RON',
-                exchange_rate REAL,
-                subtotal_amount TEXT NOT NULL DEFAULT '0',
-                vat_amount TEXT NOT NULL DEFAULT '0',
-                total_amount TEXT NOT NULL DEFAULT '0',
-                status TEXT NOT NULL DEFAULT 'DRAFT',
-                notes TEXT,
-                payment_means_code TEXT NOT NULL DEFAULT '30',
-                storno_of_invoice_id TEXT,
-                xml_path TEXT,
-                anaf_upload_id TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE invoice_line_items (
-                id TEXT PRIMARY KEY NOT NULL,
-                invoice_id TEXT NOT NULL,
-                position INTEGER NOT NULL DEFAULT 0,
-                name TEXT NOT NULL DEFAULT '',
-                description TEXT,
-                quantity TEXT NOT NULL DEFAULT '0',
-                unit TEXT NOT NULL DEFAULT 'C62',
-                unit_price TEXT NOT NULL DEFAULT '0',
-                vat_rate TEXT NOT NULL DEFAULT '19',
-                vat_category TEXT NOT NULL DEFAULT 'S',
-                subtotal_amount TEXT NOT NULL DEFAULT '0',
-                vat_amount TEXT NOT NULL DEFAULT '0',
-                total_amount TEXT NOT NULL DEFAULT '0',
-                cpv_code TEXT,
-                art331_code TEXT
-                ,revenue_kind TEXT NOT NULL DEFAULT 'goods'
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE invoice_events (
-                id TEXT PRIMARY KEY NOT NULL,
-                invoice_id TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                message TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // Seed: one company + contact
-        sqlx::query(
-            "INSERT INTO companies (id, name, cui, address, city, last_invoice_number)
-             VALUES ('comp-1', 'Test SRL', 'RO12345', 'Str. Test 1', 'Bucuresti', 0)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "INSERT INTO contacts (id, company_id, name)
-             VALUES ('contact-1', 'comp-1', 'Client Test SRL')",
+            "INSERT INTO contacts (id, company_id, contact_type, legal_name) \
+             VALUES ('contact-1', 'comp-1', 'CUSTOMER', 'Client Test SRL')",
         )
         .execute(&pool)
         .await
@@ -1229,11 +1113,14 @@ mod tests {
         status: &str,
         storno_of: Option<&str>,
     ) {
+        // Supply all required NOT NULL columns (real schema has no DB-level defaults).
         sqlx::query(
-            "INSERT INTO invoices (id, company_id, contact_id, series, number, full_number,
-             issue_date, due_date, status, storno_of_invoice_id)
-             VALUES (?1, 'comp-1', 'contact-1', 'FCT', 1, 'FCT-0001',
-             '2026-01-01', '2026-01-01', ?2, ?3)",
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, subtotal_amount, vat_amount, total_amount, \
+              status, storno_of_invoice_id) \
+             VALUES (?1, 'comp-1', 'contact-1', 'FCT', 1, 'FCT-0001', \
+                    '2026-01-01', '2026-01-01', '0', '0', '0', ?2, ?3)",
         )
         .bind(id)
         .bind(status)
@@ -1298,8 +1185,20 @@ mod tests {
         // before the TX — test the underlying condition directly.
         let pool = setup_storno_pool().await;
         insert_invoice(&pool, "inv-original", "VALIDATED", None).await;
-        // This storno invoice itself has storno_of_invoice_id set
-        insert_invoice(&pool, "inv-storno", "VALIDATED", Some("inv-original")).await;
+        // This storno invoice has a different number to avoid UNIQUE(company_id, series, number).
+        // Test-data fix: real schema enforces the UNIQUE constraint that the hand-rolled
+        // fixture silently omitted.
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, subtotal_amount, vat_amount, total_amount, \
+              status, storno_of_invoice_id) \
+             VALUES ('inv-storno', 'comp-1', 'contact-1', 'FCT', 2, 'FCT-0002', \
+                    '2026-01-02', '2026-01-02', '0', '0', '0', 'VALIDATED', 'inv-original')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
 
         let storno_of: Option<String> =
             sqlx::query_scalar("SELECT storno_of_invoice_id FROM invoices WHERE id = 'inv-storno'")
@@ -1321,152 +1220,28 @@ mod tests {
 
     // ── R13 Wave G: cross-company isolation tests ──────────────────────────
 
-    /// Full-schema in-memory pool for Wave G tests (includes every column that
-    /// `db::invoices::get` selects, so `db_inv_test::get` can be used to verify
-    /// state after the scoped operations).
+    /// Run real migrations and seed two companies + one contact for Wave G tests.
+    /// `db_inv_test::get` works because the full invoice schema (migration 006 + all ALTERs)
+    /// is present after running the real migrations.
     async fn setup_wave_g_pool() -> sqlx::SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
-            .await
-            .unwrap();
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
 
+        // Seed with valid production-schema columns.
+        // Test-data fix: real schema uses legal_name (not name), address, city, county NOT NULL.
         sqlx::query(
-            "CREATE TABLE companies (
-                id TEXT PRIMARY KEY NOT NULL,
-                name TEXT NOT NULL DEFAULT '',
-                cui TEXT NOT NULL DEFAULT '',
-                reg_com TEXT,
-                address TEXT NOT NULL DEFAULT '',
-                city TEXT NOT NULL DEFAULT '',
-                county TEXT,
-                country TEXT NOT NULL DEFAULT 'RO',
-                iban TEXT,
-                bank TEXT,
-                phone TEXT,
-                email TEXT,
-                spv_enabled INTEGER NOT NULL DEFAULT 0,
-                last_invoice_number INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
+            "INSERT INTO companies (id, cui, legal_name, address, city, county) \
+             VALUES ('comp-1', 'RO12345674', 'Test SRL', 'Str. Test 1', 'București', 'B'), \
+                    ('comp-2', 'RO98765438', 'Alt SRL',  'Str. Alt 2',  'Cluj',      'CJ')",
         )
         .execute(&pool)
         .await
         .unwrap();
 
+        // Test-data fix: real contacts schema requires contact_type NOT NULL and legal_name (not name).
         sqlx::query(
-            "CREATE TABLE contacts (
-                id TEXT PRIMARY KEY NOT NULL,
-                company_id TEXT NOT NULL,
-                name TEXT NOT NULL DEFAULT '',
-                cui TEXT,
-                reg_com TEXT,
-                address TEXT,
-                city TEXT,
-                county TEXT,
-                country TEXT,
-                iban TEXT,
-                bank TEXT,
-                email TEXT,
-                phone TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // Full schema matching db::invoices::get SELECT list.
-        sqlx::query(
-            "CREATE TABLE invoices (
-                id TEXT PRIMARY KEY NOT NULL,
-                company_id TEXT NOT NULL,
-                contact_id TEXT NOT NULL,
-                series TEXT NOT NULL DEFAULT '',
-                number INTEGER NOT NULL DEFAULT 0,
-                full_number TEXT NOT NULL DEFAULT '',
-                issue_date TEXT NOT NULL DEFAULT '',
-                due_date TEXT NOT NULL DEFAULT '',
-                currency TEXT NOT NULL DEFAULT 'RON',
-                exchange_rate REAL,
-                subtotal_amount TEXT NOT NULL DEFAULT '0',
-                vat_amount TEXT NOT NULL DEFAULT '0',
-                total_amount TEXT NOT NULL DEFAULT '0',
-                status TEXT NOT NULL DEFAULT 'DRAFT',
-                anaf_upload_id TEXT,
-                anaf_index TEXT,
-                anaf_submitted_at INTEGER,
-                anaf_validated_at INTEGER,
-                anaf_rejected_at INTEGER,
-                xml_path TEXT,
-                pdf_path TEXT,
-                signature_xml_path TEXT,
-                rejection_reason TEXT,
-                rejection_code TEXT,
-                notes TEXT,
-                payment_means_code TEXT NOT NULL DEFAULT '30',
-                storno_of_invoice_id TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE invoice_line_items (
-                id TEXT PRIMARY KEY NOT NULL,
-                invoice_id TEXT NOT NULL,
-                position INTEGER NOT NULL DEFAULT 0,
-                name TEXT NOT NULL DEFAULT '',
-                description TEXT,
-                quantity TEXT NOT NULL DEFAULT '0',
-                unit TEXT NOT NULL DEFAULT 'C62',
-                unit_price TEXT NOT NULL DEFAULT '0',
-                vat_rate TEXT NOT NULL DEFAULT '19',
-                vat_category TEXT NOT NULL DEFAULT 'S',
-                subtotal_amount TEXT NOT NULL DEFAULT '0',
-                vat_amount TEXT NOT NULL DEFAULT '0',
-                total_amount TEXT NOT NULL DEFAULT '0',
-                cpv_code TEXT,
-                art331_code TEXT
-                ,revenue_kind TEXT NOT NULL DEFAULT 'goods'
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE invoice_events (
-                id TEXT PRIMARY KEY NOT NULL,
-                invoice_id TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                message TEXT,
-                metadata TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // Seed: two companies + one contact
-        sqlx::query(
-            "INSERT INTO companies (id, name, cui, address, city, last_invoice_number)
-             VALUES ('comp-1', 'Test SRL', 'RO12345', 'Str. Test 1', 'Bucuresti', 0),
-                    ('comp-2', 'Alt SRL',  'RO99999', 'Str. Alt 2',  'Cluj',      0)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "INSERT INTO contacts (id, company_id, name)
-             VALUES ('contact-1', 'comp-1', 'Client Test SRL')",
+            "INSERT INTO contacts (id, company_id, contact_type, legal_name) \
+             VALUES ('contact-1', 'comp-1', 'CUSTOMER', 'Client Test SRL')",
         )
         .execute(&pool)
         .await
@@ -1477,11 +1252,13 @@ mod tests {
 
     /// Insert a minimal invoice row for Wave G tests (company_id is comp-1).
     async fn insert_wave_g_invoice(pool: &sqlx::SqlitePool, id: &str, status: &str) {
+        // Supply all required NOT NULL columns (real schema has no DB-level defaults).
         sqlx::query(
-            "INSERT INTO invoices (id, company_id, contact_id, series, number, full_number,
-             issue_date, due_date, status)
-             VALUES (?1, 'comp-1', 'contact-1', 'FCT', 1, 'FCT-0001',
-             '2026-01-01', '2026-01-01', ?2)",
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, subtotal_amount, vat_amount, total_amount, status) \
+             VALUES (?1, 'comp-1', 'contact-1', 'FCT', 1, 'FCT-0001', \
+                    '2026-01-01', '2026-01-01', '0', '0', '0', ?2)",
         )
         .bind(id)
         .bind(status)

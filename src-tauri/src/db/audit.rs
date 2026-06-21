@@ -103,30 +103,11 @@ pub async fn log_user_action_attributed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::SqlitePool;
 
     async fn setup_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
-            .await
-            .unwrap();
-        sqlx::query(
-            "CREATE TABLE audit_log (
-                id TEXT PRIMARY KEY,
-                action TEXT NOT NULL,
-                entity_type TEXT NOT NULL,
-                entity_id TEXT NOT NULL,
-                company_id TEXT,
-                metadata TEXT,
-                user_id TEXT,
-                user_label TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
         pool
     }
 
@@ -154,12 +135,9 @@ mod tests {
 
     #[tokio::test]
     async fn log_user_action_silent_on_db_error() {
-        // Pool with no audit_log table — INSERT will fail; helper must NOT panic
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
-            .await
-            .unwrap();
+        // Pool with no audit_log table — INSERT will fail; helper must NOT panic.
+        // Intentionally skip migrate! so there is no schema to trigger the DB error.
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         // Call should return Ok despite the underlying error
         let result = log_user_action(&pool, "x", "y", "z", None, None).await;
         assert!(result.is_ok());

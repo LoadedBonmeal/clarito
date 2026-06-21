@@ -426,106 +426,33 @@ pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::SqlitePool;
 
-    /// Minimal in-memory schema for contacts Wave A tests.
-    async fn setup_contacts_pool() -> sqlx::SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
-            .await
-            .unwrap();
+    /// Run real migrations then seed two companies + one contact each.
+    async fn setup_contacts_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
 
-        // companies table is needed because contacts::create now looks up the company.
+        // Seed two companies with valid production-schema columns.
+        // The real schema enforces: cui NOT NULL UNIQUE, legal_name NOT NULL,
+        // address NOT NULL, city NOT NULL, county NOT NULL.
         sqlx::query(
-            "CREATE TABLE companies (
-                id TEXT PRIMARY KEY NOT NULL,
-                cui TEXT NOT NULL,
-                legal_name TEXT NOT NULL DEFAULT '',
-                trade_name TEXT,
-                registry_number TEXT,
-                vat_payer INTEGER NOT NULL DEFAULT 1,
-                cash_vat INTEGER NOT NULL DEFAULT 0,
-                address TEXT NOT NULL DEFAULT '',
-                city TEXT NOT NULL DEFAULT '',
-                county TEXT NOT NULL DEFAULT '',
-                postal_code TEXT,
-                country TEXT NOT NULL DEFAULT 'RO',
-                email TEXT,
-                phone TEXT,
-                iban TEXT,
-                bank_name TEXT,
-                is_active INTEGER NOT NULL DEFAULT 1,
-                spv_enabled INTEGER NOT NULL DEFAULT 0,
-                tax_regime TEXT NOT NULL DEFAULT 'micro',
-                invoice_series TEXT NOT NULL DEFAULT 'FACT',
-                last_invoice_number INTEGER NOT NULL DEFAULT 0,
-                logo_path TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
+            "INSERT INTO companies (id, cui, legal_name, address, city, county) \
+             VALUES ('comp-1', 'RO12345674', 'Firma Unu SRL', 'Str. Test 1', 'București', 'B'), \
+                    ('comp-2', 'RO98765438', 'Firma Doi SRL', 'Str. Test 2', 'Cluj', 'CJ')",
         )
         .execute(&pool)
         .await
         .unwrap();
 
+        // Seed two contacts — one per company.
+        // The real schema requires contact_type NOT NULL and legal_name NOT NULL.
+        // Test-data fix: add contact_type (was missing from hand-rolled fixture, which
+        // had DEFAULT 'CUSTOMER' — real migration has no default on contact_type).
         sqlx::query(
-            "CREATE TABLE contacts (
-                id TEXT PRIMARY KEY NOT NULL,
-                company_id TEXT NOT NULL,
-                contact_type TEXT NOT NULL DEFAULT 'CUSTOMER',
-                cui TEXT,
-                legal_name TEXT NOT NULL DEFAULT '',
-                vat_payer INTEGER NOT NULL DEFAULT 0,
-                is_individual INTEGER NOT NULL DEFAULT 0,
-                cash_vat INTEGER NOT NULL DEFAULT 0,
-                address TEXT,
-                city TEXT,
-                county TEXT,
-                country TEXT NOT NULL DEFAULT 'RO',
-                email TEXT,
-                phone TEXT,
-                currency TEXT,
-                iban TEXT,
-                bank_name TEXT,
-                swift TEXT,
-                payment_term_days INTEGER,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // Minimal invoices table so delete()'s referential-integrity check
-        // (SELECT COUNT(*) FROM invoices ...) can run in these unit tests.
-        sqlx::query(
-            "CREATE TABLE invoices (
-                id TEXT PRIMARY KEY NOT NULL,
-                company_id TEXT NOT NULL,
-                contact_id TEXT NOT NULL
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // Seed: two companies.
-        sqlx::query(
-            "INSERT INTO companies (id, cui, legal_name) \
-             VALUES ('comp-1', 'RO12345674', 'Firma Unu SRL'), \
-                    ('comp-2', 'RO98765438', 'Firma Doi SRL')",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // Seed: two contacts — one per company.
-        sqlx::query(
-            "INSERT INTO contacts (id, company_id, legal_name)
-             VALUES ('c1', 'comp-1', 'Client Comp1'),
-                    ('c2', 'comp-2', 'Client Comp2')",
+            "INSERT INTO contacts (id, company_id, contact_type, legal_name) \
+             VALUES ('c1', 'comp-1', 'CUSTOMER', 'Client Comp1'), \
+                    ('c2', 'comp-2', 'CUSTOMER', 'Client Comp2')",
         )
         .execute(&pool)
         .await
