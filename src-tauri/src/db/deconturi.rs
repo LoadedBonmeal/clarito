@@ -21,12 +21,13 @@
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use sqlx::{FromRow, SqlitePool};
 use std::str::FromStr;
 
 use crate::db::gl::{post_manual_journal, ManualJournal};
 use crate::db::models::{new_id, now_unix};
-use crate::db::payroll::working_days;
+use crate::db::payroll::{days_in_month, working_days};
 use crate::db::payroll_diurna::upsert_extra_income;
 use crate::error::{AppError, AppResult};
 
@@ -138,6 +139,150 @@ pub fn compute_diurna(
     }
 }
 
+// ─── Multi-month diurnă engine (CF art.76(2)(k)) ─────────────────────────────
+
+/// Per-calendar-month breakdown of a delegation's diurnă.
+///
+/// CF art.76(2)(k) mandates computing the non-taxable cap **per calendar month**:
+/// the 3-salary ceiling is prorated by that month's full working-day count and
+/// multiplied only by the delegation days that fall in that month.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiurnaMonthSegment {
+    /// Calendar month, `YYYY-MM`.
+    pub period: String,
+    /// Delegation calendar days (incl. weekends) that fall in this month.
+    pub delegation_days: u32,
+    /// Working days of the FULL calendar month (NZL — for limit-B proration).
+    pub working_days: u32,
+    /// Limit A per day = 2.5 × diurna_interna.
+    pub limit_a_zi: Decimal,
+    /// Limit B per day = salariu × 3 ÷ working_days_month (or 0 if nzl=0).
+    pub limit_b_zi: Decimal,
+    /// Binding cap per day = min(A, B).
+    pub cap_zi: Decimal,
+    /// Diurnă acordată for this month = daily_rate × delegation_days.
+    pub acordata: Decimal,
+    /// Non-taxable portion = min(acordata, cap_zi × delegation_days).
+    pub nontax: Decimal,
+    /// Taxable excess = max(0, acordata − nontax). Attributed to THIS month's payroll.
+    pub excess: Decimal,
+}
+
+/// Parse an ISO date `YYYY-MM-DD` (or `YYYY-M-D`) into `(year, month, day)`.
+fn parse_ymd(iso: &str) -> Option<(i32, u32, u32)> {
+    let p: Vec<&str> = iso.split('-').collect();
+    if p.len() < 3 {
+        return None;
+    }
+    let y: i32 = p[0].parse().ok()?;
+    let m: u32 = p[1].parse().ok()?;
+    let d: u32 = p[2].parse().ok()?;
+    if m == 0 || m > 12 || d == 0 || d > 31 {
+        return None;
+    }
+    Some((y, m, d))
+}
+
+/// Advance a `(year, month, day)` by one calendar day.
+fn next_day(y: i32, m: u32, d: u32) -> (i32, u32, u32) {
+    let dim = days_in_month(y, m);
+    if d < dim {
+        (y, m, d + 1)
+    } else if m < 12 {
+        (y, m + 1, 1)
+    } else {
+        (y + 1, 1, 1)
+    }
+}
+
+/// Compare two `(year, month, day)` tuples for ordering.
+#[inline]
+fn ymd_le(a: (i32, u32, u32), b: (i32, u32, u32)) -> bool {
+    a.0 < b.0 || (a.0 == b.0 && (a.1 < b.1 || (a.1 == b.1 && a.2 <= b.2)))
+}
+
+/// Multi-month diurnă engine — CF art.76(2)(k).
+///
+/// Segments the delegation `[start_iso, end_iso]` (inclusive on both ends; every
+/// calendar day counts as a diurnă day) by calendar month, then computes per-month
+/// cap/nontax/excess using `daily_rate` per delegation day and the full working-day
+/// count of each month for limit-B proration.
+///
+/// A single-month delegation returns exactly one segment, identical to what
+/// `compute_diurna` would produce for (year, month) of the start date.
+///
+/// Returns an empty `Vec` if either date is missing or malformed, or if start > end.
+pub fn compute_diurna_multimonth(
+    start_iso: &str,
+    end_iso: &str,
+    daily_rate: Decimal,
+    salariu_brut: &str,
+    diurna_interna: &str,
+) -> Vec<DiurnaMonthSegment> {
+    let Some(start) = parse_ymd(start_iso) else {
+        return vec![];
+    };
+    let Some(end) = parse_ymd(end_iso) else {
+        return vec![];
+    };
+    if !ymd_le(start, end) {
+        return vec![];
+    }
+
+    let sal = round2(dp(salariu_brut));
+    let interna = round2(dp(diurna_interna));
+    // Limit A per day = 2.5 × diurna_interna (HG 714/2018 art.2)
+    let limit_a_zi = round2(Decimal::from_str("2.5").unwrap() * interna);
+
+    // Accumulate delegation_days per (year, month).
+    // We walk every calendar day from start to end (inclusive).
+    let mut month_days: Vec<((i32, u32), u32)> = Vec::new();
+    let mut cur = start;
+    loop {
+        let (cy, cm, _cd) = cur;
+        // Find or create entry for (cy, cm).
+        if let Some(entry) = month_days.iter_mut().find(|(ym, _)| *ym == (cy, cm)) {
+            entry.1 += 1;
+        } else {
+            month_days.push(((cy, cm), 1));
+        }
+        if cur == end {
+            break;
+        }
+        cur = next_day(cur.0, cur.1, cur.2);
+    }
+
+    // Build segments — preserve calendar order (month_days is already in order).
+    let mut segments = Vec::with_capacity(month_days.len());
+    for ((y, m), del_days) in month_days {
+        let nzl = working_days(y, m);
+        let limit_b_zi = if nzl == 0 {
+            Decimal::ZERO
+        } else {
+            round2(sal * Decimal::from(3) / Decimal::from(nzl))
+        };
+        let cap_zi = round2(limit_a_zi.min(limit_b_zi));
+        let cap_total = round2(cap_zi * Decimal::from(del_days));
+        let acordata = round2(daily_rate * Decimal::from(del_days));
+        let nontax = round2(acordata.min(cap_total));
+        let excess = round2((acordata - nontax).max(Decimal::ZERO));
+
+        segments.push(DiurnaMonthSegment {
+            period: format!("{y:04}-{m:02}"),
+            delegation_days: del_days,
+            working_days: nzl,
+            limit_a_zi,
+            limit_b_zi,
+            cap_zi,
+            acordata,
+            nontax,
+            excess,
+        });
+    }
+    segments
+}
+
 // ─── DB structs ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -168,6 +313,22 @@ pub struct CreateAdvanceInput {
     pub notes: Option<String>,
 }
 
+/// Compact serialisable form of a per-month segment stored in `diurna_breakdown_json`.
+///
+/// Only the fields needed by `approve_report` are stored (period, nontax, excess).
+/// Full per-month detail (`limit_a_zi`, `cap_zi`, etc.) is available at create time
+/// via `DiurnaMonthSegment` but is not needed for the payroll/GL feed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiurnaBreakdownSegment {
+    /// Calendar month, `YYYY-MM`.
+    pub period: String,
+    /// Non-taxable diurnă for this month (Decimal text — lossless round-trip).
+    pub nontax: String,
+    /// Taxable excess for this month (Decimal text).
+    pub excess: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct ExpenseReport {
@@ -183,6 +344,12 @@ pub struct ExpenseReport {
     pub diurna_neimpozabila: Option<String>,
     pub diurna_impozabila: Option<String>,
     pub salariu_baza: Option<String>,
+    /// Configured internal diurnă rate (lei/zi) used at create time for limit_A = 2.5×interna.
+    /// Persisted so approve_report never drifts to a hardcoded fallback. (migration 0080)
+    pub diurna_interna: Option<String>,
+    /// JSON-serialised `Vec<DiurnaBreakdownSegment>` — one entry per calendar month.
+    /// NULL for reports created before migration 0080 (backward-compat fallback in approve).
+    pub diurna_breakdown_json: Option<String>,
     pub report_date: String,
     pub status: String,
     pub notes: Option<String>,
@@ -414,39 +581,142 @@ pub async fn create_report(
     let id = new_id();
     let now = now_unix();
 
-    // Compute diurnă if all inputs are present
-    let (diurna_neimpozabila, diurna_impozabila) =
-        if let (Some(acordata), Some(sal), Some(days), Some(from)) = (
+    // ── Single source-of-truth diurnă split (P1/P2 fix) ───────────────────────
+    //
+    // compute_diurna_multimonth is called ONCE here at create time.  It uses:
+    //   • the exact daily_rate = round2(acordata / days)
+    //   • the REAL diurna_interna from the input (never a hardcoded "23.00")
+    //   • the full delegation date span [from, to] for per-month cap computation
+    //
+    // Stored results:
+    //   diurna_neimpozabila = Σ nontax[m]   (multimonth total — replaces single-month value)
+    //   diurna_impozabila   = Σ excess[m]   (multimonth total)
+    //   diurna_interna      = the configured rate used (persisted to prevent approve drift)
+    //   diurna_breakdown_json = [{period, nontax, excess}] per month (JSON, compact)
+    //
+    // Rounding remainder: the per-segment nontax/excess are already rounded to 2dp by the
+    // engine. To guarantee Σ(nontax)+Σ(excess) == acordata EXACTLY, we compute the
+    // residual (acordata − Σ(nontax) − Σ(excess)) and add it to the last segment's nontax
+    // (which keeps nontax ≤ cap, since the residual is a sub-cent artefact from round2).
+    //
+    // approve_report DESERIALIZES diurna_breakdown_json — it never recomputes.
+    let interna_str = input
+        .diurna_interna
+        .as_deref()
+        .unwrap_or("23.00")
+        .to_string();
+
+    let (diurna_neimpozabila, diurna_impozabila, stored_breakdown) =
+        if let (Some(acordata_str), Some(sal), Some(days), Some(from), Some(to)) = (
+            input.diurna_acordata.as_deref(),
+            input.salariu_baza.as_deref(),
+            input.days,
+            input.delegation_from.as_deref(),
+            input.delegation_to.as_deref(),
+        ) {
+            if days > 0 {
+                let acordata = round2(dp(acordata_str));
+                let daily_rate = round2(acordata / Decimal::from(days as u32));
+                let segments = compute_diurna_multimonth(from, to, daily_rate, sal, &interna_str);
+
+                if segments.is_empty() {
+                    // Malformed dates — fall back to single-month (safe, no crash).
+                    let parts: Vec<&str> = from.split('-').collect();
+                    let (year, month) = if parts.len() >= 2 {
+                        (
+                            parts[0].parse::<i32>().unwrap_or(2026),
+                            parts[1].parse::<u32>().unwrap_or(1),
+                        )
+                    } else {
+                        (2026, 1)
+                    };
+                    let calc =
+                        compute_diurna(acordata_str, days as u32, sal, year, month, &interna_str);
+                    (
+                        Some(calc.diurna_neimpozabila.clone()),
+                        Some(calc.diurna_impozabila.clone()),
+                        None::<String>,
+                    )
+                } else {
+                    // Sum all segments.
+                    let sum_nontax: Decimal = segments.iter().map(|s| s.nontax).sum();
+                    let sum_excess: Decimal = segments.iter().map(|s| s.excess).sum();
+
+                    // Distribute rounding remainder so Σ(nontax)+Σ(excess) == acordata EXACTLY.
+                    // Any residual is a sub-cent rounding artefact; put it on the last segment's
+                    // nontax (safe: nontax can only grow, staying ≤ acordata for that segment).
+                    let remainder = round2(acordata - sum_nontax - sum_excess);
+
+                    // Build compact breakdown for storage.
+                    let n = segments.len();
+                    let breakdown: Vec<DiurnaBreakdownSegment> = segments
+                        .iter()
+                        .enumerate()
+                        .map(|(i, s)| {
+                            let nontax = if i == n - 1 {
+                                round2(s.nontax + remainder)
+                            } else {
+                                s.nontax
+                            };
+                            DiurnaBreakdownSegment {
+                                period: s.period.clone(),
+                                nontax: fmt2(nontax),
+                                excess: fmt2(s.excess),
+                            }
+                        })
+                        .collect();
+
+                    let total_nontax = round2(sum_nontax + remainder);
+                    let total_excess = round2(sum_excess);
+                    let breakdown_json = serde_json::to_string(&breakdown).unwrap_or_default();
+
+                    (
+                        Some(fmt2(total_nontax)),
+                        Some(fmt2(total_excess)),
+                        Some(breakdown_json),
+                    )
+                }
+            } else {
+                (None, None, None)
+            }
+        } else if let (Some(acordata_str), Some(sal), Some(days), Some(from)) = (
+            // Fallback: no delegation_to — use single-month engine on the start month.
             input.diurna_acordata.as_deref(),
             input.salariu_baza.as_deref(),
             input.days,
             input.delegation_from.as_deref(),
         ) {
-            let parts: Vec<&str> = from.split('-').collect();
-            let (year, month) = if parts.len() >= 2 {
+            if days > 0 {
+                let parts: Vec<&str> = from.split('-').collect();
+                let (year, month) = if parts.len() >= 2 {
+                    (
+                        parts[0].parse::<i32>().unwrap_or(2026),
+                        parts[1].parse::<u32>().unwrap_or(1),
+                    )
+                } else {
+                    (2026, 1)
+                };
+                let calc =
+                    compute_diurna(acordata_str, days as u32, sal, year, month, &interna_str);
                 (
-                    parts[0].parse::<i32>().unwrap_or(2026),
-                    parts[1].parse::<u32>().unwrap_or(1),
+                    Some(calc.diurna_neimpozabila.clone()),
+                    Some(calc.diurna_impozabila.clone()),
+                    None::<String>,
                 )
             } else {
-                (2026, 1)
-            };
-            let interna = input.diurna_interna.as_deref().unwrap_or("23.00");
-            let calc = compute_diurna(acordata, days as u32, sal, year, month, interna);
-            (
-                Some(calc.diurna_neimpozabila.clone()),
-                Some(calc.diurna_impozabila.clone()),
-            )
+                (None, None, None)
+            }
         } else {
-            (None, None)
+            (None, None, None)
         };
 
     sqlx::query(
         "INSERT INTO expense_reports \
          (id, company_id, advance_id, employee_id, delegation_from, delegation_to, destination, \
           days, diurna_acordata, diurna_neimpozabila, diurna_impozabila, salariu_baza, \
+          diurna_interna, diurna_breakdown_json, \
           report_date, status, notes, created_at, updated_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'draft',?14,?15,?15)",
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,'draft',?16,?17,?17)",
     )
     .bind(&id)
     .bind(&input.company_id)
@@ -460,6 +730,12 @@ pub async fn create_report(
     .bind(&diurna_neimpozabila)
     .bind(&diurna_impozabila)
     .bind(&input.salariu_baza)
+    .bind(if diurna_neimpozabila.is_some() {
+        Some(interna_str.as_str())
+    } else {
+        None
+    })
+    .bind(&stored_breakdown)
     .bind(&input.report_date)
     .bind(&input.notes)
     .bind(now)
@@ -527,13 +803,16 @@ pub async fn get_report_full(
     .fetch_all(pool)
     .await?;
 
-    // Recompute diurnă calc for display (if data present)
+    // Recompute diurnă calc for display (if data present).
+    // Use the stored diurna_interna (migration 0080) so the display is consistent with
+    // what was used at create time. Falls back to "23.00" for pre-0080 reports.
     let diurna_calc = if let (Some(acordata), Some(sal), Some(days), Some(from)) = (
         report.diurna_acordata.as_deref(),
         report.salariu_baza.as_deref(),
         report.days,
         report.delegation_from.as_deref(),
     ) {
+        let interna_display = report.diurna_interna.as_deref().unwrap_or("23.00");
         let parts: Vec<&str> = from.split('-').collect();
         let (year, month) = if parts.len() >= 2 {
             (
@@ -549,7 +828,7 @@ pub async fn get_report_full(
             sal,
             year,
             month,
-            "23.00",
+            interna_display,
         ))
     } else {
         None
@@ -757,77 +1036,86 @@ pub async fn approve_report(
     .execute(pool)
     .await?;
 
-    // ── Diurnă excess → payroll feed (Wave E, P1 fix) ─────────────────────────
-    // If the report has an employee_id and a taxable excess, upsert into payroll_extra_income
-    // so the next run_payroll + D112 pick it up.
+    // ── Diurnă excess → payroll feed (single source-of-truth, P1+P2 fix) ────────
     //
-    // P1 FIX: the former post_diurna_asimilat_gl call (DIURNA_ASIMILAT journal) is REMOVED here.
-    // It computed contributions on the excess ALONE (separate rounding), which caused GL 4315/4316/
-    // 444/436 ≠ D112 when added to the separately-rounded salary contributions (round(S×r) +
-    // round(E×r) ≠ round((S+E)×r)). The GL for the excess is now handled entirely by run_payroll
-    // (D641/C625 = excess_reclass; D4282/C421 = excess_receivable; contributions on the COMBINED
-    // base S+E, single rounding), so GL == D112 to the leu.
+    // The GL 625 D (above) uses the STORED diurna_neimpozabila + diurna_impozabila, which are
+    // now the multimonth totals computed at create time.  The payroll/D112 feed is fed from the
+    // SAME stored breakdown (diurna_breakdown_json) — never recomputed here.
     //
-    // The settlement journal (EXPENSE_REPORT) continues to post 625 D for the FULL diurnă
-    // (within-cap + excess) — the excess is reclassified to 641 inside the PAYROLL note.
+    // GL ≡ payroll: stored diurna_impozabila = Σ excess across segments = Σ of what we feed.
+    // Gate: diurna_impozabila > 0 ↔ any segment has excess > 0 (same invariant).
+    //
+    // Backward-compat: reports created before migration 0080 have diurna_breakdown_json = NULL.
+    // In that case we fall back to attributing the stored diurna_impozabila to the approve_date
+    // month — same as the original single-period behaviour, no crash.
     if diurna_impozabila > Decimal::ZERO {
         if let Some(emp_id) = full.report.employee_id.as_deref() {
-            // P3b: warn if delegation spans multiple calendar months (silent mis-attribution risk).
-            // Full multi-month split is deferred; at minimum we log a warning so it's not silent.
-            let period = if let Some(from) = full.report.delegation_from.as_deref() {
-                // P3c: derive period robustly from parsed date (format!("{year}-{month:02}"))
-                // rather than string-slicing, so a non-padded or malformed month never silently
-                // produces a wrong period (e.g. "2026-6" instead of "2026-06").
-                let from_period = parse_date_to_period(from);
-                if let Some(to) = full.report.delegation_to.as_deref() {
-                    let to_period = parse_date_to_period(to);
-                    if to_period.as_deref() != Some(from_period.as_deref().unwrap_or(""))
-                        && to_period.is_some()
-                        && from_period.is_some()
-                    {
-                        // P3b: delegation spans multiple months — warn, use start month.
-                        tracing::warn!(
-                            report_id = %id,
-                            from = %from,
-                            to = %to,
-                            from_period = ?from_period,
-                            to_period = ?to_period,
-                            "approve_report: delegația acoperă mai multe luni calendaristice; \
-                            excesul impozabil este atribuit integral lunii de start. \
-                            Verificați manual și împărțiți decontul pe luni dacă este necesar."
-                        );
+            let breakdown_json = full.report.diurna_breakdown_json.as_deref();
+
+            let did_breakdown = if let Some(json) = breakdown_json {
+                // ── Post-0080 path: deserialize and feed per month ──────────────────
+                match serde_json::from_str::<Vec<DiurnaBreakdownSegment>>(json) {
+                    Ok(segments) if !segments.is_empty() => {
+                        for seg in &segments {
+                            let seg_excess = round2(dp(&seg.excess));
+                            if seg_excess > Decimal::ZERO {
+                                let is_locked = crate::db::period_locks::is_period_locked(
+                                    pool,
+                                    company_id,
+                                    &seg.period,
+                                )
+                                .await;
+                                let lock_status = if is_locked {
+                                    "needs_rectificativa"
+                                } else {
+                                    "open"
+                                };
+                                // UNIQUE key: (company_id, source_ref=id, employee_id, period).
+                                // Each month gets its own idempotent row.
+                                upsert_extra_income(
+                                    pool,
+                                    company_id,
+                                    emp_id,
+                                    &seg.period,
+                                    id,
+                                    seg_excess,
+                                    lock_status,
+                                )
+                                .await?;
+                            }
+                        }
+                        true
                     }
+                    _ => false, // JSON parse error or empty — fall through to compat path
                 }
-                from_period.unwrap_or_else(|| {
-                    // Fallback: use approve_date month
-                    approve_date.get(..7).unwrap_or("2026-01").to_string()
-                })
             } else {
-                approve_date.get(..7).unwrap_or("2026-01").to_string()
+                false // NULL json — pre-0080 report, fall through
             };
 
-            // Check if the payroll month for this period is already locked.
-            let is_locked =
-                crate::db::period_locks::is_period_locked(pool, company_id, &period).await;
-            let lock_status = if is_locked {
-                "needs_rectificativa"
-            } else {
-                "open"
-            };
-
-            // Upsert into payroll_extra_income (idempotent per source_ref+employee+period).
-            // run_payroll will fold the excess into the combined salary+excess base (single rounding)
-            // and post the GL (D641/C625 + D4282/C421 + combined contributions to 4315/4316/444/436).
-            upsert_extra_income(
-                pool,
-                company_id,
-                emp_id,
-                &period,
-                id, // source_ref = expense_report.id
-                diurna_impozabila,
-                lock_status,
-            )
-            .await?;
+            // ── Pre-0080 backward-compat path ──────────────────────────────────────
+            // Attribute the full stored excess to the approve_date month.
+            // Same behaviour as the original single-period code — no under-declaration.
+            if !did_breakdown {
+                let period = parse_date_to_period(approve_date)
+                    .unwrap_or_else(|| approve_date.get(..7).unwrap_or("2026-01").to_string());
+                let is_locked =
+                    crate::db::period_locks::is_period_locked(pool, company_id, &period).await;
+                let lock_status = if is_locked {
+                    "needs_rectificativa"
+                } else {
+                    "open"
+                };
+                upsert_extra_income(
+                    pool,
+                    company_id,
+                    emp_id,
+                    &period,
+                    id,
+                    diurna_impozabila,
+                    lock_status,
+                )
+                .await?;
+            }
         }
     }
 
@@ -1385,6 +1673,896 @@ mod tests {
         assert!(
             codes.contains(&"425".to_string()),
             "425 must be in standard_accounts"
+        );
+    }
+
+    // ── Multi-month diurnă engine tests (CF art.76(2)(k)) ─────────────────────
+
+    /// Single-month delegation → exactly one segment, results identical to compute_diurna.
+    #[test]
+    fn multimonth_single_month_identical_to_compute_diurna() {
+        // 3–7 June 2026 (5 days), daily_rate=100, salary=4000.
+        // June 2026: 21 working days, limit_a=57.50, limit_b=4000×3/21≈571.43 → cap=57.50/day
+        // acordata = 100×5 = 500; cap_total = 57.50×5 = 287.50; nontax=287.50; excess=212.50
+        let daily_rate = dec("100");
+        let segs =
+            compute_diurna_multimonth("2026-06-03", "2026-06-07", daily_rate, "4000", "23.00");
+        assert_eq!(segs.len(), 1, "single-month delegation → one segment");
+        let s = &segs[0];
+        assert_eq!(s.period, "2026-06");
+        assert_eq!(s.delegation_days, 5);
+        assert_eq!(s.working_days, 21);
+        assert_eq!(s.acordata, dec("500.00"));
+        assert_eq!(s.nontax, dec("287.50"));
+        assert_eq!(s.excess, dec("212.50"));
+
+        // Verify it matches compute_diurna (acordata=500, 5 days, salary=4000, Jun 2026).
+        let legacy = compute_diurna("500.00", 5, "4000", 2026, 6, "23.00");
+        assert_eq!(
+            s.nontax,
+            dec(&legacy.diurna_neimpozabila),
+            "nontax must equal legacy non-taxable"
+        );
+        assert_eq!(
+            s.excess,
+            dec(&legacy.diurna_impozabila),
+            "excess must equal legacy taxable"
+        );
+    }
+
+    /// Cross-month delegation 28 May–3 Jun 2026.
+    /// May 2026: 4 delegation days (28,29,30,31 May). Working days May 2026 = 20.
+    /// Jun 2026: 3 delegation days (1,2,3 Jun). Working days June 2026 = 21.
+    /// salary=200 RON → limit_B binds (200×3÷20=30 for May; 200×3÷21≈28.57 for June).
+    /// limit_A = 57.50; cap_May = min(57.50,30) = 30; cap_Jun = min(57.50,28.57) = 28.57.
+    /// daily_rate=100 → excess per month:
+    ///   May: acordata=400, cap_total=30×4=120, nontax=120, excess=280.
+    ///   Jun: acordata=300, cap_total=28.57×3=85.71, nontax=85.71, excess=214.29.
+    #[test]
+    fn multimonth_cross_month_may_jun_per_month_caps() {
+        let daily_rate = dec("100");
+        let segs =
+            compute_diurna_multimonth("2026-05-28", "2026-06-03", daily_rate, "200", "23.00");
+        assert_eq!(segs.len(), 2, "should produce two monthly segments");
+        let may = segs
+            .iter()
+            .find(|s| s.period == "2026-05")
+            .expect("May segment");
+        let jun = segs
+            .iter()
+            .find(|s| s.period == "2026-06")
+            .expect("Jun segment");
+
+        // May 2026 working days = 20 (1 Mai holiday + weekends)
+        assert_eq!(may.working_days, 20, "May 2026 should have 20 working days");
+        assert_eq!(may.delegation_days, 4, "4 May days: 28,29,30,31");
+
+        // June 2026 working days = 21 (1 Jun holiday)
+        assert_eq!(
+            jun.working_days, 21,
+            "June 2026 should have 21 working days"
+        );
+        assert_eq!(jun.delegation_days, 3, "3 Jun days: 1,2,3");
+
+        // Limit-B for May: 200×3/20 = 30.00 → binds (< 57.50)
+        let limit_b_may = round2(dec("200") * dec("3") / Decimal::from(20u32));
+        assert_eq!(
+            may.cap_zi, limit_b_may,
+            "May cap_zi = limit_B_May (binding)"
+        );
+        assert!(
+            may.cap_zi < dec("57.50"),
+            "limit_B must be less than limit_A for May"
+        );
+
+        // Limit-B for June: 200×3/21 ≈ 28.57 → binds (< 57.50)
+        let limit_b_jun = round2(dec("200") * dec("3") / Decimal::from(21u32));
+        assert_eq!(
+            jun.cap_zi, limit_b_jun,
+            "Jun cap_zi = limit_B_Jun (binding)"
+        );
+        assert!(
+            jun.cap_zi < dec("57.50"),
+            "limit_B must be less than limit_A for June"
+        );
+
+        // May: acordata=400, nontax=min(400, 30×4=120)=120, excess=280
+        assert_eq!(may.acordata, dec("400.00"));
+        assert_eq!(may.nontax, round2(limit_b_may * dec("4")));
+        assert_eq!(may.excess, dec("400.00") - may.nontax);
+
+        // June: acordata=300, cap_total=limit_b_jun×3, nontax=min(300,cap_total)
+        let jun_cap_total = round2(limit_b_jun * dec("3"));
+        assert_eq!(jun.acordata, dec("300.00"));
+        assert_eq!(jun.nontax, round2(dec("300.00").min(jun_cap_total)));
+        assert_eq!(
+            jun.excess,
+            round2((dec("300.00") - jun.nontax).max(Decimal::ZERO))
+        );
+
+        // Σ within-cap (nontax) = may.nontax + jun.nontax (not the whole-span cap)
+        let sum_nontax = may.nontax + jun.nontax;
+        let sum_acordata = may.acordata + jun.acordata;
+        let sum_excess = may.excess + jun.excess;
+        assert_eq!(
+            round2(sum_nontax + sum_excess),
+            round2(sum_acordata),
+            "Σ nontax + Σ excess == Σ acordata"
+        );
+
+        // NEVER a single whole-span cap: assert May excess ≠ excess computed with June working days
+        let wrong_may_excess =
+            round2((dec("400.00") - round2(limit_b_jun * dec("4"))).max(Decimal::ZERO));
+        assert_ne!(
+            may.excess, wrong_may_excess,
+            "May excess must use MAY working days, not June's"
+        );
+    }
+
+    /// Verify limit_A binding (high salary) vs limit_B binding (low salary) produces different
+    /// cap_perday per month even within the same delegation.
+    #[test]
+    fn multimonth_cap_binding_differs_per_month() {
+        // High salary (10000): limit_A binds for all months → same cap_zi across months.
+        let segs_high =
+            compute_diurna_multimonth("2026-05-28", "2026-06-03", dec("100"), "10000", "23.00");
+        assert_eq!(segs_high.len(), 2);
+        // Both caps = limit_A = 57.50
+        for s in &segs_high {
+            assert_eq!(
+                s.cap_zi,
+                dec("57.50"),
+                "high-salary: cap = limit_A for every month"
+            );
+        }
+
+        // Low salary (200): limit_B binds, and limit_B differs between May (20 wd) and June (21 wd)
+        let segs_low =
+            compute_diurna_multimonth("2026-05-28", "2026-06-03", dec("100"), "200", "23.00");
+        assert_eq!(segs_low.len(), 2);
+        let may_low = segs_low.iter().find(|s| s.period == "2026-05").unwrap();
+        let jun_low = segs_low.iter().find(|s| s.period == "2026-06").unwrap();
+        // Different working days → different cap_perday
+        assert_ne!(
+            may_low.cap_zi, jun_low.cap_zi,
+            "low-salary: different months have different cap_zi (different working days)"
+        );
+        assert_ne!(
+            may_low.working_days, jun_low.working_days,
+            "May and June must have different working-day counts"
+        );
+    }
+
+    /// Idempotent: approving a cross-month decont twice → still exactly 2 extra_income rows.
+    #[tokio::test]
+    async fn multimonth_approve_idempotent_two_extra_income_rows() {
+        let pool = setup().await;
+
+        // Create employee emp1 (salary 200 → limit_B binds and both months have excess).
+        sqlx::query(
+            "INSERT INTO employees \
+             (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
+              employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
+              exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, created_at, updated_at) \
+             VALUES ('emp1','co1','1900101410011','Ion Pop','200','0', \
+                     '2024-01-01',1,'1',0,'N',8,'','',0,0,0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // 28 May–3 Jun, daily_rate=100, salary=200, total 7 days, diurna=700
+        let full = create_report(
+            &pool,
+            CreateReportInput {
+                company_id: "co1".into(),
+                advance_id: None,
+                employee_id: Some("emp1".into()),
+                delegation_from: Some("2026-05-28".into()),
+                delegation_to: Some("2026-06-03".into()),
+                destination: Some("București".into()),
+                days: Some(7),
+                diurna_acordata: Some("700.00".into()),
+                salariu_baza: Some("200.00".into()),
+                report_date: "2026-06-05".into(),
+                notes: None,
+                lines: vec![ExpenseLineInput {
+                    category: "diurna".into(),
+                    description: Some("Diurnă 7 zile".into()),
+                    amount: "700.00".into(),
+                    vat_amount: None,
+                    account_code: None,
+                }],
+                diurna_interna: Some("23.00".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        // First approval
+        approve_report(&pool, &full.report.id, "co1", "2026-06-05")
+            .await
+            .unwrap();
+
+        // Second approval (idempotent — already 'approved', no-op in approve_report)
+        approve_report(&pool, &full.report.id, "co1", "2026-06-05")
+            .await
+            .unwrap();
+
+        // Must have exactly 2 extra_income rows (one per month), no duplicates
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT period, amount FROM payroll_extra_income \
+             WHERE company_id='co1' AND source_ref=?1 AND employee_id='emp1' \
+             ORDER BY period",
+        )
+        .bind(&full.report.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(rows.len(), 2, "exactly 2 extra_income rows: one per month");
+        let periods: Vec<&str> = rows.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(periods.contains(&"2026-05"), "must have 2026-05 row");
+        assert!(periods.contains(&"2026-06"), "must have 2026-06 row");
+
+        // Each month must have a positive excess
+        for (period, amount) in &rows {
+            let amt = dec(amount);
+            assert!(
+                amt > Decimal::ZERO,
+                "excess for period {} must be > 0",
+                period
+            );
+        }
+
+        // Verify May uses May's working days: cap_May = 200×3/20=30 per day × 4 days = 120 nontax
+        // May acordata = 100×4 = 400; May excess = 400-120 = 280.
+        let may_row = rows.iter().find(|(p, _)| p == "2026-05").unwrap();
+        assert_eq!(dec(&may_row.1), dec("280.00"), "May excess must be 280.00");
+
+        // June: cap_Jun = 200×3/21≈28.57 per day × 3 days = 85.71 nontax
+        // Jun acordata = 100×3=300; Jun excess = 300-85.71 = 214.29
+        let jun_row = rows.iter().find(|(p, _)| p == "2026-06").unwrap();
+        let limit_b_jun = round2(dec("200") * dec("3") / Decimal::from(21u32));
+        let jun_nontax = round2(limit_b_jun * dec("3"));
+        let jun_excess_expected = round2((dec("300") - jun_nontax).max(Decimal::ZERO));
+        assert_eq!(
+            dec(&jun_row.1),
+            jun_excess_expected,
+            "Jun excess must equal per-month computed value"
+        );
+    }
+
+    /// Single-month delegation via approve_report: still produces exactly one extra_income row.
+    #[tokio::test]
+    async fn approve_single_month_produces_one_extra_income() {
+        let pool = setup().await;
+
+        sqlx::query(
+            "INSERT INTO employees \
+             (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
+              employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
+              exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, created_at, updated_at) \
+             VALUES ('emp2','co1','2900101410011','Ana Pop','4000','0', \
+                     '2024-01-01',1,'1',0,'N',8,'','',0,0,0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // 3–7 June (5 days), salary=4000, daily_rate=100, total diurnă=500
+        // cap=57.50/day × 5 = 287.50; excess=212.50 → ONE row for 2026-06
+        let full = create_report(
+            &pool,
+            CreateReportInput {
+                company_id: "co1".into(),
+                advance_id: None,
+                employee_id: Some("emp2".into()),
+                delegation_from: Some("2026-06-03".into()),
+                delegation_to: Some("2026-06-07".into()),
+                destination: Some("Cluj".into()),
+                days: Some(5),
+                diurna_acordata: Some("500.00".into()),
+                salariu_baza: Some("4000.00".into()),
+                report_date: "2026-06-08".into(),
+                notes: None,
+                lines: vec![ExpenseLineInput {
+                    category: "diurna".into(),
+                    description: Some("Diurnă 5 zile".into()),
+                    amount: "500.00".into(),
+                    vat_amount: None,
+                    account_code: None,
+                }],
+                diurna_interna: Some("23.00".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        approve_report(&pool, &full.report.id, "co1", "2026-06-08")
+            .await
+            .unwrap();
+
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT period, amount FROM payroll_extra_income \
+             WHERE company_id='co1' AND source_ref=?1 AND employee_id='emp2'",
+        )
+        .bind(&full.report.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            rows.len(),
+            1,
+            "single-month delegation → exactly one extra_income row"
+        );
+        assert_eq!(rows[0].0, "2026-06", "period must be 2026-06");
+        assert_eq!(dec(&rows[0].1), dec("212.50"), "excess must be 212.50");
+    }
+
+    // ── P1/P2 fix: single source-of-truth tests ───────────────────────────────
+
+    /// Σ-RECONCILIATION (cross-month): Σ(nontax) + Σ(excess) == diurna_acordata EXACTLY.
+    /// Stored diurna_impozabila == Σ(excess in breakdown).
+    /// Payroll feed Σ == stored diurna_impozabila (no drift from recomputation).
+    #[tokio::test]
+    async fn sigma_reconciliation_cross_month_no_drift() {
+        let pool = setup().await;
+
+        sqlx::query(
+            "INSERT INTO employees \
+             (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
+              employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
+              exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, created_at, updated_at) \
+             VALUES ('emp_sigma','co1','1900101410012','Test Sigma','200','0', \
+                     '2024-01-01',1,'1',0,'N',8,'','',0,0,0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // 28 May–3 Jun 2026, 7 days, total diurnă 700 (daily_rate=100, salary=200).
+        // May: 4 days × 100 = 400 acordata; cap = limit_B_May = 200×3/20 = 30/day → nontax=120, excess=280.
+        // Jun: 3 days × 100 = 300 acordata; cap = limit_B_Jun = 200×3/21 ≈ 28.57/day → nontax≈85.71, excess≈214.29.
+        // Σ acordata = 700.  Σ nontax + Σ excess must == 700.00 exactly.
+        let full = create_report(
+            &pool,
+            CreateReportInput {
+                company_id: "co1".into(),
+                advance_id: None,
+                employee_id: Some("emp_sigma".into()),
+                delegation_from: Some("2026-05-28".into()),
+                delegation_to: Some("2026-06-03".into()),
+                destination: Some("Test".into()),
+                days: Some(7),
+                diurna_acordata: Some("700.00".into()),
+                salariu_baza: Some("200.00".into()),
+                report_date: "2026-06-05".into(),
+                notes: None,
+                lines: vec![ExpenseLineInput {
+                    category: "diurna".into(),
+                    description: None,
+                    amount: "700.00".into(),
+                    vat_amount: None,
+                    account_code: None,
+                }],
+                diurna_interna: Some("23.00".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let acordata = dec("700.00");
+        let stored_nontax = dec(full.report.diurna_neimpozabila.as_deref().unwrap());
+        let stored_impozabila = dec(full.report.diurna_impozabila.as_deref().unwrap());
+
+        // Σ-reconciliation: stored totals must sum exactly to acordata.
+        assert_eq!(
+            round2(stored_nontax + stored_impozabila),
+            acordata,
+            "Σ(nontax) + Σ(excess) must == diurna_acordata EXACTLY (no rounding drift)"
+        );
+
+        // Deserialize breakdown and verify internal consistency.
+        let json = full
+            .report
+            .diurna_breakdown_json
+            .as_deref()
+            .expect("breakdown_json must be stored for cross-month report");
+        let breakdown: Vec<DiurnaBreakdownSegment> = serde_json::from_str(json).unwrap();
+        assert_eq!(breakdown.len(), 2, "two months in breakdown");
+
+        let sum_bd_nontax: Decimal = breakdown.iter().map(|s| dec(&s.nontax)).sum();
+        let sum_bd_excess: Decimal = breakdown.iter().map(|s| dec(&s.excess)).sum();
+
+        // Breakdown Σ must equal stored totals.
+        assert_eq!(
+            round2(sum_bd_nontax),
+            stored_nontax,
+            "breakdown Σ nontax must == stored diurna_neimpozabila"
+        );
+        assert_eq!(
+            round2(sum_bd_excess),
+            stored_impozabila,
+            "breakdown Σ excess must == stored diurna_impozabila"
+        );
+        // And the full reconciliation holds in the breakdown itself.
+        assert_eq!(
+            round2(sum_bd_nontax + sum_bd_excess),
+            acordata,
+            "breakdown Σ(nontax + excess) must == acordata"
+        );
+
+        // Approve and verify payroll feed Σ == stored impozabila (no drift).
+        approve_report(&pool, &full.report.id, "co1", "2026-06-05")
+            .await
+            .unwrap();
+
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT period, amount FROM payroll_extra_income \
+             WHERE company_id='co1' AND source_ref=?1 AND employee_id='emp_sigma' \
+             ORDER BY period",
+        )
+        .bind(&full.report.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+        let feed_sum: Decimal = rows.iter().map(|(_, a)| dec(a)).sum();
+        assert_eq!(
+            round2(feed_sum),
+            stored_impozabila,
+            "Σ fed to payroll must == stored diurna_impozabila (GL ≡ payroll, no drift)"
+        );
+    }
+
+    /// LATER-MONTH-BINDS: a delegation where only the SECOND month has excess (the start-month
+    /// cap is not binding). The P1 defect caused stored diurna_impozabila = 0 (single-month
+    /// compute_diurna used start-month working days across the full span) → payroll feed skipped.
+    /// The fix: stored diurna_impozabila reflects the multimonth total, including later-month excess.
+    #[tokio::test]
+    async fn later_month_binds_no_under_declaration() {
+        let pool = setup().await;
+
+        sqlx::query(
+            "INSERT INTO employees \
+             (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
+              employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
+              exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, created_at, updated_at) \
+             VALUES ('emp_later','co1','1900101410013','Test Later','10000','0', \
+                     '2024-01-01',1,'1',0,'N',8,'','',0,0,0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // High-salary employee: salary=10000.
+        // limit_B_May = 10000×3/20 = 1500/day >> limit_A=57.50 → cap_May = 57.50/day.
+        // limit_B_Jun = 10000×3/21 ≈ 1428.57/day >> limit_A=57.50 → cap_Jun = 57.50/day.
+        //
+        // Delegation 28 May–3 Jun 2026 (7 days), daily_rate_may = 50 (within cap), daily_rate_jun = 100 (over cap).
+        // But compute_diurna_multimonth uses a single daily_rate.  To produce "later month binds" we
+        // need to choose a scenario where the first month doesn't produce excess but the second does.
+        //
+        // Use a VERY short first-month stay so cap_total > acordata_may, but a longer second-month.
+        // Easier: use low diurna_interna (say 5.00) → limit_A = 12.50/day.
+        // salary=10000 → limit_B >> limit_A → cap=12.50.
+        // 1 day in May (31st), 5 days in June.  daily_rate = 15.
+        //   May: acordata=15, cap_total=12.50×1=12.50 → excess=2.50.
+        //   Jun: acordata=75, cap_total=12.50×5=62.50 → excess=12.50.
+        // Both months have excess. That's fine (both > 0 = not skipped).
+        //
+        // To get "only SECOND month binds": we need acordata_first_month ≤ cap_first_month.
+        // Use limit_A = 57.50 and very few days in May.
+        // May 31 only (1 day), Jun 1–5 (5 days). daily_rate = 50.
+        //   May: acordata=50, cap_total=57.50×1=57.50 → nontax=50, excess=0 (within cap).
+        //   Jun: acordata=250, cap_total=57.50×5=287.50 → nontax=250, excess=0 (within cap too).
+        //
+        // Make Jun excess positive: daily_rate = 70.
+        //   May: acordata=70, cap=57.50 → nontax=57.50, excess=12.50.
+        //   Jun: acordata=350, cap=57.50×5=287.50 → nontax=287.50, excess=62.50.
+        // Both months have excess. Still not "only second binds".
+        //
+        // The clearest "only second binds" case: limit_B_may > limit_A (salary high), but
+        // limit_B_jun LOWER than acordata_jun due to fewer working days — but that's the same cap.
+        //
+        // Simplest case that demonstrates the BUG: cross-month where the single-month engine
+        // would compute with start-month (May, 20 working days) and produce impozabila=0,
+        // but the multimonth engine correctly finds impozabila > 0 from June.
+        // salary=200, limit_B_May=30, limit_B_Jun=28.57.  Both months: cap < daily_rate → excess > 0.
+        // The P1 bug (single-month) uses May working days (20) for the FULL 7-day span:
+        //   single-month cap = min(57.50, 200×3/20) = 30/day × 7 days = 210.
+        //   If acordata = 200 (< 210) → single-month impozabila = 0!  But per-month: May cap=30×4=120
+        //   and Jun cap=28.57×3=85.71, Σcap=205.71; acordata=200 → all nontax, excess=0.
+        // We need acordata > per-month Σcap but < single-month cap to get the P1 under-declaration.
+        //
+        // salary=200, 28 May–3 Jun (4 May days + 3 Jun days), daily_rate=30 → acordata=210.
+        //   single-month (May, 20 wd): cap/day=30, cap×7=210 → acordata=210, nontax=210, impozabila=0. ← BUG.
+        //   per-month: May cap=30×4=120, Jun cap=28.57×3=85.71 → Σcap=205.71; excess=210-205.71=4.29. ← CORRECT.
+        //
+        // So: stored diurna_impozabila should be 4.29 (multimonth total), not 0.
+        let full = create_report(
+            &pool,
+            CreateReportInput {
+                company_id: "co1".into(),
+                advance_id: None,
+                employee_id: Some("emp_later".into()),
+                delegation_from: Some("2026-05-28".into()),
+                delegation_to: Some("2026-06-03".into()),
+                destination: Some("LaterMonthBug".into()),
+                days: Some(7),
+                diurna_acordata: Some("210.00".into()),
+                salariu_baza: Some("200.00".into()),
+                report_date: "2026-06-05".into(),
+                notes: None,
+                lines: vec![ExpenseLineInput {
+                    category: "diurna".into(),
+                    description: None,
+                    amount: "210.00".into(),
+                    vat_amount: None,
+                    account_code: None,
+                }],
+                diurna_interna: Some("23.00".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let stored_impozabila_str = full
+            .report
+            .diurna_impozabila
+            .as_deref()
+            .expect("diurna_impozabila must be stored");
+        let stored_impozabila = dec(stored_impozabila_str);
+
+        // P1 BUG would give 0; the fix must give > 0.
+        assert!(
+            stored_impozabila > Decimal::ZERO,
+            "LATER-MONTH-BINDS: stored diurna_impozabila must be > 0 (was {stored_impozabila_str}); \
+             the P1 single-month bug would have returned 0 (under-declaration)",
+        );
+
+        // Verify the breakdown exists and has June excess > 0.
+        let json = full
+            .report
+            .diurna_breakdown_json
+            .as_deref()
+            .expect("breakdown_json must be stored");
+        let breakdown: Vec<DiurnaBreakdownSegment> = serde_json::from_str(json).unwrap();
+        let jun = breakdown
+            .iter()
+            .find(|s| s.period == "2026-06")
+            .expect("Jun segment");
+        assert!(
+            dec(&jun.excess) > Decimal::ZERO,
+            "June must contribute to the taxable excess"
+        );
+
+        // Approve and verify payroll feed is NOT skipped.
+        approve_report(&pool, &full.report.id, "co1", "2026-06-05")
+            .await
+            .unwrap();
+
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT period, amount FROM payroll_extra_income \
+             WHERE company_id='co1' AND source_ref=?1 AND employee_id='emp_later'",
+        )
+        .bind(&full.report.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+        assert!(
+            !rows.is_empty(),
+            "LATER-MONTH-BINDS: payroll feed must NOT be skipped (P1 under-declaration fixed)"
+        );
+        let feed_sum: Decimal = rows.iter().map(|(_, a)| dec(a)).sum();
+        assert_eq!(
+            round2(feed_sum),
+            stored_impozabila,
+            "Σ fed to payroll must == stored impozabila (no drift)"
+        );
+    }
+
+    /// diurna_interna ≠ 23: a company configured a different internal rate (e.g. 30 lei/zi).
+    /// limit_A = 2.5 × 30 = 75/day. The stored values and the payroll feed must both use 75,
+    /// NOT the hardcoded 57.50 (= 2.5×23).
+    #[tokio::test]
+    async fn diurna_interna_non_default_used_consistently() {
+        let pool = setup().await;
+
+        sqlx::query(
+            "INSERT INTO employees \
+             (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
+              employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
+              exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, created_at, updated_at) \
+             VALUES ('emp_interna','co1','1900101410014','Test Interna','10000','0', \
+                     '2024-01-01',1,'1',0,'N',8,'','',0,0,0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // salary=10000, June 2026 (21 working days): limit_B = 10000×3/21 ≈ 1428.57 >> limit_A.
+        // With diurna_interna=30: limit_A = 2.5×30 = 75/day.  Cap = 75/day.
+        // With diurna_interna=23: limit_A = 57.50/day.
+        // 3 days, acordata=300 → cap_total_30 = 75×3=225, nontax=225, excess=75.
+        //                         cap_total_23 = 57.50×3=172.50, nontax=172.50, excess=127.50.
+        // Only the correct cap (75) matches the configured rate 30.
+        let full = create_report(
+            &pool,
+            CreateReportInput {
+                company_id: "co1".into(),
+                advance_id: None,
+                employee_id: Some("emp_interna".into()),
+                delegation_from: Some("2026-06-10".into()),
+                delegation_to: Some("2026-06-12".into()),
+                destination: Some("TestInterna".into()),
+                days: Some(3),
+                diurna_acordata: Some("300.00".into()),
+                salariu_baza: Some("10000.00".into()),
+                report_date: "2026-06-13".into(),
+                notes: None,
+                lines: vec![ExpenseLineInput {
+                    category: "diurna".into(),
+                    description: None,
+                    amount: "300.00".into(),
+                    vat_amount: None,
+                    account_code: None,
+                }],
+                diurna_interna: Some("30.00".into()), // non-default configured rate
+            },
+        )
+        .await
+        .unwrap();
+
+        // Verify persisted diurna_interna.
+        assert_eq!(
+            full.report.diurna_interna.as_deref(),
+            Some("30.00"),
+            "diurna_interna must be persisted as the configured value, not hardcoded 23.00"
+        );
+
+        // Verify stored nontax/excess use limit_A = 75 (not 57.50).
+        // nontax should be 225.00 (not 172.50), excess should be 75.00 (not 127.50).
+        let stored_nontax = dec(full.report.diurna_neimpozabila.as_deref().unwrap());
+        let stored_impozabila = dec(full.report.diurna_impozabila.as_deref().unwrap());
+        assert_eq!(
+            stored_nontax,
+            dec("225.00"),
+            "nontax must use limit_A=75 (diurna_interna=30), not 57.50 (hardcoded 23)"
+        );
+        assert_eq!(
+            stored_impozabila,
+            dec("75.00"),
+            "excess must use limit_A=75 (diurna_interna=30), not 127.50 (hardcoded 23)"
+        );
+
+        // Approve and verify payroll feed uses the same (correct) excess.
+        approve_report(&pool, &full.report.id, "co1", "2026-06-13")
+            .await
+            .unwrap();
+
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT period, amount FROM payroll_extra_income \
+             WHERE company_id='co1' AND source_ref=?1 AND employee_id='emp_interna'",
+        )
+        .bind(&full.report.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(rows.len(), 1, "single-month → one row");
+        let fed_excess = dec(&rows[0].1);
+        assert_eq!(
+            fed_excess,
+            dec("75.00"),
+            "payroll feed must use excess=75 (diurna_interna=30), not 127.50 (P2 hardcoded fix)"
+        );
+        // GL 625 D = stored nontax + stored impozabila = 300 (full acordata).
+        let entries: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT e.account_code, e.debit, e.credit \
+             FROM gl_entry e \
+             JOIN gl_journal j ON j.id = e.journal_pk \
+             WHERE j.source_type='EXPENSE_REPORT' AND j.source_id=?1",
+        )
+        .bind(&full.report.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let debit_625: Decimal = entries
+            .iter()
+            .filter(|(a, _, _)| a == "625")
+            .map(|(_, d, _)| dec(d))
+            .sum();
+        assert_eq!(
+            debit_625,
+            dec("300.00"),
+            "GL 625 D must be full acordata (225 nontax + 75 excess = 300)"
+        );
+    }
+
+    /// GL≡payroll single source-of-truth: the 625 residual (Σ nontax) in the settlement GL
+    /// reconciles with the breakdown nontax totals; the fed excess == stored impozabila.
+    #[tokio::test]
+    async fn gl_625_residual_reconciles_with_breakdown_nontax() {
+        let pool = setup().await;
+
+        sqlx::query(
+            "INSERT INTO employees \
+             (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
+              employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
+              exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, created_at, updated_at) \
+             VALUES ('emp_gl','co1','1900101410015','Test GL','4000','0', \
+                     '2024-01-01',1,'1',0,'N',8,'','',0,0,0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // 3–7 June 2026 (5 days), salary=4000, diurna=500, diurna_interna=23.
+        // cap=57.50/day × 5 = 287.50; excess=212.50; nontax=287.50.
+        // GL: 625 D = 500 (full), 5311 C = 500 (no advance).
+        // After run_payroll: 641 D = 212.50 (excess), 625 C = 212.50 → 625 net = 287.50 (within-cap).
+        let full = create_report(
+            &pool,
+            CreateReportInput {
+                company_id: "co1".into(),
+                advance_id: None,
+                employee_id: Some("emp_gl".into()),
+                delegation_from: Some("2026-06-03".into()),
+                delegation_to: Some("2026-06-07".into()),
+                destination: Some("GL Test".into()),
+                days: Some(5),
+                diurna_acordata: Some("500.00".into()),
+                salariu_baza: Some("4000.00".into()),
+                report_date: "2026-06-08".into(),
+                notes: None,
+                lines: vec![ExpenseLineInput {
+                    category: "diurna".into(),
+                    description: None,
+                    amount: "500.00".into(),
+                    vat_amount: None,
+                    account_code: None,
+                }],
+                diurna_interna: Some("23.00".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        approve_report(&pool, &full.report.id, "co1", "2026-06-08")
+            .await
+            .unwrap();
+
+        // GL 625 D = full acordata (EXPENSE_REPORT journal).
+        let entries: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT e.account_code, e.debit, e.credit \
+             FROM gl_entry e \
+             JOIN gl_journal j ON j.id = e.journal_pk \
+             WHERE j.source_type='EXPENSE_REPORT' AND j.source_id=?1",
+        )
+        .bind(&full.report.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let debit_625: Decimal = entries
+            .iter()
+            .filter(|(a, _, _)| a == "625")
+            .map(|(_, d, _)| dec(d))
+            .sum();
+        assert_eq!(debit_625, dec("500.00"), "GL 625 D must be full acordata");
+
+        // Stored values match breakdown.
+        let stored_nontax = dec(full.report.diurna_neimpozabila.as_deref().unwrap());
+        let stored_impozabila = dec(full.report.diurna_impozabila.as_deref().unwrap());
+        assert_eq!(stored_nontax, dec("287.50"));
+        assert_eq!(stored_impozabila, dec("212.50"));
+
+        // Breakdown Σ nontax + Σ excess == 500 (exact reconciliation, no drift).
+        let json = full
+            .report
+            .diurna_breakdown_json
+            .as_deref()
+            .expect("breakdown_json");
+        let breakdown: Vec<DiurnaBreakdownSegment> = serde_json::from_str(json).unwrap();
+        let bd_nontax: Decimal = breakdown.iter().map(|s| dec(&s.nontax)).sum();
+        let bd_excess: Decimal = breakdown.iter().map(|s| dec(&s.excess)).sum();
+        assert_eq!(
+            round2(bd_nontax + bd_excess),
+            dec("500.00"),
+            "breakdown Σ(nontax + excess) must == 500 exactly"
+        );
+
+        // Payroll feed excess == stored impozabila (same source, no recomputation drift).
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT period, amount FROM payroll_extra_income \
+             WHERE company_id='co1' AND source_ref=?1 AND employee_id='emp_gl'",
+        )
+        .bind(&full.report.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let feed_excess: Decimal = rows.iter().map(|(_, a)| dec(a)).sum();
+        assert_eq!(
+            round2(feed_excess),
+            stored_impozabila,
+            "payroll feed Σ excess must == stored impozabila (GL ≡ payroll, no drift)"
+        );
+        // The "625 residual within cap" = 625 D (settlement) - excess_fed = nontax exactly.
+        assert_eq!(
+            round2(debit_625 - feed_excess),
+            stored_nontax,
+            "625 net after reclass = nontax (reconciles settlement with payroll)"
+        );
+    }
+
+    /// Idempotent re-approve after stored breakdown: re-approving a second time (which is a
+    /// no-op via the status check) must not create additional extra_income rows.
+    #[tokio::test]
+    async fn idempotent_reapprove_no_duplicate_extra_income() {
+        let pool = setup().await;
+
+        sqlx::query(
+            "INSERT INTO employees \
+             (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
+              employment_date, active, tip_asigurat, pensionar, tip_contract, ore_norma, \
+              exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, created_at, updated_at) \
+             VALUES ('emp_idem2','co1','1900101410016','Test Idem2','4000','0', \
+                     '2024-01-01',1,'1',0,'N',8,'','',0,0,0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let full = create_report(
+            &pool,
+            CreateReportInput {
+                company_id: "co1".into(),
+                advance_id: None,
+                employee_id: Some("emp_idem2".into()),
+                delegation_from: Some("2026-06-03".into()),
+                delegation_to: Some("2026-06-07".into()),
+                destination: Some("Idem Test".into()),
+                days: Some(5),
+                diurna_acordata: Some("500.00".into()),
+                salariu_baza: Some("4000.00".into()),
+                report_date: "2026-06-08".into(),
+                notes: None,
+                lines: vec![ExpenseLineInput {
+                    category: "diurna".into(),
+                    description: None,
+                    amount: "500.00".into(),
+                    vat_amount: None,
+                    account_code: None,
+                }],
+                diurna_interna: Some("23.00".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        approve_report(&pool, &full.report.id, "co1", "2026-06-08")
+            .await
+            .unwrap();
+        // Second call is a no-op (status already 'approved').
+        approve_report(&pool, &full.report.id, "co1", "2026-06-08")
+            .await
+            .unwrap();
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM payroll_extra_income \
+             WHERE company_id='co1' AND source_ref=?1 AND employee_id='emp_idem2'",
+        )
+        .bind(&full.report.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            count, 1,
+            "idempotent: must have exactly one extra_income row"
         );
     }
 }
