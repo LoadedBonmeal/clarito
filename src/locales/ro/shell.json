@@ -48,6 +48,7 @@
       "nir": "NIR Recepție",
       "stockTransfer": "Bon de transfer",
       "productie": "Producție (BOM)",
+      "fiscalReceipts": "Bonuri fiscale / Raport Z",
       "inventoryRegister": "Registru-inventar",
       "groupReporting": "Raportare",
       "reports": "Rapoarte",

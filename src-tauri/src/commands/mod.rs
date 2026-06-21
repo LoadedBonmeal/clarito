@@ -37,6 +37,7 @@ pub mod declarations;
 pub mod dividends;
 pub mod etransport;
 pub mod feedback;
+pub mod fiscal_receipts;
 pub mod fx_revaluation;
 pub mod gdpr;
 pub mod gl;

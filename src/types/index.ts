@@ -1903,3 +1903,73 @@ export interface ProduceInput {
   productionDate: string;
   notes?: string;
 }
+
+// ─── Fiscal Receipts / Raport Z ───────────────────────────────────────────────
+
+export type FiscalReceiptStatus = "DRAFT" | "POSTED" | "STORNAT";
+
+export interface FiscalReceipt {
+  id: string;
+  companyId: string;
+  serieCasa: string;
+  nrZ: number;
+  reportDate: string;
+  nrBonuri: number;
+  total: string;
+  numerar: string;
+  card: string;
+  tichete: string;
+  status: FiscalReceiptStatus;
+  retailMethod: number;
+  notes: string | null;
+  createdAt: number;
+}
+
+export interface FiscalReceiptVatLine {
+  id: string;
+  receiptId: string;
+  vatCategory: string;
+  rate: string;
+  baza: string;
+  tva: string;
+}
+
+export interface FiscalReceiptInvoiceLink {
+  id: string;
+  receiptId: string;
+  invoiceId: string;
+  amount: string;
+  payMeans: "CASH" | "CARD";
+}
+
+export interface FiscalReceiptDetail {
+  receipt: FiscalReceipt;
+  vatLines: FiscalReceiptVatLine[];
+  invoiceLinks: FiscalReceiptInvoiceLink[];
+}
+
+export interface FiscalReceiptInput {
+  serieCasa: string;
+  nrZ: number;
+  reportDate: string;
+  nrBonuri?: number;
+  total: string;
+  numerar: string;
+  card: string;
+  tichete?: string;
+  retailMethod?: number;
+  notes?: string;
+}
+
+export interface VatLineInput {
+  vatCategory?: string;
+  rate: string;
+  baza: string;
+  tva: string;
+}
+
+export interface InvoiceLinkInput {
+  invoiceId: string;
+  amount: string;
+  payMeans: "CASH" | "CARD";
+}

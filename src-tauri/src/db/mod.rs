@@ -26,6 +26,7 @@ pub mod assets;
 pub mod concedii;
 pub mod declaration_filings;
 pub mod dividends;
+pub mod fiscal_receipts;
 pub mod fx_revaluation;
 pub mod gestiune;
 pub mod gl;

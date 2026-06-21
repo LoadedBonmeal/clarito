@@ -607,6 +607,17 @@ pub fn run() {
             // reevaluare valutară lunară — P1 Wave 7
             commands::fx_revaluation::compute_fx_revaluation,
             commands::fx_revaluation::list_fx_revaluations,
+            // bonuri fiscale / raport Z — P2 Wave 6
+            commands::fiscal_receipts::create_fiscal_receipt,
+            commands::fiscal_receipts::list_fiscal_receipts,
+            commands::fiscal_receipts::get_fiscal_receipt,
+            commands::fiscal_receipts::update_fiscal_receipt,
+            commands::fiscal_receipts::delete_fiscal_receipt,
+            commands::fiscal_receipts::set_fiscal_receipt_vat_lines,
+            commands::fiscal_receipts::add_fiscal_receipt_invoice_link,
+            commands::fiscal_receipts::remove_fiscal_receipt_invoice_link,
+            commands::fiscal_receipts::set_fiscal_receipt_status,
+            commands::fiscal_receipts::settle_fiscal_receipt_pos,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

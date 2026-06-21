@@ -1384,6 +1384,83 @@ export const receipts = {
     invoke<string>("generate_receipt_pdf", { id, companyId }),
 };
 
+// ─── Fiscal Receipts / Raport Z — P2 Wave 6 ──────────────────────────────
+
+import type {
+  FiscalReceipt,
+  FiscalReceiptDetail,
+  FiscalReceiptInvoiceLink,
+  FiscalReceiptInput,
+  FiscalReceiptVatLine,
+  VatLineInput,
+  InvoiceLinkInput,
+} from "@/types";
+
+export const fiscalReceipts = {
+  /** Create a DRAFT fiscal receipt (Raport Z). */
+  create: (companyId: string, input: FiscalReceiptInput) =>
+    invoke<FiscalReceipt>("create_fiscal_receipt", { companyId, input }),
+  /** List fiscal receipts (optionally filtered by date range). */
+  list: (companyId: string, dateFrom?: string, dateTo?: string) =>
+    invoke<FiscalReceipt[]>("list_fiscal_receipts", {
+      companyId,
+      dateFrom: dateFrom ?? null,
+      dateTo: dateTo ?? null,
+    }),
+  /** Get a single receipt with VAT lines and invoice links. */
+  get: (id: string, companyId: string) =>
+    invoke<FiscalReceiptDetail>("get_fiscal_receipt", { id, companyId }),
+  /** Update a DRAFT receipt. */
+  update: (id: string, companyId: string, input: FiscalReceiptInput) =>
+    invoke<FiscalReceipt>("update_fiscal_receipt", { id, companyId, input }),
+  /** Delete a DRAFT receipt. */
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_fiscal_receipt", { id, companyId }),
+  /** Replace all VAT lines of a DRAFT receipt. */
+  setVatLines: (receiptId: string, companyId: string, lines: VatLineInput[]) =>
+    invoke<FiscalReceiptVatLine[]>("set_fiscal_receipt_vat_lines", {
+      receiptId,
+      companyId,
+      lines,
+    }),
+  /** Add a bon→invoice de-dup link. */
+  addInvoiceLink: (
+    receiptId: string,
+    companyId: string,
+    input: InvoiceLinkInput
+  ) =>
+    invoke<FiscalReceiptInvoiceLink>("add_fiscal_receipt_invoice_link", {
+      receiptId,
+      companyId,
+      input,
+    }),
+  /** Remove a bon→invoice de-dup link. */
+  removeInvoiceLink: (
+    linkId: string,
+    receiptId: string,
+    companyId: string
+  ) =>
+    invoke<void>("remove_fiscal_receipt_invoice_link", {
+      linkId,
+      receiptId,
+      companyId,
+    }),
+  /** Change receipt status: DRAFT→POSTED (posts GL) or POSTED→STORNAT (reverses GL). */
+  setStatus: (id: string, companyId: string, status: string) =>
+    invoke<FiscalReceipt>("set_fiscal_receipt_status", {
+      id,
+      companyId,
+      status,
+    }),
+  /** Post the POS card settlement: D 5121 = C 5125 + optional commission. */
+  settlePos: (id: string, companyId: string, commission?: string) =>
+    invoke<FiscalReceipt>("settle_fiscal_receipt_pos", {
+      id,
+      companyId,
+      commission: commission ?? null,
+    }),
+};
+
 // ─── Accounts — plan de conturi (R15 Wave 4) ──────────────────────────────
 
 /** R15 Wave 4: All account commands are company_id-scoped. */
@@ -1722,6 +1799,7 @@ export const api = {
   declarations,
   etransport,
   feedback,
+  fiscalReceipts,
   gdpr,
   gestiuni,
   gl,

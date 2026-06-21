@@ -47,6 +47,7 @@
       "nir": "Goods Receipt (NIR)",
       "stockTransfer": "Stock transfer",
       "productie": "Production (BOM)",
+      "fiscalReceipts": "Fiscal receipts / Z-Report",
       "inventoryRegister": "Inventory register",
       "groupReporting": "Reporting",
       "reports": "Reports",
