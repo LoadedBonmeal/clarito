@@ -22,6 +22,8 @@ pub mod received;
 pub mod settings;
 pub mod users;
 
+pub mod contracts;
+
 pub mod accounts;
 pub mod aging;
 pub mod assets;

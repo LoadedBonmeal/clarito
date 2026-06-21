@@ -70,6 +70,7 @@ import { HelpPage } from "@/pages/Help";
 import { AccountPage } from "@/pages/Account";
 import { PaymentsPage } from "@/pages/Payments";
 import { RecurringPage } from "@/pages/Recurring";
+import { ContractsPage } from "@/pages/Contracts";
 import { QuotesPage } from "@/pages/Quotes";
 import { OrdersPage } from "@/pages/Orders";
 import { ChartOfAccountsPage } from "@/pages/ChartOfAccounts";
@@ -262,6 +263,12 @@ const recurringRoute = createRoute({
   component: RecurringPage,
 });
 
+const contractsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/contracts",
+  component: ContractsPage,
+});
+
 const quotesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/quotes",
@@ -407,6 +414,7 @@ const routeTree = rootRoute.addChildren([
   accountRoute,
   paymentsRoute,
   recurringRoute,
+  contractsRoute,
   quotesRoute,
   ordersRoute,
   declarationsRoute,

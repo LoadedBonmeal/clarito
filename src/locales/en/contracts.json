@@ -1,0 +1,110 @@
+{
+  "contracts": {
+    "title": "Contracts",
+    "selectCompany": "Select an active company to view contracts.",
+    "sub": {
+      "contracts_one": "{{count}} contract",
+      "contracts_other": "{{count}} contracts",
+      "active": "{{n}} active"
+    },
+    "head": {
+      "new": "New contract"
+    },
+    "tabs": {
+      "all": "All",
+      "active": "Active",
+      "draft": "Drafts",
+      "expired": "Expired",
+      "terminated": "Terminated"
+    },
+    "search": "Search contract…",
+    "states": {
+      "loading": "Loading…",
+      "errorLabel": "contracts",
+      "emptyNone": "No contracts. Create one with the New contract button to manage commercial agreements.",
+      "emptyFiltered": "No records match the applied filters."
+    },
+    "status": {
+      "draft": "Draft",
+      "active": "Active",
+      "expired": "Expired",
+      "terminated": "Terminated"
+    },
+    "table": {
+      "number": "No.",
+      "title": "Title",
+      "partner": "Partner",
+      "period": "Period",
+      "value": "Value",
+      "status": "Status",
+      "expiry": "Expires in",
+      "days": "days"
+    },
+    "row": {
+      "deleteQ": "Delete?",
+      "confirmDelete": "Confirm deletion",
+      "edit": "Edit",
+      "delete": "Delete",
+      "setActive": "Mark as active",
+      "setTerminated": "Terminate",
+      "setExpired": "Mark as expired",
+      "viewRecurring": "Linked recurring invoices"
+    },
+    "expiry": {
+      "none": "—",
+      "expired": "Expired",
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days"
+    },
+    "cancel": "Cancel",
+    "modal": {
+      "editTitle": "Edit contract",
+      "createTitle": "New contract",
+      "sub": "Commercial/legal record — does not create accounting entries.",
+      "close": "Close",
+      "number": "Contract number",
+      "numberPlaceholder": "e.g. CT-2026-001",
+      "title": "Title",
+      "titlePlaceholder": "e.g. IT services contract",
+      "object": "Contract object",
+      "objectPlaceholder": "e.g. Software maintenance services",
+      "partner": "Partner",
+      "partnerPick": "— Select partner —",
+      "value": "Contract value (informational)",
+      "valuePlaceholder": "e.g. 12000.00",
+      "currency": "Currency",
+      "startDate": "Start date",
+      "endDate": "End date (optional)",
+      "status": "Status",
+      "paymentTerms": "Payment terms (days)",
+      "paymentTermsPlaceholder": "e.g. 30",
+      "autoRenew": "Auto-renew",
+      "renewalNoticeDays": "Renewal notice (days)",
+      "renewalNoticePlaceholder": "e.g. 30",
+      "notes": "Notes (optional)",
+      "notesPlaceholder": "Additional information",
+      "saving": "Saving…",
+      "saveChanges": "Save changes",
+      "create": "Create contract",
+      "recurringSection": "Linked recurring invoices",
+      "recurringEmpty": "No recurring invoices linked to this contract."
+    },
+    "validate": {
+      "title": "Enter a title for the contract.",
+      "startDate": "Enter a valid start date."
+    },
+    "notify": {
+      "created": "Contract created successfully",
+      "createError": "Could not create the contract.",
+      "updated": "Contract updated successfully",
+      "updateError": "Could not update the contract.",
+      "deleted": "Contract deleted",
+      "deleteError": "Could not delete the contract.",
+      "statusChanged": "Contract status updated.",
+      "statusError": "Could not update the contract status."
+    },
+    "banner": {
+      "info": "Contracts are informational commercial/legal records. They do not generate accounting entries (OMFP 3512/2008). Contract value is informational only — no class 8036 commitment tracking."
+    }
+  }
+}

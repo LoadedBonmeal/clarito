@@ -83,6 +83,7 @@ pub fn spawn_background_tasks(app: AppHandle) {
     let app_for_archive = app.clone();
     let app_for_token = app.clone();
     let app_for_recurring = app.clone();
+    let app_for_contracts = app.clone();
 
     // Task 1: Poll status of SUBMITTED invoices every 15 min
     spawn_supervised("poll_submitted_invoices", move || {
@@ -273,7 +274,20 @@ pub fn spawn_background_tasks(app: AppHandle) {
         }
     });
 
-    // Task 8: One-shot crash recovery — reset QUEUED invoices with no upload_id
+    // Task 8: Contract expiry notifier — daily at 09:10 local time (just after cert check)
+    spawn_supervised("check_contract_expiry", move || {
+        let app_inner = app_for_contracts.clone();
+        async move {
+            loop {
+                sleep_until_local_time(9, 10).await;
+                if let Some(state) = app_inner.try_state::<crate::state::AppState>() {
+                    crate::db::contracts::notify_expiring_contracts(&state.db).await;
+                }
+            }
+        }
+    });
+
+    // Task 9: One-shot crash recovery — reset QUEUED invoices with no upload_id
     // Not supervised: runs once at startup, not an infinite loop.
     let app8 = app.clone();
     tauri::async_runtime::spawn(async move {

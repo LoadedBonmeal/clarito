@@ -1,0 +1,112 @@
+{
+  "contracts": {
+    "title": "Contracte",
+    "selectCompany": "Selectați o companie activă pentru a vedea contractele.",
+    "sub": {
+      "contracts_one": "{{count}} contract",
+      "contracts_few": "{{count}} contracte",
+      "contracts_other": "{{count}} de contracte",
+      "active": "{{n}} active"
+    },
+    "head": {
+      "new": "Contract nou"
+    },
+    "tabs": {
+      "all": "Toate",
+      "active": "Active",
+      "draft": "Ciorne",
+      "expired": "Expirate",
+      "terminated": "Reziliate"
+    },
+    "search": "Caută contract…",
+    "states": {
+      "loading": "Se încarcă…",
+      "errorLabel": "contractele",
+      "emptyNone": "Niciun contract. Creați un contract cu butonul Contract nou pentru a gestiona acordurile comerciale.",
+      "emptyFiltered": "Nicio înregistrare pentru filtrele aplicate."
+    },
+    "status": {
+      "draft": "Ciornă",
+      "active": "Activ",
+      "expired": "Expirat",
+      "terminated": "Reziliat"
+    },
+    "table": {
+      "number": "Nr.",
+      "title": "Titlu",
+      "partner": "Partener",
+      "period": "Perioadă",
+      "value": "Valoare",
+      "status": "Status",
+      "expiry": "Expiră în",
+      "days": "zile"
+    },
+    "row": {
+      "deleteQ": "Ștergeți?",
+      "confirmDelete": "Confirmă ștergerea",
+      "edit": "Editează",
+      "delete": "Șterge",
+      "setActive": "Marchează activ",
+      "setTerminated": "Reziliați",
+      "setExpired": "Marchează expirat",
+      "viewRecurring": "Facturi recurente legate"
+    },
+    "expiry": {
+      "none": "—",
+      "expired": "Expirat",
+      "days_one": "{{count}} zi",
+      "days_few": "{{count}} zile",
+      "days_other": "{{count}} de zile"
+    },
+    "cancel": "Anulează",
+    "modal": {
+      "editTitle": "Editează contract",
+      "createTitle": "Contract nou",
+      "sub": "Înregistrare comercială/juridică — nu generează înregistrări contabile.",
+      "close": "Închide",
+      "number": "Număr contract",
+      "numberPlaceholder": "ex: CT-2026-001",
+      "title": "Titlu",
+      "titlePlaceholder": "ex: Contract servicii IT",
+      "object": "Obiect contract",
+      "objectPlaceholder": "ex: Prestare servicii de mentenanță software",
+      "partner": "Partener",
+      "partnerPick": "— Selectați partener —",
+      "value": "Valoare contractuală (informativă)",
+      "valuePlaceholder": "ex: 12000.00",
+      "currency": "Monedă",
+      "startDate": "Data start",
+      "endDate": "Data end (opțional)",
+      "status": "Status",
+      "paymentTerms": "Termen de plată (zile)",
+      "paymentTermsPlaceholder": "ex: 30",
+      "autoRenew": "Reînnoire automată",
+      "renewalNoticeDays": "Preaviz reînnoire (zile)",
+      "renewalNoticePlaceholder": "ex: 30",
+      "notes": "Notițe (opțional)",
+      "notesPlaceholder": "Informații suplimentare",
+      "saving": "Se salvează…",
+      "saveChanges": "Salvează modificările",
+      "create": "Creează contract",
+      "recurringSection": "Facturi recurente legate",
+      "recurringEmpty": "Nicio factură recurentă legată de acest contract."
+    },
+    "validate": {
+      "title": "Introduceți un titlu pentru contract.",
+      "startDate": "Introduceți o dată de start validă."
+    },
+    "notify": {
+      "created": "Contract creat cu succes",
+      "createError": "Nu s-a putut crea contractul.",
+      "updated": "Contract actualizat cu succes",
+      "updateError": "Nu s-a putut actualiza contractul.",
+      "deleted": "Contract șters",
+      "deleteError": "Nu s-a putut șterge contractul.",
+      "statusChanged": "Status contract actualizat.",
+      "statusError": "Nu s-a putut actualiza statusul contractului."
+    },
+    "banner": {
+      "info": "Contractele sunt înregistrări comerciale/juridice informative. Nu generează înregistrări contabile (OMFP 3512/2008). Valoarea contractuală este informativă — fără urmărire angajamente cls. 8036."
+    }
+  }
+}

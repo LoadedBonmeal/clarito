@@ -83,6 +83,13 @@ export const queryKeys = {
     list: (companyId: string) => ["recurringInvoices", companyId] as const,
   },
 
+  contracts: {
+    all: ["contracts"] as const,
+    list: (companyId: string) => ["contracts", "list", companyId] as const,
+    detail: (id: string) => ["contracts", "detail", id] as const,
+    recurring: (contractId: string) => ["contracts", "recurring", contractId] as const,
+  },
+
   quotes: {
     all: ["quotes"] as const,
     list: (companyId: string) => ["quotes", "list", companyId] as const,

@@ -630,6 +630,82 @@ export const recurring = {
     invoke<void>("toggle_recurring_active", { id, companyId, active }),
 };
 
+// ─── Contracts ───────────────────────────────────────────────────────────────
+
+export type ContractStatus = "draft" | "active" | "expired" | "terminated";
+
+export interface Contract {
+  id: string;
+  companyId: string;
+  contactId: string | null;
+  number: string | null;
+  title: string;
+  object: string | null;
+  /** Informational only — no GL/commitment tracking */
+  value: string | null;
+  currency: string;
+  startDate: string;
+  endDate: string | null;
+  status: ContractStatus;
+  paymentTermsDays: number | null;
+  autoRenew: boolean;
+  renewalNoticeDays: number;
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateContractArgs {
+  companyId: string;
+  contactId?: string | null;
+  number?: string | null;
+  title: string;
+  object?: string | null;
+  value?: string | null;
+  currency?: string | null;
+  startDate: string;
+  endDate?: string | null;
+  status?: ContractStatus | null;
+  paymentTermsDays?: number | null;
+  autoRenew?: boolean | null;
+  renewalNoticeDays?: number | null;
+  notes?: string | null;
+}
+
+export interface UpdateContractArgs {
+  id: string;
+  companyId: string;
+  contactId?: string | null;
+  number?: string | null;
+  title: string;
+  object?: string | null;
+  value?: string | null;
+  currency?: string | null;
+  startDate: string;
+  endDate?: string | null;
+  paymentTermsDays?: number | null;
+  autoRenew?: boolean | null;
+  renewalNoticeDays?: number | null;
+  notes?: string | null;
+}
+
+export const contracts = {
+  create: (args: CreateContractArgs) =>
+    invoke<Contract>("create_contract", { args }),
+  list: (companyId: string) =>
+    invoke<Contract[]>("list_contracts", { companyId }),
+  get: (id: string, companyId: string) =>
+    invoke<Contract>("get_contract", { id, companyId }),
+  update: (args: UpdateContractArgs) =>
+    invoke<void>("update_contract", { args }),
+  setStatus: (id: string, companyId: string, status: ContractStatus) =>
+    invoke<void>("set_contract_status", { id, companyId, status }),
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_contract", { id, companyId }),
+  listRecurring: (contractId: string, companyId: string) =>
+    invoke<RecurringInvoice[]>("list_contract_recurring", { contractId, companyId }),
+};
+
 // ─── Quotes (oferte / devize) ─────────────────────────────────────────────
 
 export type QuoteStatus = "draft" | "sent" | "accepted" | "invoiced" | "cancelled" | "expired";
@@ -2114,6 +2190,7 @@ export const api = {
   quotes,
   orders,
   recurring,
+  contracts,
   reports,
   assets,
   productie,

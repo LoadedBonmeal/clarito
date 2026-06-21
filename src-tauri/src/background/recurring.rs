@@ -56,7 +56,10 @@ async fn process_recurring_invoices(
     let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
     let hundred = Decimal::from(100u32);
 
-    let due = recurring::list_due(pool).await?;
+    // Use the contract-aware guard: recurring invoices linked to a non-active or
+    // past-end contract are excluded from generation. Unlinked invoices behave
+    // exactly as before (no regression). See db::contracts::list_due_with_contract_guard.
+    let due = crate::db::contracts::list_due_with_contract_guard(pool).await?;
 
     for template in due {
         // Parse lines_json

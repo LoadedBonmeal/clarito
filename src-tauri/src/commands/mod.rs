@@ -32,6 +32,7 @@ pub mod bank_import;
 pub mod bnr;
 pub mod companies;
 pub mod contacts;
+pub mod contracts;
 pub mod d390;
 pub mod d394;
 pub mod declarations;

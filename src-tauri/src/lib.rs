@@ -478,6 +478,14 @@ pub fn run() {
                     commands::recurring::delete_recurring_invoice,
                     commands::recurring::update_recurring_invoice,
                     commands::recurring::toggle_recurring_active,
+                    // contracts (P3 Wave B)
+                    commands::contracts::create_contract,
+                    commands::contracts::list_contracts,
+                    commands::contracts::get_contract,
+                    commands::contracts::update_contract,
+                    commands::contracts::set_contract_status,
+                    commands::contracts::delete_contract,
+                    commands::contracts::list_contract_recurring,
                     // quotes (oferte / devize)
                     commands::quotes::create_quote,
                     commands::quotes::list_quotes,
