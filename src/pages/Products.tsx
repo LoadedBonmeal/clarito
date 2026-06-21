@@ -30,7 +30,8 @@ import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { formatError } from "@/lib/error-mapper";
 import { notify } from "@/lib/toasts";
-import type { Product, ProductInput, UpdateProductInput } from "@/types";
+import type { Product, ProductGroup, ProductInput, ProductType, UpdateProductInput } from "@/types";
+import { PRODUCT_TYPES } from "@/types";
 import { VAT_RATES, VAT_CATEGORIES, VAT_CATEGORY_LABELS } from "@/lib/constants";
 
 const RO_MON = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
@@ -618,6 +619,12 @@ function ProductModal({
   const { t } = useTranslation();
   const isEdit = product !== null;
 
+  // Fetch product groups for the Grupă select.
+  const { data: groups = [] } = useQuery({
+    queryKey: ["product-groups", companyId],
+    queryFn: () => api.productGroups.list(companyId),
+  });
+
   const [form, setForm] = useState<ProductInput>({
     name: product?.name ?? "",
     unit: product?.unit ?? "buc",
@@ -628,6 +635,8 @@ function ProductModal({
     stockQty: product?.stockQty ?? "",
     art331Code: product?.art331Code ?? "",
     isService: product?.isService ?? false,
+    productType: product?.productType ?? "marfa",
+    productGroupId: product?.productGroupId ?? undefined,
     active: product?.active ?? true,
   });
   const [error, setError] = useState<string | null>(null);
@@ -668,7 +677,9 @@ function ProductModal({
       setError(t("products.modal.nameRequired"));
       return;
     }
-    const isService = form.isService ?? false;
+    // serviciu ⇔ isService consistency: the type drives is_service too.
+    const productType = (form.productType ?? "marfa") as ProductType;
+    const isService = productType === "serviciu" || (form.isService ?? false);
     const input: ProductInput = {
       ...form,
       name: form.name.trim(),
@@ -681,6 +692,8 @@ function ProductModal({
       vatRate: form.vatRate || "21",
       vatCategory: form.vatCategory || "S",
       isService,
+      productType,
+      productGroupId: form.productGroupId || undefined,
     };
     if (isEdit) {
       const { active, ...rest } = input;
@@ -763,15 +776,63 @@ function ProductModal({
                   ))}
                 </select>
               </div>
-              {/* is_service checkbox — when checked, hides stock qty and valuation fields */}
+              {/* Tip produs (P2 Wave 1) — drives default GL accounts */}
+              <div className="field">
+                <label>{t("products.modal.productType")}</label>
+                <select
+                  className="select"
+                  value={form.productType ?? "marfa"}
+                  onChange={(e) => {
+                    const pt = e.target.value as ProductType;
+                    setForm((f) => ({
+                      ...f,
+                      productType: pt,
+                      // Keep isService consistent: serviciu ⇔ isService.
+                      isService: pt === "serviciu" ? true : pt === "marfa" ? false : f.isService,
+                    }));
+                  }}
+                >
+                  {PRODUCT_TYPES.map((pt) => (
+                    <option key={pt} value={pt}>
+                      {t(`products.productTypes.${pt}`)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Grupă produs (opțional) */}
+              <div className="field">
+                <label>{t("products.modal.productGroup")}</label>
+                <select
+                  className="select"
+                  value={form.productGroupId ?? ""}
+                  onChange={(e) => setForm((f) => ({ ...f, productGroupId: e.target.value || undefined }))}
+                >
+                  <option value="">{t("products.modal.productGroupNone")}</option>
+                  {(groups as ProductGroup[]).map((g) => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* is_service checkbox — derived from product_type; kept for backwards compat */}
               <label
                 className="span2"
                 style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", userSelect: "none" }}
               >
                 <button
                   type="button"
-                  className={`cbx${form.isService ? " on" : ""}`}
-                  onClick={() => setForm((f) => ({ ...f, isService: !f.isService }))}
+                  className={`cbx${(form.productType === "serviciu" || form.isService) ? " on" : ""}`}
+                  onClick={() => {
+                    setForm((f) => {
+                      const newIsService = !(f.productType === "serviciu" || f.isService);
+                      return {
+                        ...f,
+                        isService: newIsService,
+                        productType: newIsService ? "serviciu" : (f.productType === "serviciu" ? "marfa" : f.productType),
+                      };
+                    });
+                  }}
                   aria-label={t("products.modal.isService")}
                 />
                 {t("products.modal.isService")}
@@ -779,7 +840,7 @@ function ProductModal({
               </label>
 
               {/* Stock qty — hidden for services */}
-              {!form.isService && (
+              {form.productType !== "serviciu" && !form.isService && (
                 <div className="field">
                   <label>{t("products.modal.stockQty")}</label>
                   <input

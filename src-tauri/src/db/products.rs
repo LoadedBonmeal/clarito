@@ -12,6 +12,145 @@ use sqlx::{FromRow, SqlitePool};
 use crate::db::models::{new_id, now_unix};
 use crate::error::{AppError, AppResult};
 
+// ─── Product types + account mapping ──────────────────────────────────────────
+
+/// Canonical product types (OMFP 1802/2014 plan de conturi).
+pub const PRODUCT_TYPES: &[&str] = &[
+    "marfa",
+    "produs_finit",
+    "materie_prima",
+    "material_consumabil",
+    "serviciu",
+];
+
+/// Effective account mapping returned by `resolve_accounts`.
+/// Mirrors the account_mapping DB row but is always populated (falls back to
+/// code defaults when no company override exists).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountMapping {
+    /// GL stock account (e.g. "371", "345"). None for services.
+    pub stock_account: Option<String>,
+    /// GL expense account for stock issues / cost of sales (e.g. "607", "711"). None for services.
+    pub expense_account: Option<String>,
+    /// GL income account for sales revenue (e.g. "707", "704"). None for raw-material types.
+    pub income_account: Option<String>,
+    /// Whether this type maintains a stock balance.
+    pub uses_stock: bool,
+    /// Whether this type can be sold at retail (amănunt) prices (371-class only).
+    pub retail_capable: bool,
+}
+
+/// Standard code defaults per product_type — OMFP 1802/2014.
+/// This is the single source of truth; no DB seeding is needed.
+pub fn default_account_mapping(product_type: &str) -> AccountMapping {
+    match product_type {
+        "marfa" => AccountMapping {
+            stock_account: Some("371".into()),
+            expense_account: Some("607".into()),
+            income_account: Some("707".into()),
+            uses_stock: true,
+            retail_capable: true,
+        },
+        "produs_finit" => AccountMapping {
+            stock_account: Some("345".into()),
+            expense_account: Some("711".into()),
+            income_account: Some("701".into()),
+            uses_stock: true,
+            retail_capable: false,
+        },
+        "materie_prima" => AccountMapping {
+            stock_account: Some("301".into()),
+            expense_account: Some("601".into()),
+            income_account: None,
+            uses_stock: true,
+            retail_capable: false,
+        },
+        "material_consumabil" => AccountMapping {
+            stock_account: Some("302".into()),
+            expense_account: Some("602".into()),
+            income_account: None,
+            uses_stock: true,
+            retail_capable: false,
+        },
+        "serviciu" => AccountMapping {
+            stock_account: None,
+            expense_account: None,
+            income_account: Some("704".into()),
+            uses_stock: false,
+            retail_capable: false,
+        },
+        // Unknown type: fall back to marfa defaults (defensive).
+        _ => AccountMapping {
+            stock_account: Some("371".into()),
+            expense_account: Some("607".into()),
+            income_account: Some("707".into()),
+            uses_stock: true,
+            retail_capable: true,
+        },
+    }
+}
+
+// ─── AccountMapping DB row (for override CRUD) ────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountMappingRow {
+    pub id: String,
+    pub company_id: String,
+    pub product_type: String,
+    pub stock_account: Option<String>,
+    pub expense_account: Option<String>,
+    pub income_account: Option<String>,
+    pub uses_stock: bool,
+    pub retail_capable: bool,
+    pub updated_at: i64,
+}
+
+/// Effective account mapping row — defaults merged with any company override.
+/// Always returns one entry per product_type (5 rows total).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveAccountMapping {
+    pub product_type: String,
+    /// True when a company-specific override row exists.
+    pub is_override: bool,
+    pub stock_account: Option<String>,
+    pub expense_account: Option<String>,
+    pub income_account: Option<String>,
+    pub uses_stock: bool,
+    pub retail_capable: bool,
+}
+
+// ─── ProductGroup ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductGroup {
+    pub id: String,
+    pub company_id: String,
+    pub name: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductGroupInput {
+    pub name: String,
+}
+
+// ─── SetAccountMappingInput ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetAccountMappingInput {
+    pub stock_account: Option<String>,
+    pub expense_account: Option<String>,
+    pub income_account: Option<String>,
+    pub uses_stock: bool,
+    pub retail_capable: bool,
+}
+
 // ─── Model ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -39,6 +178,12 @@ pub struct Product {
     /// True when this product is a service (non-stocabil): no fișă de magazie, no stock qty/valuation.
     /// GL revenue default: serviciu → account 704; marfă → account 707 (see db/gl.rs revenue_account).
     pub is_service: bool,
+    /// Canonical product type (OMFP 1802/2014): marfa | produs_finit | materie_prima |
+    /// material_consumabil | serviciu. Drives the default GL account mapping for NIR/producție.
+    /// Kept consistent with is_service: serviciu ⇔ is_service=true.
+    pub product_type: String,
+    /// Optional product group (FK to product_groups.id). NULL = no group.
+    pub product_group_id: Option<String>,
     pub active: bool,
     pub created_at: i64,
     pub updated_at: i64,
@@ -62,6 +207,10 @@ pub struct ProductInput {
     pub art331_code: Option<String>,
     /// True when this product is a service (non-stocabil). Defaults to false (goods).
     pub is_service: Option<bool>,
+    /// Canonical product type. Defaults to "serviciu" when is_service=true, else "marfa".
+    pub product_type: Option<String>,
+    /// Optional product group id.
+    pub product_group_id: Option<String>,
     pub active: Option<bool>,
 }
 
@@ -81,7 +230,30 @@ pub struct UpdateProductInput {
     pub art331_code: Option<String>,
     /// True when this product is a service (non-stocabil). None = leave unchanged (keeps current value).
     pub is_service: Option<bool>,
+    /// Canonical product type. None = leave unchanged.
+    pub product_type: Option<String>,
+    /// Optional product group id. None = leave unchanged.
+    pub product_group_id: Option<String>,
     pub active: Option<bool>,
+}
+
+/// Derive a canonical product_type from explicit input or fallback to is_service flag.
+/// Rules:
+///  - If `product_type` is explicitly set to a valid value → use it.
+///  - If `is_service=true` and no explicit type → "serviciu".
+///  - Otherwise → "marfa".
+fn effective_product_type(product_type: Option<&str>, is_service: bool) -> String {
+    if let Some(pt) = product_type {
+        let pt = pt.trim();
+        if PRODUCT_TYPES.contains(&pt) {
+            return pt.to_string();
+        }
+    }
+    if is_service {
+        "serviciu".to_string()
+    } else {
+        "marfa".to_string()
+    }
 }
 
 /// Câmpurile numerice FURNIZATE trebuie să fie valide — altfel un preț corupt ar fi stocat ca
@@ -125,7 +297,8 @@ pub async fn list(
     let query_term = query.filter(|s| !s.is_empty());
     let items = sqlx::query_as::<_, Product>(
         "SELECT id, company_id, name, unit, unit_price, vat_rate, vat_category, \
-         code, barcode, stock_qty, art331_code, valuation_method, stock_account, is_service, active, created_at, updated_at \
+         code, barcode, stock_qty, art331_code, valuation_method, stock_account, is_service, \
+         product_type, product_group_id, active, created_at, updated_at \
          FROM products \
          WHERE company_id = ?1 \
            AND (?2 IS NULL OR name LIKE '%' || ?2 || '%' OR code LIKE '%' || ?2 || '%') \
@@ -142,7 +315,8 @@ pub async fn list(
 pub async fn get(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Product> {
     let product = sqlx::query_as::<_, Product>(
         "SELECT id, company_id, name, unit, unit_price, vat_rate, vat_category, \
-         code, barcode, stock_qty, art331_code, valuation_method, stock_account, is_service, active, created_at, updated_at \
+         code, barcode, stock_qty, art331_code, valuation_method, stock_account, is_service, \
+         product_type, product_group_id, active, created_at, updated_at \
          FROM products WHERE id = ?1",
     )
     .bind(id)
@@ -192,14 +366,20 @@ pub async fn create(
 
     let id = new_id();
     let now = now_unix();
+    let is_service = input.is_service.unwrap_or(false);
+    let product_type = effective_product_type(input.product_type.as_deref(), is_service);
+    // Keep is_service consistent: serviciu ⇔ is_service.
+    let is_service_eff = is_service || product_type == "serviciu";
 
     sqlx::query(
         "INSERT INTO products (
             id, company_id, name, unit, unit_price, vat_rate, vat_category,
-            code, barcode, stock_qty, art331_code, is_service, active, created_at, updated_at
+            code, barcode, stock_qty, art331_code, is_service,
+            product_type, product_group_id, active, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7,
-            ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14
+            ?8, ?9, ?10, ?11, ?12,
+            ?13, ?14, ?15, ?16, ?16
         )",
     )
     .bind(&id) // ?1
@@ -214,9 +394,11 @@ pub async fn create(
     .bind(&input.barcode) // ?9
     .bind(&input.stock_qty) // ?10
     .bind(&input.art331_code) // ?11
-    .bind(input.is_service.unwrap_or(false) as i64) // ?12
-    .bind(input.active.unwrap_or(true)) // ?13
-    .bind(now) // ?14 (created_at = updated_at)
+    .bind(is_service_eff as i64) // ?12
+    .bind(&product_type) // ?13
+    .bind(&input.product_group_id) // ?14
+    .bind(input.active.unwrap_or(true)) // ?15
+    .bind(now) // ?16 (created_at = updated_at)
     .execute(pool)
     .await?;
 
@@ -261,22 +443,41 @@ pub async fn update(
     validate_numeric_fields(input.unit_price.as_deref(), input.vat_rate.as_deref())?;
 
     let now = now_unix();
+    let is_service_new = input.is_service.unwrap_or(current.is_service);
+
+    // Derive the effective product_type:
+    // - If product_type is explicitly set in the input → use it (validates in effective_product_type).
+    // - If is_service is explicitly set to false AND no explicit product_type AND current type is
+    //   "serviciu" → switch to "marfa" (caller cleared the service flag).
+    // - Otherwise inherit the current type.
+    let product_type_new = if let Some(ref pt) = input.product_type {
+        effective_product_type(Some(pt.as_str()), is_service_new)
+    } else if input.is_service == Some(false) && current.product_type == "serviciu" {
+        // Explicit is_service=false with no type override: move out of serviciu → marfa.
+        "marfa".to_string()
+    } else {
+        effective_product_type(Some(&current.product_type), is_service_new)
+    };
+    // Keep is_service consistent.
+    let is_service_eff = is_service_new || product_type_new == "serviciu";
 
     sqlx::query(
         "UPDATE products SET
-            name         = ?2,
-            unit         = ?3,
-            unit_price   = ?4,
-            vat_rate     = ?5,
-            vat_category = ?6,
-            code         = ?7,
-            barcode      = ?8,
-            stock_qty    = ?9,
-            art331_code  = ?10,
-            is_service   = ?11,
-            active       = ?12,
-            updated_at   = ?13
-        WHERE id = ?1 AND company_id = ?14",
+            name             = ?2,
+            unit             = ?3,
+            unit_price       = ?4,
+            vat_rate         = ?5,
+            vat_category     = ?6,
+            code             = ?7,
+            barcode          = ?8,
+            stock_qty        = ?9,
+            art331_code      = ?10,
+            is_service       = ?11,
+            product_type     = ?12,
+            product_group_id = ?13,
+            active           = ?14,
+            updated_at       = ?15
+        WHERE id = ?1 AND company_id = ?16",
     )
     .bind(id) // ?1
     .bind(input.name.as_deref().unwrap_or(&current.name)) // ?2
@@ -294,10 +495,12 @@ pub async fn update(
     .bind(input.barcode.or(current.barcode)) // ?8
     .bind(input.stock_qty.or(current.stock_qty)) // ?9
     .bind(input.art331_code.or(current.art331_code)) // ?10
-    .bind(input.is_service.unwrap_or(current.is_service) as i64) // ?11
-    .bind(input.active.unwrap_or(current.active)) // ?12
-    .bind(now) // ?13
-    .bind(company_id) // ?14
+    .bind(is_service_eff as i64) // ?11
+    .bind(&product_type_new) // ?12
+    .bind(input.product_group_id.or(current.product_group_id)) // ?13
+    .bind(input.active.unwrap_or(current.active)) // ?14
+    .bind(now) // ?15
+    .bind(company_id) // ?16
     .execute(pool)
     .await?;
 
@@ -322,6 +525,228 @@ pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<
     Ok(())
 }
 
+// ─── Account mapping ───────────────────────────────────────────────────────────
+
+/// Resolve the effective account mapping for (company, product_type):
+/// - Returns the company OVERRIDE from `account_mapping` when present.
+/// - Otherwise returns the code default from `default_account_mapping`.
+///
+/// This is the NEW lookup layer for future NIR/producție waves.
+/// It does NOT touch `revenue_account` or `stock_expense_account` in gl.rs.
+pub async fn resolve_accounts(
+    pool: &SqlitePool,
+    company_id: &str,
+    product_type: &str,
+) -> AppResult<AccountMapping> {
+    let row = sqlx::query_as::<_, AccountMappingRow>(
+        "SELECT id, company_id, product_type, stock_account, expense_account, income_account, \
+         uses_stock, retail_capable, updated_at \
+         FROM account_mapping \
+         WHERE company_id = ?1 AND product_type = ?2 \
+         LIMIT 1",
+    )
+    .bind(company_id)
+    .bind(product_type)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(match row {
+        Some(r) => AccountMapping {
+            stock_account: r.stock_account,
+            expense_account: r.expense_account,
+            income_account: r.income_account,
+            uses_stock: r.uses_stock,
+            retail_capable: r.retail_capable,
+        },
+        None => default_account_mapping(product_type),
+    })
+}
+
+/// List effective account mappings for all 5 canonical product types.
+/// Each row is either the company override or the code default.
+/// The UI shows all 5 rows, marking which ones are overridden.
+pub async fn list_account_mappings(
+    pool: &SqlitePool,
+    company_id: &str,
+) -> AppResult<Vec<EffectiveAccountMapping>> {
+    // Fetch all override rows for this company in one query.
+    let overrides: Vec<AccountMappingRow> = sqlx::query_as::<_, AccountMappingRow>(
+        "SELECT id, company_id, product_type, stock_account, expense_account, income_account, \
+         uses_stock, retail_capable, updated_at \
+         FROM account_mapping \
+         WHERE company_id = ?1",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?;
+
+    let result = PRODUCT_TYPES
+        .iter()
+        .map(
+            |&pt| match overrides.iter().find(|r| r.product_type == pt) {
+                Some(r) => EffectiveAccountMapping {
+                    product_type: pt.to_string(),
+                    is_override: true,
+                    stock_account: r.stock_account.clone(),
+                    expense_account: r.expense_account.clone(),
+                    income_account: r.income_account.clone(),
+                    uses_stock: r.uses_stock,
+                    retail_capable: r.retail_capable,
+                },
+                None => {
+                    let def = default_account_mapping(pt);
+                    EffectiveAccountMapping {
+                        product_type: pt.to_string(),
+                        is_override: false,
+                        stock_account: def.stock_account,
+                        expense_account: def.expense_account,
+                        income_account: def.income_account,
+                        uses_stock: def.uses_stock,
+                        retail_capable: def.retail_capable,
+                    }
+                }
+            },
+        )
+        .collect();
+
+    Ok(result)
+}
+
+/// Upsert a company override for a given product_type.
+pub async fn set_account_mapping(
+    pool: &SqlitePool,
+    company_id: &str,
+    product_type: &str,
+    input: SetAccountMappingInput,
+) -> AppResult<EffectiveAccountMapping> {
+    if !PRODUCT_TYPES.contains(&product_type) {
+        return Err(AppError::Validation(format!(
+            "Tip produs invalid: {product_type}. Valori permise: {}",
+            PRODUCT_TYPES.join(", ")
+        )));
+    }
+    let id = new_id();
+    let now = now_unix();
+
+    sqlx::query(
+        "INSERT INTO account_mapping \
+         (id, company_id, product_type, stock_account, expense_account, income_account, \
+          uses_stock, retail_capable, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+         ON CONFLICT(company_id, product_type) DO UPDATE SET \
+           stock_account   = excluded.stock_account, \
+           expense_account = excluded.expense_account, \
+           income_account  = excluded.income_account, \
+           uses_stock      = excluded.uses_stock, \
+           retail_capable  = excluded.retail_capable, \
+           updated_at      = excluded.updated_at",
+    )
+    .bind(&id)
+    .bind(company_id)
+    .bind(product_type)
+    .bind(&input.stock_account)
+    .bind(&input.expense_account)
+    .bind(&input.income_account)
+    .bind(input.uses_stock as i64)
+    .bind(input.retail_capable as i64)
+    .bind(now)
+    .execute(pool)
+    .await?;
+
+    Ok(EffectiveAccountMapping {
+        product_type: product_type.to_string(),
+        is_override: true,
+        stock_account: input.stock_account,
+        expense_account: input.expense_account,
+        income_account: input.income_account,
+        uses_stock: input.uses_stock,
+        retail_capable: input.retail_capable,
+    })
+}
+
+/// Delete the company override for a product_type → reverts to code default.
+pub async fn reset_account_mapping(
+    pool: &SqlitePool,
+    company_id: &str,
+    product_type: &str,
+) -> AppResult<EffectiveAccountMapping> {
+    sqlx::query("DELETE FROM account_mapping WHERE company_id = ?1 AND product_type = ?2")
+        .bind(company_id)
+        .bind(product_type)
+        .execute(pool)
+        .await?;
+
+    let def = default_account_mapping(product_type);
+    Ok(EffectiveAccountMapping {
+        product_type: product_type.to_string(),
+        is_override: false,
+        stock_account: def.stock_account,
+        expense_account: def.expense_account,
+        income_account: def.income_account,
+        uses_stock: def.uses_stock,
+        retail_capable: def.retail_capable,
+    })
+}
+
+// ─── Product groups ────────────────────────────────────────────────────────────
+
+/// List product groups for a company.
+pub async fn list_product_groups(
+    pool: &SqlitePool,
+    company_id: &str,
+) -> AppResult<Vec<ProductGroup>> {
+    let groups = sqlx::query_as::<_, ProductGroup>(
+        "SELECT id, company_id, name, created_at \
+         FROM product_groups \
+         WHERE company_id = ?1 \
+         ORDER BY name",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(groups)
+}
+
+/// Create a product group.
+pub async fn create_product_group(
+    pool: &SqlitePool,
+    company_id: &str,
+    input: ProductGroupInput,
+) -> AppResult<ProductGroup> {
+    let id = new_id();
+    let now = now_unix();
+    sqlx::query(
+        "INSERT INTO product_groups (id, company_id, name, created_at) VALUES (?1, ?2, ?3, ?4)",
+    )
+    .bind(&id)
+    .bind(company_id)
+    .bind(input.name.trim())
+    .bind(now)
+    .execute(pool)
+    .await?;
+
+    let group = sqlx::query_as::<_, ProductGroup>(
+        "SELECT id, company_id, name, created_at FROM product_groups WHERE id = ?1",
+    )
+    .bind(&id)
+    .fetch_one(pool)
+    .await?;
+    Ok(group)
+}
+
+/// Delete a product group. Products referencing it keep the id (FK is nullable + no CASCADE on products).
+pub async fn delete_product_group(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
+    let res = sqlx::query("DELETE FROM product_groups WHERE id = ?1 AND company_id = ?2")
+        .bind(id)
+        .bind(company_id)
+        .execute(pool)
+        .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(())
+}
+
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -329,7 +754,7 @@ mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
 
-    /// Minimal in-memory schema for products Wave 1 tests.
+    /// Minimal in-memory schema for products tests (Wave 1 + P2 Wave 1).
     async fn setup_products_pool() -> sqlx::SqlitePool {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -337,25 +762,72 @@ mod tests {
             .await
             .unwrap();
 
+        // Fake companies table to satisfy FK constraints (even though SQLite doesn't enforce FKs by default).
+        sqlx::query(
+            "CREATE TABLE companies (
+                id TEXT PRIMARY KEY NOT NULL,
+                legal_name TEXT NOT NULL DEFAULT ''
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO companies (id, legal_name) VALUES ('comp-1', 'Test 1'), ('comp-2', 'Test 2')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
         sqlx::query(
             "CREATE TABLE products (
-                id           TEXT    PRIMARY KEY NOT NULL,
-                company_id   TEXT    NOT NULL,
-                name         TEXT    NOT NULL,
-                unit         TEXT    NOT NULL DEFAULT 'buc',
-                unit_price   TEXT    NOT NULL DEFAULT '0.00',
-                vat_rate     TEXT    NOT NULL DEFAULT '19',
-                vat_category TEXT    NOT NULL DEFAULT 'S',
-                code         TEXT,
-                barcode      TEXT,
-                stock_qty    TEXT,
-                art331_code  TEXT,
+                id               TEXT    PRIMARY KEY NOT NULL,
+                company_id       TEXT    NOT NULL,
+                name             TEXT    NOT NULL,
+                unit             TEXT    NOT NULL DEFAULT 'buc',
+                unit_price       TEXT    NOT NULL DEFAULT '0.00',
+                vat_rate         TEXT    NOT NULL DEFAULT '19',
+                vat_category     TEXT    NOT NULL DEFAULT 'S',
+                code             TEXT,
+                barcode          TEXT,
+                stock_qty        TEXT,
+                art331_code      TEXT,
                 valuation_method TEXT,
                 stock_account    TEXT,
-                is_service   INTEGER NOT NULL DEFAULT 0,
-                active       INTEGER NOT NULL DEFAULT 1,
-                created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at   INTEGER NOT NULL DEFAULT (unixepoch())
+                is_service       INTEGER NOT NULL DEFAULT 0,
+                product_type     TEXT    NOT NULL DEFAULT 'marfa',
+                product_group_id TEXT,
+                active           INTEGER NOT NULL DEFAULT 1,
+                created_at       INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at       INTEGER NOT NULL DEFAULT (unixepoch())
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE product_groups (
+                id         TEXT    PRIMARY KEY NOT NULL,
+                company_id TEXT    NOT NULL,
+                name       TEXT    NOT NULL,
+                created_at INTEGER NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE account_mapping (
+                id              TEXT    PRIMARY KEY NOT NULL,
+                company_id      TEXT    NOT NULL,
+                product_type    TEXT    NOT NULL,
+                stock_account   TEXT,
+                expense_account TEXT,
+                income_account  TEXT,
+                uses_stock      INTEGER NOT NULL DEFAULT 1,
+                retail_capable  INTEGER NOT NULL DEFAULT 0,
+                updated_at      INTEGER NOT NULL,
+                UNIQUE(company_id, product_type)
             )",
         )
         .execute(&pool)
@@ -478,6 +950,8 @@ mod tests {
             stock_qty: None,
             art331_code: None,
             is_service: None,
+            product_type: None,
+            product_group_id: None,
             active: Some(true),
         };
         let created = create(&pool, "comp-1", input).await.unwrap();
@@ -528,6 +1002,8 @@ mod tests {
             stock_qty: None,
             art331_code: None,
             is_service: None,
+            product_type: None,
+            product_group_id: None,
             active: Some(true),
         };
         let r1 = create(&pool, "comp-1", input1).await;
@@ -545,6 +1021,8 @@ mod tests {
             stock_qty: None,
             art331_code: None,
             is_service: None,
+            product_type: None,
+            product_group_id: None,
             active: Some(true),
         };
         let r2 = create(&pool, "comp-1", input2).await;
@@ -565,6 +1043,8 @@ mod tests {
             stock_qty: None,
             art331_code: None,
             is_service: None,
+            product_type: None,
+            product_group_id: None,
             active: Some(true),
         };
         let r3 = create(&pool, "comp-2", input3).await;
@@ -587,6 +1067,8 @@ mod tests {
             stock_qty: None,
             art331_code: None,
             is_service: None,
+            product_type: None,
+            product_group_id: None,
             active: None,
         };
         let input2 = ProductInput {
@@ -600,6 +1082,8 @@ mod tests {
             stock_qty: None,
             art331_code: None,
             is_service: None,
+            product_type: None,
+            product_group_id: None,
             active: None,
         };
         let r1 = create(&pool, "comp-1", input1).await;
@@ -639,6 +1123,8 @@ mod tests {
             stock_qty: None,
             art331_code: None,
             is_service: Some(true),
+            product_type: None,
+            product_group_id: None,
             active: Some(true),
         };
         let created = create(&pool, "comp-1", input).await.unwrap();
@@ -668,5 +1154,253 @@ mod tests {
             !refetched.is_service,
             "get() after update must return is_service=false"
         );
+    }
+
+    // ── P2 Wave 1: product_type round-trips ─────────────────────────────────
+
+    /// product_type defaults to 'marfa' for goods.
+    #[tokio::test]
+    async fn p2w1_product_type_default_marfa() {
+        let pool = setup_products_pool().await;
+        let p = get(&pool, "p1", "comp-1").await.unwrap();
+        assert_eq!(
+            p.product_type, "marfa",
+            "seeded product without explicit type must be 'marfa'"
+        );
+    }
+
+    /// When is_service=true and product_type is None → 'serviciu'.
+    #[tokio::test]
+    async fn p2w1_product_type_derived_from_is_service() {
+        let pool = setup_products_pool().await;
+        let input = ProductInput {
+            name: "Serviciu transport".to_string(),
+            unit: Some("km".to_string()),
+            unit_price: Some("2.50".to_string()),
+            vat_rate: Some("21".to_string()),
+            vat_category: Some("S".to_string()),
+            code: None,
+            barcode: None,
+            stock_qty: None,
+            art331_code: None,
+            is_service: Some(true),
+            product_type: None, // should derive 'serviciu'
+            product_group_id: None,
+            active: Some(true),
+        };
+        let created = create(&pool, "comp-1", input).await.unwrap();
+        assert_eq!(created.product_type, "serviciu");
+        assert!(created.is_service);
+    }
+
+    /// Explicit product_type wins over is_service derivation.
+    #[tokio::test]
+    async fn p2w1_product_type_explicit_wins() {
+        let pool = setup_products_pool().await;
+        let input = ProductInput {
+            name: "Materie prima fier".to_string(),
+            unit: Some("kg".to_string()),
+            unit_price: Some("10.00".to_string()),
+            vat_rate: Some("21".to_string()),
+            vat_category: Some("S".to_string()),
+            code: None,
+            barcode: None,
+            stock_qty: None,
+            art331_code: None,
+            is_service: Some(false),
+            product_type: Some("materie_prima".to_string()),
+            product_group_id: None,
+            active: Some(true),
+        };
+        let created = create(&pool, "comp-1", input).await.unwrap();
+        assert_eq!(created.product_type, "materie_prima");
+        assert!(!created.is_service);
+    }
+
+    /// Update product_type round-trip: marfa → produs_finit.
+    #[tokio::test]
+    async fn p2w1_product_type_update_round_trip() {
+        let pool = setup_products_pool().await;
+        let upd = UpdateProductInput {
+            product_type: Some("produs_finit".to_string()),
+            ..Default::default()
+        };
+        let updated = update(&pool, "p1", "comp-1", upd).await.unwrap();
+        assert_eq!(updated.product_type, "produs_finit");
+        let refetched = get(&pool, "p1", "comp-1").await.unwrap();
+        assert_eq!(refetched.product_type, "produs_finit");
+    }
+
+    /// serviciu ⇔ is_service consistency: setting product_type=serviciu sets is_service=true.
+    #[tokio::test]
+    async fn p2w1_serviciu_sets_is_service() {
+        let pool = setup_products_pool().await;
+        // p1 starts as marfa + is_service=false.
+        let upd = UpdateProductInput {
+            product_type: Some("serviciu".to_string()),
+            is_service: Some(false), // explicit false, but type=serviciu should override
+            ..Default::default()
+        };
+        let updated = update(&pool, "p1", "comp-1", upd).await.unwrap();
+        assert_eq!(updated.product_type, "serviciu");
+        assert!(
+            updated.is_service,
+            "product_type=serviciu must set is_service=true"
+        );
+    }
+
+    // ── P2 Wave 1: resolve_accounts ─────────────────────────────────────────
+
+    /// No override → returns code default for marfa (371/607/707).
+    #[tokio::test]
+    async fn p2w1_resolve_accounts_marfa_default() {
+        let pool = setup_products_pool().await;
+        let m = resolve_accounts(&pool, "comp-1", "marfa").await.unwrap();
+        assert_eq!(m.stock_account.as_deref(), Some("371"));
+        assert_eq!(m.expense_account.as_deref(), Some("607"));
+        assert_eq!(m.income_account.as_deref(), Some("707"));
+        assert!(m.uses_stock);
+        assert!(m.retail_capable);
+    }
+
+    /// No override → returns code default for produs_finit (345/711/701).
+    #[tokio::test]
+    async fn p2w1_resolve_accounts_produs_finit_default() {
+        let pool = setup_products_pool().await;
+        let m = resolve_accounts(&pool, "comp-1", "produs_finit")
+            .await
+            .unwrap();
+        assert_eq!(m.stock_account.as_deref(), Some("345"));
+        assert_eq!(m.expense_account.as_deref(), Some("711"));
+        assert_eq!(m.income_account.as_deref(), Some("701"));
+        assert!(m.uses_stock);
+        assert!(!m.retail_capable);
+    }
+
+    /// No override → returns code default for serviciu (None/None/704, no stock).
+    #[tokio::test]
+    async fn p2w1_resolve_accounts_serviciu_default() {
+        let pool = setup_products_pool().await;
+        let m = resolve_accounts(&pool, "comp-1", "serviciu").await.unwrap();
+        assert!(m.stock_account.is_none());
+        assert!(m.expense_account.is_none());
+        assert_eq!(m.income_account.as_deref(), Some("704"));
+        assert!(!m.uses_stock);
+        assert!(!m.retail_capable);
+    }
+
+    /// With an override row → returns the override values.
+    #[tokio::test]
+    async fn p2w1_resolve_accounts_override_wins() {
+        let pool = setup_products_pool().await;
+        let input = SetAccountMappingInput {
+            stock_account: Some("3711".to_string()),
+            expense_account: Some("6071".to_string()),
+            income_account: Some("7071".to_string()),
+            uses_stock: true,
+            retail_capable: true,
+        };
+        set_account_mapping(&pool, "comp-1", "marfa", input)
+            .await
+            .unwrap();
+
+        let m = resolve_accounts(&pool, "comp-1", "marfa").await.unwrap();
+        assert_eq!(
+            m.stock_account.as_deref(),
+            Some("3711"),
+            "override stock account must be returned"
+        );
+        assert_eq!(m.expense_account.as_deref(), Some("6071"));
+        assert_eq!(m.income_account.as_deref(), Some("7071"));
+    }
+
+    /// After reset_account_mapping → returns code default again.
+    #[tokio::test]
+    async fn p2w1_reset_account_mapping_reverts_to_default() {
+        let pool = setup_products_pool().await;
+        let input = SetAccountMappingInput {
+            stock_account: Some("3711".to_string()),
+            expense_account: Some("6071".to_string()),
+            income_account: Some("7071".to_string()),
+            uses_stock: true,
+            retail_capable: false,
+        };
+        set_account_mapping(&pool, "comp-1", "marfa", input)
+            .await
+            .unwrap();
+        reset_account_mapping(&pool, "comp-1", "marfa")
+            .await
+            .unwrap();
+
+        let m = resolve_accounts(&pool, "comp-1", "marfa").await.unwrap();
+        assert_eq!(
+            m.stock_account.as_deref(),
+            Some("371"),
+            "after reset must return code default"
+        );
+        assert_eq!(m.income_account.as_deref(), Some("707"));
+    }
+
+    // ── P2 Wave 1: list_account_mappings returns all 5 rows ─────────────────
+
+    #[tokio::test]
+    async fn p2w1_list_account_mappings_returns_all_five() {
+        let pool = setup_products_pool().await;
+        let rows = list_account_mappings(&pool, "comp-1").await.unwrap();
+        assert_eq!(
+            rows.len(),
+            5,
+            "must always return exactly 5 rows (all product types)"
+        );
+        let types: Vec<&str> = rows.iter().map(|r| r.product_type.as_str()).collect();
+        for pt in PRODUCT_TYPES {
+            assert!(types.contains(pt), "must include product_type={pt}");
+        }
+        // All must be non-override (no overrides set).
+        assert!(
+            rows.iter().all(|r| !r.is_override),
+            "all must be defaults when no overrides exist"
+        );
+    }
+
+    #[tokio::test]
+    async fn p2w1_list_account_mappings_shows_override_flag() {
+        let pool = setup_products_pool().await;
+        let input = SetAccountMappingInput {
+            stock_account: Some("3711".to_string()),
+            expense_account: Some("6071".to_string()),
+            income_account: Some("7071".to_string()),
+            uses_stock: true,
+            retail_capable: true,
+        };
+        set_account_mapping(&pool, "comp-1", "marfa", input)
+            .await
+            .unwrap();
+
+        let rows = list_account_mappings(&pool, "comp-1").await.unwrap();
+        assert_eq!(rows.len(), 5);
+        let marfa = rows.iter().find(|r| r.product_type == "marfa").unwrap();
+        assert!(marfa.is_override, "marfa row must be marked as override");
+        let serviciu = rows.iter().find(|r| r.product_type == "serviciu").unwrap();
+        assert!(!serviciu.is_override, "serviciu row must remain default");
+    }
+
+    // ── P2 Wave 1: confirm no existing GL posting paths changed ─────────────
+
+    /// Verifies that the revenue_account / stock_expense_account functions in gl.rs
+    /// are separate from resolve_accounts: resolve_accounts is a new function that
+    /// does not interfere with existing invoice/stock posting logic.
+    /// This test calls resolve_accounts in isolation and verifies it doesn't panic or error.
+    #[tokio::test]
+    async fn p2w1_resolve_accounts_is_additive_only() {
+        let pool = setup_products_pool().await;
+        // Call resolve_accounts for all types — must succeed with no side effects.
+        for pt in PRODUCT_TYPES {
+            let result = resolve_accounts(&pool, "comp-1", pt).await;
+            assert!(result.is_ok(), "resolve_accounts({pt}) must not error");
+        }
+        // No data in products table was changed.
+        let p = get(&pool, "p1", "comp-1").await.unwrap();
+        assert_eq!(p.name, "Produs Comp1", "existing product must be untouched");
     }
 }

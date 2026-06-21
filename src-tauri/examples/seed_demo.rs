@@ -240,6 +240,9 @@ async fn seed_firm(
                 art331_code: None,
                 barcode: None,
                 is_service: Some(kind == "service"),
+                // product_type and product_group_id derived from is_service in the DB layer.
+                product_type: None,
+                product_group_id: None,
                 active: Some(true),
             },
         )

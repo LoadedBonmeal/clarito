@@ -706,6 +706,63 @@ export interface DataExportResult {
 
 // ─── Product (articol / catalog) ─────────────────────────────────────────
 
+// ─── P2 Wave 1: product types + account mapping ───────────────────────────
+
+/** Canonical product type values (OMFP 1802/2014). */
+export type ProductType =
+  | "marfa"
+  | "produs_finit"
+  | "materie_prima"
+  | "material_consumabil"
+  | "serviciu";
+
+export const PRODUCT_TYPES: ProductType[] = [
+  "marfa",
+  "produs_finit",
+  "materie_prima",
+  "material_consumabil",
+  "serviciu",
+];
+
+/**
+ * Effective account mapping for a product type.
+ * Either a company override or the code default.
+ */
+export interface AccountMapping {
+  stockAccount: string | null;
+  expenseAccount: string | null;
+  incomeAccount: string | null;
+  usesStock: boolean;
+  retailCapable: boolean;
+}
+
+/** Full row returned by list_account_mappings — includes override flag. */
+export interface EffectiveAccountMapping extends AccountMapping {
+  productType: ProductType;
+  /** True when a company-specific override row exists in account_mapping. */
+  isOverride: boolean;
+}
+
+export interface SetAccountMappingInput {
+  stockAccount: string | null;
+  expenseAccount: string | null;
+  incomeAccount: string | null;
+  usesStock: boolean;
+  retailCapable: boolean;
+}
+
+/** A named product group scoped to a company. */
+export interface ProductGroup {
+  id: string;
+  companyId: string;
+  name: string;
+  createdAt: number;
+}
+
+export interface ProductGroupInput {
+  name: string;
+}
+
 export interface Product {
   id: string;
   companyId: string;
@@ -725,6 +782,11 @@ export interface Product {
   /** True when this product is a service (non-stocabil): no fișă de magazie, no stock qty.
    *  GL revenue default: serviciu → 704; marfă → 707. */
   isService: boolean;
+  /** Canonical product type (P2 Wave 1). Drives default GL account mapping.
+   *  Consistent with isService: serviciu ⇔ isService=true. */
+  productType: ProductType;
+  /** Optional product group id. */
+  productGroupId: string | null;
   active: boolean;
   createdAt: number;
   updatedAt: number;
@@ -742,6 +804,10 @@ export interface ProductInput {
   art331Code?: string;
   /** True when this product is a service (non-stocabil). Defaults to false (goods). */
   isService?: boolean;
+  /** Canonical product type. Defaults to "serviciu" when isService=true, else "marfa". */
+  productType?: ProductType;
+  /** Optional product group id. */
+  productGroupId?: string;
   active?: boolean;
 }
 
@@ -757,6 +823,10 @@ export interface UpdateProductInput {
   art331Code?: string;
   /** True when this product is a service (non-stocabil). None = leave unchanged. */
   isService?: boolean;
+  /** Canonical product type. None = leave unchanged. */
+  productType?: ProductType;
+  /** Optional product group id. None = leave unchanged. */
+  productGroupId?: string;
   active?: boolean;
 }
 

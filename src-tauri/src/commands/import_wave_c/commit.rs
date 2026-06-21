@@ -612,6 +612,9 @@ async fn commit_products(
                     art331_code: None,
                     // Propagate is_service from staging: 1 → true, 0/NULL → false.
                     is_service: is_service_raw.map(|v| v != 0),
+                    // product_type and product_group_id are derived in the DB layer from is_service.
+                    product_type: None,
+                    product_group_id: None,
                     active: Some(true),
                 };
                 match products::create(pool, company_id, input).await {

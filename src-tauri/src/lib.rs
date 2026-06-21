@@ -293,6 +293,14 @@ pub fn run() {
             commands::products::update_product,
             commands::products::delete_product,
             commands::products::search_products,
+            // P2 Wave 1: account mapping + product groups
+            commands::products::resolve_accounts,
+            commands::products::list_account_mappings,
+            commands::products::set_account_mapping,
+            commands::products::reset_account_mapping,
+            commands::products::list_product_groups,
+            commands::products::create_product_group,
+            commands::products::delete_product_group,
             // invoices
             commands::invoices::list_invoices,
             commands::invoices::get_invoice,

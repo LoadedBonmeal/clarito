@@ -37,7 +37,7 @@ import { api } from "@/lib/tauri";
 import { useAppStore, type ThemeMode, type DensityMode } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
-import type { Company } from "@/types";
+import type { Company, EffectiveAccountMapping, ProductGroup, ProductType, SetAccountMappingInput } from "@/types";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -1019,6 +1019,16 @@ export function SettingsPage() {
             </div>
           </div>
 
+          {/* P2 Wave 1: conturi implicite pe tip produs */}
+          {activeCompanyId && (
+            <AccountMappingPanel companyId={activeCompanyId} />
+          )}
+
+          {/* P2 Wave 1: grupe de articole */}
+          {activeCompanyId && (
+            <ProductGroupsPanel companyId={activeCompanyId} />
+          )}
+
           {/* backup & restaurare */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
@@ -1727,6 +1737,254 @@ export function SettingsPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── P2 Wave 1: AccountMappingPanel ───────────────────────────────────────────
+
+function AccountMappingPanel({ companyId }: { companyId: string }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ["account-mapping", companyId],
+    queryFn: () => api.accountMapping.list(companyId),
+  });
+
+  const [editingType, setEditingType] = useState<ProductType | null>(null);
+  const [editForm, setEditForm] = useState<SetAccountMappingInput>({
+    stockAccount: null,
+    expenseAccount: null,
+    incomeAccount: null,
+    usesStock: true,
+    retailCapable: false,
+  });
+
+  const setMut = useMutation({
+    mutationFn: (args: { pt: ProductType; input: SetAccountMappingInput }) =>
+      api.accountMapping.set(companyId, args.pt, args.input),
+    onSuccess: () => {
+      notify.success(t("products.accountMapping.saved"));
+      void qc.invalidateQueries({ queryKey: ["account-mapping", companyId] });
+      setEditingType(null);
+    },
+    onError: (e) => notify.error(formatError(e, t("products.accountMapping.saveError"))),
+  });
+
+  const resetMut = useMutation({
+    mutationFn: (pt: ProductType) => api.accountMapping.reset(companyId, pt),
+    onSuccess: () => {
+      notify.success(t("products.accountMapping.resetDone"));
+      void qc.invalidateQueries({ queryKey: ["account-mapping", companyId] });
+    },
+    onError: (e) => notify.error(formatError(e, t("products.accountMapping.saveError"))),
+  });
+
+  const startEdit = (row: EffectiveAccountMapping) => {
+    setEditingType(row.productType as ProductType);
+    setEditForm({
+      stockAccount: row.stockAccount,
+      expenseAccount: row.expenseAccount,
+      incomeAccount: row.incomeAccount,
+      usesStock: row.usesStock,
+      retailCapable: row.retailCapable,
+    });
+  };
+
+  return (
+    <div className="scr-card" style={{ marginBottom: 14 }}>
+      <div className="scr-toolbar">
+        <div className="tt">{t("products.accountMapping.title")}</div>
+      </div>
+      <div className="card-pad" style={{ padding: "0 0 4px 0" }}>
+        <p style={{ fontSize: 12, color: "var(--text-2)", padding: "8px 16px 0", margin: 0 }}>
+          {t("products.accountMapping.subtitle")}
+        </p>
+      </div>
+      {isLoading ? (
+        <div style={{ padding: "12px 16px", fontSize: 12, color: "var(--text-2)" }}>…</div>
+      ) : (
+        <table className="scr-table">
+          <thead>
+            <tr>
+              <th>{t("products.accountMapping.colType")}</th>
+              <th className="r">{t("products.accountMapping.colStock")}</th>
+              <th className="r">{t("products.accountMapping.colExpense")}</th>
+              <th className="r">{t("products.accountMapping.colIncome")}</th>
+              <th>{t("products.accountMapping.colUsesStock")}</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.productType}>
+                <td>
+                  {t(`products.productTypes.${row.productType}`)}
+                  {row.isOverride && (
+                    <span className="chip sent" style={{ marginLeft: 6, fontSize: 10 }}>
+                      {t("products.accountMapping.overrideLabel")}
+                    </span>
+                  )}
+                </td>
+                <td className="r"><span className="doc">{row.stockAccount ?? "—"}</span></td>
+                <td className="r"><span className="doc">{row.expenseAccount ?? "—"}</span></td>
+                <td className="r"><span className="doc">{row.incomeAccount ?? "—"}</span></td>
+                <td>{row.usesStock ? t("products.accountMapping.yes") : t("products.accountMapping.no")}</td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  <button
+                    className="pill-btn"
+                    style={{ marginRight: 4 }}
+                    onClick={() => startEdit(row)}
+                  >
+                    {t("products.accountMapping.override")}
+                  </button>
+                  {row.isOverride && (
+                    <button
+                      className="pill-btn"
+                      style={{ color: "var(--red)", borderColor: "rgba(220,38,38,.3)" }}
+                      disabled={resetMut.isPending}
+                      onClick={() => resetMut.mutate(row.productType as ProductType)}
+                    >
+                      {t("products.accountMapping.reset")}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* inline edit form */}
+      {editingType && (
+        <div style={{ padding: "12px 16px", borderTop: "1px solid var(--line)" }}>
+          <p style={{ fontSize: 12, fontWeight: 600, margin: "0 0 8px" }}>
+            {t(`products.productTypes.${editingType}`)} — {t("products.accountMapping.override")}
+          </p>
+          <div className="fgrid" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
+            {(["stockAccount", "expenseAccount", "incomeAccount"] as const).map((key) => (
+              <div className="field" key={key}>
+                <label>
+                  {key === "stockAccount" ? t("products.accountMapping.colStock") :
+                   key === "expenseAccount" ? t("products.accountMapping.colExpense") :
+                   t("products.accountMapping.colIncome")}
+                </label>
+                <input
+                  className="input num"
+                  style={{ height: 30 }}
+                  value={editForm[key] ?? ""}
+                  onChange={(e) => setEditForm((f) => ({ ...f, [key]: e.target.value || null }))}
+                  placeholder="—"
+                />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button
+              className="btn-dark"
+              style={{ height: 30 }}
+              disabled={setMut.isPending}
+              onClick={() => setMut.mutate({ pt: editingType, input: editForm })}
+            >
+              <Ic name="check" />{t("products.accountMapping.override")}
+            </button>
+            <button
+              className="pill-btn"
+              style={{ height: 30 }}
+              onClick={() => setEditingType(null)}
+            >
+              {t("settings.common.cancel", { defaultValue: "Anulează" })}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── P2 Wave 1: ProductGroupsPanel ────────────────────────────────────────────
+
+function ProductGroupsPanel({ companyId }: { companyId: string }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [newName, setNewName] = useState("");
+
+  const { data: groups = [], isLoading } = useQuery({
+    queryKey: ["product-groups", companyId],
+    queryFn: () => api.productGroups.list(companyId),
+  });
+
+  const createMut = useMutation({
+    mutationFn: (name: string) => api.productGroups.create(companyId, { name }),
+    onSuccess: () => {
+      notify.success(t("products.groups.added"));
+      setNewName("");
+      void qc.invalidateQueries({ queryKey: ["product-groups", companyId] });
+    },
+    onError: (e) => notify.error(formatError(e, t("products.accountMapping.saveError"))),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.productGroups.delete(id, companyId),
+    onSuccess: () => {
+      notify.success(t("products.groups.deleted"));
+      void qc.invalidateQueries({ queryKey: ["product-groups", companyId] });
+    },
+    onError: (e) => notify.error(formatError(e, t("products.accountMapping.saveError"))),
+  });
+
+  return (
+    <div className="scr-card" style={{ marginBottom: 14 }}>
+      <div className="scr-toolbar">
+        <div className="tt">{t("products.groups.title")}</div>
+      </div>
+      {isLoading ? (
+        <div style={{ padding: "12px 16px", fontSize: 12, color: "var(--text-2)" }}>…</div>
+      ) : (groups as ProductGroup[]).length === 0 ? (
+        <div style={{ padding: "12px 16px", fontSize: 12, color: "var(--text-2)" }}>
+          {t("products.groups.empty")}
+        </div>
+      ) : (
+        <table className="scr-table">
+          <tbody>
+            {(groups as ProductGroup[]).map((g) => (
+              <tr key={g.id}>
+                <td>{g.name}</td>
+                <td style={{ width: 48, textAlign: "right" }}>
+                  <button
+                    className="pill-btn"
+                    style={{ color: "var(--red)", borderColor: "rgba(220,38,38,.3)" }}
+                    disabled={deleteMut.isPending}
+                    onClick={() => deleteMut.mutate(g.id)}
+                    title={t("products.groups.deleteConfirm", { name: g.name })}
+                  >
+                    <svg className="sic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: '<path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/>' }} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div style={{ padding: "10px 16px", display: "flex", gap: 8, alignItems: "center", borderTop: "1px solid var(--line)" }}>
+        <input
+          className="input"
+          style={{ flex: 1, height: 30, fontSize: 12.5 }}
+          placeholder={t("products.groups.namePlaceholder")}
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && newName.trim()) createMut.mutate(newName.trim()); }}
+        />
+        <button
+          className="btn-dark"
+          style={{ height: 30 }}
+          disabled={createMut.isPending || !newName.trim()}
+          onClick={() => createMut.mutate(newName.trim())}
+        >
+          <Ic name="plus" />{t("products.groups.add")}
+        </button>
+      </div>
     </div>
   );
 }

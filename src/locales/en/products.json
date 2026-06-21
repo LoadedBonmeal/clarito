@@ -107,6 +107,9 @@
       "price": "Unit price (excl. VAT)",
       "vatRate": "VAT rate %",
       "vatCategory": "VAT category",
+      "productType": "Product type",
+      "productGroup": "Group",
+      "productGroupNone": "— no group —",
       "stockQty": "Stock (quantity)",
       "stockHint": "empty = item without inventory (service)",
       "art331": "Art. 331 code (reverse charge — D394 codPR)",
@@ -121,6 +124,41 @@
       "saving": "Saving…",
       "save": "Save",
       "add": "Add"
+    },
+    "productTypes": {
+      "marfa": "Goods (371)",
+      "produs_finit": "Finished product (345)",
+      "materie_prima": "Raw material (301)",
+      "material_consumabil": "Consumable material (302)",
+      "serviciu": "Service (704)"
+    },
+    "accountMapping": {
+      "title": "Default accounts by product type",
+      "subtitle": "Effective values (default or overridden). Change only if your company uses accounts different from the standard OMFP 1802/2014 chart.",
+      "colType": "Product type",
+      "colStock": "Stock account",
+      "colExpense": "Expense account",
+      "colIncome": "Income account",
+      "colUsesStock": "Tracks stock",
+      "colRetail": "Retail price",
+      "override": "Override",
+      "reset": "Reset to default",
+      "overrideLabel": "Overridden",
+      "defaultLabel": "Default",
+      "yes": "Yes",
+      "no": "No",
+      "saved": "Account mapping saved.",
+      "resetDone": "Account mapping reset to defaults.",
+      "saveError": "Error saving the mapping."
+    },
+    "groups": {
+      "title": "Product groups",
+      "add": "New group",
+      "namePlaceholder": "e.g. Electronics, Food…",
+      "deleteConfirm": "Delete group \"{{name}}\"?",
+      "deleted": "Group deleted.",
+      "added": "Group added.",
+      "empty": "No groups defined."
     },
     "art331Codes": {
       "22": "Ferrous/non-ferrous waste",

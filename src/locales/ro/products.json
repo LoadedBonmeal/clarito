@@ -108,6 +108,9 @@
       "price": "Preț unitar (fără TVA)",
       "vatRate": "Cotă TVA %",
       "vatCategory": "Categorie TVA",
+      "productType": "Tip produs",
+      "productGroup": "Grupă",
+      "productGroupNone": "— fără grupă —",
       "stockQty": "Stoc (cantitate)",
       "stockHint": "gol = articol fără gestiune (serviciu)",
       "art331": "Cod art. 331 (taxare inversă — D394 codPR)",
@@ -122,6 +125,41 @@
       "saving": "Se salvează…",
       "save": "Salvează",
       "add": "Adaugă"
+    },
+    "productTypes": {
+      "marfa": "Marfă (371)",
+      "produs_finit": "Produs finit (345)",
+      "materie_prima": "Materie primă (301)",
+      "material_consumabil": "Material consumabil (302)",
+      "serviciu": "Serviciu (704)"
+    },
+    "accountMapping": {
+      "title": "Conturi implicite pe tip produs",
+      "subtitle": "Valorile efective (implicit sau suprascrise). Modificați doar dacă firma dvs. utilizează conturi diferite față de planul standard OMFP 1802/2014.",
+      "colType": "Tip produs",
+      "colStock": "Cont stoc",
+      "colExpense": "Cont cheltuială",
+      "colIncome": "Cont venit",
+      "colUsesStock": "Ține stoc",
+      "colRetail": "Preț amănunt",
+      "override": "Suprascrie",
+      "reset": "Resetează la implicit",
+      "overrideLabel": "Suprascris",
+      "defaultLabel": "Implicit",
+      "yes": "Da",
+      "no": "Nu",
+      "saved": "Mapare cont salvată.",
+      "resetDone": "Mapare cont resetată la valorile implicite.",
+      "saveError": "Eroare la salvarea mapării."
+    },
+    "groups": {
+      "title": "Grupe de articole",
+      "add": "Grupă nouă",
+      "namePlaceholder": "ex. Electronice, Alimente…",
+      "deleteConfirm": "Șterge grupa \"{{name}}\"?",
+      "deleted": "Grupă ștearsă.",
+      "added": "Grupă adăugată.",
+      "empty": "Nicio grupă definită."
     },
     "art331Codes": {
       "22": "Deșeuri feroase/neferoase",

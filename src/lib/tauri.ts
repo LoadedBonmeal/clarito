@@ -15,6 +15,7 @@ import { demoInvoke, isDemoMode } from "@/lib/demo";
 import type {
   Account,
   AccountInput,
+  AccountMapping,
   AnafCompanyData,
   TaxRegimeStatus,
   AppInfo,
@@ -29,6 +30,7 @@ import type {
   D394Submission,
   DataExportResult,
   DiagnosticReport,
+  EffectiveAccountMapping,
   FormStaleness,
   GlPostResult,
   Invoice,
@@ -41,13 +43,17 @@ import type {
   Notification,
   Paginated,
   Product,
+  ProductGroup,
+  ProductGroupInput,
   ProductInput,
+  ProductType,
   Receipt,
   ReceiptInput,
   ReceivedFilter,
   ReceivedInvoice,
   ReceivedStatus,
   ReconcileReport,
+  SetAccountMappingInput,
   VatSettlementResult,
   TrialBalance,
   ProfitLoss,
@@ -1207,6 +1213,39 @@ export const products = {
     invoke<Product[]>("search_products", { companyId, query }),
 };
 
+// ─── P2 Wave 1: account mapping (conturi implicite pe tip produs) ─────────────
+
+/** P2 Wave 1: account mapping commands (company-scoped). */
+export const accountMapping = {
+  /** Resolve effective account mapping for (company, productType). Returns override or code default. */
+  resolve: (companyId: string, productType: ProductType) =>
+    invoke<AccountMapping>("resolve_accounts", { companyId, productType }),
+  /** List all 5 effective rows (defaults merged with overrides). */
+  list: (companyId: string) =>
+    invoke<EffectiveAccountMapping[]>("list_account_mappings", { companyId }),
+  /** Upsert a company override for a product type. */
+  set: (companyId: string, productType: ProductType, input: SetAccountMappingInput) =>
+    invoke<EffectiveAccountMapping>("set_account_mapping", { companyId, productType, input }),
+  /** Delete the company override → reverts to code default. */
+  reset: (companyId: string, productType: ProductType) =>
+    invoke<EffectiveAccountMapping>("reset_account_mapping", { companyId, productType }),
+};
+
+// ─── P2 Wave 1: product groups ────────────────────────────────────────────────
+
+/** P2 Wave 1: product group commands (company-scoped). */
+export const productGroups = {
+  /** List product groups for a company. */
+  list: (companyId: string) =>
+    invoke<ProductGroup[]>("list_product_groups", { companyId }),
+  /** Create a product group. */
+  create: (companyId: string, input: ProductGroupInput) =>
+    invoke<ProductGroup>("create_product_group", { companyId, input }),
+  /** Delete a product group. Products keep their groupId (nullable FK, no cascade). */
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_product_group", { id, companyId }),
+};
+
 // ─── VAT Rates — global editable catalog (R15 Wave 2) ────────────────────
 
 /**
@@ -1604,6 +1643,7 @@ export const bankImport = {
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
+  accountMapping,
   accounts,
   anaf,
   bankImport,
@@ -1628,6 +1668,7 @@ export const api = {
   license,
   notifications,
   payments,
+  productGroups,
   products,
   receipts,
   received,
