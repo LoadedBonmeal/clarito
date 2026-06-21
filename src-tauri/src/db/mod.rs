@@ -39,5 +39,6 @@ pub mod received_payments;
 pub mod recurring;
 pub mod seed;
 pub mod stock;
+pub mod stock_transfer;
 pub mod stock_valuation;
 pub mod vat_rates;

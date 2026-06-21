@@ -362,8 +362,9 @@ pub async fn recompute_product_gestiune(
     };
 
     // Read only this gestiune's rows in chronological order.
-    let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
-        "SELECT id, direction, qty, unit_cost, entry_date FROM stock_ledger \
+    // We also fetch doc_type so the GL-skip for TRANSFER rows is consistent on replay.
+    let rows: Vec<(String, String, String, String, String, Option<String>)> = sqlx::query_as(
+        "SELECT id, direction, qty, unit_cost, entry_date, doc_type FROM stock_ledger \
          WHERE company_id=?1 AND product_id=?2 AND gestiune_id=?3 \
          ORDER BY entry_date, seq, created_at",
     )
@@ -375,11 +376,16 @@ pub async fn recompute_product_gestiune(
 
     let dates: std::collections::HashMap<String, String> = rows
         .iter()
-        .map(|(id, _, _, _, dt)| (id.clone(), dt.clone()))
+        .map(|(id, _, _, _, dt, _)| (id.clone(), dt.clone()))
+        .collect();
+    // Track which ledger ids are TRANSFER rows so post_stock_movement can skip GL for them.
+    let is_transfer_map: std::collections::HashMap<String, bool> = rows
+        .iter()
+        .map(|(id, _, _, _, _, doc_type)| (id.clone(), doc_type.as_deref() == Some("TRANSFER")))
         .collect();
     let events: Vec<StockEvent> = rows
         .iter()
-        .map(|(id, d, q, uc, _)| StockEvent {
+        .map(|(id, d, q, uc, _, _)| StockEvent {
             id: id.clone(),
             dir: if d == "IN" { Dir::In } else { Dir::Out },
             qty: dec(q),
@@ -461,8 +467,11 @@ pub async fn recompute_product_gestiune(
     tx.commit().await?;
 
     // Re-post each movement's GL leg from the freshly-valued ledger.
+    // TRANSFER rows (doc_type='TRANSFER') are GL-neutral: post_stock_movement will
+    // delete any prior STOCK journal for them and return without posting new entries.
     for v in &valued {
         let date = dates.get(&v.id).map(String::as_str).unwrap_or("");
+        let is_transfer = *is_transfer_map.get(&v.id).unwrap_or(&false);
         crate::db::gl::post_stock_movement(
             pool,
             company_id,
@@ -471,6 +480,7 @@ pub async fn recompute_product_gestiune(
             &stock_account,
             v.dir == Dir::In,
             v.value,
+            is_transfer,
         )
         .await?;
     }

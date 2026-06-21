@@ -561,6 +561,10 @@ pub fn run() {
             commands::nir::list_nir,
             commands::nir::finalize_nir,
             commands::nir::nir_from_received_invoice,
+            // stock transfers — bon de transfer 14-3-3A (P2 Wave 4)
+            commands::stock_transfer::transfer_stock,
+            commands::stock_transfer::list_stock_transfers,
+            commands::stock_transfer::get_stock_transfer,
             // fixed assets — Phase 6b (SAF-T Assets)
             commands::assets::create_fixed_asset,
             commands::assets::list_fixed_assets,

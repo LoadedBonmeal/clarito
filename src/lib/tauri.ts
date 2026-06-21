@@ -1673,6 +1673,17 @@ export const nir = {
     }),
 };
 
+// ─── Stock Transfers (bon de transfer 14-3-3A) ────────────────────────────────
+
+export const stockTransfer = {
+  transfer: (companyId: string, input: import("@/types").TransferInput) =>
+    invoke<import("@/types").StockTransfer>("transfer_stock", { companyId, input }),
+  list: (companyId: string) =>
+    invoke<import("@/types").StockTransfer[]>("list_stock_transfers", { companyId }),
+  get: (companyId: string, id: string) =>
+    invoke<import("@/types").StockTransfer>("get_stock_transfer", { companyId, id }),
+};
+
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
@@ -1711,6 +1722,7 @@ export const api = {
   recurring,
   reports,
   assets,
+  stockTransfer,
   stockValuation,
   payroll,
   saft,

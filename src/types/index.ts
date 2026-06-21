@@ -1807,3 +1807,30 @@ export interface NirInput {
   observatii?: string;
   lines: NirLineInput[];
 }
+
+// ─── Stock Transfers (bon de transfer 14-3-3A) ────────────────────────────────
+
+export interface StockTransfer {
+  id: string;
+  companyId: string;
+  productId: string;
+  fromGestiuneId: string;
+  toGestiuneId: string;
+  transferDate: string;
+  qty: string;
+  unitCost: string;
+  value: string;
+  transferRef: string | null;
+  notes: string | null;
+  createdAt: number;
+}
+
+export interface TransferInput {
+  productId: string;
+  fromGestiuneId: string;
+  toGestiuneId: string;
+  transferDate: string;
+  qty: string;
+  transferRef?: string;
+  notes?: string;
+}

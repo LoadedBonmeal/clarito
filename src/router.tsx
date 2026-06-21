@@ -83,6 +83,7 @@ import { GestiuniPage } from "@/pages/Gestiuni";
 import { InventoryPage } from "@/pages/Inventory";
 import { InventoryRegisterPage } from "@/pages/InventoryRegister";
 import { NirPage } from "@/pages/Nir";
+import { StockTransferPage } from "@/pages/StockTransfer";
 
 // ─── Layout root ──────────────────────────────────────────────────────────
 
@@ -334,6 +335,12 @@ const nirRoute = createRoute({
   component: NirPage,
 });
 
+const stockTransferRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/stock-transfer",
+  component: StockTransferPage,
+});
+
 // ─── Build tree + router ──────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -374,6 +381,7 @@ const routeTree = rootRoute.addChildren([
   inventoryRoute,
   inventoryRegisterRoute,
   nirRoute,
+  stockTransferRoute,
 ]);
 
 export const router = createRouter({

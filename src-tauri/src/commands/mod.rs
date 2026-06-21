@@ -61,6 +61,7 @@ pub mod reports;
 pub mod saft;
 pub mod settings;
 pub mod stock;
+pub mod stock_transfer;
 pub mod system;
 pub mod ubl;
 pub mod vat_rates;

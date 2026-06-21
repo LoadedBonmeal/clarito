@@ -3280,6 +3280,12 @@ pub(crate) fn stock_expense_account(stock_account: &str) -> &'static str {
 /// OUT → D 6xx (descărcare gestiune) / C stock_account (la cost evaluat). Zero value → delete only.
 /// Notă: o recepție fără factură în aplicație (stoc inițial, factură pe hârtie) creditează temporar
 /// 6xx până la descărcare — o reclasă net-zero pe ciclul stocului, dar vizibilă în cursul perioadei.
+///
+/// **TRANSFER skip**: when `is_transfer=true` (doc_type='TRANSFER'), we delete any prior STOCK
+/// journal for this ledger row and return WITHOUT posting new GL entries. A transfer is a
+/// 371→371 analytic inter-gestiune move: the synthetic account balance is unchanged and no
+/// 607 turnover must be generated. This skip is idempotent and applies on every recompute replay.
+#[allow(clippy::too_many_arguments)]
 pub async fn post_stock_movement(
     pool: &SqlitePool,
     company_id: &str,
@@ -3288,6 +3294,7 @@ pub async fn post_stock_movement(
     stock_account: &str,
     is_in: bool,
     value: Decimal,
+    is_transfer: bool,
 ) -> AppResult<()> {
     let mut tx = pool.begin().await?;
     sqlx::query(
@@ -3297,6 +3304,13 @@ pub async fn post_stock_movement(
     .bind(ledger_id)
     .execute(&mut *tx)
     .await?;
+
+    // TRANSFER rows are GL-neutral: the analytic inter-gestiune move must not touch
+    // synthetic accounts (371 net unchanged, 607 must stay zero for transfers).
+    if is_transfer {
+        tx.commit().await?;
+        return Ok(());
+    }
 
     if value.is_zero() {
         tx.commit().await?;
