@@ -1,6 +1,7 @@
 /**
  * Dashboard — Privire generală, date reale din backend.
  * Wave 5 — rf look: PageHeader + Segmented + Banner + StatCard + SectionCard + rf-tbl
+ * Wave 9 — KPI manageriale: cash, AR/AP aging, TVA exigibilă, P&L trend, profit, CA, stoc.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -43,6 +44,34 @@ function fmtTime(unix: number, locale: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/** Mini aging bar (CSS flex). Widths are proportional to absolute amounts. */
+function AgingBar({
+  current,
+  d130,
+  d3160,
+  d6190,
+  over90,
+}: {
+  current: number;
+  d130: number;
+  d3160: number;
+  d6190: number;
+  over90: number;
+}) {
+  const total = current + d130 + d3160 + d6190 + over90;
+  if (total <= 0) return null;
+  const pct = (v: number) => `${Math.max(0, Math.round((v / total) * 100))}%`;
+  return (
+    <div style={{ display: "flex", height: 6, borderRadius: 4, overflow: "hidden", gap: 1, marginTop: 8, marginBottom: 2 }}>
+      {current > 0 && <div style={{ width: pct(current), background: "var(--black)", borderRadius: 4 }} title={`Curent: ${Math.round(current).toLocaleString("ro-RO")} RON`} />}
+      {d130 > 0 && <div style={{ width: pct(d130), background: "#71717A", borderRadius: 4 }} title={`1-30 zile: ${Math.round(d130).toLocaleString("ro-RO")} RON`} />}
+      {d3160 > 0 && <div style={{ width: pct(d3160), background: "#F59E0B", borderRadius: 4 }} title={`31-60 zile: ${Math.round(d3160).toLocaleString("ro-RO")} RON`} />}
+      {d6190 > 0 && <div style={{ width: pct(d6190), background: "#EF4444", borderRadius: 4 }} title={`61-90 zile: ${Math.round(d6190).toLocaleString("ro-RO")} RON`} />}
+      {over90 > 0 && <div style={{ width: pct(over90), background: "#7F1D1D", borderRadius: 4 }} title={`>90 zile: ${Math.round(over90).toLocaleString("ro-RO")} RON`} />}
+    </div>
+  );
 }
 
 export function DashboardPage() {
@@ -231,6 +260,7 @@ export function DashboardPage() {
   // ── Render helpers ──────────────────────────────────────────────────────────
   const RO_MON = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
   const fmtInt = (n: number) => Math.round(n).toLocaleString("ro-RO");
+  const fmtDec2 = fmtInt;
   const fmtRoDate = (iso: string) => {
     if (!iso) return "—";
     const [y, m, d] = iso.split("-");
@@ -278,6 +308,212 @@ export function DashboardPage() {
     REJECTED:  { cls: "late", icon: "xMark", label: t("dashboard.status.rejected") },
     STORNED:   { cls: "sent", icon: "undo", label: t("dashboard.status.storned") },
   };
+
+  // ── Wave 9: Managerial KPI queries ─────────────────────────────────────────
+
+  // Helper: build last-day-of-month date string
+  const lastDayOf = (ym: string) => {
+    const [y, m] = ym.split("-").map(Number);
+    return `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+  };
+  // Helper: YM string for months ago from now
+  const ymAgo = (monthsBack: number) => {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const d = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+  };
+
+  // 6-month window keys (oldest → newest), same as existing chartData
+  const sixMonthKeys = useMemo(() => {
+    return Array.from({ length: 6 }, (_, i) => ymAgo(5 - i));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMonth]);
+
+  // Widget 1: Cash position — bilant for selected period
+  const { data: bilantData } = useQuery({
+    queryKey: ["bilant", activeCompanyId, periodFrom, periodTo],
+    queryFn:  () => api.gl.bilant(activeCompanyId!, periodFrom, periodTo),
+    enabled:  !!activeCompanyId,
+    staleTime: 5 * 60_000,
+  });
+
+  // Widget 1: Cash sparkline — bilant per month-end over last 6 months
+  const { data: cashSparkline = [] } = useQuery({
+    queryKey: ["cashSparkline", activeCompanyId, sixMonthKeys[0], sixMonthKeys[5]],
+    queryFn:  async () => {
+      if (!activeCompanyId) return [];
+      const results = await Promise.all(
+        sixMonthKeys.map(async (ym) => {
+          const from = `${ym}-01`;
+          const to   = lastDayOf(ym);
+          try {
+            const b = await api.gl.bilant(activeCompanyId, from, to);
+            return { ym, cash: parseDec(b.cashBank) };
+          } catch {
+            return { ym, cash: 0 };
+          }
+        }),
+      );
+      return results;
+    },
+    enabled:  !!activeCompanyId,
+    staleTime: 5 * 60_000,
+  });
+
+  // Widget 2 & 3: AR / AP aging — as of last day of selected period
+  const agingAsOf = periodTo;
+  const { data: arAging } = useQuery({
+    queryKey: ["aging", activeCompanyId, "RECEIVABLE", agingAsOf],
+    queryFn:  () => api.reports.aging(activeCompanyId!, "RECEIVABLE", agingAsOf),
+    enabled:  !!activeCompanyId,
+    staleTime: 5 * 60_000,
+  });
+  const { data: apAging } = useQuery({
+    queryKey: ["aging", activeCompanyId, "PAYABLE", agingAsOf],
+    queryFn:  () => api.reports.aging(activeCompanyId!, "PAYABLE", agingAsOf),
+    enabled:  !!activeCompanyId,
+    staleTime: 5 * 60_000,
+  });
+
+  // Widget 4: TVA position — trial balance (period columns = exigibilă)
+  const { data: trialBal } = useQuery({
+    queryKey: ["trialBalance", activeCompanyId, periodFrom, periodTo],
+    queryFn:  () => api.gl.trialBalance(activeCompanyId!, periodFrom, periodTo),
+    enabled:  !!activeCompanyId,
+    staleTime: 5 * 60_000,
+  });
+
+  // Widget 5 + 6 + 7: PnL for selected period
+  const { data: pnlData } = useQuery({
+    queryKey: ["profitAndLoss", activeCompanyId, periodFrom, periodTo],
+    queryFn:  () => api.gl.profitAndLoss(activeCompanyId!, periodFrom, periodTo),
+    enabled:  !!activeCompanyId,
+    staleTime: 5 * 60_000,
+  });
+
+  // Widget 7: Prior-period PnL for CA growth delta
+  const priorPeriodFrom = useMemo(() => {
+    const [y, m] = selectedYM.split("-").map(Number);
+    const prev = new Date(y, m - 2, 1);
+    return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}-01`;
+  }, [selectedYM]);
+  const priorPeriodTo = useMemo(() => {
+    const [y, m] = selectedYM.split("-").map(Number);
+    const prev = new Date(y, m - 2, 1);
+    const ym = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+    return lastDayOf(ym);
+  }, [selectedYM]);
+  const { data: priorPnl } = useQuery({
+    queryKey: ["profitAndLoss", activeCompanyId, priorPeriodFrom, priorPeriodTo],
+    queryFn:  () => api.gl.profitAndLoss(activeCompanyId!, priorPeriodFrom, priorPeriodTo),
+    enabled:  !!activeCompanyId,
+    staleTime: 5 * 60_000,
+  });
+
+  // Widget 5: Revenue vs Expense trend — PnL per month over 6-month window
+  const { data: pnlTrend = [] } = useQuery({
+    queryKey: ["pnlTrend", activeCompanyId, sixMonthKeys[0], sixMonthKeys[5]],
+    queryFn:  async () => {
+      if (!activeCompanyId) return [];
+      const CAP = ["Ian", "Feb", "Mar", "Apr", "Mai", "Iun", "Iul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const results = await Promise.all(
+        sixMonthKeys.map(async (ym) => {
+          const from = `${ym}-01`;
+          const to   = lastDayOf(ym);
+          const [, mNum] = ym.split("-").map(Number);
+          try {
+            const p = await api.gl.profitAndLoss(activeCompanyId, from, to);
+            return {
+              ym,
+              label: CAP[mNum - 1],
+              revenue: parseDec(p.totalRevenue),
+              expense: parseDec(p.totalExpense),
+            };
+          } catch {
+            return { ym, label: CAP[mNum - 1], revenue: 0, expense: 0 };
+          }
+        }),
+      );
+      return results;
+    },
+    enabled:  !!activeCompanyId,
+    staleTime: 5 * 60_000,
+  });
+
+  // ── Wave 9: Derived KPI values ──────────────────────────────────────────────
+
+  // Widget 1: Cash
+  const cashPos = bilantData ? parseDec(bilantData.cashBank) : null;
+
+  // Avg monthly expense from cashSparkline PnL (for runway hint)
+  const avgMonthlyExpense = useMemo(() => {
+    if (pnlTrend.length === 0) return 0;
+    const total = pnlTrend.reduce((s, d) => s + d.expense, 0);
+    return total / pnlTrend.length;
+  }, [pnlTrend]);
+  const cashRunwayMonths = cashPos !== null && avgMonthlyExpense > 0
+    ? Math.max(0, cashPos / avgMonthlyExpense)
+    : null;
+
+  // Cash sparkline range
+  const cashSparkMax = Math.max(1, ...cashSparkline.map((d) => Math.abs(d.cash)));
+
+  // Widget 2: AR
+  const arTotals = arAging?.totals;
+  const arCurrent  = arTotals ? parseDec(arTotals.current) : 0;
+  const arD130     = arTotals ? parseDec(arTotals.d130) : 0;
+  const arD3160    = arTotals ? parseDec(arTotals.d3160) : 0;
+  const arD6190    = arTotals ? parseDec(arTotals.d6190) : 0;
+  const arOver90   = arTotals ? parseDec(arTotals.over90) : 0;
+  const arTotal    = arTotals ? parseDec(arTotals.totalOutstanding) : 0;
+  const arOverdue  = arD3160 + arD6190 + arOver90;
+
+  // Widget 3: AP
+  const apTotals   = apAging?.totals;
+  const apCurrent  = apTotals ? parseDec(apTotals.current) : 0;
+  const apD130     = apTotals ? parseDec(apTotals.d130) : 0;
+  const apD3160    = apTotals ? parseDec(apTotals.d3160) : 0;
+  const apD6190    = apTotals ? parseDec(apTotals.d6190) : 0;
+  const apOver90   = apTotals ? parseDec(apTotals.over90) : 0;
+  const apTotal    = apTotals ? parseDec(apTotals.totalOutstanding) : 0;
+  const apScadent30 = apCurrent + apD130;  // scadent în 30 zile
+
+  // Widget 4: TVA exigibilă (period columns — NOT closing, which is cumulative)
+  // 4427 colectată: credit period = TVA colectată în perioadă
+  // 4426 deductibilă: debit period = TVA deductibilă în perioadă
+  // Net = colectată - deductibilă → pozitiv = TVA de plată, negativ = TVA de recuperat
+  const tvaPozitie = useMemo(() => {
+    if (!trialBal) return null;
+    let colectata = 0;  // 4427 credit period
+    let deductibila = 0; // 4426 debit period
+    for (const row of trialBal.rows) {
+      if (row.accountCode === "4427") colectata += parseDec(row.periodCredit);
+      if (row.accountCode === "4426") deductibila += parseDec(row.periodDebit);
+    }
+    const net = colectata - deductibila;
+    return { colectata, deductibila, net };
+  }, [trialBal]);
+
+  // Widget 5: P&L trend chart
+  const pnlTrendMax = Math.max(1, ...pnlTrend.flatMap((d) => [d.revenue, d.expense]));
+
+  // Widget 6: Profit KPIs
+  const grossResult = pnlData ? parseDec(pnlData.grossResult) : null;
+  const netResult   = pnlData ? parseDec(pnlData.netResult) : null;
+  const pnlRevenue  = pnlData ? parseDec(pnlData.totalRevenue) : 0;
+  const netMarginPct = pnlRevenue > 0 && netResult !== null
+    ? Math.round((netResult / pnlRevenue) * 100)
+    : null;
+
+  // Widget 7: Cifra de afaceri
+  const cifraAfaceri     = pnlData ? parseDec(pnlData.cifraAfaceri) : null;
+  const priorCifra       = priorPnl ? parseDec(priorPnl.cifraAfaceri) : 0;
+  const caGrowthPct      = priorCifra > 0 && cifraAfaceri !== null
+    ? Math.round(((cifraAfaceri - priorCifra) / priorCifra) * 100)
+    : null;
+
+  // Widget 8: Stoc — valoare (from bilant.inventory = class-3 GL net balance)
+  const stocValoare = bilantData ? parseDec(bilantData.inventory) : null;
 
   if (!activeCompanyId) {
     return (
@@ -397,7 +633,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* KPIs */}
+      {/* KPIs — existing 4 invoice KPIs */}
       <div className="kpis">
         <div className="kpi">
           <div className="top"><span className="klabel">{t("dashboard.kpi.totalInvoiced")}</span><Ic name="docUp" /></div>
@@ -425,7 +661,257 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* mid: chart + activity */}
+      {/* ── Wave 9: Managerial KPI row 1 — Cash + AR + AP + TVA ──────────────── */}
+      <div className="kpis" style={{ marginTop: 0 }}>
+        {/* Widget 1: Disponibil (cash position) */}
+        <div className="kpi">
+          <div className="top">
+            <span className="klabel">{t("dashboard.kpi.cash")}</span>
+            <Ic name="incasat" />
+          </div>
+          {cashPos !== null ? (
+            <>
+              <div className="val num" style={{ fontSize: 20 }}>
+                <CountUp value={cashPos} /> <span className="cur">RON</span>
+              </div>
+              {/* Cash sparkline — inline SVG */}
+              {cashSparkline.length > 1 && (
+                <svg width="100%" height="28" viewBox={`0 0 ${cashSparkline.length * 20 - 4} 28`} preserveAspectRatio="none" style={{ marginTop: 6, marginBottom: 2 }}>
+                  {cashSparkline.map((pt, i) => {
+                    const x = i * 20;
+                    const h = cashSparkMax > 0 ? Math.max(2, Math.round((Math.abs(pt.cash) / cashSparkMax) * 24)) : 2;
+                    return (
+                      <rect
+                        key={pt.ym}
+                        x={x} y={28 - h} width={16} height={h}
+                        rx={2}
+                        fill={pt.cash < 0 ? "var(--red, #EF4444)" : "var(--black)"}
+                        opacity={i === cashSparkline.length - 1 ? 1 : 0.35}
+                      />
+                    );
+                  })}
+                </svg>
+              )}
+              <div className="delta">
+                {cashRunwayMonths !== null
+                  ? t("dashboard.kpi.cashRunway", { months: cashRunwayMonths.toFixed(1) })
+                  : t("dashboard.kpi.cashNoRunway")}
+              </div>
+            </>
+          ) : (
+            <div className="val" style={{ fontSize: 16, color: "var(--text-2)", marginTop: 12 }}>—</div>
+          )}
+        </div>
+
+        {/* Widget 2: Creanțe clienți (AR aging) */}
+        <div className="kpi">
+          <div className="top">
+            <span className="klabel">{t("dashboard.kpi.arAging")}</span>
+            <Ic name="incasat" />
+          </div>
+          <div className="val num" style={{ fontSize: 20 }}>
+            <CountUp value={arTotal} /> <span className="cur">RON</span>
+          </div>
+          <AgingBar current={arCurrent} d130={arD130} d3160={arD3160} d6190={arD6190} over90={arOver90} />
+          <div className="delta">
+            {arOverdue > 0
+              ? <><span className="ar" style={{ color: "var(--red, #EF4444)" }}>!</span> {t("dashboard.kpi.arOverdue", { amount: fmtDec2(arOverdue) })}</>
+              : t("dashboard.kpi.arCurrent")
+            }
+          </div>
+        </div>
+
+        {/* Widget 3: Datorii furnizori (AP aging) */}
+        <div className="kpi">
+          <div className="top">
+            <span className="klabel">{t("dashboard.kpi.apAging")}</span>
+            <Ic name="docDown" />
+          </div>
+          <div className="val num" style={{ fontSize: 20 }}>
+            <CountUp value={apTotal} /> <span className="cur">RON</span>
+          </div>
+          <AgingBar current={apCurrent} d130={apD130} d3160={apD3160} d6190={apD6190} over90={apOver90} />
+          <div className="delta">
+            {apScadent30 > 0
+              ? t("dashboard.kpi.apDue30", { amount: fmtDec2(apScadent30) })
+              : t("dashboard.kpi.apNoDue")
+            }
+          </div>
+        </div>
+
+        {/* Widget 4: Poziție TVA (period/exigibilă columns) */}
+        <div className="kpi">
+          <div className="top">
+            <span className="klabel">{t("dashboard.kpi.tvaPosition")}</span>
+            <Ic name="calc" />
+          </div>
+          {tvaPozitie !== null ? (
+            <>
+              <div className="val num" style={{ fontSize: 20, color: tvaPozitie.net > 0 ? "var(--red, #EF4444)" : tvaPozitie.net < 0 ? "var(--green, #22C55E)" : undefined }}>
+                <CountUp value={Math.abs(tvaPozitie.net)} /> <span className="cur">RON</span>
+              </div>
+              <div className="delta">
+                {tvaPozitie.net > 0
+                  ? t("dashboard.kpi.tvaDePlata")
+                  : tvaPozitie.net < 0
+                    ? t("dashboard.kpi.tvaDeRecuperat")
+                    : t("dashboard.kpi.tvaZero")}
+              </div>
+              <div className="delta" style={{ marginTop: 2, fontSize: 11 }}>
+                {t("dashboard.kpi.tvaDetail", { col: fmtDec2(tvaPozitie.colectata), ded: fmtDec2(tvaPozitie.deductibila) })}
+              </div>
+            </>
+          ) : (
+            <div className="val" style={{ fontSize: 16, color: "var(--text-2)", marginTop: 12 }}>—</div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Wave 9: Managerial KPI row 2 — Profit + CA + Stoc ──────────────── */}
+      <div className="kpis" style={{ gridTemplateColumns: "repeat(3,1fr)", marginTop: 0 }}>
+
+        {/* Widget 6: Rezultat / Profit */}
+        <div className="kpi">
+          <div className="top">
+            <span className="klabel">{t("dashboard.kpi.profit")}</span>
+            <Ic name="chart" />
+          </div>
+          {netResult !== null ? (
+            <>
+              <div className="val num" style={{ fontSize: 20, color: netResult < 0 ? "var(--red, #EF4444)" : undefined }}>
+                <CountUp value={Math.abs(netResult)} /> <span className="cur">RON</span>
+              </div>
+              <div className="delta">
+                {netResult < 0 ? t("dashboard.kpi.profitLoss") : t("dashboard.kpi.profitNet")}
+                {netMarginPct !== null && (
+                  <> · <span className="ar">{netMarginPct}%</span> {t("dashboard.kpi.profitMargin")}</>
+                )}
+              </div>
+              {grossResult !== null && (
+                <div className="delta" style={{ marginTop: 2, fontSize: 11 }}>
+                  {t("dashboard.kpi.profitBrut", { amount: fmtDec2(grossResult) })}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="val" style={{ fontSize: 16, color: "var(--text-2)", marginTop: 12 }}>—</div>
+          )}
+        </div>
+
+        {/* Widget 7: Cifra de afaceri */}
+        <div className="kpi">
+          <div className="top">
+            <span className="klabel">{t("dashboard.kpi.cifraAfaceri")}</span>
+            <Ic name="docUp" />
+          </div>
+          {cifraAfaceri !== null ? (
+            <>
+              <div className="val num" style={{ fontSize: 20 }}>
+                <CountUp value={cifraAfaceri} /> <span className="cur">RON</span>
+              </div>
+              <div className="delta">
+                {caGrowthPct !== null ? (
+                  <><span className="ar">{caGrowthPct >= 0 ? "↑" : "↓"} {Math.abs(caGrowthPct)}%</span> {t("dashboard.kpi.vsPrev", { month: prevMonthLabel })}</>
+                ) : (
+                  t("dashboard.kpi.caNoComparison")
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="val" style={{ fontSize: 16, color: "var(--text-2)", marginTop: 12 }}>—</div>
+          )}
+        </div>
+
+        {/* Widget 8: Stoc — valoare (class-3 GL net balance from bilant.inventory) */}
+        <div className="kpi">
+          <div className="top">
+            <span className="klabel">{t("dashboard.kpi.stocValoare")}</span>
+            <Ic name="cube" />
+          </div>
+          {stocValoare !== null ? (
+            <>
+              <div className="val num" style={{ fontSize: 20 }}>
+                <CountUp value={stocValoare} /> <span className="cur">RON</span>
+              </div>
+              <div className="delta">{t("dashboard.kpi.stocHint")}</div>
+            </>
+          ) : (
+            <div className="val" style={{ fontSize: 16, color: "var(--text-2)", marginTop: 12 }}>—</div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Wave 9: Revenue vs Expense trend + existing activity ─────────────── */}
+      <div className="mid">
+        {/* Widget 5: Venituri vs Cheltuieli 6-month trend */}
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <div className="ct">{t("dashboard.pnlChart.title")}</div>
+              <div className="cs">
+                {t("dashboard.pnlChart.sub")}
+                {pnlData && (
+                  <> · {t("dashboard.pnlChart.margin", {
+                    pct: pnlRevenue > 0 ? Math.round(((pnlRevenue - parseDec(pnlData.totalExpense)) / pnlRevenue) * 100) : 0
+                  })}</>
+                )}
+              </div>
+            </div>
+            <div className="legend">
+              <span className="lg"><span className="sw" style={{ background: "var(--black)" }} />{t("dashboard.pnlChart.revenue")}</span>
+              <span className="lg"><span className="sw" style={{ background: "var(--border-strong, #D4D4D8)" }} />{t("dashboard.pnlChart.expense")}</span>
+            </div>
+          </div>
+          <div className="chart">
+            {pnlTrend.length > 0 ? pnlTrend.map((d, idx) => {
+              const h = 170;
+              const rH = Math.max(4, Math.round((d.revenue / pnlTrendMax) * h));
+              const eH = Math.max(4, Math.round((d.expense / pnlTrendMax) * h));
+              const isCur = d.ym === selectedYM;
+              return (
+                <div key={d.ym} className={`bar-col${isCur ? " curr" : ""}`}>
+                  <div className="bar-tip">
+                    <b>{d.label}</b>
+                    <span><i className="d" />{t("dashboard.pnlChart.revenue")} <em className="num">{fmtDec2(d.revenue)}</em></span>
+                    <span><i className="l" />{t("dashboard.pnlChart.expense")} <em className="num">{fmtDec2(d.expense)}</em></span>
+                  </div>
+                  <div className="bar-stack">
+                    <div className="bar b-emise anim-bar" style={{ height: rH, animationDelay: `${idx * 40}ms` }} />
+                    <div className="bar b-primite anim-bar" style={{ height: eH, animationDelay: `${idx * 40 + 20}ms` }} />
+                  </div>
+                  <div className="mlab">{d.label}</div>
+                </div>
+              );
+            }) : (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", color: "var(--text-2)", fontSize: 12 }}>
+                {t("dashboard.pnlChart.empty")}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <div className="ct">{t("dashboard.activity.title")}</div>
+            <a className="cs" style={{ textDecoration: "none", cursor: "pointer" }} onClick={() => void navigate({ to: "/notifications" })}>{t("dashboard.activity.seeAll")}</a>
+          </div>
+          <div className="activity">
+            {timelineItems.length === 0 ? (
+              <div style={{ padding: "22px 4px", fontSize: 12.5, color: "var(--text-2)", textAlign: "center" }}>{t("dashboard.activity.empty")}</div>
+            ) : timelineItems.map((n) => (
+              <div key={n.id} className="act-item">
+                <div className="act-ic"><Ic name={actIcon(n.notificationType)} /></div>
+                <div className="act-tx">
+                  <div className="a1">{n.title}</div>
+                  <div className="a2">{n.body || fmtTime(n.createdAt, i18n.language)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* existing invoice chart (emise vs primite by count) */}
       <div className="mid">
         <div className="card">
           <div className="card-head">
@@ -457,25 +943,8 @@ export function DashboardPage() {
           </div>
         </div>
 
-        <div className="card">
-          <div className="card-head">
-            <div className="ct">{t("dashboard.activity.title")}</div>
-            <a className="cs" style={{ textDecoration: "none", cursor: "pointer" }} onClick={() => void navigate({ to: "/notifications" })}>{t("dashboard.activity.seeAll")}</a>
-          </div>
-          <div className="activity">
-            {timelineItems.length === 0 ? (
-              <div style={{ padding: "22px 4px", fontSize: 12.5, color: "var(--text-2)", textAlign: "center" }}>{t("dashboard.activity.empty")}</div>
-            ) : timelineItems.map((n) => (
-              <div key={n.id} className="act-item">
-                <div className="act-ic"><Ic name={actIcon(n.notificationType)} /></div>
-                <div className="act-tx">
-                  <div className="a1">{n.title}</div>
-                  <div className="a2">{n.body || fmtTime(n.createdAt, i18n.language)}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        {/* Spacer card to keep the 2-column grid balanced */}
+        <div />
       </div>
 
       {/* recent table */}
