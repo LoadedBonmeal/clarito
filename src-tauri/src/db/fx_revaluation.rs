@@ -42,7 +42,7 @@ use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
 
 use crate::commands::bnr::parse_bnr_rate;
-use crate::db::gl::{post_manual_journal, ManualJournal};
+use crate::db::gl::{post_manual_journal_ex, ManualJournal};
 use crate::db::invoices::round2;
 use crate::db::models::new_id;
 use crate::error::{AppError, AppResult};
@@ -280,8 +280,9 @@ pub async fn compute_fx_revaluation(
     let issued_rows = sqlx::query(
         "SELECT i.id, UPPER(TRIM(i.currency)) as currency, \
                 CAST(i.exchange_rate AS TEXT) as exchange_rate, \
-                i.total_amount \
+                i.total_amount, c.cui as contact_cui \
          FROM invoices i \
+         LEFT JOIN contacts c ON c.id = i.contact_id \
          WHERE i.company_id = ?1 \
            AND i.status IN ('VALIDATED','STORNED') \
            AND UPPER(TRIM(i.currency)) != 'RON' \
@@ -297,7 +298,7 @@ pub async fn compute_fx_revaluation(
     let received_rows = sqlx::query(
         "SELECT r.id, UPPER(TRIM(r.currency)) as currency, \
                 CAST(r.exchange_rate AS TEXT) as exchange_rate, \
-                r.total_amount \
+                r.total_amount, r.issuer_cui \
          FROM received_invoices r \
          WHERE r.company_id = ?1 \
            AND UPPER(TRIM(r.currency)) != 'RON' \
@@ -361,6 +362,9 @@ pub async fn compute_fx_revaluation(
     struct RevalLine {
         invoice_id: String,
         invoice_kind: &'static str,
+        /// CUI-ul partenerului (client pentru ISSUED, furnizor pentru RECEIVED).
+        /// `None` dacă nu este disponibil în BD (factură fără contact sau fără CUI).
+        partner_cui: Option<String>,
         currency: String,
         foreign_outstanding: Decimal,
         month_end_rate: Decimal,
@@ -376,6 +380,7 @@ pub async fn compute_fx_revaluation(
     for row in &issued_rows {
         let inv_id: String = row.try_get("id").unwrap_or_default();
         let currency: String = row.try_get("currency").unwrap_or_default();
+        let contact_cui: Option<String> = row.try_get("contact_cui").unwrap_or(None);
 
         let month_end_rate = match rates.get(&currency) {
             Some(&r) => r,
@@ -419,6 +424,7 @@ pub async fn compute_fx_revaluation(
         lines.push(RevalLine {
             invoice_id: inv_id,
             invoice_kind: "ISSUED",
+            partner_cui: contact_cui.filter(|s| !s.trim().is_empty()),
             currency,
             foreign_outstanding,
             month_end_rate,
@@ -433,6 +439,7 @@ pub async fn compute_fx_revaluation(
     for row in &received_rows {
         let inv_id: String = row.try_get("id").unwrap_or_default();
         let currency: String = row.try_get("currency").unwrap_or_default();
+        let issuer_cui: Option<String> = row.try_get("issuer_cui").unwrap_or(None);
 
         let month_end_rate = match rates.get(&currency) {
             Some(&r) => r,
@@ -472,6 +479,7 @@ pub async fn compute_fx_revaluation(
         lines.push(RevalLine {
             invoice_id: inv_id,
             invoice_kind: "RECEIVED",
+            partner_cui: issuer_cui.filter(|s| !s.trim().is_empty()),
             currency,
             foreign_outstanding,
             month_end_rate,
@@ -482,49 +490,77 @@ pub async fn compute_fx_revaluation(
         });
     }
 
-    // ── 5. Construiește nota GL ────────────────────────────────────────────────
+    // ── 5. Construiește nota GL per partener ──────────────────────────────────
     //
-    // Netting per (account, currency) nu este obligatoriu — postăm NET per sens:
-    // net 4111 adj, net 401 adj, net 665, net 765.
-    // Notă: post_manual_journal verifică echilibrul; dacă liniile sunt goale, nu postăm.
-
-    // Acumulatori pentru notă GL
-    let mut d_4111 = Decimal::ZERO; // D 4111 (creanță curs ↑)
-    let mut c_4111 = Decimal::ZERO; // C 4111 (creanță curs ↓) — CREDIT
-    let mut d_401 = Decimal::ZERO; // D 401  (datorie curs ↓)
-    let mut c_401 = Decimal::ZERO; // C 401  (datorie curs ↑) — CREDIT
-    let mut d_665 = Decimal::ZERO; // D 665  cheltuială
-    let mut c_765 = Decimal::ZERO; // C 765  venit
+    // Fiecare linie de reevaluare generează o linie separată pe contul de creanță (4111)
+    // sau datorie (401), purtând CUI-ul partenerului. Conturile de cheltuieli (665) /
+    // venituri (765) se acumulează ca linii nete (non-partener) pentru a echilibra nota.
+    //
+    // Structura notei:
+    //   Per ISSUED  curs ↑ : D 4111 (partner_cui=X) / acumulare C 765
+    //   Per ISSUED  curs ↓ : acumulare D 665 / C 4111 (partner_cui=X)
+    //   Per RECEIVED curs ↑: acumulare D 665 / C 401  (partner_cui=X)
+    //   Per RECEIVED curs ↓: D 401  (partner_cui=X)  / acumulare C 765
+    //   Final: o linie D 665 (net) + o linie C 765 (net) pentru echilibru.
+    //
+    // Suma netă (Σdebit == Σcredit) este identică cu cea anterioară (acumulare pur-agregatoare).
 
     let mut total_favorable = Decimal::ZERO;
     let mut total_unfavorable = Decimal::ZERO;
 
+    // Liniile per-partener (4111/401): (cont, debit, credit, partner_cui)
+    let mut partner_gl_lines: Vec<(String, Decimal, Decimal, Option<String>)> = Vec::new();
+    // Acumulatori pentru 665/765 (non-partener, nete)
+    let mut net_d_665 = Decimal::ZERO;
+    let mut net_c_765 = Decimal::ZERO;
+
     for line in &lines {
+        let cui_ref = line.partner_cui.as_deref();
         match (line.invoice_kind, line.diff_lei > Decimal::ZERO) {
             // Creanță (4111), curs ↑ → diff > 0 → D 4111 / C 765 (favorabil)
             ("ISSUED", true) => {
-                d_4111 += line.diff_lei;
-                c_765 += line.diff_lei;
+                partner_gl_lines.push((
+                    "4111".to_string(),
+                    line.diff_lei,
+                    Decimal::ZERO,
+                    cui_ref.map(|s| s.to_string()),
+                ));
+                net_c_765 += line.diff_lei;
                 total_favorable += line.diff_lei;
             }
             // Creanță (4111), curs ↓ → diff < 0 → D 665 / C 4111 (nefavorabil)
             ("ISSUED", false) => {
                 let abs = line.diff_lei.abs();
-                d_665 += abs;
-                c_4111 += abs;
+                net_d_665 += abs;
+                partner_gl_lines.push((
+                    "4111".to_string(),
+                    Decimal::ZERO,
+                    abs,
+                    cui_ref.map(|s| s.to_string()),
+                ));
                 total_unfavorable += abs;
             }
             // Datorie (401), curs ↑ → diff > 0 → D 665 / C 401 (nefavorabil)
             ("RECEIVED", true) => {
-                d_665 += line.diff_lei;
-                c_401 += line.diff_lei;
+                net_d_665 += line.diff_lei;
+                partner_gl_lines.push((
+                    "401".to_string(),
+                    Decimal::ZERO,
+                    line.diff_lei,
+                    cui_ref.map(|s| s.to_string()),
+                ));
                 total_unfavorable += line.diff_lei;
             }
             // Datorie (401), curs ↓ → diff < 0 → D 401 / C 765 (favorabil)
             ("RECEIVED", false) => {
                 let abs = line.diff_lei.abs();
-                d_401 += abs;
-                c_765 += abs;
+                partner_gl_lines.push((
+                    "401".to_string(),
+                    abs,
+                    Decimal::ZERO,
+                    cui_ref.map(|s| s.to_string()),
+                ));
+                net_c_765 += abs;
                 total_favorable += abs;
             }
             _ => {}
@@ -538,29 +574,24 @@ pub async fn compute_fx_revaluation(
     let gl_desc = format!("Reevaluare valutară {period} — OMFP 1802/2014 art. 322");
 
     if rows_posted > 0 {
-        // Construiește liniile notei GL (doar cele cu sumă > 0)
-        let mut gl_lines: Vec<(&'static str, Decimal, Decimal)> = Vec::new();
+        // Construiește lista finală de linii cu tipul extins (acct, D, C, partner_cui).
+        // Liniile per-partener (4111/401) au CUI-ul clientului/furnizorului.
+        // Liniile de 665/765 (net) nu au partener.
+        let mut gl_lines: Vec<(&str, Decimal, Decimal, Option<&str>)> = Vec::new();
 
-        if d_4111 > Decimal::ZERO {
-            gl_lines.push(("4111", d_4111, Decimal::ZERO));
+        // Per-partener: 4111 / 401
+        for (acct, d, c, cui) in &partner_gl_lines {
+            gl_lines.push((acct.as_str(), *d, *c, cui.as_deref()));
         }
-        if c_4111 > Decimal::ZERO {
-            gl_lines.push(("4111", Decimal::ZERO, c_4111));
+        // Nete: 665 cheltuieli / 765 venituri (fără partener)
+        if net_d_665 > Decimal::ZERO {
+            gl_lines.push(("665", net_d_665, Decimal::ZERO, None));
         }
-        if d_401 > Decimal::ZERO {
-            gl_lines.push(("401", d_401, Decimal::ZERO));
-        }
-        if c_401 > Decimal::ZERO {
-            gl_lines.push(("401", Decimal::ZERO, c_401));
-        }
-        if d_665 > Decimal::ZERO {
-            gl_lines.push(("665", d_665, Decimal::ZERO));
-        }
-        if c_765 > Decimal::ZERO {
-            gl_lines.push(("765", Decimal::ZERO, c_765));
+        if net_c_765 > Decimal::ZERO {
+            gl_lines.push(("765", Decimal::ZERO, net_c_765, None));
         }
 
-        post_manual_journal(
+        post_manual_journal_ex(
             pool,
             &ManualJournal {
                 company_id,
@@ -782,6 +813,27 @@ mod tests {
         )
         .bind(id)
         .bind(company_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// Inserează contact cu CUI explicit (pentru testarea fișei partener).
+    async fn insert_contact_with_cui(
+        pool: &SqlitePool,
+        id: &str,
+        company_id: &str,
+        cui: &str,
+        legal_name: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, contact_type, legal_name, cui) \
+             VALUES (?1,?2,'CUSTOMER',?3,?4)",
+        )
+        .bind(id)
+        .bind(company_id)
+        .bind(legal_name)
+        .bind(cui)
         .execute(pool)
         .await
         .unwrap();
@@ -1453,5 +1505,193 @@ mod tests {
             dec!(30.00),
             "precizie Decimal exactă: 30.00, nu 29.999..."
         );
+    }
+
+    // ── Test: partner_cui stamped per-partner on 4111/401 legs ───────────────
+    //
+    // Scenariul: 2 clienți (CUI-A, CUI-B) cu creanțe deschise EUR + 1 furnizor (CUI-F)
+    // cu datorie deschisă EUR, curs ↑.  Verificăm că fiecare linie GL pe 4111/401
+    // poartă CUI-ul corect și că nota rămâne echilibrată.
+
+    #[tokio::test]
+    async fn partner_cui_stamped_per_partner_leg() {
+        let pool = make_pool().await;
+        insert_company(&pool, "co").await;
+
+        // Doi clienți cu CUI explicit
+        insert_contact_with_cui(&pool, "ct_a", "co", "RO100", "Client A SRL").await;
+        insert_contact_with_cui(&pool, "ct_b", "co", "RO200", "Client B SRL").await;
+
+        // Creanță client A: 1000 EUR @ 4.90 (series FA, number 1)
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, currency, exchange_rate, \
+              subtotal_amount, vat_amount, total_amount, status, payment_means_code, \
+              created_at, updated_at) \
+             VALUES ('inv_a','co','ct_a','FA',1,'FA/1','2025-11-01','2026-12-31',\
+                     'EUR',4.90,'0','0','1000.00','VALIDATED','30',1,1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Creanță client B: 500 EUR @ 4.90 (series FB, number 1 — serie diferită)
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, currency, exchange_rate, \
+              subtotal_amount, vat_amount, total_amount, status, payment_means_code, \
+              created_at, updated_at) \
+             VALUES ('inv_b','co','ct_b','FB',1,'FB/1','2025-11-01','2026-12-31',\
+                     'EUR',4.90,'0','0','500.00','VALIDATED','30',1,1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Datorie furnizor (received invoice) cu issuer_cui explicit: 300 EUR @ 4.90
+        sqlx::query(
+            "INSERT INTO received_invoices \
+             (id, company_id, anaf_download_id, issuer_cui, issuer_name, \
+              total_amount, net_amount, vat_amount, currency, exchange_rate, \
+              issue_date, xml_path, status, intra_eu_kind, downloaded_at, created_at) \
+             VALUES ('inv_f','co','inv_f','RO300','Furnizor F SRL', \
+                     '300.00','0','0','EUR',4.90,'2025-11-01','/x.xml','REGISTERED','goods',1,1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Curs BNR: 5.10 (↑ față de 4.90)
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<DataSet xmlns="http://www.bnr.ro/xsd">
+  <Body>
+    <Cube date="2026-01-30">
+      <Rate currency="EUR">5.1000</Rate>
+    </Cube>
+  </Body>
+</DataSet>"#;
+
+        let r = compute_fx_revaluation(&pool, "co", "2026-01", Some(xml))
+            .await
+            .unwrap();
+
+        // 3 facturi reevaluate
+        assert_eq!(
+            r.rows_posted, 3,
+            "3 facturi reevaluate (2 emise + 1 primită)"
+        );
+
+        // Creanțe: 1000×(5.10−4.90)=200 favorabil + 500×0.20=100 favorabil = 300 favorabil
+        // Datorie: 300×(5.10−4.90)=60 nefavorabil (datoria crește)
+        assert_eq!(
+            Decimal::from_str(&r.total_favorable).unwrap(),
+            dec!(300.00),
+            "total favorabil = 300"
+        );
+        assert_eq!(
+            Decimal::from_str(&r.total_unfavorable).unwrap(),
+            dec!(60.00),
+            "total nefavorabil = 60"
+        );
+
+        // Interogăm liniile GL: (account_code, partner_cui, debit, credit)
+        let entries: Vec<(String, Option<String>, String, String)> = sqlx::query_as(
+            "SELECT e.account_code, e.partner_cui, \
+                    CAST(e.debit AS TEXT), CAST(e.credit AS TEXT) \
+             FROM gl_entry e \
+             JOIN gl_journal j ON j.id = e.journal_pk \
+             WHERE j.source_type='FX_REVAL' AND j.source_id='FX_REVAL-2026-01' \
+             ORDER BY e.record_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+        // Nota trebuie să fie echilibrată
+        let sum_d: Decimal = entries
+            .iter()
+            .map(|(_, _, d, _)| Decimal::from_str(d).unwrap_or(Decimal::ZERO))
+            .fold(Decimal::ZERO, |a, b| a + b);
+        let sum_c: Decimal = entries
+            .iter()
+            .map(|(_, _, _, c)| Decimal::from_str(c).unwrap_or(Decimal::ZERO))
+            .fold(Decimal::ZERO, |a, b| a + b);
+        assert_eq!(sum_d, sum_c, "nota GL echilibrată (Σd={sum_d}, Σc={sum_c})");
+
+        // Liniile pe 4111 trebuie să poarte CUI-ul clientului
+        let cui_on_4111: Vec<Option<String>> = entries
+            .iter()
+            .filter(|(acct, _, _, _)| acct == "4111")
+            .map(|(_, cui, _, _)| cui.clone())
+            .collect();
+        assert_eq!(cui_on_4111.len(), 2, "2 linii 4111 (una per client)");
+        // Ambele CUI-uri trebuie prezente (ordinea poate varia)
+        let cuis_4111: std::collections::HashSet<Option<String>> =
+            cui_on_4111.into_iter().collect();
+        assert!(
+            cuis_4111.contains(&Some("RO100".to_string())),
+            "CUI RO100 prezent pe linia 4111"
+        );
+        assert!(
+            cuis_4111.contains(&Some("RO200".to_string())),
+            "CUI RO200 prezent pe linia 4111"
+        );
+
+        // Linia pe 401 trebuie să poarte CUI-ul furnizorului
+        let cui_on_401: Vec<Option<String>> = entries
+            .iter()
+            .filter(|(acct, _, _, _)| acct == "401")
+            .map(|(_, cui, _, _)| cui.clone())
+            .collect();
+        assert_eq!(cui_on_401.len(), 1, "1 linie 401 (furnizor F)");
+        assert_eq!(
+            cui_on_401[0],
+            Some("RO300".to_string()),
+            "CUI RO300 prezent pe linia 401"
+        );
+
+        // 665 și 765 nu au CUI
+        let cui_on_665: Vec<Option<String>> = entries
+            .iter()
+            .filter(|(acct, _, _, _)| acct == "665")
+            .map(|(_, cui, _, _)| cui.clone())
+            .collect();
+        assert!(
+            cui_on_665.iter().all(|c| c.is_none()),
+            "665 nu are partner_cui"
+        );
+        let cui_on_765: Vec<Option<String>> = entries
+            .iter()
+            .filter(|(acct, _, _, _)| acct == "765")
+            .map(|(_, cui, _, _)| cui.clone())
+            .collect();
+        assert!(
+            cui_on_765.iter().all(|c| c.is_none()),
+            "765 nu are partner_cui"
+        );
+
+        // Valorile 4111 per client
+        let d_4111_a: Decimal = entries
+            .iter()
+            .filter(|(acct, cui, _, _)| acct == "4111" && cui.as_deref() == Some("RO100"))
+            .map(|(_, _, d, _)| Decimal::from_str(d).unwrap_or(Decimal::ZERO))
+            .fold(Decimal::ZERO, |a, b| a + b);
+        assert_eq!(d_4111_a, dec!(200.00), "D 4111 RO100 = 200");
+
+        let d_4111_b: Decimal = entries
+            .iter()
+            .filter(|(acct, cui, _, _)| acct == "4111" && cui.as_deref() == Some("RO200"))
+            .map(|(_, _, d, _)| Decimal::from_str(d).unwrap_or(Decimal::ZERO))
+            .fold(Decimal::ZERO, |a, b| a + b);
+        assert_eq!(d_4111_b, dec!(100.00), "D 4111 RO200 = 100");
+
+        // Valoarea 401 furnizor
+        let c_401_f: Decimal = entries
+            .iter()
+            .filter(|(acct, cui, _, _)| acct == "401" && cui.as_deref() == Some("RO300"))
+            .map(|(_, _, _, c)| Decimal::from_str(c).unwrap_or(Decimal::ZERO))
+            .fold(Decimal::ZERO, |a, b| a + b);
+        assert_eq!(c_401_f, dec!(60.00), "C 401 RO300 = 60");
     }
 }

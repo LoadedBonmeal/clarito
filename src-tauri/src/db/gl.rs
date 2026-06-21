@@ -1381,6 +1381,81 @@ pub(crate) async fn post_manual_journal(
     Ok(())
 }
 
+/// Postează o notă contabilă manuală cu `partner_cui` per linie.
+///
+/// Identică cu [`post_manual_journal`], cu deosebirea că `lines` conține un al patrulea
+/// câmp `Option<&str>` = CUI-ul partenerului per linie (are prioritate față de
+/// `j.partner_cui`). Dacă al patrulea câmp este `None`, se aplică logica normală de
+/// propagare din header (`j.partner_cui` pe conturile de terți).
+///
+/// Utilizată de `compute_fx_revaluation` pentru a stampa CUI-ul corect pe fiecare
+/// linie de reevaluare per partener (4111/401), fără a afecta callerele existente.
+pub(crate) async fn post_manual_journal_ex(
+    pool: &SqlitePool,
+    j: &ManualJournal<'_>,
+    lines: &[(&str, Decimal, Decimal, Option<&str>)],
+) -> AppResult<()> {
+    let entries: Vec<GlEntry> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, (acct, d, c, line_cui))| GlEntry {
+            id: new_id(),
+            record_id: (i + 1) as i64,
+            account_code: (*acct).to_string(),
+            debit: *d,
+            credit: *c,
+            // Per-linie: dacă s-a furnizat explicit un CUI, îl folosim (pe conturi de terți).
+            // Altfel, facem fall-back la header.partner_cui, pe conturi de terți.
+            partner_cui: if let Some(cui) = line_cui {
+                if is_partner_account(acct) {
+                    Some((*cui).to_string())
+                } else {
+                    None
+                }
+            } else {
+                j.partner_cui
+                    .filter(|_| is_partner_account(acct))
+                    .map(|s| s.to_string())
+            },
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "000".to_string(),
+            tax_code: "000000".to_string(),
+            tax_percentage: None,
+            tax_base: None,
+            tax_amount: None,
+        })
+        .collect();
+    assert_balanced(&entries, j.source_id)?;
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM gl_journal WHERE company_id=?1 AND source_type=?2 AND source_id=?3")
+        .bind(j.company_id)
+        .bind(j.source_type)
+        .bind(j.source_id)
+        .execute(&mut *tx)
+        .await?;
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: j.company_id.to_string(),
+        journal_id: j.journal_id.to_string(),
+        journal_type: j.journal_type.to_string(),
+        transaction_id: j.source_id.to_string(),
+        transaction_date: j.date.to_string(),
+        description: Some(j.description.to_string()),
+        source_type: j.source_type.to_string(),
+        source_id: j.source_id.to_string(),
+        customer_id: None,
+        supplier_id: None,
+    };
+    insert_journal(&mut tx, &journal).await?;
+    for e in &entries {
+        insert_entry(&mut tx, &journal.id, e).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 // ─── Manual journal list / delete ────────────────────────────────────────────
 
 /// O linie dintr-o notă contabilă manuală (pentru `ManualJournalView`).
