@@ -657,6 +657,7 @@ pub async fn finalize_nir(
                 source_id: nir_id,
                 date: &doc.nir_date,
                 description: &description,
+                partner_cui: None,
             };
             post_manual_journal(pool, &mj, &lines_ref).await?;
         }
@@ -1152,6 +1153,7 @@ mod tests {
             source_id: &doc.id,
             date: "2026-06-01",
             description: "Re-post test",
+            partner_cui: None,
         };
         post_manual_journal(&pool, &mj, &lines).await.unwrap();
 

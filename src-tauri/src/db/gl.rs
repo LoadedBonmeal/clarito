@@ -1301,6 +1301,20 @@ pub(crate) struct ManualJournal<'a> {
     pub source_id: &'a str,
     pub date: &'a str,
     pub description: &'a str,
+    /// CUI-ul partenerului (client/furnizor). Dacă este `Some`, este propagat DOAR pe
+    /// liniile cu conturi de terți (4111, 401, 413, 403 etc.); celelalte linii rămân
+    /// `partner_cui = None`. Callerele existente trec `None` → comportament byte-identic.
+    pub partner_cui: Option<&'a str>,
+}
+
+/// Returnează `true` dacă `code` este un cont de terți (clienți/furnizori/efecte/debitori-creditori)
+/// căruia trebuie să i se atribuie CUI-ul partenerului pe o linie GL manuală.
+fn is_partner_account(code: &str) -> bool {
+    // Conturi de terți conform OMFP 1802/2014 (clienți, furnizori, efecte, debitori, creditori):
+    const PARTNER_PREFIXES: &[&str] = &[
+        "4111", "4118", "401", "404", "408", "409", "411", "419", "461", "462", "413", "403",
+    ];
+    PARTNER_PREFIXES.iter().any(|pfx| code.starts_with(pfx))
 }
 
 /// Postează o notă contabilă MANUALĂ (ex. dividende) — idempotentă per
@@ -1322,7 +1336,12 @@ pub(crate) async fn post_manual_journal(
             account_code: (*acct).to_string(),
             debit: *d,
             credit: *c,
-            partner_cui: None,
+            // Propagăm CUI-ul partenerului DOAR pe conturile de terți (4111, 401, 413, 403 etc.).
+            // Dacă header.partner_cui este None (toți callerii existenți), rămâne None → byte-identic.
+            partner_cui: j
+                .partner_cui
+                .filter(|_| is_partner_account(acct))
+                .map(|s| s.to_string()),
             customer_id: None,
             supplier_id: None,
             tax_type: "000".to_string(),
@@ -8161,5 +8180,234 @@ mod tests {
         let _ = fake_line; // suppress unused warning
         assert!(validate_pay_means("CASH").is_ok());
         assert!(validate_pay_means("TRANSFER").is_err());
+    }
+
+    // ── partner_cui propagation tests ────────────────────────────────────────────
+
+    /// `is_partner_account` — conturi de terți recunoscute și respinse corect.
+    #[test]
+    fn is_partner_account_classifies_correctly() {
+        // Conturi de terți → true
+        assert!(is_partner_account("4111"), "4111 = clienți");
+        assert!(is_partner_account("4118"), "4118 = clienți incerți");
+        assert!(is_partner_account("401"), "401 = furnizori");
+        assert!(is_partner_account("4011"), "4011 = furnizori (sub-cont)");
+        assert!(is_partner_account("404"), "404 = furnizori imobilizări");
+        assert!(
+            is_partner_account("408"),
+            "408 = furnizori-facturi nesosite"
+        );
+        assert!(is_partner_account("409"), "409 = furnizori-debitori");
+        assert!(is_partner_account("411"), "411 = clienți grupă");
+        assert!(is_partner_account("413"), "413 = efecte de primit");
+        assert!(is_partner_account("403"), "403 = efecte de plătit");
+        assert!(is_partner_account("419"), "419 = clienți-creditori");
+        assert!(is_partner_account("461"), "461 = debitori diverși");
+        assert!(is_partner_account("462"), "462 = creditori diverși");
+
+        // Conturi non-terț → false
+        assert!(!is_partner_account("5121"), "5121 = disponibil bancă");
+        assert!(!is_partner_account("607"), "607 = cheltuieli mărfuri");
+        assert!(
+            !is_partner_account("5112"),
+            "5112 = efecte de încasat la bancă"
+        );
+        assert!(!is_partner_account("5311"), "5311 = casă");
+        assert!(!is_partner_account("707"), "707 = venituri mărfuri");
+        assert!(!is_partner_account("4427"), "4427 = TVA colectat");
+        assert!(!is_partner_account("117"), "117 = rezultat reportat");
+        assert!(!is_partner_account("457"), "457 = dividende de plată");
+    }
+
+    /// `post_manual_journal` cu `partner_cui: Some("RO123")`:
+    /// — linia 4111 trebuie să aibă partner_cui = Some("RO123")
+    /// — linia 5121 trebuie să aibă partner_cui = None
+    #[tokio::test]
+    async fn manual_journal_partner_cui_propagated_only_to_partner_accounts() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id,cui,legal_name,address,city,county,country) \
+             VALUES ('co_p','11111111','Test SRL','S','B','B','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let src = new_id();
+        post_manual_journal(
+            &pool,
+            &ManualJournal {
+                company_id: "co_p",
+                journal_id: "NC",
+                journal_type: "MANUAL",
+                source_type: "MANUAL",
+                source_id: &src,
+                date: "2026-06-01",
+                description: "Test partener CUI",
+                partner_cui: Some("RO123"),
+            },
+            &[
+                ("4111", rdec!(100), Decimal::ZERO),
+                ("5121", Decimal::ZERO, rdec!(100)),
+            ],
+        )
+        .await
+        .expect("post OK");
+
+        // Fetch entries ordered by account_code
+        let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+            "SELECT e.account_code, e.partner_cui \
+             FROM gl_entry e \
+             JOIN gl_journal j ON j.id = e.journal_pk \
+             WHERE j.company_id='co_p' AND j.source_id=?1 \
+             ORDER BY e.account_code",
+        )
+        .bind(&src)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        let (acct_4111, cui_4111) = &rows[0];
+        let (acct_5121, cui_5121) = &rows[1];
+        assert_eq!(acct_4111, "4111");
+        assert_eq!(
+            cui_4111.as_deref(),
+            Some("RO123"),
+            "4111 este cont de terți → trebuie să primească CUI-ul"
+        );
+        assert_eq!(acct_5121, "5121");
+        assert_eq!(
+            *cui_5121, None,
+            "5121 este cont de trezorerie → partner_cui trebuie să rămână None"
+        );
+    }
+
+    /// `post_manual_journal` cu `partner_cui: None` — comportament byte-identic cu înainte.
+    /// Ambele linii trebuie să aibă partner_cui = None.
+    #[tokio::test]
+    async fn manual_journal_no_partner_cui_all_entries_none() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id,cui,legal_name,address,city,county,country) \
+             VALUES ('co_q','22222222','Test2 SRL','S','B','B','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let src = new_id();
+        post_manual_journal(
+            &pool,
+            &ManualJournal {
+                company_id: "co_q",
+                journal_id: "NC",
+                journal_type: "MANUAL",
+                source_type: "MANUAL",
+                source_id: &src,
+                date: "2026-06-01",
+                description: "Test fără partener",
+                partner_cui: None,
+            },
+            &[
+                ("4111", rdec!(50), Decimal::ZERO),
+                ("5121", Decimal::ZERO, rdec!(50)),
+            ],
+        )
+        .await
+        .expect("post OK");
+
+        let nulls: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM gl_entry e \
+             JOIN gl_journal j ON j.id = e.journal_pk \
+             WHERE j.company_id='co_q' AND j.source_id=?1 AND e.partner_cui IS NULL",
+        )
+        .bind(&src)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            nulls, 2,
+            "cu partner_cui: None, ambele linii rămân NULL (byte-identic)"
+        );
+    }
+
+    /// Test integrare CEC primit: la primire (413 D = 4111 C) linia 4111 trebuie să poarte
+    /// partner_cui-ul instrumentului; 413 este cont de terți → și el primește CUI-ul.
+    /// 5121/5112 (încasare ulterioară) nu primesc CUI-ul.
+    #[tokio::test]
+    async fn cec_received_register_event_attributes_partner_accounts() {
+        use crate::db::payment_instruments;
+
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let cid = "co_cec".to_string();
+        sqlx::query(
+            "INSERT INTO companies (id,cui,legal_name,address,city,county,country) \
+             VALUES (?1,'33333333','CEC SRL','S','B','B','RO')",
+        )
+        .bind(&cid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let input = payment_instruments::CreatePaymentInstrumentInput {
+            company_id: cid.clone(),
+            kind: "CEC".to_string(),
+            direction: "received".to_string(),
+            partner_id: None,
+            partner_cui: Some("RO999".to_string()),
+            number: Some("CEC-001".to_string()),
+            amount: "1000.00".to_string(),
+            currency: None,
+            issue_date: "2026-06-01".to_string(),
+            scadenta: None,
+            notes: None,
+        };
+        let pi = payment_instruments::create(&pool, input)
+            .await
+            .expect("create CEC OK");
+
+        // La primire se postează: D 413 = C 4111
+        // Ambele conturi (413 și 4111) sunt conturi de terți → ambele primesc CUI-ul.
+        let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+            "SELECT e.account_code, e.partner_cui \
+             FROM gl_entry e \
+             JOIN gl_journal j ON j.id = e.journal_pk \
+             WHERE j.company_id=?1 AND j.source_type='PAYMENT_INSTRUMENT' \
+             ORDER BY e.account_code",
+        )
+        .bind(&cid)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+        // Trebuie să avem exact 2 linii (o notă de primire: 413 + 4111).
+        assert_eq!(rows.len(), 2, "nota de primire CEC are 2 linii GL");
+
+        for (acct, cui) in &rows {
+            assert_eq!(
+                cui.as_deref(),
+                Some("RO999"),
+                "contul {acct} este cont de terți și trebuie să poarte CUI-ul partenerului"
+            );
+        }
+
+        // Verificare că partner_ledger pentru RO999 vede acum instrumentul în 4111/413.
+        let ledger = partner_ledger(&pool, &cid, "RO999", "2026-06-01", "2026-06-30")
+            .await
+            .expect("partner_ledger OK");
+        let has_4111 = ledger.iter().any(|la| la.account_code == "4111");
+        let has_413 = ledger.iter().any(|la| la.account_code == "413");
+        assert!(
+            has_4111 || has_413,
+            "partner_ledger(RO999) trebuie să conțină 4111 sau 413 din CEC-ul primit; conturi găsite: {:?}",
+            ledger.iter().map(|la| &la.account_code).collect::<Vec<_>>()
+        );
+
+        let _ = pi; // suppress unused
     }
 }

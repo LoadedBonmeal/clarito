@@ -276,6 +276,7 @@ pub async fn create_advance(
                 "Acordare avans trezorerie {}",
                 input.employee_id.as_deref().unwrap_or("-")
             ),
+            partner_cui: None,
         },
         &[
             ("542", amount_dec, Decimal::ZERO),
@@ -347,6 +348,7 @@ pub async fn return_advance(
             source_id: id,
             date: return_date,
             description: "Restituire avans trezorerie neutilizat",
+            partner_cui: None,
         },
         &[
             (cash_acct, amount, Decimal::ZERO),
@@ -686,6 +688,7 @@ pub async fn approve_report(
                     "Decont cheltuieli {}",
                     full.report.destination.as_deref().unwrap_or("")
                 ),
+                partner_cui: None,
             },
             &lines_ref,
         )

@@ -570,6 +570,7 @@ pub async fn compute_fx_revaluation(
                 source_id: &gl_source_id,
                 date: &gl_date,
                 description: &gl_desc,
+                partner_cui: None,
             },
             &gl_lines,
         )

@@ -194,6 +194,7 @@ pub async fn create(
         &input.direction,
         &input.amount,
         &input.issue_date,
+        input.partner_cui.as_deref(),
     )
     .await?;
 
@@ -283,6 +284,7 @@ pub async fn update(
         &pi.direction,
         &input.amount,
         &input.issue_date,
+        input.partner_cui.as_deref(),
     )
     .await?;
 
@@ -347,6 +349,7 @@ pub async fn event_deposit(
             ("413", Decimal::ZERO, amount),
             (transit, amount, Decimal::ZERO),
         ],
+        pi.partner_cui.as_deref(),
     )
     .await?;
 
@@ -380,6 +383,7 @@ pub async fn event_collect(
             (transit, Decimal::ZERO, amount),
             ("5121", amount, Decimal::ZERO),
         ],
+        pi.partner_cui.as_deref(),
     )
     .await?;
 
@@ -448,6 +452,7 @@ pub async fn event_discount(
                 (transit, Decimal::ZERO, total),
                 ("413", total, Decimal::ZERO),
             ],
+            pi.partner_cui.as_deref(),
         )
         .await?;
     }
@@ -464,6 +469,7 @@ pub async fn event_discount(
             ("413", Decimal::ZERO, total),
             ("5114", total, Decimal::ZERO),
         ],
+        pi.partner_cui.as_deref(),
     )
     .await?;
 
@@ -484,6 +490,7 @@ pub async fn event_discount(
         date,
         &format!("Decontare scontare BO {}", id),
         &lines,
+        pi.partner_cui.as_deref(),
     )
     .await?;
 
@@ -526,6 +533,7 @@ pub async fn event_dishonor(
             (transit, Decimal::ZERO, amount),
             ("4111", amount, Decimal::ZERO),
         ],
+        pi.partner_cui.as_deref(),
     )
     .await?;
 
@@ -562,6 +570,7 @@ pub async fn event_pay(
             ("403", amount, Decimal::ZERO),
             ("5121", Decimal::ZERO, amount),
         ],
+        pi.partner_cui.as_deref(),
     )
     .await?;
 
@@ -574,6 +583,7 @@ pub async fn event_pay(
 /// Postează nota GL de primire/acceptare (event='receive').
 /// received: D 413 = C 4111
 /// issued:   D 401 = C 403
+#[allow(clippy::too_many_arguments)]
 async fn post_receive_gl(
     pool: &SqlitePool,
     id: &str,
@@ -582,6 +592,7 @@ async fn post_receive_gl(
     direction: &str,
     amount: &str,
     date: &str,
+    partner_cui: Option<&str>,
 ) -> AppResult<()> {
     let d = parse_amount(amount)?;
     let (debit_acct, credit_acct, desc) = match direction {
@@ -600,10 +611,12 @@ async fn post_receive_gl(
             (credit_acct, Decimal::ZERO, d),
             (debit_acct, d, Decimal::ZERO),
         ],
+        partner_cui,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn post_pi_gl(
     pool: &SqlitePool,
     id: &str,
@@ -612,6 +625,7 @@ async fn post_pi_gl(
     date: &str,
     description: &str,
     lines: &[(&str, Decimal, Decimal)],
+    partner_cui: Option<&str>,
 ) -> AppResult<()> {
     let source_id = format!("{id}_{event}");
     post_manual_journal(
@@ -624,6 +638,7 @@ async fn post_pi_gl(
             source_id: &source_id,
             date,
             description,
+            partner_cui,
         },
         lines,
     )

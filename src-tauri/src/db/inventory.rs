@@ -590,6 +590,7 @@ pub async fn post_inventory_diffs(
             source_id: session_id,
             date: &s.reference_date,
             description: &desc,
+            partner_cui: None,
         },
         &lines_ref,
     )

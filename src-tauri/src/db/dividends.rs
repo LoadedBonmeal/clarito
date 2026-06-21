@@ -299,6 +299,7 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
             source_id: &id,
             date,
             description: &desc,
+            partner_cui: None,
         },
         &[
             ("117", gross, Decimal::ZERO),

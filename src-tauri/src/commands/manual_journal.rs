@@ -144,6 +144,7 @@ pub async fn create_manual_journal(
             source_id: &source_id,
             date: &date,
             description: desc_trimmed,
+            partner_cui: None,
         },
         &line_refs,
     )
@@ -281,6 +282,7 @@ mod tests {
                 source_id: &src,
                 date: "2026-06-01",
                 description: "Test echilibrat",
+                partner_cui: None,
             },
             &[
                 ("5311", rdec!(100), Decimal::ZERO),
@@ -333,6 +335,7 @@ mod tests {
                 source_id: &src,
                 date: "2026-06-05",
                 description: "Dezechilibrat",
+                partner_cui: None,
             },
             &[
                 ("5311", rdec!(100), Decimal::ZERO),
@@ -375,6 +378,7 @@ mod tests {
                 source_id: &src,
                 date: "2026-06-10",
                 description: "De șters",
+                partner_cui: None,
             },
             &[
                 ("5311", rdec!(200), Decimal::ZERO),
@@ -501,6 +505,7 @@ mod tests {
                 source_id: &src,
                 date: "2026-06-15",
                 description: "Survives regen",
+                partner_cui: None,
             },
             &[
                 ("5311", rdec!(50), Decimal::ZERO),
