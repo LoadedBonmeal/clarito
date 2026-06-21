@@ -44,6 +44,7 @@
       "dividends": "Dividends",
       "inventory": "Inventory",
       "gestiuni": "Warehouses",
+      "nir": "Goods Receipt (NIR)",
       "inventoryRegister": "Inventory register",
       "groupReporting": "Reporting",
       "reports": "Reports",

@@ -91,6 +91,7 @@ export function Sidebar() {
       { key: "cote-tva", label: t("shell.nav.vatRates"), icon: "scale", path: "/vat-rates", more: true },
       { key: "dividende", label: t("shell.nav.dividends"), icon: "incasat", path: "/dividends", more: true },
       { key: "gestiuni", label: t("shell.nav.gestiuni"), icon: "cube", path: "/gestiuni", more: true },
+      { key: "nir", label: t("shell.nav.nir"), icon: "docDown", path: "/nir", more: true },
       { key: "inventariere", label: t("shell.nav.inventory"), icon: "cube", path: "/inventory", more: true },
       { key: "registru-inventar", label: t("shell.nav.inventoryRegister"), icon: "book", path: "/inventory-register", more: true },
     ]},

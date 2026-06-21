@@ -48,6 +48,7 @@ pub mod invoices;
 pub mod journals;
 pub mod license;
 pub mod manual_journal;
+pub mod nir;
 pub mod notifications;
 pub mod payments;
 pub mod payroll;

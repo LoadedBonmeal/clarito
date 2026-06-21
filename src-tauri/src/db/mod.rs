@@ -30,6 +30,7 @@ pub mod fx_revaluation;
 pub mod gestiune;
 pub mod gl;
 pub mod inventory;
+pub mod nir;
 pub mod payments;
 pub mod payroll;
 pub mod products;

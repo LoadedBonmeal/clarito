@@ -555,6 +555,12 @@ pub fn run() {
             commands::inventory::finalize_inventory_session,
             commands::inventory::post_inventory_diffs,
             commands::inventory::list_registru_inventar,
+            // NIR — Notă de Intrare Recepție (P2 Wave 3)
+            commands::nir::create_nir,
+            commands::nir::get_nir,
+            commands::nir::list_nir,
+            commands::nir::finalize_nir,
+            commands::nir::nir_from_received_invoice,
             // fixed assets — Phase 6b (SAF-T Assets)
             commands::assets::create_fixed_asset,
             commands::assets::list_fixed_assets,

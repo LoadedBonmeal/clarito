@@ -1655,6 +1655,24 @@ export const bankImport = {
     invoke<void>("ignore_bank_txn", { txnId, companyId }),
 };
 
+// ─── NIR (Notă de Intrare Recepție) ──────────────────────────────────────────
+
+export const nir = {
+  create: (companyId: string, input: import("@/types").NirInput) =>
+    invoke<import("@/types").NirDocument>("create_nir", { companyId, input }),
+  get: (companyId: string, nirId: string) =>
+    invoke<import("@/types").NirWithLines>("get_nir", { companyId, nirId }),
+  list: (companyId: string) =>
+    invoke<import("@/types").NirDocument[]>("list_nir", { companyId }),
+  finalize: (companyId: string, nirId: string) =>
+    invoke<import("@/types").NirDocument>("finalize_nir", { companyId, nirId }),
+  fromReceivedInvoice: (companyId: string, receivedInvoiceId: string) =>
+    invoke<import("@/types").NirInput>("nir_from_received_invoice", {
+      companyId,
+      receivedInvoiceId,
+    }),
+};
+
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
@@ -1682,6 +1700,7 @@ export const api = {
   invoices,
   journals,
   license,
+  nir,
   notifications,
   payments,
   productGroups,

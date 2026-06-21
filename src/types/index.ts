@@ -1740,3 +1740,70 @@ export interface FxRevaluationResult {
   /** Ultima zi bancară folosită pentru curs BNR. */
   monthEndDate: string;
 }
+
+// ─── NIR (Notă de Intrare Recepție) ──────────────────────────────────────────
+
+export type NirStatus = "draft" | "finalized";
+
+export interface NirDocument {
+  id: string;
+  companyId: string;
+  gestiuneId: string;
+  receivedInvoiceId: string | null;
+  supplierName: string | null;
+  supplierCui: string | null;
+  nirSeries: string | null;
+  nirNumber: number;
+  nirDate: string;
+  retailMode: boolean;
+  status: NirStatus;
+  comisieReceptie: string | null;
+  observatii: string | null;
+  createdAt: number;
+  finalizedAt: number | null;
+}
+
+export interface NirLine {
+  id: string;
+  nirId: string;
+  productId: string | null;
+  denumire: string;
+  um: string | null;
+  qty: string;
+  unitCost: string;
+  vatRate: string;
+  adaosPct: string | null;
+  valueCost: string;
+  valueAdaos: string;
+  valueTvaNeex: string;
+  pretAmanunt: string;
+  lineNo: number;
+}
+
+export interface NirWithLines {
+  document: NirDocument;
+  lines: NirLine[];
+}
+
+export interface NirLineInput {
+  productId?: string;
+  denumire: string;
+  um?: string;
+  qty: string;
+  unitCost: string;
+  vatRate: string;
+  adaosPct?: string;
+  lineNo: number;
+}
+
+export interface NirInput {
+  gestiuneId: string;
+  receivedInvoiceId?: string;
+  supplierName?: string;
+  supplierCui?: string;
+  nirDate: string;
+  retailMode?: boolean;
+  comisieReceptie?: string;
+  observatii?: string;
+  lines: NirLineInput[];
+}

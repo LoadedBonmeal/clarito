@@ -82,6 +82,7 @@ import { StornatePage } from "@/pages/Stornate";
 import { GestiuniPage } from "@/pages/Gestiuni";
 import { InventoryPage } from "@/pages/Inventory";
 import { InventoryRegisterPage } from "@/pages/InventoryRegister";
+import { NirPage } from "@/pages/Nir";
 
 // ─── Layout root ──────────────────────────────────────────────────────────
 
@@ -327,6 +328,12 @@ const inventoryRegisterRoute = createRoute({
   component: InventoryRegisterPage,
 });
 
+const nirRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/nir",
+  component: NirPage,
+});
+
 // ─── Build tree + router ──────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -366,6 +373,7 @@ const routeTree = rootRoute.addChildren([
   gestiuniRoute,
   inventoryRoute,
   inventoryRegisterRoute,
+  nirRoute,
 ]);
 
 export const router = createRouter({

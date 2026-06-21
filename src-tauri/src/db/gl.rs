@@ -3261,7 +3261,7 @@ pub async fn post_asset_disposal(
 
 /// Expense account for a stock account's issue (descărcare gestiune): 371→607, 301→601, 302→602,
 /// 303→603, 345/348→711 (variația stocurilor), 381→608.
-fn stock_expense_account(stock_account: &str) -> &'static str {
+pub(crate) fn stock_expense_account(stock_account: &str) -> &'static str {
     match stock_account {
         a if a.starts_with("371") => "607",
         a if a.starts_with("301") => "601",
