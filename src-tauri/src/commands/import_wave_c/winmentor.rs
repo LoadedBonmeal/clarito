@@ -28,7 +28,17 @@
 //! Factura sections: [InfoPachet] AnLucru/LunaLucru/Tipdocument/TotalFacturi;
 //!   [Factura_n] NrDoc/Data/CodClient/TaxareInversa/TVAINCASARE/SerieCarnet/
 //!   TotalArticole/Scadenta/ANULAT;
-//!   [Items_n] Item_k=CodArticol;UM;Cant;Pret;Gestiune[;Disc;PretInreg;Obs;PretAchiz]
+//!   [Items_n] Item_k layout — POSITIONAL, SEMICOLON-DELIMITED:
+//!     pos 0: CodArticol   — product/article code
+//!     pos 1: UM           — unit of measure
+//!     pos 2: Cantitate    — quantity
+//!     pos 3: Pret         — unit price
+//!     pos 4: SimbolGestiune — warehouse symbol (empty for services)
+//!     — optional slots DIFFER by direction:
+//!     ISSUED (FACTURA IESIRE):  pos5=Discount; pos6=PretInregistrare; pos7=Observatii; pos8=PretAchizitie
+//!     RECEIVED (FACTURA INTRARE): pos5=Discount; pos6=SimbolCont; pos7=PretInregistrare; pos8=TermenGarantie; pos9=ValSuplimentara; pos10=Observatii
+//!   Positions 0-4 are identical for both directions; only the optional slots (5+) differ.
+//!   The commit engine reads optional slots — branch by direction (see parse_item_lines).
 //!
 //! ─── UNVERIFIED / PENDING REAL-FILE CHECK ───────────────────────────────────
 //! * Decimal separator in amounts (comma vs dot) — assumed dot; verify on a
@@ -535,18 +545,42 @@ fn parse_invoice(
         .filter(|s| !s.is_empty());
 
     // Partner code — resolves via 'Cod pentru identificare PARTENERI' constant.
-    // Default: CodClient is the CodFiscal (CUI) of the partner.
-    // PENDING VERIFICATION: in real files, CodClient may be cod extern/intern
-    // depending on the WinMentor constant setting.
+    // In real WinMentor files, CodClient is frequently an internal/external code
+    // like "C000020" or "F000020" rather than a CUI/fiscal code. If we
+    // canonicalize such a code it produces a junk dedup key that won't match
+    // the staged contact (which is keyed by its real CUI from [ParteneriNoi_<cod>]).
+    //
+    // FIX 3b (defensive, real-export pending): only set partner_cui_canonical
+    // when CodClient looks like a genuine fiscal code:
+    //   - All-digit string (e.g. "12345678") — Romanian CIF without prefix
+    //   - "RO" followed by digits (e.g. "RO12345678") — CIF with country prefix
+    // Anything else (starts with a letter like "C000020", "F000020") is treated
+    // as an internal source code — stored for later resolver lookup only.
+    //
+    // TODO: once a real WinMentor export is available, verify this heuristic and
+    // check whether the 'Cod pentru identificare PARTENERI' constant can force all
+    // CodClient values to always be CUI-formatted. Update accordingly.
     let partner_code: Option<String> = get_h("CodClient")
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
 
-    // Attempt CUI canonicalization; if the partner code is not a CUI
-    // (e.g. it's a cod extern), canonical_cui still returns something useful.
+    /// Returns true when `s` looks like a genuine Romanian fiscal code (CUI/CIF):
+    /// all-digit, or "RO" followed by all-digit (case-insensitive). Codes like
+    /// "C000020" or "F000020" (WinMentor internal partner codes) return false.
+    fn looks_like_cui(s: &str) -> bool {
+        let s = s.trim();
+        let digits = if s.to_ascii_uppercase().starts_with("RO") {
+            &s[2..]
+        } else {
+            s
+        };
+        !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+    }
+
     let partner_cui_canonical: Option<String> = partner_code
         .as_deref()
+        .filter(|s| looks_like_cui(s))
         .map(canonical_cui)
         .filter(|s| !s.is_empty());
 
@@ -561,8 +595,9 @@ fn parse_invoice(
     });
 
     // Parse Item_k lines from the paired [Items_n] section.
+    // direction is threaded so the commit engine (W4) can branch optional slots.
     let lines = if let Some(kv) = items_kv {
-        parse_item_lines(n, kv, warnings)
+        parse_item_lines(n, kv, warnings, direction)
     } else {
         warnings.push(format!(
             "WinMentor: [Items_{n}] lipsește pentru [Factura_{n}]."
@@ -596,6 +631,15 @@ fn parse_invoice(
         issue_date.as_deref().unwrap_or("")
     );
 
+    // When CodClient is not a CUI (e.g. "C000020"), partner_cui_canonical is None
+    // and we store the raw code in partner_source_code so the commit engine can
+    // resolve the contact from staged [ParteneriNoi_<cod>] sections.
+    let partner_source_code = if partner_cui_canonical.is_none() {
+        partner_code
+    } else {
+        None
+    };
+
     StagedInvoice {
         id: new_id(),
         source: SourceKind::WinmentorTxt.to_string(),
@@ -603,6 +647,7 @@ fn parse_invoice(
         direction: direction.to_string(),
         external_id: None,
         partner_cui_canonical,
+        partner_source_code,
         partner_name: None, // not in header; resolved from contacts in commit engine
         series,
         number,
@@ -623,19 +668,35 @@ fn parse_invoice(
 
 // ─── Item_k line parser ───────────────────────────────────────────────────────
 
-/// Parse `Item_k=CodArticol;UM;Cant;Pret;Gestiune[;Disc;PretInreg;Obs;PretAchiz]`
-/// lines from an `[Items_n]` section.
+/// Parse `Item_k=…` lines from an `[Items_n]` section.
 ///
-/// POSITIONAL, SEMICOLON-DELIMITED (order-sensitive):
+/// POSITIONAL, SEMICOLON-DELIMITED (order-sensitive). Positions 0-4 are
+/// identical for ISSUED and RECEIVED; optional slots (5+) differ:
+///
+/// **ISSUED (FACTURA IESIRE)**:
 ///   pos 0: CodArticol
 ///   pos 1: UM (unit of measure)
 ///   pos 2: Cantitate
 ///   pos 3: Pret (unit price)
 ///   pos 4: SimbolGestiune (warehouse symbol; may be empty for services)
-///   pos 5: Discount (optional, may be empty `;;`)
+///   pos 5: Discount (optional)
 ///   pos 6: PretInregistrare (optional)
 ///   pos 7: Observatii linie (optional)
 ///   pos 8: PretAchizitie (optional)
+///
+/// **RECEIVED (FACTURA INTRARE)** — 11-field WinMentor synthesis:
+///   pos 0-4: same as ISSUED
+///   pos 5: Discount (optional)
+///   pos 6: SimbolCont (GL account symbol; differs from ISSUED pos6)
+///   pos 7: PretInregistrare (optional)
+///   pos 8: TermenGarantie (warranty period; optional)
+///   pos 9: ValSuplimentara (supplementary value; optional)
+///   pos 10: Observatii linie (optional)
+///
+/// W1 only stages pos 0-4 (common to both); optional slots are noted in
+/// warnings for the commit engine (W4). The `direction` parameter is
+/// threaded here so the commit engine can branch correctly when it reads
+/// optional slots in a future wave.
 ///
 /// The spec says optional slots may be empty (`;;`). We use `.get(i)` with
 /// empty-string filtering to handle both absent and empty slots uniformly.
@@ -643,6 +704,7 @@ fn parse_item_lines(
     _invoice_n: usize,
     kv: &HashMap<String, String>,
     _warnings: &mut Vec<String>,
+    _direction: &str,
 ) -> Vec<StagedLine> {
     // Collect Item_k keys (excluding sub-keys like Item_k_Ext, _TVA, _Serii).
     let mut items: Vec<(usize, &str)> = kv
@@ -1086,5 +1148,168 @@ Item_2=45545;Buc;1.00;584;TZL;;;Obs linie;12;\n";
         };
         let data = adapter.parse(&input, &ctx).unwrap();
         assert_eq!(data.contacts.len(), 1);
+    }
+
+    // ── FIX 3a: parse_item_lines direction parameter ──────────────────────────
+
+    /// ISSUED and RECEIVED invoices both parse pos 0-4 correctly (the common subset).
+    /// This validates that threading `direction` into `parse_item_lines` doesn't break
+    /// existing positional parsing.
+    #[test]
+    fn item_lines_direction_issued_and_received_parse_pos0to4() {
+        let issued_ini = make_bytes(
+            "[InfoPachet]\n\
+             Tipdocument=FACTURA IESIRE\n\
+             TotalFacturi=1\n\
+             \n\
+             [Factura_1]\n\
+             NrDoc=1\n\
+             Data=01.01.2024\n\
+             CodClient=C000020\n\
+             TotalArticole=1\n\
+             \n\
+             [Items_1]\n\
+             Item_1=ART001;BUC;3;250;GESTIUNE1;5;280;Obs;210\n",
+        );
+        let received_ini = make_bytes(
+            "[InfoPachet]\n\
+             Tipdocument=FACTURA INTRARE\n\
+             TotalFacturi=1\n\
+             \n\
+             [Factura_1]\n\
+             NrDoc=1\n\
+             Data=01.01.2024\n\
+             CodClient=F000010\n\
+             TotalArticole=1\n\
+             \n\
+             [Items_1]\n\
+             Item_1=ART001;BUC;3;250;GESTIUNE1;5;411;280;12;100;Obs\n",
+        );
+        let ctx = ParseCtx {
+            company_cui_canonical: "999",
+            column_map: None,
+        };
+
+        for (label, ini) in [("ISSUED", issued_ini), ("RECEIVED", received_ini)] {
+            let data = parse_bytes(&ini, &ctx).unwrap();
+            assert_eq!(data.invoices.len(), 1, "{label}");
+            let l = &data.invoices[0].lines[0];
+            // pos 0-4 identical for both directions
+            assert_eq!(l.product_code.as_deref(), Some("ART001"), "{label} pos0");
+            assert_eq!(l.unit.as_deref(), Some("BUC"), "{label} pos1");
+            assert_eq!(l.quantity.as_deref(), Some("3"), "{label} pos2");
+            assert_eq!(l.unit_price.as_deref(), Some("250"), "{label} pos3");
+            assert_eq!(l.warehouse.as_deref(), Some("GESTIUNE1"), "{label} pos4");
+        }
+    }
+
+    // ── FIX 3b: CodClient CUI detection ──────────────────────────────────────
+
+    /// CodClient is an internal code → partner_cui_canonical must NOT be set,
+    /// partner_source_code must carry the raw code for resolver lookup.
+    #[test]
+    fn codclient_internal_code_not_canonicalized_as_cui() {
+        let ini = make_bytes(
+            "[InfoPachet]\n\
+             Tipdocument=FACTURA IESIRE\n\
+             TotalFacturi=1\n\
+             \n\
+             [Factura_1]\n\
+             NrDoc=1\n\
+             Data=01.01.2024\n\
+             CodClient=C000020\n\
+             TotalArticole=1\n\
+             \n\
+             [Items_1]\n\
+             Item_1=ART;buc;1;10;G\n",
+        );
+        let ctx = ParseCtx {
+            company_cui_canonical: "999",
+            column_map: None,
+        };
+        let data = parse_bytes(&ini, &ctx).unwrap();
+        let inv = &data.invoices[0];
+
+        // Must NOT set a CUI canonical from "C000020"
+        assert!(
+            inv.partner_cui_canonical.is_none(),
+            "C000020 must not produce a partner_cui_canonical (got {:?})",
+            inv.partner_cui_canonical
+        );
+        // Must carry the raw code for resolver
+        assert_eq!(
+            inv.partner_source_code.as_deref(),
+            Some("C000020"),
+            "C000020 must be stored as partner_source_code"
+        );
+    }
+
+    /// CodClient is a genuine CUI (all-digit) → partner_cui_canonical set, source_code None.
+    #[test]
+    fn codclient_genuine_cui_is_canonicalized() {
+        let ini = make_bytes(
+            "[InfoPachet]\n\
+             Tipdocument=FACTURA IESIRE\n\
+             TotalFacturi=1\n\
+             \n\
+             [Factura_1]\n\
+             NrDoc=2\n\
+             Data=01.01.2024\n\
+             CodClient=RO12345678\n\
+             TotalArticole=1\n\
+             \n\
+             [Items_1]\n\
+             Item_1=ART;buc;1;10;G\n",
+        );
+        let ctx = ParseCtx {
+            company_cui_canonical: "999",
+            column_map: None,
+        };
+        let data = parse_bytes(&ini, &ctx).unwrap();
+        let inv = &data.invoices[0];
+
+        // "RO12345678" → canonical "12345678"
+        assert_eq!(
+            inv.partner_cui_canonical.as_deref(),
+            Some("12345678"),
+            "RO12345678 must be canonicalized as partner_cui_canonical"
+        );
+        // No source code needed when CUI is known
+        assert!(
+            inv.partner_source_code.is_none(),
+            "partner_source_code must be None when CUI is available"
+        );
+    }
+
+    /// looks_like_cui helper: digit-only and RO-prefixed codes are CUI; letter-prefixed are not.
+    #[test]
+    fn looks_like_cui_helper_recognizes_valid_and_invalid() {
+        // Private access via inner fn — test through invoice parsing behavior instead.
+        // Internal code "F000010" must not become a CUI in the RECEIVED-direction fixture.
+        let ini = make_bytes(
+            "[InfoPachet]\n\
+             Tipdocument=FACTURA INTRARE\n\
+             TotalFacturi=1\n\
+             \n\
+             [Factura_1]\n\
+             NrDoc=3\n\
+             Data=01.01.2024\n\
+             CodClient=F000010\n\
+             TotalArticole=1\n\
+             \n\
+             [Items_1]\n\
+             Item_1=ART;buc;1;10;G\n",
+        );
+        let ctx = ParseCtx {
+            company_cui_canonical: "999",
+            column_map: None,
+        };
+        let data = parse_bytes(&ini, &ctx).unwrap();
+        let inv = &data.invoices[0];
+        assert!(
+            inv.partner_cui_canonical.is_none(),
+            "F000010 must not be treated as a CUI"
+        );
+        assert_eq!(inv.partner_source_code.as_deref(), Some("F000010"));
     }
 }

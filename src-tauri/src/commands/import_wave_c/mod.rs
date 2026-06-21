@@ -176,6 +176,11 @@ pub struct StagedInvoice {
     pub direction: String,
     pub external_id: Option<String>,
     pub partner_cui_canonical: Option<String>,
+    /// Internal WinMentor partner code (e.g. "C000020") when CodClient is NOT a
+    /// fiscal code. Used by the commit engine to resolve the contact by source_code
+    /// from the staged `[ParteneriNoi_<cod>]` sections. None when partner_cui_canonical
+    /// is already set (i.e. CodClient was a genuine CUI).
+    pub partner_source_code: Option<String>,
     pub partner_name: Option<String>,
     pub series: Option<String>,
     pub number: Option<String>,

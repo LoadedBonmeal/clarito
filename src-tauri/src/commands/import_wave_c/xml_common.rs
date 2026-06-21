@@ -777,6 +777,68 @@ pub fn articol_to_staged_product(rec: &ArticolRecord, source: &str) -> StagedPro
     }
 }
 
+/// Convert a SAGA/SmartBill XML date string to ISO 8601 (`yyyy-mm-dd`).
+///
+/// Confirmed real format from `<FacturaData>05.02.2024</FacturaData>` (dot-separated)
+/// and a `dd-mm-yyyy` dash variant also seen in some exports.
+/// If the input is already ISO (`yyyy-mm-dd`) it is returned unchanged.
+/// On empty input or unrecognised format, returns the original string unchanged
+/// (no panic) and pushes a warning when `warnings` is Some.
+pub fn convert_date_xml_to_iso(s: &str, field: &str, warnings: Option<&mut Vec<String>>) -> String {
+    let s = s.trim();
+    if s.is_empty() {
+        return s.to_string();
+    }
+
+    // Already ISO: yyyy-mm-dd
+    if s.len() == 10 {
+        if let (Some('-'), Some('-')) = (
+            s.as_bytes().get(4).map(|&b| b as char),
+            s.as_bytes().get(7).map(|&b| b as char),
+        ) {
+            // Validate the parts parse
+            if s[..4].parse::<i32>().is_ok()
+                && s[5..7].parse::<u32>().is_ok()
+                && s[8..10].parse::<u32>().is_ok()
+            {
+                return s.to_string();
+            }
+        }
+    }
+
+    // dd.mm.yyyy (SAGA/SmartBill confirmed format)
+    // dd-mm-yyyy (dash variant seen in some exports)
+    let sep = if s.contains('.') {
+        Some('.')
+    } else if s.len() == 10 && s.as_bytes().get(2) == Some(&b'-') {
+        Some('-')
+    } else {
+        None
+    };
+    if let Some(sep) = sep {
+        let parts: Vec<&str> = s.splitn(3, sep).collect();
+        if parts.len() == 3 && parts[0].len() == 2 && parts[1].len() == 2 && parts[2].len() == 4 {
+            if let (Ok(d), Ok(m), Ok(y)) = (
+                parts[0].parse::<u32>(),
+                parts[1].parse::<u32>(),
+                parts[2].parse::<i32>(),
+            ) {
+                if (1..=31).contains(&d) && (1..=12).contains(&m) && y >= 1900 {
+                    return format!("{y:04}-{m:02}-{d:02}");
+                }
+            }
+        }
+    }
+
+    // Unrecognised — warn and return as-is
+    if let Some(w) = warnings {
+        w.push(format!(
+            "xml_common: format dată necunoscut '{s}' pentru câmpul '{field}' — stocat nemodificat"
+        ));
+    }
+    s.to_string()
+}
+
 /// Build a `StagedInvoice` + its `StagedLine`s from a parsed `(Antet, Vec<Linie>)`.
 ///
 /// `source` = source string for staging rows.
@@ -981,8 +1043,29 @@ pub fn build_staged_invoice(
     })
     .to_string();
 
-    let dedup_key = match (&full_number, &antet.factura_data) {
-        (Some(n), d) if !d.is_empty() => Some(format!("{n}|{d}")),
+    // Convert dates from dd.mm.yyyy / dd-mm-yyyy → ISO yyyy-mm-dd (FIX 2).
+    // If already ISO or empty, returns unchanged. Malformed → warning + pass-through.
+    let issue_date_iso = if antet.factura_data.is_empty() {
+        None
+    } else {
+        Some(convert_date_xml_to_iso(
+            &antet.factura_data,
+            "FacturaData",
+            Some(warnings),
+        ))
+    };
+    let due_date_iso = if antet.factura_scadenta.is_empty() {
+        None
+    } else {
+        Some(convert_date_xml_to_iso(
+            &antet.factura_scadenta,
+            "FacturaScadenta",
+            Some(warnings),
+        ))
+    };
+
+    let dedup_key = match (&full_number, &issue_date_iso) {
+        (Some(n), Some(d)) if !d.is_empty() => Some(format!("{n}|{d}")),
         _ => None,
     };
 
@@ -993,6 +1076,7 @@ pub fn build_staged_invoice(
         direction: direction.to_string(),
         external_id,
         partner_cui_canonical,
+        partner_source_code: None, // SAGA/SmartBill XML uses CIF, not internal codes
         partner_name: if partner_name.is_empty() {
             None
         } else {
@@ -1001,16 +1085,8 @@ pub fn build_staged_invoice(
         series,
         number,
         full_number,
-        issue_date: if antet.factura_data.is_empty() {
-            None
-        } else {
-            Some(antet.factura_data.clone())
-        },
-        due_date: if antet.factura_scadenta.is_empty() {
-            None
-        } else {
-            Some(antet.factura_scadenta.clone())
-        },
+        issue_date: issue_date_iso,
+        due_date: due_date_iso,
         currency,
         exchange_rate: None,
         reverse_charge,
@@ -1270,5 +1346,106 @@ mod tests {
         assert_eq!(inv.direction, "RECEIVED");
         // Partner should be the supplier
         assert_eq!(inv.partner_name.as_deref(), Some("Furnizor SRL"));
+    }
+
+    // ── FIX 2: SAGA/SmartBill XML date → ISO conversion ──────────────────────
+
+    /// Real format confirmed: `<FacturaData>05.02.2024</FacturaData>` (dot-separated).
+    #[test]
+    fn convert_date_xml_dot_format_to_iso() {
+        assert_eq!(
+            convert_date_xml_to_iso("05.02.2024", "FacturaData", None),
+            "2024-02-05"
+        );
+        assert_eq!(
+            convert_date_xml_to_iso("01.01.2026", "FacturaData", None),
+            "2026-01-01"
+        );
+        assert_eq!(
+            convert_date_xml_to_iso("31.12.2023", "FacturaScadenta", None),
+            "2023-12-31"
+        );
+    }
+
+    /// Dash-variant: `dd-mm-yyyy` also seen in some exports.
+    #[test]
+    fn convert_date_xml_dash_format_to_iso() {
+        assert_eq!(
+            convert_date_xml_to_iso("01-06-2022", "FacturaData", None),
+            "2022-06-01"
+        );
+        assert_eq!(
+            convert_date_xml_to_iso("15-03-2025", "FacturaScadenta", None),
+            "2025-03-15"
+        );
+    }
+
+    /// Already ISO: pass-through unchanged (no double-conversion).
+    #[test]
+    fn convert_date_xml_already_iso_passthrough() {
+        assert_eq!(
+            convert_date_xml_to_iso("2024-02-05", "FacturaData", None),
+            "2024-02-05"
+        );
+        assert_eq!(
+            convert_date_xml_to_iso("2026-01-01", "FacturaData", None),
+            "2026-01-01"
+        );
+    }
+
+    /// Empty input → empty output, no warning.
+    #[test]
+    fn convert_date_xml_empty_no_warning() {
+        let mut w = vec![];
+        assert_eq!(convert_date_xml_to_iso("", "FacturaData", Some(&mut w)), "");
+        assert!(w.is_empty(), "empty input must not produce a warning");
+    }
+
+    /// Malformed input → pass-through + warning (no panic).
+    #[test]
+    fn convert_date_xml_malformed_warns_no_panic() {
+        let mut w = vec![];
+        let result = convert_date_xml_to_iso("not-a-date", "FacturaData", Some(&mut w));
+        assert_eq!(result, "not-a-date", "malformed must be returned unchanged");
+        assert!(!w.is_empty(), "malformed date must produce a warning");
+    }
+
+    /// `build_staged_invoice` stores ISO dates for a real `dd.mm.yyyy` invoice header.
+    /// Fixture: `<FacturaData>05.02.2024</FacturaData>` → issue_date == "2024-02-05"
+    #[test]
+    fn build_staged_invoice_dates_converted_to_iso() {
+        let antet = Antet {
+            furnizor_cif: "RO12345678".into(),
+            client_cif: "RO87654321".into(),
+            factura_numar: "F001".into(),
+            // Confirmed real format: dd.mm.yyyy
+            factura_data: "05.02.2024".into(),
+            factura_scadenta: "01-06-2022".into(), // dash variant
+            ..Default::default()
+        };
+        let mut w = vec![];
+        let inv = build_staged_invoice(&antet, &[], "SAGA_XML", "12345678", &mut w);
+        assert_eq!(
+            inv.issue_date.as_deref(),
+            Some("2024-02-05"),
+            "dd.mm.yyyy must be stored as ISO"
+        );
+        assert_eq!(
+            inv.due_date.as_deref(),
+            Some("2022-06-01"),
+            "dd-mm-yyyy dash variant must be stored as ISO"
+        );
+        // dedup_key uses the ISO date
+        assert!(
+            inv.dedup_key
+                .as_deref()
+                .unwrap_or("")
+                .contains("2024-02-05"),
+            "dedup_key must use the ISO-converted date"
+        );
+        assert!(
+            w.is_empty(),
+            "clean conversion must not emit warnings: {w:?}"
+        );
     }
 }
