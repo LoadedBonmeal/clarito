@@ -91,6 +91,7 @@ import { ProductiePage } from "@/pages/Productie";
 import { FiscalReceiptsPage } from "@/pages/FiscalReceipts";
 import { UsersPage } from "@/pages/Users";
 import { PaymentInstrumentsPage } from "@/pages/PaymentInstruments";
+import { DeconturiPage } from "@/pages/Deconturi";
 
 // ─── Layout root ──────────────────────────────────────────────────────────
 
@@ -390,6 +391,12 @@ const paymentInstrumentsRoute = createRoute({
   component: PaymentInstrumentsPage,
 });
 
+const deconturiRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/deconturi",
+  component: DeconturiPage,
+});
+
 // ─── Build tree + router ──────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -438,6 +445,7 @@ const routeTree = rootRoute.addChildren([
   fiscalReceiptsRoute,
   usersRoute,
   paymentInstrumentsRoute,
+  deconturiRoute,
 ]);
 
 export const router = createRouter({

@@ -158,7 +158,11 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "collect_payment_instrument"
         | "discount_payment_instrument"
         | "dishonor_payment_instrument"
-        | "pay_payment_instrument" => Some(Perm::PostGl),
+        | "pay_payment_instrument"
+        // P3 Wave D: avansuri + deconturi post GL
+        | "create_treasury_advance"
+        | "return_treasury_advance"
+        | "approve_expense_report" => Some(Perm::PostGl),
 
         // ── ClosePeriod ───────────────────────────────────────────────────
         "close_vat_period" | "close_period" => Some(Perm::ClosePeriod),
@@ -232,7 +236,10 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "delete_order"
         | "delete_contract"
         | "delete_payment_instrument"
-        | "export_backup" => Some(Perm::Delete),
+        | "export_backup"
+        // P3 Wave D
+        | "delete_treasury_advance"
+        | "delete_expense_report" => Some(Perm::Delete),
 
         // ── ViewReports ───────────────────────────────────────────────────
         "generate_vat_report"

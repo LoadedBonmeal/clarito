@@ -36,6 +36,7 @@ pub mod contracts;
 pub mod d390;
 pub mod d394;
 pub mod declarations;
+pub mod deconturi;
 pub mod dividends;
 pub mod etransport;
 pub mod feedback;

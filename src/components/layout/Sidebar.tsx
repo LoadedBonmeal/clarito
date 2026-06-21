@@ -84,6 +84,7 @@ export function Sidebar() {
       { key: "chitante", label: t("shell.nav.receipts"), icon: "receipt", path: "/receipts" },
       { key: "urmarire-plati", label: t("shell.nav.payments"), icon: "card", path: "/payments" },
       { key: "salarizare", label: t("shell.nav.payroll"), icon: "idcard", path: "/payroll" },
+      { key: "deconturi", label: t("shell.nav.deconturi"), icon: "docText", path: "/deconturi", matchPrefix: "/deconturi", more: true },
       { key: "articole", label: t("shell.nav.products"), icon: "cube", path: "/products" },
       { key: "companii", label: t("shell.nav.companies"), icon: "building", path: "/companies", matchPrefix: "/companies", more: true },
       { key: "oferte", label: t("shell.nav.quotes"), icon: "docText", path: "/quotes", matchPrefix: "/quotes", more: true },

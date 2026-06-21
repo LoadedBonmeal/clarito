@@ -687,6 +687,18 @@ pub fn run() {
                     commands::fiscal_receipts::remove_fiscal_receipt_invoice_link,
                     commands::fiscal_receipts::set_fiscal_receipt_status,
                     commands::fiscal_receipts::settle_fiscal_receipt_pos,
+                    // deconturi (avansuri de trezorerie + deconturi de cheltuieli — P3 Wave D)
+                    commands::deconturi::create_treasury_advance,
+                    commands::deconturi::list_treasury_advances,
+                    commands::deconturi::get_treasury_advance,
+                    commands::deconturi::return_treasury_advance,
+                    commands::deconturi::delete_treasury_advance,
+                    commands::deconturi::create_expense_report,
+                    commands::deconturi::list_expense_reports,
+                    commands::deconturi::get_expense_report,
+                    commands::deconturi::approve_expense_report,
+                    commands::deconturi::delete_expense_report,
+                    commands::deconturi::compute_diurna,
                 ]);
             // Gate wrapper — the SOLE invoke chokepoint.
             // All 289+ commands above flow through `inner`; this wrapper adds the RBAC

@@ -2235,6 +2235,146 @@ export const auth = {
     invoke<void>("reset_password", { userId, newPassword }),
 };
 
+// ─── P3 Wave D: Deconturi + avansuri de trezorerie ───────────────────────────
+
+export interface TreasuryAdvance {
+  id: string;
+  companyId: string;
+  employeeId: string | null;
+  amount: string;
+  currency: string;
+  grantedDate: string;
+  method: "cash" | "bank";
+  status: "granted" | "settled" | "returned";
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateAdvanceInput {
+  companyId: string;
+  employeeId?: string | null;
+  amount: string;
+  currency?: string;
+  grantedDate: string;
+  method?: "cash" | "bank";
+  notes?: string | null;
+}
+
+export interface ExpenseReport {
+  id: string;
+  companyId: string;
+  advanceId: string | null;
+  employeeId: string | null;
+  delegationFrom: string | null;
+  delegationTo: string | null;
+  destination: string | null;
+  days: number | null;
+  diurnaAcordata: string | null;
+  diurnaNeimpozabila: string | null;
+  diurnaImpozabila: string | null;
+  salariuBaza: string | null;
+  reportDate: string;
+  status: "draft" | "approved";
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ExpenseLine {
+  id: string;
+  reportId: string;
+  category: "diurna" | "transport" | "cazare" | "combustibil" | "alte";
+  description: string | null;
+  amount: string;
+  vatAmount: string | null;
+  accountCode: string;
+}
+
+export interface ExpenseLineInput {
+  category: "diurna" | "transport" | "cazare" | "combustibil" | "alte";
+  description?: string | null;
+  amount: string;
+  vatAmount?: string | null;
+  accountCode?: string | null;
+}
+
+export interface CreateReportInput {
+  companyId: string;
+  advanceId?: string | null;
+  employeeId?: string | null;
+  delegationFrom?: string | null;
+  delegationTo?: string | null;
+  destination?: string | null;
+  days?: number | null;
+  diurnaAcordata?: string | null;
+  salariuBaza?: string | null;
+  reportDate: string;
+  notes?: string | null;
+  lines: ExpenseLineInput[];
+  diurnaInterna?: string | null;
+}
+
+export interface DiurnaCalc {
+  diurnaAcordata: string;
+  diurnaNeimpozabila: string;
+  diurnaImpozabila: string;
+  limitAZi: string;
+  limitBZi: string;
+  capZi: string;
+  workingDaysUsed: number;
+}
+
+export interface ExpenseReportFull {
+  report: ExpenseReport;
+  lines: ExpenseLine[];
+  diurnaCalc: DiurnaCalc | null;
+}
+
+export const deconturi = {
+  // Treasury advances
+  createAdvance: (input: CreateAdvanceInput) =>
+    invoke<TreasuryAdvance>("create_treasury_advance", { input }),
+  listAdvances: (companyId: string) =>
+    invoke<TreasuryAdvance[]>("list_treasury_advances", { companyId }),
+  getAdvance: (id: string, companyId: string) =>
+    invoke<TreasuryAdvance>("get_treasury_advance", { id, companyId }),
+  returnAdvance: (id: string, companyId: string, returnDate: string) =>
+    invoke<TreasuryAdvance>("return_treasury_advance", { id, companyId, returnDate }),
+  deleteAdvance: (id: string, companyId: string) =>
+    invoke<void>("delete_treasury_advance", { id, companyId }),
+
+  // Expense reports
+  createReport: (input: CreateReportInput) =>
+    invoke<ExpenseReportFull>("create_expense_report", { input }),
+  listReports: (companyId: string) =>
+    invoke<ExpenseReport[]>("list_expense_reports", { companyId }),
+  getReport: (id: string, companyId: string) =>
+    invoke<ExpenseReportFull>("get_expense_report", { id, companyId }),
+  approveReport: (id: string, companyId: string, approveDate: string) =>
+    invoke<ExpenseReportFull>("approve_expense_report", { id, companyId, approveDate }),
+  deleteReport: (id: string, companyId: string) =>
+    invoke<void>("delete_expense_report", { id, companyId }),
+
+  // Diurnă computation
+  computeDiurna: (
+    companyId: string,
+    diurnaAcordata: string,
+    zileDelegare: number,
+    salariuBrut: string,
+    year: number,
+    month: number,
+  ) =>
+    invoke<DiurnaCalc>("compute_diurna", {
+      companyId,
+      diurnaAcordata,
+      zileDelegare,
+      salariuBrut,
+      year,
+      month,
+    }),
+};
+
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
@@ -2284,6 +2424,7 @@ export const api = {
   payroll,
   saft,
   dividends,
+  deconturi,
   paymentInstruments,
   settings,
   system,

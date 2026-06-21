@@ -437,6 +437,12 @@ fn standard_accounts() -> Vec<SeedEntry> {
             parent: None,
         },
         SeedEntry {
+            code: "425",
+            name: "Avansuri acordate personalului",
+            class: 4,
+            parent: None,
+        },
+        SeedEntry {
             code: "4315",
             name: "Contribuția de asigurări sociale (CAS)",
             class: 4,
@@ -595,6 +601,12 @@ fn standard_accounts() -> Vec<SeedEntry> {
             parent: None,
         },
         SeedEntry {
+            code: "542",
+            name: "Avansuri de trezorerie",
+            class: 5,
+            parent: None,
+        },
+        SeedEntry {
             code: "5311",
             name: "Casa în lei",
             class: 5,
@@ -664,6 +676,12 @@ fn standard_accounts() -> Vec<SeedEntry> {
         SeedEntry {
             code: "623",
             name: "Cheltuieli de protocol, reclamă și publicitate",
+            class: 6,
+            parent: None,
+        },
+        SeedEntry {
+            code: "6022",
+            name: "Cheltuieli privind combustibilii",
             class: 6,
             parent: None,
         },
