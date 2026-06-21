@@ -101,9 +101,9 @@ pub async fn setup_admin(
             "Numele de utilizator este obligatoriu.".to_string(),
         ));
     }
-    if password.len() < 6 {
+    if password.len() < 8 {
         return Err(AppError::Validation(
-            "Parola trebuie să aibă minim 6 caractere.".to_string(),
+            "Parola trebuie să aibă minim 8 caractere.".to_string(),
         ));
     }
     let id = new_id();
@@ -240,9 +240,9 @@ pub async fn create_user(pool: &SqlitePool, input: CreateUserInput) -> AppResult
             "Numele de utilizator este obligatoriu.".to_string(),
         ));
     }
-    if input.password.len() < 6 {
+    if input.password.len() < 8 {
         return Err(AppError::Validation(
-            "Parola trebuie să aibă minim 6 caractere.".to_string(),
+            "Parola trebuie să aibă minim 8 caractere.".to_string(),
         ));
     }
     let valid_roles = ["admin", "contabil", "operator", "viewer"];
@@ -368,9 +368,9 @@ pub async fn update_user(
 }
 
 pub async fn reset_password(pool: &SqlitePool, user_id: &str, new_password: &str) -> AppResult<()> {
-    if new_password.len() < 6 {
+    if new_password.len() < 8 {
         return Err(AppError::Validation(
-            "Parola trebuie să aibă minim 6 caractere.".to_string(),
+            "Parola trebuie să aibă minim 8 caractere.".to_string(),
         ));
     }
     let hash = hash_password(new_password)?;
