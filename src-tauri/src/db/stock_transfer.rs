@@ -152,6 +152,10 @@ pub async fn transfer_stock(
         return Err(AppError::NotFound);
     }
 
+    // Auto-vindecare: înainte de a calcula stocul disponibil, recuperăm orice transfer incomplet
+    // (crash între mișcări și document) — altfel un OUT orfan ar subevalua stocul disponibil aici.
+    recover_incomplete_transfers(pool, company_id).await?;
+
     // On-hand guard: reject if from_gestiune has insufficient stock.
     let available =
         on_hand_qty(pool, company_id, &input.product_id, &input.from_gestiune_id).await?;
@@ -202,15 +206,7 @@ pub async fn transfer_stock(
     let (_out_ledger_id, out_value_str) = match out_row {
         Some(r) => r,
         None => {
-            let _ = rollback_transfer_movements(
-                pool,
-                company_id,
-                &transfer_id,
-                &input.product_id,
-                &input.from_gestiune_id,
-                &input.to_gestiune_id,
-            )
-            .await;
+            let _ = rollback_transfer_by_ref(pool, company_id, &transfer_id).await;
             return Err(AppError::Validation(
                 "Eroare internă: rândul OUT din transfer nu a fost găsit.".into(),
             ));
@@ -244,15 +240,7 @@ pub async fn transfer_stock(
 
     if let Err(e) = stock_valuation::record_movement(pool, &in_input, Dir::In).await {
         // Compensare: anulează OUT-ul deja comis ca să nu dispară stoc (OUT fără IN).
-        let _ = rollback_transfer_movements(
-            pool,
-            company_id,
-            &transfer_id,
-            &input.product_id,
-            &input.from_gestiune_id,
-            &input.to_gestiune_id,
-        )
-        .await;
+        let _ = rollback_transfer_by_ref(pool, company_id, &transfer_id).await;
         return Err(e);
     }
 
@@ -295,45 +283,66 @@ pub async fn transfer_stock(
     .await;
     if let Err(e) = insert_res {
         // Compensare: anulează AMBELE mișcări (OUT + IN) ca să nu rămână un transfer fără document.
-        let _ = rollback_transfer_movements(
-            pool,
-            company_id,
-            &transfer_id,
-            &input.product_id,
-            &input.from_gestiune_id,
-            &input.to_gestiune_id,
-        )
-        .await;
+        let _ = rollback_transfer_by_ref(pool, company_id, &transfer_id).await;
         return Err(e.into());
     }
 
     Ok(transfer)
 }
 
-/// Compensare pentru un transfer eșuat la mijloc: șterge TOATE mișcările de stoc ale acestui
-/// transfer (doc_ref=transfer_id) și recalculează ambele gestiuni. `record_movement` se auto-comite
-/// per apel, deci un OUT comis urmat de un IN eșuat ar lăsa stoc dispărut (OUT fără IN) — această
-/// anulare readuce stocul total la valoarea inițială. Transferurile sunt GL-neutre (post_stock_movement
-/// sare peste GL pentru doc_type='TRANSFER'), deci nu există note GL 'STOCK' de șters. Best-effort:
-/// eroarea originală (cauza) e cea propagată; o eventuală eroare de compensare nu o maschează.
-async fn rollback_transfer_movements(
+/// Anulează TOATE mișcările de stoc ale unui transfer (doc_ref) și recalculează fiecare (produs,
+/// gestiune) afectat — derivat din rândurile existente, deci funcționează și fără a cunoaște dinainte
+/// gestiunile (folosit atât la compensarea în-flight cât și la recuperarea la pornire). `record_movement`
+/// se auto-comite per apel, deci un OUT comis urmat de un IN eșuat ar lăsa stoc dispărut (OUT fără IN);
+/// această anulare readuce stocul total la valoarea inițială. Transferurile sunt GL-neutre
+/// (post_stock_movement sare peste GL pentru doc_type='TRANSFER'), deci nu există note GL 'STOCK' de șters.
+/// Best-effort la compensare: eroarea originală (cauza) e cea propagată.
+async fn rollback_transfer_by_ref(
     pool: &SqlitePool,
     company_id: &str,
-    transfer_id: &str,
-    product_id: &str,
-    from_gestiune_id: &str,
-    to_gestiune_id: &str,
+    doc_ref: &str,
 ) -> AppResult<()> {
+    let affected: Vec<(String, String)> = sqlx::query_as(
+        "SELECT DISTINCT product_id, gestiune_id FROM stock_ledger \
+         WHERE company_id=?1 AND doc_ref=?2",
+    )
+    .bind(company_id)
+    .bind(doc_ref)
+    .fetch_all(pool)
+    .await?;
+    if affected.is_empty() {
+        return Ok(());
+    }
     sqlx::query("DELETE FROM stock_ledger WHERE company_id=?1 AND doc_ref=?2")
         .bind(company_id)
-        .bind(transfer_id)
+        .bind(doc_ref)
         .execute(pool)
         .await?;
-    stock_valuation::recompute_product_gestiune(pool, company_id, product_id, from_gestiune_id)
-        .await?;
-    stock_valuation::recompute_product_gestiune(pool, company_id, product_id, to_gestiune_id)
-        .await?;
+    for (pid, gid) in &affected {
+        stock_valuation::recompute_product_gestiune(pool, company_id, pid, gid).await?;
+    }
     Ok(())
+}
+
+/// Auto-vindecare a transferurilor întrerupte. Orice mișcare de stoc cu doc_type='TRANSFER' al cărei
+/// `doc_ref` NU are un rând corespunzător în `stock_transfers` reprezintă un transfer incomplet (crash
+/// sau pană de curent între comiterea mișcărilor și înregistrarea documentului — fereastra pe care
+/// compensarea în-proces nu o poate acoperi). Le anulăm, restabilind stocul total. Idempotentă; o rulăm
+/// la începutul fiecărui transfer (și poate fi apelată și la pornirea aplicației). Returnează câte
+/// transferuri incomplete au fost recuperate.
+pub async fn recover_incomplete_transfers(pool: &SqlitePool, company_id: &str) -> AppResult<usize> {
+    let orphans: Vec<(String,)> = sqlx::query_as(
+        "SELECT DISTINCT doc_ref FROM stock_ledger \
+         WHERE company_id=?1 AND doc_type='TRANSFER' AND doc_ref IS NOT NULL \
+           AND doc_ref NOT IN (SELECT id FROM stock_transfers WHERE company_id=?1)",
+    )
+    .bind(company_id)
+    .fetch_all(pool)
+    .await?;
+    for (doc_ref,) in &orphans {
+        rollback_transfer_by_ref(pool, company_id, doc_ref).await?;
+    }
+    Ok(orphans.len())
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -906,7 +915,6 @@ mod tests {
     async fn compensation_restores_stock_after_stranded_out() {
         let (pool, cid, pid) = setup("CMP").await;
         let g_a = make_gestiune(&pool, &cid, "A").await;
-        let g_b = make_gestiune(&pool, &cid, "B").await;
 
         // 10 buc into A
         record_movement(
@@ -939,9 +947,7 @@ mod tests {
         );
 
         // Compensate.
-        rollback_transfer_movements(&pool, &cid, tid, &pid, &g_a, &g_b)
-            .await
-            .unwrap();
+        rollback_transfer_by_ref(&pool, &cid, tid).await.unwrap();
 
         // Total on-hand restored to 10; no transfer rows remain.
         let restored: (Option<String>,) =
@@ -965,5 +971,68 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(remaining, 0, "no transfer ledger rows should remain");
+    }
+
+    /// Crash-window recovery: a TRANSFER ledger row whose doc_ref has NO stock_transfers record (a
+    /// transfer that committed movements but crashed before writing the document) is auto-healed by
+    /// `recover_incomplete_transfers` — restoring the product total on-hand. This covers the hard-crash
+    /// window that in-process compensation cannot.
+    #[tokio::test]
+    async fn recover_incomplete_transfers_heals_orphaned_movements() {
+        let (pool, cid, pid) = setup("CMP").await;
+        let g_a = make_gestiune(&pool, &cid, "A").await;
+        let g_b = make_gestiune(&pool, &cid, "B").await;
+
+        record_movement(
+            &pool,
+            &mv(&cid, &pid, "2026-01-01", "10", Some("5.00"), &g_a),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        // Simulate a crashed transfer: BOTH movements committed (4 left A, arrived B) but NO
+        // stock_transfers row was written (process died before the insert).
+        let tid = "crashed_transfer";
+        let mut out = mv(&cid, &pid, "2026-01-05", "4", None, &g_a);
+        out.doc_type = Some("TRANSFER".to_string());
+        out.doc_ref = Some(tid.to_string());
+        record_movement(&pool, &out, Dir::Out).await.unwrap();
+        let mut in_b = mv(&cid, &pid, "2026-01-05", "4", Some("5.00"), &g_b);
+        in_b.doc_type = Some("TRANSFER".to_string());
+        in_b.doc_ref = Some(tid.to_string());
+        record_movement(&pool, &in_b, Dir::In).await.unwrap();
+
+        // The orphan is detected + rolled back.
+        let recovered = recover_incomplete_transfers(&pool, &cid).await.unwrap();
+        assert_eq!(recovered, 1, "one incomplete transfer recovered");
+
+        // Total on-hand back to 10; A back to 10, B back to 0; no orphan rows.
+        assert_eq!(
+            onhand(&pool, &cid, pid.as_str(), &g_a).await,
+            Decimal::from(10),
+            "A restored to 10"
+        );
+        assert_eq!(
+            onhand(&pool, &cid, pid.as_str(), &g_b).await,
+            Decimal::ZERO,
+            "B restored to 0"
+        );
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM stock_ledger WHERE company_id=?1 AND doc_ref=?2",
+        )
+        .bind(&cid)
+        .bind(tid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(remaining, 0, "orphaned transfer rows cleaned up");
+
+        // Idempotent: a second pass finds nothing.
+        assert_eq!(
+            recover_incomplete_transfers(&pool, &cid).await.unwrap(),
+            0,
+            "recovery is idempotent"
+        );
     }
 }

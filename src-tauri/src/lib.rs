@@ -162,6 +162,28 @@ pub fn run() {
                         if let Err(err) = db::seed::run_if_empty(&pool).await {
                             tracing::warn!(?err, "Seed failed");
                         }
+                        // Heal any inter-gestiune transfers that crashed mid-commit (movements
+                        // committed but the document was never written) so no stock is left silently
+                        // destroyed. Idempotent; safe to run on every launch.
+                        if let Ok(companies) = db::companies::list(&pool).await {
+                            for c in &companies {
+                                match db::stock_transfer::recover_incomplete_transfers(&pool, &c.id)
+                                    .await
+                                {
+                                    Ok(n) if n > 0 => tracing::warn!(
+                                        company = %c.id,
+                                        recovered = n,
+                                        "Recovered incomplete stock transfers at startup"
+                                    ),
+                                    Ok(_) => {}
+                                    Err(err) => tracing::warn!(
+                                        ?err,
+                                        company = %c.id,
+                                        "Stock-transfer recovery failed"
+                                    ),
+                                }
+                            }
+                        }
                         handle.manage(AppState::new(pool));
                         tracing::info!("AppState initialized");
                         background::spawn_background_tasks(handle.clone());

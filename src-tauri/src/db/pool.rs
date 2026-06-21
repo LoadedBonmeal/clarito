@@ -39,7 +39,12 @@ pub async fn init(app: &AppHandle) -> AppResult<SqlitePool> {
         .filename(&db_path)
         .create_if_missing(true)
         .foreign_keys(true)
-        .journal_mode(SqliteJournalMode::Wal);
+        .journal_mode(SqliteJournalMode::Wal)
+        // Wait up to 5s for a write lock instead of erroring SQLITE_BUSY. Under WAL with multiple
+        // pool connections, two writers racing would otherwise fail instantly — which (e.g. during a
+        // multi-step stock transfer) could leave a half-committed operation. Blocking briefly removes
+        // that failure mode for the single-user desktop workload.
+        .busy_timeout(std::time::Duration::from_secs(5));
 
     let pool = SqlitePoolOptions::new()
         .max_connections(MAX_CONNECTIONS)
