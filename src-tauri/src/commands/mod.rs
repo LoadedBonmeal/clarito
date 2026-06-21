@@ -54,6 +54,7 @@ pub mod manual_journal;
 pub mod nir;
 pub mod notifications;
 pub mod orders;
+pub mod payment_instruments;
 pub mod payments;
 pub mod payroll;
 pub mod payroll_config;

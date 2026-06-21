@@ -486,6 +486,17 @@ pub fn run() {
                     commands::contracts::set_contract_status,
                     commands::contracts::delete_contract,
                     commands::contracts::list_contract_recurring,
+                    // payment instruments — CEC & BO (P3 Wave C)
+                    commands::payment_instruments::create_payment_instrument,
+                    commands::payment_instruments::list_payment_instruments,
+                    commands::payment_instruments::get_payment_instrument,
+                    commands::payment_instruments::update_payment_instrument,
+                    commands::payment_instruments::delete_payment_instrument,
+                    commands::payment_instruments::deposit_payment_instrument,
+                    commands::payment_instruments::collect_payment_instrument,
+                    commands::payment_instruments::discount_payment_instrument,
+                    commands::payment_instruments::dishonor_payment_instrument,
+                    commands::payment_instruments::pay_payment_instrument,
                     // quotes (oferte / devize)
                     commands::quotes::create_quote,
                     commands::quotes::list_quotes,

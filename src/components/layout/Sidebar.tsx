@@ -90,6 +90,7 @@ export function Sidebar() {
       { key: "comenzi", label: t("shell.nav.orders"), icon: "docUp", path: "/orders", matchPrefix: "/orders", more: true },
       { key: "facturi-recurente", label: t("shell.nav.recurring"), icon: "loop", path: "/recurring", more: true },
       { key: "contracte", label: t("shell.nav.contracts"), icon: "docText", path: "/contracts", more: true },
+      { key: "cec-bo", label: t("shell.nav.paymentInstruments"), icon: "card", path: "/payment-instruments", more: true },
       { key: "mijloace-fixe", label: t("shell.nav.assets"), icon: "wrench", path: "/assets", more: true },
       { key: "plan-conturi", label: t("shell.nav.accounts"), icon: "book", path: "/accounts", more: true },
       { key: "cote-tva", label: t("shell.nav.vatRates"), icon: "scale", path: "/vat-rates", more: true },

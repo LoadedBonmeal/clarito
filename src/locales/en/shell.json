@@ -39,6 +39,7 @@
       "companies": "Companies",
       "recurring": "Recurring invoices",
       "contracts": "Contracts",
+      "paymentInstruments": "Bills & Notes (CEC/BO)",
       "assets": "Fixed assets",
       "accounts": "Chart of accounts",
       "vatRates": "VAT rates",

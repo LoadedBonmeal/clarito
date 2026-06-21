@@ -23,6 +23,7 @@ pub mod settings;
 pub mod users;
 
 pub mod contracts;
+pub mod payment_instruments;
 
 pub mod accounts;
 pub mod aging;

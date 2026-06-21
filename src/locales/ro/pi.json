@@ -1,0 +1,139 @@
+{
+  "pi": {
+    "title": "Cecuri & Efecte",
+    "selectCompany": "Selectați o companie activă pentru a vedea instrumentele de plată.",
+    "sub": {
+      "items_one": "{{count}} instrument",
+      "items_few": "{{count}} instrumente",
+      "items_other": "{{count}} de instrumente"
+    },
+    "head": {
+      "new": "Instrument nou"
+    },
+    "tabs": {
+      "all": "Toate",
+      "received": "Primite",
+      "issued": "Emise",
+      "active": "Active",
+      "settled": "Finalizate"
+    },
+    "search": "Caută instrument…",
+    "states": {
+      "loading": "Se încarcă…",
+      "errorLabel": "instrumentele de plată",
+      "emptyNone": "Niciun instrument înregistrat. Folosiți butonul 'Instrument nou' pentru a adăuga un CEC sau bilet la ordin.",
+      "emptyFiltered": "Nicio înregistrare pentru filtrele aplicate."
+    },
+    "kind": {
+      "CEC": "CEC",
+      "BO": "Bilet la ordin"
+    },
+    "direction": {
+      "received": "Primit",
+      "issued": "Emis"
+    },
+    "status": {
+      "registered": "Înregistrat",
+      "deposited": "Depus la bancă",
+      "discounted": "Scontat",
+      "collected": "Încasat",
+      "paid": "Plătit",
+      "dishonored": "Refuzat"
+    },
+    "table": {
+      "kind": "Tip",
+      "direction": "Direcție",
+      "number": "Număr",
+      "partner": "Partener",
+      "amount": "Sumă",
+      "issueDate": "Data emiterii",
+      "scadenta": "Scadență",
+      "status": "Status"
+    },
+    "row": {
+      "deposit": "Depune la bancă",
+      "collect": "Marchează încasat",
+      "discount": "Scontare",
+      "dishonor": "Marchează refuzat",
+      "pay": "Marchează plătit",
+      "edit": "Editează",
+      "delete": "Șterge",
+      "deleteQ": "Ștergeți?",
+      "confirmDelete": "Confirmă ștergerea"
+    },
+    "modal": {
+      "editTitle": "Editează instrument",
+      "createTitle": "Instrument de plată nou",
+      "sub": "CEC (Legea 58/1934) sau Bilet la ordin (Legea 59/1934) — generează înregistrare contabilă.",
+      "close": "Închide",
+      "kind": "Tip instrument",
+      "direction": "Direcție",
+      "directionReceived": "Primit (de la client)",
+      "directionIssued": "Emis (către furnizor)",
+      "number": "Număr document",
+      "numberPlaceholder": "ex: CEC-001",
+      "partnerCui": "CUI partener",
+      "partnerCuiPlaceholder": "ex: RO12345678",
+      "amount": "Sumă",
+      "amountPlaceholder": "ex: 5000.00",
+      "currency": "Monedă",
+      "issueDate": "Data emiterii",
+      "scadenta": "Scadență (doar BO)",
+      "scadentaNote": "CEC-ul este plătibil la vedere (Legea 58/1934) — câmpul scadență nu se aplică.",
+      "notes": "Notițe (opțional)",
+      "notesPlaceholder": "Informații suplimentare",
+      "saving": "Se salvează…",
+      "saveChanges": "Salvează modificările",
+      "create": "Înregistrează instrument"
+    },
+    "discountModal": {
+      "title": "Scontare bilet la ordin",
+      "sub": "Monografie: D 5114 = C 413 → D 5121 + D 667 [+ D 627] = C 5114",
+      "discountAmount": "Scont (667)",
+      "discountPlaceholder": "ex: 50.00",
+      "commission": "Comision bancar (627, opțional)",
+      "commissionPlaceholder": "ex: 10.00",
+      "date": "Data scontării",
+      "confirm": "Confirmă scontarea",
+      "cancel": "Anulează"
+    },
+    "eventModal": {
+      "depositTitle": "Depunere la bancă",
+      "collectTitle": "Confirmare încasare",
+      "dishonorTitle": "Refuz / protest",
+      "payTitle": "Plată la scadență",
+      "date": "Data operațiunii",
+      "confirm": "Confirmă",
+      "cancel": "Anulează"
+    },
+    "validate": {
+      "kind": "Selectați tipul instrumentului (CEC sau BO).",
+      "direction": "Selectați direcția (primit/emis).",
+      "amount": "Introduceți o sumă pozitivă.",
+      "issueDate": "Introduceți o dată de emitere validă.",
+      "scadenta": "Biletul la ordin necesită scadentă (Legea 59/1934).",
+      "scadentaCec": "CEC-ul este plătibil la vedere — nu poate avea scadentă (Legea 58/1934)."
+    },
+    "notify": {
+      "created": "Instrument înregistrat cu succes",
+      "createError": "Nu s-a putut înregistra instrumentul.",
+      "updated": "Instrument actualizat",
+      "updateError": "Nu s-a putut actualiza instrumentul.",
+      "deleted": "Instrument șters",
+      "deleteError": "Nu s-a putut șterge instrumentul.",
+      "deposited": "Depus la bancă — GL înregistrat",
+      "depositError": "Eroare la depunere.",
+      "collected": "Încasat — GL înregistrat",
+      "collectError": "Eroare la confirmare încasare.",
+      "discounted": "Scontat — GL înregistrat",
+      "discountError": "Eroare la scontare.",
+      "dishonored": "Marcat refuzat — GL înregistrat",
+      "dishonorError": "Eroare la marcare refuz.",
+      "paid": "Marcat plătit — GL înregistrat",
+      "payError": "Eroare la marcare plată."
+    },
+    "banner": {
+      "info": "Instrumentele de plată generează automat note contabile GL (OMFP 1802/2014). CEC: 413/5112/5121. BO: 413/5113/5121. Scontare BO: 5114/667. Emise: 403/5121."
+    }
+  }
+}

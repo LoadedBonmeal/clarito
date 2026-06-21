@@ -152,7 +152,13 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         // generate_gl_entries (a committing GL DELETE+INSERT), so it must be gated like a GL post —
         // otherwise the preview_ read-prefix would free it to a Viewer who could re-post the ledger.
         | "preview_saft_official_xml"
-        | "dev_seed" => Some(Perm::PostGl),
+        | "dev_seed"
+        // payment instrument lifecycle events — each posts GL entries
+        | "deposit_payment_instrument"
+        | "collect_payment_instrument"
+        | "discount_payment_instrument"
+        | "dishonor_payment_instrument"
+        | "pay_payment_instrument" => Some(Perm::PostGl),
 
         // ── ClosePeriod ───────────────────────────────────────────────────
         "close_vat_period" | "close_period" => Some(Perm::ClosePeriod),
@@ -225,6 +231,7 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "delete_quote"
         | "delete_order"
         | "delete_contract"
+        | "delete_payment_instrument"
         | "export_backup" => Some(Perm::Delete),
 
         // ── ViewReports ───────────────────────────────────────────────────

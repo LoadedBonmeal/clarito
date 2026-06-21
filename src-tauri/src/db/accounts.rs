@@ -538,7 +538,44 @@ fn standard_accounts() -> Vec<SeedEntry> {
             class: 4,
             parent: None,
         },
+        // ── Clasa 4 — efecte comerciale ─────────────────────────────────────
+        SeedEntry {
+            code: "413",
+            name: "Efecte de primit de la clienți",
+            class: 4,
+            parent: None,
+        },
+        SeedEntry {
+            code: "403",
+            name: "Efecte de plătit",
+            class: 4,
+            parent: None,
+        },
+        SeedEntry {
+            code: "405",
+            name: "Efecte de plătit pentru imobilizări",
+            class: 4,
+            parent: None,
+        },
         // ── Clasa 5 — Conturi de trezorerie ────────────────────────────────
+        SeedEntry {
+            code: "5112",
+            name: "Cecuri de încasat",
+            class: 5,
+            parent: None,
+        },
+        SeedEntry {
+            code: "5113",
+            name: "Efecte de încasat",
+            class: 5,
+            parent: None,
+        },
+        SeedEntry {
+            code: "5114",
+            name: "Efecte remise spre scontare",
+            class: 5,
+            parent: None,
+        },
         SeedEntry {
             code: "5121",
             name: "Conturi la bănci în lei",
@@ -693,6 +730,12 @@ fn standard_accounts() -> Vec<SeedEntry> {
         SeedEntry {
             code: "665",
             name: "Cheltuieli din diferențe de curs valutar",
+            class: 6,
+            parent: None,
+        },
+        SeedEntry {
+            code: "667",
+            name: "Cheltuieli privind sconturile acordate",
             class: 6,
             parent: None,
         },

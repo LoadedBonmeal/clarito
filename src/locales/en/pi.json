@@ -1,0 +1,139 @@
+{
+  "pi": {
+    "title": "Bills & Promissory Notes",
+    "selectCompany": "Select an active company to view payment instruments.",
+    "sub": {
+      "items_one": "{{count}} instrument",
+      "items_few": "{{count}} instruments",
+      "items_other": "{{count}} instruments"
+    },
+    "head": {
+      "new": "New instrument"
+    },
+    "tabs": {
+      "all": "All",
+      "received": "Received",
+      "issued": "Issued",
+      "active": "Active",
+      "settled": "Settled"
+    },
+    "search": "Search instruments…",
+    "states": {
+      "loading": "Loading…",
+      "errorLabel": "payment instruments",
+      "emptyNone": "No instruments registered. Use \"New instrument\" to add a cheque or promissory note.",
+      "emptyFiltered": "No records match the current filters."
+    },
+    "kind": {
+      "CEC": "Cheque (CEC)",
+      "BO": "Promissory note (BO)"
+    },
+    "direction": {
+      "received": "Received",
+      "issued": "Issued"
+    },
+    "status": {
+      "registered": "Registered",
+      "deposited": "Deposited",
+      "discounted": "Discounted",
+      "collected": "Collected",
+      "paid": "Paid",
+      "dishonored": "Dishonored"
+    },
+    "table": {
+      "kind": "Type",
+      "direction": "Direction",
+      "number": "Number",
+      "partner": "Partner",
+      "amount": "Amount",
+      "issueDate": "Issue date",
+      "scadenta": "Maturity",
+      "status": "Status"
+    },
+    "row": {
+      "deposit": "Deposit at bank",
+      "collect": "Mark collected",
+      "discount": "Discount",
+      "dishonor": "Mark dishonored",
+      "pay": "Mark paid",
+      "edit": "Edit",
+      "delete": "Delete",
+      "deleteQ": "Delete?",
+      "confirmDelete": "Confirm delete"
+    },
+    "modal": {
+      "editTitle": "Edit instrument",
+      "createTitle": "New payment instrument",
+      "sub": "Cheque (Law 58/1934) or promissory note (Law 59/1934) — creates accounting entries.",
+      "close": "Close",
+      "kind": "Instrument type",
+      "direction": "Direction",
+      "directionReceived": "Received (from customer)",
+      "directionIssued": "Issued (to supplier)",
+      "number": "Document number",
+      "numberPlaceholder": "e.g. CEC-001",
+      "partnerCui": "Partner tax ID",
+      "partnerCuiPlaceholder": "e.g. RO12345678",
+      "amount": "Amount",
+      "amountPlaceholder": "e.g. 5000.00",
+      "currency": "Currency",
+      "issueDate": "Issue date",
+      "scadenta": "Maturity date (BO only)",
+      "scadentaNote": "Cheques are payable on demand (Law 58/1934) — maturity date does not apply.",
+      "notes": "Notes (optional)",
+      "notesPlaceholder": "Additional information",
+      "saving": "Saving…",
+      "saveChanges": "Save changes",
+      "create": "Register instrument"
+    },
+    "discountModal": {
+      "title": "Discount promissory note",
+      "sub": "Journal: D 5114 = C 413 → D 5121 + D 667 [+ D 627] = C 5114",
+      "discountAmount": "Discount amount (667)",
+      "discountPlaceholder": "e.g. 50.00",
+      "commission": "Bank commission (627, optional)",
+      "commissionPlaceholder": "e.g. 10.00",
+      "date": "Discount date",
+      "confirm": "Confirm discount",
+      "cancel": "Cancel"
+    },
+    "eventModal": {
+      "depositTitle": "Deposit at bank",
+      "collectTitle": "Confirm collection",
+      "dishonorTitle": "Dishonor / protest",
+      "payTitle": "Pay at maturity",
+      "date": "Operation date",
+      "confirm": "Confirm",
+      "cancel": "Cancel"
+    },
+    "validate": {
+      "kind": "Select instrument type (CEC or BO).",
+      "direction": "Select direction (received/issued).",
+      "amount": "Enter a positive amount.",
+      "issueDate": "Enter a valid issue date.",
+      "scadenta": "Promissory notes require a maturity date (Law 59/1934).",
+      "scadentaCec": "Cheques are payable on demand — no maturity date (Law 58/1934)."
+    },
+    "notify": {
+      "created": "Instrument registered",
+      "createError": "Could not register the instrument.",
+      "updated": "Instrument updated",
+      "updateError": "Could not update the instrument.",
+      "deleted": "Instrument deleted",
+      "deleteError": "Could not delete the instrument.",
+      "deposited": "Deposited — GL recorded",
+      "depositError": "Deposit error.",
+      "collected": "Collected — GL recorded",
+      "collectError": "Collection error.",
+      "discounted": "Discounted — GL recorded",
+      "discountError": "Discount error.",
+      "dishonored": "Marked dishonored — GL recorded",
+      "dishonorError": "Dishonor error.",
+      "paid": "Marked paid — GL recorded",
+      "payError": "Payment error."
+    },
+    "banner": {
+      "info": "Payment instruments automatically post accounting entries (OMFP 1802/2014). Cheque: 413/5112/5121. BO: 413/5113/5121. BO discount: 5114/667. Issued: 403/5121."
+    }
+  }
+}

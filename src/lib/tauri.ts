@@ -960,6 +960,91 @@ export const saft = {
   }) => invoke<string>("preview_saft_official_xml", { params }),
 };
 
+// ─── Payment instruments — CEC & BO (P3 Wave C) ──────────────────────────────
+
+/** "CEC" | "BO" */
+export type PiKind = "CEC" | "BO";
+/** "received" | "issued" */
+export type PiDirection = "received" | "issued";
+/** registered → deposited → collected | discounted | dishonored (received)
+ *  registered → deposited → paid (issued) */
+export type PiStatus = "registered" | "deposited" | "discounted" | "collected" | "paid" | "dishonored";
+
+export interface PaymentInstrument {
+  id: string;
+  companyId: string;
+  kind: PiKind;
+  direction: PiDirection;
+  partnerId: string | null;
+  partnerCui: string | null;
+  number: string | null;
+  amount: string;
+  currency: string;
+  issueDate: string;
+  scadenta: string | null;
+  status: PiStatus;
+  discountAmount: string | null;
+  commissionAmount: string | null;
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreatePaymentInstrumentArgs {
+  companyId: string;
+  kind: PiKind;
+  direction: PiDirection;
+  partnerId?: string | null;
+  partnerCui?: string | null;
+  number?: string | null;
+  amount: string;
+  currency?: string;
+  issueDate: string;
+  scadenta?: string | null;
+  notes?: string | null;
+}
+
+export interface UpdatePaymentInstrumentArgs {
+  id: string;
+  companyId: string;
+  partnerId?: string | null;
+  partnerCui?: string | null;
+  number?: string | null;
+  amount: string;
+  currency?: string;
+  issueDate: string;
+  scadenta?: string | null;
+  notes?: string | null;
+}
+
+export const paymentInstruments = {
+  list: (companyId: string) =>
+    invoke<PaymentInstrument[]>("list_payment_instruments", { companyId }),
+  get: (id: string, companyId: string) =>
+    invoke<PaymentInstrument>("get_payment_instrument", { id, companyId }),
+  create: (args: CreatePaymentInstrumentArgs) =>
+    invoke<PaymentInstrument>("create_payment_instrument", { args }),
+  update: (args: UpdatePaymentInstrumentArgs) =>
+    invoke<PaymentInstrument>("update_payment_instrument", { args }),
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_payment_instrument", { id, companyId }),
+  /** Depunere la bancă: registered → deposited. GL: 5112/5113 = 413. */
+  deposit: (id: string, companyId: string, date: string) =>
+    invoke<PaymentInstrument>("deposit_payment_instrument", { id, companyId, date }),
+  /** Încasare efectivă: deposited → collected. GL: 5121 = 5112/5113. */
+  collect: (id: string, companyId: string, date: string) =>
+    invoke<PaymentInstrument>("collect_payment_instrument", { id, companyId, date }),
+  /** Scontare BO: registered/deposited → discounted. GL: 5114 = 413 → 5121 + 667 [+ 627] = 5114. */
+  discount: (args: { id: string; companyId: string; date: string; discountAmount: string; commissionAmount?: string | null }) =>
+    invoke<PaymentInstrument>("discount_payment_instrument", { args }),
+  /** Refuz/protest: deposited → dishonored. GL: 4111 = 5112/5113. */
+  dishonor: (id: string, companyId: string, date: string) =>
+    invoke<PaymentInstrument>("dishonor_payment_instrument", { id, companyId, date }),
+  /** Plată la scadență (issued): deposited → paid. GL: 403 = 5121. */
+  pay: (id: string, companyId: string, date: string) =>
+    invoke<PaymentInstrument>("pay_payment_instrument", { id, companyId, date }),
+};
+
 // ─── Dividende (impozit pe dividende, Legea 141/2025) ───────────────────────
 
 export interface Dividend {
@@ -2199,6 +2284,7 @@ export const api = {
   payroll,
   saft,
   dividends,
+  paymentInstruments,
   settings,
   system,
   ubl,
