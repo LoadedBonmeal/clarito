@@ -519,11 +519,15 @@ pub async fn convert_to_invoice(
     company_id: &str,
     order_id: &str,
 ) -> AppResult<crate::db::invoices::Invoice> {
-    // Atomic compare-and-set guard: claim the order for conversion before creating any invoice.
-    // Prevents double fiscal number on crash/retry between invoice creation and status stamp.
+    // Atomic compare-and-set guard: claim the order for conversion using the
+    // `converting` flag latch (added in migration 0076). This avoids writing
+    // an out-of-CHECK status value ('invoicing') that was previously broken
+    // in production (the orders CHECK only allows known statuses).
+    // The flag goes 0→1 here; the status only ever moves accepted→invoiced.
     let rows_affected = sqlx::query(
-        "UPDATE orders SET status = 'invoicing' \
-         WHERE id = ?1 AND company_id = ?2 AND status = 'accepted' AND converted_invoice_id IS NULL",
+        "UPDATE orders SET converting = 1 \
+         WHERE id = ?1 AND company_id = ?2 AND status = 'accepted' \
+           AND converting = 0 AND converted_invoice_id IS NULL",
     )
     .bind(order_id)
     .bind(company_id)
@@ -588,10 +592,26 @@ pub async fn convert_to_invoice(
         lines: inv_lines,
     };
 
-    let invoice = crate::db::invoices::create(pool, invoice_input).await?;
+    let invoice = match crate::db::invoices::create(pool, invoice_input).await {
+        Ok(inv) => inv,
+        Err(e) => {
+            // Best-effort latch release so a failed convert is retryable.
+            let _ = sqlx::query(
+                "UPDATE orders SET converting = 0 \
+                 WHERE id = ?1 AND company_id = ?2 AND status = 'accepted'",
+            )
+            .bind(order_id)
+            .bind(company_id)
+            .execute(pool)
+            .await;
+            return Err(e);
+        }
+    };
 
+    // Stamp order: accepted→invoiced + link + release latch.
     sqlx::query(
-        "UPDATE orders SET status = 'invoiced', converted_invoice_id = ?1, updated_at = ?2
+        "UPDATE orders SET status = 'invoiced', converted_invoice_id = ?1, \
+         converting = 0, updated_at = ?2 \
          WHERE id = ?3 AND company_id = ?4",
     )
     .bind(&invoice.id)
@@ -611,167 +631,37 @@ mod tests {
     use super::*;
     use sqlx::SqlitePool;
 
+    /// Set up an in-memory pool running the REAL migrations (same schema as
+    /// production, including all CHECK constraints). This is what previously
+    /// diverged: hand-rolled CREATE TABLE had no CHECK, hiding the 'invoicing'
+    /// status bug. Running sqlx::migrate! exercises the identical constraints.
     async fn setup_pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:")
             .await
             .expect("in-memory DB");
 
-        sqlx::query(
-            "CREATE TABLE companies (
-                id TEXT PRIMARY KEY,
-                legal_name TEXT NOT NULL,
-                last_invoice_number INTEGER NOT NULL DEFAULT 0,
-                last_quote_number INTEGER NOT NULL DEFAULT 0,
-                last_order_number INTEGER NOT NULL DEFAULT 0
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("migrations must apply cleanly");
 
+        // Seed a minimal company row (only required NOT NULL columns without DEFAULTs).
         sqlx::query(
-            "CREATE TABLE contacts (
-                id TEXT PRIMARY KEY,
-                company_id TEXT NOT NULL
-            )",
+            "INSERT INTO companies (id, cui, legal_name, vat_payer, address, city, county, country) \
+             VALUES ('co1', 'RO1', 'Test SRL', 1, 'Str. Test 1', 'București', 'B', 'RO')",
         )
         .execute(&pool)
         .await
-        .unwrap();
+        .expect("seed company");
 
+        // Seed a contact (required FK by invoices.contact_id when converting).
         sqlx::query(
-            "CREATE TABLE invoices (
-                id TEXT PRIMARY KEY,
-                company_id TEXT NOT NULL,
-                contact_id TEXT NOT NULL,
-                series TEXT NOT NULL,
-                number INTEGER NOT NULL,
-                full_number TEXT NOT NULL,
-                issue_date TEXT NOT NULL,
-                due_date TEXT NOT NULL,
-                currency TEXT NOT NULL DEFAULT 'RON',
-                exchange_rate REAL,
-                subtotal_amount TEXT NOT NULL,
-                vat_amount TEXT NOT NULL,
-                total_amount TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'DRAFT',
-                anaf_upload_id TEXT,
-                anaf_index TEXT,
-                anaf_submitted_at INTEGER,
-                anaf_validated_at INTEGER,
-                anaf_rejected_at INTEGER,
-                xml_path TEXT,
-                pdf_path TEXT,
-                signature_xml_path TEXT,
-                rejection_reason TEXT,
-                rejection_code TEXT,
-                notes TEXT,
-                payment_means_code TEXT NOT NULL DEFAULT '30',
-                storno_of_invoice_id TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                UNIQUE(company_id, series, number)
-            )",
+            "INSERT INTO contacts (id, company_id, contact_type, legal_name) \
+             VALUES ('ct1', 'co1', 'CUSTOMER', 'Client Test SRL')",
         )
         .execute(&pool)
         .await
-        .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE invoice_line_items (
-                id TEXT PRIMARY KEY,
-                invoice_id TEXT NOT NULL,
-                position INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                description TEXT,
-                quantity TEXT NOT NULL,
-                unit TEXT NOT NULL DEFAULT '',
-                unit_price TEXT NOT NULL,
-                vat_rate TEXT NOT NULL,
-                vat_category TEXT NOT NULL DEFAULT 'S',
-                subtotal_amount TEXT NOT NULL,
-                vat_amount TEXT NOT NULL,
-                total_amount TEXT NOT NULL,
-                cpv_code TEXT,
-                art331_code TEXT,
-                revenue_kind TEXT NOT NULL DEFAULT 'goods'
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE invoice_events (
-                id TEXT PRIMARY KEY,
-                invoice_id TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                message TEXT NOT NULL,
-                metadata TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE orders (
-                id TEXT PRIMARY KEY NOT NULL,
-                company_id TEXT NOT NULL,
-                contact_id TEXT,
-                series TEXT,
-                number INTEGER NOT NULL,
-                full_number TEXT,
-                order_date TEXT NOT NULL,
-                expected_delivery TEXT,
-                currency TEXT NOT NULL DEFAULT 'RON',
-                exchange_rate TEXT,
-                subtotal_amount TEXT NOT NULL,
-                vat_amount TEXT NOT NULL,
-                total_amount TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'draft',
-                notes TEXT,
-                converted_invoice_id TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                UNIQUE(company_id, series, number)
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE order_lines (
-                id TEXT PRIMARY KEY NOT NULL,
-                order_id TEXT NOT NULL,
-                position INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                description TEXT,
-                quantity TEXT NOT NULL,
-                unit TEXT,
-                unit_price TEXT NOT NULL,
-                vat_rate TEXT NOT NULL,
-                vat_category TEXT,
-                subtotal_amount TEXT NOT NULL,
-                vat_amount TEXT NOT NULL,
-                total_amount TEXT NOT NULL,
-                revenue_kind TEXT,
-                qty_reserved TEXT NOT NULL DEFAULT '0'
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "INSERT INTO companies (id, legal_name, last_invoice_number, last_quote_number, last_order_number)
-             VALUES ('co1', 'Test SRL', 0, 0, 0)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        .expect("seed contact");
 
         pool
     }
@@ -793,7 +683,7 @@ mod tests {
     fn sample_create_input() -> CreateOrderInput {
         CreateOrderInput {
             company_id: "co1".into(),
-            contact_id: None,
+            contact_id: Some("ct1".into()),
             series: None,
             order_date: "2026-06-21".into(),
             expected_delivery: None,
@@ -828,7 +718,7 @@ mod tests {
 
     #[tokio::test]
     async fn reservation_no_stock_ledger() {
-        // Verify that available_qty works without a stock_ledger table (it doesn't use it).
+        // Verify that available_qty works correctly on the real schema.
         let pool = setup_pool().await;
 
         let order = create(&pool, sample_create_input()).await.unwrap();
@@ -871,5 +761,79 @@ mod tests {
             Decimal::ZERO,
             "After cancel, reserved qty should be 0"
         );
+    }
+
+    #[tokio::test]
+    async fn convert_order_creates_draft_invoice() {
+        let pool = setup_pool().await;
+
+        let order = create(&pool, sample_create_input()).await.unwrap();
+        set_status(&pool, &order.id, "co1", "accepted")
+            .await
+            .unwrap();
+
+        let invoice = convert_to_invoice(&pool, "co1", &order.id).await.unwrap();
+        assert!(!invoice.id.is_empty());
+        assert_eq!(invoice.status, "DRAFT");
+
+        let updated_order = get(&pool, &order.id).await.unwrap();
+        assert_eq!(updated_order.status, "invoiced");
+        assert_eq!(
+            updated_order.converted_invoice_id.as_deref(),
+            Some(invoice.id.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn convert_order_idempotent() {
+        let pool = setup_pool().await;
+
+        let order = create(&pool, sample_create_input()).await.unwrap();
+        set_status(&pool, &order.id, "co1", "accepted")
+            .await
+            .unwrap();
+        convert_to_invoice(&pool, "co1", &order.id).await.unwrap();
+
+        // Second convert must fail.
+        let result = convert_to_invoice(&pool, "co1", &order.id).await;
+        assert!(
+            result.is_err(),
+            "Converting an already-invoiced order must return Err"
+        );
+    }
+
+    #[tokio::test]
+    async fn convert_in_converting_flag_state_is_refused() {
+        // Simulate a crash after the converting=1 latch is set but before the
+        // final stamp to 'invoiced'. A concurrent/retry convert must be refused —
+        // no second invoice minted. This is the race guard that replaced the
+        // broken status='invoicing' sentinel (which violated the CHECK constraint).
+        let pool = setup_pool().await;
+
+        let order = create(&pool, sample_create_input()).await.unwrap();
+        set_status(&pool, &order.id, "co1", "accepted")
+            .await
+            .unwrap();
+
+        // Manually set the converting flag to 1 (simulates a crash mid-convert).
+        sqlx::query("UPDATE orders SET converting=1 WHERE id=?1")
+            .bind(&order.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // A retry of convert_to_invoice must be refused — no second invoice minted.
+        let result = convert_to_invoice(&pool, "co1", &order.id).await;
+        assert!(
+            result.is_err(),
+            "convert must refuse when converting=1 (race guard)"
+        );
+
+        // Confirm no invoice was created for this order.
+        let inv_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM invoices")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(inv_count, 0, "no invoice must have been created");
     }
 }
