@@ -217,77 +217,28 @@ pub async fn set_pdf_path(pool: &SqlitePool, id: &str, path: &str) -> AppResult<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
 
-    /// Minimal in-memory schema for receipts tests.
+    /// Use the REAL migrations so receipts.company_id REFERENCES companies(id)
+    /// and receipts.contact_id REFERENCES contacts(id) (migration 0015) are
+    /// enforced exactly as in production.
     async fn setup_pool() -> sqlx::SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:")
             .await
-            .unwrap();
+            .expect("in-memory DB");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("migrations must apply cleanly");
 
+        // Seed: two companies (only required NOT NULL columns without DEFAULTs).
         sqlx::query(
-            "CREATE TABLE companies (
-                id                   TEXT    PRIMARY KEY,
-                cui                  TEXT    NOT NULL,
-                legal_name           TEXT    NOT NULL,
-                trade_name           TEXT,
-                registry_number      TEXT,
-                vat_payer            INTEGER NOT NULL DEFAULT 1,
-                address              TEXT    NOT NULL DEFAULT '',
-                city                 TEXT    NOT NULL DEFAULT '',
-                county               TEXT    NOT NULL DEFAULT '',
-                postal_code          TEXT,
-                country              TEXT    NOT NULL DEFAULT 'RO',
-                email                TEXT,
-                phone                TEXT,
-                iban                 TEXT,
-                bank_name            TEXT,
-                is_active            INTEGER NOT NULL DEFAULT 1,
-                spv_enabled          INTEGER NOT NULL DEFAULT 0,
-                invoice_series       TEXT    NOT NULL DEFAULT 'FACT',
-                last_invoice_number  INTEGER NOT NULL DEFAULT 0,
-                last_receipt_number  INTEGER NOT NULL DEFAULT 0,
-                logo_path            TEXT,
-                created_at           INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at           INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
+            "INSERT INTO companies (id, cui, legal_name, vat_payer, address, city, county, country) VALUES
+             ('comp-1', '1111111', 'Firma A SRL', 1, 'Str. A 1', 'Bucuresti', 'B', 'RO'),
+             ('comp-2', '2222222', 'Firma B SRL', 1, 'Str. B 2', 'Cluj-Napoca', 'CJ', 'RO')",
         )
         .execute(&pool)
         .await
-        .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE receipts (
-                id          TEXT    PRIMARY KEY,
-                company_id  TEXT    NOT NULL,
-                series      TEXT    NOT NULL DEFAULT 'CH',
-                number      INTEGER NOT NULL,
-                contact_id  TEXT,
-                invoice_id  TEXT,
-                amount      TEXT    NOT NULL,
-                currency    TEXT    NOT NULL DEFAULT 'RON',
-                issue_date  TEXT    NOT NULL,
-                payer_name  TEXT,
-                notes       TEXT,
-                pdf_path    TEXT,
-                created_at  INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // Seed: two companies.
-        sqlx::query(
-            "INSERT INTO companies (id, cui, legal_name, address, city, county) VALUES
-             ('comp-1', '1111111', 'Firma A SRL', 'Str. A 1', 'Bucuresti', 'B'),
-             ('comp-2', '2222222', 'Firma B SRL', 'Str. B 2', 'Cluj-Napoca', 'CJ')",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        .expect("seed companies");
 
         // Seed: one receipt for comp-1.
         sqlx::query(
@@ -296,12 +247,13 @@ mod tests {
         )
         .execute(&pool)
         .await
-        .unwrap();
+        .expect("seed receipt");
+
         // Match the seeded receipt number in companies.
         sqlx::query("UPDATE companies SET last_receipt_number = 1 WHERE id = 'comp-1'")
             .execute(&pool)
             .await
-            .unwrap();
+            .expect("update last_receipt_number");
 
         pool
     }

@@ -1246,68 +1246,58 @@ mod tests {
     /// not a single 19% line.
     #[tokio::test]
     async fn purchase_multi_rate_vat_lines_produce_two_invoice_lines() {
-        use sqlx::sqlite::SqlitePoolOptions;
-        use sqlx::Executor;
-
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:")
             .await
-            .unwrap();
+            .expect("in-memory DB");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("migrations must apply cleanly");
 
-        pool.execute(sqlx::query(
-            "CREATE TABLE received_invoices (
-                id TEXT PRIMARY KEY, company_id TEXT,
-                anaf_download_id TEXT, anaf_index TEXT,
-                issuer_cui TEXT, issuer_name TEXT,
-                series TEXT, number TEXT,
-                total_amount TEXT, net_amount TEXT, vat_amount TEXT,
-                currency TEXT, exchange_rate REAL, issue_date TEXT,
-                xml_path TEXT, pdf_path TEXT, status TEXT,
-                downloaded_at INTEGER, created_at INTEGER
-            )",
-        ))
-        .await
-        .unwrap();
-
-        pool.execute(sqlx::query(
-            "CREATE TABLE received_invoice_vat_lines (
-                id TEXT PRIMARY KEY,
-                received_invoice_id TEXT,
-                vat_category TEXT,
-                vat_rate TEXT,
-                base_amount TEXT,
-                vat_amount TEXT
-            )",
-        ))
-        .await
-        .unwrap();
-
-        // Seed: one invoice with net=1100, vat=251 (1000*21%=210 + 100*11%=11 +
-        //       — simplified: 1000@21% + 100@11%)
+        // Seed company required by received_invoices.company_id FK.
         sqlx::query(
-            "INSERT INTO received_invoices VALUES ('ri-1','co-1',NULL,NULL,'RO111','Furnizor Test',\
-             'FC','100','1321.00','1100.00','221.00','RON',NULL,'2025-03-01',NULL,NULL,'APPROVED',0,0)",
+            "INSERT INTO companies (id, cui, legal_name, vat_payer, address, city, county, country) \
+             VALUES ('co-1', 'RO999', 'Firma Test SRL', 1, 'Str 1', 'Buc', 'B', 'RO')",
         )
         .execute(&pool)
         .await
-        .unwrap();
+        .expect("seed company");
+
+        // Seed: one invoice with net=1100, vat=221 (1000@21% + 100@11%).
+        // Use named columns — real schema has anaf_download_id NOT NULL UNIQUE,
+        // issuer_cui/issuer_name NOT NULL, xml_path NOT NULL.
+        sqlx::query(
+            "INSERT INTO received_invoices \
+             (id, company_id, anaf_download_id, issuer_cui, issuer_name, \
+              series, number, total_amount, currency, issue_date, xml_path, status, \
+              net_amount, vat_amount) \
+             VALUES ('ri-1','co-1','dl-001','RO111','Furnizor Test',\
+             'FC','100','1321.00','RON','2025-03-01','/tmp/ri-1.xml','APPROVED',\
+             '1100.00','221.00')",
+        )
+        .execute(&pool)
+        .await
+        .expect("seed received invoice");
 
         // VAT line 1: 21%  — base 1000, vat 210
         sqlx::query(
-            "INSERT INTO received_invoice_vat_lines VALUES ('vl-1','ri-1','S','21','1000.00','210.00')",
+            "INSERT INTO received_invoice_vat_lines \
+             (id, received_invoice_id, vat_category, vat_rate, base_amount, vat_amount) \
+             VALUES ('vl-1','ri-1','S','21','1000.00','210.00')",
         )
         .execute(&pool)
         .await
-        .unwrap();
+        .expect("seed vat line 1");
 
         // VAT line 2: 11%  — base 100, vat 11
         sqlx::query(
-            "INSERT INTO received_invoice_vat_lines VALUES ('vl-2','ri-1','S','11','100.00','11.00')",
+            "INSERT INTO received_invoice_vat_lines \
+             (id, received_invoice_id, vat_category, vat_rate, base_amount, vat_amount) \
+             VALUES ('vl-2','ri-1','S','11','100.00','11.00')",
         )
         .execute(&pool)
         .await
-        .unwrap();
+        .expect("seed vat line 2");
 
         let mut w = crate::anaf_decl::xml::new_writer().unwrap();
         write_purchase_invoices(&mut w, &pool, "co-1", "2025-01-01", "2025-12-31")
@@ -1358,53 +1348,38 @@ mod tests {
     /// with TaxBase = header net (not 0).
     #[tokio::test]
     async fn purchase_no_vat_lines_fallback_uses_header_net() {
-        use sqlx::sqlite::SqlitePoolOptions;
-        use sqlx::Executor;
-
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:")
             .await
-            .unwrap();
+            .expect("in-memory DB");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("migrations must apply cleanly");
 
-        pool.execute(sqlx::query(
-            "CREATE TABLE received_invoices (
-                id TEXT PRIMARY KEY, company_id TEXT,
-                anaf_download_id TEXT, anaf_index TEXT,
-                issuer_cui TEXT, issuer_name TEXT,
-                series TEXT, number TEXT,
-                total_amount TEXT, net_amount TEXT, vat_amount TEXT,
-                currency TEXT, exchange_rate REAL, issue_date TEXT,
-                xml_path TEXT, pdf_path TEXT, status TEXT,
-                downloaded_at INTEGER, created_at INTEGER
-            )",
-        ))
+        // Seed company required by received_invoices.company_id FK.
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, vat_payer, address, city, county, country) \
+             VALUES ('co-2', 'RO888', 'Firma 2 SRL', 1, 'Str 2', 'Buc', 'B', 'RO')",
+        )
+        .execute(&pool)
         .await
-        .unwrap();
-
-        pool.execute(sqlx::query(
-            "CREATE TABLE received_invoice_vat_lines (
-                id TEXT PRIMARY KEY,
-                received_invoice_id TEXT,
-                vat_category TEXT,
-                vat_rate TEXT,
-                base_amount TEXT,
-                vat_amount TEXT
-            )",
-        ))
-        .await
-        .unwrap();
+        .expect("seed company");
 
         // Seed: one invoice with net=1000, vat=50 (a genuine 5% rate) — NO vat_lines.
         // Chosen NON-19% so the test proves the fallback COMPUTES the rate from the
         // header amounts (round(50/1000*100)=5) rather than hard-coding 19%.
         sqlx::query(
-            "INSERT INTO received_invoices VALUES ('ri-2','co-2',NULL,NULL,'RO222','Furnizor 2',\
-             'FACT','002','1050.00','1000.00','50.00','RON',NULL,'2025-03-01',NULL,NULL,'APPROVED',0,0)",
+            "INSERT INTO received_invoices \
+             (id, company_id, anaf_download_id, issuer_cui, issuer_name, \
+              series, number, total_amount, currency, issue_date, xml_path, status, \
+              net_amount, vat_amount) \
+             VALUES ('ri-2','co-2','dl-002','RO222','Furnizor 2',\
+             'FACT','002','1050.00','RON','2025-03-01','/tmp/ri-2.xml','APPROVED',\
+             '1000.00','50.00')",
         )
         .execute(&pool)
         .await
-        .unwrap();
+        .expect("seed received invoice");
 
         let mut w = crate::anaf_decl::xml::new_writer().unwrap();
         write_purchase_invoices(&mut w, &pool, "co-2", "2025-01-01", "2025-12-31")

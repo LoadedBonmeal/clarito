@@ -297,89 +297,26 @@ async fn fetch_lines(pool: &SqlitePool, movement_id: &str) -> AppResult<Vec<Stoc
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
-    use sqlx::Executor;
 
+    /// Use the REAL migrations so ON DELETE CASCADE FKs on stock_movement_lines
+    /// (migration 0019) are enforced exactly as in production.
     async fn setup_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
+        let pool = SqlitePool::connect("sqlite::memory:")
             .await
-            .unwrap();
+            .expect("in-memory DB");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("migrations must apply cleanly");
 
-        pool.execute(sqlx::query(
-            "CREATE TABLE companies (
-                id TEXT PRIMARY KEY, cui TEXT, legal_name TEXT, trade_name TEXT,
-                registry_number TEXT, vat_payer INTEGER, address TEXT, city TEXT,
-                county TEXT, postal_code TEXT, country TEXT, email TEXT, phone TEXT,
-                iban TEXT, bank_name TEXT, is_active INTEGER, spv_enabled INTEGER,
-                invoice_series TEXT, last_invoice_number INTEGER, logo_path TEXT,
-                created_at INTEGER, updated_at INTEGER
-            )",
-        ))
+        // Seed the company row required by stock_movements.company_id FK.
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, vat_payer, address, city, county, country) \
+             VALUES ('co-1', 'RO1234', 'Test SRL', 1, 'Str 1', 'Buc', 'B', 'RO')",
+        )
+        .execute(&pool)
         .await
-        .unwrap();
-
-        pool.execute(sqlx::query(
-            "INSERT INTO companies (id, cui, legal_name, address, city, county, country, \
-                                   vat_payer, invoice_series, last_invoice_number, \
-                                   is_active, spv_enabled, created_at, updated_at) \
-             VALUES ('co-1','RO1234','Test SRL','Str 1','Buc','B','RO',1,'F',0,1,0,0,0)",
-        ))
-        .await
-        .unwrap();
-
-        pool.execute(sqlx::query(
-            "CREATE TABLE products (
-                id TEXT PRIMARY KEY, company_id TEXT, name TEXT, unit TEXT,
-                unit_price TEXT, code TEXT
-            )",
-        ))
-        .await
-        .unwrap();
-
-        pool.execute(sqlx::query(
-            "CREATE TABLE stock_movements (
-                id TEXT NOT NULL PRIMARY KEY,
-                company_id TEXT NOT NULL,
-                movement_ref TEXT NOT NULL,
-                movement_date TEXT NOT NULL,
-                posting_date TEXT NOT NULL,
-                movement_type TEXT NOT NULL DEFAULT '10',
-                direction TEXT NOT NULL DEFAULT 'IN',
-                document_type TEXT,
-                document_number TEXT,
-                source_type TEXT,
-                source_id TEXT,
-                notes TEXT,
-                created_at INTEGER NOT NULL DEFAULT 0,
-                updated_at INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(company_id, movement_ref)
-            )",
-        ))
-        .await
-        .unwrap();
-
-        pool.execute(sqlx::query(
-            "CREATE TABLE stock_movement_lines (
-                id TEXT NOT NULL PRIMARY KEY,
-                movement_id TEXT NOT NULL,
-                line_number INTEGER NOT NULL DEFAULT 1,
-                product_id TEXT,
-                product_code TEXT NOT NULL,
-                account_id TEXT NOT NULL DEFAULT '371',
-                customer_id TEXT NOT NULL DEFAULT '0',
-                supplier_id TEXT NOT NULL DEFAULT '0',
-                quantity TEXT NOT NULL DEFAULT '1',
-                unit_of_measure TEXT NOT NULL DEFAULT 'H87',
-                uom_conv_factor TEXT NOT NULL DEFAULT '1',
-                book_value TEXT NOT NULL DEFAULT '0.00',
-                movement_subtype TEXT NOT NULL DEFAULT '10',
-                comments TEXT
-            )",
-        ))
-        .await
-        .unwrap();
+        .expect("seed company");
 
         pool
     }

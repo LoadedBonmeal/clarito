@@ -258,37 +258,36 @@ pub fn advance_date(current: &str, frequency: &str, day_of_month: u32) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
 
+    /// Use the REAL migrations so recurring_invoices.client_id REFERENCES contacts(id)
+    /// (migration 0003) is enforced in tests, not silently bypassed.
     async fn setup_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
+        let pool = SqlitePool::connect("sqlite::memory:")
             .await
-            .unwrap();
-        // Schema mirrors migration 0003 (without the FK on contacts so tests stay
-        // self-contained — we never join through this table in these tests).
+            .expect("in-memory DB");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("migrations must apply cleanly");
+
+        // Seed the company row required by contacts.company_id FK.
         sqlx::query(
-            "CREATE TABLE recurring_invoices (
-                id               TEXT PRIMARY KEY NOT NULL,
-                company_id       TEXT NOT NULL,
-                template_name    TEXT NOT NULL,
-                client_id        TEXT NOT NULL,
-                frequency        TEXT NOT NULL,
-                next_issue_date  TEXT NOT NULL,
-                day_of_month     INTEGER NOT NULL DEFAULT 1,
-                auto_submit_anaf INTEGER NOT NULL DEFAULT 0,
-                active           INTEGER NOT NULL DEFAULT 1,
-                series           TEXT NOT NULL,
-                lines_json       TEXT NOT NULL,
-                notes            TEXT,
-                created_at       INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at       INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
+            "INSERT INTO companies (id, cui, legal_name, vat_payer, address, city, county, country) \
+             VALUES ('comp-1', 'RO1', 'Test SRL', 1, 'Str 1', 'Buc', 'B', 'RO')",
         )
         .execute(&pool)
         .await
-        .unwrap();
+        .expect("seed company");
+
+        // Seed the contact row required by recurring_invoices.client_id FK.
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, contact_type, legal_name) \
+             VALUES ('client-1', 'comp-1', 'CUSTOMER', 'Client Test SRL')",
+        )
+        .execute(&pool)
+        .await
+        .expect("seed contact");
+
         pool
     }
 

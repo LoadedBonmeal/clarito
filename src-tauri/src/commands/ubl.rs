@@ -215,102 +215,47 @@ pub async fn validate_invoice_xml(
 mod tests {
     use crate::db::invoices as db_inv;
     use crate::error::AppError;
-    use sqlx::sqlite::SqlitePoolOptions;
 
-    /// Minimal schema that satisfies `db::invoices::get_with_lines` (which calls
-    /// `get` + `list_lines` + `list_events`).
+    /// Use the REAL migrations so invoices has UNIQUE(company_id,series,number)
+    /// and invoice_line_items/events have ON DELETE CASCADE FKs (migration 006).
     async fn setup_ubl_pool() -> sqlx::SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:")
             .await
-            .unwrap();
+            .expect("in-memory DB");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("migrations must apply cleanly");
 
+        // Seed company required by invoices.company_id FK.
         sqlx::query(
-            "CREATE TABLE invoices (
-                id TEXT PRIMARY KEY NOT NULL,
-                company_id TEXT NOT NULL,
-                contact_id TEXT NOT NULL,
-                series TEXT NOT NULL DEFAULT '',
-                number INTEGER NOT NULL DEFAULT 0,
-                full_number TEXT NOT NULL DEFAULT '',
-                issue_date TEXT NOT NULL DEFAULT '',
-                due_date TEXT NOT NULL DEFAULT '',
-                currency TEXT NOT NULL DEFAULT 'RON',
-                exchange_rate REAL,
-                subtotal_amount TEXT NOT NULL DEFAULT '0',
-                vat_amount TEXT NOT NULL DEFAULT '0',
-                total_amount TEXT NOT NULL DEFAULT '0',
-                status TEXT NOT NULL DEFAULT 'DRAFT',
-                anaf_upload_id TEXT,
-                anaf_index TEXT,
-                anaf_submitted_at INTEGER,
-                anaf_validated_at INTEGER,
-                anaf_rejected_at INTEGER,
-                xml_path TEXT,
-                pdf_path TEXT,
-                signature_xml_path TEXT,
-                rejection_reason TEXT,
-                rejection_code TEXT,
-                notes TEXT,
-                payment_means_code TEXT NOT NULL DEFAULT '30',
-                storno_of_invoice_id TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
+            "INSERT INTO companies (id, cui, legal_name, vat_payer, address, city, county, country) \
+             VALUES ('comp-1', 'RO1', 'Test SRL', 1, 'Str 1', 'Buc', 'B', 'RO')",
         )
         .execute(&pool)
         .await
-        .unwrap();
+        .expect("seed company");
 
+        // Seed contact required by invoices.contact_id FK.
         sqlx::query(
-            "CREATE TABLE invoice_line_items (
-                id TEXT PRIMARY KEY NOT NULL,
-                invoice_id TEXT NOT NULL,
-                position INTEGER NOT NULL DEFAULT 0,
-                name TEXT NOT NULL DEFAULT '',
-                description TEXT,
-                quantity TEXT NOT NULL DEFAULT '0',
-                unit TEXT NOT NULL DEFAULT 'C62',
-                unit_price TEXT NOT NULL DEFAULT '0',
-                vat_rate TEXT NOT NULL DEFAULT '19',
-                vat_category TEXT NOT NULL DEFAULT 'S',
-                subtotal_amount TEXT NOT NULL DEFAULT '0',
-                vat_amount TEXT NOT NULL DEFAULT '0',
-                total_amount TEXT NOT NULL DEFAULT '0',
-                cpv_code TEXT,
-                art331_code TEXT
-                ,revenue_kind TEXT NOT NULL DEFAULT 'goods'
-            )",
+            "INSERT INTO contacts (id, company_id, contact_type, legal_name) \
+             VALUES ('contact-1', 'comp-1', 'CUSTOMER', 'Client Test SRL')",
         )
         .execute(&pool)
         .await
-        .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE invoice_events (
-                id TEXT PRIMARY KEY NOT NULL,
-                invoice_id TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                message TEXT,
-                metadata TEXT,
-                created_at INTEGER NOT NULL DEFAULT (unixepoch())
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        .expect("seed contact");
 
         // Seed an invoice belonging to comp-1.
         sqlx::query(
-            "INSERT INTO invoices (id, company_id, contact_id, series, number, full_number,
-             issue_date, due_date, status)
-             VALUES ('inv-ubl-1', 'comp-1', 'contact-1', 'FCT', 1, 'FCT-0001',
-             '2026-01-01', '2026-01-01', 'DRAFT')",
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, subtotal_amount, vat_amount, total_amount, status) \
+             VALUES ('inv-ubl-1', 'comp-1', 'contact-1', 'FCT', 1, 'FCT-0001', \
+             '2026-01-01', '2026-01-01', '0.00', '0.00', '0.00', 'DRAFT')",
         )
         .execute(&pool)
         .await
-        .unwrap();
+        .expect("seed invoice");
 
         pool
     }

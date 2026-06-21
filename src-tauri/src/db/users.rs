@@ -391,31 +391,18 @@ pub async fn reset_password(pool: &SqlitePool, user_id: &str, new_password: &str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
 
+    /// Use the REAL migrations so CHECK(role IN (...)) and all other constraints
+    /// match production exactly (previously the hand-rolled schema omitted the CHECK,
+    /// hiding any test that inserted an invalid role).
     async fn make_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(":memory:")
+        let pool = SqlitePool::connect("sqlite::memory:")
             .await
-            .unwrap();
-        // Minimal schema (mirrors migration 0070).
-        sqlx::query(
-            "CREATE TABLE users (
-                id            TEXT PRIMARY KEY,
-                username      TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                role          TEXT NOT NULL,
-                is_active     INTEGER NOT NULL DEFAULT 1,
-                failed_attempts INTEGER NOT NULL DEFAULT 0,
-                locked_until  INTEGER,
-                created_at    INTEGER NOT NULL,
-                last_login    INTEGER
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+            .expect("in-memory DB");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("migrations must apply cleanly");
         pool
     }
 
