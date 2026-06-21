@@ -327,13 +327,10 @@ pub async fn authorize(_company_id: &str, config: &OAuthConfig) -> Result<OAuthR
 /// `client_id` trebuie să corespundă client_id-ului configurat în Setări → ANAF;
 /// un mismatch face ca serverul ANAF să respingă revocarea.
 pub async fn revoke_token(access_token: &str, client_id: &str, client_secret: &str) {
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => return,
-    };
+    // Route through the pinning verifier so pin enforcement covers all 6 ANAF
+    // endpoints (fire-and-forget, so a pin mismatch in enforce mode will fail
+    // the request silently, which is acceptable for revocation).
+    let client = super::pinning::build_pinned_client(10);
 
     let params = [("token", access_token)];
 
@@ -417,11 +414,9 @@ pub async fn refresh_token_bundle_with_client_id(
     client_secret: &str,
     token_url: &str,
 ) -> Result<OAuthResult, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .tls_info(true) // report-only TLS observability (see anaf::pinning)
-        .build()
-        .map_err(|e| e.to_string())?;
+    // build_pinned_client installs the ANAF SPKI-pinning verifier (mode off by default →
+    // same behaviour as before; opt-in via ANAF_PIN_MODE=report|enforce).
+    let client = super::pinning::build_pinned_client(30);
 
     // Basic Auth (client_id:client_secret) — confidential client; client_id not in body.
     let params = [
@@ -594,11 +589,9 @@ async fn exchange_code_for_token(
     code_verifier: &str,
     config: &OAuthConfig,
 ) -> Result<OAuthResult, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .tls_info(true) // report-only TLS observability (see anaf::pinning)
-        .build()
-        .map_err(|e| e.to_string())?;
+    // build_pinned_client installs the ANAF SPKI-pinning verifier (mode off by default →
+    // same behaviour as before; opt-in via ANAF_PIN_MODE=report|enforce).
+    let client = super::pinning::build_pinned_client(30);
 
     // ANAF folosește autentificare client prin HTTP Basic Auth (client_id:client_secret)
     // — stil „AuthStyleInHeader". client_id NU se mai trimite și în body.
@@ -621,7 +614,7 @@ async fn exchange_code_for_token(
 }
 
 async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthResult, String> {
-    super::pinning::observe_cert(&resp); // report-only TLS observability (never blocks)
+    super::pinning::observe_cert(&resp); // legacy shim — no-op when build_pinned_client is used
     let status = resp.status();
     let body = resp
         .text()

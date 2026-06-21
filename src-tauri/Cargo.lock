@@ -1447,6 +1447,7 @@ version = "0.7.0"
 dependencies = [
  "aes-gcm",
  "argon2",
+ "base64 0.22.1",
  "chrono",
  "csv",
  "dbase",
@@ -1463,6 +1464,8 @@ dependencies = [
  "rust_decimal",
  "rust_decimal_macros",
  "rust_xlsxwriter",
+ "rustls",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "sha2",
@@ -4642,6 +4645,7 @@ version = "0.23.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",

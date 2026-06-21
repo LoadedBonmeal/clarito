@@ -182,13 +182,9 @@ impl AnafClient {
             "https://api.anaf.ro/prod"
         };
         Self {
-            client: Client::builder()
-                .timeout(Duration::from_secs(30))
-                // Capture the peer cert so `pinning::observe_cert` can log it (report-only; standard
-                // chain validation is unchanged — this only exposes the cert for observability).
-                .tls_info(true)
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            // build_pinned_client installs the ANAF SPKI-pinning verifier (default mode=off →
+            // identical behaviour to a plain client; opt-in via ANAF_PIN_MODE=report|enforce).
+            client: super::pinning::build_pinned_client(30),
             base_url: base.to_string(),
         }
     }
@@ -235,7 +231,7 @@ impl AnafClient {
                 .await
                 .map_err(|e| format!("Upload request eșuat: {e}"))?;
 
-            super::pinning::observe_cert(&resp); // report-only TLS observability (never blocks)
+            super::pinning::observe_cert(&resp); // legacy shim — no-op when build_pinned_client is used
 
             let status = resp.status();
 
