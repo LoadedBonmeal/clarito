@@ -491,6 +491,13 @@ pub async fn finalize_nir(
     let mut standalone_expense: std::collections::HashMap<String, Decimal> =
         std::collections::HashMap::new();
     let mut total_standalone_cost = Decimal::ZERO;
+    // linked non-marfă: D{expense}=Σcost + C607=Σ. Factura primită debitează MEREU 607 (post_purchase_invoice
+    // e fix pe 607). Pentru un produs non-marfă (301/302/345/381 → cheltuială 601/602/711/608), mișcarea de
+    // stoc creditează contul specific, NU 607 → 607 din factură rămâne fantomă. Reclasul D{expense}=C607
+    // netează ambele (cheltuiala specifică din mișcare ȘI 607 din factură) → net D{stoc}=C401.
+    let mut linked_expense: std::collections::HashMap<String, Decimal> =
+        std::collections::HashMap::new();
+    let mut total_linked_607 = Decimal::ZERO;
     // retail: D{stoc} = Σ(adaos+tva) per cont stoc
     let mut retail_by_stock: std::collections::HashMap<String, (Decimal, Decimal)> =
         std::collections::HashMap::new(); // stock_account → (adaos, tva_neex)
@@ -572,6 +579,13 @@ pub async fn finalize_nir(
                 .entry(expense_account.clone())
                 .or_insert(Decimal::ZERO) += value_cost;
             total_standalone_cost += value_cost;
+        } else if expense_account != "607" {
+            // Linked NIR, produs non-marfă: reclasăm cheltuiala specifică pe 607 ca să neteze
+            // D607 din factura primită (marfa nu are nevoie — mișcarea creditează deja 607).
+            *linked_expense
+                .entry(expense_account.clone())
+                .or_insert(Decimal::ZERO) += value_cost;
+            total_linked_607 += value_cost;
         }
 
         if doc.retail_mode {
@@ -601,6 +615,16 @@ pub async fn finalize_nir(
                 }
             }
             owned_lines.push(("408".to_string(), Decimal::ZERO, total_standalone_cost));
+        }
+
+        // Linked non-marfă legs: D{expense}=Σcost + C607=Σ (netează D607 din factura primită).
+        if !is_standalone && total_linked_607 > Decimal::ZERO {
+            for (exp_acct, cost) in &linked_expense {
+                if *cost > Decimal::ZERO {
+                    owned_lines.push((exp_acct.clone(), *cost, Decimal::ZERO));
+                }
+            }
+            owned_lines.push(("607".to_string(), Decimal::ZERO, total_linked_607));
         }
 
         // Retail legs: D{stoc}=adaos+tva per cont stoc + C378=Σadaos + C4428=Σtva_neex
@@ -1369,6 +1393,121 @@ mod tests {
         assert!(
             (credit_401.unwrap_or(0.0) - 500.0).abs() < 0.01,
             "401 credit trebuie să fie 500"
+        );
+    }
+
+    /// Regression (audit): a LINKED NIR for a NON-marfă product (stock 301 → expense 601) must reclass
+    /// the cost to 607 so the received invoice's hardcoded D607 nets to ZERO (no phantom 607). marfă
+    /// nets via the movement's C607; non-marfă needs the D601=C607 leg. Asserts across ALL journals:
+    /// 607 net 0, 601 net 0, 301 debit = cost, 401 credit = cost → net D301=C401.
+    #[tokio::test]
+    async fn linked_non_marfa_reclasses_607() {
+        let pool = test_pool().await;
+        let co = seed_company(&pool).await;
+        let gest = seed_gestiune(&pool, &co).await;
+        seed_vat_rate(&pool, "19").await;
+        // materie_primă product with stock_account 301 (→ expense 601).
+        let pid = new_id();
+        sqlx::query(
+            "INSERT INTO products (id, company_id, name, unit, vat_rate, unit_price, product_type, \
+             stock_account, created_at) \
+             VALUES (?1,?2,'Materie','buc','19','50.00','materie_prima','301',?3)",
+        )
+        .bind(&pid)
+        .bind(&co)
+        .bind(now_unix())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Received invoice + its GL D607=C401 (500) — what a real received invoice posts.
+        let inv_id = new_id();
+        sqlx::query(
+            "INSERT INTO received_invoices (id, company_id, anaf_download_id, issuer_cui, \
+             issuer_name, total_amount, currency, issue_date, xml_path) \
+             VALUES (?1,?2,'DL-002','RO999','Furnizor',500.0,'RON','2026-06-01','/tmp/i.xml')",
+        )
+        .bind(&inv_id)
+        .bind(&co)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let invj = new_id();
+        sqlx::query(
+            "INSERT INTO gl_journal (id, company_id, journal_id, journal_type, transaction_id, \
+             transaction_date, description, source_type, source_id, customer_id, supplier_id) \
+             VALUES (?1,?2,'FAC','RECEIVED_INVOICE',?3,'2026-06-01','Factură','RECEIVED_INVOICE',?3,NULL,NULL)",
+        )
+        .bind(&invj)
+        .bind(&co)
+        .bind(&inv_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO gl_entry (id, journal_pk, record_id, account_code, debit, credit, \
+             partner_cui, customer_id, supplier_id, tax_type, tax_code) \
+             VALUES (?1,?2,1,'607','500.00','0.00',NULL,NULL,NULL,'000','000000')",
+        )
+        .bind(new_id())
+        .bind(&invj)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO gl_entry (id, journal_pk, record_id, account_code, debit, credit, \
+             partner_cui, customer_id, supplier_id, tax_type, tax_code) \
+             VALUES (?1,?2,2,'401','0.00','500.00',NULL,NULL,NULL,'000','000000')",
+        )
+        .bind(new_id())
+        .bind(&invj)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Linked NIR (line cost 10×50 = 500, matching the invoice's 607).
+        let mut input = make_input(&gest, Some(&pid), false);
+        input.received_invoice_id = Some(inv_id.clone());
+        let doc = create_nir(&pool, &co, input).await.unwrap();
+        finalize_nir(&pool, &co, &doc.id).await.unwrap();
+
+        let rows: Vec<(String, Option<f64>, Option<f64>)> = sqlx::query_as(
+            "SELECT e.account_code, SUM(CAST(e.debit AS REAL)), SUM(CAST(e.credit AS REAL)) \
+             FROM gl_entry e JOIN gl_journal j ON j.id=e.journal_pk \
+             WHERE j.company_id=?1 AND e.account_code IN ('607','601','301','401') \
+             GROUP BY e.account_code",
+        )
+        .bind(&co)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let mut net: std::collections::HashMap<String, (f64, f64)> =
+            std::collections::HashMap::new();
+        for (acct, d, c) in rows {
+            net.insert(acct, (d.unwrap_or(0.0), c.unwrap_or(0.0)));
+        }
+        let dc = |a: &str| net.get(a).copied().unwrap_or((0.0, 0.0));
+        let (d607, c607) = dc("607");
+        let (d601, c601) = dc("601");
+        let (d301, _) = dc("301");
+        let (_, c401) = dc("401");
+        assert!(
+            (d607 - c607).abs() < 0.01,
+            "607 net must be 0 (invoice D607 reclassed away), got {}",
+            d607 - c607
+        );
+        assert!(
+            (d601 - c601).abs() < 0.01,
+            "601 net must be 0 (movement C601 reclassed to 607), got {}",
+            d601 - c601
+        );
+        assert!(
+            (d301 - 500.0).abs() < 0.01,
+            "301 debit must be 500, got {d301}"
+        );
+        assert!(
+            (c401 - 500.0).abs() < 0.01,
+            "401 credit must be 500, got {c401}"
         );
     }
 

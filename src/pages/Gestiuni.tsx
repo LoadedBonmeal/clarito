@@ -258,6 +258,7 @@ function GestiuneModal({
               <option value="FIFO">FIFO</option>
               <option value="LIFO">LIFO</option>
             </select>
+            <small className="hint">{t("gestiuni.metodaInfo")}</small>
           </div>
           <div className="field">
             <label>{t("gestiuni.fieldCont")}</label>

@@ -560,20 +560,25 @@ pub async fn produce(
     let scale = qty_produced / output_qty;
 
     // ── Verificare stoc suficient pentru TOATE componentele (pre-consume) ────
-
+    // Agregăm necesarul per COMPONENT DISTINCT (un component poate apărea pe mai multe linii BOM).
+    // Verificarea per-linie ar lăsa o rețetă 2+3 cu stoc 4 să treacă (2≤4 ȘI 3≤4) și apoi să ducă
+    // gestiunea la −1 — record_movement(Dir::Out) NU respinge stocul negativ, doar îl semnalează,
+    // deci garanția all-or-nothing s-ar rupe (OMFP 1802/2014 interzice stocul negativ). Sumăm
+    // cantitățile rotunjite per linie (identic cu felul în care se acumulează OUT-urile).
+    let mut needed_per_component: std::collections::BTreeMap<String, Decimal> =
+        std::collections::BTreeMap::new();
     for line in lines {
         let needed = round2(dec(&line.qty) * scale);
-        let available = on_hand_qty(
-            pool,
-            company_id,
-            &line.component_product_id,
-            &input.gestiune_id,
-        )
-        .await?;
-        if available < needed {
+        *needed_per_component
+            .entry(line.component_product_id.clone())
+            .or_insert(Decimal::ZERO) += needed;
+    }
+    for (component_id, needed) in &needed_per_component {
+        let available = on_hand_qty(pool, company_id, component_id, &input.gestiune_id).await?;
+        if available < *needed {
             return Err(AppError::Validation(format!(
                 "Stoc insuficient: {} (disponibil {:.6}, necesar {:.6}).",
-                line.component_product_id, available, needed
+                component_id, available, needed
             )));
         }
     }
@@ -1054,6 +1059,82 @@ mod tests {
             "duplicate component summed exactly: 25.00"
         );
         assert_eq!(order.unit_cost, "25.00", "unit_cost = 25.00");
+    }
+
+    /// Regression (audit): the pre-consume check must AGGREGATE per distinct component. The same
+    /// component on two lines (2+3=5) with on-hand 4 used to pass both per-line checks (2≤4, 3≤4)
+    /// and drive the gestiune to −1; now the aggregate need (5) is rejected before any consumption.
+    #[tokio::test]
+    async fn duplicate_component_aggregate_stock_rejected() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GA").await;
+        make_product_sql(&pool, "pf_a", &cid, "PF", "produs_finit", "345", "CMP").await;
+        make_product_sql(&pool, "mp_a", &cid, "MP", "materie_prima", "301", "CMP").await;
+
+        // Only 4 in stock.
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_a", "2026-01-01", "4", Some("5.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        // Same component on two lines: 2 + 3 = 5 needed per output.
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_a".into(),
+                name: "Dup".into(),
+                output_qty: "1".into(),
+                lines: vec![
+                    BomLineInput {
+                        component_product_id: "mp_a".into(),
+                        qty: "2".into(),
+                        um: None,
+                        line_no: 1,
+                    },
+                    BomLineInput {
+                        component_product_id: "mp_a".into(),
+                        qty: "3".into(),
+                        um: None,
+                        line_no: 2,
+                    },
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+        let res = produce(
+            &pool,
+            &cid,
+            ProduceInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "1".into(),
+                production_date: "2026-01-10".into(),
+                notes: None,
+            },
+        )
+        .await;
+
+        assert!(res.is_err(), "must reject: aggregate need 5 > on-hand 4");
+        // No consumption happened — stock unchanged, no PRODUCTION ledger rows.
+        assert_eq!(
+            onhand(&pool, &cid, "mp_a", &g).await,
+            Decimal::from(4),
+            "stock unchanged after rejection (no negative stock)"
+        );
+        let cnt: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM stock_ledger WHERE company_id=?1 AND doc_type='PRODUCTION'",
+        )
+        .bind(&cid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cnt, 0, "no PRODUCTION ledger rows after rejection");
     }
 
     // ── Test 2: component stock decreases + finished good increases ───────────

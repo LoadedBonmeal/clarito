@@ -37,6 +37,7 @@
     "tipCV": "Quantity + value tracking",
     "tipGV": "Value tracking only",
     "metodaCMP": "WAC (weighted avg. cost)",
+    "metodaInfo": "Informational. The effective valuation method is taken per product (from the product record).",
     "cancel": "Cancel",
     "saving": "Saving…",
     "save": "Save",
