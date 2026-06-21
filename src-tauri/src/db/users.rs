@@ -296,6 +296,43 @@ pub async fn update_user(
             return Err(AppError::Validation(format!("Rol invalid: '{role}'.")));
         }
     }
+
+    // ── Last-admin guard ──────────────────────────────────────────────────
+    // Fetch the current state of the target user so we can detect whether the
+    // proposed change would strip the last active admin from the system.
+    use sqlx::Row as _;
+    let current = sqlx::query("SELECT role, is_active FROM users WHERE id = ?1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let current_role: String = current.try_get("role").unwrap_or_default();
+    let current_is_active: i64 = current.try_get("is_active").unwrap_or(1);
+
+    // A change is "admin-removing" if:
+    //   - the user is currently an active admin (role='admin' AND is_active=1), AND
+    //   - the new role is something other than 'admin', OR is_active is being set to false.
+    let currently_active_admin = current_role == "admin" && current_is_active == 1;
+    let demoting = input.role.as_deref().map(|r| r != "admin").unwrap_or(false);
+    let deactivating = input.is_active == Some(false);
+
+    if currently_active_admin && (demoting || deactivating) {
+        // Count remaining active admins (excluding this user).
+        let other_admins: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1 AND id != ?1",
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?;
+
+        if other_admins == 0 {
+            return Err(AppError::Validation(
+                "Nu puteți dezactiva/retrograda ultimul administrator activ.".to_string(),
+            ));
+        }
+    }
+
     // Apply updates.
     if let Some(ref role) = input.role {
         sqlx::query("UPDATE users SET role = ?1 WHERE id = ?2")
@@ -497,5 +534,111 @@ mod tests {
             .unwrap();
         let result = login(&pool, "diana", "pass1234").await;
         assert!(result.is_err(), "Inactive user must be rejected");
+    }
+
+    // ── FIX 2: Last-admin guard ──────────────────────────────────────────
+
+    /// Demoting the sole active admin must return Err.
+    #[tokio::test]
+    async fn last_admin_demotion_blocked() {
+        let pool = make_pool().await;
+        let admin = setup_admin(&pool, "eva", "pass1234").await.unwrap();
+        let result = update_user(
+            &pool,
+            &admin.id,
+            UpdateUserInput {
+                role: Some("operator".to_string()),
+                is_active: None,
+            },
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "Demoting the sole active admin must be refused"
+        );
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("ultimul administrator"),
+            "Error must mention last admin: {err_msg}"
+        );
+    }
+
+    /// Deactivating the sole active admin must return Err.
+    #[tokio::test]
+    async fn last_admin_deactivation_blocked() {
+        let pool = make_pool().await;
+        let admin = setup_admin(&pool, "frank", "pass1234").await.unwrap();
+        let result = update_user(
+            &pool,
+            &admin.id,
+            UpdateUserInput {
+                role: None,
+                is_active: Some(false),
+            },
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "Deactivating the sole active admin must be refused"
+        );
+    }
+
+    /// With two active admins, demoting one succeeds.
+    #[tokio::test]
+    async fn second_admin_can_be_demoted() {
+        let pool = make_pool().await;
+        // Create first admin via setup_admin.
+        setup_admin(&pool, "grace", "pass1234").await.unwrap();
+        // Create a second admin directly.
+        let second = create_user(
+            &pool,
+            CreateUserInput {
+                username: "henry".to_string(),
+                password: "pass1234".to_string(),
+                role: "admin".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        // Demoting the second admin must succeed (grace is still active admin).
+        let updated = update_user(
+            &pool,
+            &second.id,
+            UpdateUserInput {
+                role: Some("operator".to_string()),
+                is_active: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.role, "operator");
+    }
+
+    /// Deactivating a non-admin user is always fine (no admin count impact).
+    #[tokio::test]
+    async fn deactivating_non_admin_is_fine() {
+        let pool = make_pool().await;
+        setup_admin(&pool, "iris", "pass1234").await.unwrap();
+        let op = create_user(
+            &pool,
+            CreateUserInput {
+                username: "joe".to_string(),
+                password: "pass1234".to_string(),
+                role: "operator".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let updated = update_user(
+            &pool,
+            &op.id,
+            UpdateUserInput {
+                role: None,
+                is_active: Some(false),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!updated.is_active, "Non-admin deactivation must succeed");
     }
 }
