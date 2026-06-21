@@ -46,6 +46,7 @@
       "gestiuni": "Warehouses",
       "nir": "Goods Receipt (NIR)",
       "stockTransfer": "Stock transfer",
+      "productie": "Production (BOM)",
       "inventoryRegister": "Inventory register",
       "groupReporting": "Reporting",
       "reports": "Reports",

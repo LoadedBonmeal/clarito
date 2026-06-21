@@ -93,6 +93,7 @@ export function Sidebar() {
       { key: "gestiuni", label: t("shell.nav.gestiuni"), icon: "cube", path: "/gestiuni", more: true },
       { key: "nir", label: t("shell.nav.nir"), icon: "docDown", path: "/nir", more: true },
       { key: "bon-transfer", label: t("shell.nav.stockTransfer"), icon: "cube", path: "/stock-transfer", more: true },
+      { key: "productie", label: t("shell.nav.productie"), icon: "cube", path: "/productie", more: true },
       { key: "inventariere", label: t("shell.nav.inventory"), icon: "cube", path: "/inventory", more: true },
       { key: "registru-inventar", label: t("shell.nav.inventoryRegister"), icon: "book", path: "/inventory-register", more: true },
     ]},

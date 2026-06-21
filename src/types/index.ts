@@ -1834,3 +1834,72 @@ export interface TransferInput {
   transferRef?: string;
   notes?: string;
 }
+
+// ─── Producție / BOM (P2 Wave 5) ─────────────────────────────────────────────
+
+export interface Bom {
+  id: string;
+  companyId: string;
+  productId: string;
+  name: string;
+  outputQty: string;
+  active: number;
+  createdAt: number;
+}
+
+export interface BomLine {
+  id: string;
+  bomId: string;
+  componentProductId: string;
+  qty: string;
+  um: string | null;
+  lineNo: number;
+}
+
+export interface BomWithLines {
+  id: string;
+  companyId: string;
+  productId: string;
+  name: string;
+  outputQty: string;
+  active: number;
+  createdAt: number;
+  lines: BomLine[];
+}
+
+export interface BomLineInput {
+  componentProductId: string;
+  qty: string;
+  um?: string;
+  lineNo: number;
+}
+
+export interface BomInput {
+  productId: string;
+  name: string;
+  outputQty: string;
+  lines: BomLineInput[];
+}
+
+export interface ProductieOrder {
+  id: string;
+  companyId: string;
+  bomId: string;
+  productId: string;
+  gestiuneId: string;
+  qtyProduced: string;
+  productionDate: string;
+  totalMaterialCost: string;
+  unitCost: string;
+  status: string;
+  notes: string | null;
+  createdAt: number;
+}
+
+export interface ProduceInput {
+  bomId: string;
+  gestiuneId: string;
+  qtyProduced: string;
+  productionDate: string;
+  notes?: string;
+}

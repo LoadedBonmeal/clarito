@@ -1684,6 +1684,27 @@ export const stockTransfer = {
     invoke<import("@/types").StockTransfer>("get_stock_transfer", { companyId, id }),
 };
 
+// ─── Producție / BOM (P2 Wave 5) ─────────────────────────────────────────────
+
+export const productie = {
+  createBom: (companyId: string, input: import("@/types").BomInput) =>
+    invoke<import("@/types").BomWithLines>("create_bom", { companyId, input }),
+  listBom: (companyId: string) =>
+    invoke<import("@/types").Bom[]>("list_bom", { companyId }),
+  getBom: (companyId: string, bomId: string) =>
+    invoke<import("@/types").BomWithLines>("get_bom", { companyId, bomId }),
+  deleteBom: (companyId: string, bomId: string) =>
+    invoke<void>("delete_bom", { companyId, bomId }),
+  updateBom: (companyId: string, bomId: string, input: import("@/types").BomInput) =>
+    invoke<import("@/types").BomWithLines>("update_bom", { companyId, bomId, input }),
+  produce: (companyId: string, input: import("@/types").ProduceInput) =>
+    invoke<import("@/types").ProductieOrder>("produce", { companyId, input }),
+  listOrders: (companyId: string) =>
+    invoke<import("@/types").ProductieOrder[]>("list_productie", { companyId }),
+  getOrder: (companyId: string, orderId: string) =>
+    invoke<import("@/types").ProductieOrder>("get_productie", { companyId, orderId }),
+};
+
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
@@ -1722,6 +1743,7 @@ export const api = {
   recurring,
   reports,
   assets,
+  productie,
   stockTransfer,
   stockValuation,
   payroll,

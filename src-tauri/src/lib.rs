@@ -565,6 +565,15 @@ pub fn run() {
             commands::stock_transfer::transfer_stock,
             commands::stock_transfer::list_stock_transfers,
             commands::stock_transfer::get_stock_transfer,
+            // producție / BOM — P2 Wave 5
+            commands::productie::create_bom,
+            commands::productie::list_bom,
+            commands::productie::get_bom,
+            commands::productie::delete_bom,
+            commands::productie::update_bom,
+            commands::productie::produce,
+            commands::productie::list_productie,
+            commands::productie::get_productie,
             // fixed assets — Phase 6b (SAF-T Assets)
             commands::assets::create_fixed_asset,
             commands::assets::list_fixed_assets,
