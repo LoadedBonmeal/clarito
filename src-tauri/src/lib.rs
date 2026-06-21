@@ -615,6 +615,9 @@ pub fn run() {
                     commands::payroll_config::reset_payroll_config_cmd,
                     commands::payroll::export_d112_xml,
                     commands::payroll::preview_d112_xml,
+                    // Simulator salariu — brut↔net (stateless, no company data, free read)
+                    commands::payroll::simulate_salary,
+                    commands::payroll::simulate_salary_from_net,
                     commands::gl::close_period,
                     commands::gl::list_period_locks,
                     commands::gl::is_period_locked,

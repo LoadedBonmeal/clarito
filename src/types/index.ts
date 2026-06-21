@@ -1440,6 +1440,38 @@ export interface PayrollResult {
   totalEmployerCost: string;
 }
 
+/** Salary simulator — options (all optional, defaults to H1 2026, 0 dependents). */
+export interface SalarySimOpts {
+  /** Number of dependents (0–4+) for the ANAF personal deduction table (art. 77 CF). */
+  dependents?: number;
+  /** Full-time min-wage beneficiary (art. III OUG 89/2025) — enables 300/200 lei non-taxable sum. */
+  beneficiarSumaNetaxabila?: boolean;
+  /** Month (1–12). Defaults to 6. */
+  month?: number;
+  /** Year. Defaults to 2026. */
+  year?: number;
+}
+
+/** Salary simulator result — full breakdown gross → net + employer cost. */
+export interface SalarySimResult {
+  gross: string;
+  cas: string;
+  cass: string;
+  nonTaxable: string;
+  deducerePersonala: string;
+  impozitBase: string;
+  impozit: string;
+  net: string;
+  cam: string;
+  totalEmployerCost: string;
+  /** Max deduction from ANAF table (before art. 77(2) gross ceiling). */
+  deducereTabel: string;
+  /** Deduction that actually entered the calculation. */
+  deducereEfectiva: string;
+  /** True if the non-taxable carve-out was applied. */
+  carveoutApplied: boolean;
+}
+
 /** Intrastat threshold monitor (per flow). */
 export interface IntrastatFlowStatus {
   ytdRon: string;

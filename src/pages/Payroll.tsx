@@ -242,6 +242,7 @@ export function PayrollPage() {
     { label: t("payroll.tabs.payslip"), count: null },
     { label: t("payroll.tabs.medicalLeaves"), count: leaves.length },
     { label: t("payroll.tabs.offices"), count: sedii.length + 1 },
+    { label: t("payroll.sim.tabLabel"), count: null },
   ];
 
   return (
@@ -589,6 +590,9 @@ export function PayrollPage() {
           </div>
         </div>
       </div>
+
+      {/* ── SIMULATOR SALARIU ────────────────────────────────────────────── */}
+      {tab === 4 && <SalarySimPanel />}
 
       {/* modale */}
       {modal && (
@@ -1241,5 +1245,241 @@ function D112Modal({
       </div>
     </div>,
     document.body,
+  );
+}
+
+// ─── Simulator salariu (tab 4) ─────────────────────────────────────────────────
+
+import type { SalarySimResult, SalarySimOpts } from "@/types";
+
+function SalarySimPanel() {
+  const { t } = useTranslation();
+  const now = new Date();
+  const [simMode, setSimMode] = useState<"gross" | "net">("gross");
+  const [simInput, setSimInput] = useState("");
+  const [simDependents, setSimDependents] = useState(0);
+  const [simBeneficiar, setSimBeneficiar] = useState(false);
+  const [simMonth, setSimMonth] = useState(now.getMonth() + 1);
+  const [simYear, setSimYear] = useState(now.getFullYear());
+  const [simResult, setSimResult] = useState<SalarySimResult | null>(null);
+  const [simError, setSimError] = useState<string | null>(null);
+  const [simLoading, setSimLoading] = useState(false);
+
+  const simOpts: SalarySimOpts = {
+    dependents: simDependents,
+    beneficiarSumaNetaxabila: simBeneficiar,
+    month: simMonth,
+    year: simYear,
+  };
+
+  const handleCalc = async () => {
+    const v = simInput.trim();
+    if (!v) { setSimError(t("payroll.sim.errorEmpty")); return; }
+    if (!/^[\d.,]+$/.test(v)) { setSimError(t("payroll.sim.errorInvalid")); return; }
+    const num = parseFloat(v.replace(",", "."));
+    if (isNaN(num)) { setSimError(t("payroll.sim.errorInvalid")); return; }
+    if (num < 0) { setSimError(t("payroll.sim.errorNegative")); return; }
+    setSimError(null);
+    setSimLoading(true);
+    try {
+      const r = simMode === "gross"
+        ? await api.payroll.simulateSalary(String(num), simOpts)
+        : await api.payroll.simulateSalaryFromNet(String(num), simOpts);
+      setSimResult(r);
+    } catch (e: unknown) {
+      setSimError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSimLoading(false);
+    }
+  };
+
+  const fmtAmt = (s: string) => {
+    const n = parseFloat(s);
+    if (isNaN(n)) return s;
+    return n.toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " RON";
+  };
+
+  const SIM_MONTHS = [
+    t("payroll.months.jan"), t("payroll.months.feb"), t("payroll.months.mar"),
+    t("payroll.months.apr"), t("payroll.months.may"), t("payroll.months.jun"),
+    t("payroll.months.jul"), t("payroll.months.aug"), t("payroll.months.sep"),
+    t("payroll.months.oct"), t("payroll.months.nov"), t("payroll.months.dec"),
+  ];
+
+  return (
+    <div className="panel show">
+      <div className="scr-card" style={{ maxWidth: 680 }}>
+        <div className="scr-toolbar">
+          <div>
+            <div className="tt">{t("payroll.sim.title")}</div>
+            <div style={{ fontSize: 12, color: "var(--txt-sub)", marginTop: 2 }}>{t("payroll.sim.subtitle")}</div>
+          </div>
+        </div>
+
+        {/* mode toggle */}
+        <div style={{ display: "flex", gap: 8, padding: "12px 16px 0" }}>
+          <button
+            className={`pill-btn${simMode === "gross" ? "" : " secondary"}`}
+            onClick={() => { setSimMode("gross"); setSimResult(null); }}
+          >{t("payroll.sim.modeGross")}</button>
+          <button
+            className={`pill-btn${simMode === "net" ? "" : " secondary"}`}
+            onClick={() => { setSimMode("net"); setSimResult(null); }}
+          >{t("payroll.sim.modeNet")}</button>
+        </div>
+
+        {/* inputs */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, padding: "12px 16px" }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: "block", marginBottom: 4 }}>
+              {simMode === "gross" ? t("payroll.sim.labelGross") : t("payroll.sim.labelNet")}
+            </label>
+            <input
+              className="form-input"
+              type="text"
+              inputMode="decimal"
+              placeholder="ex. 5000"
+              value={simInput}
+              onChange={(e) => { setSimInput(e.target.value); setSimResult(null); setSimError(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter") void handleCalc(); }}
+              style={{ width: "100%", boxSizing: "border-box" }}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: "block", marginBottom: 4 }}>
+              {t("payroll.sim.labelDependents")}
+            </label>
+            <select
+              className="form-input"
+              value={simDependents}
+              onChange={(e) => { setSimDependents(Number(e.target.value)); setSimResult(null); }}
+              style={{ width: "100%" }}
+            >
+              {[0, 1, 2, 3, 4].map((n) => (
+                <option key={n} value={n}>{n === 4 ? "≥4" : n}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: "block", marginBottom: 4 }}>
+              {t("payroll.sim.labelMonth")}
+            </label>
+            <select
+              className="form-input"
+              value={simMonth}
+              onChange={(e) => { setSimMonth(Number(e.target.value)); setSimResult(null); }}
+              style={{ width: "100%" }}
+            >
+              {SIM_MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, display: "block", marginBottom: 4 }}>
+              {t("payroll.sim.labelYear")}
+            </label>
+            <input
+              className="form-input"
+              type="number"
+              value={simYear}
+              onChange={(e) => { setSimYear(Number(e.target.value)); setSimResult(null); }}
+              style={{ width: "100%", boxSizing: "border-box" }}
+            />
+          </div>
+          <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <input
+              type="checkbox"
+              id="sim-beneficiar"
+              checked={simBeneficiar}
+              onChange={(e) => { setSimBeneficiar(e.target.checked); setSimResult(null); }}
+              style={{ marginTop: 3 }}
+            />
+            <label htmlFor="sim-beneficiar" style={{ fontSize: 13, cursor: "pointer" }}>
+              <b>{t("payroll.sim.labelBeneficiar")}</b>
+              <span style={{ color: "var(--txt-sub)", fontSize: 11, display: "block" }}>
+                {t("payroll.sim.labelBeneficiarHint")}
+              </span>
+            </label>
+          </div>
+        </div>
+
+        {simError && (
+          <div style={{ margin: "0 16px 8px", color: "var(--red)", fontSize: 13 }}>{simError}</div>
+        )}
+
+        <div style={{ padding: "0 16px 16px", display: "flex", gap: 8, alignItems: "center" }}>
+          <button className="btn-dark" onClick={() => void handleCalc()} disabled={simLoading}>
+            {simLoading ? "…" : t("payroll.sim.btnCalc")}
+          </button>
+          <span style={{ fontSize: 12, color: "var(--txt-sub)" }}>{t("payroll.sim.calcHint")}</span>
+        </div>
+
+        {simResult && (
+          <div style={{ borderTop: "1px solid var(--brd)", padding: "12px 16px 16px" }}>
+            <div style={{ fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--txt-sub)", marginBottom: 6 }}>
+              {t("payroll.sim.sectionEmployee")}
+            </div>
+            <table style={{ width: "100%", fontSize: 14, borderCollapse: "collapse" }}>
+              <tbody>
+                <SimRow label={simMode === "net" ? `${t("payroll.sim.labelGross")} (calculat)` : t("payroll.sim.labelGross")} value={fmtAmt(simResult.gross)} bold />
+                <SimRow label={t("payroll.sim.rowCas")} value={`− ${fmtAmt(simResult.cas)}`} />
+                <SimRow label={t("payroll.sim.rowCass")} value={`− ${fmtAmt(simResult.cass)}`} />
+                {parseFloat(simResult.nonTaxable) > 0 && (
+                  <SimRow label={t("payroll.sim.rowNonTaxable")} value={`− ${fmtAmt(simResult.nonTaxable)}`} note />
+                )}
+                {parseFloat(simResult.deducereEfectiva) > 0 && (
+                  <SimRow label={t("payroll.sim.rowDeducere")} value={`− ${fmtAmt(simResult.deducereEfectiva)}`} note />
+                )}
+                <SimRow label={t("payroll.sim.rowImpozitBase")} value={fmtAmt(simResult.impozitBase)} />
+                <SimRow label={t("payroll.sim.rowImpozit")} value={`− ${fmtAmt(simResult.impozit)}`} />
+                <SimRow label={t("payroll.sim.rowNet")} value={fmtAmt(simResult.net)} bold highlight />
+              </tbody>
+            </table>
+
+            <div style={{ fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--txt-sub)", margin: "14px 0 6px" }}>
+              {t("payroll.sim.sectionEmployer")}
+            </div>
+            <table style={{ width: "100%", fontSize: 14, borderCollapse: "collapse" }}>
+              <tbody>
+                <SimRow label={t("payroll.sim.labelGross")} value={fmtAmt(simResult.gross)} />
+                <SimRow label={t("payroll.sim.rowCam")} value={`+ ${fmtAmt(simResult.cam)}`} />
+                <SimRow label={t("payroll.sim.rowTotalCost")} value={fmtAmt(simResult.totalEmployerCost)} bold highlight />
+              </tbody>
+            </table>
+
+            <div style={{ marginTop: 12, fontSize: 11, color: "var(--txt-sub)", display: "flex", flexDirection: "column", gap: 3 }}>
+              {parseFloat(simResult.deducereEfectiva) > 0 && (
+                <span>ℹ {t("payroll.sim.noteDedApplied", { amount: simResult.deducereTabel, n: simDependents, persoane: t("payroll.sim.persoane", { count: simDependents }) })}</span>
+              )}
+              {parseFloat(simResult.deducereTabel) > 0 && parseFloat(simResult.deducereEfectiva) === 0 && (
+                <span>ℹ {t("payroll.sim.noteDeducereZero")}</span>
+              )}
+              {simResult.carveoutApplied && (
+                <span>ℹ {t("payroll.sim.noteCarveout")}</span>
+              )}
+              <span>ℹ {t("payroll.sim.noteNoCci")}</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SimRow({ label, value, bold, note, highlight }: { label: string; value: string; bold?: boolean; note?: boolean; highlight?: boolean }) {
+  return (
+    <tr style={{ borderBottom: "1px solid var(--brd)" }}>
+      <td style={{ padding: "5px 0", color: note ? "var(--txt-sub)" : undefined, fontStyle: note ? "italic" : undefined }}>
+        {label}
+      </td>
+      <td style={{
+        padding: "5px 0",
+        textAlign: "right",
+        fontWeight: bold ? 700 : undefined,
+        color: highlight ? "var(--accent)" : undefined,
+        fontVariantNumeric: "tabular-nums",
+      }}>
+        {value}
+      </td>
+    </tr>
   );
 }

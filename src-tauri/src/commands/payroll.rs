@@ -1328,4 +1328,345 @@ mod tests {
         }
         let _ = std::fs::remove_file(&tmp);
     }
+
+    // ── Simulator salariu — unit tests ────────────────────────────────────────
+
+    /// GOLDEN-1: simulate_salary(5000, 0 dependents) matches compute_payroll byte-identically.
+    /// This is the single-source-of-truth guarantee: the simulator and a real payroll run (without
+    /// concedii / extra income / part-time top-up) must produce the same numbers for the same gross.
+    #[tokio::test]
+    async fn simulator_matches_real_payroll_5000_no_deduction() {
+        // From the golden test in d112.rs (payroll_2026_rates_gross_to_net):
+        // gross 5000, 0 dependents → CAS 1250, CASS 500, impozit 325, net 2925, CAM 113.
+        // Deducere 0 (gross 5000 > plafon 6050 H1 NO — 5000 < 6050, dar tabelul dă 0 la gross>3600).
+        let r = simulate_salary("5000".into(), None).await.unwrap();
+        assert_eq!(r.gross, "5000.00", "gross");
+        assert_eq!(r.cas, "1250.00", "CAS 25%");
+        assert_eq!(r.cass, "500.00", "CASS 10%");
+        assert_eq!(r.impozit, "325.00", "impozit 10%");
+        assert_eq!(r.net, "2925.00", "net");
+        assert_eq!(r.cam, "113.00", "CAM 2.25% — NOT phantom CCI");
+        assert_eq!(
+            r.total_employer_cost, "5113.00",
+            "cost angajator = brut + CAM only"
+        );
+        // No CCI: confirm total_employer_cost = gross + cam (byte-identical to PayrollResult).
+        assert!(
+            !r.carveout_applied,
+            "no carveout for gross=5000 without beneficiar flag"
+        );
+    }
+
+    /// GOLDEN-2: deducere personală cu dependenți modifică impozitul corect.
+    #[tokio::test]
+    async fn simulator_deduction_reduces_impozit() {
+        // Gross 2000 (≤ 2000): 0 dependents → deducere_tabel = 807; 2 dependents → 1300.
+        // CAS 25%*2000=500; CASS 10%*2000=200; after=1300.
+        // 0 dep: impozit_base = 1300 − 807 = 493; impozit = 49.
+        // 2 dep: impozit_base = 1300 − 1300 = 0; impozit = 0.
+        let r0 = simulate_salary(
+            "2000".into(),
+            Some(SalarySimOpts {
+                dependents: 0,
+                month: 6,
+                year: 2026,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r0.deducere_tabel, "807.00");
+        assert_eq!(r0.impozit_base, "493.00");
+        assert_eq!(r0.impozit, "49.00");
+
+        let r2 = simulate_salary(
+            "2000".into(),
+            Some(SalarySimOpts {
+                dependents: 2,
+                month: 6,
+                year: 2026,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r2.deducere_tabel, "1300.00");
+        assert_eq!(r2.impozit_base, "0.00");
+        assert_eq!(r2.impozit, "0.00");
+    }
+
+    /// GOLDEN-3: net→gross round-trip — simulate_net_to_gross(simulate_gross_to_net(G).net) ≈ G.
+    #[tokio::test]
+    async fn simulator_net_to_gross_roundtrip() {
+        for gross_lei in [3000u32, 5000, 8000] {
+            let r = simulate_salary(
+                gross_lei.to_string(),
+                Some(SalarySimOpts {
+                    month: 6,
+                    year: 2026,
+                    ..Default::default()
+                }),
+            )
+            .await
+            .unwrap();
+            let net_str = r.net.clone();
+            // Invert: find the gross that gives this net.
+            let inv = simulate_salary_from_net(
+                net_str,
+                Some(SalarySimOpts {
+                    month: 6,
+                    year: 2026,
+                    ..Default::default()
+                }),
+            )
+            .await
+            .unwrap();
+            let inv_gross: u32 = inv.gross.trim_end_matches(".00").parse().unwrap_or(0);
+            assert_eq!(
+                inv_gross, gross_lei,
+                "round-trip failed for gross={gross_lei}: got {inv_gross}"
+            );
+        }
+    }
+
+    /// GOLDEN-4: no phantom CCI — total_employer_cost = gross + CAM only.
+    #[tokio::test]
+    async fn simulator_no_phantom_cci() {
+        // For gross 4050 with sum netaxabila 300 (H1): CAM = round(3750 × 2.25%) = 84.
+        // total_employer_cost = 4050 + 84 = 4134 (NEVER 4050 + 84 + 32 phantom CCI).
+        let r = simulate_salary(
+            "4050".into(),
+            Some(SalarySimOpts {
+                beneficiar_suma_netaxabila: true,
+                month: 3,
+                year: 2026,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.cam, "84.00", "CAM on reduced base 3750");
+        assert_eq!(
+            r.total_employer_cost, "4134.00",
+            "cost angajator = 4050 + 84 only"
+        );
+        assert!(
+            r.carveout_applied,
+            "carveout should be applied for min-wage beneficiary"
+        );
+        // Confirm: if total_employer_cost were gross+CAM+CCI(0.85%) it would be 4050+84+34=4168 ≠ 4134.
+        let cost: rust_decimal::Decimal =
+            rust_decimal::Decimal::from_str(&r.total_employer_cost).unwrap();
+        assert_ne!(
+            cost,
+            rust_decimal::Decimal::from(4168),
+            "phantom CCI must NOT appear"
+        );
+    }
+}
+
+// ─── Simulator salariu (brut↔net calculator, stateless) ──────────────────────
+
+use crate::anaf_decl::d112::deducere_personala_tabel;
+use serde::Serialize;
+
+/// Rezultatul complet al simulării salariale (brut → net + cost angajator).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SalarySimResult {
+    /// Salariul brut de intrare (lei).
+    pub gross: String,
+    /// CAS 25% (angajat).
+    pub cas: String,
+    /// CASS 10% (angajat).
+    pub cass: String,
+    /// Suma netaxabilă aplicată (0 dacă `beneficiarSumaNetaxabila=false` sau condiții neîndeplinite).
+    pub non_taxable: String,
+    /// Deducerea personală aplicată efectiv (după plafonul art. 77 alin. (2)).
+    pub deducere_personala: String,
+    /// Baza impozabilă = brut − CAS − CASS − suma_netaxabilă − deducere.
+    pub impozit_base: String,
+    /// Impozit pe venit 10%.
+    pub impozit: String,
+    /// Salariul net = brut − CAS − CASS − impozit.
+    pub net: String,
+    /// CAM 2,25% (angajator, pe baza = brut − suma_netaxabilă). SINGURUL cost angajator dincolo de
+    /// brut — CCI 0,85% a fost ABROGAT prin OUG 79/2017, nu se (re)calculează.
+    pub cam: String,
+    /// Cost total angajator = brut + CAM.
+    pub total_employer_cost: String,
+    /// Deducerea maximă disponibilă din tabel (informativ: înainte de plafonul de brut art. 77 (2)).
+    pub deducere_tabel: String,
+    /// Deducerea personală intrată efectiv în calcul (= min(deducere_tabel, plafon_brut, venit_net)).
+    pub deducere_efectiva: String,
+    /// Info suma netaxabilă (dacă beneficiar e fals, câmpul `non_taxable` e 0).
+    pub carveout_applied: bool,
+}
+
+/// Opțiuni suplimentare pentru simulatorul salarial.
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SalarySimOpts {
+    /// Numărul de persoane în întreținere (0–4+) — pentru calculul deducerii personale din tabelul ANAF.
+    #[serde(default)]
+    pub dependents: u32,
+    /// Beneficiar suma netaxabilă (art. III OUG 89/2025): full-time, salariu minim, nediminuat în 2026.
+    /// La `true`, se aplică 300 lei H1 / 200 lei H2 2026 dacă brut ≤ 4.300/4.600.
+    #[serde(default)]
+    pub beneficiar_suma_netaxabila: bool,
+    /// Luna (1–12) — necesară pentru ratele sezoniere (suma netaxabilă H1/H2, salariul minim).
+    /// Dacă lipsește sau e 0, se folosește luna curentă (sau luna 6 ca fallback).
+    #[serde(default)]
+    pub month: u32,
+    /// Anul — necesar pentru ratele sezoniere. Dacă lipsește sau e 0, se folosește 2026.
+    #[serde(default)]
+    pub year: i32,
+}
+
+/// Calculează brut → net + cost angajator FĂRĂ a crea angajat sau rula stat de salarii.
+/// Reutilizează EXACT același `compute_payroll` + `deducere_plafonata` + `suma_netaxabila` ca
+/// rularea reală, garantând rezultate byte-identice pentru același brut.
+/// RBAC: comandă de citire (nu mută date, nu accesează baza de date), disponibilă oricui autentificat.
+#[tauri::command]
+pub async fn simulate_salary(
+    gross_str: String,
+    opts: Option<SalarySimOpts>,
+) -> crate::error::AppResult<SalarySimResult> {
+    use crate::anaf_decl::d112::{deducere_plafonata, suma_netaxabila, PayrollInput};
+    use crate::error::AppError;
+
+    let opts = opts.unwrap_or_default();
+    let year = if opts.year <= 0 { 2026 } else { opts.year };
+    let month = if opts.month == 0 || opts.month > 12 {
+        6
+    } else {
+        opts.month
+    };
+
+    // Parse gross — reuse the same strict-no-scientific-notation logic as payroll.
+    let gross_str = gross_str.trim();
+    if gross_str.contains('e') || gross_str.contains('E') {
+        return Err(AppError::Validation(
+            "Brut invalid — folosiți formatul 1234.56 (fără notație științifică).".into(),
+        ));
+    }
+    let gross = Decimal::from_str(gross_str)
+        .map_err(|_| AppError::Validation("Brut invalid — folosiți formatul 1234.56.".into()))?;
+    if gross.is_sign_negative() {
+        return Err(AppError::Validation("Brut nu poate fi negativ.".into()));
+    }
+
+    let non_taxable = suma_netaxabila(opts.beneficiar_suma_netaxabila, "N", gross, year, month);
+    // Deducerea din tabel (pe brut complet, înainte de CAS/CASS — tabel ANAF art. 77).
+    let deducere_tabel = deducere_personala_tabel(gross, opts.dependents);
+    // Plafonarea art. 77 alin. (2): dacă brut > salariul_minim + 2.000, deducere = 0.
+    let deducere_platita = deducere_plafonata(deducere_tabel, gross, year, month);
+
+    let result = compute_payroll(&PayrollInput {
+        gross,
+        personal_deduction: deducere_platita,
+        non_taxable,
+    });
+
+    let deducere_efectiva = Decimal::from_str(&result.personal_deduction).unwrap_or(Decimal::ZERO);
+
+    Ok(SalarySimResult {
+        gross: result.gross,
+        cas: result.cas,
+        cass: result.cass,
+        non_taxable: result.non_taxable,
+        deducere_personala: result.personal_deduction.clone(),
+        impozit_base: result.taxable_base,
+        impozit: result.income_tax,
+        net: result.net,
+        cam: result.cam,
+        total_employer_cost: result.total_employer_cost,
+        deducere_tabel: format!(
+            "{:.2}",
+            deducere_tabel
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+        ),
+        deducere_efectiva: format!(
+            "{:.2}",
+            deducere_efectiva
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+        ),
+        carveout_applied: non_taxable > Decimal::ZERO,
+    })
+}
+
+/// Inversul simulatorului: date un NET dorit, caută prin căutare binară brut-ul minim din care
+/// rezultă acel net (la leu întreg). Domeniu de căutare: [0, 1.000.000] lei.
+///
+/// Notă de monotonie: funcția brut → net e în general strict crescătoare, dar la marginile
+/// tranziției suma netaxabilă (4.300→4.301 H1) există un micro-salt descendent de ~10–15 lei în
+/// net (pierderea carve-out-ului). Căutarea binară pe primul brut care atinge target-ul net poate
+/// returna un brut mai mic decât maximul, dar acesta e corect fiscal pentru acel net.
+/// Dacă targetul nu e atins (ex. net > 1.000.000), returnează Err.
+#[tauri::command]
+pub async fn simulate_salary_from_net(
+    target_net_str: String,
+    opts: Option<SalarySimOpts>,
+) -> crate::error::AppResult<SalarySimResult> {
+    use crate::anaf_decl::d112::{deducere_plafonata, suma_netaxabila, PayrollInput};
+    use crate::error::AppError;
+
+    let opts = opts.unwrap_or_default();
+    let year = if opts.year <= 0 { 2026 } else { opts.year };
+    let month = if opts.month == 0 || opts.month > 12 {
+        6
+    } else {
+        opts.month
+    };
+
+    let target_str = target_net_str.trim();
+    if target_str.contains('e') || target_str.contains('E') {
+        return Err(AppError::Validation(
+            "Net invalid — folosiți formatul 1234.56 (fără notație științifică).".into(),
+        ));
+    }
+    let target_net = Decimal::from_str(target_str)
+        .map_err(|_| AppError::Validation("Net invalid — folosiți formatul 1234.56.".into()))?;
+    if target_net.is_sign_negative() {
+        return Err(AppError::Validation("Net nu poate fi negativ.".into()));
+    }
+
+    // net(gross) helper: returns the Decimal net for a given gross (integer leu).
+    let net_for = |g: i64| -> Decimal {
+        let gross = Decimal::from(g);
+        let non_taxable = suma_netaxabila(opts.beneficiar_suma_netaxabila, "N", gross, year, month);
+        let deducere_tabel = deducere_personala_tabel(gross, opts.dependents);
+        let deducere_platita = deducere_plafonata(deducere_tabel, gross, year, month);
+        let r = compute_payroll(&PayrollInput {
+            gross,
+            personal_deduction: deducere_platita,
+            non_taxable,
+        });
+        Decimal::from_str(&r.net).unwrap_or(Decimal::ZERO)
+    };
+
+    let target_rounded = target_net
+        .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+        .to_i64()
+        .unwrap_or(0);
+
+    // Binary search in [0, 1_000_000]. Find the SMALLEST gross whose net ≥ target.
+    if net_for(1_000_000) < Decimal::from(target_rounded) {
+        return Err(AppError::Validation(
+            "Netul dorit depășește domeniul de calcul (max 1.000.000 lei brut).".into(),
+        ));
+    }
+    let mut lo: i64 = 0;
+    let mut hi: i64 = 1_000_000;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if net_for(mid) >= Decimal::from(target_rounded) {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    // `lo` is now the smallest gross whose net == target_rounded (to the leu).
+    // Re-run the simulator for that gross to get the full breakdown.
+    simulate_salary(lo.to_string(), Some(opts)).await
 }

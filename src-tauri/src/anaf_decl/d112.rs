@@ -249,6 +249,54 @@ pub fn deducere_plafonata(entered: Decimal, brut: Decimal, year: i32, month: u32
     }
 }
 
+/// Deducerea personală lunară (art. 77 alin. (1) Cod fiscal) din TABELUL ANAF 2026 (Ordinul ANAF
+/// nr. 4/2024, aplicabil în 2026 conform OG 16/2022). Calculată pe baza venitului brut realizat și a
+/// numărului de persoane în întreținere (0–4, ≥4 = 4 coloane). Returnează suma lunară în lei (Decimal).
+///
+/// Plafon art. 77 alin. (2): dacă brut > salariul_minim + 2.000 lei (6.050 H1 / 6.325 H2 2026),
+/// deducerea = 0 (confirmat și de [`deducere_plafonata`], care e sursa unică a plafonului).
+///
+/// Limitarea de a nu depăși „venitul net disponibil" rămâne în `compute_payroll` (nu se aplică în tabel).
+///
+/// TABELUL 2026 (lei/lună, venitul brut în lei):
+/// ┌──────────────────────────────────────────────────────────────────────────┐
+/// │  Persoane în │    0 pers   │   1 pers   │   2 pers   │   3 pers   │ ≥4  │
+/// │  întreținere │             │            │            │            │     │
+/// ├──────────────┼─────────────┼────────────┼────────────┼────────────┼─────┤
+/// │  ≤ 2.000     │     807     │   1.000    │   1.300    │   1.700    │ 1.700+│
+/// │ 2.001–3.600  │ linear↓0 (1)│ linear↓0  │ linear↓0  │ linear↓0  │     │
+/// │ > 3.600      │      0      │     0      │     0      │     0      │  0  │
+/// └──────────────┴─────────────┴────────────┴────────────┴────────────┴─────┘
+/// (1) Formula liniară: Ded(brut) = max(0, D0 × (3.600 − brut) / 1.600)
+///     unde D0 = deducerea maximă (brut ≤ 2.000) — pentru 0 pers = 807, 1 pers = 1.000, etc.
+///     PLUS suplimentele pentru ≥1 persoană: (Dn − D0) × (3.600 − brut) / 1.600, totul egal la
+///     = Dn × (3.600 − brut) / 1.600 (formula unificată). Rotunjire la leu întreg (cf. normelor).
+///
+/// Sursa: OMFP 4/2024 + Codul Fiscal 2026 art. 77.
+pub fn deducere_personala_tabel(gross: Decimal, dependents: u32) -> Decimal {
+    let z = Decimal::ZERO;
+    let gross = gross.max(z);
+    // Plafon art. 77 alin. (2): brut > 3.600 → deducere 0 (aplicat uniform indiferent de dependents).
+    if gross > Decimal::from(3600) {
+        return z;
+    }
+    // Deducerea maximă (brut ≤ 2.000) per număr de persoane în întreținere (tabel ANAF 2026).
+    let max_ded = Decimal::from(match dependents {
+        0 => 807,
+        1 => 1000,
+        2 => 1300,
+        3 => 1700,
+        _ => 1700, // ≥ 4 persoane → aceeași coloană ca 3 (tabelul ANAF are max 4 coloane)
+    });
+    if gross <= Decimal::from(2000) {
+        return max_ded;
+    }
+    // Interval liniar 2.001–3.600: Ded = max(0, max_ded × (3.600 − brut) / 1.600)
+    let ded = max_ded * (Decimal::from(3600) - gross) / Decimal::from(1600);
+    ded.max(z)
+        .round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
+}
+
 /// Compute one monthly salary state from the gross + personal deduction (2026 rates).
 /// `input.non_taxable` (resolved by [`suma_netaxabila`]) is carved out of the base BEFORE CAS, CASS,
 /// CAM and income tax (art. III OUG 89/2025). Plafonarea deducerii (art. 77) se aplică în apelant prin

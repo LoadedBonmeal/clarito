@@ -1760,6 +1760,18 @@ export const payroll = {
   /** Construiește XML-ul D112 (`:v7`) fără a-l scrie — pentru vizualizatorul XML (re-validare DUK separat). */
   previewD112Xml: (companyId: string, year: number, month: number, caen: string, isRectificative = false) =>
     invoke<string>("preview_d112_xml", { companyId, year, month, caen, isRectificative }),
+  /**
+   * Simulator salariu: brut → net + cost angajator (fără angajat, fără stat de salarii).
+   * Refolosește EXACT același motor de calcul ca `run_payroll` — rezultate byte-identice.
+   * CCI 0,85% ABROGAT (OUG 79/2017) — totalEmployerCost = brut + CAM 2,25% only.
+   */
+  simulateSalary: (grossStr: string, opts?: import("@/types").SalarySimOpts) =>
+    invoke<import("@/types").SalarySimResult>("simulate_salary", { grossStr, opts: opts ?? null }),
+  /**
+   * Inversul simulatorului: dintr-un net dorit, determină brut-ul minim corespunzător (căutare binară).
+   */
+  simulateSalaryFromNet: (targetNetStr: string, opts?: import("@/types").SalarySimOpts) =>
+    invoke<import("@/types").SalarySimResult>("simulate_salary_from_net", { targetNetStr, opts: opts ?? null }),
 };
 
 export const vatRates = {
