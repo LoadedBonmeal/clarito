@@ -63,7 +63,23 @@
       "backToList": "Înapoi la listă",
       "viewDetail": "Detalii ordin",
 
-      "materialCostNote": "Costul capitalizat în 345 include NUMAI costul materialelor (materii prime + materiale consumabile). Manopera directă (641/421) și regia (681) sunt cheltuieli ale perioadei, recunoscute separat — per OMFP 1802/2014 pct. 8."
+      "fieldLabourCost": "Manoperă directă (lei)",
+      "fieldOverheadCost": "Regie (lei)",
+      "advancedAbsorption": "Absorbție regie avansată (IAS 2)",
+      "fieldOverheadFixed": "Regie fixă (lei)",
+      "fieldOverheadVariable": "Regie variabilă (lei)",
+      "fieldNormalCapacity": "Capacitate normală (buc)",
+      "unabsorbedPreview": "Regie fixă neabsorbită (cheltuiala perioadei, NU în 345): {{amount}} lei",
+
+      "colLabourCost": "Manoperă",
+      "colOverheadAbsorbed": "Regie absorbită",
+      "colOverheadUnabsorbed": "Regie neabsorbită",
+      "colFullCost": "Cost complet total",
+      "colFullUnitCost": "Cost unitar complet",
+      "unabsorbedIsExpense": "cheltuiala perioadei, NU în 345",
+
+      "materialCostNote": "Costul capitalizat în 345 include NUMAI costul materialelor (materii prime + materiale consumabile). Manopera directă (641/421) și regia (681) sunt cheltuieli ale perioadei, recunoscute separat — per OMFP 1802/2014 pct. 8.",
+      "fullCostNote": "Costul complet capitalizat în 345 = materiale + manoperă directă + regie absorbită (IAS 2 / OMFP 1802/2014 pct. 8). Regia fixă neabsorbită (la sub-capacitate) rămâne cheltuiala perioadei. Numai SUMA D345=C711 se schimbă — nu se adaugă linii suplimentare D345=C641."
     },
 
     "print": {

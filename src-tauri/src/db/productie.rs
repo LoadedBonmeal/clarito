@@ -1,4 +1,4 @@
-//! Producție / BOM — OMFP 1802/2014 pct. 8 (cost de producție = materiale-only MVP).
+//! Producție / BOM — OMFP 1802/2014 pct. 8, IAS 2 (cost complet: materiale + manoperă + regie).
 //!
 //! ## Monografie producție (standard RO)
 //!
@@ -11,21 +11,37 @@
 //!   C 302 (Materiale consumabile)                 = valoare consum
 //!
 //! Obținere produse finite (345→711):
-//!   D 345 (Produse finite)                = cost producție
-//!   C 711 (Variația stocurilor)            = cost producție
+//!   D 345 (Produse finite)                = cost COMPLET de producție
+//!   C 711 (Variația stocurilor)            = cost COMPLET de producție
 //!
 //! Aceste note sunt generate automat de `record_movement` (post_stock_movement din gl.rs).
 //! Producția NU este GL-neutră (spre deosebire de transfer) — doc_type='PRODUCTION' nu
 //! setează is_transfer=true, deci GL-ul se postează normal.
 //!
-//! ## Cost capitalizat (materials-only MVP)
+//! ## Cost complet capitalizat (OMFP 1802/2014 pct. 8 + IAS 2)
 //!
-//! Costul unitar al produsului finit = Σ(qty_comp × cost_FIFO/LIFO/CMP) / qty_produsă.
-//! Manopera directă (641/421) și regia (681, costul fix/variabil) NU sunt adăugate la costul
-//! 345 în această versiune — rămân cheltuieli ale perioadei recunoscute separat.
-//! Per OMFP 1802/2014 pct. 8 costul complet ar include manoperă + regie alocată pe capacitatea
-//! normală (cu regie fixă neabsorbită → cheltuiala perioadei conform IAS 2 / pct. 8 al. (3)).
-//! Alocarea regiei este un follow-up planificat.
+//! full_cost = materials_cost + labour_cost + overhead_absorbed
+//!
+//! ### Absorbție regie (IAS 2 / pct. 8 al. 2-3):
+//!
+//! - Regie variabilă: ÎNTOTDEAUNA absorbită integral.
+//! - Regie fixă: alocată pe capacitate normală:
+//!   - activity_ratio = min(1, output_qty / normal_capacity_qty)
+//!   - fixed_absorbed = overhead_fixed * activity_ratio
+//!   - fixed_unabsorbed = overhead_fixed * (1 - activity_ratio) — cheltuiala perioadei, NU în 345
+//! - overhead_absorbed = overhead_variable + fixed_absorbed
+//! - Dacă utilizatorul introduce o singură valoare regie (fără split fix/variabil sau
+//!   fără normal_capacity_qty), regia este tratată ca integral absorbabilă.
+//! - Cap activity_ratio la 1 (nu supraabsorbție când output > capacitate normală).
+//!
+//! ### Modificare GL față de versiunea materials-only:
+//!   NUMAI SUMA din linia D345=C711 se schimbă (de la materials_cost la full_cost).
+//!   NU se adaugă linii D345=C641 sau D345=C6xx — aceea ar dubla cheltuiala.
+//!   Consumurile (D601/602=C301/302) rămân la costul materialelor.
+//!   Manopera (641/421) și regia (605/681/...) au fost deja cheltuite prin payroll / depreciere
+//!   curente; creditul 711 la full_cost le compensează în măsura capitalizării în stoc.
+//!
+//! ### Costul stocului produs finit = full_cost → COGS la vânzare ulterioară = full_cost.
 //!
 //! ## Atomicitate
 //!
@@ -103,7 +119,7 @@ pub struct BomLineInput {
     pub line_no: i64,
 }
 
-/// Un ordin de producție finalizat.
+/// Un ordin de producție finalizat — include componentele costului complet.
 #[derive(Debug, Clone, Serialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductieOrder {
@@ -116,12 +132,22 @@ pub struct ProductieOrder {
     pub production_date: String,
     pub total_material_cost: String,
     pub unit_cost: String,
+    // Full-cost fields (added in migration 0078):
+    pub labour_cost: String,
+    pub overhead_cost: String,
+    pub overhead_fixed: Option<String>,
+    pub overhead_variable: Option<String>,
+    pub normal_capacity_qty: Option<String>,
+    pub overhead_absorbed: String,
+    pub overhead_unabsorbed: String,
+    pub full_cost: String,
+    pub full_unit_cost: String,
     pub status: String,
     pub notes: Option<String>,
     pub created_at: i64,
 }
 
-/// Input pentru lansarea producției.
+/// Input pentru lansarea producției — include costurile de manoperă și regie.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProduceInput {
@@ -130,12 +156,85 @@ pub struct ProduceInput {
     pub qty_produced: String,
     pub production_date: String,
     pub notes: Option<String>,
+    /// Manoperă directă totală pentru acest ordin (641/421). Default 0.
+    #[serde(default)]
+    pub labour_cost: Option<String>,
+    /// Regie totală (dacă nu se specifică split fix/variabil). Default 0.
+    #[serde(default)]
+    pub overhead_cost: Option<String>,
+    /// Componenta FIXĂ a regiei (opțional, pentru absorbție IAS 2).
+    #[serde(default)]
+    pub overhead_fixed: Option<String>,
+    /// Componenta VARIABILĂ a regiei (opțional).
+    #[serde(default)]
+    pub overhead_variable: Option<String>,
+    /// Capacitate normală în unități (opțional, necesar pentru absorbție regie fixă IAS 2).
+    #[serde(default)]
+    pub normal_capacity_qty: Option<String>,
+}
+
+// ─── Absorption logic (IAS 2 / pct. 8 al. 2-3) ───────────────────────────────
+
+/// Rezultatul calculului de absorbție a regiei.
+#[derive(Debug, Clone)]
+pub struct AbsorptionResult {
+    /// Regia capitalizată efectiv în costul 345.
+    pub overhead_absorbed: Decimal,
+    /// Regia fixă neabsorbită — cheltuiala perioadei (NU în 345).
+    pub overhead_unabsorbed: Decimal,
+}
+
+/// Calculează regia absorbită conform IAS 2 / OMFP 1802/2014 pct. 8 al. 2-3.
+///
+/// Cazuri:
+///   1. Dacă se furnizează overhead_fixed + normal_capacity_qty: absorbție parțială conform IAS 2.
+///   2. Dacă se furnizează overhead_variable + overhead_fixed (fără normal_capacity_qty): treat fixed ca variabilă.
+///   3. Altfel (o singură valoare overhead_cost fără split): complet absorbită.
+///
+/// `qty_produced` — cantitatea efectiv produsă în acest ordin.
+pub fn compute_absorption(
+    overhead_cost: Decimal,
+    overhead_fixed: Option<Decimal>,
+    overhead_variable: Option<Decimal>,
+    normal_capacity_qty: Option<Decimal>,
+    qty_produced: Decimal,
+) -> AbsorptionResult {
+    // Dacă avem split fix/variabil ȘI capacitate normală → absorbție IAS 2
+    if let (Some(fixed), Some(normal_cap)) = (overhead_fixed, normal_capacity_qty) {
+        if normal_cap > Decimal::ZERO {
+            let variable = overhead_variable.unwrap_or(Decimal::ZERO);
+            // activity_ratio = min(1, qty_produced / normal_cap)
+            let ratio = (qty_produced / normal_cap).min(Decimal::ONE);
+            let fixed_absorbed = round2(fixed * ratio);
+            let fixed_unabsorbed = round2(fixed - fixed_absorbed);
+            let absorbed = round2(variable + fixed_absorbed);
+            return AbsorptionResult {
+                overhead_absorbed: absorbed,
+                overhead_unabsorbed: fixed_unabsorbed,
+            };
+        }
+    }
+    // Fallback: tot overhead_cost este absorbit (variabilă pură sau nicio capacitate normală).
+    // Dacă s-a introdus split dar fără normal_capacity, sumăm componentele.
+    let total = if overhead_fixed.is_some() || overhead_variable.is_some() {
+        round2(overhead_fixed.unwrap_or(Decimal::ZERO) + overhead_variable.unwrap_or(Decimal::ZERO))
+    } else {
+        overhead_cost
+    };
+    AbsorptionResult {
+        overhead_absorbed: total,
+        overhead_unabsorbed: Decimal::ZERO,
+    }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 fn dec(s: &str) -> Decimal {
     Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO)
+}
+
+fn opt_dec(s: &Option<String>) -> Option<Decimal> {
+    s.as_deref().map(dec)
 }
 
 /// Cantitatea disponibilă (run_qty a ultimei mișcări cronologice) pentru un produs în gestiune.
@@ -511,7 +610,8 @@ pub async fn update_bom(
 ///   - BOM aparține companiei, gestiunea aparține companiei, qty_produced > 0
 ///   - Verifică stoc suficient pentru TOATE componentele ÎNAINTE de a consuma oricare
 ///   - Consumă componentele (OUT, doc_type='PRODUCTION') → GL auto: D 601/602 = C 301/302
-///   - Produce produsul finit (IN la cost material) → GL auto: D 345 = C 711
+///   - Produce produsul finit (IN la full_cost) → GL auto: D 345 = C 711 (la full_cost)
+///   - full_cost = materials_cost + labour_cost + overhead_absorbed (IAS 2 absorption)
 ///   - Dacă oricare pas eșuează: rollback_production_movements (DELETE ledger rows + GL STOCK)
 ///   - Inserează productie_orders și returnează înregistrarea
 pub async fn produce(
@@ -527,6 +627,44 @@ pub async fn produce(
         return Err(AppError::Validation(
             "Cantitatea produsă trebuie să fie > 0.".into(),
         ));
+    }
+
+    // Parsăm costurile suplimentare (default 0 dacă lipsesc sau invalid)
+    let labour_cost = input
+        .labour_cost
+        .as_deref()
+        .map(|s| Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO))
+        .unwrap_or(Decimal::ZERO);
+    let overhead_cost = input
+        .overhead_cost
+        .as_deref()
+        .map(|s| Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO))
+        .unwrap_or(Decimal::ZERO);
+    let overhead_fixed = opt_dec(&input.overhead_fixed);
+    let overhead_variable = opt_dec(&input.overhead_variable);
+    let normal_capacity_qty = opt_dec(&input.normal_capacity_qty);
+
+    if labour_cost.is_sign_negative() {
+        return Err(AppError::Validation(
+            "Manopera nu poate fi negativă.".into(),
+        ));
+    }
+    if overhead_cost.is_sign_negative() {
+        return Err(AppError::Validation("Regia nu poate fi negativă.".into()));
+    }
+    if let Some(of) = overhead_fixed {
+        if of.is_sign_negative() {
+            return Err(AppError::Validation(
+                "Regia fixă nu poate fi negativă.".into(),
+            ));
+        }
+    }
+    if let Some(ov) = overhead_variable {
+        if ov.is_sign_negative() {
+            return Err(AppError::Validation(
+                "Regia variabilă nu poate fi negativă.".into(),
+            ));
+        }
     }
 
     // ── Fetch BOM (cu guard multi-tenant) ────────────────────────────────────
@@ -555,14 +693,14 @@ pub async fn produce(
 
     let output_qty = dec(&bom.output_qty);
     if output_qty <= Decimal::ZERO {
-        return Err(AppError::Validation("output_qty BOM invalid (≤ 0).".into()));
+        return Err(AppError::Validation("output_qty BOM invalid (<=0).".into()));
     }
     let scale = qty_produced / output_qty;
 
     // ── Verificare stoc suficient pentru TOATE componentele (pre-consume) ────
     // Agregăm necesarul per COMPONENT DISTINCT (un component poate apărea pe mai multe linii BOM).
-    // Verificarea per-linie ar lăsa o rețetă 2+3 cu stoc 4 să treacă (2≤4 ȘI 3≤4) și apoi să ducă
-    // gestiunea la −1 — record_movement(Dir::Out) NU respinge stocul negativ, doar îl semnalează,
+    // Verificarea per-linie ar lăsa o rețetă 2+3 cu stoc 4 să treacă (2<=4 SI 3<=4) și apoi să ducă
+    // gestiunea la -1 — record_movement(Dir::Out) NU respinge stocul negativ, doar îl semnalează,
     // deci garanția all-or-nothing s-ar rupe (OMFP 1802/2014 interzice stocul negativ). Sumăm
     // cantitățile rotunjite per linie (identic cu felul în care se acumulează OUT-urile).
     let mut needed_per_component: std::collections::BTreeMap<String, Decimal> =
@@ -652,24 +790,51 @@ pub async fn produce(
         }
     };
 
-    // ── Producem produsul finit (IN la costul materialelor) ──────────────────
-    //
-    // unit_cost = total_material_cost / qty_produced (rotunjit la 2 zecimale)
-    // Aceasta capitalizează NUMAI costul materialelor în 345. Manopera directă
-    // (641/421) și regia (681) rămân cheltuieli ale perioadei — follow-up planificat.
+    // ── Calculul absorbției regiei (IAS 2) ────────────────────────────────────
 
-    let unit_cost = if qty_produced.is_zero() {
+    let absorption = compute_absorption(
+        overhead_cost,
+        overhead_fixed,
+        overhead_variable,
+        normal_capacity_qty,
+        qty_produced,
+    );
+
+    // ── Costul complet capitalizat în 345 ─────────────────────────────────────
+    //
+    // full_cost = materiale + manoperă + regie_absorbită
+    // NUMAI această sumă merge în D345=C711. NU se adaugă linii separate D345=C641/C6xx.
+    // Regia fixă neabsorbită (overhead_unabsorbed) NU este capitalizată — rămâne cheltuiala
+    // perioadei prin simplul fapt că nu o adăugăm la 345 (class 6 deja a absorbit-o la postarea
+    // payroll / depreciere).
+
+    let full_cost = round2(total_material_cost + labour_cost + absorption.overhead_absorbed);
+    let full_unit_cost = if qty_produced.is_zero() {
+        Decimal::ZERO
+    } else {
+        round2(full_cost / qty_produced)
+    };
+
+    // unit_cost (materials-only, backward compat) — folosit și în bonul de predare print
+    let unit_cost_mat = if qty_produced.is_zero() {
         Decimal::ZERO
     } else {
         round2(total_material_cost / qty_produced)
     };
+
+    // ── Producem produsul finit (IN la full_cost) ──────────────────────────────
+    //
+    // Stocul produsului finit (345) se înregistrează la full_cost per unitate.
+    // Când produsul va fi vândut ulterior, COGS (D711=C345) va fi la full_cost.
+    // Linia GL generată automat de record_movement/post_stock_movement:
+    //   D 345 = C 711 = full_cost   ← NUMAI SUMA s-a schimbat față de materials-only.
 
     let in_input = StockMovementInput {
         company_id: company_id.to_string(),
         product_id: bom.product_id.clone(),
         entry_date: input.production_date.clone(),
         qty: format!("{:.6}", qty_produced),
-        unit_cost: Some(format!("{:.2}", unit_cost)),
+        unit_cost: Some(format!("{:.2}", full_unit_cost)),
         doc_type: Some("PRODUCTION".to_string()),
         doc_ref: Some(order_id.clone()),
         gestiune_id: Some(input.gestiune_id.clone()),
@@ -687,6 +852,177 @@ pub async fn produce(
         return Err(e);
     }
 
+    // ── DEFECT 1 FIX: pin finished-good ledger value to exact full_cost ───────
+    //
+    // record_movement stores unit_cost = round2(full_cost / qty) and then
+    // recompute_product_gestiune writes value = round2(qty × unit_cost), which
+    // drifts by up to (qty−1) cents when full_cost is not divisible by qty
+    // (e.g. full_cost=1000, qty=3 → unit=333.33, value=999.99 ≠ 1000.00).
+    //
+    // Strategy (b): after record_movement, find the production IN ledger row for
+    // the finished good and patch its `value` to the exact full_cost.  run_value
+    // is shifted by the same delta.  GL is re-posted with full_cost so that
+    // D345=C711=full_cost exactly.  The product cache (stock_value) is also
+    // adjusted by the same delta.
+    {
+        let prod_in_lookup = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT id, value, run_value \
+             FROM stock_ledger \
+             WHERE company_id=?1 AND product_id=?2 AND gestiune_id=?3 \
+               AND doc_ref=?4 AND direction='IN' \
+             LIMIT 1",
+        )
+        .bind(company_id)
+        .bind(&bom.product_id)
+        .bind(&input.gestiune_id)
+        .bind(&order_id)
+        .fetch_optional(pool)
+        .await;
+
+        let prod_in_row = match prod_in_lookup {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = rollback_production_movements(
+                    pool,
+                    company_id,
+                    &order_id,
+                    &affected_products,
+                    &input.gestiune_id,
+                )
+                .await;
+                return Err(e.into());
+            }
+        };
+
+        if let Some((ledger_id, stored_value_str, stored_run_value_str)) = prod_in_row {
+            let stored_value = dec(&stored_value_str);
+            let drift = full_cost - stored_value; // positive = engine under-recorded
+            if drift != Decimal::ZERO {
+                let corrected_run_value = round2(dec(&stored_run_value_str) + drift);
+
+                // 1. Patch the ledger row value to exact full_cost.
+                if let Err(e) = sqlx::query(
+                    "UPDATE stock_ledger SET value=?2, run_value=?3 \
+                     WHERE id=?1 AND company_id=?4",
+                )
+                .bind(&ledger_id)
+                .bind(format!("{:.2}", full_cost))
+                .bind(format!("{:.2}", corrected_run_value))
+                .bind(company_id)
+                .execute(pool)
+                .await
+                {
+                    let _ = rollback_production_movements(
+                        pool,
+                        company_id,
+                        &order_id,
+                        &affected_products,
+                        &input.gestiune_id,
+                    )
+                    .await;
+                    return Err(e.into());
+                }
+
+                // 2. Re-post GL with the corrected exact full_cost (D345=C711=full_cost).
+                let stock_account_lookup = sqlx::query_scalar::<_, String>(
+                    "SELECT COALESCE(stock_account,'345') FROM products \
+                     WHERE id=?1 AND company_id=?2",
+                )
+                .bind(&bom.product_id)
+                .bind(company_id)
+                .fetch_optional(pool)
+                .await;
+
+                let stock_account = match stock_account_lookup {
+                    Ok(opt) => opt.unwrap_or_else(|| "345".to_string()),
+                    Err(e) => {
+                        let _ = rollback_production_movements(
+                            pool,
+                            company_id,
+                            &order_id,
+                            &affected_products,
+                            &input.gestiune_id,
+                        )
+                        .await;
+                        return Err(e.into());
+                    }
+                };
+
+                if let Err(e) = crate::db::gl::post_stock_movement(
+                    pool,
+                    company_id,
+                    &ledger_id,
+                    &input.production_date,
+                    &stock_account,
+                    true,      // is_in
+                    full_cost, // exact total, no rounding drift
+                    false,     // not a transfer — posts D345=C711
+                )
+                .await
+                {
+                    let _ = rollback_production_movements(
+                        pool,
+                        company_id,
+                        &order_id,
+                        &affected_products,
+                        &input.gestiune_id,
+                    )
+                    .await;
+                    return Err(e);
+                }
+
+                // 3. Sync the product cache (stock_value) with the drift.
+                //    recompute_product_gestiune already ran inside record_movement;
+                //    the patch above changes this row's value/run_value in the DB
+                //    but the product cache still reflects the drifted value — adjust.
+                let sv_lookup = sqlx::query_as::<_, (Option<String>,)>(
+                    "SELECT stock_value FROM products WHERE id=?1 AND company_id=?2",
+                )
+                .bind(&bom.product_id)
+                .bind(company_id)
+                .fetch_optional(pool)
+                .await;
+
+                let sv_opt = match sv_lookup {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let _ = rollback_production_movements(
+                            pool,
+                            company_id,
+                            &order_id,
+                            &affected_products,
+                            &input.gestiune_id,
+                        )
+                        .await;
+                        return Err(e.into());
+                    }
+                };
+
+                let corrected_sv =
+                    round2(dec(sv_opt.and_then(|(v,)| v).as_deref().unwrap_or("0")) + drift);
+
+                if let Err(e) =
+                    sqlx::query("UPDATE products SET stock_value=?2 WHERE id=?1 AND company_id=?3")
+                        .bind(&bom.product_id)
+                        .bind(format!("{:.2}", corrected_sv))
+                        .bind(company_id)
+                        .execute(pool)
+                        .await
+                {
+                    let _ = rollback_production_movements(
+                        pool,
+                        company_id,
+                        &order_id,
+                        &affected_products,
+                        &input.gestiune_id,
+                    )
+                    .await;
+                    return Err(e.into());
+                }
+            }
+        }
+    }
+
     // ── Inserăm ordinul de producție ─────────────────────────────────────────
 
     let order = ProductieOrder {
@@ -698,7 +1034,16 @@ pub async fn produce(
         qty_produced: format!("{:.6}", qty_produced),
         production_date: input.production_date.clone(),
         total_material_cost: format!("{:.2}", total_material_cost),
-        unit_cost: format!("{:.2}", unit_cost),
+        unit_cost: format!("{:.2}", unit_cost_mat),
+        labour_cost: format!("{:.2}", labour_cost),
+        overhead_cost: format!("{:.2}", overhead_cost),
+        overhead_fixed: overhead_fixed.map(|d| format!("{:.2}", d)),
+        overhead_variable: overhead_variable.map(|d| format!("{:.2}", d)),
+        normal_capacity_qty: normal_capacity_qty.map(|d| format!("{:.6}", d)),
+        overhead_absorbed: format!("{:.2}", absorption.overhead_absorbed),
+        overhead_unabsorbed: format!("{:.2}", absorption.overhead_unabsorbed),
+        full_cost: format!("{:.2}", full_cost),
+        full_unit_cost: format!("{:.2}", full_unit_cost),
         status: "finalized".to_string(),
         notes: input.notes.clone(),
         created_at: now_unix(),
@@ -707,8 +1052,10 @@ pub async fn produce(
     let insert_res = sqlx::query(
         "INSERT INTO productie_orders \
          (id, company_id, bom_id, product_id, gestiune_id, qty_produced, production_date, \
-          total_material_cost, unit_cost, status, notes, created_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+          total_material_cost, unit_cost, labour_cost, overhead_cost, overhead_fixed, \
+          overhead_variable, normal_capacity_qty, overhead_absorbed, overhead_unabsorbed, \
+          full_cost, full_unit_cost, status, notes, created_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
     )
     .bind(&order.id)
     .bind(&order.company_id)
@@ -719,6 +1066,15 @@ pub async fn produce(
     .bind(&order.production_date)
     .bind(&order.total_material_cost)
     .bind(&order.unit_cost)
+    .bind(&order.labour_cost)
+    .bind(&order.overhead_cost)
+    .bind(&order.overhead_fixed)
+    .bind(&order.overhead_variable)
+    .bind(&order.normal_capacity_qty)
+    .bind(&order.overhead_absorbed)
+    .bind(&order.overhead_unabsorbed)
+    .bind(&order.full_cost)
+    .bind(&order.full_unit_cost)
     .bind(&order.status)
     .bind(&order.notes)
     .bind(order.created_at)
@@ -746,7 +1102,15 @@ pub async fn produce(
 pub async fn list_productie(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<ProductieOrder>> {
     Ok(sqlx::query_as::<_, ProductieOrder>(
         "SELECT id, company_id, bom_id, product_id, gestiune_id, qty_produced, \
-         production_date, total_material_cost, unit_cost, status, notes, created_at \
+         production_date, total_material_cost, unit_cost, \
+         COALESCE(labour_cost,'0') as labour_cost, \
+         COALESCE(overhead_cost,'0') as overhead_cost, \
+         overhead_fixed, overhead_variable, normal_capacity_qty, \
+         COALESCE(overhead_absorbed,'0') as overhead_absorbed, \
+         COALESCE(overhead_unabsorbed,'0') as overhead_unabsorbed, \
+         COALESCE(full_cost, total_material_cost) as full_cost, \
+         COALESCE(full_unit_cost, unit_cost) as full_unit_cost, \
+         status, notes, created_at \
          FROM productie_orders WHERE company_id=?1 \
          ORDER BY production_date DESC, created_at DESC",
     )
@@ -763,7 +1127,15 @@ pub async fn get_productie(
 ) -> AppResult<ProductieOrder> {
     sqlx::query_as::<_, ProductieOrder>(
         "SELECT id, company_id, bom_id, product_id, gestiune_id, qty_produced, \
-         production_date, total_material_cost, unit_cost, status, notes, created_at \
+         production_date, total_material_cost, unit_cost, \
+         COALESCE(labour_cost,'0') as labour_cost, \
+         COALESCE(overhead_cost,'0') as overhead_cost, \
+         overhead_fixed, overhead_variable, normal_capacity_qty, \
+         COALESCE(overhead_absorbed,'0') as overhead_absorbed, \
+         COALESCE(overhead_unabsorbed,'0') as overhead_unabsorbed, \
+         COALESCE(full_cost, total_material_cost) as full_cost, \
+         COALESCE(full_unit_cost, unit_cost) as full_unit_cost, \
+         status, notes, created_at \
          FROM productie_orders WHERE id=?1 AND company_id=?2",
     )
     .bind(order_id)
@@ -874,6 +1246,28 @@ mod tests {
         on_hand_qty(pool, cid, pid, gid).await.unwrap()
     }
 
+    // ── Helper: GL turnover per account ───────────────────────────────────────
+
+    async fn gl_turnover(pool: &SqlitePool, cid: &str, account: &str) -> (Decimal, Decimal) {
+        let row: (Option<f64>, Option<f64>) = sqlx::query_as(
+            "SELECT SUM(CAST(e.debit AS REAL)), SUM(CAST(e.credit AS REAL)) \
+             FROM gl_journal j JOIN gl_entry e ON e.journal_pk = j.id \
+             WHERE j.company_id=?1 AND e.account_code=?2",
+        )
+        .bind(cid)
+        .bind(account)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let d = Decimal::try_from(row.0.unwrap_or(0.0))
+            .unwrap_or(Decimal::ZERO)
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+        let c = Decimal::try_from(row.1.unwrap_or(0.0))
+            .unwrap_or(Decimal::ZERO)
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+        (d, c)
+    }
+
     // ── Test 1: BOM explosion + scale factor ──────────────────────────────────
 
     /// Rețetă: 2×A + 3×B → 1 produs finit. Produce 10 → consumă 20 A + 30 B.
@@ -936,7 +1330,7 @@ mod tests {
             &cid,
             BomInput {
                 product_id: "pf1".into(),
-                name: "Rețetă test".into(),
+                name: "Reteta test".into(),
                 output_qty: "1".into(),
                 lines: vec![
                     BomLineInput {
@@ -967,6 +1361,11 @@ mod tests {
                 qty_produced: "10".into(),
                 production_date: "2026-01-10".into(),
                 notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
             },
         )
         .await
@@ -987,6 +1386,12 @@ mod tests {
             "total_material_cost=190"
         );
         assert_eq!(order.unit_cost, "19.00", "unit_cost=19");
+        // Fără manoperă/regie, full_cost == total_material_cost
+        assert_eq!(
+            order.full_cost, "190.00",
+            "full_cost=190 when no labour/overhead"
+        );
+        assert_eq!(order.full_unit_cost, "19.00", "full_unit_cost=19");
     }
 
     /// Regression: the SAME component on two BOM lines (2 + 3) must value correctly. The old
@@ -1043,6 +1448,11 @@ mod tests {
                 qty_produced: "1".into(),
                 production_date: "2026-01-10".into(),
                 notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
             },
         )
         .await
@@ -1062,8 +1472,8 @@ mod tests {
     }
 
     /// Regression (audit): the pre-consume check must AGGREGATE per distinct component. The same
-    /// component on two lines (2+3=5) with on-hand 4 used to pass both per-line checks (2≤4, 3≤4)
-    /// and drive the gestiune to −1; now the aggregate need (5) is rejected before any consumption.
+    /// component on two lines (2+3=5) with on-hand 4 used to pass both per-line checks (2<=4, 3<=4)
+    /// and drive the gestiune to -1; now the aggregate need (5) is rejected before any consumption.
     #[tokio::test]
     async fn duplicate_component_aggregate_stock_rejected() {
         let (pool, cid) = setup().await;
@@ -1116,6 +1526,11 @@ mod tests {
                 qty_produced: "1".into(),
                 production_date: "2026-01-10".into(),
                 notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
             },
         )
         .await;
@@ -1194,6 +1609,11 @@ mod tests {
                 qty_produced: "4".into(),
                 production_date: "2026-02-10".into(),
                 notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
             },
         )
         .await
@@ -1212,29 +1632,7 @@ mod tests {
 
     // ── Test 3: GL monografie (consum 601=301, obținere 345=711) ─────────────
 
-    /// Query SUM(debit), SUM(credit) for an account directly from gl_entry (period-level totals,
-    /// not closing balances). This avoids the closing-net ambiguity of trial_balance.
-    async fn gl_turnover(pool: &SqlitePool, cid: &str, account: &str) -> (Decimal, Decimal) {
-        let row: (Option<f64>, Option<f64>) = sqlx::query_as(
-            "SELECT SUM(CAST(e.debit AS REAL)), SUM(CAST(e.credit AS REAL)) \
-             FROM gl_journal j JOIN gl_entry e ON e.journal_pk = j.id \
-             WHERE j.company_id=?1 AND e.account_code=?2",
-        )
-        .bind(cid)
-        .bind(account)
-        .fetch_one(pool)
-        .await
-        .unwrap();
-        let d = Decimal::try_from(row.0.unwrap_or(0.0))
-            .unwrap_or(Decimal::ZERO)
-            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
-        let c = Decimal::try_from(row.1.unwrap_or(0.0))
-            .unwrap_or(Decimal::ZERO)
-            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
-        (d, c)
-    }
-
-    /// GL monografie: consum materie primă → D601=C301; obținere → D345=C711.
+    /// GL monografie: consum materie prima → D601=C301; obtinere → D345=C711.
     /// Verificăm TOTAL debit/credit (turnover) per cont, nu soldul net (closing balance).
     #[tokio::test]
     async fn gl_monografie_601_301_345_711() {
@@ -1244,7 +1642,7 @@ mod tests {
         make_product_sql(&pool, "pf3", &cid, "PF3", "produs_finit", "345", "CMP").await;
         make_product_sql(&pool, "mp3", &cid, "MP3", "materie_prima", "301", "CMP").await;
 
-        // Stoc: 10 @ 4.00 = 40 → D 301 = C 601 (recepție stoc)
+        // Stoc: 10 @ 4.00 = 40
         record_movement(
             &pool,
             &mv(&cid, "mp3", "2026-03-01", "10", Some("4.00"), &g),
@@ -1281,42 +1679,37 @@ mod tests {
                 qty_produced: "3".into(),
                 production_date: "2026-03-10".into(),
                 notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
             },
         )
         .await
         .unwrap();
 
-        // Turnover totals per account (sum debit / sum credit across ALL gl_entry rows)
-        // 301: IN=D40/C0  + consum=D0/C24  → total D=40, C=24
-        // 601: IN=D0/C40  + consum=D24/C0  → total D=24, C=40
-        // 345: obținere=D24/C0             → total D=24, C=0
-        // 711: obținere=D0/C24             → total D=0,  C=24
         let (d301, c301) = gl_turnover(&pool, &cid, "301").await;
         let (d601, _c601) = gl_turnover(&pool, &cid, "601").await;
         let (d345, _c345) = gl_turnover(&pool, &cid, "345").await;
         let (_d711, c711) = gl_turnover(&pool, &cid, "711").await;
 
-        // Consum OUT → D601 += 24, C301 += 24
         assert!(
             c301 >= Decimal::from(24),
-            "301 total_credit ≥ 24 (consum), got {c301}"
+            "301 total_credit >= 24 (consum), got {c301}"
         );
         assert!(
             d601 >= Decimal::from(24),
-            "601 total_debit ≥ 24 (consum), got {d601}"
+            "601 total_debit >= 24 (consum), got {d601}"
         );
-
-        // Obținere IN → D345 = 24, C711 = 24
         assert!(
             d345 >= Decimal::from(24),
-            "345 total_debit ≥ 24 (obținere), got {d345}"
+            "345 total_debit >= 24 (obtinere), got {d345}"
         );
         assert!(
             c711 >= Decimal::from(24),
-            "711 total_credit ≥ 24 (obținere), got {c711}"
+            "711 total_credit >= 24 (obtinere), got {c711}"
         );
-
-        // 601 și 301 trebuie să existe și să fie > 0 (nu 607)
         assert!(
             d601 > Decimal::ZERO,
             "D601 must be posted for materie_prima"
@@ -1326,7 +1719,7 @@ mod tests {
             "C301 must be posted for materie_prima"
         );
 
-        // GL global echilibrat: Σtotal_debit == Σtotal_credit
+        // GL global echilibrat
         let (total_d, total_c): (Decimal, Decimal) = {
             let row: (Option<f64>, Option<f64>) = sqlx::query_as(
                 "SELECT SUM(CAST(e.debit AS REAL)), SUM(CAST(e.credit AS REAL)) \
@@ -1350,7 +1743,7 @@ mod tests {
             "GL balanced: Σtotal_debit={total_d} == Σtotal_credit={total_c}"
         );
 
-        let _ = d301; // used indirectly via c301 assertion; avoid unused warning
+        let _ = d301; // used indirectly
     }
 
     // ── Test 4: stoc insuficient → respins, niciun consum parțial ────────────
@@ -1415,6 +1808,11 @@ mod tests {
                 qty_produced: "1".into(),
                 production_date: "2026-04-10".into(),
                 notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
             },
         )
         .await;
@@ -1424,7 +1822,6 @@ mod tests {
             "Trebuie respins cu Validation"
         );
 
-        // Verificăm că nu a rămas niciun consum parțial
         let ledger_rows: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM stock_ledger WHERE company_id=?1 AND doc_type='PRODUCTION'",
         )
@@ -1437,7 +1834,6 @@ mod tests {
             "No partial consumption after rejection (all-or-nothing)"
         );
 
-        // Stocurile rămân intacte
         assert_eq!(onhand(&pool, &cid, "mp4a", &g).await, Decimal::from(5));
         assert_eq!(onhand(&pool, &cid, "mp4b", &g).await, Decimal::from(2));
         assert_eq!(onhand(&pool, &cid, "pf4", &g).await, Decimal::ZERO);
@@ -1445,8 +1841,6 @@ mod tests {
 
     // ── Test 5: atomicitate (compensare manuală) ──────────────────────────────
 
-    /// Simulăm un OUT parțial (ca și când IN-ul ar fi eșuat) și verificăm că
-    /// rollback_production_movements readuce stocul și nu lasă rânduri GL STOCK orfane.
     #[tokio::test]
     async fn compensation_restores_stock_and_cleans_gl() {
         let (pool, cid) = setup().await;
@@ -1471,7 +1865,6 @@ mod tests {
         out.doc_ref = Some(fake_order.to_string());
         record_movement(&pool, &out, Dir::Out).await.unwrap();
 
-        // Verificăm că stocul a scăzut și există o notă GL STOCK
         let stranded_qty = onhand(&pool, &cid, "mp5", &g).await;
         assert_eq!(stranded_qty, Decimal::from(16), "Before rollback: 20-4=16");
 
@@ -1490,7 +1883,6 @@ mod tests {
             "Should have GL STOCK entry before rollback: got {gl_before}"
         );
 
-        // Compensare
         rollback_production_movements(
             &pool,
             &cid,
@@ -1501,7 +1893,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Stocul revine la 20
         let restored = onhand(&pool, &cid, "mp5", &g).await;
         assert_eq!(
             restored,
@@ -1509,7 +1900,6 @@ mod tests {
             "After rollback: qty restored to 20"
         );
 
-        // Niciun rând doc_ref=order_fake în stock_ledger
         let remaining_rows: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM stock_ledger WHERE company_id=?1 AND doc_ref=?2",
         )
@@ -1520,7 +1910,6 @@ mod tests {
         .unwrap();
         assert_eq!(remaining_rows, 0, "No ledger rows after rollback");
 
-        // Nicio notă GL STOCK orfană
         let gl_after: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM gl_journal j \
              WHERE j.company_id=?1 AND j.source_type='STOCK' \
@@ -1536,8 +1925,6 @@ mod tests {
 
     // ── Test 6: regen golden — producție GL supraviețuiește generate_gl_entries ─
 
-    /// `generate_gl_entries` șterge doar source_type 'INVOICE'/'RECEIVED_INVOICE'/'PAYMENT'/...
-    /// dar NU 'STOCK'. Notele de stoc (inclusiv producție) trebuie să supraviețuiască regen.
     #[tokio::test]
     async fn productie_gl_survives_generate_gl_entries() {
         let (pool, cid) = setup().await;
@@ -1581,12 +1968,16 @@ mod tests {
                 qty_produced: "2".into(),
                 production_date: "2026-06-10".into(),
                 notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
             },
         )
         .await
         .unwrap();
 
-        // Numărăm notele GL STOCK înainte de regen
         let before: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM gl_journal WHERE company_id=?1 AND source_type='STOCK'",
         )
@@ -1595,7 +1986,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Rulăm generate_gl_entries (șterge INVOICE/PAYMENT etc, NU STOCK)
         crate::db::gl::generate_gl_entries(&pool, &cid, "2026-06-01", "2026-06-30", false)
             .await
             .unwrap();
@@ -1668,14 +2058,16 @@ mod tests {
                 qty_produced: "3".into(),
                 production_date: "2026-07-10".into(),
                 notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
             },
         )
         .await
         .unwrap();
 
-        // Verificăm turnover D602 > 0 (consum) și C302 > 0 (descărcare)
-        // Notă: trial_balance.closing_debit/credit = sold net (ambiguu pt. conturi cu rulaj bidirecțional);
-        // folosim turnover direct din gl_entry.
         let (d602, _c602) = gl_turnover(&pool, &cid, "602").await;
         let (_d302, c302) = gl_turnover(&pool, &cid, "302").await;
 
@@ -1688,7 +2080,6 @@ mod tests {
             "C302 must be posted for material_consumabil consumption"
         );
 
-        // GL echilibrat (total debit == total credit)
         let (td, tc): (Decimal, Decimal) = {
             let row: (Option<f64>, Option<f64>) = sqlx::query_as(
                 "SELECT SUM(CAST(e.debit AS REAL)), SUM(CAST(e.credit AS REAL)) \
@@ -1748,7 +2139,6 @@ mod tests {
         let list = list_bom(&pool, &cid).await.unwrap();
         assert!(!list.is_empty());
 
-        // Update: schimbăm liniile
         let updated = update_bom(
             &pool,
             &cid,
@@ -1770,9 +2160,1090 @@ mod tests {
         assert_eq!(updated.bom.name, "BOM CRUD Updated");
         assert_eq!(updated.lines.len(), 1);
 
-        // Delete
         delete_bom(&pool, &cid, &created.bom.id).await.unwrap();
         let gone = get_bom(&pool, &cid, &created.bom.id).await;
         assert!(matches!(gone, Err(AppError::NotFound)));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ── FULL COST TESTS (new in migration 0078) ───────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // ── Test FC-1: materials=1000, labour=300, overhead=200 (single figure) ───
+
+    /// Full cost: D345=C711 postat la 1500; OUT-urile materialelor rămân la 1000.
+    #[tokio::test]
+    async fn full_cost_materials_labour_overhead_single() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GFC1").await;
+
+        make_product_sql(
+            &pool,
+            "pf_fc1",
+            &cid,
+            "PF_FC1",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_fc1",
+            &cid,
+            "MP_FC1",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        // Stoc: 100 @ 10.00 = 1000 (vom consuma tot pentru 1 unitate)
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_fc1", "2026-01-01", "100", Some("10.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_fc1".into(),
+                name: "BOM_FC1".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_fc1".into(),
+                    qty: "100".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        let order = produce(
+            &pool,
+            &cid,
+            ProduceInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "1".into(),
+                production_date: "2026-01-10".into(),
+                notes: None,
+                labour_cost: Some("300.00".into()),
+                overhead_cost: Some("200.00".into()),
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // (1) full_cost = 1000 + 300 + 200 = 1500
+        assert_eq!(order.total_material_cost, "1000.00", "material cost = 1000");
+        assert_eq!(order.labour_cost, "300.00", "labour = 300");
+        assert_eq!(order.overhead_absorbed, "200.00", "overhead absorbed = 200");
+        assert_eq!(
+            order.overhead_unabsorbed, "0.00",
+            "no unabsorbed (single figure)"
+        );
+        assert_eq!(order.full_cost, "1500.00", "full_cost = 1500");
+        assert_eq!(
+            order.full_unit_cost, "1500.00",
+            "full_unit_cost = 1500 (1 unit)"
+        );
+
+        // (2) D345=C711 trebui să fie la 1500
+        let (d345, _) = gl_turnover(&pool, &cid, "345").await;
+        let (_, c711) = gl_turnover(&pool, &cid, "711").await;
+        assert_eq!(d345, Decimal::from(1500), "D345 = 1500 (full cost)");
+        assert_eq!(c711, Decimal::from(1500), "C711 = 1500 (full cost)");
+
+        // (3) Materialele OUT legs la 1000 (D601=C301 la 1000)
+        let (d601, _) = gl_turnover(&pool, &cid, "601").await;
+        let (_, c301) = gl_turnover(&pool, &cid, "301").await;
+        assert_eq!(
+            d601,
+            Decimal::from(1000),
+            "material OUT D601 = 1000 (NOT 1500)"
+        );
+        assert_eq!(
+            c301,
+            Decimal::from(1000),
+            "material OUT C301 = 1000 (NOT 1500)"
+        );
+
+        // (4) GL echilibrat
+        let row: (Option<f64>, Option<f64>) = sqlx::query_as(
+            "SELECT SUM(CAST(e.debit AS REAL)), SUM(CAST(e.credit AS REAL)) \
+             FROM gl_journal j JOIN gl_entry e ON e.journal_pk = j.id WHERE j.company_id=?1",
+        )
+        .bind(&cid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let td = Decimal::try_from(row.0.unwrap_or(0.0))
+            .unwrap_or(Decimal::ZERO)
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+        let tc = Decimal::try_from(row.1.unwrap_or(0.0))
+            .unwrap_or(Decimal::ZERO)
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+        assert_eq!(
+            td, tc,
+            "GL balanced after full cost production: {td} == {tc}"
+        );
+
+        // (5) Stocul produs finit valorat la full_cost (1500)
+        let inv_val: Option<String> = sqlx::query_scalar(
+            "SELECT run_value FROM stock_ledger WHERE company_id=?1 AND product_id='pf_fc1' AND direction='IN' LIMIT 1"
+        )
+        .bind(&cid)
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        let inv_val_d = dec(inv_val.as_deref().unwrap_or("0"));
+        assert_eq!(
+            inv_val_d,
+            Decimal::from(1500),
+            "finished good inventory value = 1500 (full cost)"
+        );
+    }
+
+    // ── Test FC-2: absorption — overhead_fixed=400, normal_capacity=100, output=80 ─
+
+    /// activity_ratio = 0.8; fixed_absorbed = 320; unabsorbed = 80; full_cost excludes unabsorbed.
+    #[tokio::test]
+    async fn full_cost_absorption_partial_fixed() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GFC2").await;
+
+        make_product_sql(
+            &pool,
+            "pf_fc2",
+            &cid,
+            "PF_FC2",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_fc2",
+            &cid,
+            "MP_FC2",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        // Stoc: 80 @ 1.00 = 80 (vom consuma 80 unități, cost materiale = 80)
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_fc2", "2026-01-01", "80", Some("1.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_fc2".into(),
+                name: "BOM_FC2".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_fc2".into(),
+                    qty: "1".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        // output=80, normal_capacity=100, overhead_fixed=400, overhead_variable=0
+        // activity_ratio = min(1, 80/100) = 0.8
+        // fixed_absorbed = 400 * 0.8 = 320
+        // fixed_unabsorbed = 400 * 0.2 = 80
+        // full_cost = 80 (mat) + 0 (labour) + 320 (absorbed) = 400
+        let order = produce(
+            &pool,
+            &cid,
+            ProduceInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "80".into(),
+                production_date: "2026-01-10".into(),
+                notes: None,
+                labour_cost: Some("0.00".into()),
+                overhead_cost: Some("400.00".into()),
+                overhead_fixed: Some("400.00".into()),
+                overhead_variable: Some("0.00".into()),
+                normal_capacity_qty: Some("100".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(order.total_material_cost, "80.00", "material cost = 80");
+        assert_eq!(
+            order.overhead_absorbed, "320.00",
+            "overhead absorbed = 320 (not 400)"
+        );
+        assert_eq!(order.overhead_unabsorbed, "80.00", "unabsorbed = 80");
+        assert_eq!(order.full_cost, "400.00", "full_cost = 80 + 0 + 320 = 400");
+
+        // Unabsorbed (80) NOT in 345 valuation
+        let (d345, _) = gl_turnover(&pool, &cid, "345").await;
+        assert_eq!(
+            d345,
+            Decimal::from(400),
+            "D345 = 400 (not 480 — unabsorbed excluded)"
+        );
+
+        // GL echilibrat
+        let row: (Option<f64>, Option<f64>) = sqlx::query_as(
+            "SELECT SUM(CAST(e.debit AS REAL)), SUM(CAST(e.credit AS REAL)) \
+             FROM gl_journal j JOIN gl_entry e ON e.journal_pk = j.id WHERE j.company_id=?1",
+        )
+        .bind(&cid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let td = Decimal::try_from(row.0.unwrap_or(0.0))
+            .unwrap_or(Decimal::ZERO)
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+        let tc = Decimal::try_from(row.1.unwrap_or(0.0))
+            .unwrap_or(Decimal::ZERO)
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+        assert_eq!(td, tc, "GL balanced after partial absorption");
+    }
+
+    // ── Test FC-3: output > normal_capacity → activity_ratio capped at 1 ─────
+
+    /// No over-absorption: when qty_produced=120, normal_capacity=100,
+    /// ratio=min(1, 120/100)=1 → fixed_absorbed=overhead_fixed (fully absorbed).
+    #[tokio::test]
+    async fn full_cost_absorption_cap_at_one() {
+        // Pure unit test on compute_absorption — no DB needed.
+        let result = compute_absorption(
+            Decimal::from(400),       // overhead_cost (unused when split provided)
+            Some(Decimal::from(400)), // overhead_fixed
+            Some(Decimal::ZERO),      // overhead_variable
+            Some(Decimal::from(100)), // normal_capacity_qty
+            Decimal::from(120),       // qty_produced > capacity
+        );
+        // activity_ratio = min(1, 120/100) = 1
+        // fixed_absorbed = 400 * 1 = 400, unabsorbed = 0
+        assert_eq!(
+            result.overhead_absorbed,
+            Decimal::from(400),
+            "fully absorbed (capped at 1)"
+        );
+        assert_eq!(
+            result.overhead_unabsorbed,
+            Decimal::ZERO,
+            "no unabsorbed when output > capacity"
+        );
+    }
+
+    // ── Test FC-4: materials-only (labour=0, overhead=0) → unchanged behaviour ─
+
+    /// Backward compat: materials-only produce still works; full_cost == total_material_cost.
+    #[tokio::test]
+    async fn full_cost_materials_only_unchanged() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GFC4").await;
+
+        make_product_sql(
+            &pool,
+            "pf_fc4",
+            &cid,
+            "PF_FC4",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_fc4",
+            &cid,
+            "MP_FC4",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_fc4", "2026-01-01", "10", Some("4.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_fc4".into(),
+                name: "BOM_FC4".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_fc4".into(),
+                    qty: "2".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        // No labour, no overhead → should behave exactly as before
+        let order = produce(
+            &pool,
+            &cid,
+            ProduceInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "3".into(),
+                production_date: "2026-01-10".into(),
+                notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // 3 × 2 × 4.00 = 24.00 materials; full_cost must equal materials_cost
+        assert_eq!(order.total_material_cost, "24.00", "material cost = 24");
+        assert_eq!(
+            order.full_cost, "24.00",
+            "full_cost == material cost when no labour/overhead"
+        );
+        assert_eq!(order.labour_cost, "0.00", "labour = 0");
+        assert_eq!(order.overhead_absorbed, "0.00", "overhead absorbed = 0");
+        assert_eq!(order.overhead_unabsorbed, "0.00", "unabsorbed = 0");
+
+        // D345=C711 must equal materials_cost (24), not more
+        let (d345, _) = gl_turnover(&pool, &cid, "345").await;
+        let (_, c711) = gl_turnover(&pool, &cid, "711").await;
+        assert_eq!(
+            d345,
+            Decimal::from(24),
+            "D345 = 24 (unchanged, materials only)"
+        );
+        assert_eq!(
+            c711,
+            Decimal::from(24),
+            "C711 = 24 (unchanged, materials only)"
+        );
+    }
+
+    // ── Test FC-5: the obținere journal balances ──────────────────────────────
+
+    /// With full_cost, the single D345=C711 line must still balance by construction.
+    /// (Implicitly tested by GL balance checks in FC-1 and FC-2; this test is explicit.)
+    #[tokio::test]
+    async fn full_cost_obtinere_journal_balances() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GFC5").await;
+
+        make_product_sql(
+            &pool,
+            "pf_fc5",
+            &cid,
+            "PF_FC5",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_fc5",
+            &cid,
+            "MP_FC5",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_fc5", "2026-01-01", "50", Some("2.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_fc5".into(),
+                name: "BOM_FC5".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_fc5".into(),
+                    qty: "5".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        // labour=150, overhead_variable=50 → absorbed=50; full_cost=5×10×2 + 150 + 50 = 300
+        // Actually: mat = 5 qty_per_output * qty_produced(1) * 2.00/unit ... wait:
+        // scale=1, consume 5 @ 2.00 = 10.00; labour=150; overhead_var=50; full=210
+        let order = produce(
+            &pool,
+            &cid,
+            ProduceInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "1".into(),
+                production_date: "2026-01-10".into(),
+                notes: None,
+                labour_cost: Some("150.00".into()),
+                overhead_cost: Some("50.00".into()),
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let mat = dec(&order.total_material_cost); // 5 * 2 = 10
+        let full = dec(&order.full_cost); // 10 + 150 + 50 = 210
+        assert_eq!(
+            full,
+            mat + Decimal::from(200),
+            "full_cost = mat(10) + 200 = 210"
+        );
+
+        // The D345=C711 debit and credit must be equal (= full_cost).
+        // The raw material receipt goes to D301/C607, NOT D345.
+        // So D345 total = only the production obtinere IN leg = full_cost.
+        let (d345, c345) = gl_turnover(&pool, &cid, "345").await;
+        let (d711, c711) = gl_turnover(&pool, &cid, "711").await;
+        assert_eq!(
+            d345, full,
+            "D345 total = full_cost only (no extra legs — materials receipt is D301/C607)"
+        );
+        // Check the production IN leg directly via stock_ledger.
+        let prod_in_val: Option<String> = sqlx::query_scalar(
+            "SELECT value FROM stock_ledger WHERE company_id=?1 AND product_id='pf_fc5' AND direction='IN' LIMIT 1"
+        )
+        .bind(&cid)
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        let prod_val = dec(prod_in_val.as_deref().unwrap_or("0"));
+        assert_eq!(
+            prod_val, full,
+            "stock_ledger IN value for finished good = full_cost"
+        );
+
+        // D711 (debit) from closing/future sale movements = 0 here (no sale yet).
+        // C711 from obtinere = full_cost.
+        assert_eq!(c711, full, "C711 = full_cost from obtinere leg");
+        let _ = (c345, d711); // suppress unused warnings
+    }
+
+    // ── Test FC-6: absorption pure unit tests ────────────────────────────────
+
+    #[test]
+    fn absorption_variable_only() {
+        // No split, no normal_cap: overhead fully absorbed
+        let r = compute_absorption(Decimal::from(200), None, None, None, Decimal::from(10));
+        assert_eq!(r.overhead_absorbed, Decimal::from(200));
+        assert_eq!(r.overhead_unabsorbed, Decimal::ZERO);
+    }
+
+    #[test]
+    fn absorption_fixed_at_full_capacity() {
+        // output == normal_capacity → ratio=1 → fully absorbed
+        let r = compute_absorption(
+            Decimal::from(400),
+            Some(Decimal::from(400)),
+            Some(Decimal::ZERO),
+            Some(Decimal::from(100)),
+            Decimal::from(100),
+        );
+        assert_eq!(r.overhead_absorbed, Decimal::from(400));
+        assert_eq!(r.overhead_unabsorbed, Decimal::ZERO);
+    }
+
+    #[test]
+    fn absorption_fixed_partial_80_pct() {
+        // output=80, normal=100 → ratio=0.8 → absorbed=320, unabsorbed=80
+        let r = compute_absorption(
+            Decimal::from(400),
+            Some(Decimal::from(400)),
+            Some(Decimal::ZERO),
+            Some(Decimal::from(100)),
+            Decimal::from(80),
+        );
+        assert_eq!(r.overhead_absorbed, Decimal::from(320));
+        assert_eq!(r.overhead_unabsorbed, Decimal::from(80));
+    }
+
+    #[test]
+    fn absorption_mixed_fixed_variable() {
+        // fixed=300 @80%, variable=100 always → absorbed = 240+100=340, unabsorbed=60
+        let r = compute_absorption(
+            Decimal::from(400),
+            Some(Decimal::from(300)),
+            Some(Decimal::from(100)),
+            Some(Decimal::from(100)),
+            Decimal::from(80),
+        );
+        assert_eq!(r.overhead_absorbed, Decimal::from(340));
+        assert_eq!(r.overhead_unabsorbed, Decimal::from(60));
+    }
+
+    #[test]
+    fn absorption_zero_overhead() {
+        let r = compute_absorption(Decimal::ZERO, None, None, None, Decimal::from(10));
+        assert_eq!(r.overhead_absorbed, Decimal::ZERO);
+        assert_eq!(r.overhead_unabsorbed, Decimal::ZERO);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ── DEFECT-FIX TESTS ─────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // ── DF-1: non-dividing qty=3, full_cost=1000 → D345=C711=1000 exactly ────
+
+    /// Regression: qty=3 divides 1000 into 333.33 per unit, which round-trips as
+    /// 999.99 (3×333.33).  The defect-1 fix must pin D345=C711=1000 exactly and
+    /// the finished-good inventory ledger value must be 1000, not 999.99.
+    #[tokio::test]
+    async fn rounding_drift_non_dividing_qty3_full_cost_1000() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GDF1").await;
+
+        make_product_sql(
+            &pool,
+            "pf_df1",
+            &cid,
+            "PF_DF1",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_df1",
+            &cid,
+            "MP_DF1",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        // 3 units of material @ 333.333... each → total 1000.00 (stored as 1000)
+        // We seed 3 @ 333.33 + 1 @ 0.01 = 1000.00 to match exactly, but the simpler
+        // approach: seed 1000 @ 1.00 then BOM uses all 1000 per 1 unit output.
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_df1", "2026-01-01", "1000", Some("1.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_df1".into(),
+                name: "BOM_DF1".into(),
+                // BOM produces 3 units consuming 1000 material (scale=1 when qty_produced=3).
+                output_qty: "3".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_df1".into(),
+                    qty: "1000".into(), // 1000 material for 3 units → full_cost=1000
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        // Produce qty=3 (one BOM run, scale=1). full_cost = 1000.
+        // unit = round2(1000/3) = 333.33; 3×333.33 = 999.99 → drift 0.01 without fix.
+        // With the fix: value is pinned to 1000.00 exactly.
+        let order = produce(
+            &pool,
+            &cid,
+            ProduceInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "3".into(),
+                production_date: "2026-01-10".into(),
+                notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(order.full_cost, "1000.00", "order.full_cost = 1000.00");
+
+        // The finished-good stock ledger IN row must carry value = 1000.00 exactly.
+        let inv_val: Option<String> = sqlx::query_scalar(
+            "SELECT value FROM stock_ledger \
+             WHERE company_id=?1 AND product_id='pf_df1' AND direction='IN' LIMIT 1",
+        )
+        .bind(&cid)
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        let inv_val_d = dec(inv_val.as_deref().unwrap_or("0"));
+        assert_eq!(
+            inv_val_d,
+            Decimal::from(1000),
+            "finished-good inventory ledger value must be exactly 1000, not 999.99"
+        );
+
+        // D345=C711 must both equal 1000.00 exactly.
+        let (d345, _) = gl_turnover(&pool, &cid, "345").await;
+        let (_, c711) = gl_turnover(&pool, &cid, "711").await;
+        assert_eq!(d345, Decimal::from(1000), "D345 must be exactly 1000");
+        assert_eq!(c711, Decimal::from(1000), "C711 must be exactly 1000");
+
+        // product cache stock_value must equal 1000.00.
+        let sv: Option<String> = sqlx::query_scalar(
+            "SELECT stock_value FROM products WHERE id='pf_df1' AND company_id=?1",
+        )
+        .bind(&cid)
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            dec(sv.as_deref().unwrap_or("0")),
+            Decimal::from(1000),
+            "product cache stock_value must be exactly 1000"
+        );
+
+        // GL must be balanced.
+        let row: (Option<f64>, Option<f64>) = sqlx::query_as(
+            "SELECT SUM(CAST(e.debit AS REAL)), SUM(CAST(e.credit AS REAL)) \
+             FROM gl_journal j JOIN gl_entry e ON e.journal_pk = j.id WHERE j.company_id=?1",
+        )
+        .bind(&cid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let td = Decimal::try_from(row.0.unwrap_or(0.0))
+            .unwrap_or(Decimal::ZERO)
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+        let tc = Decimal::try_from(row.1.unwrap_or(0.0))
+            .unwrap_or(Decimal::ZERO)
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+        assert_eq!(td, tc, "GL balanced: {td} == {tc}");
+    }
+
+    // ── DF-2: non-dividing qty=7, full_cost=100 → D345=C711=100 exactly ──────
+
+    /// materials=100, labour=0, overhead=0, qty=7 → full_cost=100.
+    /// unit_cost = round2(100/7) = 14.29; 7×14.29 = 100.03 → drift +0.03.
+    /// With fix: value pinned to 100.00 exactly.
+    #[tokio::test]
+    async fn rounding_drift_non_dividing_qty7_full_cost_100() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GDF2").await;
+
+        make_product_sql(
+            &pool,
+            "pf_df2",
+            &cid,
+            "PF_DF2",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_df2",
+            &cid,
+            "MP_DF2",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        // Seed 7 @ 100/7 ≈ 14.286 each; to get full_cost=100.00 exactly, seed
+        // 100 @ 1.00 and consume all 100 per output unit × qty=7.
+        // Actually: 7 units of BOM output, consuming 100 material per output:
+        // total material = 700. That's full_cost=700, not 100.
+        // Instead: consume 100 material total for qty=7 output.
+        // BOM: output_qty=1, consume 100/7 ≈ 14.286 per unit → not nice.
+        // Simpler: seed 100 @ 1.00; BOM consumes all 100 per output_qty=7
+        // → scale = 7/7 = 1 → consume 100 → total_material_cost=100.
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_df2", "2026-01-01", "100", Some("1.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_df2".into(),
+                name: "BOM_DF2".into(),
+                output_qty: "7".into(), // 7 units per BOM run
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_df2".into(),
+                    qty: "100".into(), // 100 material units per BOM run
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        // Produce qty=7 (one BOM run). scale=1. material_cost=100.
+        // unit = round2(100/7) = 14.29; 7×14.29 = 100.03 → without fix: drift.
+        let order = produce(
+            &pool,
+            &cid,
+            ProduceInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "7".into(),
+                production_date: "2026-01-10".into(),
+                notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            order.total_material_cost, "100.00",
+            "total_material_cost = 100"
+        );
+        assert_eq!(order.full_cost, "100.00", "full_cost = 100.00");
+
+        let inv_val: Option<String> = sqlx::query_scalar(
+            "SELECT value FROM stock_ledger \
+             WHERE company_id=?1 AND product_id='pf_df2' AND direction='IN' LIMIT 1",
+        )
+        .bind(&cid)
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            dec(inv_val.as_deref().unwrap_or("0")),
+            Decimal::from(100),
+            "finished-good inventory value must be exactly 100 (not 100.03)"
+        );
+
+        let (d345, _) = gl_turnover(&pool, &cid, "345").await;
+        let (_, c711) = gl_turnover(&pool, &cid, "711").await;
+        assert_eq!(d345, Decimal::from(100), "D345 = 100 exactly");
+        assert_eq!(c711, Decimal::from(100), "C711 = 100 exactly");
+    }
+
+    // ── DF-3: evenly-dividing case still passes (regression guard) ────────────
+
+    /// Evenly-dividing case: qty=4, material 5 @ 10.00 = 50. full_cost=50.
+    /// unit_cost = round2(50/4) = 12.50; 4×12.50 = 50.00 → no drift, fix is no-op.
+    #[tokio::test]
+    async fn rounding_no_drift_evenly_dividing() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GDF3").await;
+
+        make_product_sql(
+            &pool,
+            "pf_df3",
+            &cid,
+            "PF_DF3",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_df3",
+            &cid,
+            "MP_DF3",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_df3", "2026-01-01", "20", Some("10.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_df3".into(),
+                name: "BOM_DF3".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_df3".into(),
+                    qty: "5".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        // qty=4, mat_per_unit=5, cost=10.00 → total=200; unit=200/4=50.00; 4×50=200 (exact).
+        let order = produce(
+            &pool,
+            &cid,
+            ProduceInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "4".into(),
+                production_date: "2026-01-10".into(),
+                notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // total_material_cost = 4*5*10 = 200; full_cost = 200; full_unit_cost = 50.
+        assert_eq!(
+            order.full_cost, "200.00",
+            "full_cost = 200.00 (evenly divides)"
+        );
+        assert_eq!(
+            order.full_unit_cost, "50.00",
+            "full_unit_cost = 50.00 (no drift)"
+        );
+
+        let inv_val: Option<String> = sqlx::query_scalar(
+            "SELECT value FROM stock_ledger \
+             WHERE company_id=?1 AND product_id='pf_df3' AND direction='IN' LIMIT 1",
+        )
+        .bind(&cid)
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            dec(inv_val.as_deref().unwrap_or("0")),
+            Decimal::from(200),
+            "inventory value = 200 (evenly-dividing case: 4×50 = 200)"
+        );
+
+        let (d345, _) = gl_turnover(&pool, &cid, "345").await;
+        let (_, c711) = gl_turnover(&pool, &cid, "711").await;
+        assert_eq!(d345, Decimal::from(200), "D345 = 200");
+        assert_eq!(c711, Decimal::from(200), "C711 = 200");
+    }
+
+    // ── DF-4: negative overhead_fixed → Validation error ─────────────────────
+
+    #[tokio::test]
+    async fn negative_overhead_fixed_rejected() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GDF4").await;
+
+        make_product_sql(
+            &pool,
+            "pf_df4",
+            &cid,
+            "PF_DF4",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_df4",
+            &cid,
+            "MP_DF4",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_df4", "2026-01-01", "10", Some("5.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_df4".into(),
+                name: "BOM_DF4".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_df4".into(),
+                    qty: "2".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        let res = produce(
+            &pool,
+            &cid,
+            ProduceInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "1".into(),
+                production_date: "2026-01-10".into(),
+                notes: None,
+                labour_cost: Some("100.00".into()),
+                overhead_cost: Some("0.00".into()),
+                overhead_fixed: Some("-50.00".into()), // NEGATIVE — must be rejected
+                overhead_variable: Some("0.00".into()),
+                normal_capacity_qty: Some("10".into()),
+            },
+        )
+        .await;
+
+        assert!(
+            matches!(res, Err(AppError::Validation(_))),
+            "negative overhead_fixed must be rejected with Validation error, got: {res:?}"
+        );
+    }
+
+    // ── DF-5: negative overhead_variable → Validation error ──────────────────
+
+    #[tokio::test]
+    async fn negative_overhead_variable_rejected() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GDF5").await;
+
+        make_product_sql(
+            &pool,
+            "pf_df5",
+            &cid,
+            "PF_DF5",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_df5",
+            &cid,
+            "MP_DF5",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_df5", "2026-01-01", "10", Some("5.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_df5".into(),
+                name: "BOM_DF5".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_df5".into(),
+                    qty: "2".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        let res = produce(
+            &pool,
+            &cid,
+            ProduceInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "1".into(),
+                production_date: "2026-01-10".into(),
+                notes: None,
+                labour_cost: None,
+                overhead_cost: Some("0.00".into()),
+                overhead_fixed: Some("100.00".into()),
+                overhead_variable: Some("-10.00".into()), // NEGATIVE — must be rejected
+                normal_capacity_qty: Some("10".into()),
+            },
+        )
+        .await;
+
+        assert!(
+            matches!(res, Err(AppError::Validation(_))),
+            "negative overhead_variable must be rejected with Validation error, got: {res:?}"
+        );
     }
 }

@@ -63,7 +63,23 @@
       "backToList": "Back to list",
       "viewDetail": "Order detail",
 
-      "materialCostNote": "The cost capitalized in account 345 includes ONLY material costs (raw materials + consumables). Direct labor (641/421) and overhead (681) remain period expenses, recognized separately — per OMFP 1802/2014 art. 8."
+      "fieldLabourCost": "Direct labour (RON)",
+      "fieldOverheadCost": "Overhead (RON)",
+      "advancedAbsorption": "Advanced overhead absorption (IAS 2)",
+      "fieldOverheadFixed": "Fixed overhead (RON)",
+      "fieldOverheadVariable": "Variable overhead (RON)",
+      "fieldNormalCapacity": "Normal capacity (units)",
+      "unabsorbedPreview": "Unabsorbed fixed overhead (period expense, NOT in 345): {{amount}} RON",
+
+      "colLabourCost": "Labour",
+      "colOverheadAbsorbed": "Overhead absorbed",
+      "colOverheadUnabsorbed": "Overhead unabsorbed",
+      "colFullCost": "Full cost total",
+      "colFullUnitCost": "Full unit cost",
+      "unabsorbedIsExpense": "period expense, NOT in 345",
+
+      "materialCostNote": "The cost capitalized in account 345 includes ONLY material costs (raw materials + consumables). Direct labor (641/421) and overhead (681) remain period expenses, recognized separately — per OMFP 1802/2014 art. 8.",
+      "fullCostNote": "Full production cost capitalized in 345 = materials + direct labour + absorbed overhead (IAS 2 / OMFP 1802/2014 art. 8). Unabsorbed fixed overhead (below normal capacity) remains a period expense. Only the AMOUNT of D345=C711 changes — no extra D345=C641 lines."
     },
 
     "print": {

@@ -1,12 +1,13 @@
 /**
- * Producție / BOM (P2 Wave 5, OMFP 1802/2014 pct. 8).
+ * Producție / BOM (P2 Wave 5 + full-cost upgrade, OMFP 1802/2014 pct. 8, IAS 2).
  *
  * Monografie:
  *   Consum materie primă:       D 601 = C 301
  *   Consum material consumabil: D 602 = C 302
- *   Obținere produs finit:      D 345 = C 711
+ *   Obținere produs finit:      D 345 = C 711  (la FULL COST: materiale + manoperă + regie absorbită)
  *
- * Costul 345 = NUMAI cost materiale (manoperă/regie: cheltuieli ale perioadei).
+ * Costul 345 = materiale + manoperă directă + regie absorbită IAS 2.
+ * Regia fixă neabsorbită rămâne cheltuiala perioadei (NU în 345).
  *
  * Trei view-uri:
  *   list   — tab BOM + tab Ordine producție
@@ -203,7 +204,8 @@ function OrdersListTab({
                 <th>{t("productie.order.colGestiune")}</th>
                 <th className="text-right">{t("productie.order.colQty")}</th>
                 <th className="text-right">{t("productie.order.colCostTotal")}</th>
-                <th className="text-right">{t("productie.order.colUnitCost")}</th>
+                <th className="text-right">{t("productie.order.colFullCost")}</th>
+                <th className="text-right">{t("productie.order.colFullUnitCost")}</th>
                 <th></th>
               </tr>
             </thead>
@@ -216,7 +218,8 @@ function OrdersListTab({
                   <td>{gname(order.gestiuneId)}</td>
                   <td className="text-right">{fmt(order.qtyProduced)}</td>
                   <td className="text-right">{fmt2(order.totalMaterialCost)}</td>
-                  <td className="text-right">{fmt2(order.unitCost)}</td>
+                  <td className="text-right">{fmt2(order.fullCost)}</td>
+                  <td className="text-right">{fmt2(order.fullUnitCost)}</td>
                   <td className="text-right">
                     <button
                       onClick={() => onView(order)}
@@ -461,6 +464,13 @@ function ProduceForm({
   const [qtyProduced, setQtyProduced] = useState("");
   const [productionDate, setProductionDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState("");
+  // Full-cost fields
+  const [labourCost, setLabourCost] = useState("0");
+  const [overheadCost, setOverheadCost] = useState("0");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [overheadFixed, setOverheadFixed] = useState("");
+  const [overheadVariable, setOverheadVariable] = useState("");
+  const [normalCapacityQty, setNormalCapacityQty] = useState("");
 
   // Preview BOM lines pentru bomul selectat
   const { data: selectedBom } = useQuery({
@@ -482,9 +492,49 @@ function ProduceForm({
     onError: (e) => notify.error(formatError(e)),
   });
 
+  // Compute preview of full cost and unabsorbed overhead for UI display
+  const previewCost = (() => {
+    const mat = 0; // unknown until production runs (depends on FIFO/CMP valuation)
+    const labour = parseFloat(labourCost) || 0;
+    const ovhd = parseFloat(overheadCost) || 0;
+    const ovFixed = parseFloat(overheadFixed) || 0;
+    const ovVar = parseFloat(overheadVariable) || 0;
+    const normCap = parseFloat(normalCapacityQty) || 0;
+    const qty = parseFloat(qtyProduced) || 0;
+
+    let absorbed = ovhd;
+    let unabsorbed = 0;
+    if (showAdvanced && ovFixed > 0 && normCap > 0 && qty > 0) {
+      const ratio = Math.min(1, qty / normCap);
+      const varPart = ovVar || (ovhd - ovFixed);
+      absorbed = (ovVar >= 0 ? ovVar : 0) + round2_js(ovFixed * ratio);
+      unabsorbed = round2_js(ovFixed * (1 - ratio));
+      void varPart; // suppress unused
+    } else if (showAdvanced && (ovFixed > 0 || ovVar > 0)) {
+      absorbed = ovFixed + ovVar;
+      unabsorbed = 0;
+    }
+    return { labour, absorbed, unabsorbed, mat };
+  })();
+
+  function round2_js(n: number) {
+    return Math.round(n * 100) / 100;
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    produceMut.mutate({ bomId, gestiuneId, qtyProduced, productionDate, notes: notes || undefined });
+    produceMut.mutate({
+      bomId,
+      gestiuneId,
+      qtyProduced,
+      productionDate,
+      notes: notes || undefined,
+      labourCost: labourCost || "0",
+      overheadCost: overheadCost || "0",
+      overheadFixed: showAdvanced && overheadFixed ? overheadFixed : undefined,
+      overheadVariable: showAdvanced && overheadVariable ? overheadVariable : undefined,
+      normalCapacityQty: showAdvanced && normalCapacityQty ? normalCapacityQty : undefined,
+    });
   };
 
   return (
@@ -580,11 +630,94 @@ function ProduceForm({
             onChange={(e) => setNotes(e.target.value)}
           />
         </div>
+
+        {/* Manoperă directă */}
+        <div>
+          <label className="label text-sm">{t("productie.order.fieldLabourCost")}</label>
+          <input
+            className="input input-bordered w-44"
+            type="number"
+            min="0"
+            step="0.01"
+            value={labourCost}
+            onChange={(e) => setLabourCost(e.target.value)}
+          />
+        </div>
+
+        {/* Regie */}
+        <div>
+          <label className="label text-sm">{t("productie.order.fieldOverheadCost")}</label>
+          <input
+            className="input input-bordered w-44"
+            type="number"
+            min="0"
+            step="0.01"
+            value={overheadCost}
+            onChange={(e) => setOverheadCost(e.target.value)}
+          />
+        </div>
+
+        {/* Advanced: split fix/variabil + capacitate normală */}
+        <div>
+          <button
+            type="button"
+            className="text-xs text-primary hover:underline"
+            onClick={() => setShowAdvanced((v) => !v)}
+          >
+            {showAdvanced ? "▲ " : "▶ "}{t("productie.order.advancedAbsorption")}
+          </button>
+          {showAdvanced && (
+            <div className="mt-3 space-y-3 pl-3 border-l-2 border-muted">
+              <div>
+                <label className="label text-xs">{t("productie.order.fieldOverheadFixed")}</label>
+                <input
+                  className="input input-bordered w-44 text-sm"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0"
+                  value={overheadFixed}
+                  onChange={(e) => setOverheadFixed(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="label text-xs">{t("productie.order.fieldOverheadVariable")}</label>
+                <input
+                  className="input input-bordered w-44 text-sm"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0"
+                  value={overheadVariable}
+                  onChange={(e) => setOverheadVariable(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="label text-xs">{t("productie.order.fieldNormalCapacity")}</label>
+                <input
+                  className="input input-bordered w-44 text-sm"
+                  type="number"
+                  min="0"
+                  step="any"
+                  placeholder="ex: 100"
+                  value={normalCapacityQty}
+                  onChange={(e) => setNormalCapacityQty(e.target.value)}
+                />
+              </div>
+              {/* Preview regie fixă neabsorbită */}
+              {previewCost.unabsorbed > 0 && (
+                <p className="text-xs text-amber-600 bg-amber-50 rounded p-2">
+                  {t("productie.order.unabsorbedPreview", { amount: previewCost.unabsorbed.toFixed(2) })}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Notă cost materiale-only */}
+      {/* Notă cost complet */}
       <p className="text-xs text-muted-foreground bg-muted/30 rounded p-2">
-        {t("productie.order.materialCostNote")}
+        {t("productie.order.fullCostNote")}
       </p>
 
       <div className="flex gap-3">
@@ -765,14 +898,24 @@ th{background:#eee;text-align:center}
           <div><span className="text-muted-foreground">{t("productie.order.colProduct")}:</span> <strong>{pname(order.productId)}</strong></div>
           <div><span className="text-muted-foreground">{t("productie.order.colGestiune")}:</span> <strong>{gname(order.gestiuneId)}</strong></div>
           <div><span className="text-muted-foreground">{t("productie.order.colQty")}:</span> <strong>{fmt(order.qtyProduced)}</strong></div>
-          <div><span className="text-muted-foreground">{t("productie.order.colUnitCost")}:</span> <strong>{fmt2(order.unitCost)} RON</strong></div>
           <div><span className="text-muted-foreground">{t("productie.order.colCostTotal")}:</span> <strong>{fmt2(order.totalMaterialCost)} RON</strong></div>
+          <div><span className="text-muted-foreground">{t("productie.order.colLabourCost")}:</span> <strong>{fmt2(order.labourCost)} RON</strong></div>
+          <div><span className="text-muted-foreground">{t("productie.order.colOverheadAbsorbed")}:</span> <strong>{fmt2(order.overheadAbsorbed)} RON</strong></div>
+          {parseFloat(order.overheadUnabsorbed) > 0 && (
+            <div className="col-span-2">
+              <span className="text-amber-600 text-xs">{t("productie.order.colOverheadUnabsorbed")}:</span>{" "}
+              <strong className="text-amber-600">{fmt2(order.overheadUnabsorbed)} RON</strong>
+              <span className="text-xs text-muted-foreground ml-1">({t("productie.order.unabsorbedIsExpense")})</span>
+            </div>
+          )}
+          <div><span className="text-muted-foreground font-semibold">{t("productie.order.colFullCost")}:</span> <strong>{fmt2(order.fullCost)} RON</strong></div>
+          <div><span className="text-muted-foreground font-semibold">{t("productie.order.colFullUnitCost")}:</span> <strong>{fmt2(order.fullUnitCost)} RON</strong></div>
         </div>
         {order.notes && (
           <div className="text-muted-foreground text-xs">{order.notes}</div>
         )}
         <p className="text-xs text-muted-foreground bg-muted/30 rounded p-2 mt-2">
-          {t("productie.order.materialCostNote")}
+          {t("productie.order.fullCostNote")}
         </p>
       </div>
 

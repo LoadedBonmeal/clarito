@@ -1943,6 +1943,16 @@ export interface ProductieOrder {
   productionDate: string;
   totalMaterialCost: string;
   unitCost: string;
+  // Full-cost fields (migration 0078)
+  labourCost: string;
+  overheadCost: string;
+  overheadFixed: string | null;
+  overheadVariable: string | null;
+  normalCapacityQty: string | null;
+  overheadAbsorbed: string;
+  overheadUnabsorbed: string;
+  fullCost: string;
+  fullUnitCost: string;
   status: string;
   notes: string | null;
   createdAt: number;
@@ -1954,6 +1964,16 @@ export interface ProduceInput {
   qtyProduced: string;
   productionDate: string;
   notes?: string;
+  /** Direct labour cost for this order (641/421). Default 0. */
+  labourCost?: string;
+  /** Total overhead cost (if no fixed/variable split). Default 0. */
+  overheadCost?: string;
+  /** Fixed overhead component (optional, for IAS 2 absorption). */
+  overheadFixed?: string;
+  /** Variable overhead component (optional). */
+  overheadVariable?: string;
+  /** Normal capacity in units (optional, required for fixed overhead IAS 2 absorption). */
+  normalCapacityQty?: string;
 }
 
 // ─── Fiscal Receipts / Raport Z ───────────────────────────────────────────────
