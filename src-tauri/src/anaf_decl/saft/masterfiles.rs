@@ -56,8 +56,8 @@ pub enum TaxDirection {
 // Codes extracted from Ro_SAFT_SchemaDefCod_16.02.2026.xlsx:
 //
 // LIVRĂRI (Sales) sheet — primary codes for regular taxable supplies:
-//   19%  → 310309  (L9)
-//   21%  → 310344  (L9, active from 01.08.2025)
+//   21%  → 310344  (L9, standard rate from 01.08.2025 — current)
+//   19%  → 310309  (L9, standard rate until 31.07.2025 — historical)
 //   9%   → 310310  (L10)
 //   5%   → 310311  (L11)
 //   11%  → 310351  (L, dedicated 11% sales code, Activ 01.08.2025)
@@ -69,8 +69,8 @@ pub enum TaxDirection {
 //   0% fallback → 310324
 //
 // ACHIZITII DED 100% sheet — domestic purchases (not import, not simplification):
-//   19%  → 301101  (A26_100)
-//   21%  → 301104  (A26_100, active from 01.08.2025)
+//   21%  → 301104  (A26_100, standard rate from 01.08.2025 — current)
+//   19%  → 301101  (A26_100, standard rate until 31.07.2025 — historical)
 //   9%   → 301102  (A27_100)
 //   5%   → 301103  (A28_100)
 //   11%  → 301105  (A27_100, active from 01.08.2025)
@@ -94,8 +94,11 @@ pub fn saft_tax_code_dir(category: &str, rate: Decimal, dir: TaxDirection) -> &'
                     // 11% standard sales — dedicated code 310351 (Activ 01.08.2025);
                     // NOT 310310 (that is the 9% code) — would misreport the rate.
                     Some(11) => "310351",
-                    _ if rate > Decimal::ZERO => "310309", // fallback to standard
-                    _ => "310324",                         // 0% → out of scope
+                    // Unknown positive rate: fall back to the current standard (21%)
+                    // code 310344.  Historically 310309 was used (19%), but 21% is
+                    // in-force from 2025-08-01 and is the correct "standard" bucket.
+                    _ if rate > Decimal::ZERO => "310344",
+                    _ => "310324", // 0% → out of scope
                 }
             }
             "AE" => "310312", // reverse-charge
@@ -112,7 +115,8 @@ pub fn saft_tax_code_dir(category: &str, rate: Decimal, dir: TaxDirection) -> &'
                     Some(19) => "310309",
                     Some(9) => "310310",
                     Some(5) => "310311",
-                    _ => "310309",
+                    // Unknown positive rate: fall back to current standard (21%)
+                    _ => "310344",
                 }
             }
         },
@@ -125,12 +129,16 @@ pub fn saft_tax_code_dir(category: &str, rate: Decimal, dir: TaxDirection) -> &'
                     Some(9) => "301102",
                     Some(5) => "301103",
                     Some(11) => "301105",
-                    _ if rate > Decimal::ZERO => "301101", // fallback to 19% code
-                    _ => "308302",                         // 0% → exempt/non-taxable
+                    // Unknown positive rate: fall back to current standard (21%) code 301104.
+                    // Historically 301101 (19%) was used, but 21% is in-force from 2025-08-01.
+                    _ if rate > Decimal::ZERO => "301104",
+                    _ => "308302", // 0% → exempt/non-taxable
                 }
             }
-            "AE" => "300901", // simplification measures @ 19% (closest for generic reverse-charge)
-            "K" => "300201",  // intra-comm acquisition @ 19%
+            // simplification measures — closest generic reverse-charge code (21% era)
+            "AE" => "300901",
+            // intra-comm acquisition (closest generic code)
+            "K" => "300201",
             "Z" | "E" | "O" | "G" => "308302", // exempt or non-taxable acquisitions
             _ => {
                 let r = rate.to_i64();
@@ -139,7 +147,8 @@ pub fn saft_tax_code_dir(category: &str, rate: Decimal, dir: TaxDirection) -> &'
                     Some(19) => "301101",
                     Some(9) => "301102",
                     Some(5) => "301103",
-                    _ => "301101",
+                    // Unknown positive rate: fall back to current standard (21%)
+                    _ => "301104",
                 }
             }
         },
@@ -1156,6 +1165,53 @@ mod tests {
         assert_eq!(
             saft_tax_code_dir("Z", Decimal::ZERO, TaxDirection::Purchase),
             "308302"
+        );
+    }
+
+    // ── FIX 4: SAF-T standard fallback → 21% codes ────────────────────────────
+
+    /// An unmapped positive rate for 'S'/'AA' (sales) must fall back to 310344 (21%), not 310309 (19%).
+    #[test]
+    fn saft_standard_sales_unmapped_positive_rate_falls_back_to_21_code() {
+        // Rate 15% is not in the explicit match — should hit the `_ if rate > ZERO` fallback.
+        assert_eq!(
+            saft_tax_code_dir("S", Decimal::from(15), TaxDirection::Sales),
+            "310344",
+            "Unmapped positive rate for S/Sales must fall back to 310344 (21% current standard)"
+        );
+        // Same for unknown category with positive rate
+        assert_eq!(
+            saft_tax_code_dir("UNKNOWN", Decimal::from(15), TaxDirection::Sales),
+            "310344",
+            "Unknown category with positive rate must fall back to 310344 (21%)"
+        );
+        // Explicit 19% mapping must still return 310309 (historical, not the fallback)
+        assert_eq!(
+            saft_tax_code("S", Decimal::from(19)),
+            "310309",
+            "Explicit 19% sales must still map to 310309"
+        );
+    }
+
+    /// An unmapped positive rate for 'S'/'AA' (purchase) must fall back to 301104 (21%), not 301101 (19%).
+    #[test]
+    fn saft_standard_purchase_unmapped_positive_rate_falls_back_to_21_code() {
+        assert_eq!(
+            saft_tax_code_dir("S", Decimal::from(15), TaxDirection::Purchase),
+            "301104",
+            "Unmapped positive rate for S/Purchase must fall back to 301104 (21% current standard)"
+        );
+        // Unknown category with positive rate
+        assert_eq!(
+            saft_tax_code_dir("UNKNOWN", Decimal::from(15), TaxDirection::Purchase),
+            "301104",
+            "Unknown category with positive rate must fall back to 301104 (21%)"
+        );
+        // Explicit 19% mapping must still return 301101 (historical)
+        assert_eq!(
+            saft_tax_code_dir("S", Decimal::from(19), TaxDirection::Purchase),
+            "301101",
+            "Explicit 19% purchase must still map to 301101"
         );
     }
 

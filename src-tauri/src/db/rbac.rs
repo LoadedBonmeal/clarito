@@ -205,7 +205,11 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         // ── Delete ────────────────────────────────────────────────────────
         // export_backup is listed here (not in the read-prefix branch below)
         // because it writes a backup archive — not a safe read for Viewer.
-        "delete_company"
+        // export_all_my_data dumps the ENTIRE data.db (all companies + every
+        // user's Argon2 password_hash) to a ZIP — must NOT be freed by the
+        // `export_` read-prefix; gate it identically to export_backup (Delete).
+        "export_all_my_data"
+        | "delete_company"
         | "delete_contact"
         | "delete_product"
         | "delete_product_group"
@@ -909,6 +913,38 @@ mod tests {
             authorize("preview_saft_official_xml", true, Some(Role::Contabil)),
             Decision::Allow,
             "Contabil may preview/regenerate the SAF-T"
+        );
+    }
+
+    // ── FIX 1: export_all_my_data must require Delete (not freed by `export_` prefix) ──
+
+    /// export_all_my_data dumps the entire DB incl. password_hashes → must require Delete.
+    #[test]
+    fn export_all_my_data_requires_delete() {
+        assert_eq!(
+            required_perm("export_all_my_data"),
+            Some(Perm::Delete),
+            "export_all_my_data must require Delete (not freed by `export_` read-prefix)"
+        );
+        assert_eq!(
+            authorize("export_all_my_data", true, Some(Role::Viewer)),
+            Decision::Forbidden,
+            "Viewer must be Forbidden on export_all_my_data"
+        );
+        assert_eq!(
+            authorize("export_all_my_data", true, Some(Role::Operator)),
+            Decision::Forbidden,
+            "Operator must be Forbidden on export_all_my_data (no Delete perm)"
+        );
+        assert_eq!(
+            authorize("export_all_my_data", true, Some(Role::Contabil)),
+            Decision::Allow,
+            "Contabil must be allowed to call export_all_my_data"
+        );
+        assert_eq!(
+            authorize("export_all_my_data", true, Some(Role::Admin)),
+            Decision::Allow,
+            "Admin must be allowed to call export_all_my_data"
         );
     }
 

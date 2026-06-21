@@ -118,7 +118,7 @@ fn validate_scadenta(kind: &str, scadenta: Option<&str>) -> AppResult<()> {
     match kind {
         "CEC" if scadenta.map(|s| !s.is_empty()).unwrap_or(false) => {
             return Err(AppError::Validation(
-                "CEC-ul este plătibil la vedere (Legea 58/1934 art.32) — nu poate avea scadentă."
+                "CEC-ul este plătibil la vedere (Legea 59/1934 art.29) — nu poate avea scadentă."
                     .to_string(),
             ));
         }
@@ -724,7 +724,7 @@ mod tests {
 
     #[test]
     fn cec_with_scadenta_rejected() {
-        // Legea 58/1934 art.32: CEC = plătibil la vedere
+        // Legea 59/1934 art.29: CEC = plătibil la vedere (FIX 5)
         assert!(validate_scadenta("CEC", Some("2026-09-01")).is_err());
         assert!(validate_scadenta("CEC", None).is_ok());
         assert!(validate_scadenta("CEC", Some("")).is_ok()); // empty string = absent

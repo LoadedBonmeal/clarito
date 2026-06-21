@@ -456,23 +456,40 @@ pub fn tip_partener_from_cui(raw_cui: &str) -> i64 {
     }
 }
 
-/// Parse a normalized vat_rate string (integer-percent, e.g. "19") to a D394
+/// Return the in-force standard VAT rate for a given reporting period.
+///
+/// Romania changed the standard rate from 19% to 21% effective 2025-08-01
+/// (OUG 138/2024 / Legea 296/2023 modificată). Historical periods retain 19%.
+pub fn standard_cota_for(period: NaiveDate) -> i64 {
+    let cutover = NaiveDate::from_ymd_opt(2025, 8, 1).expect("static date");
+    if period >= cutover {
+        21
+    } else {
+        19
+    }
+}
+
+/// Parse a normalized vat_rate string (integer-percent, e.g. "21") to a D394
 /// `cota` integer in the enum {0, 5, 9, 11, 19, 20, 21, 24}.
 ///
-/// If the parsed value is not in the enum, emits a warning and returns 19 so
-/// that the XML remains schema-valid with a reasonable default.
-fn parse_cota_from_rate(vat_rate: &str) -> i64 {
-    let pct: i64 = vat_rate.trim().parse().unwrap_or(19);
+/// If the parsed value is not in the enum, emits a warning and returns the
+/// in-force standard rate for `period` (21% from 2025-08-01, 19% for earlier
+/// periods) so that the XML remains schema-valid with a correct default.
+fn parse_cota_from_rate(vat_rate: &str, period: NaiveDate) -> i64 {
+    let std_cota = standard_cota_for(period);
+    let pct: i64 = vat_rate.trim().parse().unwrap_or(std_cota);
     match pct {
         0 | 5 | 9 | 11 | 19 | 20 | 21 | 24 => pct,
         other => {
             tracing::warn!(
                 "D394: vat_rate '{}' ({}) is not in the cota enum {{0,5,9,11,19,20,21,24}}; \
-                 falling back to 19",
+                 falling back to {} (standard rate for period {})",
                 vat_rate,
-                other
+                other,
+                std_cota,
+                period
             );
-            19
+            std_cota
         }
     }
 }
@@ -487,12 +504,16 @@ fn parse_cota_from_rate(vat_rate: &str) -> i64 {
 ///   R215.3: tp=3/4 → tip∈{L,LS,C}
 ///   R217.1: cota=0 → tip∈{LS,AS,N,V}
 ///   R217.2: tip∈{LS,AS,N,V} → cota=0
-fn map_sales_partner(partner: &D394Partner) -> (&'static str, i64, bool) {
+fn map_sales_partner(partner: &D394Partner, period: NaiveDate) -> (&'static str, i64, bool) {
     match partner.vat_category.as_str() {
         "S" | "SR" => {
-            let cota = parse_cota_from_rate(&partner.vat_rate);
+            let cota = parse_cota_from_rate(&partner.vat_rate, period);
             // cota=0 for S would violate R217.2 for L — ensure non-zero
-            let cota = if cota == 0 { 19 } else { cota };
+            let cota = if cota == 0 {
+                standard_cota_for(period)
+            } else {
+                cota
+            };
             ("L", cota, true)
         }
         "AE" => {
@@ -523,11 +544,16 @@ fn map_sales_partner(partner: &D394Partner) -> (&'static str, i64, bool) {
 fn map_purchase_partner(
     partner: &D394Partner,
     tip_partener: i64,
+    period: NaiveDate,
 ) -> Option<(&'static str, i64, bool)> {
     Some(match partner.vat_category.as_str() {
         "S" | "SR" => {
-            let cota = parse_cota_from_rate(&partner.vat_rate);
-            let cota = if cota == 0 { 19 } else { cota };
+            let cota = parse_cota_from_rate(&partner.vat_rate, period);
+            let cota = if cota == 0 {
+                standard_cota_for(period)
+            } else {
+                cota
+            };
             match tip_partener {
                 1 => ("A", cota, true),
                 // VAT-01: a deductible taxable purchase requires a registered (tp=1) supplier — drop.
@@ -536,8 +562,12 @@ fn map_purchase_partner(
         }
         "AE" => {
             // Taxare inversă — C for all; cota MUST be ≠0 (R217.2)
-            let cota = parse_cota_from_rate(&partner.vat_rate);
-            let cota = if cota == 0 { 19 } else { cota }; // must be non-zero
+            let cota = parse_cota_from_rate(&partner.vat_rate, period);
+            let cota = if cota == 0 {
+                standard_cota_for(period)
+            } else {
+                cota
+            }; // must be non-zero
             match tip_partener {
                 1 => ("C", cota, true), // self-assessed, needs op11
                 // tp=3/4 → C allowed (R215.3)
@@ -548,8 +578,12 @@ fn map_purchase_partner(
         }
         "K" => {
             // Intra-EU acquisition
-            let cota = parse_cota_from_rate(&partner.vat_rate);
-            let cota = if cota == 0 { 19 } else { cota };
+            let cota = parse_cota_from_rate(&partner.vat_rate, period);
+            let cota = if cota == 0 {
+                standard_cota_for(period)
+            } else {
+                cota
+            };
             match tip_partener {
                 1 => ("AI", cota, true), // AI only valid for tp=1
                 // tp=3/4 → use C (reverse-charge allowed for tp=3/4 per R215.3)
@@ -616,7 +650,7 @@ pub fn build_sections(
     // Sales (livrări) → various tip types
     for partner in &report.partners {
         let tip_p = tip_partener_from_cui(&partner.partner_cui);
-        let (tip, cota, emit_tva) = map_sales_partner(partner);
+        let (tip, cota, emit_tva) = map_sales_partner(partner, period);
         let cui_digits = strip_ro(&partner.partner_cui);
         let baza = round_to_lei(parse_dec(&partner.base));
         let tva_val = round_to_lei(parse_dec(&partner.vat));
@@ -667,7 +701,7 @@ pub fn build_sections(
         let tip_p = tip_partener_from_cui(&partner.partner_cui);
         // VAT-01: a taxable purchase from a partner that isn't a valid RO VAT payer (tip_partener 2/3/4)
         // returns None — exclude it (it was wrongly emitted as livrare "L", inflating collected VAT).
-        let Some((tip, cota, emit_tva)) = map_purchase_partner(partner, tip_p) else {
+        let Some((tip, cota, emit_tva)) = map_purchase_partner(partner, tip_p, period) else {
             tracing::warn!(
                 tip_partener = tip_p,
                 cui = %partner.partner_cui,
@@ -1365,6 +1399,7 @@ mod tests {
     /// to the correct purchase code ("A"/"C"/"AI").
     #[test]
     fn vat01_taxable_purchase_from_nonvat_partner_is_dropped() {
+        let period = NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
         let mk = |cat: &str, rate: &str, cui: &str| D394Partner {
             partner_cui: cui.to_string(),
             partner_name: "Supplier".to_string(),
@@ -1377,36 +1412,106 @@ mod tests {
         };
         // Valid RO VAT payer (tp=1) → correct purchase codes.
         assert_eq!(
-            map_purchase_partner(&mk("S", "21", "RO12345674"), 1),
+            map_purchase_partner(&mk("S", "21", "RO12345674"), 1, period),
             Some(("A", 21, true))
         );
         assert_eq!(
-            map_purchase_partner(&mk("AE", "21", "RO12345674"), 1).map(|t| t.0),
+            map_purchase_partner(&mk("AE", "21", "RO12345674"), 1, period).map(|t| t.0),
             Some("C")
         );
         // tip_partener 2/3/4 taxable purchase → DROPPED (None), no longer mislabeled "L".
         for tp in [2, 3, 4] {
             assert_eq!(
-                map_purchase_partner(&mk("S", "21", "INVALID"), tp),
+                map_purchase_partner(&mk("S", "21", "INVALID"), tp, period),
                 None,
                 "S taxable purchase from tp={tp} must be dropped, not emitted as L"
             );
         }
-        assert_eq!(map_purchase_partner(&mk("AE", "21", "X"), 2), None);
-        assert_eq!(map_purchase_partner(&mk("K", "21", "X"), 2), None);
+        assert_eq!(map_purchase_partner(&mk("AE", "21", "X"), 2, period), None);
+        assert_eq!(map_purchase_partner(&mk("K", "21", "X"), 2, period), None);
         // AE/K from tp=3/4 stay reverse-charge "C" (not contaminating) — unchanged.
         assert_eq!(
-            map_purchase_partner(&mk("AE", "21", "X"), 4).map(|t| t.0),
+            map_purchase_partner(&mk("AE", "21", "X"), 4, period).map(|t| t.0),
             Some("C")
         );
         assert_eq!(
-            map_purchase_partner(&mk("K", "21", "X"), 3).map(|t| t.0),
+            map_purchase_partner(&mk("K", "21", "X"), 3, period).map(|t| t.0),
             Some("C")
         );
         // Exempt purchases (cota 0) are unaffected — they don't contaminate the VAT summaries.
         assert_eq!(
-            map_purchase_partner(&mk("E", "0", "X"), 2).map(|t| t.0),
+            map_purchase_partner(&mk("E", "0", "X"), 2, period).map(|t| t.0),
             Some("LS")
+        );
+    }
+
+    // ── FIX 3: D394 standard-cota fallback is period-aware ────────────────────
+
+    /// standard_cota_for: 19% before 2025-08-01, 21% from 2025-08-01 onward.
+    #[test]
+    fn standard_cota_for_period_aware() {
+        // Cutover date: exactly 2025-08-01 → 21
+        assert_eq!(
+            standard_cota_for(NaiveDate::from_ymd_opt(2025, 8, 1).unwrap()),
+            21,
+            "Standard rate from 2025-08-01 must be 21"
+        );
+        // Day before cutover → 19
+        assert_eq!(
+            standard_cota_for(NaiveDate::from_ymd_opt(2025, 7, 31).unwrap()),
+            19,
+            "Standard rate before 2025-08-01 must be 19"
+        );
+        // 2026 period → 21
+        assert_eq!(
+            standard_cota_for(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
+            21
+        );
+        // Historical 2024 → 19
+        assert_eq!(
+            standard_cota_for(NaiveDate::from_ymd_opt(2024, 12, 31).unwrap()),
+            19
+        );
+    }
+
+    /// A malformed standard line (unmapped rate) in a 2026 period must fall back to 21, not 19.
+    #[test]
+    fn d394_standard_fallback_21_for_2026_period() {
+        // Use an unmapped rate (e.g. "15") that is NOT in {0,5,9,11,19,20,21,24}
+        // so that parse_cota_from_rate triggers the fallback branch.
+        // Valid CUI: 98765438
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let report = make_report(
+            vec![("98765438", "S", "15", 1, "1000.00", "150.00")],
+            vec![],
+        );
+        let sub = make_submission();
+        let company = make_company();
+
+        let doc = build_sections(&report, &sub, &company, period).unwrap();
+        let op = &doc.op1_list[0];
+        assert_eq!(
+            op.cota, 21,
+            "Malformed standard cota in 2026 period must fall back to 21 (not 19)"
+        );
+    }
+
+    /// A malformed standard line in a pre-2025-08-01 period must still fall back to 19.
+    #[test]
+    fn d394_standard_fallback_19_for_historical_period() {
+        let period = NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
+        let report = make_report(
+            vec![("98765438", "S", "15", 1, "1000.00", "150.00")],
+            vec![],
+        );
+        let sub = make_submission();
+        let company = make_company();
+
+        let doc = build_sections(&report, &sub, &company, period).unwrap();
+        let op = &doc.op1_list[0];
+        assert_eq!(
+            op.cota, 19,
+            "Malformed standard cota in pre-Aug-2025 period must fall back to 19"
         );
     }
 

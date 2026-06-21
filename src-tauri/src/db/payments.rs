@@ -130,6 +130,11 @@ pub async fn list_for_invoice(
 }
 
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
+    // Delete the payment row first so we can distinguish NotFound (0 rows) from
+    // a successful delete.  Then remove the GL journal for this payment (gl_entry
+    // cascades via its FK on gl_journal.id — no separate DELETE needed).
+    // Without this, a deleted payment leaves a permanent orphan PAYMENT journal
+    // and the receivable stays "cleared" in the ledger despite no payment existing.
     let rows = sqlx::query("DELETE FROM payments WHERE id = ?1 AND company_id = ?2")
         .bind(id)
         .bind(company_id)
@@ -140,6 +145,18 @@ pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<
     if rows == 0 {
         return Err(AppError::NotFound);
     }
+
+    // Remove the GL journal posted by post_payment for this payment id.
+    // gl_entry rows cascade-delete when gl_journal rows are deleted (FK ON DELETE CASCADE).
+    sqlx::query(
+        "DELETE FROM gl_journal \
+         WHERE company_id = ?1 AND source_type = 'PAYMENT' AND source_id = ?2",
+    )
+    .bind(company_id)
+    .bind(id)
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 
@@ -627,6 +644,71 @@ mod tests {
 
         assert_eq!(get("inv1").payment_status, "PAID");
         assert_eq!(get("inv2").payment_status, "PARTIAL");
+    }
+
+    // ─── Test GL-cleanup: delete_payment removes its gl_journal (FIX 2) ─────
+
+    #[tokio::test]
+    async fn delete_payment_cleans_gl_journal() {
+        let pool = pool().await;
+        seed_invoice(&pool, "inv1", "co", "100.00", "RON").await;
+
+        // Add a payment.
+        let payment = create(
+            &pool,
+            CreatePaymentInput {
+                invoice_id: "inv1".into(),
+                company_id: "co".into(),
+                amount: "100".into(),
+                currency: None,
+                paid_at: "2026-01-10".into(),
+                method: None,
+                reference: None,
+                notes: None,
+                exchange_rate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let pid = payment.id.clone();
+
+        // Simulate the GL journal that post_payment would create for this payment.
+        sqlx::query(
+            "INSERT INTO gl_journal \
+             (id, company_id, journal_id, journal_type, transaction_id, transaction_date, \
+              source_type, source_id) \
+             VALUES ('jrn1', 'co', 'BANCA', 'PAYMENT', 'jrn1', '2026-01-10', 'PAYMENT', ?1)",
+        )
+        .bind(&pid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Verify the journal exists before delete.
+        let before: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM gl_journal \
+             WHERE company_id='co' AND source_type='PAYMENT' AND source_id=?1",
+        )
+        .bind(&pid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(before, 1, "GL journal must exist before delete");
+
+        // Delete the payment.
+        delete(&pool, &pid, "co").await.unwrap();
+
+        // The gl_journal row must be gone after delete.
+        let after: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM gl_journal \
+             WHERE company_id='co' AND source_type='PAYMENT' AND source_id=?1",
+        )
+        .bind(&pid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(after, 0, "GL journal must be deleted with the payment");
     }
 
     // ─── Test 5: corrupted amount does NOT panic — treated as 0 ────────────

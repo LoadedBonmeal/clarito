@@ -156,6 +156,20 @@ pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<
     if rows == 0 {
         return Err(AppError::NotFound);
     }
+
+    // Remove the GL journal posted by post_received_payment for this received payment id.
+    // gl_entry rows cascade-delete when gl_journal rows are deleted (FK ON DELETE CASCADE).
+    // Without this, a deleted received payment leaves a permanent orphan RECEIVED_PAYMENT
+    // journal and the payable stays "cleared" in the ledger despite no payment existing.
+    sqlx::query(
+        "DELETE FROM gl_journal \
+         WHERE company_id = ?1 AND source_type = 'RECEIVED_PAYMENT' AND source_id = ?2",
+    )
+    .bind(company_id)
+    .bind(id)
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 
@@ -306,5 +320,57 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    // ── FIX 2: delete_received_payment cleans its GL journal ─────────────────
+
+    #[tokio::test]
+    async fn delete_received_payment_cleans_gl_journal() {
+        let pool = pool().await;
+        seed(&pool).await;
+
+        let p = create(&pool, input("500", "2026-03-20")).await.unwrap();
+        let pid = p.id.clone();
+
+        // Simulate the GL journal that post_received_payment would create.
+        sqlx::query(
+            "INSERT INTO gl_journal \
+             (id, company_id, journal_id, journal_type, transaction_id, transaction_date, \
+              source_type, source_id) \
+             VALUES ('jrn_rp1', 'co', 'BANCA', 'RECEIVED_PAYMENT', 'jrn_rp1', '2026-03-20', \
+                     'RECEIVED_PAYMENT', ?1)",
+        )
+        .bind(&pid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Verify the journal exists before delete.
+        let before: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM gl_journal \
+             WHERE company_id='co' AND source_type='RECEIVED_PAYMENT' AND source_id=?1",
+        )
+        .bind(&pid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(before, 1, "GL journal must exist before delete");
+
+        // Delete the received payment.
+        delete(&pool, &pid, "co").await.unwrap();
+
+        // The gl_journal row must be gone.
+        let after: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM gl_journal \
+             WHERE company_id='co' AND source_type='RECEIVED_PAYMENT' AND source_id=?1",
+        )
+        .bind(&pid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            after, 0,
+            "GL journal must be deleted with the received payment"
+        );
     }
 }
