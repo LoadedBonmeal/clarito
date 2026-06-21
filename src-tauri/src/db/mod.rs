@@ -34,6 +34,7 @@ pub mod inventory;
 pub mod nir;
 pub mod payments;
 pub mod payroll;
+pub mod payroll_config;
 pub mod productie;
 pub mod products;
 pub mod receipts;

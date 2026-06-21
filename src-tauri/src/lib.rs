@@ -542,6 +542,10 @@ pub fn run() {
             commands::payroll::create_medical_leave,
             commands::payroll::delete_medical_leave,
             commands::payroll::run_payroll,
+            // P2 Wave 7: payroll config (GL account map + diurnă)
+            commands::payroll_config::get_payroll_config_cmd,
+            commands::payroll_config::set_payroll_config_cmd,
+            commands::payroll_config::reset_payroll_config_cmd,
             commands::payroll::export_d112_xml,
             commands::payroll::preview_d112_xml,
             commands::gl::close_period,

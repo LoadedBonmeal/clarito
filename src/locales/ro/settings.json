@@ -431,6 +431,56 @@
       "gdprExportSaveTitle": "Alegeți locul pentru exportul datelor dvs.",
       "gdprRetentionAck": "Confirmați că ați exportat/arhivat documentele și vă asumați răspunderea pentru respectarea termenului legal de păstrare?",
       "gdprRetentionTitle": "Termen legal de păstrare (L82/1991)"
+    },
+    "payrollConfig": {
+      "title": "Configurare salarizare",
+      "subtitle": "Conturile GL utilizate la înregistrarea statelor de salarii. Valorile implicite sunt conforme cu OMFP 1802/2014. Modificați doar dacă folosiți analitice.",
+      "accountMap": {
+        "title": "Hartă conturi GL",
+        "cheltuieliSalarii": "Cheltuieli salarii",
+        "salariiDatorate": "Salarii datorate",
+        "cas": "CAS reținut (angajat)",
+        "cass": "CASS reținut (angajat)",
+        "impozit": "Impozit pe venit reținut",
+        "cheltuieliCam": "Cheltuieli CAM (angajator)",
+        "cam": "CAM datorată",
+        "concedii": "CCI datorată (4373)",
+        "cheltuieliConcedii": "Cheltuieli CCI/indemnizații (6458)",
+        "netCasa": "Numerar casierie (plată net)",
+        "netBanca": "Bancă (plată net)"
+      },
+      "diurna": {
+        "title": "Diurnă",
+        "subtitle": "CF art. 76 alin. (2) lit. k) + art. 142 lit. g). Plafon neimpozabil = 2,5 × diurnă internă.",
+        "interna": "Diurnă internă (lei/zi)",
+        "plafonNeimpozabil": "Plafon neimpozabil (lei/zi)",
+        "cazare": "Cazare (lei/noapte)"
+      },
+      "rates2026": {
+        "title": "Rate și plafoane 2026",
+        "note": "Stabilite legal (Cod fiscal, OUG 89/2025, HG 146/2026); actualizate prin program.",
+        "cas": "CAS (pensie, salariat)",
+        "cass": "CASS (sănătate, salariat)",
+        "impozit": "Impozit pe venit",
+        "cam": "CAM (asigurătorie muncă, angajator)",
+        "cci": "CCI (concedii, angajator)",
+        "salariuMinimH1": "Salariu minim sem. I 2026",
+        "salariuMinimH2": "Salariu minim sem. II 2026",
+        "carveOutH1": "Sumă netaxabilă sem. I",
+        "carveOutH2": "Sumă netaxabilă sem. II",
+        "plafonScutireH1": "Plafon brut scutire sem. I",
+        "plafonScutireH2": "Plafon brut scutire sem. II",
+        "deducere": "Deducere personală max.",
+        "deducereFormula": "salariu minim + 2.000 lei"
+      },
+      "override": "Personalizat",
+      "save": "Salvează",
+      "saving": "Se salvează…",
+      "saved": "Configurație salvată.",
+      "saveError": "Eroare la salvarea configurației.",
+      "reset": "Resetează la implicit",
+      "resetDone": "Configurație resetată la valorile implicite.",
+      "resetError": "Eroare la resetare."
     }
   }
 }

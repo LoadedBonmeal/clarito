@@ -429,6 +429,56 @@
       "gdprExportSaveTitle": "Choose where to export your data.",
       "gdprRetentionAck": "Do you confirm that you exported/archived the documents and accept responsibility for complying with the legal retention period?",
       "gdprRetentionTitle": "Legal retention period (L82/1991)"
+    },
+    "payrollConfig": {
+      "title": "Payroll configuration",
+      "subtitle": "GL accounts used when posting payroll entries. Defaults are compliant with OMFP 1802/2014. Only change if you use analytics.",
+      "accountMap": {
+        "title": "GL account map",
+        "cheltuieliSalarii": "Salary expense",
+        "salariiDatorate": "Salaries payable",
+        "cas": "CAS withheld (employee)",
+        "cass": "CASS withheld (employee)",
+        "impozit": "Income tax withheld",
+        "cheltuieliCam": "CAM expense (employer)",
+        "cam": "CAM payable",
+        "concedii": "Leave contribution payable (4373)",
+        "cheltuieliConcedii": "Leave/indemnity expense (6458)",
+        "netCasa": "Cash (net pay)",
+        "netBanca": "Bank (net pay)"
+      },
+      "diurna": {
+        "title": "Per-diem allowances",
+        "subtitle": "Tax Code art. 76(2)(k) + art. 142(g). Non-taxable ceiling = 2.5 × daily rate.",
+        "interna": "Domestic daily rate (RON/day)",
+        "plafonNeimpozabil": "Non-taxable ceiling (RON/day)",
+        "cazare": "Accommodation (RON/night)"
+      },
+      "rates2026": {
+        "title": "2026 rates & ceilings",
+        "note": "Set by law (Tax Code, EGO 89/2025, GD 146/2026); updated via software.",
+        "cas": "CAS (pension, employee)",
+        "cass": "CASS (health, employee)",
+        "impozit": "Income tax",
+        "cam": "CAM (work insurance, employer)",
+        "cci": "CCI (leave contribution, employer)",
+        "salariuMinimH1": "Minimum wage H1 2026",
+        "salariuMinimH2": "Minimum wage H2 2026",
+        "carveOutH1": "Non-taxable carve-out H1",
+        "carveOutH2": "Non-taxable carve-out H2",
+        "plafonScutireH1": "Gross exemption ceiling H1",
+        "plafonScutireH2": "Gross exemption ceiling H2",
+        "deducere": "Personal deduction max.",
+        "deducereFormula": "minimum wage + 2,000 RON"
+      },
+      "override": "Custom",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Configuration saved.",
+      "saveError": "Error saving configuration.",
+      "reset": "Reset to defaults",
+      "resetDone": "Configuration reset to defaults.",
+      "resetError": "Error resetting configuration."
     }
   }
 }

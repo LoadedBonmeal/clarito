@@ -3597,6 +3597,7 @@ pub async fn post_payroll(
         cass_diff,
         indemn,
     } = totals;
+    let cfg = crate::db::payroll_config::get_payroll_config(pool, company_id).await?;
     let source_id = format!("{period_from}_{period_to}");
     // Net total = net salariu lucrat + net indemnizație.
     let net = (gross + indemn.employer + indemn.fnuass)
@@ -3646,42 +3647,57 @@ pub async fn post_payroll(
     };
     // Salariul lucrat: D 641 / C 421 (brut), apoi rețineri D 421 / C 4315/4316/444.
     if !gross.is_zero() {
-        add(&mut entries, "641", gross, Decimal::ZERO); // cheltuieli salarii
-        add(&mut entries, "421", Decimal::ZERO, gross); // salarii datorate
+        add(&mut entries, &cfg.cheltuieli_salarii, gross, Decimal::ZERO); // cheltuieli salarii
+        add(&mut entries, &cfg.salarii_datorate, Decimal::ZERO, gross); // salarii datorate
         let withholding = cas + cass + impozit;
         if !withholding.is_zero() {
-            add(&mut entries, "421", withholding, Decimal::ZERO);
+            add(
+                &mut entries,
+                &cfg.salarii_datorate,
+                withholding,
+                Decimal::ZERO,
+            );
         }
         if !cas.is_zero() {
-            add(&mut entries, "4315", Decimal::ZERO, cas);
+            add(&mut entries, &cfg.cas, Decimal::ZERO, cas);
         }
         if !cass.is_zero() {
-            add(&mut entries, "4316", Decimal::ZERO, cass);
+            add(&mut entries, &cfg.cass, Decimal::ZERO, cass);
         }
         if !impozit.is_zero() {
-            add(&mut entries, "444", Decimal::ZERO, impozit);
+            add(&mut entries, &cfg.impozit, Decimal::ZERO, impozit);
         }
     }
     if !cam.is_zero() {
-        add(&mut entries, "646", cam, Decimal::ZERO); // cheltuieli CAM (angajator)
-        add(&mut entries, "436", Decimal::ZERO, cam); // CAM datorată
+        add(&mut entries, &cfg.cheltuieli_cam, cam, Decimal::ZERO); // cheltuieli CAM (angajator)
+        add(&mut entries, &cfg.cam, Decimal::ZERO, cam); // CAM datorată
     }
     // CCI 0,85% (contribuția pentru concedii și indemnizații, OUG 158/2005): D 6458 / C 4373. Se achită
     // net de indemnizațiile recuperate din FNUASS (4382), dar acreditarea e neschimbată.
     if !concedii.is_zero() {
-        add(&mut entries, "6458", concedii, Decimal::ZERO); // cheltuieli CCI (angajator)
-        add(&mut entries, "4373", Decimal::ZERO, concedii); // contribuția concedii datorată
+        add(
+            &mut entries,
+            &cfg.cheltuieli_concedii,
+            concedii,
+            Decimal::ZERO,
+        ); // cheltuieli CCI (angajator)
+        add(&mut entries, &cfg.concedii, Decimal::ZERO, concedii); // contribuția concedii datorată
     }
     // Part-time minimum-base top-up borne by the employer: D 6458 / C 4315 (CAS) + C 4316 (CASS).
     // Brings 4315/4316 up to the contribution on the minimum base (= what D112 declares).
     let emp_diff = cas_diff + cass_diff;
     if !emp_diff.is_zero() {
-        add(&mut entries, "6458", emp_diff, Decimal::ZERO);
+        add(
+            &mut entries,
+            &cfg.cheltuieli_concedii,
+            emp_diff,
+            Decimal::ZERO,
+        );
         if !cas_diff.is_zero() {
-            add(&mut entries, "4315", Decimal::ZERO, cas_diff);
+            add(&mut entries, &cfg.cas, Decimal::ZERO, cas_diff);
         }
         if !cass_diff.is_zero() {
-            add(&mut entries, "4316", Decimal::ZERO, cass_diff);
+            add(&mut entries, &cfg.cass, Decimal::ZERO, cass_diff);
         }
     }
     // Indemnizații de concediu medical (OUG 158/2005): D 6458 / C 423 (angajator) + D 4382 / C 423
@@ -3690,7 +3706,12 @@ pub async fn post_payroll(
     // salariale ⇒ totalul = obligațiile D112 (412/432/602).
     if !indemn.is_zero() {
         if !indemn.employer.is_zero() {
-            add(&mut entries, "6458", indemn.employer, Decimal::ZERO);
+            add(
+                &mut entries,
+                &cfg.cheltuieli_concedii,
+                indemn.employer,
+                Decimal::ZERO,
+            );
         }
         if !indemn.fnuass.is_zero() {
             add(&mut entries, "4382", indemn.fnuass, Decimal::ZERO);
@@ -3704,13 +3725,13 @@ pub async fn post_payroll(
             add(&mut entries, "423", ind_wh, Decimal::ZERO);
         }
         if !indemn.cas.is_zero() {
-            add(&mut entries, "4315", Decimal::ZERO, indemn.cas);
+            add(&mut entries, &cfg.cas, Decimal::ZERO, indemn.cas);
         }
         if !indemn.cass.is_zero() {
-            add(&mut entries, "4316", Decimal::ZERO, indemn.cass);
+            add(&mut entries, &cfg.cass, Decimal::ZERO, indemn.cass);
         }
         if !indemn.tax.is_zero() {
-            add(&mut entries, "444", Decimal::ZERO, indemn.tax);
+            add(&mut entries, &cfg.impozit, Decimal::ZERO, indemn.tax);
         }
     }
     assert_balanced(&entries, &source_id)?;

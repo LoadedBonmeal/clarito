@@ -38,6 +38,7 @@ import { useAppStore, type ThemeMode, type DensityMode } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import type { Company, EffectiveAccountMapping, ProductGroup, ProductType, SetAccountMappingInput } from "@/types";
+import type { PayrollAccountMap, SetPayrollConfigInput } from "@/lib/tauri";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -1029,6 +1030,11 @@ export function SettingsPage() {
             <ProductGroupsPanel companyId={activeCompanyId} />
           )}
 
+          {/* P2 Wave 7: configurare salarizare (conturi GL + diurnă + rate 2026) */}
+          {activeCompanyId && (
+            <PayrollConfigPanel companyId={activeCompanyId} />
+          )}
+
           {/* backup & restaurare */}
           <div className="scr-card" style={{ marginBottom: 14 }}>
             <div className="scr-toolbar">
@@ -1985,6 +1991,289 @@ function ProductGroupsPanel({ companyId }: { companyId: string }) {
           <Ic name="plus" />{t("products.groups.add")}
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─── P2 Wave 7: PayrollConfigPanel ────────────────────────────────────────────
+
+/** Standard code defaults — kept in sync with Rust consts for display fallback. */
+const PAYROLL_DEFAULTS: Record<keyof Omit<SetPayrollConfigInput, never>, string> = {
+  contCheltuieliSalarii: "641",
+  contSalariiDatorate: "421",
+  contCas: "4315",
+  contCass: "4316",
+  contImpozit: "444",
+  contCheltuieliCam: "646",
+  contCam: "436",
+  contConcedii: "4373",
+  contCheltuieliConcedii: "6458",
+  contNetCasa: "5311",
+  contNetBanca: "5121",
+  diurnaInterna: "23.00",
+  diurnaPlafonNeimpozabil: "57.50",
+  diurnaCazare: "265.00",
+};
+
+type PayrollFormState = {
+  contCheltuieliSalarii: string;
+  contSalariiDatorate: string;
+  contCas: string;
+  contCass: string;
+  contImpozit: string;
+  contCheltuieliCam: string;
+  contCam: string;
+  contConcedii: string;
+  contCheltuieliConcedii: string;
+  contNetCasa: string;
+  contNetBanca: string;
+  diurnaInterna: string;
+  diurnaPlafonNeimpozabil: string;
+  diurnaCazare: string;
+};
+
+function mapToForm(cfg: PayrollAccountMap): PayrollFormState {
+  return {
+    contCheltuieliSalarii: cfg.cheltuieliSalarii,
+    contSalariiDatorate: cfg.salariiDatorate,
+    contCas: cfg.cas,
+    contCass: cfg.cass,
+    contImpozit: cfg.impozit,
+    contCheltuieliCam: cfg.cheltuieliCam,
+    contCam: cfg.cam,
+    contConcedii: cfg.concedii,
+    contCheltuieliConcedii: cfg.cheltuieliConcedii,
+    contNetCasa: cfg.netCasa,
+    contNetBanca: cfg.netBanca,
+    diurnaInterna: cfg.diurnaInterna,
+    diurnaPlafonNeimpozabil: cfg.diurnaPlafonNeimpozabil,
+    diurnaCazare: cfg.diurnaCazare,
+  };
+}
+
+function PayrollConfigPanel({ companyId }: { companyId: string }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+
+  const { data: cfg, isLoading } = useQuery({
+    queryKey: ["payroll-config", companyId],
+    queryFn: () => api.payrollConfig.get(companyId),
+  });
+
+  const [form, setForm] = useState<PayrollFormState>(
+    Object.fromEntries(
+      Object.keys(PAYROLL_DEFAULTS).map((k) => [k, PAYROLL_DEFAULTS[k as keyof typeof PAYROLL_DEFAULTS]])
+    ) as PayrollFormState
+  );
+  const [dirty, setDirty] = useState(false);
+
+  // Sync form when server data arrives.
+  useEffect(() => {
+    if (cfg) {
+      setForm(mapToForm(cfg));
+      setDirty(false);
+    }
+  }, [cfg]);
+
+  const setField = (key: keyof PayrollFormState, value: string) => {
+    setForm((f) => ({ ...f, [key]: value }));
+    setDirty(true);
+  };
+
+  const saveMut = useMutation({
+    mutationFn: () => {
+      // Any field equal to its code default is sent as null (→ removes override for that column).
+      const input: SetPayrollConfigInput = {};
+      (Object.keys(form) as (keyof PayrollFormState)[]).forEach((k) => {
+        const v = form[k].trim() || null;
+        const def = PAYROLL_DEFAULTS[k as keyof typeof PAYROLL_DEFAULTS];
+        (input as Record<string, string | null>)[k] = (v === def || v === "") ? null : v;
+      });
+      return api.payrollConfig.set(companyId, input);
+    },
+    onSuccess: (updated) => {
+      notify.success(t("settings.payrollConfig.saved"));
+      setForm(mapToForm(updated));
+      setDirty(false);
+      void qc.invalidateQueries({ queryKey: ["payroll-config", companyId] });
+    },
+    onError: (e) => notify.error(formatError(e, t("settings.payrollConfig.saveError"))),
+  });
+
+  const resetMut = useMutation({
+    mutationFn: () => api.payrollConfig.reset(companyId),
+    onSuccess: (updated) => {
+      notify.success(t("settings.payrollConfig.resetDone"));
+      setForm(mapToForm(updated));
+      setDirty(false);
+      void qc.invalidateQueries({ queryKey: ["payroll-config", companyId] });
+    },
+    onError: (e) => notify.error(formatError(e, t("settings.payrollConfig.resetError"))),
+  });
+
+  /** Rows for the GL account map table. */
+  const accountRows: { key: keyof PayrollFormState; labelKey: string; default: string }[] = [
+    { key: "contCheltuieliSalarii",  labelKey: "settings.payrollConfig.accountMap.cheltuieliSalarii",  default: "641"  },
+    { key: "contSalariiDatorate",    labelKey: "settings.payrollConfig.accountMap.salariiDatorate",    default: "421"  },
+    { key: "contCas",                labelKey: "settings.payrollConfig.accountMap.cas",                default: "4315" },
+    { key: "contCass",               labelKey: "settings.payrollConfig.accountMap.cass",               default: "4316" },
+    { key: "contImpozit",            labelKey: "settings.payrollConfig.accountMap.impozit",            default: "444"  },
+    { key: "contCheltuieliCam",      labelKey: "settings.payrollConfig.accountMap.cheltuieliCam",      default: "646"  },
+    { key: "contCam",                labelKey: "settings.payrollConfig.accountMap.cam",                default: "436"  },
+    { key: "contConcedii",           labelKey: "settings.payrollConfig.accountMap.concedii",           default: "4373" },
+    { key: "contCheltuieliConcedii", labelKey: "settings.payrollConfig.accountMap.cheltuieliConcedii", default: "6458" },
+    { key: "contNetCasa",            labelKey: "settings.payrollConfig.accountMap.netCasa",            default: "5311" },
+    { key: "contNetBanca",           labelKey: "settings.payrollConfig.accountMap.netBanca",           default: "5121" },
+  ];
+
+  const diurnaRows: { key: keyof PayrollFormState; labelKey: string }[] = [
+    { key: "diurnaInterna",           labelKey: "settings.payrollConfig.diurna.interna" },
+    { key: "diurnaPlafonNeimpozabil", labelKey: "settings.payrollConfig.diurna.plafonNeimpozabil" },
+    { key: "diurnaCazare",            labelKey: "settings.payrollConfig.diurna.cazare" },
+  ];
+
+  /** Read-only 2026 fiscal rates/ceilings card. */
+  const rates2026 = [
+    { label: t("settings.payrollConfig.rates2026.cas"),           value: "25%"             },
+    { label: t("settings.payrollConfig.rates2026.cass"),          value: "10%"             },
+    { label: t("settings.payrollConfig.rates2026.impozit"),       value: "10%"             },
+    { label: t("settings.payrollConfig.rates2026.cam"),           value: "2,25%"           },
+    { label: t("settings.payrollConfig.rates2026.cci"),           value: "0,85%"           },
+    { label: t("settings.payrollConfig.rates2026.salariuMinimH1"), value: "4.050 lei"      },
+    { label: t("settings.payrollConfig.rates2026.salariuMinimH2"), value: "4.325 lei"      },
+    { label: t("settings.payrollConfig.rates2026.carveOutH1"),    value: "300 lei"         },
+    { label: t("settings.payrollConfig.rates2026.carveOutH2"),    value: "200 lei"         },
+    { label: t("settings.payrollConfig.rates2026.plafonScutireH1"), value: "4.300 lei"     },
+    { label: t("settings.payrollConfig.rates2026.plafonScutireH2"), value: "4.600 lei"     },
+    { label: t("settings.payrollConfig.rates2026.deducere"),
+      value: t("settings.payrollConfig.rates2026.deducereFormula") },
+  ];
+
+  return (
+    <div className="scr-card" style={{ marginBottom: 14 }}>
+      <div className="scr-toolbar">
+        <div className="tt">{t("settings.payrollConfig.title")}</div>
+        {cfg?.isOverride && (
+          <span className="chip sent" style={{ fontSize: 10, marginLeft: 8 }}>
+            {t("settings.payrollConfig.override")}
+          </span>
+        )}
+        <div className="spacer" />
+        {dirty && (
+          <button
+            className="btn-dark"
+            style={{ height: 28, fontSize: 12 }}
+            disabled={saveMut.isPending}
+            onClick={() => saveMut.mutate()}
+          >
+            {saveMut.isPending ? t("settings.payrollConfig.saving") : t("settings.payrollConfig.save")}
+          </button>
+        )}
+        {cfg?.isOverride && (
+          <button
+            className="pill-btn"
+            style={{ height: 28, fontSize: 12, color: "var(--red)", borderColor: "rgba(220,38,38,.3)" }}
+            disabled={resetMut.isPending}
+            onClick={() => resetMut.mutate()}
+          >
+            {t("settings.payrollConfig.reset")}
+          </button>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div style={{ padding: "12px 16px", fontSize: 12, color: "var(--text-2)" }}>…</div>
+      ) : (
+        <>
+          {/* GL account map */}
+          <div style={{ padding: "8px 16px 4px", fontSize: 11, fontWeight: 600, color: "var(--text-2)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            {t("settings.payrollConfig.accountMap.title")}
+          </div>
+          <p style={{ fontSize: 12, color: "var(--text-2)", padding: "0 16px 6px", margin: 0 }}>
+            {t("settings.payrollConfig.subtitle")}
+          </p>
+          <table className="scr-table">
+            <thead>
+              <tr>
+                <th>{t("settings.payrollConfig.accountMap.title")}</th>
+                <th className="r" style={{ width: 160 }}>Cont</th>
+              </tr>
+            </thead>
+            <tbody>
+              {accountRows.map(({ key, labelKey, default: def }) => {
+                const isCustom = form[key] !== def;
+                return (
+                  <tr key={key}>
+                    <td style={{ fontSize: 12.5 }}>
+                      {t(labelKey)}
+                      <span className="doc" style={{ marginLeft: 8, fontSize: 11, color: "var(--text-2)" }}>
+                        {def}
+                      </span>
+                    </td>
+                    <td className="r">
+                      <input
+                        className="input num"
+                        style={{ height: 26, width: 130, fontSize: 12, textAlign: "right",
+                          borderColor: isCustom ? "var(--accent)" : undefined }}
+                        value={form[key]}
+                        onChange={(e) => setField(key, e.target.value)}
+                        placeholder={def}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {/* Diurnă */}
+          <div style={{ padding: "10px 16px 4px", fontSize: 11, fontWeight: 600, color: "var(--text-2)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            {t("settings.payrollConfig.diurna.title")}
+          </div>
+          <p style={{ fontSize: 12, color: "var(--text-2)", padding: "0 16px 6px", margin: 0 }}>
+            {t("settings.payrollConfig.diurna.subtitle")}
+          </p>
+          <table className="scr-table">
+            <tbody>
+              {diurnaRows.map(({ key, labelKey }) => (
+                <tr key={key}>
+                  <td style={{ fontSize: 12.5 }}>{t(labelKey)}</td>
+                  <td className="r">
+                    <input
+                      className="input num"
+                      style={{ height: 26, width: 130, fontSize: 12, textAlign: "right" }}
+                      value={form[key]}
+                      onChange={(e) => setField(key, e.target.value)}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {/* Read-only 2026 rates */}
+          <div style={{ padding: "10px 16px 4px", fontSize: 11, fontWeight: 600, color: "var(--text-2)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            {t("settings.payrollConfig.rates2026.title")}
+          </div>
+          <table className="scr-table">
+            <tbody>
+              {rates2026.map(({ label, value }) => (
+                <tr key={label}>
+                  <td style={{ fontSize: 12.5 }}>{label}</td>
+                  <td className="r">
+                    <span className="doc" style={{ fontSize: 12.5, fontWeight: 600 }}>{value}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="pager">
+            <span style={{ fontSize: 11, color: "var(--text-2)" }}>
+              {t("settings.payrollConfig.rates2026.note")}
+            </span>
+          </div>
+        </>
+      )}
     </div>
   );
 }

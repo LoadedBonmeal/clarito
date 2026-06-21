@@ -1782,11 +1782,65 @@ export const productie = {
     invoke<import("@/types").ProductieOrder>("get_productie", { companyId, orderId }),
 };
 
+// ─── P2 Wave 7: payroll config (GL account map + diurnă) ─────────────────────
+
+/** Effective payroll GL account map + diurnă for a company. All fields populated. */
+export interface PayrollAccountMap {
+  cheltuieliSalarii: string;
+  salariiDatorate: string;
+  cas: string;
+  cass: string;
+  impozit: string;
+  cheltuieliCam: string;
+  cam: string;
+  concedii: string;
+  cheltuieliConcedii: string;
+  netCasa: string;
+  netBanca: string;
+  diurnaInterna: string;
+  diurnaPlafonNeimpozabil: string;
+  diurnaCazare: string;
+  /** True when a company override row exists (as opposed to pure code defaults). */
+  isOverride: boolean;
+}
+
+/** Input for set_payroll_config_cmd — all fields optional (null = use default). */
+export interface SetPayrollConfigInput {
+  contCheltuieliSalarii?: string | null;
+  contSalariiDatorate?: string | null;
+  contCas?: string | null;
+  contCass?: string | null;
+  contImpozit?: string | null;
+  contCheltuieliCam?: string | null;
+  contCam?: string | null;
+  contConcedii?: string | null;
+  contCheltuieliConcedii?: string | null;
+  contNetCasa?: string | null;
+  contNetBanca?: string | null;
+  diurnaInterna?: string | null;
+  diurnaPlafonNeimpozabil?: string | null;
+  diurnaCazare?: string | null;
+}
+
+/** P2 Wave 7: payroll config commands (company-scoped). */
+export const payrollConfig = {
+  /** Get effective payroll GL account map + diurnă (override merged onto code defaults). */
+  get: (companyId: string) =>
+    invoke<PayrollAccountMap>("get_payroll_config_cmd", { companyId }),
+  /** Upsert a company override. Null field = revert that column to default. */
+  set: (companyId: string, input: SetPayrollConfigInput) =>
+    invoke<PayrollAccountMap>("set_payroll_config_cmd", { companyId, input }),
+  /** Delete the company override row → reverts all to code defaults. */
+  reset: (companyId: string) =>
+    invoke<PayrollAccountMap>("reset_payroll_config_cmd", { companyId }),
+};
+
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
   accountMapping,
   accounts,
+  payrollConfig,
   anaf,
   bankImport,
   archive,
