@@ -24,6 +24,7 @@ pub(crate) fn require_valid_date_opt(label: &str, s: Option<&str>) -> crate::err
 }
 
 pub mod accounts;
+pub mod advance_invoices;
 pub mod anaf;
 pub mod archive;
 pub mod assets;

@@ -26,6 +26,7 @@ pub mod contracts;
 pub mod payment_instruments;
 
 pub mod accounts;
+pub mod advance_invoices;
 pub mod aging;
 pub mod assets;
 pub mod concedii;
@@ -70,6 +71,8 @@ mod no_inline_test_schema {
     /// during schema rebuilds and *_v view aliases).
     const MIGRATION_TABLES: &[&str] = &[
         "account_mapping",
+        "advance_invoice_settlements",
+        "advance_received_settlements",
         "asset_depreciation",
         "asset_transactions",
         "audit_archive",

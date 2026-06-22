@@ -493,6 +493,474 @@ fn post_purchase_invoice(
     (journal, entries)
 }
 
+// ─── Advance invoice posting (art. 282 Cod Fiscal) ───────────────────────────
+
+/// Postare FACTURĂ DE AVANS EMISĂ — art. 282 Cod Fiscal.
+///
+/// La emiterea avansului TVA devine exigibilă imediat (nu se amână la livrare).
+/// Monografie: D 4111 Clienți = C 419 Clienți-creditori (baza avans) + C 4427 TVA colectată.
+/// **NU** se creditează 70x (veniturile se recunosc la livrarea efectivă, nu la avans).
+///
+/// `vat_groups`: (net_ron, vat_ron, category, rate, _revenue_kind) — aceeași structură ca
+/// `post_sales_invoice`, dar credit-ul merge pe 419 în loc de 70x.
+fn post_advance_issued_invoice(
+    company_id: &str,
+    invoice_id: &str,
+    full_number: &str,
+    issue_date: &str,
+    contact_id_raw: &str,
+    partner_cui: Option<&str>,
+    vat_groups: &[(Decimal, Decimal, String, Decimal, String)],
+) -> (GlJournal, Vec<GlEntry>) {
+    use crate::anaf_decl::saft::masterfiles::canonical_partner_id;
+    let contact_id = canonical_partner_id(contact_id_raw, partner_cui.unwrap_or(""));
+
+    let gross: Decimal = vat_groups.iter().map(|(n, v, _, _, _)| n + v).sum();
+
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: "VANZARI".to_string(),
+        journal_type: "SALES".to_string(),
+        transaction_id: full_number.to_string(),
+        transaction_date: issue_date.to_string(),
+        description: Some(format!("Factura de avans {full_number}")),
+        source_type: "INVOICE".to_string(),
+        source_id: invoice_id.to_string(),
+        customer_id: Some(contact_id.clone()),
+        supplier_id: None,
+    };
+
+    let mut entries: Vec<GlEntry> = Vec::new();
+    let mut record_id: i64 = 1;
+
+    // D 4111 Clienți = gross (total cu TVA datorat de client)
+    entries.push(GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: "4111".to_string(),
+        debit: if gross > Decimal::ZERO {
+            gross
+        } else {
+            Decimal::ZERO
+        },
+        credit: if gross < Decimal::ZERO {
+            -gross
+        } else {
+            Decimal::ZERO
+        },
+        partner_cui: partner_cui.map(|s| s.to_string()),
+        customer_id: Some(contact_id.clone()),
+        supplier_id: None,
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+    });
+    record_id += 1;
+
+    // Per rate group: C 419 Clienți-creditori (baza avans) + C 4427 TVA colectată.
+    for (net_ron, vat_ron, category, rate, _) in vat_groups {
+        let tc = sales_tax_code_str(category, *rate);
+        let rate_str = fmt_dec(*rate);
+
+        // C 419 Clienți-creditori = baza avans (NOT 70x — venitul nu se recunoaște la avans)
+        entries.push(GlEntry {
+            id: new_id(),
+            record_id,
+            account_code: "419".to_string(),
+            debit: if *net_ron < Decimal::ZERO {
+                -*net_ron
+            } else {
+                Decimal::ZERO
+            },
+            credit: if *net_ron > Decimal::ZERO {
+                *net_ron
+            } else {
+                Decimal::ZERO
+            },
+            partner_cui: partner_cui.map(|s| s.to_string()),
+            customer_id: Some(contact_id.clone()),
+            supplier_id: None,
+            tax_type: "300".to_string(),
+            tax_code: tc.clone(),
+            tax_percentage: Some(rate_str.clone()),
+            tax_base: Some(fmt_dec(*net_ron)),
+            tax_amount: Some(fmt_dec(*vat_ron)),
+        });
+        record_id += 1;
+
+        // C 4427 TVA colectată = TVA aferentă avansului
+        if *vat_ron != Decimal::ZERO {
+            entries.push(GlEntry {
+                id: new_id(),
+                record_id,
+                account_code: "4427".to_string(),
+                debit: if *vat_ron < Decimal::ZERO {
+                    -*vat_ron
+                } else {
+                    Decimal::ZERO
+                },
+                credit: if *vat_ron > Decimal::ZERO {
+                    *vat_ron
+                } else {
+                    Decimal::ZERO
+                },
+                partner_cui: None,
+                customer_id: None,
+                supplier_id: None,
+                tax_type: "300".to_string(),
+                tax_code: tc,
+                tax_percentage: Some(rate_str),
+                tax_base: None,
+                tax_amount: None,
+            });
+            record_id += 1;
+        }
+    }
+
+    (journal, entries)
+}
+
+/// Postare STORNO AVANS EMIS (regularizare la factura finală).
+///
+/// La emiterea facturii finale se anulează avansul cu sume NEGATIVE (roșu) pe 419 și 4427.
+/// Rata TVA folosită este RATA AVANSULUI (nu rata livrării) — art. 282 alin. 11.
+/// Storno-ul este un jurnal separat cu source_type='ADVANCE_STORNO', source_id=settlement_id.
+///
+/// `advances`: slice of (advance_invoice_id, settlement_id, base_ron, vat_ron, rate) —
+/// câte un rând per avans de regularizat.
+fn post_advance_issued_storno(
+    company_id: &str,
+    settlement_id: &str,
+    final_invoice_date: &str,
+    contact_id_raw: &str,
+    partner_cui: Option<&str>,
+    advances: &[(String, Decimal, Decimal, Decimal)], // (adv_inv_id, base, vat, rate)
+) -> (GlJournal, Vec<GlEntry>) {
+    use crate::anaf_decl::saft::masterfiles::canonical_partner_id;
+    let contact_id = canonical_partner_id(contact_id_raw, partner_cui.unwrap_or(""));
+
+    // Gross storno = Σ(−base − vat) — sume negative ca la orice storno în roșu
+    let gross_storno: Decimal = advances.iter().map(|(_, b, v, _)| -(b + v)).sum();
+
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: "VANZARI".to_string(),
+        journal_type: "SALES".to_string(),
+        transaction_id: settlement_id.to_string(),
+        transaction_date: final_invoice_date.to_string(),
+        description: Some(format!("Storno avans regularizare {settlement_id}")),
+        source_type: "ADVANCE_STORNO".to_string(),
+        source_id: settlement_id.to_string(),
+        customer_id: Some(contact_id.clone()),
+        supplier_id: None,
+    };
+
+    let mut entries: Vec<GlEntry> = Vec::new();
+    let mut record_id: i64 = 1;
+
+    // D 4111 Clienți = storno gross (negativ → credit 4111 în roșu)
+    // Debit când gross_storno < 0 → gross_storno este negativ → debit = 0, credit = |gross|
+    entries.push(GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: "4111".to_string(),
+        debit: if gross_storno > Decimal::ZERO {
+            gross_storno
+        } else {
+            Decimal::ZERO
+        },
+        credit: if gross_storno < Decimal::ZERO {
+            -gross_storno
+        } else {
+            Decimal::ZERO
+        },
+        partner_cui: partner_cui.map(|s| s.to_string()),
+        customer_id: Some(contact_id.clone()),
+        supplier_id: None,
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+    });
+    record_id += 1;
+
+    // Per avans: D 419 (−baza) + D 4427 (−TVA) — storno în roșu
+    // D 419 = baza negativă → debit 0, credit |baza| (anulează soldul creditor 419)
+    // D 4427 = TVA negativă → debit 0, credit |TVA| (anulează soldul creditor 4427)
+    for (_, base, vat, rate) in advances {
+        let tc = sales_tax_code_str("S", *rate);
+        let rate_str = fmt_dec(*rate);
+        let neg_base = -base;
+        let neg_vat = -vat;
+
+        entries.push(GlEntry {
+            id: new_id(),
+            record_id,
+            account_code: "419".to_string(),
+            // Storno reverse-direction: 419 had a credit at the advance; the storno DEBITS it to
+            // cancel the avans (D 419 = base). tax_base/tax_amount stay negative for the D300 reversal.
+            debit: *base,
+            credit: Decimal::ZERO,
+            partner_cui: partner_cui.map(|s| s.to_string()),
+            customer_id: Some(contact_id.clone()),
+            supplier_id: None,
+            tax_type: "300".to_string(),
+            tax_code: tc.clone(),
+            tax_percentage: Some(rate_str.clone()),
+            tax_base: Some(fmt_dec(neg_base)),
+            tax_amount: Some(fmt_dec(neg_vat)),
+        });
+        record_id += 1;
+
+        if *vat != Decimal::ZERO {
+            entries.push(GlEntry {
+                id: new_id(),
+                record_id,
+                account_code: "4427".to_string(),
+                // Storno reverse-direction: D 4427 = VAT cancels the advance's collected VAT.
+                debit: *vat,
+                credit: Decimal::ZERO,
+                partner_cui: None,
+                customer_id: None,
+                supplier_id: None,
+                tax_type: "300".to_string(),
+                tax_code: tc,
+                tax_percentage: Some(rate_str),
+                tax_base: None,
+                tax_amount: None,
+            });
+            record_id += 1;
+        }
+    }
+
+    (journal, entries)
+}
+
+/// Postare FACTURĂ DE AVANS PRIMITĂ — art. 282 Cod Fiscal (latura cumpărări).
+///
+/// Monografie: D 4091 Furnizori-debitori (baza) + D 4426 TVA deductibilă = C 401 Furnizori.
+/// **NU** se debitează 607/3xx — cheltuiala se recunoaște la livrarea efectivă.
+///
+/// `vat_lines`: (net_ron, vat_ron, category, rate) — aceeași structură ca `post_purchase_invoice`.
+fn post_advance_received_invoice(
+    company_id: &str,
+    received_invoice_id: &str,
+    doc_number: &str,
+    issue_date: &str,
+    issuer_cui: &str,
+    gross_ron: Decimal,
+    vat_lines: &[(Decimal, Decimal, String, Decimal)],
+) -> (GlJournal, Vec<GlEntry>) {
+    use crate::anaf_decl::saft::masterfiles::canonical_partner_id;
+    let supplier_canon = canonical_partner_id(received_invoice_id, issuer_cui);
+
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: "CUMPARARI".to_string(),
+        journal_type: "PURCHASE".to_string(),
+        transaction_id: doc_number.to_string(),
+        transaction_date: issue_date.to_string(),
+        description: Some(format!("Factura de avans primita {doc_number}")),
+        source_type: "RECEIVED_INVOICE".to_string(),
+        source_id: received_invoice_id.to_string(),
+        customer_id: None,
+        supplier_id: Some(supplier_canon.clone()),
+    };
+
+    let mut entries: Vec<GlEntry> = Vec::new();
+    let mut record_id: i64 = 1;
+
+    // Per linie TVA: D 4091 Furnizori-debitori (baza) + D 4426 TVA deductibilă
+    for (net, vat, category, rate) in vat_lines {
+        let tc = purchase_tax_code_str(category, *rate);
+        let rate_str = fmt_dec(*rate);
+
+        // D 4091 Furnizori-debitori = baza avans (NU 607 — cheltuiala nu e recunoscută)
+        entries.push(GlEntry {
+            id: new_id(),
+            record_id,
+            account_code: "4091".to_string(),
+            debit: *net,
+            credit: Decimal::ZERO,
+            partner_cui: Some(issuer_cui.to_string()),
+            customer_id: None,
+            supplier_id: Some(supplier_canon.clone()),
+            tax_type: "300".to_string(),
+            tax_code: tc.clone(),
+            tax_percentage: Some(rate_str.clone()),
+            tax_base: Some(fmt_dec(*net)),
+            tax_amount: Some(fmt_dec(*vat)),
+        });
+        record_id += 1;
+
+        // D 4426 TVA deductibilă = TVA avans (exigibilă imediat per art. 282)
+        entries.push(GlEntry {
+            id: new_id(),
+            record_id,
+            account_code: "4426".to_string(),
+            debit: *vat,
+            credit: Decimal::ZERO,
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "300".to_string(),
+            tax_code: tc,
+            tax_percentage: Some(rate_str),
+            tax_base: None,
+            tax_amount: None,
+        });
+        record_id += 1;
+    }
+
+    // C 401 Furnizori = gross (total plătit/datorat furnizorului)
+    entries.push(GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: "401".to_string(),
+        debit: Decimal::ZERO,
+        credit: gross_ron,
+        partner_cui: Some(issuer_cui.to_string()),
+        customer_id: None,
+        supplier_id: Some(supplier_canon),
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+    });
+
+    (journal, entries)
+}
+
+/// Postare STORNO AVANS PRIMIT (regularizare la factura finală primită).
+///
+/// Anulează avansul înregistrat anterior: D (−4091 baza) + D (−4426 TVA) = C 401 (−).
+/// Rata TVA = rata avansului (art. 282 alin. 11), NU rata livrării.
+fn post_advance_received_storno(
+    company_id: &str,
+    settlement_id: &str,
+    final_invoice_date: &str,
+    issuer_cui: &str,
+    advances: &[(String, Decimal, Decimal, Decimal)], // (recv_inv_id, base, vat, rate)
+) -> (GlJournal, Vec<GlEntry>) {
+    use crate::anaf_decl::saft::masterfiles::canonical_partner_id;
+    let supplier_canon = canonical_partner_id(settlement_id, issuer_cui);
+
+    // Gross storno = Σ(base + vat) negativ → C 401 se reduce
+    let gross_storno: Decimal = advances.iter().map(|(_, b, v, _)| -(b + v)).sum();
+
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: "CUMPARARI".to_string(),
+        journal_type: "PURCHASE".to_string(),
+        transaction_id: settlement_id.to_string(),
+        transaction_date: final_invoice_date.to_string(),
+        description: Some(format!("Storno avans primit regularizare {settlement_id}")),
+        source_type: "ADVANCE_RECV_STORNO".to_string(),
+        source_id: settlement_id.to_string(),
+        customer_id: None,
+        supplier_id: Some(supplier_canon.clone()),
+    };
+
+    let mut entries: Vec<GlEntry> = Vec::new();
+    let mut record_id: i64 = 1;
+
+    // Per avans: D (−4091) + D (−4426) — storno în roșu
+    for (_, base, vat, rate) in advances {
+        let tc = purchase_tax_code_str("S", *rate);
+        let rate_str = fmt_dec(*rate);
+        let neg_base = -base;
+        let neg_vat = -vat;
+
+        entries.push(GlEntry {
+            id: new_id(),
+            record_id,
+            account_code: "4091".to_string(),
+            debit: if neg_base > Decimal::ZERO {
+                neg_base
+            } else {
+                Decimal::ZERO
+            },
+            credit: if neg_base < Decimal::ZERO {
+                -neg_base
+            } else {
+                Decimal::ZERO
+            },
+            partner_cui: Some(issuer_cui.to_string()),
+            customer_id: None,
+            supplier_id: Some(supplier_canon.clone()),
+            tax_type: "300".to_string(),
+            tax_code: tc.clone(),
+            tax_percentage: Some(rate_str.clone()),
+            tax_base: Some(fmt_dec(neg_base)),
+            tax_amount: Some(fmt_dec(neg_vat)),
+        });
+        record_id += 1;
+
+        if *vat != Decimal::ZERO {
+            entries.push(GlEntry {
+                id: new_id(),
+                record_id,
+                account_code: "4426".to_string(),
+                debit: if neg_vat > Decimal::ZERO {
+                    neg_vat
+                } else {
+                    Decimal::ZERO
+                },
+                credit: if neg_vat < Decimal::ZERO {
+                    -neg_vat
+                } else {
+                    Decimal::ZERO
+                },
+                partner_cui: None,
+                customer_id: None,
+                supplier_id: None,
+                tax_type: "300".to_string(),
+                tax_code: tc,
+                tax_percentage: Some(rate_str),
+                tax_base: None,
+                tax_amount: None,
+            });
+            record_id += 1;
+        }
+    }
+
+    // C 401 Furnizori = gross storno (negativ → se reduce datoria)
+    // gross_storno < 0 → credit este -gross_storno (pozitiv) = Debit 401
+    entries.push(GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: "401".to_string(),
+        debit: if gross_storno < Decimal::ZERO {
+            -gross_storno
+        } else {
+            Decimal::ZERO
+        },
+        credit: if gross_storno > Decimal::ZERO {
+            gross_storno
+        } else {
+            Decimal::ZERO
+        },
+        partner_cui: Some(issuer_cui.to_string()),
+        customer_id: None,
+        supplier_id: Some(supplier_canon),
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+    });
+
+    (journal, entries)
+}
+
 /// Postare plată client primită.
 #[allow(clippy::too_many_arguments)]
 fn post_payment(
@@ -2303,7 +2771,8 @@ pub async fn generate_gl_entries(
     let sales_rows = sqlx::query(
         "SELECT i.id, i.full_number, i.issue_date, i.contact_id, i.storno_of_invoice_id, \
                 i.status, c.cui as contact_cui, \
-                COALESCE(i.currency,'RON') as currency, i.exchange_rate \
+                COALESCE(i.currency,'RON') as currency, i.exchange_rate, \
+                COALESCE(i.invoice_kind,'standard') as invoice_kind \
          FROM invoices i \
          LEFT JOIN contacts c ON c.id = i.contact_id \
          WHERE i.company_id = ?1 \
@@ -2332,6 +2801,10 @@ pub async fn generate_gl_entries(
             row.try_get::<Option<f64>, _>("exchange_rate")
                 .unwrap_or(None),
         );
+        let invoice_kind: String = row
+            .try_get("invoice_kind")
+            .unwrap_or_else(|_| "standard".to_string());
+        let is_advance_invoice = invoice_kind == "advance";
 
         // FIX 1: per-(vat_category, vat_rate, revenue_kind) groups from invoice_line_items —
         // correctly handles mixed-rate invoices.
@@ -2426,18 +2899,31 @@ pub async fn generate_gl_entries(
                 _ => None,
             };
 
-        let (journal, entries) = post_sales_invoice(
-            company_id,
-            &inv_id,
-            &full_number,
-            &issue_date,
-            &contact_id,
-            contact_cui.as_deref(),
-            &vat_groups,
-            is_storno,
-            cash_vat_applies,
-            storno_split.as_ref(),
-        );
+        // Branch: advance invoices use 419 + 4427 (not 70x); standard invoices use the normal path.
+        let (journal, entries) = if is_advance_invoice {
+            post_advance_issued_invoice(
+                company_id,
+                &inv_id,
+                &full_number,
+                &issue_date,
+                &contact_id,
+                contact_cui.as_deref(),
+                &vat_groups,
+            )
+        } else {
+            post_sales_invoice(
+                company_id,
+                &inv_id,
+                &full_number,
+                &issue_date,
+                &contact_id,
+                contact_cui.as_deref(),
+                &vat_groups,
+                is_storno,
+                cash_vat_applies,
+                storno_split.as_ref(),
+            )
+        };
 
         // FIX 2: Balance guard — reject before writing.
         assert_balanced(&entries, &inv_id)?;
@@ -2464,13 +2950,88 @@ pub async fn generate_gl_entries(
         }
     }
 
+    // ── 1b. Storno avansuri emise (regularizare finală) ───────────────────────
+    //
+    // Pentru fiecare settlement din advance_invoice_settlements a cărei factură FINALĂ cade în
+    // perioadă și are status VALIDATED/STORNED, postăm storno-ul avansului (D 4111 = C −419 + C −4427)
+    // la rata TVA A AVANSULUI (art.282 alin.11). Idempotent per settlement_id.
+
+    let adv_storno_rows = sqlx::query(
+        "SELECT s.id AS settlement_id, s.advance_invoice_id, \
+                s.advance_base, s.advance_vat, s.advance_vat_rate, \
+                i.issue_date AS final_date, i.contact_id, c.cui AS contact_cui \
+         FROM advance_invoice_settlements s \
+         JOIN invoices i ON i.id = s.final_invoice_id \
+         LEFT JOIN contacts c ON c.id = i.contact_id \
+         WHERE s.company_id = ?1 \
+           AND i.issue_date >= ?2 AND i.issue_date <= ?3 \
+           AND i.status IN ('VALIDATED','STORNED')",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_all(pool)
+    .await?;
+
+    for row in &adv_storno_rows {
+        let settlement_id: String = row.try_get("settlement_id").unwrap_or_default();
+        let adv_inv_id: String = row.try_get("advance_invoice_id").unwrap_or_default();
+        let base_s: String = row.try_get("advance_base").unwrap_or_default();
+        let vat_s: String = row.try_get("advance_vat").unwrap_or_default();
+        let rate_s: String = row.try_get("advance_vat_rate").unwrap_or_default();
+        let final_date: String = row.try_get("final_date").unwrap_or_default();
+        let contact_id: String = row.try_get("contact_id").unwrap_or_default();
+        let contact_cui: Option<String> = row.try_get("contact_cui").unwrap_or(None);
+
+        let base = dec(&base_s);
+        let vat = dec(&vat_s);
+        let rate = dec(&rate_s);
+
+        if base.is_zero() && vat.is_zero() {
+            continue;
+        }
+
+        let advances = vec![(adv_inv_id, base, vat, rate)];
+        let (journal, entries) = post_advance_issued_storno(
+            company_id,
+            &settlement_id,
+            &final_date,
+            &contact_id,
+            contact_cui.as_deref(),
+            &advances,
+        );
+        assert_balanced(&entries, &settlement_id)?;
+
+        let deleted = sqlx::query(
+            "DELETE FROM gl_journal \
+             WHERE company_id=?1 AND source_type='ADVANCE_STORNO' AND source_id=?2",
+        )
+        .bind(company_id)
+        .bind(&settlement_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if deleted > 0 {
+            journals_replaced += 1;
+        }
+        let journal_id = journal.id.clone();
+        insert_journal(&mut tx, &journal).await?;
+        journals_inserted += 1;
+        for entry in &entries {
+            insert_entry(&mut tx, &journal_id, entry).await?;
+            entries_inserted += 1;
+        }
+    }
+
     // ── 2. Facturi primite ────────────────────────────────────────────────────
 
     // Fetch received invoices cu linii TVA (skip cele fără defalcare).
+    // Include is_advance flag to branch between 607 (normal) and 4091 (advance).
     let recv_rows = sqlx::query(
         "SELECT ri.id, ri.issuer_cui, ri.issuer_name, ri.issue_date, \
                 COALESCE(ri.series,'') as series, COALESCE(ri.number,'') as number, \
-                COALESCE(ri.currency,'RON') as currency, ri.exchange_rate \
+                COALESCE(ri.currency,'RON') as currency, ri.exchange_rate, \
+                COALESCE(ri.is_advance,0) as is_advance \
          FROM received_invoices ri \
          WHERE ri.company_id = ?1 \
            AND ri.issue_date >= ?2 \
@@ -2521,6 +3082,7 @@ pub async fn generate_gl_entries(
             row.try_get::<Option<f64>, _>("exchange_rate")
                 .unwrap_or(None),
         );
+        let is_advance_recv: bool = row.try_get::<i64, _>("is_advance").unwrap_or(0) != 0;
 
         // Fetch liniile TVA per cotă
         let vat_lines_rows = sqlx::query(
@@ -2569,21 +3131,34 @@ pub async fn generate_gl_entries(
             })
             .sum();
 
-        // Buyer-side TVA la încasare: defer the "S" input VAT to 4428 when the supplier applies
-        // cash VAT (art. 297(2)) OR the buyer applies it in-window (art. 297(3)).
-        let cash_vat_deferred =
-            in_cash_vat_window(&issue_date) || supplier_on_cash_vat(&issuer_cui);
+        // Branch: advance received invoices use 4091 + 4426 (not 607); standard use normal path.
+        let (journal, entries) = if is_advance_recv {
+            post_advance_received_invoice(
+                company_id,
+                &recv_id,
+                &doc_number,
+                &issue_date,
+                &issuer_cui,
+                gross_ron,
+                &vat_lines,
+            )
+        } else {
+            // Buyer-side TVA la încasare: defer the "S" input VAT to 4428 when the supplier applies
+            // cash VAT (art. 297(2)) OR the buyer applies it in-window (art. 297(3)).
+            let cash_vat_deferred =
+                in_cash_vat_window(&issue_date) || supplier_on_cash_vat(&issuer_cui);
 
-        let (journal, entries) = post_purchase_invoice(
-            company_id,
-            &recv_id,
-            &doc_number,
-            &issue_date,
-            &issuer_cui,
-            gross_ron,
-            &vat_lines,
-            cash_vat_deferred,
-        );
+            post_purchase_invoice(
+                company_id,
+                &recv_id,
+                &doc_number,
+                &issue_date,
+                &issuer_cui,
+                gross_ron,
+                &vat_lines,
+                cash_vat_deferred,
+            )
+        };
 
         // FIX 2: Balance guard.
         assert_balanced(&entries, &recv_id)?;
@@ -2605,6 +3180,76 @@ pub async fn generate_gl_entries(
         insert_journal(&mut tx, &journal).await?;
         journals_inserted += 1;
 
+        for entry in &entries {
+            insert_entry(&mut tx, &journal_id, entry).await?;
+            entries_inserted += 1;
+        }
+    }
+
+    // ── 2b. Storno avansuri primite (regularizare finală) ─────────────────────
+    //
+    // Pentru fiecare settlement din advance_received_settlements a cărei factură finală cade în
+    // perioadă, postăm storno-ul avansului primit (D −4091 + D −4426 = C 401 −).
+    // Rata TVA = rata avansului (art.282 alin.11). Idempotent per settlement_id.
+
+    let adv_recv_storno_rows = sqlx::query(
+        "SELECT s.id AS settlement_id, s.advance_received_id, \
+                s.advance_base, s.advance_vat, s.advance_vat_rate, \
+                ri.issue_date AS final_date, ri.issuer_cui \
+         FROM advance_received_settlements s \
+         JOIN received_invoices ri ON ri.id = s.final_received_id \
+         WHERE s.company_id = ?1 \
+           AND ri.issue_date >= ?2 AND ri.issue_date <= ?3 \
+           AND ri.status != 'REJECTED'",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_all(pool)
+    .await?;
+
+    for row in &adv_recv_storno_rows {
+        let settlement_id: String = row.try_get("settlement_id").unwrap_or_default();
+        let adv_recv_id: String = row.try_get("advance_received_id").unwrap_or_default();
+        let base_s: String = row.try_get("advance_base").unwrap_or_default();
+        let vat_s: String = row.try_get("advance_vat").unwrap_or_default();
+        let rate_s: String = row.try_get("advance_vat_rate").unwrap_or_default();
+        let final_date: String = row.try_get("final_date").unwrap_or_default();
+        let issuer_cui: String = row.try_get("issuer_cui").unwrap_or_default();
+
+        let base = dec(&base_s);
+        let vat = dec(&vat_s);
+        let rate = dec(&rate_s);
+
+        if base.is_zero() && vat.is_zero() {
+            continue;
+        }
+
+        let advances = vec![(adv_recv_id, base, vat, rate)];
+        let (journal, entries) = post_advance_received_storno(
+            company_id,
+            &settlement_id,
+            &final_date,
+            &issuer_cui,
+            &advances,
+        );
+        assert_balanced(&entries, &settlement_id)?;
+
+        let deleted = sqlx::query(
+            "DELETE FROM gl_journal \
+             WHERE company_id=?1 AND source_type='ADVANCE_RECV_STORNO' AND source_id=?2",
+        )
+        .bind(company_id)
+        .bind(&settlement_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if deleted > 0 {
+            journals_replaced += 1;
+        }
+        let journal_id = journal.id.clone();
+        insert_journal(&mut tx, &journal).await?;
+        journals_inserted += 1;
         for entry in &entries {
             insert_entry(&mut tx, &journal_id, entry).await?;
             entries_inserted += 1;
@@ -8748,5 +9393,551 @@ mod tests {
             "perioadă blocată + allow_locked=true → trebuie să treacă: {:?}",
             allowed.err()
         );
+    }
+
+    // ── Advance invoice tests (art. 282 Cod Fiscal) ───────────────────────────
+
+    /// Seed an ISSUED advance invoice with a single line at the given rate.
+    /// `net` and `vat` are TEXT Decimal strings.
+    async fn insert_advance_invoice(
+        pool: &SqlitePool,
+        company_id: &str,
+        inv_id: &str,
+        contact_id: &str,
+        net: &str,
+        vat: &str,
+        vat_rate: &str,
+    ) {
+        let gross = (dec(net) + dec(vat)).to_string();
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, currency, subtotal_amount, vat_amount, total_amount, \
+              status, payment_means_code, storno_of_invoice_id, invoice_kind, created_at, updated_at) \
+             VALUES (?1,?2,?3,'AV',1,'AV-0001','2026-06-01','2026-06-30','RON', \
+                    ?4,?5,?6,'VALIDATED','42',NULL,'advance',1,1)",
+        )
+        .bind(inv_id)
+        .bind(company_id)
+        .bind(contact_id)
+        .bind(net)
+        .bind(vat)
+        .bind(&gross)
+        .execute(pool)
+        .await
+        .expect("insert advance invoice");
+
+        sqlx::query(
+            "INSERT INTO invoice_line_items \
+             (id, invoice_id, position, name, quantity, unit, unit_price, \
+              vat_rate, vat_category, subtotal_amount, vat_amount, total_amount) \
+             VALUES (?1,?2,1,'Avans servicii','1','buc',?3,?4,'S',?5,?6,?7)",
+        )
+        .bind(format!("line-{inv_id}"))
+        .bind(inv_id)
+        .bind(net) // unit_price = net
+        .bind(vat_rate)
+        .bind(net)
+        .bind(vat)
+        .bind(&gross)
+        .execute(pool)
+        .await
+        .expect("insert advance line");
+    }
+
+    /// Seed a RECEIVED advance invoice with a vat line.
+    async fn insert_received_advance(
+        pool: &SqlitePool,
+        company_id: &str,
+        rid: &str,
+        rate: &str,
+        net: &str,
+        vat: &str,
+    ) {
+        let gross = (dec(net) + dec(vat)).to_string();
+        let dl_id = format!("dl-{rid}");
+        sqlx::query(
+            "INSERT INTO received_invoices \
+             (id, company_id, anaf_download_id, issuer_cui, issuer_name, \
+              total_amount, net_amount, vat_amount, currency, issue_date, \
+              xml_path, status, is_advance, downloaded_at, created_at) \
+             VALUES (?1,?2,?6,'CUI999','Furnizor Avans',?3,?4,?5,'RON','2026-06-01', \
+                     'x.xml','NEW',1,1,1)",
+        )
+        .bind(rid)
+        .bind(company_id)
+        .bind(&gross)
+        .bind(net)
+        .bind(vat)
+        .bind(&dl_id)
+        .execute(pool)
+        .await
+        .expect("insert received advance");
+
+        sqlx::query(
+            "INSERT INTO received_invoice_vat_lines \
+             (id, received_invoice_id, vat_rate, vat_category, base_amount, vat_amount) \
+             VALUES (?1,?2,?3,'S',?4,?5)",
+        )
+        .bind(format!("vl-{rid}"))
+        .bind(rid)
+        .bind(rate)
+        .bind(net)
+        .bind(vat)
+        .execute(pool)
+        .await
+        .expect("insert received advance vat line");
+    }
+
+    // ── Test A1: Issued advance invoice → D 4111 = C 419 + C 4427 (NOT 707) ──
+
+    /// Art. 282 test: factură de avans EMISĂ 1000 baza + 21% TVA = 210 → total 1210.
+    /// GL trebuie: D 4111=1210, C 419=1000, C 4427=210 (NU 707).
+    #[tokio::test]
+    async fn advance_issued_gl_posts_419_not_707() {
+        let pool = setup_pool().await;
+        let cid = "adv_co1";
+        insert_company(&pool, cid).await;
+        insert_contact(&pool, cid, "ct_adv1", "CUI_ADV1").await;
+        insert_advance_invoice(&pool, cid, "adv_inv1", "ct_adv1", "1000", "210", "21").await;
+
+        generate_gl_entries(&pool, cid, "2026-06-01", "2026-06-30", false)
+            .await
+            .expect("generate_gl_entries advance issued");
+
+        let jpk = get_journal_pk(&pool, "adv_inv1").await;
+        let d4111 = get_entry_amount(&pool, &jpk, "4111", "debit").await;
+        let c419 = get_entry_amount(&pool, &jpk, "419", "credit").await;
+        let c4427 = get_entry_amount(&pool, &jpk, "4427", "credit").await;
+        let c707 = get_entry_amount(&pool, &jpk, "707", "credit").await;
+
+        assert_eq!(d4111, rdec!(1210), "D 4111 = 1210 (gross avans)");
+        assert_eq!(c419, rdec!(1000), "C 419 = 1000 (baza avans, NU 707)");
+        assert_eq!(c4427, rdec!(210), "C 4427 = 210 (TVA exigibilă la avans)");
+        assert_eq!(
+            c707,
+            Decimal::ZERO,
+            "707 trebuie să fie ZERO (nu e venit la avans)"
+        );
+
+        let (total_d, total_c) = sum_entries(&pool, &jpk).await;
+        assert_eq!(total_d, total_c, "Avans emis: GL dezechilibrat");
+    }
+
+    // ── Test A2: Receipt of advance (D 5121 = C 4111) ────────────────────────
+
+    /// Încasarea avansului: D 5121 = C 4111.
+    /// (Refolosim test3_payment_posting din suite — avansul e un 4111 normal la încasare.)
+    #[tokio::test]
+    async fn advance_issued_receipt_posts_5121_c4111() {
+        let pool = setup_pool().await;
+        let cid = "adv_co2";
+        insert_company(&pool, cid).await;
+        insert_contact(&pool, cid, "ct_adv2", "CUI_ADV2").await;
+        insert_advance_invoice(&pool, cid, "adv_inv2", "ct_adv2", "1000", "210", "21").await;
+
+        // Insert a payment (like test3).
+        sqlx::query(
+            "INSERT INTO payments (id, company_id, invoice_id, paid_at, amount, method) \
+             VALUES ('pay_adv2',?1,'adv_inv2','2026-06-05','1210','transfer')",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        generate_gl_entries(&pool, cid, "2026-06-01", "2026-06-30", false)
+            .await
+            .expect("generate advance receipt");
+
+        // Payment journal: D 5121 = C 4111 = 1210.
+        let pay_jpk: String =
+            sqlx::query_scalar("SELECT id FROM gl_journal WHERE source_id = 'pay_adv2'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let d5121 = get_entry_amount(&pool, &pay_jpk, "5121", "debit").await;
+        let c4111 = get_entry_amount(&pool, &pay_jpk, "4111", "credit").await;
+        assert_eq!(d5121, rdec!(1210), "D 5121 = 1210 la încasare avans");
+        assert_eq!(c4111, rdec!(1210), "C 4111 = 1210 la încasare avans");
+    }
+
+    // ── Test A3: Final invoice settles advance → storno 419/4427 + 707/4427 ──
+
+    /// Regularizare: factura finală (1000 + 21% TVA standard) stornează avansul.
+    /// Net revenue 707 trebuie recunoscută O SINGURĂ DATĂ pe factura finală.
+    /// 419 trebuie să fie net-zero după storno.
+    #[tokio::test]
+    async fn advance_settlement_storno_and_revenue_recognized_once() {
+        let pool = setup_pool().await;
+        let cid = "adv_co3";
+        insert_company(&pool, cid).await;
+        insert_contact(&pool, cid, "ct_adv3", "CUI_ADV3").await;
+
+        // Advance invoice: 1000 + 21% = 210 TVA, total 1210
+        insert_advance_invoice(&pool, cid, "adv_inv3", "ct_adv3", "1000", "210", "21").await;
+
+        // Final invoice: same amount (full settlement), standard kind
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, currency, subtotal_amount, vat_amount, total_amount, \
+              status, payment_means_code, storno_of_invoice_id, invoice_kind, created_at, updated_at) \
+             VALUES ('fin_inv3',?1,'ct_adv3','FACT',2,'FACT-0002','2026-06-15','2026-06-30', \
+                    'RON','1000','210','1210','VALIDATED','42',NULL,'standard',1,1)",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO invoice_line_items \
+             (id, invoice_id, position, name, quantity, unit, unit_price, \
+              vat_rate, vat_category, subtotal_amount, vat_amount, total_amount) \
+             VALUES ('line-fin3','fin_inv3',1,'Servicii','1','buc','1000','21','S','1000','210','1210')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Settlement: fin_inv3 settles adv_inv3 fully
+        sqlx::query(
+            "INSERT INTO advance_invoice_settlements \
+             (id, company_id, final_invoice_id, advance_invoice_id, \
+              advance_base, advance_vat, advance_vat_rate, created_at) \
+             VALUES ('settle3',?1,'fin_inv3','adv_inv3','1000','210','21',1)",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        generate_gl_entries(&pool, cid, "2026-06-01", "2026-06-30", false)
+            .await
+            .expect("generate advance settlement");
+
+        // Advance journal: D 4111=1210, C 419=1000, C 4427=210
+        let adv_jpk = get_journal_pk(&pool, "adv_inv3").await;
+        let adv_d4111 = get_entry_amount(&pool, &adv_jpk, "4111", "debit").await;
+        let adv_c419 = get_entry_amount(&pool, &adv_jpk, "419", "credit").await;
+        let adv_c4427 = get_entry_amount(&pool, &adv_jpk, "4427", "credit").await;
+        assert_eq!(adv_d4111, rdec!(1210), "avans D 4111");
+        assert_eq!(adv_c419, rdec!(1000), "avans C 419");
+        assert_eq!(adv_c4427, rdec!(210), "avans C 4427");
+
+        // Final invoice journal: D 4111=1210, C 707=1000, C 4427=210
+        let fin_jpk = get_journal_pk(&pool, "fin_inv3").await;
+        let fin_d4111 = get_entry_amount(&pool, &fin_jpk, "4111", "debit").await;
+        let fin_c707 = get_entry_amount(&pool, &fin_jpk, "707", "credit").await;
+        let fin_c4427 = get_entry_amount(&pool, &fin_jpk, "4427", "credit").await;
+        assert_eq!(fin_d4111, rdec!(1210), "final D 4111");
+        assert_eq!(
+            fin_c707,
+            rdec!(1000),
+            "final C 707 — venit recunoscut O singură dată"
+        );
+        assert_eq!(fin_c4427, rdec!(210), "final C 4427");
+
+        // Storno journal (ADVANCE_STORNO): C 4111=1210, D 419=1000, D 4427=210
+        // (storno reverses the advance — 419 is debited in red = credit of advance cancelled)
+        let storno_jpk: String = sqlx::query_scalar(
+            "SELECT id FROM gl_journal WHERE source_type='ADVANCE_STORNO' AND source_id='settle3'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("storno journal for settle3");
+        let storno_c4111 = get_entry_amount(&pool, &storno_jpk, "4111", "credit").await;
+        let storno_d419 = get_entry_amount(&pool, &storno_jpk, "419", "debit").await;
+        let storno_d4427 = get_entry_amount(&pool, &storno_jpk, "4427", "debit").await;
+        assert_eq!(
+            storno_c4111,
+            rdec!(1210),
+            "storno C 4111 = 1210 (creanța anulată)"
+        );
+        assert_eq!(
+            storno_d419,
+            rdec!(1000),
+            "storno D 419 = 1000 (avans anulat)"
+        );
+        assert_eq!(
+            storno_d4427,
+            rdec!(210),
+            "storno D 4427 = 210 (TVA avans anulată)"
+        );
+
+        // Net: 419 balance = C 1000 (avans) − D 1000 (storno) = 0 (settled exactly)
+        let (all_d419, all_c419): (Decimal, Decimal) = {
+            let rows = sqlx::query(
+                "SELECT e.debit, e.credit FROM gl_entry e \
+                 JOIN gl_journal j ON j.id = e.journal_pk \
+                 WHERE j.company_id = ?1 AND e.account_code = '419'",
+            )
+            .bind(cid)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+            rows.iter()
+                .fold((Decimal::ZERO, Decimal::ZERO), |(d, c), r| {
+                    let rd: String = r.try_get("debit").unwrap_or_default();
+                    let rc: String = r.try_get("credit").unwrap_or_default();
+                    (d + dec(&rd), c + dec(&rc))
+                })
+        };
+        assert_eq!(
+            all_d419, all_c419,
+            "419 trebuie să fie net-zero după regularizare (avans anulat complet)"
+        );
+
+        // Revenue 707 recognised ONCE (only on the final invoice, NOT on the advance)
+        let (_, all_c707): (Decimal, Decimal) = {
+            let rows = sqlx::query(
+                "SELECT e.debit, e.credit FROM gl_entry e \
+                 JOIN gl_journal j ON j.id = e.journal_pk \
+                 WHERE j.company_id = ?1 AND e.account_code = '707'",
+            )
+            .bind(cid)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+            rows.iter()
+                .fold((Decimal::ZERO, Decimal::ZERO), |(d, c), r| {
+                    let rd: String = r.try_get("debit").unwrap_or_default();
+                    let rc: String = r.try_get("credit").unwrap_or_default();
+                    (d + dec(&rd), c + dec(&rc))
+                })
+        };
+        assert_eq!(
+            all_c707,
+            rdec!(1000),
+            "707 venit recunoscut O singură dată = 1000"
+        );
+
+        // Each individual journal balanced
+        let (d1, c1) = sum_entries(&pool, &adv_jpk).await;
+        let (d2, c2) = sum_entries(&pool, &fin_jpk).await;
+        let (d3, c3) = sum_entries(&pool, &storno_jpk).await;
+        assert_eq!(d1, c1, "avans jurnal dezechilibrat");
+        assert_eq!(d2, c2, "final jurnal dezechilibrat");
+        assert_eq!(d3, c3, "storno jurnal dezechilibrat");
+    }
+
+    // ── Test A4: Received advance invoice → D 4091 + D 4426 = C 401 (NOT 607) ─
+
+    /// Factură de avans PRIMITĂ: D 4091=1000, D 4426=210, C 401=1210.
+    #[tokio::test]
+    async fn advance_received_gl_posts_4091_not_607() {
+        let pool = setup_pool().await;
+        let cid = "adv_co4";
+        insert_company(&pool, cid).await;
+        insert_received_advance(&pool, cid, "ra_inv4", "21", "1000", "210").await;
+
+        generate_gl_entries(&pool, cid, "2026-06-01", "2026-06-30", false)
+            .await
+            .expect("generate advance received");
+
+        let jpk = get_journal_pk(&pool, "ra_inv4").await;
+        let d4091 = get_entry_amount(&pool, &jpk, "4091", "debit").await;
+        let d4426 = get_entry_amount(&pool, &jpk, "4426", "debit").await;
+        let c401 = get_entry_amount(&pool, &jpk, "401", "credit").await;
+        let d607 = get_entry_amount(&pool, &jpk, "607", "debit").await;
+
+        assert_eq!(d4091, rdec!(1000), "D 4091 = 1000 (avans furnizor)");
+        assert_eq!(d4426, rdec!(210), "D 4426 = 210 (TVA deductibilă avans)");
+        assert_eq!(c401, rdec!(1210), "C 401 = 1210 (datorie furnizor)");
+        assert_eq!(
+            d607,
+            Decimal::ZERO,
+            "607 trebuie să fie ZERO (nu e cheltuială la avans)"
+        );
+
+        let (total_d, total_c) = sum_entries(&pool, &jpk).await;
+        assert_eq!(total_d, total_c, "Avans primit: GL dezechilibrat");
+    }
+
+    // ── Test A5: Storno uses advance's OWN rate even if delivery rate differs ─
+
+    /// Art. 282 alin. 11: storno-ul avansului folosește RATA AVANSULUI (19%)
+    /// chiar dacă livrarea e la rata curentă (21%).
+    /// Seed un avans la 19% (pre-01.08.2025), final la 21%, settlement la 19%.
+    #[tokio::test]
+    async fn advance_storno_uses_advance_own_rate() {
+        let pool = setup_pool().await;
+        let cid = "adv_co5";
+        insert_company(&pool, cid).await;
+        insert_contact(&pool, cid, "ct_adv5", "CUI_ADV5").await;
+
+        // Advance at OLD rate 19% (historic, pre-01.08.2025)
+        // We bypass the vat-rate validation by inserting directly.
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, currency, subtotal_amount, vat_amount, total_amount, \
+              status, payment_means_code, storno_of_invoice_id, invoice_kind, created_at, updated_at) \
+             VALUES ('adv_inv5',?1,'ct_adv5','AV',1,'AV-0001','2025-07-01','2025-07-31', \
+                    'RON','1000','190','1190','VALIDATED','42',NULL,'advance',1,1)",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO invoice_line_items \
+             (id, invoice_id, position, name, quantity, unit, unit_price, \
+              vat_rate, vat_category, subtotal_amount, vat_amount, total_amount) \
+             VALUES ('line-adv5','adv_inv5',1,'Avans','1','buc','1000','19','S','1000','190','1190')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Final invoice at NEW rate 21% (post-01.08.2025)
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, currency, subtotal_amount, vat_amount, total_amount, \
+              status, payment_means_code, storno_of_invoice_id, invoice_kind, created_at, updated_at) \
+             VALUES ('fin_inv5',?1,'ct_adv5','FACT',2,'FACT-0002','2026-06-15','2026-06-30', \
+                    'RON','1000','210','1210','VALIDATED','42',NULL,'standard',1,1)",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO invoice_line_items \
+             (id, invoice_id, position, name, quantity, unit, unit_price, \
+              vat_rate, vat_category, subtotal_amount, vat_amount, total_amount) \
+             VALUES ('line-fin5','fin_inv5',1,'Servicii','1','buc','1000','21','S','1000','210','1210')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Settlement records advance_vat_rate='19' (the advance's own rate)
+        sqlx::query(
+            "INSERT INTO advance_invoice_settlements \
+             (id, company_id, final_invoice_id, advance_invoice_id, \
+              advance_base, advance_vat, advance_vat_rate, created_at) \
+             VALUES ('settle5',?1,'fin_inv5','adv_inv5','1000','190','19',1)",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Generate for the period covering the FINAL invoice date
+        generate_gl_entries(&pool, cid, "2026-06-01", "2026-06-30", false)
+            .await
+            .expect("generate advance settlement cross-period");
+
+        // Storno journal: advance_vat_rate=19 → D 4427 should be 190 (not 210)
+        let storno_jpk: String = sqlx::query_scalar(
+            "SELECT id FROM gl_journal WHERE source_type='ADVANCE_STORNO' AND source_id='settle5'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("storno journal settle5");
+
+        let storno_d419 = get_entry_amount(&pool, &storno_jpk, "419", "debit").await;
+        let storno_d4427 = get_entry_amount(&pool, &storno_jpk, "4427", "debit").await;
+
+        assert_eq!(
+            storno_d419,
+            rdec!(1000),
+            "storno D 419 = 1000 (baza avans la rata avansului)"
+        );
+        assert_eq!(
+            storno_d4427,
+            rdec!(190),
+            "storno D 4427 = 190 (rata AVANSULUI 19%, NU rata livrării 21%)"
+        );
+
+        // The storno journal itself must balance
+        let (d_s, c_s) = sum_entries(&pool, &storno_jpk).await;
+        assert_eq!(d_s, c_s, "storno cross-period: jurnal dezechilibrat");
+    }
+
+    // ── Test A6: partner_cui stamped on 419 and 4091 legs ─────────────────────
+
+    /// CUI-ul partenerului trebuie să apară pe liniile 419 (emis) și 4091 (primit).
+    #[tokio::test]
+    async fn advance_partner_cui_stamped_on_419_and_4091() {
+        let pool = setup_pool().await;
+        let cid = "adv_co6";
+        insert_company(&pool, cid).await;
+        insert_contact(&pool, cid, "ct_adv6", "RO12345678").await;
+        insert_advance_invoice(&pool, cid, "adv_inv6", "ct_adv6", "500", "105", "21").await;
+        insert_received_advance(&pool, cid, "ra_inv6", "21", "500", "105").await;
+
+        generate_gl_entries(&pool, cid, "2026-06-01", "2026-06-30", false)
+            .await
+            .expect("generate advance partner_cui test");
+
+        // Check 419 entry has partner_cui set
+        let adv_jpk = get_journal_pk(&pool, "adv_inv6").await;
+        let cui_on_419: Option<String> = sqlx::query_scalar(
+            "SELECT partner_cui FROM gl_entry \
+             WHERE journal_pk = ?1 AND account_code = '419' LIMIT 1",
+        )
+        .bind(&adv_jpk)
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+        .flatten();
+        assert!(
+            cui_on_419.is_some(),
+            "partner_cui trebuie să fie setat pe linia 419"
+        );
+
+        // Check 4091 entry has partner_cui set
+        let recv_jpk = get_journal_pk(&pool, "ra_inv6").await;
+        let cui_on_4091: Option<String> = sqlx::query_scalar(
+            "SELECT partner_cui FROM gl_entry \
+             WHERE journal_pk = ?1 AND account_code = '4091' LIMIT 1",
+        )
+        .bind(&recv_jpk)
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+        .flatten();
+        assert!(
+            cui_on_4091.is_some(),
+            "partner_cui trebuie să fie setat pe linia 4091"
+        );
+    }
+
+    // ── Test A7: Idempotency — re-running generate_gl_entries doesn't duplicate ─
+
+    #[tokio::test]
+    async fn advance_gl_is_idempotent() {
+        let pool = setup_pool().await;
+        let cid = "adv_co7";
+        insert_company(&pool, cid).await;
+        insert_contact(&pool, cid, "ct_adv7", "CUI_ADV7").await;
+        insert_advance_invoice(&pool, cid, "adv_inv7", "ct_adv7", "1000", "210", "21").await;
+
+        // Run twice
+        generate_gl_entries(&pool, cid, "2026-06-01", "2026-06-30", false)
+            .await
+            .unwrap();
+        generate_gl_entries(&pool, cid, "2026-06-01", "2026-06-30", false)
+            .await
+            .unwrap();
+
+        // Only one journal should exist for adv_inv7
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM gl_journal WHERE source_id = 'adv_inv7'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            count, 1,
+            "GL idempotent: trebuie exact 1 jurnal, nu duplicate"
+        );
+
+        // GL must still balance
+        let jpk = get_journal_pk(&pool, "adv_inv7").await;
+        let (d, c) = sum_entries(&pool, &jpk).await;
+        assert_eq!(d, c, "avans idempotent: GL dezechilibrat");
     }
 }
