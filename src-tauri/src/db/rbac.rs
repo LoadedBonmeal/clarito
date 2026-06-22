@@ -159,6 +159,8 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "discount_payment_instrument"
         | "dishonor_payment_instrument"
         | "pay_payment_instrument"
+        // DEVALIDARE: unpost GL + set VALIDATED→DRAFT — same tier as generate_gl_entries.
+        | "devalidate_invoice"
         // P3 Wave D: avansuri + deconturi post GL
         | "create_treasury_advance"
         | "return_treasury_advance"

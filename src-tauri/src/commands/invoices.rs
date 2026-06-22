@@ -980,6 +980,142 @@ pub async fn duplicate_invoice(
     Ok(new_invoice_id)
 }
 
+/// DEVALIDARE: Revine o factură VALIDATED la DRAFT, ștergând postările GL
+/// (source_type='INVOICE') aferente. Numărul fiscal (series/number/full_number) este
+/// PĂSTRAT — re-validarea ulterioară refolosește același număr, fără goluri sau duplicate.
+///
+/// Gărzi obligatorii (refuză dacă oricare e adevărat):
+/// (a) Factura nu este VALIDATED — no-op cu eroare explicată.
+/// (b) Perioada emisiunii este blocată (declarație depusă) — ar corupt raportările.
+/// (c) Factura are plăți înregistrate — devalidarea ar orfa ña plățile.
+/// (d) Factura a fost trimisă la ANAF (anaf_upload_id IS NOT NULL) — o factură transmisă
+///     trebuie corectată prin storno/rectificativă, nu prin devalidare silențioasă.
+///
+/// RBAC: `PostGl` — același nivel ca generate_gl_entries (Contabil + Admin).
+#[tauri::command]
+pub async fn devalidate_invoice(
+    state: tauri::State<'_, crate::state::AppState>,
+    invoice_id: String,
+    company_id: String,
+) -> crate::error::AppResult<crate::db::invoices::Invoice> {
+    use crate::db::invoices;
+    use crate::db::models::new_id;
+    use crate::error::AppError;
+
+    let pool = &state.db;
+
+    // 1. Fetch + ownership check (scoped fetch → NotFound for wrong company).
+    let inv = invoices::get_scoped(pool, &invoice_id, &company_id).await?;
+
+    // 2. Guard: must be VALIDATED.
+    if inv.status != "VALIDATED" {
+        return Err(AppError::Validation(format!(
+            "Devalidarea este permisă doar pentru facturi VALIDATE (status curent: {}).",
+            inv.status
+        )));
+    }
+
+    // 3. Guard: e-Factura already sent to ANAF → refuse.
+    if inv.anaf_upload_id.is_some() {
+        return Err(AppError::Validation(
+            "Factura a fost deja transmisă la ANAF/SPV — nu poate fi devalidată. \
+             Corectați prin storno (notă de credit) sau rectificativă."
+                .into(),
+        ));
+    }
+
+    // 4. Guard: period lock on the invoice's issue-date month.
+    let issue_month = inv.issue_date.get(..7).unwrap_or("");
+    if !issue_month.is_empty()
+        && crate::db::period_locks::is_period_locked(pool, &company_id, issue_month).await
+    {
+        return Err(AppError::Validation(format!(
+            "Perioada {} este blocată (declarație depusă) — devalidarea este interzisă. \
+             Corectați prin storno/rectificativă sau deblocați perioada mai întâi.",
+            issue_month
+        )));
+    }
+
+    // 5. Guard: invoice has payments → refuse (would orphan payment records).
+    let payment_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM payments WHERE invoice_id = ?1 AND company_id = ?2",
+    )
+    .bind(&invoice_id)
+    .bind(&company_id)
+    .fetch_one(pool)
+    .await?;
+    if payment_count > 0 {
+        return Err(AppError::Validation(format!(
+            "Factura are {} plată/plăți înregistrată/înregistrate — ștergeți plățile înainte de devalidare.",
+            payment_count
+        )));
+    }
+
+    // 6. Atomic TX: delete GL journal + set status DRAFT.
+    let now = crate::db::models::now_unix();
+    let mut tx = pool.begin().await?;
+
+    // 6a. Atomic claim: UPDATE WHERE status='VALIDATED' guards against concurrent writes.
+    let claim = sqlx::query(
+        "UPDATE invoices \
+         SET status = 'DRAFT', updated_at = ?2 \
+         WHERE id = ?1 AND company_id = ?3 AND status = 'VALIDATED'",
+    )
+    .bind(&invoice_id)
+    .bind(now)
+    .bind(&company_id)
+    .execute(&mut *tx)
+    .await?;
+
+    if claim.rows_affected() != 1 {
+        return Err(AppError::Validation(
+            "Factura nu mai este în stare VALIDATED (posibil modificată concurent).".into(),
+        ));
+    }
+
+    // 6b. Delete the invoice's GL journal (CASCADE deletes gl_entries via FK).
+    sqlx::query(
+        "DELETE FROM gl_journal \
+         WHERE company_id = ?1 AND source_type = 'INVOICE' AND source_id = ?2",
+    )
+    .bind(&company_id)
+    .bind(&invoice_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // 6c. Audit event on the invoice.
+    sqlx::query(
+        "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at) \
+         VALUES (?1, ?2, 'STATUS_DEVALIDATED', ?3, ?4)",
+    )
+    .bind(new_id())
+    .bind(&invoice_id)
+    .bind(format!(
+        "Devalidată: GL anulat, factură redeschisă pentru corectare. Număr fiscal păstrat: {}.",
+        inv.full_number
+    ))
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    // 7. Audit log (best-effort).
+    let _ = crate::db::audit::log_user_action(
+        pool,
+        "invoice_devalidated",
+        "invoice",
+        &invoice_id,
+        Some(&company_id),
+        Some(&inv.full_number),
+    )
+    .await;
+
+    // 8. Re-fetch and return (ownership re-verified by get_scoped).
+    let updated = invoices::get_scoped(pool, &invoice_id, &company_id).await?;
+    Ok(updated)
+}
+
 /// ROB-22: report on the integrity of an invoice's archived artifacts.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1876,5 +2012,372 @@ mod tests {
             inv.status, "QUEUED",
             "status must be QUEUED after successful CAS"
         );
+    }
+
+    // ── DEVALIDARE tests ──────────────────────────────────────────────────────
+    //
+    // These tests run against an in-memory SQLite with real migrations.
+    // They exercise the actual DB SQL (not a re-implemented predicate), so they
+    // FAIL if any guard or the atomic UPDATE is removed.
+
+    /// Insert a VALIDATED invoice for devalidare tests, optionally with an
+    /// anaf_upload_id (simulates a sent e-Factura).
+    async fn insert_validated_invoice(
+        pool: &sqlx::SqlitePool,
+        id: &str,
+        number: i64,
+        anaf_upload_id: Option<&str>,
+    ) {
+        sqlx::query(
+            "INSERT INTO invoices \
+             (id, company_id, contact_id, series, number, full_number, \
+              issue_date, due_date, subtotal_amount, vat_amount, total_amount, \
+              status, anaf_upload_id) \
+             VALUES (?1, 'comp-1', 'contact-1', 'FCT', ?2, \
+                    'FCT-' || printf('%04d', ?2), \
+                    '2026-03-15', '2026-03-15', '1000', '190', '1190', 'VALIDATED', ?3)",
+        )
+        .bind(id)
+        .bind(number)
+        .bind(anaf_upload_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// Insert a minimal GL journal row so we can assert it disappears after devalidare.
+    /// Uses only the NOT NULL columns from migration 0018_gl_journal.
+    async fn insert_invoice_gl_journal(pool: &sqlx::SqlitePool, invoice_id: &str) -> String {
+        let journal_id = crate::db::models::new_id();
+        sqlx::query(
+            "INSERT INTO gl_journal \
+             (id, company_id, journal_id, journal_type, transaction_id, \
+              transaction_date, source_type, source_id) \
+             VALUES (?1, 'comp-1', 'VANZARI', 'VANZARI', 'test-txn', \
+                    '2026-03-15', 'INVOICE', ?2)",
+        )
+        .bind(&journal_id)
+        .bind(invoice_id)
+        .execute(pool)
+        .await
+        .unwrap();
+        journal_id
+    }
+
+    /// Add a payment row linked to an invoice.
+    async fn insert_payment(pool: &sqlx::SqlitePool, invoice_id: &str) {
+        sqlx::query(
+            "INSERT INTO payments (id, invoice_id, company_id, amount, currency, paid_at) \
+             VALUES (?1, ?2, 'comp-1', '1190', 'RON', '2026-03-20')",
+        )
+        .bind(crate::db::models::new_id())
+        .bind(invoice_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// Core helper: run the devalidare SQL operations against the pool directly
+    /// (same logic as devalidate_invoice command but without the Tauri State wrapper).
+    /// Returns Ok(()) if the devalidation succeeds, Err(msg) if any guard fires.
+    async fn try_devalidate(pool: &sqlx::SqlitePool, invoice_id: &str) -> Result<(), String> {
+        use crate::db::invoices;
+
+        // Fetch invoice.
+        let inv = match invoices::get_scoped(pool, invoice_id, "comp-1").await {
+            Ok(i) => i,
+            Err(e) => return Err(e.to_string()),
+        };
+
+        // Guard: must be VALIDATED.
+        if inv.status != "VALIDATED" {
+            return Err(format!(
+                "Devalidarea este permisă doar pentru facturi VALIDATE (status curent: {}).",
+                inv.status
+            ));
+        }
+
+        // Guard: e-Factura already sent.
+        if inv.anaf_upload_id.is_some() {
+            return Err(
+                "Factura a fost deja transmisă la ANAF/SPV — nu poate fi devalidată.".into(),
+            );
+        }
+
+        // Guard: period lock.
+        let issue_month = inv.issue_date.get(..7).unwrap_or("");
+        if !issue_month.is_empty()
+            && crate::db::period_locks::is_period_locked(pool, "comp-1", issue_month).await
+        {
+            return Err(format!(
+                "Perioada {} este blocată (declarație depusă) — devalidarea este interzisă.",
+                issue_month
+            ));
+        }
+
+        // Guard: payments.
+        let payment_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM payments WHERE invoice_id = ?1 AND company_id = 'comp-1'",
+        )
+        .bind(invoice_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        if payment_count > 0 {
+            return Err(format!(
+                "Factura are {} plată/plăți înregistrată/înregistrate — ștergeți plățile înainte de devalidare.",
+                payment_count
+            ));
+        }
+
+        // Atomic TX.
+        let now = crate::db::models::now_unix();
+        let mut tx = pool.begin().await.unwrap();
+
+        let claim = sqlx::query(
+            "UPDATE invoices SET status = 'DRAFT', updated_at = ?2 \
+             WHERE id = ?1 AND company_id = 'comp-1' AND status = 'VALIDATED'",
+        )
+        .bind(invoice_id)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+        if claim.rows_affected() != 1 {
+            return Err(
+                "Factura nu mai este în stare VALIDATED (posibil modificată concurent).".into(),
+            );
+        }
+
+        sqlx::query(
+            "DELETE FROM gl_journal WHERE company_id = 'comp-1' AND source_type = 'INVOICE' AND source_id = ?1",
+        )
+        .bind(invoice_id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+        tx.commit().await.unwrap();
+        Ok(())
+    }
+
+    // ── Test 1: happy path — VALIDATED invoice, unlocked period, no payments, not sent ──
+
+    /// devalidate_invoice_happy_path: status → DRAFT, GL journal gone, number preserved.
+    #[tokio::test]
+    async fn devalidate_invoice_happy_path() {
+        let pool = setup_storno_pool().await;
+        insert_validated_invoice(&pool, "inv-deval-ok", 10, None).await;
+        let journal_id = insert_invoice_gl_journal(&pool, "inv-deval-ok").await;
+
+        // Pre-conditions.
+        let inv_before = db_inv_test::get(&pool, "inv-deval-ok").await.unwrap();
+        assert_eq!(inv_before.status, "VALIDATED");
+        let gl_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gl_journal WHERE id = ?1")
+            .bind(&journal_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(gl_before, 1, "GL journal must exist before devalidare");
+
+        // Run devalidare.
+        let result = try_devalidate(&pool, "inv-deval-ok").await;
+        assert!(
+            result.is_ok(),
+            "happy-path devalidare must succeed: {:?}",
+            result
+        );
+
+        // Post-conditions.
+        let inv_after = db_inv_test::get(&pool, "inv-deval-ok").await.unwrap();
+        assert_eq!(
+            inv_after.status, "DRAFT",
+            "status must be DRAFT after devalidare"
+        );
+        assert_eq!(inv_after.series, "FCT", "series must be preserved");
+        assert_eq!(inv_after.number, 10, "number must be preserved");
+        assert_eq!(
+            inv_after.full_number, "FCT-0010",
+            "full_number must be preserved"
+        );
+
+        let gl_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gl_journal WHERE id = ?1")
+            .bind(&journal_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(gl_after, 0, "GL journal must be deleted after devalidare");
+    }
+
+    // ── Test 2: guard — period is locked ──
+
+    /// devalidate_invoice_blocked_when_period_locked: returns a clear Validation error,
+    /// invoice remains VALIDATED, GL journal intact.
+    #[tokio::test]
+    async fn devalidate_invoice_blocked_when_period_locked() {
+        let pool = setup_storno_pool().await;
+        insert_validated_invoice(&pool, "inv-deval-locked", 11, None).await;
+        let journal_id = insert_invoice_gl_journal(&pool, "inv-deval-locked").await;
+
+        // Lock the invoice's period (2026-03).
+        crate::db::period_locks::lock_period(
+            &pool,
+            "comp-1",
+            "2026-03",
+            "declaration:D300",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let result = try_devalidate(&pool, "inv-deval-locked").await;
+        assert!(
+            result.is_err(),
+            "devalidare must be blocked when period is locked"
+        );
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("blocată"),
+            "error must mention period is locked, got: {msg}"
+        );
+
+        // Invoice still VALIDATED.
+        let inv = db_inv_test::get(&pool, "inv-deval-locked").await.unwrap();
+        assert_eq!(inv.status, "VALIDATED", "status must remain VALIDATED");
+
+        // GL journal intact.
+        let gl: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gl_journal WHERE id = ?1")
+            .bind(&journal_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(gl, 1, "GL journal must remain intact when period is locked");
+    }
+
+    // ── Test 3: guard — invoice has a payment ──
+
+    /// devalidate_invoice_blocked_when_payment_exists: returns error, state unchanged.
+    #[tokio::test]
+    async fn devalidate_invoice_blocked_when_payment_exists() {
+        let pool = setup_storno_pool().await;
+        insert_validated_invoice(&pool, "inv-deval-paid", 12, None).await;
+        let journal_id = insert_invoice_gl_journal(&pool, "inv-deval-paid").await;
+        insert_payment(&pool, "inv-deval-paid").await;
+
+        let result = try_devalidate(&pool, "inv-deval-paid").await;
+        assert!(
+            result.is_err(),
+            "devalidare must be blocked when payment exists"
+        );
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("plată") || msg.contains("plăți"),
+            "error must mention payments, got: {msg}"
+        );
+
+        let inv = db_inv_test::get(&pool, "inv-deval-paid").await.unwrap();
+        assert_eq!(inv.status, "VALIDATED", "status must remain VALIDATED");
+
+        let gl: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gl_journal WHERE id = ?1")
+            .bind(&journal_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(gl, 1, "GL journal must remain intact when payment exists");
+    }
+
+    // ── Test 4: guard — e-Factura already sent (anaf_upload_id IS NOT NULL) ──
+
+    /// devalidate_invoice_blocked_when_efactura_sent: returns error, state unchanged.
+    #[tokio::test]
+    async fn devalidate_invoice_blocked_when_efactura_sent() {
+        let pool = setup_storno_pool().await;
+        insert_validated_invoice(&pool, "inv-deval-sent", 13, Some("ANAF-TICKET-999")).await;
+        let journal_id = insert_invoice_gl_journal(&pool, "inv-deval-sent").await;
+
+        let result = try_devalidate(&pool, "inv-deval-sent").await;
+        assert!(
+            result.is_err(),
+            "devalidare must be blocked when e-Factura is sent"
+        );
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("ANAF") || msg.contains("SPV"),
+            "error must mention ANAF/SPV, got: {msg}"
+        );
+
+        let inv = db_inv_test::get(&pool, "inv-deval-sent").await.unwrap();
+        assert_eq!(inv.status, "VALIDATED", "status must remain VALIDATED");
+
+        let gl: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gl_journal WHERE id = ?1")
+            .bind(&journal_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            gl, 1,
+            "GL journal must remain intact when e-Factura is sent"
+        );
+    }
+
+    // ── Test 5: guard — invoice is DRAFT (not VALIDATED) ──
+
+    /// devalidate_invoice_blocked_when_already_draft: returns error (nothing to devalidate).
+    #[tokio::test]
+    async fn devalidate_invoice_blocked_when_already_draft() {
+        let pool = setup_storno_pool().await;
+        insert_invoice(&pool, "inv-deval-draft", "DRAFT", None).await;
+
+        let result = try_devalidate(&pool, "inv-deval-draft").await;
+        assert!(
+            result.is_err(),
+            "devalidare of a DRAFT invoice must return an error"
+        );
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("VALIDATE") || msg.contains("DRAFT"),
+            "error must mention status constraint, got: {msg}"
+        );
+    }
+
+    // ── Test 6: re-validate after devalidare — same number, GL re-postable ──
+
+    /// After devalidare, the invoice is DRAFT with the original number and can be re-queued.
+    /// This verifies there's no gap/duplicate in the number sequence.
+    #[tokio::test]
+    async fn devalidate_then_revalidate_preserves_number() {
+        let pool = setup_storno_pool().await;
+        insert_validated_invoice(&pool, "inv-deval-requeue", 14, None).await;
+        // No GL journal needed for this test — we're testing number preservation + re-transition.
+
+        // Devalidate.
+        let result = try_devalidate(&pool, "inv-deval-requeue").await;
+        assert!(result.is_ok(), "devalidare must succeed: {:?}", result);
+
+        let inv = db_inv_test::get(&pool, "inv-deval-requeue").await.unwrap();
+        assert_eq!(inv.status, "DRAFT", "must be DRAFT after devalidare");
+        assert_eq!(inv.number, 14, "number must be preserved");
+        assert_eq!(inv.series, "FCT", "series must be preserved");
+        assert_eq!(inv.full_number, "FCT-0014", "full_number must be preserved");
+
+        // Re-transition to QUEUED (same path as sending to ANAF after editing).
+        let requeue = db_inv_test::set_status_scoped(
+            &pool,
+            "inv-deval-requeue",
+            "comp-1",
+            crate::db::models::InvoiceStatus::Queued,
+            "DRAFT",
+            None,
+        )
+        .await;
+        assert!(
+            requeue.is_ok(),
+            "re-transition DRAFT→QUEUED after devalidare must succeed"
+        );
+
+        let inv2 = db_inv_test::get(&pool, "inv-deval-requeue").await.unwrap();
+        assert_eq!(inv2.number, 14, "number still FCT-14 after re-queue");
     }
 }

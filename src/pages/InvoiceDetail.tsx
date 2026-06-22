@@ -118,12 +118,18 @@ export function InvoiceDetailPage() {
   const [templateFrequency, setTemplateFrequency] = useState("monthly");
   const [templateName, setTemplateName] = useState("");
 
+  // Devalidare modal state
+  const [showDevalidateModal, setShowDevalidateModal] = useState(false);
+
   // Animated-exit close handlers (play .modal-back.closing before unmount)
   const { closing: stornoClosing, close: closeStorno } = useAnimatedClose(
     useCallback(() => { setShowStornoModal(false); setStornoReason(""); }, []),
   );
   const { closing: payClosing, close: closePay } = useAnimatedClose(
     useCallback(() => setShowPayModal(false), []),
+  );
+  const { closing: devalidateClosing, close: closeDevalidate } = useAnimatedClose(
+    useCallback(() => setShowDevalidateModal(false), []),
   );
   const { closing: templateClosing, close: closeTemplate } = useAnimatedClose(
     useCallback(() => setShowSaveAsTemplate(false), []),
@@ -293,6 +299,24 @@ export function InvoiceDetailPage() {
     onError: (e) => setActionError(formatError(e, t("detail.notify.stornoError"))),
   });
 
+  const devalidateInvoice = useMutation({
+    mutationFn: () => {
+      if (!activeCompanyId) return Promise.reject(new Error(t("detail.noActiveCompany")));
+      return api.invoices.devalidate(id, activeCompanyId);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.all });
+      closeDevalidate();
+      setActionError(null);
+      notify.success(t("detail.notify.devalidated"));
+    },
+    onError: (e) => {
+      closeDevalidate();
+      setActionError(formatError(e, t("detail.notify.devalidateError")));
+    },
+  });
+
   const pushSmartbill = useMutation({
     mutationFn: () => api.integrations.smartbillPush(data!.invoice.companyId, id),
     onSuccess: (result) => {
@@ -443,6 +467,10 @@ export function InvoiceDetailPage() {
   const paySaveDisabled = addPayment.isPending || !payForm.amount || !payForm.paidAt;
 
   const canStorno = invoice.status === "VALIDATED" && invoice.stornoOfInvoiceId === null;
+  // Devalidare is only shown for VALIDATED invoices that have NOT been sent to ANAF.
+  // The backend enforces the full set of guards (period lock, payments, sent); the
+  // button is pre-filtered on the one signal visible without an async call.
+  const canDevalidate = invoice.status === "VALIDATED" && !invoice.anafUploadId;
   const canSubmit = !!invoice.xmlPath && invoice.status === "DRAFT";
   const canCheckStatus = invoice.status === "SUBMITTED" || invoice.status === "QUEUED" || !!invoice.anafIndex;
 
@@ -485,6 +513,19 @@ export function InvoiceDetailPage() {
                 <path d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
               </svg>
               {t("detail.actions.storno")}
+            </button>
+          )}
+          {canDevalidate && (
+            <button
+              className="pill-btn"
+              style={{ color: "var(--text-2)" }}
+              onClick={() => setShowDevalidateModal(true)}
+              disabled={devalidateInvoice.isPending}
+            >
+              <svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+              </svg>
+              {devalidateInvoice.isPending ? t("detail.actions.devalidating") : t("detail.actions.devalidate")}
             </button>
           )}
           {invoice.status !== "DRAFT" && invoice.status !== "STORNED" && (
@@ -991,6 +1032,52 @@ export function InvoiceDetailPage() {
               >
                 {stornoInvoice.isPending ? t("detail.stornoModal.pending") : t("detail.stornoModal.confirm")}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* modal devalidare */}
+      {showDevalidateModal && (
+        <div
+          className={`modal-back ${devalidateClosing ? "closing" : "show"}`}
+          style={{ position: "fixed" }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) closeDevalidate(); }}
+        >
+          <div className="modal" style={{ maxWidth: 480 }}>
+            <div className="modal-head">
+              <div>
+                <div className="mt" style={{ color: "var(--amber)" }}>{t("detail.devalidateModal.title")}</div>
+                <div className="ms num">{invoice.fullNumber} · {t("detail.devalidateModal.sub")}</div>
+              </div>
+              <button className="modal-x" onClick={() => closeDevalidate()}>
+                <Ic name="xMark" />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--text-1)" }}>{t("detail.devalidateModal.body1")}</p>
+              <ul style={{ margin: "0 0 12px", paddingLeft: 20, fontSize: 13, color: "var(--text-2)", lineHeight: 1.6 }}>
+                <li>{t("detail.devalidateModal.bullet1")}</li>
+                <li>{t("detail.devalidateModal.bullet2")}</li>
+                <li>{t("detail.devalidateModal.bullet3", { nr: invoice.fullNumber })}</li>
+              </ul>
+              <p style={{ margin: 0, fontSize: 12, color: "var(--text-3)" }}>{t("detail.devalidateModal.warn")}</p>
+            </div>
+            <div className="modal-foot">
+              <span />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="pill-btn" onClick={() => closeDevalidate()} disabled={devalidateInvoice.isPending}>
+                  {t("detail.devalidateModal.cancel")}
+                </button>
+                <button
+                  className="btn-dark"
+                  style={{ background: "var(--amber)", color: "#fff" }}
+                  disabled={devalidateInvoice.isPending}
+                  onClick={() => devalidateInvoice.mutate()}
+                >
+                  {devalidateInvoice.isPending ? t("detail.devalidateModal.pending") : t("detail.devalidateModal.confirm")}
+                </button>
+              </div>
             </div>
           </div>
         </div>

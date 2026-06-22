@@ -239,6 +239,13 @@ export const invoices = {
   /** R14 Wave A: companyId is required — cross-company duplication returns NotFound. */
   duplicate: (invoiceId: string, companyId: string) =>
     invoke<string>("duplicate_invoice", { invoiceId, companyId }),
+  /**
+   * DEVALIDARE: revine factura VALIDATED→DRAFT și șterge GL-ul aferent.
+   * Numărul fiscal este păstrat. Garduri: perioadă blocată, plăți, e-Factura trimisă.
+   * Necesită rolul Contabil sau Admin (PostGl).
+   */
+  devalidate: (invoiceId: string, companyId: string) =>
+    invoke<Invoice>("devalidate_invoice", { invoiceId, companyId }),
 };
 
 // ─── Received ─────────────────────────────────────────────────────────────

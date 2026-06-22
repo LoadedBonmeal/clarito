@@ -366,6 +366,7 @@ pub fn run() {
                     commands::invoices::verify_invoice_files,
                     commands::invoices::storno_invoice,
                     commands::invoices::duplicate_invoice,
+                    commands::invoices::devalidate_invoice,
                     // received
                     commands::received::list_received_invoices,
                     commands::received::get_received_invoice,

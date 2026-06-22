@@ -54,6 +54,8 @@
       "generateXml": "Generează XML",
       "viewXml": "Vezi XML",
       "storno": "Storno",
+      "devalidate": "Devalidează",
+      "devalidating": "Devalidare…",
       "recordPayment": "Înregistrează plata",
       "moreTitle": "Mai multe acțiuni",
       "invoiceActions": "Acțiuni factură",
@@ -192,6 +194,18 @@
       "pending": "Se stornează…",
       "confirm": "Stornează"
     },
+    "devalidateModal": {
+      "title": "Devalidează factura",
+      "sub": "factura revine la ciornă — GL-ul este anulat imediat",
+      "body1": "Operațiunea:",
+      "bullet1": "Șterge înregistrările contabile (GL) ale acestei facturi.",
+      "bullet2": "Redeschide factura pentru editare (status CIORNĂ).",
+      "bullet3": "Păstrează numărul fiscal {{nr}} — re-validarea va folosi același număr.",
+      "warn": "Interzis dacă: perioada este blocată, factura are plăți sau a fost trimisă la ANAF.",
+      "cancel": "Anulează",
+      "pending": "Se devalidează…",
+      "confirm": "Devalidează"
+    },
     "payModal": {
       "balance": "sold {{amount}} {{currency}}",
       "amountLabel": "Suma încasată ({{currency}})",
@@ -299,6 +313,8 @@
       "duplicateError": "Eroare duplicare.",
       "stornoCreated": "Factură storno creată: {{nr}}",
       "stornoError": "Eroare stornare.",
+      "devalidated": "Factura a fost devalidată și redeschisă pentru corectare.",
+      "devalidateError": "Eroare devalidare.",
       "smartbillSent": "Factură trimisă în SmartBill: {{result}}",
       "smartbillError": "Eroare trimitere SmartBill.",
       "paymentAdded": "Plată înregistrată.",
