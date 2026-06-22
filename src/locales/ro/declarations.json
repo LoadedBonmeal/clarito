@@ -41,7 +41,8 @@
       "period": "Perioada",
       "due": "Termen",
       "baseWord": "bază",
-      "vat": "TVA"
+      "vat": "TVA",
+      "rectificativa": "Rectificativă"
     },
     "notify": {
       "selectCompany": "Selectați o companie activă.",
@@ -61,7 +62,10 @@
       "saveD300Official": "Salvează D300 oficial ANAF (XML)",
       "saveD390": "Salvează D390 XML",
       "saveD394Extract": "Salvează D394 XML (extract)",
-      "saveD394Official": "Salvează D394 oficial ANAF (XML)"
+      "saveD394Official": "Salvează D394 oficial ANAF (XML)",
+      "saveD301": "Salvează D301 oficial ANAF (XML)",
+      "saveD700": "Salvează D700 oficial ANAF (XML)",
+      "saveD710": "Salvează D710 oficial ANAF (XML)"
     },
     "vatCat": {
       "s": "Standard",
@@ -411,7 +415,39 @@
       "previewXml": "Vizualizează / Editează XML",
       "exportXml": "Export XML",
       "previewing": "Se construiește…",
-      "previewFailed": "Nu s-a putut construi XML-ul D301."
+      "previewFailed": "Nu s-a putut construi XML-ul D301.",
+      "aggregate": "Auto-agregare din facturi",
+      "aggregating": "Se agregă…",
+      "colTipOperatie": "Tip operație (editabil)",
+      "colNrDoc": "Nr. document",
+      "colDataDoc": "Data doc.",
+      "colTipValuta": "Valută",
+      "colBaza": "Bază impozabilă (lei)",
+      "colTva": "TVA datorată (lei)",
+      "removeRow": "Elimină rândul",
+      "empty": "Apăsați «Auto-agregare» pentru a prelua operațiunile din facturile primite.",
+      "emptyAfterAggregate": "Nu există operațiuni de raportat în perioada selectată.",
+      "totalRows_one": "{{count}} rând",
+      "totalRows_few": "{{count}} rânduri",
+      "totalRows_other": "{{count}} de rânduri",
+      "notify": {
+        "aggregated_one": "{{count}} rând auto-agregat.",
+        "aggregated_few": "{{count}} rânduri auto-agregate.",
+        "aggregated_other": "{{count}} de rânduri auto-agregate.",
+        "noRows": "Nu există operațiuni de raportat pentru perioada selectată.",
+        "aggregateFailed": "Eroare la agregarea rândurilor D301.",
+        "savedDuk": "D301 salvat și validat DUK: {{path}}",
+        "savedNoDuk": "D301 salvat (DUK indisponibil): {{path}}",
+        "exportFailed": "Eroare la exportul D301."
+      },
+      "gate": {
+        "semanticWarnTitle": "DUK validează schema, NU corectitudinea fiscală",
+        "semanticWarnBody": "Validarea DUK confirmă că XML-ul e structurat corect (conform XSD), NU că sumele sau clasificările sunt corecte fiscal. Contabilul trebuie să verifice manual fiecare rând înainte de depunere.",
+        "classificationNote": "Clasificare sugerată automat din facturile primite — verificați încadrarea pe secțiuni (tip_operatie 1-5) față de legislație și natura reală a operațiunilor înainte de export.",
+        "confirmLabel": "Am verificat declarația",
+        "confirmDesc": "Confirm că am verificat sumele, clasificarea pe secțiuni și datele declarantului. Înțeleg că DUK nu garantează corectitudinea fiscală.",
+        "mustConfirm": "Bifați confirmarea de verificare înainte de export."
+      }
     },
     "d700": {
       "title": "Mențiuni / Vector fiscal",
@@ -426,6 +462,23 @@
       "exportXml": "Export XML",
       "previewing": "Se construiește…",
       "previewFailed": "Nu s-a putut construi XML-ul D700.",
+      "none": "Niciuna",
+      "sectATitle": "A — Identificare",
+      "sectBTitle": "B — Vector fiscal (mențiuni)",
+      "sectCTitle": "C — Domiciliu fiscal",
+      "sectDTitle": "D — Radiere",
+      "reprNume": "Nume reprezentant",
+      "reprPrenume": "Prenume reprezentant",
+      "reprFunctie": "Funcție",
+      "judetCod": "Cod județ (2 litere)",
+      "formaJuridica": "Formă juridică",
+      "tvaData": "Data efectivă TVA",
+      "regimFiscalData": "Data efectivă regim",
+      "domiciliuFiscalNou": "Domiciliu fiscal nou",
+      "domiciliuPlaceholder": "Adresa noului domiciliu fiscal (dacă se schimbă)",
+      "motivRadiere": "Motiv radiere",
+      "motivPlaceholder": "Motivul radierii (dacă se depune declarație de radiere)",
+      "dataRadiere": "Data radiere",
       "tvaOptions": {
         "inregistrare": "Înregistrare în scopuri TVA",
         "anulare": "Anulare înregistrare TVA",
@@ -439,6 +492,19 @@
         "trecerea_la_profit": "Trecere la impozit pe profit",
         "modificare_frecventa_profit_lunar": "Frecvență profit → lunar",
         "modificare_frecventa_profit_trimestrial": "Frecvență profit → trimestrial"
+      },
+      "notify": {
+        "savedDuk": "D700 salvat și validat DUK: {{path}}",
+        "savedNoDuk": "D700 salvat (DUK indisponibil): {{path}}",
+        "exportFailed": "Eroare la exportul D700."
+      },
+      "gate": {
+        "userDrivenTitle": "D700 — completare EXCLUSIV manuală",
+        "userDrivenBody": "Completați mențiunile manual — D700 NU se generează automat din date contabile (modificarea vectorului fiscal este o decizie a contribuabilului, nu o consecință automatică a cifrelor). Nu există auto-derivare din rulaj sau balanță.",
+        "semanticWarnTitle": "DUK validează schema, NU decizia fiscală",
+        "confirmLabel": "Am verificat declarația",
+        "confirmDesc": "Confirm că mențiunile completate reflectă intenția reală a contribuabilului și au bază legală. Înțeleg că D700 nu se generează automat din date.",
+        "mustConfirm": "Bifați confirmarea de verificare înainte de export."
       }
     },
     "d710": {
@@ -452,11 +518,54 @@
       "denOblig": "Denumire obligație",
       "sumaInitiala": "Suma inițial declarată (I), lei",
       "sumaCorecta": "Suma corectă (C, totală), lei",
-      "addRow": "+ Adaugă obligație",
+      "addRow": "Adaugă obligație",
       "previewXml": "Vizualizează / Editează XML",
       "exportXml": "Export XML",
       "previewing": "Se construiește…",
-      "previewFailed": "Nu s-a putut construi XML-ul D710."
+      "previewFailed": "Nu s-a putut construi XML-ul D710.",
+      "prefillFromD100": "Preia din D100",
+      "prefillFromD100Title": "Calculează D100 pentru perioada selectată și pre-completează suma inițială",
+      "prefilling": "Se calculează D100…",
+      "obligationsTitle": "Obligații de rectificat",
+      "colCodOblig": "Cod obligație",
+      "colDenOblig": "Denumire",
+      "colCodBugetar": "Cod bugetar",
+      "colScadenta": "Scadență",
+      "colSumaDatI": "Suma datorată (I)",
+      "colSumaDatC": "Suma datorată (C) *",
+      "colDiff": "Diferență (C-I)",
+      "numeDeclar": "Nume declarant",
+      "prenumeDeclar": "Prenume declarant",
+      "functieDeclar": "Funcție declarant",
+      "dAnulare": "Tip declarație",
+      "dAnulareNo": "Rectificativă",
+      "dAnulareYes": "Anulare",
+      "denObligPlaceholder": "ex. Impozit micro",
+      "sumaCCorectataRequired": "Introduceți suma corectă",
+      "d100Sourced": "Pre-completat din D100 calculat pentru această perioadă",
+      "notify": {
+        "d100Prefilled": "Suma inițială pentru codul {{cod}} pre-completată din D100.",
+        "d100Failed": "Nu s-a putut calcula D100 pentru pre-completare.",
+        "noObligations": "Completați cel puțin o obligație (cod, cod bugetar, scadență).",
+        "savedDuk": "D710 salvat și validat DUK: {{path}}",
+        "savedNoDuk": "D710 salvat (DUK indisponibil): {{path}}",
+        "exportFailed": "Eroare la exportul D710."
+      },
+      "gate": {
+        "semanticWarnTitle": "Verificați sumele față de D100 original",
+        "semanticWarnBody": "Suma corectă (C) este totalul corect — NU diferența față de inițial. Verificați față de D100 original depus la ANAF pentru această perioadă. DUK validează schema, nu corectitudinea sumelor.",
+        "totalNotDiff": "Sumele (C) reprezintă TOTALUL CORECT, nu diferența față de suma inițial declarată. De ex.: dacă inițial ați declarat 1.000 lei și suma corectă este 1.200 lei, introduceți 1.200 (nu 200).",
+        "noBasis_one": "{{count}} obligație fără bază D100 calculată pentru această perioadă — verificați dacă rectificarea are temei.",
+        "noBasis_few": "{{count}} obligații fără bază D100 calculată pentru această perioadă — verificați dacă rectificarea are temei.",
+        "noBasis_other": "{{count}} de obligații fără bază D100 calculată pentru această perioadă — verificați dacă rectificarea are temei.",
+        "missingCorrected_one": "{{count}} obligație fără suma corectă (C) completată — câmpul este obligatoriu.",
+        "missingCorrected_few": "{{count}} obligații fără suma corectă (C) completată — câmpul este obligatoriu.",
+        "missingCorrected_other": "{{count}} de obligații fără suma corectă (C) completată — câmpul este obligatoriu.",
+        "missingCorrectedTitle": "Introduceți suma corectă (C) pentru toate obligațiile.",
+        "confirmLabel": "Am verificat declarația",
+        "confirmDesc": "Confirm că am verificat sumele față de D100 original depus, că sumele (C) sunt totalurile corecte și că rectificarea are temei legal. Înțeleg că DUK nu garantează corectitudinea fiscală.",
+        "mustConfirm": "Bifați confirmarea de verificare înainte de export."
+      }
     },
     "filings": {
       "title": "Declarații depuse",

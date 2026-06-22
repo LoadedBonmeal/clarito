@@ -43,6 +43,9 @@ import { SalesJournalView }    from "./reports/SalesJournalView";
 import { PurchaseJournalView } from "./reports/PurchaseJournalView";
 import { AccountingExportView } from "./reports/AccountingExportView";
 import { AgingView }            from "./reports/AgingView";
+import { D301View }             from "./reports/D301View";
+import { D700View }             from "./reports/D700View";
+import { D710View }             from "./reports/D710View";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -105,6 +108,9 @@ const TABS: { value: ReportView; labelKey: string }[] = [
   { value: "d394",              labelKey: "reports.tabs.d394"             },
   { value: "d101",              labelKey: "reports.tabs.d101"             },
   { value: "d100",              labelKey: "reports.tabs.d100"             },
+  { value: "D301",              labelKey: "reports.tabs.d301"             },
+  { value: "D700",              labelKey: "reports.tabs.d700"             },
+  { value: "D710",              labelKey: "reports.tabs.d710"             },
   { value: "salariu",           labelKey: "reports.tabs.salary"           },
   { value: "saft",              labelKey: "reports.tabs.saft"             },
   { value: "sales-journal",     labelKey: "reports.tabs.salesJournal"     },
@@ -932,6 +938,21 @@ export function ReportsPage() {
 
       {/* ── Balanță cu vechime sold (aging) ────────────────────────────────── */}
       {view === "aging" && <AgingView />}
+
+      {/* ── D301 — Decont special de TVA ───────────────────────────────────── */}
+      {view === "D301" && (
+        <D301View dateFrom={dateFrom} dateTo={dateTo} />
+      )}
+
+      {/* ── D700 — Declarație mențiuni / vector fiscal ─────────────────────── */}
+      {view === "D700" && (
+        <D700View dateFrom={dateFrom} dateTo={dateTo} />
+      )}
+
+      {/* ── D710 — Rectificativă obligații D100 ────────────────────────────── */}
+      {view === "D710" && (
+        <D710View dateFrom={dateFrom} dateTo={dateTo} />
+      )}
     </div>
   );
 }

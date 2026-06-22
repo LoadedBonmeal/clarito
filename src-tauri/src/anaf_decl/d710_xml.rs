@@ -240,6 +240,25 @@ pub fn build_d710_xml(input: &D710Input) -> AppResult<String> {
         )));
     }
 
+    // GUARDRAIL: suma_dat_c (suma datorată CORECTĂ) este obligatorie per regulile de business
+    // D710 — fără suma corectată, declarația nu are sens fiscal (rectifică fără a indica corectul).
+    // Nota: sumele (C) = totalul corect, NU diferența față de inițial.
+    for (i, o) in input.obligations.iter().enumerate() {
+        if o.suma_dat_c.is_none()
+            && o.suma_plata_c.is_none()
+            && o.suma_ded_c.is_none()
+            && o.suma_rest_c.is_none()
+        {
+            return Err(AppError::Validation(format!(
+                "D710: obligația {} (cod_oblig={}) nu are nicio sumă corectă (C) completată. \
+                 Introduceți cel puțin suma datorată corectă (suma_dat_c) — aceasta reprezintă \
+                 totalul corect, NU diferența față de suma inițial declarată.",
+                i + 1,
+                o.cod_oblig
+            )));
+        }
+    }
+
     // totalPlata_A = suma tuturor suma_plata_c (valoarea corectă de plată per obligație).
     // Dacă nu există suma_plata_c, folosim suma_dat_c ca fallback, altfel 0.
     let total_plata_a: i64 = input
@@ -693,5 +712,130 @@ mod tests {
         assert!(xml.contains(r#"suma_rest_i="50""#), "suma_rest_i: {xml}");
         assert!(xml.contains(r#"suma_rest_c="55""#), "suma_rest_c: {xml}");
         assert!(xml.contains(r#"cota="1""#), "cota: {xml}");
+    }
+
+    // ── GUARDRAIL tests: suma_dat_c required ─────────────────────────────────
+
+    /// GUARDRAIL: obligation with no corrected (C) amounts is rejected.
+    /// suma_dat_c is required — D710 without a corrected amount has no fiscal meaning.
+    #[test]
+    fn suma_dat_c_missing_all_c_fields_rejected() {
+        let input = D710Input {
+            header: header(5, 2026),
+            obligations: vec![D710Obligation {
+                cod_oblig: 5,
+                cod_bugetar: "0205".into(),
+                scadenta: "25.06.2026".into(),
+                nr_evid: 0,
+                suma_dat_i: Some(d("1000")), // (I) present
+                suma_dat_c: None,            // (C) missing
+                suma_ded_i: None,
+                suma_ded_c: None, // (C) missing
+                suma_plata_i: None,
+                suma_plata_c: None, // (C) missing
+                suma_rest_i: None,
+                suma_rest_c: None, // (C) missing
+                cota: None,
+                den_oblig: "Impozit micro".into(),
+            }],
+        };
+        let result = build_d710_xml(&input);
+        assert!(
+            result.is_err(),
+            "D710 obligation with no corrected (C) amount must be rejected by guardrail"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("suma") || msg.contains("corect"),
+            "error should mention suma or corect: {msg}"
+        );
+    }
+
+    /// GUARDRAIL: obligation with suma_dat_c set is accepted (C present).
+    #[test]
+    fn suma_dat_c_present_accepted() {
+        let input = D710Input {
+            header: header(5, 2026),
+            obligations: vec![D710Obligation {
+                cod_oblig: 5,
+                cod_bugetar: "0205".into(),
+                scadenta: "25.06.2026".into(),
+                nr_evid: 0,
+                suma_dat_i: Some(d("1000")),
+                suma_dat_c: Some(d("1200")), // (C) required — TOTAL correct, not diff
+                suma_ded_i: None,
+                suma_ded_c: None,
+                suma_plata_i: None,
+                suma_plata_c: None,
+                suma_rest_i: None,
+                suma_rest_c: None,
+                cota: None,
+                den_oblig: "Impozit micro".into(),
+            }],
+        };
+        let result = build_d710_xml(&input);
+        assert!(
+            result.is_ok(),
+            "D710 obligation with suma_dat_c must be accepted: {:?}",
+            result
+        );
+        let xml = result.unwrap();
+        assert!(
+            xml.contains(r#"suma_dat_c="1200""#),
+            "suma_dat_c in XML: {xml}"
+        );
+        assert!(
+            xml.contains(r#"suma_dat_i="1000""#),
+            "suma_dat_i in XML: {xml}"
+        );
+    }
+
+    /// GUARDRAIL: obligation with only suma_plata_c (no suma_dat_c) is also accepted
+    /// because at least one corrected (C) field is present.
+    #[test]
+    fn suma_plata_c_only_accepted() {
+        // oblig_simple uses suma_plata_c (not suma_dat_c) — this must succeed.
+        let input = D710Input {
+            header: header(5, 2026),
+            obligations: vec![oblig_simple(17, "0405", "25.06.2026", "500", "600")],
+        };
+        let result = build_d710_xml(&input);
+        assert!(
+            result.is_ok(),
+            "D710 with suma_plata_c but no suma_dat_c must be accepted: {:?}",
+            result
+        );
+    }
+
+    /// GUARDRAIL: multiple obligations — only the one without any C rejected.
+    #[test]
+    fn mixed_obligations_one_missing_c_rejected() {
+        let input = D710Input {
+            header: header(5, 2026),
+            obligations: vec![
+                oblig_simple(5, "0205", "25.06.2026", "1000", "1200"), // valid
+                D710Obligation {
+                    cod_oblig: 2,
+                    cod_bugetar: "0105".into(),
+                    scadenta: "25.06.2026".into(),
+                    nr_evid: 0,
+                    suma_dat_i: Some(d("5000")),
+                    suma_dat_c: None, // missing C
+                    suma_ded_i: None,
+                    suma_ded_c: None,
+                    suma_plata_i: None,
+                    suma_plata_c: None,
+                    suma_rest_i: None,
+                    suma_rest_c: None,
+                    cota: None,
+                    den_oblig: "Impozit profit".into(),
+                },
+            ],
+        };
+        let result = build_d710_xml(&input);
+        assert!(
+            result.is_err(),
+            "one obligation without any C should reject the whole D710"
+        );
     }
 }

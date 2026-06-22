@@ -1230,23 +1230,39 @@ export const dividends = {
 // ─── D301 — Decont special de TVA ─────────────────────────────────────────
 
 /**
- * Un rând D301 (baza impozabilă + TVA datorată pentru o secțiune).
+ * Un rând D301 (`<sectiune>`), corespunzând unui document sursă.
+ * tip_operatie ∈ {1,2,3,4,5}:
+ *   1 = AIC bunuri taxabile (K + goods)
+ *   2 = AIC mijloace transport noi
+ *   3 = AIC produse accizabile
+ *   4 = Servicii intracomunitare art.307(2) (K + services)
+ *   5 = Alte operațiuni taxare inversă (AE)
  * STRUCTURA CORECTĂ PER SPECIFICAȚIE — NECESITĂ VALIDARE DUK/XSD înainte de depunere.
  */
-export interface D301Row {
-  bazaImpozabila: string; // Decimal ca string
-  tvaDatorata: string;
+export interface D301Sectiune {
+  /** tip_operatie ∈ {1,2,3,4,5} — accountant-editable in UI */
+  tipOperatie: number;
+  nrDoc: string;
+  dataDoc: string;
+  valValuta: string;   // Decimal as string
+  tipValuta: string;
+  cursValutar: string; // Decimal as string
+  baza: string;        // Decimal as string
+  tva: string;         // Decimal as string
 }
 
 /**
- * Datele D301 pentru o perioadă (secțiunile 1-4, doar cele cu operațiuni).
+ * Datele D301 pentru o perioadă: lista de rânduri `<sectiune>`.
  * STRUCTURA CORECTĂ PER SPECIFICAȚIE — NECESITĂ VALIDARE DUK/XSD înainte de depunere.
  */
 export interface D301Data {
-  sectiune1?: D301Row | null;
-  sectiune2?: D301Row | null;
-  sectiune3?: D301Row | null;
-  sectiune4?: D301Row | null;
+  sectiuni: D301Sectiune[];
+}
+
+/** @deprecated Use D301Sectiune-based D301Data. Kept for reference only. */
+export interface D301Row {
+  bazaImpozabila: string;
+  tvaDatorata: string;
 }
 
 /**
@@ -1318,27 +1334,54 @@ export interface D700Input {
 }
 
 /**
- * O obligație rectificată în D710 (cod + suma inițial declarată (I) + suma corectă (C)).
- * D710 poartă AMBELE sume per obligație conform structurii formularului D100 rectificativă
- * (OPANAF 587/2016 + 779/2024). Ambele câmpuri sunt obligatorii.
+ * O obligație rectificată în D710 (rând `<obligatie>`).
+ * cod_oblig, cod_bugetar, scadenta, nr_evid sunt REQUIRED per XSD.
+ * Sumele sunt opționale per XSD dar suma_dat_c (corectă) este cerută de guardrail-ul UI.
+ * Semantica I/C: _i = inițial declarată, _c = valoarea corectă (total, NU diferența).
  * STRUCTURA CORECTĂ PER SPECIFICAȚIE — NECESITĂ VALIDARE DUK/XSD înainte de depunere.
  */
 export interface D710Obligation {
-  codOblig: string;
+  codOblig: number;
+  codBugetar: string;
+  scadenta: string;
+  nrEvid: number;
   denOblig: string;
-  /** (I) Suma inițial declarată în D100 original, în lei (Decimal ca string). */
-  sumaInitiala: string;
-  /** (C) Suma corectă — totalul corect, NU diferența față de suma inițială (Decimal ca string). */
-  sumaCorecta: string;
+  /** (I) Suma datorată inițial declarată, lei întregi (opțional per XSD). */
+  sumaDatI?: string | null;
+  /** (C) Suma datorată corectă — TOTAL corect, NU diferența (REQUIRED by UI guardrail). */
+  sumaDatC?: string | null;
+  sumaDedI?: string | null;
+  sumaDedC?: string | null;
+  sumaPlataI?: string | null;
+  sumaPlataC?: string | null;
+  sumaRestI?: string | null;
+  sumaRestC?: string | null;
+  cota?: number | null;
 }
 
 export interface D710Header {
   cui: string;
   den: string;
   adresa: string;
-  quarter: number;
-  year: number;
-  dRec?: number;
+  luna: number;
+  an: number;
+  dAnulare: number;
+  rectificativa: boolean;
+  temei?: number | null;
+  telefon?: string | null;
+  fax?: string | null;
+  mail?: string | null;
+  cifR?: string | null;
+  denR?: string | null;
+  adrR?: string | null;
+  telR?: string | null;
+  faxR?: string | null;
+  emailR?: string | null;
+  cifS?: string | null;
+  dSucc?: number | null;
+  dDizolv?: number | null;
+  dEnergie?: number | null;
+  dModif?: number | null;
   numeDeclar: string;
   prenumeDeclar: string;
   functieDeclar: string;
@@ -1361,13 +1404,24 @@ export const d301 = {
   previewXml: (companyId: string, luna: number, an: number, dRec: number, data: D301Data) =>
     invoke<string>("preview_d301_xml", { companyId, luna, an, dRec, data }),
   /**
-   * Exportă D301 ca fișier XML la destPath.
+   * Exportă D301 ca fișier XML oficial, cu gate DUK + gate confirmare contabil.
+   * Returnează OfficialExportResult — dacă written=false, DUK a blocat exportul.
    * STRUCTURA CORECTĂ PER SPECIFICAȚIE — NECESITĂ VALIDARE DUK/XSD înainte de depunere la ANAF.
    */
-  exportXml: (companyId: string, luna: number, an: number, dRec: number, data: D301Data, destPath: string) =>
-    invoke<string>("export_d301_xml", {
-      params: { companyId, luna, an, dRec, data, destPath },
+  exportXmlOfficial: (
+    companyId: string, luna: number, an: number, dRec: number,
+    data: D301Data, destPath: string, skipDukOverride = false,
+  ) =>
+    invoke<OfficialExportResult>("export_d301_xml", {
+      params: { companyId, luna, an, dRec, data, destPath, skipDukOverride },
     }),
+  /**
+   * Auto-agregă rândurile D301 din facturile primite (received_invoice_vat_lines)
+   * pentru compania și luna/an date. Clasificare automată: K+goods→1, K+services→4, AE→5.
+   * Tipurile 2 și 3 (transport nou / accizabile) necesită adăugare manuală.
+   */
+  aggregateRows: (companyId: string, luna: number, an: number) =>
+    invoke<D301Sectiune[]>("aggregate_d301_rows", { companyId, luna, an }),
 };
 
 export const d700 = {
@@ -1378,11 +1432,14 @@ export const d700 = {
   previewXml: (input: D700Input) =>
     invoke<string>("preview_d700_xml", { input }),
   /**
-   * Exportă D700 ca fișier XML la destPath.
+   * Exportă D700 ca fișier XML oficial, cu gate DUK + gate confirmare contabil.
+   * Returnează OfficialExportResult — dacă written=false, DUK a blocat exportul.
    * STRUCTURA CORECTĂ PER SPECIFICAȚIE — NECESITĂ VALIDARE DUK/XSD înainte de depunere la ANAF.
    */
-  exportXml: (input: D700Input, destPath: string) =>
-    invoke<string>("export_d700_xml", { params: { input, destPath } }),
+  exportXmlOfficial: (input: D700Input, destPath: string, skipDukOverride = false) =>
+    invoke<OfficialExportResult>("export_d700_xml", {
+      params: { input, destPath, skipDukOverride },
+    }),
 };
 
 export const d710 = {
@@ -1393,11 +1450,14 @@ export const d710 = {
   previewXml: (input: D710Input) =>
     invoke<string>("preview_d710_xml", { input }),
   /**
-   * Exportă D710 ca fișier XML la destPath.
+   * Exportă D710 ca fișier XML oficial, cu gate DUK + gate confirmare contabil.
+   * Returnează OfficialExportResult — dacă written=false, DUK a blocat exportul.
    * STRUCTURA CORECTĂ PER SPECIFICAȚIE — NECESITĂ VALIDARE DUK/XSD înainte de depunere la ANAF.
    */
-  exportXml: (input: D710Input, destPath: string) =>
-    invoke<string>("export_d710_xml", { params: { input, destPath } }),
+  exportXmlOfficial: (input: D710Input, destPath: string, skipDukOverride = false) =>
+    invoke<OfficialExportResult>("export_d710_xml", {
+      params: { input, destPath, skipDukOverride },
+    }),
 };
 
 // ─── GL — Jurnal contabil ──────────────────────────────────────────────────

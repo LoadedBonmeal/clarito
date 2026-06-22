@@ -194,6 +194,19 @@ pub fn build_d301_xml(header: &D301Header, data: &D301Data) -> AppResult<String>
         ));
     }
 
+    // GUARDRAIL: tip_operatie must be in {1,2,3,4,5} per d301.xsd enum.
+    // Contabilul poate edita clasificarea în UI, dar valorile invalide sunt respinse la export.
+    for (i, s) in data.sectiuni.iter().enumerate() {
+        if !matches!(s.tip_operatie, 1..=5) {
+            return Err(AppError::Validation(format!(
+                "D301: rândul {} are tip_operatie={} invalid (valori acceptate: 1, 2, 3, 4, 5). \
+                 Selectați tipul corect din lista derulantă înainte de export.",
+                i + 1,
+                s.tip_operatie
+            )));
+        }
+    }
+
     // ── Totalizatoare per tip_operatie (baza1..5 / tva1..5) ──────────────────
     let (baza1, tva1) = totals_for(&data.sectiuni, 1);
     let (baza2, tva2) = totals_for(&data.sectiuni, 2);
@@ -1075,5 +1088,115 @@ mod tests {
         assert_eq!(classify_tip("AE", "services"), Some(5));
         assert_eq!(classify_tip("S", "goods"), None);
         assert_eq!(classify_tip("Z", "goods"), None);
+    }
+
+    // ── GUARDRAIL tests: tip_operatie validation ──────────────────────────────
+
+    /// GUARDRAIL: tip_operatie 0 is invalid — should be rejected.
+    #[test]
+    fn tip_operatie_zero_rejected() {
+        let data = D301Data {
+            sectiuni: vec![D301Sectiune {
+                tip_operatie: 0, // invalid
+                nr_doc: "FAC001".into(),
+                data_doc: "15.05.2026".into(),
+                val_valuta: d("1000.00"),
+                tip_valuta: "RON".into(),
+                curs_valutar: d("1.0000"),
+                baza: d("1000.00"),
+                tva: d("190.00"),
+            }],
+        };
+        let result = build_d301_xml(&header(), &data);
+        assert!(
+            result.is_err(),
+            "tip_operatie=0 must be rejected by the guardrail"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("tip_operatie") || msg.contains("invalid"),
+            "error message should mention tip_operatie: {msg}"
+        );
+    }
+
+    /// GUARDRAIL: tip_operatie 6 is invalid — should be rejected.
+    #[test]
+    fn tip_operatie_six_rejected() {
+        let data = D301Data {
+            sectiuni: vec![D301Sectiune {
+                tip_operatie: 6, // invalid (max is 5)
+                nr_doc: "FAC002".into(),
+                data_doc: "15.05.2026".into(),
+                val_valuta: d("500.00"),
+                tip_valuta: "RON".into(),
+                curs_valutar: d("1.0000"),
+                baza: d("500.00"),
+                tva: d("95.00"),
+            }],
+        };
+        let result = build_d301_xml(&header(), &data);
+        assert!(
+            result.is_err(),
+            "tip_operatie=6 must be rejected by the guardrail"
+        );
+    }
+
+    /// GUARDRAIL: all valid tip_operatie values (1-5) should be accepted.
+    #[test]
+    fn tip_operatie_all_valid_values_accepted() {
+        for tip in 1u8..=5 {
+            let data = D301Data {
+                sectiuni: vec![D301Sectiune {
+                    tip_operatie: tip,
+                    nr_doc: format!("FAC{tip:03}"),
+                    data_doc: "15.05.2026".into(),
+                    val_valuta: d("1000.00"),
+                    tip_valuta: "RON".into(),
+                    curs_valutar: d("1.0000"),
+                    baza: d("1000.00"),
+                    tva: d("190.00"),
+                }],
+            };
+            let result = build_d301_xml(&header(), &data);
+            assert!(
+                result.is_ok(),
+                "tip_operatie={tip} should be accepted: {:?}",
+                result
+            );
+        }
+    }
+
+    /// GUARDRAIL: mix of valid + invalid in same D301Data — rejected at first invalid row.
+    #[test]
+    fn tip_operatie_mixed_valid_invalid_rejected() {
+        let data = D301Data {
+            sectiuni: vec![
+                D301Sectiune {
+                    tip_operatie: 1, // valid
+                    nr_doc: "FAC001".into(),
+                    data_doc: "15.05.2026".into(),
+                    val_valuta: d("1000.00"),
+                    tip_valuta: "RON".into(),
+                    curs_valutar: d("1.0000"),
+                    baza: d("1000.00"),
+                    tva: d("190.00"),
+                },
+                D301Sectiune {
+                    tip_operatie: 99, // invalid
+                    nr_doc: "FAC002".into(),
+                    data_doc: "15.05.2026".into(),
+                    val_valuta: d("500.00"),
+                    tip_valuta: "RON".into(),
+                    curs_valutar: d("1.0000"),
+                    baza: d("500.00"),
+                    tva: d("95.00"),
+                },
+            ],
+        };
+        let result = build_d301_xml(&header(), &data);
+        assert!(
+            result.is_err(),
+            "invalid tip_operatie in any row should reject the whole batch"
+        );
     }
 }

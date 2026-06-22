@@ -41,7 +41,8 @@
       "period": "Period",
       "due": "Due",
       "baseWord": "base",
-      "vat": "VAT"
+      "vat": "VAT",
+      "rectificativa": "Amendment"
     },
     "notify": {
       "selectCompany": "Select an active company.",
@@ -61,7 +62,10 @@
       "saveD300Official": "Save official ANAF D300 (XML)",
       "saveD390": "Save D390 XML",
       "saveD394Extract": "Save D394 XML (extract)",
-      "saveD394Official": "Save official ANAF D394 (XML)"
+      "saveD394Official": "Save official ANAF D394 (XML)",
+      "saveD301": "Save official ANAF D301 (XML)",
+      "saveD700": "Save official ANAF D700 (XML)",
+      "saveD710": "Save official ANAF D710 (XML)"
     },
     "vatCat": {
       "s": "Standard",
@@ -406,7 +410,37 @@
       "previewXml": "Preview / Edit XML",
       "exportXml": "Export XML",
       "previewing": "Building…",
-      "previewFailed": "Could not build the D301 XML."
+      "previewFailed": "Could not build the D301 XML.",
+      "aggregate": "Auto-aggregate from invoices",
+      "aggregating": "Aggregating…",
+      "colTipOperatie": "Operation type (editable)",
+      "colNrDoc": "Document no.",
+      "colDataDoc": "Doc. date",
+      "colTipValuta": "Currency",
+      "colBaza": "Taxable base (lei)",
+      "colTva": "VAT due (lei)",
+      "removeRow": "Remove row",
+      "empty": "Click «Auto-aggregate» to pull operations from received invoices.",
+      "emptyAfterAggregate": "No reportable operations in the selected period.",
+      "totalRows_one": "{{count}} row",
+      "totalRows_other": "{{count}} rows",
+      "notify": {
+        "aggregated_one": "{{count}} row auto-aggregated.",
+        "aggregated_other": "{{count}} rows auto-aggregated.",
+        "noRows": "No reportable operations for the selected period.",
+        "aggregateFailed": "Error aggregating D301 rows.",
+        "savedDuk": "D301 saved and DUK-validated: {{path}}",
+        "savedNoDuk": "D301 saved (DUK unavailable): {{path}}",
+        "exportFailed": "Error exporting D301."
+      },
+      "gate": {
+        "semanticWarnTitle": "DUK validates the schema, NOT fiscal correctness",
+        "semanticWarnBody": "DUK validation confirms the XML is structurally correct (per XSD), NOT that the amounts or classifications are fiscally correct. The accountant must manually verify each row before filing.",
+        "classificationNote": "Classification auto-suggested from received invoices — verify the operation type (tip_operatie 1-5) against legislation and the actual nature of each transaction before exporting.",
+        "confirmLabel": "I have reviewed the declaration",
+        "confirmDesc": "I confirm that I have verified the amounts, section classifications, and declarant data. I understand DUK does not guarantee fiscal correctness.",
+        "mustConfirm": "Tick the review confirmation before exporting."
+      }
     },
     "d700": {
       "title": "Fiscal Vector / Registration Changes",
@@ -421,6 +455,23 @@
       "exportXml": "Export XML",
       "previewing": "Building…",
       "previewFailed": "Could not build the D700 XML.",
+      "none": "None",
+      "sectATitle": "A — Identification",
+      "sectBTitle": "B — Fiscal vector (changes)",
+      "sectCTitle": "C — Fiscal domicile",
+      "sectDTitle": "D — Deregistration",
+      "reprNume": "Representative last name",
+      "reprPrenume": "Representative first name",
+      "reprFunctie": "Function",
+      "judetCod": "County code (2 letters)",
+      "formaJuridica": "Legal form",
+      "tvaData": "VAT effective date",
+      "regimFiscalData": "Regime effective date",
+      "domiciliuFiscalNou": "New fiscal domicile",
+      "domiciliuPlaceholder": "New fiscal domicile address (if changing)",
+      "motivRadiere": "Deregistration reason",
+      "motivPlaceholder": "Reason for deregistration (if filing deregistration)",
+      "dataRadiere": "Deregistration date",
       "tvaOptions": {
         "inregistrare": "VAT registration",
         "anulare": "VAT deregistration",
@@ -434,6 +485,19 @@
         "trecerea_la_profit": "Switch to profit tax",
         "modificare_frecventa_profit_lunar": "Profit tax frequency → monthly",
         "modificare_frecventa_profit_trimestrial": "Profit tax frequency → quarterly"
+      },
+      "notify": {
+        "savedDuk": "D700 saved and DUK-validated: {{path}}",
+        "savedNoDuk": "D700 saved (DUK unavailable): {{path}}",
+        "exportFailed": "Error exporting D700."
+      },
+      "gate": {
+        "userDrivenTitle": "D700 — MANUAL entry only",
+        "userDrivenBody": "Fill in the changes manually — D700 is NOT auto-generated from accounting data (modifying the fiscal vector is the taxpayer's decision, not an automatic consequence of figures). There is no auto-derivation from turnover or ledger balances.",
+        "semanticWarnTitle": "DUK validates the schema, NOT the fiscal decision",
+        "confirmLabel": "I have reviewed the declaration",
+        "confirmDesc": "I confirm that the changes entered reflect the taxpayer's actual intent and have a legal basis. I understand D700 is not auto-generated from accounting data.",
+        "mustConfirm": "Tick the review confirmation before exporting."
       }
     },
     "d710": {
@@ -447,11 +511,52 @@
       "denOblig": "Obligation name",
       "sumaInitiala": "Initially-declared amount (I), lei",
       "sumaCorecta": "Correct amount (C, total), lei",
-      "addRow": "+ Add obligation",
+      "addRow": "Add obligation",
       "previewXml": "Preview / Edit XML",
       "exportXml": "Export XML",
       "previewing": "Building…",
-      "previewFailed": "Could not build the D710 XML."
+      "previewFailed": "Could not build the D710 XML.",
+      "prefillFromD100": "Pull from D100",
+      "prefillFromD100Title": "Compute D100 for the selected period and pre-fill the initial amount",
+      "prefilling": "Computing D100…",
+      "obligationsTitle": "Obligations to amend",
+      "colCodOblig": "Code",
+      "colDenOblig": "Name",
+      "colCodBugetar": "Budget code",
+      "colScadenta": "Due date",
+      "colSumaDatI": "Amount due (I)",
+      "colSumaDatC": "Amount due (C) *",
+      "colDiff": "Diff (C-I)",
+      "numeDeclar": "Declarant last name",
+      "prenumeDeclar": "Declarant first name",
+      "functieDeclar": "Declarant function",
+      "dAnulare": "Declaration type",
+      "dAnulareNo": "Amendment",
+      "dAnulareYes": "Cancellation",
+      "denObligPlaceholder": "e.g. Micro-enterprise income tax",
+      "sumaCCorectataRequired": "Enter the correct amount",
+      "d100Sourced": "Pre-filled from D100 computed for this period",
+      "notify": {
+        "d100Prefilled": "Initial amount for code {{cod}} pre-filled from D100.",
+        "d100Failed": "Could not compute D100 for pre-filling.",
+        "noObligations": "Fill in at least one obligation (code, budget code, due date).",
+        "savedDuk": "D710 saved and DUK-validated: {{path}}",
+        "savedNoDuk": "D710 saved (DUK unavailable): {{path}}",
+        "exportFailed": "Error exporting D710."
+      },
+      "gate": {
+        "semanticWarnTitle": "Verify amounts against the original D100",
+        "semanticWarnBody": "The correct amount (C) is the correct TOTAL — NOT the difference from the initial. Verify against the original D100 filed with ANAF for this period. DUK validates structure, not amount correctness.",
+        "totalNotDiff": "Amounts (C) represent the CORRECT TOTAL, not the difference from the initially declared amount. E.g.: if you originally declared 1,000 lei and the correct amount is 1,200 lei, enter 1,200 (not 200).",
+        "noBasis_one": "{{count}} obligation has no D100 basis for this period — verify that the amendment is warranted.",
+        "noBasis_other": "{{count}} obligations have no D100 basis for this period — verify that the amendments are warranted.",
+        "missingCorrected_one": "{{count}} obligation is missing the correct amount (C) — this field is required.",
+        "missingCorrected_other": "{{count}} obligations are missing the correct amount (C) — this field is required.",
+        "missingCorrectedTitle": "Enter the correct amount (C) for all obligations.",
+        "confirmLabel": "I have reviewed the declaration",
+        "confirmDesc": "I confirm I have verified the amounts against the original D100 filed, that amounts (C) are correct totals, and that the amendment has a legal basis. I understand DUK does not guarantee fiscal correctness.",
+        "mustConfirm": "Tick the review confirmation before exporting."
+      }
     },
     "filings": {
       "title": "Filed Declarations",

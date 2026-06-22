@@ -28,7 +28,10 @@ export type ReportView =
   | "sales-journal"
   | "purchase-journal"
   | "accounting-export"
-  | "aging";
+  | "aging"
+  | "D301"
+  | "D700"
+  | "D710";
 
 const REPORT_VIEWS: ReportView[] = [
   "tva",
@@ -43,6 +46,9 @@ const REPORT_VIEWS: ReportView[] = [
   "purchase-journal",
   "accounting-export",
   "aging",
+  "D301",
+  "D700",
+  "D710",
 ];
 
 import { AppShell } from "@/components/layout/AppShell";
