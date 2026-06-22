@@ -133,14 +133,14 @@ curl -fL --progress-bar -o "$D301_XSD_PATH" "$D301_XSD_URL" || {
 echo ""
 
 # ── D710 XSD schema ──────────────────────────────────────────────────────────
-# Official ANAF XSD (d710_20012025.xsd, targetNamespace mfp:anaf:dgti:d710:declaratie:v1,
-# version 1.02). NOTE: the published XSD has a typo (xmlns=v2 vs targetNamespace=v1);
-# the vendored copy has this corrected so xmllint can compile the schema.
+# Official ANAF XSD (d710_20012025.xsd). NOTE: the published XSD has a typo —
+# it declares `targetNamespace=v1` but DUKIntegrator (`-v D710`) requires documents
+# to use namespace `v2`. We patch the vendored XSD to use v2 everywhere so that
+# xmllint validates v2 documents correctly.
 # Used by tests/d710_xsd.rs (skips gracefully when absent).
-# Full business-rule validation requires D710Validator.jar from D710_20052026.zip
-# (STANDALONE — NOT through DUKIntegrator):
+# Full business-rule validation requires D710Validator.jar via DUKIntegrator:
 #   https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D710_20052026.zip
-# Run: java -jar D710Validator.jar <xml>
+# Run via DUKIntegrator: java -jar DUKIntegrator.jar -v D710 <xml> <result>
 # D700 full business-rule validation requires D700Validator.jar from D700_20260423.zip:
 #   https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D700_20260423.zip
 # Run via DUKIntegrator: java -jar DUKIntegrator.jar -v D700 <xml> <result>
@@ -152,11 +152,26 @@ echo "  URL: $D710_XSD_URL"
 curl -fL --progress-bar -o "$D710_XSD_PATH" "$D710_XSD_URL" || {
     echo "  WARNING: D710 XSD download failed; the d710_xsd test will skip until vendored."
 }
-# Patch the xmlns= typo in the downloaded XSD (v2 → v1 to match targetNamespace).
+# Patch 1: targetNamespace AND xmlns from v1 to v2 (DUK requires v2 namespace in documents;
+# the vendored XSD must match so xmllint validates v2 documents correctly).
+# Patch 2: attribute names suma_dat_i/c → suma_dat_I/C (DUK v2 requires uppercase I/C suffixes;
+# the published XSD uses lowercase which is the v1 convention).
 if [ -f "$D710_XSD_PATH" ]; then
-    sed -i '' 's/xmlns="mfp:anaf:dgti:d710:declaratie:v2"/xmlns="mfp:anaf:dgti:d710:declaratie:v1"/' "$D710_XSD_PATH" 2>/dev/null || \
-    sed -i 's/xmlns="mfp:anaf:dgti:d710:declaratie:v2"/xmlns="mfp:anaf:dgti:d710:declaratie:v1"/' "$D710_XSD_PATH" 2>/dev/null || true
-    echo "  Patched D710 XSD xmlns (v2→v1) to fix ANAF publishing typo."
+    sed -i '' 's|targetNamespace="mfp:anaf:dgti:d710:declaratie:v1"|targetNamespace="mfp:anaf:dgti:d710:declaratie:v2"|g' "$D710_XSD_PATH" 2>/dev/null || \
+    sed -i 's|targetNamespace="mfp:anaf:dgti:d710:declaratie:v1"|targetNamespace="mfp:anaf:dgti:d710:declaratie:v2"|g' "$D710_XSD_PATH" 2>/dev/null || true
+    sed -i '' 's|xmlns="mfp:anaf:dgti:d710:declaratie:v1"|xmlns="mfp:anaf:dgti:d710:declaratie:v2"|g' "$D710_XSD_PATH" 2>/dev/null || \
+    sed -i 's|xmlns="mfp:anaf:dgti:d710:declaratie:v1"|xmlns="mfp:anaf:dgti:d710:declaratie:v2"|g' "$D710_XSD_PATH" 2>/dev/null || true
+    # Patch attribute name case: v1 has lowercase _i/_c; DUK v2 requires uppercase _I/_C.
+    for pair in "suma_dat_i:suma_dat_I" "suma_dat_c:suma_dat_C" \
+                "suma_ded_i:suma_ded_I" "suma_ded_c:suma_ded_C" \
+                "suma_plata_i:suma_plata_I" "suma_plata_c:suma_plata_C" \
+                "suma_rest_i:suma_rest_I" "suma_rest_c:suma_rest_C"; do
+        old="${pair%%:*}"
+        new="${pair##*:}"
+        sed -i '' "s|name=\"$old\"|name=\"$new\"|g" "$D710_XSD_PATH" 2>/dev/null || \
+        sed -i "s|name=\"$old\"|name=\"$new\"|g" "$D710_XSD_PATH" 2>/dev/null || true
+    done
+    echo "  Patched D710 XSD: namespace v1→v2 + attribute names lowercase→uppercase I/C (DUK v2 requirement)."
 fi
 echo ""
 

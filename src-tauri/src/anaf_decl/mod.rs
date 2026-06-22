@@ -39,9 +39,9 @@ pub mod xml;
 /// `lib/D700Validator.jar` are dispatched via `java -jar DUKIntegrator.jar -v D301 …`
 /// / `-v D700 …` (the standard `-v` overlay path in `run_java_validator`).
 ///
-/// D710 is a STANDALONE validator: `lib/D710Validator.jar` is invoked DIRECTLY as
-/// `java -jar D710Validator.jar <xml>` (NO `-v` token, NO result-file; output on STDOUT).
-/// `run_duk` routes D710 to `run_standalone_validator` instead of `run_java_validator`.
+/// D710 este un validator OVERLAY (ca D301/D700): `lib/D710Validator.jar` este apelat
+/// PRIN `DUKIntegrator.jar -v D710 <xml> <result>` (NU direct, NU standalone).
+/// `run_duk` rutează D710 prin același `run_java_validator` ca D301/D700.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeclKind {
     D300,
@@ -54,7 +54,7 @@ pub enum DeclKind {
     D301,
     /// D700 — declarație înregistrare/mențiuni/radiere (OPANAF 15/2026). Overlay: lib/D700Validator.jar.
     D700,
-    /// D710 — declarație rectificativă D100 (OPANAF 587/2016). STANDALONE: lib/D710Validator.jar.
+    /// D710 — declarație rectificativă D100 (OPANAF 587/2016). Overlay: lib/D710Validator.jar via DUKIntegrator `-v D710`.
     D710,
 }
 
@@ -75,8 +75,11 @@ impl DeclKind {
     /// Returns `true` for declarations whose validator jar is invoked standalone
     /// (`java -jar <jar> <xml>`) rather than via the DUKIntegrator overlay
     /// (`java -jar DUKIntegrator.jar -v <TYPE> <xml> <result>`).
+    ///
+    /// NOTE: All current declarations (D301, D700, D710) use the DUKIntegrator OVERLAY path.
+    /// D710 was previously mistakenly classified as standalone — confirmed to use `-v D710`.
     pub fn is_standalone_validator(self) -> bool {
-        matches!(self, DeclKind::D710)
+        false // All declarations use DUKIntegrator overlay; no current standalone validators.
     }
 }
 
@@ -241,9 +244,10 @@ mod decl_kind_tests {
     }
 
     #[test]
-    fn d710_is_standalone_validator() {
-        // D710 uses the standalone path; others use the DUKIntegrator overlay.
-        assert!(DeclKind::D710.is_standalone_validator());
+    fn no_validators_are_standalone() {
+        // D710 was previously misclassified as standalone; confirmed via DUK that it uses
+        // the standard DUKIntegrator overlay path (`-v D710`). All validators return false.
+        assert!(!DeclKind::D710.is_standalone_validator());
         assert!(!DeclKind::D301.is_standalone_validator());
         assert!(!DeclKind::D700.is_standalone_validator());
         assert!(!DeclKind::D300.is_standalone_validator());

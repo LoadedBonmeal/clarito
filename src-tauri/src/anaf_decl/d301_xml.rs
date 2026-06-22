@@ -27,15 +27,15 @@
 //! ## Structura XML (per d301.xsd v1.02)
 //! ```text
 //!   <declaratie301 xmlns="mfp:anaf:dgti:d301:declaratie:v1"
-//!                  luna="N" an="AAAA" d_rec="0|1" temei="1|2"
+//!                  luna="N" an="AAAA" d_rec="0|1" temei="2"
 //!                  mijl_trans="0|1"   ← 1 dacă există sectiune tip_operatie=2
 //!                  cif="…" denumire="…" adresa="…"
-//!                  telefon="…" fax="…" email="…" banca="…" cont="…"
+//!                  telefon="…" [fax="…"] [email="…"] banca="…" cont="…"
 //!                  pers_inreg="1|2"   ← 1=neînregistrat art.316; 2=înregistrat art.317
-//!                  nr_evid="N"        ← INTEGER ≥ 0 (IntStr23SType)
+//!                  nr_evid="NNNNNNNNNNNNNNNNNNNNNNN"  ← 23 cifre, format ANAF specific
 //!                  baza1="…" tva1="…" baza2="…" tva2="…"
 //!                  baza3="…" tva3="…" baza4="…" tva4="…" baza5="…" tva5="…"
-//!                  totalPlata_A="N"   ← suma TVA totale (întreg lei)
+//!                  totalPlata_A="N"   ← Σ(baza_i + tva_i) rotunjit la lei întregi
 //!                  nume_declarant="…" prenume_declarant="…" functia_declarant="…">
 //!     <sectiune tip_operatie="1|2|3|4|5"
 //!               nr_doc="…(max 20 chr)" data_doc="ZZ.LL.AAAA"
@@ -44,6 +44,19 @@
 //!     …
 //!   </declaratie301>
 //! ```
+//!
+//! ## Regulile de business DUK (D301Validator.jar prin DUKIntegrator)
+//! - **R5b**: temei ≠ 1 dacă d_rec = 0 (declarație inițială)
+//! - **R16**: nr_evid este un cod structural 23 de cifre (nu un număr liber):
+//!   - pos 0-6: `"1030101"` (fix)
+//!   - pos 7-10: `MMYY` (luna cu zero-pad, ultimele 2 cifre ale anului)
+//!   - pos 11-16: `25MMYY` (ziua 25 + luna și an ale scadenței = luna+1)
+//!   - pos 17: `mijl_trans` (0 sau 1)
+//!   - pos 18-20: `"000"` (fix)
+//!   - pos 21-22: suma de control (mod 100 din suma cifrelor 0-20)
+//! - **R28**: totalPlata_A = Σ(baza_i + tva_i) pentru i=1..5, rotunjit la lei întregi
+//! - Atributele `fax` și `email` sunt opționale (omise când goale)
+//! - Atributele `banca` și `cont` sunt OBLIGATORII per DUK (chiar dacă XSD le marchează opționale)
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -85,7 +98,9 @@ pub struct D301Header {
     pub cont: String,
     /// Statutul TVA: 1 = neînregistrat art.316 (tipic D301), 2 = înregistrat art.317.
     pub pers_inreg: u8,
-    /// Numărul de evidență în ROI (IntStr23SType — integer ≥ 0; 0 dacă lipsește).
+    /// Numărul de evidență a plății (IntStr23SType).
+    /// Dacă este 0, emitorul îl calculează automat din luna/an/mijl_trans.
+    /// Dacă este non-zero, valoarea este folosită as-is (trebuie să fie validă per DUK R16).
     pub nr_evid: u64,
     /// Luna perioadei de raportare (1-12).
     pub luna: u32,
@@ -171,25 +186,74 @@ fn totals_for(sectiuni: &[D301Sectiune], tip: u8) -> (Decimal, Decimal) {
         })
 }
 
+// ── Calcul nr_evid ────────────────────────────────────────────────────────────
+
+/// Calculează Numărul de Evidență a Plății (23 cifre) conform algoritmului DUK R16.
+///
+/// Format (decodat din `d301validator/v0/Declaratie301.class`):
+/// - pos 0-6:  `"1030101"` — prefix fix
+/// - pos 7-10: `MM` (luna, cu zero-pad) + `YY` (ultimele 2 cifre ale anului)
+/// - pos 11-16: `"25"` + `MM_scad` (luna scadenței, zero-pad) + `YY_scad` (an scadență 2 cifre)
+///   - scadența = a 25-a zi din luna următoare (dacă luna > 12: luna=1, an+1)
+/// - pos 17:   `mijl_trans` (0 sau 1, integer)
+/// - pos 18-20: `"000"` — suffix fix
+/// - pos 21-22: cifre de control = `(Σ cifre[0..20]) % 100` ca două cifre
+///
+/// Dacă `nr_evid_override > 0`, returnează acel număr formatat pe 23 cifre fără calcul.
+pub fn compute_nr_evid(luna: u32, an: i32, mijl_trans: u8, nr_evid_override: u64) -> String {
+    if nr_evid_override > 0 {
+        return format!("{:023}", nr_evid_override);
+    }
+
+    // Scadența = a 25-a a lunii luna+1 (sau luna=1, an+1 dacă luna=12).
+    let scad_luna = if luna >= 12 { 1u32 } else { luna + 1 };
+    let scad_an = if luna >= 12 { an + 1 } else { an };
+
+    let mm = format!("{:02}", luna);
+    let yy = format!("{:02}", an.abs() % 100);
+    let sm = format!("{:02}", scad_luna);
+    let sy = format!("{:02}", scad_an.abs() % 100);
+
+    let base = format!("1030101{mm}{yy}25{sm}{sy}{mijl_trans}000");
+    debug_assert_eq!(base.len(), 21, "base must be 21 chars");
+
+    let sum: u32 = base.chars().map(|c| c.to_digit(10).unwrap_or(0)).sum();
+    let ctrl = sum % 100;
+    format!("{base}{:02}", ctrl)
+}
+
 // ── Emitorul XML ──────────────────────────────────────────────────────────────
 
 /// Construiește XML-ul D301 (decont special de TVA) pentru perioada dată.
 ///
-/// Structura este **XSD-validată** față de `tools/anaf/d301.xsd` (ANAF oficial, v1.02).
-/// Atributele obligatorii per XSD: `luna`, `an`, `d_rec`, `temei`, `mijl_trans`, `cif`,
-/// `denumire`, `banca`, `cont`, `pers_inreg`, `nr_evid`, `baza1..5`, `tva1..5`,
-/// `totalPlata_A`, `nume_declarant`, `prenume_declarant`, `functia_declarant`.
-/// `<sectiune>` necesită și `curs_valutar` (DblPoz15_4SType, required per XSD).
+/// Structura este **XSD-validată** față de `tools/anaf/d301.xsd` (ANAF oficial, v1.02)
+/// și **DUK-validată** față de regulile de business din `D301Validator.jar`.
 ///
-/// Validarea completă a regulilor de business necesită `D301Validator.jar` din pachetul
-/// `D301_20201022.zip` de pe declaratii.anaf.ro, rulat prin DUKIntegrator.
+/// Atributele obligatorii per XSD: `luna`, `an`, `d_rec`, `temei`, `mijl_trans`, `cif`,
+/// `denumire`, `adresa`, `banca`, `cont`, `pers_inreg`, `nr_evid`, `baza1..5`, `tva1..5`,
+/// `totalPlata_A`, `nume_declarant`, `prenume_declarant`, `functia_declarant`.
+/// Atributele opționale (omise când goale): `telefon`, `fax`, `email`.
+///
+/// ## Regulile DUK aplicate automat
+/// - **R5b**: returnează eroare dacă `d_rec=0` și `temei=1`
+/// - **R16**: `nr_evid` este calculat automat din `luna`/`an`/`mijl_trans` când `header.nr_evid=0`
+/// - **R28**: `totalPlata_A = Σ(baza_i + tva_i)` pentru i=1..5, rotunjit la lei întregi
 ///
 /// # Erori
-/// Returnează eroare dacă nu există niciun rând de raportat.
+/// Returnează eroare dacă nu există niciun rând de raportat sau dacă temei=1 cu d_rec=0.
 pub fn build_d301_xml(header: &D301Header, data: &D301Data) -> AppResult<String> {
     if !data.has_any_data() {
         return Err(AppError::Validation(
             "D301: nu există operațiuni de raportat în nicio secțiune pentru perioada selectată."
+                .into(),
+        ));
+    }
+
+    // GUARDRAIL R5b: pentru declarații inițiale (d_rec=0), temei trebuie să fie 2 (nu 1).
+    if header.d_rec == 0 && header.temei == 1 {
+        return Err(AppError::Validation(
+            "D301 R5b: pentru declarație inițială (d_rec=0), temei trebuie să fie 2 (nu 1). \
+             Rectificați valoarea atributului `temei` la 2."
                 .into(),
         ));
     }
@@ -214,11 +278,11 @@ pub fn build_d301_xml(header: &D301Header, data: &D301Data) -> AppResult<String>
     let (baza4, tva4) = totals_for(&data.sectiuni, 4);
     let (baza5, tva5) = totals_for(&data.sectiuni, 5);
 
-    // totalPlata_A = suma TVA totale din toate secțiunile (IntNeg17SType — întreg lei).
-    let total_tva = tva1 + tva2 + tva3 + tva4 + tva5;
-    let total_plata_a = total_tva
-        .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
-        .to_string();
+    // totalPlata_A = Σ(baza_i + tva_i) pentru toate secțiunile (DUK R28, IntNeg17SType, lei întregi).
+    let total_plata_a =
+        ((baza1 + tva1) + (baza2 + tva2) + (baza3 + tva3) + (baza4 + tva4) + (baza5 + tva5))
+            .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+            .to_string();
 
     // mijl_trans = 1 dacă există rânduri cu tip_operatie=2 (mijloace transport noi).
     let mijl_trans: u8 = if data.sectiuni.iter().any(|s| s.tip_operatie == 2) {
@@ -227,13 +291,15 @@ pub fn build_d301_xml(header: &D301Header, data: &D301Data) -> AppResult<String>
         0
     };
 
+    // nr_evid: calculat automat dacă lipsește (0), altfel folosit as-is.
+    let nr_evid_s = compute_nr_evid(header.luna, header.an, mijl_trans, header.nr_evid);
+
     let luna_s = header.luna.to_string();
     let an_s = header.an.to_string();
     let d_rec_s = header.d_rec.to_string();
     let mijl_s = mijl_trans.to_string();
     let pers_s = header.pers_inreg.to_string();
     let temei_s = header.temei.to_string();
-    let nr_evid_s = header.nr_evid.to_string();
 
     // Truncate per XSD field lengths.
     let denumire = trunc(header.denumire.trim(), 200);
@@ -261,42 +327,47 @@ pub fn build_d301_xml(header: &D301Header, data: &D301Data) -> AppResult<String>
 
     let mut w = new_writer()?;
 
-    start_elem_attrs(
-        &mut w,
-        D301_ROOT,
-        &[
-            ("xmlns", D301_NAMESPACE),
-            ("luna", &luna_s),
-            ("an", &an_s),
-            ("d_rec", &d_rec_s),
-            ("mijl_trans", &mijl_s),
-            ("temei", &temei_s),
-            ("cif", header.cif.trim()),
-            ("denumire", &denumire),
-            ("adresa", &adresa),
-            ("telefon", &telefon),
-            ("fax", &fax),
-            ("email", &email),
-            ("banca", &banca),
-            ("cont", &cont),
-            ("pers_inreg", &pers_s),
-            ("nr_evid", &nr_evid_s),
-            ("baza1", &baza1_s),
-            ("tva1", &tva1_s),
-            ("baza2", &baza2_s),
-            ("tva2", &tva2_s),
-            ("baza3", &baza3_s),
-            ("tva3", &tva3_s),
-            ("baza4", &baza4_s),
-            ("tva4", &tva4_s),
-            ("baza5", &baza5_s),
-            ("tva5", &tva5_s),
-            ("totalPlata_A", &total_plata_a),
-            ("nume_declarant", &nume),
-            ("prenume_declarant", &prenume),
-            ("functia_declarant", &functia),
-        ],
-    )?;
+    // Build root attribute list; omit optional attrs when empty (DUK accepts omission).
+    let mut attrs: Vec<(&str, &str)> = vec![
+        ("xmlns", D301_NAMESPACE),
+        ("luna", &luna_s),
+        ("an", &an_s),
+        ("d_rec", &d_rec_s),
+        ("mijl_trans", &mijl_s),
+        ("temei", &temei_s),
+        ("cif", header.cif.trim()),
+        ("denumire", &denumire),
+        ("adresa", &adresa),
+    ];
+    if !telefon.is_empty() {
+        attrs.push(("telefon", &telefon));
+    }
+    if !fax.is_empty() {
+        attrs.push(("fax", &fax));
+    }
+    if !email.is_empty() {
+        attrs.push(("email", &email));
+    }
+    attrs.push(("banca", &banca));
+    attrs.push(("cont", &cont));
+    attrs.push(("pers_inreg", &pers_s));
+    attrs.push(("nr_evid", &nr_evid_s));
+    attrs.push(("baza1", &baza1_s));
+    attrs.push(("tva1", &tva1_s));
+    attrs.push(("baza2", &baza2_s));
+    attrs.push(("tva2", &tva2_s));
+    attrs.push(("baza3", &baza3_s));
+    attrs.push(("tva3", &tva3_s));
+    attrs.push(("baza4", &baza4_s));
+    attrs.push(("tva4", &tva4_s));
+    attrs.push(("baza5", &baza5_s));
+    attrs.push(("tva5", &tva5_s));
+    attrs.push(("totalPlata_A", &total_plata_a));
+    attrs.push(("nume_declarant", &nume));
+    attrs.push(("prenume_declarant", &prenume));
+    attrs.push(("functia_declarant", &functia));
+
+    start_elem_attrs(&mut w, D301_ROOT, &attrs)?;
 
     // Emit rows.
     for s in &data.sectiuni {
@@ -477,7 +548,7 @@ pub async fn aggregate_d301(
         })
         .collect();
 
-    let mut sectiuni = Vec::with_capacity(raw.len());
+    let mut sectiuni = Vec::with_capacity(raw.len() * 2);
     for line in raw {
         let Some(tip) = classify_tip(&line.vat_category, &line.intra_eu_kind) else {
             continue;
@@ -499,16 +570,36 @@ pub async fn aggregate_d301(
                 .unwrap_or(Decimal::ONE)
         };
 
+        let tip_valuta = if line.currency.is_empty() {
+            "RON".into()
+        } else {
+            line.currency.to_uppercase()
+        };
+        let data_doc = iso_to_anaf_date(&line.data_doc_iso);
+
+        // DUK R32.1: tip_operatie=5 ("sectiunea 4.1") trebuie să aibă un rând tip=4 identic.
+        // Când un rând este clasificat ca tip=5 (AE → alte operațiuni art.307(3)(5)(6)),
+        // emitem ÎNTÂI rândul tip=4 (sectiunea 4) și APOI rândul tip=5 (sectiunea 4.1)
+        // cu aceleași valori. Fără rândul tip=4 perechea, DUK respinge cu R32.1.
+        if tip == 5 {
+            sectiuni.push(D301Sectiune {
+                tip_operatie: 4,
+                nr_doc: line.nr_doc.clone(),
+                data_doc: data_doc.clone(),
+                val_valuta,
+                tip_valuta: tip_valuta.clone(),
+                curs_valutar,
+                baza: baza_ron,
+                tva: tva_ron,
+            });
+        }
+
         sectiuni.push(D301Sectiune {
             tip_operatie: tip,
             nr_doc: line.nr_doc,
-            data_doc: iso_to_anaf_date(&line.data_doc_iso),
+            data_doc,
             val_valuta,
-            tip_valuta: if line.currency.is_empty() {
-                "RON".into()
-            } else {
-                line.currency.to_uppercase()
-            },
+            tip_valuta,
             curs_valutar,
             baza: baza_ron,
             tva: tva_ron,
@@ -539,11 +630,11 @@ mod tests {
             banca: "Banca Test".into(),
             cont: "RO49AAAA1B31007593840000".into(),
             pers_inreg: 1,
-            nr_evid: 0,
+            nr_evid: 0, // → auto-computed per DUK R16
             luna: 5,
             an: 2026,
             d_rec: 0,
-            temei: 1,
+            temei: 2, // DUK R5b: d_rec=0 → temei must be 2
             nume_declarant: "Popescu".into(),
             prenume_declarant: "Ion".into(),
             functia_declarant: "Administrator".into(),
@@ -601,7 +692,10 @@ mod tests {
         assert!(xml.contains(r#"luna="5""#), "luna missing: {xml}");
         assert!(xml.contains(r#"an="2026""#), "an missing: {xml}");
         assert!(xml.contains(r#"d_rec="0""#), "d_rec missing: {xml}");
-        assert!(xml.contains(r#"temei="1""#), "temei missing: {xml}");
+        assert!(
+            xml.contains(r#"temei="2""#),
+            "temei must be 2 for d_rec=0 (DUK R5b): {xml}"
+        );
         assert!(xml.contains(r#"cif="12345674""#), "cif missing: {xml}");
         assert!(
             xml.contains(r#"pers_inreg="1""#),
@@ -615,7 +709,12 @@ mod tests {
             xml.contains(r#"denumire="Test SRL""#),
             "denumire missing: {xml}"
         );
-        assert!(xml.contains(r#"nr_evid="0""#), "nr_evid missing: {xml}");
+        // nr_evid is auto-computed (DUK R16): luna=5, an=2026, mijl_trans=0 → 23-char code.
+        let expected_nr_evid = compute_nr_evid(5, 2026, 0, 0);
+        assert!(
+            xml.contains(&format!(r#"nr_evid="{expected_nr_evid}""#)),
+            "nr_evid auto-computed wrong: {xml}"
+        );
         assert!(xml.contains(r#"baza1="1000.00""#), "baza1 missing: {xml}");
         assert!(xml.contains(r#"tva1="190.00""#), "tva1 missing: {xml}");
         assert!(
@@ -623,9 +722,10 @@ mod tests {
             "baza5 (zero) missing: {xml}"
         );
         assert!(xml.contains(r#"tva5="0.00""#), "tva5 (zero) missing: {xml}");
+        // totalPlata_A = Σ(baza_i + tva_i) = 1000 + 190 = 1190 (DUK R28).
         assert!(
-            xml.contains(r#"totalPlata_A="190""#),
-            "totalPlata_A missing: {xml}"
+            xml.contains(r#"totalPlata_A="1190""#),
+            "totalPlata_A must be baza+tva = 1190 (not just TVA): {xml}"
         );
         assert!(
             xml.contains(r#"nume_declarant="Popescu""#),
@@ -744,9 +844,10 @@ mod tests {
             "baza2 total wrong: {xml}"
         );
         assert!(xml.contains(r#"tva2="9500.00""#), "tva2 total wrong: {xml}");
+        // totalPlata_A = baza2 + tva2 = 50000 + 9500 = 59500 (DUK R28: Σ(baza_i+tva_i)).
         assert!(
-            xml.contains(r#"totalPlata_A="9500""#),
-            "totalPlata_A: {xml}"
+            xml.contains(r#"totalPlata_A="59500""#),
+            "totalPlata_A (baza+tva for tip2): {xml}"
         );
     }
 
@@ -844,8 +945,8 @@ mod tests {
         // baza4 = 100, tva4 = 19.
         assert!(xml.contains(r#"baza4="100.00""#), "baza4 aggregate: {xml}");
         assert!(xml.contains(r#"tva4="19.00""#), "tva4 aggregate: {xml}");
-        // totalPlata_A = 0 + 19 = 19 lei.
-        assert!(xml.contains(r#"totalPlata_A="19""#), "totalPlata_A: {xml}");
+        // totalPlata_A = Σ(baza_i+tva_i) = (200+300+0) + (100+19) = 619 lei (DUK R28).
+        assert!(xml.contains(r#"totalPlata_A="619""#), "totalPlata_A: {xml}");
     }
 
     // ── Auto-agregare (DB) ──────────────────────────────────────────────────────
@@ -978,10 +1079,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn aggregate_ae_category_maps_to_tip5() {
+    async fn aggregate_ae_category_maps_to_tip4_and_tip5_pair() {
         let pool = test_pool().await;
 
-        // Invoice: AE reverse-charge (non-EU / art.307(3)(5)(6)) → tip 5.
+        // Invoice: AE reverse-charge (non-EU / art.307(3)(5)(6)) → tip 5 (sectiunea 4.1).
+        // DUK R32.1: requires paired tip=4 row — aggregate_d301 emits BOTH tip=4 AND tip=5.
         seed_received_with_vat(
             &pool,
             "co",
@@ -1000,13 +1102,21 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(rows.len(), 1);
+        // DUK R32.1: two rows emitted — tip=4 (section 4 paired) + tip=5 (section 4.1)
         assert_eq!(
-            rows[0].tip_operatie, 5,
-            "AE must map to tip_operatie=5 (alte operațiuni)"
+            rows.len(),
+            2,
+            "AE row must produce paired tip=4+tip=5 rows (DUK R32.1): got {rows:?}"
         );
-        assert_eq!(rows[0].baza, d("800.00"), "baza for AE row");
-        assert_eq!(rows[0].tva, d("152.00"), "tva for AE row");
+        let tip4: Vec<_> = rows.iter().filter(|r| r.tip_operatie == 4).collect();
+        let tip5: Vec<_> = rows.iter().filter(|r| r.tip_operatie == 5).collect();
+        assert_eq!(tip4.len(), 1, "must have one tip=4 pair row");
+        assert_eq!(tip5.len(), 1, "must have one tip=5 row");
+        // Both rows must have identical baza/tva
+        assert_eq!(tip4[0].baza, d("800.00"), "baza for AE tip=4 pair");
+        assert_eq!(tip4[0].tva, d("152.00"), "tva for AE tip=4 pair");
+        assert_eq!(tip5[0].baza, d("800.00"), "baza for AE tip=5 row");
+        assert_eq!(tip5[0].tva, d("152.00"), "tva for AE tip=5 row");
     }
 
     #[tokio::test]

@@ -1,11 +1,12 @@
 //! D710 — Declarație rectificativă pentru obligații D100 (OPANAF 587/2016 + 779/2024).
 //!
-//! **XSD-VALIDAT via `xmllint --schema tools/anaf/d710.xsd`** (official ANAF XSD,
-//! targetNamespace `mfp:anaf:dgti:d710:declaratie:v1`, version 1.02).
-//! Structura, atributele obligatorii, enumerările și tipurile sunt exacte față de XSD.
-//! Validarea completă a regulilor de business necesită rularea `D710Validator.jar`
-//! (pachetul standalone `D710_20052026.zip` de pe declaratii.anaf.ro, NU prin
-//! DUKIntegrator — D710 are validator separat) înainte de depunerea electronică prin SPV.
+//! **XSD-VALIDAT via `xmllint --schema tools/anaf/d710.xsd`** (XSD vendored patched la
+//! targetNamespace `mfp:anaf:dgti:d710:declaratie:v2`, version 1.02).
+//! **DUK-VALIDAT prin DUKIntegrator** (`java -jar DUKIntegrator.jar -v D710 <xml> <result>`),
+//! același mecanism overlay ca D301 și D700.
+//! NOTĂ: XSD-ul ANAF oficial are `targetNamespace=v1` dar DUKIntegrator cere `v2`;
+//! XSD-ul vendored este patched de `scripts/fetch-validators.sh` să accepte `v2`.
+//! Atributele `<obligatie>` folosesc uppercase `_I`/`_C` (cerință DUK v2+, nu lowercase ca în XSD v1).
 //!
 //! ## Ce corectează D710 și ce NU?
 //! D710 rectifică EXCLUSIV obligațiile din formularul D100 (autoimpunere și reținere la sursă):
@@ -28,10 +29,10 @@
 //!                  totalPlata_A="N"      ← suma totală de plată (≥ 0, întreg lei)
 //!                  nume_declar="…" prenume_declar="…" functie_declar="…">
 //!     <obligatie cod_oblig="N" cod_bugetar="…" scadenta="ZZ.LL.AAAA" nr_evid="N"
-//!                suma_dat_i="N" suma_dat_c="N"
-//!                suma_ded_i="N" suma_ded_c="N"
-//!                suma_plata_i="N" suma_plata_c="N"
-//!                suma_rest_i="N" suma_rest_c="N"
+//!                suma_dat_I="N" suma_dat_C="N"
+//!                suma_ded_I="N" suma_ded_C="N"
+//!                suma_plata_I="N" suma_plata_C="N"
+//!                suma_rest_I="N" suma_rest_C="N"
 //!                cota="1|2|3"/>    ← toate sumele și cota sunt opționale per XSD
 //!     …
 //!   </declaratie710>
@@ -56,10 +57,12 @@ use crate::error::{AppError, AppResult};
 
 // ── Schema constants ──────────────────────────────────────────────────────────
 
-/// Namespace D710 — targetNamespace din d710.xsd (v1).
-/// NOTE: XSD-ul ANAF publicat are un bug tipografic (xmlns=v2 dar targetNamespace=v1);
-/// documentele generate trebuie să folosească v1 (targetNamespace-ul este autoritar).
-pub const D710_NAMESPACE: &str = "mfp:anaf:dgti:d710:declaratie:v1";
+/// Namespace D710 — cerut de `D710Validator.jar` prin DUKIntegrator (`-v D710`).
+/// NOTE: XSD-ul ANAF publicat are un bug tipografic: XSD-ul oficial are `targetNamespace=v1`
+/// dar validatorul DUK respinge documentele cu `v1` și cere `v2`. XSD-ul vendored
+/// (`tools/anaf/d710.xsd`) este patched de `scripts/fetch-validators.sh` să accepte `v2`.
+/// Documentele generate trebuie să folosească `v2` (cerința DUKIntegrator este autoritativă).
+pub const D710_NAMESPACE: &str = "mfp:anaf:dgti:d710:declaratie:v2";
 
 /// Elementul rădăcină al documentului D710 (per d710.xsd).
 pub const D710_ROOT: &str = "declaratie710";
@@ -141,7 +144,7 @@ pub struct D710Header {
 /// O obligație rectificată — un rând `<obligatie>` în D710.
 ///
 /// Per d710.xsd: `cod_oblig`, `cod_bugetar`, `scadenta`, `nr_evid` sunt REQUIRED;
-/// toate sumele (`suma_dat_i/c`, `suma_ded_i/c`, `suma_plata_i/c`, `suma_rest_i/c`)
+/// toate sumele (`suma_dat_I/c`, `suma_ded_I/c`, `suma_plata_I/c`, `suma_rest_I/c`)
 /// și `cota` sunt OPȚIONALE. Sumele sunt IntPoz15SType (întreg ≥ 0, lei întregi).
 ///
 /// Semantica perechilor I/C (inițial/corect):
@@ -149,6 +152,7 @@ pub struct D710Header {
 /// - `_c` = valoarea CORECTĂ (totalul corect, NU diferența față de inițial).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(non_snake_case)] // Attribute names must match DUKIntegrator v2 protocol (uppercase I/C)
 pub struct D710Obligation {
     /// Codul obligației din Nomenclatorul D100 (număr întreg ≥ 1, ex. 2, 5, 17, 22, 37).
     pub cod_oblig: u32,
@@ -160,28 +164,28 @@ pub struct D710Obligation {
     pub nr_evid: u64,
     /// Suma datorată inițial (I), lei întregi (opțional per XSD).
     #[serde(default)]
-    pub suma_dat_i: Option<Decimal>,
+    pub suma_dat_I: Option<Decimal>,
     /// Suma datorată corectă (C), lei întregi (opțional per XSD).
     #[serde(default)]
-    pub suma_dat_c: Option<Decimal>,
+    pub suma_dat_C: Option<Decimal>,
     /// Suma deductibilă inițial (I), lei întregi (opțional).
     #[serde(default)]
-    pub suma_ded_i: Option<Decimal>,
+    pub suma_ded_I: Option<Decimal>,
     /// Suma deductibilă corectă (C), lei întregi (opțional).
     #[serde(default)]
-    pub suma_ded_c: Option<Decimal>,
+    pub suma_ded_C: Option<Decimal>,
     /// Suma de plată inițial (I), lei întregi (opțional).
     #[serde(default)]
-    pub suma_plata_i: Option<Decimal>,
+    pub suma_plata_I: Option<Decimal>,
     /// Suma de plată corectă (C), lei întregi (opțional).
     #[serde(default)]
-    pub suma_plata_c: Option<Decimal>,
+    pub suma_plata_C: Option<Decimal>,
     /// Suma restantă inițial (I), lei întregi (opțional).
     #[serde(default)]
-    pub suma_rest_i: Option<Decimal>,
+    pub suma_rest_I: Option<Decimal>,
     /// Suma restantă corectă (C), lei întregi (opțional).
     #[serde(default)]
-    pub suma_rest_c: Option<Decimal>,
+    pub suma_rest_C: Option<Decimal>,
     /// Cota aplicabilă (1, 2 sau 3 — IntInt1_3SType, opțional).
     #[serde(default)]
     pub cota: Option<u8>,
@@ -208,12 +212,63 @@ fn to_lei(d: Decimal) -> String {
     round_lei(d).to_string()
 }
 
+/// Calculează Numărul de Evidență a Plății D710 (23 cifre) conform algoritmului DUK R16.
+///
+/// Format (decodat din `v10/Obligatie.class` din `D710Validator.jar`):
+/// - pos 0-1:   `"10"` — prefix fix
+/// - pos 2-4:   `cod_oblig` zero-padded la 3 cifre
+/// - pos 5-6:   `"01"` — câmp fix (verificat prin concat [0:2]+[5:7]+[17:21] = "10010000")
+/// - pos 7-10:  `MMYY` — luna (zero-pad 2) + ultimele 2 cifre ale anului
+/// - pos 11-16: `"25"` + `scad_MM` (zero-pad 2) + `scad_YY` (2 cifre) — data scadenței
+/// - pos 17-20: `"0000"` — câmp fix
+/// - pos 21-22: suma cifrelor [0..20] mod 100, 2 cifre
+///
+/// Dacă `nr_evid_override > 0`, returnează acel număr formatat pe 23 cifre fără calcul.
+pub fn compute_nr_evid_d710(
+    luna: u32,
+    an: i32,
+    cod_oblig: u32,
+    scad_mm: u32,
+    scad_yy: u32,
+    nr_evid_override: u64,
+) -> String {
+    if nr_evid_override > 0 {
+        return format!("{:023}", nr_evid_override);
+    }
+
+    let cod_s = format!("{:03}", cod_oblig);
+    let mm = format!("{:02}", luna);
+    let yy = format!("{:02}", an.abs() % 100);
+    let scad_mm_s = format!("{:02}", scad_mm);
+    let scad_yy_s = format!("{:02}", scad_yy % 100);
+
+    // Build 21-char base: "10" + COD(3) + "01" + MMYY(4) + "25" + scadMM(2) + scadYY(2) + "0000"(4)
+    let base = format!("10{cod_s}01{mm}{yy}25{scad_mm_s}{scad_yy_s}0000");
+    debug_assert_eq!(base.len(), 21, "D710 nr_evid base must be 21 chars");
+
+    let sum: u32 = base.chars().map(|c| c.to_digit(10).unwrap_or(0)).sum();
+    let ctrl = sum % 100;
+    format!("{base}{:02}", ctrl)
+}
+
+/// Parsează data scadenței "ZZ.LL.AAAA" și returnează (luna, an) sau None.
+fn parse_scadenta(scadenta: &str) -> Option<(u32, u32)> {
+    let parts: Vec<&str> = scadenta.split('.').collect();
+    if parts.len() == 3 {
+        let mm = parts[1].parse::<u32>().ok()?;
+        let yy = parts[2].parse::<u32>().ok()? % 100;
+        Some((mm, yy))
+    } else {
+        None
+    }
+}
+
 // ── Emitorul XML ──────────────────────────────────────────────────────────────
 
 /// Construiește XML-ul D710 (declarație rectificativă obligații D100) pentru perioada dată.
 ///
-/// Structura este **XSD-validată** față de `tools/anaf/d710.xsd` (ANAF oficial, v1.02,
-/// targetNamespace `mfp:anaf:dgti:d710:declaratie:v1`).
+/// Structura este **XSD-validată** față de `tools/anaf/d710.xsd` (patched la v2, version 1.02)
+/// și **DUK-validată** prin DUKIntegrator (`-v D710`).
 /// Atribute rădăcină obligatorii: `luna`, `an`, `d_anulare`, `cui`, `den`, `adresa`,
 /// `totalPlata_A`, `nume_declar`, `prenume_declar`, `functie_declar`.
 /// Copii obligatori: cel puțin un `<obligatie>` cu atribute `cod_oblig`, `cod_bugetar`,
@@ -240,18 +295,18 @@ pub fn build_d710_xml(input: &D710Input) -> AppResult<String> {
         )));
     }
 
-    // GUARDRAIL: suma_dat_c (suma datorată CORECTĂ) este obligatorie per regulile de business
+    // GUARDRAIL: suma_dat_C (suma datorată CORECTĂ) este obligatorie per regulile de business
     // D710 — fără suma corectată, declarația nu are sens fiscal (rectifică fără a indica corectul).
     // Nota: sumele (C) = totalul corect, NU diferența față de inițial.
     for (i, o) in input.obligations.iter().enumerate() {
-        if o.suma_dat_c.is_none()
-            && o.suma_plata_c.is_none()
-            && o.suma_ded_c.is_none()
-            && o.suma_rest_c.is_none()
+        if o.suma_dat_C.is_none()
+            && o.suma_plata_C.is_none()
+            && o.suma_ded_C.is_none()
+            && o.suma_rest_C.is_none()
         {
             return Err(AppError::Validation(format!(
                 "D710: obligația {} (cod_oblig={}) nu are nicio sumă corectă (C) completată. \
-                 Introduceți cel puțin suma datorată corectă (suma_dat_c) — aceasta reprezintă \
+                 Introduceți cel puțin suma datorată corectă (suma_dat_C) — aceasta reprezintă \
                  totalul corect, NU diferența față de suma inițial declarată.",
                 i + 1,
                 o.cod_oblig
@@ -259,14 +314,40 @@ pub fn build_d710_xml(input: &D710Input) -> AppResult<String> {
         }
     }
 
-    // totalPlata_A = suma tuturor suma_plata_c (valoarea corectă de plată per obligație).
-    // Dacă nu există suma_plata_c, folosim suma_dat_c ca fallback, altfel 0.
+    // DUK R11b: totalPlata_A = Σ(TOATE câmpurile sumă non-nule pentru TOATE obligațiile).
+    // DUK calculează: Σ(suma_dat_I + suma_dat_C + suma_ded_I + suma_ded_C +
+    //                   suma_plata_I + suma_plata_C + suma_rest_I + suma_rest_C)
+    // pentru fiecare obligație, indiferent de câmpul prezent.
     let total_plata_a: i64 = input
         .obligations
         .iter()
         .map(|o| {
-            let val = o.suma_plata_c.or(o.suma_dat_c).unwrap_or(Decimal::ZERO);
-            round_lei(val)
+            let mut s = 0i64;
+            if let Some(v) = o.suma_dat_I {
+                s += round_lei(v);
+            }
+            if let Some(v) = o.suma_dat_C {
+                s += round_lei(v);
+            }
+            if let Some(v) = o.suma_ded_I {
+                s += round_lei(v);
+            }
+            if let Some(v) = o.suma_ded_C {
+                s += round_lei(v);
+            }
+            if let Some(v) = o.suma_plata_I {
+                s += round_lei(v);
+            }
+            if let Some(v) = o.suma_plata_C {
+                s += round_lei(v);
+            }
+            if let Some(v) = o.suma_rest_I {
+                s += round_lei(v);
+            }
+            if let Some(v) = o.suma_rest_C {
+                s += round_lei(v);
+            }
+            s
         })
         .sum::<i64>()
         .max(0);
@@ -363,7 +444,14 @@ pub fn build_d710_xml(input: &D710Input) -> AppResult<String> {
     for o in &input.obligations {
         let cod_s = o.cod_oblig.to_string();
         let cod_bug = trunc(o.cod_bugetar.trim(), 10);
-        let nr_evid_s = o.nr_evid.to_string();
+        // nr_evid: dacă 0, calculează automat din luna/an/cod_oblig/scadenta (DUK R16).
+        let nr_evid_s = if o.nr_evid == 0 {
+            let (scad_mm, scad_yy) =
+                parse_scadenta(o.scadenta.trim()).unwrap_or((hdr.luna + 1, (hdr.an % 100) as u32));
+            compute_nr_evid_d710(hdr.luna, hdr.an, o.cod_oblig, scad_mm, scad_yy, 0)
+        } else {
+            format!("{:023}", o.nr_evid)
+        };
 
         let mut oattrs: Vec<(&str, String)> = vec![
             ("cod_oblig", cod_s),
@@ -372,29 +460,29 @@ pub fn build_d710_xml(input: &D710Input) -> AppResult<String> {
             ("nr_evid", nr_evid_s),
         ];
 
-        if let Some(v) = o.suma_dat_i {
-            oattrs.push(("suma_dat_i", to_lei(v)));
+        if let Some(v) = o.suma_dat_I {
+            oattrs.push(("suma_dat_I", to_lei(v)));
         }
-        if let Some(v) = o.suma_dat_c {
-            oattrs.push(("suma_dat_c", to_lei(v)));
+        if let Some(v) = o.suma_dat_C {
+            oattrs.push(("suma_dat_C", to_lei(v)));
         }
-        if let Some(v) = o.suma_ded_i {
-            oattrs.push(("suma_ded_i", to_lei(v)));
+        if let Some(v) = o.suma_ded_I {
+            oattrs.push(("suma_ded_I", to_lei(v)));
         }
-        if let Some(v) = o.suma_ded_c {
-            oattrs.push(("suma_ded_c", to_lei(v)));
+        if let Some(v) = o.suma_ded_C {
+            oattrs.push(("suma_ded_C", to_lei(v)));
         }
-        if let Some(v) = o.suma_plata_i {
-            oattrs.push(("suma_plata_i", to_lei(v)));
+        if let Some(v) = o.suma_plata_I {
+            oattrs.push(("suma_plata_I", to_lei(v)));
         }
-        if let Some(v) = o.suma_plata_c {
-            oattrs.push(("suma_plata_c", to_lei(v)));
+        if let Some(v) = o.suma_plata_C {
+            oattrs.push(("suma_plata_C", to_lei(v)));
         }
-        if let Some(v) = o.suma_rest_i {
-            oattrs.push(("suma_rest_i", to_lei(v)));
+        if let Some(v) = o.suma_rest_I {
+            oattrs.push(("suma_rest_I", to_lei(v)));
         }
-        if let Some(v) = o.suma_rest_c {
-            oattrs.push(("suma_rest_c", to_lei(v)));
+        if let Some(v) = o.suma_rest_C {
+            oattrs.push(("suma_rest_C", to_lei(v)));
         }
         if let Some(c) = o.cota {
             oattrs.push(("cota", c.to_string()));
@@ -461,14 +549,14 @@ mod tests {
             cod_bugetar: cod_bug.into(),
             scadenta: scadenta.into(),
             nr_evid: 0,
-            suma_dat_i: None,
-            suma_dat_c: None,
-            suma_ded_i: None,
-            suma_ded_c: None,
-            suma_plata_i: Some(d(plata_i)),
-            suma_plata_c: Some(d(plata_c)),
-            suma_rest_i: None,
-            suma_rest_c: None,
+            suma_dat_I: None,
+            suma_dat_C: None,
+            suma_ded_I: None,
+            suma_ded_C: None,
+            suma_plata_I: Some(d(plata_i)),
+            suma_plata_C: Some(d(plata_c)),
+            suma_rest_I: None,
+            suma_rest_C: None,
             cota: None,
             den_oblig: String::new(),
         }
@@ -498,7 +586,7 @@ mod tests {
     }
 
     #[test]
-    fn root_is_declaratie710_v1_namespace() {
+    fn root_is_declaratie710_v2_namespace() {
         let input = D710Input {
             header: header(5, 2026),
             obligations: vec![oblig_simple(2, "0105", "25.06.2026", "8000", "10000")],
@@ -513,10 +601,10 @@ mod tests {
             xml.contains("</declaratie710>"),
             "close tag </declaratie710> missing: {xml}"
         );
-        // Namespace MUST be v1 (targetNamespace per XSD, not the buggy xmlns=v2 in the XSD header)
+        // Namespace MUST be v2 (required by DUKIntegrator `-v D710`; XSD is patched to v2 by fetch-validators.sh)
         assert!(
-            xml.contains(r#"xmlns="mfp:anaf:dgti:d710:declaratie:v1""#),
-            "namespace must be v1: {xml}"
+            xml.contains(r#"xmlns="mfp:anaf:dgti:d710:declaratie:v2""#),
+            "namespace must be v2 (DUK requirement): {xml}"
         );
     }
 
@@ -547,15 +635,16 @@ mod tests {
             xml.contains(r#"scadenta="25.04.2026""#),
             "scadenta attr: {xml}"
         );
-        assert!(xml.contains(r#"nr_evid="0""#), "nr_evid attr: {xml}");
+        // nr_evid is auto-computed (23 chars) when 0 (DUK R16)
+        assert!(xml.contains(r#"nr_evid=""#), "nr_evid attr missing: {xml}");
         // Optional sum attributes
         assert!(
-            xml.contains(r#"suma_plata_i="8000""#),
-            "suma_plata_i attr: {xml}"
+            xml.contains(r#"suma_plata_I="8000""#),
+            "suma_plata_I attr: {xml}"
         );
         assert!(
-            xml.contains(r#"suma_plata_c="10000""#),
-            "suma_plata_c attr: {xml}"
+            xml.contains(r#"suma_plata_C="10000""#),
+            "suma_plata_C attr: {xml}"
         );
     }
 
@@ -584,10 +673,10 @@ mod tests {
             xml.contains(r#"functie_declar="Administrator""#),
             "functie_declar: {xml}"
         );
-        // totalPlata_A = suma_plata_c = 2000
+        // DUK R11b: totalPlata_A = Σ(ALL non-null sums) = suma_plata_I(1800) + suma_plata_C(2000)
         assert!(
-            xml.contains(r#"totalPlata_A="2000""#),
-            "totalPlata_A: {xml}"
+            xml.contains(r#"totalPlata_A="3800""#),
+            "totalPlata_A (R11b: all sums): {xml}"
         );
     }
 
@@ -611,25 +700,26 @@ mod tests {
         assert!(xml.contains(r#"cod_oblig="5""#), "cod micro: {xml}");
         assert!(xml.contains(r#"cod_oblig="17""#), "cod dividende: {xml}");
 
-        // totalPlata_A = 2000 + 1600 = 3600
+        // DUK R11b: totalPlata_A = Σ(ALL non-null sums)
+        // = plata_I(1800) + plata_C(2000) + plata_I(1400) + plata_C(1600) = 6800
         assert!(
-            xml.contains(r#"totalPlata_A="3600""#),
-            "totalPlata_A sum: {xml}"
+            xml.contains(r#"totalPlata_A="6800""#),
+            "totalPlata_A (R11b: Σ all sums): {xml}"
         );
         assert!(
-            xml.contains(r#"suma_plata_i="1800""#),
+            xml.contains(r#"suma_plata_I="1800""#),
             "plata_i micro: {xml}"
         );
         assert!(
-            xml.contains(r#"suma_plata_c="2000""#),
+            xml.contains(r#"suma_plata_C="2000""#),
             "plata_c micro: {xml}"
         );
         assert!(
-            xml.contains(r#"suma_plata_i="1400""#),
+            xml.contains(r#"suma_plata_I="1400""#),
             "plata_i dividende: {xml}"
         );
         assert!(
-            xml.contains(r#"suma_plata_c="1600""#),
+            xml.contains(r#"suma_plata_C="1600""#),
             "plata_c dividende: {xml}"
         );
     }
@@ -643,14 +733,14 @@ mod tests {
                 cod_bugetar: "0105".into(),
                 scadenta: "25.04.2026".into(),
                 nr_evid: 0,
-                suma_plata_i: Some(d("8888.50")), // → 8889
-                suma_plata_c: Some(d("9999.50")), // → 10000
+                suma_plata_I: Some(d("8888.50")), // → 8889
+                suma_plata_C: Some(d("9999.50")), // → 10000
                 ..Default::default()
             }],
         };
         let xml = build_d710_xml(&input).unwrap();
-        assert!(xml.contains(r#"suma_plata_i="8889""#), "rounding I: {xml}");
-        assert!(xml.contains(r#"suma_plata_c="10000""#), "rounding C: {xml}");
+        assert!(xml.contains(r#"suma_plata_I="8889""#), "rounding I: {xml}");
+        assert!(xml.contains(r#"suma_plata_C="10000""#), "rounding C: {xml}");
     }
 
     #[test]
@@ -689,37 +779,41 @@ mod tests {
                 cod_bugetar: "0105".into(),
                 scadenta: "25.06.2026".into(),
                 nr_evid: 42,
-                suma_dat_i: Some(d("1000")),
-                suma_dat_c: Some(d("1100")),
-                suma_ded_i: Some(d("100")),
-                suma_ded_c: Some(d("110")),
-                suma_plata_i: Some(d("900")),
-                suma_plata_c: Some(d("990")),
-                suma_rest_i: Some(d("50")),
-                suma_rest_c: Some(d("55")),
+                suma_dat_I: Some(d("1000")),
+                suma_dat_C: Some(d("1100")),
+                suma_ded_I: Some(d("100")),
+                suma_ded_C: Some(d("110")),
+                suma_plata_I: Some(d("900")),
+                suma_plata_C: Some(d("990")),
+                suma_rest_I: Some(d("50")),
+                suma_rest_C: Some(d("55")),
                 cota: Some(1),
                 den_oblig: "Test".into(),
             }],
         };
         let xml = build_d710_xml(&input).unwrap();
-        assert!(xml.contains(r#"nr_evid="42""#), "nr_evid: {xml}");
-        assert!(xml.contains(r#"suma_dat_i="1000""#), "suma_dat_i: {xml}");
-        assert!(xml.contains(r#"suma_dat_c="1100""#), "suma_dat_c: {xml}");
-        assert!(xml.contains(r#"suma_ded_i="100""#), "suma_ded_i: {xml}");
-        assert!(xml.contains(r#"suma_ded_c="110""#), "suma_ded_c: {xml}");
-        assert!(xml.contains(r#"suma_plata_i="900""#), "suma_plata_i: {xml}");
-        assert!(xml.contains(r#"suma_plata_c="990""#), "suma_plata_c: {xml}");
-        assert!(xml.contains(r#"suma_rest_i="50""#), "suma_rest_i: {xml}");
-        assert!(xml.contains(r#"suma_rest_c="55""#), "suma_rest_c: {xml}");
+        // nr_evid is always 23-char (override non-zero → zero-padded to 23 digits)
+        assert!(
+            xml.contains(r#"nr_evid="00000000000000000000042""#),
+            "nr_evid (23-char): {xml}"
+        );
+        assert!(xml.contains(r#"suma_dat_I="1000""#), "suma_dat_I: {xml}");
+        assert!(xml.contains(r#"suma_dat_C="1100""#), "suma_dat_C: {xml}");
+        assert!(xml.contains(r#"suma_ded_I="100""#), "suma_ded_I: {xml}");
+        assert!(xml.contains(r#"suma_ded_C="110""#), "suma_ded_C: {xml}");
+        assert!(xml.contains(r#"suma_plata_I="900""#), "suma_plata_I: {xml}");
+        assert!(xml.contains(r#"suma_plata_C="990""#), "suma_plata_C: {xml}");
+        assert!(xml.contains(r#"suma_rest_I="50""#), "suma_rest_I: {xml}");
+        assert!(xml.contains(r#"suma_rest_C="55""#), "suma_rest_C: {xml}");
         assert!(xml.contains(r#"cota="1""#), "cota: {xml}");
     }
 
-    // ── GUARDRAIL tests: suma_dat_c required ─────────────────────────────────
+    // ── GUARDRAIL tests: suma_dat_C required ─────────────────────────────────
 
     /// GUARDRAIL: obligation with no corrected (C) amounts is rejected.
-    /// suma_dat_c is required — D710 without a corrected amount has no fiscal meaning.
+    /// suma_dat_C is required — D710 without a corrected amount has no fiscal meaning.
     #[test]
-    fn suma_dat_c_missing_all_c_fields_rejected() {
+    fn suma_dat_corrected_missing_all_c_fields_rejected() {
         let input = D710Input {
             header: header(5, 2026),
             obligations: vec![D710Obligation {
@@ -727,14 +821,14 @@ mod tests {
                 cod_bugetar: "0205".into(),
                 scadenta: "25.06.2026".into(),
                 nr_evid: 0,
-                suma_dat_i: Some(d("1000")), // (I) present
-                suma_dat_c: None,            // (C) missing
-                suma_ded_i: None,
-                suma_ded_c: None, // (C) missing
-                suma_plata_i: None,
-                suma_plata_c: None, // (C) missing
-                suma_rest_i: None,
-                suma_rest_c: None, // (C) missing
+                suma_dat_I: Some(d("1000")), // (I) present
+                suma_dat_C: None,            // (C) missing
+                suma_ded_I: None,
+                suma_ded_C: None, // (C) missing
+                suma_plata_I: None,
+                suma_plata_C: None, // (C) missing
+                suma_rest_I: None,
+                suma_rest_C: None, // (C) missing
                 cota: None,
                 den_oblig: "Impozit micro".into(),
             }],
@@ -751,9 +845,9 @@ mod tests {
         );
     }
 
-    /// GUARDRAIL: obligation with suma_dat_c set is accepted (C present).
+    /// GUARDRAIL: obligation with suma_dat_C set is accepted (C present).
     #[test]
-    fn suma_dat_c_present_accepted() {
+    fn suma_dat_corrected_present_accepted() {
         let input = D710Input {
             header: header(5, 2026),
             obligations: vec![D710Obligation {
@@ -761,14 +855,14 @@ mod tests {
                 cod_bugetar: "0205".into(),
                 scadenta: "25.06.2026".into(),
                 nr_evid: 0,
-                suma_dat_i: Some(d("1000")),
-                suma_dat_c: Some(d("1200")), // (C) required — TOTAL correct, not diff
-                suma_ded_i: None,
-                suma_ded_c: None,
-                suma_plata_i: None,
-                suma_plata_c: None,
-                suma_rest_i: None,
-                suma_rest_c: None,
+                suma_dat_I: Some(d("1000")),
+                suma_dat_C: Some(d("1200")), // (C) required — TOTAL correct, not diff
+                suma_ded_I: None,
+                suma_ded_C: None,
+                suma_plata_I: None,
+                suma_plata_C: None,
+                suma_rest_I: None,
+                suma_rest_C: None,
                 cota: None,
                 den_oblig: "Impozit micro".into(),
             }],
@@ -776,25 +870,25 @@ mod tests {
         let result = build_d710_xml(&input);
         assert!(
             result.is_ok(),
-            "D710 obligation with suma_dat_c must be accepted: {:?}",
+            "D710 obligation with suma_dat_C must be accepted: {:?}",
             result
         );
         let xml = result.unwrap();
         assert!(
-            xml.contains(r#"suma_dat_c="1200""#),
-            "suma_dat_c in XML: {xml}"
+            xml.contains(r#"suma_dat_C="1200""#),
+            "suma_dat_C in XML: {xml}"
         );
         assert!(
-            xml.contains(r#"suma_dat_i="1000""#),
-            "suma_dat_i in XML: {xml}"
+            xml.contains(r#"suma_dat_I="1000""#),
+            "suma_dat_I in XML: {xml}"
         );
     }
 
-    /// GUARDRAIL: obligation with only suma_plata_c (no suma_dat_c) is also accepted
+    /// GUARDRAIL: obligation with only suma_plata_C (no suma_dat_C) is also accepted
     /// because at least one corrected (C) field is present.
     #[test]
-    fn suma_plata_c_only_accepted() {
-        // oblig_simple uses suma_plata_c (not suma_dat_c) — this must succeed.
+    fn suma_plata_corrected_only_accepted() {
+        // oblig_simple uses suma_plata_C (not suma_dat_C) — this must succeed.
         let input = D710Input {
             header: header(5, 2026),
             obligations: vec![oblig_simple(17, "0405", "25.06.2026", "500", "600")],
@@ -802,7 +896,7 @@ mod tests {
         let result = build_d710_xml(&input);
         assert!(
             result.is_ok(),
-            "D710 with suma_plata_c but no suma_dat_c must be accepted: {:?}",
+            "D710 with suma_plata_C but no suma_dat_C must be accepted: {:?}",
             result
         );
     }
@@ -819,14 +913,14 @@ mod tests {
                     cod_bugetar: "0105".into(),
                     scadenta: "25.06.2026".into(),
                     nr_evid: 0,
-                    suma_dat_i: Some(d("5000")),
-                    suma_dat_c: None, // missing C
-                    suma_ded_i: None,
-                    suma_ded_c: None,
-                    suma_plata_i: None,
-                    suma_plata_c: None,
-                    suma_rest_i: None,
-                    suma_rest_c: None,
+                    suma_dat_I: Some(d("5000")),
+                    suma_dat_C: None, // missing C
+                    suma_ded_I: None,
+                    suma_ded_C: None,
+                    suma_plata_I: None,
+                    suma_plata_C: None,
+                    suma_rest_I: None,
+                    suma_rest_C: None,
                     cota: None,
                     den_oblig: "Impozit profit".into(),
                 },

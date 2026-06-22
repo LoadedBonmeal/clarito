@@ -37,11 +37,11 @@ fn header() -> D301Header {
         banca: "Banca Comerciala Romana".into(),
         cont: "RO49AAAA1B31007593840000".into(),
         pers_inreg: 1,
-        nr_evid: 0,
+        nr_evid: 0, // → auto-computed per DUK R16
         luna: 5,
         an: 2026,
         d_rec: 0,
-        temei: 1,
+        temei: 2, // DUK R5b: d_rec=0 → temei must be 2
         nume_declarant: "Popescu".into(),
         prenume_declarant: "Ion".into(),
         functia_declarant: "Administrator".into(),
@@ -53,7 +53,9 @@ fn header() -> D301Header {
 /// - tip 2: AIC mijloace transport noi (EUR, curs 5.0200) → triggers mijl_trans=1
 /// - tip 3: AIC produse accizabile (EUR, curs 5.0200)
 /// - tip 4: Servicii intracomunitare (beneficiar obligat, art.307(2)) (EUR)
-/// - tip 5: Alte operațiuni taxare inversă (USD, curs 4.6300)
+/// - tip 4 + tip 5 pair: DUK R32.1 — tip_operatie=5 ("sectiunea 4.1") MUST have
+///   an identical tip_operatie=4 row with the same nr_doc/data_doc/valori.
+///   Both SRV-EU-001 (art.307(2)) and SRV-NEU-001 (art.307(3)) follow this rule.
 fn all_sections() -> D301Data {
     D301Data {
         sectiuni: vec![
@@ -87,6 +89,7 @@ fn all_sections() -> D301Data {
                 baza: d("10040.00"),
                 tva: d("1907.60"),
             },
+            // Section 4: intra-EU service — tip_operatie=4 (main row)
             D301Sectiune {
                 tip_operatie: 4,
                 nr_doc: "SRV-EU-001".into(),
@@ -97,6 +100,19 @@ fn all_sections() -> D301Data {
                 baza: d("15060.00"),
                 tva: d("2861.40"),
             },
+            // Section 4 (paired): same document also appears as tip=4 per DUK R32.1
+            D301Sectiune {
+                tip_operatie: 4,
+                nr_doc: "SRV-NEU-001".into(),
+                data_doc: "22.05.2026".into(),
+                val_valuta: d("1500.00"),
+                tip_valuta: "USD".into(),
+                curs_valutar: d("4.6300"),
+                baza: d("6945.00"),
+                tva: d("1319.55"),
+            },
+            // Section 4.1 (tip=5): DUK R32.1 — MUST be an exact duplicate of a tip=4 row.
+            // The validator checks that every tip=5 row has an identical tip=4 counterpart.
             D301Sectiune {
                 tip_operatie: 5,
                 nr_doc: "SRV-NEU-001".into(),

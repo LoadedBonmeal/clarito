@@ -107,11 +107,11 @@ pub struct DukOutcome {
 /// runtime is available (caller falls back to layer A). Never panics.
 ///
 /// Routing:
-/// - D710 → `run_standalone_validator(java, lib/D710Validator.jar, xml)` (no `-v`, no result-file)
-/// - All others → `run_java_validator(java, DUKIntegrator.jar, -v <TYPE>, xml, result)` (overlay path)
+/// - All declarations (D301, D700, D710, D300, D394, D406, D112, D205) →
+///   `run_java_validator(java, DUKIntegrator.jar, -v <TYPE>, xml, result)` (overlay path)
 ///
-/// For standalone validators the specific jar (`lib/<TYPE>Validator.jar`) is probed first; if absent
-/// the function returns `None` (graceful fallback — same pattern as D205).
+/// NOTE: D710 was previously misclassified as standalone; confirmed to use overlay (`-v D710`).
+/// The `is_standalone_validator()` method now returns false for all declarations.
 pub fn run_duk(
     provider: &dyn DukProvider,
     decl: DeclKind,
@@ -120,21 +120,6 @@ pub fn run_duk(
     let Some(rt) = provider.resolve() else {
         return Ok(None);
     };
-
-    if decl.is_standalone_validator() {
-        // Standalone path: the specific validator jar is the sole entry point.
-        let standalone_jar = rt
-            .jar_dir
-            .join("lib")
-            .join(format!("{}Validator.jar", decl.as_duk_type()));
-        if !standalone_jar.is_file() {
-            // Jar absent → graceful skip (same as the D205 jar-probe pattern).
-            return Ok(None);
-        }
-        let raw =
-            crate::anaf_decl::validation::run_standalone_validator(&rt.java, &standalone_jar, xml)?;
-        return Ok(Some(parse_duk_output(&raw)));
-    }
 
     let raw = crate::anaf_decl::validation::run_java_validator(&rt.java, &rt.duk_jar(), decl, xml)?;
     Ok(Some(parse_duk_output(&raw)))
@@ -243,43 +228,31 @@ mod tests {
         }
     }
 
-    /// D710 routes to the standalone path (is_standalone_validator = true).
-    /// When lib/D710Validator.jar is absent (sandbox), run_duk returns None gracefully —
-    /// just like the D205 jar-probe pattern.
+    /// D710 uses the DUKIntegrator overlay path (is_standalone_validator = false).
+    /// When the DukRuntime is absent (provider returns None), run_duk returns Ok(None)
+    /// for D710 — same pattern as D301/D700.
     #[test]
-    fn d710_run_duk_skips_gracefully_when_jar_absent() {
-        // NoopProvider always resolves to a DukRuntime pointing at a nonexistent jar_dir.
-        struct NoopProvider {
-            jar_dir: std::path::PathBuf,
-        }
-        impl DukProvider for NoopProvider {
+    fn d710_run_duk_returns_none_when_runtime_absent() {
+        struct NoneProvider;
+        impl DukProvider for NoneProvider {
             fn resolve(&self) -> Option<DukRuntime> {
-                Some(DukRuntime {
-                    java: std::path::PathBuf::from("java"),
-                    jar_dir: self.jar_dir.clone(),
-                })
+                None
             }
         }
-        // Use a temp dir that exists but has NO D710Validator.jar inside lib/.
-        let tmp = std::env::temp_dir().join("duk_d710_noop_test");
-        let provider = NoopProvider {
-            jar_dir: tmp.clone(),
-        };
-        let xml_path = std::env::temp_dir().join("d710_dummy.xml");
-        // The file doesn't need to exist — the jar probe fires first.
-        let result = run_duk(&provider, crate::anaf_decl::DeclKind::D710, &xml_path);
-        // Should return Ok(None) because lib/D710Validator.jar is absent.
-        assert!(result.is_ok(), "run_duk must not error when jar absent");
+        let p = NoneProvider;
+        let dummy = std::path::Path::new("/nonexistent_d710.xml");
+        let result = run_duk(&p, crate::anaf_decl::DeclKind::D710, dummy);
+        assert!(result.is_ok(), "run_duk must not error when runtime absent");
         assert!(
             result.unwrap().is_none(),
-            "run_duk must return None (graceful skip) when D710Validator.jar is absent"
+            "run_duk must return None (graceful skip) when no DUK runtime"
         );
     }
 
-    /// D301 and D700 use the DUKIntegrator overlay path (is_standalone_validator = false).
+    /// All declarations use the DUKIntegrator overlay path (is_standalone_validator = false).
     /// When the DukRuntime is absent (provider returns None), run_duk returns Ok(None).
     #[test]
-    fn d301_d700_run_duk_return_none_when_runtime_absent() {
+    fn all_decls_run_duk_return_none_when_runtime_absent() {
         struct NoneProvider;
         impl DukProvider for NoneProvider {
             fn resolve(&self) -> Option<DukRuntime> {
@@ -290,6 +263,7 @@ mod tests {
         let dummy = std::path::Path::new("/nonexistent.xml");
         let r301 = run_duk(&p, crate::anaf_decl::DeclKind::D301, dummy);
         let r700 = run_duk(&p, crate::anaf_decl::DeclKind::D700, dummy);
+        let r710 = run_duk(&p, crate::anaf_decl::DeclKind::D710, dummy);
         assert!(
             r301.is_ok() && r301.unwrap().is_none(),
             "D301: None when no runtime"
@@ -297,6 +271,10 @@ mod tests {
         assert!(
             r700.is_ok() && r700.unwrap().is_none(),
             "D700: None when no runtime"
+        );
+        assert!(
+            r710.is_ok() && r710.unwrap().is_none(),
+            "D710: None when no runtime (overlay path, same as D301/D700)"
         );
     }
 }

@@ -1,20 +1,19 @@
 //! Integration test: generate a D710 XML (declarație rectificativă obligații D100) and
-//! validate it against the official ANAF XSD (`tools/anaf/d710.xsd`, targetNamespace
-//! `mfp:anaf:dgti:d710:declaratie:v1`, version 1.02) via `xmllint`.
+//! validate it against the official ANAF XSD (`tools/anaf/d710.xsd`, patched to
+//! `mfp:anaf:dgti:d710:declaratie:v2`, version 1.02) via `xmllint`.
 //!
 //! Skips gracefully when the XSD or xmllint are absent so the standard `cargo test` gate
 //! stays green everywhere. On a machine that has both (the XSD is fetched by
 //! `scripts/fetch-validators.sh`), this is the proof that the generated D710 declaration
-//! is structurally conformant with the official schema.
+//! is structurally conformant with the patched schema.
 //!
 //! ## Official validators
 //! - **XSD structural gate** (this test): `xmllint --schema tools/anaf/d710.xsd <xml>`
-//!   NOTE: The vendored d710.xsd has an ANAF publishing typo (`xmlns=v2` vs
-//!   `targetNamespace=v1`). The file is vendored with the typo corrected to `xmlns=v1`
-//!   so that xmllint can compile the schema.
-//! - **Business-rule gate**: `D710Validator.jar` from pachetul standalone
-//!   `D710_20052026.zip` pe declaratii.anaf.ro (NU prin DUKIntegrator — D710 are
-//!   validator separat). Rulați: `java -jar D710Validator.jar <xml>`
+//!   NOTE: The vendored d710.xsd is patched by `fetch-validators.sh` to use `v2` namespace
+//!   (both `xmlns=v2` and `targetNamespace=v2`) so that xmllint validates v2 documents.
+//!   The ANAF published XSD has `targetNamespace=v1` but DUKIntegrator requires `v2`.
+//! - **Business-rule gate**: `D710Validator.jar` prin DUKIntegrator (același mecanism ca D301/D700):
+//!   `java -jar DUKIntegrator.jar -v D710 <xml> <result>` (NU validator standalone!)
 
 use std::path::Path;
 
@@ -59,26 +58,38 @@ fn header(luna: u32, an: i32) -> D710Header {
     }
 }
 
-/// Two obligations for the same period: impozit profit + impozit micro.
+/// Two obligations for the same period: impozit profit (cod_oblig=103) + impozit micro (cod_oblig=121).
 /// Exercises: cod_oblig, cod_bugetar, scadenta, nr_evid, suma_plata_i/c, totalPlata_A sum.
+///
+/// DUK nomenclator (Parameters_v33, valabil 2026-03):
+/// - cod_oblig=103 (impozit profit, model 8#): cod_bugetar="20470101"
+///   Model 8# amounts: suma_dat_I/C, suma_plata_I/C (suma_plata_C = suma_dat_C as simplification)
+/// - cod_oblig=121 (impozit micro, model 8#): cod_bugetar="20470101"
+///
+/// DUK R11b: totalPlata_A = Σ(ALL non-null amount fields across ALL obligations).
 fn two_obligations() -> Vec<D710Obligation> {
     vec![
         D710Obligation {
-            cod_oblig: 2,
-            cod_bugetar: "0105".into(),
+            cod_oblig: 103,
+            cod_bugetar: "20470101".into(),
             scadenta: "25.04.2026".into(),
-            nr_evid: 0,
-            suma_plata_i: Some(d("8000")),
-            suma_plata_c: Some(d("10000")),
+            nr_evid: 0, // → auto-computed per compute_nr_evid_d710
+            suma_dat_I: Some(d("8000")),
+            suma_dat_C: Some(d("10000")),
+            suma_plata_I: Some(d("8000")),
+            suma_plata_C: Some(d("10000")),
             ..Default::default()
         },
         D710Obligation {
-            cod_oblig: 5,
-            cod_bugetar: "0205".into(),
+            cod_oblig: 121,
+            cod_bugetar: "20470101".into(),
             scadenta: "25.04.2026".into(),
-            nr_evid: 0,
-            suma_plata_i: Some(d("1800")),
-            suma_plata_c: Some(d("2000")),
+            nr_evid: 0, // → auto-computed per compute_nr_evid_d710
+            suma_dat_I: Some(d("1800")),
+            suma_dat_C: Some(d("2000")),
+            suma_plata_I: Some(d("1800")),
+            suma_plata_C: Some(d("2000")),
+            cota: Some(1), // DUK R17: cod_oblig=121 (micro) requires cota impozitare
             ..Default::default()
         },
     ]
@@ -140,14 +151,14 @@ fn d710_rectificativa_with_all_sums_validates_against_official_xsd() {
             cod_bugetar: "0405".into(),
             scadenta: "25.06.2026".into(),
             nr_evid: 12345,
-            suma_dat_i: Some(d("5000")),
-            suma_dat_c: Some(d("5500")),
-            suma_ded_i: Some(d("500")),
-            suma_ded_c: Some(d("550")),
-            suma_plata_i: Some(d("4500")),
-            suma_plata_c: Some(d("4950")),
-            suma_rest_i: Some(d("200")),
-            suma_rest_c: Some(d("220")),
+            suma_dat_I: Some(d("5000")), // uppercase I/C per DUK v2 protocol
+            suma_dat_C: Some(d("5500")),
+            suma_ded_I: Some(d("500")),
+            suma_ded_C: Some(d("550")),
+            suma_plata_I: Some(d("4500")),
+            suma_plata_C: Some(d("4950")),
+            suma_rest_I: Some(d("200")),
+            suma_rest_C: Some(d("220")),
             cota: Some(1),
             den_oblig: "Impozit nerezidenți".into(),
         }],
