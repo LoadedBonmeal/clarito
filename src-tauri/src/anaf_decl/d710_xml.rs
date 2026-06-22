@@ -12,7 +12,9 @@
 //! rectifică D300 (are D300 propriu).
 //!
 //! ## Reguli structurale
-//! - **Sumele sunt SUMELE CORECTE** (totalul corect, nu diferența față de declarația anterioară).
+//! - Fiecare obligație rectificată poartă **DOUĂ sume**: suma inițial declarată **(I)** și suma
+//!   corectă **(C)**. XML-ul emite ambele: `<suma_initiala>` (I) și `<suma_corecta>` (C).
+//!   Suma C este totalul corect (nu diferența față de suma inițială).
 //! - Mai multe obligații **pentru aceeași perioadă** → mai multe `<tabel>` în același D710.
 //! - Obligații cu **perioade diferite** → formulare D710 separate (câte un fișier XML per perioadă).
 //! - Codul obligației (`cod_oblig`) provine din Nomenclatorul D100 (Anexa formularului D100).
@@ -41,12 +43,15 @@ use crate::error::{AppError, AppResult};
 
 // ── Schema version — TODO: verify against official ANAF XSD + DUKIntegrator ──
 
-/// Namespace D710. Poate fi partajat cu D100 (ambele vizează obligațiile D100 vector).
-/// **TODO-verify**: Confirmați versiunea exactă (vN) față de XSD-ul oficial din pachetul
-/// Soft J publicat pe declaratii.anaf.ro (OPANAF 587/2016 + 779/2024).
-pub const D710_NAMESPACE: &str = "mfp:anaf:dgti:d710:declaratie:v1";
+/// Namespace D710, versiunea schemei v2 (OPANAF 587/2016, actualizat OPANAF 779/2024).
+/// D710 partajează structura formularului D100 (declaratie710 = rectificativă pe vectorul D100).
+/// Rădăcina `<declaratie710>` v2 este corectă per cercetare (OPANAF 587/2016 + 779/2024).
+/// **TODO-verify**: Confirmați față de XSD-ul oficial din pachetul Soft J (DUKIntegrator,
+/// declaratii.anaf.ro) înainte de depunerea electronică — structura este research-acurată
+/// dar XSD-ul exact nu a fost rulat prin DUKIntegrator.
+pub const D710_NAMESPACE: &str = "mfp:anaf:dgti:d710:declaratie:v2";
 
-/// Elementul rădăcină al documentului D710.
+/// Elementul rădăcină al documentului D710 (research-verificat: `<declaratie710>` v2).
 pub const D710_ROOT: &str = "declaratie710";
 
 // ── Model date ────────────────────────────────────────────────────────────────
@@ -76,7 +81,12 @@ pub struct D710Header {
 }
 
 /// O obligație rectificată (un rând `<tabel>` în D710).
-/// Suma este CORECTUL integral (nu diferența).
+///
+/// D710 poartă AMBELE sume per obligație, conform structurii formularului D100 rectificativă:
+/// - **(I) suma inițial declarată** (`suma_initiala`) — ce s-a declarat în D100 original.
+/// - **(C) suma corectă** (`suma_corecta`) — valoarea TOTALĂ CORECTĂ (nu diferența).
+///
+/// XML-ul emite ambele: `<suma_initiala>` și `<suma_corecta>` în același `<tabel>`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct D710Obligation {
@@ -85,18 +95,25 @@ pub struct D710Obligation {
     /// Denumirea scurtă a obligației (pentru claritate, nu intră în XML ca element separat —
     /// XML-ul D710 identifică obligația prin `cod_oblig` conform nomenclatorului oficial).
     pub den_oblig: String,
-    /// Suma corectă (totală), în lei. Se rotunjește la lei întregi la emitere.
+    /// **(I) Suma inițial declarată** în D100 original, în lei. Se rotunjește la lei întregi.
+    pub suma_initiala: Decimal,
+    /// **(C) Suma corectă** (totalul corect, NU diferența față de suma inițială), în lei.
+    /// Se rotunjește la lei întregi la emitere.
     pub suma_corecta: Decimal,
 }
 
 /// Datele complete ale declarației D710 pentru O perioadă.
 /// Perioade diferite → obiecte D710Input separate → fișiere XML separate.
+///
+/// Fiecare intrare din `obligations` poartă atât suma inițial declarată (I) cât și suma corectă
+/// (C). XML-ul emite ambele per `<tabel>` (conform formularului D100 rectificativă OPANAF 587/2016).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct D710Input {
     /// Antet cu datele declarantului și perioada rectificată.
     pub header: D710Header,
-    /// Lista obligațiilor rectificate (minimum una). Obligații cu cod diferit → rânduri separate.
+    /// Lista obligațiilor rectificate (minimum una). Fiecare poartă suma I + suma C.
+    /// Obligații cu cod diferit → rânduri `<tabel>` separate.
     pub obligations: Vec<D710Obligation>,
 }
 
@@ -105,11 +122,12 @@ pub struct D710Input {
 /// Construiește XML-ul D710 (declarație rectificativă obligații D100) pentru perioada dată.
 ///
 /// **STRUCTURA CORECTĂ PER SPECIFICAȚIE — NESUPUSĂ VALIDĂRII DUK/XSD.**
-/// Verificați namespace-ul (`D710_NAMESPACE`) și structura față de XSD-ul oficial ANAF
-/// (OPANAF 587/2016 + 779/2024) înainte de depunerea electronică prin SPV.
+/// Rădăcina `<declaratie710>` v2 și perechile I/C sunt research-accurate (OPANAF 587/2016 +
+/// 779/2024), dar XSD-ul exact TREBUIE confirmat prin DUKIntegrator înainte de depunere.
 ///
 /// Fiecare obligație din `input.obligations` devine un element `<tabel>` separat în XML,
-/// cu `cod_oblig` și `suma_corecta` (sumele corecte TOTALE, nu diferențele).
+/// cu `cod_oblig`, `suma_initiala` (I — suma inițial declarată) și `suma_corecta` (C — totalul
+/// corect). Ambele sume sunt obligatorii per structura formularului D100 rectificativă.
 ///
 /// # Erori
 /// Returnează eroare dacă lista de obligații e goală sau trimestrul e invalid (1-4).
@@ -175,11 +193,14 @@ pub fn build_d710_xml(input: &D710Input) -> AppResult<String> {
 
     // Un `<tabel>` per obligație rectificată — mai multe obligații aceeași perioadă =
     // mai multe `<tabel>` siblings în același D710 (per specificație OPANAF 587/2016).
+    // Fiecare `<tabel>` poartă AMBELE sume: suma_initiala (I) și suma_corecta (C).
     for oblig in &input.obligations {
-        let suma = round_lei(oblig.suma_corecta).to_string();
+        let suma_i = round_lei(oblig.suma_initiala).to_string();
+        let suma_c = round_lei(oblig.suma_corecta).to_string();
         start_elem(&mut w, "tabel")?;
         write_text_elem(&mut w, "cod_oblig", oblig.cod_oblig.trim())?;
-        write_text_elem(&mut w, "suma_corecta", &suma)?;
+        write_text_elem(&mut w, "suma_initiala", &suma_i)?;
+        write_text_elem(&mut w, "suma_corecta", &suma_c)?;
         write_text_elem(&mut w, "scadenta", &scadenta)?;
         end_elem(&mut w, "tabel")?;
     }
@@ -213,17 +234,19 @@ mod tests {
         }
     }
 
-    fn oblig(cod: &str, suma: &str, den: &str) -> D710Obligation {
+    fn oblig(cod: &str, suma_i: &str, suma_c: &str, den: &str) -> D710Obligation {
         D710Obligation {
             cod_oblig: cod.into(),
             den_oblig: den.into(),
-            suma_corecta: d(suma),
+            suma_initiala: d(suma_i),
+            suma_corecta: d(suma_c),
         }
     }
 
-    /// Structural tests — NOT DUK/XSD validation (no official XSD bundled).
-    /// Verifies: well-formed XML, correct namespace, one <tabel> per obligation,
-    /// correct replacement amounts (not differences), scadenta derived from quarter.
+    // Structural tests — NOT DUK/XSD validation (no official XSD bundled).
+    // Verifies: well-formed XML, root <declaratie710> v2 (research-verified),
+    // each obligation emits BOTH <suma_initiala> (I) and <suma_corecta> (C),
+    // one <tabel> per obligation, scadenta derived from quarter.
 
     #[test]
     fn empty_obligations_returns_error() {
@@ -241,24 +264,60 @@ mod tests {
     fn invalid_quarter_returns_error() {
         let input = D710Input {
             header: header(5, 2026), // invalid: 5 > 4
-            obligations: vec![oblig("2", "10000", "Impozit profit")],
+            obligations: vec![oblig("2", "8000", "10000", "Impozit profit")],
         };
         assert!(build_d710_xml(&input).is_err(), "quarter=5 should fail");
+    }
+
+    /// D710 root MUST be `<declaratie710>` v2 (research-verified OPANAF 587/2016 + 779/2024).
+    /// Each obligation emits BOTH <suma_initiala> (I) and <suma_corecta> (C).
+    #[test]
+    fn root_is_declaratie710_v2_with_ic_pair() {
+        let input = D710Input {
+            header: header(1, 2026),
+            obligations: vec![oblig("2", "8000", "10000", "Impozit profit")],
+        };
+        let xml = build_d710_xml(&input).unwrap();
+        // Root must be <declaratie710>
+        assert!(
+            xml.contains("<declaratie710 ") || xml.contains("<declaratie710>"),
+            "root must be <declaratie710>: {xml}"
+        );
+        assert!(
+            xml.contains("</declaratie710>"),
+            "close tag </declaratie710> missing: {xml}"
+        );
+        // Namespace must be v2
+        assert!(
+            xml.contains(r#"xmlns="mfp:anaf:dgti:d710:declaratie:v2""#),
+            "namespace v2 missing: {xml}"
+        );
+        // I amount (suma_initiala)
+        assert!(
+            xml.contains("<suma_initiala>8000</suma_initiala>"),
+            "suma_initiala (I) missing: {xml}"
+        );
+        // C amount (suma_corecta)
+        assert!(
+            xml.contains("<suma_corecta>10000</suma_corecta>"),
+            "suma_corecta (C) missing: {xml}"
+        );
     }
 
     #[test]
     fn two_obligations_same_period_produce_two_tabele() {
         // D710 per spec: mai multe obligații aceeași perioadă → mai multe <tabel> siblings.
+        // Fiecare <tabel> emite suma_initiala (I) + suma_corecta (C).
         let input = D710Input {
             header: header(2, 2026),
             obligations: vec![
-                oblig("5", "2000", "Impozit micro"),
-                oblig("17", "1600", "Impozit dividende"),
+                oblig("5", "1800", "2000", "Impozit micro"),
+                oblig("17", "1400", "1600", "Impozit dividende"),
             ],
         };
         let xml = build_d710_xml(&input).unwrap();
 
-        // Root + namespace
+        // Root + namespace v2
         assert!(
             xml.contains(&format!(r#"xmlns="{D710_NAMESPACE}""#)),
             "namespace missing: {xml}"
@@ -284,17 +343,27 @@ mod tests {
             "expected 2 </tabel> close tags: {xml}"
         );
 
-        // Sumele corecte (REPLACEMENT, nu diferențe)
+        // Sumele inițiale (I) — câte una per obligație
+        assert!(
+            xml.contains("<suma_initiala>1800</suma_initiala>"),
+            "suma_initiala micro (I): {xml}"
+        );
+        assert!(
+            xml.contains("<suma_initiala>1400</suma_initiala>"),
+            "suma_initiala dividende (I): {xml}"
+        );
+
+        // Sumele corecte (C — REPLACEMENT, nu diferențe)
         assert!(
             xml.contains("<suma_corecta>2000</suma_corecta>"),
-            "suma micro: {xml}"
+            "suma_corecta micro (C): {xml}"
         );
         assert!(
             xml.contains("<suma_corecta>1600</suma_corecta>"),
-            "suma dividende: {xml}"
+            "suma_corecta dividende (C): {xml}"
         );
 
-        // Codurile obligațiilor
+        // Codurile obligațiilor (din Nomenclatorul D100)
         assert!(xml.contains("<cod_oblig>5</cod_oblig>"), "cod micro: {xml}");
         assert!(
             xml.contains("<cod_oblig>17</cod_oblig>"),
@@ -320,15 +389,19 @@ mod tests {
 
     #[test]
     fn amounts_rounded_to_whole_lei() {
-        // Sumele cu zecimale se rotunjesc la lei întregi (comercial: 0.5 → 1).
+        // Ambele sume (I și C) se rotunjesc la lei întregi (comercial: 0.5 → 1).
         let input = D710Input {
             header: header(1, 2026),
-            obligations: vec![oblig("2", "9999.50", "Impozit profit")],
+            obligations: vec![oblig("2", "8888.50", "9999.50", "Impozit profit")],
         };
         let xml = build_d710_xml(&input).unwrap();
         assert!(
+            xml.contains("<suma_initiala>8889</suma_initiala>"),
+            "rounding I: {xml}"
+        );
+        assert!(
             xml.contains("<suma_corecta>10000</suma_corecta>"),
-            "rounding: {xml}"
+            "rounding C: {xml}"
         );
     }
 
@@ -337,7 +410,7 @@ mod tests {
         // Q4 → luna 12, scadenta 25.01 anul următor.
         let input = D710Input {
             header: header(4, 2026),
-            obligations: vec![oblig("5", "5000", "Impozit micro")],
+            obligations: vec![oblig("5", "4000", "5000", "Impozit micro")],
         };
         let xml = build_d710_xml(&input).unwrap();
         assert!(xml.contains(r#"luna="12""#), "luna Q4: {xml}");
@@ -353,7 +426,7 @@ mod tests {
         hdr.d_rec = 1;
         let input = D710Input {
             header: hdr,
-            obligations: vec![oblig("22", "3000", "Impozit nerezidenți")],
+            obligations: vec![oblig("22", "2500", "3000", "Impozit nerezidenți")],
         };
         let xml = build_d710_xml(&input).unwrap();
         assert!(xml.contains(r#"d_rec="1""#), "d_rec=1: {xml}");

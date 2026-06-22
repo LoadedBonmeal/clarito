@@ -1318,13 +1318,18 @@ export interface D700Input {
 }
 
 /**
- * O obligație rectificată în D710 (cod + suma corectă totală).
+ * O obligație rectificată în D710 (cod + suma inițial declarată (I) + suma corectă (C)).
+ * D710 poartă AMBELE sume per obligație conform structurii formularului D100 rectificativă
+ * (OPANAF 587/2016 + 779/2024). Ambele câmpuri sunt obligatorii.
  * STRUCTURA CORECTĂ PER SPECIFICAȚIE — NECESITĂ VALIDARE DUK/XSD înainte de depunere.
  */
 export interface D710Obligation {
   codOblig: string;
   denOblig: string;
-  sumaCorecta: string; // Decimal ca string
+  /** (I) Suma inițial declarată în D100 original, în lei (Decimal ca string). */
+  sumaInitiala: string;
+  /** (C) Suma corectă — totalul corect, NU diferența față de suma inițială (Decimal ca string). */
+  sumaCorecta: string;
 }
 
 export interface D710Header {

@@ -31,13 +31,15 @@ use crate::error::{AppError, AppResult};
 
 // ── Schema version — TODO: verify against official ANAF XSD + DUKIntegrator ──
 
-/// Namespace D700, ediția 0126 (OPANAF 15/2026).
-/// **TODO-verify**: Confirmați versiunea exactă (vN) față de XSD-ul oficial din pachetul
-/// Soft J publicat pe declaratii.anaf.ro (ediția 0126).
+/// Namespace D700, ediția 0126 (OPANAF 15/2026), versiunea schemei v4.
+/// Rădăcina `<D700>` și versiunea v4 sunt corecte per cercetare (OPANAF 15/2026).
+/// **TODO-verify**: Confirmați față de XSD-ul oficial din pachetul Soft J (DUKIntegrator,
+/// declaratii.anaf.ro) înainte de depunerea electronică — structura este research-acurată
+/// dar XSD-ul exact nu a fost rulat prin DUKIntegrator.
 pub const D700_NAMESPACE: &str = "mfp:anaf:dgti:d700:declaratie:v4";
 
-/// Elementul rădăcină al documentului D700.
-pub const D700_ROOT: &str = "declaratie700";
+/// Elementul rădăcină al documentului D700 (verificat: `<D700>` per OPANAF 15/2026 ed. 0126).
+pub const D700_ROOT: &str = "D700";
 
 // ── Enumerări vector fiscal ───────────────────────────────────────────────────
 
@@ -371,9 +373,43 @@ mod tests {
         }
     }
 
-    /// Structural tests — NOT DUK/XSD validation (no official XSD bundled).
-    /// These verify: well-formed XML, correct namespace, section B present with TVA mention,
-    /// sections C/D absent when empty. DUK validation requires the official XSD from ANAF.
+    // Structural tests — NOT DUK/XSD validation (no official XSD bundled).
+    // These verify: well-formed XML, root element is <D700> (research-verified, OPANAF 15/2026),
+    // correct namespace v4, section B present with TVA mention,
+    // sections C/D absent when empty. DUK validation requires the official XSD from ANAF.
+
+    /// D700 root MUST be `<D700>` (research-verified vs OPANAF 15/2026, ed. 0126).
+    /// NOT `<declaratie700>` — that was the previous guessed name.
+    #[test]
+    fn root_is_d700_not_declaratie700() {
+        let input = D700Input {
+            d_rec: 0,
+            sect_a: sect_a(),
+            sect_b: D700SectB {
+                tva_mentiune: Some(TvaMentiune::Inregistrare),
+                ..D700SectB::default()
+            },
+            sect_c: D700SectC::default(),
+            sect_d: D700SectD::default(),
+        };
+        let xml = build_d700_xml(&input).unwrap();
+        assert!(
+            xml.contains("<D700 ") || xml.contains("<D700>"),
+            "root must be <D700>: {xml}"
+        );
+        assert!(
+            !xml.contains("<declaratie700"),
+            "old guessed root <declaratie700> must NOT appear: {xml}"
+        );
+        assert!(
+            xml.contains("</D700>"),
+            "root close tag must be </D700>: {xml}"
+        );
+        assert!(
+            xml.contains(r#"xmlns="mfp:anaf:dgti:d700:declaratie:v4""#),
+            "namespace v4 must be present: {xml}"
+        );
+    }
 
     #[test]
     fn no_sections_returns_error() {

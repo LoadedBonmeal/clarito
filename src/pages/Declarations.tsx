@@ -796,7 +796,7 @@ export function DeclarationsPage() {
           </div>
           <div className="dkv">
             <span>{t("declarations.d710.obligations")}</span>
-            <span>{t("declarations.d710.sumaCorecta")}</span>
+            <span>{t("declarations.d710.sumaInitiala")} · {t("declarations.d710.sumaCorecta")}</span>
           </div>
           <div className="dfoot">
             <span className="spacer" />
