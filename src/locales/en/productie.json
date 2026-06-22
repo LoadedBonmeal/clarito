@@ -40,6 +40,7 @@
     "order": {
       "title": "Production orders",
       "new": "New production run",
+      "newPlanned": "Planned order",
       "empty": "No production orders.",
       "colDate": "Production date",
       "colBom": "Recipe",
@@ -76,7 +77,36 @@
       "colOverheadUnabsorbed": "Overhead unabsorbed",
       "colFullCost": "Full cost total",
       "colFullUnitCost": "Full unit cost",
+      "colStatus": "Status",
+      "colPlannedDate": "Planned date",
       "unabsorbedIsExpense": "period expense, NOT in 345",
+
+      "statusFinalized": "Finalized",
+      "statusPlanned": "Planned",
+      "statusInProgress": "In progress",
+      "statusCancelled": "Cancelled",
+      "statusDraft": "Draft",
+
+      "fieldPlannedDate": "Planned date",
+      "planned": {
+        "title": "New planned order",
+        "saving": "Planning…",
+        "saved": "Planned order created.",
+        "submit": "Create planned order",
+        "estimateTitle": "Cost estimate (informational)",
+        "estimateMat": "Materials (current avg cost)",
+        "estimateLabour": "Estimated labour",
+        "estimateOverhead": "Estimated overhead absorbed",
+        "estimateFull": "Estimated full cost",
+        "executeBtn": "Execute",
+        "cancelBtn": "Cancel order",
+        "executing": "Executing…",
+        "executed": "Order executed successfully.",
+        "cancelling": "Cancelling…",
+        "cancelled": "Order cancelled.",
+        "confirmCancel": "Cancel this planned order? This action is irreversible.",
+        "confirmExecute": "Execute this order? Stock will be consumed and GL will be posted."
+      },
 
       "materialCostNote": "The cost capitalized in account 345 includes ONLY material costs (raw materials + consumables). Direct labor (641/421) and overhead (681) remain period expenses, recognized separately — per OMFP 1802/2014 art. 8.",
       "fullCostNote": "Full production cost capitalized in 345 = materials + direct labour + absorbed overhead (IAS 2 / OMFP 1802/2014 art. 8). Unabsorbed fixed overhead (below normal capacity) remains a period expense. Only the AMOUNT of D345=C711 changes — no extra D345=C641 lines."

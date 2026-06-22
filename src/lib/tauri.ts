@@ -2220,8 +2220,20 @@ export const productie = {
     invoke<import("@/types").ProductieOrder>("produce", { companyId, input }),
   listOrders: (companyId: string) =>
     invoke<import("@/types").ProductieOrder[]>("list_productie", { companyId }),
+  listOrdersByStatus: (companyId: string, status: string) =>
+    invoke<import("@/types").ProductieOrder[]>("list_productie_by_status", { companyId, status }),
   getOrder: (companyId: string, orderId: string) =>
     invoke<import("@/types").ProductieOrder>("get_productie", { companyId, orderId }),
+  // Lifecycle (migration 0087)
+  createPlannedOrder: (companyId: string, input: import("@/types").CreatePlannedOrderInput) =>
+    invoke<[import("@/types").ProductieOrder, import("@/types").CostEstimate]>(
+      "create_planned_order",
+      { companyId, input },
+    ),
+  executeOrder: (companyId: string, orderId: string) =>
+    invoke<import("@/types").ProductieOrder>("execute_order", { companyId, orderId }),
+  cancelOrder: (companyId: string, orderId: string) =>
+    invoke<import("@/types").ProductieOrder>("cancel_order", { companyId, orderId }),
 };
 
 // ─── P2 Wave 7: payroll config (GL account map + diurnă) ─────────────────────

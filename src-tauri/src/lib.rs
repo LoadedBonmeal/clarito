@@ -681,7 +681,12 @@ pub fn run() {
                     commands::productie::update_bom,
                     commands::productie::produce,
                     commands::productie::list_productie,
+                    commands::productie::list_productie_by_status,
                     commands::productie::get_productie,
+                    // lifecycle (migration 0087)
+                    commands::productie::create_planned_order,
+                    commands::productie::execute_order,
+                    commands::productie::cancel_order,
                     // fixed assets — Phase 6b (SAF-T Assets)
                     commands::assets::create_fixed_asset,
                     commands::assets::list_fixed_assets,

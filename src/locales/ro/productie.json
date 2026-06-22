@@ -40,6 +40,7 @@
     "order": {
       "title": "Ordine de producție",
       "new": "Lansare producție",
+      "newPlanned": "Comandă planificată",
       "empty": "Niciun ordin de producție.",
       "colDate": "Data producției",
       "colBom": "Rețetă",
@@ -76,7 +77,36 @@
       "colOverheadUnabsorbed": "Regie neabsorbită",
       "colFullCost": "Cost complet total",
       "colFullUnitCost": "Cost unitar complet",
+      "colStatus": "Status",
+      "colPlannedDate": "Dată planificată",
       "unabsorbedIsExpense": "cheltuiala perioadei, NU în 345",
+
+      "statusFinalized": "Finalizat",
+      "statusPlanned": "Planificat",
+      "statusInProgress": "În execuție",
+      "statusCancelled": "Anulat",
+      "statusDraft": "Ciornă",
+
+      "fieldPlannedDate": "Dată planificată",
+      "planned": {
+        "title": "Comandă planificată nouă",
+        "saving": "Se planifică…",
+        "saved": "Comandă planificată creată.",
+        "submit": "Planifică comanda",
+        "estimateTitle": "Estimare cost (informativă)",
+        "estimateMat": "Materiale (cost mediu curent)",
+        "estimateLabour": "Manoperă estimată",
+        "estimateOverhead": "Regie estimată absorbită",
+        "estimateFull": "Cost complet estimat",
+        "executeBtn": "Execută",
+        "cancelBtn": "Anulează comanda",
+        "executing": "Se execută…",
+        "executed": "Ordin executat cu succes.",
+        "cancelling": "Se anulează…",
+        "cancelled": "Comandă anulată.",
+        "confirmCancel": "Anulați comanda planificată? Acțiunea este ireversibilă.",
+        "confirmExecute": "Executați comanda? Stocul va fi consumat și GL-ul va fi postat."
+      },
 
       "materialCostNote": "Costul capitalizat în 345 include NUMAI costul materialelor (materii prime + materiale consumabile). Manopera directă (641/421) și regia (681) sunt cheltuieli ale perioadei, recunoscute separat — per OMFP 1802/2014 pct. 8.",
       "fullCostNote": "Costul complet capitalizat în 345 = materiale + manoperă directă + regie absorbită (IAS 2 / OMFP 1802/2014 pct. 8). Regia fixă neabsorbită (la sub-capacitate) rămâne cheltuiala perioadei. Numai SUMA D345=C711 se schimbă — nu se adaugă linii suplimentare D345=C641."

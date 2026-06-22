@@ -144,6 +144,8 @@ pub struct ProductieOrder {
     pub full_unit_cost: String,
     pub status: String,
     pub notes: Option<String>,
+    // Added in migration 0087:
+    pub planned_date: Option<String>,
     pub created_at: i64,
 }
 
@@ -171,6 +173,54 @@ pub struct ProduceInput {
     /// Capacitate normală în unități (opțional, necesar pentru absorbție regie fixă IAS 2).
     #[serde(default)]
     pub normal_capacity_qty: Option<String>,
+}
+
+/// Input pentru crearea unui ordin planificat (fără consum stoc, fără GL).
+///
+/// Un ordin planificat înregistrează INTENȚIA de producție (BOM, cantitate, dată planificată,
+/// gestiune, estimate costuri) fără a posta nicio mișcare de stoc sau notă GL.
+/// La `execute_order()` se rulează logica completă de consum + producție + GL.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePlannedOrderInput {
+    pub bom_id: String,
+    pub gestiune_id: String,
+    pub qty_produced: String,
+    /// Data planificată a producției (YYYY-MM-DD).
+    pub planned_date: String,
+    /// Data efectivă — folosită la executare; dacă lipsește se folosește planned_date.
+    #[serde(default)]
+    pub production_date: Option<String>,
+    pub notes: Option<String>,
+    /// Estimare manoperă directă (informativă, NU postată la creare).
+    #[serde(default)]
+    pub labour_cost: Option<String>,
+    /// Estimare regie totală (informativă, NU postată la creare).
+    #[serde(default)]
+    pub overhead_cost: Option<String>,
+    #[serde(default)]
+    pub overhead_fixed: Option<String>,
+    #[serde(default)]
+    pub overhead_variable: Option<String>,
+    #[serde(default)]
+    pub normal_capacity_qty: Option<String>,
+}
+
+/// Estimarea costului de producție pentru un ordin planificat.
+/// Valorile sunt informative (la prețul actual de stoc); costul real se calculează la execute_order.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostEstimate {
+    /// Costul materialelor la prețul mediu curent (CMP/FIFO/LIFO estimat).
+    pub estimated_material_cost: String,
+    /// Estimare manoperă (din input).
+    pub labour_cost: String,
+    /// Estimare regie absorbită.
+    pub overhead_absorbed: String,
+    /// Estimare regie neabsorbită.
+    pub overhead_unabsorbed: String,
+    /// Estimare cost complet total.
+    pub estimated_full_cost: String,
 }
 
 // ─── Absorption logic (IAS 2 / pct. 8 al. 2-3) ───────────────────────────────
@@ -1046,6 +1096,7 @@ pub async fn produce(
         full_unit_cost: format!("{:.2}", full_unit_cost),
         status: "finalized".to_string(),
         notes: input.notes.clone(),
+        planned_date: None, // direct-produce path; planned_date unused
         created_at: now_unix(),
     };
 
@@ -1054,8 +1105,8 @@ pub async fn produce(
          (id, company_id, bom_id, product_id, gestiune_id, qty_produced, production_date, \
           total_material_cost, unit_cost, labour_cost, overhead_cost, overhead_fixed, \
           overhead_variable, normal_capacity_qty, overhead_absorbed, overhead_unabsorbed, \
-          full_cost, full_unit_cost, status, notes, created_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+          full_cost, full_unit_cost, status, notes, planned_date, created_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
     )
     .bind(&order.id)
     .bind(&order.company_id)
@@ -1077,6 +1128,7 @@ pub async fn produce(
     .bind(&order.full_unit_cost)
     .bind(&order.status)
     .bind(&order.notes)
+    .bind(&order.planned_date)
     .bind(order.created_at)
     .execute(pool)
     .await;
@@ -1110,11 +1162,37 @@ pub async fn list_productie(pool: &SqlitePool, company_id: &str) -> AppResult<Ve
          COALESCE(overhead_unabsorbed,'0') as overhead_unabsorbed, \
          COALESCE(full_cost, total_material_cost) as full_cost, \
          COALESCE(full_unit_cost, unit_cost) as full_unit_cost, \
-         status, notes, created_at \
+         status, notes, planned_date, created_at \
          FROM productie_orders WHERE company_id=?1 \
          ORDER BY production_date DESC, created_at DESC",
     )
     .bind(company_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Listează ordinele de producție filtrate după status.
+pub async fn list_productie_by_status(
+    pool: &SqlitePool,
+    company_id: &str,
+    status: &str,
+) -> AppResult<Vec<ProductieOrder>> {
+    Ok(sqlx::query_as::<_, ProductieOrder>(
+        "SELECT id, company_id, bom_id, product_id, gestiune_id, qty_produced, \
+         production_date, total_material_cost, unit_cost, \
+         COALESCE(labour_cost,'0') as labour_cost, \
+         COALESCE(overhead_cost,'0') as overhead_cost, \
+         overhead_fixed, overhead_variable, normal_capacity_qty, \
+         COALESCE(overhead_absorbed,'0') as overhead_absorbed, \
+         COALESCE(overhead_unabsorbed,'0') as overhead_unabsorbed, \
+         COALESCE(full_cost, total_material_cost) as full_cost, \
+         COALESCE(full_unit_cost, unit_cost) as full_unit_cost, \
+         status, notes, planned_date, created_at \
+         FROM productie_orders WHERE company_id=?1 AND status=?2 \
+         ORDER BY production_date DESC, created_at DESC",
+    )
+    .bind(company_id)
+    .bind(status)
     .fetch_all(pool)
     .await?)
 }
@@ -1135,7 +1213,7 @@ pub async fn get_productie(
          COALESCE(overhead_unabsorbed,'0') as overhead_unabsorbed, \
          COALESCE(full_cost, total_material_cost) as full_cost, \
          COALESCE(full_unit_cost, unit_cost) as full_unit_cost, \
-         status, notes, created_at \
+         status, notes, planned_date, created_at \
          FROM productie_orders WHERE id=?1 AND company_id=?2",
     )
     .bind(order_id)
@@ -1143,6 +1221,619 @@ pub async fn get_productie(
     .fetch_optional(pool)
     .await?
     .ok_or(AppError::NotFound)
+}
+
+// ─── Lifecycle: create_planned_order / execute_order / cancel_order ───────────
+
+/// Creează un ordin de producție PLANIFICAT (status='planned').
+///
+/// Nu consumă stoc și nu postează nicio notă GL. Returnează ordinul + o estimare
+/// informativă a costului la prețul mediu curent al componentelor.
+///
+/// RBAC: CreateDraft (creare planificare; nu PostGl).
+pub async fn create_planned_order(
+    pool: &SqlitePool,
+    company_id: &str,
+    input: CreatePlannedOrderInput,
+) -> AppResult<(ProductieOrder, CostEstimate)> {
+    // ── Validare cantitate ────────────────────────────────────────────────────
+    let qty_produced = Decimal::from_str(input.qty_produced.trim())
+        .map_err(|_| AppError::Validation("Cantitate produsă invalidă.".into()))?;
+    if qty_produced <= Decimal::ZERO {
+        return Err(AppError::Validation(
+            "Cantitatea produsă trebuie să fie > 0.".into(),
+        ));
+    }
+
+    // ── Parsăm estimările de cost (default 0) ─────────────────────────────────
+    let labour_cost = input
+        .labour_cost
+        .as_deref()
+        .map(|s| Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO))
+        .unwrap_or(Decimal::ZERO);
+    let overhead_cost = input
+        .overhead_cost
+        .as_deref()
+        .map(|s| Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO))
+        .unwrap_or(Decimal::ZERO);
+    let overhead_fixed = opt_dec(&input.overhead_fixed);
+    let overhead_variable = opt_dec(&input.overhead_variable);
+    let normal_capacity_qty = opt_dec(&input.normal_capacity_qty);
+
+    // ── Fetch BOM + guard multi-tenant ────────────────────────────────────────
+    let bom_with_lines = get_bom(pool, company_id, &input.bom_id).await?;
+    let bom = &bom_with_lines.bom;
+    let lines = &bom_with_lines.lines;
+
+    if lines.is_empty() {
+        return Err(AppError::Validation("BOM-ul nu are componente.".into()));
+    }
+
+    // ── Verificare gestiune aparține companiei ────────────────────────────────
+    let gest_exists: Option<String> =
+        sqlx::query_scalar("SELECT id FROM gestiune WHERE id=?1 AND company_id=?2")
+            .bind(&input.gestiune_id)
+            .bind(company_id)
+            .fetch_optional(pool)
+            .await?;
+    if gest_exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+
+    // ── Estimare cost materiale (la avg_cost curent) ──────────────────────────
+    let output_qty = dec(&bom.output_qty);
+    if output_qty <= Decimal::ZERO {
+        return Err(AppError::Validation("output_qty BOM invalid (<=0).".into()));
+    }
+    let scale = qty_produced / output_qty;
+
+    let mut estimated_material_cost = Decimal::ZERO;
+    for line in lines {
+        let needed = round2(dec(&line.qty) * scale);
+        // Luăm avg_cost curent (poate fi 0 dacă nu există stoc)
+        let avg_cost: Option<String> =
+            sqlx::query_scalar("SELECT avg_cost FROM products WHERE id=?1 AND company_id=?2")
+                .bind(&line.component_product_id)
+                .bind(company_id)
+                .fetch_optional(pool)
+                .await?
+                .flatten();
+        let unit_avg = avg_cost.as_deref().map(dec).unwrap_or(Decimal::ZERO);
+        estimated_material_cost += round2(needed * unit_avg);
+    }
+
+    // ── Absorbție estimată ────────────────────────────────────────────────────
+    let absorption = compute_absorption(
+        overhead_cost,
+        overhead_fixed,
+        overhead_variable,
+        normal_capacity_qty,
+        qty_produced,
+    );
+
+    let estimated_full_cost =
+        round2(estimated_material_cost + labour_cost + absorption.overhead_absorbed);
+
+    // ── Determintăm data producției (fallback la planned_date) ────────────────
+    let production_date = input
+        .production_date
+        .clone()
+        .unwrap_or_else(|| input.planned_date.clone());
+
+    // ── Inserare rând cu status='planned', fără mișcări de stoc/GL ───────────
+    let order_id = new_id();
+    let now = now_unix();
+
+    // Costurile estimate sunt stocate în câmpurile existente (ca estimare),
+    // dar total_material_cost='0.00' și full_cost='0.00' rămân la zero până la execuție.
+    sqlx::query(
+        "INSERT INTO productie_orders \
+         (id, company_id, bom_id, product_id, gestiune_id, qty_produced, production_date, \
+          total_material_cost, unit_cost, labour_cost, overhead_cost, overhead_fixed, \
+          overhead_variable, normal_capacity_qty, overhead_absorbed, overhead_unabsorbed, \
+          full_cost, full_unit_cost, status, notes, planned_date, created_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,'0.00','0.00',?8,?9,?10,?11,?12,?13,?14,'0.00','0.00',\
+                 'planned',?15,?16,?17)",
+    )
+    .bind(&order_id)
+    .bind(company_id)
+    .bind(&input.bom_id)
+    .bind(&bom.product_id)
+    .bind(&input.gestiune_id)
+    .bind(format!("{:.6}", qty_produced))
+    .bind(&production_date)
+    .bind(format!("{:.2}", labour_cost))
+    .bind(format!("{:.2}", overhead_cost))
+    .bind(overhead_fixed.map(|d| format!("{:.2}", d)))
+    .bind(overhead_variable.map(|d| format!("{:.2}", d)))
+    .bind(normal_capacity_qty.map(|d| format!("{:.6}", d)))
+    .bind(format!("{:.2}", absorption.overhead_absorbed))
+    .bind(format!("{:.2}", absorption.overhead_unabsorbed))
+    .bind(&input.notes)
+    .bind(&input.planned_date)
+    .bind(now)
+    .execute(pool)
+    .await?;
+
+    let order = get_productie(pool, company_id, &order_id).await?;
+
+    let estimate = CostEstimate {
+        estimated_material_cost: format!("{:.2}", estimated_material_cost),
+        labour_cost: format!("{:.2}", labour_cost),
+        overhead_absorbed: format!("{:.2}", absorption.overhead_absorbed),
+        overhead_unabsorbed: format!("{:.2}", absorption.overhead_unabsorbed),
+        estimated_full_cost: format!("{:.2}", estimated_full_cost),
+    };
+
+    Ok((order, estimate))
+}
+
+/// Execută un ordin planificat (planned / in_progress → finalized).
+///
+/// Rulează logica completă de consum componente + producere produs finit + postare GL.
+/// Guard idempotent: un ordin deja 'finalized' nu poate fi re-executat (fără double-consume).
+/// Guard stoc: all-or-nothing — dacă vreun component este insuficient, ordinul rămâne 'planned'.
+///
+/// RBAC: PostGl.
+pub async fn execute_order(
+    pool: &SqlitePool,
+    company_id: &str,
+    order_id: &str,
+) -> AppResult<ProductieOrder> {
+    // ── Fetch ordin + guard multi-tenant ──────────────────────────────────────
+    let order = get_productie(pool, company_id, order_id).await?;
+
+    // ── Guard status ─────────────────────────────────────────────────────────
+    match order.status.as_str() {
+        "planned" | "in_progress" | "draft" => {} // pot fi executate
+        "finalized" => {
+            return Err(AppError::Validation(
+                "Ordinul este deja finalizat. Re-executarea este interzisă (ar dubla consumul)."
+                    .into(),
+            ));
+        }
+        "cancelled" => {
+            return Err(AppError::Validation(
+                "Un ordin anulat nu poate fi executat. Creați un ordin nou.".into(),
+            ));
+        }
+        s => {
+            return Err(AppError::Validation(format!(
+                "Status necunoscut: '{s}'. Nu se poate executa."
+            )));
+        }
+    }
+
+    // ── Construim un ProduceInput din datele ordinului planificat ─────────────
+    // Preluăm data producției efectivă (production_date) din ordin.
+    let produce_input = ProduceInput {
+        bom_id: order.bom_id.clone(),
+        gestiune_id: order.gestiune_id.clone(),
+        qty_produced: order.qty_produced.clone(),
+        production_date: order.production_date.clone(),
+        notes: order.notes.clone(),
+        labour_cost: Some(order.labour_cost.clone()),
+        overhead_cost: Some(order.overhead_cost.clone()),
+        overhead_fixed: order.overhead_fixed.clone(),
+        overhead_variable: order.overhead_variable.clone(),
+        normal_capacity_qty: order.normal_capacity_qty.clone(),
+    };
+
+    // ── Rulăm logica completă de producție (intern): validare stoc + consum + GL ─
+    // Aceasta este o re-implementare care apelează direct logica din produce(),
+    // dar actualizează ordinul existent în loc să îl creeze din nou.
+    //
+    // Strategie: create a temporary new order via the existing produce() inner logic,
+    // then copy the results to the existing order row and delete the temp order.
+    // Dar pentru a evita duplicarea codului, refactorizăm: extragem logica
+    // de consum+GL în execute_produce_inner() și o apelăm din ambele locuri.
+    //
+    // Implementare concretă: apelăm direct produce_for_order() care face tot consumul
+    // pe order_id-ul existent.
+    execute_produce_inner(pool, company_id, order_id, produce_input).await
+}
+
+/// Logica internă de execuție a unui ordin de producție pe un order_id EXISTENT.
+///
+/// Folosit de `execute_order()`. Actualizează rândul existent (status → 'finalized',
+/// costurile reale, mișcările de stoc + GL) în loc de a insera unul nou.
+async fn execute_produce_inner(
+    pool: &SqlitePool,
+    company_id: &str,
+    order_id: &str,
+    input: ProduceInput,
+) -> AppResult<ProductieOrder> {
+    // ── Validare input ────────────────────────────────────────────────────────
+    let qty_produced = Decimal::from_str(input.qty_produced.trim())
+        .map_err(|_| AppError::Validation("Cantitate produsă invalidă.".into()))?;
+    if qty_produced <= Decimal::ZERO {
+        return Err(AppError::Validation(
+            "Cantitatea produsă trebuie să fie > 0.".into(),
+        ));
+    }
+
+    let labour_cost = input
+        .labour_cost
+        .as_deref()
+        .map(|s| Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO))
+        .unwrap_or(Decimal::ZERO);
+    let overhead_cost = input
+        .overhead_cost
+        .as_deref()
+        .map(|s| Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO))
+        .unwrap_or(Decimal::ZERO);
+    let overhead_fixed = opt_dec(&input.overhead_fixed);
+    let overhead_variable = opt_dec(&input.overhead_variable);
+    let normal_capacity_qty = opt_dec(&input.normal_capacity_qty);
+
+    // ── Fetch BOM ─────────────────────────────────────────────────────────────
+    let bom_with_lines = get_bom(pool, company_id, &input.bom_id).await?;
+    let bom = &bom_with_lines.bom;
+    let lines = &bom_with_lines.lines;
+
+    if lines.is_empty() {
+        return Err(AppError::Validation("BOM-ul nu are componente.".into()));
+    }
+
+    // ── Scală + verificare stoc suficient ─────────────────────────────────────
+    let output_qty = dec(&bom.output_qty);
+    if output_qty <= Decimal::ZERO {
+        return Err(AppError::Validation("output_qty BOM invalid (<=0).".into()));
+    }
+    let scale = qty_produced / output_qty;
+
+    let mut needed_per_component: std::collections::BTreeMap<String, Decimal> =
+        std::collections::BTreeMap::new();
+    for line in lines {
+        let needed = round2(dec(&line.qty) * scale);
+        *needed_per_component
+            .entry(line.component_product_id.clone())
+            .or_insert(Decimal::ZERO) += needed;
+    }
+    for (component_id, needed) in &needed_per_component {
+        let available = on_hand_qty(pool, company_id, component_id, &input.gestiune_id).await?;
+        if available < *needed {
+            return Err(AppError::Validation(format!(
+                "Stoc insuficient: {} (disponibil {:.6}, necesar {:.6}).",
+                component_id, available, needed
+            )));
+        }
+    }
+
+    // ── Produse afectate (pentru rollback) ────────────────────────────────────
+    let mut affected_products: Vec<String> = lines
+        .iter()
+        .map(|l| l.component_product_id.clone())
+        .collect();
+    affected_products.push(bom.product_id.clone());
+    affected_products.dedup();
+
+    // ── Consumăm componentele (OUT) ──────────────────────────────────────────
+    for line in lines {
+        let needed = round2(dec(&line.qty) * scale);
+        let out_input = StockMovementInput {
+            company_id: company_id.to_string(),
+            product_id: line.component_product_id.clone(),
+            entry_date: input.production_date.clone(),
+            qty: format!("{:.6}", needed),
+            unit_cost: None,
+            doc_type: Some("PRODUCTION".to_string()),
+            doc_ref: Some(order_id.to_string()),
+            gestiune_id: Some(input.gestiune_id.clone()),
+        };
+
+        if let Err(e) = stock_valuation::record_movement(pool, &out_input, Dir::Out).await {
+            let _ = rollback_production_movements(
+                pool,
+                company_id,
+                order_id,
+                &affected_products,
+                &input.gestiune_id,
+            )
+            .await;
+            return Err(e);
+        }
+    }
+
+    // ── Costul total al materialelor ──────────────────────────────────────────
+    let total_material_cost: Decimal = match sqlx::query_as::<_, (String,)>(
+        "SELECT value FROM stock_ledger \
+         WHERE company_id=?1 AND doc_ref=?2 AND direction='OUT'",
+    )
+    .bind(company_id)
+    .bind(order_id)
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows.iter().map(|(v,)| dec(v)).sum(),
+        Err(e) => {
+            let _ = rollback_production_movements(
+                pool,
+                company_id,
+                order_id,
+                &affected_products,
+                &input.gestiune_id,
+            )
+            .await;
+            return Err(e.into());
+        }
+    };
+
+    // ── Absorbție regie ───────────────────────────────────────────────────────
+    let absorption = compute_absorption(
+        overhead_cost,
+        overhead_fixed,
+        overhead_variable,
+        normal_capacity_qty,
+        qty_produced,
+    );
+
+    let full_cost = round2(total_material_cost + labour_cost + absorption.overhead_absorbed);
+    let full_unit_cost = if qty_produced.is_zero() {
+        Decimal::ZERO
+    } else {
+        round2(full_cost / qty_produced)
+    };
+    let unit_cost_mat = if qty_produced.is_zero() {
+        Decimal::ZERO
+    } else {
+        round2(total_material_cost / qty_produced)
+    };
+
+    // ── Producem produsul finit (IN la full_cost) ──────────────────────────────
+    let in_input = StockMovementInput {
+        company_id: company_id.to_string(),
+        product_id: bom.product_id.clone(),
+        entry_date: input.production_date.clone(),
+        qty: format!("{:.6}", qty_produced),
+        unit_cost: Some(format!("{:.2}", full_unit_cost)),
+        doc_type: Some("PRODUCTION".to_string()),
+        doc_ref: Some(order_id.to_string()),
+        gestiune_id: Some(input.gestiune_id.clone()),
+    };
+
+    if let Err(e) = stock_valuation::record_movement(pool, &in_input, Dir::In).await {
+        let _ = rollback_production_movements(
+            pool,
+            company_id,
+            order_id,
+            &affected_products,
+            &input.gestiune_id,
+        )
+        .await;
+        return Err(e);
+    }
+
+    // ── Pinning exact full_cost (defect-fix: elimină drift rotunjire) ─────────
+    {
+        let prod_in_lookup = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT id, value, run_value \
+             FROM stock_ledger \
+             WHERE company_id=?1 AND product_id=?2 AND gestiune_id=?3 \
+               AND doc_ref=?4 AND direction='IN' \
+             LIMIT 1",
+        )
+        .bind(company_id)
+        .bind(&bom.product_id)
+        .bind(&input.gestiune_id)
+        .bind(order_id)
+        .fetch_optional(pool)
+        .await;
+
+        let prod_in_row = match prod_in_lookup {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = rollback_production_movements(
+                    pool,
+                    company_id,
+                    order_id,
+                    &affected_products,
+                    &input.gestiune_id,
+                )
+                .await;
+                return Err(e.into());
+            }
+        };
+
+        if let Some((ledger_id, stored_value_str, stored_run_value_str)) = prod_in_row {
+            let stored_value = dec(&stored_value_str);
+            let drift = full_cost - stored_value;
+            if drift != Decimal::ZERO {
+                let corrected_run_value = round2(dec(&stored_run_value_str) + drift);
+
+                if let Err(e) = sqlx::query(
+                    "UPDATE stock_ledger SET value=?2, run_value=?3 \
+                     WHERE id=?1 AND company_id=?4",
+                )
+                .bind(&ledger_id)
+                .bind(format!("{:.2}", full_cost))
+                .bind(format!("{:.2}", corrected_run_value))
+                .bind(company_id)
+                .execute(pool)
+                .await
+                {
+                    let _ = rollback_production_movements(
+                        pool,
+                        company_id,
+                        order_id,
+                        &affected_products,
+                        &input.gestiune_id,
+                    )
+                    .await;
+                    return Err(e.into());
+                }
+
+                let stock_account_lookup = sqlx::query_scalar::<_, String>(
+                    "SELECT COALESCE(stock_account,'345') FROM products \
+                     WHERE id=?1 AND company_id=?2",
+                )
+                .bind(&bom.product_id)
+                .bind(company_id)
+                .fetch_optional(pool)
+                .await;
+
+                let stock_account = match stock_account_lookup {
+                    Ok(opt) => opt.unwrap_or_else(|| "345".to_string()),
+                    Err(e) => {
+                        let _ = rollback_production_movements(
+                            pool,
+                            company_id,
+                            order_id,
+                            &affected_products,
+                            &input.gestiune_id,
+                        )
+                        .await;
+                        return Err(e.into());
+                    }
+                };
+
+                if let Err(e) = crate::db::gl::post_stock_movement(
+                    pool,
+                    company_id,
+                    &ledger_id,
+                    &input.production_date,
+                    &stock_account,
+                    true,
+                    full_cost,
+                    false,
+                )
+                .await
+                {
+                    let _ = rollback_production_movements(
+                        pool,
+                        company_id,
+                        order_id,
+                        &affected_products,
+                        &input.gestiune_id,
+                    )
+                    .await;
+                    return Err(e);
+                }
+
+                let sv_lookup = sqlx::query_as::<_, (Option<String>,)>(
+                    "SELECT stock_value FROM products WHERE id=?1 AND company_id=?2",
+                )
+                .bind(&bom.product_id)
+                .bind(company_id)
+                .fetch_optional(pool)
+                .await;
+
+                let sv_opt = match sv_lookup {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let _ = rollback_production_movements(
+                            pool,
+                            company_id,
+                            order_id,
+                            &affected_products,
+                            &input.gestiune_id,
+                        )
+                        .await;
+                        return Err(e.into());
+                    }
+                };
+
+                let corrected_sv =
+                    round2(dec(sv_opt.and_then(|(v,)| v).as_deref().unwrap_or("0")) + drift);
+
+                if let Err(e) =
+                    sqlx::query("UPDATE products SET stock_value=?2 WHERE id=?1 AND company_id=?3")
+                        .bind(&bom.product_id)
+                        .bind(format!("{:.2}", corrected_sv))
+                        .bind(company_id)
+                        .execute(pool)
+                        .await
+                {
+                    let _ = rollback_production_movements(
+                        pool,
+                        company_id,
+                        order_id,
+                        &affected_products,
+                        &input.gestiune_id,
+                    )
+                    .await;
+                    return Err(e.into());
+                }
+            }
+        }
+    }
+
+    // ── Actualizăm rândul existent → status='finalized' + costuri reale ───────
+    let update_res = sqlx::query(
+        "UPDATE productie_orders SET \
+         status='finalized', \
+         total_material_cost=?2, unit_cost=?3, \
+         labour_cost=?4, overhead_cost=?5, \
+         overhead_absorbed=?6, overhead_unabsorbed=?7, \
+         full_cost=?8, full_unit_cost=?9 \
+         WHERE id=?1 AND company_id=?10",
+    )
+    .bind(order_id)
+    .bind(format!("{:.2}", total_material_cost))
+    .bind(format!("{:.2}", unit_cost_mat))
+    .bind(format!("{:.2}", labour_cost))
+    .bind(format!("{:.2}", overhead_cost))
+    .bind(format!("{:.2}", absorption.overhead_absorbed))
+    .bind(format!("{:.2}", absorption.overhead_unabsorbed))
+    .bind(format!("{:.2}", full_cost))
+    .bind(format!("{:.2}", full_unit_cost))
+    .bind(company_id)
+    .execute(pool)
+    .await;
+
+    if let Err(e) = update_res {
+        let _ = rollback_production_movements(
+            pool,
+            company_id,
+            order_id,
+            &affected_products,
+            &input.gestiune_id,
+        )
+        .await;
+        return Err(e.into());
+    }
+
+    get_productie(pool, company_id, order_id).await
+}
+
+/// Anulează un ordin planificat (planned / draft / in_progress → cancelled).
+///
+/// Un ordin 'finalized' NU poate fi anulat prin această funcție — trebuie
+/// folosit `rollback_production_movements` (stornare contabilă separată).
+///
+/// RBAC: Delete sau CreateDraft.
+pub async fn cancel_order(
+    pool: &SqlitePool,
+    company_id: &str,
+    order_id: &str,
+) -> AppResult<ProductieOrder> {
+    let order = get_productie(pool, company_id, order_id).await?;
+
+    match order.status.as_str() {
+        "planned" | "draft" | "in_progress" => {} // se pot anula
+        "finalized" => {
+            return Err(AppError::Validation(
+                "Un ordin finalizat nu poate fi anulat direct — utilizați stornarea (rollback)."
+                    .into(),
+            ));
+        }
+        "cancelled" => {
+            return Err(AppError::Validation("Ordinul este deja anulat.".into()));
+        }
+        s => {
+            return Err(AppError::Validation(format!(
+                "Status necunoscut: '{s}'. Nu se poate anula."
+            )));
+        }
+    }
+
+    sqlx::query("UPDATE productie_orders SET status='cancelled' WHERE id=?1 AND company_id=?2")
+        .bind(order_id)
+        .bind(company_id)
+        .execute(pool)
+        .await?;
+
+    get_productie(pool, company_id, order_id).await
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -3245,5 +3936,808 @@ mod tests {
             matches!(res, Err(AppError::Validation(_))),
             "negative overhead_variable must be rejected with Validation error, got: {res:?}"
         );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ── LIFECYCLE TESTS (migration 0087) ──────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // ── LC-1: create_planned_order → status='planned', no stock movement, no GL ─
+
+    /// Un ordin planificat inserează un rând cu status='planned' și NU postează
+    /// nicio mișcare de stoc sau notă GL.
+    #[tokio::test]
+    async fn lifecycle_planned_no_stock_no_gl() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GLC1").await;
+
+        make_product_sql(
+            &pool,
+            "pf_lc1",
+            &cid,
+            "PF_LC1",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_lc1",
+            &cid,
+            "MP_LC1",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        // Stoc inițial: 50 @ 4.00
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_lc1", "2026-01-01", "50", Some("4.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_lc1".into(),
+                name: "BOM_LC1".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_lc1".into(),
+                    qty: "5".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        let (order, estimate) = create_planned_order(
+            &pool,
+            &cid,
+            CreatePlannedOrderInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "3".into(),
+                planned_date: "2026-02-01".into(),
+                production_date: None,
+                notes: Some("Test plan".into()),
+                labour_cost: Some("100.00".into()),
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // (1) Status = planned
+        assert_eq!(order.status, "planned", "planned order has status=planned");
+
+        // (2) Stocul componentei NEATINS
+        assert_eq!(
+            onhand(&pool, &cid, "mp_lc1", &g).await,
+            Decimal::from(50),
+            "component stock unchanged after planned order"
+        );
+        assert_eq!(
+            onhand(&pool, &cid, "pf_lc1", &g).await,
+            Decimal::ZERO,
+            "finished good stock unchanged after planned order"
+        );
+
+        // (3) Nicio mișcare PRODUCTION în stock_ledger
+        let prod_cnt: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM stock_ledger WHERE company_id=?1 AND doc_type='PRODUCTION'",
+        )
+        .bind(&cid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            prod_cnt, 0,
+            "no PRODUCTION stock movements for planned order"
+        );
+
+        // (4) Nicio notă GL din mișcări PRODUCTION (GL-ul de la recepție inițială nu contează)
+        let gl_cnt: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM gl_journal j WHERE j.company_id=?1 AND j.source_type='STOCK' \
+             AND j.source_id IN (SELECT id FROM stock_ledger WHERE company_id=?1 AND doc_type='PRODUCTION')",
+        )
+        .bind(&cid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            gl_cnt, 0,
+            "no GL entries from PRODUCTION movements for planned order"
+        );
+
+        // (5) Estimarea costului este calculată (nu zero)
+        let est_mat = dec(&estimate.estimated_material_cost);
+        // 3 units × 5 component/unit × 4.00 avg_cost = 60.00
+        assert_eq!(
+            est_mat,
+            Decimal::from(60),
+            "estimated material cost = 3*5*4 = 60"
+        );
+        let est_full = dec(&estimate.estimated_full_cost);
+        // 60 + 100 labour + 0 overhead = 160
+        assert_eq!(
+            est_full,
+            Decimal::from(160),
+            "estimated full cost = 60 + 100 labour = 160"
+        );
+
+        // (6) planned_date stocat corect
+        assert_eq!(
+            order.planned_date.as_deref(),
+            Some("2026-02-01"),
+            "planned_date stored"
+        );
+    }
+
+    // ── LC-2: execute_order → planned → finalized, stock consumed, GL posted ──
+
+    /// execute_order tranzitează un ordin planificat la 'finalized', consumă
+    /// componentele și postează GL (D601=C301 + D345=C711).
+    #[tokio::test]
+    async fn lifecycle_execute_order_consumes_stock_posts_gl() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GLC2").await;
+
+        make_product_sql(
+            &pool,
+            "pf_lc2",
+            &cid,
+            "PF_LC2",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_lc2",
+            &cid,
+            "MP_LC2",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_lc2", "2026-01-01", "20", Some("5.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_lc2".into(),
+                name: "BOM_LC2".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_lc2".into(),
+                    qty: "4".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        let (planned, _) = create_planned_order(
+            &pool,
+            &cid,
+            CreatePlannedOrderInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "2".into(),
+                planned_date: "2026-02-10".into(),
+                production_date: Some("2026-02-10".into()),
+                notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(planned.status, "planned");
+
+        // Executăm
+        let finalized = execute_order(&pool, &cid, &planned.id).await.unwrap();
+
+        // (1) Status = finalized
+        assert_eq!(finalized.status, "finalized", "status becomes finalized");
+
+        // (2) Stocul componentei scade (2 unități × 4 = 8)
+        assert_eq!(
+            onhand(&pool, &cid, "mp_lc2", &g).await,
+            Decimal::from(12),
+            "component: 20 - 8 = 12"
+        );
+        // Stocul produs finit crește
+        assert_eq!(
+            onhand(&pool, &cid, "pf_lc2", &g).await,
+            Decimal::from(2),
+            "finished good: 0 + 2 = 2"
+        );
+
+        // (3) Costuri reale stocate
+        // mat: 2 × 4 × 5.00 = 40.00
+        assert_eq!(finalized.total_material_cost, "40.00", "material cost = 40");
+        assert_eq!(
+            finalized.full_cost, "40.00",
+            "full cost = 40 (no labour/overhead)"
+        );
+
+        // (4) GL postat: D345=C711=40
+        let (d345, _) = gl_turnover(&pool, &cid, "345").await;
+        let (_, c711) = gl_turnover(&pool, &cid, "711").await;
+        assert_eq!(d345, Decimal::from(40), "D345 = 40 after execute");
+        assert_eq!(c711, Decimal::from(40), "C711 = 40 after execute");
+    }
+
+    // ── LC-3: re-execute rejected (idempotent guard, no double-consume) ────────
+
+    /// Un ordin deja 'finalized' nu poate fi re-executat.
+    /// Stocul rămâne neatins după tentativa de re-executare.
+    #[tokio::test]
+    async fn lifecycle_re_execute_rejected() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GLC3").await;
+
+        make_product_sql(
+            &pool,
+            "pf_lc3",
+            &cid,
+            "PF_LC3",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_lc3",
+            &cid,
+            "MP_LC3",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_lc3", "2026-01-01", "20", Some("3.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_lc3".into(),
+                name: "BOM_LC3".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_lc3".into(),
+                    qty: "2".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        let (planned, _) = create_planned_order(
+            &pool,
+            &cid,
+            CreatePlannedOrderInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "1".into(),
+                planned_date: "2026-02-01".into(),
+                production_date: Some("2026-02-01".into()),
+                notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Prima execuție — OK
+        execute_order(&pool, &cid, &planned.id).await.unwrap();
+        let after_first = onhand(&pool, &cid, "mp_lc3", &g).await;
+        assert_eq!(
+            after_first,
+            Decimal::from(18),
+            "20 - 2 = 18 after first execute"
+        );
+
+        // A doua execuție — trebuie respinsă
+        let re_exec = execute_order(&pool, &cid, &planned.id).await;
+        assert!(
+            matches!(re_exec, Err(AppError::Validation(_))),
+            "re-execute must be rejected with Validation error"
+        );
+
+        // Stocul rămâne neatins (18, nu 16)
+        assert_eq!(
+            onhand(&pool, &cid, "mp_lc3", &g).await,
+            Decimal::from(18),
+            "stock unchanged after re-execute rejection (no double-consume)"
+        );
+    }
+
+    // ── LC-4: cancel_order (planned → cancelled), finalized cannot be cancelled ─
+
+    #[tokio::test]
+    async fn lifecycle_cancel_order() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GLC4").await;
+
+        make_product_sql(
+            &pool,
+            "pf_lc4",
+            &cid,
+            "PF_LC4",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_lc4",
+            &cid,
+            "MP_LC4",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_lc4", "2026-01-01", "20", Some("2.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_lc4".into(),
+                name: "BOM_LC4".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_lc4".into(),
+                    qty: "3".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        let (planned, _) = create_planned_order(
+            &pool,
+            &cid,
+            CreatePlannedOrderInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "1".into(),
+                planned_date: "2026-03-01".into(),
+                production_date: None,
+                notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Anulare ordin planificat → OK
+        let cancelled = cancel_order(&pool, &cid, &planned.id).await.unwrap();
+        assert_eq!(
+            cancelled.status, "cancelled",
+            "cancel sets status=cancelled"
+        );
+
+        // Stocul rămâne neatins
+        assert_eq!(
+            onhand(&pool, &cid, "mp_lc4", &g).await,
+            Decimal::from(20),
+            "stock unchanged after cancel"
+        );
+
+        // Niciun GL din mișcări PRODUCTION (GL-ul de la recepție inițială e așteptat)
+        let gl_cnt: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM gl_journal j WHERE j.company_id=?1 AND j.source_type='STOCK' \
+             AND j.source_id IN (SELECT id FROM stock_ledger WHERE company_id=?1 AND doc_type='PRODUCTION')",
+        )
+        .bind(&cid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(gl_cnt, 0, "no GL after cancel");
+
+        // Nu poți anula din nou
+        let re_cancel = cancel_order(&pool, &cid, &planned.id).await;
+        assert!(
+            matches!(re_cancel, Err(AppError::Validation(_))),
+            "re-cancelling cancelled order must fail"
+        );
+
+        // Un ordin finalizat NU poate fi anulat prin cancel_order
+        let (planned2, _) = create_planned_order(
+            &pool,
+            &cid,
+            CreatePlannedOrderInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "1".into(),
+                planned_date: "2026-03-05".into(),
+                production_date: Some("2026-03-05".into()),
+                notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+        execute_order(&pool, &cid, &planned2.id).await.unwrap();
+
+        let cancel_finalized = cancel_order(&pool, &cid, &planned2.id).await;
+        assert!(
+            matches!(cancel_finalized, Err(AppError::Validation(_))),
+            "cancelling a finalized order must be rejected"
+        );
+    }
+
+    // ── LC-5: direct produce() still creates finalized order (backward compat) ─
+
+    /// Calea directă produce() creează un ordin 'finalized' cu GL postat — nicio schimbare.
+    #[tokio::test]
+    async fn lifecycle_direct_produce_backward_compat() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GLC5").await;
+
+        make_product_sql(
+            &pool,
+            "pf_lc5",
+            &cid,
+            "PF_LC5",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_lc5",
+            &cid,
+            "MP_LC5",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_lc5", "2026-01-01", "10", Some("6.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_lc5".into(),
+                name: "BOM_LC5".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_lc5".into(),
+                    qty: "2".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        let order = produce(
+            &pool,
+            &cid,
+            ProduceInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "3".into(),
+                production_date: "2026-01-10".into(),
+                notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // (1) Status = finalized
+        assert_eq!(
+            order.status, "finalized",
+            "direct produce() still produces finalized order"
+        );
+
+        // (2) GL postat (D345=C711=36)
+        let (d345, _) = gl_turnover(&pool, &cid, "345").await;
+        let (_, c711) = gl_turnover(&pool, &cid, "711").await;
+        assert_eq!(d345, Decimal::from(36), "D345 = 3*2*6 = 36");
+        assert_eq!(c711, Decimal::from(36), "C711 = 36");
+
+        // (3) Stocuri corecte: 10 - 6 = 4 componente, 3 produs finit
+        assert_eq!(onhand(&pool, &cid, "mp_lc5", &g).await, Decimal::from(4));
+        assert_eq!(onhand(&pool, &cid, "pf_lc5", &g).await, Decimal::from(3));
+    }
+
+    // ── LC-6: execute with insufficient stock → rejected, order stays planned ──
+
+    #[tokio::test]
+    async fn lifecycle_execute_insufficient_stock_stays_planned() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GLC6").await;
+
+        make_product_sql(
+            &pool,
+            "pf_lc6",
+            &cid,
+            "PF_LC6",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_lc6",
+            &cid,
+            "MP_LC6",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        // Only 2 units in stock; need 6 (3 produced × 2 per BOM)
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_lc6", "2026-01-01", "2", Some("5.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_lc6".into(),
+                name: "BOM_LC6".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_lc6".into(),
+                    qty: "2".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        let (planned, _) = create_planned_order(
+            &pool,
+            &cid,
+            CreatePlannedOrderInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "3".into(), // needs 6, only 2 available
+                planned_date: "2026-02-01".into(),
+                production_date: Some("2026-02-01".into()),
+                notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let res = execute_order(&pool, &cid, &planned.id).await;
+        assert!(
+            matches!(res, Err(AppError::Validation(_))),
+            "execute with insufficient stock must fail"
+        );
+
+        // Order still planned
+        let still_planned = get_productie(&pool, &cid, &planned.id).await.unwrap();
+        assert_eq!(
+            still_planned.status, "planned",
+            "order stays planned when execution fails due to insufficient stock"
+        );
+
+        // Stock untouched
+        assert_eq!(
+            onhand(&pool, &cid, "mp_lc6", &g).await,
+            Decimal::from(2),
+            "stock unchanged after failed execute"
+        );
+
+        // No GL from PRODUCTION movements (the initial receipt GL is expected)
+        let gl_cnt: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM gl_journal j WHERE j.company_id=?1 AND j.source_type='STOCK' \
+             AND j.source_id IN (SELECT id FROM stock_ledger WHERE company_id=?1 AND doc_type='PRODUCTION')",
+        )
+        .bind(&cid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(gl_cnt, 0, "no GL after failed execute");
+    }
+
+    // ── LC-7: list_productie_by_status returns only matching orders ───────────
+
+    #[tokio::test]
+    async fn lifecycle_list_by_status() {
+        let (pool, cid) = setup().await;
+        let g = make_gestiune(&pool, &cid, "GLC7").await;
+
+        make_product_sql(
+            &pool,
+            "pf_lc7",
+            &cid,
+            "PF_LC7",
+            "produs_finit",
+            "345",
+            "CMP",
+        )
+        .await;
+        make_product_sql(
+            &pool,
+            "mp_lc7",
+            &cid,
+            "MP_LC7",
+            "materie_prima",
+            "301",
+            "CMP",
+        )
+        .await;
+
+        record_movement(
+            &pool,
+            &mv(&cid, "mp_lc7", "2026-01-01", "50", Some("1.00"), &g),
+            Dir::In,
+        )
+        .await
+        .unwrap();
+
+        let bom = create_bom(
+            &pool,
+            &cid,
+            BomInput {
+                product_id: "pf_lc7".into(),
+                name: "BOM_LC7".into(),
+                output_qty: "1".into(),
+                lines: vec![BomLineInput {
+                    component_product_id: "mp_lc7".into(),
+                    qty: "1".into(),
+                    um: None,
+                    line_no: 1,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        // Create 2 planned orders
+        let (p1, _) = create_planned_order(
+            &pool,
+            &cid,
+            CreatePlannedOrderInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "1".into(),
+                planned_date: "2026-02-01".into(),
+                production_date: Some("2026-02-01".into()),
+                notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let (p2, _) = create_planned_order(
+            &pool,
+            &cid,
+            CreatePlannedOrderInput {
+                bom_id: bom.bom.id.clone(),
+                gestiune_id: g.clone(),
+                qty_produced: "2".into(),
+                planned_date: "2026-02-15".into(),
+                production_date: Some("2026-02-15".into()),
+                notes: None,
+                labour_cost: None,
+                overhead_cost: None,
+                overhead_fixed: None,
+                overhead_variable: None,
+                normal_capacity_qty: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Execute p1
+        execute_order(&pool, &cid, &p1.id).await.unwrap();
+
+        let planned_list = list_productie_by_status(&pool, &cid, "planned")
+            .await
+            .unwrap();
+        let finalized_list = list_productie_by_status(&pool, &cid, "finalized")
+            .await
+            .unwrap();
+
+        assert_eq!(planned_list.len(), 1, "1 planned order remaining");
+        assert_eq!(planned_list[0].id, p2.id, "p2 still planned");
+        assert_eq!(finalized_list.len(), 1, "1 finalized order");
+        assert_eq!(finalized_list[0].id, p1.id, "p1 is finalized");
     }
 }

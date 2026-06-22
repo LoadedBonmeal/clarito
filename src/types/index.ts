@@ -2016,6 +2016,8 @@ export interface BomInput {
   lines: BomLineInput[];
 }
 
+export type ProductieOrderStatus = "draft" | "planned" | "in_progress" | "finalized" | "cancelled";
+
 export interface ProductieOrder {
   id: string;
   companyId: string;
@@ -2036,8 +2038,10 @@ export interface ProductieOrder {
   overheadUnabsorbed: string;
   fullCost: string;
   fullUnitCost: string;
-  status: string;
+  status: ProductieOrderStatus;
   notes: string | null;
+  // Added in migration 0087
+  plannedDate: string | null;
   createdAt: number;
 }
 
@@ -2057,6 +2061,34 @@ export interface ProduceInput {
   overheadVariable?: string;
   /** Normal capacity in units (optional, required for fixed overhead IAS 2 absorption). */
   normalCapacityQty?: string;
+}
+
+/** Input for creating a planned (non-executing) production order. */
+export interface CreatePlannedOrderInput {
+  bomId: string;
+  gestiuneId: string;
+  qtyProduced: string;
+  /** Planned production date (YYYY-MM-DD). */
+  plannedDate: string;
+  /** Actual production date used when the order is executed. Defaults to plannedDate. */
+  productionDate?: string;
+  notes?: string;
+  /** Estimated direct labour cost (informational, not posted at creation). */
+  labourCost?: string;
+  /** Estimated overhead cost (informational, not posted at creation). */
+  overheadCost?: string;
+  overheadFixed?: string;
+  overheadVariable?: string;
+  normalCapacityQty?: string;
+}
+
+/** Cost estimate returned with a newly created planned order. */
+export interface CostEstimate {
+  estimatedMaterialCost: string;
+  labourCost: string;
+  overheadAbsorbed: string;
+  overheadUnabsorbed: string;
+  estimatedFullCost: string;
 }
 
 // ─── Fiscal Receipts / Raport Z ───────────────────────────────────────────────

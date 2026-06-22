@@ -1,8 +1,11 @@
-//! Tauri commands pentru Producție / BOM (P2 Wave 5).
+//! Tauri commands pentru Producție / BOM (P2 Wave 5 + lifecycle Wave).
 
 use tauri::State;
 
-use crate::db::productie::{self, Bom, BomInput, BomWithLines, ProduceInput, ProductieOrder};
+use crate::db::productie::{
+    self, Bom, BomInput, BomWithLines, CostEstimate, CreatePlannedOrderInput, ProduceInput,
+    ProductieOrder,
+};
 use crate::error::AppResult;
 use crate::state::AppState;
 
@@ -88,4 +91,56 @@ pub async fn get_productie(
     order_id: String,
 ) -> AppResult<ProductieOrder> {
     productie::get_productie(&state.db, &company_id, &order_id).await
+}
+
+/// Listează ordinele de producție filtrate după status.
+#[tauri::command]
+pub async fn list_productie_by_status(
+    state: State<'_, AppState>,
+    company_id: String,
+    status: String,
+) -> AppResult<Vec<ProductieOrder>> {
+    productie::list_productie_by_status(&state.db, &company_id, &status).await
+}
+
+// ─── Lifecycle commands ────────────────────────────────────────────────────────
+
+/// Creează un ordin de producție PLANIFICAT (status='planned').
+///
+/// Nu consumă stoc și nu postează GL. Returnează ordinul + estimarea costului.
+/// RBAC: CreateDraft.
+#[tauri::command]
+pub async fn create_planned_order(
+    state: State<'_, AppState>,
+    company_id: String,
+    input: CreatePlannedOrderInput,
+) -> AppResult<(ProductieOrder, CostEstimate)> {
+    productie::create_planned_order(&state.db, &company_id, input).await
+}
+
+/// Execută un ordin planificat (planned / in_progress → finalized).
+///
+/// Consumă componentele + produce produs finit + postează GL.
+/// Guard idempotent: un ordin 'finalized' nu poate fi re-executat.
+/// RBAC: PostGl.
+#[tauri::command]
+pub async fn execute_order(
+    state: State<'_, AppState>,
+    company_id: String,
+    order_id: String,
+) -> AppResult<ProductieOrder> {
+    productie::execute_order(&state.db, &company_id, &order_id).await
+}
+
+/// Anulează un ordin planificat (planned / in_progress → cancelled).
+///
+/// Un ordin 'finalized' NU poate fi anulat prin această funcție.
+/// RBAC: Delete sau CreateDraft.
+#[tauri::command]
+pub async fn cancel_order(
+    state: State<'_, AppState>,
+    company_id: String,
+    order_id: String,
+) -> AppResult<ProductieOrder> {
+    productie::cancel_order(&state.db, &company_id, &order_id).await
 }
