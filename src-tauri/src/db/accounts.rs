@@ -248,6 +248,12 @@ fn standard_accounts() -> Vec<SeedEntry> {
             parent: None,
         },
         SeedEntry {
+            code: "105",
+            name: "Rezerve din reevaluare",
+            class: 1,
+            parent: None,
+        },
+        SeedEntry {
             code: "106",
             name: "Rezerve",
             class: 1,
@@ -270,6 +276,12 @@ fn standard_accounts() -> Vec<SeedEntry> {
             name: "Rezultatul reportat",
             class: 1,
             parent: None,
+        },
+        SeedEntry {
+            code: "1175",
+            name: "Rezultatul reportat reprezentând surplusul realizat din rezerve din reevaluare",
+            class: 1,
+            parent: Some("117"),
         },
         SeedEntry {
             code: "4411",
@@ -740,6 +752,12 @@ fn standard_accounts() -> Vec<SeedEntry> {
             parent: Some("645"),
         },
         SeedEntry {
+            code: "655",
+            name: "Cheltuieli din reevaluarea imobilizărilor corporale",
+            class: 6,
+            parent: None,
+        },
+        SeedEntry {
             code: "658",
             name: "Alte cheltuieli de exploatare",
             class: 6,
@@ -829,6 +847,13 @@ fn standard_accounts() -> Vec<SeedEntry> {
             name: "Alte venituri din exploatare",
             class: 7,
             parent: None,
+        },
+        SeedEntry {
+            code: "7558",
+            name:
+                "Alte venituri din exploatare — venituri din reevaluarea imobilizărilor corporale",
+            class: 7,
+            parent: Some("758"),
         },
         SeedEntry {
             code: "765",

@@ -162,7 +162,8 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         // P3 Wave D: avansuri + deconturi post GL
         | "create_treasury_advance"
         | "return_treasury_advance"
-        | "approve_expense_report" => Some(Perm::PostGl),
+        | "approve_expense_report"
+        | "revalue_fixed_asset" => Some(Perm::PostGl),
 
         // ── ClosePeriod ───────────────────────────────────────────────────
         "close_vat_period" | "close_period" | "lock_period" | "unlock_period" => Some(Perm::ClosePeriod),

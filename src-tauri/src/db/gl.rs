@@ -4099,6 +4099,163 @@ pub async fn post_asset_disposal(
     Ok(())
 }
 
+// ─── Reevaluare imobilizări corporale (OMFP 1802/2014, pct.100) ──────────────
+
+/// Postează nota contabilă de reevaluare a unui mijloc fix (metoda valorii nete).
+///
+/// Idempotentă per `(company_id, "ASSET_REVAL", revaluation_id)`.
+///
+/// # Intrări GL posibile (metoda valorii nete)
+///
+/// **Eliminare amortizare cumulată** (întotdeauna, dacă accumulated > 0):
+///   D 281x (amortizare cumulată) / C 21x (activ — costul de intrare)
+///
+/// **Ajustare la valoarea justă** (surplus = fair_value − net_value):
+///   - Surplus → C 105 (rezervă din reevaluare)
+///   - Surplus care acoperă un deficit anterior 655 → C 7558 (până la deficit), C 105 (rest)
+///   - Deficit → D 655 (cheltuieli din reevaluare)
+///   - Deficit acoperit de rezerva 105 disponibilă → D 105 (până la rezervă), D 655 (rest)
+///
+/// **Realizarea rezervei la casare** (opțional, `reserve_to_realize > 0`):
+///   D 105 / C 1175
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn post_asset_revaluation(
+    pool: &SqlitePool,
+    company_id: &str,
+    revaluation_id: &str,
+    revaluation_date: &str,
+    asset_acct: &str, // 21x (e.g. "213")
+    amort_acct: &str, // 281x (e.g. "2813")
+    cost: rust_decimal::Decimal,
+    accumulated: rust_decimal::Decimal,
+    fair_value: rust_decimal::Decimal,
+    // Net delta breakdown (caller pre-computes to avoid duplicating business logic):
+    reserve_credit: rust_decimal::Decimal, // > 0 → credit 105; < 0 → debit 105
+    income_7558: rust_decimal::Decimal,    // ≥ 0 credit 7558 (reversal of prior 655)
+    expense_655: rust_decimal::Decimal,    // ≥ 0 debit 655
+    // Reserve realization on disposal (0 if not realizing yet):
+    reserve_to_realize: rust_decimal::Decimal,
+) -> AppResult<()> {
+    use rust_decimal::Decimal;
+    let zero = Decimal::ZERO;
+
+    let mk = |record_id: i64, account: &str, debit: Decimal, credit: Decimal| GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: account.to_string(),
+        debit,
+        credit,
+        partner_cui: None,
+        customer_id: None,
+        supplier_id: None,
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+    };
+
+    let mut entries: Vec<GlEntry> = Vec::new();
+    let mut rec: i64 = 1;
+
+    // ── Step 1: Eliminate accumulated depreciation (D 281x / C 21x) ───────────
+    if accumulated > zero {
+        entries.push(mk(rec, amort_acct, accumulated, zero)); // D 281x
+        rec += 1;
+        entries.push(mk(rec, asset_acct, zero, accumulated)); // C 21x (partial)
+        rec += 1;
+    }
+
+    // net_value = cost − accumulated (after elimination, 21x carries net_value)
+    let net_value = (cost - accumulated).max(zero);
+    let surplus_or_deficit = fair_value - net_value;
+
+    if surplus_or_deficit > zero {
+        // ── Surplus ────────────────────────────────────────────────────────────
+        // D 21x / C 7558 (income reversal up to prior 655) + C 105 (remainder)
+        let adjustment = surplus_or_deficit;
+        entries.push(mk(rec, asset_acct, adjustment, zero)); // D 21x total surplus
+        rec += 1;
+        if income_7558 > zero {
+            entries.push(mk(rec, "7558", zero, income_7558)); // C 7558
+            rec += 1;
+        }
+        if reserve_credit > zero {
+            entries.push(mk(rec, "105", zero, reserve_credit)); // C 105
+            rec += 1;
+        }
+    } else if surplus_or_deficit < zero {
+        // ── Deficit ────────────────────────────────────────────────────────────
+        // C 21x / D 105 (up to available reserve) + D 655 (remainder)
+        let adjustment = (-surplus_or_deficit).max(zero);
+        entries.push(mk(rec, asset_acct, zero, adjustment)); // C 21x total deficit
+        rec += 1;
+        if reserve_credit < zero {
+            // reserve_credit < 0 means we're debiting 105
+            let debit_105 = (-reserve_credit).max(zero);
+            entries.push(mk(rec, "105", debit_105, zero)); // D 105
+            rec += 1;
+        }
+        if expense_655 > zero {
+            entries.push(mk(rec, "655", expense_655, zero)); // D 655
+            rec += 1;
+        }
+    }
+
+    // ── Step 3: Reserve realization (D 105 / C 1175) — on disposal ────────────
+    if reserve_to_realize > zero {
+        entries.push(mk(rec, "105", reserve_to_realize, zero)); // D 105
+        rec += 1;
+        entries.push(mk(rec, "1175", zero, reserve_to_realize)); // C 1175
+    }
+
+    if entries.is_empty() {
+        // Zero-net revaluation (fair == net): idempotent delete + return.
+        let mut tx = pool.begin().await?;
+        sqlx::query(
+            "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='ASSET_REVAL' AND source_id=?2",
+        )
+        .bind(company_id)
+        .bind(revaluation_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(());
+    }
+
+    assert_balanced(&entries, revaluation_id)?;
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='ASSET_REVAL' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(revaluation_id)
+    .execute(&mut *tx)
+    .await?;
+
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: "REEVALUARE".to_string(),
+        journal_type: "ASSET_REVAL".to_string(),
+        transaction_id: revaluation_id.to_string(),
+        transaction_date: revaluation_date.to_string(),
+        description: Some(format!("Reevaluare imobilizare {revaluation_id}")),
+        source_type: "ASSET_REVAL".to_string(),
+        source_id: revaluation_id.to_string(),
+        customer_id: None,
+        supplier_id: None,
+    };
+    let journal_pk = journal.id.clone();
+    insert_journal(&mut tx, &journal).await?;
+    for e in &entries {
+        insert_entry(&mut tx, &journal_pk, e).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 // ─── Stocuri (mișcări → GL) ──────────────────────────────────────────────────
 
 /// Expense account for a stock account's issue (descărcare gestiune): 371→607, 301→601, 302→602,

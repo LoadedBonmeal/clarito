@@ -4,7 +4,8 @@
 use tauri::State;
 
 use crate::db::assets::{
-    self, AssetDepreciationRow, DepreciationRun, FiscalScheduleRow, FixedAsset, FixedAssetInput,
+    self, AssetDepreciationRow, AssetRevaluation, DepreciationRun, FiscalScheduleRow, FixedAsset,
+    FixedAssetInput, RevaluationResult,
 };
 use crate::error::AppResult;
 use crate::state::AppState;
@@ -91,4 +92,35 @@ pub async fn get_asset_fiscal_schedule(
 ) -> AppResult<Vec<FiscalScheduleRow>> {
     let asset = assets::get(&state.db, &asset_id, &company_id).await?;
     assets::compute_fiscal_schedule(&asset)
+}
+
+/// Reevaluează un mijloc fix la valoarea justă (OMFP 1802/2014, pct.100 — metoda valorii nete).
+/// Postează nota GL (ASSET_REVAL) și înregistrează evenimentul în `asset_revaluations`.
+/// Necesită permisiunea PostGl.
+#[tauri::command]
+pub async fn revalue_fixed_asset(
+    state: State<'_, AppState>,
+    company_id: String,
+    asset_id: String,
+    fair_value: String,
+    revaluation_date: String,
+) -> AppResult<RevaluationResult> {
+    assets::revalue_asset(
+        &state.db,
+        &company_id,
+        &asset_id,
+        &fair_value,
+        &revaluation_date,
+    )
+    .await
+}
+
+/// Listează reevaluările înregistrate pentru un activ sau pentru toți activii companiei.
+#[tauri::command]
+pub async fn list_asset_revaluations(
+    state: State<'_, AppState>,
+    company_id: String,
+    asset_id: Option<String>,
+) -> AppResult<Vec<AssetRevaluation>> {
+    assets::list_revaluations(&state.db, &company_id, asset_id.as_deref()).await
 }
