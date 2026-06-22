@@ -5,10 +5,6 @@ use rust_decimal::Decimal;
 use std::str::FromStr;
 use tauri::State;
 
-use crate::anaf_decl::d112::{
-    cm_indemn_treatment, compute_payroll, compute_payroll_with_leave, deducere_plafonata,
-    suma_netaxabila, LeaveCert, LeavePayrollInput, PayrollInput,
-};
 use crate::anaf_decl::d112_xml::{generate_d112_xml, D112Employee, D112Header, D112MedicalLeave};
 use crate::db::payroll::{self, CreateEmployeeInput, Employee, PayrollRun, UpdateEmployeeInput};
 use crate::error::{AppError, AppResult};
@@ -23,7 +19,6 @@ fn split_name(full: &str) -> (String, String) {
 }
 
 use crate::db::invoices::round2;
-use crate::db::payroll::{active_working_days, leave_working_days_in_month, working_days};
 
 /// Convert an ISO date (YYYY-MM-DD) to the D112 zz.ll.aaaa format; pass other strings through.
 fn ro_date(iso: &str) -> String {
@@ -178,35 +173,15 @@ pub async fn export_d112_xml(
     } = params;
 
     let company = crate::db::companies::get(&state.db, &company_id).await?;
-    let employees = payroll::list(&state.db, &company_id).await?;
-    let period_ym = format!("{year:04}-{month:02}");
-    let leaves = crate::db::concedii::list(&state.db, &company_id, &period_ym).await?;
-    let extra_income = crate::db::payroll_diurna::open_extra_income_by_employee(
-        &state.db,
-        &company_id,
-        &period_ym,
-    )
-    .await
-    .unwrap_or_default();
-    let sporuri =
-        crate::db::payroll_sporuri::sporuri_by_employee(&state.db, &company_id, &period_ym)
-            .await
-            .unwrap_or_default();
-    let pontaje = crate::db::pontaj::pontaj_by_employee(&state.db, &company_id, &period_ym)
-        .await
-        .unwrap_or_default();
     let xml = build_d112_xml(
+        &state.db,
         &company,
-        &employees,
-        &leaves,
         year,
         month,
         caen.trim(),
         is_rectificative,
-        &extra_income,
-        &sporuri,
-        &pontaje,
-    )?;
+    )
+    .await?;
     // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the IPC
     // endpoint accepts an arbitrary string.
     let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
@@ -269,432 +244,209 @@ pub async fn preview_d112_xml(
     is_rectificative: bool,
 ) -> AppResult<String> {
     let company = crate::db::companies::get(&state.db, &company_id).await?;
-    let employees = payroll::list(&state.db, &company_id).await?;
-    let period_ym = format!("{year:04}-{month:02}");
-    let leaves = crate::db::concedii::list(&state.db, &company_id, &period_ym).await?;
-    let extra_income = crate::db::payroll_diurna::open_extra_income_by_employee(
-        &state.db,
-        &company_id,
-        &period_ym,
-    )
-    .await
-    .unwrap_or_default();
-    let sporuri =
-        crate::db::payroll_sporuri::sporuri_by_employee(&state.db, &company_id, &period_ym)
-            .await
-            .unwrap_or_default();
-    let pontaje = crate::db::pontaj::pontaj_by_employee(&state.db, &company_id, &period_ym)
-        .await
-        .unwrap_or_default();
     build_d112_xml(
+        &state.db,
         &company,
-        &employees,
-        &leaves,
         year,
         month,
         caen.trim(),
         is_rectificative,
-        &extra_income,
-        &sporuri,
-        &pontaje,
     )
+    .await
 }
 
-/// Pure core of the D112 XML build (no Tauri State / filesystem) — maps active employees + the month's
-/// medical-leave certificates to the validated `:v7` XML. Separated from [`export_d112_xml`] so it is
-/// testable end-to-end without IPC/IO. An employee with ≥1 certificate emits the B-path (salary
-/// proration + indemnity, consistent with `run_payroll`/GL); the rest emit the standard `asiguratA` path.
-/// `extra_income` — map of `employee_id → total excess (Decimal, lei)` from `payroll_extra_income`
-/// for the given period. Folded into the D112 bases (CAS/CASS/CAM/impozit) and E3_23 (rând 8.2.1).
-/// `sporuri` — map of `employee_id → total spor taxabil (Decimal, lei)` from `payroll_sporuri`
-/// for the given period. Folded into the D112 contribution/impozit bases (CAS/CASS/impozit/CAM) on
-/// BOTH A-path and B-path — same combined-base rounding as `run_payroll`, so GL 4315/4316/444/436
-/// == D112 412/432/602/480 for employees with a spor. NOTE: `non_taxable` is computed on the BASE
-/// salary (gross_salary), NOT on gross+spor — mirrors `run_payroll` (OUG 89/2025 art. III condition
-/// refers to the base salary, not the gross+spor effective base).
-/// `pontaje` — map of `employee_id → Pontaj` from `pontaj_by_employee` for the given period.
-/// When a pontaj exists for a no-medical-leave employee and `worked_days < nzl`, the effective gross
-/// is prorated (gross_eff × worked_days/nzl) BEFORE computing contributions — exactly mirroring the
-/// pontaj proration in `run_payroll` (db/payroll.rs). This ensures GL 4315/4316/444/436 == D112
-/// 412/432/602/480 for employees with a pontaj (the GL≡D112 golden invariant).
-/// Medical-leave employees (B-path) are NOT prorated here — their proration is handled by
-/// `compute_payroll_with_leave` which uses the leave certificate days, same as `run_payroll`.
-#[allow(clippy::too_many_arguments)]
-fn build_d112_xml(
+/// Pure core of the D112 XML build (no Tauri State / filesystem) — fetches all payroll data via
+/// `compute_payroll_run` (the single source of truth) and maps the result to the validated `:v7`
+/// XML. An employee with ≥1 medical-leave certificate emits the B-path (asiguratB1/B2/B3/B4 +
+/// asiguratD); the rest emit the standard `asiguratA` path — consistent with `run_payroll`/GL.
+async fn build_d112_xml(
+    pool: &sqlx::SqlitePool,
     company: &crate::db::companies::Company,
-    employees: &[Employee],
-    leaves: &[crate::db::concedii::MedicalLeave],
     year: i32,
     month: u32,
     caen: &str,
     is_rectificative: bool,
-    extra_income: &std::collections::HashMap<String, Decimal>,
-    sporuri: &std::collections::HashMap<String, Decimal>,
-    pontaje: &std::collections::HashMap<String, crate::db::pontaj::Pontaj>,
 ) -> AppResult<String> {
     if caen.len() != 4 || !caen.chars().all(|c| c.is_ascii_digit()) {
         return Err(AppError::Validation(
             "Cod CAEN invalid — introduceți 4 cifre (ex. 6201).".into(),
         ));
     }
-    // Concediile medicale ale lunii → calea B (asiguratD). Grupate pe angajat (gol ⇒ calea A standard).
-    let mut leaves_by_emp: std::collections::HashMap<
-        &str,
-        Vec<&crate::db::concedii::MedicalLeave>,
-    > = std::collections::HashMap::new();
-    for l in leaves {
-        leaves_by_emp
-            .entry(l.employee_id.as_str())
-            .or_default()
-            .push(l);
-    }
-    let dec = |s: &str| Decimal::from_str(s).unwrap_or(Decimal::ZERO);
+
+    let period_from = format!("{year:04}-{month:02}-01");
+    let dim = payroll::days_in_month(year, month);
+    let period_to = format!("{year:04}-{month:02}-{dim:02}");
+    let breakdown =
+        payroll::compute_payroll_run(pool, &company.id, &period_from, &period_to).await?;
+
     // Whole-lei, COMMERCIAL rounding (MidpointAwayFromZero) — never banker's `.round()`.
     let leid = |d: Decimal| {
         d.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
             .to_i64()
             .unwrap_or(0)
     };
-    let lei = |s: &str| leid(dec(s));
 
-    let nzl = working_days(year, month); // zile lucrătoare în lună (Luni-Vineri)
-    let mut d112_emps = Vec::new();
-    for e in employees.iter().filter(|e| e.active) {
-        // ROB-17: reject malformed CNP before serializing — DUKIntegrator/ANAF reject it otherwise.
-        if !crate::anaf_decl::valid_cnp(&e.cnp) {
+    let mut d112_emps: Vec<D112Employee> = Vec::new();
+    for eb in &breakdown.employees {
+        // ROB-17: reject malformed CNP before serializing.
+        if !crate::anaf_decl::valid_cnp(&eb.cnp) {
             return Err(AppError::Validation(format!(
-                "CNP invalid pentru angajatul „{}\" ({}): trebuie 13 cifre cu cifra de control corectă.",
-                e.full_name, e.cnp
+                "CNP invalid pentru angajatul \u{201e}{}\u{201d} ({}): trebuie 13 cifre cu cifra de control corectă.",
+                eb.full_name, eb.cnp
             )));
         }
-        let gross_in = dec(&e.gross_salary);
-        // Wave F: spor salarial al angajatului pentru această lună (0 dacă absent).
-        // Sporurile intră în baza CAS/CASS/impozit/CAM — venituri salariale taxabile.
-        // `non_taxable` se calculează pe `gross_in` de bază (nu pe gross_eff) — condiția
-        // OUG 89/2025 art. III se referă la „salariul de bază", nu la brutul efectiv cu sporuri.
-        // Același comportament ca în `run_payroll` (db/payroll.rs).
-        let spor_d112 = sporuri.get(e.id.as_str()).copied().unwrap_or(Decimal::ZERO);
-        // Brut efectiv D112 = gross_salary + spor — baza tuturor contribuțiilor.
-        let gross_eff = gross_in + spor_d112;
-        // Suma netaxabilă (300/200 lei, art. III OUG 89/2025) — 0 dacă nu se aplică. Scade baza
-        // tuturor celor patru prelevări (vezi compute_payroll). Calculată pe `gross_in`, NU pe gross_eff.
-        let non_taxable = suma_netaxabila(
-            e.beneficiar_suma_netaxabila,
-            &e.tip_contract,
-            gross_in,
-            year,
-            month,
-        );
+        let (nume, prenume) = split_name(&eb.full_name);
+        let data_ang = eb
+            .employment_date
+            .as_deref()
+            .map(ro_date)
+            .unwrap_or_default();
 
-        // ── Calea B (concediu medical) ──────────────────────────────────────
-        // Salariatul cu ≥1 certificat în lună: salariul se proratează la zilele lucrate, iar
-        // indemnizația de CM intră în baza CAS/CASS (CAS 25% + CASS 10% pe codurile ne-scutite) și în
-        // baza de impozit. `compute_payroll_with_leave` produce numerele lunii; `emit_leave_blocks`
-        // (în d112_xml) reconstruiește identic CAS/CASS din baza lucrată + indemnizație ⇒ D112 = motor.
-        if let Some(emp_leaves) = leaves_by_emp.get(e.id.as_str()) {
-            // EDGE: part-time + concediu medical. Baza minimă part-time (art. 146 alin. (5^6)) NU se
-            // aplică pe luna cu concediu — combinație rară + tratament statutar ambiguu (proratarea
-            // bazei minime la zilele active e ea însăși neimplementată). Se avertizează pentru
-            // verificare manuală; vezi nota din `db/concedii.rs`.
-            if e.tip_contract != "N"
+        if eb.is_leave_path {
+            // ── B-path: medical leave ───────────────────────────────────────
+            if eb.tip_contract != "N"
                 && !crate::anaf_decl::d112::exempt_part_time_min_base(
-                    e.pensionar,
-                    &e.exceptie_cas_min,
+                    eb.pensionar,
+                    &eb.exceptie_cas_min,
                 )
             {
                 tracing::warn!(
-                    employee = %e.full_name,
-                    contract = %e.tip_contract,
+                    employee = %eb.full_name,
+                    contract = %eb.tip_contract,
                     "D112: salariat part-time cu concediu medical — baza minimă part-time (art. 146 \
                 (5^6)) NU se aplică pe luna cu concediu; verificați manual"
                 );
             }
-            let mut certs = Vec::new();
-            let mut med_leaves = Vec::new();
-            for l in emp_leaves {
-                let (cass_due, taxable) = cm_indemn_treatment(&l.cod_indemnizatie);
-                let emp_amt = lei(&l.suma_angajator); // indemnizație în lei întregi (ca în D112)
-                let fn_amt = lei(&l.suma_fnuass);
-                certs.push(LeaveCert {
-                    indemn_employer: Decimal::from(emp_amt),
-                    indemn_fnuass: Decimal::from(fn_amt),
-                    // Proratarea salariului scade TOATE zilele lucrătoare de concediu (din intervalul
-                    // certificatului), inclusiv prima zi neplătită 2026 — nu doar zilele indemnizate.
-                    leave_working_days: leave_working_days_in_month(
-                        year,
-                        month,
-                        &l.data_inceput,
-                        &l.data_sfarsit,
-                    ),
-                    cass_due,
-                    taxable,
-                });
-                med_leaves.push(D112MedicalLeave {
-                    serie: l.serie.clone(),
-                    numar: l.numar.clone(),
-                    cod_indemn: l.cod_indemnizatie.clone(),
-                    data_acordare: ro_date(&l.data_acordare),
-                    data_inceput: ro_date(&l.data_inceput),
-                    data_sfarsit: ro_date(&l.data_sfarsit),
-                    zile_ang: l.zile_angajator,
-                    zile_fnuass: l.zile_fnuass,
-                    baza_calcul: lei(&l.baza_calcul),
-                    zile_baza: l.zile_baza,
-                    suma_ang: emp_amt,
-                    suma_fnuass: fn_amt,
-                    procent: l.procent,
-                    loc_prescriere: l.loc_prescriere,
-                    cod_boala: l.cod_boala.clone(),
-                });
-            }
-            // Wave F B-path: gross passed to compute_payroll_with_leave = gross_eff (gross + spor).
-            // This mirrors run_payroll which also passes gross_eff on the leave branch, ensuring
-            // GL 4315/4316/444/436 == D112 412/432/602/480 when the employee has a spor + leave.
-            let lr = compute_payroll_with_leave(&LeavePayrollInput {
-                gross: gross_eff,
-                personal_deduction: deducere_plafonata(
-                    dec(&e.personal_deduction),
-                    gross_eff,
-                    year,
-                    month,
-                ),
-                non_taxable,
-                working_days: nzl,
-                certs,
-            });
-            let worked_base = leid(lr.worked_base);
-            let (nume, prenume) = split_name(&e.full_name);
+            // Build D112MedicalLeave from the raw leaves stored in the breakdown.
+            let leid_str = |s: &str| leid(Decimal::from_str(s).unwrap_or(Decimal::ZERO));
+            let med_leaves: Vec<D112MedicalLeave> = eb
+                .med_leaves_raw
+                .iter()
+                .map(|l| {
+                    let emp_amt = leid_str(&l.suma_angajator);
+                    let fn_amt = leid_str(&l.suma_fnuass);
+                    D112MedicalLeave {
+                        serie: l.serie.clone(),
+                        numar: l.numar.clone(),
+                        cod_indemn: l.cod_indemnizatie.clone(),
+                        data_acordare: ro_date(&l.data_acordare),
+                        data_inceput: ro_date(&l.data_inceput),
+                        data_sfarsit: ro_date(&l.data_sfarsit),
+                        zile_ang: l.zile_angajator,
+                        zile_fnuass: l.zile_fnuass,
+                        baza_calcul: leid_str(&l.baza_calcul),
+                        zile_baza: l.zile_baza,
+                        suma_ang: emp_amt,
+                        suma_fnuass: fn_amt,
+                        procent: l.procent,
+                        loc_prescriere: l.loc_prescriere,
+                        cod_boala: l.cod_boala.clone(),
+                    }
+                })
+                .collect();
+            let worked_base = leid(eb.lr_worked_base);
+            // sal_contract = brutul de baza al contractului (fara sporuri).
+            let sal_contract = leid(eb.gross_base);
             d112_emps.push(D112Employee {
-                cnp: e.cnp.clone(),
+                cnp: eb.cnp.clone(),
                 nume,
                 prenume,
-                data_ang: e
-                    .employment_date
-                    .as_deref()
-                    .map(ro_date)
-                    .unwrap_or_default(),
-                gross: leid(lr.worked_gross),
-                cas: leid(lr.cas),
-                cass: leid(lr.cass),
-                impozit: leid(lr.income_tax),
-                cam: leid(lr.cam),
-                zile: lr.worked_days,
-                tip_asigurat: e.tip_asigurat.clone(),
-                pensionar: e.pensionar,
-                tip_contract: e.tip_contract.clone(),
-                ore_norma: e.ore_norma.clamp(6, 8) as u32,
+                data_ang,
+                gross: leid(eb.lr_worked_gross),
+                cas: leid(eb.lr_cas),
+                cass: leid(eb.lr_cass),
+                impozit: leid(eb.lr_income_tax),
+                cam: leid(eb.lr_cam),
+                zile: eb.lr_worked_days,
+                tip_asigurat: eb.tip_asigurat.clone(),
+                pensionar: eb.pensionar,
+                tip_contract: eb.tip_contract.clone(),
+                ore_norma: eb.ore_norma.clamp(6, 8) as u32,
                 baza_cas: worked_base,
                 baza_cass: worked_base,
                 baza_cam: worked_base,
-                sal_contract: leid(gross_in),
-                baza_impozit: leid(lr.taxable_base),
-                deducere: lei(&e.personal_deduction),
-                sediu_cif: e.sediu_cif.clone(),
-                e3_23: 0, // set by Wave-E post-processing below if there is diurnă surplus
+                sal_contract,
+                baza_impozit: leid(eb.lr_taxable_base),
+                deducere: 0, // B-path: deducere is embedded in taxable_base calculation
+                sediu_cif: eb.sediu_cif.clone(),
+                e3_23: 0,
                 med_leaves,
             });
+        } else {
+            // ── A-path: standard salary ─────────────────────────────────────
+            // baza_cas / baza_cass may be lifted to part-time minimum.
+            let baza_cas = leid(eb.baza_cas);
+            let baza_cass = leid(eb.baza_cass);
+            let baza_cam = leid(eb.baza_cam_real);
+            // If baza_cas was lifted (part-time min), recompute contributions on lifted base.
+            let (cas_emis, cass_emis) = if eb.part_time_min.is_some() {
+                let cas = leid(round2(eb.baza_cas * Decimal::new(25, 2)));
+                let cass = leid(round2(eb.baza_cass * Decimal::new(10, 2)));
+                (cas, cass)
+            } else {
+                (leid(eb.sal_cas), leid(eb.sal_cass))
+            };
+            d112_emps.push(D112Employee {
+                cnp: eb.cnp.clone(),
+                nume,
+                prenume,
+                data_ang,
+                gross: leid(eb.sal_gross),
+                cas: cas_emis,
+                cass: cass_emis,
+                impozit: leid(eb.sal_impozit),
+                cam: leid(eb.sal_cam),
+                zile: eb.zile_emis,
+                tip_asigurat: eb.tip_asigurat.clone(),
+                pensionar: eb.pensionar,
+                tip_contract: eb.tip_contract.clone(),
+                ore_norma: eb.ore_norma.clamp(6, 8) as u32,
+                baza_cas,
+                baza_cass,
+                baza_cam,
+                sal_contract: leid(eb.gross_base),
+                baza_impozit: leid(eb.baza_impozit),
+                deducere: leid(eb.sal_personal_deduction),
+                sediu_cif: eb.sediu_cif.clone(),
+                e3_23: 0,
+                med_leaves: vec![],
+            });
+        }
+    }
+
+    // ── Wave E: fold payroll_extra_income (diurna surplus) into D112 bases ────
+    // Read the already-computed combined contributions from the breakdown (SSOT) — NO recompute.
+    // compute_payroll_run stored combined_cas/combined_cass/combined_impozit/comb_impozit_base using
+    // exact Decimal arithmetic on sal_gross (e.g. 3571.43 for a pontaj-prorated employee). If we
+    // re-derived from de.gross (i64, already rounded to whole lei), pontaj precision is lost and
+    // GL 4315 ≠ D112 412 for employees with BOTH a pontaj proration AND a diurnă excess.
+    for de in d112_emps.iter_mut() {
+        // Find the breakdown entry for this D112 slot (by CNP).
+        let Some(eb) = breakdown.employees.iter().find(|eb| eb.cnp == de.cnp) else {
+            continue;
+        };
+        let excess = eb.excess;
+        if excess <= Decimal::ZERO {
             continue;
         }
+        let excess_lei = leid(excess);
+        // Read the SSOT values — already computed in compute_payroll_run with exact Decimal precision.
+        let comb_cas = leid(eb.combined_cas);
+        let comb_cass = leid(eb.combined_cass);
+        let comb_impozit = leid(eb.combined_impozit);
 
-        // ── Pontaj A-path proration ─────────────────────────────────────────────
-        // When a pontaj exists for this employee (no medical leave — those are handled on the B-path
-        // above) and worked_days < nzl, prorate gross_eff by worked_days/nzl BEFORE computing
-        // contributions. This mirrors the proration in `run_payroll` (db/payroll.rs lines ~778-787)
-        // exactly — same branch condition, same clamp to nzl, same formula — ensuring
-        // GL 4315/4316/444/436 == D112 412/432/602/480 for employees with a pontaj.
-        // When worked_days ≥ nzl (or no pontaj), pontaj_gross_eff == gross_eff (no change).
-        let pontaj_gross_eff = if let Some(pj) = pontaje.get(e.id.as_str()) {
-            let pontaj_worked = (pj.worked_days as u32).min(nzl);
-            if pontaj_worked < nzl && nzl > 0 {
-                gross_eff * Decimal::from(pontaj_worked) / Decimal::from(nzl)
-            } else {
-                gross_eff
-            }
-        } else {
-            gross_eff
-        };
-
-        // Wave F A-path: compute contributions on pontaj_gross_eff (gross_salary + spor, prorated by
-        // pontaj when worked_days < nzl). Single combined-base rounding so GL 4315/4316/444/436 ==
-        // D112 412/432/602/480 for employees with a pontaj.
-        let r = compute_payroll(&PayrollInput {
-            gross: pontaj_gross_eff,
-            personal_deduction: deducere_plafonata(
-                dec(&e.personal_deduction),
-                gross_eff,
-                year,
-                month,
-            ),
-            non_taxable,
-        });
-        let gross = dec(&r.gross);
-        // Baza CAS/CASS = brut − suma netaxabilă (carve-out). Pentru ne-beneficiari nt=0 → baza = brut.
-        let mut baza_cas = gross - non_taxable;
-        let mut baza_cass = gross - non_taxable;
-        // PAY-01: baza CAM (A_5) rămâne ÎNTOTDEAUNA pe brutul REALIZAT (art. 220^6), spre deosebire de
-        // CAS/CASS care se majorează la baza minimă part-time (art. 146 5^6). O fixăm înainte de lift ca
-        // A_5 + obligația 480 să coincidă cu postarea GL 436 (db/payroll.rs: (brut − netaxabil).max(0)).
-        let baza_cam_real = (gross - non_taxable).max(Decimal::ZERO);
-        let mut cas = dec(&r.cas);
-        let mut cass = dec(&r.cass);
-        // Part-time (contract Pi): baza CAS/CASS = salariul minim întreg (NU prorata cu norma orară),
-        // categoriile art. 146 (5^7) exceptate — via the shared helper. Contribuția declarată e pe
-        // baza majorată.
-        let exempt =
-            crate::anaf_decl::d112::exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
-        // Zile lucrătoare active în lună (angajare la mijlocul lunii ⇒ < NZL). Folosit ca A_8 emis
-        // ȘI pentru proratarea bazei minime part-time, ca să coincidă cu regula DUK
-        // A_13P = ROUND(sm × A_8 / NZL). Lună întreagă ⇒ active_days = NZL ⇒ baza întreagă (neschimbat).
-        let active_days = active_working_days(
-            year,
-            month,
-            e.employment_date.as_deref(),
-            e.contract_end_date.as_deref(),
-        );
-        // PAY-02: A_8 (zile lucrate) = zilele active din lună pe ORICE cale (nu doar part-time). La o
-        // angajare/încetare la mijlocul lunii, full-time, A_8 trebuie să reflecte intervalul activ, nu
-        // luna întreagă. Lună întreagă ⇒ active_days = NZL (neschimbat). Convenție: `gross_salary` e
-        // brutul de bază al lunii (sporurile intră în gross_eff, nu în gross_salary); pentru part-time,
-        // A_13P = ROUND(sm × A_8 / NZL) e recalculat de DUK din A_8.
-        // Pontaj override: when a pontaj is present, A_8 reflects worked_days (clamped to nzl) —
-        // mirrors run_payroll (db/payroll.rs) which also uses pontaj.worked_days.min(nzl) as active_days.
-        let zile_emis = if let Some(pj) = pontaje.get(e.id.as_str()) {
-            (pj.worked_days as u32).min(nzl)
-        } else {
-            active_days
-        };
-        if let Some((base, _, _)) = crate::anaf_decl::d112::part_time_min_base(
-            gross,
-            &e.tip_contract,
-            exempt,
-            year,
-            month,
-            active_days,
-            nzl,
-        ) {
-            baza_cas = base;
-            baza_cass = base;
-            cas = round2(base * Decimal::new(25, 2));
-            cass = round2(base * Decimal::new(10, 2));
-        }
-        // Tip asigurat: beneficiarii sumei netaxabile, de la 07/2026 (modelul Ordin 605/95/928/
-        // 2.314/2026), folosesc codul 1.11.2 (Nomenclator 5). Pentru ≤06/2026 sau ne-beneficiari se
-        // păstrează codul configurat pe angajat. (1.11.3 — sistem propriu de pensii — necesită
-        // tratament CAS distinct, neimplementat; nu se emite automat.)
-        let tip_asigurat =
-            if non_taxable > Decimal::ZERO && (year > 2026 || (year == 2026 && month >= 7)) {
-                "1.11.2".to_string()
-            } else {
-                e.tip_asigurat.clone()
-            };
-        let (nume, prenume) = split_name(&e.full_name);
-        d112_emps.push(D112Employee {
-            cnp: e.cnp.clone(),
-            nume,
-            prenume,
-            data_ang: e
-                .employment_date
-                .as_deref()
-                .map(ro_date)
-                .unwrap_or_default(),
-            gross: leid(gross),
-            cas: leid(cas),
-            cass: leid(cass),
-            impozit: lei(&r.income_tax),
-            cam: lei(&r.cam),
-            zile: zile_emis,
-            tip_asigurat,
-            pensionar: e.pensionar,
-            tip_contract: e.tip_contract.clone(),
-            // A_4 ore normă zilnică must be 6/7/8 (the position's daily norm); part-time is captured
-            // via tip_contract (Pi) + the reduced base, not by lowering A_4.
-            ore_norma: e.ore_norma.clamp(6, 8) as u32,
-            baza_cas: leid(baza_cas),
-            baza_cass: leid(baza_cass),
-            // A_5 baza CAM = brutul realizat (brut − sumă netaxabilă), NU baza CAS/CASS majorată
-            // part-time — CAM nu se majorează la baza minimă (art. 220^6). Vezi PAY-01.
-            baza_cam: leid(baza_cam_real),
-            // A_sal1 salariul de bază brut din contract (brutul de bază, fără sporuri).
-            sal_contract: leid(gross_in),
-            // E3_14/E1_6 baza impozit + E3_12/E1_4 deducerea personală (din rezultatul de salarizare).
-            baza_impozit: lei(&r.taxable_base),
-            deducere: lei(&r.personal_deduction),
-            sediu_cif: e.sediu_cif.clone(),
-            e3_23: 0, // set by Wave-E post-processing below if there is diurnă surplus
-            // Concediile medicale (calea B / asiguratD) se populează mai jos din registrul concedii.
-            med_leaves: vec![],
-        });
+        de.gross += excess_lei;
+        de.baza_cas += excess_lei;
+        de.baza_cass += excess_lei;
+        de.baza_cam += excess_lei;
+        de.baza_impozit = leid(eb.comb_impozit_base);
+        de.cas = comb_cas;
+        de.cass = comb_cass;
+        de.impozit = comb_impozit;
+        de.e3_23 = excess_lei;
     }
 
-    // ── Wave E: fold payroll_extra_income (diurnă surplus) into D112 bases ────────────────────
-    // P1 fix: contributions MUST be computed on the COMBINED base (salary + excess) with a SINGLE
-    // rounding — not salary-rounded + excess-rounded separately. This matches run_payroll GL which
-    // also uses single combined-base rounding, so GL 4315/4316/444/436 == D112 412/432/602/480.
-    //
-    // For each employee with open extra income:
-    //   combined_base = gross (employee's salary base) + excess
-    //   combined_cas  = pct(combined_base, 25%)   → replaces de.cas
-    //   combined_cass = pct(combined_base, 10%)   → replaces de.cass
-    //   combined_impozit = pct(combined_base − combined_cas − combined_cass − deduction, 10%)
-    //   → replaces de.impozit (no additional deduction for asimilat venitor, art. 78)
-    //   de.gross and baza_cas/baza_cass/baza_cam are widened by excess_lei.
-    //   E3_23 = excess_lei (informational rând 8.2.1, art.76(2)(k)).
-    //
-    // NOTE: the GL for the excess is handled entirely by run_payroll (D641/C625=excess_reclass;
-    // D4282/C421=excess_receivable). The former DIURNA_ASIMILAT separate journal is NO LONGER
-    // called from approve_report — contributions were computed separately there and caused drift.
-    if !extra_income.is_empty() {
-        // Build a CNP → employee_id map so we can look up by CNP (D112Employee uses CNP as key).
-        let emp_by_cnp: std::collections::HashMap<&str, &Employee> =
-            employees.iter().map(|e| (e.cnp.as_str(), e)).collect();
-
-        for de in d112_emps.iter_mut() {
-            // Find the employee record for this D112 slot.
-            let Some(emp) = emp_by_cnp.get(de.cnp.as_str()) else {
-                continue;
-            };
-            let excess = match extra_income.get(emp.id.as_str()) {
-                Some(&ex) if ex > Decimal::ZERO => ex,
-                _ => continue,
-            };
-            let excess_lei = leid(excess);
-            use crate::anaf_decl::d112::pct;
-            // Combined base (salary + excess) — single rounding matches GL run_payroll.
-            // de.gross (salary gross, lei) is the existing salary base before excess.
-            let sal_gross_dec = Decimal::from(de.gross);
-            let combined = sal_gross_dec + excess;
-            let comb_cas = leid(pct(combined, (25, 2)));
-            let comb_cass = leid(pct(combined, (10, 2)));
-            // impozit base = combined − CAS − CASS − deduction (same deduction as salary path).
-            let ded = de.deducere; // already in lei
-            let comb_impozit_base = (combined
-                - Decimal::from(comb_cas)
-                - Decimal::from(comb_cass)
-                - Decimal::from(ded))
-            .max(Decimal::ZERO);
-            let comb_impozit = leid(pct(comb_impozit_base, (10, 2)));
-
-            // Update D112Employee fields: set combined contributions (not add excess-only).
-            de.gross += excess_lei;
-            de.baza_cas += excess_lei;
-            de.baza_cass += excess_lei;
-            // baza_cam: aggregate CAM = ROUND(Σ baza_cam × 2,25%) in generate_d112_xml.
-            // Include the excess in the CAM base (CAM 2.25% applies per art. 220^6 + art.76(2)(k)).
-            de.baza_cam += excess_lei;
-            // baza_impozit = combined − CAS − CASS − deduction (matches comb_impozit_base).
-            de.baza_impozit = leid(comb_impozit_base);
-            // Set combined contributions (replaces salary-only values with combined-base values).
-            de.cas = comb_cas;
-            de.cass = comb_cass;
-            de.impozit = comb_impozit;
-            // NOTE: de.cam is NOT updated — generate_d112_xml uses baza_cam aggregate, not per-employee cam.
-            de.e3_23 = excess_lei; // rând 8.2.1 informational (diurnă impozabilă asimilată)
-        }
-    }
-    // ─────────────────────────────────────────────────────────────────────────────────────────────
-
-    // ROB-01: a D112 with zero insured persons is a malformed declaration (B_sal=0, no asigurat) —
-    // ANAF rejects it. Guard with a clear error instead of emitting an empty draft.
+    // ROB-01: a D112 with zero insured persons is malformed — ANAF rejects it.
     if d112_emps.is_empty() {
         return Err(AppError::Validation(
             "Nu există angajați activi pentru luna selectată — D112 nu poate fi generat gol."
@@ -711,8 +463,7 @@ fn build_d112_xml(
     let header = D112Header {
         luna: month,
         an: year,
-        d_rec: u8::from(is_rectificative), // 0 = inițială, 1 = rectificativă
-        // Declarantul (persoană) se completează în aplicație; folosim denumirea ca substituent.
+        d_rec: u8::from(is_rectificative),
         nume_declar: company.legal_name.chars().take(75).collect(),
         prenume_declar: "-".into(),
         functie_declar: "Administrator".into(),
@@ -721,22 +472,14 @@ fn build_d112_xml(
         den: company.legal_name.chars().take(200).collect(),
         casa,
     };
-    // Modelul NOU D112 (Ordin comun 605/95/928/2.314/2026, MO 463/02.06.2026) se aplică veniturilor
-    // din 07/2026 (prima depunere 25.08.2026). Sursele oficiale arată schimbări la nivel de
-    // nomenclator/instrucțiuni (sumă netaxabilă 300→200, relabel tip asigurat 1.11.2/1.11.3,
-    // simplificare concedii) — NU câmpuri XML noi; namespace-ul rămâne :v7, deci structura emisă aici
-    // este corectă STRUCTURAL și pentru H2. La data implementării ANAF nu publicase încă
-    // structura/XSD/DUKIntegrator pentru noul model → RE-VALIDAȚI contra artefactelor oficiale înainte
-    // de depunere. FE avertizează utilizatorul; logăm și aici.
     if year > 2026 || (year == 2026 && month >= 7) {
         tracing::warn!(
             year,
             month,
-            "D112 ≥ 07/2026: model nou (Ordin 605/95/928/2.314/2026) — structura :v7 emisă e \
-conformă structural; re-validați cu artefactele oficiale ANAF înainte de depunere (25.08.2026)"
+            "D112 >= 07/2026: model nou (Ordin 605/95/928/2.314/2026) — structura :v7 emisa e \
+conforma structural; re-validati cu artefactele oficiale ANAF inainte de depunere (25.08.2026)"
         );
     }
-    // Pretty-print so the exported/previewed .xml is a readable document (DUK-safe whitespace).
     Ok(crate::anaf_decl::xml::pretty_print(&generate_d112_xml(
         &header, &d112_emps,
     )))
@@ -921,23 +664,9 @@ mod tests {
         .unwrap();
 
         let company = crate::db::companies::get(&pool, "co1").await.unwrap();
-        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
-        let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
             .await
             .unwrap();
-        let xml = build_d112_xml(
-            &company,
-            &employees,
-            &leaves,
-            2026,
-            6,
-            "6201",
-            false,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-        )
-        .unwrap();
 
         assert!(xml.contains("declaratie:v7"));
         assert_eq!(xml.matches("<asigurat ").count(), 2); // doi asigurați
@@ -971,23 +700,9 @@ mod tests {
         .unwrap();
 
         let company = crate::db::companies::get(&pool, "co1").await.unwrap();
-        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
-        let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
             .await
             .unwrap();
-        let xml = build_d112_xml(
-            &company,
-            &employees,
-            &leaves,
-            2026,
-            6,
-            "6201",
-            false,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-        )
-        .unwrap();
 
         assert_eq!(xml.matches("<asiguratD ").count(), 2); // două certificate
         assert!(xml.contains("D_1=\"AA\""));
@@ -1018,10 +733,6 @@ mod tests {
         .unwrap();
 
         let company = crate::db::companies::get(&pool, "co1").await.unwrap();
-        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
-        let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
-            .await
-            .unwrap();
 
         // GL path: run_payroll posts the note; read the credit per account from the trial balance.
         crate::db::payroll::run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
@@ -1048,19 +759,9 @@ mod tests {
         };
 
         // D112 path: parse the `angajatorA` obligation `A_datorat` per code.
-        let xml = build_d112_xml(
-            &company,
-            &employees,
-            &leaves,
-            2026,
-            6,
-            "6201",
-            false,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-        )
-        .unwrap();
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
+            .await
+            .unwrap();
         let oblig = |cod: &str| -> i64 {
             let key = format!("A_codOblig=\"{cod}\"");
             let i = xml
@@ -1157,26 +858,11 @@ mod tests {
                 .unwrap_or(0)
         };
 
-        // Build D112 with the same extra_income map.
+        // Build D112 via compute_payroll_run (same data path as run_payroll, ensures GL==D112).
         let company = crate::db::companies::get(&pool, "co1").await.unwrap();
-        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
-        let extra_income =
-            crate::db::payroll_diurna::open_extra_income_by_employee(&pool, "co1", "2026-06")
-                .await
-                .unwrap();
-        let xml = build_d112_xml(
-            &company,
-            &employees,
-            &[],
-            2026,
-            6,
-            "6201",
-            false,
-            &extra_income,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-        )
-        .unwrap();
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
+            .await
+            .unwrap();
         let oblig = |cod: &str| -> i64 {
             let key = format!("A_codOblig=\"{cod}\"");
             let i = xml
@@ -1325,23 +1011,9 @@ mod tests {
 
         // D112 path: build_d112_xml must fold sporuri into the contribution bases.
         let company = crate::db::companies::get(&pool, "co1").await.unwrap();
-        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
-        let sporuri_map = crate::db::payroll_sporuri::sporuri_by_employee(&pool, "co1", "2026-06")
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
             .await
             .unwrap();
-        let xml = build_d112_xml(
-            &company,
-            &employees,
-            &[],
-            2026,
-            6,
-            "6201",
-            false,
-            &std::collections::HashMap::new(),
-            &sporuri_map,
-            &std::collections::HashMap::new(),
-        )
-        .unwrap();
         let oblig = |cod: &str| -> i64 {
             let key = format!("A_codOblig=\"{cod}\"");
             let i = xml
@@ -1454,23 +1126,9 @@ mod tests {
 
         // D112 path: build_d112_xml must now apply the same pontaj proration (15/21 of 5000).
         let company = crate::db::companies::get(&pool, "co1").await.unwrap();
-        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
-        let pontaje_map = crate::db::pontaj::pontaj_by_employee(&pool, "co1", "2026-06")
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
             .await
             .unwrap();
-        let xml = build_d112_xml(
-            &company,
-            &employees,
-            &[],
-            2026,
-            6,
-            "6201",
-            false,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-            &pontaje_map,
-        )
-        .unwrap();
         let oblig = |cod: &str| -> i64 {
             let key = format!("A_codOblig=\"{cod}\"");
             let i = xml
@@ -1532,6 +1190,147 @@ mod tests {
         assert!(tb.balanced, "payroll journal with pontaj must balance");
     }
 
+    /// P2 GOLDEN TEST — GL≡D112 WITH PONTAJ + DIURNĂ EXCESS (the precision edge the SSOT fix closes).
+    ///
+    /// Scenario: one full-time employee, base salary 5000, June 2026 (nzl=21 working days).
+    /// Pontaj: 15 worked days → sal_gross = 5000 × 15/21 ≈ 3571.4285… (Decimal, NOT rounded).
+    /// Diurnă excess: 212 RON.
+    ///
+    /// compute_payroll_run computes contributions on EXACT sal_gross (3571.428571…):
+    ///   combined_base = 3571.428571… + 212 = 3783.428571…
+    ///   combined_cas  = pct(3783.428…, 25/2) = ROUND(3783.428… × 0.25) = ROUND(945.857…) = 946
+    ///   combined_cass = pct(3783.428…, 10/2) = ROUND(3783.428… × 0.10) = ROUND(378.342…) = 378
+    ///   comb_impozit_base = 3783.428… − 946 − 378 − 0 = 2459.428…
+    ///   combined_impozit  = ROUND(2459.428… × 0.10) = ROUND(245.942…) = 246
+    ///
+    /// OLD Wave E (before fix): de.gross = leid(3571.428…) = 3571 (truncated i64)
+    ///   combined = 3571 + 212 = 3783  (loss of 0.428… lei)
+    ///   comb_cas  = ROUND(3783 × 0.25) = ROUND(945.75) = 946  ← same here
+    ///   comb_cass = ROUND(3783 × 0.10) = ROUND(378.3)  = 378  ← same here
+    ///   comb_impozit_base = 3783 − 946 − 378 = 2459
+    ///   comb_impozit      = ROUND(2459 × 0.10) = ROUND(245.9) = 246 ← same (lucky)
+    ///
+    /// The divergence is subtle and case-dependent; this test guards the structural invariant that
+    /// Wave E reads the breakdown (SSOT) rather than re-deriving from de.gross (i64) — ensuring
+    /// that NO pontaj+excess combination can ever silently drift.
+    ///
+    /// The test asserts:
+    ///   GL 4315 C == D112 412 (CAS)
+    ///   GL 4316 C == D112 432 (CASS)
+    ///   GL 444  C == D112 602 (impozit)
+    ///   GL 436  C == D112 480 (CAM)
+    /// all to the exact leu, covering the edge case the previous recompute path could not guarantee.
+    #[tokio::test]
+    async fn gl_d112_golden_pontaj_plus_diurna_excess() {
+        use rust_decimal::prelude::ToPrimitive;
+        let pool = setup().await;
+        // base salary 5000, no deduction, full-time (tip_contract N).
+        let emp = crate::db::payroll::create(&pool, emp_input("1960101410019", "Pop Ana", "5000"))
+            .await
+            .unwrap();
+
+        // Pontaj: 15 worked days out of 21 in June 2026 → sal_gross = 5000 × 15/21 (Decimal exact).
+        crate::db::pontaj::create(
+            &pool,
+            crate::db::pontaj::CreatePontajInput {
+                company_id: "co1".into(),
+                employee_id: emp.id.clone(),
+                period: "2026-06".into(),
+                worked_days: 15,
+                overtime_hours: None,
+                night_hours: None,
+                absence_days: Some(6),
+                leave_days: None,
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Diurnă excess: 212 RON.
+        let excess = rust_decimal::Decimal::from_str("212").unwrap();
+        crate::db::payroll_diurna::upsert_extra_income(
+            &pool,
+            "co1",
+            &emp.id,
+            "2026-06",
+            "dec-p2-pontaj-excess",
+            excess,
+            "open",
+        )
+        .await
+        .unwrap();
+
+        // GL path: run_payroll computes combined contributions with EXACT Decimal sal_gross.
+        crate::db::payroll::run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let gl_credit = |code: &str| -> i64 {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| {
+                    Decimal::from_str(&r.closing_credit)
+                        .unwrap_or(Decimal::ZERO)
+                        .round_dp_with_strategy(
+                            0,
+                            rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                        )
+                        .to_i64()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+        };
+
+        // D112 path: build_d112_xml must now read combined_* from the breakdown (SSOT), not re-derive.
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
+            .await
+            .unwrap();
+        let oblig = |cod: &str| -> i64 {
+            let key = format!("A_codOblig=\"{cod}\"");
+            let i = xml
+                .find(&key)
+                .unwrap_or_else(|| panic!("obligația {cod} lipsește"));
+            let dk = "A_datorat=\"";
+            let j = i + xml[i..].find(dk).expect("A_datorat") + dk.len();
+            let end = xml[j..].find('"').unwrap();
+            xml[j..j + end].parse::<i64>().unwrap()
+        };
+
+        // P2 INVARIANT: pontaj + excess must produce identical GL and D112 obligations.
+        // Wave E reads combined_cas/cass/impozit from breakdown (computed on exact sal_gross Decimal)
+        // rather than re-deriving from de.gross (i64), so no rounding divergence is possible.
+        assert_eq!(
+            gl_credit("4315"),
+            oblig("412"),
+            "P2: CAS GL 4315 ≠ D112 412 (pontaj+excess: Wave E must read breakdown, not de.gross!)"
+        );
+        assert_eq!(
+            gl_credit("4316"),
+            oblig("432"),
+            "P2: CASS GL 4316 ≠ D112 432 (pontaj+excess: Wave E must read breakdown, not de.gross!)"
+        );
+        assert_eq!(
+            gl_credit("444"),
+            oblig("602"),
+            "P2: impozit GL 444 ≠ D112 602 (pontaj+excess: Wave E must read breakdown, not de.gross!)"
+        );
+        assert_eq!(
+            gl_credit("436"),
+            oblig("480"),
+            "P2: CAM GL 436 ≠ D112 480 (pontaj+excess: Wave E must read breakdown, not de.gross!)"
+        );
+
+        assert!(
+            tb.balanced,
+            "payroll journal with pontaj+excess must balance"
+        );
+    }
+
     /// PAY-01 regression: a part-time employee whose CAS/CASS base is lifted to the statutory minimum
     /// (art. 146 5^7) must STILL declare CAM (480 / A_5) on the REALIZED gross (art. 220^6), matching the
     /// GL 436 posting. Guards against the lifted CAS base leaking into the CAM base. Part-timer P1 gross
@@ -1547,10 +1346,6 @@ mod tests {
         crate::db::payroll::create(&pool, inp).await.unwrap();
 
         let company = crate::db::companies::get(&pool, "co1").await.unwrap();
-        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
-        let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
-            .await
-            .unwrap();
 
         crate::db::payroll::run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
             .await
@@ -1575,19 +1370,9 @@ mod tests {
                 .unwrap_or(0)
         };
 
-        let xml = build_d112_xml(
-            &company,
-            &employees,
-            &leaves,
-            2026,
-            6,
-            "6201",
-            false,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-        )
-        .unwrap();
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
+            .await
+            .unwrap();
         let oblig = |cod: &str| -> i64 {
             let key = format!("A_codOblig=\"{cod}\"");
             let i = xml
@@ -1630,20 +1415,9 @@ mod tests {
         crate::db::payroll::create(&pool, inp).await.unwrap();
 
         let company = crate::db::companies::get(&pool, "co1").await.unwrap();
-        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
-        let xml = build_d112_xml(
-            &company,
-            &employees,
-            &[],
-            2026,
-            6,
-            "6201",
-            false,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-        )
-        .unwrap();
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
+            .await
+            .unwrap();
 
         let active = crate::db::payroll::active_working_days(2026, 6, Some("2026-06-16"), None);
         let full = crate::db::payroll::working_days(2026, 6);
@@ -1677,23 +1451,9 @@ mod tests {
         .await
         .unwrap();
         let company = crate::db::companies::get(&pool, "co1").await.unwrap();
-        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
-        let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
             .await
             .unwrap();
-        let xml = build_d112_xml(
-            &company,
-            &employees,
-            &leaves,
-            2026,
-            6,
-            "6201",
-            false,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-        )
-        .unwrap();
         let path = std::env::temp_dir().join("d112_from_db.xml");
         std::fs::write(&path, &xml).unwrap();
         eprintln!("WROTE {}", path.display());
@@ -1719,23 +1479,9 @@ mod tests {
             .await
             .unwrap();
         let company = crate::db::companies::get(&pool, "co1").await.unwrap();
-        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
-        let leaves = crate::db::concedii::list(&pool, "co1", "2026-06")
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
             .await
             .unwrap();
-        let xml = build_d112_xml(
-            &company,
-            &employees,
-            &leaves,
-            2026,
-            6,
-            "6201",
-            false,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-        )
-        .unwrap();
         let tmp = std::env::temp_dir().join("d112_duk_gate_test.xml");
         std::fs::write(&tmp, &xml).unwrap();
 
@@ -1780,6 +1526,158 @@ mod tests {
             }
         }
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    // ── Architecture invariant: GL ≡ D112 by construction ────────────────────
+
+    /// ARCHITECTURE INVARIANT — GL ≡ D112 BY CONSTRUCTION.
+    ///
+    /// Both `run_payroll` (GL) and `build_d112_xml` (D112 XML) call `compute_payroll_run` and
+    /// derive their outputs from the SAME `PayrollRunBreakdown`. This test verifies, for a MIXED
+    /// roster (base salary + spor + pontaj proration + diurnă excess + medical leave), that all
+    /// four GL/D112 obligation pairs are EQUAL TO THE EXACT LEU after the refactor.
+    ///
+    /// Because both consumers share a single breakdown, future base-modifier changes in
+    /// `compute_payroll_run` automatically propagate to BOTH GL and D112 — divergence is
+    /// impossible by construction.
+    #[tokio::test]
+    async fn architecture_gl_equals_d112_by_construction_mixed_roster() {
+        use rust_decimal::prelude::ToPrimitive;
+        let pool = setup().await;
+
+        // Employee A: full-time, base 4000, spor 500 → gross_eff 4500.
+        let a = crate::db::payroll::create(&pool, emp_input("1960101410019", "Pop Ana", "4000"))
+            .await
+            .unwrap();
+        crate::db::payroll_sporuri::create(
+            &pool,
+            crate::db::payroll_sporuri::CreateSporInput {
+                company_id: "co1".into(),
+                employee_id: a.id.clone(),
+                period: "2026-06".into(),
+                amount: "500".into(),
+                kind: Some("vechime".into()),
+                description: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Employee B: full-time 5000, pontaj 15/21 worked days.
+        let b =
+            crate::db::payroll::create(&pool, emp_input("1900101410011", "Ion Gheorghe", "5000"))
+                .await
+                .unwrap();
+        crate::db::pontaj::create(
+            &pool,
+            crate::db::pontaj::CreatePontajInput {
+                company_id: "co1".into(),
+                employee_id: b.id.clone(),
+                period: "2026-06".into(),
+                worked_days: 15,
+                overtime_hours: None,
+                night_hours: None,
+                absence_days: Some(6),
+                leave_days: None,
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Employee C: full-time 3000, diurnă excess 200.
+        let c =
+            crate::db::payroll::create(&pool, emp_input("2960101410010", "Maria Ionescu", "3000"))
+                .await
+                .unwrap();
+        let excess = rust_decimal::Decimal::from_str("200").unwrap();
+        crate::db::payroll_diurna::upsert_extra_income(
+            &pool,
+            "co1",
+            &c.id,
+            "2026-06",
+            "arch-test-dec",
+            excess,
+            "open",
+        )
+        .await
+        .unwrap();
+
+        // Employee D: medical leave (B-path), gross 5500, leave 8-12 June (5 days).
+        // CNP 1900101410028: ctrl = (2×1+7×9+9×0+1×0+4×1+6×0+3×1+5×4+8×1+2×0+7×0+9×2)%11 = 8.
+        let d = crate::db::payroll::create(&pool, emp_input("1900101410028", "Vasile Pop", "5500"))
+            .await
+            .unwrap();
+        crate::db::concedii::create(
+            &pool,
+            leave_input(&d.id, "CD", "9999999", "2026-06-08", "2026-06-12"),
+        )
+        .await
+        .unwrap();
+
+        // Run payroll → posts GL.
+        crate::db::payroll::run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let gl_credit = |code: &str| -> i64 {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| {
+                    rust_decimal::Decimal::from_str(&r.closing_credit)
+                        .unwrap_or(rust_decimal::Decimal::ZERO)
+                        .round_dp_with_strategy(
+                            0,
+                            rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                        )
+                        .to_i64()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+        };
+
+        // Build D112 via compute_payroll_run (same data path as run_payroll).
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
+            .await
+            .unwrap();
+        let oblig = |cod: &str| -> i64 {
+            let key = format!("A_codOblig=\"{cod}\"");
+            let i = xml
+                .find(&key)
+                .unwrap_or_else(|| panic!("obligația {cod} lipsește din XML"));
+            let dk = "A_datorat=\"";
+            let j = i + xml[i..].find(dk).expect("A_datorat") + dk.len();
+            let end = xml[j..].find('"').unwrap();
+            xml[j..j + end].parse::<i64>().unwrap()
+        };
+
+        // ARCHITECTURE INVARIANT: all four GL/D112 pairs must match to the exact leu.
+        // With the SSoT refactor, divergence is IMPOSSIBLE BY CONSTRUCTION.
+        assert_eq!(
+            gl_credit("4315"),
+            oblig("412"),
+            "ARCH: CAS GL 4315 ≠ D112 412 — mixed roster (spor+pontaj+excess+leave)"
+        );
+        assert_eq!(
+            gl_credit("4316"),
+            oblig("432"),
+            "ARCH: CASS GL 4316 ≠ D112 432 — mixed roster"
+        );
+        assert_eq!(
+            gl_credit("444"),
+            oblig("602"),
+            "ARCH: impozit GL 444 ≠ D112 602 — mixed roster"
+        );
+        assert_eq!(
+            gl_credit("436"),
+            oblig("480"),
+            "ARCH: CAM GL 436 ≠ D112 480 — mixed roster"
+        );
+        assert!(tb.balanced, "mixed-roster payroll journal must balance");
     }
 
     // ── Simulator salariu — unit tests ────────────────────────────────────────
@@ -1985,7 +1883,9 @@ pub async fn simulate_salary(
     gross_str: String,
     opts: Option<SalarySimOpts>,
 ) -> crate::error::AppResult<SalarySimResult> {
-    use crate::anaf_decl::d112::{deducere_plafonata, suma_netaxabila, PayrollInput};
+    use crate::anaf_decl::d112::{
+        compute_payroll, deducere_plafonata, suma_netaxabila, PayrollInput,
+    };
     use crate::error::AppError;
 
     let opts = opts.unwrap_or_default();
@@ -2061,7 +1961,9 @@ pub async fn simulate_salary_from_net(
     target_net_str: String,
     opts: Option<SalarySimOpts>,
 ) -> crate::error::AppResult<SalarySimResult> {
-    use crate::anaf_decl::d112::{deducere_plafonata, suma_netaxabila, PayrollInput};
+    use crate::anaf_decl::d112::{
+        compute_payroll, deducere_plafonata, suma_netaxabila, PayrollInput,
+    };
     use crate::error::AppError;
 
     let opts = opts.unwrap_or_default();

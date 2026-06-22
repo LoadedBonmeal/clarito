@@ -10,14 +10,12 @@ use sqlx::{FromRow, SqlitePool};
 use std::str::FromStr;
 
 use crate::anaf_decl::d112::{
-    cm_indemn_treatment, compute_payroll, compute_payroll_with_leave, deducere_plafonata,
     exempt_part_time_min_base, part_time_min_base, pct, suma_netaxabila, LeaveCert,
     LeavePayrollInput, PayrollInput, CAM_PCT,
 };
-use crate::db::gl::IndemnityTotals;
 use crate::db::models::{new_id, now_unix};
 use crate::db::payroll_diurna::open_extra_income_by_employee;
-use crate::db::payroll_retineri::{apply_retineri, retineri_by_employee};
+use crate::db::payroll_retineri::retineri_by_employee;
 use crate::db::payroll_sporuri::sporuri_by_employee;
 use crate::db::pontaj::pontaj_by_employee;
 use crate::error::{AppError, AppResult};
@@ -536,13 +534,152 @@ pub fn active_working_days(
     leave_working_days_in_month(year, month, &s, &e)
 }
 
-/// Compute the monthly salary states for all active employees and post the aggregate to the GL.
-pub async fn run_payroll(
+// ─── Per-employee payroll breakdown ──────────────────────────────────────────
+
+/// Per-employee payroll breakdown — the single source of truth for both GL posting and D112 XML.
+#[derive(Debug, Clone)]
+pub struct EmployeeBreakdown {
+    pub employee_id: String,
+    pub full_name: String,
+    pub cnp: String,
+    pub spor: Decimal,
+    pub gross_base: Decimal,
+    pub gross_eff: Decimal,
+    pub pontaj_gross_eff: Decimal,
+    pub non_taxable: Decimal,
+    pub active_days: u32,
+    pub zile_emis: u32,
+    pub is_leave_path: bool,
+
+    // A-path fields (standard salary)
+    pub sal_gross: Decimal,
+    pub sal_cas: Decimal,
+    pub sal_cass: Decimal,
+    pub sal_impozit: Decimal,
+    pub sal_net: Decimal,
+    pub sal_cam: Decimal,
+    pub sal_taxable_base: Decimal,
+    pub sal_personal_deduction: Decimal,
+    pub combined_cas: Decimal,
+    pub combined_cass: Decimal,
+    pub combined_impozit: Decimal,
+    /// Combined-base taxable base for impozit (sal_gross + excess − comb_cas − comb_cass − ded).
+    /// Zero when there is no excess. Used by build_d112_xml's Wave E to set baza_impozit without
+    /// recomputing from the already-rounded de.gross (i64), which would lose pontaj precision.
+    pub comb_impozit_base: Decimal,
+    pub excess: Decimal,
+    pub excess_receivable: Decimal,
+    pub part_time_min: Option<(Decimal, Decimal, Decimal)>,
+    pub baza_cas: Decimal,
+    pub baza_cass: Decimal,
+    pub baza_cam_real: Decimal,
+    pub baza_impozit: Decimal,
+    pub tip_asigurat: String,
+    pub cam_base_contribution: Decimal,
+
+    // B-path fields (medical leave)
+    pub lr_worked_gross: Decimal,
+    pub lr_worked_base: Decimal,
+    pub lr_worked_days: u32,
+    pub lr_cas: Decimal,
+    pub lr_cass: Decimal,
+    pub lr_income_tax: Decimal,
+    pub lr_cam: Decimal,
+    pub lr_net: Decimal,
+    pub lr_indemn_employer: Decimal,
+    pub lr_indemn_fnuass: Decimal,
+    pub lr_indemn_total: Decimal,
+    pub lr_taxable_base: Decimal,
+    pub sal_cas_leave: Decimal,
+    pub sal_cass_leave: Decimal,
+    pub sal_tax_leave: Decimal,
+    pub indemn_tax: Decimal,
+    pub b_combined_cas: Decimal,
+    pub b_combined_cass: Decimal,
+    pub b_comb_sal_impozit: Decimal,
+    pub b_excess_recv: Decimal,
+    pub b_excess: Decimal,
+    pub b_cam_base: Decimal,
+
+    // GL contribution fields (what goes into the GL totals)
+    pub gl_cas: Decimal,
+    pub gl_cass: Decimal,
+    pub gl_tax: Decimal,
+    pub gl_gross: Decimal,
+    pub gl_cam_base: Decimal,
+    pub gl_excess_reclass: Decimal,
+    pub gl_excess_receivable: Decimal,
+
+    // Rețineri
+    pub retineri_result: crate::db::payroll_retineri::RetinereResult,
+
+    // Medical leaves for D112
+    pub med_leaves_raw: Vec<crate::db::concedii::MedicalLeave>,
+
+    // Employee metadata for D112
+    pub employment_date: Option<String>,
+    pub tip_contract: String,
+    pub pensionar: bool,
+    pub ore_norma: i64,
+    pub sediu_cif: String,
+    pub beneficiar_suma_netaxabila: bool,
+    pub exceptie_cas_min: String,
+}
+
+/// The result of `compute_payroll_run`.
+#[derive(Debug, Clone)]
+pub struct PayrollRunBreakdown {
+    pub employees: Vec<EmployeeBreakdown>,
+    pub t_gross: Decimal,
+    pub t_cas: Decimal,
+    pub t_cass: Decimal,
+    pub t_tax: Decimal,
+    pub t_net: Decimal,
+    pub t_cam_base: Decimal,
+    pub t_cam: Decimal,
+    pub t_cas_diff: Decimal,
+    pub t_cass_diff: Decimal,
+    pub t_excess_reclass: Decimal,
+    pub t_excess_receivable: Decimal,
+    pub t_retinut: Decimal,
+    pub indemn: crate::db::gl::IndemnityTotals,
+    pub retin_items: Vec<crate::db::gl::RetinereGlItem>,
+    pub nzl: u32,
+    pub year: i32,
+    pub month: u32,
+}
+
+/// **SINGLE SOURCE OF TRUTH** for all per-employee payroll computation.
+///
+/// Loads all active employees + their leaves, sporuri, pontaje, and diurnă extra-income for the
+/// given period, and computes for each employee:
+/// - `gross_eff` (base salary + sporuri, prorated by pontaj `worked_days/nzl` when applicable)
+/// - `non_taxable` (suma netaxabilă art. III OUG 89/2025, on the BASE salary, not on gross+spor)
+/// - part-time minimum CAS/CASS base (art. 146 alin. (5^6)), employer-borne difference
+/// - CAS/CASS/impozit/CAM on the COMBINED base (salary + diurnă excess) with SINGLE rounding
+/// - net, rețineri post-net, leave (B-path) indemnity values
+///
+/// Returns a [`PayrollRunBreakdown`] with per-employee [`EmployeeBreakdown`] structs and the
+/// aggregated GL totals (t_gross, t_cas, t_cass, t_tax, t_cam, indemn, retin_items, …).
+///
+/// **Pure function — no side effects, no GL posting.**
+///
+/// ## Consumers
+/// - [`run_payroll`]: calls this function then posts GL from `breakdown.t_*` aggregates.
+/// - `build_d112_xml` (commands/payroll.rs): calls this function then maps each
+///   [`EmployeeBreakdown`] to a D112Employee — **no independent re-computation**.
+///
+/// ## GL ≡ D112 by construction
+/// Because BOTH consumers derive from this single breakdown, the GL obligations
+/// (4315/4316/444/436) are IDENTICAL to the D112 obligations (412/432/602/480) BY CONSTRUCTION.
+/// Any future base-modifier (new OUG, sporuri type, leave treatment) must be implemented here
+/// ONLY; both consumers automatically stay in sync.
+pub async fn compute_payroll_run(
     pool: &SqlitePool,
     company_id: &str,
     period_from: &str,
-    period_to: &str,
-) -> AppResult<PayrollRun> {
+    _period_to: &str,
+) -> AppResult<PayrollRunBreakdown> {
     let dec = |s: &str| Decimal::from_str(s).unwrap_or(Decimal::ZERO);
     let month: u32 = period_from
         .get(5..7)
@@ -553,7 +690,6 @@ pub async fn run_payroll(
         .and_then(|y| y.parse().ok())
         .unwrap_or(2026);
     let employees = list(pool, company_id).await?;
-    // Concedii medicale ale lunii → proratare salariu + indemnizație. Grupate pe angajat.
     let period_ym = format!("{year:04}-{month:02}");
     let leaves = crate::db::concedii::list(pool, company_id, &period_ym).await?;
     let mut leaves_by_emp: std::collections::HashMap<
@@ -570,41 +706,21 @@ pub async fn run_payroll(
     let leid0 = |d: Decimal| {
         d.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
     };
-    let f = |d: Decimal| {
-        format!(
-            "{:.2}",
-            d.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
-        )
-    };
 
-    // ── Wave E: load open diurnă extra-income for this period ────────────────
-    // map: employee_id → total taxable excess (Decimal, lei). Empty when no excess exists.
-    // Used INSIDE the employee loop to fold excess into combined contribution bases so
-    // GL 4315/4316/444/436 == D112 obligations (single combined-base rounding, not split rounding).
     let extra_income = open_extra_income_by_employee(pool, company_id, &period_ym)
         .await
         .unwrap_or_default();
-
-    // ── Wave F: sporuri + rețineri ───────────────────────────────────────────
-    // sporuri_map: employee_id → Σ sporuri taxabile (Decimal, lei). Zero when absent.
-    // retineri_map: employee_id → Vec<Retinere> sorted by priority (pensie alimentară first).
     let sporuri_map = sporuri_by_employee(pool, company_id, &period_ym)
         .await
         .unwrap_or_default();
     let retineri_map = retineri_by_employee(pool, company_id, &period_ym)
         .await
         .unwrap_or_default();
-
-    // ── Pontaj (condică de prezență — CM art. 119) ───────────────────────────
-    // pontaje_map: employee_id → Pontaj. Empty when no pontaj was recorded.
-    // When present AND employee has no medical leave, `worked_days` overrides the
-    // calendar basis for gross proration and part-time min-base calculation.
     let pontaje_map = pontaj_by_employee(pool, company_id, &period_ym)
         .await
         .unwrap_or_default();
 
-    let mut states = Vec::new();
-    // Worked-salary aggregates (intră în nota GL: 641/421, 4315/4316/444 salariale, 646/436 CAM).
+    let mut breakdowns = Vec::new();
     let (mut t_gross, mut t_cas, mut t_cass, mut t_tax, mut t_net) = (
         Decimal::ZERO,
         Decimal::ZERO,
@@ -612,52 +728,33 @@ pub async fn run_payroll(
         Decimal::ZERO,
         Decimal::ZERO,
     );
-    // Employer-borne part-time minimum-base CAS/CASS difference (art. 146 (5^6)).
     let (mut t_cas_diff, mut t_cass_diff) = (Decimal::ZERO, Decimal::ZERO);
-    // CAM (646/436) angajator se calculează pe baza AGREGATĂ — ROUND(Σ bază × cotă), regula A21.46
-    // — NU ca Σ rotunjirilor per-salariat. Altfel GL (436) ≠ D112 (480) cu 1 leu când ≥2 salariați
-    // rotunjesc în sus. Acumulăm baza (= brut − netaxabil, rotunjită la leu ca baza_cam din D112) și
-    // aplicăm cota O SINGURĂ DATĂ după buclă. CCI (4373) a fost ABROGATĂ; nu se acumulează.
-    // NOTE: CCI 0,85% (OUG 158/2005) abolished 1 Jan 2018 by OUG 79/2017 — no separate contribution.
     let mut t_cam_base = Decimal::ZERO;
-    // Indemnizații de concediu medical (postate separat: 6458/4382/423).
-    let mut indemn = IndemnityTotals::default();
-    // Wave E — diurnă excess GL tracking. Both are ZERO when no excess exists (feature off by default).
-    //   t_excess_reclass   = Σ excess amounts → D 641 / C 625 (reclass travel→salary).
-    //   t_excess_receivable = Σ excess withholdings = combined_wh − salary_wh → D 4282 / C 421
-    //                          (receivable from employees for charges on their excess cash).
+    let mut indemn = crate::db::gl::IndemnityTotals::default();
     let (mut t_excess_reclass, mut t_excess_receivable) = (Decimal::ZERO, Decimal::ZERO);
-    // Wave F: Σ rețineri nete (D421=C427/4282/462) — split-ul netului față de angajat.
     let mut t_retinut = Decimal::ZERO;
-    // Wave F: rețineri GL items per employee — accumulated to pass to post_payroll.
     let mut retin_items: Vec<crate::db::gl::RetinereGlItem> = Vec::new();
 
     for e in employees.iter().filter(|e| e.active) {
-        // Wave F: spor salarial al angajatului pentru această lună (0 dacă absent).
-        // Sporurile intră în baza CAS/CASS/impozit/CAM (sunt venituri salariale).
-        // `non_taxable` se calculează pe `gross` de bază (nu pe gross+spor) — condiția
-        // beneficiarSumaNetaxabila se referă la „salariul de bază" conform OUG 89/2025.
         let spor = sporuri_map.get(&e.id).copied().unwrap_or(Decimal::ZERO);
-
         let gross = dec(&e.gross_salary);
-        // Brut efectiv = gross_salary + sporuri — baza tuturor contribuțiilor.
         let gross_eff = gross + spor;
-
         let non_taxable = suma_netaxabila(
             e.beneficiar_suma_netaxabila,
             &e.tip_contract,
-            gross, // condiția netaxabilă e pe salariul de bază, nu pe gross_eff
+            gross,
             year,
             month,
         );
 
-        // Salariatul cu concediu medical: salariul se proratează la zilele lucrate; indemnizația intră
-        // în baza CAS/CASS și de impozit. GL: partea salarială (lucrată) separat de indemnizație.
+        // ── B-path: medical leave ───────────────────────────────────────────
         if let Some(emp_leaves) = leaves_by_emp.get(&e.id) {
+            let med_leaves_raw = emp_leaves.clone();
             let certs: Vec<LeaveCert> = emp_leaves
                 .iter()
                 .map(|l| {
-                    let (cass_due, taxable) = cm_indemn_treatment(&l.cod_indemnizatie);
+                    let (cass_due, taxable) =
+                        crate::anaf_decl::d112::cm_indemn_treatment(&l.cod_indemnizatie);
                     LeaveCert {
                         indemn_employer: leid0(dec(&l.suma_angajator)),
                         indemn_fnuass: leid0(dec(&l.suma_fnuass)),
@@ -672,12 +769,9 @@ pub async fn run_payroll(
                     }
                 })
                 .collect();
-            // Wave F: sporurile se adaugă la gross înainte de proratare (dacă angajatul are CM +
-            // spor, sporul se foloseşte în baza proratată). Modelul simplu: gross_eff = gross + spor,
-            // care intră în compute_payroll_with_leave → worked_gross prorata pe gross_eff.
-            let lr = compute_payroll_with_leave(&LeavePayrollInput {
+            let lr = crate::anaf_decl::d112::compute_payroll_with_leave(&LeavePayrollInput {
                 gross: gross_eff,
-                personal_deduction: deducere_plafonata(
+                personal_deduction: crate::anaf_decl::d112::deducere_plafonata(
                     dec(&e.personal_deduction),
                     gross_eff,
                     year,
@@ -687,10 +781,9 @@ pub async fn run_payroll(
                 working_days: nzl,
                 certs,
             });
-            // Partea salarială lucrată (pentru split-ul GL): contribuțiile pe brutul lucrat.
-            let w = compute_payroll(&PayrollInput {
+            let w = crate::anaf_decl::d112::compute_payroll(&PayrollInput {
                 gross: lr.worked_gross,
-                personal_deduction: deducere_plafonata(
+                personal_deduction: crate::anaf_decl::d112::deducere_plafonata(
                     dec(&e.personal_deduction),
                     gross_eff,
                     year,
@@ -699,33 +792,46 @@ pub async fn run_payroll(
                 non_taxable,
             });
             let (wcas, wcass, wtax) = (dec(&w.cas), dec(&w.cass), dec(&w.income_tax));
-            // Split impozit 421(salarial)/423(indemnizație): CAS se aplică pe TOATE codurile de
-            // indemnizație (inclusiv cele scutite de impozit, ex. cod 08), deci pentru o indemnizație
-            // neimpozabilă baza combinată de impozit poate coborî SUB baza lucrată ⇒ (lr.tax − wtax)
-            // ar deveni NEGATIVĂ. Indemnizația nu poate purta impozit negativ: o plafonăm la 0 și
-            // lăsăm deducerea personală integral pe partea salarială (421). Suma rămâne lr.tax ⇒
-            // creditul 444 = D112.
             let indemn_tax = (lr.income_tax - wtax).max(Decimal::ZERO);
-            // Wave E: fold diurnă excess into the leave employee's combined base (salary+excess).
-            // S (salary base) = lr.worked_gross (prorated salary). Contributions on S+E, single rounding.
             let sal_cas_leave = wcas;
             let sal_cass_leave = wcass;
             let sal_tax_leave = lr.income_tax - indemn_tax;
-            let ded_leave = deducere_plafonata(dec(&e.personal_deduction), gross_eff, year, month);
+            let ded_leave = crate::anaf_decl::d112::deducere_plafonata(
+                dec(&e.personal_deduction),
+                gross_eff,
+                year,
+                month,
+            );
+
+            let mut b_excess = Decimal::ZERO;
+            let mut b_excess_recv = Decimal::ZERO;
+            let mut b_combined_cas = sal_cas_leave;
+            let mut b_combined_cass = sal_cass_leave;
+            let mut b_comb_sal_impozit = sal_tax_leave;
+            let mut b_cam_base = leid0(lr.worked_base);
+            // Combined-base impozit taxable base for the B-path excess employee (see A-path
+            // comb_impozit_base_used for the rationale — same precision-preservation goal).
+            let mut b_comb_impozit_base = Decimal::ZERO;
+
             if let Some(&emp_excess) = extra_income.get(&e.id) {
                 if emp_excess > Decimal::ZERO {
-                    // Combined CAS/CASS on (worked_gross + excess); impozit on combined − CAS − CASS − ded.
-                    // No additional deduction applies to asimilat venitor (art. 78).
                     let combined_base = lr.worked_gross + emp_excess;
                     let comb_cas = pct(combined_base, (25, 2));
                     let comb_cass = pct(combined_base, (10, 2));
                     let comb_impozit_base =
                         (combined_base - comb_cas - comb_cass - ded_leave).max(Decimal::ZERO);
                     let comb_sal_impozit = pct(comb_impozit_base, (10, 2));
-                    // Excess receivable = combined withholdings − salary withholdings.
                     let excess_recv = (comb_cas - sal_cas_leave)
                         + (comb_cass - sal_cass_leave)
                         + (comb_sal_impozit - sal_tax_leave);
+                    b_excess = emp_excess;
+                    b_excess_recv = excess_recv;
+                    b_combined_cas = comb_cas;
+                    b_combined_cass = comb_cass;
+                    b_comb_sal_impozit = comb_sal_impozit;
+                    b_comb_impozit_base = comb_impozit_base;
+                    b_cam_base = leid0(lr.worked_base) + leid0(emp_excess);
+
                     t_gross += lr.worked_gross;
                     t_cas += comb_cas;
                     t_cass += comb_cass;
@@ -748,9 +854,9 @@ pub async fn run_payroll(
                 t_cam_base += leid0(lr.worked_base);
             }
             t_net += lr.net;
-            // Wave F: rețineri post-net pe ramura concediu medical.
+
             let retin = if let Some(emp_ret) = retineri_map.get(&e.id) {
-                let res = apply_retineri(lr.net, emp_ret);
+                let res = crate::db::payroll_retineri::apply_retineri(lr.net, emp_ret);
                 t_retinut += res.total_retinut;
                 for it in &res.items {
                     retin_items.push(crate::db::gl::RetinereGlItem {
@@ -767,31 +873,114 @@ pub async fn run_payroll(
                     items: vec![],
                 }
             };
-            // Indemnizația = combinat − lucrat (CAS/CASS ≥ 0 mereu; impozitul plafonat mai sus).
+
             indemn.employer += lr.indemn_employer;
             indemn.fnuass += lr.indemn_fnuass;
             indemn.cas += lr.cas - sal_cas_leave;
             indemn.cass += lr.cass - sal_cass_leave;
             indemn.tax += indemn_tax;
-            states.push(EmployeeState {
+
+            let gl_cas = if b_excess > Decimal::ZERO {
+                b_combined_cas
+            } else {
+                sal_cas_leave
+            };
+            let gl_cass = if b_excess > Decimal::ZERO {
+                b_combined_cass
+            } else {
+                sal_cass_leave
+            };
+            let gl_tax = if b_excess > Decimal::ZERO {
+                b_comb_sal_impozit
+            } else {
+                sal_tax_leave
+            };
+
+            breakdowns.push(EmployeeBreakdown {
                 employee_id: e.id.clone(),
                 full_name: e.full_name.clone(),
-                gross: f(lr.worked_gross + lr.indemn_total), // total venit (lucrat + indemnizație)
-                cas: f(lr.cas),
-                cass: f(lr.cass),
-                income_tax: f(lr.income_tax),
-                net: f(lr.net),
-                cam: f(lr.cam),
-                spor: f(spor),
-                total_retinut: f(retin.total_retinut),
-                net_employee: f(retin.net_redus),
+                cnp: e.cnp.clone(),
+                spor,
+                gross_base: gross,
+                gross_eff,
+                pontaj_gross_eff: gross_eff, // B-path: no pontaj proration
+                non_taxable,
+                active_days: nzl, // B-path: full month active days (leave handles proration internally)
+                zile_emis: lr.worked_days,
+                is_leave_path: true,
+
+                // A-path fields (unused for B-path, zeroed)
+                sal_gross: lr.worked_gross,
+                sal_cas: sal_cas_leave,
+                sal_cass: sal_cass_leave,
+                sal_impozit: sal_tax_leave,
+                sal_net: lr.net,
+                sal_cam: lr.cam,
+                sal_taxable_base: lr.taxable_base,
+                sal_personal_deduction: Decimal::ZERO,
+                combined_cas: gl_cas,
+                combined_cass: gl_cass,
+                combined_impozit: gl_tax,
+                comb_impozit_base: b_comb_impozit_base,
+                excess: b_excess,
+                excess_receivable: b_excess_recv,
+                part_time_min: None,
+                baza_cas: leid0(lr.worked_base),
+                baza_cass: leid0(lr.worked_base),
+                baza_cam_real: leid0(lr.worked_base),
+                baza_impozit: leid0(lr.taxable_base),
+                tip_asigurat: e.tip_asigurat.clone(),
+                cam_base_contribution: b_cam_base,
+
+                // B-path fields
+                lr_worked_gross: lr.worked_gross,
+                lr_worked_base: lr.worked_base,
+                lr_worked_days: lr.worked_days,
+                lr_cas: lr.cas,
+                lr_cass: lr.cass,
+                lr_income_tax: lr.income_tax,
+                lr_cam: lr.cam,
+                lr_net: lr.net,
+                lr_indemn_employer: lr.indemn_employer,
+                lr_indemn_fnuass: lr.indemn_fnuass,
+                lr_indemn_total: lr.indemn_total,
+                lr_taxable_base: lr.taxable_base,
+                sal_cas_leave,
+                sal_cass_leave,
+                sal_tax_leave,
+                indemn_tax,
+                b_combined_cas,
+                b_combined_cass,
+                b_comb_sal_impozit,
+                b_excess_recv,
+                b_excess,
+                b_cam_base,
+
+                // GL fields
+                gl_cas,
+                gl_cass,
+                gl_tax,
+                gl_gross: lr.worked_gross,
+                gl_cam_base: b_cam_base,
+                gl_excess_reclass: b_excess,
+                gl_excess_receivable: b_excess_recv,
+
+                retineri_result: retin,
+                med_leaves_raw,
+
+                // Employee metadata
+                employment_date: e.employment_date.clone(),
+                tip_contract: e.tip_contract.clone(),
+                pensionar: e.pensionar,
+                ore_norma: e.ore_norma,
+                sediu_cif: e.sediu_cif.clone(),
+                beneficiar_suma_netaxabila: e.beneficiar_suma_netaxabila,
+                exceptie_cas_min: e.exceptie_cas_min.clone(),
             });
             continue;
         }
 
-        // ── Pontaj override: use worked_days as the payroll basis ────────────
-        // When a pontaj exists and worked_days < nzl, prorate gross_eff.
-        // When worked_days ≥ nzl (or no pontaj), use full gross_eff (no change).
+        // ── A-path: standard salary ─────────────────────────────────────────
         let pontaj_gross_eff = if let Some(pj) = pontaje_map.get(&e.id) {
             let pontaj_worked = (pj.worked_days as u32).min(nzl);
             if pontaj_worked < nzl && nzl > 0 {
@@ -802,9 +991,9 @@ pub async fn run_payroll(
         } else {
             gross_eff
         };
-        let r = compute_payroll(&PayrollInput {
+        let r = crate::anaf_decl::d112::compute_payroll(&PayrollInput {
             gross: pontaj_gross_eff,
-            personal_deduction: deducere_plafonata(
+            personal_deduction: crate::anaf_decl::d112::deducere_plafonata(
                 dec(&e.personal_deduction),
                 gross_eff,
                 year,
@@ -813,10 +1002,6 @@ pub async fn run_payroll(
             non_taxable,
         });
         let exempt = exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
-        // Aceeași proratare pe zile active ca în emiterea D112 (commands/payroll.rs) — diferența de
-        // contribuție suportată de angajator din sumar trebuie să coincidă cu D112.
-        // Pontaj: dacă există, `worked_days` (clamped la nzl) înlocuiește `active_days` pentru
-        // calculul bazei minime part-time.
         let active_days = if let Some(pj) = pontaje_map.get(&e.id) {
             (pj.worked_days as u32).min(nzl)
         } else {
@@ -827,45 +1012,84 @@ pub async fn run_payroll(
                 e.contract_end_date.as_deref(),
             )
         };
-        if let Some((_, cas_diff, cass_diff)) = part_time_min_base(
-            gross_eff,
+        let zile_emis = active_days;
+
+        let part_time_min_result = part_time_min_base(
+            dec(&r.gross),
             &e.tip_contract,
             exempt,
             year,
             month,
             active_days,
             nzl,
-        ) {
+        );
+        if let Some((_, cas_diff, cass_diff)) = part_time_min_result {
             t_cas_diff += cas_diff;
             t_cass_diff += cass_diff;
         }
-        // Wave E: fold diurnă excess into combined base for single-rounding contributions.
-        // S = salary gross (dec(&r.gross)) which already includes sporuri via gross_eff.
-        // E = excess from payroll_extra_income (or 0). When E=0 path is byte-identical to pre-Wave-E.
+
         let sal_gross = dec(&r.gross);
         let sal_cas = dec(&r.cas);
         let sal_cass = dec(&r.cass);
         let sal_impozit = dec(&r.income_tax);
+        let sal_net = dec(&r.net);
+
+        // Baza CAS/CASS (after optional part-time lift)
+        let mut baza_cas = sal_gross - non_taxable;
+        let mut baza_cass = sal_gross - non_taxable;
+        let baza_cam_real = (sal_gross - non_taxable).max(Decimal::ZERO);
+        if let Some((base, _, _)) = part_time_min_result {
+            baza_cas = base;
+            baza_cass = base;
+        }
+
+        // tip_asigurat: beneficiarii sumei netaxabile ≥07/2026 usese codul 1.11.2
+        let tip_asigurat =
+            if non_taxable > Decimal::ZERO && (year > 2026 || (year == 2026 && month >= 7)) {
+                "1.11.2".to_string()
+            } else {
+                e.tip_asigurat.clone()
+            };
+
+        let mut excess_used = Decimal::ZERO;
+        let mut excess_recv_used = Decimal::ZERO;
+        let mut combined_cas = sal_cas;
+        let mut combined_cass = sal_cass;
+        let mut combined_impozit = sal_impozit;
+        // Combined-base impozit taxable base (sal_gross+excess − comb_cas − comb_cass − ded).
+        // Zero when no excess; stored on breakdown so Wave E in build_d112_xml never re-derives
+        // from de.gross (i64, already rounded) and thus preserves pontaj Decimal precision.
+        let mut comb_impozit_base_used = Decimal::ZERO;
+        let cam_base_contrib = leid0((pontaj_gross_eff - non_taxable).max(Decimal::ZERO));
+
         if let Some(&emp_excess) = extra_income.get(&e.id) {
             if emp_excess > Decimal::ZERO {
-                // Combined base = salary gross (incl. spor) + excess.
-                // non_taxable already excluded from r.gross via compute_payroll.
-                let emp_ded =
-                    deducere_plafonata(dec(&e.personal_deduction), gross_eff, year, month);
+                let emp_ded = crate::anaf_decl::d112::deducere_plafonata(
+                    dec(&e.personal_deduction),
+                    gross_eff,
+                    year,
+                    month,
+                );
                 let combined_base = sal_gross + emp_excess;
                 let comb_cas = pct(combined_base, (25, 2));
                 let comb_cass = pct(combined_base, (10, 2));
                 let comb_impozit_base =
                     (combined_base - comb_cas - comb_cass - emp_ded).max(Decimal::ZERO);
                 let comb_impozit = pct(comb_impozit_base, (10, 2));
-                // Excess receivable = combined withholdings − salary withholdings (employee's debt).
                 let excess_recv =
                     (comb_cas - sal_cas) + (comb_cass - sal_cass) + (comb_impozit - sal_impozit);
+                excess_used = emp_excess;
+                excess_recv_used = excess_recv;
+                combined_cas = comb_cas;
+                combined_cass = comb_cass;
+                combined_impozit = comb_impozit;
+                comb_impozit_base_used = comb_impozit_base;
+
                 t_gross += sal_gross;
-                t_cas += comb_cas; // combined — matches D112 single rounding
+                t_cas += comb_cas;
                 t_cass += comb_cass;
                 t_tax += comb_impozit;
-                t_net += dec(&r.net); // salary net (excess net was already paid cash)
+                t_net += sal_net;
                 t_cam_base +=
                     leid0((pontaj_gross_eff - non_taxable).max(Decimal::ZERO)) + leid0(emp_excess);
                 t_excess_reclass += emp_excess;
@@ -875,7 +1099,7 @@ pub async fn run_payroll(
                 t_cas += sal_cas;
                 t_cass += sal_cass;
                 t_tax += sal_impozit;
-                t_net += dec(&r.net);
+                t_net += sal_net;
                 t_cam_base += leid0((pontaj_gross_eff - non_taxable).max(Decimal::ZERO));
             }
         } else {
@@ -883,13 +1107,12 @@ pub async fn run_payroll(
             t_cas += sal_cas;
             t_cass += sal_cass;
             t_tax += sal_impozit;
-            t_net += dec(&r.net);
+            t_net += sal_net;
             t_cam_base += leid0((pontaj_gross_eff - non_taxable).max(Decimal::ZERO));
         }
-        // Wave F: rețineri post-net pentru calea standard (fără concediu medical).
-        let emp_net = dec(&r.net);
+
         let retin = if let Some(emp_ret) = retineri_map.get(&e.id) {
-            let res = apply_retineri(emp_net, emp_ret);
+            let res = crate::db::payroll_retineri::apply_retineri(sal_net, emp_ret);
             t_retinut += res.total_retinut;
             for it in &res.items {
                 retin_items.push(crate::db::gl::RetinereGlItem {
@@ -901,31 +1124,189 @@ pub async fn run_payroll(
         } else {
             crate::db::payroll_retineri::RetinereResult {
                 total_retinut: Decimal::ZERO,
-                net_redus: emp_net,
+                net_redus: sal_net,
                 clamped: false,
                 items: vec![],
             }
         };
-        states.push(EmployeeState {
+
+        let gl_cas_a = if excess_used > Decimal::ZERO {
+            combined_cas
+        } else {
+            sal_cas
+        };
+        let gl_cass_a = if excess_used > Decimal::ZERO {
+            combined_cass
+        } else {
+            sal_cass
+        };
+        let gl_tax_a = if excess_used > Decimal::ZERO {
+            combined_impozit
+        } else {
+            sal_impozit
+        };
+        let gl_cam_base_a = if excess_used > Decimal::ZERO {
+            cam_base_contrib + leid0(excess_used)
+        } else {
+            cam_base_contrib
+        };
+
+        breakdowns.push(EmployeeBreakdown {
             employee_id: e.id.clone(),
             full_name: e.full_name.clone(),
-            gross: r.gross,
-            cas: r.cas,
-            cass: r.cass,
-            income_tax: r.income_tax,
-            net: r.net.clone(),
-            cam: r.cam,
-            spor: f(spor),
-            total_retinut: f(retin.total_retinut),
-            net_employee: f(retin.net_redus),
+            cnp: e.cnp.clone(),
+            spor,
+            gross_base: gross,
+            gross_eff,
+            pontaj_gross_eff,
+            non_taxable,
+            active_days,
+            zile_emis,
+            is_leave_path: false,
+
+            // A-path fields
+            sal_gross,
+            sal_cas,
+            sal_cass,
+            sal_impozit,
+            sal_net,
+            sal_cam: dec(&r.cam),
+            sal_taxable_base: dec(&r.taxable_base),
+            sal_personal_deduction: dec(&r.personal_deduction),
+            combined_cas,
+            combined_cass,
+            combined_impozit,
+            comb_impozit_base: comb_impozit_base_used,
+            excess: excess_used,
+            excess_receivable: excess_recv_used,
+            part_time_min: part_time_min_result,
+            baza_cas,
+            baza_cass,
+            baza_cam_real,
+            baza_impozit: dec(&r.taxable_base),
+            tip_asigurat,
+            cam_base_contribution: cam_base_contrib,
+
+            // B-path fields (unused)
+            lr_worked_gross: Decimal::ZERO,
+            lr_worked_base: Decimal::ZERO,
+            lr_worked_days: 0,
+            lr_cas: Decimal::ZERO,
+            lr_cass: Decimal::ZERO,
+            lr_income_tax: Decimal::ZERO,
+            lr_cam: Decimal::ZERO,
+            lr_net: Decimal::ZERO,
+            lr_indemn_employer: Decimal::ZERO,
+            lr_indemn_fnuass: Decimal::ZERO,
+            lr_indemn_total: Decimal::ZERO,
+            lr_taxable_base: Decimal::ZERO,
+            sal_cas_leave: Decimal::ZERO,
+            sal_cass_leave: Decimal::ZERO,
+            sal_tax_leave: Decimal::ZERO,
+            indemn_tax: Decimal::ZERO,
+            b_combined_cas: Decimal::ZERO,
+            b_combined_cass: Decimal::ZERO,
+            b_comb_sal_impozit: Decimal::ZERO,
+            b_excess_recv: Decimal::ZERO,
+            b_excess: Decimal::ZERO,
+            b_cam_base: Decimal::ZERO,
+
+            // GL fields
+            gl_cas: gl_cas_a,
+            gl_cass: gl_cass_a,
+            gl_tax: gl_tax_a,
+            gl_gross: sal_gross,
+            gl_cam_base: gl_cam_base_a,
+            gl_excess_reclass: excess_used,
+            gl_excess_receivable: excess_recv_used,
+
+            retineri_result: retin,
+            med_leaves_raw: vec![],
+
+            // Employee metadata
+            employment_date: e.employment_date.clone(),
+            tip_contract: e.tip_contract.clone(),
+            pensionar: e.pensionar,
+            ore_norma: e.ore_norma,
+            sediu_cif: e.sediu_cif.clone(),
+            beneficiar_suma_netaxabila: e.beneficiar_suma_netaxabila,
+            exceptie_cas_min: e.exceptie_cas_min.clone(),
         });
     }
 
-    // Aplică cota O SINGURĂ DATĂ pe baza agregată (rotunjire comercială la leu) — GL 436 = D112
-    // (480) la leu, eliminând diferența de reconciliere din Σ rotunjirilor per-salariat.
-    // CAM 2,25% (646/436) = singura contribuție angajator pe fondul de salarii.
-    // CCI 0,85% (4373) a fost ABROGATĂ prin OUG 79/2017 de la 1 ian. 2018 — nu se mai calculează.
     let t_cam = pct(t_cam_base, CAM_PCT);
+
+    Ok(PayrollRunBreakdown {
+        employees: breakdowns,
+        t_gross,
+        t_cas,
+        t_cass,
+        t_tax,
+        t_net,
+        t_cam_base,
+        t_cam,
+        t_cas_diff,
+        t_cass_diff,
+        t_excess_reclass,
+        t_excess_receivable,
+        t_retinut,
+        indemn,
+        retin_items,
+        nzl,
+        year,
+        month,
+    })
+}
+
+/// Compute the monthly salary states for all active employees and post the aggregate to the GL.
+pub async fn run_payroll(
+    pool: &SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<PayrollRun> {
+    let f = |d: Decimal| {
+        format!(
+            "{:.2}",
+            d.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+        )
+    };
+
+    let breakdown = compute_payroll_run(pool, company_id, period_from, period_to).await?;
+
+    // Build EmployeeState from breakdown (for the UI payroll register).
+    let mut states = Vec::new();
+    for eb in &breakdown.employees {
+        if eb.is_leave_path {
+            states.push(EmployeeState {
+                employee_id: eb.employee_id.clone(),
+                full_name: eb.full_name.clone(),
+                gross: f(eb.lr_worked_gross + eb.lr_indemn_total),
+                cas: f(eb.lr_cas),
+                cass: f(eb.lr_cass),
+                income_tax: f(eb.lr_income_tax),
+                net: f(eb.lr_net),
+                cam: f(eb.lr_cam),
+                spor: f(eb.spor),
+                total_retinut: f(eb.retineri_result.total_retinut),
+                net_employee: f(eb.retineri_result.net_redus),
+            });
+        } else {
+            states.push(EmployeeState {
+                employee_id: eb.employee_id.clone(),
+                full_name: eb.full_name.clone(),
+                gross: f(eb.sal_gross),
+                cas: f(eb.sal_cas),
+                cass: f(eb.sal_cass),
+                income_tax: f(eb.sal_impozit),
+                net: f(eb.sal_net),
+                cam: f(eb.sal_cam),
+                spor: f(eb.spor),
+                total_retinut: f(eb.retineri_result.total_retinut),
+                net_employee: f(eb.retineri_result.net_redus),
+            });
+        }
+    }
 
     let post = crate::db::gl::post_payroll(
         pool,
@@ -933,32 +1314,30 @@ pub async fn run_payroll(
         period_from,
         period_to,
         crate::db::gl::PayrollTotals {
-            gross: t_gross,
-            cas: t_cas,
-            cass: t_cass,
-            impozit: t_tax,
-            cam: t_cam,
-            cas_diff: t_cas_diff,
-            cass_diff: t_cass_diff,
-            indemn: indemn.clone(),
-            excess_reclass: t_excess_reclass,
-            excess_receivable: t_excess_receivable,
-            // Wave F: rețineri — net split per creditor account.
-            retineri: retin_items,
+            gross: breakdown.t_gross,
+            cas: breakdown.t_cas,
+            cass: breakdown.t_cass,
+            impozit: breakdown.t_tax,
+            cam: breakdown.t_cam,
+            cas_diff: breakdown.t_cas_diff,
+            cass_diff: breakdown.t_cass_diff,
+            indemn: breakdown.indemn.clone(),
+            excess_reclass: breakdown.t_excess_reclass,
+            excess_receivable: breakdown.t_excess_receivable,
+            retineri: breakdown.retin_items,
         },
     )
     .await?;
 
     Ok(PayrollRun {
         states,
-        // Totaluri de afișare = lucrat + indemnizație (Σ states).
-        total_gross: f(t_gross + indemn.employer + indemn.fnuass),
-        total_cas: f(t_cas + indemn.cas),
-        total_cass: f(t_cass + indemn.cass),
-        total_income_tax: f(t_tax + indemn.tax),
-        total_net: f(t_net),
-        total_cam: f(t_cam),
-        total_retinut: f(t_retinut),
+        total_gross: f(breakdown.t_gross + breakdown.indemn.employer + breakdown.indemn.fnuass),
+        total_cas: f(breakdown.t_cas + breakdown.indemn.cas),
+        total_cass: f(breakdown.t_cass + breakdown.indemn.cass),
+        total_income_tax: f(breakdown.t_tax + breakdown.indemn.tax),
+        total_net: f(breakdown.t_net),
+        total_cam: f(breakdown.t_cam),
+        total_retinut: f(breakdown.t_retinut),
         posted: post.posted,
         entry_date: post.entry_date,
     })
