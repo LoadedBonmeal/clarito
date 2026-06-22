@@ -1416,13 +1416,21 @@ export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, "companyId">
 export interface EmployeeState {
   employeeId: string;
   fullName: string;
+  /** Brut total (gross_salary + sporuri) pe care s-au calculat CAS/CASS/impozit/CAM. */
   gross: string;
   cas: string;
   cass: string;
   incomeTax: string;
+  /** Net înainte de rețineri. */
   net: string;
   cam: string;
   // NOTE: concedii (CCI 0,85%) removed — abolished 1 Jan 2018 by OUG 79/2017.
+  /** Suma sporurilor taxabile adăugate la brut pentru luna curentă (0 dacă nu există). */
+  spor: string;
+  /** Suma reținută din net (popriri, pensie alimentară etc. — post-net). 0 dacă nu există. */
+  totalRetinut: string;
+  /** Netul efectiv de plată angajatului (net − totalRetinut). */
+  netEmployee: string;
 }
 
 export interface PayrollRun {
@@ -1434,8 +1442,78 @@ export interface PayrollRun {
   totalNet: string;
   totalCam: string;
   // NOTE: totalConcedii (CCI 0,85%) removed — abolished 1 Jan 2018 by OUG 79/2017.
+  /** Σ rețineri din net (D421=C427/4282/462) pentru toate lunile. */
+  totalRetinut: string;
   posted: boolean;
   entryDate: string;
+}
+
+// ─── Wave F: Sporuri salariale + Rețineri/Popriri ────────────────────────────
+
+/** Spor salarial taxabil per angajat per lună. */
+export interface Spor {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  period: string;
+  amount: string;
+  /** 'vechime' | 'noapte' | 'suplimentare' | 'conditii_deosebite' | 'alte' */
+  kind: string;
+  description: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateSporInput {
+  companyId: string;
+  employeeId: string;
+  period: string;
+  amount: string;
+  kind?: string;
+  description?: string;
+}
+
+export interface UpdateSporInput {
+  amount?: string;
+  kind?: string;
+  description?: string;
+}
+
+/** Reținere/poprire din salariu net (post-CAS/CASS/impozit). */
+export interface Retinere {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  period: string;
+  amount: string;
+  /** 'poprire' | 'pensie_alimentara' | 'avans' | 'sindicat' | 'alte' */
+  kind: string;
+  creditor: string;
+  /** Cont credit GL: '427' | '4282' | '462' */
+  account: string;
+  /** 1 = pensie alimentară (prioritate maximă), 2+ = altele */
+  priority: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateRetinereInput {
+  companyId: string;
+  employeeId: string;
+  period: string;
+  amount: string;
+  kind?: string;
+  creditor?: string;
+  account?: string;
+  priority?: number;
+}
+
+export interface UpdateRetinereInput {
+  amount?: string;
+  kind?: string;
+  creditor?: string;
+  account?: string;
+  priority?: number;
 }
 
 /** Payroll (D112 core) — one salary state. */

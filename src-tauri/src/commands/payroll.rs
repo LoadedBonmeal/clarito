@@ -188,6 +188,10 @@ pub async fn export_d112_xml(
     )
     .await
     .unwrap_or_default();
+    let sporuri =
+        crate::db::payroll_sporuri::sporuri_by_employee(&state.db, &company_id, &period_ym)
+            .await
+            .unwrap_or_default();
     let xml = build_d112_xml(
         &company,
         &employees,
@@ -197,6 +201,7 @@ pub async fn export_d112_xml(
         caen.trim(),
         is_rectificative,
         &extra_income,
+        &sporuri,
     )?;
     // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the IPC
     // endpoint accepts an arbitrary string.
@@ -270,6 +275,10 @@ pub async fn preview_d112_xml(
     )
     .await
     .unwrap_or_default();
+    let sporuri =
+        crate::db::payroll_sporuri::sporuri_by_employee(&state.db, &company_id, &period_ym)
+            .await
+            .unwrap_or_default();
     build_d112_xml(
         &company,
         &employees,
@@ -279,6 +288,7 @@ pub async fn preview_d112_xml(
         caen.trim(),
         is_rectificative,
         &extra_income,
+        &sporuri,
     )
 }
 
@@ -288,6 +298,12 @@ pub async fn preview_d112_xml(
 /// proration + indemnity, consistent with `run_payroll`/GL); the rest emit the standard `asiguratA` path.
 /// `extra_income` — map of `employee_id → total excess (Decimal, lei)` from `payroll_extra_income`
 /// for the given period. Folded into the D112 bases (CAS/CASS/CAM/impozit) and E3_23 (rând 8.2.1).
+/// `sporuri` — map of `employee_id → total spor taxabil (Decimal, lei)` from `payroll_sporuri`
+/// for the given period. Folded into the D112 contribution/impozit bases (CAS/CASS/impozit/CAM) on
+/// BOTH A-path and B-path — same combined-base rounding as `run_payroll`, so GL 4315/4316/444/436
+/// == D112 412/432/602/480 for employees with a spor. NOTE: `non_taxable` is computed on the BASE
+/// salary (gross_salary), NOT on gross+spor — mirrors `run_payroll` (OUG 89/2025 art. III condition
+/// refers to the base salary, not the gross+spor effective base).
 #[allow(clippy::too_many_arguments)]
 fn build_d112_xml(
     company: &crate::db::companies::Company,
@@ -298,6 +314,7 @@ fn build_d112_xml(
     caen: &str,
     is_rectificative: bool,
     extra_income: &std::collections::HashMap<String, Decimal>,
+    sporuri: &std::collections::HashMap<String, Decimal>,
 ) -> AppResult<String> {
     if caen.len() != 4 || !caen.chars().all(|c| c.is_ascii_digit()) {
         return Err(AppError::Validation(
@@ -335,8 +352,16 @@ fn build_d112_xml(
             )));
         }
         let gross_in = dec(&e.gross_salary);
+        // Wave F: spor salarial al angajatului pentru această lună (0 dacă absent).
+        // Sporurile intră în baza CAS/CASS/impozit/CAM — venituri salariale taxabile.
+        // `non_taxable` se calculează pe `gross_in` de bază (nu pe gross_eff) — condiția
+        // OUG 89/2025 art. III se referă la „salariul de bază", nu la brutul efectiv cu sporuri.
+        // Același comportament ca în `run_payroll` (db/payroll.rs).
+        let spor_d112 = sporuri.get(e.id.as_str()).copied().unwrap_or(Decimal::ZERO);
+        // Brut efectiv D112 = gross_salary + spor — baza tuturor contribuțiilor.
+        let gross_eff = gross_in + spor_d112;
         // Suma netaxabilă (300/200 lei, art. III OUG 89/2025) — 0 dacă nu se aplică. Scade baza
-        // tuturor celor patru prelevări (vezi compute_payroll).
+        // tuturor celor patru prelevări (vezi compute_payroll). Calculată pe `gross_in`, NU pe gross_eff.
         let non_taxable = suma_netaxabila(
             e.beneficiar_suma_netaxabila,
             &e.tip_contract,
@@ -406,11 +431,14 @@ fn build_d112_xml(
                     cod_boala: l.cod_boala.clone(),
                 });
             }
+            // Wave F B-path: gross passed to compute_payroll_with_leave = gross_eff (gross + spor).
+            // This mirrors run_payroll which also passes gross_eff on the leave branch, ensuring
+            // GL 4315/4316/444/436 == D112 412/432/602/480 when the employee has a spor + leave.
             let lr = compute_payroll_with_leave(&LeavePayrollInput {
-                gross: gross_in,
+                gross: gross_eff,
                 personal_deduction: deducere_plafonata(
                     dec(&e.personal_deduction),
-                    gross_in,
+                    gross_eff,
                     year,
                     month,
                 ),
@@ -452,11 +480,13 @@ fn build_d112_xml(
             continue;
         }
 
+        // Wave F A-path: compute contributions on gross_eff (gross_salary + spor). Single combined-base
+        // rounding so GL 4315/4316/444/436 == D112 412/432/602/480.
         let r = compute_payroll(&PayrollInput {
-            gross: gross_in,
+            gross: gross_eff,
             personal_deduction: deducere_plafonata(
                 dec(&e.personal_deduction),
-                gross_in,
+                gross_eff,
                 year,
                 month,
             ),
@@ -489,8 +519,8 @@ fn build_d112_xml(
         // PAY-02: A_8 (zile lucrate) = zilele active din lună pe ORICE cale (nu doar part-time). La o
         // angajare/încetare la mijlocul lunii, full-time, A_8 trebuie să reflecte intervalul activ, nu
         // luna întreagă. Lună întreagă ⇒ active_days = NZL (neschimbat). Convenție: `gross_salary` e
-        // brutul REALIZAT al lunii (nu se proratează automat aici — proratarea brutului e o decizie a
-        // contabilului); pentru part-time, A_13P = ROUND(sm × A_8 / NZL) e recalculat de DUK din A_8.
+        // brutul de bază al lunii (sporurile intră în gross_eff, nu în gross_salary); pentru part-time,
+        // A_13P = ROUND(sm × A_8 / NZL) e recalculat de DUK din A_8.
         let zile_emis = active_days;
         if let Some((base, _, _)) = crate::anaf_decl::d112::part_time_min_base(
             gross,
@@ -543,7 +573,7 @@ fn build_d112_xml(
             // A_5 baza CAM = brutul realizat (brut − sumă netaxabilă), NU baza CAS/CASS majorată
             // part-time — CAM nu se majorează la baza minimă (art. 220^6). Vezi PAY-01.
             baza_cam: leid(baza_cam_real),
-            // A_sal1 salariul de bază brut din contract (brutul realizat al lunii).
+            // A_sal1 salariul de bază brut din contract (brutul de bază, fără sporuri).
             sal_contract: leid(gross_in),
             // E3_14/E1_6 baza impozit + E3_12/E1_4 deducerea personală (din rezultatul de salarizare).
             baza_impozit: lei(&r.taxable_base),
@@ -671,6 +701,94 @@ conformă structural; re-validați cu artefactele oficiale ANAF înainte de depu
     )))
 }
 
+// ─── Wave F: Sporuri salariale ────────────────────────────────────────────────
+
+use crate::db::payroll_sporuri::{CreateSporInput, Spor, UpdateSporInput};
+
+/// Lista sporurilor unui angajat/perioadă. Oricine autentificat poate citi.
+#[tauri::command]
+pub async fn list_sporuri(
+    state: State<'_, AppState>,
+    company_id: String,
+    period: String,
+) -> AppResult<Vec<Spor>> {
+    crate::db::payroll_sporuri::list(&state.db, &company_id, &period).await
+}
+
+/// Adaugă un spor salarial taxabil (spor vechime, noapte, ore suplimentare, …).
+/// Intră în baza CAS/CASS/impozit/CAM la rularea lunii. Necesită CreateDraft.
+#[tauri::command]
+pub async fn create_spor(state: State<'_, AppState>, input: CreateSporInput) -> AppResult<Spor> {
+    crate::db::payroll_sporuri::create(&state.db, input).await
+}
+
+/// Actualizează sumă/tip/descriere spor. Necesită CreateDraft.
+#[tauri::command]
+pub async fn update_spor(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+    input: UpdateSporInput,
+) -> AppResult<Spor> {
+    crate::db::payroll_sporuri::update(&state.db, &id, &company_id, input).await
+}
+
+/// Șterge un spor salarial. Necesită Delete.
+#[tauri::command]
+pub async fn delete_spor(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+) -> AppResult<()> {
+    crate::db::payroll_sporuri::delete(&state.db, &id, &company_id).await
+}
+
+// ─── Wave F: Rețineri/Popriri ─────────────────────────────────────────────────
+
+use crate::db::payroll_retineri::{CreateRetinereInput, Retinere, UpdateRetinereInput};
+
+/// Lista rețineri/popriri ale perioadei. Oricine autentificat poate citi.
+#[tauri::command]
+pub async fn list_retineri(
+    state: State<'_, AppState>,
+    company_id: String,
+    period: String,
+) -> AppResult<Vec<Retinere>> {
+    crate::db::payroll_retineri::list(&state.db, &company_id, &period).await
+}
+
+/// Adaugă o reținere/poprire din salariu net (poprire, pensie alimentară, avans,
+/// sindicat). Se aplică post-net; nu modifică contribuțiile sau D112.
+/// Necesită CreateDraft.
+#[tauri::command]
+pub async fn create_retinere(
+    state: State<'_, AppState>,
+    input: CreateRetinereInput,
+) -> AppResult<Retinere> {
+    crate::db::payroll_retineri::create(&state.db, input).await
+}
+
+/// Actualizează sumă/tip/creditor/cont/prioritate reținere. Necesită CreateDraft.
+#[tauri::command]
+pub async fn update_retinere(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+    input: UpdateRetinereInput,
+) -> AppResult<Retinere> {
+    crate::db::payroll_retineri::update(&state.db, &id, &company_id, input).await
+}
+
+/// Șterge o reținere. Necesită Delete.
+#[tauri::command]
+pub async fn delete_retinere(
+    state: State<'_, AppState>,
+    id: String,
+    company_id: String,
+) -> AppResult<()> {
+    crate::db::payroll_retineri::delete(&state.db, &id, &company_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -773,6 +891,7 @@ mod tests {
             "6201",
             false,
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         )
         .unwrap();
 
@@ -820,6 +939,7 @@ mod tests {
             6,
             "6201",
             false,
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         )
         .unwrap();
@@ -891,6 +1011,7 @@ mod tests {
             6,
             "6201",
             false,
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         )
         .unwrap();
@@ -1006,6 +1127,7 @@ mod tests {
             "6201",
             false,
             &extra_income,
+            &std::collections::HashMap::new(),
         )
         .unwrap();
         let oblig = |cod: &str| -> i64 {
@@ -1087,6 +1209,134 @@ mod tests {
         assert!(tb.balanced, "payroll journal with excess must balance");
     }
 
+    /// P1 GOLDEN TEST — GL≡D112 WITH SPOR (Wave F invariant).
+    ///
+    /// Scenario: one full-time employee, base salary 4000, spor vechime 1000 → gross_eff = 5000.
+    /// non_taxable stays on base salary (gross_in = 4000), NOT on gross_eff — mirrors run_payroll.
+    ///
+    /// Expected contributions on gross_eff = 5000 (combined-base, single rounding):
+    ///   CAS  = ROUND(5000 × 25%)           = 1250
+    ///   CASS = ROUND(5000 × 10%)           = 500
+    ///   impozit_base = 5000 − 1250 − 500   = 3250; impozit = ROUND(3250 × 10%) = 325
+    ///   CAM  = ROUND(5000 × 2.25%)         = 113 (aggregate single-rounding on cam_base)
+    ///
+    /// GL 4315 C = 1250 == D112 412 A_datorat
+    /// GL 4316 C = 500  == D112 432 A_datorat
+    /// GL 444  C = 325  == D112 602 A_datorat
+    /// GL 436  C = 113  == D112 480 A_datorat
+    ///
+    /// Also verifies that non_taxable is NOT applied to gross+spor:
+    ///   A beneficiar_suma_netaxabila flag on the employee is NOT set, so non_taxable = 0.
+    ///   If it were applied to gross_eff, GL would be computed on 5000 and D112 on 4000, breaking the
+    ///   invariant. The test uses a plain non-beneficiar to keep the non_taxable = 0 path.
+    #[tokio::test]
+    async fn gl_d112_golden_with_spor() {
+        use rust_decimal::prelude::ToPrimitive;
+        let pool = setup().await;
+        let emp = crate::db::payroll::create(&pool, emp_input("1960101410019", "Pop Ana", "4000"))
+            .await
+            .unwrap();
+
+        // Insert a spor vechime of 1000 for this employee.
+        crate::db::payroll_sporuri::create(
+            &pool,
+            crate::db::payroll_sporuri::CreateSporInput {
+                company_id: "co1".into(),
+                employee_id: emp.id.clone(),
+                period: "2026-06".into(),
+                amount: "1000".into(),
+                kind: Some("vechime".into()),
+                description: Some("spor test".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        // GL path: run_payroll folds spor into gross_eff = 5000; posts GL on combined base.
+        crate::db::payroll::run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let gl_credit = |code: &str| -> i64 {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| {
+                    Decimal::from_str(&r.closing_credit)
+                        .unwrap_or(Decimal::ZERO)
+                        .round_dp_with_strategy(
+                            0,
+                            rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                        )
+                        .to_i64()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+        };
+
+        // D112 path: build_d112_xml must fold sporuri into the contribution bases.
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
+        let sporuri_map = crate::db::payroll_sporuri::sporuri_by_employee(&pool, "co1", "2026-06")
+            .await
+            .unwrap();
+        let xml = build_d112_xml(
+            &company,
+            &employees,
+            &[],
+            2026,
+            6,
+            "6201",
+            false,
+            &std::collections::HashMap::new(),
+            &sporuri_map,
+        )
+        .unwrap();
+        let oblig = |cod: &str| -> i64 {
+            let key = format!("A_codOblig=\"{cod}\"");
+            let i = xml
+                .find(&key)
+                .unwrap_or_else(|| panic!("obligația {cod} lipsește"));
+            let dk = "A_datorat=\"";
+            let j = i + xml[i..].find(dk).expect("A_datorat") + dk.len();
+            let end = xml[j..].find('"').unwrap();
+            xml[j..j + end].parse::<i64>().unwrap()
+        };
+
+        // P1 INVARIANT: GL obligations MUST equal D112 obligations for employee with a spor.
+        assert_eq!(
+            gl_credit("4315"),
+            oblig("412"),
+            "CAS: GL 4315 ≠ D112 412 (GL≡D112 breaks when spor not folded into D112 base!)"
+        );
+        assert_eq!(
+            gl_credit("4316"),
+            oblig("432"),
+            "CASS: GL 4316 ≠ D112 432 (GL≡D112 breaks when spor not folded into D112 base!)"
+        );
+        assert_eq!(
+            gl_credit("444"),
+            oblig("602"),
+            "impozit: GL 444 ≠ D112 602 (GL≡D112 breaks when spor not folded into D112 base!)"
+        );
+        assert_eq!(
+            gl_credit("436"),
+            oblig("480"),
+            "CAM: GL 436 ≠ D112 480 (GL≡D112 breaks when spor not folded into D112 base!)"
+        );
+
+        // Exact value spot-checks: gross_eff = 4000 + 1000 = 5000.
+        assert_eq!(oblig("412"), 1250, "CAS = ROUND(5000 × 25%) = 1250");
+        assert_eq!(oblig("432"), 500, "CASS = ROUND(5000 × 10%) = 500");
+        assert_eq!(oblig("602"), 325, "impozit = ROUND(3250 × 10%) = 325");
+        // CAM = ROUND(5000 × 2.25%) aggregate = 113.
+        assert_eq!(oblig("480"), 113, "CAM = ROUND(5000 × 2.25%) = 113");
+
+        assert!(tb.balanced, "payroll journal with spor must balance");
+    }
+
     /// PAY-01 regression: a part-time employee whose CAS/CASS base is lifted to the statutory minimum
     /// (art. 146 5^7) must STILL declare CAM (480 / A_5) on the REALIZED gross (art. 220^6), matching the
     /// GL 436 posting. Guards against the lifted CAS base leaking into the CAM base. Part-timer P1 gross
@@ -1138,6 +1388,7 @@ mod tests {
             6,
             "6201",
             false,
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         )
         .unwrap();
@@ -1193,6 +1444,7 @@ mod tests {
             "6201",
             false,
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         )
         .unwrap();
 
@@ -1241,6 +1493,7 @@ mod tests {
             "6201",
             false,
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         )
         .unwrap();
         let path = std::env::temp_dir().join("d112_from_db.xml");
@@ -1280,6 +1533,7 @@ mod tests {
             6,
             "6201",
             false,
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         )
         .unwrap();

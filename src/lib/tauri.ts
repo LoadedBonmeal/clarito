@@ -1782,6 +1782,34 @@ export const payroll = {
    */
   simulateSalaryFromNet: (targetNetStr: string, opts?: import("@/types").SalarySimOpts) =>
     invoke<import("@/types").SalarySimResult>("simulate_salary_from_net", { targetNetStr, opts: opts ?? null }),
+
+  // ── Wave F: sporuri salariale taxabile ──────────────────────────────────
+  /** Lista sporurilor pentru o perioadă (YYYY-MM). */
+  listSporuri: (companyId: string, period: string) =>
+    invoke<import("@/types").Spor[]>("list_sporuri", { companyId, period }),
+  /** Adaugă un spor taxabil (spor vechime, noapte, ore suplimentare etc.). */
+  createSpor: (input: import("@/types").CreateSporInput) =>
+    invoke<import("@/types").Spor>("create_spor", { input }),
+  /** Actualizează sumă/tip/descriere spor. */
+  updateSpor: (id: string, companyId: string, input: import("@/types").UpdateSporInput) =>
+    invoke<import("@/types").Spor>("update_spor", { id, companyId, input }),
+  /** Șterge un spor salarial. */
+  deleteSpor: (id: string, companyId: string) =>
+    invoke<void>("delete_spor", { id, companyId }),
+
+  // ── Wave F: rețineri/popriri din net ────────────────────────────────────
+  /** Lista rețineri/popriri pentru o perioadă (YYYY-MM). */
+  listRetineri: (companyId: string, period: string) =>
+    invoke<import("@/types").Retinere[]>("list_retineri", { companyId, period }),
+  /** Adaugă o reținere (poprire, pensie alimentară, avans, sindicat). */
+  createRetinere: (input: import("@/types").CreateRetinereInput) =>
+    invoke<import("@/types").Retinere>("create_retinere", { input }),
+  /** Actualizează sumă/tip/creditor/cont/prioritate reținere. */
+  updateRetinere: (id: string, companyId: string, input: import("@/types").UpdateRetinereInput) =>
+    invoke<import("@/types").Retinere>("update_retinere", { id, companyId, input }),
+  /** Șterge o reținere. */
+  deleteRetinere: (id: string, companyId: string) =>
+    invoke<void>("delete_retinere", { id, companyId }),
 };
 
 export const vatRates = {

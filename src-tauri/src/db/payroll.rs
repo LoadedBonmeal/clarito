@@ -17,6 +17,8 @@ use crate::anaf_decl::d112::{
 use crate::db::gl::IndemnityTotals;
 use crate::db::models::{new_id, now_unix};
 use crate::db::payroll_diurna::open_extra_income_by_employee;
+use crate::db::payroll_retineri::{apply_retineri, retineri_by_employee};
+use crate::db::payroll_sporuri::sporuri_by_employee;
 use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -333,15 +335,23 @@ pub async fn delete_sediu(pool: &SqlitePool, id: &str, company_id: &str) -> AppR
 pub struct EmployeeState {
     pub employee_id: String,
     pub full_name: String,
+    /// Brut total (gross_salary + sporuri) pe care s-au calculat CAS/CASS/impozit/CAM.
     pub gross: String,
     pub cas: String,
     pub cass: String,
     pub income_tax: String,
+    /// Net înainte de rețineri (gross − CAS − CASS − impozit).
     pub net: String,
     pub cam: String,
     // NOTE: concedii (CCI 0,85%) field removed — abolished 1 Jan 2018 by OUG 79/2017;
     // the separate 0,85% contribution has no 2026 legal basis (CF art.220^1, OUG 158/2005
     // art.6 Abrogat). Only CAM 2,25% (646/436) remains as employer social contribution.
+    /// Suma sporurilor taxabile adăugate la brut pentru luna curentă (0 dacă nu există).
+    pub spor: String,
+    /// Suma reținută din net (popriri, pensie alimentară, avansuri — post-net). 0 dacă nu există.
+    pub total_retinut: String,
+    /// Netul efectiv de plată angajatului (net − total_retinut).
+    pub net_employee: String,
 }
 
 /// The monthly payroll register + the GL post result.
@@ -356,6 +366,8 @@ pub struct PayrollRun {
     pub total_net: String,
     pub total_cam: String,
     // NOTE: total_concedii (CCI 0,85%) removed — abolished 1 Jan 2018; no 2026 legal basis.
+    /// Σ rețineri din net (D421=C427/4282/462) pentru toate lunile.
+    pub total_retinut: String,
     pub posted: bool,
     pub entry_date: String,
 }
@@ -555,6 +567,16 @@ pub async fn run_payroll(
         .await
         .unwrap_or_default();
 
+    // ── Wave F: sporuri + rețineri ───────────────────────────────────────────
+    // sporuri_map: employee_id → Σ sporuri taxabile (Decimal, lei). Zero when absent.
+    // retineri_map: employee_id → Vec<Retinere> sorted by priority (pensie alimentară first).
+    let sporuri_map = sporuri_by_employee(pool, company_id, &period_ym)
+        .await
+        .unwrap_or_default();
+    let retineri_map = retineri_by_employee(pool, company_id, &period_ym)
+        .await
+        .unwrap_or_default();
+
     let mut states = Vec::new();
     // Worked-salary aggregates (intră în nota GL: 641/421, 4315/4316/444 salariale, 646/436 CAM).
     let (mut t_gross, mut t_cas, mut t_cass, mut t_tax, mut t_net) = (
@@ -579,13 +601,26 @@ pub async fn run_payroll(
     //   t_excess_receivable = Σ excess withholdings = combined_wh − salary_wh → D 4282 / C 421
     //                          (receivable from employees for charges on their excess cash).
     let (mut t_excess_reclass, mut t_excess_receivable) = (Decimal::ZERO, Decimal::ZERO);
+    // Wave F: Σ rețineri nete (D421=C427/4282/462) — split-ul netului față de angajat.
+    let mut t_retinut = Decimal::ZERO;
+    // Wave F: rețineri GL items per employee — accumulated to pass to post_payroll.
+    let mut retin_items: Vec<crate::db::gl::RetinereGlItem> = Vec::new();
 
     for e in employees.iter().filter(|e| e.active) {
+        // Wave F: spor salarial al angajatului pentru această lună (0 dacă absent).
+        // Sporurile intră în baza CAS/CASS/impozit/CAM (sunt venituri salariale).
+        // `non_taxable` se calculează pe `gross` de bază (nu pe gross+spor) — condiția
+        // beneficiarSumaNetaxabila se referă la „salariul de bază" conform OUG 89/2025.
+        let spor = sporuri_map.get(&e.id).copied().unwrap_or(Decimal::ZERO);
+
         let gross = dec(&e.gross_salary);
+        // Brut efectiv = gross_salary + sporuri — baza tuturor contribuțiilor.
+        let gross_eff = gross + spor;
+
         let non_taxable = suma_netaxabila(
             e.beneficiar_suma_netaxabila,
             &e.tip_contract,
-            gross,
+            gross, // condiția netaxabilă e pe salariul de bază, nu pe gross_eff
             year,
             month,
         );
@@ -611,11 +646,14 @@ pub async fn run_payroll(
                     }
                 })
                 .collect();
+            // Wave F: sporurile se adaugă la gross înainte de proratare (dacă angajatul are CM +
+            // spor, sporul se foloseşte în baza proratată). Modelul simplu: gross_eff = gross + spor,
+            // care intră în compute_payroll_with_leave → worked_gross prorata pe gross_eff.
             let lr = compute_payroll_with_leave(&LeavePayrollInput {
-                gross,
+                gross: gross_eff,
                 personal_deduction: deducere_plafonata(
                     dec(&e.personal_deduction),
-                    gross,
+                    gross_eff,
                     year,
                     month,
                 ),
@@ -628,7 +666,7 @@ pub async fn run_payroll(
                 gross: lr.worked_gross,
                 personal_deduction: deducere_plafonata(
                     dec(&e.personal_deduction),
-                    gross,
+                    gross_eff,
                     year,
                     month,
                 ),
@@ -647,7 +685,7 @@ pub async fn run_payroll(
             let sal_cas_leave = wcas;
             let sal_cass_leave = wcass;
             let sal_tax_leave = lr.income_tax - indemn_tax;
-            let ded_leave = deducere_plafonata(dec(&e.personal_deduction), gross, year, month);
+            let ded_leave = deducere_plafonata(dec(&e.personal_deduction), gross_eff, year, month);
             if let Some(&emp_excess) = extra_income.get(&e.id) {
                 if emp_excess > Decimal::ZERO {
                     // Combined CAS/CASS on (worked_gross + excess); impozit on combined − CAS − CASS − ded.
@@ -684,6 +722,25 @@ pub async fn run_payroll(
                 t_cam_base += leid0(lr.worked_base);
             }
             t_net += lr.net;
+            // Wave F: rețineri post-net pe ramura concediu medical.
+            let retin = if let Some(emp_ret) = retineri_map.get(&e.id) {
+                let res = apply_retineri(lr.net, emp_ret);
+                t_retinut += res.total_retinut;
+                for it in &res.items {
+                    retin_items.push(crate::db::gl::RetinereGlItem {
+                        account: it.account.clone(),
+                        amount: it.suma_efectiva,
+                    });
+                }
+                res
+            } else {
+                crate::db::payroll_retineri::RetinereResult {
+                    total_retinut: Decimal::ZERO,
+                    net_redus: lr.net,
+                    clamped: false,
+                    items: vec![],
+                }
+            };
             // Indemnizația = combinat − lucrat (CAS/CASS ≥ 0 mereu; impozitul plafonat mai sus).
             indemn.employer += lr.indemn_employer;
             indemn.fnuass += lr.indemn_fnuass;
@@ -699,13 +756,21 @@ pub async fn run_payroll(
                 income_tax: f(lr.income_tax),
                 net: f(lr.net),
                 cam: f(lr.cam),
+                spor: f(spor),
+                total_retinut: f(retin.total_retinut),
+                net_employee: f(retin.net_redus),
             });
             continue;
         }
 
         let r = compute_payroll(&PayrollInput {
-            gross,
-            personal_deduction: deducere_plafonata(dec(&e.personal_deduction), gross, year, month),
+            gross: gross_eff,
+            personal_deduction: deducere_plafonata(
+                dec(&e.personal_deduction),
+                gross_eff,
+                year,
+                month,
+            ),
             non_taxable,
         });
         let exempt = exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
@@ -718,7 +783,7 @@ pub async fn run_payroll(
             e.contract_end_date.as_deref(),
         );
         if let Some((_, cas_diff, cass_diff)) = part_time_min_base(
-            gross,
+            gross_eff,
             &e.tip_contract,
             exempt,
             year,
@@ -730,17 +795,18 @@ pub async fn run_payroll(
             t_cass_diff += cass_diff;
         }
         // Wave E: fold diurnă excess into combined base for single-rounding contributions.
-        // S = salary gross (dec(&r.gross)). E = excess from payroll_extra_income (or 0).
-        // When E=0 the path is byte-identical to the pre-Wave-E code.
+        // S = salary gross (dec(&r.gross)) which already includes sporuri via gross_eff.
+        // E = excess from payroll_extra_income (or 0). When E=0 path is byte-identical to pre-Wave-E.
         let sal_gross = dec(&r.gross);
         let sal_cas = dec(&r.cas);
         let sal_cass = dec(&r.cass);
         let sal_impozit = dec(&r.income_tax);
         if let Some(&emp_excess) = extra_income.get(&e.id) {
             if emp_excess > Decimal::ZERO {
-                // Combined base = salary gross + excess (non_taxable already excluded from r.gross via compute_payroll).
-                // For impozit: deduction applies (same deduction as salary path, not doubled).
-                let emp_ded = deducere_plafonata(dec(&e.personal_deduction), gross, year, month);
+                // Combined base = salary gross (incl. spor) + excess.
+                // non_taxable already excluded from r.gross via compute_payroll.
+                let emp_ded =
+                    deducere_plafonata(dec(&e.personal_deduction), gross_eff, year, month);
                 let combined_base = sal_gross + emp_excess;
                 let comb_cas = pct(combined_base, (25, 2));
                 let comb_cass = pct(combined_base, (10, 2));
@@ -755,7 +821,8 @@ pub async fn run_payroll(
                 t_cass += comb_cass;
                 t_tax += comb_impozit;
                 t_net += dec(&r.net); // salary net (excess net was already paid cash)
-                t_cam_base += leid0((gross - non_taxable).max(Decimal::ZERO)) + leid0(emp_excess);
+                t_cam_base +=
+                    leid0((gross_eff - non_taxable).max(Decimal::ZERO)) + leid0(emp_excess);
                 t_excess_reclass += emp_excess;
                 t_excess_receivable += excess_recv;
             } else {
@@ -764,7 +831,7 @@ pub async fn run_payroll(
                 t_cass += sal_cass;
                 t_tax += sal_impozit;
                 t_net += dec(&r.net);
-                t_cam_base += leid0((gross - non_taxable).max(Decimal::ZERO));
+                t_cam_base += leid0((gross_eff - non_taxable).max(Decimal::ZERO));
             }
         } else {
             t_gross += sal_gross;
@@ -772,8 +839,28 @@ pub async fn run_payroll(
             t_cass += sal_cass;
             t_tax += sal_impozit;
             t_net += dec(&r.net);
-            t_cam_base += leid0((gross - non_taxable).max(Decimal::ZERO));
+            t_cam_base += leid0((gross_eff - non_taxable).max(Decimal::ZERO));
         }
+        // Wave F: rețineri post-net pentru calea standard (fără concediu medical).
+        let emp_net = dec(&r.net);
+        let retin = if let Some(emp_ret) = retineri_map.get(&e.id) {
+            let res = apply_retineri(emp_net, emp_ret);
+            t_retinut += res.total_retinut;
+            for it in &res.items {
+                retin_items.push(crate::db::gl::RetinereGlItem {
+                    account: it.account.clone(),
+                    amount: it.suma_efectiva,
+                });
+            }
+            res
+        } else {
+            crate::db::payroll_retineri::RetinereResult {
+                total_retinut: Decimal::ZERO,
+                net_redus: emp_net,
+                clamped: false,
+                items: vec![],
+            }
+        };
         states.push(EmployeeState {
             employee_id: e.id.clone(),
             full_name: e.full_name.clone(),
@@ -781,8 +868,11 @@ pub async fn run_payroll(
             cas: r.cas,
             cass: r.cass,
             income_tax: r.income_tax,
-            net: r.net,
+            net: r.net.clone(),
             cam: r.cam,
+            spor: f(spor),
+            total_retinut: f(retin.total_retinut),
+            net_employee: f(retin.net_redus),
         });
     }
 
@@ -808,6 +898,8 @@ pub async fn run_payroll(
             indemn: indemn.clone(),
             excess_reclass: t_excess_reclass,
             excess_receivable: t_excess_receivable,
+            // Wave F: rețineri — net split per creditor account.
+            retineri: retin_items,
         },
     )
     .await?;
@@ -821,6 +913,7 @@ pub async fn run_payroll(
         total_income_tax: f(t_tax + indemn.tax),
         total_net: f(t_net),
         total_cam: f(t_cam),
+        total_retinut: f(t_retinut),
         posted: post.posted,
         entry_date: post.entry_date,
     })
@@ -1128,5 +1221,433 @@ mod tests {
         assert!(parse_money("Brut", "1e10").is_err());
         assert!(parse_money("Brut", "1E5").is_err());
         assert!(parse_money("Brut", "-1e3").is_err());
+    }
+
+    // ── Wave F: Sporuri + Rețineri ────────────────────────────────────────────
+
+    fn emp_input_f(cnp: &str, name: &str, gross: &str) -> CreateEmployeeInput {
+        CreateEmployeeInput {
+            company_id: "co1".into(),
+            cnp: cnp.into(),
+            full_name: name.into(),
+            gross_salary: gross.into(),
+            personal_deduction: Some("0".into()),
+            employment_date: None,
+            contract_end_date: None,
+            tip_asigurat: None,
+            pensionar: None,
+            tip_contract: None,
+            ore_norma: None,
+            exceptie_cas_min: None,
+            sediu_cif: None,
+            beneficiar_suma_netaxabila: None,
+        }
+    }
+
+    /// SPOR-1: angajat cu salariu de bază 4000 + spor 1000 → contribuțiile calculate pe 5000.
+    /// CAS 25%×5000=1250, CASS 10%×5000=500, impozit 10%×(5000−1250−500)=325, net=2925.
+    /// CAM 2,25% pe baza agregată (5000, un singur angajat) = ROUND(5000×2,25%)=113.
+    /// GL≡D112: un singur angajat, deci nu e diferență de roundup agregat vs per-salariat.
+    #[tokio::test]
+    async fn spor_folds_into_gross_contributions_computed_on_combined() {
+        let pool = setup().await;
+        let emp = create(&pool, emp_input_f("1900101410011", "Pop Ion", "4000"))
+            .await
+            .unwrap();
+
+        // Inserează spor 1000 lei (vecchime).
+        crate::db::payroll_sporuri::create(
+            &pool,
+            crate::db::payroll_sporuri::CreateSporInput {
+                company_id: "co1".into(),
+                employee_id: emp.id.clone(),
+                period: "2026-06".into(),
+                amount: "1000".into(),
+                kind: Some("vechime".into()),
+                description: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let run = run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+
+        // Contribuțiile pe gross_eff=5000 (salariu 4000 + spor 1000):
+        // CAS=1250, CASS=500, impozit=10%×(5000−1250−500)=325, net=2925, CAM=113.
+        assert_eq!(run.states.len(), 1);
+        let st = &run.states[0];
+        assert_eq!(st.gross, "5000.00", "gross trebuie să includă sporul");
+        assert_eq!(st.cas, "1250.00", "CAS 25% pe 5000");
+        assert_eq!(st.cass, "500.00", "CASS 10% pe 5000");
+        assert_eq!(st.income_tax, "325.00", "impozit pe 5000");
+        assert_eq!(st.net, "2925.00", "net înainte de rețineri");
+        assert_eq!(st.spor, "1000.00", "spor raportat");
+        assert_eq!(st.total_retinut, "0.00", "fără rețineri");
+        assert_eq!(
+            st.net_employee, "2925.00",
+            "net angajat = net când fără rețineri"
+        );
+        // CAM agregat = ROUND(5000×2,25%) = 113 (ca în golden test 5000 brut)
+        assert_eq!(run.total_cam, "113.00", "CAM pe 5000");
+        assert!(run.posted);
+
+        // GL: 641 debit = 5000 (gross_eff incl. spor), 421 credit = 2925 (net angajat).
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let bal = |code: &str| {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| (r.closing_debit.clone(), r.closing_credit.clone()))
+        };
+        assert_eq!(bal("641"), Some(("5000.00".into(), "0.00".into())));
+        // 421 credit = net = 2925; 4315 = CAS = 1250; 4316 = CASS = 500; 444 = impozit = 325.
+        assert_eq!(bal("4315"), Some(("0.00".into(), "1250.00".into())));
+        assert_eq!(bal("4316"), Some(("0.00".into(), "500.00".into())));
+        assert_eq!(bal("444"), Some(("0.00".into(), "325.00".into())));
+        // 421 credit = 2925 (net angajat — fără rețineri, tot netul merge la angajat)
+        assert_eq!(bal("421"), Some(("0.00".into(), "2925.00".into())));
+        assert!(tb.balanced, "sporuri journal trebuie să fie echilibrat");
+    }
+
+    /// SPOR-2 GL≡D112: sporurile intră în baza D112 — golden test cu spor.
+    /// Doi angajați: A salariu 5000 fără spor, B salariu 4000 + spor 1000 → baza totală CAM = 10000.
+    /// ROUND(10000×2,25%) = 225 (identic cu 2×5000 din golden original).
+    /// 421 credit = (5000−1250−500−325) + (5000−1250−500−325) = 2925+2925 = 5850.
+    #[tokio::test]
+    async fn spor_gl_equals_d112_combined_base_golden() {
+        let pool = setup().await;
+        // Angajat A: brut 5000, fără spor.
+        create(&pool, emp_input_f("1", "A", "5000")).await.unwrap();
+        // Angajat B: brut 4000 + spor 1000 = gross_eff 5000.
+        let b = create(&pool, emp_input_f("2", "B", "4000")).await.unwrap();
+        crate::db::payroll_sporuri::create(
+            &pool,
+            crate::db::payroll_sporuri::CreateSporInput {
+                company_id: "co1".into(),
+                employee_id: b.id.clone(),
+                period: "2026-06".into(),
+                amount: "1000".into(),
+                kind: None,
+                description: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let run = run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        // Ambii pe gross_eff 5000 → total_gross=10000 (A:5000 + B:5000).
+        assert_eq!(run.total_gross, "10000.00");
+        assert_eq!(run.total_cas, "2500.00");
+        assert_eq!(run.total_cass, "1000.00");
+        assert_eq!(run.total_income_tax, "650.00");
+        assert_eq!(run.total_net, "5850.00");
+        // CAM pe baza AGREGATĂ 10000 (single rounding) = 225, identic cu golden original.
+        assert_eq!(run.total_cam, "225.00");
+        assert!(run.posted);
+
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let bal = |code: &str| {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| (r.closing_debit.clone(), r.closing_credit.clone()))
+        };
+        assert_eq!(bal("641"), Some(("10000.00".into(), "0.00".into())));
+        assert_eq!(bal("421"), Some(("0.00".into(), "5850.00".into())));
+        assert_eq!(bal("4315"), Some(("0.00".into(), "2500.00".into())));
+        assert_eq!(bal("646"), Some(("225.00".into(), "0.00".into())));
+        assert!(
+            tb.balanced,
+            "sporuri GL≡D112 golden journal trebuie să fie echilibrat"
+        );
+    }
+
+    /// RETINERE-1: angajat net 2925 (brut 5000 = 4000+1000 spor), poprire 800.
+    /// 800 ≤ 1/3 × 2925 = 975 → reținere trece integral.
+    /// GL: D421=C427 800, D421=C5311 2125; contribuțiile NESCHIMBATE.
+    #[tokio::test]
+    async fn retinere_post_net_splits_421_into_427_and_5311() {
+        let pool = setup().await;
+        let emp = create(&pool, emp_input_f("1900101410011", "Pop Ion", "4000"))
+            .await
+            .unwrap();
+        // Spor 1000 → gross_eff = 5000, net = 2925.
+        crate::db::payroll_sporuri::create(
+            &pool,
+            crate::db::payroll_sporuri::CreateSporInput {
+                company_id: "co1".into(),
+                employee_id: emp.id.clone(),
+                period: "2026-06".into(),
+                amount: "1000".into(),
+                kind: None,
+                description: None,
+            },
+        )
+        .await
+        .unwrap();
+        // Poprire 800 (< 1/3 × 2925 = 975 → trece integral).
+        crate::db::payroll_retineri::create(
+            &pool,
+            crate::db::payroll_retineri::CreateRetinereInput {
+                company_id: "co1".into(),
+                employee_id: emp.id.clone(),
+                period: "2026-06".into(),
+                amount: "800".into(),
+                kind: Some("poprire".into()),
+                creditor: Some("Tribunal".into()),
+                account: Some("427".into()),
+                priority: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let run = run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        // Contribuțiile NESCHIMBATE (reținerea e post-net):
+        assert_eq!(run.total_cas, "1250.00", "CAS neschimbat");
+        assert_eq!(run.total_cass, "500.00", "CASS neschimbat");
+        assert_eq!(run.total_income_tax, "325.00", "impozit neschimbat");
+        // Net total (înainte de rețineri) = 2925; totalRetinut = 800; net angajat = 2125.
+        assert_eq!(run.total_net, "2925.00", "net total înainte rețineri");
+        assert_eq!(run.total_retinut, "800.00", "total reținut");
+        assert_eq!(run.states[0].net_employee, "2125.00", "net efectiv angajat");
+
+        // GL: contribuțiile identice cu cazul fără rețineri (4315/4316/444/436 neschimbate).
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let bal = |code: &str| {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| (r.closing_debit.clone(), r.closing_credit.clone()))
+        };
+        // Contribuțiile = obligațiile D112 (neschimbate de rețineri):
+        assert_eq!(bal("4315"), Some(("0.00".into(), "1250.00".into())));
+        assert_eq!(bal("4316"), Some(("0.00".into(), "500.00".into())));
+        assert_eq!(bal("444"), Some(("0.00".into(), "325.00".into())));
+        // 421: credit net 2925, debit reținere 800 → sold credit 2125.
+        // Nota: GL înregistrează D421/C427=800 (reținere) în aceeași notă PAYROLL.
+        // 421 net credit = 2925 - 800 = 2125 (de plată angajat); 427 credit = 800 (de plată terț).
+        // Balanța: suma = 5000 debit 641 + 113 debit 646 = 5000 credit 421 brut +1250 C4315 +500 C4316 +325 C444 +113 C436;
+        // din 421 credit: 1250+500+325 D421 (rețineri contribuții) + 800 D421 C427 → 421 net credit = 5000-2075-800=2125.
+        assert!(tb.balanced, "rețineri journal trebuie să fie echilibrat");
+        // 427 credit = 800 (obligație față de terț).
+        assert_eq!(bal("427"), Some(("0.00".into(), "800.00".into())));
+    }
+
+    /// RETINERE-2: reținere depășind 1/3 net → plafonată la 1/3.
+    /// Net = 2925; cerut 1500 > 1/3=975 → efectiv 975; net angajat = 1950.
+    /// Contribuțiile NESCHIMBATE.
+    #[tokio::test]
+    async fn retinere_exceeds_cap_is_clamped() {
+        let pool = setup().await;
+        let emp = create(&pool, emp_input_f("1900101410011", "Pop Ion", "5000"))
+            .await
+            .unwrap();
+        // Net = 5000 - 1250 - 500 - 325 = 2925.
+        crate::db::payroll_retineri::create(
+            &pool,
+            crate::db::payroll_retineri::CreateRetinereInput {
+                company_id: "co1".into(),
+                employee_id: emp.id.clone(),
+                period: "2026-06".into(),
+                amount: "1500".into(), // > 1/3 × 2925 = 975
+                kind: Some("poprire".into()),
+                creditor: None,
+                account: Some("427".into()),
+                priority: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let run = run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        // Contribuțiile neschimbate:
+        assert_eq!(run.total_cas, "1250.00");
+        assert_eq!(run.total_cass, "500.00");
+        assert_eq!(run.total_income_tax, "325.00");
+        // Reținere clamped la 975 (1/3 din 2925):
+        assert_eq!(run.total_retinut, "975.00", "clamped la 1/3 net");
+        assert_eq!(
+            run.states[0].net_employee, "1950.00",
+            "net efectiv = 2925-975"
+        );
+
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        assert!(tb.balanced, "journal echilibrat și cu reținere clamped");
+        let c427 = tb
+            .rows
+            .iter()
+            .find(|r| r.account_code == "427")
+            .map(|r| r.closing_credit.clone())
+            .unwrap_or_default();
+        assert_eq!(c427, "975.00", "427 credit = suma clamped");
+    }
+
+    /// RETINERE-3: sporuri + rețineri împreună, un singur angajat.
+    /// Gross 4000 + spor 1000 = 5000. CAS 1250, CASS 500, impozit 325, net 2925.
+    /// Poprire 800 (< 975) + pensie alimentară 900 (< 975). Σ = 1700 > 1/2×2925=1462.5.
+    /// Pensie alimentară (priority 1) → 900; poprire → min(800, 975, 562.5) = 562.5.
+    /// Total reținut = 900+562.5=1462.5; net angajat = 1462.5.
+    #[tokio::test]
+    async fn spor_and_retineri_combined_on_one_employee() {
+        let pool = setup().await;
+        let emp = create(&pool, emp_input_f("1900101410011", "Pop Ion", "4000"))
+            .await
+            .unwrap();
+        // Spor 1000
+        crate::db::payroll_sporuri::create(
+            &pool,
+            crate::db::payroll_sporuri::CreateSporInput {
+                company_id: "co1".into(),
+                employee_id: emp.id.clone(),
+                period: "2026-06".into(),
+                amount: "1000".into(),
+                kind: None,
+                description: None,
+            },
+        )
+        .await
+        .unwrap();
+        // Pensie alimentară 900 (priority 1)
+        crate::db::payroll_retineri::create(
+            &pool,
+            crate::db::payroll_retineri::CreateRetinereInput {
+                company_id: "co1".into(),
+                employee_id: emp.id.clone(),
+                period: "2026-06".into(),
+                amount: "900".into(),
+                kind: Some("pensie_alimentara".into()),
+                creditor: None,
+                account: Some("427".into()),
+                priority: None, // defaults to 1
+            },
+        )
+        .await
+        .unwrap();
+        // Poprire 800 (priority 2)
+        crate::db::payroll_retineri::create(
+            &pool,
+            crate::db::payroll_retineri::CreateRetinereInput {
+                company_id: "co1".into(),
+                employee_id: emp.id.clone(),
+                period: "2026-06".into(),
+                amount: "800".into(),
+                kind: Some("poprire".into()),
+                creditor: None,
+                account: Some("462".into()),
+                priority: Some(2),
+            },
+        )
+        .await
+        .unwrap();
+
+        let run = run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        // Contribuțiile pe gross_eff 5000 (neschimbate de rețineri):
+        assert_eq!(run.total_cas, "1250.00", "CAS pe 5000");
+        assert_eq!(run.total_cass, "500.00", "CASS pe 5000");
+        assert_eq!(run.total_income_tax, "325.00", "impozit pe 5000");
+        assert_eq!(run.total_net, "2925.00", "net total înainte rețineri");
+
+        // 1/3 din 2925 = 975; 1/2 din 2925 = 1462.50.
+        // Pensie alimentară (priority 1): min(900, 975, 1462.50) = 900.
+        // Poprire (priority 2): min(800, 975, 1462.50-900=562.50) = 562.50.
+        // Total = 1462.50.
+        let total_ret = rust_decimal::Decimal::from_str(&run.total_retinut).unwrap();
+        assert_eq!(
+            total_ret,
+            rust_decimal::Decimal::new(146250, 2), // 1462.50
+            "total reținut = 1462.50 (plafon 1/2 net)"
+        );
+        let net_emp = rust_decimal::Decimal::from_str(&run.states[0].net_employee).unwrap();
+        assert_eq!(
+            net_emp,
+            rust_decimal::Decimal::new(146250, 2), // 1462.50
+            "net angajat = 1462.50"
+        );
+
+        // GL: echilibrat; 427 = 900 (pensie alimentară); 462 = 562.50 (poprire clamped).
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let bal_credit = |code: &str| {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| r.closing_credit.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(bal_credit("427"), "900.00", "427 = pensie alimentară 900");
+        let c462 = rust_decimal::Decimal::from_str(&bal_credit("462")).unwrap_or_default();
+        assert_eq!(
+            c462,
+            rust_decimal::Decimal::new(56250, 2), // 562.50
+            "462 = poprire clamped 562.50"
+        );
+        assert!(tb.balanced, "sporuri+rețineri journal trebuie echilibrat");
+    }
+
+    /// RETINERE-4: reținerea nu modifică contribuțiile (sunt post-net).
+    /// Verifică explicit că 4315/4316/444/436 sunt identice cu/fără rețineri.
+    #[tokio::test]
+    async fn retinere_does_not_affect_contributions_or_d112_base() {
+        let pool = setup().await;
+        let emp = create(&pool, emp_input_f("1900101410011", "Pop Ion", "5000"))
+            .await
+            .unwrap();
+
+        // Rulare fără rețineri (referință).
+        let run_ref = run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let cas_ref = run_ref.total_cas.clone();
+        let cass_ref = run_ref.total_cass.clone();
+        let tax_ref = run_ref.total_income_tax.clone();
+        let cam_ref = run_ref.total_cam.clone();
+
+        // Adaugă o reținere.
+        crate::db::payroll_retineri::create(
+            &pool,
+            crate::db::payroll_retineri::CreateRetinereInput {
+                company_id: "co1".into(),
+                employee_id: emp.id.clone(),
+                period: "2026-07".into(), // luna diferită — nu interferă cu 06
+                amount: "500".into(),
+                kind: None,
+                creditor: None,
+                account: Some("427".into()),
+                priority: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Re-rulare (idempotentă, aceeași lună):
+        let run2 = run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        assert_eq!(run2.total_cas, cas_ref, "CAS neschimbat");
+        assert_eq!(run2.total_cass, cass_ref, "CASS neschimbat");
+        assert_eq!(run2.total_income_tax, tax_ref, "impozit neschimbat");
+        assert_eq!(run2.total_cam, cam_ref, "CAM neschimbat");
+        // Luna 07 n-a afectat luna 06:
+        assert_eq!(run2.total_retinut, "0.00", "fără rețineri în iunie");
     }
 }

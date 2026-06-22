@@ -4453,6 +4453,16 @@ impl IndemnityTotals {
     }
 }
 
+/// O reținere individuală pentru nota GL (Wave F).
+/// Fiecare item ⇒ D 421 = C <account> (427 / 4282 / 462).
+#[derive(Debug, Clone)]
+pub struct RetinereGlItem {
+    /// Contul credit: '427', '4282', sau '462'.
+    pub account: String,
+    /// Suma reținută (Decimal, > 0).
+    pub amount: Decimal,
+}
+
 /// Aggregated monthly payroll totals fed to [`post_payroll`] (Wave 4 — replaces a 13-positional-arg
 /// signature). All whole-lei (ANAF commercial rounding) except `gross`/`net`-bearing sums.
 ///
@@ -4470,6 +4480,12 @@ impl IndemnityTotals {
 ///   excess; 421 nets to salary-net only, since the excess-net was already paid cash).
 ///
 /// Both are ZERO when no excess exists → the existing salary-only path is byte-identical.
+///
+/// ## Rețineri/Popriri (Wave F)
+/// `retineri` carries per-creditor account split of the net deductions applied post-net.
+/// Each item ⇒ D 421 / C 427/4282/462 (reduces the salary payable; increases creditor payable).
+/// The remaining net (421 − Σ rețineri) is paid to the employee: D 421 / C 5311.
+/// Empty when no rețineri exist → byte-identical to pre-Wave-F path.
 #[derive(Debug, Clone)]
 pub struct PayrollTotals {
     /// Σ brut lucrat (D 641). Does NOT include excess — excess goes via D641/C625 (excess_reclass).
@@ -4497,6 +4513,8 @@ pub struct PayrollTotals {
     /// Σ excess-attributable withholdings = combined_withholdings − salary_withholdings (Wave E).
     /// GL: D 4282 / C 421 = excess_receivable. Makes 421 net to salary-net (not combined net).
     pub excess_receivable: Decimal,
+    /// Rețineri/Popriri post-net (Wave F). Empty when none. GL: D 421 / C 427/4282/462 per item.
+    pub retineri: Vec<RetinereGlItem>,
 }
 
 /// Post the monthly payroll aggregate to the GL (OMFP 1802/2014 monograph): D 641 / C 421 (gross);
@@ -4522,6 +4540,7 @@ pub async fn post_payroll(
         indemn,
         excess_reclass,
         excess_receivable,
+        retineri,
     } = totals;
     let cfg = crate::db::payroll_config::get_payroll_config(pool, company_id).await?;
     let source_id = format!("{period_from}_{period_to}");
@@ -4684,6 +4703,42 @@ pub async fn post_payroll(
         }
         if !indemn.tax.is_zero() {
             add(&mut entries, &cfg.impozit, Decimal::ZERO, indemn.tax);
+        }
+    }
+    // Wave F — Rețineri/Popriri post-net (Codul muncii art.169 + Cod proc. civ.).
+    //
+    // Reținerea NU modifică contribuțiile sau D112 (e post-net). Împarte doar netul:
+    //   D 421 / C 427/4282/462 = suma reținută (obligație față de terț)
+    //   D 421 / C 5311 = restul net (de plată angajatului)
+    //
+    // Dacă nu există rețineri, blocul e sărit (byte-identical cu pre-Wave-F).
+    // Nota GL rămâne idempotentă (DELETE+INSERT pe source_id PAYROLL).
+    if !retineri.is_empty() {
+        // Aggregate rețineri by account (combine multiple employees per account for a clean note).
+        let mut by_account: std::collections::HashMap<String, Decimal> =
+            std::collections::HashMap::new();
+        for item in &retineri {
+            *by_account
+                .entry(item.account.clone())
+                .or_insert(Decimal::ZERO) += item.amount;
+        }
+        let total_retinut: Decimal = by_account.values().copied().sum();
+        if !total_retinut.is_zero() {
+            // D 421 = Σ rețineri
+            add(
+                &mut entries,
+                &cfg.salarii_datorate,
+                total_retinut,
+                Decimal::ZERO,
+            );
+            // C 427/4282/462 per creditor account
+            let mut sorted_accounts: Vec<(String, Decimal)> = by_account.into_iter().collect();
+            sorted_accounts.sort_by(|a, b| a.0.cmp(&b.0));
+            for (acc, amt) in sorted_accounts {
+                if !amt.is_zero() {
+                    add(&mut entries, &acc, Decimal::ZERO, amt);
+                }
+            }
         }
     }
     assert_balanced(&entries, &source_id)?;

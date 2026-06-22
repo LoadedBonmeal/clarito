@@ -44,6 +44,8 @@ pub mod payments;
 pub mod payroll;
 pub mod payroll_config;
 pub mod payroll_diurna;
+pub mod payroll_retineri;
+pub mod payroll_sporuri;
 pub mod period_locks;
 pub mod productie;
 pub mod products;
@@ -123,6 +125,8 @@ mod no_inline_test_schema {
         "payments",
         "payroll_config",
         "payroll_extra_income",
+        "payroll_retineri",
+        "payroll_sporuri",
         "period_locks",
         "product_groups",
         "productie_orders",

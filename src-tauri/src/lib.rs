@@ -626,6 +626,16 @@ pub fn run() {
                     // Simulator salariu — brut↔net (stateless, no company data, free read)
                     commands::payroll::simulate_salary,
                     commands::payroll::simulate_salary_from_net,
+                    // Wave F: sporuri salariale taxabile
+                    commands::payroll::list_sporuri,
+                    commands::payroll::create_spor,
+                    commands::payroll::update_spor,
+                    commands::payroll::delete_spor,
+                    // Wave F: rețineri/popriri din net
+                    commands::payroll::list_retineri,
+                    commands::payroll::create_retinere,
+                    commands::payroll::update_retinere,
+                    commands::payroll::delete_retinere,
                     commands::gl::close_period,
                     commands::gl::list_period_locks,
                     commands::gl::is_period_locked,

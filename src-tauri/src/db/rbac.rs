@@ -244,7 +244,10 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "export_backup"
         // P3 Wave D
         | "delete_treasury_advance"
-        | "delete_expense_report" => Some(Perm::Delete),
+        | "delete_expense_report"
+        // Wave F: sporuri + rețineri
+        | "delete_spor"
+        | "delete_retinere" => Some(Perm::Delete),
 
         // ── ViewReports ───────────────────────────────────────────────────
         "generate_vat_report"
