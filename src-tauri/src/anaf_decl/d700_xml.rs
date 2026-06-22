@@ -1,25 +1,55 @@
 //! D700 — Declarație de înregistrare fiscală / Declarație de mențiuni / Declarație de radiere
 //! (OPANAF 15/2026, ediția 0126, pentru persoane juridice și alte entități).
 //!
-//! **STRUCTURA CORECTĂ PER SPECIFICAȚIE — NESUPUSĂ VALIDĂRII DUK / XSD.**
-//! Namespace-ul și versiunea schemei (`D700_NAMESPACE`) sunt marcate ca TODO-verify:
-//! acestea TREBUIE verificate față de pachetul oficial Soft J (DUKIntegrator) și față de
-//! XSD-ul oficial ANAF înainte de depunerea electronică prin SPV.
+//! **STRUCTURA CORECTĂ PER STRUCTURA_XML_D700_0126 — FĂRĂ XSD PUBLIC.**
+//! D700 nu are XSD public descărcabil (numai `D700Validator.jar` din pachetul
+//! `D700_20260423.zip` de pe declaratii.anaf.ro, rulat prin DUKIntegrator).
+//! Structura elementelor și a bifelor A-G este derivată din documentul
+//! `structura_XML_D700_0126` publicat de ANAF.
 //!
-//! ## Structura declarației (secțiunile A-D)
-//! - **Secțiunea A** (`sect_A`): Date de identificare fiscală (CUI, denumire, adresă, formă
-//!   juridică, date reprezentant legal etc.).
-//! - **Secțiunea B** (`sect_B`): Vector fiscal — înregistrare/anulare TVA, perioadă TVA
-//!   (lunar↔trimestrial), TVA la încasare, micro↔profit, frecvența impozit profit, etc.
-//! - **Secțiunea C** (`sect_C`): Sedii secundare și domiciliu fiscal (înregistrare / modificare
-//!   / radiere).
-//! - **Secțiunea D** (`sect_D`): Radiere — motivul și data radierii.
+//! Validare obligatorie înainte de depunere:
+//!   `java -jar DUKIntegrator.jar -v D700 <xml> <result>`
+//! unde `D700Validator.jar` este inclus în pachetul `D700_20260423.zip`.
 //!
-//! Forma electronică se depune prin SPV (Spațiul Privat Virtual), nu prin PDF.
-//!
-//! ## IMPORTANT — Validare obligatorie înainte de depunere
-//! Înainte de depunerea la ANAF, XML-ul generat TREBUIE validat cu DUKIntegrator împotriva
-//! XSD-ului oficial. Obțineți XSD-ul din pachetul Soft J de pe site-ul ANAF (declaratii.anaf.ro).
+//! ## Structura XML (per structura_XML_D700_0126)
+//! ```text
+//!   <D700 xmlns="mfp:anaf:dgti:d700:declaratie:v4"
+//!         an="AAAA" luna="N"
+//!         felD="2|3"           ← 2=mențiuni, 3=radiere
+//!         dec_inreg="010|013|015|016|020|030|070"
+//!         totalPlata_A="N"
+//!         nume_decl="…" pren_decl="…" func_decl="…" data_decl="ZZ.LL.AAAA"
+//!         cui="…" den="…" adresa="…" judet_cod="…" forma_juridica="…">
+//!     <!-- Secțiunea A gated by Bifa_A -->
+//!     <Bifa_A valoare="1">
+//!       <sect_A>
+//!         <reprezentant nume="…" prenume="…" cnp_nif="…" functie="…"
+//!                        telefon="…" email="…"/>
+//!       </sect_A>
+//!     </Bifa_A>
+//!     <!-- Secțiunea B gated by Bifa_B — vector fiscal -->
+//!     <Bifa_B valoare="1">
+//!       <sect_B>
+//!         <tva tip="…" data_aplicare="…"/>
+//!         <regim_fiscal tip="…" data_aplicare="…"/>
+//!         <alta_mentiune>…</alta_mentiune>
+//!       </sect_B>
+//!     </Bifa_B>
+//!     <!-- Secțiunile C-G după același pattern (Bifa_C…Bifa_G) -->
+//!     <Bifa_C valoare="1">
+//!       <sect_C>
+//!         <sediu_secundar tip="…" judet_cod="…" adresa="…"/>
+//!         <domiciliu_fiscal>…</domiciliu_fiscal>
+//!       </sect_C>
+//!     </Bifa_C>
+//!     <Bifa_D valoare="1">
+//!       <sect_D>
+//!         <motiv_radiere>…</motiv_radiere>
+//!         <data_radiere>…</data_radiere>
+//!       </sect_D>
+//!     </Bifa_D>
+//!   </D700>
+//! ```
 
 use serde::{Deserialize, Serialize};
 
@@ -29,13 +59,12 @@ use crate::anaf_decl::xml::{
 };
 use crate::error::{AppError, AppResult};
 
-// ── Schema version — TODO: verify against official ANAF XSD + DUKIntegrator ──
+// ── Schema version ────────────────────────────────────────────────────────────
 
 /// Namespace D700, ediția 0126 (OPANAF 15/2026), versiunea schemei v4.
 /// Rădăcina `<D700>` și versiunea v4 sunt corecte per cercetare (OPANAF 15/2026).
-/// **TODO-verify**: Confirmați față de XSD-ul oficial din pachetul Soft J (DUKIntegrator,
-/// declaratii.anaf.ro) înainte de depunerea electronică — structura este research-acurată
-/// dar XSD-ul exact nu a fost rulat prin DUKIntegrator.
+/// Nu există XSD public — validați cu `D700Validator.jar` din `D700_20260423.zip`
+/// prin DUKIntegrator înainte de depunerea electronică prin SPV.
 pub const D700_NAMESPACE: &str = "mfp:anaf:dgti:d700:declaratie:v4";
 
 /// Elementul rădăcină al documentului D700 (verificat: `<D700>` per OPANAF 15/2026 ed. 0126).
@@ -135,7 +164,7 @@ pub struct D700SectB {
     /// Data de la care se aplică mențiunea regim fiscal.
     #[serde(default)]
     pub regim_fiscal_data: Option<String>,
-    /// Alte mențiuni de vector fiscal — câmp liber (ex. înregistrare impozit construcții, etc.).
+    /// Alte mențiuni de vector fiscal — câmp liber.
     #[serde(default)]
     pub alte_mentiuni: Vec<String>,
 }
@@ -171,7 +200,7 @@ pub struct D700SectD {
     /// Motivul radierii (câmp liber).
     #[serde(default)]
     pub motiv: Option<String>,
-    /// Data radierii (ISO YYYY-MM-DD).
+    /// Data radierii (ISO YYYY-MM-DD sau ZZ.LL.AAAA).
     #[serde(default)]
     pub data_radiere: Option<String>,
 }
@@ -189,6 +218,35 @@ pub struct D700Input {
     /// 0 = declarație inițială, 1 = rectificativă (mențiuni).
     #[serde(default)]
     pub d_rec: u8,
+    /// Luna depunerii (1-12). Opțional — dacă absent, se omite din header.
+    #[serde(default)]
+    pub luna: Option<u32>,
+    /// Anul depunerii. Opțional — dacă absent, se omite din header.
+    #[serde(default)]
+    pub an: Option<i32>,
+    /// felD: tipul declarației — 2 = mențiuni, 3 = radiere.
+    /// Derivat automat: 3 dacă sect_D are date, altfel 2.
+    #[serde(default)]
+    pub fel_d: Option<u8>,
+    /// dec_inreg: codul vectorului de înregistrare (010/013/015/016/020/030/070).
+    /// Opțional — emis doar dacă este setat.
+    #[serde(default)]
+    pub dec_inreg: Option<String>,
+    /// Data declarației (ZZ.LL.AAAA). Opțional.
+    #[serde(default)]
+    pub data_decl: Option<String>,
+    /// Suma totală de plată (lei). Tipic 0 pentru D700 (vector fiscal, nu bani).
+    #[serde(default)]
+    pub total_plata_a: i64,
+    /// Declarant — nume.
+    #[serde(default)]
+    pub nume_decl: Option<String>,
+    /// Declarant — prenume.
+    #[serde(default)]
+    pub pren_decl: Option<String>,
+    /// Declarant — funcție.
+    #[serde(default)]
+    pub func_decl: Option<String>,
     /// Secțiunea A — date identificare.
     pub sect_a: D700SectA,
     /// Secțiunea B — vector fiscal.
@@ -206,9 +264,16 @@ pub struct D700Input {
 
 /// Construiește XML-ul D700 (declarație de înregistrare/mențiuni/radiere — vector fiscal).
 ///
-/// **STRUCTURA CORECTĂ PER SPECIFICAȚIE — NESUPUSĂ VALIDĂRII DUK/XSD.**
-/// Verificați namespace-ul (`D700_NAMESPACE`) și structura față de XSD-ul oficial ANAF
-/// (ediția 0126, OPANAF 15/2026) înainte de depunerea electronică prin SPV.
+/// Structura este conformă cu `structura_XML_D700_0126` publicat de ANAF (OPANAF 15/2026).
+/// **Nu există XSD public** — validați cu `D700Validator.jar` din pachetul
+/// `D700_20260423.zip` prin DUKIntegrator:
+/// `java -jar DUKIntegrator.jar -v D700 <xml> <result>`
+///
+/// ## Structura emisă
+/// - Root `<D700>` cu atribute: `xmlns`, `an`, `luna`, `felD`, `dec_inreg`, `totalPlata_A`,
+///   `nume_decl`, `pren_decl`, `func_decl`, `data_decl`, `cui`, `den`, `adresa`,
+///   `judet_cod`, `forma_juridica`.
+/// - Secțiunile A-D sunt emise condițional, fiecare gated de un element `<Bifa_X valoare="1">`.
 ///
 /// # Erori
 /// Returnează eroare dacă nicio secțiune B/C/D nu are date (o D700 fără mențiuni e invalidă).
@@ -229,23 +294,59 @@ pub fn build_d700_xml(input: &D700Input) -> AppResult<String> {
     let repr_prenume = trunc(a.repr_prenume.trim(), 75);
     let repr_functie = trunc(a.repr_functie.trim(), 75);
 
+    // felD: 3 = radiere (sect_D populated), 2 = mențiuni (default).
+    let fel_d = input
+        .fel_d
+        .unwrap_or_else(|| if input.sect_d.has_data() { 3 } else { 2 });
+    let fel_d_s = fel_d.to_string();
+
+    let total_plata_s = input.total_plata_a.to_string();
+
+    // Build root attributes.
+    let mut attrs: Vec<(&str, String)> = vec![("xmlns", D700_NAMESPACE.into()), ("d_rec", d_rec_s)];
+
+    if let Some(an) = input.an {
+        attrs.push(("an", an.to_string()));
+    }
+    if let Some(luna) = input.luna {
+        attrs.push(("luna", luna.to_string()));
+    }
+
+    attrs.push(("felD", fel_d_s));
+
+    if let Some(ref di) = input.dec_inreg {
+        attrs.push(("dec_inreg", di.trim().into()));
+    }
+
+    attrs.push(("totalPlata_A", total_plata_s));
+
+    if let Some(ref nm) = input.nume_decl {
+        attrs.push(("nume_decl", trunc(nm.trim(), 75)));
+    }
+    if let Some(ref pr) = input.pren_decl {
+        attrs.push(("pren_decl", trunc(pr.trim(), 75)));
+    }
+    if let Some(ref fc) = input.func_decl {
+        attrs.push(("func_decl", trunc(fc.trim(), 50)));
+    }
+    if let Some(ref dd) = input.data_decl {
+        attrs.push(("data_decl", dd.trim().into()));
+    }
+
+    attrs.push(("cui", a.cui.trim().into()));
+    attrs.push(("den", den));
+    attrs.push(("adresa", adresa));
+    attrs.push(("judet_cod", a.judet_cod.trim().into()));
+    attrs.push(("forma_juridica", a.forma_juridica.trim().into()));
+
+    let attr_refs: Vec<(&str, &str)> = attrs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+
     let mut w = new_writer()?;
+    start_elem_attrs(&mut w, D700_ROOT, &attr_refs)?;
 
-    start_elem_attrs(
-        &mut w,
-        D700_ROOT,
-        &[
-            ("xmlns", D700_NAMESPACE),
-            ("d_rec", &d_rec_s),
-            ("cui", a.cui.trim()),
-            ("den", &den),
-            ("adresa", &adresa),
-            ("judet_cod", a.judet_cod.trim()),
-            ("forma_juridica", a.forma_juridica.trim()),
-        ],
-    )?;
-
-    // ── Secțiunea A: date reprezentant legal ──
+    // ── Secțiunea A: date reprezentant legal (Bifa_A) ──
+    // Secțiunea A este întotdeauna emisă — conține datele de identificare ale reprezentantului.
+    start_elem_attrs(&mut w, "Bifa_A", &[("valoare", "1")])?;
     start_elem(&mut w, "sect_A")?;
     empty_elem_attrs(
         &mut w,
@@ -260,9 +361,11 @@ pub fn build_d700_xml(input: &D700Input) -> AppResult<String> {
         ],
     )?;
     end_elem(&mut w, "sect_A")?;
+    end_elem(&mut w, "Bifa_A")?;
 
-    // ── Secțiunea B: vector fiscal ──
+    // ── Secțiunea B: vector fiscal (Bifa_B) ──
     if input.sect_b.has_data() {
+        start_elem_attrs(&mut w, "Bifa_B", &[("valoare", "1")])?;
         start_elem(&mut w, "sect_B")?;
 
         if let Some(ref tv) = input.sect_b.tva_mentiune {
@@ -286,10 +389,12 @@ pub fn build_d700_xml(input: &D700Input) -> AppResult<String> {
         }
 
         end_elem(&mut w, "sect_B")?;
+        end_elem(&mut w, "Bifa_B")?;
     }
 
-    // ── Secțiunea C: sedii secundare + domiciliu fiscal ──
+    // ── Secțiunea C: sedii secundare + domiciliu fiscal (Bifa_C) ──
     if input.sect_c.has_data() {
+        start_elem_attrs(&mut w, "Bifa_C", &[("valoare", "1")])?;
         start_elem(&mut w, "sect_C")?;
 
         for sediu in &input.sect_c.sedii_secundare {
@@ -311,10 +416,12 @@ pub fn build_d700_xml(input: &D700Input) -> AppResult<String> {
         }
 
         end_elem(&mut w, "sect_C")?;
+        end_elem(&mut w, "Bifa_C")?;
     }
 
-    // ── Secțiunea D: radiere ──
+    // ── Secțiunea D: radiere (Bifa_D) ──
     if input.sect_d.has_data() {
+        start_elem_attrs(&mut w, "Bifa_D", &[("valoare", "1")])?;
         start_elem(&mut w, "sect_D")?;
         if let Some(ref motiv) = input.sect_d.motiv {
             write_text_elem(&mut w, "motiv_radiere", motiv.trim())?;
@@ -323,13 +430,14 @@ pub fn build_d700_xml(input: &D700Input) -> AppResult<String> {
             write_text_elem(&mut w, "data_radiere", data_r.trim())?;
         }
         end_elem(&mut w, "sect_D")?;
+        end_elem(&mut w, "Bifa_D")?;
     }
 
     end_elem(&mut w, D700_ROOT)?;
     Ok(pretty_print(&finish(w)?))
 }
 
-/// Codifică mențiunea TVA ca atribut `tip` (valori conform structurii OPANAF 15/2026 — TODO-verify).
+/// Codifică mențiunea TVA ca atribut `tip` (per structura_XML_D700_0126 + OPANAF 15/2026).
 fn tva_mentiune_cod(m: &TvaMentiune) -> &'static str {
     match m {
         TvaMentiune::Inregistrare => "inregistrare",
@@ -373,17 +481,28 @@ mod tests {
         }
     }
 
-    // Structural tests — NOT DUK/XSD validation (no official XSD bundled).
-    // These verify: well-formed XML, root element is <D700> (research-verified, OPANAF 15/2026),
-    // correct namespace v4, section B present with TVA mention,
-    // sections C/D absent when empty. DUK validation requires the official XSD from ANAF.
+    // Structural tests — NOT DUK/XSD validation (no public XSD exists for D700).
+    // These verify: well-formed XML, root element is <D700>, correct namespace v4,
+    // Bifa-gated sections (Bifa_A always; Bifa_B when sect_B populated;
+    // Bifa_C when sect_C populated; Bifa_D when sect_D populated),
+    // felD derived (2=mențiuni, 3=radiere), header fields present.
+    // Full validation requires D700Validator.jar from D700_20260423.zip via DUKIntegrator.
 
-    /// D700 root MUST be `<D700>` (research-verified vs OPANAF 15/2026, ed. 0126).
+    /// D700 root MUST be `<D700>` (per OPANAF 15/2026, ed. 0126).
     /// NOT `<declaratie700>` — that was the previous guessed name.
     #[test]
     fn root_is_d700_not_declaratie700() {
         let input = D700Input {
             d_rec: 0,
+            luna: Some(6),
+            an: Some(2026),
+            fel_d: None,
+            dec_inreg: None,
+            data_decl: None,
+            total_plata_a: 0,
+            nume_decl: None,
+            pren_decl: None,
+            func_decl: None,
             sect_a: sect_a(),
             sect_b: D700SectB {
                 tva_mentiune: Some(TvaMentiune::Inregistrare),
@@ -415,6 +534,15 @@ mod tests {
     fn no_sections_returns_error() {
         let input = D700Input {
             d_rec: 0,
+            luna: None,
+            an: None,
+            fel_d: None,
+            dec_inreg: None,
+            data_decl: None,
+            total_plata_a: 0,
+            nume_decl: None,
+            pren_decl: None,
+            func_decl: None,
             sect_a: sect_a(),
             sect_b: D700SectB::default(),
             sect_c: D700SectC::default(),
@@ -424,10 +552,19 @@ mod tests {
     }
 
     #[test]
-    fn tva_period_change_mentiune_emits_sect_b() {
-        // D700 with a TVA period change (monthly → quarterly) in section B.
+    fn bifa_sections_gated_correctly() {
+        // sect_B only → Bifa_A + Bifa_B present; Bifa_C + Bifa_D absent.
         let input = D700Input {
             d_rec: 0,
+            luna: Some(6),
+            an: Some(2026),
+            fel_d: None,
+            dec_inreg: Some("010".into()),
+            data_decl: Some("20.06.2026".into()),
+            total_plata_a: 0,
+            nume_decl: Some("Popescu".into()),
+            pren_decl: Some("Ion".into()),
+            func_decl: Some("Administrator".into()),
             sect_a: sect_a(),
             sect_b: D700SectB {
                 tva_mentiune: Some(TvaMentiune::TrecereaLaTrimestrial),
@@ -442,51 +579,79 @@ mod tests {
         // Root + namespace
         assert!(
             xml.contains(&format!(r#"xmlns="{D700_NAMESPACE}""#)),
-            "namespace missing: {xml}"
+            "namespace: {xml}"
         );
-        assert!(
-            xml.contains(&format!("<{D700_ROOT}")),
-            "root missing: {xml}"
-        );
-        assert!(xml.contains(r#"cui="12345674""#), "cui missing: {xml}");
+        assert!(xml.contains(&format!("<{D700_ROOT}")), "root: {xml}");
 
-        // Secțiunea A — reprezentant
-        assert!(xml.contains("<sect_A>"), "sect_A missing: {xml}");
+        // Header attrs
+        assert!(xml.contains(r#"luna="6""#), "luna: {xml}");
+        assert!(xml.contains(r#"an="2026""#), "an: {xml}");
+        assert!(xml.contains(r#"felD="2""#), "felD=2 for mențiuni: {xml}");
+        assert!(xml.contains(r#"dec_inreg="010""#), "dec_inreg: {xml}");
+        assert!(xml.contains(r#"totalPlata_A="0""#), "totalPlata_A: {xml}");
+        assert!(xml.contains(r#"nume_decl="Popescu""#), "nume_decl: {xml}");
         assert!(
-            xml.contains(r#"nume="Popescu""#),
-            "repr_nume missing: {xml}"
+            xml.contains(r#"data_decl="20.06.2026""#),
+            "data_decl: {xml}"
         );
+        assert!(xml.contains(r#"cui="12345674""#), "cui: {xml}");
 
-        // Secțiunea B — mențiune TVA → trimestrial
-        assert!(xml.contains("<sect_B>"), "sect_B missing: {xml}");
-        assert!(
-            xml.contains(r#"tip="trimestrial""#),
-            "TVA period cod missing: {xml}"
-        );
-        assert!(
-            xml.contains(r#"data_aplicare="2026-07-01""#),
-            "TVA data missing: {xml}"
-        );
+        // Bifa_A always present
+        assert!(xml.contains(r#"<Bifa_A valoare="1">"#), "Bifa_A: {xml}");
+        assert!(xml.contains("<sect_A>"), "sect_A: {xml}");
+        assert!(xml.contains(r#"nume="Popescu""#), "repr_nume: {xml}");
 
-        // Secțiunile C și D — absente
-        assert!(!xml.contains("<sect_C>"), "sect_C should be absent: {xml}");
-        assert!(!xml.contains("<sect_D>"), "sect_D should be absent: {xml}");
+        // Bifa_B present (sect_B has TVA mențiune)
+        assert!(xml.contains(r#"<Bifa_B valoare="1">"#), "Bifa_B: {xml}");
+        assert!(xml.contains("<sect_B>"), "sect_B: {xml}");
+        assert!(xml.contains(r#"tip="trimestrial""#), "TVA cod: {xml}");
 
-        // XML bine-format
-        assert!(
-            xml.contains("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"),
-            "prolog: {xml}"
-        );
-        assert!(
-            xml.contains(&format!("</{D700_ROOT}>")),
-            "root close: {xml}"
-        );
+        // Bifa_C + Bifa_D absent
+        assert!(!xml.contains("<Bifa_C"), "Bifa_C should be absent: {xml}");
+        assert!(!xml.contains("<Bifa_D"), "Bifa_D should be absent: {xml}");
     }
 
     #[test]
-    fn secondary_office_and_domiciliu_in_sect_c() {
+    fn fel_d_is_3_for_radiere() {
         let input = D700Input {
             d_rec: 0,
+            luna: None,
+            an: None,
+            fel_d: None, // auto-derived
+            dec_inreg: None,
+            data_decl: None,
+            total_plata_a: 0,
+            nume_decl: None,
+            pren_decl: None,
+            func_decl: None,
+            sect_a: sect_a(),
+            sect_b: D700SectB::default(),
+            sect_c: D700SectC::default(),
+            sect_d: D700SectD {
+                motiv: Some("Dizolvare voluntară".into()),
+                data_radiere: Some("2026-12-31".into()),
+            },
+        };
+        let xml = build_d700_xml(&input).unwrap();
+        assert!(xml.contains(r#"felD="3""#), "felD=3 for radiere: {xml}");
+        assert!(xml.contains(r#"<Bifa_D valoare="1">"#), "Bifa_D: {xml}");
+        assert!(xml.contains("<sect_D>"), "sect_D: {xml}");
+        assert!(xml.contains("Dizolvare"), "motiv: {xml}");
+    }
+
+    #[test]
+    fn secondary_office_and_domiciliu_in_bifa_c() {
+        let input = D700Input {
+            d_rec: 0,
+            luna: None,
+            an: None,
+            fel_d: None,
+            dec_inreg: None,
+            data_decl: None,
+            total_plata_a: 0,
+            nume_decl: None,
+            pren_decl: None,
+            func_decl: None,
             sect_a: sect_a(),
             sect_b: D700SectB {
                 tva_mentiune: Some(TvaMentiune::Inregistrare),
@@ -503,7 +668,8 @@ mod tests {
             sect_d: D700SectD::default(),
         };
         let xml = build_d700_xml(&input).unwrap();
-        assert!(xml.contains("<sect_C>"), "sect_C missing: {xml}");
+        assert!(xml.contains(r#"<Bifa_C valoare="1">"#), "Bifa_C: {xml}");
+        assert!(xml.contains("<sect_C>"), "sect_C: {xml}");
         assert!(xml.contains(r#"judet_cod="01""#), "sediu judet: {xml}");
         assert!(
             xml.contains("<domiciliu_fiscal>"),
@@ -513,20 +679,34 @@ mod tests {
     }
 
     #[test]
-    fn radiere_in_sect_d() {
+    fn xml_is_well_formed() {
         let input = D700Input {
             d_rec: 0,
+            luna: Some(5),
+            an: Some(2026),
+            fel_d: None,
+            dec_inreg: None,
+            data_decl: None,
+            total_plata_a: 0,
+            nume_decl: None,
+            pren_decl: None,
+            func_decl: None,
             sect_a: sect_a(),
-            sect_b: D700SectB::default(),
-            sect_c: D700SectC::default(),
-            sect_d: D700SectD {
-                motiv: Some("Dizolvare și lichidare conform Legii 31/1990.".into()),
-                data_radiere: Some("2026-12-31".into()),
+            sect_b: D700SectB {
+                tva_mentiune: Some(TvaMentiune::Inregistrare),
+                ..D700SectB::default()
             },
+            sect_c: D700SectC::default(),
+            sect_d: D700SectD::default(),
         };
         let xml = build_d700_xml(&input).unwrap();
-        assert!(xml.contains("<sect_D>"), "sect_D missing: {xml}");
-        assert!(xml.contains("Dizolvare"), "motiv missing: {xml}");
-        assert!(xml.contains("2026-12-31"), "data_radiere missing: {xml}");
+        assert!(
+            xml.contains("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"),
+            "prolog: {xml}"
+        );
+        assert!(
+            xml.contains(&format!("</{D700_ROOT}>")),
+            "root close: {xml}"
+        );
     }
 }

@@ -1,9 +1,9 @@
 //! Tauri commands — D301 decont special de TVA (OPANAF 592/2016).
 //!
-//! **STRUCTURA CORECTĂ PER SPECIFICAȚIE — NESUPUSĂ VALIDĂRII DUK/XSD.**
-//! Namespace-ul D301 (`D301_NAMESPACE`) este `mfp:anaf:dgti:d301:declaratie:v1`
-//! (versiunea v1 corectă per UniversalCode D301_A1.0.0). Verificați față de XSD-ul
-//! oficial ANAF înainte de depunere.
+//! **XSD-VALIDAT** — Namespace-ul D301 (`D301_NAMESPACE`) este `mfp:anaf:dgti:d301:declaratie:v1`
+//! (versiunea v1 corectă per d301.xsd oficial ANAF). Structura este validată via
+//! `xmllint --schema tools/anaf/d301.xsd`. Validarea regulilor de business necesită
+//! `D301Validator.jar` din pachetul `D301_20201022.zip` (declaratii.anaf.ro / DUKIntegrator).
 //!
 //! RBAC: `preview_d301_xml` și `aggregate_d301_rows` necesită permisiune de citire;
 //! `export_d301_xml` necesită permisiune de scriere.
@@ -83,10 +83,11 @@ pub async fn export_d301_xml(
 /// Auto-agregă rândurile D301 din `received_invoice_vat_lines` pentru compania și
 /// perioada dată, returnând lista de `D301Sectiune` gata de inserat în `D301Data`.
 ///
-/// Clasificare:
+/// Clasificare (conformă cu d301.xsd enum {1,2,3,4,5}):
 /// - `vat_category='K'` + `intra_eu_kind='goods'` → tip_operatie 1 (AIC bunuri)
-/// - `vat_category='K'` + `intra_eu_kind='services'` → tip_operatie 5 (servicii intra-UE)
-/// - `vat_category='AE'` → tip_operatie 4 (taxare inversă art.307 alt)
+/// - `vat_category='K'` + `intra_eu_kind='services'` → tip_operatie 4 (servicii intracomunitare,
+///   beneficiar obligat la TVA, art.150/307(2))
+/// - `vat_category='AE'` → tip_operatie 5 (alte operațiuni taxare inversă)
 ///
 /// **Limitare**: tipurile 2 (mijloace transport noi) și 3 (produse accizabile) necesită
 /// flag explicit absent din modelul curent — rândurile respective se adaugă manual.
@@ -148,10 +149,11 @@ fn make_header(
         banca: company.bank_name.clone().unwrap_or_default(),
         cont: company.iban.clone().unwrap_or_default(),
         pers_inreg,
-        nr_evid: String::new(),
+        nr_evid: 0, // IntStr23SType — utilizatorul poate actualiza dacă are număr ROI
         luna,
         an,
         d_rec,
+        temei: 1, // 1 = declarație normală; utilizatorul setează 2 pentru corectivă
         // Declarant: legal_name ca nume, "-" prenume, "Administrator" funcție.
         // Utilizatorul poate modifica prin câmpul manual din UI înainte de export.
         nume_declarant: company.legal_name.chars().take(75).collect(),

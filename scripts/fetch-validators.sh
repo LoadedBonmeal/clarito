@@ -116,6 +116,50 @@ echo ""
 # D300_XSD_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/D300_v12.xsd"
 # curl -fL --progress-bar -o "$TOOLS_DIR/D300_v12.xsd" "$D300_XSD_URL"
 
+# ── D301 XSD schema ──────────────────────────────────────────────────────────
+# Official ANAF XSD (d301_20200130.xsd, targetNamespace mfp:anaf:dgti:d301:declaratie:v1,
+# version 1.02). Used by tests/d301_xsd.rs (skips gracefully when absent).
+# Full business-rule validation requires D301Validator.jar from D301_20201022.zip:
+#   https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D301_20201022.zip
+# Run via DUKIntegrator: java -jar DUKIntegrator.jar -v D301 <xml> <result>
+D301_XSD_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/d301_20200130.xsd"
+D301_XSD_PATH="$REPO_ROOT/src-tauri/tools/anaf/d301.xsd"
+mkdir -p "$(dirname "$D301_XSD_PATH")"
+echo "▶ Downloading D301 v1 XSD schema ..."
+echo "  URL: $D301_XSD_URL"
+curl -fL --progress-bar -o "$D301_XSD_PATH" "$D301_XSD_URL" || {
+    echo "  WARNING: D301 XSD download failed; the d301_xsd test will skip until vendored."
+}
+echo ""
+
+# ── D710 XSD schema ──────────────────────────────────────────────────────────
+# Official ANAF XSD (d710_20012025.xsd, targetNamespace mfp:anaf:dgti:d710:declaratie:v1,
+# version 1.02). NOTE: the published XSD has a typo (xmlns=v2 vs targetNamespace=v1);
+# the vendored copy has this corrected so xmllint can compile the schema.
+# Used by tests/d710_xsd.rs (skips gracefully when absent).
+# Full business-rule validation requires D710Validator.jar from D710_20052026.zip
+# (STANDALONE — NOT through DUKIntegrator):
+#   https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D710_20052026.zip
+# Run: java -jar D710Validator.jar <xml>
+# D700 full business-rule validation requires D700Validator.jar from D700_20260423.zip:
+#   https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D700_20260423.zip
+# Run via DUKIntegrator: java -jar DUKIntegrator.jar -v D700 <xml> <result>
+D710_XSD_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/d710_20012025.xsd"
+D710_XSD_PATH="$REPO_ROOT/src-tauri/tools/anaf/d710.xsd"
+mkdir -p "$(dirname "$D710_XSD_PATH")"
+echo "▶ Downloading D710 v1 XSD schema ..."
+echo "  URL: $D710_XSD_URL"
+curl -fL --progress-bar -o "$D710_XSD_PATH" "$D710_XSD_URL" || {
+    echo "  WARNING: D710 XSD download failed; the d710_xsd test will skip until vendored."
+}
+# Patch the xmlns= typo in the downloaded XSD (v2 → v1 to match targetNamespace).
+if [ -f "$D710_XSD_PATH" ]; then
+    sed -i '' 's/xmlns="mfp:anaf:dgti:d710:declaratie:v2"/xmlns="mfp:anaf:dgti:d710:declaratie:v1"/' "$D710_XSD_PATH" 2>/dev/null || \
+    sed -i 's/xmlns="mfp:anaf:dgti:d710:declaratie:v2"/xmlns="mfp:anaf:dgti:d710:declaratie:v1"/' "$D710_XSD_PATH" 2>/dev/null || true
+    echo "  Patched D710 XSD xmlns (v2→v1) to fix ANAF publishing typo."
+fi
+echo ""
+
 # ── D112 validator (medical-leave / asiguratD emission gate) ─────────────────
 # D112 is NOT covered by the generic DUKIntegrator.jar above — it ships a dedicated
 # business-rule validator. Index: https://static.anaf.ro/static/10/Anaf/Declaratii_R/112.html

@@ -1,8 +1,9 @@
 //! Tauri commands — D700 declarație de înregistrare/mențiuni/radiere (OPANAF 15/2026, ed. 0126).
 //!
-//! **STRUCTURA CORECTĂ PER SPECIFICAȚIE — NESUPUSĂ VALIDĂRII DUK/XSD.**
-//! Namespace-ul D700 (`D700_NAMESPACE`) și versiunea schemei sunt marcate TODO-verify
-//! în `anaf_decl::d700_xml`. Verificați față de XSD-ul oficial ANAF înainte de depunere.
+//! **STRUCTURA CORECTĂ PER STRUCTURA_XML_D700_0126 — FĂRĂ XSD PUBLIC.**
+//! D700 nu are XSD public descărcabil — validați cu `D700Validator.jar` din pachetul
+//! `D700_20260423.zip` pe declaratii.anaf.ro, prin DUKIntegrator, înainte de depunere.
+//! Structura XML include `felD`, `dec_inreg`, `totalPlata_A`, `Bifa_A..Bifa_D` gates.
 //!
 //! RBAC: `preview_d700_xml` necesită permisiune de citire; `export_d700_xml` — scriere.
 
