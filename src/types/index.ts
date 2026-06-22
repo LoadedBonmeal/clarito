@@ -1516,6 +1516,46 @@ export interface UpdateRetinereInput {
   priority?: number;
 }
 
+// ─── Pontaje (condică de prezență — CM art. 119) ─────────────────────────
+export interface Pontaj {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  /** Format YYYY-MM */
+  period: string;
+  workedDays: number;
+  /** Ore suplimentare (Decimal ca string, ex. "2.5") */
+  overtimeHours: string;
+  /** Ore noapte (Decimal ca string) */
+  nightHours: string;
+  absenceDays: number;
+  leaveDays: number;
+  notes: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreatePontajInput {
+  companyId: string;
+  employeeId: string;
+  period: string;
+  workedDays: number;
+  overtimeHours?: string;
+  nightHours?: string;
+  absenceDays?: number;
+  leaveDays?: number;
+  notes?: string;
+}
+
+export interface UpdatePontajInput {
+  workedDays?: number;
+  overtimeHours?: string;
+  nightHours?: string;
+  absenceDays?: number;
+  leaveDays?: number;
+  notes?: string;
+}
+
 /** Payroll (D112 core) — one salary state. */
 export interface PayrollInput {
   gross: string;

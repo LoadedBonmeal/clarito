@@ -65,6 +65,7 @@ pub mod payment_instruments;
 pub mod payments;
 pub mod payroll;
 pub mod payroll_config;
+pub mod pontaj;
 pub mod productie;
 pub mod products;
 pub mod quotes;

@@ -1978,6 +1978,19 @@ export const payroll = {
   /** Șterge o reținere. */
   deleteRetinere: (id: string, companyId: string) =>
     invoke<void>("delete_retinere", { id, companyId }),
+  // ── Pontaje (condică de prezență — CM art. 119) ─────────────────────────
+  /** Lista pontajelor pentru o perioadă (YYYY-MM). */
+  listPontaje: (companyId: string, period: string) =>
+    invoke<import("@/types").Pontaj[]>("list_pontaje", { companyId, period }),
+  /** Adaugă / actualizează un pontaj (unic per angajat/lună). */
+  createPontaj: (input: import("@/types").CreatePontajInput) =>
+    invoke<import("@/types").Pontaj>("create_pontaj", { input }),
+  /** Actualizează un pontaj existent. */
+  updatePontaj: (id: string, companyId: string, input: import("@/types").UpdatePontajInput) =>
+    invoke<import("@/types").Pontaj>("update_pontaj", { id, companyId, input }),
+  /** Șterge un pontaj. */
+  deletePontaj: (id: string, companyId: string) =>
+    invoke<void>("delete_pontaj", { id, companyId }),
 };
 
 export const vatRates = {

@@ -49,6 +49,7 @@ pub mod payroll_diurna;
 pub mod payroll_retineri;
 pub mod payroll_sporuri;
 pub mod period_locks;
+pub mod pontaj;
 pub mod productie;
 pub mod products;
 pub mod quotes;
@@ -134,6 +135,7 @@ mod no_inline_test_schema {
         "payroll_retineri",
         "payroll_sporuri",
         "period_locks",
+        "pontaje",
         "product_groups",
         "productie_orders",
         "products",

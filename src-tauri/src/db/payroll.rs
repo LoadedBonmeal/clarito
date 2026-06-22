@@ -19,6 +19,7 @@ use crate::db::models::{new_id, now_unix};
 use crate::db::payroll_diurna::open_extra_income_by_employee;
 use crate::db::payroll_retineri::{apply_retineri, retineri_by_employee};
 use crate::db::payroll_sporuri::sporuri_by_employee;
+use crate::db::pontaj::pontaj_by_employee;
 use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -577,6 +578,14 @@ pub async fn run_payroll(
         .await
         .unwrap_or_default();
 
+    // ── Pontaj (condică de prezență — CM art. 119) ───────────────────────────
+    // pontaje_map: employee_id → Pontaj. Empty when no pontaj was recorded.
+    // When present AND employee has no medical leave, `worked_days` overrides the
+    // calendar basis for gross proration and part-time min-base calculation.
+    let pontaje_map = pontaj_by_employee(pool, company_id, &period_ym)
+        .await
+        .unwrap_or_default();
+
     let mut states = Vec::new();
     // Worked-salary aggregates (intră în nota GL: 641/421, 4315/4316/444 salariale, 646/436 CAM).
     let (mut t_gross, mut t_cas, mut t_cass, mut t_tax, mut t_net) = (
@@ -763,8 +772,21 @@ pub async fn run_payroll(
             continue;
         }
 
+        // ── Pontaj override: use worked_days as the payroll basis ────────────
+        // When a pontaj exists and worked_days < nzl, prorate gross_eff.
+        // When worked_days ≥ nzl (or no pontaj), use full gross_eff (no change).
+        let pontaj_gross_eff = if let Some(pj) = pontaje_map.get(&e.id) {
+            let pontaj_worked = (pj.worked_days as u32).min(nzl);
+            if pontaj_worked < nzl && nzl > 0 {
+                gross_eff * Decimal::from(pontaj_worked) / Decimal::from(nzl)
+            } else {
+                gross_eff
+            }
+        } else {
+            gross_eff
+        };
         let r = compute_payroll(&PayrollInput {
-            gross: gross_eff,
+            gross: pontaj_gross_eff,
             personal_deduction: deducere_plafonata(
                 dec(&e.personal_deduction),
                 gross_eff,
@@ -776,12 +798,18 @@ pub async fn run_payroll(
         let exempt = exempt_part_time_min_base(e.pensionar, &e.exceptie_cas_min);
         // Aceeași proratare pe zile active ca în emiterea D112 (commands/payroll.rs) — diferența de
         // contribuție suportată de angajator din sumar trebuie să coincidă cu D112.
-        let active_days = active_working_days(
-            year,
-            month,
-            e.employment_date.as_deref(),
-            e.contract_end_date.as_deref(),
-        );
+        // Pontaj: dacă există, `worked_days` (clamped la nzl) înlocuiește `active_days` pentru
+        // calculul bazei minime part-time.
+        let active_days = if let Some(pj) = pontaje_map.get(&e.id) {
+            (pj.worked_days as u32).min(nzl)
+        } else {
+            active_working_days(
+                year,
+                month,
+                e.employment_date.as_deref(),
+                e.contract_end_date.as_deref(),
+            )
+        };
         if let Some((_, cas_diff, cass_diff)) = part_time_min_base(
             gross_eff,
             &e.tip_contract,
@@ -822,7 +850,7 @@ pub async fn run_payroll(
                 t_tax += comb_impozit;
                 t_net += dec(&r.net); // salary net (excess net was already paid cash)
                 t_cam_base +=
-                    leid0((gross_eff - non_taxable).max(Decimal::ZERO)) + leid0(emp_excess);
+                    leid0((pontaj_gross_eff - non_taxable).max(Decimal::ZERO)) + leid0(emp_excess);
                 t_excess_reclass += emp_excess;
                 t_excess_receivable += excess_recv;
             } else {
@@ -831,7 +859,7 @@ pub async fn run_payroll(
                 t_cass += sal_cass;
                 t_tax += sal_impozit;
                 t_net += dec(&r.net);
-                t_cam_base += leid0((gross_eff - non_taxable).max(Decimal::ZERO));
+                t_cam_base += leid0((pontaj_gross_eff - non_taxable).max(Decimal::ZERO));
             }
         } else {
             t_gross += sal_gross;
@@ -839,7 +867,7 @@ pub async fn run_payroll(
             t_cass += sal_cass;
             t_tax += sal_impozit;
             t_net += dec(&r.net);
-            t_cam_base += leid0((gross_eff - non_taxable).max(Decimal::ZERO));
+            t_cam_base += leid0((pontaj_gross_eff - non_taxable).max(Decimal::ZERO));
         }
         // Wave F: rețineri post-net pentru calea standard (fără concediu medical).
         let emp_net = dec(&r.net);

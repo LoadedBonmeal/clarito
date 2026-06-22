@@ -40,7 +40,8 @@
       "employees": "Angajați",
       "payslip": "Stat de salarii",
       "medicalLeaves": "Concedii medicale",
-      "offices": "Sedii secundare"
+      "offices": "Sedii secundare",
+      "pontaj": "Pontaj"
     },
     "emp": {
       "searchPlaceholder": "Caută angajat…",
@@ -272,6 +273,25 @@
       "errorInvalid": "Valoare invalidă — ex. 5000 sau 4050.50",
       "errorNegative": "Valoarea nu poate fi negativă.",
       "errorTooBig": "Netul dorit depășește domeniul de calcul."
+    },
+    "pontaj": {
+      "title": "Condică de prezență — {{period}}",
+      "subtitle": "Zile lucrate per angajat (CM art. 119). Suprascrie baza calendaristică la rularea statului de salarii.",
+      "empty": "Niciun pontaj înregistrat pentru {{period}}.",
+      "save": "Salvează pontaj",
+      "th": {
+        "employee": "Angajat",
+        "workedDays": "Zile lucrate",
+        "overtimeHours": "Ore suplimentare",
+        "nightHours": "Ore noapte",
+        "absenceDays": "Zile absență",
+        "leaveDays": "Zile CO",
+        "notes": "Observații"
+      },
+      "nzl": "{{nzl}} zile lucrătoare în {{period}}",
+      "footnote": "* Zilele lucrate suprascriu baza calendaristică la rularea statului de salarii (numai dacă angajatul nu are concediu medical înregistrat). Absențele și CO sunt informative.",
+      "print": "Printează",
+      "confirmDelete": "Ștergeți pontajul pentru \"{{name}}\"?"
     }
   }
 }

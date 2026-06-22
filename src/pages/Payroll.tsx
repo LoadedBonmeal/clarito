@@ -243,6 +243,7 @@ export function PayrollPage() {
     { label: t("payroll.tabs.medicalLeaves"), count: leaves.length },
     { label: t("payroll.tabs.offices"), count: sedii.length + 1 },
     { label: t("payroll.sim.tabLabel"), count: null },
+    { label: t("payroll.tabs.pontaj"), count: null },
   ];
 
   return (
@@ -593,6 +594,9 @@ export function PayrollPage() {
 
       {/* ── SIMULATOR SALARIU ────────────────────────────────────────────── */}
       {tab === 4 && <SalarySimPanel />}
+
+      {/* ── PONTAJ (condică de prezență — CM art. 119) ──────────────────── */}
+      {tab === 5 && <PontajPanel companyId={companyId} period={periodYm} employees={employees} />}
 
       {/* modale */}
       {modal && (
@@ -1481,5 +1485,207 @@ function SimRow({ label, value, bold, note, highlight }: { label: string; value:
         {value}
       </td>
     </tr>
+  );
+}
+
+// ─── Pontaj tab (tab 5) ─────────────────────────────────────────────────────
+
+interface PontajPanelProps {
+  companyId: string;
+  period: string;  // YYYY-MM
+  employees: import("@/types").Employee[];
+}
+
+function PontajPanel({ companyId, period, employees }: PontajPanelProps) {
+  const { t } = useTranslation();
+  const [pontaje, setPontaje] = useState<import("@/types").Pontaj[]>([]);
+  const [editing, setEditing] = useState<{ empId: string; pontaj: import("@/types").Pontaj | null } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ workedDays: "0", overtimeHours: "0", nightHours: "0", absenceDays: "0", leaveDays: "0", notes: "" });
+
+  const activeEmps = employees.filter(e => e.active);
+
+  useEffect(() => {
+    if (!companyId || !period) return;
+    api.payroll.listPontaje(companyId, period).then(setPontaje).catch(() => {});
+  }, [companyId, period]);
+
+  // Map employee_id → Pontaj
+  const pontajMap = useMemo(() => {
+    const m: Record<string, import("@/types").Pontaj> = {};
+    for (const p of pontaje) m[p.employeeId] = p;
+    return m;
+  }, [pontaje]);
+
+  function openEdit(emp: import("@/types").Employee) {
+    const pj = pontajMap[emp.id] ?? null;
+    setEditing({ empId: emp.id, pontaj: pj });
+    setForm({
+      workedDays: pj ? String(pj.workedDays) : "0",
+      overtimeHours: pj ? pj.overtimeHours : "0",
+      nightHours: pj ? pj.nightHours : "0",
+      absenceDays: pj ? String(pj.absenceDays) : "0",
+      leaveDays: pj ? String(pj.leaveDays) : "0",
+      notes: pj ? pj.notes : "",
+    });
+  }
+
+  async function save() {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      const wdNum = parseInt(form.workedDays, 10) || 0;
+      const abNum = parseInt(form.absenceDays, 10) || 0;
+      const lvNum = parseInt(form.leaveDays, 10) || 0;
+      let updated: import("@/types").Pontaj;
+      if (editing.pontaj) {
+        const input: import("@/types").UpdatePontajInput = {
+          workedDays: wdNum,
+          overtimeHours: form.overtimeHours || "0",
+          nightHours: form.nightHours || "0",
+          absenceDays: abNum,
+          leaveDays: lvNum,
+          notes: form.notes,
+        };
+        updated = await api.payroll.updatePontaj(editing.pontaj.id, companyId, input);
+      } else {
+        const input: import("@/types").CreatePontajInput = {
+          companyId,
+          employeeId: editing.empId,
+          period,
+          workedDays: wdNum,
+          overtimeHours: form.overtimeHours || "0",
+          nightHours: form.nightHours || "0",
+          absenceDays: abNum,
+          leaveDays: lvNum,
+          notes: form.notes,
+        };
+        updated = await api.payroll.createPontaj(input);
+      }
+      setPontaje(prev => {
+        const without = prev.filter(p => p.employeeId !== editing.empId);
+        return [...without, updated];
+      });
+      setEditing(null);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removePontaj(pj: import("@/types").Pontaj) {
+    const empName = activeEmps.find(e => e.id === pj.employeeId)?.fullName ?? pj.employeeId;
+    if (!window.confirm(t("payroll.pontaj.confirmDelete", { name: empName }))) return;
+    await api.payroll.deletePontaj(pj.id, companyId).catch(() => {});
+    setPontaje(prev => prev.filter(p => p.id !== pj.id));
+  }
+
+  return (
+    <div className="pontaj-panel" style={{ padding: "16px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div>
+          <div className="tt">{t("payroll.pontaj.title", { period })}</div>
+          <div style={{ fontSize: 12, color: "var(--txt-sub)", marginTop: 2 }}>{t("payroll.pontaj.subtitle")}</div>
+        </div>
+        <button className="btn-secondary" onClick={() => window.print()} style={{ fontSize: 12 }}>
+          {t("payroll.pontaj.print")}
+        </button>
+      </div>
+
+      {activeEmps.length === 0 ? (
+        <div style={{ color: "var(--txt-sub)", fontSize: 13 }}>{t("payroll.pontaj.empty", { period })}</div>
+      ) : (
+        <table className="scr-table">
+          <thead>
+            <tr>
+              <th>{t("payroll.pontaj.th.employee")}</th>
+              <th style={{ textAlign: "center" }}>{t("payroll.pontaj.th.workedDays")}</th>
+              <th style={{ textAlign: "center" }}>{t("payroll.pontaj.th.overtimeHours")}</th>
+              <th style={{ textAlign: "center" }}>{t("payroll.pontaj.th.nightHours")}</th>
+              <th style={{ textAlign: "center" }}>{t("payroll.pontaj.th.absenceDays")}</th>
+              <th style={{ textAlign: "center" }}>{t("payroll.pontaj.th.leaveDays")}</th>
+              <th>{t("payroll.pontaj.th.notes")}</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {activeEmps.map(emp => {
+              const pj = pontajMap[emp.id];
+              const isEditing = editing?.empId === emp.id;
+              if (isEditing) {
+                return (
+                  <tr key={emp.id} style={{ background: "var(--surface-2, var(--bg-card))" }}>
+                    <td style={{ fontWeight: 500 }}>{emp.fullName}</td>
+                    <td style={{ textAlign: "center" }}>
+                      <input type="number" min={0} value={form.workedDays}
+                        onChange={ev => setForm(f => ({ ...f, workedDays: ev.target.value }))}
+                        style={{ width: 60, textAlign: "center" }} />
+                    </td>
+                    <td style={{ textAlign: "center" }}>
+                      <input type="text" value={form.overtimeHours}
+                        onChange={ev => setForm(f => ({ ...f, overtimeHours: ev.target.value }))}
+                        style={{ width: 60, textAlign: "center" }} />
+                    </td>
+                    <td style={{ textAlign: "center" }}>
+                      <input type="text" value={form.nightHours}
+                        onChange={ev => setForm(f => ({ ...f, nightHours: ev.target.value }))}
+                        style={{ width: 60, textAlign: "center" }} />
+                    </td>
+                    <td style={{ textAlign: "center" }}>
+                      <input type="number" min={0} value={form.absenceDays}
+                        onChange={ev => setForm(f => ({ ...f, absenceDays: ev.target.value }))}
+                        style={{ width: 60, textAlign: "center" }} />
+                    </td>
+                    <td style={{ textAlign: "center" }}>
+                      <input type="number" min={0} value={form.leaveDays}
+                        onChange={ev => setForm(f => ({ ...f, leaveDays: ev.target.value }))}
+                        style={{ width: 60, textAlign: "center" }} />
+                    </td>
+                    <td>
+                      <input type="text" value={form.notes}
+                        onChange={ev => setForm(f => ({ ...f, notes: ev.target.value }))}
+                        style={{ width: "100%" }} />
+                    </td>
+                    <td style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <button className="btn-primary" onClick={save} disabled={saving} style={{ fontSize: 12 }}>
+                        {saving ? t("payroll.common.saving") : t("payroll.pontaj.save")}
+                      </button>
+                      <button className="btn-secondary" onClick={() => setEditing(null)} style={{ fontSize: 12 }}>
+                        {t("payroll.common.cancel")}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              }
+              return (
+                <tr key={emp.id}>
+                  <td style={{ fontWeight: 500 }}>{emp.fullName}</td>
+                  <td style={{ textAlign: "center" }}>{pj ? pj.workedDays : "—"}</td>
+                  <td style={{ textAlign: "center" }}>{pj ? pj.overtimeHours : "—"}</td>
+                  <td style={{ textAlign: "center" }}>{pj ? pj.nightHours : "—"}</td>
+                  <td style={{ textAlign: "center" }}>{pj ? pj.absenceDays : "—"}</td>
+                  <td style={{ textAlign: "center" }}>{pj ? pj.leaveDays : "—"}</td>
+                  <td style={{ color: "var(--txt-sub)", fontSize: 12 }}>{pj?.notes ?? ""}</td>
+                  <td style={{ display: "flex", gap: 6 }}>
+                    <button className="btn-secondary" onClick={() => openEdit(emp)} style={{ fontSize: 12 }}>
+                      {t("payroll.actions.edit")}
+                    </button>
+                    {pj && (
+                      <button className="btn-danger" onClick={() => removePontaj(pj)} style={{ fontSize: 12 }}>
+                        {t("payroll.actions.delete")}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      <p style={{ fontSize: 11, color: "var(--txt-sub)", marginTop: 12 }}>
+        {t("payroll.pontaj.footnote")}
+      </p>
+    </div>
   );
 }

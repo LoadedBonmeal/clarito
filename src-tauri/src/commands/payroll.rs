@@ -192,6 +192,9 @@ pub async fn export_d112_xml(
         crate::db::payroll_sporuri::sporuri_by_employee(&state.db, &company_id, &period_ym)
             .await
             .unwrap_or_default();
+    let pontaje = crate::db::pontaj::pontaj_by_employee(&state.db, &company_id, &period_ym)
+        .await
+        .unwrap_or_default();
     let xml = build_d112_xml(
         &company,
         &employees,
@@ -202,6 +205,7 @@ pub async fn export_d112_xml(
         is_rectificative,
         &extra_income,
         &sporuri,
+        &pontaje,
     )?;
     // Validate the caller-supplied destination (absolute, no '..', no UNC, whitelist ext) — the IPC
     // endpoint accepts an arbitrary string.
@@ -279,6 +283,9 @@ pub async fn preview_d112_xml(
         crate::db::payroll_sporuri::sporuri_by_employee(&state.db, &company_id, &period_ym)
             .await
             .unwrap_or_default();
+    let pontaje = crate::db::pontaj::pontaj_by_employee(&state.db, &company_id, &period_ym)
+        .await
+        .unwrap_or_default();
     build_d112_xml(
         &company,
         &employees,
@@ -289,6 +296,7 @@ pub async fn preview_d112_xml(
         is_rectificative,
         &extra_income,
         &sporuri,
+        &pontaje,
     )
 }
 
@@ -304,6 +312,13 @@ pub async fn preview_d112_xml(
 /// == D112 412/432/602/480 for employees with a spor. NOTE: `non_taxable` is computed on the BASE
 /// salary (gross_salary), NOT on gross+spor — mirrors `run_payroll` (OUG 89/2025 art. III condition
 /// refers to the base salary, not the gross+spor effective base).
+/// `pontaje` — map of `employee_id → Pontaj` from `pontaj_by_employee` for the given period.
+/// When a pontaj exists for a no-medical-leave employee and `worked_days < nzl`, the effective gross
+/// is prorated (gross_eff × worked_days/nzl) BEFORE computing contributions — exactly mirroring the
+/// pontaj proration in `run_payroll` (db/payroll.rs). This ensures GL 4315/4316/444/436 == D112
+/// 412/432/602/480 for employees with a pontaj (the GL≡D112 golden invariant).
+/// Medical-leave employees (B-path) are NOT prorated here — their proration is handled by
+/// `compute_payroll_with_leave` which uses the leave certificate days, same as `run_payroll`.
 #[allow(clippy::too_many_arguments)]
 fn build_d112_xml(
     company: &crate::db::companies::Company,
@@ -315,6 +330,7 @@ fn build_d112_xml(
     is_rectificative: bool,
     extra_income: &std::collections::HashMap<String, Decimal>,
     sporuri: &std::collections::HashMap<String, Decimal>,
+    pontaje: &std::collections::HashMap<String, crate::db::pontaj::Pontaj>,
 ) -> AppResult<String> {
     if caen.len() != 4 || !caen.chars().all(|c| c.is_ascii_digit()) {
         return Err(AppError::Validation(
@@ -480,10 +496,29 @@ fn build_d112_xml(
             continue;
         }
 
-        // Wave F A-path: compute contributions on gross_eff (gross_salary + spor). Single combined-base
-        // rounding so GL 4315/4316/444/436 == D112 412/432/602/480.
+        // ── Pontaj A-path proration ─────────────────────────────────────────────
+        // When a pontaj exists for this employee (no medical leave — those are handled on the B-path
+        // above) and worked_days < nzl, prorate gross_eff by worked_days/nzl BEFORE computing
+        // contributions. This mirrors the proration in `run_payroll` (db/payroll.rs lines ~778-787)
+        // exactly — same branch condition, same clamp to nzl, same formula — ensuring
+        // GL 4315/4316/444/436 == D112 412/432/602/480 for employees with a pontaj.
+        // When worked_days ≥ nzl (or no pontaj), pontaj_gross_eff == gross_eff (no change).
+        let pontaj_gross_eff = if let Some(pj) = pontaje.get(e.id.as_str()) {
+            let pontaj_worked = (pj.worked_days as u32).min(nzl);
+            if pontaj_worked < nzl && nzl > 0 {
+                gross_eff * Decimal::from(pontaj_worked) / Decimal::from(nzl)
+            } else {
+                gross_eff
+            }
+        } else {
+            gross_eff
+        };
+
+        // Wave F A-path: compute contributions on pontaj_gross_eff (gross_salary + spor, prorated by
+        // pontaj when worked_days < nzl). Single combined-base rounding so GL 4315/4316/444/436 ==
+        // D112 412/432/602/480 for employees with a pontaj.
         let r = compute_payroll(&PayrollInput {
-            gross: gross_eff,
+            gross: pontaj_gross_eff,
             personal_deduction: deducere_plafonata(
                 dec(&e.personal_deduction),
                 gross_eff,
@@ -521,7 +556,13 @@ fn build_d112_xml(
         // luna întreagă. Lună întreagă ⇒ active_days = NZL (neschimbat). Convenție: `gross_salary` e
         // brutul de bază al lunii (sporurile intră în gross_eff, nu în gross_salary); pentru part-time,
         // A_13P = ROUND(sm × A_8 / NZL) e recalculat de DUK din A_8.
-        let zile_emis = active_days;
+        // Pontaj override: when a pontaj is present, A_8 reflects worked_days (clamped to nzl) —
+        // mirrors run_payroll (db/payroll.rs) which also uses pontaj.worked_days.min(nzl) as active_days.
+        let zile_emis = if let Some(pj) = pontaje.get(e.id.as_str()) {
+            (pj.worked_days as u32).min(nzl)
+        } else {
+            active_days
+        };
         if let Some((base, _, _)) = crate::anaf_decl::d112::part_time_min_base(
             gross,
             &e.tip_contract,
@@ -892,6 +933,7 @@ mod tests {
             false,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         )
         .unwrap();
 
@@ -939,6 +981,7 @@ mod tests {
             6,
             "6201",
             false,
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         )
@@ -1011,6 +1054,7 @@ mod tests {
             6,
             "6201",
             false,
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         )
@@ -1127,6 +1171,7 @@ mod tests {
             "6201",
             false,
             &extra_income,
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         )
         .unwrap();
@@ -1292,6 +1337,7 @@ mod tests {
             false,
             &std::collections::HashMap::new(),
             &sporuri_map,
+            &std::collections::HashMap::new(),
         )
         .unwrap();
         let oblig = |cod: &str| -> i64 {
@@ -1335,6 +1381,153 @@ mod tests {
         assert_eq!(oblig("480"), 113, "CAM = ROUND(5000 × 2.25%) = 113");
 
         assert!(tb.balanced, "payroll journal with spor must balance");
+    }
+
+    /// P1 GOLDEN TEST — GL≡D112 WITH PONTAJ (the invariant that broke before this fix).
+    ///
+    /// Scenario: one full-time employee, base salary 5000, June 2026 (nzl=21 working days).
+    /// Pontaj: 15 worked days → prorated gross = 5000 × 15/21 ≈ 3571.43 (Decimal exact arithmetic).
+    ///
+    /// Expected contributions on prorated gross_eff = 5000 × 15/21 (single rounding):
+    ///   CAS  = ROUND(gross_prorated × 25%)                  → GL 4315 C == D112 412 A_datorat
+    ///   CASS = ROUND(gross_prorated × 10%)                  → GL 4316 C == D112 432 A_datorat
+    ///   impozit_base = gross_prorated − CAS − CASS − ded=0 → GL 444  C == D112 602 A_datorat
+    ///   CAM  = ROUND(cam_base × 2.25%) (aggregate)         → GL 436  C == D112 480 A_datorat
+    ///
+    /// Before fix: run_payroll used the prorated gross but build_d112_xml used the FULL 5000 →
+    /// GL obligations on ~3571 ≠ D112 obligations on 5000 → golden invariant broken.
+    /// After fix: both use the same prorated gross → all four pairs equal to the exact leu.
+    ///
+    /// Also verifies: the existing no-pontaj golden test scenario (same pool, run without pontaj)
+    /// is byte-identical — i.e. the proration branch fires ONLY when worked_days < nzl.
+    #[tokio::test]
+    async fn gl_d112_golden_with_pontaj() {
+        use rust_decimal::prelude::ToPrimitive;
+        let pool = setup().await;
+        let emp = crate::db::payroll::create(&pool, emp_input("1960101410019", "Pop Ana", "5000"))
+            .await
+            .unwrap();
+
+        // Insert a pontaj of 15 worked days out of 21 (June 2026).
+        crate::db::pontaj::create(
+            &pool,
+            crate::db::pontaj::CreatePontajInput {
+                company_id: "co1".into(),
+                employee_id: emp.id.clone(),
+                period: "2026-06".into(),
+                worked_days: 15,
+                overtime_hours: None,
+                night_hours: None,
+                absence_days: Some(6),
+                leave_days: None,
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // GL path: run_payroll prorates gross on 15/21 days and posts GL.
+        crate::db::payroll::run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let gl_credit = |code: &str| -> i64 {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| {
+                    Decimal::from_str(&r.closing_credit)
+                        .unwrap_or(Decimal::ZERO)
+                        .round_dp_with_strategy(
+                            0,
+                            rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                        )
+                        .to_i64()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+        };
+
+        // D112 path: build_d112_xml must now apply the same pontaj proration (15/21 of 5000).
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let employees = crate::db::payroll::list(&pool, "co1").await.unwrap();
+        let pontaje_map = crate::db::pontaj::pontaj_by_employee(&pool, "co1", "2026-06")
+            .await
+            .unwrap();
+        let xml = build_d112_xml(
+            &company,
+            &employees,
+            &[],
+            2026,
+            6,
+            "6201",
+            false,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+            &pontaje_map,
+        )
+        .unwrap();
+        let oblig = |cod: &str| -> i64 {
+            let key = format!("A_codOblig=\"{cod}\"");
+            let i = xml
+                .find(&key)
+                .unwrap_or_else(|| panic!("obligația {cod} lipsește"));
+            let dk = "A_datorat=\"";
+            let j = i + xml[i..].find(dk).expect("A_datorat") + dk.len();
+            let end = xml[j..].find('"').unwrap();
+            xml[j..j + end].parse::<i64>().unwrap()
+        };
+
+        // P1 GOLDEN INVARIANT: all four GL/D112 pairs must match to the exact leu.
+        // Before the fix: GL used prorated gross (~3571) but D112 used full gross (5000) → mismatch.
+        // After the fix: both use the SAME prorated gross → exact equality.
+        assert_eq!(
+            gl_credit("4315"),
+            oblig("412"),
+            "pontaj P1: CAS GL 4315 ≠ D112 412 (GL uses prorated gross, D112 must too!)"
+        );
+        assert_eq!(
+            gl_credit("4316"),
+            oblig("432"),
+            "pontaj P1: CASS GL 4316 ≠ D112 432 (GL uses prorated gross, D112 must too!)"
+        );
+        assert_eq!(
+            gl_credit("444"),
+            oblig("602"),
+            "pontaj P1: impozit GL 444 ≠ D112 602 (GL uses prorated gross, D112 must too!)"
+        );
+        assert_eq!(
+            gl_credit("436"),
+            oblig("480"),
+            "pontaj P1: CAM GL 436 ≠ D112 480 (GL uses prorated gross, D112 must too!)"
+        );
+
+        // Spot-check: all D112 obligations must be LESS than the no-pontaj baseline.
+        // (5000 gross: CAS=1250, CASS=500, impozit=325, CAM=113)
+        assert!(
+            oblig("412") < 1250,
+            "CAS with pontaj 15/21 must be below no-pontaj 1250, got {}",
+            oblig("412")
+        );
+        assert!(
+            oblig("432") < 500,
+            "CASS with pontaj 15/21 must be below no-pontaj 500, got {}",
+            oblig("432")
+        );
+        assert!(
+            oblig("602") < 325,
+            "impozit with pontaj 15/21 must be below no-pontaj 325, got {}",
+            oblig("602")
+        );
+        assert!(
+            oblig("480") < 113,
+            "CAM with pontaj 15/21 must be below no-pontaj 113, got {}",
+            oblig("480")
+        );
+
+        assert!(tb.balanced, "payroll journal with pontaj must balance");
     }
 
     /// PAY-01 regression: a part-time employee whose CAS/CASS base is lifted to the statutory minimum
@@ -1388,6 +1581,7 @@ mod tests {
             6,
             "6201",
             false,
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         )
@@ -1445,6 +1639,7 @@ mod tests {
             false,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         )
         .unwrap();
 
@@ -1494,6 +1689,7 @@ mod tests {
             false,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         )
         .unwrap();
         let path = std::env::temp_dir().join("d112_from_db.xml");
@@ -1533,6 +1729,7 @@ mod tests {
             6,
             "6201",
             false,
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         )

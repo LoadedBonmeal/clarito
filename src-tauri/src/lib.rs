@@ -642,6 +642,11 @@ pub fn run() {
                     commands::payroll::create_retinere,
                     commands::payroll::update_retinere,
                     commands::payroll::delete_retinere,
+                    // Pontaj (condică de prezență — CM art. 119)
+                    commands::pontaj::list_pontaje,
+                    commands::pontaj::create_pontaj,
+                    commands::pontaj::update_pontaj,
+                    commands::pontaj::delete_pontaj,
                     commands::gl::close_period,
                     commands::gl::list_period_locks,
                     commands::gl::is_period_locked,

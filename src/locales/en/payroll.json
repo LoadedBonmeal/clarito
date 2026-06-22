@@ -39,7 +39,8 @@
       "employees": "Employees",
       "payslip": "Payroll register",
       "medicalLeaves": "Medical leaves",
-      "offices": "Secondary offices"
+      "offices": "Secondary offices",
+      "pontaj": "Timesheet"
     },
     "emp": {
       "searchPlaceholder": "Search employee…",
@@ -269,6 +270,25 @@
       "errorInvalid": "Invalid value — e.g. 5000 or 4050.50",
       "errorNegative": "Value cannot be negative.",
       "errorTooBig": "Desired net exceeds calculation range."
+    },
+    "pontaj": {
+      "title": "Timesheet — {{period}}",
+      "subtitle": "Worked days per employee (Labour Code art. 119). Overrides the calendar basis when running the payroll register.",
+      "empty": "No timesheet recorded for {{period}}.",
+      "save": "Save timesheet",
+      "th": {
+        "employee": "Employee",
+        "workedDays": "Worked days",
+        "overtimeHours": "Overtime hours",
+        "nightHours": "Night hours",
+        "absenceDays": "Absence days",
+        "leaveDays": "Annual leave",
+        "notes": "Notes"
+      },
+      "nzl": "{{nzl}} working days in {{period}}",
+      "footnote": "* Worked days override the calendar basis when running the payroll register (only if the employee has no medical leave recorded). Absences and annual leave are informational.",
+      "print": "Print",
+      "confirmDelete": "Delete timesheet for \"{{name}}\"?"
     }
   }
 }
