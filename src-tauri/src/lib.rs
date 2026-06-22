@@ -735,6 +735,17 @@ pub fn run() {
                     commands::deconturi::approve_expense_report,
                     commands::deconturi::delete_expense_report,
                     commands::deconturi::compute_diurna,
+                    // avize de însoțire a mărfii — OMFP 2634/2015 formular 14-3-6A
+                    commands::avize::create_aviz,
+                    commands::avize::get_aviz,
+                    commands::avize::list_avize,
+                    commands::avize::issue_aviz,
+                    commands::avize::convert_aviz_to_invoice,
+                    // dezmembrare stocuri — OMFP 1802/2014
+                    commands::dezmembrari::create_dezmembrare,
+                    commands::dezmembrari::get_dezmembrare,
+                    commands::dezmembrari::list_dezmembrari,
+                    commands::dezmembrari::post_dezmembrare,
                 ]);
             // Gate wrapper — the SOLE invoke chokepoint.
             // All 289+ commands above flow through `inner`; this wrapper adds the RBAC

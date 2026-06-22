@@ -163,7 +163,12 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "create_treasury_advance"
         | "return_treasury_advance"
         | "approve_expense_report"
-        | "revalue_fixed_asset" => Some(Perm::PostGl),
+        | "revalue_fixed_asset"
+        // avize de însoțire: emitere (D418/C707/C4428 + stoc OUT) și conversie (418→4111 + 4428→4427)
+        | "issue_aviz"
+        | "convert_aviz_to_invoice"
+        // dezmembrare stocuri: postare (D607/C371 + D371/C7588)
+        | "post_dezmembrare" => Some(Perm::PostGl),
 
         // ── ClosePeriod ───────────────────────────────────────────────────
         "close_vat_period" | "close_period" | "lock_period" | "unlock_period" => Some(Perm::ClosePeriod),

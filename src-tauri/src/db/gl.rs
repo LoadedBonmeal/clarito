@@ -2883,6 +2883,10 @@ pub async fn generate_gl_entries(
     // ── 1. Facturi emise ──────────────────────────────────────────────────────
 
     // FIX 1: Fetch invoice headers without aggregate — we query per-rate groups separately.
+    // P1 aviz-double-post guard: exclude aviz-linked invoices (aviz_id IS NOT NULL).
+    // Their revenue (707) was recognised at aviz issuance; the reclass (AVIZ_RECLASS) books
+    // 4111=418 + 4428=4427. Re-posting 707+4427 here would double-count revenue in GL+D300/D394.
+    // D300/D394 read invoice_line_items directly (not GL), so VAT is still declared once correctly.
     let sales_rows = sqlx::query(
         "SELECT i.id, i.full_number, i.issue_date, i.contact_id, i.storno_of_invoice_id, \
                 i.status, c.cui as contact_cui, \
@@ -2893,7 +2897,8 @@ pub async fn generate_gl_entries(
          WHERE i.company_id = ?1 \
            AND i.status IN ('VALIDATED','STORNED') \
            AND i.issue_date >= ?2 \
-           AND i.issue_date <= ?3",
+           AND i.issue_date <= ?3 \
+           AND i.aviz_id IS NULL",
     )
     .bind(company_id)
     .bind(period_from)

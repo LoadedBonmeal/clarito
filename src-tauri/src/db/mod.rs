@@ -29,9 +29,11 @@ pub mod accounts;
 pub mod advance_invoices;
 pub mod aging;
 pub mod assets;
+pub mod avize;
 pub mod concedii;
 pub mod declaration_filings;
 pub mod deconturi;
+pub mod dezmembrari;
 pub mod dividends;
 pub mod fiscal_receipts;
 pub mod fx_revaluation;
@@ -76,6 +78,10 @@ mod no_inline_test_schema {
         "advance_invoice_settlements",
         "advance_received_settlements",
         "asset_depreciation",
+        "aviz_lines",
+        "avize",
+        "dezmembrare_lines",
+        "dezmembrari",
         "asset_transactions",
         "audit_archive",
         "audit_log",
