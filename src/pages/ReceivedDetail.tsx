@@ -30,7 +30,10 @@ import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
 import { formatError } from "@/lib/error-mapper";
+import { isDemoMode } from "@/lib/demo";
+import { buildStandaloneHtml } from "@/lib/doc-render/doc-html";
 import type { ReceivedStatus } from "@/types";
+import type { OrdinPlataData } from "@/lib/tauri";
 
 const RO_MON = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
 const fmtRoDate = (iso: string | null | undefined) => {
@@ -80,6 +83,59 @@ const STATUS_LABEL_KEYS: Record<ReceivedStatus, string> = {
   REJECTED: "detail.statusLower.rejected",
   ARCHIVED: "detail.statusLower.archived",
 };
+
+// ─── Ordin de Plată HTML builder ─────────────────────────────────────────────
+
+/**
+ * Builds a standalone printable HTML page for an Ordin de Plată document.
+ * Layout follows the statutory form (Reg. BNR 2/2016 art. 3):
+ *   Plătitor | Bancă plătitoare | Beneficiar | Sumă | Monedă | Data | Referință | Nr. OP.
+ */
+function buildOrdinPlataHtml(op: OrdinPlataData, t: (k: string) => string): string {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const row = (label: string, value: string, cls = "") =>
+    `<tr><td class="lbl">${esc(label)}</td><td class="${cls}">${esc(value) || "<span class='muted'>—</span>"}</td></tr>`;
+
+  const html = `
+    <div class="docv">
+      <div class="docv-title">${esc(t("detail.op.title"))}</div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-bottom:16px;font-size:12px;color:var(--text-2)">
+        <span>${esc(t("detail.op.nr"))} <b>${esc(op.opNumber)}</b></span>
+        <span>·</span>
+        <span>${esc(t("detail.op.data"))} <b>${esc(op.issueDate)}</b></span>
+      </div>
+      <table class="scr-table op-table" style="margin-bottom:16px">
+        <tbody>
+          <tr class="section-head"><td colspan="2"><b>${esc(t("detail.op.platitor"))}</b></td></tr>
+          ${row(t("detail.op.denumire"), op.platitorName, "bold")}
+          ${row("CUI", op.platitorCui)}
+          ${row("IBAN", op.platitorIban, "num")}
+          ${row(t("detail.op.banca"), op.platitorBanca)}
+          <tr class="section-head"><td colspan="2"><b>${esc(t("detail.op.beneficiar"))}</b></td></tr>
+          ${row(t("detail.op.denumire"), op.beneficiarName, "bold")}
+          ${row("CUI", op.beneficiarCui)}
+          ${row("IBAN", op.beneficiarIban, "num")}
+          ${row(t("detail.op.banca"), op.beneficiarBanca)}
+          <tr class="section-head"><td colspan="2"><b>${esc(t("detail.op.suma"))}</b></td></tr>
+          ${row(t("detail.op.valoare"), `${op.amount.replace(".", ",")} ${op.currency}`, "num bold")}
+          ${op.amountWords ? row(t("detail.op.sumaLitere"), op.amountWords) : ""}
+          ${row(t("detail.op.referinta"), op.reference)}
+          ${op.notes ? row(t("detail.op.explicatii"), op.notes) : ""}
+        </tbody>
+      </table>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:40px;font-size:12px">
+        <div>
+          <div style="border-top:1px solid var(--line);padding-top:4px;text-align:center">${esc(t("detail.op.semnaturaPlat"))}</div>
+        </div>
+        <div>
+          <div style="border-top:1px solid var(--line);padding-top:4px;text-align:center">${esc(t("detail.op.stampila"))}</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  return buildStandaloneHtml(t("detail.op.title"), html);
+}
 
 const METHOD_KEYS: Record<string, string> = {
   transfer: "detail.method.transfer",
@@ -577,6 +633,23 @@ function SupplierPaymentsCard({
     onError: (e) => notify.error(formatError(e, t("detail.notify.paymentDeleteError"))),
   });
 
+  /** Prints an Ordin de Plată for the given received-invoice payment id. */
+  const handlePrintOP = async (paymentId: string) => {
+    try {
+      const data = await api.ordinPlata.getData({ paymentId, companyId });
+      const html = buildOrdinPlataHtml(data, t);
+      const fileName = `ordin-de-plata-${data.opNumber}.html`;
+      if (isDemoMode()) {
+        const w = window.open("", "_blank");
+        if (w) { w.document.write(html); w.document.close(); }
+        return;
+      }
+      await api.declarations.openDocInBrowser(html, fileName);
+    } catch (err) {
+      notify.error(formatError(err, t("detail.op.printError")));
+    }
+  };
+
   const payStatus = summary?.paymentStatus ?? "UNPAID";
   const payChip = payStatus === "PAID"
     ? { cls: "paid", icon: "check", label: t("detail.pay.paidFull") }
@@ -618,6 +691,17 @@ function SupplierPaymentsCard({
                   <div className="p2 num">{fmtRoDate(p.paidAt)}</div>
                 </div>
                 <span className="amt num">{fmtRON(p.amount)}</span>
+                {/* Tipărește OP — only on transfer payments (OP = bank transfer document) */}
+                {(p.method === "transfer" || p.method === "OP") && (
+                  <button
+                    className="mini-btn"
+                    title={t("detail.op.tiparesteOp")}
+                    onClick={() => void handlePrintOP(p.id)}
+                    style={{ fontSize: 11 }}
+                  >
+                    <Ic name="dl" />
+                  </button>
+                )}
                 <button
                   className="mini-btn"
                   title={t("detail.payments.deleteTitle")}

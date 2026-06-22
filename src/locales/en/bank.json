@@ -17,6 +17,8 @@
     "colIncasari": "Receipts (Debit)",
     "colPlati": "Payments (Credit)",
     "colSold": "Balance",
+    "colSumaValuta": "Foreign amount",
+    "colCurs": "Rate",
     "empty": "No cash movements (5311) in the selected period.",
     "empty5314": "No foreign-currency cash movements (5314) in the selected period.",
     "print": "Print / Save as PDF",

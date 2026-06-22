@@ -314,7 +314,26 @@
       "intraEuError": "Could not update the acquisition type.",
       "fileUnavailable": "{{label}} unavailable",
       "fileOpenError": "Error opening {{label}}.",
-      "supplierPaymentAdded": "Supplier payment recorded."
+      "supplierPaymentAdded": "Supplier payment recorded.",
+      "paymentAddError": "Failed to record supplier payment."
+    },
+    "op": {
+      "title": "Payment Order",
+      "nr": "OP No.",
+      "data": "Date",
+      "platitor": "Payer",
+      "beneficiar": "Beneficiary",
+      "suma": "Amount",
+      "denumire": "Name",
+      "banca": "Bank",
+      "valoare": "Value",
+      "sumaLitere": "Amount in words",
+      "referinta": "Reference / Payment reason",
+      "explicatii": "Notes",
+      "semnaturaPlat": "Authorised signature (payer)",
+      "stampila": "Payer stamp",
+      "tiparesteOp": "Print Payment Order (OP)",
+      "printError": "Error generating Payment Order"
     }
   }
 }

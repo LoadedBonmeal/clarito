@@ -8,10 +8,11 @@
  * A toggle in the toolbar switches between the two views.
  * Both reuse the identical daily încasări/plăți/sold rendering.
  *
- * NOTE: the GL register stores all amounts in lei (RON) — a per-currency
- * foreign-amount + exchange-rate column (true cod 14-4-7/aA) would require a
- * join to the source receipts/payments and is a documented follow-up.
- * This wave only surfaces the lei-equivalent ledger for 5314.
+ * 5314 (cod 14-4-7/aA) — foreign-amount + exchange-rate columns:
+ *   Each 5314 entry now carries amountFxForeign + currencyCode from gl_entry.
+ *   The register shows: Document | Explanation | Contra | Foreign Amt + Currency |
+ *   Curs (lei ÷ foreign) | Încasări (lei) | Plăți (lei) | Sold (lei).
+ *   Entries without FX data (old/RON-only rows) fall back to lei-only display.
  *
  * Print / Save as PDF reuses the XmlViewerModal pattern:
  *   - wraps the printable `.docv` element with `buildStandaloneHtml`
@@ -67,6 +68,25 @@ function groupByDay(entries: LedgerEntry[]): Array<{ day: string; rows: LedgerEn
 const cashBalance = (debit: string | number, credit: string | number) =>
   parseDec(debit) - parseDec(credit);
 
+// ─── FX helpers ──────────────────────────────────────────────────────────────
+
+/** Format a decimal string to 4 decimal places (exchange-rate display). */
+const fmtRate = (n: number) => n.toFixed(4).replace(".", ",");
+
+/** Format a foreign-currency amount (e.g. "100.00 EUR"). */
+const fmtFx = (amt: string, ccy: string) => `${amt.replace(".", ",")} ${ccy}`;
+
+/**
+ * Implied exchange rate for a 5314 line: lei / foreign.
+ * Returns null when the foreign amount is zero (division guard).
+ */
+function impliedRate(leiAmt: string, fxAmt: string): number | null {
+  const lei = parseDec(leiAmt);
+  const fx = parseDec(fxAmt);
+  if (fx === 0) return null;
+  return lei / fx;
+}
+
 // ─── RegisterView ─────────────────────────────────────────────────────────────
 // Renders the printable daily-register table for one account sheet.
 
@@ -74,14 +94,21 @@ interface RegisterViewProps {
   account: LedgerAccount;
   periodLabel: string;
   accountLabel: string;
+  /** When true, renders the extra foreign-amount + curs columns (5314 cod 14-4-7/aA). */
+  showFxColumns: boolean;
   printRef: React.RefObject<HTMLDivElement | null>;
   t: (key: string, opts?: Record<string, unknown>) => string;
 }
 
-function RegisterView({ account, periodLabel, accountLabel, printRef, t }: RegisterViewProps) {
+function RegisterView({ account, periodLabel, accountLabel, showFxColumns, printRef, t }: RegisterViewProps) {
   const days = groupByDay(account.entries);
   const openingBal = cashBalance(account.openingDebit, account.openingCredit);
   const closingBal = cashBalance(account.closingDebit, account.closingCredit);
+
+  // 5314 has 2 extra columns (Suma valută + Curs) before Încasări/Plăți/Sold.
+  // Standard 5311 register has 7 columns; 5314 register has 9.
+  const nBaseCol = showFxColumns ? 6 : 4; // colSpan for left cells in summary rows
+  const totalCols = showFxColumns ? 9 : 7;
 
   return (
     /* Printable registru — wrapped in .docv so buildStandaloneHtml picks up the right CSS */
@@ -103,6 +130,12 @@ function RegisterView({ account, periodLabel, accountLabel, printRef, t }: Regis
             <th>{t("bank.colDocument")}</th>
             <th>{t("bank.colExplicatie")}</th>
             <th>{t("bank.colContrapartida")}</th>
+            {showFxColumns && (
+              <>
+                <th className="r">{t("bank.colSumaValuta")}</th>
+                <th className="r">{t("bank.colCurs")}</th>
+              </>
+            )}
             <th className="r">{t("bank.colIncasari")}</th>
             <th className="r">{t("bank.colPlati")}</th>
             <th className="r">{t("bank.colSold")}</th>
@@ -111,7 +144,7 @@ function RegisterView({ account, periodLabel, accountLabel, printRef, t }: Regis
         <tbody>
           {/* Sold inițial */}
           <tr style={{ background: "var(--bg-table-header)", fontWeight: 600 }}>
-            <td colSpan={6}>{t("bank.soldInitial")}</td>
+            <td colSpan={totalCols - 1}>{t("bank.soldInitial")}</td>
             <td className="r num">{fmtRON(openingBal)}</td>
           </tr>
 
@@ -122,37 +155,59 @@ function RegisterView({ account, periodLabel, accountLabel, printRef, t }: Regis
             // The end-of-day sold is the running balance of the last entry in the day.
             const eodBalance = parseDec(rows[rows.length - 1].balance);
 
-            return rows.map((entry, idx) => (
-              <Fragment key={`${day}-${idx}`}>
-                <tr>
-                  <td className="num">{fmtD(day)}</td>
-                  <td><span className="doc">{entry.document || "—"}</span></td>
-                  <td>{entry.explanation || "—"}</td>
-                  <td>{entry.contra ? <span className="doc">{entry.contra}</span> : <span className="muted">—</span>}</td>
-                  <td className="r num">
-                    {parseDec(entry.debit) > 0 ? fmtRON(entry.debit) : <span className="muted">—</span>}
-                  </td>
-                  <td className="r num">
-                    {parseDec(entry.credit) > 0 ? fmtRON(entry.credit) : <span className="muted">—</span>}
-                  </td>
-                  <td className="r num">{fmtRON(parseDec(entry.balance))}</td>
-                </tr>
-                {/* Total zi row after last entry of the day */}
-                {idx === rows.length - 1 && (
-                  <tr style={{ background: "var(--fill)", fontStyle: "italic" }}>
-                    <td colSpan={4} style={{ paddingLeft: 12 }}>{t("bank.totalZi")} — {fmtD(day)}</td>
-                    <td className="r num">{dayDebit > 0 ? fmtRON(dayDebit) : <span className="muted">—</span>}</td>
-                    <td className="r num">{dayCredit > 0 ? fmtRON(dayCredit) : <span className="muted">—</span>}</td>
-                    <td className="r num">{fmtRON(eodBalance)}</td>
+            return rows.map((entry, idx) => {
+              // FX columns for 5314: use entry.amountFxForeign when present.
+              const hasFx = showFxColumns && entry.amountFxForeign != null && entry.currencyCode != null;
+              // The lei amount for this line is debit or credit (whichever is non-zero).
+              const leiAmt = parseDec(entry.debit) > 0 ? entry.debit : entry.credit;
+              const rate = hasFx ? impliedRate(leiAmt, entry.amountFxForeign!) : null;
+
+              return (
+                <Fragment key={`${day}-${idx}`}>
+                  <tr>
+                    <td className="num">{fmtD(day)}</td>
+                    <td><span className="doc">{entry.document || "—"}</span></td>
+                    <td>{entry.explanation || "—"}</td>
+                    <td>{entry.contra ? <span className="doc">{entry.contra}</span> : <span className="muted">—</span>}</td>
+                    {showFxColumns && (
+                      <>
+                        <td className="r num">
+                          {hasFx
+                            ? <span>{fmtFx(entry.amountFxForeign!, entry.currencyCode!)}</span>
+                            : <span className="muted">—</span>}
+                        </td>
+                        <td className="r num">
+                          {rate != null
+                            ? <span>{fmtRate(rate)}</span>
+                            : <span className="muted">—</span>}
+                        </td>
+                      </>
+                    )}
+                    <td className="r num">
+                      {parseDec(entry.debit) > 0 ? fmtRON(entry.debit) : <span className="muted">—</span>}
+                    </td>
+                    <td className="r num">
+                      {parseDec(entry.credit) > 0 ? fmtRON(entry.credit) : <span className="muted">—</span>}
+                    </td>
+                    <td className="r num">{fmtRON(parseDec(entry.balance))}</td>
                   </tr>
-                )}
-              </Fragment>
-            ));
+                  {/* Total zi row after last entry of the day */}
+                  {idx === rows.length - 1 && (
+                    <tr style={{ background: "var(--fill)", fontStyle: "italic" }}>
+                      <td colSpan={nBaseCol} style={{ paddingLeft: 12 }}>{t("bank.totalZi")} — {fmtD(day)}</td>
+                      <td className="r num">{dayDebit > 0 ? fmtRON(dayDebit) : <span className="muted">—</span>}</td>
+                      <td className="r num">{dayCredit > 0 ? fmtRON(dayCredit) : <span className="muted">—</span>}</td>
+                      <td className="r num">{fmtRON(eodBalance)}</td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            });
           })}
 
           {/* Sold final */}
           <tr style={{ background: "var(--bg-table-header)", fontWeight: 700 }}>
-            <td colSpan={4}>{t("bank.soldFinal")}</td>
+            <td colSpan={nBaseCol}>{t("bank.soldFinal")}</td>
             <td className="r num">{fmtRON(account.totalDebit)}</td>
             <td className="r num">{fmtRON(account.totalCredit)}</td>
             <td className="r num">{fmtRON(closingBal)}</td>
@@ -351,6 +406,7 @@ export function BankPage() {
             account={activeAccount}
             periodLabel={periodLabel}
             accountLabel={activeAccountLabel}
+            showFxColumns={activeTab === "5314"}
             printRef={printRef}
             t={t}
           />

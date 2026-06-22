@@ -469,6 +469,8 @@ pub fn run() {
                     commands::bank_import::commands::match_bank_txn,
                     commands::bank_import::commands::unmatch_bank_txn,
                     commands::bank_import::commands::ignore_bank_txn,
+                    // ordin de plată (BNR 2/2016 art. 3) — read-only document data
+                    commands::ordin_plata::get_ordin_plata_data,
                     // supplier payments (payments-out / buyer-side TVA la încasare)
                     commands::received_payments::add_received_payment,
                     commands::received_payments::list_received_payments,

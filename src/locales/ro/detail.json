@@ -317,7 +317,26 @@
       "intraEuError": "Nu s-a putut actualiza tipul achiziției.",
       "fileUnavailable": "{{label}} indisponibil",
       "fileOpenError": "Eroare deschidere {{label}}.",
-      "supplierPaymentAdded": "Plată furnizor înregistrată."
+      "supplierPaymentAdded": "Plată furnizor înregistrată.",
+      "paymentAddError": "Nu s-a putut înregistra plata furnizor."
+    },
+    "op": {
+      "title": "Ordin de Plată",
+      "nr": "Nr. OP",
+      "data": "Data",
+      "platitor": "Plătitor",
+      "beneficiar": "Beneficiar",
+      "suma": "Sumă",
+      "denumire": "Denumire",
+      "banca": "Bancă",
+      "valoare": "Valoare",
+      "sumaLitere": "Suma în litere",
+      "referinta": "Referință / Motivul plății",
+      "explicatii": "Explicații",
+      "semnaturaPlat": "Semnătură autorizată plătitor",
+      "stampila": "Ștampilă plătitor",
+      "tiparesteOp": "Tipărește Ordin de Plată",
+      "printError": "Eroare la generarea Ordinului de Plată"
     }
   }
 }

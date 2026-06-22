@@ -1139,6 +1139,15 @@ export interface LedgerEntry {
   credit: string;
   balance: string;
   balanceSide: string;
+  /**
+   * Suma în valută (mereu pozitivă) — prezentă NUMAI pe conturile 5124/5314
+   * în valută (cod 14-4-7/aA). Undefined pentru linii în lei sau alte conturi.
+   */
+  amountFxForeign?: string;
+  /**
+   * Codul ISO al valutei (ex. "EUR") — prezent numai când amountFxForeign e definit.
+   */
+  currencyCode?: string;
 }
 
 /** One synthetic-account sheet of the Cartea mare (cod 14-1-3). */

@@ -614,6 +614,42 @@ export const receivedPayments = {
     }),
 };
 
+// ─── Ordin de Plată (BNR 2/2016 art. 3) ──────────────────────────────────────
+
+/** Data assembled from a received-invoice payment for printing an Ordin de Plată. */
+export interface OrdinPlataData {
+  /** Short unique OP number (first 8 hex chars of payment id). */
+  opNumber: string;
+  /** Payment date (YYYY-MM-DD). */
+  issueDate: string;
+  // Plătitor (our company)
+  platitorName: string;
+  platitorCui: string;
+  /** Company IBAN — may be empty if not configured. */
+  platitorIban: string;
+  platitorBanca: string;
+  // Beneficiar (supplier)
+  beneficiarName: string;
+  beneficiarCui: string;
+  /** Supplier IBAN from contacts — may be empty if not on file. */
+  beneficiarIban: string;
+  beneficiarBanca: string;
+  // Suma
+  amount: string;
+  currency: string;
+  /** Amount in Romanian words — populated only when currency === "RON". */
+  amountWords: string;
+  // Referință
+  reference: string;
+  notes: string;
+}
+
+export const ordinPlata = {
+  /** Assembles OP data for a received-invoice payment (read-only). */
+  getData: (args: { paymentId: string; companyId: string }) =>
+    invoke<OrdinPlataData>("get_ordin_plata_data", { args }),
+};
+
 // ─── Recurring invoices ────────────────────────────────────────────────────
 
 export interface RecurringInvoice {
@@ -2711,6 +2747,7 @@ export const api = {
   receivedPayments,
   quotes,
   orders,
+  ordinPlata,
   recurring,
   contracts,
   reports,

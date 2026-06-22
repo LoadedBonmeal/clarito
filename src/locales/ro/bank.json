@@ -17,6 +17,8 @@
     "colIncasari": "Încasări (Debit)",
     "colPlati": "Plăți (Credit)",
     "colSold": "Sold",
+    "colSumaValuta": "Sumă valută",
+    "colCurs": "Curs",
     "empty": "Nicio mișcare de numerar (5311) în perioada selectată.",
     "empty5314": "Nicio mișcare de numerar în valută (5314) în perioada selectată.",
     "print": "Printează / Salvează PDF",

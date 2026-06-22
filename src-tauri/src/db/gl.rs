@@ -5788,6 +5788,14 @@ pub struct LedgerEntry {
     pub credit: String,
     pub balance: String,
     pub balance_side: String,
+    /// Suma în valută (mereu pozitivă) — populată NUMAI pe piciorul de trezorerie (5124/5314)
+    /// al tranzacțiilor în valută. None pentru toate celelalte linii (registru LEI, conturi fără FX).
+    /// Codul 14-4-7/aA: coloana „Suma în valută" din registrul de casă în valută.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount_fx_foreign: Option<String>,
+    /// Codul ISO al valutei (ex. "EUR") — populat numai când amount_fx_foreign este Some.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub currency_code: Option<String>,
 }
 
 /// One synthetic account's ledger sheet (filă din Cartea mare).
@@ -5888,7 +5896,9 @@ async fn ledger_for(
     // `e.partner_cui` so the sheet loop can keep only the partner's own lines.
     let ent_sql = format!(
         "SELECT e.journal_pk, j.transaction_date AS d, j.journal_id, j.transaction_id, \
-                j.description, e.account_code, e.debit, e.credit, e.record_id, e.partner_cui AS ent_partner \
+                j.description, e.account_code, e.debit, e.credit, e.record_id, \
+                e.partner_cui AS ent_partner, \
+                e.amount_fx_foreign, e.currency_code \
          FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
          WHERE j.company_id = ?1 AND j.transaction_date >= ?2 AND j.transaction_date <= ?3{} \
          ORDER BY j.transaction_date, j.transaction_id, e.record_id",
@@ -6003,6 +6013,17 @@ async fn ledger_for(
         *bal += debit - credit;
         let side = if *bal >= Decimal::ZERO { "D" } else { "C" };
 
+        // FX fields — populated only on 5124/5314 entries in foreign currency.
+        // Stored as TEXT in gl_entry; we pass them through as Option<String>.
+        let fx_foreign: Option<String> = r
+            .try_get::<Option<String>, _>("amount_fx_foreign")
+            .unwrap_or(None)
+            .filter(|s| !s.trim().is_empty());
+        let fx_currency: Option<String> = r
+            .try_get::<Option<String>, _>("currency_code")
+            .unwrap_or(None)
+            .filter(|s| !s.trim().is_empty());
+
         acct.entries.push(LedgerEntry {
             date: r.try_get("d").unwrap_or_default(),
             document: format!("{journal_id} {tx_id}").trim().to_string(),
@@ -6015,6 +6036,8 @@ async fn ledger_for(
             credit: fmt_dec(credit),
             balance: fmt_dec((*bal).abs()),
             balance_side: side.to_string(),
+            amount_fx_foreign: fx_foreign,
+            currency_code: fx_currency,
         });
 
         let t = totals.entry(acc).or_insert((Decimal::ZERO, Decimal::ZERO));
@@ -10132,6 +10155,177 @@ mod tests {
         assert!(
             cui_on_4091.is_some(),
             "partner_cui trebuie să fie setat pe linia 4091"
+        );
+    }
+
+    // ── Test: casă-valută (5314) register includes FX columns ────────────────
+    //
+    // For a gl_entry on account 5314 with amount_fx_foreign=100 EUR and
+    // debit=500 RON, the general_ledger result must expose:
+    //   • amount_fx_foreign = Some("100.00")   (foreign amount)
+    //   • currency_code     = Some("EUR")
+    //   • debit             = "500.00"          (lei equivalent)
+    //
+    // For a plain RON entry the two FX fields must be None (no crash).
+
+    #[tokio::test]
+    async fn casa_valuta_5314_fx_columns_present_and_lei_only_safe() {
+        let pool = setup_pool().await;
+        let cid = "fx_co1";
+        insert_company(&pool, cid).await;
+
+        let mut tx = pool.begin().await.unwrap();
+
+        // Journal 1: foreign-currency 5314 debit (100 EUR = 500 RON)
+        let j1 = GlJournal {
+            id: "j_fx1".into(),
+            company_id: cid.into(),
+            journal_id: "CASA".into(),
+            journal_type: "PAYMENT".into(),
+            transaction_id: "pay_fx1".into(),
+            transaction_date: "2026-04-10".into(),
+            description: Some("Plată EUR 100".into()),
+            source_type: "PAYMENT".into(),
+            source_id: "pay_fx1".into(),
+            customer_id: None,
+            supplier_id: None,
+        };
+        let jpk1 = j1.id.clone();
+        insert_journal(&mut tx, &j1).await.unwrap();
+
+        // D 5314 / C 401 — balanced (500 both sides)
+        let e1_debit = GlEntry {
+            id: new_id(),
+            record_id: 1,
+            account_code: "5314".into(),
+            debit: rdec!(500),
+            credit: Decimal::ZERO,
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "000".into(),
+            tax_code: "000000".into(),
+            tax_percentage: None,
+            tax_base: None,
+            tax_amount: None,
+            amount_fx_foreign: Some(rdec!(100)),
+            currency_code: Some("EUR".into()),
+        };
+        let e1_credit = GlEntry {
+            id: new_id(),
+            record_id: 2,
+            account_code: "401".into(),
+            debit: Decimal::ZERO,
+            credit: rdec!(500),
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "000".into(),
+            tax_code: "000000".into(),
+            tax_percentage: None,
+            tax_base: None,
+            tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
+        };
+        insert_entry(&mut tx, &jpk1, &e1_debit).await.unwrap();
+        insert_entry(&mut tx, &jpk1, &e1_credit).await.unwrap();
+
+        // Journal 2: plain RON 5311 debit (no FX) — must not crash
+        let j2 = GlJournal {
+            id: "j_ron1".into(),
+            company_id: cid.into(),
+            journal_id: "CASA".into(),
+            journal_type: "PAYMENT".into(),
+            transaction_id: "pay_ron1".into(),
+            transaction_date: "2026-04-11".into(),
+            description: Some("Plată RON".into()),
+            source_type: "PAYMENT".into(),
+            source_id: "pay_ron1".into(),
+            customer_id: None,
+            supplier_id: None,
+        };
+        let jpk2 = j2.id.clone();
+        insert_journal(&mut tx, &j2).await.unwrap();
+
+        let e2_debit = GlEntry {
+            id: new_id(),
+            record_id: 1,
+            account_code: "5311".into(),
+            debit: rdec!(200),
+            credit: Decimal::ZERO,
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "000".into(),
+            tax_code: "000000".into(),
+            tax_percentage: None,
+            tax_base: None,
+            tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
+        };
+        let e2_credit = GlEntry {
+            id: new_id(),
+            record_id: 2,
+            account_code: "401".into(),
+            debit: Decimal::ZERO,
+            credit: rdec!(200),
+            partner_cui: None,
+            customer_id: None,
+            supplier_id: None,
+            tax_type: "000".into(),
+            tax_code: "000000".into(),
+            tax_percentage: None,
+            tax_base: None,
+            tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
+        };
+        insert_entry(&mut tx, &jpk2, &e2_debit).await.unwrap();
+        insert_entry(&mut tx, &jpk2, &e2_credit).await.unwrap();
+
+        tx.commit().await.unwrap();
+
+        // Run general_ledger for the period
+        let sheets = general_ledger(&pool, cid, "2026-04-01", "2026-04-30")
+            .await
+            .unwrap();
+
+        // ── 5314 sheet: FX columns populated ──────────────────────────────
+        let sheet_5314 = sheets
+            .iter()
+            .find(|s| s.account_code == "5314")
+            .expect("5314 sheet");
+        assert_eq!(sheet_5314.entries.len(), 1);
+        let entry_fx = &sheet_5314.entries[0];
+        assert_eq!(entry_fx.debit, "500.00", "lei debit must be 500");
+        assert_eq!(
+            entry_fx.amount_fx_foreign.as_deref(),
+            Some("100.00"),
+            "foreign amount must be 100.00"
+        );
+        assert_eq!(
+            entry_fx.currency_code.as_deref(),
+            Some("EUR"),
+            "currency code must be EUR"
+        );
+
+        // ── 5311 sheet: no FX fields (lei-only, no crash) ─────────────────
+        let sheet_5311 = sheets
+            .iter()
+            .find(|s| s.account_code == "5311")
+            .expect("5311 sheet");
+        assert_eq!(sheet_5311.entries.len(), 1);
+        let entry_ron = &sheet_5311.entries[0];
+        assert_eq!(entry_ron.debit, "200.00");
+        assert!(
+            entry_ron.amount_fx_foreign.is_none(),
+            "RON entry must not have fx_foreign"
+        );
+        assert!(
+            entry_ron.currency_code.is_none(),
+            "RON entry must not have currency_code"
         );
     }
 
