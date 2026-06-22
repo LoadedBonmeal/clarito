@@ -48,6 +48,8 @@
       "inventory": "Inventory",
       "gestiuni": "Warehouses",
       "nir": "Goods Receipt (NIR)",
+      "avize": "Delivery Notes",
+      "dezmembrari": "Dismantling",
       "stockTransfer": "Stock transfer",
       "productie": "Production (BOM)",
       "fiscalReceipts": "Fiscal receipts / Z-Report",

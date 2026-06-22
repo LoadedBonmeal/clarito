@@ -49,6 +49,8 @@
       "inventory": "Inventariere",
       "gestiuni": "Gestiuni",
       "nir": "NIR Recepție",
+      "avize": "Avize de însoțire",
+      "dezmembrari": "Dezmembrări",
       "stockTransfer": "Bon de transfer",
       "productie": "Producție (BOM)",
       "fiscalReceipts": "Bonuri fiscale / Raport Z",

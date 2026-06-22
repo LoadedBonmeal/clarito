@@ -1,0 +1,83 @@
+{
+  "dezmembrari": {
+    "title": "Dismantling Records",
+    "selectCompany": "Select an active company to view dismantling records.",
+    "head": {
+      "new": "New dismantling"
+    },
+    "tabs": {
+      "all": "All",
+      "draft": "Draft",
+      "posted": "Posted"
+    },
+    "search": "Search dismantling…",
+    "status": {
+      "DRAFT": "Draft",
+      "POSTED": "Posted"
+    },
+    "table": {
+      "date": "Date",
+      "product": "Dismantled product",
+      "qty": "Quantity",
+      "carryingCost": "Carrying cost",
+      "status": "Status"
+    },
+    "states": {
+      "loading": "Loading dismantling records…",
+      "errorLabel": "Error loading dismantling records",
+      "emptyNone": "No dismantling records yet.",
+      "emptyFiltered": "No records match the selected filters."
+    },
+    "modal": {
+      "createTitle": "New dismantling record",
+      "close": "Close",
+      "saving": "Saving…",
+      "create": "Create",
+      "date": "Dismantling date",
+      "gestiune": "Warehouse",
+      "gestiunePick": "— default —",
+      "dismantledProduct": "Dismantled product",
+      "dismantledProductPick": "Select product…",
+      "dismantledQty": "Dismantled quantity",
+      "components": "Recovered components",
+      "compProduct": "Product",
+      "compProductPick": "Select…",
+      "compQty": "Quantity",
+      "compValue": "Fair value / unit (RON)",
+      "addComponent": "+ Add component",
+      "notes": "Notes",
+      "notesPlaceholder": "Optional notes…"
+    },
+    "glPreview": {
+      "title": "GL preview (after posting)",
+      "debit": "Debit",
+      "credit": "Credit",
+      "amount": "Amount",
+      "desc": "Description",
+      "rowOut": "607 — Cost of goods (stock out {{product}})",
+      "rowIn": "371 — Goods (component {{product}})",
+      "rowDiff": "7588 — Other operating income (value difference)"
+    },
+    "actions": {
+      "post": "Post (GL + stock)",
+      "delete": "Delete",
+      "confirmDelete": "Confirm deletion"
+    },
+    "notify": {
+      "created": "Dismantling record created.",
+      "createError": "Error creating record:",
+      "posted": "Posted. GL and stock updated.",
+      "postError": "Error posting:",
+      "deleted": "Dismantling record deleted.",
+      "deleteError": "Error deleting record:"
+    },
+    "validate": {
+      "product": "Select the product to dismantle.",
+      "qty": "Enter the quantity.",
+      "components": "Add at least one recovered component.",
+      "compProduct": "Select component product.",
+      "compQty": "Enter component quantity.",
+      "compValue": "Enter component fair value."
+    }
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "dezmembrari": {
+    "title": "Dezmembrări",
+    "selectCompany": "Selectați o companie activă pentru a vizualiza dezmembrările.",
+    "head": {
+      "new": "Dezmembrare nouă"
+    },
+    "tabs": {
+      "all": "Toate",
+      "draft": "Draft",
+      "posted": "Postate"
+    },
+    "search": "Caută dezmembrare…",
+    "status": {
+      "DRAFT": "Draft",
+      "POSTED": "Postată"
+    },
+    "table": {
+      "date": "Data",
+      "product": "Produs dezmembrat",
+      "qty": "Cantitate",
+      "carryingCost": "Cost contabil",
+      "status": "Status"
+    },
+    "states": {
+      "loading": "Se încarcă dezmembrările…",
+      "errorLabel": "Eroare la încărcarea dezmembrărilor",
+      "emptyNone": "Nicio dezmembrare înregistrată.",
+      "emptyFiltered": "Nicio dezmembrare nu corespunde filtrelor."
+    },
+    "modal": {
+      "createTitle": "Dezmembrare nouă",
+      "close": "Închide",
+      "saving": "Se salvează…",
+      "create": "Creează",
+      "date": "Data dezmembrării",
+      "gestiune": "Gestiune",
+      "gestiunePick": "— implicită —",
+      "dismantledProduct": "Produs dezmembrat",
+      "dismantledProductPick": "Selectați produsul…",
+      "dismantledQty": "Cantitate dezmembrată",
+      "components": "Componente recuperate",
+      "compProduct": "Produs",
+      "compProductPick": "Selectați…",
+      "compQty": "Cantitate",
+      "compValue": "Valoare justă / buc (RON)",
+      "addComponent": "+ Adaugă componentă",
+      "notes": "Observații",
+      "notesPlaceholder": "Observații opționale…"
+    },
+    "glPreview": {
+      "title": "Previzualizare GL (după postare)",
+      "debit": "Debit",
+      "credit": "Credit",
+      "amount": "Sumă",
+      "desc": "Descriere",
+      "rowOut": "607 — Cheltuieli cu mărfurile (ieșire stoc {{product}})",
+      "rowIn": "371 — Mărfuri (componentă {{product}})",
+      "rowDiff": "7588 — Alte venituri din exploatare (diferență valoare)"
+    },
+    "actions": {
+      "post": "Postează (GL + stoc)",
+      "delete": "Șterge",
+      "confirmDelete": "Confirmă ștergerea"
+    },
+    "notify": {
+      "created": "Dezmembrare creată.",
+      "createError": "Eroare la creare:",
+      "posted": "Dezmembrare postată. GL și stoc actualizate.",
+      "postError": "Eroare la postare:",
+      "deleted": "Dezmembrare ștearsă.",
+      "deleteError": "Eroare la ștergere:"
+    },
+    "validate": {
+      "product": "Selectați produsul de dezmembrat.",
+      "qty": "Introduceți cantitatea.",
+      "components": "Adăugați cel puțin o componentă recuperată.",
+      "compProduct": "Selectați produsul componentei.",
+      "compQty": "Introduceți cantitatea componentei.",
+      "compValue": "Introduceți valoarea justă a componentei."
+    }
+  }
+}

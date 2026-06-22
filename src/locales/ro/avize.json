@@ -1,0 +1,107 @@
+{
+  "avize": {
+    "title": "Avize de însoțire",
+    "selectCompany": "Selectați o companie activă pentru a vizualiza avizele.",
+    "head": {
+      "new": "Aviz nou"
+    },
+    "tabs": {
+      "all": "Toate",
+      "draft": "Draft",
+      "issued": "Emise",
+      "invoiced": "Facturate"
+    },
+    "search": "Caută aviz…",
+    "status": {
+      "DRAFT": "Draft",
+      "ISSUED": "Emis",
+      "INVOICED": "Facturat"
+    },
+    "table": {
+      "number": "Nr. aviz",
+      "date": "Data",
+      "contact": "Client",
+      "destination": "Destinație",
+      "total": "Total",
+      "status": "Status"
+    },
+    "states": {
+      "loading": "Se încarcă avizele…",
+      "errorLabel": "Eroare la încărcarea avizelor",
+      "emptyNone": "Niciun aviz creat încă.",
+      "emptyFiltered": "Niciun aviz nu corespunde filtrelor selectate."
+    },
+    "modal": {
+      "createTitle": "Aviz de însoțire nou",
+      "close": "Închide",
+      "saving": "Se salvează…",
+      "create": "Creează aviz",
+      "contact": "Client",
+      "contactPick": "Selectați clientul…",
+      "date": "Data aviz",
+      "series": "Serie document",
+      "seriesPlaceholder": "ex. AVZ",
+      "currency": "Monedă",
+      "gestiune": "Gestiune sursă",
+      "gestiunePick": "— implicită —",
+      "transportMeans": "Mijloc de transport",
+      "transportMeansPlaceholder": "ex. Auto, Curier",
+      "driverName": "Șofer / delegat",
+      "driverNamePlaceholder": "Nume complet",
+      "vehiclePlate": "Nr. înmatriculare",
+      "vehiclePlatePlaceholder": "ex. B 123 ABC",
+      "destination": "Destinație",
+      "destinationPlaceholder": "Adresa de livrare",
+      "lines": "Articole",
+      "notes": "Observații",
+      "notesPlaceholder": "Observații opționale…",
+      "exchangeRate": "Curs valutar (RON)"
+    },
+    "actions": {
+      "issue": "Emite aviz",
+      "convertToInvoice": "Convertește în factură",
+      "print": "Tipărește",
+      "delete": "Șterge",
+      "confirmDelete": "Confirmă ștergerea"
+    },
+    "notify": {
+      "created": "Aviz creat.",
+      "createError": "Eroare la crearea avizului:",
+      "issued": "Aviz emis. GL și stoc actualizate.",
+      "issueError": "Eroare la emiterea avizului:",
+      "converted": "Aviz convertit în factură.",
+      "convertError": "Eroare la conversie:",
+      "deleted": "Aviz șters.",
+      "deleteError": "Eroare la ștergerea avizului:"
+    },
+    "validate": {
+      "contact": "Selectați un client.",
+      "date": "Introduceți data avizului.",
+      "lines": "Adăugați cel puțin un articol."
+    },
+    "print": {
+      "title": "Aviz de însoțire a mărfii nr. {{number}}",
+      "formCode": "Formular 14-3-6A",
+      "company": "Furnizor (expeditor)",
+      "contact": "Client (destinatar)",
+      "date": "Data",
+      "transportMeans": "Mijloc transport",
+      "driver": "Șofer / delegat",
+      "plate": "Nr. auto",
+      "destination": "Destinație",
+      "tablePos": "Nr.",
+      "tableName": "Denumire",
+      "tableUnit": "U.M.",
+      "tableQty": "Cantitate",
+      "tablePrice": "Preț unitar",
+      "tableVat": "TVA %",
+      "tableTotal": "Total",
+      "subtotal": "Subtotal",
+      "vat": "TVA",
+      "total": "TOTAL",
+      "signExpeditor": "Semnătură expeditor",
+      "signTransportator": "Semnătură transportator",
+      "signDestinatar": "Semnătură destinatar"
+    }
+  }
+}

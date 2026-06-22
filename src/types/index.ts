@@ -2295,3 +2295,132 @@ export interface InvoiceLinkInput {
   amount: string;
   payMeans: "CASH" | "CARD";
 }
+
+// ─── Avize (Aviz de însoțire a mărfii 14-3-6A) ────────────────────────────────
+
+export type AvizStatus = "DRAFT" | "ISSUED" | "INVOICED";
+
+export interface Aviz {
+  id: string;
+  companyId: string;
+  contactId: string;
+  series: string;
+  number: number;
+  fullNumber: string;
+  avizDate: string;
+  transportMeans: string | null;
+  driverName: string | null;
+  vehiclePlate: string | null;
+  destination: string | null;
+  status: AvizStatus;
+  invoiceId: string | null;
+  gestiuneId: string | null;
+  currency: string;
+  exchangeRate: number | null;
+  subtotalAmount: string;
+  vatAmount: string;
+  totalAmount: string;
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AvizLine {
+  id: string;
+  avizId: string;
+  position: number;
+  productId: string | null;
+  name: string;
+  description: string | null;
+  quantity: string;
+  unit: string;
+  unitPrice: string;
+  vatRate: string;
+  vatCategory: string;
+  subtotalAmount: string;
+  vatAmount: string;
+  totalAmount: string;
+  revenueKind: string;
+}
+
+export interface AvizWithLines {
+  aviz: Aviz;
+  lines: AvizLine[];
+}
+
+export interface CreateAvizLineInput {
+  productId?: string | null;
+  name: string;
+  description?: string | null;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  vatRate: number;
+  vatCategory: string;
+  revenueKind?: string | null;
+}
+
+export interface CreateAvizInput {
+  companyId: string;
+  contactId: string;
+  series: string;
+  avizDate: string;
+  gestiuneId?: string | null;
+  transportMeans?: string | null;
+  driverName?: string | null;
+  vehiclePlate?: string | null;
+  destination?: string | null;
+  currency?: string | null;
+  exchangeRate?: number | null;
+  notes?: string | null;
+  lines: CreateAvizLineInput[];
+}
+
+// ─── Dezmembrări (dismantling / component recovery) ───────────────────────────
+
+export type DezmembrareStatus = "DRAFT" | "POSTED";
+
+export interface Dezmembrare {
+  id: string;
+  companyId: string;
+  gestiuneId: string;
+  dismantledProductId: string;
+  dismantledQty: string;
+  dismantledCarryingCost: string;
+  dezmembrareDate: string;
+  status: DezmembrareStatus;
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DezmembrareLine {
+  id: string;
+  dezmembrareId: string;
+  position: number;
+  productId: string;
+  qty: string;
+  unitFairValue: string;
+  totalFairValue: string;
+}
+
+export interface DezmembrareWithLines {
+  dezmembrare: Dezmembrare;
+  lines: DezmembrareLine[];
+}
+
+export interface DezmembrareLineInput {
+  productId: string;
+  qty: number;
+  unitFairValue: number;
+}
+
+export interface CreateDezmembrareInput {
+  companyId: string;
+  gestiuneId?: string | null;
+  dismantledProductId: string;
+  dismantledQty: number;
+  dezmembrareDate: string;
+  notes?: string | null;
+  lines: DezmembrareLineInput[];
+}

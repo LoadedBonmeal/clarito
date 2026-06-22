@@ -2724,6 +2724,34 @@ export const deconturi = {
     }),
 };
 
+// ─── Avize (Aviz de însoțire a mărfii 14-3-6A) ────────────────────────────────
+
+export const avize = {
+  create: (input: import("@/types").CreateAvizInput) =>
+    invoke<import("@/types").AvizWithLines>("create_aviz", { input }),
+  get: (companyId: string, avizId: string) =>
+    invoke<import("@/types").AvizWithLines>("get_aviz", { companyId, avizId }),
+  list: (companyId: string) =>
+    invoke<import("@/types").Aviz[]>("list_avize", { companyId }),
+  issue: (companyId: string, avizId: string) =>
+    invoke<import("@/types").Aviz>("issue_aviz", { companyId, avizId }),
+  convertToInvoice: (companyId: string, avizId: string, invoiceId: string) =>
+    invoke<import("@/types").Aviz>("convert_aviz_to_invoice", { companyId, avizId, invoiceId }),
+};
+
+// ─── Dezmembrări (component recovery / dismantling) ───────────────────────────
+
+export const dezmembrari = {
+  create: (input: import("@/types").CreateDezmembrareInput) =>
+    invoke<import("@/types").DezmembrareWithLines>("create_dezmembrare", { input }),
+  get: (companyId: string, dezmembrareId: string) =>
+    invoke<import("@/types").DezmembrareWithLines>("get_dezmembrare", { companyId, dezmembrareId }),
+  list: (companyId: string) =>
+    invoke<import("@/types").Dezmembrare[]>("list_dezmembrari", { companyId }),
+  post: (companyId: string, dezmembrareId: string) =>
+    invoke<import("@/types").Dezmembrare>("post_dezmembrare", { companyId, dezmembrareId }),
+};
+
 // ─── API umbrella ─────────────────────────────────────────────────────────
 
 export const api = {
@@ -2777,6 +2805,8 @@ export const api = {
   d301,
   d700,
   d710,
+  avize,
+  dezmembrari,
   deconturi,
   paymentInstruments,
   settings,

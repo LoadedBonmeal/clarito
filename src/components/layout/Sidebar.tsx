@@ -98,6 +98,8 @@ export function Sidebar() {
       { key: "dividende", label: t("shell.nav.dividends"), icon: "incasat", path: "/dividends", more: true },
       { key: "gestiuni", label: t("shell.nav.gestiuni"), icon: "cube", path: "/gestiuni", more: true },
       { key: "nir", label: t("shell.nav.nir"), icon: "docDown", path: "/nir", more: true },
+      { key: "avize", label: t("shell.nav.avize"), icon: "docUp", path: "/avize", matchPrefix: "/avize", more: true },
+      { key: "dezmembrari", label: t("shell.nav.dezmembrari"), icon: "cube", path: "/dezmembrari", matchPrefix: "/dezmembrari", more: true },
       { key: "bon-transfer", label: t("shell.nav.stockTransfer"), icon: "cube", path: "/stock-transfer", more: true },
       { key: "productie", label: t("shell.nav.productie"), icon: "cube", path: "/productie", more: true },
       { key: "bonuri-fiscale", label: t("shell.nav.fiscalReceipts"), icon: "docText", path: "/fiscal-receipts", more: true },

@@ -1,0 +1,107 @@
+{
+  "avize": {
+    "title": "Delivery Notes",
+    "selectCompany": "Select an active company to view delivery notes.",
+    "head": {
+      "new": "New delivery note"
+    },
+    "tabs": {
+      "all": "All",
+      "draft": "Draft",
+      "issued": "Issued",
+      "invoiced": "Invoiced"
+    },
+    "search": "Search delivery note…",
+    "status": {
+      "DRAFT": "Draft",
+      "ISSUED": "Issued",
+      "INVOICED": "Invoiced"
+    },
+    "table": {
+      "number": "Doc. no.",
+      "date": "Date",
+      "contact": "Client",
+      "destination": "Destination",
+      "total": "Total",
+      "status": "Status"
+    },
+    "states": {
+      "loading": "Loading delivery notes…",
+      "errorLabel": "Error loading delivery notes",
+      "emptyNone": "No delivery notes created yet.",
+      "emptyFiltered": "No delivery notes match the selected filters."
+    },
+    "modal": {
+      "createTitle": "New delivery note",
+      "close": "Close",
+      "saving": "Saving…",
+      "create": "Create delivery note",
+      "contact": "Client",
+      "contactPick": "Select client…",
+      "date": "Date",
+      "series": "Document series",
+      "seriesPlaceholder": "e.g. AVZ",
+      "currency": "Currency",
+      "gestiune": "Source warehouse",
+      "gestiunePick": "— default —",
+      "transportMeans": "Transport means",
+      "transportMeansPlaceholder": "e.g. Car, Courier",
+      "driverName": "Driver / delegate",
+      "driverNamePlaceholder": "Full name",
+      "vehiclePlate": "Vehicle plate",
+      "vehiclePlatePlaceholder": "e.g. B 123 ABC",
+      "destination": "Destination",
+      "destinationPlaceholder": "Delivery address",
+      "lines": "Items",
+      "notes": "Notes",
+      "notesPlaceholder": "Optional notes…",
+      "exchangeRate": "Exchange rate (RON)"
+    },
+    "actions": {
+      "issue": "Issue delivery note",
+      "convertToInvoice": "Convert to invoice",
+      "print": "Print",
+      "delete": "Delete",
+      "confirmDelete": "Confirm deletion"
+    },
+    "notify": {
+      "created": "Delivery note created.",
+      "createError": "Error creating delivery note:",
+      "issued": "Delivery note issued. GL and stock updated.",
+      "issueError": "Error issuing delivery note:",
+      "converted": "Delivery note converted to invoice.",
+      "convertError": "Error converting:",
+      "deleted": "Delivery note deleted.",
+      "deleteError": "Error deleting delivery note:"
+    },
+    "validate": {
+      "contact": "Please select a client.",
+      "date": "Please enter the delivery note date.",
+      "lines": "Please add at least one item."
+    },
+    "print": {
+      "title": "Delivery note no. {{number}}",
+      "formCode": "Form 14-3-6A",
+      "company": "Supplier (sender)",
+      "contact": "Client (recipient)",
+      "date": "Date",
+      "transportMeans": "Transport means",
+      "driver": "Driver / delegate",
+      "plate": "Vehicle plate",
+      "destination": "Destination",
+      "tablePos": "No.",
+      "tableName": "Name",
+      "tableUnit": "U.M.",
+      "tableQty": "Qty",
+      "tablePrice": "Unit price",
+      "tableVat": "VAT %",
+      "tableTotal": "Total",
+      "subtotal": "Subtotal",
+      "vat": "VAT",
+      "total": "TOTAL",
+      "signExpeditor": "Sender signature",
+      "signTransportator": "Carrier signature",
+      "signDestinatar": "Recipient signature"
+    }
+  }
+}

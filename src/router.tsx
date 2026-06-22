@@ -92,6 +92,8 @@ import { FiscalReceiptsPage } from "@/pages/FiscalReceipts";
 import { UsersPage } from "@/pages/Users";
 import { PaymentInstrumentsPage } from "@/pages/PaymentInstruments";
 import { DeconturiPage } from "@/pages/Deconturi";
+import { AvizePage } from "@/pages/Avize";
+import { DezmembrariPage } from "@/pages/Dezmembrari";
 
 // ─── Layout root ──────────────────────────────────────────────────────────
 
@@ -397,6 +399,18 @@ const deconturiRoute = createRoute({
   component: DeconturiPage,
 });
 
+const avizeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/avize",
+  component: AvizePage,
+});
+
+const dezmembrariRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dezmembrari",
+  component: DezmembrariPage,
+});
+
 // ─── Build tree + router ──────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -446,6 +460,8 @@ const routeTree = rootRoute.addChildren([
   usersRoute,
   paymentInstrumentsRoute,
   deconturiRoute,
+  avizeRoute,
+  dezmembrariRoute,
 ]);
 
 export const router = createRouter({
