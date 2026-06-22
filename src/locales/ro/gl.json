@@ -207,20 +207,22 @@
     "fxReval": {
       "title": "Reevaluare valutară — {{period}}",
       "confirmTitle": "Reevaluare valutară",
-      "confirmText": "Rulează reevaluarea valutară pentru {{period}}? Nota GL va fi postată cu source_type='FX_REVAL' (idempotentă — rularea din nou înlocuiește nota existentă).",
-      "chipPosted": "{{n}} facturi reevaluate",
+      "confirmText": "Rulează reevaluarea valutară pentru {{period}}? Acoperă creanțe/datorii (4111/401) și trezorerie (5124/5314). Nota GL va fi postată cu source_type='FX_REVAL' (idempotentă — rularea din nou înlocuiește nota existentă).",
+      "chipPosted": "{{n}} facturi · {{t}} conturi trezorerie",
       "chipNone": "Fără diferențe",
       "chipNotRun": "Nerulată",
-      "favorable": "Diferențe favorabile",
-      "unfavorable": "Diferențe nefavorabile",
+      "favorable": "Diferențe favorabile (4111/401)",
+      "unfavorable": "Diferențe nefavorabile (4111/401)",
       "net": "Diferență netă",
-      "netNote": "favorabile − nefavorabile",
-      "note": "Reevaluează creanțele/datoriile valutare la cursul BNR din ultima zi bancară a lunii (art. 322 OMFP 1802/2014). Baza = cursul lunii anterioare, nu cursul de booking.",
+      "netNote": "favorabile − nefavorabile (creanțe/datorii)",
+      "treasuryFavorable": "Diferențe favorabile trezorerie (5124/5314)",
+      "treasuryUnfavorable": "Diferențe nefavorabile trezorerie (5124/5314)",
+      "note": "Reevaluează creanțele/datoriile valutare (4111/401) și trezoreria valutară (5124/5314) la cursul BNR din ultima zi bancară a lunii (art. 322 + pct.304(3)-(4) OMFP 1802/2014). Baza = cursul lunii anterioare, nu cursul de booking.",
       "run": "Rulează reevaluarea",
       "runAgain": "Rerulează",
       "running": "Se calculează…",
       "notifyNone": "Nicio diferență de curs pentru {{period}} — toate soldurile valutare neschimbate.",
-      "notifyOk": "Reevaluare {{period}}: {{n}} facturi · favorabil +{{fav}} RON · nefavorabil −{{unfav}} RON.",
+      "notifyOk": "Reevaluare {{period}}: {{n}} facturi + {{t}} conturi trezorerie · favorabil +{{fav}} RON · nefavorabil −{{unfav}} RON.",
       "notifyError": "Eroare la reevaluarea valutară",
       "th": {
         "kind": "Cont",
@@ -231,6 +233,23 @@
         "priorLei": "Valoare anterioară",
         "revaluedLei": "Valoare reevaluată",
         "diffLei": "Diferență (RON)"
+      },
+      "treasury": {
+        "sectionTitle": "Trezorerie valutară (5124/5314)",
+        "favorable": "Diferențe favorabile",
+        "unfavorable": "Diferențe nefavorabile",
+        "th": {
+          "kind": "Tip",
+          "glAccount": "Cont GL",
+          "currency": "Valută",
+          "balance": "Sold val.",
+          "monthEndRate": "Curs lună",
+          "priorLei": "Valoare anterioară",
+          "revaluedLei": "Valoare reevaluată",
+          "diffLei": "Diferență (RON)"
+        },
+        "kindBank": "Bancă (5124)",
+        "kindCash": "Casă (5314)"
       }
     },
     "reconcile": {

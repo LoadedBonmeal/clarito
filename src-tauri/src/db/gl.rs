@@ -115,6 +115,11 @@ struct GlEntry {
     tax_percentage: Option<String>,
     tax_base: Option<String>,
     tax_amount: Option<String>,
+    /// Valoarea în valută străină (mereu pozitivă) — populată NUMAI pe piciorul de trezorerie
+    /// (5124/5314) al tranzacțiilor în valută. None pentru toate celelalte linii GL.
+    amount_fx_foreign: Option<Decimal>,
+    /// Codul ISO al valutei (ex. "EUR") — populat NUMAI pe piciorul 5124/5314 în valută. None altundeva.
+    currency_code: Option<String>,
 }
 
 // ─── Decimal helpers ──────────────────────────────────────────────────────────
@@ -256,6 +261,8 @@ fn post_sales_invoice(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     });
     record_id += 1;
 
@@ -289,6 +296,8 @@ fn post_sales_invoice(
             tax_percentage: Some(rate_str.clone()),
             tax_base: Some(fmt_dec(net)),
             tax_amount: Some(fmt_dec(vat)),
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
 
@@ -325,6 +334,8 @@ fn post_sales_invoice(
                             tax_percentage: Some(rate_str.clone()),
                             tax_base: None,
                             tax_amount: None,
+                            amount_fx_foreign: None,
+                            currency_code: None,
                         });
                         record_id += 1;
                     }
@@ -357,6 +368,8 @@ fn post_sales_invoice(
                     tax_percentage: Some(rate_str),
                     tax_base: None,
                     tax_amount: None,
+                    amount_fx_foreign: None,
+                    currency_code: None,
                 });
                 record_id += 1;
             }
@@ -425,6 +438,8 @@ fn post_purchase_invoice(
             tax_percentage: Some(rate_str.clone()),
             tax_base: Some(fmt_dec(*net)),
             tax_amount: Some(fmt_dec(*vat)),
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
 
@@ -449,6 +464,8 @@ fn post_purchase_invoice(
             tax_percentage: Some(rate_str.clone()),
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
 
@@ -468,6 +485,8 @@ fn post_purchase_invoice(
                 tax_percentage: Some(rate_str),
                 tax_base: None,
                 tax_amount: None,
+                amount_fx_foreign: None,
+                currency_code: None,
             });
             record_id += 1;
         }
@@ -488,6 +507,8 @@ fn post_purchase_invoice(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     });
 
     (journal, entries)
@@ -557,6 +578,8 @@ fn post_advance_issued_invoice(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     });
     record_id += 1;
 
@@ -588,6 +611,8 @@ fn post_advance_issued_invoice(
             tax_percentage: Some(rate_str.clone()),
             tax_base: Some(fmt_dec(*net_ron)),
             tax_amount: Some(fmt_dec(*vat_ron)),
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
 
@@ -615,6 +640,8 @@ fn post_advance_issued_invoice(
                 tax_percentage: Some(rate_str),
                 tax_base: None,
                 tax_amount: None,
+                amount_fx_foreign: None,
+                currency_code: None,
             });
             record_id += 1;
         }
@@ -686,6 +713,8 @@ fn post_advance_issued_storno(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     });
     record_id += 1;
 
@@ -715,6 +744,8 @@ fn post_advance_issued_storno(
             tax_percentage: Some(rate_str.clone()),
             tax_base: Some(fmt_dec(neg_base)),
             tax_amount: Some(fmt_dec(neg_vat)),
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
 
@@ -734,6 +765,8 @@ fn post_advance_issued_storno(
                 tax_percentage: Some(rate_str),
                 tax_base: None,
                 tax_amount: None,
+                amount_fx_foreign: None,
+                currency_code: None,
             });
             record_id += 1;
         }
@@ -797,6 +830,8 @@ fn post_advance_received_invoice(
             tax_percentage: Some(rate_str.clone()),
             tax_base: Some(fmt_dec(*net)),
             tax_amount: Some(fmt_dec(*vat)),
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
 
@@ -815,6 +850,8 @@ fn post_advance_received_invoice(
             tax_percentage: Some(rate_str),
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
     }
@@ -834,6 +871,8 @@ fn post_advance_received_invoice(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     });
 
     (journal, entries)
@@ -902,6 +941,8 @@ fn post_advance_received_storno(
             tax_percentage: Some(rate_str.clone()),
             tax_base: Some(fmt_dec(neg_base)),
             tax_amount: Some(fmt_dec(neg_vat)),
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
 
@@ -928,6 +969,8 @@ fn post_advance_received_storno(
                 tax_percentage: Some(rate_str),
                 tax_base: None,
                 tax_amount: None,
+                amount_fx_foreign: None,
+                currency_code: None,
             });
             record_id += 1;
         }
@@ -957,6 +1000,8 @@ fn post_advance_received_storno(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     });
 
     (journal, entries)
@@ -983,6 +1028,11 @@ fn post_payment(
     // normal-VAT invoices (no second leg). Cumulative over the invoice's receipts this clears
     // 4428 to zero exactly (vat_released trues up the final receipt).
     released: &[(Decimal, Decimal)],
+    // Valoarea în valută (mereu pozitivă) și codul ISO al valutei — populat NUMAI pe piciorul
+    // de trezorerie (5124/5314) al tranzacțiilor în valută, pentru reevaluarea lunii (art. 322).
+    // None pentru plăți RON sau pentru orice alt picior.
+    amount_fx_foreign: Option<Decimal>,
+    currency_code: Option<String>,
 ) -> (GlJournal, Vec<GlEntry>) {
     // Use canonical partner ID so it matches MasterFiles and SourceDocuments
     let contact_id = canonical_partner_id(contact_id_raw, partner_cui.unwrap_or(""));
@@ -1023,6 +1073,9 @@ fn post_payment(
             tax_percentage: None,
             tax_base: None,
             tax_amount: None,
+            // Populăm FX numai pe contul de trezorerie în valută (5124/5314) — reevaluare art. 322.
+            amount_fx_foreign: if foreign { amount_fx_foreign } else { None },
+            currency_code: if foreign { currency_code } else { None },
         },
         // C 4111 Clienți (invoice-date rate) = receivable_ron
         GlEntry {
@@ -1039,6 +1092,8 @@ fn post_payment(
             tax_percentage: None,
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         },
     ];
 
@@ -1068,6 +1123,8 @@ fn post_payment(
             tax_percentage: None,
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
     }
@@ -1095,6 +1152,8 @@ fn post_payment(
             tax_percentage: Some(rate_str.clone()),
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
         // C 4427 — now exigible TVA colectată.
@@ -1112,6 +1171,8 @@ fn post_payment(
             tax_percentage: Some(rate_str),
             tax_base: None,
             tax_amount: Some(fmt_dec(*vat)),
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
     }
@@ -1548,6 +1609,11 @@ fn post_received_payment(
     // Per-rate input VAT made exigible/deductible by THIS payment (rate, vat_ron); empty for
     // a non-deferred invoice. Each posts the transfer D 4426 / C 4428.
     released: &[(Decimal, Decimal)],
+    // Valoarea în valută (mereu pozitivă) și codul ISO al valutei — populat NUMAI pe piciorul
+    // de trezorerie (5124/5314) al tranzacțiilor în valută, pentru reevaluarea lunii (art. 322).
+    // None pentru plăți RON sau pentru orice alt picior.
+    amount_fx_foreign: Option<Decimal>,
+    currency_code: Option<String>,
 ) -> (GlJournal, Vec<GlEntry>) {
     let supplier_canon = canonical_partner_id(received_invoice_id, issuer_cui);
     // Money leaves: credit the treasury by instrument + currency (cash → 5311/5314, else 5121/5124).
@@ -1587,6 +1653,8 @@ fn post_received_payment(
             tax_percentage: None,
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         },
         // C 5121/5124/5311/5314 (treasury, payment-date rate) = cash_ron
         GlEntry {
@@ -1603,6 +1671,9 @@ fn post_received_payment(
             tax_percentage: None,
             tax_base: None,
             tax_amount: None,
+            // Populăm FX numai pe contul de trezorerie în valută (5124/5314) — reevaluare art. 322.
+            amount_fx_foreign: if foreign { amount_fx_foreign } else { None },
+            currency_code: if foreign { currency_code } else { None },
         },
     ];
 
@@ -1631,6 +1702,8 @@ fn post_received_payment(
             tax_percentage: None,
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
     }
@@ -1657,6 +1730,8 @@ fn post_received_payment(
             tax_percentage: Some(rate_str.clone()),
             tax_base: None,
             tax_amount: Some(fmt_dec(*vat)),
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
         // C 4428 — release out of TVA neexigibilă.
@@ -1674,6 +1749,8 @@ fn post_received_payment(
             tax_percentage: Some(rate_str),
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         record_id += 1;
     }
@@ -1720,8 +1797,9 @@ async fn insert_entry(
         "INSERT INTO gl_entry \
          (id, journal_pk, record_id, account_code, debit, credit, \
           partner_cui, customer_id, supplier_id, \
-          tax_type, tax_code, tax_percentage, tax_base, tax_amount) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+          tax_type, tax_code, tax_percentage, tax_base, tax_amount, \
+          amount_fx_foreign, currency_code) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
     )
     .bind(&e.id)
     .bind(journal_pk)
@@ -1737,6 +1815,8 @@ async fn insert_entry(
     .bind(&e.tax_percentage)
     .bind(&e.tax_base)
     .bind(&e.tax_amount)
+    .bind(e.amount_fx_foreign.map(fmt_dec))
+    .bind(&e.currency_code)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -1818,6 +1898,8 @@ pub(crate) async fn post_manual_journal(
             tax_percentage: None,
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         })
         .collect();
     assert_balanced(&entries, j.source_id)?;
@@ -1893,6 +1975,8 @@ pub(crate) async fn post_manual_journal_ex(
             tax_percentage: None,
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         })
         .collect();
     assert_balanced(&entries, j.source_id)?;
@@ -2246,6 +2330,8 @@ pub async fn post_fiscal_receipt(
             tax_percentage: None,
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         rec_id += 1;
         // C 4111
@@ -2263,6 +2349,8 @@ pub async fn post_fiscal_receipt(
             tax_percentage: None,
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         rec_id += 1;
     }
@@ -2330,6 +2418,8 @@ pub async fn post_fiscal_receipt(
                 tax_percentage: None,
                 tax_base: None,
                 tax_amount: None,
+                amount_fx_foreign: None,
+                currency_code: None,
             });
             rec_id += 1;
             // C 707 net (venituri din vânzarea mărfurilor)
@@ -2347,6 +2437,8 @@ pub async fn post_fiscal_receipt(
                 tax_percentage: Some(rate_str.clone()),
                 tax_base: Some(fmt_dec(net_cash)),
                 tax_amount: Some(fmt_dec(tva_cash)),
+                amount_fx_foreign: None,
+                currency_code: None,
             });
             rec_id += 1;
             if !tva_cash.is_zero() {
@@ -2364,6 +2456,8 @@ pub async fn post_fiscal_receipt(
                     tax_percentage: Some(rate_str.clone()),
                     tax_base: None,
                     tax_amount: None,
+                    amount_fx_foreign: None,
+                    currency_code: None,
                 });
                 rec_id += 1;
             }
@@ -2386,6 +2480,8 @@ pub async fn post_fiscal_receipt(
                 tax_percentage: None,
                 tax_base: None,
                 tax_amount: None,
+                amount_fx_foreign: None,
+                currency_code: None,
             });
             rec_id += 1;
             entries.push(GlEntry {
@@ -2402,6 +2498,8 @@ pub async fn post_fiscal_receipt(
                 tax_percentage: Some(rate_str.clone()),
                 tax_base: Some(fmt_dec(net_card)),
                 tax_amount: Some(fmt_dec(tva_card)),
+                amount_fx_foreign: None,
+                currency_code: None,
             });
             rec_id += 1;
             if !tva_card.is_zero() {
@@ -2419,6 +2517,8 @@ pub async fn post_fiscal_receipt(
                     tax_percentage: Some(rate_str),
                     tax_base: None,
                     tax_amount: None,
+                    amount_fx_foreign: None,
+                    currency_code: None,
                 });
                 rec_id += 1;
             }
@@ -2442,6 +2542,8 @@ pub async fn post_fiscal_receipt(
                 tax_percentage: None,
                 tax_base: None,
                 tax_amount: None,
+                amount_fx_foreign: None,
+                currency_code: None,
             });
             rec_id += 1;
             entries.push(GlEntry {
@@ -2458,6 +2560,8 @@ pub async fn post_fiscal_receipt(
                 tax_percentage: Some(rate_str_t.clone()),
                 tax_base: Some(fmt_dec(net_tichete)),
                 tax_amount: Some(fmt_dec(tva_tichete)),
+                amount_fx_foreign: None,
+                currency_code: None,
             });
             rec_id += 1;
             if !tva_tichete.is_zero() {
@@ -2475,6 +2579,8 @@ pub async fn post_fiscal_receipt(
                     tax_percentage: Some(rate_str_t),
                     tax_base: None,
                     tax_amount: None,
+                    amount_fx_foreign: None,
+                    currency_code: None,
                 });
                 rec_id += 1;
             }
@@ -2579,6 +2685,8 @@ pub async fn post_fiscal_receipt_settle(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     });
     rec_id += 1;
 
@@ -2597,6 +2705,8 @@ pub async fn post_fiscal_receipt_settle(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     });
     rec_id += 1;
 
@@ -2616,6 +2726,8 @@ pub async fn post_fiscal_receipt_settle(
             tax_percentage: None,
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         });
         rec_id += 1;
         entries.push(GlEntry {
@@ -2632,6 +2744,8 @@ pub async fn post_fiscal_receipt_settle(
             tax_percentage: None,
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         });
     }
 
@@ -3330,6 +3444,15 @@ pub async fn generate_gl_entries(
             Vec::new()
         };
 
+        // Pentru reevaluarea trezoreriei (art. 322): transmitem suma în valută și codul valutei
+        // NUMAI pe tranzacțiile în valută — 5124/5314 trebuie populate pentru compute_fx_revaluation.
+        let pay_amount_fx_foreign = if foreign { Some(dec(&amount_s)) } else { None };
+        let pay_currency_code = if foreign {
+            Some(currency.clone())
+        } else {
+            None
+        };
+
         let (journal, entries) = post_payment(
             company_id,
             &pay_id,
@@ -3342,6 +3465,8 @@ pub async fn generate_gl_entries(
             foreign,
             &method,
             &released,
+            pay_amount_fx_foreign,
+            pay_currency_code,
         );
 
         // FIX 2: Balance guard.
@@ -3434,6 +3559,15 @@ pub async fn generate_gl_entries(
             Vec::new()
         };
 
+        // Pentru reevaluarea trezoreriei (art. 322): transmitem suma în valută și codul valutei
+        // NUMAI pe tranzacțiile în valută — 5124/5314 trebuie populate pentru compute_fx_revaluation.
+        let recv_amount_fx_foreign = if foreign { Some(dec(&amount_s)) } else { None };
+        let recv_currency_code = if foreign {
+            Some(currency.clone())
+        } else {
+            None
+        };
+
         let (journal, entries) = post_received_payment(
             company_id,
             &pay_id,
@@ -3445,6 +3579,8 @@ pub async fn generate_gl_entries(
             foreign,
             &method,
             &released,
+            recv_amount_fx_foreign,
+            recv_currency_code,
         );
         assert_balanced(&entries, &pay_id)?;
 
@@ -3752,6 +3888,8 @@ pub async fn post_vat_settlement(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     };
 
     let mut entries: Vec<GlEntry> = Vec::new();
@@ -3930,6 +4068,8 @@ pub async fn post_period_close(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     };
 
     let mut entries: Vec<GlEntry> = Vec::new();
@@ -4101,6 +4241,8 @@ pub async fn post_income_tax(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     };
     let entries = vec![
         mk(1, expense_account, amount, Decimal::ZERO),
@@ -4218,6 +4360,8 @@ pub async fn post_annual_close(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     };
     // Profit (121 credit balance): D 121 / C 117. Loss (121 debit balance): D 117 / C 121.
     let (kind, entries) = if net_credit > Decimal::ZERO {
@@ -4420,6 +4564,8 @@ pub async fn post_payroll(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     };
     let mut entries: Vec<GlEntry> = Vec::new();
     let mut rec = 0i64;
@@ -4625,6 +4771,8 @@ pub async fn post_depreciation(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     };
     let mut entries = Vec::new();
     let mut rec = 1;
@@ -4709,6 +4857,8 @@ pub async fn post_asset_disposal(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     };
     let mut entries = Vec::new();
     let mut rec = 1;
@@ -4799,6 +4949,8 @@ pub(crate) async fn post_asset_revaluation(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     };
 
     let mut entries: Vec<GlEntry> = Vec::new();
@@ -4976,6 +5128,8 @@ pub async fn post_stock_movement(
         tax_percentage: None,
         tax_base: None,
         tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
     };
     let exp = stock_expense_account(stock_account);
     let entries = if is_in {
@@ -5930,6 +6084,8 @@ mod tests {
             tax_percentage: None,
             tax_base: None,
             tax_amount: None,
+            amount_fx_foreign: None,
+            currency_code: None,
         };
         for e in [
             mk(1, "4111", rdec!(10000), Decimal::ZERO),
@@ -6046,6 +6202,8 @@ mod tests {
                 tax_percentage: None,
                 tax_base: None,
                 tax_amount: None,
+                amount_fx_foreign: None,
+                currency_code: None,
             };
             insert_entry(&mut tx, &jpk, &e).await.unwrap();
         }
@@ -7102,6 +7260,8 @@ mod tests {
                 tax_percentage: None,
                 tax_base: None,
                 tax_amount: None,
+                amount_fx_foreign: None,
+                currency_code: None,
             },
             GlEntry {
                 id: "e2".to_string(),
@@ -7117,6 +7277,8 @@ mod tests {
                 tax_percentage: Some("19.00".to_string()),
                 tax_base: Some("1000.00".to_string()),
                 tax_amount: Some("190.00".to_string()),
+                amount_fx_foreign: None,
+                currency_code: None,
             },
         ];
 
@@ -7142,6 +7304,8 @@ mod tests {
                 tax_percentage: None,
                 tax_base: None,
                 tax_amount: None,
+                amount_fx_foreign: None,
+                currency_code: None,
             },
             GlEntry {
                 id: "b2".to_string(),
@@ -7157,6 +7321,8 @@ mod tests {
                 tax_percentage: Some("19.00".to_string()),
                 tax_base: Some("1000.00".to_string()),
                 tax_amount: Some("190.00".to_string()),
+                amount_fx_foreign: None,
+                currency_code: None,
             },
             GlEntry {
                 id: "b3".to_string(),
@@ -7172,6 +7338,8 @@ mod tests {
                 tax_percentage: Some("19.00".to_string()),
                 tax_base: None,
                 tax_amount: None,
+                amount_fx_foreign: None,
+                currency_code: None,
             },
         ];
 

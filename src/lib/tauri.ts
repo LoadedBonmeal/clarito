@@ -76,6 +76,7 @@ import type {
   UpdateVatRateInput,
   FxRevaluationRow,
   FxRevaluationResult,
+  FxTreasuryRevaluationRow,
 } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -1318,6 +1319,13 @@ export const gl = {
    */
   listFxRevaluations: (companyId: string, period: string) =>
     invoke<FxRevaluationRow[]>("list_fx_revaluations", { companyId, period }),
+
+  /**
+   * Listează rândurile de reevaluare per cont de trezorerie (5124/5314) pentru o perioadă.
+   * Rust command: `list_fx_treasury_revaluations`.
+   */
+  listFxTreasuryRevaluations: (companyId: string, period: string) =>
+    invoke<FxTreasuryRevaluationRow[]>("list_fx_treasury_revaluations", { companyId, period }),
 };
 
 // ─── Declarations (D300) ──────────────────────────────────────────────────

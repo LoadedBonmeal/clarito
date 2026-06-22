@@ -1831,18 +1831,49 @@ export interface FxRevaluationRow {
 export interface FxRevaluationResult {
   /** Perioada reevaluată ("YYYY-MM"). */
   period: string;
-  /** Număr de facturi cu diff ≠ 0 reevaluate. */
+  /** Număr de facturi cu diff ≠ 0 reevaluate (creanțe/datorii). */
   rowsPosted: number;
-  /** Diferențe totale favorabile (lei) — C 765. */
+  /** Diferențe totale favorabile (lei) — C 765 (creanțe/datorii). */
   totalFavorable: string;
-  /** Diferențe totale nefavorabile (lei) — D 665. */
+  /** Diferențe totale nefavorabile (lei) — D 665 (creanțe/datorii). */
   totalUnfavorable: string;
-  /** Diferența netă (favorabil - nefavorabil). */
+  /** Diferența netă (favorabil - nefavorabil), creanțe/datorii. */
   netDiff: string;
   /** source_id-ul notei GL postate ("FX_REVAL-YYYY-MM"). */
   glSourceId: string;
   /** Ultima zi bancară folosită pentru curs BNR. */
   monthEndDate: string;
+  /** Număr de conturi de trezorerie reevaluate (5124/5314). */
+  treasuryRowsPosted: number;
+  /** Diferențe favorabile trezorerie (lei) — C 765. */
+  treasuryFavorable: string;
+  /** Diferențe nefavorabile trezorerie (lei) — D 665. */
+  treasuryUnfavorable: string;
+}
+
+/** O linie de reevaluare per cont de trezorerie (5124/5314). */
+export interface FxTreasuryRevaluationRow {
+  id: string;
+  companyId: string;
+  period: string;
+  /** "BANK" (5124) sau "CASH" (5314). */
+  treasuryKind: "BANK" | "CASH";
+  /** Referința contului (bank_account.id sau "5314"). */
+  accountRef: string;
+  /** Codul GL ("5124" sau "5314"). */
+  glAccount: string;
+  currency: string;
+  /** Sold valutar net (Decimal). */
+  foreignBalance: string;
+  /** Cursul BNR din ultima zi bancară a perioadei. */
+  monthEndRate: string;
+  /** Valoarea în lei la care soldul era evaluat înainte de reevaluare. */
+  priorLei: string;
+  /** Valoarea în lei la cursul month_end_rate. */
+  revaluedLei: string;
+  /** Diferența (signed): revalued_lei - prior_lei. Pozitiv = favorabil. */
+  diffLei: string;
+  createdAt: number;
 }
 
 // ─── NIR (Notă de Intrare Recepție) ──────────────────────────────────────────

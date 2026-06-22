@@ -148,10 +148,11 @@ export function GlLedgerPage() {
   const [showNcModal,       setShowNcModal]       = useState(false);
   const [ncAccounts,        setNcAccounts]        = useState<Account[] | null>(null);
 
-  // ── Reevaluare valutară (P1 Wave 7) ─────────────────────────────────────
-  const [fxRevalRunning,    setFxRevalRunning]    = useState(false);
-  const [fxRevalResult,     setFxRevalResult]     = useState<import("@/types").FxRevaluationResult | null>(null);
-  const [fxRevalRows,       setFxRevalRows]       = useState<import("@/types").FxRevaluationRow[] | null>(null);
+  // ── Reevaluare valutară (P1 Wave 7 + trezorerie 5124/5314) ──────────────
+  const [fxRevalRunning,       setFxRevalRunning]       = useState(false);
+  const [fxRevalResult,        setFxRevalResult]        = useState<import("@/types").FxRevaluationResult | null>(null);
+  const [fxRevalRows,          setFxRevalRows]          = useState<import("@/types").FxRevaluationRow[] | null>(null);
+  const [fxTreasuryRows,       setFxTreasuryRows]       = useState<import("@/types").FxTreasuryRevaluationRow[] | null>(null);
 
   const [refreshTick, setRefreshTick] = useState(0);
   const attempted = useRef<Set<string>>(new Set());
@@ -185,6 +186,7 @@ export function GlLedgerPage() {
     setNcList(null);
     setFxRevalResult(null);
     setFxRevalRows(null);
+    setFxTreasuryRows(null);
   };
   const prevCtx = useRef(`${activeCompanyId}|${dateFrom}`);
   useEffect(() => {
@@ -516,14 +518,20 @@ export function GlLedgerPage() {
     try {
       const r = await api.gl.computeFxRevaluation(activeCompanyId, period);
       setFxRevalResult(r);
-      const rows = await api.gl.listFxRevaluations(activeCompanyId, period);
+      const [rows, tRows] = await Promise.all([
+        api.gl.listFxRevaluations(activeCompanyId, period),
+        api.gl.listFxTreasuryRevaluations(activeCompanyId, period),
+      ]);
       setFxRevalRows(rows);
-      if (r.rowsPosted === 0) {
+      setFxTreasuryRows(tRows);
+      const totalPosted = r.rowsPosted + r.treasuryRowsPosted;
+      if (totalPosted === 0) {
         notify.info(t("gl.fxReval.notifyNone", { period }));
       } else {
         notify.success(t("gl.fxReval.notifyOk", {
           period,
           n: r.rowsPosted,
+          t: r.treasuryRowsPosted,
           fav: r.totalFavorable,
           unfav: r.totalUnfavorable,
         }));
@@ -1063,17 +1071,19 @@ export function GlLedgerPage() {
             </div>
           </div>
 
-          {/* Reevaluare valutară (P1 Wave 7) */}
+          {/* Reevaluare valutară (P1 Wave 7 + trezorerie 5124/5314) */}
           <div className="scr-card close-card">
             <div className="scr-toolbar">
               <div className="tt">{t("gl.fxReval.title", { period: periodLabel })}</div>
               <div className="spacer" />
               {fxRevalResult
-                ? fxRevalResult.rowsPosted > 0
-                  ? <ChipPaid label={t("gl.fxReval.chipPosted", { n: fxRevalResult.rowsPosted })} />
+                ? (fxRevalResult.rowsPosted + fxRevalResult.treasuryRowsPosted) > 0
+                  ? <ChipPaid label={t("gl.fxReval.chipPosted", { n: fxRevalResult.rowsPosted, t: fxRevalResult.treasuryRowsPosted })} />
                   : <ChipWait label={t("gl.fxReval.chipNone")} />
                 : <ChipWait label={t("gl.fxReval.chipNotRun")} />}
             </div>
+
+            {/* Creanțe / datorii */}
             <div className="crow">
               <div>
                 <div className="c1">{t("gl.fxReval.favorable")}</div>
@@ -1105,6 +1115,27 @@ export function GlLedgerPage() {
                   : "—"}
               </span>
             </div>
+
+            {/* Trezorerie */}
+            <div className="crow">
+              <div>
+                <div className="c1">{t("gl.fxReval.treasuryFavorable")}</div>
+                <div className="c2"><span className="doc">5124</span> / <span className="doc">5314</span> → <span className="doc">765</span></div>
+              </div>
+              <span className="amt num pos">
+                {fxRevalResult && fxRevalResult.treasuryRowsPosted > 0 ? `+${fmtRON(fxRevalResult.treasuryFavorable)}` : "—"}
+              </span>
+            </div>
+            <div className="crow">
+              <div>
+                <div className="c1">{t("gl.fxReval.treasuryUnfavorable")}</div>
+                <div className="c2"><span className="doc">665</span> → <span className="doc">5124</span> / <span className="doc">5314</span></div>
+              </div>
+              <span className="amt num neg">
+                {fxRevalResult && fxRevalResult.treasuryRowsPosted > 0 ? `-${fmtRON(fxRevalResult.treasuryUnfavorable)}` : "—"}
+              </span>
+            </div>
+
             <div className="crow" style={{ background: "var(--bg-table-header)" }}>
               <div className="c2" style={{ margin: 0 }}>
                 {t("gl.fxReval.note")}
@@ -1115,11 +1146,15 @@ export function GlLedgerPage() {
                 disabled={fxRevalRunning}
                 onClick={() => void handleFxReval()}
               >
-                {fxRevalRunning ? t("gl.fxReval.running") : (fxRevalResult?.rowsPosted ?? 0) > 0 ? t("gl.fxReval.runAgain") : t("gl.fxReval.run")}
+                {fxRevalRunning
+                  ? t("gl.fxReval.running")
+                  : ((fxRevalResult?.rowsPosted ?? 0) + (fxRevalResult?.treasuryRowsPosted ?? 0)) > 0
+                    ? t("gl.fxReval.runAgain")
+                    : t("gl.fxReval.run")}
               </button>
             </div>
 
-            {/* Tabel detaliu per factură */}
+            {/* Tabel detaliu per factură (creanțe/datorii) */}
             {fxRevalRows && fxRevalRows.length > 0 && (
               <div style={{ marginTop: 8, overflowX: "auto" }}>
                 <table className="scr-table" style={{ fontSize: 12 }}>
@@ -1146,6 +1181,49 @@ export function GlLedgerPage() {
                         <td>{row.currency}</td>
                         <td className="num">{Number(row.foreignOutstanding).toFixed(2)}</td>
                         <td className="num">{Number(row.priorRate).toFixed(4)}</td>
+                        <td className="num">{Number(row.monthEndRate).toFixed(4)}</td>
+                        <td className="num">{fmtRON(row.priorLei)}</td>
+                        <td className="num">{fmtRON(row.revaluedLei)}</td>
+                        <td className={`num${parseFloat(row.diffLei) >= 0 ? " pos" : " neg"}`}>
+                          {parseFloat(row.diffLei) >= 0 ? "+" : ""}{fmtRON(row.diffLei)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Tabel detaliu per cont trezorerie (5124/5314) */}
+            {fxTreasuryRows && fxTreasuryRows.length > 0 && (
+              <div style={{ marginTop: 8, overflowX: "auto" }}>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-2)", padding: "4px 0 2px" }}>
+                  {t("gl.fxReval.treasury.sectionTitle")}
+                </div>
+                <table className="scr-table" style={{ fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th>{t("gl.fxReval.treasury.th.kind")}</th>
+                      <th>{t("gl.fxReval.treasury.th.glAccount")}</th>
+                      <th>{t("gl.fxReval.treasury.th.currency")}</th>
+                      <th className="num">{t("gl.fxReval.treasury.th.balance")}</th>
+                      <th className="num">{t("gl.fxReval.treasury.th.monthEndRate")}</th>
+                      <th className="num">{t("gl.fxReval.treasury.th.priorLei")}</th>
+                      <th className="num">{t("gl.fxReval.treasury.th.revaluedLei")}</th>
+                      <th className="num">{t("gl.fxReval.treasury.th.diffLei")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fxTreasuryRows.map((row) => (
+                      <tr key={row.id}>
+                        <td>
+                          {row.treasuryKind === "BANK"
+                            ? t("gl.fxReval.treasury.kindBank")
+                            : t("gl.fxReval.treasury.kindCash")}
+                        </td>
+                        <td><span className="doc">{row.glAccount}</span></td>
+                        <td>{row.currency}</td>
+                        <td className="num">{Number(row.foreignBalance).toFixed(2)}</td>
                         <td className="num">{Number(row.monthEndRate).toFixed(4)}</td>
                         <td className="num">{fmtRON(row.priorLei)}</td>
                         <td className="num">{fmtRON(row.revaluedLei)}</td>

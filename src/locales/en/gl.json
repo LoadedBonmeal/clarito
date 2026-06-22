@@ -204,20 +204,22 @@
     "fxReval": {
       "title": "FX Revaluation — {{period}}",
       "confirmTitle": "FX Revaluation",
-      "confirmText": "Run FX revaluation for {{period}}? A GL note will be posted with source_type='FX_REVAL' (idempotent — re-running replaces the existing note).",
-      "chipPosted": "{{n}} invoices revalued",
+      "confirmText": "Run FX revaluation for {{period}}? Covers receivables/payables (4111/401) and treasury (5124/5314). A GL note will be posted with source_type='FX_REVAL' (idempotent — re-running replaces the existing note).",
+      "chipPosted": "{{n}} invoices · {{t}} treasury accounts",
       "chipNone": "No differences",
       "chipNotRun": "Not run",
-      "favorable": "Favorable differences",
-      "unfavorable": "Unfavorable differences",
+      "favorable": "Favorable differences (4111/401)",
+      "unfavorable": "Unfavorable differences (4111/401)",
       "net": "Net difference",
-      "netNote": "favorable − unfavorable",
-      "note": "Revalues open FX receivables/payables at the BNR rate on the last banking day of the month (art. 322 OMFP 1802/2014). Base = prior month rate, not original booking rate.",
+      "netNote": "favorable − unfavorable (receivables/payables)",
+      "treasuryFavorable": "Favorable treasury differences (5124/5314)",
+      "treasuryUnfavorable": "Unfavorable treasury differences (5124/5314)",
+      "note": "Revalues open FX receivables/payables (4111/401) and FX treasury balances (5124/5314) at the BNR rate on the last banking day of the month (art. 322 + pct.304(3)-(4) OMFP 1802/2014). Base = prior month rate, not original booking rate.",
       "run": "Run revaluation",
       "runAgain": "Re-run",
       "running": "Calculating…",
       "notifyNone": "No FX differences for {{period}} — all open FX balances unchanged.",
-      "notifyOk": "FX revaluation {{period}}: {{n}} invoices · favorable +{{fav}} RON · unfavorable −{{unfav}} RON.",
+      "notifyOk": "FX revaluation {{period}}: {{n}} invoices + {{t}} treasury accounts · favorable +{{fav}} RON · unfavorable −{{unfav}} RON.",
       "notifyError": "Error during FX revaluation",
       "th": {
         "kind": "Account",
@@ -228,6 +230,23 @@
         "priorLei": "Prior value",
         "revaluedLei": "Revalued",
         "diffLei": "Difference (RON)"
+      },
+      "treasury": {
+        "sectionTitle": "FX treasury (5124/5314)",
+        "favorable": "Favorable differences",
+        "unfavorable": "Unfavorable differences",
+        "th": {
+          "kind": "Type",
+          "glAccount": "GL account",
+          "currency": "Currency",
+          "balance": "Balance",
+          "monthEndRate": "Month-end rate",
+          "priorLei": "Prior value",
+          "revaluedLei": "Revalued",
+          "diffLei": "Difference (RON)"
+        },
+        "kindBank": "Bank (5124)",
+        "kindCash": "Cash (5314)"
       }
     },
     "reconcile": {

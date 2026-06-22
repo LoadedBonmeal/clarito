@@ -693,9 +693,10 @@ pub fn run() {
                     commands::assets::get_asset_fiscal_schedule,
                     commands::assets::revalue_fixed_asset,
                     commands::assets::list_asset_revaluations,
-                    // reevaluare valutară lunară — P1 Wave 7
+                    // reevaluare valutară lunară — P1 Wave 7 + trezorerie 5124/5314
                     commands::fx_revaluation::compute_fx_revaluation,
                     commands::fx_revaluation::list_fx_revaluations,
+                    commands::fx_revaluation::list_fx_treasury_revaluations,
                     // bonuri fiscale / raport Z — P2 Wave 6
                     commands::fiscal_receipts::create_fiscal_receipt,
                     commands::fiscal_receipts::list_fiscal_receipts,
