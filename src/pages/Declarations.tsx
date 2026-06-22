@@ -728,6 +728,87 @@ export function DeclarationsPage() {
           </div>
         </div>
 
+        {/* ── D301 — Decont special de TVA ───────────────────────────────── */}
+        <div className="dec">
+          <div className="dh">
+            <div>
+              <div className="dt"><span className="doc">D301</span>{t("declarations.d301.title")}</div>
+              <div className="ds">{t("declarations.d301.desc")}</div>
+            </div>
+          </div>
+          {/* DUK validation warning banner */}
+          <div style={{ margin: "0 14px 10px", padding: "8px 10px", fontSize: 11.5, color: "var(--amber)", background: "var(--rf-warning-bg)", border: "1px solid var(--rf-warning-bd)", borderRadius: 7, lineHeight: 1.5 }}>
+            ⚠ {t("declarations.d301.dukWarning")}
+          </div>
+          <div className="dkv">
+            <span>{t("declarations.d301.sect1")}</span>
+            <span>{t("declarations.d301.sect4")}</span>
+          </div>
+          <div className="dfoot">
+            <span className="spacer" />
+            <button
+              className="pill-btn"
+              onClick={() => navigate({ to: "/reports", search: { view: "D301" as ReportView } })}
+            >
+              <Ic name="eye" />{t("declarations.d301.previewXml")}
+            </button>
+          </div>
+        </div>
+
+        {/* ── D700 — Declarație de mențiuni / vector fiscal ──────────────── */}
+        <div className="dec">
+          <div className="dh">
+            <div>
+              <div className="dt"><span className="doc">D700</span>{t("declarations.d700.title")}</div>
+              <div className="ds">{t("declarations.d700.desc")}</div>
+            </div>
+          </div>
+          {/* DUK validation warning banner */}
+          <div style={{ margin: "0 14px 10px", padding: "8px 10px", fontSize: 11.5, color: "var(--amber)", background: "var(--rf-warning-bg)", border: "1px solid var(--rf-warning-bd)", borderRadius: 7, lineHeight: 1.5 }}>
+            ⚠ {t("declarations.d700.dukWarning")}
+          </div>
+          <div className="dkv">
+            <span>{t("declarations.d700.sectB")}: {t("declarations.d700.tvaMentiune")}, {t("declarations.d700.regimFiscal")}</span>
+            <span>{t("declarations.d700.sectC")} · {t("declarations.d700.sectD")}</span>
+          </div>
+          <div className="dfoot">
+            <span className="spacer" />
+            <button
+              className="pill-btn"
+              onClick={() => navigate({ to: "/reports", search: { view: "D700" as ReportView } })}
+            >
+              <Ic name="eye" />{t("declarations.d700.previewXml")}
+            </button>
+          </div>
+        </div>
+
+        {/* ── D710 — Declarație rectificativă obligații D100 ─────────────── */}
+        <div className="dec">
+          <div className="dh">
+            <div>
+              <div className="dt"><span className="doc">D710</span>{t("declarations.d710.title")}</div>
+              <div className="ds">{t("declarations.d710.desc")}</div>
+            </div>
+          </div>
+          {/* DUK validation warning banner */}
+          <div style={{ margin: "0 14px 10px", padding: "8px 10px", fontSize: 11.5, color: "var(--amber)", background: "var(--rf-warning-bg)", border: "1px solid var(--rf-warning-bd)", borderRadius: 7, lineHeight: 1.5 }}>
+            ⚠ {t("declarations.d710.dukWarning")}
+          </div>
+          <div className="dkv">
+            <span>{t("declarations.d710.obligations")}</span>
+            <span>{t("declarations.d710.sumaCorecta")}</span>
+          </div>
+          <div className="dfoot">
+            <span className="spacer" />
+            <button
+              className="pill-btn"
+              onClick={() => navigate({ to: "/reports", search: { view: "D710" as ReportView } })}
+            >
+              <Ic name="eye" />{t("declarations.d710.previewXml")}
+            </button>
+          </div>
+        </div>
+
       </div>
 
       {/* ── Preflight validation panel (advisory) ─────────────────────────── */}

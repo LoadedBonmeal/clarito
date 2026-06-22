@@ -398,6 +398,65 @@
         "fetchFailed": "Nu s-a putut descărca precompletatul din SPV."
       }
     },
+    "d301": {
+      "title": "Decont special de TVA",
+      "desc": "Depus de persoanele NEÎNREGISTRATE în scopuri de TVA (art.316), pentru achiziții intracomunitare de bunuri/transport/accizabile și servicii cu taxare inversă (art.307). Persoanele înregistrate TVA depun D300.",
+      "dukWarning": "ATENȚIE: XML-ul generat este structurat per specificație (OPANAF 592/2016), dar nu a fost validat cu DUKIntegrator — lipsește XSD-ul oficial. Verificați namespace-ul față de pachetul Soft J (declaratii.anaf.ro) înainte de depunere.",
+      "sect1": "Sec.1 AIC bunuri taxabile",
+      "sect2": "Sec.2 AIC mijloace transport noi",
+      "sect3": "Sec.3 AIC produse accizabile",
+      "sect4": "Sec.4 Servicii taxare inversă (art.307)",
+      "bazaImpozabila": "Bază impozabilă",
+      "tvaDatorata": "TVA datorată",
+      "previewXml": "Vizualizează / Editează XML",
+      "exportXml": "Export XML",
+      "previewing": "Se construiește…",
+      "previewFailed": "Nu s-a putut construi XML-ul D301."
+    },
+    "d700": {
+      "title": "Mențiuni / Vector fiscal",
+      "desc": "Declarație de înregistrare/mențiuni/radiere (OPANAF 15/2026, ed. 0126): TVA (înregistrare/anulare/perioadă/TVA la încasare), micro↔profit, frecvență impozit profit, sedii secundare, domiciliu fiscal, radiere.",
+      "dukWarning": "ATENȚIE: XML-ul generat este structurat per specificație (OPANAF 15/2026), dar nu a fost validat cu DUKIntegrator — lipsește XSD-ul oficial. Verificați namespace-ul față de pachetul Soft J (declaratii.anaf.ro) înainte de depunere.",
+      "sectB": "B — Vector fiscal",
+      "tvaMentiune": "Mențiune TVA",
+      "regimFiscal": "Regim fiscal",
+      "sectC": "C — Sedii / Domiciliu",
+      "sectD": "D — Radiere",
+      "previewXml": "Vizualizează / Editează XML",
+      "exportXml": "Export XML",
+      "previewing": "Se construiește…",
+      "previewFailed": "Nu s-a putut construi XML-ul D700.",
+      "tvaOptions": {
+        "inregistrare": "Înregistrare în scopuri TVA",
+        "anulare": "Anulare înregistrare TVA",
+        "trecerea_la_lunar": "Trecere la TVA lunar",
+        "trecerea_la_trimestrial": "Trecere la TVA trimestrial",
+        "tva_la_incasare_inregistrare": "Înregistrare TVA la încasare",
+        "tva_la_incasare_anulare": "Anulare TVA la încasare"
+      },
+      "regimOptions": {
+        "trecerea_la_micro": "Trecere la impozit micro",
+        "trecerea_la_profit": "Trecere la impozit pe profit",
+        "modificare_frecventa_profit_lunar": "Frecvență profit → lunar",
+        "modificare_frecventa_profit_trimestrial": "Frecvență profit → trimestrial"
+      }
+    },
+    "d710": {
+      "title": "Rectificativă obligații D100",
+      "desc": "Rectifică EXCLUSIV obligațiile din D100 (autoimpunere/reținere la sursă: impozit profit, nerezidenți, dividende, accize, construcții, contribuții angajator). NU rectifică D112 sau D300. Sumele sunt CORECTE (totale), nu diferențele. Perioade diferite → formulare separate.",
+      "dukWarning": "ATENȚIE: XML-ul generat este structurat per specificație (OPANAF 587/2016 + 779/2024), dar nu a fost validat cu DUKIntegrator — lipsește XSD-ul oficial. Verificați namespace-ul față de pachetul Soft J (declaratii.anaf.ro) înainte de depunere.",
+      "quarter": "Trimestrul rectificat",
+      "year": "Anul",
+      "obligations": "Obligații de rectificat",
+      "codOblig": "Cod obligație (Nomenclator D100)",
+      "denOblig": "Denumire obligație",
+      "sumaCorecta": "Suma corectă (totală, lei)",
+      "addRow": "+ Adaugă obligație",
+      "previewXml": "Vizualizează / Editează XML",
+      "exportXml": "Export XML",
+      "previewing": "Se construiește…",
+      "previewFailed": "Nu s-a putut construi XML-ul D710."
+    },
     "filings": {
       "title": "Declarații depuse",
       "colKind": "Tip",

@@ -393,6 +393,65 @@
         "fetchFailed": "Could not download the pre-filled return from SPV."
       }
     },
+    "d301": {
+      "title": "Special VAT Return",
+      "desc": "Filed by persons NOT registered for VAT (art.316), for intra-Community acquisitions of goods/transport/excisable products and reverse-charge services (art.307). VAT-registered entities file D300.",
+      "dukWarning": "WARNING: The generated XML is structure-correct per spec (OPANAF 592/2016) but has NOT been validated with DUKIntegrator — the official XSD is not bundled. Verify the namespace against the Soft J package (declaratii.anaf.ro) before filing.",
+      "sect1": "Sec.1 IC acquisitions taxable goods",
+      "sect2": "Sec.2 IC acquisitions new means of transport",
+      "sect3": "Sec.3 IC acquisitions excisable products",
+      "sect4": "Sec.4 Reverse-charge services (art.307)",
+      "bazaImpozabila": "Taxable base",
+      "tvaDatorata": "VAT due",
+      "previewXml": "Preview / Edit XML",
+      "exportXml": "Export XML",
+      "previewing": "Building…",
+      "previewFailed": "Could not build the D301 XML."
+    },
+    "d700": {
+      "title": "Fiscal Vector / Registration Changes",
+      "desc": "Registration/amendments/deregistration declaration (OPANAF 15/2026, ed. 0126): VAT (registration/deregistration/period/cash-VAT), micro↔profit, profit-tax frequency, secondary offices, fiscal domicile, deregistration.",
+      "dukWarning": "WARNING: The generated XML is structure-correct per spec (OPANAF 15/2026) but has NOT been validated with DUKIntegrator — the official XSD is not bundled. Verify the namespace against the Soft J package (declaratii.anaf.ro) before filing.",
+      "sectB": "B — Fiscal vector",
+      "tvaMentiune": "VAT change",
+      "regimFiscal": "Tax regime",
+      "sectC": "C — Offices / Domicile",
+      "sectD": "D — Deregistration",
+      "previewXml": "Preview / Edit XML",
+      "exportXml": "Export XML",
+      "previewing": "Building…",
+      "previewFailed": "Could not build the D700 XML.",
+      "tvaOptions": {
+        "inregistrare": "VAT registration",
+        "anulare": "VAT deregistration",
+        "trecerea_la_lunar": "Switch to monthly VAT",
+        "trecerea_la_trimestrial": "Switch to quarterly VAT",
+        "tva_la_incasare_inregistrare": "Enable cash-basis VAT",
+        "tva_la_incasare_anulare": "Disable cash-basis VAT"
+      },
+      "regimOptions": {
+        "trecerea_la_micro": "Switch to micro-enterprise tax",
+        "trecerea_la_profit": "Switch to profit tax",
+        "modificare_frecventa_profit_lunar": "Profit tax frequency → monthly",
+        "modificare_frecventa_profit_trimestrial": "Profit tax frequency → quarterly"
+      }
+    },
+    "d710": {
+      "title": "Amend D100 Obligations",
+      "desc": "Corrects ONLY D100 obligations (self-assessed/withheld-at-source: profit tax, non-resident tax, dividend tax, excise, construction tax, employer contributions). Does NOT amend D112 or D300. Amounts are CORRECT totals (not differences). Different periods → separate forms.",
+      "dukWarning": "WARNING: The generated XML is structure-correct per spec (OPANAF 587/2016 + 779/2024) but has NOT been validated with DUKIntegrator — the official XSD is not bundled. Verify the namespace against the Soft J package (declaratii.anaf.ro) before filing.",
+      "quarter": "Quarter to amend",
+      "year": "Year",
+      "obligations": "Obligations to amend",
+      "codOblig": "Obligation code (D100 Nomenclator)",
+      "denOblig": "Obligation name",
+      "sumaCorecta": "Correct amount (total, lei)",
+      "addRow": "+ Add obligation",
+      "previewXml": "Preview / Edit XML",
+      "exportXml": "Export XML",
+      "previewing": "Building…",
+      "previewFailed": "Could not build the D710 XML."
+    },
     "filings": {
       "title": "Filed Declarations",
       "colKind": "Type",
