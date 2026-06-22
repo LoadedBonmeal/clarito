@@ -524,6 +524,7 @@ pub fn run() {
                     commands::declarations::intrastat_status,
                     commands::d301::preview_d301_xml,
                     commands::d301::export_d301_xml,
+                    commands::d301::aggregate_d301_rows,
                     commands::d700::preview_d700_xml,
                     commands::d700::export_d700_xml,
                     commands::d710::preview_d710_xml,

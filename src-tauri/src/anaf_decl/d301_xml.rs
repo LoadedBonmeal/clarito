@@ -1,51 +1,76 @@
 //! D301 — Decont special de TVA (OPANAF 592/2016, model actualizat).
 //!
 //! **STRUCTURA CORECTĂ PER SPECIFICAȚIE — NESUPUSĂ VALIDĂRII DUK / XSD.**
-//! Namespace-ul și versiunea schemei (`D301_SCHEMA_VERSION` / `D301_NAMESPACE`) sunt
-//! marcate ca TODO-verify: acestea TREBUIE verificate față de pachetul oficial Soft J
-//! (DUKIntegrator) și față de XSD-ul oficial ANAF înainte de depunerea electronică.
-//! Fără XSD-ul oficial LOCAL nu se poate rula DUKIntegrator — testele de mai jos sunt
-//! STRUCTURALE (XML bine-format, secțiuni + atribute prezente, sume corecte).
+//! Namespace-ul și versiunea schemei (`D301_SCHEMA_VERSION` / `D301_NAMESPACE`) au
+//! fost corecte față de structura oficială UniversalCode D301_A1.0.0 v1.0.0.
+//! XML-ul generat TREBUIE validat cu DUKIntegrator față de XSD-ul oficial ANAF
+//! (declaratii.anaf.ro → pachet Soft J) înainte de depunerea electronică prin SPV.
 //!
 //! ## Cine depune D301 și de ce diferă de D300?
-//! D301 e depus de persoanele **NEÎNREGISTRATE** în scopuri de TVA conform art.316 Cod fiscal
-//! (deci firmele înregistrate normal depun D300, nu D301). Categoriile de operațiuni:
-//! - **Secțiunea 1**: Achiziții intracomunitare (AIC) de bunuri taxabile, ALTELE decât mijloace
-//!   de transport noi sau produse accizabile (art.268 alin.(3) lit.c).
-//! - **Secțiunea 2**: AIC de mijloace de transport noi (art.268 alin.(3) lit.b).
-//! - **Secțiunea 3**: AIC de produse accizabile (art.268 alin.(3) lit.d).
-//! - **Secțiunea 4**: Operațiuni cu taxare inversă pentru servicii primite de la nerezidenți
-//!   (art.307 alin.(2)-(6)).
+//! D301 e depus de persoanele **NEÎNREGISTRATE** în scopuri de TVA conform art.316 Cod
+//! fiscal (firmele înregistrate normal depun D300, nu D301). Categoriile de operațiuni
+//! (`tip_operatie`):
+//! - **1**: Achiziții intracomunitare (AIC) de bunuri taxabile, ALTELE decât mijloace
+//!   de transport noi sau produse accizabile (art.268 alin.(3) lit.c). Categorie UBL: K
+//!   cu `intra_eu_kind = "goods"`.
+//! - **2**: AIC de mijloace de transport noi (art.268 alin.(3) lit.b). Necesită flag
+//!   explicit `new_vehicle = true` — modelul curent nu capturează acest flag; rândurile
+//!   de tip 2 pot fi adăugate manual.
+//! - **3**: AIC de produse accizabile (art.268 alin.(3) lit.d). Necesită flag explicit
+//!   `excisable = true` — rândurile de tip 3 pot fi adăugate manual.
+//! - **4**: Servicii cu taxare inversă de la nerezidenți non-UE / art.307 alin.(3),(5),(6).
+//!   Categorie UBL: AE (prestatorul nerezident, neinclus în tratatul UE de servicii).
+//! - **5**: Servicii intracomunitare primite, art.307 alin.(2) (prestator UE). Categorie
+//!   UBL: K cu `intra_eu_kind = "services"`.
 //!
-//! Fiecare secțiune conține câte un rând `<rand>` cu `baza_impozabila` + `tva_datorata`.
-//! Secțiunile fără operațiuni în perioadă NU se emit.
-//! Termen: lunar, 25 a lunii următoare perioadei de raportare.
+//! ## Structura XML
+//! ```text
+//!   <declaratie301 xmlns="mfp:anaf:dgti:d301:declaratie:v1"
+//!                  luna="N" an="AAAA" d_rec="0|1"
+//!                  mijl_trans="0|1"   ← 1 dacă există sectiune tip_operatie=2
+//!                  cif="…" denumire="…" adresa="…"
+//!                  telefon="…" fax="…" email="…" banca="…" cont="…"
+//!                  pers_inreg="1|2"   ← 1=neînregistrat art.316; 2=înregistrat art.317
+//!                  nr_evid="…"
+//!                  baza1="…" tva1="…" baza2="…" tva2="…"
+//!                  baza3="…" tva3="…" baza4="…" tva4="…" baza5="…" tva5="…"
+//!                  nume_declarant="…" prenume_declarant="…" functia_declarant="…">
+//!     <sectiune tip_operatie="1|2|3|4|5"
+//!               nr_doc="…" data_doc="ZZ.LL.AAAA"
+//!               val_valuta="N15.2" tip_valuta="RON|EUR|…"
+//!               baza="N15.2" tva="N15.2"/>
+//!     …
+//!   </declaratie301>
+//! ```
+//!
+//! ## Auto-agregare din date contabile
+//! `aggregate_d301` interoghează `received_invoice_vat_lines` (JOIN `received_invoices`)
+//! pentru perioada dată și clasifică în tip_operatie conform categoriei UBL:
+//! - `vat_category = 'K'` + `intra_eu_kind = 'goods'` → tip 1 (AIC bunuri)
+//! - `vat_category = 'K'` + `intra_eu_kind = 'services'` → tip 5 (servicii intra-UE)
+//! - `vat_category = 'AE'` → tip 4 (taxare inversă alt 307)
+//!
+//! Tipurile 2 și 3 necesită un flag explicit în model (absent curent) — rânduri manuale.
 //!
 //! ## IMPORTANT — Validare obligatorie înainte de depunere
-//! Înainte de depunerea la ANAF, XML-ul generat TREBUIE validat cu DUKIntegrator împotriva
-//! XSD-ului oficial. Obțineți XSD-ul din pachetul Soft J de pe site-ul ANAF (declaratii.anaf.ro).
+//! Înainte de depunerea la ANAF, XML-ul generat TREBUIE validat cu DUKIntegrator față
+//! de XSD-ul oficial. Obțineți XSD-ul din pachetul Soft J de pe site-ul ANAF.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::anaf_decl::round_lei;
 use crate::anaf_decl::xml::{
     empty_elem_attrs, end_elem, finish, new_writer, pretty_print, start_elem_attrs, trunc,
 };
 use crate::error::{AppError, AppResult};
 
-// ── Schema version — TODO: verify against official ANAF XSD + DUKIntegrator ──
+// ── Schema constants ──────────────────────────────────────────────────────────
 
-/// Namespace D301.
-/// **TODO-verify**: Confirmați versiunea exactă (vN) față de XSD-ul oficial din pachetul
-/// Soft J publicat pe declaratii.anaf.ro. Versiunea v4 este o estimare structurală.
-pub const D301_NAMESPACE: &str = "mfp:anaf:dgti:d301:declaratie:v4";
+/// Namespace D301 — versiunea oficială v1 (UniversalCode D301_A1.0.0).
+pub const D301_NAMESPACE: &str = "mfp:anaf:dgti:d301:declaratie:v1";
 
 /// Elementul rădăcină al documentului D301.
 pub const D301_ROOT: &str = "declaratie301";
-
-/// Versiunea schemei D301, ca etichetă (pentru SchemaVersion). TODO-verify.
-pub const D301_SCHEMA_VERSION: &str = "v4 (TODO-verify vs XSD oficial)";
 
 // ── Model date ────────────────────────────────────────────────────────────────
 
@@ -53,82 +78,113 @@ pub const D301_SCHEMA_VERSION: &str = "v4 (TODO-verify vs XSD oficial)";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct D301Header {
-    /// CUI-ul declarantului (fără „RO", doar cifre).
-    pub cui: String,
-    /// Denumirea persoanei impozabile.
-    pub den: String,
+    /// CUI-ul declarantului (fără „RO", doar cifre). Atribut `cif` în XML.
+    pub cif: String,
+    /// Denumirea persoanei impozabile. Atribut `denumire` în XML.
+    pub denumire: String,
     /// Adresa completă.
     pub adresa: String,
+    /// Telefon (opțional, trimis ca șir gol dacă lipsește).
+    pub telefon: String,
+    /// Fax (opțional).
+    pub fax: String,
+    /// E-mail (opțional).
+    pub email: String,
+    /// Banca declarantului (opțional).
+    pub banca: String,
+    /// Contul bancar (IBAN) al declarantului (opțional).
+    pub cont: String,
+    /// Statutul TVA: 1 = neînregistrat art.316 (tipic D301), 2 = înregistrat art.317.
+    pub pers_inreg: u8,
+    /// Numărul de evidență / înregistrare în Registrul Operatorilor Intracomunitari (opțional).
+    pub nr_evid: String,
     /// Luna perioadei de raportare (1-12).
     pub luna: u32,
-    /// Anul perioadei de raportare.
+    /// Anul perioadei de raportare (≥ 2013).
     pub an: i32,
     /// 0 = declarație inițială, 1 = rectificativă.
     pub d_rec: u8,
-    /// Numele declarantului.
-    pub nume_declar: String,
+    /// Numele declarantului (semnatar).
+    pub nume_declarant: String,
     /// Prenumele declarantului.
-    pub prenume_declar: String,
+    pub prenume_declarant: String,
     /// Funcția declarantului.
-    pub functie_declar: String,
+    pub functia_declarant: String,
 }
 
-/// Un rând de operațiuni D301 — baza impozabilă + TVA datorată.
-/// Sumele sunt `Decimal` (2 zecimale); se rotunjesc la lei întregi la emitere.
+/// Un rând din D301 (`<sectiune>`), corespunzând unui document sursă.
+///
+/// Sumele sunt `Decimal` cu 2 zecimale (N15.2); se formatează cu 2 zecimale la emitere
+/// (OPANAF 592/2016 prevede N15.2 pentru baza și TVA la nivel de rând — spre deosebire
+/// de totalizatoarele rădăcini care folosesc același format).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct D301Row {
-    /// Baza impozabilă (lei).
-    pub baza_impozabila: Decimal,
-    /// TVA datorată (lei).
-    pub tva_datorata: Decimal,
+pub struct D301Sectiune {
+    /// tip_operatie ∈ {1, 2, 3, 4, 5} — vezi doc modul.
+    pub tip_operatie: u8,
+    /// Numărul documentului (numărul facturii furnizorului).
+    pub nr_doc: String,
+    /// Data documentului (ZZ.LL.AAAA — formatul ANAF).
+    pub data_doc: String,
+    /// Valoarea în valuta originală a tranzacției (N15.2).
+    pub val_valuta: Decimal,
+    /// Codul ISO 4217 al valutei (3 litere, ex. "RON", "EUR").
+    pub tip_valuta: String,
+    /// Baza impozabilă în lei (N15.2).
+    pub baza: Decimal,
+    /// TVA datorată în lei (N15.2).
+    pub tva: Decimal,
 }
 
-impl D301Row {
-    /// Returnează `true` dacă rândul are operațiuni de raportat (baza sau TVA > 0).
-    pub fn has_data(&self) -> bool {
-        !self.baza_impozabila.is_zero() || !self.tva_datorata.is_zero()
-    }
-}
-
-/// Datele complete D301 pentru o perioadă.
+/// Datele complete D301 pentru o perioadă: lista de rânduri `<sectiune>`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct D301Data {
-    /// Secțiunea 1: AIC bunuri taxabile (altele decât noi mijloace de transport + accizabile).
-    pub sectiune1: Option<D301Row>,
-    /// Secțiunea 2: AIC mijloace de transport noi.
-    pub sectiune2: Option<D301Row>,
-    /// Secțiunea 3: AIC produse accizabile.
-    pub sectiune3: Option<D301Row>,
-    /// Secțiunea 4: Servicii primite de la nerezidenți cu taxare inversă (art.307 alin.(2)-(6)).
-    pub sectiune4: Option<D301Row>,
+    /// Rândurile de operațiuni (0..n `<sectiune>`).
+    pub sectiuni: Vec<D301Sectiune>,
 }
 
 impl D301Data {
-    /// Returnează `true` dacă există cel puțin o secțiune cu date de raportat.
+    /// Returnează `true` dacă există cel puțin un rând cu date de raportat.
     pub fn has_any_data(&self) -> bool {
-        [
-            &self.sectiune1,
-            &self.sectiune2,
-            &self.sectiune3,
-            &self.sectiune4,
-        ]
-        .iter()
-        .any(|s| s.as_ref().map(|r| r.has_data()).unwrap_or(false))
+        !self.sectiuni.is_empty()
     }
+}
+
+// ── Helpers de formatare ──────────────────────────────────────────────────────
+
+/// Formatează un `Decimal` ca N15.2 (2 zecimale fixe, rotunjire comercială).
+fn fmt_n15_2(d: Decimal) -> String {
+    format!(
+        "{:.2}",
+        d.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+    )
+}
+
+/// Agregat (baza, tva) pentru un tip_operatie, din lista de sectiuni.
+fn totals_for(sectiuni: &[D301Sectiune], tip: u8) -> (Decimal, Decimal) {
+    sectiuni
+        .iter()
+        .filter(|s| s.tip_operatie == tip)
+        .fold((Decimal::ZERO, Decimal::ZERO), |(b, t), s| {
+            (b + s.baza, t + s.tva)
+        })
 }
 
 // ── Emitorul XML ──────────────────────────────────────────────────────────────
 
 /// Construiește XML-ul D301 (decont special de TVA) pentru perioada dată.
 ///
-/// **STRUCTURA CORECTĂ PER SPECIFICAȚIE — NESUPUSĂ VALIDĂRII DUK/XSD.**
-/// Verificați namespace-ul (`D301_NAMESPACE`) și structura față de XSD-ul oficial ANAF
-/// înainte de depunerea electronică prin SPV.
+/// Structura corectă per OPANAF 592/2016 + UniversalCode D301_A1.0.0 v1.0.0:
+/// - Root: `<declaratie301 xmlns="mfp:anaf:dgti:d301:declaratie:v1" …totale…>`
+/// - Rânduri: `<sectiune tip_operatie="N" nr_doc="…" data_doc="ZZ.LL.AAAA"
+///              val_valuta="N15.2" tip_valuta="RON" baza="N15.2" tva="N15.2"/>`
+///
+/// **NESUPUSĂ VALIDĂRII DUK/XSD** — verificați față de XSD-ul oficial ANAF înainte de
+/// depunerea electronică prin SPV.
 ///
 /// # Erori
-/// Returnează eroare dacă nu există nicio secțiune cu date de raportat.
+/// Returnează eroare dacă nu există niciun rând de raportat.
 pub fn build_d301_xml(header: &D301Header, data: &D301Data) -> AppResult<String> {
     if !data.has_any_data() {
         return Err(AppError::Validation(
@@ -137,28 +193,49 @@ pub fn build_d301_xml(header: &D301Header, data: &D301Data) -> AppResult<String>
         ));
     }
 
-    // TVA totală de plată = suma TVA din toate secțiunile cu date.
-    let total_tva: i64 = [
-        &data.sectiune1,
-        &data.sectiune2,
-        &data.sectiune3,
-        &data.sectiune4,
-    ]
-    .iter()
-    .filter_map(|s| s.as_ref())
-    .filter(|r| r.has_data())
-    .map(|r| round_lei(r.tva_datorata))
-    .sum();
+    // ── Totalizatoare per tip_operatie (baza1..5 / tva1..5) ──────────────────
+    let (baza1, tva1) = totals_for(&data.sectiuni, 1);
+    let (baza2, tva2) = totals_for(&data.sectiuni, 2);
+    let (baza3, tva3) = totals_for(&data.sectiuni, 3);
+    let (baza4, tva4) = totals_for(&data.sectiuni, 4);
+    let (baza5, tva5) = totals_for(&data.sectiuni, 5);
+
+    // mijl_trans = 1 dacă există rânduri cu tip_operatie=2 (mijloace transport noi).
+    let mijl_trans: u8 = if data.sectiuni.iter().any(|s| s.tip_operatie == 2) {
+        1
+    } else {
+        0
+    };
 
     let luna_s = header.luna.to_string();
     let an_s = header.an.to_string();
     let d_rec_s = header.d_rec.to_string();
-    let total_s = total_tva.to_string();
-    let den = trunc(header.den.trim(), 200);
+    let mijl_s = mijl_trans.to_string();
+    let pers_s = header.pers_inreg.to_string();
+
+    let denumire = trunc(header.denumire.trim(), 200);
     let adresa = trunc(header.adresa.trim(), 200);
-    let nume = trunc(header.nume_declar.trim(), 75);
-    let prenume = trunc(header.prenume_declar.trim(), 75);
-    let functie = trunc(header.functie_declar.trim(), 75);
+    let telefon = trunc(header.telefon.trim(), 50);
+    let fax = trunc(header.fax.trim(), 50);
+    let email = trunc(header.email.trim(), 100);
+    let banca = trunc(header.banca.trim(), 100);
+    let cont = trunc(header.cont.trim(), 34);
+    let nr_evid = trunc(header.nr_evid.trim(), 20);
+    let nume = trunc(header.nume_declarant.trim(), 75);
+    let prenume = trunc(header.prenume_declarant.trim(), 75);
+    let functia = trunc(header.functia_declarant.trim(), 75);
+
+    // N15.2 strings for totals.
+    let baza1_s = fmt_n15_2(baza1);
+    let tva1_s = fmt_n15_2(tva1);
+    let baza2_s = fmt_n15_2(baza2);
+    let tva2_s = fmt_n15_2(tva2);
+    let baza3_s = fmt_n15_2(baza3);
+    let tva3_s = fmt_n15_2(tva3);
+    let baza4_s = fmt_n15_2(baza4);
+    let tva4_s = fmt_n15_2(tva4);
+    let baza5_s = fmt_n15_2(baza5);
+    let tva5_s = fmt_n15_2(tva5);
 
     let mut w = new_writer()?;
 
@@ -170,44 +247,236 @@ pub fn build_d301_xml(header: &D301Header, data: &D301Data) -> AppResult<String>
             ("luna", &luna_s),
             ("an", &an_s),
             ("d_rec", &d_rec_s),
-            ("cui", header.cui.trim()),
-            ("den", &den),
+            ("mijl_trans", &mijl_s),
+            ("cif", header.cif.trim()),
+            ("denumire", &denumire),
             ("adresa", &adresa),
-            ("nume_declar", &nume),
-            ("prenume_declar", &prenume),
-            ("functie_declar", &functie),
-            ("totalPlata_A", &total_s),
+            ("telefon", &telefon),
+            ("fax", &fax),
+            ("email", &email),
+            ("banca", &banca),
+            ("cont", &cont),
+            ("pers_inreg", &pers_s),
+            ("nr_evid", &nr_evid),
+            ("baza1", &baza1_s),
+            ("tva1", &tva1_s),
+            ("baza2", &baza2_s),
+            ("tva2", &tva2_s),
+            ("baza3", &baza3_s),
+            ("tva3", &tva3_s),
+            ("baza4", &baza4_s),
+            ("tva4", &tva4_s),
+            ("baza5", &baza5_s),
+            ("tva5", &tva5_s),
+            ("nume_declarant", &nume),
+            ("prenume_declarant", &prenume),
+            ("functia_declarant", &functia),
         ],
     )?;
 
-    // Emit only sections that have data (per spec: sections without operations are omitted).
-    emit_section(&mut w, "sectiune1", &data.sectiune1)?;
-    emit_section(&mut w, "sectiune2", &data.sectiune2)?;
-    emit_section(&mut w, "sectiune3", &data.sectiune3)?;
-    emit_section(&mut w, "sectiune4", &data.sectiune4)?;
+    // Emit rows.
+    for s in &data.sectiuni {
+        let tip_s = s.tip_operatie.to_string();
+        let val_s = fmt_n15_2(s.val_valuta);
+        let baza_s = fmt_n15_2(s.baza);
+        let tva_s = fmt_n15_2(s.tva);
+        let tip_val = trunc(s.tip_valuta.trim().to_uppercase().as_str(), 3);
+        empty_elem_attrs(
+            &mut w,
+            "sectiune",
+            &[
+                ("tip_operatie", &tip_s),
+                ("nr_doc", s.nr_doc.trim()),
+                ("data_doc", s.data_doc.trim()),
+                ("val_valuta", &val_s),
+                ("tip_valuta", &tip_val),
+                ("baza", &baza_s),
+                ("tva", &tva_s),
+            ],
+        )?;
+    }
 
     end_elem(&mut w, D301_ROOT)?;
     Ok(pretty_print(&finish(w)?))
 }
 
-/// Emite o secțiune `<sectiuneN baza_impozabila="…" tva_datorata="…"/>` dacă există date.
-fn emit_section(
-    w: &mut crate::anaf_decl::xml::XmlWriter,
-    elem: &str,
-    row: &Option<D301Row>,
-) -> AppResult<()> {
-    if let Some(r) = row {
-        if r.has_data() {
-            let baza = round_lei(r.baza_impozabila).to_string();
-            let tva = round_lei(r.tva_datorata).to_string();
-            empty_elem_attrs(
-                w,
-                elem,
-                &[("baza_impozabila", &baza), ("tva_datorata", &tva)],
-            )?;
-        }
+// ── Auto-agregare din date contabile ─────────────────────────────────────────
+
+/// Un rând brut extras din `received_invoice_vat_lines` JOIN `received_invoices`
+/// (folosit intern de `aggregate_d301`).
+#[derive(Debug)]
+struct RawVatLine {
+    /// Nr. document (numărul facturii furnizorului).
+    nr_doc: String,
+    /// Data documentului ISO (YYYY-MM-DD) — convertit în ZZ.LL.AAAA la emitere.
+    data_doc_iso: String,
+    /// Baza impozabilă din linia TVA (TEXT în DB).
+    base_amount: String,
+    /// TVA din linia TVA (TEXT în DB).
+    vat_amount: String,
+    /// Valuta facturii.
+    currency: String,
+    /// Cursul de schimb față de RON (None = RON nativ).
+    exchange_rate: Option<f64>,
+    /// Categoria TVA UBL: "K" sau "AE".
+    vat_category: String,
+    /// Tipul achiziției intra-UE: "goods" sau "services" (relevant pentru K).
+    intra_eu_kind: String,
+}
+
+/// Convertește o dată ISO (YYYY-MM-DD) în formatul ANAF (ZZ.LL.AAAA).
+fn iso_to_anaf_date(iso: &str) -> String {
+    let parts: Vec<&str> = iso.split('-').collect();
+    if parts.len() == 3 {
+        format!("{}.{}.{}", parts[2], parts[1], parts[0])
+    } else {
+        iso.to_string()
     }
-    Ok(())
+}
+
+/// Parsează un șir Decimal sau returnează zero.
+fn parse_dec(s: &str) -> Decimal {
+    s.trim().parse::<Decimal>().unwrap_or(Decimal::ZERO)
+}
+
+/// Convertește o sumă în valuta dată la RON (cu cursul de schimb).
+fn to_ron(amount: Decimal, currency: &str, fx: Option<f64>) -> Decimal {
+    if currency.eq_ignore_ascii_case("RON") {
+        return amount;
+    }
+    let rate = fx
+        .and_then(Decimal::from_f64_retain)
+        .unwrap_or(Decimal::ONE);
+    if rate.is_zero() {
+        amount
+    } else {
+        amount * rate
+    }
+}
+
+/// Clasifică un rând TVA în `tip_operatie` D301:
+/// - K + goods → 1 (AIC bunuri)
+/// - K + services → 5 (servicii intracomunitare art.307(2))
+/// - AE → 4 (taxare inversă alt art.307)
+/// - Altele → None (nu intră în D301 — saltă)
+fn classify_tip(vat_category: &str, intra_eu_kind: &str) -> Option<u8> {
+    match vat_category {
+        "K" => {
+            if intra_eu_kind == "services" {
+                Some(5)
+            } else {
+                Some(1) // "goods" sau default
+            }
+        }
+        "AE" => Some(4),
+        _ => None,
+    }
+}
+
+/// Agregă rânduri D301 din `received_invoice_vat_lines` pentru o companie și perioadă.
+///
+/// Condiții pentru includere:
+/// - `ri.company_id = company_id`
+/// - `ri.issue_date` în `[period_from, period_to]` (format YYYY-MM-DD)
+/// - `ri.status != 'REJECTED'`
+/// - `vl.vat_category IN ('K', 'AE')`
+///
+/// Clasificare:
+/// - `K` + `intra_eu_kind = "goods"` → tip_operatie 1 (AIC bunuri)
+/// - `K` + `intra_eu_kind = "services"` → tip_operatie 5 (servicii intra-UE)
+/// - `AE` → tip_operatie 4 (taxare inversă)
+///
+/// **Limitare**: tipurile 2 (mijloace transport noi) și 3 (produse accizabile) necesită
+/// un flag explicit absent din modelul curent — rândurile respective trebuie adăugate manual.
+///
+/// Dacă `vat_payer = true` (art.316), compania depune D300, nu D301 → returnează eroare.
+pub async fn aggregate_d301(
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+    vat_payer: bool,
+) -> AppResult<Vec<D301Sectiune>> {
+    if vat_payer {
+        return Err(AppError::Validation(
+            "D301: compania este înregistrată în scopuri de TVA (art.316) și depune D300, nu D301."
+                .into(),
+        ));
+    }
+
+    let rows = sqlx::query(
+        "SELECT ri.number   AS nr_doc, \
+                ri.issue_date AS data_doc_iso, \
+                vl.base_amount, \
+                vl.vat_amount, \
+                COALESCE(ri.currency, 'RON')           AS currency, \
+                ri.exchange_rate, \
+                vl.vat_category, \
+                COALESCE(ri.intra_eu_kind, 'goods')    AS intra_eu_kind \
+         FROM received_invoice_vat_lines vl \
+         JOIN received_invoices ri ON ri.id = vl.received_invoice_id \
+         WHERE ri.company_id  = ?1 \
+           AND ri.issue_date >= ?2 \
+           AND ri.issue_date <= ?3 \
+           AND ri.status     != 'REJECTED' \
+           AND vl.vat_category IN ('K', 'AE') \
+         ORDER BY ri.issue_date, ri.number",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    use sqlx::Row;
+    let raw: Vec<RawVatLine> = rows
+        .iter()
+        .map(|r| RawVatLine {
+            nr_doc: r
+                .try_get::<Option<String>, _>("nr_doc")
+                .unwrap_or(None)
+                .unwrap_or_default(),
+            data_doc_iso: r.try_get("data_doc_iso").unwrap_or_default(),
+            base_amount: r.try_get("base_amount").unwrap_or_default(),
+            vat_amount: r.try_get("vat_amount").unwrap_or_default(),
+            currency: r.try_get("currency").unwrap_or_else(|_| "RON".into()),
+            exchange_rate: r.try_get("exchange_rate").unwrap_or(None),
+            vat_category: r.try_get("vat_category").unwrap_or_default(),
+            intra_eu_kind: r
+                .try_get("intra_eu_kind")
+                .unwrap_or_else(|_| "goods".into()),
+        })
+        .collect();
+
+    let mut sectiuni = Vec::with_capacity(raw.len());
+    for line in raw {
+        let Some(tip) = classify_tip(&line.vat_category, &line.intra_eu_kind) else {
+            continue;
+        };
+        let base_dec = parse_dec(&line.base_amount);
+        let vat_dec = parse_dec(&line.vat_amount);
+        let baza_ron = to_ron(base_dec, &line.currency, line.exchange_rate);
+        let tva_ron = to_ron(vat_dec, &line.currency, line.exchange_rate);
+
+        // val_valuta = valoarea în valuta originală (baza + tva în valuta documentului).
+        let val_valuta = base_dec + vat_dec;
+
+        sectiuni.push(D301Sectiune {
+            tip_operatie: tip,
+            nr_doc: line.nr_doc,
+            data_doc: iso_to_anaf_date(&line.data_doc_iso),
+            val_valuta,
+            tip_valuta: if line.currency.is_empty() {
+                "RON".into()
+            } else {
+                line.currency.to_uppercase()
+            },
+            baza: baza_ron,
+            tva: tva_ron,
+        });
+    }
+    Ok(sectiuni)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -223,21 +492,29 @@ mod tests {
 
     fn header() -> D301Header {
         D301Header {
-            cui: "12345674".into(),
-            den: "Test SRL".into(),
+            cif: "12345674".into(),
+            denumire: "Test SRL".into(),
             adresa: "Str. Test 1, București".into(),
+            telefon: "0721000000".into(),
+            fax: "".into(),
+            email: "test@test.ro".into(),
+            banca: "Banca Test".into(),
+            cont: "RO49AAAA1B31007593840000".into(),
+            pers_inreg: 1,
+            nr_evid: "".into(),
             luna: 5,
             an: 2026,
             d_rec: 0,
-            nume_declar: "Popescu".into(),
-            prenume_declar: "Ion".into(),
-            functie_declar: "Administrator".into(),
+            nume_declarant: "Popescu".into(),
+            prenume_declarant: "Ion".into(),
+            functia_declarant: "Administrator".into(),
         }
     }
 
     /// Structural tests — NOT DUK/XSD validation (no official XSD bundled).
-    /// These verify: well-formed XML, correct namespace, sections present when data is non-zero,
-    /// amounts formatted as whole lei. DUK validation requires the official XSD from ANAF.
+    /// These verify: well-formed XML, correct namespace/root, attributes present,
+    /// sectiune rows with tip_operatie, amounts N15.2, totals correct, mijl_trans flag.
+    /// DUK validation requires the official XSD from ANAF.
 
     #[test]
     fn empty_data_returns_error() {
@@ -246,145 +523,499 @@ mod tests {
     }
 
     #[test]
-    fn sectiune1_and_sectiune4_present_sectiune2_3_absent() {
-        // D301 per spec: only sections with data are emitted.
+    fn namespace_is_v1_and_root_is_declaratie301() {
         let data = D301Data {
-            sectiune1: Some(D301Row {
-                baza_impozabila: d("50000"),
-                tva_datorata: d("10000"),
-            }),
-            sectiune2: None,
-            sectiune3: None,
-            sectiune4: Some(D301Row {
-                baza_impozabila: d("20000"),
-                tva_datorata: d("4000"),
-            }),
+            sectiuni: vec![D301Sectiune {
+                tip_operatie: 1,
+                nr_doc: "FAC001".into(),
+                data_doc: "15.05.2026".into(),
+                val_valuta: d("1190.00"),
+                tip_valuta: "EUR".into(),
+                baza: d("1000.00"),
+                tva: d("190.00"),
+            }],
         };
         let xml = build_d301_xml(&header(), &data).unwrap();
-
-        // Root + namespace
         assert!(
             xml.contains(&format!(r#"xmlns="{D301_NAMESPACE}""#)),
-            "namespace mismatch: {xml}"
+            "namespace must be v1: {xml}"
         );
         assert!(
-            xml.contains(&format!("<{D301_ROOT}")),
-            "root element missing: {xml}"
+            xml.contains(&format!("<{D301_ROOT} ")),
+            "root must be declaratie301: {xml}"
         );
-        assert!(
-            xml.contains(r#"luna="5""#) && xml.contains(r#"an="2026""#),
-            "period attributes missing: {xml}"
-        );
-        assert!(xml.contains(r#"cui="12345674""#), "cui missing: {xml}");
+    }
+
+    #[test]
+    fn root_attributes_present() {
+        let data = D301Data {
+            sectiuni: vec![D301Sectiune {
+                tip_operatie: 1,
+                nr_doc: "FAC001".into(),
+                data_doc: "15.05.2026".into(),
+                val_valuta: d("1000.00"),
+                tip_valuta: "RON".into(),
+                baza: d("1000.00"),
+                tva: d("190.00"),
+            }],
+        };
+        let xml = build_d301_xml(&header(), &data).unwrap();
+
+        // Required root attributes per OPANAF 592/2016.
+        assert!(xml.contains(r#"luna="5""#), "luna missing: {xml}");
+        assert!(xml.contains(r#"an="2026""#), "an missing: {xml}");
         assert!(xml.contains(r#"d_rec="0""#), "d_rec missing: {xml}");
-
-        // Secțiunea 1: baza=50000, tva=10000
+        assert!(xml.contains(r#"cif="12345674""#), "cif missing: {xml}");
         assert!(
-            xml.contains("<sectiune1 ") || xml.contains("<sectiune1\n"),
-            "sectiune1 missing: {xml}"
+            xml.contains(r#"pers_inreg="1""#),
+            "pers_inreg missing: {xml}"
         );
         assert!(
-            xml.contains(r#"baza_impozabila="50000""#),
-            "baza s1 wrong: {xml}"
-        );
-
-        // Secțiunea 4: present (reverse charge services)
-        assert!(
-            xml.contains("<sectiune4 ") || xml.contains("<sectiune4\n"),
-            "sectiune4 missing: {xml}"
+            xml.contains(r#"mijl_trans="0""#),
+            "mijl_trans missing: {xml}"
         );
         assert!(
-            xml.contains(r#"baza_impozabila="20000""#),
-            "baza s4 wrong: {xml}"
+            xml.contains(r#"denumire="Test SRL""#),
+            "denumire missing: {xml}"
         );
-
-        // Secțiunile 2 și 3: absente (nu au date)
+        assert!(xml.contains(r#"baza1="1000.00""#), "baza1 missing: {xml}");
+        assert!(xml.contains(r#"tva1="190.00""#), "tva1 missing: {xml}");
         assert!(
-            !xml.contains("<sectiune2"),
-            "sectiune2 should be absent: {xml}"
+            xml.contains(r#"baza5="0.00""#),
+            "baza5 (zero) missing: {xml}"
         );
+        assert!(xml.contains(r#"tva5="0.00""#), "tva5 (zero) missing: {xml}");
         assert!(
-            !xml.contains("<sectiune3"),
-            "sectiune3 should be absent: {xml}"
-        );
-
-        // totalPlata_A = 10000 + 4000 = 14000
-        assert!(
-            xml.contains(r#"totalPlata_A="14000""#),
-            "totalPlata_A wrong: {xml}"
-        );
-
-        // XML bine-format: are declaratie XML + rădăcină deschisă + rădăcină închisă
-        assert!(
-            xml.contains("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"),
-            "XML prolog missing: {xml}"
+            xml.contains(r#"nume_declarant="Popescu""#),
+            "nume_declarant missing: {xml}"
         );
         assert!(
-            xml.contains(&format!("</{D301_ROOT}>")),
-            "root close tag missing: {xml}"
+            xml.contains(r#"prenume_declarant="Ion""#),
+            "prenume_declarant missing: {xml}"
+        );
+        assert!(
+            xml.contains(r#"functia_declarant="Administrator""#),
+            "functia_declarant missing: {xml}"
         );
     }
 
     #[test]
-    fn amounts_rounded_to_whole_lei() {
-        // Sume cu zecimale — se rotunjesc la lei întregi (comercial).
+    fn sectiune_row_attributes_correct() {
+        // tip 1 (AIC goods) + tip 5 (EU service) → check baza1/tva1 + baza5/tva5 totals.
         let data = D301Data {
-            sectiune1: Some(D301Row {
-                baza_impozabila: d("999.50"), // → 1000 (commercial round)
-                tva_datorata: d("199.49"),    // → 199
-            }),
-            ..D301Data::default()
+            sectiuni: vec![
+                D301Sectiune {
+                    tip_operatie: 1,
+                    nr_doc: "FAC001".into(),
+                    data_doc: "15.05.2026".into(),
+                    val_valuta: d("1000.00"),
+                    tip_valuta: "RON".into(),
+                    baza: d("1000.00"),
+                    tva: d("0.00"),
+                },
+                D301Sectiune {
+                    tip_operatie: 5,
+                    nr_doc: "SRV001".into(),
+                    data_doc: "20.05.2026".into(),
+                    val_valuta: d("500.00"),
+                    tip_valuta: "EUR".into(),
+                    baza: d("500.00"),
+                    tva: d("95.00"),
+                },
+            ],
         };
         let xml = build_d301_xml(&header(), &data).unwrap();
+
+        // Rows.
         assert!(
-            xml.contains(r#"baza_impozabila="1000""#),
-            "rounding baza: {xml}"
+            xml.contains(r#"tip_operatie="1""#),
+            "tip_operatie=1 missing: {xml}"
         );
-        assert!(xml.contains(r#"tva_datorata="199""#), "rounding tva: {xml}");
-        assert!(xml.contains(r#"totalPlata_A="199""#), "totalPlata_A: {xml}");
+        assert!(
+            xml.contains(r#"tip_operatie="5""#),
+            "tip_operatie=5 missing: {xml}"
+        );
+        assert!(xml.contains(r#"nr_doc="FAC001""#), "nr_doc missing: {xml}");
+        assert!(
+            xml.contains(r#"data_doc="15.05.2026""#),
+            "data_doc missing: {xml}"
+        );
+        assert!(
+            xml.contains(r#"tip_valuta="RON""#),
+            "tip_valuta RON missing: {xml}"
+        );
+        assert!(
+            xml.contains(r#"tip_valuta="EUR""#),
+            "tip_valuta EUR missing: {xml}"
+        );
+
+        // Totals: baza1=1000.00 tva1=0.00 ; baza5=500.00 tva5=95.00.
+        assert!(
+            xml.contains(r#"baza1="1000.00""#),
+            "baza1 total wrong: {xml}"
+        );
+        assert!(xml.contains(r#"tva1="0.00""#), "tva1 total wrong: {xml}");
+        assert!(
+            xml.contains(r#"baza5="500.00""#),
+            "baza5 total wrong: {xml}"
+        );
+        assert!(xml.contains(r#"tva5="95.00""#), "tva5 total wrong: {xml}");
+
+        // mijl_trans=0 (no tip 2 row).
+        assert!(
+            xml.contains(r#"mijl_trans="0""#),
+            "mijl_trans should be 0: {xml}"
+        );
     }
 
     #[test]
-    fn all_four_sections_emitted_when_all_have_data() {
+    fn mijl_trans_set_when_tip2_present() {
         let data = D301Data {
-            sectiune1: Some(D301Row {
-                baza_impozabila: d("1000"),
-                tva_datorata: d("190"),
-            }),
-            sectiune2: Some(D301Row {
-                baza_impozabila: d("2000"),
-                tva_datorata: d("380"),
-            }),
-            sectiune3: Some(D301Row {
-                baza_impozabila: d("3000"),
-                tva_datorata: d("570"),
-            }),
-            sectiune4: Some(D301Row {
-                baza_impozabila: d("4000"),
-                tva_datorata: d("760"),
-            }),
+            sectiuni: vec![D301Sectiune {
+                tip_operatie: 2,
+                nr_doc: "MT001".into(),
+                data_doc: "01.05.2026".into(),
+                val_valuta: d("50000.00"),
+                tip_valuta: "EUR".into(),
+                baza: d("50000.00"),
+                tva: d("9500.00"),
+            }],
         };
         let xml = build_d301_xml(&header(), &data).unwrap();
-        assert!(xml.contains("<sectiune1"), "s1 missing: {xml}");
-        assert!(xml.contains("<sectiune2"), "s2 missing: {xml}");
-        assert!(xml.contains("<sectiune3"), "s3 missing: {xml}");
-        assert!(xml.contains("<sectiune4"), "s4 missing: {xml}");
-        // totalPlata_A = 190+380+570+760 = 1900
-        assert!(xml.contains(r#"totalPlata_A="1900""#), "total wrong: {xml}");
+        assert!(
+            xml.contains(r#"mijl_trans="1""#),
+            "mijl_trans must be 1 when tip_operatie=2 exists: {xml}"
+        );
+        assert!(
+            xml.contains(r#"baza2="50000.00""#),
+            "baza2 total wrong: {xml}"
+        );
+        assert!(xml.contains(r#"tva2="9500.00""#), "tva2 total wrong: {xml}");
+    }
+
+    #[test]
+    fn amounts_n15_2_format() {
+        // Amounts must be formatted as N15.2 (2 decimal places), not whole lei.
+        let data = D301Data {
+            sectiuni: vec![D301Sectiune {
+                tip_operatie: 1,
+                nr_doc: "FAC999".into(),
+                data_doc: "01.05.2026".into(),
+                val_valuta: d("999.505"), // → 999.51 (round half-up)
+                tip_valuta: "RON".into(),
+                baza: d("999.505"),
+                tva: d("199.491"), // → 199.49
+            }],
+        };
+        let xml = build_d301_xml(&header(), &data).unwrap();
+        // Row-level amounts (sectiune attrs).
+        assert!(
+            xml.contains(r#"baza="999.51""#),
+            "N15.2 rounding baza: {xml}"
+        );
+        assert!(xml.contains(r#"tva="199.49""#), "N15.2 rounding tva: {xml}");
+        // Total in root attrs.
+        assert!(
+            xml.contains(r#"baza1="999.51""#),
+            "N15.2 baza1 total: {xml}"
+        );
+        assert!(xml.contains(r#"tva1="199.49""#), "N15.2 tva1 total: {xml}");
     }
 
     #[test]
     fn rectificativa_flag_emitted_correctly() {
         let data = D301Data {
-            sectiune1: Some(D301Row {
-                baza_impozabila: d("1000"),
-                tva_datorata: d("190"),
-            }),
-            ..D301Data::default()
+            sectiuni: vec![D301Sectiune {
+                tip_operatie: 1,
+                nr_doc: "FAC001".into(),
+                data_doc: "01.05.2026".into(),
+                val_valuta: d("1000.00"),
+                tip_valuta: "RON".into(),
+                baza: d("1000.00"),
+                tva: d("0.00"),
+            }],
         };
         let mut hdr = header();
         hdr.d_rec = 1;
         let xml = build_d301_xml(&hdr, &data).unwrap();
         assert!(xml.contains(r#"d_rec="1""#), "d_rec rectificativă: {xml}");
+    }
+
+    #[test]
+    fn multiple_sections_totals_aggregated_correctly() {
+        // 2 × tip 1 rows (should sum into baza1/tva1) + 1 × tip 4.
+        let data = D301Data {
+            sectiuni: vec![
+                D301Sectiune {
+                    tip_operatie: 1,
+                    nr_doc: "F1".into(),
+                    data_doc: "01.05.2026".into(),
+                    val_valuta: d("200.00"),
+                    tip_valuta: "RON".into(),
+                    baza: d("200.00"),
+                    tva: d("0.00"),
+                },
+                D301Sectiune {
+                    tip_operatie: 1,
+                    nr_doc: "F2".into(),
+                    data_doc: "10.05.2026".into(),
+                    val_valuta: d("300.00"),
+                    tip_valuta: "RON".into(),
+                    baza: d("300.00"),
+                    tva: d("0.00"),
+                },
+                D301Sectiune {
+                    tip_operatie: 4,
+                    nr_doc: "S1".into(),
+                    data_doc: "15.05.2026".into(),
+                    val_valuta: d("100.00"),
+                    tip_valuta: "EUR".into(),
+                    baza: d("100.00"),
+                    tva: d("19.00"),
+                },
+            ],
+        };
+        let xml = build_d301_xml(&header(), &data).unwrap();
+        // baza1 = 200 + 300 = 500.
+        assert!(xml.contains(r#"baza1="500.00""#), "baza1 aggregate: {xml}");
+        assert!(xml.contains(r#"tva1="0.00""#), "tva1 aggregate: {xml}");
+        // baza4 = 100, tva4 = 19.
+        assert!(xml.contains(r#"baza4="100.00""#), "baza4 aggregate: {xml}");
+        assert!(xml.contains(r#"tva4="19.00""#), "tva4 aggregate: {xml}");
+    }
+
+    // ── Auto-agregare (DB) ──────────────────────────────────────────────────────
+
+    async fn test_pool() -> sqlx::SqlitePool {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        // Company: not VAT payer (vat_payer = 0).
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co','RO12345674','TestSRL','Str 1','Buc','IF','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn seed_received_with_vat(
+        pool: &sqlx::SqlitePool,
+        company_id: &str,
+        inv_id: &str,
+        number: &str,
+        issue_date: &str,
+        currency: &str,
+        intra_eu_kind: &str,
+        vat_category: &str,
+        base_amount: &str,
+        vat_amount: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO received_invoices \
+             (id, company_id, anaf_download_id, issuer_cui, issuer_name, \
+              total_amount, currency, issue_date, xml_path, status, intra_eu_kind, \
+              number, downloaded_at, created_at) \
+             VALUES (?1, ?2, ?3, 'RO999', 'Furnizor EU', '1000.00', ?4, ?5, '/x.xml', \
+                     'NEW', ?6, ?7, 1, 1)",
+        )
+        .bind(inv_id)
+        .bind(company_id)
+        .bind(inv_id) // anaf_download_id = inv_id for uniqueness
+        .bind(currency)
+        .bind(issue_date)
+        .bind(intra_eu_kind)
+        .bind(number)
+        .execute(pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO received_invoice_vat_lines \
+             (id, received_invoice_id, vat_rate, vat_category, base_amount, vat_amount) \
+             VALUES (?1, ?2, '19', ?3, ?4, ?5)",
+        )
+        .bind(format!("{inv_id}-line"))
+        .bind(inv_id)
+        .bind(vat_category)
+        .bind(base_amount)
+        .bind(vat_amount)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn aggregate_art316_company_returns_error() {
+        let pool = test_pool().await;
+        let err = aggregate_d301(&pool, "co", "2026-05-01", "2026-05-31", true).await;
+        assert!(err.is_err(), "art.316 company should return error for D301");
+        assert!(
+            err.unwrap_err().to_string().contains("D300"),
+            "error should mention D300"
+        );
+    }
+
+    #[tokio::test]
+    async fn aggregate_ic_goods_and_eu_service_classified_correctly() {
+        let pool = test_pool().await;
+
+        // Invoice 1: IC goods (K + goods) → tip 1, baza 1000.
+        seed_received_with_vat(
+            &pool,
+            "co",
+            "inv1",
+            "FAC001",
+            "2026-05-10",
+            "RON",
+            "goods",
+            "K",
+            "1000.00",
+            "0.00",
+        )
+        .await;
+
+        // Invoice 2: EU reverse-charge service (K + services) → tip 5, baza 500.
+        seed_received_with_vat(
+            &pool,
+            "co",
+            "inv2",
+            "SRV001",
+            "2026-05-15",
+            "RON",
+            "services",
+            "K",
+            "500.00",
+            "95.00",
+        )
+        .await;
+
+        let rows = aggregate_d301(&pool, "co", "2026-05-01", "2026-05-31", false)
+            .await
+            .unwrap();
+
+        assert_eq!(rows.len(), 2, "expected 2 rows, got {}", rows.len());
+        let tip1: Vec<_> = rows.iter().filter(|r| r.tip_operatie == 1).collect();
+        let tip5: Vec<_> = rows.iter().filter(|r| r.tip_operatie == 5).collect();
+
+        assert_eq!(tip1.len(), 1, "expected 1 tip-1 row");
+        assert_eq!(tip5.len(), 1, "expected 1 tip-5 row");
+
+        let baza1_total: Decimal = tip1.iter().map(|r| r.baza).sum();
+        let baza5_total: Decimal = tip5.iter().map(|r| r.baza).sum();
+        assert_eq!(baza1_total, d("1000.00"), "tip-1 baza total");
+        assert_eq!(baza5_total, d("500.00"), "tip-5 baza total");
+    }
+
+    #[tokio::test]
+    async fn aggregate_ae_category_maps_to_tip4() {
+        let pool = test_pool().await;
+
+        // Invoice: AE reverse-charge (non-EU service) → tip 4.
+        seed_received_with_vat(
+            &pool,
+            "co",
+            "inv3",
+            "SERV-NON-EU",
+            "2026-05-20",
+            "USD",
+            "goods",
+            "AE",
+            "800.00",
+            "152.00",
+        )
+        .await;
+
+        let rows = aggregate_d301(&pool, "co", "2026-05-01", "2026-05-31", false)
+            .await
+            .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].tip_operatie, 4, "AE must map to tip_operatie=4");
+        assert_eq!(rows[0].baza, d("800.00"), "baza for AE row");
+        assert_eq!(rows[0].tva, d("152.00"), "tva for AE row");
+    }
+
+    #[tokio::test]
+    async fn aggregate_rejected_invoice_excluded() {
+        let pool = test_pool().await;
+
+        // Insert a REJECTED invoice — should NOT appear in D301.
+        sqlx::query(
+            "INSERT INTO received_invoices \
+             (id, company_id, anaf_download_id, issuer_cui, issuer_name, \
+              total_amount, currency, issue_date, xml_path, status, intra_eu_kind, \
+              number, downloaded_at, created_at) \
+             VALUES ('inv-rej', 'co', 'inv-rej', 'RO1', 'X', '100.00', 'RON', '2026-05-01', \
+                     '/x.xml', 'REJECTED', 'goods', 'FAC-REJ', 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO received_invoice_vat_lines \
+             (id, received_invoice_id, vat_rate, vat_category, base_amount, vat_amount) \
+             VALUES ('inv-rej-line', 'inv-rej', '19', 'K', '100.00', '0.00')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let rows = aggregate_d301(&pool, "co", "2026-05-01", "2026-05-31", false)
+            .await
+            .unwrap();
+
+        assert!(rows.is_empty(), "REJECTED invoice must not appear in D301");
+    }
+
+    #[tokio::test]
+    async fn aggregate_outside_period_excluded() {
+        let pool = test_pool().await;
+
+        // Invoice outside the requested period.
+        seed_received_with_vat(
+            &pool,
+            "co",
+            "inv-old",
+            "FAC-OLD",
+            "2026-04-30",
+            "RON",
+            "goods",
+            "K",
+            "2000.00",
+            "0.00",
+        )
+        .await;
+
+        let rows = aggregate_d301(&pool, "co", "2026-05-01", "2026-05-31", false)
+            .await
+            .unwrap();
+
+        assert!(
+            rows.is_empty(),
+            "invoice outside period must be excluded: {rows:?}"
+        );
+    }
+
+    #[test]
+    fn iso_to_anaf_date_conversion() {
+        assert_eq!(iso_to_anaf_date("2026-05-15"), "15.05.2026");
+        assert_eq!(iso_to_anaf_date("2026-01-01"), "01.01.2026");
+        // Edge: malformed → returned as-is.
+        assert_eq!(iso_to_anaf_date("bad"), "bad");
+    }
+
+    #[test]
+    fn classify_tip_all_variants() {
+        assert_eq!(classify_tip("K", "goods"), Some(1));
+        assert_eq!(classify_tip("K", ""), Some(1)); // default goods
+        assert_eq!(classify_tip("K", "services"), Some(5));
+        assert_eq!(classify_tip("AE", "goods"), Some(4));
+        assert_eq!(classify_tip("AE", "services"), Some(4));
+        assert_eq!(classify_tip("S", "goods"), None);
+        assert_eq!(classify_tip("Z", "goods"), None);
     }
 }
