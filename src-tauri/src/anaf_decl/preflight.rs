@@ -112,6 +112,7 @@ pub async fn preflight(
     // ── Check 2: VAT payer status ────────────────────────────────────────────
 
     // D300 and D394 are filed by VAT payers only.
+    // D301, D700, D710 are accepted for non-payers and payers alike — no VAT-payer gate.
     if matches!(kind, DeclKind::D300 | DeclKind::D394) && vat_payer == 0 {
         issues.push(PreflightIssue::warning(
             "NEPLATITOR_TVA",

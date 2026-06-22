@@ -65,6 +65,29 @@ pub fn run_java_validator(
     Ok(body)
 }
 
+/// Run a STANDALONE declaration validator (e.g. D710Validator.jar) that is invoked
+/// as `java -jar <jar> <xml>` — NO `-v` token, NO result-file; it writes findings
+/// to STDOUT/STDERR. Returns the combined output (stdout + stderr) for parsing by
+/// `parse_duk_output`. Used by `run_duk` when `decl.is_standalone_validator()`.
+pub fn run_standalone_validator(java: &Path, jar: &Path, xml_path: &Path) -> AppResult<String> {
+    let output = std::process::Command::new(java)
+        .arg("-jar")
+        .arg(jar)
+        .arg(xml_path)
+        .output()
+        .map_err(|e| AppError::Other(format!("Nu pot porni validatorul standalone: {e}")))?;
+    // Combine stdout + stderr — different validator jars use different streams.
+    let mut body = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.is_empty() {
+        if !body.is_empty() {
+            body.push('\n');
+        }
+        body.push_str(&stderr);
+    }
+    Ok(body)
+}
+
 /// Validate `xml_path` with DUKIntegrator's `-v` mode. Returns Err if the harness
 /// is not configured (call `duk_available()` first to skip).
 pub fn validate_with_duk(decl: DeclKind, xml_path: &Path) -> AppResult<DukResult> {

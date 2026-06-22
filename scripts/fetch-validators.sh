@@ -181,6 +181,74 @@ curl -fL --progress-bar -o "$D112_VALIDATOR_PATH" "$D112_VALIDATOR_URL" || {
 }
 echo ""
 
+# ── D301 validator (DUKIntegrator overlay) ───────────────────────────────────
+# D301Validator.jar is shipped inside D301_20201022.zip (ANAF AplicatiiDec index).
+# Invoked via DUKIntegrator overlay: java -jar DUKIntegrator.jar -v D301 <xml> <result>
+# The extracted jar is placed in dukintegrator/lib/ so the bundled runtime can find it
+# at resources/duk/lib/D301Validator.jar (Tauri resource layout).
+# Official ZIP: https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D301_20201022.zip
+# NOTE: the SHIPPED jars come from the release duk.zip secret (consistent with D300/D112 jars);
+# this script is for DEV/CI use only (src-tauri/tools/ and resources/duk are gitignored).
+D301_LIB_DIR="$TOOLS_DIR/lib"
+mkdir -p "$D301_LIB_DIR"
+D301_ZIP_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D301_20201022.zip"
+D301_ZIP_PATH="$TOOLS_DIR/D301_20201022.zip"
+echo "▶ Downloading D301 validator package ..."
+echo "  URL: $D301_ZIP_URL"
+curl -fL --progress-bar -o "$D301_ZIP_PATH" "$D301_ZIP_URL" || {
+    echo "  WARNING: D301_20201022.zip download failed — D301 DUK gate will skip gracefully without jar."
+}
+if [ -f "$D301_ZIP_PATH" ]; then
+    # Extract only D301Validator.jar (may be at root or in a subdirectory).
+    unzip -p "$D301_ZIP_PATH" "D301Validator.jar" > "$D301_LIB_DIR/D301Validator.jar" 2>/dev/null || \
+    unzip -p "$D301_ZIP_PATH" "*/D301Validator.jar" > "$D301_LIB_DIR/D301Validator.jar" 2>/dev/null || \
+    unzip -j "$D301_ZIP_PATH" "*D301Validator.jar" -d "$D301_LIB_DIR" 2>/dev/null || \
+    echo "  WARNING: Could not extract D301Validator.jar from zip — extract manually."
+    rm -f "$D301_ZIP_PATH"
+fi
+echo ""
+
+# ── D700 validator (DUKIntegrator overlay) ───────────────────────────────────
+# D700Validator.jar is shipped inside D700_20260423.zip (ANAF AplicatiiDec index).
+# Invoked via DUKIntegrator overlay: java -jar DUKIntegrator.jar -v D700 <xml> <result>
+# Official ZIP: https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D700_20260423.zip
+D700_ZIP_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D700_20260423.zip"
+D700_ZIP_PATH="$TOOLS_DIR/D700_20260423.zip"
+echo "▶ Downloading D700 validator package ..."
+echo "  URL: $D700_ZIP_URL"
+curl -fL --progress-bar -o "$D700_ZIP_PATH" "$D700_ZIP_URL" || {
+    echo "  WARNING: D700_20260423.zip download failed — D700 DUK gate will skip gracefully without jar."
+}
+if [ -f "$D700_ZIP_PATH" ]; then
+    unzip -p "$D700_ZIP_PATH" "D700Validator.jar" > "$D301_LIB_DIR/D700Validator.jar" 2>/dev/null || \
+    unzip -p "$D700_ZIP_PATH" "*/D700Validator.jar" > "$D301_LIB_DIR/D700Validator.jar" 2>/dev/null || \
+    unzip -j "$D700_ZIP_PATH" "*D700Validator.jar" -d "$D301_LIB_DIR" 2>/dev/null || \
+    echo "  WARNING: Could not extract D700Validator.jar from zip — extract manually."
+    rm -f "$D700_ZIP_PATH"
+fi
+echo ""
+
+# ── D710 validator (STANDALONE — NOT through DUKIntegrator) ──────────────────
+# D710Validator.jar is shipped inside D710_20052026.zip (ANAF AplicatiiDec index).
+# STANDALONE invocation: java -jar D710Validator.jar <xml>  (no -v token, no result-file)
+# Output goes to STDOUT; same parse_duk_output markers as DUKIntegrator.
+# Official ZIP: https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D710_20052026.zip
+D710_ZIP_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D710_20052026.zip"
+D710_ZIP_PATH="$TOOLS_DIR/D710_20052026.zip"
+echo "▶ Downloading D710 validator package (STANDALONE) ..."
+echo "  URL: $D710_ZIP_URL"
+curl -fL --progress-bar -o "$D710_ZIP_PATH" "$D710_ZIP_URL" || {
+    echo "  WARNING: D710_20052026.zip download failed — D710 DUK gate will skip gracefully without jar."
+}
+if [ -f "$D710_ZIP_PATH" ]; then
+    unzip -p "$D710_ZIP_PATH" "D710Validator.jar" > "$D301_LIB_DIR/D710Validator.jar" 2>/dev/null || \
+    unzip -p "$D710_ZIP_PATH" "*/D710Validator.jar" > "$D301_LIB_DIR/D710Validator.jar" 2>/dev/null || \
+    unzip -j "$D710_ZIP_PATH" "*D710Validator.jar" -d "$D301_LIB_DIR" 2>/dev/null || \
+    echo "  WARNING: Could not extract D710Validator.jar from zip — extract manually."
+    rm -f "$D710_ZIP_PATH"
+fi
+echo ""
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo "══════════════════════════════════════════════════════"
 echo "  Validators fetched. To enable the DUKIntegrator gate:"

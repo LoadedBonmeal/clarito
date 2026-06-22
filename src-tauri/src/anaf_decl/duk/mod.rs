@@ -105,6 +105,13 @@ pub struct DukOutcome {
 
 /// Run DUK against `xml` using the runtime from `provider`. Returns `None` when no
 /// runtime is available (caller falls back to layer A). Never panics.
+///
+/// Routing:
+/// - D710 → `run_standalone_validator(java, lib/D710Validator.jar, xml)` (no `-v`, no result-file)
+/// - All others → `run_java_validator(java, DUKIntegrator.jar, -v <TYPE>, xml, result)` (overlay path)
+///
+/// For standalone validators the specific jar (`lib/<TYPE>Validator.jar`) is probed first; if absent
+/// the function returns `None` (graceful fallback — same pattern as D205).
 pub fn run_duk(
     provider: &dyn DukProvider,
     decl: DeclKind,
@@ -113,6 +120,22 @@ pub fn run_duk(
     let Some(rt) = provider.resolve() else {
         return Ok(None);
     };
+
+    if decl.is_standalone_validator() {
+        // Standalone path: the specific validator jar is the sole entry point.
+        let standalone_jar = rt
+            .jar_dir
+            .join("lib")
+            .join(format!("{}Validator.jar", decl.as_duk_type()));
+        if !standalone_jar.is_file() {
+            // Jar absent → graceful skip (same as the D205 jar-probe pattern).
+            return Ok(None);
+        }
+        let raw =
+            crate::anaf_decl::validation::run_standalone_validator(&rt.java, &standalone_jar, xml)?;
+        return Ok(Some(parse_duk_output(&raw)));
+    }
+
     let raw = crate::anaf_decl::validation::run_java_validator(&rt.java, &rt.duk_jar(), decl, xml)?;
     Ok(Some(parse_duk_output(&raw)))
 }
@@ -218,5 +241,62 @@ mod tests {
             }
             _ => assert!(p.resolve().is_none(), "no jar -> None, never panic"),
         }
+    }
+
+    /// D710 routes to the standalone path (is_standalone_validator = true).
+    /// When lib/D710Validator.jar is absent (sandbox), run_duk returns None gracefully —
+    /// just like the D205 jar-probe pattern.
+    #[test]
+    fn d710_run_duk_skips_gracefully_when_jar_absent() {
+        // NoopProvider always resolves to a DukRuntime pointing at a nonexistent jar_dir.
+        struct NoopProvider {
+            jar_dir: std::path::PathBuf,
+        }
+        impl DukProvider for NoopProvider {
+            fn resolve(&self) -> Option<DukRuntime> {
+                Some(DukRuntime {
+                    java: std::path::PathBuf::from("java"),
+                    jar_dir: self.jar_dir.clone(),
+                })
+            }
+        }
+        // Use a temp dir that exists but has NO D710Validator.jar inside lib/.
+        let tmp = std::env::temp_dir().join("duk_d710_noop_test");
+        let provider = NoopProvider {
+            jar_dir: tmp.clone(),
+        };
+        let xml_path = std::env::temp_dir().join("d710_dummy.xml");
+        // The file doesn't need to exist — the jar probe fires first.
+        let result = run_duk(&provider, crate::anaf_decl::DeclKind::D710, &xml_path);
+        // Should return Ok(None) because lib/D710Validator.jar is absent.
+        assert!(result.is_ok(), "run_duk must not error when jar absent");
+        assert!(
+            result.unwrap().is_none(),
+            "run_duk must return None (graceful skip) when D710Validator.jar is absent"
+        );
+    }
+
+    /// D301 and D700 use the DUKIntegrator overlay path (is_standalone_validator = false).
+    /// When the DukRuntime is absent (provider returns None), run_duk returns Ok(None).
+    #[test]
+    fn d301_d700_run_duk_return_none_when_runtime_absent() {
+        struct NoneProvider;
+        impl DukProvider for NoneProvider {
+            fn resolve(&self) -> Option<DukRuntime> {
+                None
+            }
+        }
+        let p = NoneProvider;
+        let dummy = std::path::Path::new("/nonexistent.xml");
+        let r301 = run_duk(&p, crate::anaf_decl::DeclKind::D301, dummy);
+        let r700 = run_duk(&p, crate::anaf_decl::DeclKind::D700, dummy);
+        assert!(
+            r301.is_ok() && r301.unwrap().is_none(),
+            "D301: None when no runtime"
+        );
+        assert!(
+            r700.is_ok() && r700.unwrap().is_none(),
+            "D700: None when no runtime"
+        );
     }
 }

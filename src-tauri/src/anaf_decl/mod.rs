@@ -34,6 +34,14 @@ pub mod xml;
 /// DUKIntegrator kit; D112 and D205 are each validated by a SEPARATE validator
 /// (D112Validator / D205Validator), so their harness wiring routes to a distinct
 /// jar (see `validation.rs`).
+///
+/// D301 and D700 are DUKIntegrator OVERLAY validators: `lib/D301Validator.jar` /
+/// `lib/D700Validator.jar` are dispatched via `java -jar DUKIntegrator.jar -v D301 …`
+/// / `-v D700 …` (the standard `-v` overlay path in `run_java_validator`).
+///
+/// D710 is a STANDALONE validator: `lib/D710Validator.jar` is invoked DIRECTLY as
+/// `java -jar D710Validator.jar <xml>` (NO `-v` token, NO result-file; output on STDOUT).
+/// `run_duk` routes D710 to `run_standalone_validator` instead of `run_java_validator`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeclKind {
     D300,
@@ -42,6 +50,12 @@ pub enum DeclKind {
     D112,
     /// D205 — declarația informativă anuală, pe beneficiar (impozit reținut la sursă; cap. dividende).
     D205,
+    /// D301 — decont special TVA (OPANAF 592/2016). Overlay DUKIntegrator: lib/D301Validator.jar.
+    D301,
+    /// D700 — declarație înregistrare/mențiuni/radiere (OPANAF 15/2026). Overlay: lib/D700Validator.jar.
+    D700,
+    /// D710 — declarație rectificativă D100 (OPANAF 587/2016). STANDALONE: lib/D710Validator.jar.
+    D710,
 }
 
 impl DeclKind {
@@ -52,7 +66,17 @@ impl DeclKind {
             DeclKind::D406 => "D406",
             DeclKind::D112 => "D112",
             DeclKind::D205 => "D205",
+            DeclKind::D301 => "D301",
+            DeclKind::D700 => "D700",
+            DeclKind::D710 => "D710",
         }
+    }
+
+    /// Returns `true` for declarations whose validator jar is invoked standalone
+    /// (`java -jar <jar> <xml>`) rather than via the DUKIntegrator overlay
+    /// (`java -jar DUKIntegrator.jar -v <TYPE> <xml> <result>`).
+    pub fn is_standalone_validator(self) -> bool {
+        matches!(self, DeclKind::D710)
     }
 }
 
@@ -195,6 +219,46 @@ pub fn valid_cnp(raw: &str) -> bool {
         ctrl = 1;
     }
     ctrl == d[12]
+}
+
+#[cfg(test)]
+mod decl_kind_tests {
+    use super::*;
+
+    #[test]
+    fn d301_as_duk_type_round_trip() {
+        assert_eq!(DeclKind::D301.as_duk_type(), "D301");
+    }
+
+    #[test]
+    fn d700_as_duk_type_round_trip() {
+        assert_eq!(DeclKind::D700.as_duk_type(), "D700");
+    }
+
+    #[test]
+    fn d710_as_duk_type_round_trip() {
+        assert_eq!(DeclKind::D710.as_duk_type(), "D710");
+    }
+
+    #[test]
+    fn d710_is_standalone_validator() {
+        // D710 uses the standalone path; others use the DUKIntegrator overlay.
+        assert!(DeclKind::D710.is_standalone_validator());
+        assert!(!DeclKind::D301.is_standalone_validator());
+        assert!(!DeclKind::D700.is_standalone_validator());
+        assert!(!DeclKind::D300.is_standalone_validator());
+        assert!(!DeclKind::D205.is_standalone_validator());
+        assert!(!DeclKind::D112.is_standalone_validator());
+    }
+
+    #[test]
+    fn existing_decl_kinds_unchanged() {
+        assert_eq!(DeclKind::D300.as_duk_type(), "D300");
+        assert_eq!(DeclKind::D394.as_duk_type(), "D394");
+        assert_eq!(DeclKind::D406.as_duk_type(), "D406");
+        assert_eq!(DeclKind::D112.as_duk_type(), "D112");
+        assert_eq!(DeclKind::D205.as_duk_type(), "D205");
+    }
 }
 
 #[cfg(test)]

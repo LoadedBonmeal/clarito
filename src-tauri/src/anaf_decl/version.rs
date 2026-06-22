@@ -118,6 +118,45 @@ pub fn schema_versions() -> Vec<SchemaVersion> {
             schema_label: "D205 v3 (≥2025, OPANAF 102/2025)",
             duk_type: "D205",
         },
+        // ── D301 (decont special TVA) ──────────────────────────────────────
+        // OPANAF 592/2016. Schema v1 (d301_20200130.xsd). Overlay DUKIntegrator:
+        // `java -jar DUKIntegrator.jar -v D301 <xml> <result>` via lib/D301Validator.jar.
+        // Emitentul (d301_xml.rs) hardcodează namespace-ul; această înregistrare
+        // este metadată (ca D112) — emitentul stăpânește namespace-ul.
+        SchemaVersion {
+            decl: DeclKind::D301,
+            valid_from: d(2020, 1, 1),
+            valid_to: None,
+            namespace: "mfp:anaf:dgti:d301:declaratie:v1",
+            root_element: "declaratie301",
+            schema_label: "D301 v1 (≥2020, OPANAF 592/2016)",
+            duk_type: "D301",
+        },
+        // ── D700 (înregistrare/mențiuni/radiere) ──────────────────────────
+        // OPANAF 15/2026, ediția 0126. Schema v4. Overlay DUKIntegrator:
+        // `java -jar DUKIntegrator.jar -v D700 <xml> <result>` via lib/D700Validator.jar.
+        SchemaVersion {
+            decl: DeclKind::D700,
+            valid_from: d(2026, 1, 1),
+            valid_to: None,
+            namespace: "mfp:anaf:dgti:d700:declaratie:v4",
+            root_element: "D700",
+            schema_label: "D700 v4 (≥2026-01, OPANAF 15/2026)",
+            duk_type: "D700",
+        },
+        // ── D710 (rectificativă D100) ──────────────────────────────────────
+        // OPANAF 587/2016 + 779/2024. Schema v1 (d710_20012025.xsd). STANDALONE:
+        // `java -jar D710Validator.jar <xml>` — NU prin DUKIntegrator overlay.
+        // lib/D710Validator.jar din pachetul D710_20052026.zip.
+        SchemaVersion {
+            decl: DeclKind::D710,
+            valid_from: d(2016, 1, 1),
+            valid_to: None,
+            namespace: "mfp:anaf:dgti:d710:declaratie:v1",
+            root_element: "declaratie710",
+            schema_label: "D710 v1 (≥2016, OPANAF 587/2016)",
+            duk_type: "D710",
+        },
     ]
 }
 
@@ -173,6 +212,32 @@ mod tests {
     }
 
     #[test]
+    fn d301_resolves_for_any_period_from_2020() {
+        let sv = resolve(DeclKind::D301, date(2020, 1, 1)).expect("D301 should resolve ≥2020");
+        assert_eq!(sv.namespace, "mfp:anaf:dgti:d301:declaratie:v1");
+        assert_eq!(sv.root_element, "declaratie301");
+        let sv2026 =
+            resolve(DeclKind::D301, date(2026, 6, 1)).expect("D301 should resolve in 2026");
+        assert_eq!(sv2026.duk_type, "D301");
+    }
+
+    #[test]
+    fn d700_resolves_from_2026() {
+        let sv = resolve(DeclKind::D700, date(2026, 1, 1)).expect("D700 should resolve ≥2026");
+        assert_eq!(sv.namespace, "mfp:anaf:dgti:d700:declaratie:v4");
+        assert_eq!(sv.root_element, "D700");
+    }
+
+    #[test]
+    fn d710_resolves_from_2016() {
+        let sv = resolve(DeclKind::D710, date(2016, 1, 1)).expect("D710 should resolve ≥2016");
+        assert_eq!(sv.namespace, "mfp:anaf:dgti:d710:declaratie:v1");
+        assert_eq!(sv.root_element, "declaratie710");
+        let sv2 = resolve(DeclKind::D710, date(2026, 6, 1)).expect("D710 resolves in 2026");
+        assert_eq!(sv2.duk_type, "D710");
+    }
+
+    #[test]
     fn windows_non_overlapping_for_all_decl_kinds() {
         // For each DeclKind, test a spread of representative dates and assert
         // that at most one SchemaVersion matches each date.
@@ -193,6 +258,9 @@ mod tests {
             DeclKind::D406,
             DeclKind::D112,
             DeclKind::D205,
+            DeclKind::D301,
+            DeclKind::D700,
+            DeclKind::D710,
         ];
 
         for kind in all_kinds {

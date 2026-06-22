@@ -8,13 +8,13 @@
 //! RBAC: `preview_d301_xml` și `aggregate_d301_rows` necesită permisiune de citire;
 //! `export_d301_xml` necesită permisiune de scriere.
 
-use std::path::PathBuf;
-
 use tauri::State;
 
 use crate::anaf_decl::d301_xml::{
     aggregate_d301, build_d301_xml, D301Data, D301Header, D301Sectiune,
 };
+use crate::anaf_decl::DeclKind;
+use crate::commands::declarations::{duk_gate_allows_write, OfficialExportResult};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -35,6 +35,9 @@ pub struct D301ExportParams {
     pub data: D301Data,
     /// Calea de scriere a fișierului XML.
     pub dest_path: String,
+    /// `true` → scrie fișierul chiar dacă DUK raportează erori (pentru debugging / override manual).
+    #[serde(default)]
+    pub skip_duk_override: bool,
 }
 
 // ── Comenzi Tauri ─────────────────────────────────────────────────────────────
@@ -59,25 +62,74 @@ pub async fn preview_d301_xml(
     build_d301_xml(&header, &data)
 }
 
-/// Exportă D301 ca fișier XML la calea specificată.
+/// Exportă D301 ca fișier XML la calea specificată, cu gate DUK (D301Validator.jar).
 ///
-/// **STRUCTURA CORECTĂ PER SPECIFICAȚIE — NESUPUSĂ VALIDĂRII DUK/XSD.**
-/// Verificați namespace-ul față de XSD-ul oficial și rulați DUKIntegrator
-/// înainte de depunerea la ANAF prin SPV.
+/// Validează cu `java -jar DUKIntegrator.jar -v D301 <xml> <result>` (lib/D301Validator.jar)
+/// înainte de scriere — aceeași formă gated ca D205/D112. Dacă jar-ul lipsește din build,
+/// validarea DUK este omisă grațios (duk_available=false) și fișierul este scris oricum.
 #[tauri::command]
 pub async fn export_d301_xml(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     params: D301ExportParams,
-) -> AppResult<String> {
+) -> AppResult<OfficialExportResult> {
+    let dest = crate::commands::integrations::validate_export_path(&params.dest_path)?;
     let company = crate::db::companies::get(&state.db, &params.company_id).await?;
     let cif: String = company.cui.chars().filter(|c| c.is_ascii_digit()).collect();
     let header = make_header(&company, cif, params.luna, params.an, params.d_rec);
     let xml = build_d301_xml(&header, &params.data)?;
 
-    let path = PathBuf::from(&params.dest_path);
-    std::fs::write(&path, &xml)
-        .map_err(|e| AppError::Other(format!("Nu s-a putut scrie D301 XML: {e}")))?;
-    Ok(params.dest_path)
+    // Layer D: validare cu DUK (D301Validator.jar) înainte de scriere — grațios dacă lipsește.
+    let tmp =
+        std::env::temp_dir().join(format!("d301_official_check_{}.xml", uuid::Uuid::now_v7()));
+    std::fs::write(&tmp, xml.as_bytes())
+        .map_err(|e| AppError::Other(format!("Nu s-a putut scrie temp D301: {e}")))?;
+    let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
+    let d301_jar = {
+        use tauri::Manager;
+        let root =
+            crate::anaf_decl::duk::bundled_res_root(&app.path().resource_dir().unwrap_or_default());
+        root.join("duk/lib/D301Validator.jar")
+    };
+    let duk = if d301_jar.is_file() {
+        crate::anaf_decl::duk::run_duk(&provider, DeclKind::D301, &tmp)?
+    } else {
+        None
+    };
+    let _ = std::fs::remove_file(&tmp);
+    let (duk_available, duk_passed, issues) = match &duk {
+        Some(o) => (true, o.passed, o.errors.clone()),
+        None => (false, false, Vec::new()),
+    };
+    if !duk_gate_allows_write(duk_available, duk_passed, params.skip_duk_override) {
+        return Ok(OfficialExportResult {
+            path: String::new(),
+            written: false,
+            duk_available,
+            duk_passed,
+            issues,
+        });
+    }
+
+    std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
+    let _ = crate::db::declaration_filings::record(
+        &state.db,
+        crate::db::declaration_filings::FilingInput {
+            company_id: params.company_id.clone(),
+            kind: "D301".into(),
+            period: format!("{:04}-{:02}", params.an, params.luna),
+            is_rectificative: params.d_rec != 0,
+            file_path: Some(dest.to_string_lossy().to_string()),
+        },
+    )
+    .await;
+    Ok(OfficialExportResult {
+        path: dest.to_string_lossy().to_string(),
+        written: true,
+        duk_available,
+        duk_passed,
+        issues,
+    })
 }
 
 /// Auto-agregă rândurile D301 din `received_invoice_vat_lines` pentru compania și

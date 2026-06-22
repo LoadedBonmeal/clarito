@@ -202,6 +202,9 @@ pub async fn validate_declaration_xml(
         "D406" => DeclKind::D406,
         "D112" => DeclKind::D112,
         "D205" => DeclKind::D205,
+        "D301" => DeclKind::D301,
+        "D700" => DeclKind::D700,
+        "D710" => DeclKind::D710,
         other => {
             return Err(AppError::Validation(format!(
                 "Tip de declarație necunoscut pentru validare DUK: {other}"
