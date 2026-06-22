@@ -118,40 +118,47 @@ pub async fn create_advance_settlement(
         ));
     }
 
-    // Verificare că factura de avans aparține companiei și are invoice_kind='advance'
-    let advance_kind: Option<String> =
-        sqlx::query_scalar("SELECT invoice_kind FROM invoices WHERE id = ?1 AND company_id = ?2")
-            .bind(&input.advance_invoice_id)
-            .bind(&input.company_id)
-            .fetch_optional(pool)
-            .await?;
-
-    match advance_kind.as_deref() {
+    // Factura de avans: aparține companiei, are invoice_kind='advance'; reținem partenerul + baza.
+    let adv_row: Option<(Option<String>, Option<String>, String)> = sqlx::query_as(
+        "SELECT invoice_kind, contact_id, subtotal_amount FROM invoices WHERE id = ?1 AND company_id = ?2",
+    )
+    .bind(&input.advance_invoice_id)
+    .bind(&input.company_id)
+    .fetch_optional(pool)
+    .await?;
+    let (adv_contact, adv_subtotal) = match adv_row {
         None => return Err(AppError::NotFound),
-        Some(k) if k != "advance" => {
+        Some((kind, _, _)) if kind.as_deref() != Some("advance") => {
             return Err(AppError::Validation(
                 "Factura indicată nu este de tip avans (invoice_kind != 'advance')".into(),
             ));
         }
-        _ => {}
-    }
+        Some((_, contact, subtotal)) => (contact, subtotal),
+    };
 
-    // Verificare că factura finală aparține companiei și este standard (nu avans)
-    let final_kind: Option<String> =
-        sqlx::query_scalar("SELECT invoice_kind FROM invoices WHERE id = ?1 AND company_id = ?2")
-            .bind(&input.final_invoice_id)
-            .bind(&input.company_id)
-            .fetch_optional(pool)
-            .await?;
-
-    match final_kind.as_deref() {
+    // Factura finală: aparține companiei, NU este avans; reținem partenerul.
+    let fin_row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT invoice_kind, contact_id FROM invoices WHERE id = ?1 AND company_id = ?2",
+    )
+    .bind(&input.final_invoice_id)
+    .bind(&input.company_id)
+    .fetch_optional(pool)
+    .await?;
+    let fin_contact = match fin_row {
         None => return Err(AppError::NotFound),
-        Some("advance") => {
+        Some((kind, _)) if kind.as_deref() == Some("advance") => {
             return Err(AppError::Validation(
                 "Factura finală nu poate fi ea însăși o factură de avans".into(),
             ));
         }
-        _ => {}
+        Some((_, contact)) => contact,
+    };
+
+    // Cross-partner guard: avansul și factura finală trebuie să fie pentru ACELAȘI partener.
+    if adv_contact != fin_contact {
+        return Err(AppError::Validation(
+            "Avansul și factura finală trebuie să fie pentru același partener.".into(),
+        ));
     }
 
     // Idempotency check
@@ -167,6 +174,27 @@ pub async fn create_advance_settlement(
 
     if let Some(existing_id) = existing {
         return get_advance_settlement(pool, &existing_id, &input.company_id).await;
+    }
+
+    // Over-settlement guard: Σ(baze deja regularizate pentru acest avans) + baza nouă nu poate depăși
+    // baza avansului (un avans nu poate fi regularizat de mai multe ori peste valoarea lui).
+    let adv_subtotal_dec = Decimal::from_str_exact(adv_subtotal.trim()).unwrap_or(Decimal::ZERO);
+    let settled_bases: Vec<String> = sqlx::query_scalar(
+        "SELECT advance_base FROM advance_invoice_settlements \
+         WHERE company_id = ?1 AND advance_invoice_id = ?2",
+    )
+    .bind(&input.company_id)
+    .bind(&input.advance_invoice_id)
+    .fetch_all(pool)
+    .await?;
+    let already: Decimal = settled_bases
+        .iter()
+        .filter_map(|s| Decimal::from_str_exact(s.trim()).ok())
+        .sum();
+    if already + base > adv_subtotal_dec {
+        return Err(AppError::Validation(format!(
+            "Regularizare peste valoarea avansului: deja regularizat {already} + {base} > baza avans {adv_subtotal_dec}."
+        )));
     }
 
     let id = new_id();
@@ -546,5 +574,78 @@ mod tests {
 
         assert_eq!(s.advance_received_id, "ra1");
         assert_eq!(s.final_received_id, "rf1");
+    }
+
+    #[tokio::test]
+    async fn create_settlement_rejects_cross_partner() {
+        let pool = pool().await;
+        seed_invoice(&pool, "adv_x", "advance", 1).await; // contact_id 'ct'
+                                                          // a DIFFERENT partner + a final invoice for it
+        sqlx::query(
+            "INSERT INTO contacts (id, company_id, contact_type, legal_name) \
+             VALUES ('OTHER','co','CUSTOMER','Alt Client SRL')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO invoices (id, company_id, contact_id, series, number, full_number, \
+             issue_date, due_date, subtotal_amount, vat_amount, total_amount, status, invoice_kind) \
+             VALUES ('fin_y','co','OTHER','AV',2,'AV-0002','2026-06-01','2026-06-01',\
+             '1000','210','1210','VALIDATED','standard')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let err = create_advance_settlement(
+            &pool,
+            CreateAdvanceSettlementInput {
+                company_id: "co".into(),
+                final_invoice_id: "fin_y".into(),
+                advance_invoice_id: "adv_x".into(),
+                advance_base: "1000".into(),
+                advance_vat: "210".into(),
+                advance_vat_rate: "21".into(),
+            },
+        )
+        .await;
+        assert!(err.is_err(), "cross-partner settlement must be rejected");
+    }
+
+    #[tokio::test]
+    async fn create_settlement_rejects_over_settlement() {
+        let pool = pool().await;
+        seed_invoice(&pool, "adv_o", "advance", 1).await; // subtotal 1000
+        seed_invoice(&pool, "fin_o", "standard", 2).await;
+        seed_invoice(&pool, "fin_o2", "standard", 3).await;
+        // settle 600 (ok)
+        create_advance_settlement(
+            &pool,
+            CreateAdvanceSettlementInput {
+                company_id: "co".into(),
+                final_invoice_id: "fin_o".into(),
+                advance_invoice_id: "adv_o".into(),
+                advance_base: "600".into(),
+                advance_vat: "126".into(),
+                advance_vat_rate: "21".into(),
+            },
+        )
+        .await
+        .unwrap();
+        // settle another 600 → cumulative 1200 > 1000 advance subtotal → reject
+        let err = create_advance_settlement(
+            &pool,
+            CreateAdvanceSettlementInput {
+                company_id: "co".into(),
+                final_invoice_id: "fin_o2".into(),
+                advance_invoice_id: "adv_o".into(),
+                advance_base: "600".into(),
+                advance_vat: "126".into(),
+                advance_vat_rate: "21".into(),
+            },
+        )
+        .await;
+        assert!(err.is_err(), "over-settlement must be rejected");
     }
 }

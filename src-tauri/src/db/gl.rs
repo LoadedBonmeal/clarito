@@ -689,9 +689,10 @@ fn post_advance_issued_storno(
     });
     record_id += 1;
 
-    // Per avans: D 419 (−baza) + D 4427 (−TVA) — storno în roșu
-    // D 419 = baza negativă → debit 0, credit |baza| (anulează soldul creditor 419)
-    // D 4427 = TVA negativă → debit 0, credit |TVA| (anulează soldul creditor 4427)
+    // Per avans, storno reverse-direction (anulează nota de avans D4111=C419+C4427):
+    //   D 419  = baza  → anulează soldul creditor 419 (avansul recunoscut)
+    //   D 4427 = TVA   → anulează TVA colectată la avans
+    // tax_base/tax_amount rămân negative pentru reversarea în D394/SAF-T.
     for (_, base, vat, rate) in advances {
         let tc = sales_tax_code_str("S", *rate);
         let rate_str = fmt_dec(*rate);
