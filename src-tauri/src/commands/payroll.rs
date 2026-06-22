@@ -866,6 +866,8 @@ mod tests {
             exceptie_cas_min: None,
             sediu_cif: None,
             beneficiar_suma_netaxabila: None,
+            functia: None,
+            cod_cor: None,
         }
     }
 
@@ -2120,4 +2122,382 @@ pub async fn simulate_salary_from_net(
     // `lo` is now the smallest gross whose net == target_rounded (to the leu).
     // Re-run the simulator for that gross to get the full breakdown.
     simulate_salary(lo.to_string(), Some(opts)).await
+}
+
+// ── Export REGES-Online (Registrul General de Evidență a Salariaților) ────────
+//
+// HG 295/2025 abrogă HG 905/2017 — „Revisal" devine REGES-Online (Inspecția Muncii).
+// Aplicația NU depune automat la portalul REGES-Online (portal online, nu API);
+// exportă un CSV structurat pe care contabilul îl folosește ca referință / îl
+// adaptează la formatul de import al portalului.
+//
+// Coloane (un rând per angajat, sortat alfabetic după nume):
+//   Nume, CNP, Funcția, Cod COR, Tip contract, Durată, Data angajării,
+//   Data încetării, Ore normă/zi, Salariu brut (RON)
+//
+// Formula-injection-safe: câmpurile text trec prin `csv_neutralize`.
+// Valorile monetare trec prin `csv_num` (ca la jurnalul de vânzări).
+
+/// Exportă Registrul General de Evidenţa Salariaţilor (REGES-Online) ca CSV.
+///
+/// Produce un rând per angajat (activi + inactivi — toţi contractanţii înregistraţi),
+/// sortat alfabetic după `full_name`. Exportul este destinat exclusiv referinţei
+/// contabilului; depunerea efectivă se face prin **portalul Inspecţiei Muncii**
+/// (REGES-Online, HG 295/2025) — aplicaţia nu comunică automat cu portalul.
+#[tauri::command]
+pub async fn export_reges_register(
+    state: State<'_, AppState>,
+    company_id: String,
+    dest_path: String,
+) -> AppResult<String> {
+    use crate::commands::journals::csv_num;
+
+    let dest = crate::commands::integrations::validate_export_path(&dest_path)?
+        .to_string_lossy()
+        .to_string();
+
+    // Fetch all employees for this company (active + inactive), sorted by name.
+    let mut employees = payroll::list(&state.db, &company_id).await?;
+    employees.sort_by(|a, b| a.full_name.cmp(&b.full_name));
+
+    let mut out = String::with_capacity(4096);
+
+    // Header row — column labels aligned with REGES-Online register requirements
+    // (HG 295/2025): name, CNP, job title, COR code, contract type, duration,
+    // hire date, end date, hours/day, base salary.
+    out.push_str(
+        "Nume,CNP,Funcția,Cod COR,Tip contract,Durată contract,\
+         Data angajării,Data încetării,Ore normă/zi,Salariu brut (RON)\n",
+    );
+
+    for emp in &employees {
+        // Contract type label (D112 Nomenclator 12): "N" → "CIM normă întreagă",
+        // "P1".."P7" → "CIM part-time Pn". Raw code stored as fallback.
+        let tip_label = match emp.tip_contract.as_str() {
+            "N" => "CIM normă întreagă".to_string(),
+            p if p.starts_with('P') => format!("CIM part-time {}", p),
+            other => other.to_string(),
+        };
+
+        // Duration: if contract_end_date is set → "determinată", else "nedeterminată".
+        let durata = if emp.contract_end_date.is_some() {
+            "determinată"
+        } else {
+            "nedeterminată"
+        };
+
+        // Date columns — store ISO YYYY-MM-DD; emit as-is (universally parseable).
+        let hire = emp.employment_date.as_deref().unwrap_or("");
+        let end = emp.contract_end_date.as_deref().unwrap_or("");
+
+        // csv_neutralize for all text fields (formula-injection safety per journals.rs).
+        // csv_num for the salary amount (numeric, may have decimal point, no injection risk).
+        let row = format!(
+            "{},{},{},{},{},{},{},{},{},{}\n",
+            csv_neutralize_field(&emp.full_name),
+            csv_neutralize_field(&emp.cnp),
+            csv_neutralize_field(&emp.functia),
+            csv_neutralize_field(&emp.cod_cor),
+            csv_neutralize_field(&tip_label),
+            csv_neutralize_field(durata),
+            csv_neutralize_field(hire),
+            csv_neutralize_field(end),
+            emp.ore_norma, // integer, no injection risk
+            csv_num(&emp.gross_salary),
+        );
+        out.push_str(&row);
+    }
+
+    std::fs::write(&dest, out.as_bytes())?;
+
+    Ok(dest)
+}
+
+/// RFC 4180 quoting with formula-injection neutralization — wraps the shared
+/// `csv_neutralize` logic with proper comma/quote/newline quoting for CSV output.
+/// (Mirrors `csv_field` in journals.rs but avoids a cross-crate visibility issue
+/// by re-applying the same logic locally in the payroll command module.)
+fn csv_neutralize_field(s: &str) -> String {
+    use crate::commands::journals::csv_neutralize;
+    let s = csv_neutralize(s);
+    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod reges_tests {
+    use super::csv_neutralize_field;
+
+    // ── helper: build a minimal Employee for testing ──────────────────────────
+
+    #[allow(clippy::too_many_arguments)]
+    fn make_emp(
+        full_name: &str,
+        cnp: &str,
+        functia: &str,
+        cod_cor: &str,
+        tip_contract: &str,
+        employment_date: Option<&str>,
+        contract_end_date: Option<&str>,
+        ore_norma: i64,
+        gross_salary: &str,
+    ) -> crate::db::payroll::Employee {
+        crate::db::payroll::Employee {
+            id: "test-id".into(),
+            company_id: "cmp-1".into(),
+            cnp: cnp.into(),
+            full_name: full_name.into(),
+            gross_salary: gross_salary.into(),
+            personal_deduction: "0".into(),
+            employment_date: employment_date.map(|s| s.to_string()),
+            contract_end_date: contract_end_date.map(|s| s.to_string()),
+            active: true,
+            tip_asigurat: "1".into(),
+            pensionar: false,
+            tip_contract: tip_contract.into(),
+            ore_norma,
+            exceptie_cas_min: "".into(),
+            sediu_cif: "".into(),
+            beneficiar_suma_netaxabila: false,
+            functia: functia.into(),
+            cod_cor: cod_cor.into(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    /// Build the CSV body (without file I/O) from a slice of employees.
+    fn build_reges_csv(emps: &[crate::db::payroll::Employee]) -> String {
+        use crate::commands::journals::csv_num;
+        let mut out = String::with_capacity(1024);
+        out.push_str(
+            "Nume,CNP,Funcția,Cod COR,Tip contract,Durată contract,\
+             Data angajării,Data încetării,Ore normă/zi,Salariu brut (RON)\n",
+        );
+        for emp in emps {
+            let tip_label = match emp.tip_contract.as_str() {
+                "N" => "CIM normă întreagă".to_string(),
+                p if p.starts_with('P') => format!("CIM part-time {}", p),
+                other => other.to_string(),
+            };
+            let durata = if emp.contract_end_date.is_some() {
+                "determinată"
+            } else {
+                "nedeterminată"
+            };
+            let hire = emp.employment_date.as_deref().unwrap_or("");
+            let end = emp.contract_end_date.as_deref().unwrap_or("");
+            let row = format!(
+                "{},{},{},{},{},{},{},{},{},{}\n",
+                csv_neutralize_field(&emp.full_name),
+                csv_neutralize_field(&emp.cnp),
+                csv_neutralize_field(&emp.functia),
+                csv_neutralize_field(&emp.cod_cor),
+                csv_neutralize_field(&tip_label),
+                csv_neutralize_field(durata),
+                csv_neutralize_field(hire),
+                csv_neutralize_field(end),
+                emp.ore_norma,
+                csv_num(&emp.gross_salary),
+            );
+            out.push_str(&row);
+        }
+        out
+    }
+
+    /// The register CSV has a header + one data row per employee with the
+    /// correct columns: name, CNP, funcția, cod COR, contract type, duration,
+    /// hire date, end date, hours/day, salary.
+    #[test]
+    fn reges_register_columns_and_values() {
+        let emp = make_emp(
+            "Popescu Ion",
+            "1800101123456",
+            "Programator",
+            "251202",
+            "N",
+            Some("2020-03-01"),
+            None,
+            8,
+            "5000",
+        );
+        let csv = build_reges_csv(&[emp]);
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines.len(), 2, "header + 1 data row");
+        // Header contains expected column names
+        assert!(lines[0].contains("Nume"), "header: Nume");
+        assert!(lines[0].contains("CNP"), "header: CNP");
+        assert!(lines[0].contains("Cod COR"), "header: Cod COR");
+        assert!(lines[0].contains("Tip contract"), "header: Tip contract");
+        assert!(
+            lines[0].contains("Data angajării"),
+            "header: Data angajării"
+        );
+        assert!(lines[0].contains("Salariu brut"), "header: Salariu brut");
+        // Data row values
+        assert!(lines[1].contains("Popescu Ion"), "name in row");
+        assert!(lines[1].contains("1800101123456"), "CNP in row");
+        assert!(lines[1].contains("Programator"), "functia in row");
+        assert!(lines[1].contains("251202"), "COR in row");
+        assert!(lines[1].contains("CIM normă întreagă"), "full-time label");
+        assert!(lines[1].contains("nedeterminată"), "open-ended duration");
+        assert!(lines[1].contains("2020-03-01"), "hire date");
+        assert!(lines[1].contains("5000"), "salary");
+    }
+
+    /// An employee with a contract_end_date shows it; an active open-ended one doesn't.
+    #[test]
+    fn reges_end_date_present_when_set() {
+        let ended = make_emp(
+            "Ionescu Maria",
+            "2900505654321",
+            "Contabil",
+            "241101",
+            "N",
+            Some("2018-01-15"),
+            Some("2024-12-31"),
+            8,
+            "4000",
+        );
+        let csv = build_reges_csv(&[ended]);
+        let data = csv.lines().nth(1).unwrap();
+        assert!(data.contains("2024-12-31"), "end date present");
+        assert!(
+            data.contains("determinată"),
+            "determinată when end date set"
+        );
+    }
+
+    /// An active employee without an end date shows empty end-date column.
+    #[test]
+    fn reges_no_end_date_when_active() {
+        let active = make_emp(
+            "Georgescu Andrei",
+            "1920810987654",
+            "Inginer",
+            "214201",
+            "N",
+            Some("2022-06-01"),
+            None,
+            8,
+            "7000",
+        );
+        let csv = build_reges_csv(&[active]);
+        let data = csv.lines().nth(1).unwrap();
+        assert!(
+            data.contains("nedeterminată"),
+            "open-ended when no end date"
+        );
+        // end date column is empty — the row has a comma followed immediately by another field
+        // (ore_norma). Check that "nedeterminată" appears and no spurious date in end-date slot.
+        // The row format: ...,hire_date,,ore_norma,...
+        assert!(data.contains("2022-06-01,,"), "empty end-date column");
+    }
+
+    /// Part-time contract shows the P-code label; ore_norma != 8 is preserved.
+    #[test]
+    fn reges_part_time_contract_label() {
+        let pt = make_emp(
+            "Dumitrescu Ana",
+            "2850320123456",
+            "Asistent",
+            "325901",
+            "P2",
+            Some("2023-03-01"),
+            None,
+            4,
+            "2500",
+        );
+        let csv = build_reges_csv(&[pt]);
+        let data = csv.lines().nth(1).unwrap();
+        assert!(
+            data.contains("CIM part-time P2"),
+            "part-time label with code"
+        );
+        assert!(data.contains(",4,"), "ore_norma=4");
+    }
+
+    /// Formula-injection safety: a name starting with '=' is prefixed with ' (apostrophe).
+    #[test]
+    fn reges_formula_injection_safe_name() {
+        let malicious = make_emp(
+            "=cmd|' /C calc'!A0",
+            "1900101000000",
+            "Test",
+            "000000",
+            "N",
+            None,
+            None,
+            8,
+            "3000",
+        );
+        let csv = build_reges_csv(&[malicious]);
+        let data = csv.lines().nth(1).unwrap();
+        // The cell must start with the apostrophe prefix, neutralizing the '=' formula trigger.
+        assert!(
+            data.starts_with("'=cmd"),
+            "formula-injection prefix applied: got: {data}"
+        );
+    }
+
+    /// csv_neutralize_field handles names with commas by quoting the field.
+    #[test]
+    fn reges_name_with_comma_is_quoted() {
+        let emp = make_emp(
+            "Pop, Ioan-Mihai",
+            "1900101000001",
+            "Manager",
+            "121901",
+            "N",
+            Some("2021-01-01"),
+            None,
+            8,
+            "8000",
+        );
+        let csv = build_reges_csv(&[emp]);
+        let data = csv.lines().nth(1).unwrap();
+        // The name contains a comma so it must be wrapped in double quotes per RFC 4180.
+        assert!(data.contains("\"Pop, Ioan-Mihai\""), "comma in name quoted");
+    }
+
+    /// COR code validation: a 6-digit string is stored and reproduced verbatim;
+    /// COR codes with fewer or more digits are stored as-is (app stores, portal validates).
+    /// (The app deliberately does NOT hard-reject at DB level — see export note.)
+    #[test]
+    fn reges_cor_code_stored_verbatim() {
+        let emp = make_emp(
+            "Test",
+            "1900101000002",
+            "Dev",
+            "251202",
+            "N",
+            None,
+            None,
+            8,
+            "4000",
+        );
+        let csv = build_reges_csv(&[emp]);
+        assert!(csv.contains("251202"), "6-digit COR reproduced");
+
+        let emp2 = make_emp(
+            "Test2",
+            "1900101000003",
+            "Dev",
+            "1234",
+            "N",
+            None,
+            None,
+            8,
+            "4000",
+        );
+        let csv2 = build_reges_csv(&[emp2]);
+        assert!(
+            csv2.contains("1234"),
+            "short COR stored as-is (portal validates)"
+        );
+    }
 }

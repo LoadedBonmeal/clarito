@@ -1343,6 +1343,10 @@ export interface Employee {
   /** Beneficiar al sumei netaxabile din salariul minim (art. III OUG 89/2025): normă întreagă,
    *  salariu de bază = salariul minim, fără diminuare în 2026 → carve-out 300/200 lei. */
   beneficiarSumaNetaxabila: boolean;
+  /** Funcția (denumirea postului), ex. "Programator". Folosit în exportul REGES-Online (HG 295/2025). */
+  functia: string;
+  /** Codul COR (Clasificarea Ocupațiilor din România) — 6 cifre, ex. "251202". Obligatoriu în REGES-Online. */
+  codCor: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -1416,6 +1420,10 @@ export interface CreateEmployeeInput {
   exceptieCasMin?: string;
   sediuCif?: string;
   beneficiarSumaNetaxabila?: boolean;
+  /** Funcția (denumirea postului) — REGES-Online (HG 295/2025). */
+  functia?: string;
+  /** Codul COR 6 cifre — REGES-Online (HG 295/2025). */
+  codCor?: string;
 }
 
 export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, "companyId">> & {

@@ -2034,6 +2034,15 @@ export const payroll = {
   /** Șterge un pontaj. */
   deletePontaj: (id: string, companyId: string) =>
     invoke<void>("delete_pontaj", { id, companyId }),
+
+  /**
+   * Exportă Registrul General de Evidenţa Salariaţilor (REGES-Online, HG 295/2025) ca CSV.
+   * Un rând per angajat (activi + inactivi), sortat alfabetic, formula-injection-safe.
+   * NOTĂ: depunerea efectivă se face exclusiv prin portalul Inspecţiei Muncii (REGES-Online)
+   * — aplicaţia nu comunică automat cu portalul; acest CSV e pentru referinţă / import manual.
+   */
+  exportRegesRegister: (companyId: string, destPath: string) =>
+    invoke<string>("export_reges_register", { companyId, destPath }),
 };
 
 export const vatRates = {

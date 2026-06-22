@@ -24,6 +24,7 @@
     "actions": {
       "newEmployee": "New employee",
       "exportD112": "Export D112 (XML)",
+      "exportReges": "Export Employee Register (REGES)",
       "prevYear": "Previous year",
       "nextYear": "Next year",
       "edit": "Edit",
@@ -162,7 +163,18 @@
       "beneficiar200": "Min-wage non-taxable amount beneficiary (300/200 lei)",
       "beneficiar200Hint": "Art. III OUG 89/2025: full-time employee, base salary = minimum wage, not cut during 2026. 300 lei (Jan–Jun) / 200 lei (Jul–Dec) free of income tax + CAS/CASS/CAM. Tick only if all conditions are met.",
       "nameRequired": "Name is required.",
-      "save": "Save employee"
+      "save": "Save employee",
+      "functia": "Job title",
+      "functiiaPlaceholder": "e.g. Software Developer",
+      "codCor": "COR code (6 digits)",
+      "codCorPlaceholder": "e.g. 251202",
+      "codCorHint": "Romanian Occupational Classification code — required on the REGES-Online portal."
+    },
+    "reges": {
+      "saveTitle": "Save Employee Register (CSV)",
+      "exported": "Employee register exported ({{path}}).",
+      "exportError": "Could not export the REGES register.",
+      "portalNote": "REGES-Online (HG 295/2025) is an online portal operated by the Labour Inspectorate — filing is done at registrul.inspectmun.ro. This CSV is the register dataset for reference / manual upload."
     },
     "cmModal": {
       "title": "Add medical leave certificate",
@@ -222,6 +234,8 @@
       "addConcediuError": "Could not add the medical leave.",
       "addSediuError": "Could not add the secondary office.",
       "exportError": "Could not export D112.",
+      "exportRegesError": "Could not export the REGES employee register.",
+      "exportRegesOk": "Employee register exported (REGES-Online).",
       "newModelWarn": "For {{month}} {{year}} the NEW D112 model (OPANAF 605/2026) applies, not yet implemented — the exported file uses the old structure (≤ June 2026) and may be rejected by DUKIntegrator. Check it before filing.",
       "exported": "D112 (XML) exported — header + employer obligations + {{insured}}. Import it into the D112 application (smart PDF), validate it (DUKIntegrator) and fill in the declarant + special blocks before filing."
     },

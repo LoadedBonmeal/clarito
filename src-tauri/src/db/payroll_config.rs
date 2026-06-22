@@ -431,6 +431,8 @@ mod tests {
                 exceptie_cas_min: None,
                 sediu_cif: None,
                 beneficiar_suma_netaxabila: None,
+                functia: None,
+                cod_cor: None,
             },
         )
         .await

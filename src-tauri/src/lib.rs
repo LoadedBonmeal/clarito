@@ -626,6 +626,8 @@ pub fn run() {
                     commands::payroll::create_medical_leave,
                     commands::payroll::delete_medical_leave,
                     commands::payroll::run_payroll,
+                    // REGES-Online — Registrul General de Evidenţa Salariaţilor (HG 295/2025)
+                    commands::payroll::export_reges_register,
                     // P2 Wave 7: payroll config (GL account map + diurnă)
                     commands::payroll_config::get_payroll_config_cmd,
                     commands::payroll_config::set_payroll_config_cmd,

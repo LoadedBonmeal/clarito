@@ -25,6 +25,7 @@
     "actions": {
       "newEmployee": "Angajat nou",
       "exportD112": "Export D112 (XML)",
+      "exportReges": "Export Registru Salariați (REGES)",
       "prevYear": "Anul precedent",
       "nextYear": "Anul următor",
       "edit": "Editează",
@@ -163,7 +164,18 @@
       "beneficiar200": "Beneficiar sumă netaxabilă din salariul minim (300/200 lei)",
       "beneficiar200Hint": "Art. III OUG 89/2025: salariat cu normă întreagă, salariu de bază = salariul minim, fără diminuare în 2026. 300 lei (ian-iun) / 200 lei (iul-dec) scutiți de impozit + CAS/CASS/CAM. Bifați doar dacă toate condițiile sunt îndeplinite.",
       "nameRequired": "Numele e obligatoriu.",
-      "save": "Salvează angajat"
+      "save": "Salvează angajat",
+      "functia": "Funcția (denumire post)",
+      "functiiaPlaceholder": "ex. Programator",
+      "codCor": "Cod COR (6 cifre)",
+      "codCorPlaceholder": "ex. 251202",
+      "codCorHint": "Clasificarea Ocupațiilor din România — obligatoriu în REGES-Online."
+    },
+    "reges": {
+      "saveTitle": "Salvează Registru Salariați (CSV)",
+      "exported": "Registrul General de Evidență a Salariaților exportat ({{path}}).",
+      "exportError": "Nu s-a putut exporta registrul REGES.",
+      "portalNote": "REGES-Online (HG 295/2025) este un portal online al Inspecției Muncii — depunerea se face direct la adresa registrul.inspectmun.ro. Acest fișier CSV este registrul de date pentru referință / import manual pe portal."
     },
     "cmModal": {
       "title": "Adaugă certificat de concediu medical",
@@ -224,6 +236,8 @@
       "addConcediuError": "Nu s-a putut adăuga concediul medical.",
       "addSediuError": "Nu s-a putut adăuga sediul secundar.",
       "exportError": "Nu s-a putut exporta D112.",
+      "exportRegesError": "Nu s-a putut exporta registrul REGES.",
+      "exportRegesOk": "Registru Salariați exportat (REGES-Online).",
       "newModelWarn": "Pentru {{month}} {{year}} se aplică NOUL model D112 (OPANAF 605/2026), neimplementat încă — fișierul exportat folosește structura veche (≤ iunie 2026) și poate fi respins de DUKIntegrator. Verificați înainte de depunere.",
       "exported": "D112 (XML) exportat — antet + obligații angajator + {{insured}}. Importați-l în aplicația D112 (PDF inteligent), validați (DUKIntegrator) și completați declarantul + blocurile speciale înainte de depunere."
     },

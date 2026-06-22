@@ -168,6 +168,29 @@ export function PayrollPage() {
 
   const openXml = useOpenXml();
 
+  /**
+   * Exportă Registrul General de Evidenţa Salariaţilor (REGES-Online, HG 295/2025) ca CSV.
+   *
+   * NOTĂ: REGES-Online este un portal online al Inspecţiei Muncii — depunerea se face
+   * exclusiv prin portal (registrul.inspectmun.ro). Acest fişier CSV este registrul de date
+   * pentru referinţă / import manual. Aplicaţia NU depune automat la portal.
+   */
+  const runRegesExport = async () => {
+    if (!companyId) return;
+    const dest = await saveDialog({
+      title: t("payroll.reges.saveTitle"),
+      defaultPath: "registru-salariati-reges.csv",
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (!dest) return;
+    try {
+      await api.payroll.exportRegesRegister(companyId, dest);
+      notify.success(t("payroll.notify.exportRegesOk"));
+    } catch (err) {
+      notify.error(formatError(err, t("payroll.notify.exportRegesError")));
+    }
+  };
+
   /** Construiește XML-ul D112 al lunii și îl deschide în vizualizatorul/editorul XML (cu re-validare DUK). */
   const runD112Preview = async (caen: string, isRectificative: boolean) => {
     if (!companyId) return;
@@ -283,6 +306,9 @@ export function PayrollPage() {
           </div>
           <button className="pill-btn" onClick={() => setModal("create")}>
             <Ic name="plus" />{t("payroll.actions.newEmployee")}
+          </button>
+          <button className="pill-btn" onClick={runRegesExport} title={t("payroll.reges.portalNote")}>
+            <Ic name="dl" />{t("payroll.actions.exportReges")}
           </button>
           <button className="btn-dark" onClick={() => setShowD112(true)}>
             <Ic name="code" />{t("payroll.actions.exportD112")}
@@ -681,6 +707,8 @@ function EmployeeModal({
     beneficiarSumaNetaxabila: employee?.beneficiarSumaNetaxabila ?? false,
     employmentDate: employee?.employmentDate ?? "",
     contractEndDate: employee?.contractEndDate ?? "",
+    functia: employee?.functia ?? "",
+    codCor: employee?.codCor ?? "",
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -700,6 +728,8 @@ function EmployeeModal({
         beneficiarSumaNetaxabila: form.beneficiarSumaNetaxabila,
         employmentDate: form.employmentDate || undefined,
         contractEndDate: form.contractEndDate || undefined,
+        functia: form.functia,
+        codCor: form.codCor,
       };
       if (isEdit) {
         return api.payroll.update(employee!.id, companyId, payload);
@@ -713,7 +743,7 @@ function EmployeeModal({
 
   const { closing, close } = useAnimatedClose(onClose);
 
-  type StrKey = "cnp" | "fullName" | "grossSalary" | "personalDeduction" | "oreNorma";
+  type StrKey = "cnp" | "fullName" | "grossSalary" | "personalDeduction" | "oreNorma" | "functia" | "codCor";
   const field = (k: StrKey) => ({
     value: form[k],
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value })),
@@ -837,6 +867,16 @@ function EmployeeModal({
                 <span>{t("payroll.empModal.beneficiar200")}</span>
               </label>
               <div className="hint">{t("payroll.empModal.beneficiar200Hint")}</div>
+            </div>
+            {/* REGES-Online fields — funcția + cod COR (HG 295/2025) */}
+            <div className="field">
+              <label>{t("payroll.empModal.functia")}</label>
+              <input className="input" type="text" placeholder={t("payroll.empModal.functiiaPlaceholder")} {...field("functia")} />
+            </div>
+            <div className="field">
+              <label>{t("payroll.empModal.codCor")}</label>
+              <input className="input num" type="text" inputMode="numeric" maxLength={6} placeholder={t("payroll.empModal.codCorPlaceholder")} {...field("codCor")} />
+              <div className="hint">{t("payroll.empModal.codCorHint")}</div>
             </div>
             {error && (
               <div className="field span2">

@@ -324,6 +324,8 @@ async fn seed_firm(
                 exceptie_cas_min: None,
                 sediu_cif: None,
                 beneficiar_suma_netaxabila: Some(false),
+                functia: None,
+                cod_cor: None,
             },
         )
         .await?;

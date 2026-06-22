@@ -52,6 +52,12 @@ pub struct Employee {
     /// salariatul e cu normă întreagă, salariul de bază = salariul minim și nu a fost diminuat în
     /// 2026. Activează carve-out-ul (300/200 lei) în [`crate::anaf_decl::d112::suma_netaxabila`].
     pub beneficiar_suma_netaxabila: bool,
+    /// Funcția (denumirea postului), ex. "Programator". Folosit în exportul REGES-Online
+    /// (Registrul General de Evidență a Salariaților, HG 295/2025). String liber, opțional.
+    pub functia: String,
+    /// Codul COR (Clasificarea Ocupațiilor din România) — 6 cifre, ex. "251202".
+    /// Obligatoriu în REGES-Online; golit la creare (utilizatorul îl completează).
+    pub cod_cor: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -82,6 +88,10 @@ pub struct CreateEmployeeInput {
     pub sediu_cif: Option<String>,
     #[serde(default)]
     pub beneficiar_suma_netaxabila: Option<bool>,
+    #[serde(default)]
+    pub functia: Option<String>,
+    #[serde(default)]
+    pub cod_cor: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -101,12 +111,14 @@ pub struct UpdateEmployeeInput {
     pub exceptie_cas_min: Option<String>,
     pub sediu_cif: Option<String>,
     pub beneficiar_suma_netaxabila: Option<bool>,
+    pub functia: Option<String>,
+    pub cod_cor: Option<String>,
 }
 
 const COLS: &str = "id, company_id, cnp, full_name, gross_salary, personal_deduction, \
                     employment_date, contract_end_date, active, tip_asigurat, pensionar, \
                     tip_contract, ore_norma, exceptie_cas_min, sediu_cif, \
-                    beneficiar_suma_netaxabila, created_at, updated_at";
+                    beneficiar_suma_netaxabila, functia, cod_cor, created_at, updated_at";
 
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Employee>> {
     let q = format!(
@@ -169,8 +181,9 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     sqlx::query(
         "INSERT INTO employees (id, company_id, cnp, full_name, gross_salary, personal_deduction, \
          employment_date, contract_end_date, active, tip_asigurat, pensionar, tip_contract, \
-         ore_norma, exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, created_at, updated_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,1,?9,?10,?11,?12,?13,?14,?15,?16,?16)",
+         ore_norma, exceptie_cas_min, sediu_cif, beneficiar_suma_netaxabila, functia, cod_cor, \
+         created_at, updated_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,1,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?18)",
     )
     .bind(&id)
     .bind(&input.company_id)
@@ -187,6 +200,8 @@ pub async fn create(pool: &SqlitePool, input: CreateEmployeeInput) -> AppResult<
     .bind(input.exceptie_cas_min.as_deref().unwrap_or(""))
     .bind(input.sediu_cif.as_deref().unwrap_or("").trim())
     .bind(input.beneficiar_suma_netaxabila.unwrap_or(false))
+    .bind(input.functia.as_deref().unwrap_or("").trim())
+    .bind(input.cod_cor.as_deref().unwrap_or("").trim())
     .bind(now)
     .execute(pool)
     .await?;
@@ -213,7 +228,7 @@ pub async fn update(
         "UPDATE employees SET cnp=?3, full_name=?4, gross_salary=?5, personal_deduction=?6, \
          employment_date=?7, contract_end_date=?8, active=?9, tip_asigurat=?10, pensionar=?11, \
          tip_contract=?12, ore_norma=?13, exceptie_cas_min=?14, sediu_cif=?15, \
-         beneficiar_suma_netaxabila=?16, updated_at=?17 \
+         beneficiar_suma_netaxabila=?16, functia=?17, cod_cor=?18, updated_at=?19 \
          WHERE id=?1 AND company_id=?2",
     )
     .bind(id)
@@ -241,6 +256,8 @@ pub async fn update(
             .beneficiar_suma_netaxabila
             .unwrap_or(cur.beneficiar_suma_netaxabila),
     )
+    .bind(input.functia.as_deref().unwrap_or(&cur.functia))
+    .bind(input.cod_cor.as_deref().unwrap_or(&cur.cod_cor))
     .bind(now_unix())
     .execute(pool)
     .await?;
@@ -1004,6 +1021,8 @@ mod tests {
                 exceptie_cas_min: None,
                 sediu_cif: None,
                 beneficiar_suma_netaxabila: None,
+                functia: None,
+                cod_cor: None,
             },
         )
         .await
@@ -1054,6 +1073,8 @@ mod tests {
                     exceptie_cas_min: None,
                     sediu_cif: None,
                     beneficiar_suma_netaxabila: None,
+                    functia: None,
+                    cod_cor: None,
                 },
             )
             .await
@@ -1122,6 +1143,8 @@ mod tests {
                 exceptie_cas_min: None,
                 sediu_cif: None,
                 beneficiar_suma_netaxabila: None,
+                functia: None,
+                cod_cor: None,
             },
         )
         .await
@@ -1269,6 +1292,8 @@ mod tests {
             exceptie_cas_min: None,
             sediu_cif: None,
             beneficiar_suma_netaxabila: None,
+            functia: None,
+            cod_cor: None,
         }
     }
 
