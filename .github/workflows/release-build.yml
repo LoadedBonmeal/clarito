@@ -73,6 +73,13 @@ jobs:
             curl -fsSL "${{ secrets.DUK_JARS_URL }}" -o /tmp/duk.zip
             unzip -q /tmp/duk.zip -d src-tauri/resources/duk
             echo "DUK_BUNDLED=1" >> "$GITHUB_ENV"
+            # Self-heal the per-declaration *Validator.jar overlays straight from static.anaf.ro
+            # so the bundle carries the latest D301/D700/D710/D100/D101 (and any future) validators
+            # even if the duk.zip secret predates them. DUKIntegrator.jar + the JRE stay from the secret.
+            # The per-declaration validators are freely downloadable from ANAF (public AplicatiiDec index).
+            mkdir -p src-tauri/resources/duk/lib
+            DUK_LIB_DIR="$PWD/src-tauri/resources/duk/lib" bash scripts/fetch-validators.sh \
+              || echo "::warning::Validator top-up partially failed — bundle uses the secret's jars as-is."
           else
             echo "::warning::DUK_JARS_URL not set — building UNBUNDLED (no local DUK validator). Set the secret to ship complete installers."
             echo "unbundled placeholder" > src-tauri/resources/jre-min/.keep

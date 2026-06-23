@@ -45,8 +45,14 @@ DUK_JAR_PATH="$TOOLS_DIR/DUKIntegrator.jar"
 
 echo "▶ Downloading DUKIntegrator jar ..."
 echo "  URL: $DUK_JAR_URL"
-curl -fL --progress-bar -o "$DUK_JAR_PATH" "$DUK_JAR_URL"
-echo "  Saved: $DUK_JAR_PATH"
+# Guarded: the static.anaf.ro/static/DUKIntegrator/ path moves periodically (currently 404).
+# The bundled app ships DUKIntegrator.jar via the duk.zip secret, and the CI self-heal step only
+# needs the per-declaration *Validator.jar overlays below — so a DUKIntegrator 404 must NOT abort
+# the whole fetch under `set -e`. For a fresh DEV setup, grab DUKIntegrator.jar from the current
+# DUKIntegrator.htm index and point $EFACTURA_DUK_JAR at it.
+curl -fL --progress-bar -o "$DUK_JAR_PATH" "$DUK_JAR_URL" \
+  && echo "  Saved: $DUK_JAR_PATH" \
+  || echo "  WARNING: DUKIntegrator.jar download failed (URL moved); bundle ships it via the duk.zip secret."
 echo ""
 
 # ── SAF-T D406 XSD schema ────────────────────────────────────────────────────
@@ -204,7 +210,13 @@ echo ""
 # Official ZIP: https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D301_20201022.zip
 # NOTE: the SHIPPED jars come from the release duk.zip secret (consistent with D300/D112 jars);
 # this script is for DEV/CI use only (src-tauri/tools/ and resources/duk are gitignored).
-D301_LIB_DIR="$TOOLS_DIR/lib"
+# Where the per-declaration *Validator.jar overlays land. Defaults to the DEV path
+# (tools/dukintegrator/lib, used via $EFACTURA_DUK_JAR). Override with DUK_LIB_DIR to
+# populate the BUNDLED path directly — the release CI sets
+# DUK_LIB_DIR=src-tauri/resources/duk/lib so the shipped bundle self-heals the freely
+# downloadable validators (D301/D700/D710/D100/D101 …) from static.anaf.ro at build time,
+# even when the duk.zip secret is stale. DUKIntegrator.jar + the JRE still come from the secret.
+D301_LIB_DIR="${DUK_LIB_DIR:-$TOOLS_DIR/lib}"
 mkdir -p "$D301_LIB_DIR"
 D301_ZIP_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D301_20201022.zip"
 D301_ZIP_PATH="$TOOLS_DIR/D301_20201022.zip"
@@ -245,12 +257,13 @@ echo ""
 
 # ── D710 validator (STANDALONE — NOT through DUKIntegrator) ──────────────────
 # D710Validator.jar is shipped inside D710_20052026.zip (ANAF AplicatiiDec index).
-# STANDALONE invocation: java -jar D710Validator.jar <xml>  (no -v token, no result-file)
-# Output goes to STDOUT; same parse_duk_output markers as DUKIntegrator.
+# DUKIntegrator OVERLAY: java -jar DUKIntegrator.jar -v D710 <xml> <result>  (NOT standalone —
+# the jar has no Main-Class; confirmed by running real DUK: `-v D710` works, `java -jar D710Validator.jar`
+# fails "no main manifest attribute"). DUK requires xmlns=...d710:declaratie:v2 in the document.
 # Official ZIP: https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D710_20052026.zip
 D710_ZIP_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D710_20052026.zip"
 D710_ZIP_PATH="$TOOLS_DIR/D710_20052026.zip"
-echo "▶ Downloading D710 validator package (STANDALONE) ..."
+echo "▶ Downloading D710 validator package (DUKIntegrator overlay) ..."
 echo "  URL: $D710_ZIP_URL"
 curl -fL --progress-bar -o "$D710_ZIP_PATH" "$D710_ZIP_URL" || {
     echo "  WARNING: D710_20052026.zip download failed — D710 DUK gate will skip gracefully without jar."
@@ -278,25 +291,54 @@ echo "  URL: $D100_XSD_URL"
 curl -fL --progress-bar -o "$D100_XSD_PATH" "$D100_XSD_URL" || {
     echo "  WARNING: D100 XSD download failed; already vendored in repo."
 }
+# D100Validator.jar (DUKIntegrator overlay, -v D100). Confirmed PASSES real DUK.
+D100_ZIP_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D100_22052026.zip"
+D100_ZIP_PATH="$TOOLS_DIR/D100_22052026.zip"
+echo "▶ Downloading D100 validator package (DUKIntegrator overlay) ..."
+echo "  URL: $D100_ZIP_URL"
+curl -fL --progress-bar -o "$D100_ZIP_PATH" "$D100_ZIP_URL" || {
+    echo "  WARNING: D100_22052026.zip download failed — D100 DUK gate will skip gracefully without jar."
+}
+if [ -f "$D100_ZIP_PATH" ]; then
+    unzip -p "$D100_ZIP_PATH" "D100Validator.jar" > "$D301_LIB_DIR/D100Validator.jar" 2>/dev/null || \
+    unzip -p "$D100_ZIP_PATH" "*/D100Validator.jar" > "$D301_LIB_DIR/D100Validator.jar" 2>/dev/null || \
+    unzip -j "$D100_ZIP_PATH" "*D100Validator.jar" -d "$D301_LIB_DIR" 2>/dev/null || \
+    echo "  WARNING: Could not extract D100Validator.jar from zip — extract manually."
+    rm -f "$D100_ZIP_PATH"
+fi
 echo ""
 
 # ── D101 validator (DUKIntegrator overlay) ───────────────────────────────────
 # D101Validator.jar is shipped inside D101_<date>.zip (ANAF AplicatiiDec index).
 # Invoked via DUKIntegrator overlay: java -jar DUKIntegrator.jar -v D101 <xml> <result>
-# XSD: d101_20250214.xsd (targetNamespace mfp:anaf:dgti:d101:declaratie:v3, but DUK uses v2)
+# XSD: d101_20250214.xsd (targetNamespace mfp:anaf:dgti:d101:declaratie:v3) — but DUKIntegrator
+# requires a PERIOD-DEPENDENT namespace in documents: ≤2023 → ...d101:declaratie:v9, ≥2024 → v10
+# (confirmed by running real DUK). So the vendored v3 XSD does NOT match DUK; the d101_xsd test
+# skips and DUK is the authoritative check. See tests/d101_xsd.rs.
 # Official index: https://static.anaf.ro/static/10/Anaf/Declaratii_R/descarcare_declaratii.htm
-# XSD download: https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/d101_20250214.xsd
-# NOTE: the vendored XSD has targetNamespace v3, but DUKIntegrator requires v2 namespace in
-# documents. The XSD is downloaded for reference only — use the DUK gate for authoritative
-# validation. See tests/d101_xsd.rs for full explanation of the mismatch.
 D101_XSD_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/d101_20250214.xsd"
 D101_XSD_PATH="$REPO_ROOT/src-tauri/tools/anaf/d101_20250214.xsd"
 mkdir -p "$(dirname "$D101_XSD_PATH")"
-echo "▶ Downloading D101 XSD schema (v3 file; DUK uses v2 — see tests/d101_xsd.rs) ..."
+echo "▶ Downloading D101 XSD schema (v3 file; DUK uses v9/v10 — see tests/d101_xsd.rs) ..."
 echo "  URL: $D101_XSD_URL"
 curl -fL --progress-bar -o "$D101_XSD_PATH" "$D101_XSD_URL" || {
     echo "  WARNING: D101 XSD download failed; already vendored in repo."
 }
+# D101Validator.jar (DUKIntegrator overlay, -v D101). Confirmed PASSES real DUK.
+D101_ZIP_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/D101_J1103.zip"
+D101_ZIP_PATH="$TOOLS_DIR/D101_J1103.zip"
+echo "▶ Downloading D101 validator package (DUKIntegrator overlay) ..."
+echo "  URL: $D101_ZIP_URL"
+curl -fL --progress-bar -o "$D101_ZIP_PATH" "$D101_ZIP_URL" || {
+    echo "  WARNING: D101_J1103.zip download failed — D101 DUK gate will skip gracefully without jar."
+}
+if [ -f "$D101_ZIP_PATH" ]; then
+    unzip -p "$D101_ZIP_PATH" "D101Validator.jar" > "$D301_LIB_DIR/D101Validator.jar" 2>/dev/null || \
+    unzip -p "$D101_ZIP_PATH" "*/D101Validator.jar" > "$D301_LIB_DIR/D101Validator.jar" 2>/dev/null || \
+    unzip -j "$D101_ZIP_PATH" "*D101Validator.jar" -d "$D301_LIB_DIR" 2>/dev/null || \
+    echo "  WARNING: Could not extract D101Validator.jar from zip — extract manually."
+    rm -f "$D101_ZIP_PATH"
+fi
 echo ""
 # NOTE: Bilanț (situații financiare) uses the ANAF PDF Intelligent / Soft-J program — NOT DUKIntegrator.
 # No DUK token exists for bilanț (confirmed: BILANT/S1002/S1003/S1005/UU/BS/BL all return
