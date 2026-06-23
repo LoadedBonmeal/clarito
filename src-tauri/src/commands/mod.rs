@@ -35,6 +35,8 @@ pub mod bnr;
 pub mod companies;
 pub mod contacts;
 pub mod contracts;
+pub mod d100;
+pub mod d101;
 pub mod d301;
 pub mod d390;
 pub mod d394;

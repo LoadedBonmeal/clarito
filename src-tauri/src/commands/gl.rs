@@ -225,6 +225,11 @@ async fn build_bilant_xml_for(
 /// blocurile F10 (bilanț) + F20 (cont de profit și pierdere) din contabilitate, pentru import în
 /// PDF-ul inteligent ANAF. Header-ul (cod fiscal teritorial, întocmitor, audit) + F30 «Date
 /// informative» se completează în aplicația ANAF după import. Returnează calea fișierului scris.
+///
+/// **Revizuire obligatorie înainte de depunere**: bilanțul NU are token DUKIntegrator (confirmat:
+/// BILANT/S1002/S1003/S1005/UU/BS/BL returnează «Tip declaratie necunoscut») — importul XML în
+/// PDF-ul inteligent ANAF (situații financiare) face singur validarea structurală. Contabilul
+/// trebuie să verifice XML-ul față de contabilitate înainte de a-l importa în formularul ANAF.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn export_bilant_xml(

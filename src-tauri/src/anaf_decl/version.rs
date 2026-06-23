@@ -157,6 +157,44 @@ pub fn schema_versions() -> Vec<SchemaVersion> {
             schema_label: "D710 v1 (≥2016, OPANAF 587/2016)",
             duk_type: "D710",
         },
+        // ── D100 (obligații de plată la bugetul de stat) ───────────────────────
+        // OPANAF 57/2026. Overlay DUKIntegrator: `java -jar DUKIntegrator.jar -v D100`.
+        // Namespace v2 (confirmed by DUKIntegrator D100Validator.jar, 2026-06).
+        // XSD: tools/anaf/d100_24022022.xsd (targetNamespace v2).
+        SchemaVersion {
+            decl: DeclKind::D100,
+            valid_from: d(2011, 1, 1),
+            valid_to: None,
+            namespace: "mfp:anaf:dgti:d100:declaratie:v2",
+            root_element: "declaratie100",
+            schema_label: "D100 v2 (≥2011, OPANAF 57/2026)",
+            duk_type: "D100",
+        },
+        // ── D101 (impozit pe profit anual) ────────────────────────────────────────
+        // OPANAF 206/2025. Overlay DUKIntegrator: `java -jar DUKIntegrator.jar -v D101`.
+        // Namespace is PERIOD-DEPENDENT (confirmed by DUKIntegrator D101Validator.jar, 2026-06):
+        //   ≤2023 → v9  (entry below)
+        //   ≥2024 → v10 (entry below)
+        // XSD: tools/anaf/d101_20250214.xsd says v3 — the XSD file is outdated vs DUK.
+        // Use d101_namespace_for_year(an) to resolve the correct namespace at emit-time.
+        SchemaVersion {
+            decl: DeclKind::D101,
+            valid_from: d(2012, 1, 1),
+            valid_to: Some(d(2023, 12, 31)),
+            namespace: "mfp:anaf:dgti:d101:declaratie:v9",
+            root_element: "declaratie101",
+            schema_label: "D101 v9 (2012–2023, DUK-confirmed)",
+            duk_type: "D101",
+        },
+        SchemaVersion {
+            decl: DeclKind::D101,
+            valid_from: d(2024, 1, 1),
+            valid_to: None,
+            namespace: "mfp:anaf:dgti:d101:declaratie:v10",
+            root_element: "declaratie101",
+            schema_label: "D101 v10 (≥2024, OPANAF 206/2025, DUK-confirmed)",
+            duk_type: "D101",
+        },
     ]
 }
 
@@ -238,6 +276,30 @@ mod tests {
     }
 
     #[test]
+    fn d100_resolves_from_2011() {
+        let sv = resolve(DeclKind::D100, date(2026, 3, 31)).expect("D100 should resolve ≥2011");
+        assert_eq!(sv.namespace, "mfp:anaf:dgti:d100:declaratie:v2");
+        assert_eq!(sv.root_element, "declaratie100");
+        assert_eq!(sv.duk_type, "D100");
+    }
+
+    #[test]
+    fn d101_resolves_period_dependent_namespaces() {
+        // ≤2023 → v9 (DUK-confirmed via live D101Validator.jar, 2026-06)
+        let sv9 = resolve(DeclKind::D101, date(2023, 12, 31)).expect("D101 should resolve 2023");
+        assert_eq!(sv9.namespace, "mfp:anaf:dgti:d101:declaratie:v9");
+        assert_eq!(sv9.root_element, "declaratie101");
+        assert_eq!(sv9.duk_type, "D101");
+        // ≥2024 → v10
+        let sv10 = resolve(DeclKind::D101, date(2024, 1, 1)).expect("D101 should resolve 2024");
+        assert_eq!(sv10.namespace, "mfp:anaf:dgti:d101:declaratie:v10");
+        let sv10_2025 = resolve(DeclKind::D101, date(2025, 12, 31)).expect("D101 resolves 2025");
+        assert_eq!(sv10_2025.namespace, "mfp:anaf:dgti:d101:declaratie:v10");
+        let sv10_2026 = resolve(DeclKind::D101, date(2026, 6, 1)).expect("D101 resolves 2026");
+        assert_eq!(sv10_2026.duk_type, "D101");
+    }
+
+    #[test]
     fn windows_non_overlapping_for_all_decl_kinds() {
         // For each DeclKind, test a spread of representative dates and assert
         // that at most one SchemaVersion matches each date.
@@ -261,6 +323,8 @@ mod tests {
             DeclKind::D301,
             DeclKind::D700,
             DeclKind::D710,
+            DeclKind::D100,
+            DeclKind::D101,
         ];
 
         for kind in all_kinds {

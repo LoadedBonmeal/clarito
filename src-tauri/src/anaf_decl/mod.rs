@@ -8,7 +8,9 @@
 pub mod bilant_xml;
 pub mod cash_vat;
 pub mod d100;
+pub mod d100_xml;
 pub mod d101;
+pub mod d101_xml;
 pub mod d112;
 pub mod d112_xml;
 pub mod d205_xml;
@@ -56,6 +58,12 @@ pub enum DeclKind {
     D700,
     /// D710 — declarație rectificativă D100 (OPANAF 587/2016). Overlay: lib/D710Validator.jar via DUKIntegrator `-v D710`.
     D710,
+    /// D100 — declarație privind obligațiile de plată la bugetul de stat (OPANAF 57/2026).
+    /// Overlay DUKIntegrator: lib/D100Validator.jar via `java -jar DUKIntegrator.jar -v D100`.
+    D100,
+    /// D101 — declarație privind impozitul pe profit (OPANAF 206/2025).
+    /// Overlay DUKIntegrator: lib/D101Validator.jar via `java -jar DUKIntegrator.jar -v D101`.
+    D101,
 }
 
 impl DeclKind {
@@ -69,6 +77,8 @@ impl DeclKind {
             DeclKind::D301 => "D301",
             DeclKind::D700 => "D700",
             DeclKind::D710 => "D710",
+            DeclKind::D100 => "D100",
+            DeclKind::D101 => "D101",
         }
     }
 
@@ -244,6 +254,16 @@ mod decl_kind_tests {
     }
 
     #[test]
+    fn d100_as_duk_type_round_trip() {
+        assert_eq!(DeclKind::D100.as_duk_type(), "D100");
+    }
+
+    #[test]
+    fn d101_as_duk_type_round_trip() {
+        assert_eq!(DeclKind::D101.as_duk_type(), "D101");
+    }
+
+    #[test]
     fn no_validators_are_standalone() {
         // D710 was previously misclassified as standalone; confirmed via DUK that it uses
         // the standard DUKIntegrator overlay path (`-v D710`). All validators return false.
@@ -253,6 +273,8 @@ mod decl_kind_tests {
         assert!(!DeclKind::D300.is_standalone_validator());
         assert!(!DeclKind::D205.is_standalone_validator());
         assert!(!DeclKind::D112.is_standalone_validator());
+        assert!(!DeclKind::D100.is_standalone_validator());
+        assert!(!DeclKind::D101.is_standalone_validator());
     }
 
     #[test]

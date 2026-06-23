@@ -264,6 +264,47 @@ if [ -f "$D710_ZIP_PATH" ]; then
 fi
 echo ""
 
+# ── D100 validator (DUKIntegrator overlay) ───────────────────────────────────
+# D100Validator.jar is shipped inside D100_<date>.zip (ANAF AplicatiiDec index).
+# Invoked via DUKIntegrator overlay: java -jar DUKIntegrator.jar -v D100 <xml> <result>
+# XSD: d100_24022022.xsd (targetNamespace mfp:anaf:dgti:d100:declaratie:v2, version 1.02)
+# Official index: https://static.anaf.ro/static/10/Anaf/Declaratii_R/descarcare_declaratii.htm
+# XSD download: https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/d100_24022022.xsd
+D100_XSD_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/d100_24022022.xsd"
+D100_XSD_PATH="$REPO_ROOT/src-tauri/tools/anaf/d100_24022022.xsd"
+mkdir -p "$(dirname "$D100_XSD_PATH")"
+echo "▶ Downloading D100 v2 XSD schema ..."
+echo "  URL: $D100_XSD_URL"
+curl -fL --progress-bar -o "$D100_XSD_PATH" "$D100_XSD_URL" || {
+    echo "  WARNING: D100 XSD download failed; already vendored in repo."
+}
+echo ""
+
+# ── D101 validator (DUKIntegrator overlay) ───────────────────────────────────
+# D101Validator.jar is shipped inside D101_<date>.zip (ANAF AplicatiiDec index).
+# Invoked via DUKIntegrator overlay: java -jar DUKIntegrator.jar -v D101 <xml> <result>
+# XSD: d101_20250214.xsd (targetNamespace mfp:anaf:dgti:d101:declaratie:v3, but DUK uses v2)
+# Official index: https://static.anaf.ro/static/10/Anaf/Declaratii_R/descarcare_declaratii.htm
+# XSD download: https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/d101_20250214.xsd
+# NOTE: the vendored XSD has targetNamespace v3, but DUKIntegrator requires v2 namespace in
+# documents. The XSD is downloaded for reference only — use the DUK gate for authoritative
+# validation. See tests/d101_xsd.rs for full explanation of the mismatch.
+D101_XSD_URL="https://static.anaf.ro/static/10/Anaf/Declaratii_R/AplicatiiDec/d101_20250214.xsd"
+D101_XSD_PATH="$REPO_ROOT/src-tauri/tools/anaf/d101_20250214.xsd"
+mkdir -p "$(dirname "$D101_XSD_PATH")"
+echo "▶ Downloading D101 XSD schema (v3 file; DUK uses v2 — see tests/d101_xsd.rs) ..."
+echo "  URL: $D101_XSD_URL"
+curl -fL --progress-bar -o "$D101_XSD_PATH" "$D101_XSD_URL" || {
+    echo "  WARNING: D101 XSD download failed; already vendored in repo."
+}
+echo ""
+# NOTE: Bilanț (situații financiare) uses the ANAF PDF Intelligent / Soft-J program — NOT DUKIntegrator.
+# No DUK token exists for bilanț (confirmed: BILANT/S1002/S1003/S1005/UU/BS/BL all return
+# "Tip declaratie necunoscut"). The bilanț XML is imported into the ANAF offline PDF form for
+# completion and submission.
+# Bilanț validator: download from https://static.anaf.ro/static/10/Anaf/Declaratii_R/descarcare_declaratii.htm
+# (search "situatii financiare" / "bilant" — NOT included here as it's a separate program, not DUK).
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo "══════════════════════════════════════════════════════"
 echo "  Validators fetched. To enable the DUKIntegrator gate:"
