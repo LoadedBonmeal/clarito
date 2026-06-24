@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { api, sessionExpiredSignal } from "@/lib/tauri";
 import { formatError } from "@/lib/error-mapper";
 import { notify } from "@/lib/toasts";
+import { BrandMark } from "@/components/shared/BrandMark";
 
 interface LoginScreenProps {
   onSuccess: () => void;
@@ -62,31 +63,18 @@ export function LoginScreen({ onSuccess }: LoginScreenProps) {
       <div
         style={{
           width: "100%",
-          maxWidth: 380,
-          padding: "40px 32px",
+          maxWidth: 400,
+          padding: "36px 32px",
           background: "var(--rf-card)",
           border: "1px solid var(--rf-border)",
-          borderRadius: 8,
+          borderRadius: 16,
+          boxShadow: "0 1px 2px rgba(0,0,0,.04), 0 18px 40px -24px rgba(0,0,0,.25)",
           margin: 16,
         }}
       >
-        {/* Logo mark */}
-        <div
-          style={{
-            width: 40,
-            height: 40,
-            background: "var(--rf-accent)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: 6,
-            color: "#fff",
-            fontWeight: 700,
-            fontSize: 16,
-            marginBottom: 20,
-          }}
-        >
-          C
+        {/* Brand mark — real Clarito logo, centered */}
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
+          <BrandMark size={48} />
         </div>
 
         {/* Session-expired notice — shown once after an idle-timeout expiry */}
@@ -111,14 +99,16 @@ export function LoginScreen({ onSuccess }: LoginScreenProps) {
         <h1
           style={{
             color: "var(--rf-text)",
-            fontSize: 18,
-            fontWeight: 700,
+            fontSize: 20,
+            fontWeight: 600,
+            letterSpacing: "-0.01em",
             margin: "0 0 6px",
+            textAlign: "center",
           }}
         >
           {t("auth.login.title")}
         </h1>
-        <p style={{ color: "var(--rf-text-dim)", fontSize: 13, margin: "0 0 24px" }}>
+        <p style={{ color: "var(--rf-text-dim)", fontSize: 13, margin: "0 0 24px", textAlign: "center" }}>
           {t("auth.login.sub")}
         </p>
 
@@ -164,10 +154,10 @@ export function LoginScreen({ onSuccess }: LoginScreenProps) {
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
-  padding: "9px 12px",
+  padding: "10px 12px",
   background: "var(--rf-input-bg, var(--rf-bg))",
   border: "1px solid var(--rf-border)",
-  borderRadius: 5,
+  borderRadius: 9,
   color: "var(--rf-text)",
   fontSize: 14,
   outline: "none",
@@ -176,10 +166,10 @@ const inputStyle: React.CSSProperties = {
 
 const btnStyle: React.CSSProperties = {
   width: "100%",
-  padding: "10px 16px",
+  padding: "11px 16px",
   background: "var(--rf-accent)",
   border: "none",
-  borderRadius: 5,
+  borderRadius: 9,
   color: "#fff",
   fontSize: 14,
   fontWeight: 600,
