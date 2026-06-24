@@ -27,7 +27,7 @@ mod ubl;
 // re-export — single source of truth for the HMAC key algorithm.
 pub use commands::license::{key_checksum, validate_license_key};
 
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
 
@@ -169,6 +169,23 @@ pub fn run() {
                         handle.manage(AppState::new(pool.clone()));
                         tracing::info!("AppState initialized");
 
+                        // ⚠️ TEMPORARY TESTING BYPASS — auto-establish a session for the first
+                        // active user so the login screen is skipped while testing the UI.
+                        // REMOVE THIS BLOCK to restore the normal login flow.
+                        if let Ok(users) = db::users::list_users(&pool).await {
+                            if let Some(u) = users.into_iter().find(|u| u.is_active) {
+                                handle
+                                    .state::<AppState>()
+                                    .set_session(db::users::CurrentUser {
+                                        id: u.id,
+                                        username: u.username,
+                                        role: u.role,
+                                    })
+                                    .await;
+                                tracing::warn!("TEMP: login skipped — auto-session for first user");
+                            }
+                        }
+
                         #[cfg(debug_assertions)]
                         if let Err(err) = db::seed::run_if_empty(&pool).await {
                             tracing::warn!(?err, "Seed failed");
@@ -207,15 +224,37 @@ pub fn run() {
             let show_item = MenuItem::with_id(app, "show", "Deschide Clarito", true, None::<&str>)?;
             let new_invoice_item =
                 MenuItem::with_id(app, "new_invoice", "Factură nouă", true, None::<&str>)?;
+            let new_receipt_item =
+                MenuItem::with_id(app, "new_receipt", "Chitanță nouă", true, None::<&str>)?;
+            let new_contact_item = MenuItem::with_id(
+                app,
+                "new_contact",
+                "Client / Furnizor nou",
+                true,
+                None::<&str>,
+            )?;
             let sync_item =
                 MenuItem::with_id(app, "sync", "Sincronizare ANAF", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Ieșire", true, None::<&str>)?;
+            let sep1 = PredefinedMenuItem::separator(app)?;
+            let sep2 = PredefinedMenuItem::separator(app)?;
+            let sep3 = PredefinedMenuItem::separator(app)?;
             let menu = Menu::with_items(
                 app,
-                &[&show_item, &new_invoice_item, &sync_item, &quit_item],
+                &[
+                    &show_item,
+                    &sep1,
+                    &new_invoice_item,
+                    &new_receipt_item,
+                    &new_contact_item,
+                    &sep2,
+                    &sync_item,
+                    &sep3,
+                    &quit_item,
+                ],
             )?;
             let _tray = TrayIconBuilder::with_id("main")
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tauri::include_image!("icons/tray-glyph.png"))
                 .icon_as_template(true)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
@@ -246,6 +285,22 @@ pub fn run() {
                             let _ = window.set_focus();
                             use tauri::Emitter;
                             let _ = window.emit("tray_navigate", "/invoices/new");
+                        }
+                    }
+                    "new_receipt" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            use tauri::Emitter;
+                            let _ = window.emit("tray_navigate", "/receipts");
+                        }
+                    }
+                    "new_contact" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            use tauri::Emitter;
+                            let _ = window.emit("tray_navigate", "/contacts");
                         }
                     }
                     "sync" => {

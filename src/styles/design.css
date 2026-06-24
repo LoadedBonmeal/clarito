@@ -285,7 +285,7 @@ input, select, textarea { font: inherit; color: inherit; }
    ------------------------------------------------------------------ */
 .app {
   display: grid;
-  grid-template-columns: 248px 1fr;
+  grid-template-columns: 252px 1fr;
   grid-template-rows: 60px 1fr;
   grid-template-areas: "side top" "side main";
   height: 100vh;
@@ -293,7 +293,7 @@ input, select, textarea { font: inherit; color: inherit; }
   background: #FAFAFA;
   transition: grid-template-columns .26s cubic-bezier(.4, 0, .2, 1);
 }
-.app.sidebar-collapsed { grid-template-columns: 84px 1fr; }
+.app.sidebar-collapsed { grid-template-columns: 92px 1fr; }
 
 /* Topbar spans the full width across the top; sidebar sits below it on the
    left, main fills the rest (design clarito-shell.css grid). */

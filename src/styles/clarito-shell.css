@@ -30,7 +30,7 @@
 .ic{width:18px;height:18px;display:block;stroke:var(--dim);stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round;flex:none}
 
 /* ===== TOP BAR ===== */
-.topbar{grid-area:top;display:flex;align-items:center;gap:16px;padding:0 18px;border-bottom:1px solid var(--line);background:var(--bg);z-index:6}
+.topbar{grid-area:top;display:flex;align-items:center;gap:14px;padding:0 18px 0 12px;background:transparent;z-index:6}
 .brand{display:flex;align-items:center;gap:8px;flex:none;padding-right:8px}
 .brand .b-logo{display:flex;align-items:center;gap:10px;flex:none;min-width:0}
 .mark{width:26px;height:26px;border-radius:7px;background:var(--black);display:flex;align-items:center;justify-content:center;flex:none}
@@ -92,8 +92,7 @@
 .avatar{width:32px;height:32px;border-radius:999px;background:var(--fill);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--text-2);flex:none}
 
 /* ===== SIDEBAR ===== */
-.sidebar{grid-area:side;background:var(--bg);border:1px solid var(--line);border-radius:18px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 16px 32px -20px rgba(0,0,0,.24);margin:10px 8px 10px 12px;display:flex;flex-direction:column;min-height:0;position:relative;transition:margin .26s cubic-bezier(.4,0,.2,1),border-radius .26s cubic-bezier(.4,0,.2,1)}
-.app.sidebar-collapsed .sidebar{border-radius:20px}
+.sidebar{grid-area:side;margin:10px;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 10px 30px -16px rgba(0,0,0,.18);display:flex;flex-direction:column;min-height:0;position:relative;transition:margin .24s cubic-bezier(.4,0,.2,1)}
 .collapse-btn{width:30px;height:30px;border-radius:8px;border:0;background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
 .collapse-btn:hover{background:var(--fill)}
 .collapse-btn .ic{width:17px;height:17px}
