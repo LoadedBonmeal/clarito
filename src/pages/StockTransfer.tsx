@@ -30,10 +30,12 @@ type View = "list" | "create" | "detail";
 
 function TransferList({
   companyId,
+  companyName,
   onNew,
   onView,
 }: {
   companyId: string;
+  companyName: string;
   onNew: () => void;
   onView: (t: StockTransfer) => void;
 }) {
@@ -63,14 +65,19 @@ function TransferList({
     gestiuni.find((g: Gestiune) => g.id === id)?.denumire ?? id;
 
   return (
-    <div className="main-inner">
+    <div className="main-inner wide">
       <div className="page-head">
         <div>
-          <h1 className="page-title">{t("stockTransfer.title")}</h1>
+          <h1>{t("stockTransfer.title")}</h1>
+          <p className="sub">
+            Bon de transfer cod 14-3-3A &middot; {companyName}
+          </p>
         </div>
-        <button className="btn-dark" onClick={onNew}>
-          <Ic name="plus" /> {t("stockTransfer.new")}
-        </button>
+        <div className="head-actions">
+          <button className="btn-dark" onClick={onNew}>
+            <Ic name="plus" /> {t("stockTransfer.new")}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -78,45 +85,53 @@ function TransferList({
       )}
 
       <div className="scr-card">
-        <div className="scr-toolbar">
-          <div className="spacer" />
-        </div>
         {isLoading && <div className="state-row">{t("stockTransfer.loading")}</div>}
-        {!isLoading && !error && transfers.length === 0 && (
-          <div className="state-row muted">{t("stockTransfer.empty")}</div>
-        )}
-        {!isLoading && transfers.length > 0 && (
+        {!isLoading && (
           <table className="scr-table">
             <thead>
               <tr>
-                <th>{t("stockTransfer.colDate")}</th>
+                <th style={{ width: 120 }}>{t("stockTransfer.colDate")}</th>
                 <th>{t("stockTransfer.colProduct")}</th>
-                <th>{t("stockTransfer.colFrom")}</th>
-                <th>{t("stockTransfer.colTo")}</th>
-                <th style={{ textAlign: "right" }}>{t("stockTransfer.colQty")}</th>
-                <th style={{ textAlign: "right" }}>{t("stockTransfer.colValue")}</th>
-                <th>{t("stockTransfer.colRef")}</th>
+                <th style={{ width: 150 }}>{t("stockTransfer.colFrom")}</th>
+                <th style={{ width: 160 }}>{t("stockTransfer.colTo")}</th>
+                <th className="r" style={{ width: 100 }}>{t("stockTransfer.colQty")}</th>
+                <th className="r" style={{ width: 120 }}>{t("stockTransfer.colValue")}</th>
+                <th style={{ width: 130 }}>{t("stockTransfer.colRef")}</th>
               </tr>
             </thead>
-            <tbody>
-              {transfers.map((tr: StockTransfer) => (
-                <tr
-                  key={tr.id}
-                  style={{ cursor: "pointer" }}
-                  onClick={() => onView(tr)}
-                >
-                  <td>{tr.transferDate}</td>
-                  <td>{productName(tr.productId)}</td>
-                  <td>{gesName(tr.fromGestiuneId)}</td>
-                  <td>{gesName(tr.toGestiuneId)}</td>
-                  <td style={{ textAlign: "right" }}>
-                    {parseFloat(tr.qty).toFixed(3)}
+            {transfers.length === 0 ? (
+              <tbody>
+                <tr>
+                  <td colSpan={7} style={{ padding: 0 }}>
+                    <div className="empty">
+                      <div className="ei"><Ic name="swap" /></div>
+                      <b>Niciun bon de transfer.</b>
+                      Inregistrati un transfer intre gestiuni.
+                    </div>
                   </td>
-                  <td style={{ textAlign: "right" }}>{tr.value}</td>
-                  <td>{tr.transferRef ?? "—"}</td>
                 </tr>
-              ))}
-            </tbody>
+              </tbody>
+            ) : (
+              <tbody>
+                {transfers.map((tr: StockTransfer) => (
+                  <tr
+                    key={tr.id}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => onView(tr)}
+                  >
+                    <td>{tr.transferDate}</td>
+                    <td>{productName(tr.productId)}</td>
+                    <td>{gesName(tr.fromGestiuneId)}</td>
+                    <td>{gesName(tr.toGestiuneId)}</td>
+                    <td className="r">
+                      {parseFloat(tr.qty).toFixed(3)}
+                    </td>
+                    <td className="r">{tr.value}</td>
+                    <td>{tr.transferRef ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            )}
           </table>
         )}
       </div>
@@ -516,9 +531,18 @@ export function StockTransferPage() {
   const [view, setView] = useState<View>("list");
   const [selectedTransfer, setSelectedTransfer] = useState<StockTransfer | null>(null);
 
+  const { data: companies = [] } = useQuery({
+    queryKey: ["companies", "list"],
+    queryFn: () => api.companies.list(),
+  });
+
+  const activeCompany = (companies as unknown as { id: string; name: string }[]).find(
+    (c) => c.id === activeCompanyId,
+  );
+
   if (!activeCompanyId) {
     return (
-      <div className="main-inner">
+      <div className="main-inner wide">
         <div className="state-row muted">
           {t("stockTransfer.selectCompany")}
         </div>
@@ -552,6 +576,7 @@ export function StockTransferPage() {
   return (
     <TransferList
       companyId={activeCompanyId}
+      companyName={activeCompany?.name ?? ""}
       onNew={() => setView("create")}
       onView={(tr) => {
         setSelectedTransfer(tr);

@@ -21,6 +21,7 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 
 import { Ic } from "@/components/shared/Ic";
 import { MonthPicker } from "@/components/shared/MonthPicker";
@@ -126,19 +127,19 @@ function RegisterView({ account, periodLabel, accountLabel, showFxColumns, print
       <table className="scr-table" style={{ marginBottom: 0 }}>
         <thead>
           <tr>
-            <th>{t("bank.colData")}</th>
-            <th>{t("bank.colDocument")}</th>
+            <th style={{ width: 110 }}>{t("bank.colData")}</th>
+            <th style={{ width: 130 }}>{t("bank.colDocument")}</th>
             <th>{t("bank.colExplicatie")}</th>
-            <th>{t("bank.colContrapartida")}</th>
+            <th style={{ width: 130 }}>{t("bank.colContrapartida")}</th>
             {showFxColumns && (
               <>
-                <th className="r">{t("bank.colSumaValuta")}</th>
-                <th className="r">{t("bank.colCurs")}</th>
+                <th className="r" style={{ width: 130 }}>{t("bank.colSumaValuta")}</th>
+                <th className="r" style={{ width: 100 }}>{t("bank.colCurs")}</th>
               </>
             )}
-            <th className="r">{t("bank.colIncasari")}</th>
-            <th className="r">{t("bank.colPlati")}</th>
-            <th className="r">{t("bank.colSold")}</th>
+            <th className="r" style={{ width: 130 }}>{t("bank.colIncasari")}</th>
+            <th className="r" style={{ width: 130 }}>{t("bank.colPlati")}</th>
+            <th className="r" style={{ width: 120 }}>{t("bank.colSold")}</th>
           </tr>
         </thead>
         <tbody>
@@ -148,62 +149,74 @@ function RegisterView({ account, periodLabel, accountLabel, showFxColumns, print
             <td className="r num">{fmtRON(openingBal)}</td>
           </tr>
 
-          {/* Day groups */}
-          {days.map(({ day, rows }) => {
-            const dayDebit  = rows.reduce((s, r) => s + parseDec(r.debit),  0);
-            const dayCredit = rows.reduce((s, r) => s + parseDec(r.credit), 0);
-            // The end-of-day sold is the running balance of the last entry in the day.
-            const eodBalance = parseDec(rows[rows.length - 1].balance);
+          {days.length === 0 ? (
+            <tr>
+              <td colSpan={totalCols} style={{ padding: 0 }}>
+                <div className="empty">
+                  <div className="ei"><Ic name="wallet" /></div>
+                  <b>Nicio mișcare de numerar ({showFxColumns ? "5314" : "5311"}) în perioada selectată.</b>
+                  Înregistrați o încasare sau o plată în numerar.
+                </div>
+              </td>
+            </tr>
+          ) : (
+            /* Day groups */
+            days.map(({ day, rows }) => {
+              const dayDebit  = rows.reduce((s, r) => s + parseDec(r.debit),  0);
+              const dayCredit = rows.reduce((s, r) => s + parseDec(r.credit), 0);
+              // The end-of-day sold is the running balance of the last entry in the day.
+              const eodBalance = parseDec(rows[rows.length - 1].balance);
 
-            return rows.map((entry, idx) => {
-              // FX columns for 5314: use entry.amountFxForeign when present.
-              const hasFx = showFxColumns && entry.amountFxForeign != null && entry.currencyCode != null;
-              // The lei amount for this line is debit or credit (whichever is non-zero).
-              const leiAmt = parseDec(entry.debit) > 0 ? entry.debit : entry.credit;
-              const rate = hasFx ? impliedRate(leiAmt, entry.amountFxForeign!) : null;
+              return rows.map((entry, idx) => {
+                // FX columns for 5314: use entry.amountFxForeign when present.
+                const hasFx = showFxColumns && entry.amountFxForeign != null && entry.currencyCode != null;
+                // The lei amount for this line is debit or credit (whichever is non-zero).
+                const leiAmt = parseDec(entry.debit) > 0 ? entry.debit : entry.credit;
+                const rate = hasFx ? impliedRate(leiAmt, entry.amountFxForeign!) : null;
 
-              return (
-                <Fragment key={`${day}-${idx}`}>
-                  <tr>
-                    <td className="num">{fmtD(day)}</td>
-                    <td><span className="doc">{entry.document || "—"}</span></td>
-                    <td>{entry.explanation || "—"}</td>
-                    <td>{entry.contra ? <span className="doc">{entry.contra}</span> : <span className="muted">—</span>}</td>
-                    {showFxColumns && (
-                      <>
-                        <td className="r num">
-                          {hasFx
-                            ? <span>{fmtFx(entry.amountFxForeign!, entry.currencyCode!)}</span>
-                            : <span className="muted">—</span>}
-                        </td>
-                        <td className="r num">
-                          {rate != null
-                            ? <span>{fmtRate(rate)}</span>
-                            : <span className="muted">—</span>}
-                        </td>
-                      </>
-                    )}
-                    <td className="r num">
-                      {parseDec(entry.debit) > 0 ? fmtRON(entry.debit) : <span className="muted">—</span>}
-                    </td>
-                    <td className="r num">
-                      {parseDec(entry.credit) > 0 ? fmtRON(entry.credit) : <span className="muted">—</span>}
-                    </td>
-                    <td className="r num">{fmtRON(parseDec(entry.balance))}</td>
-                  </tr>
-                  {/* Total zi row after last entry of the day */}
-                  {idx === rows.length - 1 && (
-                    <tr style={{ background: "var(--fill)", fontStyle: "italic" }}>
-                      <td colSpan={nBaseCol} style={{ paddingLeft: 12 }}>{t("bank.totalZi")} — {fmtD(day)}</td>
-                      <td className="r num">{dayDebit > 0 ? fmtRON(dayDebit) : <span className="muted">—</span>}</td>
-                      <td className="r num">{dayCredit > 0 ? fmtRON(dayCredit) : <span className="muted">—</span>}</td>
-                      <td className="r num">{fmtRON(eodBalance)}</td>
+                return (
+                  <Fragment key={`${day}-${idx}`}>
+                    <tr>
+                      <td className="num">{fmtD(day)}</td>
+                      <td><span className="doc">{entry.document || "—"}</span></td>
+                      <td>{entry.explanation || "—"}</td>
+                      <td>{entry.contra ? <span className="doc">{entry.contra}</span> : <span className="muted">—</span>}</td>
+                      {showFxColumns && (
+                        <>
+                          <td className="r num">
+                            {hasFx
+                              ? <span>{fmtFx(entry.amountFxForeign!, entry.currencyCode!)}</span>
+                              : <span className="muted">—</span>}
+                          </td>
+                          <td className="r num">
+                            {rate != null
+                              ? <span>{fmtRate(rate)}</span>
+                              : <span className="muted">—</span>}
+                          </td>
+                        </>
+                      )}
+                      <td className="r num">
+                        {parseDec(entry.debit) > 0 ? fmtRON(entry.debit) : <span className="muted">—</span>}
+                      </td>
+                      <td className="r num">
+                        {parseDec(entry.credit) > 0 ? fmtRON(entry.credit) : <span className="muted">—</span>}
+                      </td>
+                      <td className="r num">{fmtRON(parseDec(entry.balance))}</td>
                     </tr>
-                  )}
-                </Fragment>
-              );
-            });
-          })}
+                    {/* Total zi row after last entry of the day */}
+                    {idx === rows.length - 1 && (
+                      <tr style={{ background: "var(--fill)", fontStyle: "italic" }}>
+                        <td colSpan={nBaseCol} style={{ paddingLeft: 12 }}>{t("bank.totalZi")} — {fmtD(day)}</td>
+                        <td className="r num">{dayDebit > 0 ? fmtRON(dayDebit) : <span className="muted">—</span>}</td>
+                        <td className="r num">{dayCredit > 0 ? fmtRON(dayCredit) : <span className="muted">—</span>}</td>
+                        <td className="r num">{fmtRON(eodBalance)}</td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              });
+            })
+          )}
 
           {/* Sold final */}
           <tr style={{ background: "var(--bg-table-header)", fontWeight: 700 }}>
@@ -223,6 +236,13 @@ function RegisterView({ account, periodLabel, accountLabel, showFxColumns, print
 export function BankPage() {
   const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
+
+  const { data: companies = [] } = useQuery({
+    queryKey: ["companies", "list"],
+    queryFn: () => api.companies.list(),
+  });
+  const activeCompany = companies.find((c) => c.id === activeCompanyId);
+  const companyName = activeCompany?.legalName ?? "";
 
   const MONTHS = [
     t("gl.months.jan"), t("gl.months.feb"), t("gl.months.mar"),
@@ -311,7 +331,7 @@ export function BankPage() {
   // ── No company ────────────────────────────────────────────────────────────
   if (!activeCompanyId) {
     return (
-      <div className="main-inner">
+      <div className="main-inner wide">
         <div className="page-head"><div><h1>{t("bank.title")}</h1></div></div>
         <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-2)", fontSize: 13 }}>
           {t("bank.noCompany")}
@@ -323,21 +343,49 @@ export function BankPage() {
   // ── Active account for the current tab ────────────────────────────────────
   const activeAccount = activeTab === "5314" ? account5314 : account5311;
   const activeAccountLabel = activeTab === "5314" ? t("bank.account5314") : t("bank.account5311");
-  const activeEmptyKey = activeTab === "5314" ? "bank.empty5314" : "bank.empty";
 
   // Print button disabled when: loading, or the current tab has no data.
   const printDisabled = !activeAccount || loading;
 
+  // ── Summary row values ────────────────────────────────────────────────────
+  const openingBal = activeAccount
+    ? cashBalance(activeAccount.openingDebit, activeAccount.openingCredit)
+    : 0;
+  const closingBal = activeAccount
+    ? cashBalance(activeAccount.closingDebit, activeAccount.closingCredit)
+    : 0;
+  const totalIncasari = activeAccount ? parseDec(activeAccount.totalDebit) : 0;
+  const totalPlati    = activeAccount ? parseDec(activeAccount.totalCredit) : 0;
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="main-inner">
-      {/* page head */}
+    <div className="main-inner wide">
+
+      {/* Page head */}
       <div className="page-head">
         <div>
           <h1>{t("bank.title")}</h1>
-          <p className="sub">{periodLabel} · {activeAccountLabel}</p>
+          <p className="sub">
+            {t("bank.sub")}{companyName ? ` · ${companyName}` : ""}
+          </p>
         </div>
         <div className="head-actions">
+          {/* Account toggle tabs: Lei (5311) / Valuta (5314) */}
+          <div className="tabs">
+            <div
+              className={"tab" + (activeTab === "5311" ? " active" : "")}
+              onClick={() => setActiveTab("5311")}
+            >
+              {t("bank.toggle5311")}
+            </div>
+            <div
+              className={"tab" + (activeTab === "5314" ? " active" : "")}
+              onClick={() => setActiveTab("5314")}
+            >
+              {t("bank.toggle5314")}
+            </div>
+          </div>
+
           {/* Period picker */}
           <div className="nou-wrap" style={{ position: "relative" }}>
             <button
@@ -375,32 +423,49 @@ export function BankPage() {
         </div>
       </div>
 
-      {/* Account toggle: 5311 / 5314 */}
-      <div className="tabs" style={{ marginBottom: 12 }}>
-        <div
-          className={`tab${activeTab === "5311" ? " active" : ""}`}
-          onClick={() => setActiveTab("5311")}
-        >
-          {t("bank.toggle5311")}
+      {/* Summary row */}
+      <div className="sum-row">
+        <div className="sum">
+          <div className="l">{t("bank.soldInitial")}</div>
+          <div className="v num">{fmtRON(openingBal)}</div>
         </div>
-        <div
-          className={`tab${activeTab === "5314" ? " active" : ""}`}
-          onClick={() => setActiveTab("5314")}
-        >
-          {t("bank.toggle5314")}
+        <div className="sum">
+          <div className="l">{t("bank.colIncasari")}</div>
+          <div className="v num">{fmtRON(totalIncasari)}</div>
+        </div>
+        <div className="sum">
+          <div className="l">{t("bank.colPlati")}</div>
+          <div className="v num">{fmtRON(totalPlati)}</div>
+        </div>
+        <div className="sum">
+          <div className="l">{t("bank.soldFinal")}</div>
+          <div className="v num">{fmtRON(closingBal)}</div>
         </div>
       </div>
 
       {/* Content card */}
       <div className="scr-card">
         {loading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>
-            {t("gl.common.loading")}
-          </div>
-        ) : activeAccount === null || (activeAccount === undefined && !loading) ? (
-          <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-            {t(activeEmptyKey)}
-          </div>
+          <table className="scr-table">
+            <thead>
+              <tr>
+                <th style={{ width: 110 }}>{t("bank.colData")}</th>
+                <th style={{ width: 130 }}>{t("bank.colDocument")}</th>
+                <th>{t("bank.colExplicatie")}</th>
+                <th style={{ width: 130 }}>{t("bank.colContrapartida")}</th>
+                <th className="r" style={{ width: 130 }}>{t("bank.colIncasari")}</th>
+                <th className="r" style={{ width: 130 }}>{t("bank.colPlati")}</th>
+                <th className="r" style={{ width: 120 }}>{t("bank.colSold")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colSpan={7} style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
+                  {t("gl.common.loading")}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         ) : activeAccount ? (
           <RegisterView
             account={activeAccount}
@@ -410,8 +475,38 @@ export function BankPage() {
             printRef={printRef}
             t={t}
           />
-        ) : null}
+        ) : (
+          <table className="scr-table">
+            <thead>
+              <tr>
+                <th style={{ width: 110 }}>{t("bank.colData")}</th>
+                <th style={{ width: 130 }}>{t("bank.colDocument")}</th>
+                <th>{t("bank.colExplicatie")}</th>
+                <th style={{ width: 130 }}>{t("bank.colContrapartida")}</th>
+                <th className="r" style={{ width: 130 }}>{t("bank.colIncasari")}</th>
+                <th className="r" style={{ width: 130 }}>{t("bank.colPlati")}</th>
+                <th className="r" style={{ width: 120 }}>{t("bank.colSold")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colSpan={7} style={{ padding: 0 }}>
+                  <div className="empty">
+                    <div className="ei"><Ic name="wallet" /></div>
+                    <b>
+                      {activeTab === "5314"
+                        ? "Nicio mișcare de numerar în valută (5314) în perioada selectată."
+                        : "Nicio mișcare de numerar (5311) în perioada selectată."}
+                    </b>
+                    Înregistrați o încasare sau o plată în numerar.
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        )}
       </div>
+
     </div>
   );
 }

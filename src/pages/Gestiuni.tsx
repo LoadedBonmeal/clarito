@@ -8,6 +8,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
+import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -26,6 +27,13 @@ export function GestiuniPage() {
     enabled: !!companyId,
   });
 
+  const { data: companies = [] } = useQuery({
+    queryKey: ["companies", "list"],
+    queryFn: () => api.companies.list(),
+  });
+
+  const activeCompany = companies.find((c) => c.id === companyId);
+
   const [editing, setEditing] = useState<Gestiune | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -40,9 +48,11 @@ export function GestiuniPage() {
 
   if (!companyId) {
     return (
-      <div className="main-inner">
+      <div className="main-inner wide">
         <div className="page-head">
-          <h1 className="page-title">{t("gestiuni.title")}</h1>
+          <div>
+            <h1>{t("gestiuni.title")}</h1>
+          </div>
         </div>
         <div className="scr-card" style={{ padding: 24, color: "var(--text-2)" }}>
           {t("gestiuni.selectCompany")}
@@ -51,17 +61,23 @@ export function GestiuniPage() {
     );
   }
 
+  const count = gestiuni.length;
+  const companyName = activeCompany?.legalName ?? "";
+
   return (
-    <div className="main-inner">
+    <div className="main-inner wide">
       <div className="page-head">
         <div>
-          <div className="page-title">{t("gestiuni.title")}</div>
-          <div className="page-sub">{t("gestiuni.sub")}</div>
+          <h1>{t("gestiuni.title")}</h1>
+          <p className="sub">
+            {count} {t("gestiuni.title").toLowerCase()} · {companyName}
+          </p>
         </div>
-        <div className="spacer" />
-        <button className="btn-dark" onClick={() => setCreating(true)}>
-          + {t("gestiuni.new")}
-        </button>
+        <div className="head-actions">
+          <button className="btn-dark" onClick={() => setCreating(true)}>
+            <Ic name="plus" /> {t("gestiuni.new")}
+          </button>
+        </div>
       </div>
 
       {error && <QueryErrorBanner error={error} label={t("gestiuni.errorLabel")} />}
@@ -70,76 +86,95 @@ export function GestiuniPage() {
         <table className="scr-table">
           <thead>
             <tr>
-              <th>{t("gestiuni.colCod")}</th>
+              <th style={{ width: 120 }}>{t("gestiuni.colCod")}</th>
               <th>{t("gestiuni.colDenumire")}</th>
-              <th>{t("gestiuni.colTip")}</th>
-              <th>{t("gestiuni.colMetoda")}</th>
-              <th>{t("gestiuni.colCont")}</th>
-              <th>{t("gestiuni.colStatus")}</th>
-              <th></th>
+              <th style={{ width: 200 }}>{t("gestiuni.colTip")}</th>
+              <th style={{ width: 120 }}>{t("gestiuni.colMetoda")}</th>
+              <th style={{ width: 120 }}>{t("gestiuni.colCont")}</th>
+              <th style={{ width: 120 }}>{t("gestiuni.colStatus")}</th>
+              <th style={{ width: 120 }}></th>
             </tr>
           </thead>
-          <tbody>
-            {isLoading && (
+          {!isLoading && gestiuni.length === 0 ? (
+            <tbody>
               <tr>
-                <td colSpan={7} style={{ textAlign: "center", padding: 24 }}>
-                  {t("gestiuni.loading")}
+                <td colSpan={7} style={{ padding: 0 }}>
+                  <div className="empty">
+                    <div className="ei"><Ic name="archive" /></div>
+                    <b>Nicio gestiune adaugata</b>
+                    Adauga primul depozit sau magazie pentru a gestiona stocurile.
+                  </div>
                 </td>
               </tr>
-            )}
-            {!isLoading && gestiuni.length === 0 && (
-              <tr>
-                <td colSpan={7} style={{ textAlign: "center", padding: 24, color: "var(--text-2)" }}>
-                  {t("gestiuni.empty")}
-                </td>
-              </tr>
-            )}
-            {gestiuni.map((g) => (
-              <tr key={g.id}>
-                <td>
-                  <span className="doc">{g.cod}</span>
-                </td>
-                <td>
-                  {g.denumire}
-                  {g.isDefault === 1 && (
-                    <span className="chip sent" style={{ marginLeft: 8 }}>
-                      {t("gestiuni.default")}
-                    </span>
-                  )}
-                </td>
-                <td>
-                  <span className="chip">
-                    {g.tip === "cantitativ_valorica" ? t("gestiuni.tipCV") : t("gestiuni.tipGV")}
-                  </span>
-                </td>
-                <td>
-                  <span className="chip">{g.metodaEvaluare}</span>
-                </td>
-                <td>
-                  <span className="doc">{g.contStoc}</span>
-                </td>
-                <td>
-                  <span className={`chip ${g.activ === 1 ? "sent" : "late"}`}>
-                    {g.activ === 1 ? t("gestiuni.active") : t("gestiuni.inactive")}
-                  </span>
-                </td>
-                <td style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                  <button className="pill-btn" onClick={() => setEditing(g)}>
-                    {t("gestiuni.edit")}
-                  </button>
-                  {g.isDefault !== 1 && (
-                    <button
-                      className="pill-btn"
-                      onClick={() => deleteMut.mutate(g.id)}
-                      disabled={deleteMut.isPending}
-                    >
-                      {t("gestiuni.delete")}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
+            </tbody>
+          ) : (
+            <tbody>
+              {isLoading && (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: "center", padding: 24 }}>
+                    {t("gestiuni.loading")}
+                  </td>
+                </tr>
+              )}
+              {gestiuni.map((g) => {
+                const initials = g.denumire
+                  .split(" ")
+                  .slice(0, 2)
+                  .map((w: string) => w[0]?.toUpperCase() ?? "")
+                  .join("");
+                return (
+                  <tr key={g.id}>
+                    <td>
+                      <span className="doc" style={{ fontWeight: 700, color: "var(--text)" }}>
+                        {g.cod}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="cli">
+                        <span className="cli-ava">{initials}</span>
+                        {g.denumire}
+                        {g.isDefault === 1 && (
+                          <span className="chip sent" style={{ marginLeft: 8 }}>
+                            {t("gestiuni.default")}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <span className="chip sent">
+                        {g.tip === "cantitativ_valorica" ? t("gestiuni.tipCV") : t("gestiuni.tipGV")}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="chip">{g.metodaEvaluare}</span>
+                    </td>
+                    <td>
+                      <span className="doc">{g.contStoc}</span>
+                    </td>
+                    <td>
+                      <span className={"chip " + (g.activ === 1 ? "sent" : "late")}>
+                        {g.activ === 1 ? t("gestiuni.active") : t("gestiuni.inactive")}
+                      </span>
+                    </td>
+                    <td style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                      <button className="pill-btn" onClick={() => setEditing(g)}>
+                        {t("gestiuni.edit")}
+                      </button>
+                      {g.isDefault !== 1 && (
+                        <button
+                          className="pill-btn"
+                          onClick={() => deleteMut.mutate(g.id)}
+                          disabled={deleteMut.isPending}
+                        >
+                          {t("gestiuni.delete")}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          )}
         </table>
       </div>
 

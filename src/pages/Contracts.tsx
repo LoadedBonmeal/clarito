@@ -43,16 +43,6 @@ const localDateISO = (d = new Date()) => {
   return `${y}-${m}-${day}`;
 };
 
-/** Days from today until the end_date (positive = future, negative = past). */
-function daysUntil(endDate: string | null | undefined): number | null {
-  if (!endDate) return null;
-  const end = new Date(endDate);
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  end.setHours(0, 0, 0, 0);
-  return Math.round((end.getTime() - now.getTime()) / 86_400_000);
-}
-
 // ─── Status chip ─────────────────────────────────────────────────────────────
 
 const STATUS_CLS: Record<ContractStatus, string> = {
@@ -67,41 +57,6 @@ function StatusChip({ status }: { status: ContractStatus }) {
   return (
     <span className={`status-chip ${STATUS_CLS[status] ?? "sent"}`}>
       {t(`contracts.status.${status}`)}
-    </span>
-  );
-}
-
-// ─── Expiry indicator ─────────────────────────────────────────────────────────
-
-function ExpiryBadge({
-  endDate,
-  renewalNoticeDays,
-  status,
-}: {
-  endDate: string | null | undefined;
-  renewalNoticeDays: number;
-  status: ContractStatus;
-}) {
-  const { t } = useTranslation();
-  if (!endDate || status === "terminated") return <span className="text-muted">—</span>;
-
-  const days = daysUntil(endDate);
-  if (days === null) return <span className="text-muted">—</span>;
-
-  if (days < 0) {
-    return <span style={{ color: "var(--color-error, #e53)" }}>{t("contracts.expiry.expired")}</span>;
-  }
-  if (days <= renewalNoticeDays) {
-    const urgentColor = days <= 7 ? "var(--color-error, #e53)" : "var(--color-warning, #f90)";
-    return (
-      <span style={{ color: urgentColor, fontWeight: 600 }}>
-        {t("contracts.expiry.days", { count: days })}
-      </span>
-    );
-  }
-  return (
-    <span className="text-muted">
-      {t("contracts.expiry.days", { count: days })}
     </span>
   );
 }
@@ -192,6 +147,11 @@ export function ContractsPage() {
     queryKey: queryKeys.contracts.recurring(showRecurring ?? ""),
     queryFn: () => api.contracts.listRecurring(showRecurring!, activeCompanyId!),
     enabled: !!showRecurring && !!activeCompanyId,
+  });
+
+  const { data: companies = [] } = useQuery({
+    queryKey: queryKeys.companies.list(),
+    queryFn: () => api.companies.list(),
   });
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -335,17 +295,25 @@ export function ContractsPage() {
 
   // ── Stats ──────────────────────────────────────────────────────────────────
 
-  const stats = useMemo(() => {
-    const all = contractsData ?? [];
-    const active = all.filter((c) => c.status === "active").length;
-    return { total: all.length, active };
-  }, [contractsData]);
+  const allContracts = contractsData ?? [];
+  const tabCounts: Record<TabFilter, number> = useMemo(() => ({
+    all: allContracts.length,
+    active: allContracts.filter((c) => c.status === "active").length,
+    draft: allContracts.filter((c) => c.status === "draft").length,
+    expired: allContracts.filter((c) => c.status === "expired").length,
+    terminated: allContracts.filter((c) => c.status === "terminated").length,
+  }), [allContracts]);
 
   const contactMap = useMemo(() => {
     const m: Record<string, string> = {};
     for (const c of contactsData ?? []) m[c.id] = c.legalName;
     return m;
   }, [contactsData]);
+
+  // ── Active company name ────────────────────────────────────────────────────
+
+  const activeCompany = companies.find((c) => c.id === activeCompanyId);
+  const companyName = activeCompany?.legalName ?? "";
 
   // ── Render helpers ────────────────────────────────────────────────────────
 
@@ -360,22 +328,21 @@ export function ContractsPage() {
   }
 
   return (
-    <div className="main-inner">
+    <div className="main-inner wide">
       {/* Page header */}
       <div className="page-head">
         <div>
-          <h1 className="page-title">{t("contracts.title")}</h1>
-          <p className="page-sub">
-            {t("contracts.sub.contracts", { count: stats.total })}
-            {stats.active > 0 && (
-              <> · {t("contracts.sub.active", { n: stats.active })}</>
-            )}
+          <h1>{t("contracts.title")}</h1>
+          <p className="sub">
+            {allContracts.length} contracte · {companyName}
           </p>
         </div>
-        <button className="btn-dark" onClick={openCreate}>
-          <Ic name="plus" />
-          {t("contracts.head.new")}
-        </button>
+        <div className="head-actions">
+          <button className="btn-dark" onClick={openCreate}>
+            <Ic name="plus" />
+            {t("contracts.head.new")}
+          </button>
+        </div>
       </div>
 
       {/* Card */}
@@ -384,21 +351,22 @@ export function ContractsPage() {
         <div className="scr-toolbar">
           <div className="tabs">
             {(["all", "active", "draft", "expired", "terminated"] as TabFilter[]).map((tb) => (
-              <button
+              <div
                 key={tb}
                 className={"tab" + (tab === tb ? " active" : "")}
                 onClick={() => setTab(tb)}
               >
                 {t(`contracts.tabs.${tb}`)}
-              </button>
+                <span className="cnt">{tabCounts[tb]}</span>
+              </div>
             ))}
           </div>
-          <span className="spacer" />
+          <div className="spacer" />
           <div className="scr-search">
-            <Ic name="search" />
+            <Ic name="lens" />
             <input
               type="search"
-              placeholder={t("contracts.search")}
+              placeholder="Cauta dupa partener..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -412,50 +380,54 @@ export function ContractsPage() {
         {isLoading && <div className="state-row">{t("contracts.states.loading")}</div>}
 
         {/* Table */}
-        {!isLoading && !error && (filtered.length === 0 ? (
-          <div className="state-row muted">
-            {(contractsData?.length ?? 0) === 0
-              ? t("contracts.states.emptyNone")
-              : t("contracts.states.emptyFiltered")}
-          </div>
-        ) : (
+        {!isLoading && !error && (
           <table className="scr-table">
             <thead>
               <tr>
-                <th>{t("contracts.table.number")}</th>
-                <th>{t("contracts.table.title")}</th>
-                <th>{t("contracts.table.partner")}</th>
-                <th>{t("contracts.table.period")}</th>
-                <th className="col-right">{t("contracts.table.value")}</th>
-                <th>{t("contracts.table.status")}</th>
-                <th>{t("contracts.table.expiry")}</th>
-                <th className="col-acts" />
+                <th>Partener</th>
+                <th className="r" style={{ width: 150 }}>Valoare</th>
+                <th style={{ width: 200 }}>Perioada</th>
+                <th style={{ width: 120 }}>Status</th>
               </tr>
             </thead>
-            <tbody>
-              {filtered.map((c) => (
-                <ContractRow
-                  key={c.id}
-                  contract={c}
-                  contactName={contactMap[c.contactId ?? ""] ?? "—"}
-                  deleteConfirmId={deleteConfirmId}
-                  onEdit={openEdit}
-                  onDelete={(id) => {
-                    if (deleteConfirmId === id) {
-                      deleteMut.mutate({ id, companyId: activeCompanyId });
-                    } else {
-                      setDeleteConfirmId(id);
+            {filtered.length === 0 ? (
+              <tbody>
+                <tr>
+                  <td colSpan={4} style={{ padding: 0 }}>
+                    <div className="empty">
+                      <div className="ei"><Ic name="docText" /></div>
+                      <b>Niciun contract.</b>
+                      Adaugati un contract cu un partener.
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            ) : (
+              <tbody>
+                {filtered.map((c) => (
+                  <ContractRow
+                    key={c.id}
+                    contract={c}
+                    contactName={contactMap[c.contactId ?? ""] ?? "—"}
+                    deleteConfirmId={deleteConfirmId}
+                    onEdit={openEdit}
+                    onDelete={(id) => {
+                      if (deleteConfirmId === id) {
+                        deleteMut.mutate({ id, companyId: activeCompanyId });
+                      } else {
+                        setDeleteConfirmId(id);
+                      }
+                    }}
+                    onCancelDelete={() => setDeleteConfirmId(null)}
+                    onSetStatus={(id, status) =>
+                      setStatusMut.mutate({ id, companyId: activeCompanyId, status })
                     }
-                  }}
-                  onCancelDelete={() => setDeleteConfirmId(null)}
-                  onSetStatus={(id, status) =>
-                    setStatusMut.mutate({ id, companyId: activeCompanyId, status })
-                  }
-                />
-              ))}
-            </tbody>
+                  />
+                ))}
+              </tbody>
+            )}
           </table>
-        ))}
+        )}
       </div>
 
       {/* Info banner */}
@@ -776,23 +748,11 @@ function ContractRow({
 
   return (
     <tr>
-      <td className="col-mono">{c.number ?? "—"}</td>
-      <td>
-        <span className="doc-name">{c.title}</span>
-        {c.object && <span className="doc-sub">{c.object}</span>}
-      </td>
       <td>{contactName}</td>
+      <td className="r text-mono">{valueLabel}</td>
       <td className="text-muted">{periodLabel}</td>
-      <td className="col-right text-mono">{valueLabel}</td>
       <td>
         <StatusChip status={c.status} />
-      </td>
-      <td>
-        <ExpiryBadge
-          endDate={c.endDate}
-          renewalNoticeDays={c.renewalNoticeDays}
-          status={c.status}
-        />
       </td>
       <td className="col-acts">
         <div className="row-acts">

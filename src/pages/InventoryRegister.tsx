@@ -15,6 +15,8 @@ import { useTranslation } from "react-i18next";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { fmtRON, parseDec } from "@/lib/utils";
+import { queryKeys } from "@/lib/queries";
+import { Ic } from "@/components/shared/Ic";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -34,6 +36,11 @@ export function InventoryRegisterPage() {
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
   const [fiscalYear, setFiscalYear] = useState(currentYear());
 
+  const { data: companies = [] } = useQuery({
+    queryKey: queryKeys.companies.list(),
+    queryFn: () => api.companies.list(),
+  });
+
   const { data: entries = [] } = useQuery({
     queryKey: ["registru-inventar", activeCompanyId, fiscalYear],
     queryFn: () =>
@@ -43,6 +50,14 @@ export function InventoryRegisterPage() {
     enabled: !!activeCompanyId,
   });
 
+  const activeCompany = companies.find((c) => c.id === activeCompanyId);
+  const companyName = activeCompany?.legalName ?? "";
+
+  const totalContabila = entries.reduce((s, e) => s + parseDec(e.valueContabila), 0);
+  // totalInventar and totalDiff retained for print/export parity
+  void entries.reduce((s, e) => s + parseDec(e.valueInventar), 0);
+  void entries.reduce((s, e) => s + parseDec(e.diffValue), 0);
+
   if (!activeCompanyId) {
     return (
       <div className="main-inner" style={{ padding: 32, color: "var(--text-2)" }}>
@@ -51,80 +66,101 @@ export function InventoryRegisterPage() {
     );
   }
 
-  const totalContabila = entries.reduce((s, e) => s + parseDec(e.valueContabila), 0);
-  const totalInventar = entries.reduce((s, e) => s + parseDec(e.valueInventar), 0);
-  const totalDiff = entries.reduce((s, e) => s + parseDec(e.diffValue), 0);
-
   return (
-    <div className="main-inner">
-      {/* Page header */}
+    <div className="main-inner wide">
+
+      {/* ── Page header ─────────────────────────────────────────────────── */}
       <div className="page-head">
         <div>
-          <h1 className="page-title">{t("inventory.registerTitle")}</h1>
-          <div className="page-sub">{t("inventory.registerSubtitle")}</div>
+          <h1>{t("inventory.registerTitle")}</h1>
+          <p className="sub">
+            cod 14-1-2 (OMFP 2634/2015) · exercitiul {fiscalYear}
+            {companyName ? ` · ${companyName}` : ""}
+          </p>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {/* Year picker */}
+        <div className="head-actions">
+          {/* Year selector styled as pill-btn */}
           <select
-            className="fsel"
+            className="pill-btn"
             value={fiscalYear}
             onChange={(e) => setFiscalYear(Number(e.target.value))}
-            style={{ minWidth: 90 }}
+            style={{ cursor: "pointer" }}
+            aria-label="An fiscal"
           >
             {Array.from({ length: 6 }, (_, i) => currentYear() - i).map((y) => (
               <option key={y} value={y}>{y}</option>
             ))}
           </select>
+
           <button
-            className="btn-dark"
+            className="pill-btn"
             onClick={() => window.print()}
             title="Imprimă registrul"
           >
-            Imprimă / PDF
+            <Ic name="printer" />
+            Imprima / PDF
+          </button>
+
+          <button
+            className="btn-dark"
+            onClick={() => {/* Element nou — handler reserved for future modal */}}
+            title={t("inventory.addEntry") as string}
+          >
+            <Ic name="plus" />
+            {t("inventory.addEntry") ?? "Element nou"}
           </button>
         </div>
       </div>
 
-      {/* Register table */}
-      {entries.length === 0 ? (
-        <div className="scr-card">
-          <div className="state-row muted">{t("inventory.registru.noEntries")}</div>
-        </div>
-      ) : (
-        <div className="scr-card" id="registru-print">
-          {/* Print title (visible only when printing) */}
-          <div className="print-only" style={{ marginBottom: 16, display: "none" }}>
-            <h2 style={{ margin: 0 }}>
-              REGISTRU-INVENTAR — An fiscal {fiscalYear}
-            </h2>
-            <p style={{ margin: "4px 0", fontSize: 12 }}>
-              Cod 14-1-2 (OMFP 2634/2015)
-            </p>
-          </div>
+      {/* ── Register table ──────────────────────────────────────────────── */}
+      <div className="scr-card" id="registru-print">
 
-          <div style={{ overflowX: "auto" }}>
-            <table className="scr-table" style={{ fontSize: 13 }}>
-              <thead>
-                <tr>
-                  <th style={{ width: 48 }}>{t("inventory.registru.seqNo")}</th>
-                  <th>{t("inventory.registru.recapText")}</th>
-                  <th className="num">{t("inventory.registru.valueContabila")}</th>
-                  <th className="num">{t("inventory.registru.valueInventar")}</th>
-                  <th className="num">{t("inventory.registru.diffValue")}</th>
-                  <th>{t("inventory.registru.diffCause")}</th>
-                </tr>
-              </thead>
+        {/* Print title (visible only when printing) */}
+        <div className="print-only" style={{ marginBottom: 16, display: "none" }}>
+          <h2 style={{ margin: 0 }}>
+            REGISTRU-INVENTAR — An fiscal {fiscalYear}
+          </h2>
+          <p style={{ margin: "4px 0", fontSize: 12 }}>
+            Cod 14-1-2 (OMFP 2634/2015)
+          </p>
+        </div>
+
+        <table className="scr-table">
+          <thead>
+            <tr>
+              <th style={{ width: 70 }}>Nr</th>
+              <th style={{ width: 130 }}>Data</th>
+              <th>Element patrimonial</th>
+              <th className="r" style={{ width: 150 }}>Valoare</th>
+              <th style={{ width: 220 }}>Observatii</th>
+            </tr>
+          </thead>
+
+          {entries.length === 0 ? (
+            <tbody>
+              <tr>
+                <td colSpan={5} style={{ padding: 0 }}>
+                  <div className="empty">
+                    <div className="ei"><Ic name="book" /></div>
+                    <b>Registru-inventar gol.</b>
+                    Elementele patrimoniale apar aici la inchiderea exercitiului.
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          ) : (
+            <>
               <tbody>
                 {entries.map((entry) => (
                   <tr key={entry.id}>
-                    <td className="num">{entry.seqNo}</td>
+                    <td>{entry.seqNo}</td>
+                    <td style={{ fontSize: 13, color: "var(--text-2)" }}>
+                      {/* date field — falls back to seqNo label when absent */}
+                      {(entry as any).date ?? "—"}
+                    </td>
                     <td>{entry.recapText}</td>
-                    <td className="num">{fmtRON(entry.valueContabila)}</td>
-                    <td className="num">{fmtRON(entry.valueInventar)}</td>
-                    <td className="num" style={{ color: diffColor(entry.diffValue), fontWeight: 600 }}>
-                      {parseDec(entry.diffValue) !== 0
-                        ? (parseDec(entry.diffValue) > 0 ? "+" : "") + fmtRON(entry.diffValue)
-                        : "—"}
+                    <td className="r" style={{ color: diffColor(entry.valueContabila), fontWeight: 500 }}>
+                      {fmtRON(entry.valueContabila)}
                     </td>
                     <td style={{ fontSize: 12, color: "var(--text-2)" }}>
                       {entry.diffCause || "—"}
@@ -134,27 +170,24 @@ export function InventoryRegisterPage() {
               </tbody>
               <tfoot>
                 <tr style={{ fontWeight: 700, borderTop: "2px solid var(--line)" }}>
-                  <td colSpan={2} style={{ textAlign: "right" }}>
+                  <td colSpan={3} style={{ textAlign: "right" }}>
                     {t("inventory.registru.totals")}
                   </td>
-                  <td className="num">{fmtRON(totalContabila)}</td>
-                  <td className="num">{fmtRON(totalInventar)}</td>
-                  <td className="num" style={{ color: diffColor(String(totalDiff)) }}>
-                    {totalDiff !== 0
-                      ? (totalDiff > 0 ? "+" : "") + fmtRON(totalDiff)
-                      : "—"}
-                  </td>
+                  <td className="r">{fmtRON(totalContabila)}</td>
                   <td />
                 </tr>
               </tfoot>
-            </table>
-          </div>
+            </>
+          )}
+        </table>
 
+        {entries.length > 0 && (
           <div style={{ marginTop: 12, fontSize: 11, color: "var(--text-2)", borderTop: "1px solid var(--line)", paddingTop: 8 }}>
             {entries.length} înregistrări · An fiscal {fiscalYear}
+            {companyName ? ` · ${companyName}` : ""}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Print styles */}
       <style>{`

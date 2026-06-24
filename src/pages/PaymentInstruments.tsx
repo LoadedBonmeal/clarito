@@ -34,6 +34,7 @@ import type {
 import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
+import { queryKeys } from "@/lib/queries";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -531,6 +532,13 @@ export function PaymentInstrumentsPage() {
   const [pending, setPending] = useState<PendingEvent | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
+  const { data: companies = [] } = useQuery({
+    queryKey: queryKeys.companies.list(),
+    queryFn: () => api.companies.list(),
+  });
+
+  const activeCompany = companies.find((c) => c.id === activeCompanyId);
+
   const { data: items = [], isLoading, error } = useQuery({
     queryKey: ["paymentInstruments", activeCompanyId],
     queryFn: () => api.paymentInstruments.list(activeCompanyId!),
@@ -584,6 +592,14 @@ export function PaymentInstrumentsPage() {
     onError: (e) => notify.error(formatError(e) || t("pi.notify.deleteError")),
   });
 
+  // ── Tab counts ────────────────────────────────────────────────────────────────
+
+  const countAll      = items.length;
+  const countReceived = useMemo(() => items.filter((x) => x.direction === "received").length, [items]);
+  const countIssued   = useMemo(() => items.filter((x) => x.direction === "issued").length, [items]);
+  const countActive   = useMemo(() => items.filter((x) => ACTIVE_STATUSES.includes(x.status)).length, [items]);
+  const countSettled  = useMemo(() => items.filter((x) => SETTLED_STATUSES.includes(x.status)).length, [items]);
+
   // ── Filtering ────────────────────────────────────────────────────────────────
 
   const filtered = useMemo(() => {
@@ -620,28 +636,32 @@ export function PaymentInstrumentsPage() {
     return <div className="state-row muted">{t("pi.selectCompany")}</div>;
   }
 
-  const TABS: { id: TabId; label: string }[] = [
-    { id: "all",      label: t("pi.tabs.all") },
-    { id: "received", label: t("pi.tabs.received") },
-    { id: "issued",   label: t("pi.tabs.issued") },
-    { id: "active",   label: t("pi.tabs.active") },
-    { id: "settled",  label: t("pi.tabs.settled") },
+  const TABS: { id: TabId; label: string; count: number }[] = [
+    { id: "all",      label: t("pi.tabs.all"),      count: countAll },
+    { id: "received", label: t("pi.tabs.received"),  count: countReceived },
+    { id: "issued",   label: t("pi.tabs.issued"),    count: countIssued },
+    { id: "active",   label: t("pi.tabs.active"),    count: countActive },
+    { id: "settled",  label: t("pi.tabs.settled"),   count: countSettled },
   ];
 
+  const companyName = activeCompany?.legalName ?? "";
+
   return (
-    <div className="main-inner">
+    <div className="main-inner wide">
       {/* Header */}
       <div className="page-head">
         <div>
-          <h1 className="page-title">{t("pi.title")}</h1>
-          <div className="page-sub">
-            {t("pi.sub.items", { count: items.length, context: items.length === 1 ? "one" : items.length < 5 ? "few" : "other" })}
-          </div>
+          <h1>{t("pi.title")}</h1>
+          <p className="sub">
+            {countAll} {t("pi.tabs.all").toLowerCase()} · {companyName}
+          </p>
         </div>
-        <button className="btn-dark" onClick={() => setEditing("new")}>
-          <Ic name="plus" />
-          {t("pi.head.new")}
-        </button>
+        <div className="head-actions">
+          <button className="btn-dark" onClick={() => setEditing("new")}>
+            <Ic name="plus" />
+            {t("pi.head.new")}
+          </button>
+        </div>
       </div>
 
       {/* Info banner */}
@@ -655,20 +675,20 @@ export function PaymentInstrumentsPage() {
         <div className="scr-toolbar">
           <div className="tabs">
             {TABS.map((tb) => (
-              <button
+              <div
                 key={tb.id}
                 className={"tab" + (tab === tb.id ? " active" : "")}
                 onClick={() => setTab(tb.id)}
               >
-                {tb.label}
-              </button>
+                {tb.label}<span className="cnt">{tb.count}</span>
+              </div>
             ))}
           </div>
           <div className="spacer" />
           <div className="scr-search">
-            <Ic name="search" />
+            <Ic name="lens" />
             <input
-              placeholder={t("pi.search")}
+              placeholder="Cauta dupa numar sau partener..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -683,74 +703,80 @@ export function PaymentInstrumentsPage() {
 
         {/* Table */}
         {!isLoading && !error && (
-          <>
+          <table className="scr-table">
+            <thead>
+              <tr>
+                <th style={{ width: 130 }}>{t("pi.table.kind")}</th>
+                <th style={{ width: 100 }}>{t("pi.table.direction")}</th>
+                <th style={{ width: 130 }}>{t("pi.table.number")}</th>
+                <th>{t("pi.table.partner")}</th>
+                <th className="r" style={{ width: 120 }}>{t("pi.table.amount")}</th>
+                <th style={{ width: 130 }}>{t("pi.table.issueDate")}</th>
+                <th style={{ width: 120 }}>{t("pi.table.scadenta")}</th>
+                <th style={{ width: 120 }}>{t("pi.table.status")}</th>
+                <th>{/* actions */}</th>
+              </tr>
+            </thead>
             {filtered.length === 0 ? (
-              <div className="state-row muted">
-                {items.length === 0 ? t("pi.states.emptyNone") : t("pi.states.emptyFiltered")}
-              </div>
+              <tbody>
+                <tr>
+                  <td colSpan={9} style={{ padding: 0 }}>
+                    <div className="empty">
+                      <div className="ei"><Ic name="card" /></div>
+                      <b>Niciun instrument.</b>
+                      Inregistrati un cec sau bilet la ordin.
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
             ) : (
-              <table className="scr-table">
-                <thead>
-                  <tr>
-                    <th>{t("pi.table.kind")}</th>
-                    <th>{t("pi.table.direction")}</th>
-                    <th>{t("pi.table.number")}</th>
-                    <th>{t("pi.table.partner")}</th>
-                    <th style={{ textAlign: "right" }}>{t("pi.table.amount")}</th>
-                    <th>{t("pi.table.issueDate")}</th>
-                    <th>{t("pi.table.scadenta")}</th>
-                    <th>{t("pi.table.status")}</th>
-                    <th>{/* actions */}</th>
+              <tbody>
+                {filtered.map((pi) => (
+                  <tr key={pi.id}>
+                    <td>
+                      <strong>{t(`pi.kind.${pi.kind}`)}</strong>
+                    </td>
+                    <td>{t(`pi.direction.${pi.direction}`)}</td>
+                    <td>{pi.number ?? "—"}</td>
+                    <td>{pi.partnerCui ?? "—"}</td>
+                    <td className="r" style={{ fontVariantNumeric: "tabular-nums" }}>
+                      {pi.amount} {pi.currency}
+                    </td>
+                    <td>{fmtRoDate(pi.issueDate)}</td>
+                    <td>{fmtRoDate(pi.scadenta)}</td>
+                    <td><StatusChip status={pi.status} /></td>
+                    <td>
+                      {deleteId === pi.id ? (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button
+                            className="btn-sm danger"
+                            onClick={() => deleteMut.mutate(pi.id)}
+                            disabled={deleteMut.isPending}
+                          >
+                            {t("pi.row.confirmDelete")}
+                          </button>
+                          <button className="btn-sm secondary" onClick={() => setDeleteId(null)}>
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <ActionButtons
+                          pi={pi}
+                          onDeposit={() => setPending({ kind: "event", type: "deposit", pi })}
+                          onCollect={() => setPending({ kind: "event", type: "collect", pi })}
+                          onDiscount={() => setPending({ kind: "discount", pi })}
+                          onDishonor={() => setPending({ kind: "event", type: "dishonor", pi })}
+                          onPay={() => setPending({ kind: "event", type: "pay", pi })}
+                          onEdit={() => setEditing(pi)}
+                          onDelete={() => setDeleteId(pi.id)}
+                        />
+                      )}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((pi) => (
-                    <tr key={pi.id}>
-                      <td>
-                        <strong>{t(`pi.kind.${pi.kind}`)}</strong>
-                      </td>
-                      <td>{t(`pi.direction.${pi.direction}`)}</td>
-                      <td>{pi.number ?? "—"}</td>
-                      <td>{pi.partnerCui ?? "—"}</td>
-                      <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                        {pi.amount} {pi.currency}
-                      </td>
-                      <td>{fmtRoDate(pi.issueDate)}</td>
-                      <td>{fmtRoDate(pi.scadenta)}</td>
-                      <td><StatusChip status={pi.status} /></td>
-                      <td>
-                        {deleteId === pi.id ? (
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button
-                              className="btn-sm danger"
-                              onClick={() => deleteMut.mutate(pi.id)}
-                              disabled={deleteMut.isPending}
-                            >
-                              {t("pi.row.confirmDelete")}
-                            </button>
-                            <button className="btn-sm secondary" onClick={() => setDeleteId(null)}>
-                              ✕
-                            </button>
-                          </div>
-                        ) : (
-                          <ActionButtons
-                            pi={pi}
-                            onDeposit={() => setPending({ kind: "event", type: "deposit", pi })}
-                            onCollect={() => setPending({ kind: "event", type: "collect", pi })}
-                            onDiscount={() => setPending({ kind: "discount", pi })}
-                            onDishonor={() => setPending({ kind: "event", type: "dishonor", pi })}
-                            onPay={() => setPending({ kind: "event", type: "pay", pi })}
-                            onEdit={() => setEditing(pi)}
-                            onDelete={() => setDeleteId(pi.id)}
-                          />
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                ))}
+              </tbody>
             )}
-          </>
+          </table>
         )}
       </div>
 

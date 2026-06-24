@@ -14,6 +14,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 
 import { Ic } from "@/components/shared/Ic";
 import { api, BankStatement, BankTransaction } from "@/lib/tauri";
@@ -171,28 +172,26 @@ function TxnRow({
   return (
     <>
       <tr
-        className={`clickable${txn.status === "MATCHED" ? " row-matched" : txn.status === "IGNORED" ? " row-ignored" : ""}`}
+        className={"clickable" + (txn.status === "MATCHED" ? " row-matched" : txn.status === "IGNORED" ? " row-ignored" : "")}
         onClick={() => setExpanded((e) => !e)}
         style={{ opacity: busy ? 0.5 : 1 }}
       >
-        <td className="num" style={{ width: 96 }}>{txn.bookingDate}</td>
+        <td className="num" style={{ width: 120 }}>{txn.bookingDate}</td>
         <td>{txn.counterpartyName || <span className="muted">—</span>}</td>
         <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           <span title={txn.reference ?? ""} style={{ fontSize: 12, color: "var(--text-2)" }}>
             {txn.reference || "—"}
           </span>
         </td>
-        <td className={amtCls(txn.amount)} style={{ textAlign: "right" }}>
+        <td className={amtCls(txn.amount)} style={{ textAlign: "right", width: 140 }}>
           {fmtAmt(txn.amount)} {txn.currency}
         </td>
-        <td style={{ width: 90 }}>
+        <td style={{ width: 220 }}>
           <span className={STATUS_BADGE[txn.status] ?? "badge"}>
             {t(`bankImport.status.${txn.status}`, txn.status)}
           </span>
-        </td>
-        <td style={{ width: 100, textAlign: "right" }}>
           {txn.status === "UNMATCHED" && txn.suggestions.length > 0 && (
-            <span style={{ fontSize: 11, color: "var(--accent)" }}>
+            <span style={{ fontSize: 11, color: "var(--accent)", marginLeft: 6 }}>
               {txn.suggestions.length} {t("bankImport.suggestions")}
             </span>
           )}
@@ -200,6 +199,7 @@ function TxnRow({
             <button
               className="pill-btn xs"
               disabled={busy}
+              style={{ marginLeft: 6 }}
               onClick={(e) => { e.stopPropagation(); void handleUnmatch(); }}
             >
               {t("bankImport.unmatch")}
@@ -211,7 +211,7 @@ function TxnRow({
       {/* Expanded detail: suggestions + actions */}
       {expanded && txn.status === "UNMATCHED" && (
         <tr>
-          <td colSpan={6} style={{ background: "var(--fill)", padding: "8px 16px" }}>
+          <td colSpan={5} style={{ background: "var(--fill)", padding: "8px 16px" }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
               {txn.suggestions.length > 0 ? (
                 <div style={{ flex: 1 }}>
@@ -318,8 +318,8 @@ function StatementView({
 
   useEffect(() => { void loadTxns(); }, [stmt.id]);
 
-  const matched  = txns?.filter((t) => t.status === "MATCHED").length ?? 0;
-  const ignored  = txns?.filter((t) => t.status === "IGNORED").length ?? 0;
+  const matched   = txns?.filter((t) => t.status === "MATCHED").length ?? 0;
+  const ignored   = txns?.filter((t) => t.status === "IGNORED").length ?? 0;
   const unmatched = txns?.filter((t) => t.status === "UNMATCHED").length ?? 0;
 
   return (
@@ -350,19 +350,37 @@ function StatementView({
             {t("gl.common.loading")}
           </div>
         ) : txns && txns.length === 0 ? (
-          <div style={{ padding: 32, textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-            {t("bankImport.noTxns")}
-          </div>
+          <table className="scr-table">
+            <thead>
+              <tr>
+                <th style={{ width: 120 }}>{t("bankImport.colDate")}</th>
+                <th>{t("bankImport.colCounterparty")}</th>
+                <th>{t("bankImport.colReference")}</th>
+                <th className="r" style={{ width: 140 }}>{t("bankImport.colAmount")}</th>
+                <th style={{ width: 220 }}>{t("bankImport.colStatus")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colSpan={5} style={{ padding: 0 }}>
+                  <div className="empty">
+                    <div className="ei"><Ic name="bank" /></div>
+                    <b>Niciun extras importat.</b>
+                    Importati un fisier MT940, CAMT.053 sau CSV pentru a incepe.
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         ) : (
           <table className="scr-table">
             <thead>
               <tr>
-                <th>{t("bankImport.colDate")}</th>
+                <th style={{ width: 120 }}>{t("bankImport.colDate")}</th>
                 <th>{t("bankImport.colCounterparty")}</th>
                 <th>{t("bankImport.colReference")}</th>
-                <th className="r">{t("bankImport.colAmount")}</th>
-                <th>{t("bankImport.colStatus")}</th>
-                <th></th>
+                <th className="r" style={{ width: 140 }}>{t("bankImport.colAmount")}</th>
+                <th style={{ width: 220 }}>{t("bankImport.colStatus")}</th>
               </tr>
             </thead>
             <tbody>
@@ -387,6 +405,15 @@ function StatementView({
 export function BankImportPage() {
   const { t } = useTranslation();
   const activeCompanyId = useAppStore((s) => s.activeCompanyId);
+
+  const { data: companies = [] } = useQuery({
+    queryKey: ["companies", "list"],
+    queryFn: () => api.companies.list(),
+  });
+
+  const activeCompany = (companies as Array<{ id: string; legalName: string }>).find(
+    (c) => c.id === activeCompanyId,
+  );
 
   const [format, setFormat] = useState<"MT940" | "CAMT053" | "CSV">("MT940");
   const [importing, setImporting] = useState(false);
@@ -457,7 +484,7 @@ export function BankImportPage() {
 
   if (!activeCompanyId) {
     return (
-      <div className="main-inner">
+      <div className="main-inner wide">
         <div className="page-head">
           <div><h1>{t("bankImport.title")}</h1></div>
         </div>
@@ -469,12 +496,15 @@ export function BankImportPage() {
   }
 
   return (
-    <div className="main-inner">
-      {/* Page header */}
+    <div className="main-inner wide">
+
+      {/* ── Page header ───────────────────────────────────────────────── */}
       <div className="page-head">
         <div>
           <h1>{t("bankImport.title")}</h1>
-          <p className="sub">{t("bankImport.sub")}</p>
+          <p className="sub">
+            {statements.length} {t("bankImport.title").toLowerCase()} &middot; {activeCompany?.legalName ?? ""}
+          </p>
         </div>
         <div className="head-actions">
           {/* Format selector */}
@@ -489,10 +519,10 @@ export function BankImportPage() {
             <option value="CSV">CSV</option>
           </select>
 
-          {/* File picker */}
+          {/* File picker — styled as btn-dark per export */}
           <label
-            className={`pill-btn primary${importing ? " disabled" : ""}`}
-            style={{ cursor: importing ? "default" : "pointer" }}
+            className={"btn-dark" + (importing ? " disabled" : "")}
+            style={{ cursor: importing ? "default" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}
           >
             <input
               ref={fileInputRef}
@@ -502,13 +532,35 @@ export function BankImportPage() {
               disabled={importing}
               onChange={(e) => void handleFileSelect(e)}
             />
-            <Ic name="dl" />
+            <Ic name="plus" />
             {importing ? t("bankImport.importing") : t("bankImport.pickFile")}
           </label>
         </div>
       </div>
 
-      {/* Active statement view */}
+      {/* ── Drop zone card ────────────────────────────────────────────── */}
+      <div className="scr-card" style={{ marginBottom: 16 }}>
+        <div style={{
+          border: "1.5px dashed var(--border-strong, #DADADA)",
+          borderRadius: 12,
+          margin: 16,
+          padding: "34px 20px",
+          textAlign: "center",
+          color: "var(--dim)",
+        }}>
+          <div style={{ width: 30, height: 30, margin: "0 auto 10px", color: "var(--border-strong, #DADADA)" }}>
+            <Ic name="dl" />
+          </div>
+          <div style={{ color: "var(--text-2)", fontWeight: 600, fontSize: 13.5, marginBottom: 3 }}>
+            Trageti fisierul extrasului aici
+          </div>
+          <div style={{ fontSize: 12.5 }}>
+            MT940 · CAMT.053 (XML) · CSV — sau apasati „{t("bankImport.pickFile")}"
+          </div>
+        </div>
+      </div>
+
+      {/* ── Active statement view ─────────────────────────────────────── */}
       {activeStmt && activeCompanyId && (
         <StatementView
           stmt={activeStmt}
@@ -518,27 +570,49 @@ export function BankImportPage() {
         />
       )}
 
-      {/* Previous statements list */}
+      {/* ── Previous statements list ──────────────────────────────────── */}
       {!activeStmt && (
         <div className="scr-card">
+          <div className="scr-toolbar">
+            <div className="tt">Tranzactii importate</div>
+          </div>
+
           {loadingStmts ? (
             <div style={{ padding: 24, fontSize: 13, color: "var(--text-2)" }}>
               {t("gl.common.loading")}
             </div>
           ) : statements.length === 0 ? (
-            <div style={{ padding: "44px 16px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}>
-              {t("bankImport.empty")}
-            </div>
+            <table className="scr-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 120 }}>Data</th>
+                  <th>Descriere</th>
+                  <th className="r" style={{ width: 140 }}>Suma</th>
+                  <th style={{ width: 220 }}>Potrivire</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colSpan={4} style={{ padding: 0 }}>
+                    <div className="empty">
+                      <div className="ei"><Ic name="bank" /></div>
+                      <b>Niciun extras importat.</b>
+                      Importati un fisier MT940, CAMT.053 sau CSV pentru a incepe.
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           ) : (
             <table className="scr-table">
               <thead>
                 <tr>
-                  <th>{t("bankImport.colDate")}</th>
+                  <th style={{ width: 120 }}>{t("bankImport.colDate")}</th>
                   <th>{t("bankImport.ref")}</th>
                   <th>{t("bankImport.format")}</th>
-                  <th className="r">{t("bankImport.opening")}</th>
-                  <th className="r">{t("bankImport.closing")}</th>
-                  <th></th>
+                  <th className="r" style={{ width: 140 }}>{t("bankImport.opening")}</th>
+                  <th className="r" style={{ width: 140 }}>{t("bankImport.closing")}</th>
+                  <th style={{ width: 220 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -574,7 +648,7 @@ export function BankImportPage() {
         </div>
       )}
 
-      {/* Back to list when viewing a statement */}
+      {/* ── Back to list when viewing a statement ────────────────────── */}
       {activeStmt && (
         <div style={{ marginTop: 12 }}>
           <button

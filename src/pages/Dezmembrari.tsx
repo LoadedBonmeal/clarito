@@ -17,6 +17,7 @@ import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import { fmtRON } from "@/lib/utils";
 import type {
+  Company,
   Dezmembrare,
   DezmembrareWithLines,
   CreateDezmembrareInput,
@@ -543,6 +544,16 @@ export function DezmembrariPage() {
   const [menuDz, setMenuDz] = useState<Dezmembrare | undefined>();
   const [detailData, setDetailData] = useState<DezmembrareWithLines | null>(null);
 
+  const { data: companies = [] } = useQuery({
+    queryKey: ["companies", "list"],
+    queryFn: () => api.companies.list(),
+    staleTime: 60_000,
+  });
+
+  const activeCompany = (companies as Company[]).find(
+    (c) => c.id === activeCompanyId,
+  );
+
   const { data: dezmembrari = [], isLoading, error } = useQuery({
     queryKey: ["dezmembrari", "list", activeCompanyId ?? ""],
     queryFn: () => api.dezmembrari.list(activeCompanyId!),
@@ -572,6 +583,10 @@ export function DezmembrariPage() {
     return items;
   }, [dezmembrari, tab, search, products]);
 
+  const countAll = dezmembrari.length;
+  const countDraft = dezmembrari.filter((d) => d.status === "DRAFT").length;
+  const countPosted = dezmembrari.filter((d) => d.status === "POSTED").length;
+
   const handleOpenMenu = useCallback((e: React.MouseEvent, d: Dezmembrare) => {
     e.stopPropagation();
     setMenuAnchor((e.currentTarget as HTMLElement).getBoundingClientRect());
@@ -594,44 +609,57 @@ export function DezmembrariPage() {
 
   if (!activeCompanyId) {
     return (
-      <div className="page-body">
+      <div className="main-inner wide">
         <div className="banner info">{t("dezmembrari.selectCompany")}</div>
       </div>
     );
   }
 
   return (
-    <div className="page-body">
+    <div className="main-inner wide">
       <div className="page-head">
         <div>
-          <h1 className="page-title">{t("dezmembrari.title")}</h1>
-          <div className="page-sub num">{filtered.length} {t("dezmembrari.title").toLowerCase()}</div>
+          <h1>{t("dezmembrari.title")}</h1>
+          <p className="sub">
+            {dezmembrari.length} {t("dezmembrari.title").toLowerCase()} &middot; {activeCompany?.legalName ?? ""}
+          </p>
         </div>
-        <button className="btn-dark" onClick={() => setModalOpen(true)}>
-          <Ic name="plus" />
-          {t("dezmembrari.head.new")}
-        </button>
+        <div className="head-actions">
+          <button className="btn-dark" onClick={() => setModalOpen(true)}>
+            <Ic name="plus" />
+            {t("dezmembrari.head.new")}
+          </button>
+        </div>
       </div>
 
       <div className="scr-card">
         <div className="scr-toolbar">
           <div className="tabs">
-            {(["all","draft","posted"] as TabFilter[]).map((tb) => (
-              <button
-                key={tb}
-                className={`tab${tab === tb ? " active" : ""}`}
-                onClick={() => setTab(tb)}
-              >
-                {t(`dezmembrari.tabs.${tb}`)}
-              </button>
-            ))}
+            <div
+              className={"tab" + (tab === "all" ? " active" : "")}
+              onClick={() => setTab("all")}
+            >
+              {t("dezmembrari.tabs.all")}<span className="cnt">{countAll}</span>
+            </div>
+            <div
+              className={"tab" + (tab === "draft" ? " active" : "")}
+              onClick={() => setTab("draft")}
+            >
+              {t("dezmembrari.tabs.draft")}<span className="cnt">{countDraft}</span>
+            </div>
+            <div
+              className={"tab" + (tab === "posted" ? " active" : "")}
+              onClick={() => setTab("posted")}
+            >
+              {t("dezmembrari.tabs.posted")}<span className="cnt">{countPosted}</span>
+            </div>
           </div>
           <div className="spacer" />
           <div className="scr-search">
-            <Ic name="search" />
+            <Ic name="lens" />
             <input
               type="text"
-              placeholder={t("dezmembrari.search")}
+              placeholder="Cauta dezmembrare..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -642,22 +670,30 @@ export function DezmembrariPage() {
         {error && <QueryErrorBanner label={t("dezmembrari.states.errorLabel")} error={error} />}
 
         {!isLoading && !error && (
-          filtered.length === 0 ? (
-            <div className="state-row muted">
-              {search || tab !== "all" ? t("dezmembrari.states.emptyFiltered") : t("dezmembrari.states.emptyNone")}
-            </div>
-          ) : (
-            <table className="scr-table">
-              <thead>
+          <table className="scr-table">
+            <thead>
+              <tr>
+                <th style={{ width: 120 }}>{t("dezmembrari.table.date")}</th>
+                <th>{t("dezmembrari.table.product")}</th>
+                <th style={{ width: 180 }}>{t("dezmembrari.table.qty")}</th>
+                <th className="r" style={{ width: 130 }}>{t("dezmembrari.table.carryingCost")}</th>
+                <th style={{ width: 120 }}>{t("dezmembrari.table.status")}</th>
+                <th style={{ width: 40 }}></th>
+              </tr>
+            </thead>
+            {filtered.length === 0 ? (
+              <tbody>
                 <tr>
-                  <th>{t("dezmembrari.table.date")}</th>
-                  <th>{t("dezmembrari.table.product")}</th>
-                  <th className="num">{t("dezmembrari.table.qty")}</th>
-                  <th className="num">{t("dezmembrari.table.carryingCost")}</th>
-                  <th>{t("dezmembrari.table.status")}</th>
-                  <th style={{ width: 40 }}></th>
+                  <td colSpan={6} style={{ padding: 0 }}>
+                    <div className="empty">
+                      <div className="ei"><Ic name="scissors" /></div>
+                      <b>Nicio dezmembrare.</b>
+                      Inregistrati o dezmembrare de mijloc fix sau stoc.
+                    </div>
+                  </td>
                 </tr>
-              </thead>
+              </tbody>
+            ) : (
               <tbody>
                 {filtered.map((d) => {
                   const chip = STATUS_CHIP[d.status] ?? { cls: "sent" };
@@ -665,8 +701,8 @@ export function DezmembrariPage() {
                     <tr key={d.id}>
                       <td>{fmtRoDate(d.dezmembrareDate)}</td>
                       <td>{productName(d.dismantledProductId)}</td>
-                      <td className="num">{d.dismantledQty}</td>
-                      <td className="num">
+                      <td>{d.dismantledQty}</td>
+                      <td className="r">
                         {d.status === "POSTED" ? `${fmtRON(d.dismantledCarryingCost)} RON` : "—"}
                       </td>
                       <td><span className={`chip ${chip.cls}`}>{t(`dezmembrari.status.${d.status}`)}</span></td>
@@ -685,8 +721,8 @@ export function DezmembrariPage() {
                   );
                 })}
               </tbody>
-            </table>
-          )
+            )}
+          </table>
         )}
       </div>
 

@@ -363,11 +363,37 @@ export function OrdersPage() {
   const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
   const [menuOrder, setMenuOrder] = useState<Order | undefined>();
 
+  const { data: companies = [] } = useQuery({
+    queryKey: queryKeys.companies.list(),
+    queryFn: () => api.companies.list(),
+  });
+
+  const activeCompany = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
+
   const { data: orderList = [], isLoading, error } = useQuery({
     queryKey: queryKeys.orders.list(activeCompanyId ?? ""),
     queryFn: () => api.orders.list(activeCompanyId!),
     enabled: !!activeCompanyId,
   });
+
+  const { data: contactsList = [] } = useQuery({
+    queryKey: queryKeys.contacts.list({ companyId: activeCompanyId ?? undefined }),
+    queryFn: () => api.contacts.list({ companyId: activeCompanyId ?? undefined }),
+    enabled: !!activeCompanyId,
+    staleTime: 60_000,
+  });
+
+  const contactMap = useMemo(
+    () => Object.fromEntries(contactsList.map((c) => [c.id, c])),
+    [contactsList],
+  );
+
+  const tabCounts = useMemo(() => {
+    const all = orderList.length;
+    const active = orderList.filter((o) => !["invoiced", "cancelled"].includes(o.status)).length;
+    const invoiced = orderList.filter((o) => o.status === "invoiced").length;
+    return { all, active, invoiced };
+  }, [orderList]);
 
   const filtered = useMemo(() => {
     let items = orderList;
@@ -391,40 +417,56 @@ export function OrdersPage() {
 
   if (!activeCompanyId) {
     return (
-      <div className="page-body">
+      <div className="main-inner wide">
         <div className="banner info">{t("orders.selectCompany")}</div>
       </div>
     );
   }
 
+  const TAB_DEFS: { id: TabFilter; label: string; count: number }[] = [
+    { id: "all",      label: t("orders.tabs.all"),      count: tabCounts.all },
+    { id: "active",   label: t("orders.tabs.active"),   count: tabCounts.active },
+    { id: "invoiced", label: t("orders.tabs.invoiced"), count: tabCounts.invoiced },
+  ];
+
+  const colCount = 6;
+
   return (
-    <div className="page-body">
+    <div className="main-inner wide">
       <div className="page-head">
         <div>
-          <h1 className="page-title">{t("orders.title")}</h1>
-          <div className="page-sub num">{filtered.length} {t("orders.title").toLowerCase()}</div>
+          <h1>{t("orders.title")}</h1>
+          <p className="sub">
+            {orderList.length} {t("orders.title").toLowerCase()} · {activeCompany?.legalName ?? ""}
+          </p>
         </div>
-        <button className="btn-dark" onClick={() => { setEditOrder(undefined); setModalOpen(true); }}>
-          <Ic name="plus" />
-          {t("orders.head.new")}
-        </button>
+        <div className="head-actions">
+          <button className="btn-dark" onClick={() => { setEditOrder(undefined); setModalOpen(true); }}>
+            <Ic name="plus" />
+            {t("orders.head.new")}
+          </button>
+        </div>
       </div>
 
       <div className="scr-card">
         <div className="scr-toolbar">
           <div className="tabs">
-            {(["all","active","invoiced"] as TabFilter[]).map((tb) => (
-              <button key={tb} className={`tab${tab === tb ? " active" : ""}`} onClick={() => setTab(tb)}>
-                {t(`orders.tabs.${tb}`)}
-              </button>
+            {TAB_DEFS.map((tb) => (
+              <div
+                key={tb.id}
+                className={"tab" + (tab === tb.id ? " active" : "")}
+                onClick={() => setTab(tb.id)}
+              >
+                {tb.label}<span className="cnt">{tb.count}</span>
+              </div>
             ))}
           </div>
           <div className="spacer" />
           <div className="scr-search">
-            <Ic name="search" />
+            <Ic name="lens" />
             <input
               type="text"
-              placeholder={t("orders.search")}
+              placeholder="Cauta comanda..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -435,22 +477,31 @@ export function OrdersPage() {
         {error && <QueryErrorBanner label={t("orders.states.errorLabel")} error={error} />}
 
         {!isLoading && !error && (
-          filtered.length === 0 ? (
-            <div className="state-row muted">
-              {search || tab !== "all" ? t("orders.states.emptyFiltered") : t("orders.states.emptyNone")}
-            </div>
-          ) : (
-            <table className="scr-table">
-              <thead>
+          <table className="scr-table">
+            <thead>
+              <tr>
+                <th style={{ width: 140 }}>{t("orders.table.number")}</th>
+                <th style={{ width: 130 }}>{t("orders.table.date")}</th>
+                <th>{t("orders.table.client") || "Client"}</th>
+                <th style={{ width: 150 }}>{t("orders.table.delivery")}</th>
+                <th className="r" style={{ width: 130 }}>{t("orders.table.total")}</th>
+                <th style={{ width: 120 }}>{t("orders.table.status")}</th>
+                <th style={{ width: 40 }}></th>
+              </tr>
+            </thead>
+            {filtered.length === 0 ? (
+              <tbody>
                 <tr>
-                  <th>{t("orders.table.number")}</th>
-                  <th>{t("orders.table.date")}</th>
-                  <th>{t("orders.table.delivery")}</th>
-                  <th className="num">{t("orders.table.total")}</th>
-                  <th>{t("orders.table.status")}</th>
-                  <th style={{ width: 40 }}></th>
+                  <td colSpan={colCount + 1} style={{ padding: 0 }}>
+                    <div className="empty">
+                      <div className="ei"><Ic name="clipboardList" /></div>
+                      <b>Nicio comanda.</b>
+                      Adaugati o comanda de la un client.
+                    </div>
+                  </td>
                 </tr>
-              </thead>
+              </tbody>
+            ) : (
               <tbody>
                 {filtered.map((o) => {
                   const chip = STATUS_CHIP[o.status] ?? { cls: "sent", labelKey: `orders.status.${o.status}` };
@@ -458,8 +509,9 @@ export function OrdersPage() {
                     <tr key={o.id}>
                       <td className="num">{o.fullNumber ?? `CMD-${String(o.number).padStart(4, "0")}`}</td>
                       <td>{fmtRoDate(o.orderDate)}</td>
+                      <td>{o.contactId ? (contactMap[o.contactId]?.legalName ?? "—") : "—"}</td>
                       <td>{fmtRoDate(o.expectedDelivery)}</td>
-                      <td className="num">{fmtRON(o.totalAmount)} {o.currency !== "RON" ? o.currency : ""}</td>
+                      <td className="r">{fmtRON(o.totalAmount)} {o.currency !== "RON" ? o.currency : ""}</td>
                       <td><span className={`chip ${chip.cls}`}>{t(chip.labelKey)}</span></td>
                       <td>
                         <button
@@ -476,8 +528,8 @@ export function OrdersPage() {
                   );
                 })}
               </tbody>
-            </table>
-          )
+            )}
+          </table>
         )}
       </div>
 

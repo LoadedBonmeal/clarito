@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
+import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -21,19 +22,24 @@ import type { NirDocument, NirInput, NirLineInput, NirWithLines, Gestiune } from
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type View = "list" | "create" | "detail";
+type NirTab = "all" | "draft" | "posted";
 
 // ─── List view ────────────────────────────────────────────────────────────────
 
 function NirList({
   companyId,
+  companyName,
   onNew,
   onView,
 }: {
   companyId: string;
+  companyName: string;
   onNew: () => void;
   onView: (nir: NirDocument) => void;
 }) {
   const { t } = useTranslation();
+  const [tab, setTab] = useState<NirTab>("all");
+  const [search, setSearch] = useState("");
 
   const { data: nirList = [], isLoading, error } = useQuery({
     queryKey: ["nir", companyId],
@@ -41,68 +47,133 @@ function NirList({
     enabled: !!companyId,
   });
 
+  const filtered = nirList.filter((n) => {
+    if (tab === "draft" && n.status !== "draft") return false;
+    if (tab === "posted" && n.status !== "finalized") return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const num = `${n.nirSeries ? n.nirSeries + "-" : ""}${n.nirNumber}`.toLowerCase();
+      const sup = (n.supplierName ?? "").toLowerCase();
+      if (!num.includes(q) && !sup.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const countAll = nirList.length;
+  const countDraft = nirList.filter((n) => n.status === "draft").length;
+  const countPosted = nirList.filter((n) => n.status === "finalized").length;
+
   return (
-    <div className="main-inner">
+    <div className="main-inner wide">
       <div className="page-head">
         <div>
-          <h1 className="page-title">{t("nir.title")}</h1>
-          <div className="page-sub">{nirList.length > 0 ? `${nirList.length} NIR-uri` : ""}</div>
+          <h1>Nota Intrare Receptie</h1>
+          <p className="sub">
+            NIR cod 14-3-1A · {companyName}
+          </p>
         </div>
-        <button className="btn-dark" onClick={onNew}>
-          + {t("nir.new")}
-        </button>
+        <div className="head-actions">
+          <button className="btn-dark" onClick={onNew}>
+            <Ic name="plus" /> {t("nir.new")}
+          </button>
+        </div>
       </div>
 
       {error && <QueryErrorBanner error={error} label={t("nir.errorLabel")} />}
 
       <div className="scr-card">
-        {isLoading && <div className="state-row">{t("nir.loading")}</div>}
-        {!isLoading && !error && (nirList.length === 0
-          ? <div className="state-row muted">{t("nir.empty")}</div>
-          : (
-            <table className="scr-table">
-              <thead>
-                <tr>
-                  <th>{t("nir.colNumber")}</th>
-                  <th>{t("nir.colDate")}</th>
-                  <th>{t("nir.colSupplier")}</th>
-                  <th>{t("nir.colStatus")}</th>
-                  <th>{t("nir.colRetail")}</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {nirList.map((n) => (
+        <div className="scr-toolbar">
+          <div className="tabs">
+            <div
+              className={"tab" + (tab === "all" ? " active" : "")}
+              onClick={() => setTab("all")}
+            >
+              Toate<span className="cnt">{countAll}</span>
+            </div>
+            <div
+              className={"tab" + (tab === "draft" ? " active" : "")}
+              onClick={() => setTab("draft")}
+            >
+              Draft<span className="cnt">{countDraft}</span>
+            </div>
+            <div
+              className={"tab" + (tab === "posted" ? " active" : "")}
+              onClick={() => setTab("posted")}
+            >
+              Postate<span className="cnt">{countPosted}</span>
+            </div>
+          </div>
+          <div className="spacer" />
+          <div className="scr-search">
+            <Ic name="lens" />
+            <input
+              type="text"
+              placeholder="Cauta dupa numar sau furnizor..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <table className="scr-table">
+          <thead>
+            <tr>
+              <th style={{ width: 150 }}>Numar</th>
+              <th style={{ width: 130 }}>Data</th>
+              <th>Furnizor</th>
+              <th className="r" style={{ width: 150 }}>Valoare</th>
+              <th style={{ width: 120 }}>Status</th>
+            </tr>
+          </thead>
+          {isLoading ? (
+            <tbody>
+              <tr>
+                <td colSpan={5} style={{ padding: 0 }}>
+                  <div className="empty">
+                    <div className="ei"><Ic name="inboxIn" /></div>
+                    <b>{t("nir.loading")}</b>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          ) : filtered.length === 0 ? (
+            <tbody>
+              <tr>
+                <td colSpan={5} style={{ padding: 0 }}>
+                  <div className="empty">
+                    <div className="ei"><Ic name="inboxIn" /></div>
+                    <b>Niciun NIR.</b>Receptionati marfa de la un furnizor.
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          ) : (
+            <tbody>
+              {filtered.map((n) => {
+                const nirLabel = `${n.nirSeries ? n.nirSeries + "-" : ""}${n.nirNumber}`;
+                return (
                   <tr key={n.id} style={{ cursor: "pointer" }} onClick={() => onView(n)}>
                     <td>
-                      <span className="doc">
-                        {n.nirSeries ? `${n.nirSeries}-` : ""}
-                        {n.nirNumber}
-                      </span>
+                      <span className="doc">{nirLabel}</span>
                     </td>
                     <td>{n.nirDate}</td>
                     <td>{n.supplierName ?? "—"}</td>
+                    <td className="r">
+                      {n.retailMode && (
+                        <span className="chip sent" style={{ marginRight: 6 }}>{t("nir.colRetail")}</span>
+                      )}
+                    </td>
                     <td>
                       <span className={`chip ${n.status === "finalized" ? "sent" : "draft"}`}>
                         {n.status === "finalized" ? t("nir.statusFinalized") : t("nir.statusDraft")}
                       </span>
                     </td>
-                    <td>
-                      {n.retailMode && (
-                        <span className="chip sent">{t("nir.colRetail")}</span>
-                      )}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      <button className="pill-btn" onClick={(e) => { e.stopPropagation(); onView(n); }}>
-                        {t("nir.viewDetail")}
-                      </button>
-                    </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )
-        )}
+                );
+              })}
+            </tbody>
+          )}
+        </table>
       </div>
     </div>
   );
@@ -203,12 +274,14 @@ function NirCreateForm({
   };
 
   return (
-    <div className="main-inner">
+    <div className="main-inner wide">
       <div className="page-head">
         <div>
-          <h1 className="page-title">{t("nir.new")}</h1>
+          <h1>{t("nir.new")}</h1>
         </div>
-        <button className="pill-btn" onClick={onCancel}>{t("nir.cancel")}</button>
+        <div className="head-actions">
+          <button className="pill-btn" onClick={onCancel}>{t("nir.cancel")}</button>
+        </div>
       </div>
 
       {/* Prefill from invoice */}
@@ -457,7 +530,7 @@ function NirDetail({
 
   if (isLoading) {
     return (
-      <div className="main-inner">
+      <div className="main-inner wide">
         <div className="state-row">{t("nir.loading")}</div>
       </div>
     );
@@ -465,7 +538,7 @@ function NirDetail({
 
   if (error || !data) {
     return (
-      <div className="main-inner">
+      <div className="main-inner wide">
         <QueryErrorBanner error={error} label={t("nir.errorLabel")} />
         <button className="pill-btn" onClick={onBack}>{t("nir.backToList")}</button>
       </div>
@@ -483,37 +556,33 @@ function NirDetail({
   const totalPret = lines.reduce((s, l) => s + parseFloat(l.pretAmanunt || "0"), 0);
 
   return (
-    <div className="main-inner">
-      <div className="page-head" style={{ display: "flex", gap: 8 }}>
-        <button className="pill-btn" onClick={onBack}>{t("nir.backToList")}</button>
-        <div className="spacer" />
-        {isDraft && (
-          <button
-            className="btn-dark"
-            onClick={() => {
-              if (window.confirm(t("nir.confirmFinalize"))) finalizeMut.mutate();
-            }}
-            disabled={finalizeMut.isPending}
-          >
-            {finalizeMut.isPending ? t("nir.finalizing") : t("nir.finalize")}
+    <div className="main-inner wide">
+      <div className="page-head">
+        <div>
+          <h1>{t("nir.printTitle", { number: nirLabel })}</h1>
+          <p className="sub">Formular 14-3-1A (OMFP 2634/2015) · {doc.nirDate}</p>
+        </div>
+        <div className="head-actions">
+          <button className="pill-btn" onClick={onBack}>{t("nir.backToList")}</button>
+          {isDraft && (
+            <button
+              className="btn-dark"
+              onClick={() => {
+                if (window.confirm(t("nir.confirmFinalize"))) finalizeMut.mutate();
+              }}
+              disabled={finalizeMut.isPending}
+            >
+              {finalizeMut.isPending ? t("nir.finalizing") : t("nir.finalize")}
+            </button>
+          )}
+          <button className="pill-btn" onClick={handlePrint}>
+            <Ic name="print" /> {t("nir.print")}
           </button>
-        )}
-        <button className="pill-btn" onClick={handlePrint}>{t("nir.print")}</button>
+        </div>
       </div>
 
       {/* Formular 14-3-1A layout */}
       <div className="scr-card nir-print-area" style={{ padding: 24 }}>
-        {/* Header formular */}
-        <div style={{ textAlign: "center", marginBottom: 16 }}>
-          <div style={{ fontSize: 12, color: "var(--text-2)" }}>
-            Formular 14-3-1A (OMFP 2634/2015)
-          </div>
-          <h2 style={{ margin: "4px 0", fontSize: 18, fontWeight: 700 }}>
-            {t("nir.printTitle", { number: nirLabel })}
-          </h2>
-          <div style={{ fontSize: 14 }}>{t("nir.fieldDate")}: {doc.nirDate}</div>
-        </div>
-
         {/* Meta */}
         <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16, fontSize: 13 }}>
           <tbody>
@@ -659,17 +728,25 @@ function NirDetail({
 
 export function NirPage() {
   const { t } = useTranslation();
-  const companyId = useAppStore((s) => s.activeCompanyId);
+  const activeCompanyId = useAppStore((s) => s.activeCompanyId);
 
   const [view, setView] = useState<View>("list");
   const [selectedNirId, setSelectedNirId] = useState<string | null>(null);
 
-  if (!companyId) {
+  const { data: companies = [] } = useQuery({
+    queryKey: ["companies"],
+    queryFn: () => api.companies.list(),
+  });
+
+  const activeCompany = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
+  const companyName = activeCompany?.legalName ?? "";
+
+  if (!activeCompanyId) {
     return (
-      <div className="main-inner">
+      <div className="main-inner wide">
         <div className="page-head">
           <div>
-            <h1 className="page-title">{t("nir.title")}</h1>
+            <h1>Nota Intrare Receptie</h1>
           </div>
         </div>
         <div className="scr-card" style={{ padding: 24, color: "var(--text-2)" }}>
@@ -682,7 +759,7 @@ export function NirPage() {
   if (view === "create") {
     return (
       <NirCreateForm
-        companyId={companyId}
+        companyId={activeCompanyId}
         onSaved={(doc) => {
           setSelectedNirId(doc.id);
           setView("detail");
@@ -695,7 +772,7 @@ export function NirPage() {
   if (view === "detail" && selectedNirId) {
     return (
       <NirDetail
-        companyId={companyId}
+        companyId={activeCompanyId}
         nirId={selectedNirId}
         onBack={() => setView("list")}
       />
@@ -704,7 +781,8 @@ export function NirPage() {
 
   return (
     <NirList
-      companyId={companyId}
+      companyId={activeCompanyId}
+      companyName={companyName}
       onNew={() => setView("create")}
       onView={(n) => {
         setSelectedNirId(n.id);

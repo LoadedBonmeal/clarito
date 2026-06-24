@@ -400,7 +400,14 @@ export function InventoryPage() {
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [activeSession, setActiveSession] = useState<InventorySession | null>(null);
-  const [filterYear, setFilterYear] = useState<number | undefined>(currentYear());
+  const [filterYear, setFilterYear] = useState<number>(currentYear());
+
+  const { data: companies = [] } = useQuery({
+    queryKey: ["companies", "list"],
+    queryFn: () => api.companies.list(),
+  });
+
+  const activeCompany = companies.find((c) => c.id === activeCompanyId);
 
   const { data: sessions = [] } = useQuery({
     queryKey: ["inventory-sessions", activeCompanyId, filterYear],
@@ -435,7 +442,7 @@ export function InventoryPage() {
 
   if (activeSession) {
     return (
-      <div className="main-inner">
+      <div className="main-inner wide">
         <SessionDetail
           session={activeSession}
           companyId={activeCompanyId}
@@ -449,8 +456,10 @@ export function InventoryPage() {
     );
   }
 
+  const companyName = activeCompany?.legalName ?? "";
+
   return (
-    <div className="main-inner">
+    <div className="main-inner wide">
       {showCreate && (
         <CreateSessionModal
           companyId={activeCompanyId}
@@ -466,24 +475,30 @@ export function InventoryPage() {
       {/* Page header */}
       <div className="page-head">
         <div>
-          <h1 className="page-title">{t("inventory.pageTitle")}</h1>
-          <div className="page-sub">{t("inventory.pageSubtitle")}</div>
+          <h1>{t("inventory.pageTitle")}</h1>
+          <p className="sub">
+            {sessions.length} {sessions.length === 1 ? "sesiune" : "sesiuni"}{companyName ? ` · ${companyName}` : ""}
+          </p>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {/* Year filter */}
-          <select
-            className="fsel"
-            value={filterYear ?? ""}
-            onChange={(e) =>
-              setFilterYear(e.target.value ? Number(e.target.value) : undefined)
-            }
-            style={{ minWidth: 90 }}
+        <div className="head-actions">
+          {/* Year filter — pill-btn style matching the export */}
+          <button
+            className="pill-btn"
+            style={{ display: "flex", alignItems: "center", gap: 4, position: "relative" }}
+            onClick={() => {
+              // cycle through last 6 years on click
+              setFilterYear((prev) => {
+                const years = Array.from({ length: 6 }, (_, i) => currentYear() - i);
+                const idx = years.indexOf(prev);
+                return years[(idx + 1) % years.length];
+              });
+            }}
+            title="Schimbă anul"
           >
-            <option value="">{t("inventory.registru.yearPicker")} (toate)</option>
-            {Array.from({ length: 6 }, (_, i) => currentYear() - i).map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
+            <Ic name="calendar" />
+            {filterYear}
+            <Ic name="chevD" />
+          </button>
           <button className="btn-dark" onClick={() => setShowCreate(true)}>
             <Ic name="plus" /> {t("inventory.newSession")}
           </button>
@@ -491,27 +506,33 @@ export function InventoryPage() {
       </div>
 
       {/* Sessions list */}
-      {sessions.length === 0 ? (
-        <div className="state-row muted">{t("inventory.empty")}</div>
-      ) : (
-        <div className="scr-card">
-          <table className="scr-table">
-            <thead>
+      <div className="scr-card">
+        <table className="scr-table">
+          <thead>
+            <tr>
+              <th style={{ width: 140 }}>Data</th>
+              <th>Gestiune</th>
+              <th style={{ width: 150 }}>Status</th>
+              <th style={{ width: 48 }} />
+            </tr>
+          </thead>
+          {sessions.length === 0 ? (
+            <tbody>
               <tr>
-                <th>Data de referință</th>
-                <th>An fiscal</th>
-                <th>Tip</th>
-                <th>Gestiune</th>
-                <th>Status</th>
-                <th style={{ width: 80 }} />
+                <td colSpan={4} style={{ padding: 0 }}>
+                  <div className="empty">
+                    <div className="ei"><Ic name="clipboardCheck" /></div>
+                    <b>Nicio sesiune de inventariere.</b>
+                    Creati o sesiune noua pentru anul selectat.
+                  </div>
+                </td>
               </tr>
-            </thead>
+            </tbody>
+          ) : (
             <tbody>
               {sessions.map((s) => (
                 <tr key={s.id} className="row-click" onClick={() => setActiveSession(s)}>
                   <td className="num">{s.referenceDate}</td>
-                  <td className="num">{s.fiscalYear}</td>
-                  <td>{t(`inventory.sessionType.${s.type}`)}</td>
                   <td>{s.gestiune ?? "—"}</td>
                   <td>
                     <span
@@ -538,9 +559,9 @@ export function InventoryPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
-      )}
+          )}
+        </table>
+      </div>
     </div>
   );
 }

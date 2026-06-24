@@ -48,6 +48,14 @@ export function Dividends() {
     enabled: !!companyId,
   });
 
+  const { data: companies = [] } = useQuery({
+    queryKey: ["companies", "list"],
+    queryFn: () => api.companies.list(),
+  });
+
+  const activeCompany = companies.find((c) => c.id === companyId);
+  const companyName = activeCompany?.legalName ?? "";
+
   // Dividendele către NEREZIDENȚI sunt excluse din D205 (se raportează separat în D207, emis mai jos) —
   // le semnalăm explicit ca să nu fie raportate „tăcut" în nicio declarație.
   const nonResidentCount = list.filter((d) => !d.beneficiaryResident).length;
@@ -230,40 +238,66 @@ export function Dividends() {
       <div className="page-head">
         <div>
           <h1>{t("dividends.title")}</h1>
-          <div className="sub">{t("dividends.sub")}</div>
+          <p className="sub">
+            {list.length} {list.length === 1 ? "distribuire" : "distribuiri"}
+            {companyName ? ` · ${companyName}` : ""}
+          </p>
         </div>
+        <div className="head-actions" />
       </div>
 
-      {/* Entry form */}
-      <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-        <div className="fgrid">
+      {/* Entry form — Distribuie dividende */}
+      <div className="scr-card" style={{ marginBottom: 16 }}>
+        <div className="scr-toolbar"><div className="tt">Distribuie dividende</div></div>
+        <div className="fgrid-form" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
           <div className="field">
             <label>{t("dividends.distributionDate")}</label>
-            <input className="input" type="date" value={distributionDate} onChange={(e) => setDistributionDate(e.target.value)} />
+            <input
+              className="input num"
+              type="date"
+              value={distributionDate}
+              onChange={(e) => setDistributionDate(e.target.value)}
+            />
           </div>
           <div className="field">
             <label>{t("dividends.gross")}</label>
-            <input className="input num num-r" inputMode="decimal" placeholder="10000" value={grossAmount} onChange={(e) => setGrossAmount(e.target.value.replace(/[^0-9.]/g, ""))} />
+            <input
+              className="input num"
+              inputMode="decimal"
+              placeholder="0,00"
+              style={{ textAlign: "right" }}
+              value={grossAmount}
+              onChange={(e) => setGrossAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+            />
           </div>
           <div className="field">
             <label>{t("dividends.paymentDate")}</label>
-            <input className="input" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
+            <input
+              className="input num"
+              type="date"
+              value={paymentDate}
+              onChange={(e) => setPaymentDate(e.target.value)}
+            />
           </div>
           <div className="field">
             <label>{t("dividends.shareholder")}</label>
-            <input className="input" value={shareholder} onChange={(e) => setShareholder(e.target.value)} />
+            <input
+              className="input"
+              placeholder="Nume beneficiar"
+              value={shareholder}
+              onChange={(e) => setShareholder(e.target.value)}
+            />
           </div>
           <div className="field">
             <label>{t("dividends.beneficiaryType")}</label>
             <select
-              className="input"
+              className="select"
               value={beneficiaryType}
               onChange={(e) => setBeneficiaryType(e.target.value as "PF" | "PJ")}
             >
               <option value="PF">{t("dividends.beneficiaryTypePF")}</option>
               <option value="PJ">{t("dividends.beneficiaryTypePJ")}</option>
             </select>
-            <div className="hint">{t("dividends.beneficiaryTypeHint")}</div>
           </div>
           <div className="field">
             <label>{t("dividends.beneficiaryCnp")}</label>
@@ -271,20 +305,19 @@ export function Dividends() {
               className="input num"
               inputMode="numeric"
               maxLength={13}
-              placeholder="1960101410019"
+              placeholder="1234567890123"
               value={beneficiaryCnp}
               onChange={(e) => setBeneficiaryCnp(e.target.value.replace(/\D/g, ""))}
             />
-            <div className="hint">{t("dividends.beneficiaryCnpHint")}</div>
           </div>
-          <div className="field span2">
+          <div className="field">
             <label className="chk-row">
               <input type="checkbox" checked={beneficiaryResident} onChange={(e) => setBeneficiaryResident(e.target.checked)} />
               <span>{t("dividends.beneficiaryResident")}</span>
             </label>
             <div className="hint">{t("dividends.beneficiaryResidentHint")}</div>
           </div>
-          <div className="field span2">
+          <div className="field">
             <label className="chk-row">
               <input type="checkbox" checked={interim2025} onChange={(e) => setInterim2025(e.target.checked)} />
               <span>{t("dividends.interim2025")}</span>
@@ -292,194 +325,228 @@ export function Dividends() {
             <div className="hint">{t("dividends.interim2025Hint")}</div>
           </div>
         </div>
-        <button className="btn-dark" style={{ marginTop: 12 }} disabled={add.isPending || !grossAmount} onClick={() => add.mutate()}>
-          <Ic name="plus" />{t("dividends.add")}
-        </button>
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 16px 16px" }}>
+          <button className="btn-dark" disabled={add.isPending || !grossAmount} onClick={() => add.mutate()}>
+            <Ic name="plus" />{t("dividends.add")}
+          </button>
+        </div>
       </div>
 
       {/* Export D205 — declarația informativă anuală, pe beneficiar (capitol dividende), validată DUK */}
-      <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{t("dividends.d205.title")}</div>
-        <div className="hint" style={{ marginBottom: 12 }}>{t("dividends.d205.hint")}</div>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
-          <div className="field" style={{ width: 140 }}>
-            <label>{t("dividends.d205.year")}</label>
-            <input
-              className="input num"
-              inputMode="numeric"
-              maxLength={4}
-              value={d205Year}
-              onChange={(e) => setD205Year(Number(e.target.value.replace(/\D/g, "")) || d205Year)}
-            />
-          </div>
-          <button className="btn-dark" disabled={exportingD205} onClick={() => void runD205Export()}>
-            <Ic name="code" />{exportingD205 ? t("dividends.d205.exporting") : t("dividends.d205.export")}
-          </button>
-          <button className="pill-btn" disabled={previewingD205} onClick={() => void runD205Preview()}>
-            <Ic name="eye" />{previewingD205 ? t("dividends.d205.previewing") : t("dividends.d205.preview")}
-          </button>
-        </div>
-        <div className="field" style={{ marginTop: 10 }}>
-          <label className="chk-row">
-            <input type="checkbox" checked={d205Rectif} onChange={(e) => setD205Rectif(e.target.checked)} />
-            <span>{t("dividends.d205.rectificative")}</span>
-          </label>
-          <div className="hint">{t("dividends.d205.rectificativeHint")}</div>
-        </div>
-        {nonResidentCount > 0 && (
-          <div
-            className="hint"
-            style={{ marginTop: 10, color: "var(--red)", display: "flex", gap: 6, alignItems: "flex-start" }}
-          >
-            <Ic name="shield" />
-            <span>{t("dividends.d205.nonResidentWarn", { count: nonResidentCount })}</span>
-          </div>
-        )}
-        {dukBlock && (
-          <div style={{ marginTop: 12 }}>
-            <PreflightPanel issues={dukBlock} />
-            <button
-              className="pill-btn"
-              style={{ marginTop: 8, color: "var(--red)", borderColor: "rgba(220,38,38,.35)" }}
-              disabled={exportingD205}
-              onClick={() => void runD205Export(true)}
-            >
-              {t("declarations.common.exportAnyway")}
+      <div className="scr-card" style={{ marginBottom: 16 }}>
+        <div className="scr-toolbar"><div className="tt">{t("dividends.d205.title")}</div></div>
+        <div style={{ padding: "12px 16px 4px" }}>
+          <div className="hint" style={{ marginBottom: 12 }}>{t("dividends.d205.hint")}</div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+            <div className="field" style={{ width: 140 }}>
+              <label>{t("dividends.d205.year")}</label>
+              <input
+                className="input num"
+                inputMode="numeric"
+                maxLength={4}
+                value={d205Year}
+                onChange={(e) => setD205Year(Number(e.target.value.replace(/\D/g, "")) || d205Year)}
+              />
+            </div>
+            <button className="btn-dark" disabled={exportingD205} onClick={() => void runD205Export()}>
+              <Ic name="code" />{exportingD205 ? t("dividends.d205.exporting") : t("dividends.d205.export")}
+            </button>
+            <button className="pill-btn" disabled={previewingD205} onClick={() => void runD205Preview()}>
+              <Ic name="eye" />{previewingD205 ? t("dividends.d205.previewing") : t("dividends.d205.preview")}
             </button>
           </div>
-        )}
+          <div className="field" style={{ marginTop: 10 }}>
+            <label className="chk-row">
+              <input type="checkbox" checked={d205Rectif} onChange={(e) => setD205Rectif(e.target.checked)} />
+              <span>{t("dividends.d205.rectificative")}</span>
+            </label>
+            <div className="hint">{t("dividends.d205.rectificativeHint")}</div>
+          </div>
+          {nonResidentCount > 0 && (
+            <div
+              className="hint"
+              style={{ marginTop: 10, color: "var(--red)", display: "flex", gap: 6, alignItems: "flex-start" }}
+            >
+              <Ic name="shield" />
+              <span>{t("dividends.d205.nonResidentWarn", { count: nonResidentCount })}</span>
+            </div>
+          )}
+          {dukBlock && (
+            <div style={{ marginTop: 12, paddingBottom: 4 }}>
+              <PreflightPanel issues={dukBlock} />
+              <button
+                className="pill-btn"
+                style={{ marginTop: 8, color: "var(--red)", borderColor: "rgba(220,38,38,.35)" }}
+                disabled={exportingD205}
+                onClick={() => void runD205Export(true)}
+              >
+                {t("declarations.common.exportAnyway")}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Export D207 — informativă anuală pentru veniturile nerezidenților (capitol dividende), validată XSD ANAF.
           Apare doar când există beneficiari nerezidenți (altfel declarația nu se depune). */}
       {nonResidentCount > 0 && (
-        <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{t("dividends.d207.title")}</div>
-          <div className="hint" style={{ marginBottom: 12 }}>{t("dividends.d207.hint")}</div>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
-            <div className="field" style={{ width: 140 }}>
-              <label>{t("dividends.d207.year")}</label>
-              <input
-                className="input num"
-                inputMode="numeric"
-                maxLength={4}
-                value={d207Year}
-                onChange={(e) => setD207Year(Number(e.target.value.replace(/\D/g, "")) || d207Year)}
-              />
+        <div className="scr-card" style={{ marginBottom: 16 }}>
+          <div className="scr-toolbar"><div className="tt">{t("dividends.d207.title")}</div></div>
+          <div style={{ padding: "12px 16px 4px" }}>
+            <div className="hint" style={{ marginBottom: 12 }}>{t("dividends.d207.hint")}</div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+              <div className="field" style={{ width: 140 }}>
+                <label>{t("dividends.d207.year")}</label>
+                <input
+                  className="input num"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={d207Year}
+                  onChange={(e) => setD207Year(Number(e.target.value.replace(/\D/g, "")) || d207Year)}
+                />
+              </div>
+              <button className="btn-dark" disabled={exportingD207} onClick={() => void runD207Export()}>
+                <Ic name="code" />{exportingD207 ? t("dividends.d207.exporting") : t("dividends.d207.export")}
+              </button>
+              <button className="pill-btn" disabled={previewingD207} onClick={() => void runD207Preview()}>
+                <Ic name="eye" />{previewingD207 ? t("dividends.d207.previewing") : t("dividends.d207.preview")}
+              </button>
             </div>
-            <button className="btn-dark" disabled={exportingD207} onClick={() => void runD207Export()}>
-              <Ic name="code" />{exportingD207 ? t("dividends.d207.exporting") : t("dividends.d207.export")}
-            </button>
-            <button className="pill-btn" disabled={previewingD207} onClick={() => void runD207Preview()}>
-              <Ic name="eye" />{previewingD207 ? t("dividends.d207.previewing") : t("dividends.d207.preview")}
-            </button>
-          </div>
-          <div className="field" style={{ marginTop: 10 }}>
-            <label className="chk-row">
-              <input type="checkbox" checked={d207Rectif} onChange={(e) => setD207Rectif(e.target.checked)} />
-              <span>{t("dividends.d207.rectificative")}</span>
-            </label>
-            <div className="hint">{t("dividends.d207.rectificativeHint")}</div>
-          </div>
-          {/* DIV-02: the emitter reports every non-resident dividend as fully taxable at the domestic
-              rate (cod venit 01). Treaty-reduced / EU parent-subsidiary-exempt cases aren't modelled yet. */}
-          <div
-            className="hint"
-            style={{ marginTop: 10, color: "var(--amber, #b45309)", display: "flex", gap: 6, alignItems: "flex-start" }}
-          >
-            <Ic name="shield" />
-            <span>{t("dividends.d207.treatyNote")}</span>
+            <div className="field" style={{ marginTop: 10 }}>
+              <label className="chk-row">
+                <input type="checkbox" checked={d207Rectif} onChange={(e) => setD207Rectif(e.target.checked)} />
+                <span>{t("dividends.d207.rectificative")}</span>
+              </label>
+              <div className="hint">{t("dividends.d207.rectificativeHint")}</div>
+            </div>
+            {/* DIV-02: the emitter reports every non-resident dividend as fully taxable at the domestic
+                rate (cod venit 01). Treaty-reduced / EU parent-subsidiary-exempt cases aren't modelled yet. */}
+            <div
+              className="hint"
+              style={{ marginTop: 10, color: "var(--amber, #b45309)", display: "flex", gap: 6, alignItems: "flex-start" }}
+            >
+              <Ic name="shield" />
+              <span>{t("dividends.d207.treatyNote")}</span>
+            </div>
           </div>
         </div>
       )}
 
       {/* DIV-01: editor beneficiar in-place (corectare CNP / nume / rezidență / tip / dată plată). */}
       {editing && (
-        <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-            {t("dividends.editTitle")} — {editing.distributionDate} · {fmtRON(editing.grossAmount)}
+        <div className="scr-card" style={{ marginBottom: 16 }}>
+          <div className="scr-toolbar">
+            <div className="tt">
+              {t("dividends.editTitle")} — {editing.distributionDate} · {fmtRON(editing.grossAmount)}
+            </div>
           </div>
-          <div className="hint" style={{ marginBottom: 12 }}>{t("dividends.editHint")}</div>
-          <div className="fgrid">
-            <div className="field">
-              <label>{t("dividends.paymentDate")}</label>
-              <input className="input" type="date" value={ePayment} onChange={(e) => setEPayment(e.target.value)} />
+          <div style={{ padding: "12px 16px 4px" }}>
+            <div className="hint" style={{ marginBottom: 12 }}>{t("dividends.editHint")}</div>
+            <div className="fgrid-form" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
+              <div className="field">
+                <label>{t("dividends.paymentDate")}</label>
+                <input className="input num" type="date" value={ePayment} onChange={(e) => setEPayment(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>{t("dividends.shareholder")}</label>
+                <input className="input" value={eName} onChange={(e) => setEName(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>{t("dividends.beneficiaryType")}</label>
+                <select className="select" value={eType} onChange={(e) => setEType(e.target.value as "PF" | "PJ")}>
+                  <option value="PF">{t("dividends.beneficiaryTypePF")}</option>
+                  <option value="PJ">{t("dividends.beneficiaryTypePJ")}</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>{t("dividends.beneficiaryCnp")}</label>
+                <input
+                  className="input num"
+                  inputMode="numeric"
+                  maxLength={13}
+                  placeholder="1960101410019"
+                  value={eCnp}
+                  onChange={(e) => setECnp(e.target.value.replace(/\D/g, ""))}
+                />
+              </div>
+              <div className="field">
+                <label className="chk-row">
+                  <input type="checkbox" checked={eResident} onChange={(e) => setEResident(e.target.checked)} />
+                  <span>{t("dividends.beneficiaryResident")}</span>
+                </label>
+              </div>
+              {/* D207: nerezidenții poartă țara de rezidență (Stat_R) + NIF-ul fiscal străin (cifS). */}
+              {!eResident && (
+                <>
+                  <div className="field">
+                    <label>{t("dividends.beneficiaryCountry")}</label>
+                    <input
+                      className="input"
+                      maxLength={2}
+                      placeholder="GB"
+                      value={eCountry}
+                      onChange={(e) => setECountry(e.target.value.replace(/[^a-zA-Z]/g, "").toUpperCase())}
+                    />
+                    <div className="hint">{t("dividends.beneficiaryCountryHint")}</div>
+                  </div>
+                  <div className="field">
+                    <label>{t("dividends.beneficiaryForeignTaxId")}</label>
+                    <input
+                      className="input"
+                      maxLength={40}
+                      placeholder="GB123456789"
+                      value={eForeign}
+                      onChange={(e) => setEForeign(e.target.value)}
+                    />
+                    <div className="hint">{t("dividends.beneficiaryForeignTaxIdHint")}</div>
+                  </div>
+                </>
+              )}
             </div>
-            <div className="field">
-              <label>{t("dividends.shareholder")}</label>
-              <input className="input" value={eName} onChange={(e) => setEName(e.target.value)} />
+            <div style={{ display: "flex", gap: 8, padding: "8px 0 12px" }}>
+              <button className="btn-dark" disabled={updateBen.isPending} onClick={() => updateBen.mutate()}>
+                <Ic name="check" />{t("dividends.save")}
+              </button>
+              <button className="pill-btn" disabled={updateBen.isPending} onClick={() => setEditing(null)}>
+                {t("dividends.cancel")}
+              </button>
             </div>
-            <div className="field">
-              <label>{t("dividends.beneficiaryType")}</label>
-              <select className="input" value={eType} onChange={(e) => setEType(e.target.value as "PF" | "PJ")}>
-                <option value="PF">{t("dividends.beneficiaryTypePF")}</option>
-                <option value="PJ">{t("dividends.beneficiaryTypePJ")}</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>{t("dividends.beneficiaryCnp")}</label>
-              <input className="input num" inputMode="numeric" maxLength={13} placeholder="1960101410019" value={eCnp} onChange={(e) => setECnp(e.target.value.replace(/\D/g, ""))} />
-            </div>
-            <div className="field span2">
-              <label className="chk-row">
-                <input type="checkbox" checked={eResident} onChange={(e) => setEResident(e.target.checked)} />
-                <span>{t("dividends.beneficiaryResident")}</span>
-              </label>
-            </div>
-            {/* D207: nerezidenții poartă țara de rezidență (Stat_R) + NIF-ul fiscal străin (cifS). */}
-            {!eResident && (
-              <>
-                <div className="field">
-                  <label>{t("dividends.beneficiaryCountry")}</label>
-                  <input className="input" maxLength={2} placeholder="GB" value={eCountry} onChange={(e) => setECountry(e.target.value.replace(/[^a-zA-Z]/g, "").toUpperCase())} />
-                  <div className="hint">{t("dividends.beneficiaryCountryHint")}</div>
-                </div>
-                <div className="field">
-                  <label>{t("dividends.beneficiaryForeignTaxId")}</label>
-                  <input className="input" maxLength={40} placeholder="GB123456789" value={eForeign} onChange={(e) => setEForeign(e.target.value)} />
-                  <div className="hint">{t("dividends.beneficiaryForeignTaxIdHint")}</div>
-                </div>
-              </>
-            )}
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <button className="btn-dark" disabled={updateBen.isPending} onClick={() => updateBen.mutate()}>
-              <Ic name="check" />{t("dividends.save")}
-            </button>
-            <button className="pill-btn" disabled={updateBen.isPending} onClick={() => setEditing(null)}>
-              {t("dividends.cancel")}
-            </button>
           </div>
         </div>
       )}
 
-      {/* List — .scr-card (not .card) so the table is clipped to the rounded corners (overflow:hidden). */}
+      {/* List — Distribuiri */}
       <div className="scr-card">
+        <div className="scr-toolbar"><div className="tt">Distribuiri</div></div>
         <table className="scr-table">
           <thead>
             <tr>
-              <th>{t("dividends.col.distribution")}</th>
-              <th className="r">{t("dividends.col.gross")}</th>
-              <th className="r">{t("dividends.col.rate")}</th>
-              <th className="r">{t("dividends.col.tax")}</th>
-              <th className="r">{t("dividends.col.net")}</th>
-              <th>{t("dividends.col.deadline")}</th>
               <th>{t("dividends.col.shareholder")}</th>
-              <th className="r w-del"></th>
+              <th style={{ width: 150 }}>{t("dividends.col.distribution")}</th>
+              <th className="r" style={{ width: 120 }}>{t("dividends.col.gross")}</th>
+              <th className="r" style={{ width: 110 }}>{t("dividends.col.tax")}</th>
+              <th className="r" style={{ width: 120 }}>{t("dividends.col.net")}</th>
+              <th style={{ width: 70 }}>{t("dividends.col.rate")}</th>
+              <th style={{ width: 120 }}>{t("dividends.col.deadline")}</th>
+              <th className="r w-del" />
             </tr>
           </thead>
-          <tbody>
-            {list.length === 0 ? (
-              <tr><td colSpan={8} style={{ padding: "32px 16px", textAlign: "center", color: "var(--text-2)" }}>{t("dividends.empty")}</td></tr>
-            ) : (
-              list.map((d) => (
+          {list.length === 0 ? (
+            <tbody>
+              <tr>
+                <td colSpan={8} style={{ padding: 0 }}>
+                  <div className="empty">
+                    <div className="ei"><Ic name="scale" /></div>
+                    <b>Nicio distribuire de dividende.</b>
+                    Completați formularul pentru a repartiza dividende.
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          ) : (
+            <tbody>
+              {list.map((d) => (
                 <tr key={d.id}>
-                  <td>{d.distributionDate}</td>
-                  <td className="r num">{fmtRON(d.grossAmount)}</td>
-                  <td className="r num">{d.taxRate}%</td>
-                  <td className="r num">{fmtRON(d.taxAmount)}</td>
-                  <td className="r num">{fmtRON(d.netAmount)}</td>
-                  <td>{d.taxDeadline}</td>
                   <td>
                     {d.shareholder ?? "—"}
                     {!d.beneficiaryResident && (
@@ -500,6 +567,12 @@ export function Dividends() {
                       </span>
                     )}
                   </td>
+                  <td>{d.distributionDate}</td>
+                  <td className="r num">{fmtRON(d.grossAmount)}</td>
+                  <td className="r num">{fmtRON(d.taxAmount)}</td>
+                  <td className="r num">{fmtRON(d.netAmount)}</td>
+                  <td>{d.taxRate}%</td>
+                  <td>{d.taxDeadline}</td>
                   <td className="r w-del">
                     <div style={{ display: "inline-flex", gap: 2 }}>
                       <button
@@ -519,9 +592,9 @@ export function Dividends() {
                     </div>
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
+              ))}
+            </tbody>
+          )}
         </table>
       </div>
     </div>

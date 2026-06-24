@@ -28,6 +28,8 @@ import { useAppStore } from "@/lib/store";
 import { notify } from "@/lib/toasts";
 import { formatError } from "@/lib/error-mapper";
 import { fmtRON } from "@/lib/utils";
+import { queryKeys } from "@/lib/queries";
+import { Ic } from "@/components/shared/Ic";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -55,8 +57,6 @@ const statusBadge = (s: string) => {
   };
   return <span className={map[s] ?? "badge"}>{labels[s] ?? s}</span>;
 };
-
-const methodLabel = (m: string) => (m === "bank" ? "Transfer bancar" : "Numerar");
 
 // ── Empty line template ───────────────────────────────────────────────────────
 type LineForm = {
@@ -155,6 +155,11 @@ export function DeconturiPage() {
   const [selectedReport, setSelectedReport] = useState<ExpenseReportFull | null>(null);
 
   // ── Queries ───────────────────────────────────────────────────────────────
+  const { data: companies = [] } = useQuery({
+    queryKey: queryKeys.companies.list(),
+    queryFn: () => api.companies.list(),
+  });
+
   const { data: advances = [] } = useQuery({
     queryKey: ["treasury_advances", companyId ?? ""],
     queryFn: () => api.deconturi.listAdvances(companyId!),
@@ -166,6 +171,9 @@ export function DeconturiPage() {
     queryFn: () => api.deconturi.listReports(companyId!),
     enabled: !!companyId,
   });
+
+  const activeCompany = companies.find((c) => c.id === companyId);
+  const companyName = activeCompany?.legalName ?? "—";
 
   const grantedAdvances = advances.filter((a) => a.status === "granted");
 
@@ -347,235 +355,251 @@ export function DeconturiPage() {
   }
 
   return (
-    <div className="main-inner">
+    <div className="main-inner wide">
       {/* ── Header ── */}
       <div className="page-head">
         <div>
-          <h1 className="page-title">Deconturi & Avansuri de trezorerie</h1>
-          <div className="page-sub">
-            Avansuri 542 · Deconturi cu diurnă (HG 714/2018, CF art.76) · GL automat
-          </div>
+          <h1>Deconturi &amp; Avansuri de trezorerie</h1>
+          <p className="sub">
+            Avansuri acordate angajatilor si deconturi de cheltuieli · {companyName}
+          </p>
+        </div>
+        <div className="head-actions">
+          <button
+            className="btn-dark"
+            disabled={!advAmount || !advDate || createAdvance.isPending}
+            onClick={() => { setTab("avansuri"); createAdvance.mutate(); }}
+          >
+            <Ic name="plus" /> Acorda avans
+          </button>
         </div>
       </div>
 
-      {/* ── Tabs inside scr-card toolbar ── */}
-      <div className="scr-card">
+      {/* ── Tabs card ── */}
+      <div className="scr-card" style={{ marginBottom: 16 }}>
         <div className="scr-toolbar">
           <div className="tabs">
-            <button
-              className={`tab${tab === "avansuri" ? " active" : ""}`}
+            <div
+              className={"tab" + (tab === "avansuri" ? " active" : "")}
               onClick={() => setTab("avansuri")}
             >
-              Avansuri de trezorerie
-              {advances.filter((a) => a.status === "granted").length > 0 && (
-                <span className="tab-badge">{advances.filter((a) => a.status === "granted").length}</span>
-              )}
-            </button>
-            <button
-              className={`tab${tab === "deconturi" ? " active" : ""}`}
+              Avansuri de trezorerie<span className="cnt">{advances.length}</span>
+            </div>
+            <div
+              className={"tab" + (tab === "deconturi" ? " active" : "")}
               onClick={() => setTab("deconturi")}
             >
-              Deconturi de cheltuieli
-              {reports.filter((r) => r.status === "draft").length > 0 && (
-                <span className="tab-badge">{reports.filter((r) => r.status === "draft").length}</span>
-              )}
-            </button>
+              Deconturi<span className="cnt">{reports.length}</span>
+            </div>
           </div>
           <div className="spacer" />
         </div>
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB 1: AVANSURI
-      ══════════════════════════════════════════════════════════════════════ */}
-      {tab === "avansuri" && (
-        <div className="panel-split">
-          {/* ── Create form ── */}
-          <div className="scr-card">
-            <h3 className="card-title">Acordare avans</h3>
-            <div className="field">
-              <label>Angajat (opțional)</label>
-              <input
-                className="input"
-                value={advEmployee}
-                onChange={(e) => setAdvEmployee(e.target.value)}
-                placeholder="Nume angajat"
-              />
-            </div>
-            <div className="field">
-              <label>Suma (RON) *</label>
-              <input
-                className="input"
-                type="number"
-                step="0.01"
-                min="0"
-                value={advAmount}
-                onChange={(e) => setAdvAmount(e.target.value)}
-                placeholder="0.00"
-              />
-            </div>
-            <div className="field">
-              <label>Data acordare *</label>
-              <input
-                className="input"
-                type="date"
-                value={advDate}
-                onChange={(e) => setAdvDate(e.target.value)}
-              />
-            </div>
-            <div className="field">
-              <label>Mod plată</label>
-              <select
-                className="input"
-                value={advMethod}
-                onChange={(e) => setAdvMethod(e.target.value as "cash" | "bank")}
-              >
-                <option value="cash">Numerar (5311)</option>
-                <option value="bank">Transfer bancar (5121)</option>
-              </select>
-            </div>
-            <div className="field">
-              <label>Note</label>
-              <input
-                className="input"
-                value={advNotes}
-                onChange={(e) => setAdvNotes(e.target.value)}
-                placeholder="Opțional"
-              />
-            </div>
-            <div className="form-hint">
-              Nota GL: <code>542 D = {advMethod === "bank" ? "5121" : "5311"} C</code>
-            </div>
-            <button
-              className="btn-dark"
-              disabled={!advAmount || !advDate || createAdvance.isPending}
-              onClick={() => createAdvance.mutate()}
+        {/* ── "Acorda avans" inline form (always visible, export style) ── */}
+        <div style={{ padding: "4px 16px 0" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, padding: "12px 0 2px" }}>Acorda avans</div>
+        </div>
+        <div className="fgrid-form">
+          <div className="field">
+            <label>Angajat</label>
+            <input
+              className="input"
+              value={advEmployee}
+              onChange={(e) => setAdvEmployee(e.target.value)}
+              placeholder="Selecteaza angajat…"
+            />
+          </div>
+          <div className="field">
+            <label>Suma (RON)</label>
+            <input
+              className="input num"
+              type="number"
+              step="0.01"
+              min="0"
+              value={advAmount}
+              onChange={(e) => setAdvAmount(e.target.value)}
+              placeholder="0,00"
+              style={{ textAlign: "right" }}
+            />
+          </div>
+          <div className="field">
+            <label>Data</label>
+            <input
+              className="input num"
+              type="date"
+              value={advDate}
+              onChange={(e) => setAdvDate(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label>Scop</label>
+            <input
+              className="input"
+              value={advNotes}
+              onChange={(e) => setAdvNotes(e.target.value)}
+              placeholder="ex. deplasare, achizitii"
+            />
+          </div>
+          <div className="field">
+            <label>Mod plată</label>
+            <select
+              className="select"
+              value={advMethod}
+              onChange={(e) => setAdvMethod(e.target.value as "cash" | "bank")}
             >
-              {createAdvance.isPending ? "Se procesează..." : "Acordă avans"}
-            </button>
+              <option value="cash">Numerar (5311)</option>
+              <option value="bank">Transfer bancar (5121)</option>
+            </select>
           </div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 16px 16px" }}>
+          <button
+            className="btn-dark"
+            disabled={!advAmount || !advDate || createAdvance.isPending}
+            onClick={() => createAdvance.mutate()}
+          >
+            <Ic name="banknotes" />
+            {createAdvance.isPending ? "Se procesează..." : "Acorda avans"}
+          </button>
+        </div>
+      </div>
 
-          {/* ── Advances list ── */}
-          <div className="scr-card">
-            <h3 className="card-title">Avansuri ({advances.length})</h3>
+      {/* ── Avansuri table card ── */}
+      {tab === "avansuri" && (
+        <div className="scr-card">
+          <div className="scr-toolbar">
+            <div className="tt">Avansuri acordate</div>
+          </div>
+          <table className="scr-table">
+            <thead>
+              <tr>
+                <th style={{ width: 130 }}>Data</th>
+                <th>Angajat</th>
+                <th>Scop</th>
+                <th className="r" style={{ width: 130 }}>Suma acordata</th>
+                <th className="r" style={{ width: 130 }}>Sold de decontat</th>
+                <th style={{ width: 120 }}>Status</th>
+                <th style={{ width: 120 }}></th>
+              </tr>
+            </thead>
             {advances.length === 0 ? (
-              <div className="table-empty">Niciun avans înregistrat.</div>
+              <tbody>
+                <tr>
+                  <td colSpan={7} style={{ padding: 0 }}>
+                    <div className="empty">
+                      <div className="ei"><Ic name="banknotes" /></div>
+                      <b>Niciun avans acordat.</b>
+                      Completati formularul de mai sus pentru a acorda un avans.
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
             ) : (
-              <table className="scr-table">
-                <thead>
-                  <tr>
-                    <th>Data</th>
-                    <th>Angajat</th>
-                    <th>Sumă</th>
-                    <th>Mod</th>
-                    <th>Status</th>
-                    <th></th>
+              <tbody>
+                {advances.map((adv) => (
+                  <tr key={adv.id}>
+                    <td>{fmtDate(adv.grantedDate)}</td>
+                    <td>{adv.employeeId ?? "—"}</td>
+                    <td>{adv.notes ?? "—"}</td>
+                    <td className="r">{fmtRON(adv.amount)}</td>
+                    <td className="r">{fmtRON(adv.amount)}</td>
+                    <td>{statusBadge(adv.status)}</td>
+                    <td>
+                      {adv.status === "granted" && (
+                        <div style={{ display: "flex", gap: 4 }}>
+                          <button
+                            className="btn btn-sm btn-outline"
+                            onClick={() => setReturningId(adv.id)}
+                          >
+                            Restituie
+                          </button>
+                          <button
+                            className="btn btn-sm btn-danger-outline"
+                            onClick={() => deleteAdvance.mutate(adv.id)}
+                          >
+                            Șterge
+                          </button>
+                        </div>
+                      )}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {advances.map((adv) => (
-                    <tr key={adv.id}>
-                      <td>{fmtDate(adv.grantedDate)}</td>
-                      <td>{adv.employeeId ?? "—"}</td>
-                      <td className="text-right">{fmtRON(adv.amount)}</td>
-                      <td>{methodLabel(adv.method)}</td>
-                      <td>{statusBadge(adv.status)}</td>
-                      <td className="table-actions">
-                        {adv.status === "granted" && (
-                          <>
-                            <button
-                              className="btn btn-sm btn-outline"
-                              onClick={() => setReturningId(adv.id)}
-                            >
-                              Restituie
-                            </button>
-                            <button
-                              className="btn btn-sm btn-danger-outline"
-                              onClick={() => deleteAdvance.mutate(adv.id)}
-                            >
-                              Șterge
-                            </button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                ))}
+              </tbody>
             )}
+          </table>
 
-            {/* Return modal */}
-            {returningId && (
-              <div className="inline-form">
-                <h4>Restituire avans</h4>
-                <div className="field">
-                  <label>Data restituire</label>
-                  <input
-                    className="input"
-                    type="date"
-                    value={returnDate}
-                    onChange={(e) => setReturnDate(e.target.value)}
-                  />
-                </div>
-                <div className="form-actions">
-                  <button
-                    className="btn-dark"
-                    disabled={returnAdvance.isPending}
-                    onClick={() => returnAdvance.mutate(returningId)}
-                  >
-                    {returnAdvance.isPending ? "Se procesează..." : "Confirmă restituire"}
-                  </button>
-                  <button className="btn btn-outline" onClick={() => setReturningId(null)}>
-                    Anulează
-                  </button>
-                </div>
+          {/* Return inline form */}
+          {returningId && (
+            <div className="inline-form">
+              <h4>Restituire avans</h4>
+              <div className="field">
+                <label>Data restituire</label>
+                <input
+                  className="input"
+                  type="date"
+                  value={returnDate}
+                  onChange={(e) => setReturnDate(e.target.value)}
+                />
               </div>
-            )}
-          </div>
+              <div className="form-actions">
+                <button
+                  className="btn-dark"
+                  disabled={returnAdvance.isPending}
+                  onClick={() => returnAdvance.mutate(returningId)}
+                >
+                  {returnAdvance.isPending ? "Se procesează..." : "Confirmă restituire"}
+                </button>
+                <button className="btn btn-outline" onClick={() => setReturningId(null)}>
+                  Anulează
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          TAB 2: DECONTURI
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ── Deconturi tab ── */}
       {tab === "deconturi" && (
-        <div className="panel-split">
-          {/* ── Create form ── */}
-          <div className="scr-card">
-            <h3 className="card-title">Decont nou</h3>
-            <div className="field">
-              <label>Angajat (opțional)</label>
-              <input
-                className="input"
-                value={rEmployee}
-                onChange={(e) => setREmployee(e.target.value)}
-                placeholder="Nume angajat"
-              />
+        <>
+          {/* ── Create form card ── */}
+          <div className="scr-card" style={{ marginBottom: 16 }}>
+            <div className="scr-toolbar">
+              <div className="tt">Decont nou</div>
             </div>
-            <div className="field">
-              <label>Avans legat (opțional)</label>
-              <select
-                className="input"
-                value={rAdvanceId}
-                onChange={(e) => setRAdvanceId(e.target.value)}
-              >
-                <option value="">— fără avans —</option>
-                {grantedAdvances.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {fmtDate(a.grantedDate)} · {fmtRON(a.amount)} · {a.employeeId ?? "—"}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>Destinație</label>
-              <input
-                className="input"
-                value={rDest}
-                onChange={(e) => setRDest(e.target.value)}
-                placeholder="ex. București"
-              />
-            </div>
-            <div className="form-row">
+            <div className="fgrid-form">
+              <div className="field">
+                <label>Angajat (opțional)</label>
+                <input
+                  className="input"
+                  value={rEmployee}
+                  onChange={(e) => setREmployee(e.target.value)}
+                  placeholder="Nume angajat"
+                />
+              </div>
+              <div className="field">
+                <label>Avans legat (opțional)</label>
+                <select
+                  className="select"
+                  value={rAdvanceId}
+                  onChange={(e) => setRAdvanceId(e.target.value)}
+                >
+                  <option value="">— fără avans —</option>
+                  {grantedAdvances.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {fmtDate(a.grantedDate)} · {fmtRON(a.amount)} · {a.employeeId ?? "—"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>Destinație</label>
+                <input
+                  className="input"
+                  value={rDest}
+                  onChange={(e) => setRDest(e.target.value)}
+                  placeholder="ex. București"
+                />
+              </div>
               <div className="field">
                 <label>De la</label>
                 <input
@@ -594,8 +618,6 @@ export function DeconturiPage() {
                   onChange={(e) => setRTo(e.target.value)}
                 />
               </div>
-            </div>
-            <div className="form-row">
               <div className="field">
                 <label>Zile delegare</label>
                 <input
@@ -610,7 +632,7 @@ export function DeconturiPage() {
               <div className="field">
                 <label>Diurnă acordată (RON)</label>
                 <input
-                  className="input"
+                  className="input num"
                   type="number"
                   step="0.01"
                   min="0"
@@ -619,21 +641,40 @@ export function DeconturiPage() {
                   placeholder="0.00"
                 />
               </div>
+              <div className="field">
+                <label>Salariu brut bază (RON) — plafonul B</label>
+                <input
+                  className="input num"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={rSalar}
+                  onChange={(e) => { setRSalar(e.target.value); setLiveCalc(null); }}
+                  placeholder="ex. 4000.00"
+                />
+              </div>
+              <div className="field">
+                <label>Data decont</label>
+                <input
+                  className="input"
+                  type="date"
+                  value={rDate}
+                  onChange={(e) => setRDate(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label>Note</label>
+                <input
+                  className="input"
+                  value={rNotes}
+                  onChange={(e) => setRNotes(e.target.value)}
+                  placeholder="Opțional"
+                />
+              </div>
             </div>
-            <div className="field">
-              <label>Salariu brut bază (RON) — pentru plafonul B</label>
-              <input
-                className="input"
-                type="number"
-                step="0.01"
-                min="0"
-                value={rSalar}
-                onChange={(e) => { setRSalar(e.target.value); setLiveCalc(null); }}
-                placeholder="ex. 4000.00"
-              />
-            </div>
+
             {rDiurna && rDays && rSalar && rFrom && (
-              <div style={{ marginBottom: "0.5rem" }}>
+              <div style={{ padding: "0 16px 8px" }}>
                 <button
                   className="btn btn-sm btn-outline"
                   onClick={triggerDiurnaCalc}
@@ -643,20 +684,24 @@ export function DeconturiPage() {
                 </button>
               </div>
             )}
-            {liveCalc && <DiurnaPanel calc={liveCalc} />}
+            {liveCalc && (
+              <div style={{ padding: "0 16px 8px" }}>
+                <DiurnaPanel calc={liveCalc} />
+              </div>
+            )}
 
             {/* Expense lines */}
-            <div className="field">
-              <label>Linii cheltuieli</label>
-              <table className="expense-lines-table">
+            <div style={{ padding: "0 16px 8px" }}>
+              <div style={{ fontSize: 13, fontWeight: 600, padding: "4px 0 8px" }}>Linii cheltuieli</div>
+              <table className="scr-table">
                 <thead>
                   <tr>
                     <th>Categorie</th>
                     <th>Descriere</th>
-                    <th>Sumă (RON)</th>
-                    <th>TVA ded.</th>
-                    <th>Cont</th>
-                    <th></th>
+                    <th className="r" style={{ width: 120 }}>Sumă (RON)</th>
+                    <th className="r" style={{ width: 100 }}>TVA ded.</th>
+                    <th style={{ width: 100 }}>Cont</th>
+                    <th style={{ width: 40 }}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -664,7 +709,7 @@ export function DeconturiPage() {
                     <tr key={i}>
                       <td>
                         <select
-                          className="input"
+                          className="select"
                           value={line.category}
                           onChange={(e) => updateLine(i, { category: e.target.value as LineForm["category"] })}
                         >
@@ -683,24 +728,26 @@ export function DeconturiPage() {
                       </td>
                       <td>
                         <input
-                          className="input text-right"
+                          className="input num"
                           type="number"
                           step="0.01"
                           min="0"
                           value={line.amount}
                           onChange={(e) => updateLine(i, { amount: e.target.value })}
                           placeholder="0.00"
+                          style={{ textAlign: "right" }}
                         />
                       </td>
                       <td>
                         <input
-                          className="input text-right"
+                          className="input num"
                           type="number"
                           step="0.01"
                           min="0"
                           value={line.vatAmount}
                           onChange={(e) => updateLine(i, { vatAmount: e.target.value })}
                           placeholder="—"
+                          style={{ textAlign: "right" }}
                         />
                       </td>
                       <td>
@@ -725,58 +772,52 @@ export function DeconturiPage() {
                   ))}
                 </tbody>
               </table>
-              <button className="btn btn-sm btn-outline" onClick={addLine} type="button">
+              <button className="btn btn-sm btn-outline" onClick={addLine} type="button" style={{ marginTop: 8 }}>
                 + Linie nouă
               </button>
             </div>
 
-            <div className="form-row">
-              <div className="field">
-                <label>Data decont *</label>
-                <input
-                  className="input"
-                  type="date"
-                  value={rDate}
-                  onChange={(e) => setRDate(e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label>Note</label>
-                <input
-                  className="input"
-                  value={rNotes}
-                  onChange={(e) => setRNotes(e.target.value)}
-                  placeholder="Opțional"
-                />
-              </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 16px 16px" }}>
+              <button
+                className="btn-dark"
+                disabled={!rDate || lines.every((l) => !l.amount) || createReport.isPending}
+                onClick={() => createReport.mutate()}
+              >
+                <Ic name="banknotes" />
+                {createReport.isPending ? "Se creează..." : "Salvează decont (ciornă)"}
+              </button>
             </div>
-
-            <button
-              className="btn-dark"
-              disabled={!rDate || lines.every((l) => !l.amount) || createReport.isPending}
-              onClick={() => createReport.mutate()}
-            >
-              {createReport.isPending ? "Se creează..." : "Salvează decont (ciornă)"}
-            </button>
           </div>
 
-          {/* ── Reports list + detail ── */}
+          {/* ── Deconturi list card ── */}
           <div className="scr-card">
-            <h3 className="card-title">Deconturi ({reports.length})</h3>
-            {reports.length === 0 ? (
-              <div className="table-empty">Niciun decont înregistrat.</div>
-            ) : (
-              <table className="scr-table">
-                <thead>
+            <div className="scr-toolbar">
+              <div className="tt">Deconturi de cheltuieli</div>
+            </div>
+            <table className="scr-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 130 }}>Data</th>
+                  <th>Angajat</th>
+                  <th>Destinație</th>
+                  <th className="r" style={{ width: 130 }}>Diurnă</th>
+                  <th style={{ width: 120 }}>Status</th>
+                  <th style={{ width: 140 }}></th>
+                </tr>
+              </thead>
+              {reports.length === 0 ? (
+                <tbody>
                   <tr>
-                    <th>Data</th>
-                    <th>Destinație</th>
-                    <th>Angajat</th>
-                    <th>Diurnă</th>
-                    <th>Status</th>
-                    <th></th>
+                    <td colSpan={6} style={{ padding: 0 }}>
+                      <div className="empty">
+                        <div className="ei"><Ic name="banknotes" /></div>
+                        <b>Niciun decont înregistrat.</b>
+                        Completati formularul de mai sus pentru a crea un decont.
+                      </div>
+                    </td>
                   </tr>
-                </thead>
+                </tbody>
+              ) : (
                 <tbody>
                   {reports.map((r) => (
                     <tr
@@ -786,18 +827,18 @@ export function DeconturiPage() {
                       style={{ cursor: "pointer" }}
                     >
                       <td>{fmtDate(r.reportDate)}</td>
-                      <td>{r.destination ?? "—"}</td>
                       <td>{r.employeeId ?? "—"}</td>
-                      <td className="text-right">
+                      <td>{r.destination ?? "—"}</td>
+                      <td className="r">
                         {r.diurnaAcordata ? fmtRON(r.diurnaAcordata) : "—"}
                         {r.diurnaImpozabila && parseFloat(r.diurnaImpozabila) > 0 && (
                           <span className="badge badge--red ml-1" title="Surplus impozabil">!</span>
                         )}
                       </td>
                       <td>{statusBadge(r.status)}</td>
-                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                      <td onClick={(e) => e.stopPropagation()}>
                         {r.status === "draft" && (
-                          <>
+                          <div style={{ display: "flex", gap: 4 }}>
                             <button
                               className="btn btn-sm btn-primary"
                               onClick={() => setApprovingId(r.id)}
@@ -810,14 +851,14 @@ export function DeconturiPage() {
                             >
                               Șterge
                             </button>
-                          </>
+                          </div>
                         )}
                       </td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
-            )}
+              )}
+            </table>
 
             {/* Approve inline form */}
             {approvingId && (
@@ -877,8 +918,8 @@ export function DeconturiPage() {
                         <tr>
                           <th>Categorie</th>
                           <th>Descriere</th>
-                          <th>Sumă</th>
-                          <th>TVA ded.</th>
+                          <th className="r">Sumă</th>
+                          <th className="r">TVA ded.</th>
                           <th>Cont</th>
                         </tr>
                       </thead>
@@ -887,8 +928,8 @@ export function DeconturiPage() {
                           <tr key={l.id}>
                             <td>{CATEGORIES.find((c) => c.value === l.category)?.label ?? l.category}</td>
                             <td>{l.description ?? "—"}</td>
-                            <td className="text-right">{fmtRON(l.amount)}</td>
-                            <td className="text-right">{l.vatAmount ? fmtRON(l.vatAmount) : "—"}</td>
+                            <td className="r">{fmtRON(l.amount)}</td>
+                            <td className="r">{l.vatAmount ? fmtRON(l.vatAmount) : "—"}</td>
                             <td>{l.accountCode}</td>
                           </tr>
                         ))}
@@ -907,9 +948,8 @@ export function DeconturiPage() {
               </div>
             )}
           </div>
-        </div>
+        </>
       )}
-      </div>
     </div>
   );
 }

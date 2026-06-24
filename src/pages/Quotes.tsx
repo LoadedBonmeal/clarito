@@ -398,11 +398,41 @@ export function QuotesPage() {
   const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
   const [menuQuote, setMenuQuote] = useState<Quote | undefined>();
 
+  const { data: companies = [] } = useQuery({
+    queryKey: queryKeys.companies.list(),
+    queryFn: () => api.companies.list(),
+    staleTime: 60_000,
+  });
+
+  const activeCompany = companies.find((c) => c.id === activeCompanyId);
+
+  const { data: contacts = [] } = useQuery({
+    queryKey: queryKeys.contacts.list({ companyId: activeCompanyId ?? undefined }),
+    queryFn: () => api.contacts.list({ companyId: activeCompanyId ?? undefined }),
+    enabled: !!activeCompanyId,
+    staleTime: 60_000,
+  });
+
+  const contactMap = useMemo(
+    () => new Map(contacts.map((c) => [c.id, c.legalName])),
+    [contacts],
+  );
+
   const { data: quotes = [], isLoading, error } = useQuery({
     queryKey: queryKeys.quotes.list(activeCompanyId ?? ""),
     queryFn: () => api.quotes.list(activeCompanyId!),
     enabled: !!activeCompanyId,
   });
+
+  const allCount = quotes.length;
+  const activeCount = useMemo(
+    () => quotes.filter((q) => !["invoiced", "cancelled", "expired"].includes(q.status)).length,
+    [quotes],
+  );
+  const invoicedCount = useMemo(
+    () => quotes.filter((q) => q.status === "invoiced").length,
+    [quotes],
+  );
 
   const filtered = useMemo(() => {
     let items = quotes;
@@ -426,40 +456,55 @@ export function QuotesPage() {
 
   if (!activeCompanyId) {
     return (
-      <div className="page-body">
+      <div className="main-inner wide">
         <div className="banner info">{t("quotes.selectCompany")}</div>
       </div>
     );
   }
 
+  const tabCounts: Record<TabFilter, number> = {
+    all: allCount,
+    active: activeCount,
+    invoiced: invoicedCount,
+  };
+
   return (
-    <div className="page-body">
+    <div className="main-inner wide">
       <div className="page-head">
         <div>
-          <h1 className="page-title">{t("quotes.title")}</h1>
-          <div className="page-sub num">{filtered.length} {t("quotes.title").toLowerCase()}</div>
+          <h1>{t("quotes.title")}</h1>
+          <p className="sub">
+            {allCount} {t("quotes.title").toLowerCase()} &middot; {activeCompany?.legalName ?? ""}
+          </p>
         </div>
-        <button className="btn-dark" onClick={() => { setEditQuote(undefined); setModalOpen(true); }}>
-          <Ic name="plus" />
-          {t("quotes.head.new")}
-        </button>
+        <div className="head-actions">
+          <button className="btn-dark" onClick={() => { setEditQuote(undefined); setModalOpen(true); }}>
+            <Ic name="plus" />
+            {t("quotes.head.new")}
+          </button>
+        </div>
       </div>
 
       <div className="scr-card">
         <div className="scr-toolbar">
           <div className="tabs">
-            {(["all","active","invoiced"] as TabFilter[]).map((tb) => (
-              <button key={tb} className={`tab${tab === tb ? " active" : ""}`} onClick={() => setTab(tb)}>
-                {t(`quotes.tabs.${tb}`)}
-              </button>
+            {(["all", "active", "invoiced"] as TabFilter[]).map((tb) => (
+              <div
+                key={tb}
+                className={"tab" + (tab === tb ? " active" : "")}
+                onClick={() => setTab(tb)}
+                style={{ cursor: "pointer" }}
+              >
+                {t(`quotes.tabs.${tb}`)}<span className="cnt">{tabCounts[tb]}</span>
+              </div>
             ))}
           </div>
           <div className="spacer" />
           <div className="scr-search">
-            <Ic name="search" />
+            <Ic name="lens" />
             <input
               type="text"
-              placeholder={t("quotes.search")}
+              placeholder="Cauta oferta..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -470,33 +515,43 @@ export function QuotesPage() {
         {error && <QueryErrorBanner label={t("quotes.states.errorLabel")} error={error} />}
 
         {!isLoading && !error && (
-          filtered.length === 0 ? (
-            <div className="state-row muted">
-              {search || tab !== "all" ? t("quotes.states.emptyFiltered") : t("quotes.states.emptyNone")}
-            </div>
-          ) : (
-            <table className="scr-table">
-              <thead>
+          <table className="scr-table">
+            <thead>
+              <tr>
+                <th style={{ width: 140 }}>{t("quotes.table.number")}</th>
+                <th style={{ width: 120 }}>{t("quotes.table.date")}</th>
+                <th>{t("quotes.table.client") || "Client"}</th>
+                <th style={{ width: 110 }}>{t("quotes.table.kind")}</th>
+                <th style={{ width: 130 }}>{t("quotes.table.validUntil")}</th>
+                <th className="r" style={{ width: 130 }}>{t("quotes.table.total")}</th>
+                <th style={{ width: 120 }}>{t("quotes.table.status")}</th>
+                <th style={{ width: 40 }}></th>
+              </tr>
+            </thead>
+            {filtered.length === 0 ? (
+              <tbody>
                 <tr>
-                  <th>{t("quotes.table.number")}</th>
-                  <th>{t("quotes.table.date")}</th>
-                  <th>{t("quotes.table.kind")}</th>
-                  <th>{t("quotes.table.validUntil")}</th>
-                  <th className="num">{t("quotes.table.total")}</th>
-                  <th>{t("quotes.table.status")}</th>
-                  <th style={{ width: 40 }}></th>
+                  <td colSpan={8} style={{ padding: 0 }}>
+                    <div className="empty">
+                      <div className="ei"><Ic name="calc" /></div>
+                      <b>Nicio oferta.</b>
+                      Creati o oferta cu butonul Oferta noua.
+                    </div>
+                  </td>
                 </tr>
-              </thead>
+              </tbody>
+            ) : (
               <tbody>
                 {filtered.map((q) => {
                   const chip = STATUS_CHIP[q.status] ?? { cls: "sent", labelKey: `quotes.status.${q.status}` };
                   return (
                     <tr key={q.id}>
-                      <td className="num">{q.fullNumber ?? `${q.series ?? "OFR"}-${String(q.number).padStart(4, "0")}`}</td>
+                      <td>{q.fullNumber ?? `${q.series ?? "OFR"}-${String(q.number).padStart(4, "0")}`}</td>
                       <td>{fmtRoDate(q.issueDate)}</td>
+                      <td>{(q.contactId && contactMap.get(q.contactId)) ?? "—"}</td>
                       <td><span className="chip">{t(`quotes.kind.${q.kind}`)}</span></td>
                       <td>{fmtRoDate(q.validUntil)}</td>
-                      <td className="num">{fmtRON(q.totalAmount)} {q.currency !== "RON" ? q.currency : ""}</td>
+                      <td className="r">{fmtRON(q.totalAmount)} {q.currency !== "RON" ? q.currency : ""}</td>
                       <td><span className={`chip ${chip.cls}`}>{t(chip.labelKey)}</span></td>
                       <td>
                         <button
@@ -513,8 +568,8 @@ export function QuotesPage() {
                   );
                 })}
               </tbody>
-            </table>
-          )
+            )}
+          </table>
         )}
       </div>
 

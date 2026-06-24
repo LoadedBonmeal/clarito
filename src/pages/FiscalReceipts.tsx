@@ -530,7 +530,7 @@ function DedupPanel({ companyId, detail, onRefresh }: DedupPanelProps) {
         return (
           <div
             key={inv.id}
-            className={`dedup-row ${linked ? "dedup-linked" : ""}`}
+            className={"dedup-row" + (linked ? " dedup-linked" : "")}
           >
             <label className="dedup-chk">
               <input
@@ -655,7 +655,7 @@ function DetailDrawer({ receiptId, companyId, onClose }: DetailDrawerProps) {
             <span className="drawer-sub">{fmtRoDate(receipt.reportDate)}</span>
           </div>
           <div className="drawer-head-acts">
-            <span className={`badge ${STATUS_CLASS[receipt.status]}`}>
+            <span className={"badge " + STATUS_CLASS[receipt.status]}>
               {STATUS_LABEL[receipt.status]}
             </span>
             {isDraft && (
@@ -794,7 +794,6 @@ export function FiscalReceiptsPage() {
     isLoading,
     isError,
     error,
-    refetch,
   } = useQuery({
     queryKey: ["fiscalReceipts", activeCompanyId],
     queryFn: () =>
@@ -803,6 +802,13 @@ export function FiscalReceiptsPage() {
         : Promise.resolve([] as FiscalReceipt[]),
     enabled: !!activeCompanyId,
   });
+
+  const { data: companies = [] } = useQuery({
+    queryKey: ["companies"],
+    queryFn: () => api.companies.list(),
+  });
+  const activeCompany = companies.find((c) => c.id === activeCompanyId);
+  const companyName = activeCompany?.legalName ?? "";
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.fiscalReceipts.delete(id, activeCompanyId!),
@@ -825,22 +831,19 @@ export function FiscalReceiptsPage() {
     );
   }
 
+  const count = receipts.length;
+
   return (
-    <div className="main-inner">
+    <div className="main-inner wide">
       {/* Header */}
       <div className="page-head">
         <div>
-          <h1 className="page-title">Bonuri fiscale / Raport Z</h1>
-          <p className="page-sub">{receipts.length} bonuri înregistrate</p>
+          <h1>Bonuri fiscale / Raport Z</h1>
+          <p className="sub">
+            {count} {count === 1 ? "bon înregistrat" : "bonuri inregistrate"} · {companyName}
+          </p>
         </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <button
-            className="sq-btn"
-            onClick={() => void refetch()}
-            title="Reîmprospătează"
-          >
-            <Ic name="arrowPath" />
-          </button>
+        <div className="head-actions">
           <button className="btn-dark" onClick={() => setShowCreate(true)}>
             <Ic name="plus" /> Raport Z nou
           </button>
@@ -864,80 +867,86 @@ export function FiscalReceiptsPage() {
       <div className="scr-card">
         {isLoading && <div className="state-row">Se încarcă…</div>}
         {isError && <QueryErrorBanner error={error} label="bonurile fiscale" />}
-        {!isLoading && !isError && receipts.length === 0 && (
-          <div className="state-row muted">
-            Niciun Raport Z. Apăsați „Raport Z nou" pentru a înregistra primul
-            bon.
-          </div>
-        )}
-        {!isLoading && !isError && receipts.length > 0 && (
+
+        {!isLoading && !isError && (
           <table className="scr-table">
             <thead>
               <tr>
-                <th>Dată</th>
-                <th>Serie / Nr. Z</th>
-                <th>Nr. bonuri</th>
-                <th className="r">Numerar</th>
-                <th className="r">Card</th>
-                <th className="r">Total</th>
-                <th>Status</th>
+                <th style={{ width: "130px" }}>Data</th>
+                <th className="r" style={{ width: "120px" }}>Total</th>
+                <th className="r" style={{ width: "110px" }}>TVA 21%</th>
+                <th className="r" style={{ width: "110px" }}>TVA 11%</th>
+                <th className="r" style={{ width: "110px" }}>TVA 9%</th>
+                <th className="r" style={{ width: "120px" }}>Numerar</th>
+                <th className="r" style={{ width: "120px" }}>Card</th>
+                <th style={{ width: "110px" }}>Status</th>
                 <th></th>
               </tr>
             </thead>
-            <tbody>
-              {receipts.map((r) => (
-                <tr
-                  key={r.id}
-                  className="trow-link"
-                  onClick={() => setSelectedId(r.id)}
-                >
-                  <td>{fmtRoDate(r.reportDate)}</td>
-                  <td>
-                    {r.serieCasa} / Z{r.nrZ}
-                  </td>
-                  <td>{r.nrBonuri}</td>
-                  <td className="r">{fmtRON(parseDec(r.numerar))}</td>
-                  <td className="r">{fmtRON(parseDec(r.card))}</td>
-                  <td className="r">
-                    <strong>{fmtRON(parseDec(r.total))}</strong>
-                  </td>
-                  <td>
-                    <span className={`badge ${STATUS_CLASS[r.status]}`}>
-                      {STATUS_LABEL[r.status]}
-                    </span>
-                  </td>
-                  <td className="row-acts">
-                    {r.status === "DRAFT" && (
-                      <button
-                        className="sq-btn sq-sm"
-                        title="Șterge"
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          const ok = await confirm(
-                            "Ștergeți acest bon fiscal?",
-                            { title: "Confirmare" }
-                          );
-                          if (ok) deleteMutation.mutate(r.id);
-                        }}
-                      >
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth={1.5}
-                          dangerouslySetInnerHTML={{
-                            __html:
-                              '<path d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/>',
-                          }}
-                        />
-                      </button>
-                    )}
+            {receipts.length === 0 ? (
+              <tbody>
+                <tr>
+                  <td colSpan={9} style={{ padding: 0 }}>
+                    <div className="empty">
+                      <div className="ei"><Ic name="receipt" /></div>
+                      <b>Niciun Raport Z.</b>
+                      Apasati Raport Z nou.
+                    </div>
                   </td>
                 </tr>
-              ))}
-            </tbody>
+              </tbody>
+            ) : (
+              <tbody>
+                {receipts.map((r) => {
+                  // Extract per-rate TVA from vatLines if available on the list item,
+                  // otherwise show em-dash (detail drawer has full vatLines breakdown)
+                  const tva21 = (r as any).tva21 != null ? fmtRON(parseDec((r as any).tva21)) : "—";
+                  const tva11 = (r as any).tva11 != null ? fmtRON(parseDec((r as any).tva11)) : "—";
+                  const tva9  = (r as any).tva9  != null ? fmtRON(parseDec((r as any).tva9))  : "—";
+
+                  return (
+                    <tr
+                      key={r.id}
+                      className="trow-link"
+                      onClick={() => setSelectedId(r.id)}
+                    >
+                      <td>{fmtRoDate(r.reportDate)}</td>
+                      <td className="r">
+                        <strong>{fmtRON(parseDec(r.total))}</strong>
+                      </td>
+                      <td className="r">{tva21}</td>
+                      <td className="r">{tva11}</td>
+                      <td className="r">{tva9}</td>
+                      <td className="r">{fmtRON(parseDec(r.numerar))}</td>
+                      <td className="r">{fmtRON(parseDec(r.card))}</td>
+                      <td>
+                        <span className={"badge " + STATUS_CLASS[r.status]}>
+                          {STATUS_LABEL[r.status]}
+                        </span>
+                      </td>
+                      <td className="row-acts">
+                        {r.status === "DRAFT" && (
+                          <button
+                            className="sq-btn sq-sm"
+                            title="Șterge"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              const ok = await confirm(
+                                "Ștergeți acest bon fiscal?",
+                                { title: "Confirmare" }
+                              );
+                              if (ok) deleteMutation.mutate(r.id);
+                            }}
+                          >
+                            <Ic name="trash" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            )}
           </table>
         )}
       </div>

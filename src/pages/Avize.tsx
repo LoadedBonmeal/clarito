@@ -58,8 +58,8 @@ function makeEmptyRow(): LineRow {
   };
 }
 
-
-type TabFilter = "all" | "draft" | "issued" | "invoiced";
+// "all" | "draft" | "facturate" — "facturate" covers both ISSUED and INVOICED
+type TabFilter = "all" | "draft" | "facturate";
 
 const STATUS_CHIP: Record<string, { cls: string }> = {
   DRAFT:    { cls: "sent" },
@@ -508,6 +508,14 @@ function RowActions({ aviz, companyId, onPrint, onClose, anchor }: RowActionsPro
   );
 }
 
+// ─── Tab definitions ──────────────────────────────────────────────────────────
+
+const TABS: { id: TabFilter; label: string }[] = [
+  { id: "all",       label: "Toate" },
+  { id: "draft",     label: "Draft" },
+  { id: "facturate", label: "Facturate" },
+];
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function AvizePage() {
@@ -546,9 +554,22 @@ export function AvizePage() {
   const contactName = (contactId: string) =>
     contacts.find((c) => c.id === contactId)?.legalName ?? contactId;
 
+  // Count per tab (used for <span className="cnt">)
+  const countAll       = avize.length;
+  const countDraft     = avize.filter((a) => a.status === "DRAFT").length;
+  const countFacturate = avize.filter((a) => a.status === "ISSUED" || a.status === "INVOICED").length;
+
+  const tabCount = (id: TabFilter): number => {
+    if (id === "all")       return countAll;
+    if (id === "draft")     return countDraft;
+    if (id === "facturate") return countFacturate;
+    return 0;
+  };
+
   const filtered = useMemo(() => {
     let items = avize;
-    if (tab !== "all") items = items.filter((a) => a.status === tab.toUpperCase());
+    if (tab === "draft")     items = items.filter((a) => a.status === "DRAFT");
+    if (tab === "facturate") items = items.filter((a) => a.status === "ISSUED" || a.status === "INVOICED");
     if (search.trim()) {
       const s = search.toLowerCase();
       items = items.filter((a) =>
@@ -586,44 +607,49 @@ export function AvizePage() {
 
   if (!activeCompanyId) {
     return (
-      <div className="page-body">
+      <div className="main-inner wide">
         <div className="banner info">{t("avize.selectCompany")}</div>
       </div>
     );
   }
 
   return (
-    <div className="page-body">
+    <div className="main-inner wide">
+
       <div className="page-head">
         <div>
-          <h1 className="page-title">{t("avize.title")}</h1>
-          <div className="page-sub num">{filtered.length} {t("avize.title").toLowerCase()}</div>
+          <h1>Avize de insotire a marfii</h1>
+          <p className="sub">
+            Aviz cod 14-3-6A · {activeCompany?.legalName ?? ""}
+          </p>
         </div>
-        <button className="btn-dark" onClick={() => setModalOpen(true)}>
-          <Ic name="plus" />
-          {t("avize.head.new")}
-        </button>
+        <div className="head-actions">
+          <button className="btn-dark" onClick={() => setModalOpen(true)}>
+            <Ic name="plus" />
+            {t("avize.head.new")}
+          </button>
+        </div>
       </div>
 
       <div className="scr-card">
         <div className="scr-toolbar">
           <div className="tabs">
-            {(["all","draft","issued","invoiced"] as TabFilter[]).map((tb) => (
-              <button
-                key={tb}
-                className={`tab${tab === tb ? " active" : ""}`}
-                onClick={() => setTab(tb)}
+            {TABS.map(({ id, label }) => (
+              <div
+                key={id}
+                className={"tab" + (tab === id ? " active" : "")}
+                onClick={() => setTab(id)}
               >
-                {t(`avize.tabs.${tb}`)}
-              </button>
+                {label}<span className="cnt">{tabCount(id)}</span>
+              </div>
             ))}
           </div>
           <div className="spacer" />
           <div className="scr-search">
-            <Ic name="search" />
+            <Ic name="lens" />
             <input
               type="text"
-              placeholder={t("avize.search")}
+              placeholder="Cauta dupa numar sau client..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -634,23 +660,30 @@ export function AvizePage() {
         {error && <QueryErrorBanner label={t("avize.states.errorLabel")} error={error} />}
 
         {!isLoading && !error && (
-          filtered.length === 0 ? (
-            <div className="state-row muted">
-              {search || tab !== "all" ? t("avize.states.emptyFiltered") : t("avize.states.emptyNone")}
-            </div>
-          ) : (
-            <table className="scr-table">
-              <thead>
+          <table className="scr-table">
+            <thead>
+              <tr>
+                <th style={{ width: 150 }}>Numar</th>
+                <th style={{ width: 130 }}>Data</th>
+                <th>Client</th>
+                <th className="r" style={{ width: 150 }}>Valoare</th>
+                <th style={{ width: 120 }}>Status</th>
+                <th style={{ width: 40 }}></th>
+              </tr>
+            </thead>
+            {filtered.length === 0 ? (
+              <tbody>
                 <tr>
-                  <th>{t("avize.table.number")}</th>
-                  <th>{t("avize.table.date")}</th>
-                  <th>{t("avize.table.contact")}</th>
-                  <th>{t("avize.table.destination")}</th>
-                  <th className="num">{t("avize.table.total")}</th>
-                  <th>{t("avize.table.status")}</th>
-                  <th style={{ width: 40 }}></th>
+                  <td colSpan={6} style={{ padding: 0 }}>
+                    <div className="empty">
+                      <div className="ei"><Ic name="truck" /></div>
+                      <b>Niciun aviz.</b>
+                      Emiteti un aviz de insotire a marfii.
+                    </div>
+                  </td>
                 </tr>
-              </thead>
+              </tbody>
+            ) : (
               <tbody>
                 {filtered.map((a) => {
                   const chip = STATUS_CHIP[a.status] ?? { cls: "sent" };
@@ -659,8 +692,7 @@ export function AvizePage() {
                       <td className="num">{a.fullNumber ?? `${a.series}-${String(a.number).padStart(4, "0")}`}</td>
                       <td>{fmtRoDate(a.avizDate)}</td>
                       <td>{contactName(a.contactId)}</td>
-                      <td>{a.destination ?? "—"}</td>
-                      <td className="num">{fmtRON(a.totalAmount)} {a.currency !== "RON" ? a.currency : ""}</td>
+                      <td className="r">{fmtRON(a.totalAmount)}{a.currency !== "RON" ? ` ${a.currency}` : ""}</td>
                       <td><span className={`chip ${chip.cls}`}>{t(`avize.status.${a.status}`)}</span></td>
                       <td>
                         <button
@@ -677,8 +709,8 @@ export function AvizePage() {
                   );
                 })}
               </tbody>
-            </table>
-          )
+            )}
+          </table>
         )}
       </div>
 
