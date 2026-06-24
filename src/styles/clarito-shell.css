@@ -120,10 +120,12 @@
 .nav-primary .ic{stroke:var(--text);stroke-width:1.8}
 .sec{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);font-weight:600;padding:0 11px;margin:15px 0 5px;white-space:nowrap;overflow:hidden}
 .nav-group{display:flex;flex-direction:column;gap:1px}
-/* "Mai multe" drawer — display toggle (reliable in collapsed + expanded) */
-.nav-extra{overflow:hidden}
-.nav-extra-inner{display:none;flex-direction:column;gap:1px}
-.nav-extra.open .nav-extra-inner{display:flex}
+/* "Mai multe" drawer — folder-style unfold: animate grid-row 0fr→1fr so it
+   expands to its natural height (the item cascade lives in clarito-anim.css §14). */
+.nav-extra{display:grid;grid-template-rows:0fr;overflow:hidden;transition:grid-template-rows .34s cubic-bezier(.2,.8,.2,1)}
+.nav-extra.open{grid-template-rows:1fr}
+.nav-extra-inner{display:flex;flex-direction:column;gap:1px;min-height:0;overflow:hidden}
+.nav-extra:not(.open) .nav-extra-inner{pointer-events:none}
 .nav-more{display:flex;align-items:center;gap:12px;height:36px;padding:0 11px;border-radius:10px;font-size:13px;color:var(--text-2);background:none;border:0;cursor:pointer;width:100%;font-family:inherit;margin-top:1px}
 .nav-more:hover{background:var(--fill);color:var(--text)}
 .nav-more .ic{width:18px;height:18px;transition:transform .22s cubic-bezier(.2,.8,.2,1)}

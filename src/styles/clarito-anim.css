@@ -107,6 +107,13 @@ svg[data-ic="trash"],svg[data-ic="pen"],svg[data-ic="copy"],svg[data-ic="undo"],
 .side-scroll .nav-item:hover [data-nic="truck"]{transform:translateX(3.5px)}
 .side-scroll .nav-item:hover [data-nic="cog"]{transform:rotate(55deg)}
 .side-scroll .nav-item:hover [data-nic="plus"]{transform:rotate(90deg)}
+/* STOCURI / OPERARE icons — same one-meaning-per-icon principle */
+.side-scroll .nav-item:hover [data-nic="swap"]{transform:rotate(180deg)}
+.side-scroll .nav-item:hover [data-nic="archive"]{transform:translateY(-2px) scale(1.05)}
+.side-scroll .nav-item:hover [data-nic="banknotes"]{transform:translateY(-2px) rotate(-3deg)}
+.side-scroll .nav-item:hover [data-nic="clipboard"]{transform:rotate(-5deg);transform-origin:50% 12%}
+@keyframes nicSnip{0%{transform:rotate(0)}38%{transform:rotate(-15deg)}68%{transform:rotate(7deg)}100%{transform:rotate(0)}}
+.side-scroll .nav-item:hover [data-nic="scissors"]{animation:nicSnip .42s var(--anim-ease) !important;transform-origin:32% 50%}
 @keyframes nicBell{0%{transform:rotate(0)}28%{transform:rotate(-11deg)}58%{transform:rotate(8deg)}82%{transform:rotate(-3deg)}100%{transform:rotate(0)}}
 .side-scroll .nav-item:hover [data-nic="bell"]{animation:nicBell .5s var(--anim-ease) !important;transform-origin:50% 15%}
 
@@ -161,6 +168,28 @@ svg[data-ic="trash"],svg[data-ic="pen"],svg[data-ic="copy"],svg[data-ic="undo"],
 .modal-back.show .modal{animation:anModalIn .15s var(--anim-ease)}
 .modal-back.closing .modal{animation:anModalOut .12s var(--anim-ease) forwards}
 .modal-back.closing{pointer-events:none}
+
+/* ═══ 13. EMPTY-STATE icon — soft entrance, then a slow idle float (alive, like
+   the breathing SPV dot). The .ei wrapper does the entrance; the svg floats. ═══ */
+@keyframes anEmptyIn{0%{opacity:0;transform:translateY(7px) scale(.9)}68%{opacity:1;transform:translateY(-1px) scale(1.03)}100%{opacity:1;transform:none}}
+@keyframes anEmptyFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.5px)}}
+.empty .ei{animation:anEmptyIn .5s var(--anim-ease) backwards}
+.empty .ei svg{animation:anEmptyFloat 3.8s ease-in-out .5s infinite}
+
+/* ═══ 14. "Mai multe" drawer — folder unfold: items cascade in top-to-bottom as
+   the grid-row opens (height transition lives in clarito-shell.css). ═══ */
+@keyframes anDrawerItem{from{opacity:0;transform:translateY(-7px) scale(.98)}to{opacity:1;transform:none}}
+.nav-extra.open .nav-item{animation:anDrawerItem .3s var(--anim-ease) backwards}
+.nav-extra.open .nav-item:nth-child(1){animation-delay:.03s}
+.nav-extra.open .nav-item:nth-child(2){animation-delay:.06s}
+.nav-extra.open .nav-item:nth-child(3){animation-delay:.09s}
+.nav-extra.open .nav-item:nth-child(4){animation-delay:.12s}
+.nav-extra.open .nav-item:nth-child(5){animation-delay:.15s}
+.nav-extra.open .nav-item:nth-child(6){animation-delay:.18s}
+.nav-extra.open .nav-item:nth-child(7){animation-delay:.21s}
+.nav-extra.open .nav-item:nth-child(8){animation-delay:.24s}
+.nav-extra.open .nav-item:nth-child(9){animation-delay:.27s}
+.nav-extra.open .nav-item:nth-child(n+10){animation-delay:.3s}
 
 }/* end no-preference */
 
