@@ -40,9 +40,9 @@ export function GestiuniPage() {
 
   if (!companyId) {
     return (
-      <div className="page">
+      <div className="main-inner">
         <div className="page-head">
-          <div className="page-title">{t("gestiuni.title")}</div>
+          <h1 className="page-title">{t("gestiuni.title")}</h1>
         </div>
         <div className="scr-card" style={{ padding: 24, color: "var(--text-2)" }}>
           {t("gestiuni.selectCompany")}
@@ -52,7 +52,7 @@ export function GestiuniPage() {
   }
 
   return (
-    <div className="page">
+    <div className="main-inner">
       <div className="page-head">
         <div>
           <div className="page-title">{t("gestiuni.title")}</div>

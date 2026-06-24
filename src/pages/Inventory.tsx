@@ -249,7 +249,7 @@ function SessionDetail({ session, companyId, onBack, onSessionChanged }: Session
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button className="ic-btn" onClick={onBack} title="Înapoi"><Ic name="chevL" /></button>
           <div>
-            <div className="page-title">{t("inventory.sessionOf", { date: session.referenceDate })}</div>
+            <h1 className="page-title">{t("inventory.sessionOf", { date: session.referenceDate })}</h1>
             <div className="page-sub">
               {t(`inventory.sessionType.${session.type}`)}
               {session.gestiune ? ` — ${session.gestiune}` : ""}
@@ -427,7 +427,7 @@ export function InventoryPage() {
 
   if (!activeCompanyId) {
     return (
-      <div className="page" style={{ padding: 32, color: "var(--text-2)" }}>
+      <div className="main-inner" style={{ padding: 32, color: "var(--text-2)" }}>
         Selectați o companie activă.
       </div>
     );
@@ -435,7 +435,7 @@ export function InventoryPage() {
 
   if (activeSession) {
     return (
-      <div className="page">
+      <div className="main-inner">
         <SessionDetail
           session={activeSession}
           companyId={activeCompanyId}
@@ -450,7 +450,7 @@ export function InventoryPage() {
   }
 
   return (
-    <div className="page">
+    <div className="main-inner">
       {showCreate && (
         <CreateSessionModal
           companyId={activeCompanyId}
@@ -466,7 +466,7 @@ export function InventoryPage() {
       {/* Page header */}
       <div className="page-head">
         <div>
-          <div className="page-title">{t("inventory.pageTitle")}</div>
+          <h1 className="page-title">{t("inventory.pageTitle")}</h1>
           <div className="page-sub">{t("inventory.pageSubtitle")}</div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -484,7 +484,7 @@ export function InventoryPage() {
               <option key={y} value={y}>{y}</option>
             ))}
           </select>
-          <button className="pill-btn" onClick={() => setShowCreate(true)}>
+          <button className="btn-dark" onClick={() => setShowCreate(true)}>
             <Ic name="plus" /> {t("inventory.newSession")}
           </button>
         </div>
@@ -492,9 +492,7 @@ export function InventoryPage() {
 
       {/* Sessions list */}
       {sessions.length === 0 ? (
-        <div className="scr-card" style={{ padding: 48, textAlign: "center", color: "var(--text-2)" }}>
-          {t("inventory.empty")}
-        </div>
+        <div className="state-row muted">{t("inventory.empty")}</div>
       ) : (
         <div className="scr-card">
           <table className="scr-table">

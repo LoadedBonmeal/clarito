@@ -42,12 +42,12 @@ function NirList({
   });
 
   return (
-    <div className="page">
+    <div className="main-inner">
       <div className="page-head">
         <div>
-          <div className="page-title">{t("nir.title")}</div>
+          <h1 className="page-title">{t("nir.title")}</h1>
+          <div className="page-sub">{nirList.length > 0 ? `${nirList.length} NIR-uri` : ""}</div>
         </div>
-        <div className="spacer" />
         <button className="btn-dark" onClick={onNew}>
           + {t("nir.new")}
         </button>
@@ -56,61 +56,53 @@ function NirList({
       {error && <QueryErrorBanner error={error} label={t("nir.errorLabel")} />}
 
       <div className="scr-card">
-        <table className="scr-table">
-          <thead>
-            <tr>
-              <th>{t("nir.colNumber")}</th>
-              <th>{t("nir.colDate")}</th>
-              <th>{t("nir.colSupplier")}</th>
-              <th>{t("nir.colStatus")}</th>
-              <th>{t("nir.colRetail")}</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading && (
-              <tr>
-                <td colSpan={6} style={{ textAlign: "center", padding: 24 }}>
-                  {t("nir.loading")}
-                </td>
-              </tr>
-            )}
-            {!isLoading && nirList.length === 0 && (
-              <tr>
-                <td colSpan={6} style={{ textAlign: "center", padding: 24, color: "var(--text-2)" }}>
-                  {t("nir.empty")}
-                </td>
-              </tr>
-            )}
-            {nirList.map((n) => (
-              <tr key={n.id} style={{ cursor: "pointer" }} onClick={() => onView(n)}>
-                <td>
-                  <span className="doc">
-                    {n.nirSeries ? `${n.nirSeries}-` : ""}
-                    {n.nirNumber}
-                  </span>
-                </td>
-                <td>{n.nirDate}</td>
-                <td>{n.supplierName ?? "—"}</td>
-                <td>
-                  <span className={`chip ${n.status === "finalized" ? "sent" : "draft"}`}>
-                    {n.status === "finalized" ? t("nir.statusFinalized") : t("nir.statusDraft")}
-                  </span>
-                </td>
-                <td>
-                  {n.retailMode && (
-                    <span className="chip sent">{t("nir.colRetail")}</span>
-                  )}
-                </td>
-                <td style={{ textAlign: "right" }}>
-                  <button className="pill-btn" onClick={(e) => { e.stopPropagation(); onView(n); }}>
-                    {t("nir.viewDetail")}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {isLoading && <div className="state-row">{t("nir.loading")}</div>}
+        {!isLoading && !error && (nirList.length === 0
+          ? <div className="state-row muted">{t("nir.empty")}</div>
+          : (
+            <table className="scr-table">
+              <thead>
+                <tr>
+                  <th>{t("nir.colNumber")}</th>
+                  <th>{t("nir.colDate")}</th>
+                  <th>{t("nir.colSupplier")}</th>
+                  <th>{t("nir.colStatus")}</th>
+                  <th>{t("nir.colRetail")}</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {nirList.map((n) => (
+                  <tr key={n.id} style={{ cursor: "pointer" }} onClick={() => onView(n)}>
+                    <td>
+                      <span className="doc">
+                        {n.nirSeries ? `${n.nirSeries}-` : ""}
+                        {n.nirNumber}
+                      </span>
+                    </td>
+                    <td>{n.nirDate}</td>
+                    <td>{n.supplierName ?? "—"}</td>
+                    <td>
+                      <span className={`chip ${n.status === "finalized" ? "sent" : "draft"}`}>
+                        {n.status === "finalized" ? t("nir.statusFinalized") : t("nir.statusDraft")}
+                      </span>
+                    </td>
+                    <td>
+                      {n.retailMode && (
+                        <span className="chip sent">{t("nir.colRetail")}</span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      <button className="pill-btn" onClick={(e) => { e.stopPropagation(); onView(n); }}>
+                        {t("nir.viewDetail")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+        )}
       </div>
     </div>
   );
@@ -211,10 +203,11 @@ function NirCreateForm({
   };
 
   return (
-    <div className="page">
+    <div className="main-inner">
       <div className="page-head">
-        <div className="page-title">{t("nir.new")}</div>
-        <div className="spacer" />
+        <div>
+          <h1 className="page-title">{t("nir.new")}</h1>
+        </div>
         <button className="pill-btn" onClick={onCancel}>{t("nir.cancel")}</button>
       </div>
 
@@ -464,15 +457,15 @@ function NirDetail({
 
   if (isLoading) {
     return (
-      <div className="page">
-        <p style={{ padding: 32 }}>{t("nir.loading")}</p>
+      <div className="main-inner">
+        <div className="state-row">{t("nir.loading")}</div>
       </div>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="page">
+      <div className="main-inner">
         <QueryErrorBanner error={error} label={t("nir.errorLabel")} />
         <button className="pill-btn" onClick={onBack}>{t("nir.backToList")}</button>
       </div>
@@ -490,7 +483,7 @@ function NirDetail({
   const totalPret = lines.reduce((s, l) => s + parseFloat(l.pretAmanunt || "0"), 0);
 
   return (
-    <div className="page">
+    <div className="main-inner">
       <div className="page-head" style={{ display: "flex", gap: 8 }}>
         <button className="pill-btn" onClick={onBack}>{t("nir.backToList")}</button>
         <div className="spacer" />
@@ -673,9 +666,11 @@ export function NirPage() {
 
   if (!companyId) {
     return (
-      <div className="page">
+      <div className="main-inner">
         <div className="page-head">
-          <div className="page-title">{t("nir.title")}</div>
+          <div>
+            <h1 className="page-title">{t("nir.title")}</h1>
+          </div>
         </div>
         <div className="scr-card" style={{ padding: 24, color: "var(--text-2)" }}>
           {t("nir.selectCompany")}

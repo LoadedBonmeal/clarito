@@ -338,45 +338,51 @@ export function DeconturiPage() {
 
   if (!companyId) {
     return (
-      <div className="page-empty">
-        <p>Selectați o companie pentru a gestiona deconturile.</p>
+      <div className="main-inner">
+        <div className="state-row muted">
+          <p>Selectați o companie pentru a gestiona deconturile.</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="page-root">
+    <div className="main-inner">
       {/* ── Header ── */}
       <div className="page-head">
         <div>
           <h1 className="page-title">Deconturi & Avansuri de trezorerie</h1>
-          <p className="page-sub">
+          <div className="page-sub">
             Avansuri 542 · Deconturi cu diurnă (HG 714/2018, CF art.76) · GL automat
-          </p>
+          </div>
         </div>
       </div>
 
-      {/* ── Tabs ── */}
-      <div className="tabs">
-        <button
-          className={`tab${tab === "avansuri" ? " tab--active" : ""}`}
-          onClick={() => setTab("avansuri")}
-        >
-          Avansuri de trezorerie
-          {advances.filter((a) => a.status === "granted").length > 0 && (
-            <span className="tab-badge">{advances.filter((a) => a.status === "granted").length}</span>
-          )}
-        </button>
-        <button
-          className={`tab${tab === "deconturi" ? " tab--active" : ""}`}
-          onClick={() => setTab("deconturi")}
-        >
-          Deconturi de cheltuieli
-          {reports.filter((r) => r.status === "draft").length > 0 && (
-            <span className="tab-badge">{reports.filter((r) => r.status === "draft").length}</span>
-          )}
-        </button>
-      </div>
+      {/* ── Tabs inside scr-card toolbar ── */}
+      <div className="scr-card">
+        <div className="scr-toolbar">
+          <div className="tabs">
+            <button
+              className={`tab${tab === "avansuri" ? " active" : ""}`}
+              onClick={() => setTab("avansuri")}
+            >
+              Avansuri de trezorerie
+              {advances.filter((a) => a.status === "granted").length > 0 && (
+                <span className="tab-badge">{advances.filter((a) => a.status === "granted").length}</span>
+              )}
+            </button>
+            <button
+              className={`tab${tab === "deconturi" ? " active" : ""}`}
+              onClick={() => setTab("deconturi")}
+            >
+              Deconturi de cheltuieli
+              {reports.filter((r) => r.status === "draft").length > 0 && (
+                <span className="tab-badge">{reports.filter((r) => r.status === "draft").length}</span>
+              )}
+            </button>
+          </div>
+          <div className="spacer" />
+        </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
           TAB 1: AVANSURI
@@ -386,63 +392,61 @@ export function DeconturiPage() {
           {/* ── Create form ── */}
           <div className="scr-card">
             <h3 className="card-title">Acordare avans</h3>
-            <div className="form-grid">
-              <div className="form-row">
-                <label className="form-label">Angajat (opțional)</label>
-                <input
-                  className="form-input"
-                  value={advEmployee}
-                  onChange={(e) => setAdvEmployee(e.target.value)}
-                  placeholder="Nume angajat"
-                />
-              </div>
-              <div className="form-row">
-                <label className="form-label">Suma (RON) *</label>
-                <input
-                  className="form-input"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={advAmount}
-                  onChange={(e) => setAdvAmount(e.target.value)}
-                  placeholder="0.00"
-                />
-              </div>
-              <div className="form-row">
-                <label className="form-label">Data acordare *</label>
-                <input
-                  className="form-input"
-                  type="date"
-                  value={advDate}
-                  onChange={(e) => setAdvDate(e.target.value)}
-                />
-              </div>
-              <div className="form-row">
-                <label className="form-label">Mod plată</label>
-                <select
-                  className="form-input"
-                  value={advMethod}
-                  onChange={(e) => setAdvMethod(e.target.value as "cash" | "bank")}
-                >
-                  <option value="cash">Numerar (5311)</option>
-                  <option value="bank">Transfer bancar (5121)</option>
-                </select>
-              </div>
-              <div className="form-row">
-                <label className="form-label">Note</label>
-                <input
-                  className="form-input"
-                  value={advNotes}
-                  onChange={(e) => setAdvNotes(e.target.value)}
-                  placeholder="Opțional"
-                />
-              </div>
+            <div className="field">
+              <label>Angajat (opțional)</label>
+              <input
+                className="input"
+                value={advEmployee}
+                onChange={(e) => setAdvEmployee(e.target.value)}
+                placeholder="Nume angajat"
+              />
+            </div>
+            <div className="field">
+              <label>Suma (RON) *</label>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                min="0"
+                value={advAmount}
+                onChange={(e) => setAdvAmount(e.target.value)}
+                placeholder="0.00"
+              />
+            </div>
+            <div className="field">
+              <label>Data acordare *</label>
+              <input
+                className="input"
+                type="date"
+                value={advDate}
+                onChange={(e) => setAdvDate(e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Mod plată</label>
+              <select
+                className="input"
+                value={advMethod}
+                onChange={(e) => setAdvMethod(e.target.value as "cash" | "bank")}
+              >
+                <option value="cash">Numerar (5311)</option>
+                <option value="bank">Transfer bancar (5121)</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Note</label>
+              <input
+                className="input"
+                value={advNotes}
+                onChange={(e) => setAdvNotes(e.target.value)}
+                placeholder="Opțional"
+              />
             </div>
             <div className="form-hint">
               Nota GL: <code>542 D = {advMethod === "bank" ? "5121" : "5311"} C</code>
             </div>
             <button
-              className="btn btn-primary"
+              className="btn-dark"
               disabled={!advAmount || !advDate || createAdvance.isPending}
               onClick={() => createAdvance.mutate()}
             >
@@ -503,10 +507,10 @@ export function DeconturiPage() {
             {returningId && (
               <div className="inline-form">
                 <h4>Restituire avans</h4>
-                <div className="form-row">
-                  <label className="form-label">Data restituire</label>
+                <div className="field">
+                  <label>Data restituire</label>
                   <input
-                    className="form-input"
+                    className="input"
                     type="date"
                     value={returnDate}
                     onChange={(e) => setReturnDate(e.target.value)}
@@ -514,7 +518,7 @@ export function DeconturiPage() {
                 </div>
                 <div className="form-actions">
                   <button
-                    className="btn btn-primary"
+                    className="btn-dark"
                     disabled={returnAdvance.isPending}
                     onClick={() => returnAdvance.mutate(returningId)}
                   >
@@ -538,219 +542,217 @@ export function DeconturiPage() {
           {/* ── Create form ── */}
           <div className="scr-card">
             <h3 className="card-title">Decont nou</h3>
-            <div className="form-grid">
-              <div className="form-row">
-                <label className="form-label">Angajat (opțional)</label>
+            <div className="field">
+              <label>Angajat (opțional)</label>
+              <input
+                className="input"
+                value={rEmployee}
+                onChange={(e) => setREmployee(e.target.value)}
+                placeholder="Nume angajat"
+              />
+            </div>
+            <div className="field">
+              <label>Avans legat (opțional)</label>
+              <select
+                className="input"
+                value={rAdvanceId}
+                onChange={(e) => setRAdvanceId(e.target.value)}
+              >
+                <option value="">— fără avans —</option>
+                {grantedAdvances.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {fmtDate(a.grantedDate)} · {fmtRON(a.amount)} · {a.employeeId ?? "—"}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Destinație</label>
+              <input
+                className="input"
+                value={rDest}
+                onChange={(e) => setRDest(e.target.value)}
+                placeholder="ex. București"
+              />
+            </div>
+            <div className="form-row">
+              <div className="field">
+                <label>De la</label>
                 <input
-                  className="form-input"
-                  value={rEmployee}
-                  onChange={(e) => setREmployee(e.target.value)}
-                  placeholder="Nume angajat"
+                  className="input"
+                  type="date"
+                  value={rFrom}
+                  onChange={(e) => { setRFrom(e.target.value); setLiveCalc(null); }}
                 />
               </div>
-              <div className="form-row">
-                <label className="form-label">Avans legat (opțional)</label>
-                <select
-                  className="form-input"
-                  value={rAdvanceId}
-                  onChange={(e) => setRAdvanceId(e.target.value)}
-                >
-                  <option value="">— fără avans —</option>
-                  {grantedAdvances.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {fmtDate(a.grantedDate)} · {fmtRON(a.amount)} · {a.employeeId ?? "—"}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-row">
-                <label className="form-label">Destinație</label>
+              <div className="field">
+                <label>Până la</label>
                 <input
-                  className="form-input"
-                  value={rDest}
-                  onChange={(e) => setRDest(e.target.value)}
-                  placeholder="ex. București"
+                  className="input"
+                  type="date"
+                  value={rTo}
+                  onChange={(e) => setRTo(e.target.value)}
                 />
               </div>
-              <div className="form-row-2col">
-                <div className="form-row">
-                  <label className="form-label">De la</label>
-                  <input
-                    className="form-input"
-                    type="date"
-                    value={rFrom}
-                    onChange={(e) => { setRFrom(e.target.value); setLiveCalc(null); }}
-                  />
-                </div>
-                <div className="form-row">
-                  <label className="form-label">Până la</label>
-                  <input
-                    className="form-input"
-                    type="date"
-                    value={rTo}
-                    onChange={(e) => setRTo(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="form-row-2col">
-                <div className="form-row">
-                  <label className="form-label">Zile delegare</label>
-                  <input
-                    className="form-input"
-                    type="number"
-                    min="1"
-                    value={rDays}
-                    onChange={(e) => { setRDays(e.target.value); setLiveCalc(null); }}
-                    placeholder="1"
-                  />
-                </div>
-                <div className="form-row">
-                  <label className="form-label">Diurnă acordată (RON)</label>
-                  <input
-                    className="form-input"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={rDiurna}
-                    onChange={(e) => { setRDiurna(e.target.value); setLiveCalc(null); }}
-                    placeholder="0.00"
-                  />
-                </div>
-              </div>
-              <div className="form-row">
-                <label className="form-label">Salariu brut bază (RON) — pentru plafonul B</label>
+            </div>
+            <div className="form-row">
+              <div className="field">
+                <label>Zile delegare</label>
                 <input
-                  className="form-input"
+                  className="input"
+                  type="number"
+                  min="1"
+                  value={rDays}
+                  onChange={(e) => { setRDays(e.target.value); setLiveCalc(null); }}
+                  placeholder="1"
+                />
+              </div>
+              <div className="field">
+                <label>Diurnă acordată (RON)</label>
+                <input
+                  className="input"
                   type="number"
                   step="0.01"
                   min="0"
-                  value={rSalar}
-                  onChange={(e) => { setRSalar(e.target.value); setLiveCalc(null); }}
-                  placeholder="ex. 4000.00"
+                  value={rDiurna}
+                  onChange={(e) => { setRDiurna(e.target.value); setLiveCalc(null); }}
+                  placeholder="0.00"
                 />
               </div>
-              {rDiurna && rDays && rSalar && rFrom && (
-                <div className="form-row">
-                  <button
-                    className="btn btn-sm btn-outline"
-                    onClick={triggerDiurnaCalc}
-                    type="button"
-                  >
-                    Calculează plafon diurnă
-                  </button>
-                </div>
-              )}
-              {liveCalc && <DiurnaPanel calc={liveCalc} />}
-
-              {/* Expense lines */}
-              <div className="form-row">
-                <label className="form-label">Linii cheltuieli</label>
-                <table className="expense-lines-table">
-                  <thead>
-                    <tr>
-                      <th>Categorie</th>
-                      <th>Descriere</th>
-                      <th>Sumă (RON)</th>
-                      <th>TVA ded.</th>
-                      <th>Cont</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lines.map((line, i) => (
-                      <tr key={i}>
-                        <td>
-                          <select
-                            className="form-input form-input-sm"
-                            value={line.category}
-                            onChange={(e) => updateLine(i, { category: e.target.value as LineForm["category"] })}
-                          >
-                            {CATEGORIES.map((c) => (
-                              <option key={c.value} value={c.value}>{c.label}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          <input
-                            className="form-input form-input-sm"
-                            value={line.description}
-                            onChange={(e) => updateLine(i, { description: e.target.value })}
-                            placeholder="Descriere"
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="form-input form-input-sm text-right"
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={line.amount}
-                            onChange={(e) => updateLine(i, { amount: e.target.value })}
-                            placeholder="0.00"
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="form-input form-input-sm text-right"
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={line.vatAmount}
-                            onChange={(e) => updateLine(i, { vatAmount: e.target.value })}
-                            placeholder="—"
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="form-input form-input-sm"
-                            value={line.accountCode}
-                            onChange={(e) => updateLine(i, { accountCode: e.target.value })}
-                            placeholder="auto"
-                          />
-                        </td>
-                        <td>
-                          <button
-                            className="btn btn-xs btn-danger-outline"
-                            onClick={() => removeLine(i)}
-                            disabled={lines.length === 1}
-                            type="button"
-                          >
-                            ×
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <button className="btn btn-sm btn-outline" onClick={addLine} type="button">
-                  + Linie nouă
+            </div>
+            <div className="field">
+              <label>Salariu brut bază (RON) — pentru plafonul B</label>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                min="0"
+                value={rSalar}
+                onChange={(e) => { setRSalar(e.target.value); setLiveCalc(null); }}
+                placeholder="ex. 4000.00"
+              />
+            </div>
+            {rDiurna && rDays && rSalar && rFrom && (
+              <div style={{ marginBottom: "0.5rem" }}>
+                <button
+                  className="btn btn-sm btn-outline"
+                  onClick={triggerDiurnaCalc}
+                  type="button"
+                >
+                  Calculează plafon diurnă
                 </button>
               </div>
+            )}
+            {liveCalc && <DiurnaPanel calc={liveCalc} />}
 
-              <div className="form-row-2col">
-                <div className="form-row">
-                  <label className="form-label">Data decont *</label>
-                  <input
-                    className="form-input"
-                    type="date"
-                    value={rDate}
-                    onChange={(e) => setRDate(e.target.value)}
-                  />
-                </div>
-                <div className="form-row">
-                  <label className="form-label">Note</label>
-                  <input
-                    className="form-input"
-                    value={rNotes}
-                    onChange={(e) => setRNotes(e.target.value)}
-                    placeholder="Opțional"
-                  />
-                </div>
+            {/* Expense lines */}
+            <div className="field">
+              <label>Linii cheltuieli</label>
+              <table className="expense-lines-table">
+                <thead>
+                  <tr>
+                    <th>Categorie</th>
+                    <th>Descriere</th>
+                    <th>Sumă (RON)</th>
+                    <th>TVA ded.</th>
+                    <th>Cont</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((line, i) => (
+                    <tr key={i}>
+                      <td>
+                        <select
+                          className="input"
+                          value={line.category}
+                          onChange={(e) => updateLine(i, { category: e.target.value as LineForm["category"] })}
+                        >
+                          {CATEGORIES.map((c) => (
+                            <option key={c.value} value={c.value}>{c.label}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          className="input"
+                          value={line.description}
+                          onChange={(e) => updateLine(i, { description: e.target.value })}
+                          placeholder="Descriere"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="input text-right"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={line.amount}
+                          onChange={(e) => updateLine(i, { amount: e.target.value })}
+                          placeholder="0.00"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="input text-right"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={line.vatAmount}
+                          onChange={(e) => updateLine(i, { vatAmount: e.target.value })}
+                          placeholder="—"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="input"
+                          value={line.accountCode}
+                          onChange={(e) => updateLine(i, { accountCode: e.target.value })}
+                          placeholder="auto"
+                        />
+                      </td>
+                      <td>
+                        <button
+                          className="btn btn-xs btn-danger-outline"
+                          onClick={() => removeLine(i)}
+                          disabled={lines.length === 1}
+                          type="button"
+                        >
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button className="btn btn-sm btn-outline" onClick={addLine} type="button">
+                + Linie nouă
+              </button>
+            </div>
+
+            <div className="form-row">
+              <div className="field">
+                <label>Data decont *</label>
+                <input
+                  className="input"
+                  type="date"
+                  value={rDate}
+                  onChange={(e) => setRDate(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label>Note</label>
+                <input
+                  className="input"
+                  value={rNotes}
+                  onChange={(e) => setRNotes(e.target.value)}
+                  placeholder="Opțional"
+                />
               </div>
             </div>
 
             <button
-              className="btn btn-primary"
+              className="btn-dark"
               disabled={!rDate || lines.every((l) => !l.amount) || createReport.isPending}
               onClick={() => createReport.mutate()}
             >
@@ -821,10 +823,10 @@ export function DeconturiPage() {
             {approvingId && (
               <div className="inline-form">
                 <h4>Aprobare decont</h4>
-                <div className="form-row">
-                  <label className="form-label">Data aprobare</label>
+                <div className="field">
+                  <label>Data aprobare</label>
                   <input
-                    className="form-input"
+                    className="input"
                     type="date"
                     value={approveDate}
                     onChange={(e) => setApproveDate(e.target.value)}
@@ -832,7 +834,7 @@ export function DeconturiPage() {
                 </div>
                 <div className="form-actions">
                   <button
-                    className="btn btn-primary"
+                    className="btn-dark"
                     disabled={approveReport.isPending}
                     onClick={() => approveReport.mutate(approvingId)}
                   >
@@ -907,6 +909,7 @@ export function DeconturiPage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

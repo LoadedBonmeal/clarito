@@ -37,16 +37,6 @@ function notifIcon(type: string): string {
   return "mail";
 }
 
-/** The design brand mark — white "C" glyph on the near-black `.mark` square. */
-function MarkGlyph() {
-  return (
-    <svg viewBox="0 0 32 32" fill="none" style={{ width: 16, height: 16, display: "block" }}>
-      <path d="M23 9.4A9 9 0 1 0 23 22.6" stroke="var(--rf-text-on-accent)" strokeWidth="2.7" strokeLinecap="round" />
-      <circle cx="16" cy="16" r="2.9" fill="var(--rf-text-on-accent)" />
-    </svg>
-  );
-}
-
 export function TopBar() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -172,12 +162,8 @@ export function TopBar() {
 
   return (
     <header className="topbar">
-      {/* Brand + collapse */}
+      {/* Collapse toggle (the brand now lives in the sidebar's company card) */}
       <div className="brand">
-        <div className="b-logo">
-          <div className="mark"><MarkGlyph /></div>
-          <span className="wordmark">Clarito</span>
-        </div>
         <button className="collapse-btn" onClick={toggleSidebar} aria-label={t("shell.topbar.collapseMenu")}>
           <Ic name="collapse" />
         </button>

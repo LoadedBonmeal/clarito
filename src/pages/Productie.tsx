@@ -106,64 +106,59 @@ function BomListTab({
 
   const pname = (id: string) => products.find((p) => p.id === id)?.name ?? id;
 
-  if (isLoading) return <p className="text-muted-foreground text-sm">{t("productie.loading")}</p>;
-  if (error) return <QueryErrorBanner error={error} label={t("productie.bom.title")} />;
-
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold">{t("productie.bom.title")}</h2>
-        <button
-          onClick={onNew}
-          className="btn btn-primary text-sm px-4 py-2"
-        >
+    <div className="scr-card">
+      <div className="scr-toolbar">
+        <div className="tt">{t("productie.bom.title")}</div>
+        <div className="spacer" />
+        <button onClick={onNew} className="btn-dark">
           {t("productie.bom.new")}
         </button>
       </div>
-      {boms.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{t("productie.bom.empty")}</p>
+      {isLoading && <div className="state-row">{t("productie.loading")}</div>}
+      {error && <QueryErrorBanner error={error} label={t("productie.bom.title")} />}
+      {!isLoading && !error && (boms.length === 0 ? (
+        <div className="state-row muted">{t("productie.bom.empty")}</div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="table-compact w-full text-sm">
-            <thead>
-              <tr>
-                <th>{t("productie.bom.colName")}</th>
-                <th>{t("productie.bom.colProduct")}</th>
-                <th className="text-right">{t("productie.bom.colOutputQty")}</th>
-                <th className="text-right">{t("productie.bom.colLines")}</th>
-                <th></th>
+        <table className="scr-table">
+          <thead>
+            <tr>
+              <th>{t("productie.bom.colName")}</th>
+              <th>{t("productie.bom.colProduct")}</th>
+              <th className="text-right">{t("productie.bom.colOutputQty")}</th>
+              <th className="text-right">{t("productie.bom.colLines")}</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {boms.map((bom) => (
+              <tr key={bom.id}>
+                <td className="font-medium">{bom.name}</td>
+                <td>{pname(bom.productId)}</td>
+                <td className="text-right">{fmt(bom.outputQty)}</td>
+                <td className="text-right">—</td>
+                <td className="text-right space-x-2">
+                  <button
+                    onClick={() => onEdit(bom)}
+                    className="text-primary hover:underline text-xs"
+                  >
+                    {t("productie.bom.edit")}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm(t("productie.bom.confirmDelete", { name: bom.name })))
+                        deleteMut.mutate(bom.id);
+                    }}
+                    className="text-destructive hover:underline text-xs"
+                  >
+                    {t("productie.bom.delete")}
+                  </button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {boms.map((bom) => (
-                <tr key={bom.id}>
-                  <td className="font-medium">{bom.name}</td>
-                  <td>{pname(bom.productId)}</td>
-                  <td className="text-right">{fmt(bom.outputQty)}</td>
-                  <td className="text-right">—</td>
-                  <td className="text-right space-x-2">
-                    <button
-                      onClick={() => onEdit(bom)}
-                      className="text-primary hover:underline text-xs"
-                    >
-                      {t("productie.bom.edit")}
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (window.confirm(t("productie.bom.confirmDelete", { name: bom.name })))
-                          deleteMut.mutate(bom.id);
-                      }}
-                      className="text-destructive hover:underline text-xs"
-                    >
-                      {t("productie.bom.delete")}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+            ))}
+          </tbody>
+        </table>
+      ))}
     </div>
   );
 }
@@ -219,98 +214,88 @@ function OrdersListTab({
   const gname = (id: string) => gestiuni.find((g) => g.id === id)?.denumire ?? id;
   const bname = (id: string) => boms.find((b) => b.id === id)?.name ?? id;
 
-  if (isLoading) return <p className="text-muted-foreground text-sm">{t("productie.loading")}</p>;
-  if (error) return <QueryErrorBanner error={error} label={t("productie.order.title")} />;
-
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold">{t("productie.order.title")}</h2>
-        <div className="flex gap-2">
-          <button
-            onClick={onNewPlanned}
-            className="btn btn-outline text-sm px-4 py-2"
-          >
-            {t("productie.order.newPlanned")}
-          </button>
-          <button
-            onClick={onNew}
-            className="btn btn-primary text-sm px-4 py-2"
-          >
-            {t("productie.order.new")}
-          </button>
-        </div>
+    <div className="scr-card">
+      <div className="scr-toolbar">
+        <div className="tt">{t("productie.order.title")}</div>
+        <div className="spacer" />
+        <button onClick={onNewPlanned} className="btn-dark">
+          {t("productie.order.newPlanned")}
+        </button>
+        <button onClick={onNew} className="btn-dark">
+          {t("productie.order.new")}
+        </button>
       </div>
-      {orders.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{t("productie.order.empty")}</p>
+      {isLoading && <div className="state-row">{t("productie.loading")}</div>}
+      {error && <QueryErrorBanner error={error} label={t("productie.order.title")} />}
+      {!isLoading && !error && (orders.length === 0 ? (
+        <div className="state-row muted">{t("productie.order.empty")}</div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="table-compact w-full text-sm">
-            <thead>
-              <tr>
-                <th>{t("productie.order.colStatus")}</th>
-                <th>{t("productie.order.colDate")}</th>
-                <th>{t("productie.order.colBom")}</th>
-                <th>{t("productie.order.colProduct")}</th>
-                <th>{t("productie.order.colGestiune")}</th>
-                <th className="text-right">{t("productie.order.colQty")}</th>
-                <th className="text-right">{t("productie.order.colFullCost")}</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((order) => {
-                const isActive = order.status === "planned" || order.status === "in_progress" || order.status === "draft";
-                return (
-                  <tr key={order.id} className={order.status === "cancelled" ? "opacity-50" : ""}>
-                    <td><StatusBadge status={order.status} t={t} /></td>
-                    <td>{order.plannedDate && order.status !== "finalized" ? `${order.plannedDate} (planif.)` : order.productionDate}</td>
-                    <td>{bname(order.bomId)}</td>
-                    <td>{pname(order.productId)}</td>
-                    <td>{gname(order.gestiuneId)}</td>
-                    <td className="text-right">{fmt(order.qtyProduced)}</td>
-                    <td className="text-right">{order.status === "finalized" ? fmt2(order.fullCost) : "—"}</td>
-                    <td className="text-right space-x-2 whitespace-nowrap">
-                      {isActive && (
-                        <>
-                          <button
-                            onClick={() => {
-                              if (window.confirm(t("productie.order.planned.confirmExecute")))
-                                executeMut.mutate(order.id);
-                            }}
-                            disabled={executeMut.isPending}
-                            className="text-green-700 hover:underline text-xs font-medium"
-                          >
-                            {t("productie.order.planned.executeBtn")}
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (window.confirm(t("productie.order.planned.confirmCancel")))
-                                cancelMut.mutate(order.id);
-                            }}
-                            disabled={cancelMut.isPending}
-                            className="text-destructive hover:underline text-xs"
-                          >
-                            {t("productie.order.planned.cancelBtn")}
-                          </button>
-                        </>
-                      )}
-                      {order.status === "finalized" && (
+        <table className="scr-table">
+          <thead>
+            <tr>
+              <th>{t("productie.order.colStatus")}</th>
+              <th>{t("productie.order.colDate")}</th>
+              <th>{t("productie.order.colBom")}</th>
+              <th>{t("productie.order.colProduct")}</th>
+              <th>{t("productie.order.colGestiune")}</th>
+              <th className="text-right">{t("productie.order.colQty")}</th>
+              <th className="text-right">{t("productie.order.colFullCost")}</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map((order) => {
+              const isActive = order.status === "planned" || order.status === "in_progress" || order.status === "draft";
+              return (
+                <tr key={order.id} className={order.status === "cancelled" ? "opacity-50" : ""}>
+                  <td><StatusBadge status={order.status} t={t} /></td>
+                  <td>{order.plannedDate && order.status !== "finalized" ? `${order.plannedDate} (planif.)` : order.productionDate}</td>
+                  <td>{bname(order.bomId)}</td>
+                  <td>{pname(order.productId)}</td>
+                  <td>{gname(order.gestiuneId)}</td>
+                  <td className="text-right">{fmt(order.qtyProduced)}</td>
+                  <td className="text-right">{order.status === "finalized" ? fmt2(order.fullCost) : "—"}</td>
+                  <td className="text-right space-x-2 whitespace-nowrap">
+                    {isActive && (
+                      <>
                         <button
-                          onClick={() => onView(order)}
-                          className="text-primary hover:underline text-xs"
+                          onClick={() => {
+                            if (window.confirm(t("productie.order.planned.confirmExecute")))
+                              executeMut.mutate(order.id);
+                          }}
+                          disabled={executeMut.isPending}
+                          className="text-green-700 hover:underline text-xs font-medium"
                         >
-                          {t("productie.order.viewDetail")}
+                          {t("productie.order.planned.executeBtn")}
                         </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+                        <button
+                          onClick={() => {
+                            if (window.confirm(t("productie.order.planned.confirmCancel")))
+                              cancelMut.mutate(order.id);
+                          }}
+                          disabled={cancelMut.isPending}
+                          className="text-destructive hover:underline text-xs"
+                        >
+                          {t("productie.order.planned.cancelBtn")}
+                        </button>
+                      </>
+                    )}
+                    {order.status === "finalized" && (
+                      <button
+                        onClick={() => onView(order)}
+                        className="text-primary hover:underline text-xs"
+                      >
+                        {t("productie.order.viewDetail")}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ))}
     </div>
   );
 }
@@ -1276,13 +1261,13 @@ export function ProductiePage() {
   });
 
   if (!companyId) {
-    return <p className="text-muted-foreground text-sm p-4">{t("productie.selectCompany")}</p>;
+    return <div className="main-inner"><div className="state-row muted">{t("productie.selectCompany")}</div></div>;
   }
 
   // ── BOM Form ──
   if (view === "bom-form") {
     return (
-      <div className="p-4">
+      <div className="main-inner">
         <BomForm
           companyId={companyId}
           products={products}
@@ -1299,7 +1284,7 @@ export function ProductiePage() {
   // ── Lansare producție ──
   if (view === "produce-form") {
     return (
-      <div className="p-4">
+      <div className="main-inner">
         <ProduceForm
           companyId={companyId}
           boms={boms}
@@ -1321,7 +1306,7 @@ export function ProductiePage() {
   // ── Comandă planificată ──
   if (view === "planned-form") {
     return (
-      <div className="p-4">
+      <div className="main-inner">
         <PlannedOrderForm
           companyId={companyId}
           boms={boms}
@@ -1339,7 +1324,7 @@ export function ProductiePage() {
   // ── Detalii ordin ──
   if (view === "order-detail" && viewingOrder) {
     return (
-      <div className="p-4">
+      <div className="main-inner">
         <OrderDetail
           companyId={companyId}
           order={viewingOrder}
@@ -1358,63 +1343,63 @@ export function ProductiePage() {
 
   // ── List (tab-uri BOM + Ordine) ──
   return (
-    <div className="p-4 space-y-4">
-      <h1 className="text-2xl font-bold">{t("productie.title")}</h1>
-
-      {/* Tab bar */}
-      <div className="flex gap-1 border-b">
-        <button
-          onClick={() => setActiveTab("bom")}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "bom"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {t("productie.tabBom")}
-        </button>
-        <button
-          onClick={() => setActiveTab("orders")}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "orders"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {t("productie.tabOrders")}
-        </button>
+    <div className="main-inner">
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">{t("productie.title")}</h1>
+        </div>
       </div>
 
-      {activeTab === "bom" && (
-        <BomListTab
-          companyId={companyId}
-          products={products}
-          onNew={() => {
-            setEditingBom(null);
-            setView("bom-form");
-          }}
-          onEdit={async (bom) => {
-            const detail = await api.productie.getBom(companyId, bom.id);
-            setEditingBom(detail);
-            setView("bom-form");
-          }}
-        />
-      )}
+      <div className="scr-card">
+        <div className="scr-toolbar">
+          <div className="tabs">
+            <button
+              onClick={() => setActiveTab("bom")}
+              className={"tab" + (activeTab === "bom" ? " active" : "")}
+            >
+              {t("productie.tabBom")}
+            </button>
+            <button
+              onClick={() => setActiveTab("orders")}
+              className={"tab" + (activeTab === "orders" ? " active" : "")}
+            >
+              {t("productie.tabOrders")}
+            </button>
+          </div>
+          <div className="spacer" />
+        </div>
 
-      {activeTab === "orders" && (
-        <OrdersListTab
-          companyId={companyId}
-          products={products}
-          gestiuni={gestiuni}
-          boms={boms}
-          onNew={() => setView("produce-form")}
-          onNewPlanned={() => setView("planned-form")}
-          onView={(order) => {
-            setViewingOrder(order);
-            setView("order-detail");
-          }}
-        />
-      )}
+        {activeTab === "bom" && (
+          <BomListTab
+            companyId={companyId}
+            products={products}
+            onNew={() => {
+              setEditingBom(null);
+              setView("bom-form");
+            }}
+            onEdit={async (bom) => {
+              const detail = await api.productie.getBom(companyId, bom.id);
+              setEditingBom(detail);
+              setView("bom-form");
+            }}
+          />
+        )}
+
+        {activeTab === "orders" && (
+          <OrdersListTab
+            companyId={companyId}
+            products={products}
+            gestiuni={gestiuni}
+            boms={boms}
+            onNew={() => setView("produce-form")}
+            onNewPlanned={() => setView("planned-form")}
+            onView={(order) => {
+              setViewingOrder(order);
+              setView("order-detail");
+            }}
+          />
+        )}
+      </div>
     </div>
   );
 }

@@ -162,6 +162,13 @@ pub fn run() {
             tauri::async_runtime::block_on(async move {
                 match db::pool::init(&handle).await {
                     Ok(pool) => {
+                        // Manage AppState immediately after the pool is ready — BEFORE the
+                        // slower seed/recovery work below — so an early command from the
+                        // onboarding UI (e.g. `start_trial` on the Licență step) cannot race
+                        // the manage() call and fail with "state not managed".
+                        handle.manage(AppState::new(pool.clone()));
+                        tracing::info!("AppState initialized");
+
                         #[cfg(debug_assertions)]
                         if let Err(err) = db::seed::run_if_empty(&pool).await {
                             tracing::warn!(?err, "Seed failed");
@@ -188,8 +195,6 @@ pub fn run() {
                                 }
                             }
                         }
-                        handle.manage(AppState::new(pool));
-                        tracing::info!("AppState initialized");
                         background::spawn_background_tasks(handle.clone());
                     }
                     Err(err) => {

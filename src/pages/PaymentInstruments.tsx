@@ -617,7 +617,7 @@ export function PaymentInstrumentsPage() {
   }
 
   if (!activeCompanyId) {
-    return <div className="page-empty">{t("pi.selectCompany")}</div>;
+    return <div className="state-row muted">{t("pi.selectCompany")}</div>;
   }
 
   const TABS: { id: TabId; label: string }[] = [
@@ -629,66 +629,67 @@ export function PaymentInstrumentsPage() {
   ];
 
   return (
-    <div className="page">
+    <div className="main-inner">
       {/* Header */}
-      <div className="page-header">
-        <div className="page-header-left">
+      <div className="page-head">
+        <div>
           <h1 className="page-title">{t("pi.title")}</h1>
-          <p className="page-subtitle">
+          <div className="page-sub">
             {t("pi.sub.items", { count: items.length, context: items.length === 1 ? "one" : items.length < 5 ? "few" : "other" })}
-          </p>
+          </div>
         </div>
-        <div className="page-header-right">
-          <button className="btn primary" onClick={() => setEditing("new")}>
-            <Ic name="plus" />
-            {t("pi.head.new")}
-          </button>
-        </div>
+        <button className="btn-dark" onClick={() => setEditing("new")}>
+          <Ic name="plus" />
+          {t("pi.head.new")}
+        </button>
       </div>
 
       {/* Info banner */}
-      <div className="banner info" style={{ marginBottom: 16 }}>
+      <div className="banner">
         <Ic name="info" />
         <span>{t("pi.banner.info")}</span>
       </div>
 
-      {/* Tabs + search */}
-      <div className="tab-bar" style={{ marginBottom: 12 }}>
-        {TABS.map((tb) => (
-          <button
-            key={tb.id}
-            className={`tab${tab === tb.id ? " active" : ""}`}
-            onClick={() => setTab(tb.id)}
-          >
-            {tb.label}
-          </button>
-        ))}
-        <input
-          type="search"
-          className="search-input"
-          placeholder={t("pi.search")}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ marginLeft: "auto", maxWidth: 220 }}
-        />
-      </div>
+      {/* Card: tabs + search + table */}
+      <div className="scr-card">
+        <div className="scr-toolbar">
+          <div className="tabs">
+            {TABS.map((tb) => (
+              <button
+                key={tb.id}
+                className={"tab" + (tab === tb.id ? " active" : "")}
+                onClick={() => setTab(tb.id)}
+              >
+                {tb.label}
+              </button>
+            ))}
+          </div>
+          <div className="spacer" />
+          <div className="scr-search">
+            <Ic name="search" />
+            <input
+              placeholder={t("pi.search")}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
 
-      {/* Error */}
-      {error && <QueryErrorBanner label={t("pi.states.errorLabel")} error={error} />}
+        {/* Error */}
+        {error && <QueryErrorBanner label={t("pi.states.errorLabel")} error={error} />}
 
-      {/* Loading */}
-      {isLoading && <div className="page-loading">{t("pi.states.loading")}</div>}
+        {/* Loading */}
+        {isLoading && <div className="state-row">{t("pi.states.loading")}</div>}
 
-      {/* Table */}
-      {!isLoading && !error && (
-        <>
-          {filtered.length === 0 ? (
-            <div className="page-empty">
-              {items.length === 0 ? t("pi.states.emptyNone") : t("pi.states.emptyFiltered")}
-            </div>
-          ) : (
-            <div className="table-wrap">
-              <table className="data-table">
+        {/* Table */}
+        {!isLoading && !error && (
+          <>
+            {filtered.length === 0 ? (
+              <div className="state-row muted">
+                {items.length === 0 ? t("pi.states.emptyNone") : t("pi.states.emptyFiltered")}
+              </div>
+            ) : (
+              <table className="scr-table">
                 <thead>
                   <tr>
                     <th>{t("pi.table.kind")}</th>
@@ -748,10 +749,10 @@ export function PaymentInstrumentsPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
-          )}
-        </>
-      )}
+            )}
+          </>
+        )}
+      </div>
 
       {/* Create/Edit modal */}
       {editing !== null && (

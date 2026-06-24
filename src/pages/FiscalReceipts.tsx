@@ -817,21 +817,23 @@ export function FiscalReceiptsPage() {
 
   if (!activeCompanyId) {
     return (
-      <div className="page-empty">
-        Selectați o companie activă pentru a vedea bonurile fiscale.
+      <div className="main-inner">
+        <div className="state-row muted">
+          Selectați o companie activă pentru a vedea bonurile fiscale.
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="page">
+    <div className="main-inner">
       {/* Header */}
       <div className="page-head">
         <div>
           <h1 className="page-title">Bonuri fiscale / Raport Z</h1>
           <p className="page-sub">{receipts.length} bonuri înregistrate</p>
         </div>
-        <div className="page-head-acts">
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
           <button
             className="sq-btn"
             onClick={() => void refetch()}
@@ -840,7 +842,7 @@ export function FiscalReceiptsPage() {
             <Ic name="arrowPath" />
           </button>
           <button className="btn-dark" onClick={() => setShowCreate(true)}>
-            Raport Z nou
+            <Ic name="plus" /> Raport Z nou
           </button>
         </div>
       </div>
@@ -860,13 +862,13 @@ export function FiscalReceiptsPage() {
 
       {/* Content */}
       <div className="scr-card">
-        {isLoading && <p className="state-loading">Se încarcă…</p>}
+        {isLoading && <div className="state-row">Se încarcă…</div>}
         {isError && <QueryErrorBanner error={error} label="bonurile fiscale" />}
         {!isLoading && !isError && receipts.length === 0 && (
-          <p className="state-empty">
+          <div className="state-row muted">
             Niciun Raport Z. Apăsați „Raport Z nou" pentru a înregistra primul
             bon.
-          </p>
+          </div>
         )}
         {!isLoading && !isError && receipts.length > 0 && (
           <table className="scr-table">

@@ -353,14 +353,14 @@ export function ContractsPage() {
 
   if (!activeCompanyId) {
     return (
-      <div className="page-empty-state">
+      <div className="state-row muted">
         <p>{t("contracts.selectCompany")}</p>
       </div>
     );
   }
 
   return (
-    <div className="page-root">
+    <div className="main-inner">
       {/* Page header */}
       <div className="page-head">
         <div>
@@ -386,7 +386,7 @@ export function ContractsPage() {
             {(["all", "active", "draft", "expired", "terminated"] as TabFilter[]).map((tb) => (
               <button
                 key={tb}
-                className={`tab-btn${tab === tb ? " active" : ""}`}
+                className={"tab" + (tab === tb ? " active" : "")}
                 onClick={() => setTab(tb)}
               >
                 {t(`contracts.tabs.${tb}`)}
@@ -409,61 +409,57 @@ export function ContractsPage() {
         {error && <QueryErrorBanner error={error} label={t("contracts.states.errorLabel")} />}
 
         {/* Loading */}
-        {isLoading && <p className="table-loading">{t("contracts.states.loading")}</p>}
+        {isLoading && <div className="state-row">{t("contracts.states.loading")}</div>}
 
         {/* Table */}
-        {!isLoading && !error && (
-          <>
-            {filtered.length === 0 ? (
-              <p className="table-empty">
-                {(contractsData?.length ?? 0) === 0
-                  ? t("contracts.states.emptyNone")
-                  : t("contracts.states.emptyFiltered")}
-              </p>
-            ) : (
-              <table className="scr-table">
-                <thead>
-                  <tr>
-                    <th>{t("contracts.table.number")}</th>
-                    <th>{t("contracts.table.title")}</th>
-                    <th>{t("contracts.table.partner")}</th>
-                    <th>{t("contracts.table.period")}</th>
-                    <th className="col-right">{t("contracts.table.value")}</th>
-                    <th>{t("contracts.table.status")}</th>
-                    <th>{t("contracts.table.expiry")}</th>
-                    <th className="col-acts" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((c) => (
-                    <ContractRow
-                      key={c.id}
-                      contract={c}
-                      contactName={contactMap[c.contactId ?? ""] ?? "—"}
-                      deleteConfirmId={deleteConfirmId}
-                      onEdit={openEdit}
-                      onDelete={(id) => {
-                        if (deleteConfirmId === id) {
-                          deleteMut.mutate({ id, companyId: activeCompanyId });
-                        } else {
-                          setDeleteConfirmId(id);
-                        }
-                      }}
-                      onCancelDelete={() => setDeleteConfirmId(null)}
-                      onSetStatus={(id, status) =>
-                        setStatusMut.mutate({ id, companyId: activeCompanyId, status })
-                      }
-                    />
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </>
-        )}
+        {!isLoading && !error && (filtered.length === 0 ? (
+          <div className="state-row muted">
+            {(contractsData?.length ?? 0) === 0
+              ? t("contracts.states.emptyNone")
+              : t("contracts.states.emptyFiltered")}
+          </div>
+        ) : (
+          <table className="scr-table">
+            <thead>
+              <tr>
+                <th>{t("contracts.table.number")}</th>
+                <th>{t("contracts.table.title")}</th>
+                <th>{t("contracts.table.partner")}</th>
+                <th>{t("contracts.table.period")}</th>
+                <th className="col-right">{t("contracts.table.value")}</th>
+                <th>{t("contracts.table.status")}</th>
+                <th>{t("contracts.table.expiry")}</th>
+                <th className="col-acts" />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((c) => (
+                <ContractRow
+                  key={c.id}
+                  contract={c}
+                  contactName={contactMap[c.contactId ?? ""] ?? "—"}
+                  deleteConfirmId={deleteConfirmId}
+                  onEdit={openEdit}
+                  onDelete={(id) => {
+                    if (deleteConfirmId === id) {
+                      deleteMut.mutate({ id, companyId: activeCompanyId });
+                    } else {
+                      setDeleteConfirmId(id);
+                    }
+                  }}
+                  onCancelDelete={() => setDeleteConfirmId(null)}
+                  onSetStatus={(id, status) =>
+                    setStatusMut.mutate({ id, companyId: activeCompanyId, status })
+                  }
+                />
+              ))}
+            </tbody>
+          </table>
+        ))}
       </div>
 
       {/* Info banner */}
-      <div className="info-banner">
+      <div className="banner">
         <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_INFO }} />
         <span>{t("contracts.banner.info")}</span>
       </div>

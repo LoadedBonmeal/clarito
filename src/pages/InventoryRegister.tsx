@@ -45,7 +45,7 @@ export function InventoryRegisterPage() {
 
   if (!activeCompanyId) {
     return (
-      <div className="page" style={{ padding: 32, color: "var(--text-2)" }}>
+      <div className="main-inner" style={{ padding: 32, color: "var(--text-2)" }}>
         Selectați o companie activă.
       </div>
     );
@@ -56,11 +56,11 @@ export function InventoryRegisterPage() {
   const totalDiff = entries.reduce((s, e) => s + parseDec(e.diffValue), 0);
 
   return (
-    <div className="page">
+    <div className="main-inner">
       {/* Page header */}
       <div className="page-head">
         <div>
-          <div className="page-title">{t("inventory.registerTitle")}</div>
+          <h1 className="page-title">{t("inventory.registerTitle")}</h1>
           <div className="page-sub">{t("inventory.registerSubtitle")}</div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -76,7 +76,7 @@ export function InventoryRegisterPage() {
             ))}
           </select>
           <button
-            className="btn"
+            className="btn-dark"
             onClick={() => window.print()}
             title="Imprimă registrul"
           >
@@ -87,8 +87,8 @@ export function InventoryRegisterPage() {
 
       {/* Register table */}
       {entries.length === 0 ? (
-        <div className="scr-card" style={{ padding: 48, textAlign: "center", color: "var(--text-2)" }}>
-          {t("inventory.registru.noEntries")}
+        <div className="scr-card">
+          <div className="state-row muted">{t("inventory.registru.noEntries")}</div>
         </div>
       ) : (
         <div className="scr-card" id="registru-print">

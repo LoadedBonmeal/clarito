@@ -15,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
+import { Ic } from "@/components/shared/Ic";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
 import { formatError } from "@/lib/error-mapper";
@@ -62,14 +63,13 @@ function TransferList({
     gestiuni.find((g: Gestiune) => g.id === id)?.denumire ?? id;
 
   return (
-    <div className="page">
+    <div className="main-inner">
       <div className="page-head">
         <div>
-          <div className="page-title">{t("stockTransfer.title")}</div>
+          <h1 className="page-title">{t("stockTransfer.title")}</h1>
         </div>
-        <div className="spacer" />
         <button className="btn-dark" onClick={onNew}>
-          + {t("stockTransfer.new")}
+          <Ic name="plus" /> {t("stockTransfer.new")}
         </button>
       </div>
 
@@ -78,55 +78,47 @@ function TransferList({
       )}
 
       <div className="scr-card">
-        <table className="scr-table">
-          <thead>
-            <tr>
-              <th>{t("stockTransfer.colDate")}</th>
-              <th>{t("stockTransfer.colProduct")}</th>
-              <th>{t("stockTransfer.colFrom")}</th>
-              <th>{t("stockTransfer.colTo")}</th>
-              <th style={{ textAlign: "right" }}>{t("stockTransfer.colQty")}</th>
-              <th style={{ textAlign: "right" }}>{t("stockTransfer.colValue")}</th>
-              <th>{t("stockTransfer.colRef")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading && (
+        <div className="scr-toolbar">
+          <div className="spacer" />
+        </div>
+        {isLoading && <div className="state-row">{t("stockTransfer.loading")}</div>}
+        {!isLoading && !error && transfers.length === 0 && (
+          <div className="state-row muted">{t("stockTransfer.empty")}</div>
+        )}
+        {!isLoading && transfers.length > 0 && (
+          <table className="scr-table">
+            <thead>
               <tr>
-                <td colSpan={7} style={{ textAlign: "center", padding: 24 }}>
-                  {t("stockTransfer.loading")}
-                </td>
+                <th>{t("stockTransfer.colDate")}</th>
+                <th>{t("stockTransfer.colProduct")}</th>
+                <th>{t("stockTransfer.colFrom")}</th>
+                <th>{t("stockTransfer.colTo")}</th>
+                <th style={{ textAlign: "right" }}>{t("stockTransfer.colQty")}</th>
+                <th style={{ textAlign: "right" }}>{t("stockTransfer.colValue")}</th>
+                <th>{t("stockTransfer.colRef")}</th>
               </tr>
-            )}
-            {!isLoading && transfers.length === 0 && (
-              <tr>
-                <td
-                  colSpan={7}
-                  style={{ textAlign: "center", padding: 24, color: "var(--text-2)" }}
+            </thead>
+            <tbody>
+              {transfers.map((tr: StockTransfer) => (
+                <tr
+                  key={tr.id}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => onView(tr)}
                 >
-                  {t("stockTransfer.empty")}
-                </td>
-              </tr>
-            )}
-            {transfers.map((tr: StockTransfer) => (
-              <tr
-                key={tr.id}
-                style={{ cursor: "pointer" }}
-                onClick={() => onView(tr)}
-              >
-                <td>{tr.transferDate}</td>
-                <td>{productName(tr.productId)}</td>
-                <td>{gesName(tr.fromGestiuneId)}</td>
-                <td>{gesName(tr.toGestiuneId)}</td>
-                <td style={{ textAlign: "right" }}>
-                  {parseFloat(tr.qty).toFixed(3)}
-                </td>
-                <td style={{ textAlign: "right" }}>{tr.value}</td>
-                <td>{tr.transferRef ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  <td>{tr.transferDate}</td>
+                  <td>{productName(tr.productId)}</td>
+                  <td>{gesName(tr.fromGestiuneId)}</td>
+                  <td>{gesName(tr.toGestiuneId)}</td>
+                  <td style={{ textAlign: "right" }}>
+                    {parseFloat(tr.qty).toFixed(3)}
+                  </td>
+                  <td style={{ textAlign: "right" }}>{tr.value}</td>
+                  <td>{tr.transferRef ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
@@ -209,36 +201,23 @@ function TransferCreate({
   const stockableProducts = products.filter((p: Product) => !p.isService);
 
   return (
-    <div className="page">
+    <div className="main-inner">
       <div className="page-head">
-        <button className="btn-ghost" onClick={onCancel}>
-          ← {t("stockTransfer.backToList")}
-        </button>
-        <div className="page-title" style={{ marginLeft: 16 }}>
-          {t("stockTransfer.new")}
+        <div>
+          <button className="btn-ghost" onClick={onCancel}>
+            ← {t("stockTransfer.backToList")}
+          </button>
+          <h1 className="page-title">{t("stockTransfer.new")}</h1>
         </div>
       </div>
 
-      <div className="scr-card" style={{ maxWidth: 640 }}>
-        {/* GL-neutral info note */}
-        <div
-          style={{
-            background: "var(--surface-2)",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            padding: "10px 14px",
-            marginBottom: 20,
-            fontSize: 13,
-            color: "var(--text-2)",
-          }}
-        >
-          {t("stockTransfer.glNeutralNote")}
-        </div>
+      <div className="banner"><Ic name="info" /><span>{t("stockTransfer.glNeutralNote")}</span></div>
 
+      <div className="scr-card" style={{ maxWidth: 640 }}>
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {/* Product */}
           <div className="field">
-            <label className="label">{t("stockTransfer.fieldProduct")}</label>
+            <label>{t("stockTransfer.fieldProduct")}</label>
             <select
               className="input"
               value={productId}
@@ -256,7 +235,7 @@ function TransferCreate({
 
           {/* From gestiune */}
           <div className="field">
-            <label className="label">{t("stockTransfer.fieldFrom")}</label>
+            <label>{t("stockTransfer.fieldFrom")}</label>
             <select
               className="input"
               value={fromGestiuneId}
@@ -279,7 +258,7 @@ function TransferCreate({
 
           {/* To gestiune */}
           <div className="field">
-            <label className="label">{t("stockTransfer.fieldTo")}</label>
+            <label>{t("stockTransfer.fieldTo")}</label>
             <select
               className="input"
               value={toGestiuneId}
@@ -299,7 +278,7 @@ function TransferCreate({
 
           {/* Qty */}
           <div className="field">
-            <label className="label">{t("stockTransfer.fieldQty")}</label>
+            <label>{t("stockTransfer.fieldQty")}</label>
             <input
               className="input"
               type="number"
@@ -314,7 +293,7 @@ function TransferCreate({
 
           {/* Date */}
           <div className="field">
-            <label className="label">{t("stockTransfer.fieldDate")}</label>
+            <label>{t("stockTransfer.fieldDate")}</label>
             <input
               className="input"
               type="date"
@@ -326,7 +305,7 @@ function TransferCreate({
 
           {/* Reference */}
           <div className="field">
-            <label className="label">{t("stockTransfer.fieldRef")}</label>
+            <label>{t("stockTransfer.fieldRef")}</label>
             <input
               className="input"
               type="text"
@@ -338,7 +317,7 @@ function TransferCreate({
 
           {/* Notes */}
           <div className="field">
-            <label className="label">{t("stockTransfer.fieldNotes")}</label>
+            <label>{t("stockTransfer.fieldNotes")}</label>
             <textarea
               className="input"
               value={notes}
@@ -401,15 +380,14 @@ function TransferDetail({
   });
 
   return (
-    <div className="page">
+    <div className="main-inner">
       <div className="page-head">
-        <button className="btn-ghost" onClick={onBack}>
-          ← {t("stockTransfer.backToList")}
-        </button>
-        <div className="page-title" style={{ marginLeft: 16 }}>
-          {t("stockTransfer.viewDetail")}
+        <div>
+          <button className="btn-ghost" onClick={onBack}>
+            ← {t("stockTransfer.backToList")}
+          </button>
+          <h1 className="page-title">{t("stockTransfer.viewDetail")}</h1>
         </div>
-        <div className="spacer" />
         <button className="btn-ghost" onClick={() => window.print()}>
           {t("stockTransfer.print")}
         </button>
@@ -540,8 +518,8 @@ export function StockTransferPage() {
 
   if (!activeCompanyId) {
     return (
-      <div className="page">
-        <div style={{ padding: 32, color: "var(--text-2)" }}>
+      <div className="main-inner">
+        <div className="state-row muted">
           {t("stockTransfer.selectCompany")}
         </div>
       </div>

@@ -287,13 +287,13 @@ input, select, textarea { font: inherit; color: inherit; }
   display: grid;
   grid-template-columns: 248px 1fr;
   grid-template-rows: 60px 1fr;
-  grid-template-areas: "top top" "side main";
+  grid-template-areas: "side top" "side main";
   height: 100vh;
   overflow: hidden;
-  background: var(--bg);
-  transition: grid-template-columns .22s ease;
+  background: #FAFAFA;
+  transition: grid-template-columns .26s cubic-bezier(.4, 0, .2, 1);
 }
-.app.sidebar-collapsed { grid-template-columns: 74px 1fr; }
+.app.sidebar-collapsed { grid-template-columns: 84px 1fr; }
 
 /* Topbar spans the full width across the top; sidebar sits below it on the
    left, main fills the rest (design clarito-shell.css grid). */
