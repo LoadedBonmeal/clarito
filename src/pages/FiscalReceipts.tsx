@@ -193,88 +193,92 @@ function ReceiptForm({ companyId, initial, onSuccess, onCancel }: ReceiptFormPro
       setForm((prev) => ({ ...prev, [field]: e.target.value }));
 
   return (
-    <div className="modal-inner">
+    <>
       <div className="modal-head">
-        <span>{initial ? "Editare Raport Z" : "Raport Z nou"}</span>
-        <button className="sq-btn" onClick={onCancel}>
+        <div>
+          <div className="mt">{initial ? "Editare Raport Z" : "Raport Z nou"}</div>
+        </div>
+        <button className="modal-x" onClick={onCancel} aria-label="Inchide">
           <Ic name="xMark" />
         </button>
       </div>
-      <div className="fgrid">
-        <label>
-          <span>Serie casă</span>
-          <input value={form.serieCasa} onChange={f("serieCasa")} className="inp" />
-        </label>
-        <label>
-          <span>Nr. Z</span>
-          <input
-            type="number"
-            min={1}
-            value={form.nrZ}
-            onChange={(e) =>
-              setForm((p) => ({ ...p, nrZ: parseInt(e.target.value) || 1 }))
-            }
-            className="inp"
-          />
-        </label>
-        <label>
-          <span>Data raportului</span>
-          <input
-            type="date"
-            value={form.reportDate}
-            onChange={f("reportDate")}
-            className="inp"
-          />
-        </label>
-        <label>
-          <span>Nr. bonuri</span>
-          <input
-            type="number"
-            min={0}
-            value={form.nrBonuri ?? 0}
-            onChange={(e) =>
-              setForm((p) => ({ ...p, nrBonuri: parseInt(e.target.value) || 0 }))
-            }
-            className="inp"
-          />
-        </label>
-        <label>
-          <span>Numerar (RON)</span>
-          <input value={form.numerar} onChange={f("numerar")} className="inp" />
-        </label>
-        <label>
-          <span>Card (RON)</span>
-          <input value={form.card} onChange={f("card")} className="inp" />
-        </label>
-        <label>
-          <span>Tichete (RON)</span>
-          <input
-            value={form.tichete ?? "0.00"}
-            onChange={f("tichete")}
-            className="inp"
-          />
-        </label>
-        <label className="span2">
-          <span>Total Z (calculat)</span>
-          <input
-            value={computedTotal}
-            readOnly
-            className="inp"
-            style={{ color: "var(--accent)", fontWeight: 600 }}
-          />
-        </label>
-        <label className="span2">
-          <span>Observații</span>
-          <textarea
-            value={form.notes ?? ""}
-            onChange={f("notes")}
-            className="inp"
-            rows={2}
-          />
-        </label>
+      <div className="modal-body">
+        <div className="fgrid">
+          <div className="field">
+            <label>Serie casă</label>
+            <input value={form.serieCasa} onChange={f("serieCasa")} className="input" />
+          </div>
+          <div className="field">
+            <label>Nr. Z</label>
+            <input
+              type="number"
+              min={1}
+              value={form.nrZ}
+              onChange={(e) =>
+                setForm((p) => ({ ...p, nrZ: parseInt(e.target.value) || 1 }))
+              }
+              className="input"
+            />
+          </div>
+          <div className="field">
+            <label>Data raportului</label>
+            <input
+              type="date"
+              value={form.reportDate}
+              onChange={f("reportDate")}
+              className="input"
+            />
+          </div>
+          <div className="field">
+            <label>Nr. bonuri</label>
+            <input
+              type="number"
+              min={0}
+              value={form.nrBonuri ?? 0}
+              onChange={(e) =>
+                setForm((p) => ({ ...p, nrBonuri: parseInt(e.target.value) || 0 }))
+              }
+              className="input"
+            />
+          </div>
+          <div className="field">
+            <label>Numerar (RON)</label>
+            <input value={form.numerar} onChange={f("numerar")} className="input" />
+          </div>
+          <div className="field">
+            <label>Card (RON)</label>
+            <input value={form.card} onChange={f("card")} className="input" />
+          </div>
+          <div className="field">
+            <label>Tichete (RON)</label>
+            <input
+              value={form.tichete ?? "0.00"}
+              onChange={f("tichete")}
+              className="input"
+            />
+          </div>
+          <div className="field span2">
+            <label>Total Z (calculat)</label>
+            <input
+              value={computedTotal}
+              readOnly
+              className="input"
+              style={{ color: "var(--accent)", fontWeight: 600 }}
+            />
+          </div>
+          <div className="field span2">
+            <label>Observații</label>
+            <textarea
+              value={form.notes ?? ""}
+              onChange={f("notes")}
+              className="input"
+              rows={2}
+            />
+          </div>
+        </div>
       </div>
       <div className="modal-foot">
-        <button className="btn-ghost" onClick={onCancel}>
+        <button type="button" className="pill-btn" onClick={onCancel}>
           Anulare
         </button>
         <button
@@ -289,7 +293,7 @@ function ReceiptForm({ companyId, initial, onSuccess, onCancel }: ReceiptFormPro
             : "Creează bon"}
         </button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -852,7 +856,7 @@ export function FiscalReceiptsPage() {
 
       {/* Create modal */}
       {showCreate && (
-        <div className="modal-back" onClick={() => setShowCreate(false)}>
+        <div className="modal-back show" onClick={() => setShowCreate(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <ReceiptForm
               companyId={activeCompanyId}
@@ -899,10 +903,11 @@ export function FiscalReceiptsPage() {
               <tbody>
                 {receipts.map((r) => {
                   // Extract per-rate TVA from vatLines if available on the list item,
-                  // otherwise show em-dash (detail drawer has full vatLines breakdown)
-                  const tva21 = (r as any).tva21 != null ? fmtRON(parseDec((r as any).tva21)) : "—";
-                  const tva11 = (r as any).tva11 != null ? fmtRON(parseDec((r as any).tva11)) : "—";
-                  const tva9  = (r as any).tva9  != null ? fmtRON(parseDec((r as any).tva9))  : "—";
+                  // otherwise show em-dash (detail drawer has full vatLines breakdown).
+                  const rv = r as { tva21?: string | null; tva11?: string | null; tva9?: string | null };
+                  const tva21 = rv.tva21 != null ? fmtRON(parseDec(rv.tva21)) : "—";
+                  const tva11 = rv.tva11 != null ? fmtRON(parseDec(rv.tva11)) : "—";
+                  const tva9 = rv.tva9 != null ? fmtRON(parseDec(rv.tva9)) : "—";
 
                   return (
                     <tr

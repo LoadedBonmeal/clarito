@@ -541,16 +541,16 @@ export function DeconturiPage() {
                   onChange={(e) => setReturnDate(e.target.value)}
                 />
               </div>
-              <div className="form-actions">
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }}>
+                <button className="btn btn-outline" onClick={() => setReturningId(null)}>
+                  Anulează
+                </button>
                 <button
                   className="btn-dark"
                   disabled={returnAdvance.isPending}
                   onClick={() => returnAdvance.mutate(returningId)}
                 >
                   {returnAdvance.isPending ? "Se procesează..." : "Confirmă restituire"}
-                </button>
-                <button className="btn btn-outline" onClick={() => setReturningId(null)}>
-                  Anulează
                 </button>
               </div>
             </div>
@@ -873,16 +873,16 @@ export function DeconturiPage() {
                     onChange={(e) => setApproveDate(e.target.value)}
                   />
                 </div>
-                <div className="form-actions">
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }}>
+                  <button className="btn btn-outline" onClick={() => setApprovingId(null)}>
+                    Anulează
+                  </button>
                   <button
                     className="btn-dark"
                     disabled={approveReport.isPending}
                     onClick={() => approveReport.mutate(approvingId)}
                   >
                     {approveReport.isPending ? "Se procesează..." : "Confirmă aprobare + GL"}
-                  </button>
-                  <button className="btn btn-outline" onClick={() => setApprovingId(null)}>
-                    Anulează
                   </button>
                 </div>
               </div>

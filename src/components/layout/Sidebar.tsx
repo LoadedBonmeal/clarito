@@ -67,6 +67,19 @@ export function Sidebar() {
   });
 
   const activeCompany = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
+
+  // Self-heal a stale persisted active company. If the saved id no longer
+  // matches a real company (company deleted, DB reseeded, or a leftover id
+  // from a previous install), every page query silently returns empty for the
+  // ghost id and writes like "Populează planul standard" fail on a foreign-key
+  // violation. Fall back to the first real company so the app stays usable.
+  useEffect(() => {
+    if (companies.length === 0) return;
+    if (activeCompanyId && !companies.some((c) => c.id === activeCompanyId)) {
+      setActiveCompanyId(companies[0].id);
+    }
+  }, [companies, activeCompanyId, setActiveCompanyId]);
+
   const initials = (s: string | undefined, n = 2) =>
     (s ?? "AC").replace(/[^A-Za-zĂÂÎȘȚ ]/g, "").split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, n).toUpperCase() || "AC";
 
@@ -169,44 +182,6 @@ export function Sidebar() {
           </div>
           <Ic name="chevUD" cls="ic chev" />
         </button>
-        {companyOpen && (
-          <div className="pop show" id="companyPop" onMouseDown={stop}>
-            <div className="col-title">{t("shell.company.active")}</div>
-            {activeCompany && (
-              <div className="co-row sel">
-                <div className="co-ava">{initials(activeCompany.legalName, 1)}</div>
-                <div className="co-meta">
-                  <div className="co-name">{activeCompany.legalName}</div>
-                  <div className="co-cui">{activeCompany.cui}</div>
-                </div>
-                <Ic name="check" cls="co-check" />
-              </div>
-            )}
-            {companies.filter((c) => c.id !== activeCompany?.id).length > 0 && (
-              <>
-                <div className="pop-div" />
-                <div className="col-title">{t("shell.company.switch")}</div>
-                {companies.filter((c) => c.id !== activeCompany?.id).map((c) => (
-                  <button key={c.id} className="co-row" onClick={() => { setActiveCompanyId(c.id); setCompanyOpen(false); }}>
-                    <div className="co-ava alt">{initials(c.legalName, 1)}</div>
-                    <div className="co-meta">
-                      <div className="co-name">{c.legalName}</div>
-                      <div className="co-cui">{c.cui}</div>
-                    </div>
-                    <Ic name="check" cls="co-check" />
-                  </button>
-                ))}
-              </>
-            )}
-            <div className="pop-div" />
-            <button className="pop-item" onClick={() => { setCompanyOpen(false); void navigate({ to: "/companies/new" }); }}>
-              <Ic name="plus" />{t("shell.company.add")}
-            </button>
-            <button className="pop-item" onClick={() => { setCompanyOpen(false); void navigate({ to: "/companies" }); }}>
-              <Ic name="cog" />{t("shell.company.manage")}
-            </button>
-          </div>
-        )}
 
         {/* Nav groups */}
         {NAV.map((g) => {
@@ -252,11 +227,51 @@ export function Sidebar() {
         </button>
       </div>
 
+      {/* Company switcher pop — direct child of <aside> so it escapes the
+          .side-scroll overflow clipping (esp. when the sidebar is collapsed). */}
+      {companyOpen && (
+        <div className="pop show" id="companyPop" onMouseDown={stop}>
+          <div className="col-title">{t("shell.company.active")}</div>
+          {activeCompany && (
+            <div className="co-row sel">
+              <div className="co-ava">{initials(activeCompany.legalName, 1)}</div>
+              <div className="co-meta">
+                <div className="co-name">{activeCompany.legalName}</div>
+                <div className="co-cui">{activeCompany.cui}</div>
+              </div>
+              <Ic name="check" cls="co-check" />
+            </div>
+          )}
+          {companies.filter((c) => c.id !== activeCompany?.id).length > 0 && (
+            <>
+              <div className="pop-div" />
+              <div className="col-title">{t("shell.company.switch")}</div>
+              {companies.filter((c) => c.id !== activeCompany?.id).map((c) => (
+                <button key={c.id} className="co-row" onClick={() => { setActiveCompanyId(c.id); setCompanyOpen(false); }}>
+                  <div className="co-ava alt">{initials(c.legalName, 1)}</div>
+                  <div className="co-meta">
+                    <div className="co-name">{c.legalName}</div>
+                    <div className="co-cui">{c.cui}</div>
+                  </div>
+                  <Ic name="check" cls="co-check" />
+                </button>
+              ))}
+            </>
+          )}
+          <div className="pop-div" />
+          <button className="pop-item" onClick={() => { setCompanyOpen(false); void navigate({ to: "/companies/new" }); }}>
+            <Ic name="plus" />{t("shell.company.add")}
+          </button>
+          <button className="pop-item" onClick={() => { setCompanyOpen(false); void navigate({ to: "/companies" }); }}>
+            <Ic name="cog" />{t("shell.company.manage")}
+          </button>
+        </div>
+      )}
+
       {/* Profile pop (anchored to the aside via #profilePop bottom:70px) */}
       {profileOpen && (
         <div className="pop show" id="profilePop" onMouseDown={stop}>
           <div className="pop-head">
-            <div className="u-ava">{initials(license?.email ?? "Clarito", 2)}</div>
             <div><div className="pn">{accountName}</div><div className="pm">{license?.email ?? t("shell.profile.defaultAccount")}</div></div>
           </div>
           <div className="pop-div" />

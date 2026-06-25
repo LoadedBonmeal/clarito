@@ -85,8 +85,8 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
     >
       <div
         style={{
-          background: "var(--rf-card)",
-          border: "1px solid var(--rf-border)",
+          background: "var(--bg-content)",
+          border: "1px solid var(--line)",
           borderRadius: 8,
           padding: "24px 28px",
           width: "100%",
@@ -178,8 +178,8 @@ function ResetPasswordModal({ userId, onClose }: { userId: string; onClose: () =
     >
       <div
         style={{
-          background: "var(--rf-card)",
-          border: "1px solid var(--rf-border)",
+          background: "var(--bg-content)",
+          border: "1px solid var(--line)",
           borderRadius: 8,
           padding: "24px 28px",
           width: "100%",
@@ -434,7 +434,7 @@ const btnStyle: React.CSSProperties = {
   background: "var(--rf-accent)",
   border: "none",
   borderRadius: 5,
-  color: "#fff",
+  color: "var(--on-accent)",
   fontSize: 13,
   fontWeight: 600,
   cursor: "pointer",

@@ -169,9 +169,12 @@ pub fn run() {
                         handle.manage(AppState::new(pool.clone()));
                         tracing::info!("AppState initialized");
 
-                        // ⚠️ TEMPORARY TESTING BYPASS — auto-establish a session for the first
-                        // active user so the login screen is skipped while testing the UI.
-                        // REMOVE THIS BLOCK to restore the normal login flow.
+                        // DEV-ONLY TESTING BYPASS — auto-establish a session for the first active
+                        // user so the login screen is skipped while testing the UI. Gated to debug
+                        // builds via `cfg!(debug_assertions)` (true for `tauri dev` and
+                        // `tauri build --debug`, FALSE for the production release build), so it can
+                        // never ship. The release build always shows the normal login flow.
+                        #[cfg(debug_assertions)]
                         if let Ok(users) = db::users::list_users(&pool).await {
                             if let Some(u) = users.into_iter().find(|u| u.is_active) {
                                 handle
@@ -182,7 +185,7 @@ pub fn run() {
                                         role: u.role,
                                     })
                                     .await;
-                                tracing::warn!("TEMP: login skipped — auto-session for first user");
+                                tracing::warn!("DEV: login skipped — auto-session for first user");
                             }
                         }
 

@@ -3679,6 +3679,12 @@ pub async fn reconcile(
     .fetch_one(pool)
     .await?;
 
+    // Money is stored as 2-decimal TEXT; here we SUM via SQLite REAL (f64) only to compute the two
+    // period TOTALS, then immediately round to bani. This is exact for any realistic GL: f64's
+    // 53-bit mantissa represents integer bani precisely up to ~9×10^13 lei, and the round_dp(2)
+    // below absorbs sub-bani noise. Crucially, both sides use the IDENTICAL method, so the
+    // Σdebit==Σcredit balance check is unaffected. Per-account balances (used for the fiscal
+    // outputs) are summed as Decimal elsewhere — this f64 path is display/reconciliation only.
     let total_debit_f: f64 = totals_row.try_get("total_debit").unwrap_or(0.0);
     let total_credit_f: f64 = totals_row.try_get("total_credit").unwrap_or(0.0);
     let total_debit = Decimal::try_from(total_debit_f)

@@ -146,25 +146,26 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
   };
 
   return (
-    <div className={`modal-overlay${closing ? " closing" : ""}`} onClick={animClose}>
+    <div className={`modal-back ${closing ? "closing" : "show"}`} onClick={animClose}>
       <div
-        className="modal-panel"
-        style={{ maxWidth: 820, width: "100%" }}
+        className="modal lg"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-head">
-          <span className="modal-title">{t("avize.modal.createTitle")}</span>
-          <button className="sq-btn ghost" onClick={animClose} aria-label={t("avize.modal.close")}>
+          <div>
+            <div className="mt">{t("avize.modal.createTitle")}</div>
+          </div>
+          <button className="modal-x" onClick={animClose} aria-label={t("avize.modal.close")}>
             <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
               <path d="M6 18 18 6M6 6l12 12"/>
             </svg>
           </button>
         </div>
 
-        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 16, padding: "20px 24px" }}>
+        <div className="modal-body">
           {/* Client */}
-          <div className="form-row">
-            <label className="form-label">{t("avize.modal.contact")}</label>
+          <div className="field">
+            <label>{t("avize.modal.contact")}</label>
             <select className="select" value={contactId} onChange={(e) => setContactId(e.target.value)}>
               <option value="">{t("avize.modal.contactPick")}</option>
               {contacts.map((c) => (
@@ -174,9 +175,9 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
           </div>
 
           {/* Date + Series + Currency */}
-          <div style={{ display: "flex", gap: 12 }}>
-            <div className="form-row" style={{ flex: 2 }}>
-              <label className="form-label">{t("avize.modal.date")}</label>
+          <div className="fgrid">
+            <div className="field" style={{ flex: 2 }}>
+              <label>{t("avize.modal.date")}</label>
               <input
                 type="date"
                 className="input"
@@ -184,8 +185,8 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
                 onChange={(e) => setAvizDate(e.target.value)}
               />
             </div>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label className="form-label">{t("avize.modal.series")}</label>
+            <div className="field">
+              <label>{t("avize.modal.series")}</label>
               <input
                 type="text"
                 className="input"
@@ -194,8 +195,8 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
                 onChange={(e) => setSeries(e.target.value)}
               />
             </div>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label className="form-label">{t("avize.modal.currency")}</label>
+            <div className="field">
+              <label>{t("avize.modal.currency")}</label>
               <select className="select" value={currency} onChange={(e) => setCurrency(e.target.value)}>
                 <option value="RON">RON</option>
                 <option value="EUR">EUR</option>
@@ -205,8 +206,8 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
           </div>
 
           {/* Gestiune */}
-          <div className="form-row">
-            <label className="form-label">{t("avize.modal.gestiune")}</label>
+          <div className="field">
+            <label>{t("avize.modal.gestiune")}</label>
             <select className="select" value={gestiuneId} onChange={(e) => setGestiuneId(e.target.value)}>
               <option value="">{t("avize.modal.gestiunePick")}</option>
               {gestiuni.map((g) => (
@@ -216,9 +217,9 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
           </div>
 
           {/* Transport */}
-          <div style={{ display: "flex", gap: 12 }}>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label className="form-label">{t("avize.modal.transportMeans")}</label>
+          <div className="fgrid">
+            <div className="field">
+              <label>{t("avize.modal.transportMeans")}</label>
               <input
                 type="text"
                 className="input"
@@ -227,8 +228,8 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
                 onChange={(e) => setTransportMeans(e.target.value)}
               />
             </div>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label className="form-label">{t("avize.modal.driverName")}</label>
+            <div className="field">
+              <label>{t("avize.modal.driverName")}</label>
               <input
                 type="text"
                 className="input"
@@ -237,8 +238,8 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
                 onChange={(e) => setDriverName(e.target.value)}
               />
             </div>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label className="form-label">{t("avize.modal.vehiclePlate")}</label>
+            <div className="field">
+              <label>{t("avize.modal.vehiclePlate")}</label>
               <input
                 type="text"
                 className="input"
@@ -250,8 +251,8 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
           </div>
 
           {/* Destination */}
-          <div className="form-row">
-            <label className="form-label">{t("avize.modal.destination")}</label>
+          <div className="field">
+            <label>{t("avize.modal.destination")}</label>
             <input
               type="text"
               className="input"
@@ -263,7 +264,7 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
 
           {/* Lines */}
           <div>
-            <div className="form-label" style={{ marginBottom: 8 }}>{t("avize.modal.lines")}</div>
+            <div style={{ marginBottom: 8 }}>{t("avize.modal.lines")}</div>
             <LineItemsEditor
               lines={lines}
               onChange={setLines}
@@ -275,8 +276,8 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
           </div>
 
           {/* Notes */}
-          <div className="form-row">
-            <label className="form-label">{t("avize.modal.notes")}</label>
+          <div className="field">
+            <label>{t("avize.modal.notes")}</label>
             <textarea
               className="input"
               rows={2}
@@ -288,8 +289,8 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
           </div>
         </div>
 
-        <div className="modal-foot" style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "16px 24px" }}>
-          <button className="btn ghost" onClick={animClose}>{t("avize.modal.close")}</button>
+        <div className="modal-foot">
+          <button type="button" className="pill-btn" onClick={animClose}>{t("avize.modal.close")}</button>
           <button className="btn-dark" onClick={handleSubmit} disabled={createMut.isPending}>
             {createMut.isPending ? t("avize.modal.saving") : t("avize.modal.create")}
           </button>
@@ -313,14 +314,16 @@ function PrintView({ awl, companyName, contactName, onClose }: PrintViewProps) {
   const { aviz, lines } = awl;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-back show" onClick={onClose}>
       <div
-        className="modal-panel"
-        style={{ maxWidth: 900, width: "100%", maxHeight: "90vh", overflowY: "auto" }}
+        className="modal lg"
+        style={{ maxHeight: "90vh", overflowY: "auto" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-head">
-          <span className="modal-title">{t("avize.print.title", { number: aviz.fullNumber })}</span>
+          <div>
+            <div className="mt">{t("avize.print.title", { number: aviz.fullNumber })}</div>
+          </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn ghost" onClick={() => window.print()}>
               <Ic name="print" />

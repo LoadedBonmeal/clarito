@@ -170,7 +170,7 @@ const btnStyle: React.CSSProperties = {
   background: "var(--rf-accent)",
   border: "none",
   borderRadius: 9,
-  color: "#fff",
+  color: "var(--on-accent)",
   fontSize: 14,
   fontWeight: 600,
   cursor: "pointer",

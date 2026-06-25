@@ -153,7 +153,7 @@ svg[data-ic="trash"],svg[data-ic="pen"],svg[data-ic="copy"],svg[data-ic="undo"],
 /* ═══ 10. SIDEBAR — indicator slides between items ═══ */
 .side-scroll{position:relative}
 .side-scroll .company,.side-scroll .nav-item,.side-scroll .sec,.side-scroll .nav-group{position:relative;z-index:1}
-.nav-slider{position:absolute;left:12px;right:12px;height:38px;border-radius:10px;background:#fff;border:1px solid var(--line,#ECECEC);box-shadow:0 1px 1px rgba(0,0,0,.03),0 6px 16px -8px rgba(0,0,0,.22);opacity:0;pointer-events:none;z-index:0;transition:top .12s var(--anim-ease),opacity .08s ease}
+.nav-slider{position:absolute;left:12px;right:12px;height:38px;border-radius:10px;background:var(--bg-content);border:1px solid var(--line,#ECECEC);box-shadow:0 1px 1px rgba(0,0,0,.03),0 6px 16px -8px rgba(0,0,0,.22);opacity:0;pointer-events:none;z-index:0;transition:top .12s var(--anim-ease),opacity .08s ease}
 .nav-slider.on{opacity:1}
 
 /* ═══ 11. load-once: chart bars + plafon meters (JS adds classes) ═══ */

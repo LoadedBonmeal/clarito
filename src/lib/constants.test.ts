@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   VAT_RATES,
+  VAT_RATES_ALL,
   VAT_CATEGORIES,
   VAT_CATEGORY_LABELS,
   COUNTRIES,
@@ -8,12 +9,20 @@ import {
 } from "./constants";
 
 describe("VAT_RATES", () => {
-  it("contains exactly [0, 5, 9, 11, 19, 21]", () => {
-    expect([...VAT_RATES]).toEqual([0, 5, 9, 11, 19, 21]);
+  it("active set for new docs is exactly [0, 9, 11, 21] (2026 law — no abolished 5%/19%)", () => {
+    expect([...VAT_RATES]).toEqual([0, 9, 11, 21]);
+  });
+
+  it("the historical/all set still recognizes [0, 5, 9, 11, 19, 21] for old-doc parsing", () => {
+    expect([...VAT_RATES_ALL]).toEqual([0, 5, 9, 11, 19, 21]);
+  });
+
+  it("active rates are a subset of all recognized rates", () => {
+    expect([...VAT_RATES].every((r) => (VAT_RATES_ALL as readonly number[]).includes(r))).toBe(true);
   });
 
   it("all entries are non-negative numbers", () => {
-    expect([...VAT_RATES].every((r) => typeof r === "number" && r >= 0)).toBe(true);
+    expect([...VAT_RATES_ALL].every((r) => typeof r === "number" && r >= 0)).toBe(true);
   });
 });
 

@@ -240,16 +240,18 @@ function GestiuneModal({
   });
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-back show" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
         <div className="modal-head">
-          <div className="modal-title">
-            {gestiune
-              ? t("gestiuni.editTitle", { cod: gestiune.cod })
-              : t("gestiuni.newTitle")}
+          <div>
+            <div className="mt">
+              {gestiune
+                ? t("gestiuni.editTitle", { cod: gestiune.cod })
+                : t("gestiuni.newTitle")}
+            </div>
           </div>
-          <button className="modal-close" onClick={onClose}>
-            &times;
+          <button className="modal-x" onClick={onClose} aria-label="Inchide">
+            <Ic name="xMark" />
           </button>
         </div>
         <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -313,7 +315,7 @@ function GestiuneModal({
               placeholder={t("gestiuni.adresaPlaceholder")}
             />
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+          <label className="chk-row">
             <input
               type="checkbox"
               checked={dispersata}
@@ -322,8 +324,8 @@ function GestiuneModal({
             {t("gestiuni.fieldDispersata")}
           </label>
         </div>
-        <div className="modal-footer">
-          <button className="btn-ghost" onClick={onClose}>
+        <div className="modal-foot">
+          <button type="button" className="pill-btn" onClick={onClose}>
             {t("gestiuni.cancel")}
           </button>
           <button

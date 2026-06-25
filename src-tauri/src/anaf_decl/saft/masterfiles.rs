@@ -236,6 +236,18 @@ fn strip_ro(cui: &str) -> String {
 use crate::anaf_decl::xml::trunc; // char-safe truncation, shared (anaf_decl::xml)
 use crate::anaf_decl::xml_esc as esc;
 
+/// SAF-T D406 `BankAccountNumber` for a partner: the recorded IBAN (trimmed, ≤35, XML-escaped)
+/// when on file, else the `"N/A"` mention. The DUK validator rejects an empty value when the
+/// `CompanyStructure/BankAccount` element is present, so the fallback must stay non-empty.
+fn saft_bank_account_number(iban: &str) -> String {
+    let t = iban.trim();
+    if t.is_empty() {
+        "N/A".to_string()
+    } else {
+        esc(&trunc(t, 35))
+    }
+}
+
 // ── AmountStructure helper (RON-only; CurrencyCode=RON, CurrencyAmount=Amount) ─
 pub fn write_amount_structure(w: &mut XmlWriter, elem: &str, amount: Decimal) -> AppResult<()> {
     start_elem(w, elem)?;
@@ -362,7 +374,7 @@ pub async fn write_customers(
     start_elem(w, "Customers")?;
 
     let rows = sqlx::query(
-        "SELECT id, contact_type, cui, legal_name, address, city, county, country \
+        "SELECT id, contact_type, cui, legal_name, address, city, county, country, iban \
          FROM contacts \
          WHERE company_id = ?1 \
            AND (contact_type = '\"CUSTOMER\"' OR contact_type = '\"BOTH\"' \
@@ -381,6 +393,7 @@ pub async fn write_customers(
         let city: String = row.try_get("city").unwrap_or_default();
         let county: String = row.try_get("county").unwrap_or_default();
         let country: String = row.try_get("country").unwrap_or_else(|_| "RO".to_string());
+        let iban: String = row.try_get("iban").unwrap_or_default();
         let country_2 = if country.len() >= 2 {
             &country[..2]
         } else {
@@ -409,10 +422,11 @@ pub async fn write_customers(
             Some("StreetAddress"),
         )?;
         // DUK rule: BankAccount (minOccurs=1 in CompanyHeaderStructure restriction):
-        // CompanyStructure itself has minOccurs=0, but when present it needs a BankAccount.
-        // ANAF DUK requires at least one BankAccount — emit placeholder.
+        // CompanyStructure itself has minOccurs=0, but when present it needs a BankAccount with a
+        // non-empty BankAccountNumber (DUK rejects an empty IBAN). Emit the partner's real IBAN
+        // when on file; fall back to the "N/A" mention only when none is recorded.
         start_elem(w, "BankAccount")?;
-        write_text_elem(w, "BankAccountNumber", "N/A")?;
+        write_text_elem(w, "BankAccountNumber", &saft_bank_account_number(&iban))?;
         end_elem(w, "BankAccount")?;
         end_elem(w, "CompanyStructure")?;
         write_text_elem(w, "CustomerID", &esc(&trunc(&canon_id, 35)))?;
@@ -438,7 +452,7 @@ pub async fn write_suppliers(
 
     // Contacts that are SUPPLIER or BOTH
     let rows = sqlx::query(
-        "SELECT id, contact_type, cui, legal_name, address, city, county, country \
+        "SELECT id, contact_type, cui, legal_name, address, city, county, country, iban \
          FROM contacts \
          WHERE company_id = ?1 \
            AND (contact_type = '\"SUPPLIER\"' OR contact_type = '\"BOTH\"' \
@@ -459,6 +473,7 @@ pub async fn write_suppliers(
         let city: String = row.try_get("city").unwrap_or_default();
         let county: String = row.try_get("county").unwrap_or_default();
         let country: String = row.try_get("country").unwrap_or_else(|_| "RO".to_string());
+        let iban: String = row.try_get("iban").unwrap_or_default();
         let country_2 = if country.len() >= 2 {
             &country[..2]
         } else {
@@ -488,9 +503,10 @@ pub async fn write_suppliers(
             country_2,
             Some("StreetAddress"),
         )?;
-        // DUK rule: BankAccount required per ANAF business rules — emit placeholder
+        // DUK rule: BankAccount required per ANAF business rules — emit the partner's real IBAN
+        // when on file, else the non-empty "N/A" mention.
         start_elem(w, "BankAccount")?;
-        write_text_elem(w, "BankAccountNumber", "N/A")?;
+        write_text_elem(w, "BankAccountNumber", &saft_bank_account_number(&iban))?;
         end_elem(w, "BankAccount")?;
         end_elem(w, "CompanyStructure")?;
         write_text_elem(w, "SupplierID", &esc(&trunc(&canon_id, 35)))?;

@@ -5,7 +5,7 @@
    not leak in. */
 .pg-gl .panel{display:none;background:none;border:none;border-radius:0;box-shadow:none;overflow:visible}
 .pg-gl .panel.show{display:block}
-.pg-gl .eq-row{display:flex;gap:14px;padding:14px 16px;border-top:1px solid var(--line);background:#FCFCFD;flex-wrap:wrap}
+.pg-gl .eq-row{display:flex;gap:14px;padding:14px 16px;border-top:1px solid var(--line);background:var(--bg-table-header);flex-wrap:wrap}
 .pg-gl .eq{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2)}
 .pg-gl .eq .sic{width:14px;height:14px;stroke:var(--green);stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round}
 /* app addition: failed equality (the prototype only shows the all-green state) */

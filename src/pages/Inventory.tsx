@@ -106,11 +106,11 @@ function CreateSessionModal({ companyId, onClose, onCreated }: CreateModalProps)
   };
 
   return (
-    <div className="modal-back" onClick={onClose}>
+    <div className="modal-back show" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <span>{t("inventory.newSession")}</span>
-          <button className="ic-btn" onClick={onClose}><Ic name="x" /></button>
+          <span className="mt">{t("inventory.newSession")}</span>
+          <button className="modal-x" onClick={onClose}><Ic name="xMark" /></button>
         </div>
         <form onSubmit={(e) => void handleSubmit(e)}>
           <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>

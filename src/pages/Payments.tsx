@@ -882,7 +882,7 @@ function InvoicePickerCombobox({
           minHeight: 36,
           padding: "4px 6px 4px 11px",
           border: "1px solid var(--line)",
-          background: "#fff",
+          background: "var(--bg-content)",
           borderRadius: 8,
         }}
       >

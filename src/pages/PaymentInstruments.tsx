@@ -179,29 +179,32 @@ function EventModal({
       : t(titleKey);
 
   return (
-    <div className={`modal-backdrop${closing ? " closing" : ""}`} onClick={onAnimClose}>
+    <div className={`modal-back ${closing ? "closing" : "show"}`} onClick={onAnimClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2 className="modal-title">{displayTitle}</h2>
-          <button className="modal-close" onClick={onAnimClose}><Ic name="x" /></button>
+        <div className="modal-head">
+          <div>
+            <div className="mt">{displayTitle}</div>
+          </div>
+          <button className="modal-x" onClick={onAnimClose} aria-label="Inchide"><Ic name="xMark" /></button>
         </div>
-        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <label className="field-label">
-            {t("pi.eventModal.date")}
+        <div className="modal-body">
+          <div className="field">
+            <label>{t("pi.eventModal.date")}</label>
             <input
               type="date"
-              className="field-input"
+              className="input"
               value={date}
               onChange={(e) => setDate(e.target.value)}
             />
-          </label>
+          </div>
         </div>
-        <div className="modal-footer">
-          <button className="btn secondary" onClick={onAnimClose}>
+        <div className="modal-foot">
+          <button type="button" className="pill-btn" onClick={onAnimClose}>
             {t("pi.eventModal.cancel")}
           </button>
           <button
-            className="btn primary"
+            type="button"
+            className="btn-dark"
             disabled={!date}
             onClick={() => { if (date) onConfirm(date); }}
           >
@@ -231,56 +234,57 @@ function DiscountModal({
   const canSubmit = date && discountAmount && Number(discountAmount) > 0;
 
   return (
-    <div className={`modal-backdrop${closing ? " closing" : ""}`} onClick={onAnimClose}>
+    <div className={`modal-back ${closing ? "closing" : "show"}`} onClick={onAnimClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2 className="modal-title">{t("pi.discountModal.title")}</h2>
-          <button className="modal-close" onClick={onAnimClose}><Ic name="x" /></button>
+        <div className="modal-head">
+          <div>
+            <div className="mt">{t("pi.discountModal.title")}</div>
+            <div className="ms">{t("pi.discountModal.sub")}</div>
+          </div>
+          <button className="modal-x" onClick={onAnimClose} aria-label="Inchide"><Ic name="xMark" /></button>
         </div>
-        <p style={{ margin: "8px 24px 0", fontSize: 13, color: "var(--text-muted)" }}>
-          {t("pi.discountModal.sub")}
-        </p>
-        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <label className="field-label">
-            {t("pi.discountModal.date")}
+        <div className="modal-body">
+          <div className="field">
+            <label>{t("pi.discountModal.date")}</label>
             <input
               type="date"
-              className="field-input"
+              className="input"
               value={date}
               onChange={(e) => setDate(e.target.value)}
             />
-          </label>
-          <label className="field-label">
-            {t("pi.discountModal.discountAmount")}
+          </div>
+          <div className="field">
+            <label>{t("pi.discountModal.discountAmount")}</label>
             <input
               type="number"
               step="0.01"
               min="0.01"
-              className="field-input"
+              className="input"
               placeholder={t("pi.discountModal.discountPlaceholder")}
               value={discountAmount}
               onChange={(e) => setDiscountAmount(e.target.value)}
             />
-          </label>
-          <label className="field-label">
-            {t("pi.discountModal.commission")}
+          </div>
+          <div className="field">
+            <label>{t("pi.discountModal.commission")}</label>
             <input
               type="number"
               step="0.01"
               min="0"
-              className="field-input"
+              className="input"
               placeholder={t("pi.discountModal.commissionPlaceholder")}
               value={commissionAmount}
               onChange={(e) => setCommissionAmount(e.target.value)}
             />
-          </label>
+          </div>
         </div>
-        <div className="modal-footer">
-          <button className="btn secondary" onClick={onAnimClose}>
+        <div className="modal-foot">
+          <button type="button" className="pill-btn" onClick={onAnimClose}>
             {t("pi.discountModal.cancel")}
           </button>
           <button
-            className="btn primary"
+            type="button"
+            className="btn-dark"
             disabled={!canSubmit}
             onClick={() => {
               if (canSubmit) onConfirm(date, discountAmount, commissionAmount);
@@ -383,96 +387,96 @@ function PiModal({
   const isBusy = createMut.isPending || updateMut.isPending;
 
   return (
-    <div className={`modal-backdrop${closing ? " closing" : ""}`} onClick={onAnimClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
-        <div className="modal-header">
-          <h2 className="modal-title">
-            {pi ? t("pi.modal.editTitle") : t("pi.modal.createTitle")}
-          </h2>
-          <button className="modal-close" onClick={onAnimClose}><Ic name="x" /></button>
+    <div className={`modal-back ${closing ? "closing" : "show"}`} onClick={onAnimClose}>
+      <div className="modal lg" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <div className="mt">
+              {pi ? t("pi.modal.editTitle") : t("pi.modal.createTitle")}
+            </div>
+            <div className="ms">{t("pi.modal.sub")}</div>
+          </div>
+          <button className="modal-x" onClick={onAnimClose} aria-label="Inchide"><Ic name="xMark" /></button>
         </div>
-        <p style={{ margin: "8px 24px 0", fontSize: 13, color: "var(--text-muted)" }}>
-          {t("pi.modal.sub")}
-        </p>
-        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="modal-body">
 
           {/* Kind + Direction — only editable on create */}
           {!pi && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <label className="field-label">
-                {t("pi.modal.kind")}
-                <select className="field-input" value={form.kind} onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value as PiKind, scadenta: "" }))}>
+            <div className="fgrid">
+              <div className="field">
+                <label>{t("pi.modal.kind")}</label>
+                <select className="select" value={form.kind} onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value as PiKind, scadenta: "" }))}>
                   <option value="CEC">{t("pi.kind.CEC")}</option>
                   <option value="BO">{t("pi.kind.BO")}</option>
                 </select>
-              </label>
-              <label className="field-label">
-                {t("pi.modal.direction")}
-                <select className="field-input" value={form.direction} onChange={set("direction") as React.ChangeEventHandler<HTMLSelectElement>}>
+              </div>
+              <div className="field">
+                <label>{t("pi.modal.direction")}</label>
+                <select className="select" value={form.direction} onChange={set("direction") as React.ChangeEventHandler<HTMLSelectElement>}>
                   <option value="received">{t("pi.modal.directionReceived")}</option>
                   <option value="issued">{t("pi.modal.directionIssued")}</option>
                 </select>
-              </label>
+              </div>
             </div>
           )}
 
           {/* Number + Partner CUI */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <label className="field-label">
-              {t("pi.modal.number")}
-              <input type="text" className="field-input" placeholder={t("pi.modal.numberPlaceholder")} value={form.number} onChange={set("number")} />
-            </label>
-            <label className="field-label">
-              {t("pi.modal.partnerCui")}
-              <input type="text" className="field-input" placeholder={t("pi.modal.partnerCuiPlaceholder")} value={form.partnerCui} onChange={set("partnerCui")} />
-            </label>
+          <div className="fgrid">
+            <div className="field">
+              <label>{t("pi.modal.number")}</label>
+              <input type="text" className="input" placeholder={t("pi.modal.numberPlaceholder")} value={form.number} onChange={set("number")} />
+            </div>
+            <div className="field">
+              <label>{t("pi.modal.partnerCui")}</label>
+              <input type="text" className="input" placeholder={t("pi.modal.partnerCuiPlaceholder")} value={form.partnerCui} onChange={set("partnerCui")} />
+            </div>
           </div>
 
           {/* Amount + Currency */}
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
-            <label className="field-label">
-              {t("pi.modal.amount")}
+          <div className="fgrid">
+            <div className="field">
+              <label>{t("pi.modal.amount")} <span className="req">*</span></label>
               <input
                 type="number"
                 step="0.01"
                 min="0.01"
-                className={`field-input${errors.amount ? " field-error" : ""}`}
+                className={`input${errors.amount ? " invalid" : ""}`}
                 placeholder={t("pi.modal.amountPlaceholder")}
                 value={form.amount}
                 onChange={set("amount")}
               />
-              {errors.amount && <span className="field-error-msg">{errors.amount}</span>}
-            </label>
-            <label className="field-label">
-              {t("pi.modal.currency")}
-              <select className="field-input" value={form.currency} onChange={set("currency") as React.ChangeEventHandler<HTMLSelectElement>}>
+              {errors.amount && <div className="err">{errors.amount}</div>}
+            </div>
+            <div className="field">
+              <label>{t("pi.modal.currency")}</label>
+              <select className="select" value={form.currency} onChange={set("currency") as React.ChangeEventHandler<HTMLSelectElement>}>
                 <option value="RON">RON</option>
                 <option value="EUR">EUR</option>
                 <option value="USD">USD</option>
               </select>
-            </label>
+            </div>
           </div>
 
           {/* Issue date + Scadenta */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <label className="field-label">
-              {t("pi.modal.issueDate")}
+          <div className="fgrid">
+            <div className="field">
+              <label>{t("pi.modal.issueDate")} <span className="req">*</span></label>
               <input
                 type="date"
-                className={`field-input${errors.issueDate ? " field-error" : ""}`}
+                className={`input${errors.issueDate ? " invalid" : ""}`}
                 value={form.issueDate}
                 onChange={set("issueDate")}
               />
-              {errors.issueDate && <span className="field-error-msg">{errors.issueDate}</span>}
-            </label>
-            <label className="field-label">
-              {t("pi.modal.scadenta")}
+              {errors.issueDate && <div className="err">{errors.issueDate}</div>}
+            </div>
+            <div className="field">
+              <label>{t("pi.modal.scadenta")}</label>
               {form.kind === "CEC" ? (
-                <input type="date" className="field-input" disabled placeholder="—" value="" onChange={() => {}} />
+                <input type="date" className="input" disabled placeholder="—" value="" onChange={() => {}} />
               ) : (
                 <input
                   type="date"
-                  className={`field-input${errors.scadenta ? " field-error" : ""}`}
+                  className={`input${errors.scadenta ? " invalid" : ""}`}
                   value={form.scadenta}
                   onChange={set("scadenta")}
                 />
@@ -482,27 +486,27 @@ function PiModal({
                   {t("pi.modal.scadentaNote")}
                 </span>
               )}
-              {errors.scadenta && <span className="field-error-msg">{errors.scadenta}</span>}
-            </label>
+              {errors.scadenta && <div className="err">{errors.scadenta}</div>}
+            </div>
           </div>
 
           {/* Notes */}
-          <label className="field-label">
-            {t("pi.modal.notes")}
+          <div className="field">
+            <label>{t("pi.modal.notes")}</label>
             <textarea
-              className="field-input"
+              className="input"
               rows={2}
               placeholder={t("pi.modal.notesPlaceholder")}
               value={form.notes}
               onChange={set("notes")}
             />
-          </label>
+          </div>
         </div>
-        <div className="modal-footer">
-          <button className="btn secondary" onClick={onAnimClose}>
+        <div className="modal-foot">
+          <button type="button" className="pill-btn" onClick={onAnimClose}>
             {t("pi.modal.close")}
           </button>
-          <button className="btn primary" disabled={isBusy} onClick={handleSubmit}>
+          <button type="button" className="btn-dark" disabled={isBusy} onClick={handleSubmit}>
             {isBusy
               ? t("pi.modal.saving")
               : pi

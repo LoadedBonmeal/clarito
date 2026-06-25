@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useAppStore, type DensityMode } from "@/lib/store";
 
 function applyDensityClass(density: DensityMode) {
@@ -16,19 +17,43 @@ export function useTheme() {
 
   useEffect(() => {
     const root = document.documentElement;
-    const apply = (mode: "light" | "dark") => {
+    const apply = (mode: "light" | "dark") =>
       root.classList.toggle("dark", mode === "dark");
-    };
 
-    if (theme === "system") {
-      const mq = window.matchMedia("(prefers-color-scheme: dark)");
-      apply(mq.matches ? "dark" : "light");
-      const onChange = (e: MediaQueryListEvent) =>
-        apply(e.matches ? "dark" : "light");
-      mq.addEventListener("change", onChange);
-      return () => mq.removeEventListener("change", onChange);
+    // Explicit user choice — just apply it.
+    if (theme !== "system") {
+      apply(theme);
+      return;
     }
-    apply(theme);
+
+    // "system" → track the OS appearance dynamically. WKWebView's
+    // prefers-color-scheme is unreliable on macOS (it can stay stuck on light
+    // even when the OS is dark), so use Tauri's NATIVE window theme API
+    // (NSWindow.effectiveAppearance) as the source of truth, and keep
+    // matchMedia only as a fallback signal.
+    let cancelled = false;
+    let unlistenTheme: (() => void) | undefined;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onMq = (e: MediaQueryListEvent) => apply(e.matches ? "dark" : "light");
+
+    const win = getCurrentWindow();
+    win
+      .theme()
+      .then((t) => { if (!cancelled) apply(t === "dark" ? "dark" : "light"); })
+      .catch(() => { if (!cancelled) apply(mq.matches ? "dark" : "light"); });
+    win
+      .onThemeChanged(({ payload }) =>
+        apply(payload === "dark" ? "dark" : "light"),
+      )
+      .then((u) => { if (cancelled) u(); else unlistenTheme = u; })
+      .catch(() => {});
+    mq.addEventListener("change", onMq);
+
+    return () => {
+      cancelled = true;
+      unlistenTheme?.();
+      mq.removeEventListener("change", onMq);
+    };
   }, [theme]);
 
   // Sync density class on mount + whenever density changes

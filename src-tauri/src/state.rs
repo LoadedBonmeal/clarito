@@ -37,10 +37,20 @@ const ROLE_NONE: u8 = 0xFF;
 /// the session as expired and clears it.  Each successful authenticated command
 /// slides the window.  Pre-auth / PUBLIC commands do NOT slide it.
 ///
-/// Override at compile time via the `CLARITO_IDLE_TIMEOUT_SECS` environment
-/// variable (parsed at start-up via `idle_timeout_secs()`), or leave the
-/// constant as the prod default.
-pub const IDLE_TIMEOUT_SECS_DEFAULT: i64 = 900; // 15 minutes
+/// Production idle-timeout default: 15 minutes. Override at runtime via the
+/// `CLARITO_IDLE_TIMEOUT_SECS` environment variable (read in `idle_timeout_secs()`).
+/// Referenced only by the release-build fallback below, so debug builds see it as unused.
+#[allow(dead_code)]
+pub const IDLE_TIMEOUT_SECS_DEFAULT: i64 = 900; // 15 minutes (production)
+
+/// Effective fallback when no env override is set. Debug builds (`tauri dev` /
+/// `tauri build --debug`) effectively disable the idle-timeout so the DEV
+/// login-skip session (see lib.rs) doesn't expire during UI testing. The
+/// production release build always uses the 15-minute default.
+#[cfg(debug_assertions)]
+const IDLE_TIMEOUT_FALLBACK: i64 = 315_360_000; // ~10 years — DEBUG BUILDS ONLY
+#[cfg(not(debug_assertions))]
+const IDLE_TIMEOUT_FALLBACK: i64 = IDLE_TIMEOUT_SECS_DEFAULT;
 
 /// Returns the effective idle-timeout (seconds).  Reads the env var
 /// `CLARITO_IDLE_TIMEOUT_SECS` at call time so tests can override it.
@@ -49,7 +59,7 @@ pub fn idle_timeout_secs() -> i64 {
         .ok()
         .and_then(|v| v.parse::<i64>().ok())
         .filter(|&v| v > 0)
-        .unwrap_or(IDLE_TIMEOUT_SECS_DEFAULT)
+        .unwrap_or(IDLE_TIMEOUT_FALLBACK)
 }
 
 /// Pure, unit-testable idle-expiry check.

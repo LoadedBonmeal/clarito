@@ -440,7 +440,7 @@ export function ContractsPage() {
       {isModalOpen && (
         <div className={`modal-back ${closing ? "closing" : "show"}`} onClick={closeModal}>
           <div
-            className="modal-panel modal-lg"
+            className="modal lg"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -449,14 +449,14 @@ export function ContractsPage() {
             {/* Modal header */}
             <div className="modal-head">
               <div>
-                <h2 id="contract-modal-title">
+                <div className="mt" id="contract-modal-title">
                   {editingContract
                     ? t("contracts.modal.editTitle")
                     : t("contracts.modal.createTitle")}
-                </h2>
-                <p className="modal-sub">{t("contracts.modal.sub")}</p>
+                </div>
+                <div className="ms">{t("contracts.modal.sub")}</div>
               </div>
-              <button className="modal-close" onClick={closeModal} aria-label={t("contracts.modal.close")}>
+              <button className="modal-x" onClick={closeModal} aria-label={t("contracts.modal.close")}>
                 <svg className="ic" viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: SVG_X }} />
               </button>
             </div>
@@ -464,35 +464,35 @@ export function ContractsPage() {
             {/* Modal body */}
             <div className="modal-body">
               {/* Row 1: Number + Title */}
-              <div className="form-row form-row-2">
-                <div className="form-group">
-                  <label className="form-label">{t("contracts.modal.number")}</label>
+              <div className="fgrid">
+                <div className="field">
+                  <label>{t("contracts.modal.number")}</label>
                   <input
-                    className="form-input"
+                    className="input"
                     type="text"
                     value={form.number}
                     onChange={(e) => setField("number", e.target.value)}
                     placeholder={t("contracts.modal.numberPlaceholder")}
                   />
                 </div>
-                <div className="form-group">
-                  <label className="form-label required">{t("contracts.modal.title")}</label>
+                <div className="field">
+                  <label>{t("contracts.modal.title")} <span className="req">*</span></label>
                   <input
-                    className={`form-input${formErrors.title ? " input-error" : ""}`}
+                    className={`input${formErrors.title ? " invalid" : ""}`}
                     type="text"
                     value={form.title}
                     onChange={(e) => setField("title", e.target.value)}
                     placeholder={t("contracts.modal.titlePlaceholder")}
                   />
-                  {formErrors.title && <p className="form-error">{formErrors.title}</p>}
+                  {formErrors.title && <div className="err">{formErrors.title}</div>}
                 </div>
               </div>
 
               {/* Row 2: Object */}
-              <div className="form-group">
-                <label className="form-label">{t("contracts.modal.object")}</label>
+              <div className="field">
+                <label>{t("contracts.modal.object")}</label>
                 <input
-                  className="form-input"
+                  className="input"
                   type="text"
                   value={form.object}
                   onChange={(e) => setField("object", e.target.value)}
@@ -501,10 +501,10 @@ export function ContractsPage() {
               </div>
 
               {/* Row 3: Partner */}
-              <div className="form-group">
-                <label className="form-label">{t("contracts.modal.partner")}</label>
+              <div className="field">
+                <label>{t("contracts.modal.partner")}</label>
                 <select
-                  className="form-select"
+                  className="select"
                   value={form.contactId}
                   onChange={(e) => setField("contactId", e.target.value)}
                 >
@@ -518,11 +518,11 @@ export function ContractsPage() {
               </div>
 
               {/* Row 4: Value + Currency */}
-              <div className="form-row form-row-2">
-                <div className="form-group">
-                  <label className="form-label">{t("contracts.modal.value")}</label>
+              <div className="fgrid">
+                <div className="field">
+                  <label>{t("contracts.modal.value")}</label>
                   <input
-                    className="form-input"
+                    className="input"
                     type="text"
                     inputMode="decimal"
                     value={form.value}
@@ -530,10 +530,10 @@ export function ContractsPage() {
                     placeholder={t("contracts.modal.valuePlaceholder")}
                   />
                 </div>
-                <div className="form-group">
-                  <label className="form-label">{t("contracts.modal.currency")}</label>
+                <div className="field">
+                  <label>{t("contracts.modal.currency")}</label>
                   <select
-                    className="form-select"
+                    className="select"
                     value={form.currency}
                     onChange={(e) => setField("currency", e.target.value)}
                   >
@@ -545,23 +545,23 @@ export function ContractsPage() {
               </div>
 
               {/* Row 5: Start date + End date */}
-              <div className="form-row form-row-2">
-                <div className="form-group">
-                  <label className="form-label required">{t("contracts.modal.startDate")}</label>
+              <div className="fgrid">
+                <div className="field">
+                  <label>{t("contracts.modal.startDate")} <span className="req">*</span></label>
                   <input
-                    className={`form-input${formErrors.startDate ? " input-error" : ""}`}
+                    className={`input${formErrors.startDate ? " invalid" : ""}`}
                     type="date"
                     value={form.startDate}
                     onChange={(e) => setField("startDate", e.target.value)}
                   />
                   {formErrors.startDate && (
-                    <p className="form-error">{formErrors.startDate}</p>
+                    <div className="err">{formErrors.startDate}</div>
                   )}
                 </div>
-                <div className="form-group">
-                  <label className="form-label">{t("contracts.modal.endDate")}</label>
+                <div className="field">
+                  <label>{t("contracts.modal.endDate")}</label>
                   <input
-                    className="form-input"
+                    className="input"
                     type="date"
                     value={form.endDate}
                     onChange={(e) => setField("endDate", e.target.value)}
@@ -570,12 +570,12 @@ export function ContractsPage() {
               </div>
 
               {/* Row 6: Status (create only) + Payment terms */}
-              <div className="form-row form-row-2">
+              <div className="fgrid">
                 {!editingContract && (
-                  <div className="form-group">
-                    <label className="form-label">{t("contracts.modal.status")}</label>
+                  <div className="field">
+                    <label>{t("contracts.modal.status")}</label>
                     <select
-                      className="form-select"
+                      className="select"
                       value={form.status}
                       onChange={(e) => setField("status", e.target.value as ContractStatus)}
                     >
@@ -587,10 +587,10 @@ export function ContractsPage() {
                     </select>
                   </div>
                 )}
-                <div className="form-group">
-                  <label className="form-label">{t("contracts.modal.paymentTerms")}</label>
+                <div className="field">
+                  <label>{t("contracts.modal.paymentTerms")}</label>
                   <input
-                    className="form-input"
+                    className="input"
                     type="number"
                     min={0}
                     value={form.paymentTermsDays}
@@ -601,24 +601,21 @@ export function ContractsPage() {
               </div>
 
               {/* Row 7: Auto-renew + Notice days */}
-              <div className="form-row form-row-2">
-                <div className="form-group form-group-check">
-                  <label className="toggle-label">
-                    <span className="toggle-track">
-                      <input
-                        type="checkbox"
-                        checked={form.autoRenew}
-                        onChange={(e) => setField("autoRenew", e.target.checked)}
-                      />
-                      <span className="toggle-thumb" />
-                    </span>
+              <div className="fgrid">
+                <div className="field">
+                  <label className="chk-row">
+                    <input
+                      type="checkbox"
+                      checked={form.autoRenew}
+                      onChange={(e) => setField("autoRenew", e.target.checked)}
+                    />
                     {t("contracts.modal.autoRenew")}
                   </label>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">{t("contracts.modal.renewalNoticeDays")}</label>
+                <div className="field">
+                  <label>{t("contracts.modal.renewalNoticeDays")}</label>
                   <input
-                    className="form-input"
+                    className="input"
                     type="number"
                     min={1}
                     value={form.renewalNoticeDays}
@@ -629,10 +626,10 @@ export function ContractsPage() {
               </div>
 
               {/* Notes */}
-              <div className="form-group">
-                <label className="form-label">{t("contracts.modal.notes")}</label>
+              <div className="field">
+                <label>{t("contracts.modal.notes")}</label>
                 <textarea
-                  className="form-input form-textarea"
+                  className="input"
                   value={form.notes}
                   onChange={(e) => setField("notes", e.target.value)}
                   placeholder={t("contracts.modal.notesPlaceholder")}
@@ -642,9 +639,9 @@ export function ContractsPage() {
 
               {/* Linked recurring invoices (edit mode only) */}
               {editingContract && (
-                <div className="form-group">
+                <div className="field">
                   <div className="section-label-row">
-                    <label className="form-label">{t("contracts.modal.recurringSection")}</label>
+                    <label>{t("contracts.modal.recurringSection")}</label>
                     {showRecurring !== editingContract.id && (
                       <button
                         className="btn-link"
@@ -694,10 +691,10 @@ export function ContractsPage() {
 
             {/* Modal footer */}
             <div className="modal-foot">
-              <button className="btn-ghost" onClick={closeModal} disabled={isSaving}>
+              <button type="button" className="pill-btn" onClick={closeModal} disabled={isSaving}>
                 {t("contracts.cancel")}
               </button>
-              <button className="btn-dark" onClick={handleSubmit} disabled={isSaving}>
+              <button type="button" className="btn-dark" onClick={handleSubmit} disabled={isSaving}>
                 {isSaving
                   ? t("contracts.modal.saving")
                   : editingContract

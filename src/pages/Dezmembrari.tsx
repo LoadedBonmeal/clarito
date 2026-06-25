@@ -179,26 +179,27 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
   const compTotal = compRows.reduce((s, r) => s + r.qty * r.unitFairValue, 0);
 
   return (
-    <div className={`modal-overlay${closing ? " closing" : ""}`} onClick={animClose}>
+    <div className={`modal-back ${closing ? "closing" : "show"}`} onClick={animClose}>
       <div
-        className="modal-panel"
-        style={{ maxWidth: 780, width: "100%" }}
+        className="modal lg"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-head">
-          <span className="modal-title">{t("dezmembrari.modal.createTitle")}</span>
-          <button className="sq-btn ghost" onClick={animClose} aria-label={t("dezmembrari.modal.close")}>
+          <div>
+            <div className="mt">{t("dezmembrari.modal.createTitle")}</div>
+          </div>
+          <button className="modal-x" onClick={animClose} aria-label={t("dezmembrari.modal.close")}>
             <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
               <path d="M6 18 18 6M6 6l12 12"/>
             </svg>
           </button>
         </div>
 
-        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 16, padding: "20px 24px" }}>
+        <div className="modal-body">
           {/* Date + Gestiune */}
-          <div style={{ display: "flex", gap: 12 }}>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label className="form-label">{t("dezmembrari.modal.date")}</label>
+          <div className="fgrid">
+            <div className="field">
+              <label>{t("dezmembrari.modal.date")}</label>
               <input
                 type="date"
                 className="input"
@@ -206,8 +207,8 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
                 onChange={(e) => setDate(e.target.value)}
               />
             </div>
-            <div className="form-row" style={{ flex: 2 }}>
-              <label className="form-label">{t("dezmembrari.modal.gestiune")}</label>
+            <div className="field">
+              <label>{t("dezmembrari.modal.gestiune")}</label>
               <select className="select" value={gestiuneId} onChange={(e) => setGestiuneId(e.target.value)}>
                 <option value="">{t("dezmembrari.modal.gestiunePick")}</option>
                 {gestiuni.map((g) => (
@@ -218,9 +219,9 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
           </div>
 
           {/* Dismantled product + qty */}
-          <div style={{ display: "flex", gap: 12 }}>
-            <div className="form-row" style={{ flex: 3 }}>
-              <label className="form-label">{t("dezmembrari.modal.dismantledProduct")}</label>
+          <div className="fgrid">
+            <div className="field">
+              <label>{t("dezmembrari.modal.dismantledProduct")}</label>
               <select
                 className="select"
                 value={dismantledProductId}
@@ -232,8 +233,8 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
                 ))}
               </select>
             </div>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label className="form-label">{t("dezmembrari.modal.dismantledQty")}</label>
+            <div className="field">
+              <label>{t("dezmembrari.modal.dismantledQty")}</label>
               <input
                 type="number"
                 className="input"
@@ -247,7 +248,7 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
 
           {/* Component lines */}
           <div>
-            <div className="form-label" style={{ marginBottom: 8 }}>{t("dezmembrari.modal.components")}</div>
+            <div style={{ marginBottom: 8, fontWeight: 500 }}>{t("dezmembrari.modal.components")}</div>
             <table className="scr-table" style={{ marginBottom: 8 }}>
               <thead>
                 <tr>
@@ -377,8 +378,8 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
           </div>
 
           {/* Notes */}
-          <div className="form-row">
-            <label className="form-label">{t("dezmembrari.modal.notes")}</label>
+          <div className="field">
+            <label>{t("dezmembrari.modal.notes")}</label>
             <textarea
               className="input"
               rows={2}
@@ -390,8 +391,8 @@ function CreateModal({ companyId, onClose }: CreateModalProps) {
           </div>
         </div>
 
-        <div className="modal-foot" style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "16px 24px" }}>
-          <button className="btn ghost" onClick={animClose}>{t("dezmembrari.modal.close")}</button>
+        <div className="modal-foot">
+          <button type="button" className="pill-btn" onClick={animClose}>{t("dezmembrari.modal.close")}</button>
           <button className="btn-dark" onClick={handleSubmit} disabled={createMut.isPending}>
             {createMut.isPending ? t("dezmembrari.modal.saving") : t("dezmembrari.modal.create")}
           </button>
@@ -417,21 +418,22 @@ function DetailModal({ dwl, products, onClose }: DetailModalProps) {
   const compTotal = lines.reduce((s, l) => s + parseFloat(l.totalFairValue), 0);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-back show" onClick={onClose}>
       <div
-        className="modal-panel"
-        style={{ maxWidth: 700, width: "100%" }}
+        className="modal lg"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-head">
-          <span className="modal-title">{t("dezmembrari.title")} — {fmtRoDate(dz.dezmembrareDate)}</span>
-          <button className="sq-btn ghost" onClick={onClose} aria-label="Închide">
+          <div>
+            <div className="mt">{t("dezmembrari.title")} — {fmtRoDate(dz.dezmembrareDate)}</div>
+          </div>
+          <button className="modal-x" onClick={onClose} aria-label="Închide">
             <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
               <path d="M6 18 18 6M6 6l12 12"/>
             </svg>
           </button>
         </div>
-        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 16, padding: "20px 24px" }}>
+        <div className="modal-body">
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
             <div><span style={{ color: "var(--fg-muted)", fontSize: 12 }}>{t("dezmembrari.modal.dismantledProduct")}: </span><strong>{productName(dz.dismantledProductId)}</strong></div>
             <div><span style={{ color: "var(--fg-muted)", fontSize: 12 }}>Cantitate: </span><strong>{dz.dismantledQty}</strong></div>
@@ -440,7 +442,7 @@ function DetailModal({ dwl, products, onClose }: DetailModalProps) {
             )}
           </div>
 
-          <div className="form-label" style={{ marginBottom: 4 }}>{t("dezmembrari.modal.components")}</div>
+          <div style={{ marginBottom: 4, fontWeight: 500 }}>{t("dezmembrari.modal.components")}</div>
           <table className="scr-table">
             <thead>
               <tr>

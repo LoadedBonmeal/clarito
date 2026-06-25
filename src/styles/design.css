@@ -20,6 +20,7 @@
   --bg-toolbar: #FFFFFF;          /* flat toolbar */
   --bg-statusbar: #FFFFFF;
   --bg-table-header: #FCFCFD;
+  --canvas: #FAFAFA;              /* app background behind cards (.main) */
   --bg-row-zebra: #FFFFFF;
   --bg-row-hover: #F7F7F8;
   --bg-row-selected: #F4F4F5;
@@ -165,6 +166,7 @@
   --bg-toolbar: #15171F;
   --bg-statusbar: #15171F;
   --bg-table-header: #1A1D26;
+  --canvas: #0B0D12;
   --bg-row-zebra: #15171F;
   --bg-row-hover: #1C1F29;
   --bg-row-selected: #23262F;
@@ -290,7 +292,7 @@ input, select, textarea { font: inherit; color: inherit; }
   grid-template-areas: "side top" "side main";
   height: 100vh;
   overflow: hidden;
-  background: #FAFAFA;
+  background: var(--canvas);
   transition: grid-template-columns .26s cubic-bezier(.4, 0, .2, 1);
 }
 .app.sidebar-collapsed { grid-template-columns: 92px 1fr; }

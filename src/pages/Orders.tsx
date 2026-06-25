@@ -188,22 +188,24 @@ function OrderModal({ companyId, order, onClose }: ModalProps) {
   };
 
   return (
-    <div className={`modal-overlay${closing ? " closing" : ""}`} onClick={animClose}>
-      <div className="modal-panel" style={{ maxWidth: 780, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+    <div className={`modal-back ${closing ? "closing" : "show"}`} onClick={animClose}>
+      <div className="modal lg" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <span className="modal-title">
-            {isEdit ? t("orders.modal.editTitle") : t("orders.modal.createTitle")}
-          </span>
-          <button className="sq-btn ghost" onClick={animClose} aria-label={t("orders.modal.close")}>
+          <div>
+            <div className="mt">
+              {isEdit ? t("orders.modal.editTitle") : t("orders.modal.createTitle")}
+            </div>
+          </div>
+          <button className="modal-x" onClick={animClose} aria-label={t("orders.modal.close")}>
             <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
               <path d="M6 18 18 6M6 6l12 12"/>
             </svg>
           </button>
         </div>
 
-        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 16, padding: "20px 24px" }}>
-          <div className="form-row">
-            <label className="form-label">{t("orders.modal.client")}</label>
+        <div className="modal-body">
+          <div className="field">
+            <label>{t("orders.modal.client")}</label>
             <select className="select" value={contactId} onChange={(e) => setContactId(e.target.value)}>
               <option value="">{t("orders.modal.clientPick")}</option>
               {contacts.map((c) => (
@@ -212,24 +214,24 @@ function OrderModal({ companyId, order, onClose }: ModalProps) {
             </select>
           </div>
 
-          <div style={{ display: "flex", gap: 12 }}>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label className="form-label">{t("orders.modal.orderDate")}</label>
+          <div className="fgrid">
+            <div className="field">
+              <label>{t("orders.modal.orderDate")}</label>
               <input type="date" className="input" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} />
             </div>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label className="form-label">{t("orders.modal.expectedDelivery")}</label>
+            <div className="field">
+              <label>{t("orders.modal.expectedDelivery")}</label>
               <input type="date" className="input" value={expectedDelivery} onChange={(e) => setExpectedDelivery(e.target.value)} />
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 12 }}>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label className="form-label">{t("orders.modal.series")}</label>
+          <div className="fgrid">
+            <div className="field">
+              <label>{t("orders.modal.series")}</label>
               <input type="text" className="input" placeholder={t("orders.modal.seriesPlaceholder")} value={series} onChange={(e) => setSeries(e.target.value)} />
             </div>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label className="form-label">{t("orders.modal.currency")}</label>
+            <div className="field">
+              <label>{t("orders.modal.currency")}</label>
               <select className="select" value={currency} onChange={(e) => setCurrency(e.target.value)}>
                 <option value="RON">RON</option>
                 <option value="EUR">EUR</option>
@@ -239,8 +241,8 @@ function OrderModal({ companyId, order, onClose }: ModalProps) {
             </div>
           </div>
 
-          <div>
-            <div className="form-label" style={{ marginBottom: 8 }}>{t("orders.modal.lines")}</div>
+          <div className="field span2">
+            <label>{t("orders.modal.lines")}</label>
             <LineItemsEditor
               lines={lines}
               onChange={setLines}
@@ -251,8 +253,8 @@ function OrderModal({ companyId, order, onClose }: ModalProps) {
             />
           </div>
 
-          <div className="form-row">
-            <label className="form-label">{t("orders.modal.notes")}</label>
+          <div className="field">
+            <label>{t("orders.modal.notes")}</label>
             <textarea
               className="input"
               rows={2}
@@ -264,9 +266,9 @@ function OrderModal({ companyId, order, onClose }: ModalProps) {
           </div>
         </div>
 
-        <div className="modal-foot" style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "16px 24px" }}>
-          <button className="btn ghost" onClick={animClose}>{t("orders.modal.close")}</button>
-          <button className="btn-dark" onClick={handleSubmit} disabled={saving}>
+        <div className="modal-foot">
+          <button type="button" className="pill-btn" onClick={animClose}>{t("orders.modal.close")}</button>
+          <button type="button" className="btn-dark" onClick={handleSubmit} disabled={saving}>
             {saving
               ? t("orders.modal.saving")
               : isEdit ? t("orders.modal.saveChanges") : t("orders.modal.create")}

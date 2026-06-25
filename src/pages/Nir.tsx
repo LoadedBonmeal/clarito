@@ -289,7 +289,7 @@ function NirCreateForm({
         <div style={{ fontWeight: 600, marginBottom: 8 }}>{t("nir.fromInvoiceTitle")}</div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input
-            className="form-input"
+            className="input"
             placeholder={t("nir.fromInvoiceId")}
             value={prefillInvId}
             onChange={(e) => setPrefillInvId(e.target.value)}
@@ -308,20 +308,20 @@ function NirCreateForm({
       {/* Header */}
       <div className="scr-card" style={{ marginBottom: 16, padding: "16px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-          <label className="form-field">
+          <label className="field">
             <span>{t("nir.fieldDate")}</span>
             <input
               type="date"
-              className="form-input"
+              className="input"
               value={nirDate}
               onChange={(e) => setNirDate(e.target.value)}
             />
           </label>
 
-          <label className="form-field">
+          <label className="field">
             <span>{t("nir.fieldGestiune")}</span>
             <select
-              className="form-input"
+              className="select"
               value={gestiuneId}
               onChange={(e) => setGestiuneId(e.target.value)}
             >
@@ -334,7 +334,7 @@ function NirCreateForm({
             </select>
           </label>
 
-          <label className="form-field" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 18 }}>
+          <label className="field" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 18 }}>
             <input
               type="checkbox"
               checked={retailMode}
@@ -343,37 +343,37 @@ function NirCreateForm({
             <span>{t("nir.fieldRetailMode")}</span>
           </label>
 
-          <label className="form-field">
+          <label className="field">
             <span>{t("nir.fieldSupplier")}</span>
             <input
-              className="form-input"
+              className="input"
               value={supplierName}
               onChange={(e) => setSupplierName(e.target.value)}
             />
           </label>
 
-          <label className="form-field">
+          <label className="field">
             <span>{t("nir.fieldCui")}</span>
             <input
-              className="form-input"
+              className="input"
               value={supplierCui}
               onChange={(e) => setSupplierCui(e.target.value)}
             />
           </label>
 
-          <label className="form-field">
+          <label className="field">
             <span>{t("nir.fieldComisie")}</span>
             <input
-              className="form-input"
+              className="input"
               value={comisie}
               onChange={(e) => setComisie(e.target.value)}
             />
           </label>
 
-          <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+          <label className="field" style={{ gridColumn: "1 / -1" }}>
             <span>{t("nir.fieldObservatii")}</span>
             <textarea
-              className="form-input"
+              className="input"
               value={observatii}
               onChange={(e) => setObservatii(e.target.value)}
               rows={2}
@@ -409,7 +409,7 @@ function NirCreateForm({
                 <td style={{ textAlign: "center", color: "var(--text-2)" }}>{i + 1}</td>
                 <td>
                   <input
-                    className="form-input"
+                    className="input"
                     value={ln.denumire}
                     onChange={(e) => updateLine(i, "denumire", e.target.value)}
                     style={{ width: "100%", minWidth: 160 }}
@@ -417,7 +417,7 @@ function NirCreateForm({
                 </td>
                 <td>
                   <input
-                    className="form-input"
+                    className="input"
                     value={ln.um ?? ""}
                     onChange={(e) => updateLine(i, "um", e.target.value)}
                     style={{ width: 60 }}
@@ -425,7 +425,7 @@ function NirCreateForm({
                 </td>
                 <td>
                   <input
-                    className="form-input"
+                    className="input"
                     value={ln.qty}
                     onChange={(e) => updateLine(i, "qty", e.target.value)}
                     style={{ width: 85, textAlign: "right" }}
@@ -433,7 +433,7 @@ function NirCreateForm({
                 </td>
                 <td>
                   <input
-                    className="form-input"
+                    className="input"
                     value={ln.unitCost}
                     onChange={(e) => updateLine(i, "unitCost", e.target.value)}
                     style={{ width: 85, textAlign: "right" }}
@@ -441,7 +441,7 @@ function NirCreateForm({
                 </td>
                 <td>
                   <input
-                    className="form-input"
+                    className="input"
                     value={ln.vatRate}
                     onChange={(e) => updateLine(i, "vatRate", e.target.value)}
                     style={{ width: 60, textAlign: "right" }}
@@ -450,7 +450,7 @@ function NirCreateForm({
                 {retailMode && (
                   <td>
                     <input
-                      className="form-input"
+                      className="input"
                       value={ln.adaosPct ?? ""}
                       onChange={(e) => updateLine(i, "adaosPct", e.target.value)}
                       style={{ width: 60, textAlign: "right" }}

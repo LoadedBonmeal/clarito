@@ -120,6 +120,13 @@ pub fn build_d207_xml(header: &D207Header, benefs: &[D207Benef]) -> AppResult<St
     let d_rec = header.d_rec.to_string();
     let total_s = total_plata_a.to_string();
     let cui = digits_only(&header.cui);
+    // The declarant CUI is mandatory — `digits_only` would otherwise silently emit an empty
+    // `cui=""` attribute that the ANAF DUK validator rejects.
+    if cui.is_empty() {
+        return Err(AppError::Validation(
+            "CUI-ul declarantului este obligatoriu pentru D207.".to_string(),
+        ));
+    }
     let den = trunc(header.den.trim(), 200);
     let adresa = trunc(header.adresa.trim(), 1000);
     let nume = trunc(header.nume_declar.trim(), 75);

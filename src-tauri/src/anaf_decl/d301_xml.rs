@@ -313,6 +313,20 @@ pub fn build_d301_xml(header: &D301Header, data: &D301Data) -> AppResult<String>
     let prenume = trunc(header.prenume_declarant.trim(), 75);
     let functia = trunc(header.functia_declarant.trim(), 50);
 
+    // The ANAF DUK validator requires the declarant's bank + account attributes to be
+    // present and non-empty — reject early with a clear message rather than emitting an
+    // XML the validator will reject.
+    if banca.is_empty() {
+        return Err(AppError::Validation(
+            "Banca declarantului este obligatorie pentru D301.".to_string(),
+        ));
+    }
+    if cont.is_empty() {
+        return Err(AppError::Validation(
+            "Contul bancar (IBAN) al declarantului este obligatoriu pentru D301.".to_string(),
+        ));
+    }
+
     // N15.2 strings for totals.
     let baza1_s = fmt_n15_2(baza1);
     let tva1_s = fmt_n15_2(tva1);

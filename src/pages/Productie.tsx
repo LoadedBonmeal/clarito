@@ -382,19 +382,19 @@ function BomForm({
 
       {/* Cap BOM */}
       <div className="grid gap-4">
-        <div>
-          <label className="label text-sm">{t("productie.bom.fieldName")}</label>
+        <div className="field">
+          <label>{t("productie.bom.fieldName")}</label>
           <input
-            className="input input-bordered w-full"
+            className="input"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
           />
         </div>
-        <div>
-          <label className="label text-sm">{t("productie.bom.fieldProduct")}</label>
+        <div className="field">
+          <label>{t("productie.bom.fieldProduct")}</label>
           <select
-            className="select select-bordered w-full"
+            className="select"
             value={productId}
             onChange={(e) => setProductId(e.target.value)}
             required
@@ -410,10 +410,10 @@ function BomForm({
               ))}
           </select>
         </div>
-        <div>
-          <label className="label text-sm">{t("productie.bom.fieldOutputQty")}</label>
+        <div className="field">
+          <label>{t("productie.bom.fieldOutputQty")}</label>
           <input
-            className="input input-bordered w-32"
+            className="input"
             type="number"
             min="0.000001"
             step="any"
@@ -436,7 +436,7 @@ function BomForm({
           {lines.map((line, idx) => (
             <div key={idx} className="flex gap-2 items-center">
               <select
-                className="select select-bordered flex-1 text-sm"
+                className="select flex-1 text-sm"
                 value={line.componentProductId}
                 onChange={(e) => updateLine(idx, { componentProductId: e.target.value })}
                 required
@@ -451,7 +451,7 @@ function BomForm({
                   ))}
               </select>
               <input
-                className="input input-bordered w-24 text-sm"
+                className="input w-24 text-sm"
                 type="number"
                 min="0.000001"
                 step="any"
@@ -461,7 +461,7 @@ function BomForm({
                 required
               />
               <input
-                className="input input-bordered w-16 text-sm"
+                className="input w-16 text-sm"
                 placeholder={t("productie.bom.lineUm")}
                 value={line.um ?? ""}
                 onChange={(e) => updateLine(idx, { um: e.target.value || undefined })}
@@ -603,10 +603,10 @@ function ProduceForm({
       </div>
 
       <div className="grid gap-4">
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldBom")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldBom")}</label>
           <select
-            className="select select-bordered w-full"
+            className="select"
             value={bomId}
             onChange={(e) => setBomId(e.target.value)}
             required
@@ -637,10 +637,10 @@ function ProduceForm({
           </div>
         )}
 
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldGestiune")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldGestiune")}</label>
           <select
-            className="select select-bordered w-full"
+            className="select"
             value={gestiuneId}
             onChange={(e) => setGestiuneId(e.target.value)}
             required
@@ -652,10 +652,10 @@ function ProduceForm({
           </select>
         </div>
 
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldQty")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldQty")}</label>
           <input
-            className="input input-bordered w-40"
+            className="input"
             type="number"
             min="0.000001"
             step="any"
@@ -665,10 +665,10 @@ function ProduceForm({
           />
         </div>
 
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldDate")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldDate")}</label>
           <input
-            className="input input-bordered w-44"
+            className="input"
             type="date"
             value={productionDate}
             onChange={(e) => setProductionDate(e.target.value)}
@@ -676,10 +676,10 @@ function ProduceForm({
           />
         </div>
 
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldNotes")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldNotes")}</label>
           <textarea
-            className="textarea textarea-bordered w-full"
+            className="input"
             rows={2}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
@@ -687,10 +687,10 @@ function ProduceForm({
         </div>
 
         {/* Manoperă directă */}
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldLabourCost")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldLabourCost")}</label>
           <input
-            className="input input-bordered w-44"
+            className="input"
             type="number"
             min="0"
             step="0.01"
@@ -700,10 +700,10 @@ function ProduceForm({
         </div>
 
         {/* Regie */}
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldOverheadCost")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldOverheadCost")}</label>
           <input
-            className="input input-bordered w-44"
+            className="input"
             type="number"
             min="0"
             step="0.01"
@@ -723,10 +723,10 @@ function ProduceForm({
           </button>
           {showAdvanced && (
             <div className="mt-3 space-y-3 pl-3 border-l-2 border-muted">
-              <div>
-                <label className="label text-xs">{t("productie.order.fieldOverheadFixed")}</label>
+              <div className="field">
+                <label>{t("productie.order.fieldOverheadFixed")}</label>
                 <input
-                  className="input input-bordered w-44 text-sm"
+                  className="input"
                   type="number"
                   min="0"
                   step="0.01"
@@ -735,10 +735,10 @@ function ProduceForm({
                   onChange={(e) => setOverheadFixed(e.target.value)}
                 />
               </div>
-              <div>
-                <label className="label text-xs">{t("productie.order.fieldOverheadVariable")}</label>
+              <div className="field">
+                <label>{t("productie.order.fieldOverheadVariable")}</label>
                 <input
-                  className="input input-bordered w-44 text-sm"
+                  className="input"
                   type="number"
                   min="0"
                   step="0.01"
@@ -747,10 +747,10 @@ function ProduceForm({
                   onChange={(e) => setOverheadVariable(e.target.value)}
                 />
               </div>
-              <div>
-                <label className="label text-xs">{t("productie.order.fieldNormalCapacity")}</label>
+              <div className="field">
+                <label>{t("productie.order.fieldNormalCapacity")}</label>
                 <input
-                  className="input input-bordered w-44 text-sm"
+                  className="input"
                   type="number"
                   min="0"
                   step="any"
@@ -863,10 +863,10 @@ function PlannedOrderForm({
       </div>
 
       <div className="grid gap-4">
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldBom")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldBom")}</label>
           <select
-            className="select select-bordered w-full"
+            className="select"
             value={bomId}
             onChange={(e) => setBomId(e.target.value)}
             required
@@ -892,10 +892,10 @@ function PlannedOrderForm({
           </div>
         )}
 
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldGestiune")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldGestiune")}</label>
           <select
-            className="select select-bordered w-full"
+            className="select"
             value={gestiuneId}
             onChange={(e) => setGestiuneId(e.target.value)}
             required
@@ -907,10 +907,10 @@ function PlannedOrderForm({
           </select>
         </div>
 
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldQty")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldQty")}</label>
           <input
-            className="input input-bordered w-40"
+            className="input"
             type="number"
             min="0.000001"
             step="any"
@@ -920,10 +920,10 @@ function PlannedOrderForm({
           />
         </div>
 
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldPlannedDate")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldPlannedDate")}</label>
           <input
-            className="input input-bordered w-44"
+            className="input"
             type="date"
             value={plannedDate}
             onChange={(e) => setPlannedDate(e.target.value)}
@@ -931,10 +931,10 @@ function PlannedOrderForm({
           />
         </div>
 
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldLabourCost")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldLabourCost")}</label>
           <input
-            className="input input-bordered w-44"
+            className="input"
             type="number"
             min="0"
             step="0.01"
@@ -943,10 +943,10 @@ function PlannedOrderForm({
           />
         </div>
 
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldOverheadCost")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldOverheadCost")}</label>
           <input
-            className="input input-bordered w-44"
+            className="input"
             type="number"
             min="0"
             step="0.01"
@@ -955,10 +955,10 @@ function PlannedOrderForm({
           />
         </div>
 
-        <div>
-          <label className="label text-sm">{t("productie.order.fieldNotes")}</label>
+        <div className="field">
+          <label>{t("productie.order.fieldNotes")}</label>
           <textarea
-            className="textarea textarea-bordered w-full"
+            className="input"
             rows={2}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}

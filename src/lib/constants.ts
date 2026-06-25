@@ -1,5 +1,20 @@
-export const VAT_RATES = [0, 5, 9, 11, 19, 21] as const;
-export type VatRate = typeof VAT_RATES[number];
+/**
+ * All VAT rates the app recognizes, INCLUDING the historical 5% and 19% (the pre-reform
+ * standard/reduced rates abolished by Legea 141/2025 effective 2025-08-01). Kept for parsing,
+ * editing, and storno of pre-reform documents. Use this for "is this a known rate" checks.
+ */
+export const VAT_RATES_ALL = [0, 5, 9, 11, 19, 21] as const;
+export type VatRate = typeof VAT_RATES_ALL[number];
+
+/**
+ * VAT rates selectable for NEW documents under 2026 law: 21% standard, 11% reduced, 9% reduced
+ * (new-housing transition, valid through 31.07.2026 — Legea 141/2025), and 0% (zero-rated).
+ * The historical 5%/19% are intentionally excluded here so new invoices can't pick an abolished
+ * rate; editing an existing line still preserves its stored rate via the dropdown merge in
+ * LineItemsEditor. This is only the FALLBACK — the live rate list comes from the user-managed
+ * Cote TVA table (api.vatRates.list).
+ */
+export const VAT_RATES = [0, 9, 11, 21] as const;
 
 export const VAT_CATEGORIES = ['S', 'AE', 'E', 'Z', 'O', 'K', 'G'] as const;
 export type VatCategory = typeof VAT_CATEGORIES[number];

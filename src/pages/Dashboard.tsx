@@ -127,19 +127,6 @@ export function DashboardPage() {
     enabled:  !!activeCompanyId,
   });
 
-  // Received invoices — for the "Facturi primite" KPI + the emise-vs-primite chart.
-  const receivedFilter = useMemo(
-    () => ({ companyId: activeCompanyId ?? undefined, page: { offset: 0, limit: 10000 } }),
-    [activeCompanyId],
-  );
-  const { data: receivedPage } = useQuery({
-    queryKey: queryKeys.received.list(receivedFilter),
-    queryFn:  () => api.received.list(receivedFilter),
-    enabled:  !!activeCompanyId,
-  });
-  const receivedItems = receivedPage?.items ?? [];
-  const receivedTotal = receivedPage?.total ?? 0;
-
   // Micro-enterprise ceiling monitor (100.000 EUR, OUG 89/2025). Conversia plafonului se face la
   // cursul BNR de la ÎNCHIDEREA EXERCIȚIULUI PRECEDENT (31.12 anul anterior) — NU la cursul zilei.
   // Pentru 2026 cursul oficial 31.12.2025 = 5.0985 RON/EUR (folosit și ca fallback offline).
@@ -196,20 +183,6 @@ export function DashboardPage() {
     return [`${selectedYM}-01`, `${selectedYM}-${String(last).padStart(2, "0")}`];
   }, [selectedYM]);
 
-  const periodInvoices = useMemo(
-    () => invoices.filter((inv) => inv.issueDate >= periodFrom && inv.issueDate <= periodTo),
-    [invoices, periodFrom, periodTo],
-  );
-
-  const totalNet = useMemo(
-    () => periodInvoices.reduce((s, inv) => s + parseDec(inv.subtotalAmount), 0),
-    [periodInvoices],
-  );
-  const totalVat = useMemo(
-    () => periodInvoices.reduce((s, inv) => s + parseDec(inv.vatAmount), 0),
-    [periodInvoices],
-  );
-
   const lastRejected = useMemo(
     () => invoices.find((inv) => inv.status === "REJECTED"),
     [invoices],
@@ -218,42 +191,12 @@ export function DashboardPage() {
   const recentInvoices   = invoices.slice(0, 10);
   const timelineItems    = notifications.slice(0, 8);
 
-  // ── Monthly emise-vs-primite chart (last 6 months, by document count) ───────
-  const chartData = useMemo(() => {
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const months: { key: string; label: string }[] = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const CAP = ["Ian", "Feb", "Mar", "Apr", "Mai", "Iun", "Iul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      months.push({ key: `${d.getFullYear()}-${pad(d.getMonth() + 1)}`, label: CAP[d.getMonth()] });
-    }
-    const emiseBy: Record<string, number> = {};
-    const primiteBy: Record<string, number> = {};
-    for (const inv of invoices) { const m = inv.issueDate.slice(0, 7); emiseBy[m] = (emiseBy[m] ?? 0) + 1; }
-    for (const r of receivedItems) { const m = r.issueDate.slice(0, 7); primiteBy[m] = (primiteBy[m] ?? 0) + 1; }
-    return months.map((mo) => ({ ...mo, emise: emiseBy[mo.key] ?? 0, primite: primiteBy[mo.key] ?? 0 }));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invoices, receivedItems, currentMonth]);
-  const chartMax = Math.max(1, ...chartData.flatMap((d) => [d.emise, d.primite]));
-  const curChart = chartData[chartData.length - 1] ?? { key: "", label: "", emise: 0, primite: 0 };
-
-  // ── "Total facturat" + delta vs the month before the selected one ──
-  const totalFacturat = totalNet + totalVat;
-  const { deltaPct, deltaDir, prevMonthLabel } = useMemo(() => {
-    const monthTotal = (key: string) =>
-      invoices
-        .filter((inv) => inv.issueDate.slice(0, 7) === key)
-        .reduce((s, inv) => s + parseDec(inv.subtotalAmount) + parseDec(inv.vatAmount), 0);
+  // ── CA delta vs the month before the selected one ──
+  const prevMonthLabel = useMemo(() => {
     const [y, m] = selectedYM.split("-").map(Number);
     const prevD = new Date(y, m - 2, 1);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const prevKey = `${prevD.getFullYear()}-${pad(prevD.getMonth() + 1)}`;
-    const prevTotal = monthTotal(prevKey);
-    const label = prevD.toLocaleDateString(i18n.language, { month: "long" });
-    if (prevTotal <= 0) return { deltaPct: null as number | null, deltaDir: "neutral" as "up" | "down" | "neutral", prevMonthLabel: label };
-    const pct = Math.round(((monthTotal(selectedYM) - prevTotal) / prevTotal) * 100);
-    return { deltaPct: pct, deltaDir: (pct >= 0 ? "up" : "down") as "up" | "down" | "neutral", prevMonthLabel: label };
-  }, [invoices, selectedYM, i18n.language]);
+    return prevD.toLocaleDateString(i18n.language, { month: "long" });
+  }, [selectedYM, i18n.language]);
 
   const activeCompany    = companies.find((c) => c.id === activeCompanyId) ?? companies[0];
 
@@ -284,7 +227,6 @@ export function DashboardPage() {
     t("dashboard.months.jul"), t("dashboard.months.aug"), t("dashboard.months.sep"),
     t("dashboard.months.oct"), t("dashboard.months.nov"), t("dashboard.months.dec"),
   ];
-  const selM = selDate.getMonth() + 1;
   const periodLabel = `${MONTHS_FULL[selDate.getMonth()]} ${selDate.getFullYear()}`;
   const headDate = cap(selDate.toLocaleDateString(i18n.language, { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
   const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -294,11 +236,6 @@ export function DashboardPage() {
     t("dashboard.weekdays.sa"),
   ];
   const calStart = new Date(viewYM.y, viewYM.m, 1).getDay();
-
-  // De încasat = issued, not-yet-finalized invoices in the period (proxy for outstanding).
-  const openInvoices = periodInvoices.filter((i) => ["VALIDATED", "SUBMITTED", "QUEUED"].includes(i.status));
-  const deIncasat = openInvoices.reduce((s, i) => s + parseDec(i.totalAmount), 0);
-  const receivedSum = receivedItems.reduce((s, r) => s + parseDec(r.totalAmount), 0);
 
   const STATUS_CHIP: Record<string, { cls: string; icon: string; label: string }> = {
     DRAFT:     { cls: "sent", icon: "docText", label: t("dashboard.status.draft") },
@@ -514,9 +451,6 @@ export function DashboardPage() {
     ? Math.round(((cifraAfaceri - priorCifra) / priorCifra) * 100)
     : null;
 
-  // Widget 8: Stoc — valoare (from bilant.inventory = class-3 GL net balance)
-  const stocValoare = bilantData ? parseDec(bilantData.inventory) : null;
-
   if (!activeCompanyId) {
     return (
       <div className="main-inner">
@@ -635,36 +569,8 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* KPIs — existing 4 invoice KPIs */}
-      <div className="kpis">
-        <div className="kpi">
-          <div className="top"><span className="klabel">{t("dashboard.kpi.totalInvoiced")}</span><Ic name="docUp" /></div>
-          <div className="val num"><CountUp value={totalFacturat} /> <span className="cur">RON</span></div>
-          <div className="delta">
-            {deltaPct != null
-              ? (<><span className="ar">{deltaDir === "up" ? "↑" : "↓"} {Math.abs(deltaPct)}%</span> {t("dashboard.kpi.vsPrev", { month: prevMonthLabel })}</>)
-              : t("dashboard.kpi.invoicesNet", { count: periodInvoices.length, net: fmtInt(totalNet) })}
-          </div>
-        </div>
-        <div className="kpi">
-          <div className="top"><span className="klabel">{t("dashboard.kpi.receivable")}</span><Ic name="incasat" /></div>
-          <div className="val num"><CountUp value={deIncasat} /> <span className="cur">RON</span></div>
-          <div className="delta">{t("dashboard.kpi.openInvoices", { count: openInvoices.length })}</div>
-        </div>
-        <div className="kpi">
-          <div className="top"><span className="klabel">{t("dashboard.kpi.received")}</span><Ic name="docDown" /></div>
-          <div className="val num"><CountUp value={receivedSum} /> <span className="cur">RON</span></div>
-          <div className="delta">{t("dashboard.kpi.documents", { count: receivedTotal })}</div>
-        </div>
-        <div className="kpi">
-          <div className="top"><span className="klabel">{t("dashboard.kpi.vatToCollect")}</span><Ic name="calc" /></div>
-          <div className="val num"><CountUp value={totalVat} /> <span className="cur">RON</span></div>
-          <div className="delta">{t("dashboard.kpi.vatDue", { month: RO_MON[selM % 12] })}</div>
-        </div>
-      </div>
-
-      {/* ── Wave 9: Managerial KPI row 1 — Cash + AR + AP + TVA ──────────────── */}
-      <div className="kpis" style={{ marginTop: 0 }}>
+      {/* ── KPI Row A — Position: Cash · AR · AP ──────────────────────────────── */}
+      <div className="kpis" style={{ gridTemplateColumns: "repeat(3,1fr)", marginTop: 0 }}>
         {/* Widget 1: Disponibil (cash position) */}
         <div className="kpi">
           <div className="top">
@@ -740,6 +646,10 @@ export function DashboardPage() {
             }
           </div>
         </div>
+      </div>
+
+      {/* ── KPI Row B — Performance/Fiscal: TVA · Profit · CA ────────────────── */}
+      <div className="kpis" style={{ gridTemplateColumns: "repeat(3,1fr)", marginTop: 0 }}>
 
         {/* Widget 4: Poziție TVA (period/exigibilă columns) */}
         <div className="kpi">
@@ -767,10 +677,6 @@ export function DashboardPage() {
             <div className="val" style={{ fontSize: 16, color: "var(--text-2)", marginTop: 12 }}>—</div>
           )}
         </div>
-      </div>
-
-      {/* ── Wave 9: Managerial KPI row 2 — Profit + CA + Stoc ──────────────── */}
-      <div className="kpis" style={{ gridTemplateColumns: "repeat(3,1fr)", marginTop: 0 }}>
 
         {/* Widget 6: Rezultat / Profit */}
         <div className="kpi">
@@ -818,24 +724,6 @@ export function DashboardPage() {
                   t("dashboard.kpi.caNoComparison")
                 )}
               </div>
-            </>
-          ) : (
-            <div className="val" style={{ fontSize: 16, color: "var(--text-2)", marginTop: 12 }}>—</div>
-          )}
-        </div>
-
-        {/* Widget 8: Stoc — valoare (class-3 GL net balance from bilant.inventory) */}
-        <div className="kpi">
-          <div className="top">
-            <span className="klabel">{t("dashboard.kpi.stocValoare")}</span>
-            <Ic name="cube" />
-          </div>
-          {stocValoare !== null ? (
-            <>
-              <div className="val num" style={{ fontSize: 20 }}>
-                <CountUp value={stocValoare} /> <span className="cur">RON</span>
-              </div>
-              <div className="delta">{t("dashboard.kpi.stocHint")}</div>
             </>
           ) : (
             <div className="val" style={{ fontSize: 16, color: "var(--text-2)", marginTop: 12 }}>—</div>
@@ -911,42 +799,6 @@ export function DashboardPage() {
             ))}
           </div>
         </div>
-      </div>
-
-      {/* existing invoice chart (emise vs primite by count) */}
-      <div className="mid">
-        <div className="card">
-          <div className="card-head">
-            <div>
-              <div className="ct">{t("dashboard.chart.title")}</div>
-              <div className="cs">{t("dashboard.chart.sub")} · {curChart.label}: <b>{curChart.emise}</b> {t("dashboard.chart.issuedLc")} · <b>{curChart.primite}</b> {t("dashboard.chart.receivedLc")}</div>
-            </div>
-            <div className="legend">
-              <span className="lg"><span className="sw" style={{ background: "var(--black)" }} />{t("dashboard.chart.issued")}</span>
-              <span className="lg"><span className="sw" style={{ background: "var(--border-strong)" }} />{t("dashboard.chart.received")}</span>
-            </div>
-          </div>
-          <div className="chart">
-            {chartData.map((d) => {
-              const h = 170;
-              const eH = Math.max(4, Math.round((d.emise / chartMax) * h));
-              const pH = Math.max(4, Math.round((d.primite / chartMax) * h));
-              return (
-                <div key={d.key} className={`bar-col${d.key === curChart.key ? " curr" : ""}`}>
-                  <div className="bar-tip"><b>{d.label}</b><span><i className="d" />{t("dashboard.chart.issued")}<em className="num">{d.emise}</em></span><span><i className="l" />{t("dashboard.chart.received")}<em className="num">{d.primite}</em></span></div>
-                  <div className="bar-stack">
-                    <div className="bar b-emise anim-bar" style={{ height: eH, animationDelay: `${chartData.indexOf(d) * 40}ms` }} />
-                    <div className="bar b-primite anim-bar" style={{ height: pH, animationDelay: `${chartData.indexOf(d) * 40 + 20}ms` }} />
-                  </div>
-                  <div className="mlab">{d.label}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Spacer card to keep the 2-column grid balanced */}
-        <div />
       </div>
 
       {/* recent table */}

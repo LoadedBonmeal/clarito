@@ -177,12 +177,19 @@ pub fn allocate_collection(
         .collect()
 }
 
-/// The cash-VAT eligibility/exit plafon in lei, in force on `date` (ISO "YYYY-MM-DD").
+/// The cash-VAT EXIT plafon in lei (cumulative current-year turnover), in force on `date`
+/// (ISO "YYYY-MM-DD").
 ///
-/// OUG 8/2026 staged it: 4.500.000 lei through 28.02.2026, 5.000.000 from 01.03.2026, and
-/// 5.500.000 from 01.01.2027. For the EXIT test (cumulative current-year turnover) the OUG
-/// 8/2026 art. 9 transitional protects a Jan–Feb 2026 breach that stays under 5.000.000, so
-/// the practical 2026 exit plafon is 5.000.000 for the whole year — which is what this returns.
+/// Legal basis: OUG nr. 8/2026 (Monitorul Oficial nr. 147 din 25.02.2026), amending art. 282
+/// alin. (3) Cod fiscal — 5.000.000 lei (1 mar–31 dec 2026), 5.500.000 lei (din 1 ian 2027).
+/// The pre-amendment 4.500.000 lei survives only as the ENTRY-eligibility step for 1 ian–28 feb
+/// 2026.
+///
+/// For the EXIT test this returns 5.000.000 for ALL of 2026 because OUG 8/2026 art. 9 (verbatim)
+/// protects a Jan/Feb-2026 cumulative breach that stays under 5.000.000: "...nu vor fi radiate din
+/// Registrul persoanelor impozabile care aplică sistemul TVA la încasare" and (Feb) no art. 324(14)
+/// notification obligation. So a Jan/Feb breach of 4.5M < x < 5M does NOT trigger mandatory exit —
+/// confirmed by `plafon_breach_transitional_jan_feb_2026` below.
 pub fn plafon_lei(date: &str) -> i64 {
     if date >= "2027-01-01" {
         5_500_000
@@ -398,6 +405,27 @@ mod tests {
         // Exactly at the plafon is NOT a breach (strictly greater).
         let exact = vec![("2026-01".to_string(), 5_000_000)];
         assert_eq!(plafon_breach_month(&exact, 5_000_000), None);
+    }
+
+    #[test]
+    fn plafon_breach_transitional_jan_feb_2026() {
+        // OUG 8/2026 art. 9: a Jan/Feb-2026 cumulative breach of 4.5M that stays under 5M does NOT
+        // trigger mandatory exit ("nu vor fi radiate din Registrul"). With the effective 2026 exit
+        // plafon (5.000.000, per plafon_lei) the breach must NOT register.
+        let jan_feb = vec![
+            ("2026-01".to_string(), 3_000_000),
+            ("2026-02".to_string(), 1_800_000), // cumulative 4.8M: over 4.5M, under 5M
+        ];
+        assert_eq!(
+            plafon_breach_month(&jan_feb, plafon_lei("2026-02-15")),
+            None
+        );
+        // Sanity: against the pre-amendment 4.5M figure it WOULD have breached in Feb — proving the
+        // art. 9 transitional (→ 5M) is what protects the taxpayer.
+        assert_eq!(
+            plafon_breach_month(&jan_feb, 4_500_000),
+            Some("2026-02".to_string())
+        );
     }
 
     #[test]

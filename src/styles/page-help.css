@@ -2,7 +2,7 @@
 /* Ajutor — FAQ accordion (verbatim din Ajutor.html, inline <style>) */
 .faq-item{border-bottom:1px solid var(--line)}.faq-item:last-child{border-bottom:0}
 .faq-q{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border:0;background:none;font:inherit;text-align:left;cursor:pointer;font-size:13.5px;font-weight:500;color:var(--text)}
-.faq-q:hover{background:#FCFCFD}
+.faq-q:hover{background:var(--bg-table-header)}
 .faq-chev{width:16px;height:16px;transition:transform .2s var(--anim-ease,cubic-bezier(.2,.8,.2,1));flex:none}
 .faq-item.open .faq-chev{transform:rotate(180deg)}
 .faq-a{display:none;padding:0 16px 14px}

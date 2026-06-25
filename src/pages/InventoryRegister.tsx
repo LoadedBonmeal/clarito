@@ -155,8 +155,8 @@ export function InventoryRegisterPage() {
                   <tr key={entry.id}>
                     <td>{entry.seqNo}</td>
                     <td style={{ fontSize: 13, color: "var(--text-2)" }}>
-                      {/* date field — falls back to seqNo label when absent */}
-                      {(entry as any).date ?? "—"}
+                      {/* date field — falls back to em-dash when absent on the row type */}
+                      {(entry as { date?: string }).date ?? "—"}
                     </td>
                     <td>{entry.recapText}</td>
                     <td className="r" style={{ color: diffColor(entry.valueContabila), fontWeight: 500 }}>

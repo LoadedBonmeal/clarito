@@ -89,14 +89,47 @@ impl AppError {
             AppError::SessionExpired(_) => "SessionExpired",
         }
     }
+
+    /// True for infrastructure errors whose raw detail must NOT reach the client
+    /// (sqlx/migration text can leak the DB schema; io can leak filesystem paths).
+    fn is_internal(&self) -> bool {
+        matches!(
+            self,
+            AppError::Database(_)
+                | AppError::Migration(_)
+                | AppError::Io(_)
+                | AppError::Json(_)
+                | AppError::Tauri(_)
+        )
+    }
+
+    /// Client-safe message: a generic string for internal errors (the real detail
+    /// is logged server-side), the real message for domain / user-facing errors
+    /// (Validation, NotFound, Conflict, Xml, Pdf, …) which are meant to be shown.
+    fn client_message(&self) -> String {
+        match self {
+            AppError::Database(_) | AppError::Migration(_) => {
+                "Eroare la accesarea bazei de date.".to_string()
+            }
+            AppError::Io(_) => "Eroare de intrare/ieșire.".to_string(),
+            AppError::Json(_) => "Eroare la procesarea datelor.".to_string(),
+            AppError::Tauri(_) => "Eroare internă a aplicației.".to_string(),
+            other => other.to_string(),
+        }
+    }
 }
 
 impl Serialize for AppError {
     fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
+        // Log the full internal detail server-side BEFORE masking it for the client,
+        // so diagnostics are preserved without leaking schema/paths to the frontend.
+        if self.is_internal() {
+            tracing::error!(kind = self.kind(), detail = %self, "internal error (masked for client)");
+        }
         let mut s = ser.serialize_struct("AppError", 2)?;
         s.serialize_field("kind", self.kind())?;
-        s.serialize_field("message", &self.to_string())?;
+        s.serialize_field("message", &self.client_message())?;
         s.end()
     }
 }
