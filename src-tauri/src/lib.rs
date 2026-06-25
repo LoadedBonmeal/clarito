@@ -554,6 +554,11 @@ pub fn run() {
                     commands::contracts::set_contract_status,
                     commands::contracts::delete_contract,
                     commands::contracts::list_contract_recurring,
+                    // accruals — cheltuieli/venituri în avans (471/472)
+                    commands::accruals::create_accrual,
+                    commands::accruals::list_accruals,
+                    commands::accruals::delete_accrual,
+                    commands::accruals::run_accruals,
                     // payment instruments — CEC & BO (P3 Wave C)
                     commands::payment_instruments::create_payment_instrument,
                     commands::payment_instruments::list_payment_instruments,

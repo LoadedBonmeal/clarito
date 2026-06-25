@@ -216,7 +216,8 @@ fn validate_leave(input: &MedicalLeaveInput) -> AppResult<()> {
     // the chosen percent can never be BELOW the tier implied by this certificate's own duration. A
     // HIGHER percent is allowed (continuation of a longer episode). This catches an impossible
     // too-low tier without false-rejecting legitimate continuations.
-    let cert_days = input.zile_angajator.unwrap_or(0).max(0) + input.zile_fnuass.unwrap_or(0).max(0);
+    let cert_days =
+        input.zile_angajator.unwrap_or(0).max(0) + input.zile_fnuass.unwrap_or(0).max(0);
     let min_tier = if cert_days <= 7 {
         55
     } else if cert_days <= 14 {

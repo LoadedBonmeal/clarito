@@ -4881,6 +4881,105 @@ pub async fn post_depreciation(
     })
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterPostResult {
+    pub total: String,
+    pub posted: bool,
+    pub entry_date: String,
+}
+
+/// Generic balanced-journal poster for the month-end registers (accruals 471/472, provisions 15x,
+/// capital-goods VAT adjustments). Posts D `lines[i].0` / C `lines[i].1` for amount `lines[i].2`
+/// (zero-amount lines skipped). Idempotent per `(company, source_type, source_id)`: any prior
+/// journal with the same key is deleted first, so re-running a month is safe. A zero total deletes
+/// the prior journal and posts nothing.
+#[allow(clippy::too_many_arguments)]
+pub async fn post_register_lines(
+    pool: &SqlitePool,
+    company_id: &str,
+    journal_id: &str,
+    source_type: &str,
+    source_id: &str,
+    transaction_date: &str,
+    description: &str,
+    lines: Vec<(String, String, Decimal)>,
+) -> AppResult<RegisterPostResult> {
+    let total: Decimal = lines.iter().map(|(_, _, a)| *a).sum();
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM gl_journal WHERE company_id=?1 AND source_type=?2 AND source_id=?3")
+        .bind(company_id)
+        .bind(source_type)
+        .bind(source_id)
+        .execute(&mut *tx)
+        .await?;
+
+    if total.is_zero() {
+        tx.commit().await?;
+        return Ok(RegisterPostResult {
+            total: fmt_dec(total),
+            posted: false,
+            entry_date: transaction_date.to_string(),
+        });
+    }
+
+    let mk = |record_id: i64, account: &str, debit: Decimal, credit: Decimal| GlEntry {
+        id: new_id(),
+        record_id,
+        account_code: account.to_string(),
+        debit,
+        credit,
+        partner_cui: None,
+        customer_id: None,
+        supplier_id: None,
+        tax_type: "000".to_string(),
+        tax_code: "000000".to_string(),
+        tax_percentage: None,
+        tax_base: None,
+        tax_amount: None,
+        amount_fx_foreign: None,
+        currency_code: None,
+    };
+    let mut entries = Vec::new();
+    let mut rec = 1;
+    for (dr, cr, amt) in &lines {
+        if amt.is_zero() {
+            continue;
+        }
+        entries.push(mk(rec, dr, *amt, Decimal::ZERO));
+        entries.push(mk(rec + 1, cr, Decimal::ZERO, *amt));
+        rec += 2;
+    }
+    assert_balanced(&entries, source_id)?;
+
+    let journal = GlJournal {
+        id: new_id(),
+        company_id: company_id.to_string(),
+        journal_id: journal_id.to_string(),
+        journal_type: source_type.to_string(),
+        transaction_id: format!("{source_type}-{source_id}"),
+        transaction_date: transaction_date.to_string(),
+        description: Some(description.to_string()),
+        source_type: source_type.to_string(),
+        source_id: source_id.to_string(),
+        customer_id: None,
+        supplier_id: None,
+    };
+    let journal_pk = journal.id.clone();
+    insert_journal(&mut tx, &journal).await?;
+    for e in &entries {
+        insert_entry(&mut tx, &journal_pk, e).await?;
+    }
+    tx.commit().await?;
+
+    Ok(RegisterPostResult {
+        total: fmt_dec(total),
+        posted: true,
+        entry_date: transaction_date.to_string(),
+    })
+}
+
 /// Post an asset disposal de-recognition: D 281x (accumulated) + D 6583 (residual) / C 21x (cost).
 /// Idempotent per `(company,'DISPOSAL',asset_id)`.
 #[allow(clippy::too_many_arguments)]

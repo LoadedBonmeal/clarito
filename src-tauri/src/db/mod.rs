@@ -26,6 +26,7 @@ pub mod contracts;
 pub mod payment_instruments;
 
 pub mod accounts;
+pub mod accruals;
 pub mod advance_invoices;
 pub mod aging;
 pub mod assets;

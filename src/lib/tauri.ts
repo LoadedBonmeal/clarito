@@ -1131,6 +1131,49 @@ export const paymentInstruments = {
     invoke<PaymentInstrument>("pay_payment_instrument", { id, companyId, date }),
 };
 
+// ─── Accruals (cheltuieli/venituri în avans, 471/472, OMFP 1802/2014 pct. 351) ──
+
+export interface Accrual {
+  id: string;
+  companyId: string;
+  kind: "prepaid" | "deferred";
+  description: string;
+  counterAcct: string;
+  totalAmount: string;
+  startPeriod: string; // YYYY-MM
+  months: number;
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateAccrualInput {
+  companyId: string;
+  kind: "prepaid" | "deferred";
+  description: string;
+  counterAcct: string;
+  totalAmount: string;
+  startPeriod: string;
+  months: number;
+  notes?: string | null;
+}
+
+export interface RegisterPostResult {
+  total: string;
+  posted: boolean;
+  entryDate: string;
+}
+
+export const accruals = {
+  list: (companyId: string) => invoke<Accrual[]>("list_accruals", { companyId }),
+  create: (input: CreateAccrualInput) => invoke<Accrual>("create_accrual", { input }),
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_accrual", { id, companyId }),
+  /** Recunoaște tranșa lunară a tuturor accrual-urilor active în perioada AAAA-LL. */
+  run: (companyId: string, period: string) =>
+    invoke<RegisterPostResult>("run_accruals", { companyId, period }),
+};
+
 // ─── Dividende (impozit pe dividende, Legea 141/2025) ───────────────────────
 
 export interface Dividend {
