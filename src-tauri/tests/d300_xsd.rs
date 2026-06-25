@@ -159,7 +159,8 @@ fn d300_validates_against_official_xsd() {
     let submission = test_submission();
     let company = test_company();
 
-    let rows = map_to_rows(&report, &submission, &company, period)
+    // Non-zero art. 305 capital-goods adjustment → exercises R31_2 emission + R32 inclusion under XSD.
+    let rows = map_to_rows(&report, &submission, &company, period, -500)
         .expect("map_to_rows must not fail on valid input");
 
     let xml = generate_d300_xml(&rows, &ver).expect("generate_d300_xml must not fail");
@@ -233,7 +234,7 @@ fn d300_empty_period_generates_valid_xml() {
     let sub = test_submission();
     let co = test_company();
 
-    let rows = map_to_rows(&empty_report, &sub, &co, period).expect("map_to_rows empty");
+    let rows = map_to_rows(&empty_report, &sub, &co, period, 0).expect("map_to_rows empty");
     assert_eq!(rows.total_plata_a, 0, "empty period: totalPlata_A = 0");
     assert_eq!(rows.r9_1, None, "empty period: R9_1 = None");
 
@@ -338,7 +339,7 @@ fn d300_wave4_scenario_a_reverse_charge_ae() {
     };
 
     let rows =
-        map_to_rows(&report, &test_submission(), &test_company(), period).expect("map_to_rows");
+        map_to_rows(&report, &test_submission(), &test_company(), period, 0).expect("map_to_rows");
 
     // Verify AE mapping
     assert_eq!(rows.r12_1, Some(1000), "Scenario A: R12_1=1000");
@@ -445,7 +446,7 @@ fn d300_wave4_scenario_e_reverse_charge_buyer_and_seller() {
     };
 
     let rows =
-        map_to_rows(&report, &test_submission(), &test_company(), period).expect("map_to_rows");
+        map_to_rows(&report, &test_submission(), &test_company(), period, 0).expect("map_to_rows");
     assert_eq!(rows.r12_1, Some(1000), "E: R12_1 = purchase only");
     assert_eq!(rows.r12_2, Some(210), "E: R12_2 = self-assessed VAT");
     assert_eq!(rows.r13_1, Some(500), "E: R13_1 = seller base");
@@ -520,7 +521,7 @@ fn d300_wave4_scenario_b_intra_eu_k_purchase() {
     };
 
     let rows =
-        map_to_rows(&report, &test_submission(), &test_company(), period).expect("map_to_rows");
+        map_to_rows(&report, &test_submission(), &test_company(), period, 0).expect("map_to_rows");
 
     assert_eq!(rows.r5_1, Some(2000), "Scenario B: R5_1=2000");
     assert_eq!(rows.r5_2, Some(420), "Scenario B: R5_2=420");
@@ -621,7 +622,7 @@ fn d300_wave4_scenario_c_multirate_sales() {
     };
 
     let rows =
-        map_to_rows(&report, &test_submission(), &test_company(), period).expect("map_to_rows");
+        map_to_rows(&report, &test_submission(), &test_company(), period, 0).expect("map_to_rows");
 
     assert_eq!(rows.r9_1, Some(1000), "Scenario C: R9_1=1000 (21%)");
     assert_eq!(rows.r9_2, Some(210), "Scenario C: R9_2=210 (21% VAT)");
@@ -715,7 +716,7 @@ fn d300_wave4_scenario_d_9pct_purchase_excluded() {
     };
 
     let rows =
-        map_to_rows(&report, &test_submission(), &test_company(), period).expect("map_to_rows");
+        map_to_rows(&report, &test_submission(), &test_company(), period, 0).expect("map_to_rows");
 
     // The 9% purchase must NOT land in R23 (the 11% row) — it goes to R30 instead (Wave 8).
     assert_eq!(
@@ -777,7 +778,7 @@ fn d300_totals_reconciliation() {
     let sub = test_submission();
     let co = test_company();
 
-    let rows = map_to_rows(&report, &sub, &co, period).expect("map_to_rows");
+    let rows = map_to_rows(&report, &sub, &co, period, 0).expect("map_to_rows");
 
     assert_eq!(rows.r17_2, Some(2650), "R17_2");
     assert_eq!(rows.r27_2, Some(1680), "R27_2");
@@ -860,7 +861,7 @@ fn d300_wave7_intra_eu_services() {
     };
 
     let rows =
-        map_to_rows(&report, &test_submission(), &test_company(), period).expect("map_to_rows");
+        map_to_rows(&report, &test_submission(), &test_company(), period, 0).expect("map_to_rows");
 
     // R7/R20 populated for services
     assert_eq!(
@@ -996,7 +997,7 @@ fn d300_wave8_old_rate_sales_to_r16() {
     };
 
     let rows =
-        map_to_rows(&report, &test_submission(), &test_company(), period).expect("map_to_rows");
+        map_to_rows(&report, &test_submission(), &test_company(), period, 0).expect("map_to_rows");
 
     // R16 populated for old-rate sales
     assert_eq!(
@@ -1116,7 +1117,7 @@ fn d300_wave8_old_rate_purchase_to_r30() {
     };
 
     let rows =
-        map_to_rows(&report, &test_submission(), &test_company(), period).expect("map_to_rows");
+        map_to_rows(&report, &test_submission(), &test_company(), period, 0).expect("map_to_rows");
 
     // R30 populated for 9% purchases
     assert_eq!(
@@ -1240,7 +1241,7 @@ fn d300_wave8_override() {
     let mut submission = test_submission();
     submission.reg_colectata_tva = Some(180);
 
-    let rows = map_to_rows(&report, &submission, &test_company(), period).expect("map_to_rows");
+    let rows = map_to_rows(&report, &submission, &test_company(), period, 0).expect("map_to_rows");
 
     // Override must take effect: R16_2 = 180, not 190
     assert_eq!(

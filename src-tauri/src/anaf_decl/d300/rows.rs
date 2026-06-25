@@ -200,6 +200,9 @@ pub struct D300Rows {
     ///   (DUK R108), NOT R27 — see the TOTALS block above.
     pub r30_1: Option<i64>,
     pub r30_2: Option<i64>,
+    /// R31_2 — ajustări conform pro-rata/ajustări de taxă (rd.34 printed; schema row 33).
+    ///   Signed (IntNeg15SType), VAT-only. Carries the art. 305 capital-goods adjustment; feeds R32.
+    pub r31_2: Option<i64>,
 
     // ── Totals (computed) ─────────────────────────────────────────────────────
     /// R17_1 / R17_2 — TOTAL TAXĂ COLECTATĂ (baza / TVA)
@@ -389,6 +392,7 @@ pub fn map_to_rows(
     submission: &D300Submission,
     company: &Company,
     period: NaiveDate,
+    capital_goods_adjustment: i64,
 ) -> AppResult<D300Rows> {
     // ── Header ────────────────────────────────────────────────────────────────
     let luna = period.month() as i32;
@@ -716,9 +720,14 @@ pub fn map_to_rows(
             .round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
     };
 
+    // R31_2 (rd.34, "Ajustări conform pro-rata/ajustări de taxă") — signed (IntNeg15SType), VAT-only.
+    // Carries the Cod fiscal art. 305 capital-goods VAT adjustment (clawback negative, additional
+    // deduction positive). Distinct from R30_2 (regularizări); both feed the R32_2 total deductible.
+    let r31_2_dec = Decimal::from(capital_goods_adjustment);
+
     // R32_2 = R28_2 + R29_2 + R30_2 + R31_2
-    // DUK rule R108: R32_2 = R28_2 + R30_2 (regularizări dedusă flows here, not into R27)
-    let r32_vat = r28_vat + r30_2_dec;
+    // DUK rule R108: R32_2 = R28_2 + R30_2 + R31_2 (regularizări + ajustări flow here, not into R27)
+    let r32_vat = r28_vat + r30_2_dec + r31_2_dec;
 
     // R33_2 = MAX(R32_2 - R17_2, 0)  [TVA de recuperat]
     let r33_vat = if r32_vat > r17_vat {
@@ -807,6 +816,7 @@ pub fn map_to_rows(
     let r25_2_2_v = opt_nonzero(round_to_lei(ae11_vat)); // = R12_2_2 (DUK V_24)
     let r30_1_v = opt_nonzero(r30_1_val);
     let r30_2_v = opt_nonzero(r30_2_val);
+    let r31_2_v = opt_nonzero(round_to_lei(r31_2_dec));
     let r27_1_v = opt_nonzero(round_to_lei(r27_base));
     let r27_2_v = opt_nonzero(round_to_lei(r27_vat));
     let r28_2_v = opt_nonzero(round_to_lei(r28_vat));
@@ -831,8 +841,8 @@ pub fn map_to_rows(
         r10_2_v, r11_1_v, r11_2_v, r12_1_v, r12_2_v, r12_1_1_v, r12_1_2_v, r12_2_1_v, r12_2_2_v,
         r13_1_v, r16_1_v, r16_2_v, r18_1_v, r18_2_v, r17_1_v, r17_2_v, r20_1_v, r20_2_v, r20_1_1_v,
         r20_1_2_v, r22_1_v, r22_2_v, r23_1_v, r23_2_v, r25_1_v, r25_2_v, r25_1_1_v, r25_1_2_v,
-        r25_2_1_v, r25_2_2_v, r27_1_v, r27_2_v, r28_2_v, r30_1_v, r30_2_v, r32_2_v, r33_2_v,
-        r34_2_v, r37_2_v, r40_2_v, r41_2_v, r42_2_v,
+        r25_2_1_v, r25_2_2_v, r27_1_v, r27_2_v, r28_2_v, r30_1_v, r30_2_v, r31_2_v, r32_2_v,
+        r33_2_v, r34_2_v, r37_2_v, r40_2_v, r41_2_v, r42_2_v,
     ]
     .iter()
     .map(|o| o.unwrap_or(0))
@@ -924,6 +934,8 @@ pub fn map_to_rows(
         // R30 — regularizări dedusă cote vechi (Wave 8)
         r30_1: r30_1_v,
         r30_2: r30_2_v,
+        // R31_2 — ajustări de taxă (art. 305 capital-goods adjustment)
+        r31_2: r31_2_v,
 
         // totals
         r17_1: r17_1_v,
@@ -1080,7 +1092,7 @@ mod tests {
         let company = make_company();
         let period = NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
 
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
 
         // R9_1/R9_2 = sales at 21%
         assert_eq!(rows.r9_1, Some(1000), "R9_1 should be 1000");
@@ -1113,6 +1125,42 @@ mod tests {
     }
 
     #[test]
+    fn capital_goods_adjustment_feeds_r31_and_r32() {
+        // Same base as totals_reconcile_simple: R17_2=265, R27_2=R28_2=168.
+        let report = make_report(
+            vec![
+                ("0.21", "S", "1000.00", "210.00"),
+                ("0.11", "S", "500.00", "55.00"),
+            ],
+            vec![("0.21", "S", "800.00", "168.00")],
+        );
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
+
+        // art. 305 clawback of −30 → R31_2 = −30, R32_2 = 168 − 30 = 138, R34_2 = 265 − 138 = 127.
+        let rows = map_to_rows(&report, &sub, &company, period, -30).expect("map_to_rows");
+        assert_eq!(rows.r31_2, Some(-30), "R31_2 carries the signed adjustment");
+        assert_eq!(
+            rows.r32_2,
+            Some(138),
+            "R32_2 = R28_2 + R30_2 + R31_2 = 168 + 0 - 30"
+        );
+        assert_eq!(rows.r34_2, Some(127), "R34_2 = R17_2 - R32_2 = 265 - 138");
+
+        // Positive adjustment +50 → R32_2 = 218, R34_2 = 47.
+        let rows = map_to_rows(&report, &sub, &company, period, 50).expect("map_to_rows");
+        assert_eq!(rows.r31_2, Some(50));
+        assert_eq!(rows.r32_2, Some(218));
+        assert_eq!(rows.r34_2, Some(47));
+
+        // Zero → R31_2 omitted (None), totals unchanged.
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
+        assert_eq!(rows.r31_2, None, "zero adjustment → attribute omitted");
+        assert_eq!(rows.r32_2, Some(168));
+    }
+
+    #[test]
     fn refund_period_sets_r33_and_r42() {
         // Purchases > Sales → TVA de recuperat
         let report = make_report(
@@ -1123,7 +1171,7 @@ mod tests {
         let company = make_company();
         let period = NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
 
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
 
         assert_eq!(rows.r17_2, Some(105), "R17_2 = 105");
         assert_eq!(rows.r27_2, Some(210), "R27_2 = 210");
@@ -1141,7 +1189,7 @@ mod tests {
         let company = make_company();
         let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
 
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
 
         assert_eq!(rows.r11_1, Some(200), "R11_1 = 200 (9% sales → R11)");
         assert_eq!(rows.r11_2, Some(18), "R11_2 = 18 (9% VAT → R11)");
@@ -1157,7 +1205,7 @@ mod tests {
         let company = make_company();
         let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
 
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
 
         assert_eq!(rows.r5_1, Some(1000), "R5_1 = 1000");
         assert_eq!(rows.r5_2, Some(210), "R5_2 = 210");
@@ -1182,7 +1230,7 @@ mod tests {
         let company = make_company();
         let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
 
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
 
         // R12 collected
         assert_eq!(rows.r12_1, Some(1000), "R12_1 = 1000 (AE collected base)");
@@ -1217,7 +1265,7 @@ mod tests {
         let company = make_company();
         let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
 
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
 
         assert_eq!(rows.r12_1, Some(500), "R12_1 = 500");
         assert_eq!(rows.r12_2, Some(55), "R12_2 = 55");
@@ -1243,7 +1291,7 @@ mod tests {
         let sub = make_submission();
         let company = make_company();
         let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
         assert_eq!(
             rows.r12_1,
             Some(1000),
@@ -1272,7 +1320,7 @@ mod tests {
         let company = make_company();
         let period = NaiveDate::from_ymd_opt(2025, 10, 1).unwrap();
 
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
 
         assert_eq!(rows.r1_1, Some(2000), "R1_1 = 2000 (Z sales)");
         assert_eq!(rows.r9_1, None, "R9_1 = None (no standard-rate sales)");
@@ -1300,7 +1348,7 @@ mod tests {
         let company = make_company();
         let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
 
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
 
         assert_eq!(rows.r1_1, Some(2000), "R1_1 = 2000 (Z)");
         assert_eq!(rows.r13_1, Some(1500), "R13_1 = 1500 (AE vânzător)");
@@ -1323,7 +1371,7 @@ mod tests {
         let report = make_report(vec![], vec![]);
         let period = NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
 
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
         assert_eq!(
             rows.cui, "12345678",
             "RO prefix and spaces must be stripped"
@@ -1341,7 +1389,7 @@ mod tests {
         let report = make_report(vec![], vec![]);
         let period = NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
 
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
         assert_eq!(rows.bifa_cereale, "D");
         assert_eq!(rows.solicit_ramb, "D");
         assert_eq!(rows.bifa_mob, "N");
@@ -1356,7 +1404,7 @@ mod tests {
         let period = NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
 
         // This must not panic (debug_assert in map_to_rows)
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
         assert_eq!(rows.r9_2, Some(210));
     }
 
@@ -1465,7 +1513,7 @@ mod tests {
         let company = make_company();
         let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
 
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
         assert_eq!(
             rows.nr_evid.len(),
             23,
@@ -1487,7 +1535,7 @@ mod tests {
         let company = make_company();
         let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
 
-        let rows = map_to_rows(&report, &sub, &company, period).expect("map_to_rows");
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
         assert_eq!(
             rows.nr_evid, "10301010126250226000032",
             "valid 23-char nr_evid should be kept verbatim"

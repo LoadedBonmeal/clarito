@@ -158,6 +158,7 @@ pub fn generate_d300_xml(rows: &D300Rows, ver: &SchemaVersion) -> AppResult<Stri
     // R30 — regularizări taxă dedusă, cote vechi 19%/9%/5% (Wave 8)
     push_opt!(rows.r30_1, "R30_1");
     push_opt!(rows.r30_2, "R30_2");
+    push_opt!(rows.r31_2, "R31_2");
 
     // Totals
     push_opt!(rows.r17_1, "R17_1");

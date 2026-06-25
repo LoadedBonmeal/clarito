@@ -1783,17 +1783,6 @@ pub async fn compute_d300(
             }
         }
     }
-
-    // Capital-goods VAT adjustments (Cod fiscal art. 305) are signed regularizări ale taxei
-    // deductibile — they belong on R30 (regularizări taxă dedusă, IntNeg15SType, signed), which feeds
-    // the R32 total deductible (DUK R108). Clawback adds a negative, a positive adjustment a positive.
-    let cg_from = period_from.get(..7).unwrap_or(period_from.as_str());
-    let cg_to = period_to.get(..7).unwrap_or(period_to.as_str());
-    let cg_adjustment =
-        crate::db::capital_goods::period_adjustment_lei_range(pool, &company_id, cg_from, cg_to)
-            .await?;
-    reg_ded_tva += Decimal::from(cg_adjustment);
-
     let cash_vat_memo = cash_vat_memo_balances(pool, &company_id, &period_from, &period_to).await?;
 
     Ok(D300Report {
@@ -2061,11 +2050,22 @@ pub async fn export_d300_official(
     // Clonăm pool-ul înainte de a muta `state` în compute_d300 — necesar pentru înregistrarea depunerii.
     let pool = state.db.clone();
 
+    // art. 305 capital-goods VAT adjustment for the period → R31_2 (ajustări de taxă). Computed
+    // before `state`/ids move into compute_d300; range-aware for quarterly filers.
+    let cg_from = period_from
+        .get(..7)
+        .unwrap_or(period_from.as_str())
+        .to_string();
+    let cg_to = period_to.get(..7).unwrap_or(period_to.as_str()).to_string();
+    let cg_adjustment =
+        crate::db::capital_goods::period_adjustment_lei_range(&pool, &company_id, &cg_from, &cg_to)
+            .await?;
+
     // Compute the fiscal aggregates.
     let report = compute_d300(state, company_id, period_from, period_to).await?;
 
     // Map to D300Rows (all amounts rounded to lei, totals computed).
-    let rows = map_to_rows(&report, &submission, &company, period)?;
+    let rows = map_to_rows(&report, &submission, &company, period, cg_adjustment)?;
 
     // Generate XML.
     let xml = generate_d300_xml(&rows, &ver)?;
@@ -2145,11 +2145,22 @@ pub async fn preview_d300_xml(
     // Fetch the company record (needed for cui/den/adresa) — înainte de a muta `state` în compute_d300.
     let company = companies::get(&state.db, &company_id).await?;
 
+    // art. 305 capital-goods adjustment → R31_2 (computed before ids move into compute_d300).
+    let pool = state.db.clone();
+    let cg_from = period_from
+        .get(..7)
+        .unwrap_or(period_from.as_str())
+        .to_string();
+    let cg_to = period_to.get(..7).unwrap_or(period_to.as_str()).to_string();
+    let cg_adjustment =
+        crate::db::capital_goods::period_adjustment_lei_range(&pool, &company_id, &cg_from, &cg_to)
+            .await?;
+
     // Compute the fiscal aggregates.
     let report = compute_d300(state, company_id, period_from, period_to).await?;
 
     // Map to D300Rows (all amounts rounded to lei, totals computed).
-    let rows = map_to_rows(&report, &submission, &company, period)?;
+    let rows = map_to_rows(&report, &submission, &company, period, cg_adjustment)?;
 
     // Generate XML (fără validare DUK, fără scriere — doar întoarce șirul).
     generate_d300_xml(&rows, &ver)

@@ -300,7 +300,7 @@ function RecordModal({ good, companyId, onClose, onSubmit, saving }: {
               {preview > 0 ? "+" : ""}{fmtRON(preview)}
             </div>
             <div className="ms" style={{ marginTop: 4 }}>
-              {preview < 0 ? "Clawback — D 635 / C 4426 (TVA dedusă devine cost)." : preview > 0 ? "Deducere suplimentară — D 4426 / C 758." : "Fără ajustare (utilizare neschimbată)."}
+              {preview < 0 ? "Clawback — D 635 / C 4426 (TVA dedusă devine cost)." : preview > 0 ? "Deducere suplimentară — D 4426 / C 635." : "Fără ajustare (utilizare neschimbată)."}
             </div>
           </div>
         </div>

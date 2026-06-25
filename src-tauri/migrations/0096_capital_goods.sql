@@ -43,15 +43,15 @@ CREATE TABLE IF NOT EXISTS capital_good_adjustments (
 
 CREATE INDEX IF NOT EXISTS idx_cg_adj_company ON capital_good_adjustments(company_id, capital_good_id);
 
--- Backfill the adjustment counterparties (idempotent; harmless if already seeded by the standard PCG).
--- 635 = clawback (deducted VAT becomes a cost); 758 = positive adjustment (additional deductible VAT
--- recognized as income). 4426 is the deductible-VAT account that is adjusted.
+-- Backfill the adjustment counterparty (idempotent; harmless if already seeded by the standard PCG).
+-- The art. 305 adjustment uses the CECCAR "635 = 4426" pairing both ways: D 635/C 4426 for a clawback,
+-- D 4426/C 635 (recorded as "635 = 4426" with a minus) for a positive adjustment. 4426 is a core
+-- VAT account already seeded; only 635 may be missing.
 INSERT INTO chart_of_accounts (id, company_id, account_code, account_name, account_class)
 SELECT lower(hex(randomblob(16))), c.id, v.code, v.name, v.class
 FROM companies c
 CROSS JOIN (
     SELECT '635' AS code, 'Cheltuieli cu alte impozite, taxe și vărsăminte asimilate' AS name, 6 AS class
-    UNION ALL SELECT '758', 'Alte venituri din exploatare', 7
 ) v
 WHERE NOT EXISTS (
     SELECT 1 FROM chart_of_accounts a

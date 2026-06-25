@@ -10,10 +10,11 @@
 //! `new_pct < initial_pct` → negative (clawback: repay part of the deducted VAT);
 //! `new_pct > initial_pct` → positive (additional deductible VAT).
 //!
-//! GL (idempotent per adjustment id, `source_type='CAPGOOD_ADJ'`):
+//! GL (idempotent per adjustment id, `source_type='CAPGOOD_ADJ'`) — the CECCAR "635 = 4426" pairing
+//! both ways (the standard treatment; NOT 758/6588, which were refuted):
 //!   clawback (amount < 0): D 635 / C 4426   — deducted VAT becomes a cost
-//!   positive (amount > 0): D 4426 / C 758    — additional deductible VAT, recognized as income
-//! The signed amount is also reported on the D300 deductible-adjustment row (art. 305 + OPANAF 174/2026).
+//!   positive (amount > 0): D 4426 / C 635   — recorded conventionally as "635 = 4426" with a minus
+//! The signed amount is also reported on D300 R31_2 (ajustări de taxă; art. 305 + OPANAF 174/2026).
 
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::{Decimal, RoundingStrategy};
@@ -290,7 +291,7 @@ pub async fn record_adjustment(
     let lines: Vec<(String, String, Decimal)> = if amount < Decimal::ZERO {
         vec![("635".into(), "4426".into(), amount.abs())] // clawback
     } else if amount > Decimal::ZERO {
-        vec![("4426".into(), "758".into(), amount)] // positive adjustment
+        vec![("4426".into(), "635".into(), amount)] // positive adjustment (635 = 4426 cu semnul minus)
     } else {
         vec![]
     };
@@ -535,6 +536,51 @@ mod tests {
                 .await
                 .unwrap(),
             0
+        );
+    }
+
+    #[tokio::test]
+    async fn record_positive_posts_4426_to_635() {
+        let pool = pool().await;
+        // movable N=5, vat 100000, initial 0% (acquired for exempt), now used 100% taxable → +1/5 = +20000
+        let g = create(
+            &pool,
+            CreateCapitalGoodInput {
+                kind: "movable".into(),
+                vat_deducted: "100000.00".into(),
+                initial_deduction_pct: 0.0,
+                ..input()
+            },
+        )
+        .await
+        .unwrap();
+        let adj = record_adjustment(
+            &pool,
+            RecordAdjustmentInput {
+                company_id: "co".into(),
+                capital_good_id: g.id.clone(),
+                year: 2,
+                new_deduction_pct: 100.0,
+                period: "2027-12".into(),
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(adj.adjustment_amount, "20000.00");
+        let rows: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT e.account_code, e.debit, e.credit FROM gl_entry e \
+             JOIN gl_journal j ON j.id=e.journal_pk WHERE j.source_type='CAPGOOD_ADJ'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        // positive adjustment → D 4426 / C 635
+        assert!(rows.iter().any(|r| r.0 == "4426" && r.1 == "20000.00"));
+        assert!(rows.iter().any(|r| r.0 == "635" && r.2 == "20000.00"));
+        assert_eq!(
+            period_adjustment_lei(&pool, "co", "2027-12").await.unwrap(),
+            20000
         );
     }
 
