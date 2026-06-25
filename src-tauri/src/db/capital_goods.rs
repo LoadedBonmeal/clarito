@@ -329,11 +329,24 @@ pub async fn period_adjustment_lei(
     company_id: &str,
     period: &str,
 ) -> AppResult<i64> {
+    period_adjustment_lei_range(pool, company_id, period, period).await
+}
+
+/// Like [`period_adjustment_lei`] but over an inclusive YYYY-MM range — the D300 reporting period can
+/// span several months (quarterly filers). `period` is YYYY-MM, lexically comparable.
+pub async fn period_adjustment_lei_range(
+    pool: &SqlitePool,
+    company_id: &str,
+    from_ym: &str,
+    to_ym: &str,
+) -> AppResult<i64> {
     let rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT adjustment_amount FROM capital_good_adjustments WHERE company_id=?1 AND period=?2",
+        "SELECT adjustment_amount FROM capital_good_adjustments \
+         WHERE company_id=?1 AND period >= ?2 AND period <= ?3",
     )
     .bind(company_id)
-    .bind(period)
+    .bind(from_ym)
+    .bind(to_ym)
     .fetch_all(pool)
     .await?;
     let sum: Decimal = rows
@@ -482,6 +495,47 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[tokio::test]
+    async fn period_range_sum_covers_quarter() {
+        let pool = pool().await;
+        let g = create(&pool, input()).await.unwrap(); // immovable N=20, vat 210000
+                                                       // two clawbacks in different months of Q2
+        for (yr, per) in [(3, "2028-04"), (4, "2028-06")] {
+            record_adjustment(
+                &pool,
+                RecordAdjustmentInput {
+                    company_id: "co".into(),
+                    capital_good_id: g.id.clone(),
+                    year: yr,
+                    new_deduction_pct: 0.0, // each = -10500
+                    period: per.into(),
+                    notes: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        // single April month
+        assert_eq!(
+            period_adjustment_lei(&pool, "co", "2028-04").await.unwrap(),
+            -10500
+        );
+        // Q2 range catches both
+        assert_eq!(
+            period_adjustment_lei_range(&pool, "co", "2028-04", "2028-06")
+                .await
+                .unwrap(),
+            -21000
+        );
+        // a quarter with no adjustments → 0
+        assert_eq!(
+            period_adjustment_lei_range(&pool, "co", "2028-07", "2028-09")
+                .await
+                .unwrap(),
+            0
+        );
     }
 
     #[tokio::test]

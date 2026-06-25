@@ -1784,6 +1784,16 @@ pub async fn compute_d300(
         }
     }
 
+    // Capital-goods VAT adjustments (Cod fiscal art. 305) are signed regularizări ale taxei
+    // deductibile — they belong on R30 (regularizări taxă dedusă, IntNeg15SType, signed), which feeds
+    // the R32 total deductible (DUK R108). Clawback adds a negative, a positive adjustment a positive.
+    let cg_from = period_from.get(..7).unwrap_or(period_from.as_str());
+    let cg_to = period_to.get(..7).unwrap_or(period_to.as_str());
+    let cg_adjustment =
+        crate::db::capital_goods::period_adjustment_lei_range(pool, &company_id, cg_from, cg_to)
+            .await?;
+    reg_ded_tva += Decimal::from(cg_adjustment);
+
     let cash_vat_memo = cash_vat_memo_balances(pool, &company_id, &period_from, &period_to).await?;
 
     Ok(D300Report {
