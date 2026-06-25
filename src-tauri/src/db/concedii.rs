@@ -211,6 +211,19 @@ fn validate_leave(input: &MedicalLeaveInput) -> AppResult<()> {
     // tier-ului EXACT pe zilele cumulate ale episodului (poate traversa luni/certificate) e o extensie
     // ulterioară — aici validăm apartenența la set. Pentru orice cod, procentul trebuie 1–100.
     let cod_ind = input.cod_indemnizatie.as_deref().unwrap_or("01");
+    // This certificate's own covered days are a LOWER BOUND on the episode's cumulative days, and
+    // the OUG 91/2025 tier (55% ≤7z, 65% 8–14z, 75% ≥15z) is non-decreasing in cumulative days — so
+    // the chosen percent can never be BELOW the tier implied by this certificate's own duration. A
+    // HIGHER percent is allowed (continuation of a longer episode). This catches an impossible
+    // too-low tier without false-rejecting legitimate continuations.
+    let cert_days = input.zile_angajator.unwrap_or(0).max(0) + input.zile_fnuass.unwrap_or(0).max(0);
+    let min_tier = if cert_days <= 7 {
+        55
+    } else if cert_days <= 14 {
+        65
+    } else {
+        75
+    };
     match input.procent {
         Some(p) if !(1..=100).contains(&p) => {
             return Err(AppError::Validation(
@@ -223,6 +236,13 @@ fn validate_leave(input: &MedicalLeaveInput) -> AppResult<()> {
                  (scala graduală pe zile de episod, OUG 91/2025)."
                     .into(),
             ));
+        }
+        Some(p) if cod_ind == "01" && cert_days > 0 && p < min_tier => {
+            return Err(AppError::Validation(format!(
+                "Boala obișnuită (cod 01): pentru {cert_days} zile acoperite procentul minim este \
+                 {min_tier}% (OUG 91/2025: 55% ≤7z, 65% 8–14z, 75% ≥15z), dar s-a indicat {p}%. \
+                 Un procent mai mare e permis doar la continuarea unui episod mai lung."
+            )));
         }
         None if cod_ind == "01" => {
             return Err(AppError::Validation(
@@ -538,6 +558,44 @@ mod tests {
         )
         .await
         .is_ok());
+    }
+
+    /// Engine-improvement (deep-research): the percent cannot be BELOW the tier implied by the
+    /// certificate's OWN covered days (OUG 91/2025), since those days are a lower bound on the
+    /// episode's cumulative days. A higher percent (continuation of a longer episode) is allowed.
+    #[tokio::test]
+    async fn cod01_percent_not_below_own_duration_tier() {
+        let pool = pool().await;
+        // 20 covered days → minimum tier is 75%; 55% is impossible → rejected.
+        let bad = create(
+            &pool,
+            MedicalLeaveInput {
+                zile_angajator: Some(5),
+                zile_fnuass: Some(15), // 20 days total
+                procent: Some(55),
+                ..valid_input()
+            },
+        )
+        .await;
+        assert!(
+            matches!(bad, Err(AppError::Validation(_))),
+            "55% on a 20-day certificate must be rejected (own-duration floor is 75%)"
+        );
+        // A HIGHER percent than the own-duration floor is allowed (continuation): 5 days at 75%.
+        assert!(
+            create(
+                &pool,
+                MedicalLeaveInput {
+                    zile_angajator: Some(5),
+                    zile_fnuass: Some(0), // 5 days → floor 55%, but 75% allowed (continuation)
+                    procent: Some(75),
+                    ..valid_input()
+                },
+            )
+            .await
+            .is_ok(),
+            "75% on a 5-day certificate must be allowed (possible continuation of a longer episode)"
+        );
     }
 
     #[tokio::test]
