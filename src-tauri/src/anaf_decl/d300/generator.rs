@@ -173,6 +173,16 @@ pub fn generate_d300_xml(rows: &D300Rows, ver: &SchemaVersion) -> AppResult<Stri
     push_opt!(rows.r41_2, "R41_2");
     push_opt!(rows.r42_2, "R42_2");
 
+    // Informational memo rows A/A1/B/B1 — closing TVA neexigibilă (TVA la încasare).
+    push_opt!(rows.valoare_a, "valoare_a");
+    push_opt!(rows.tva_a, "tva_a");
+    push_opt!(rows.valoare_a1, "valoare_a1");
+    push_opt!(rows.tva_a1, "tva_a1");
+    push_opt!(rows.valoare_b, "valoare_b");
+    push_opt!(rows.tva_b, "tva_b");
+    push_opt!(rows.valoare_b1, "valoare_b1");
+    push_opt!(rows.tva_b1, "tva_b1");
+
     // Self-close the element
     w.write_event(Event::Empty(elem)).map_err(map_err)?;
 

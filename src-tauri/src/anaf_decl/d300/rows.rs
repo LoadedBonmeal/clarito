@@ -224,6 +224,27 @@ pub struct D300Rows {
     pub r41_2: Option<i64>,
     /// R42_2 — sold final de recuperat: MAX(R40_2 - R37_2, 0)
     pub r42_2: Option<i64>,
+
+    // ── Informational memo rows A/A1/B/B1 — "TVA neexigibilă" (TVA la încasare) ──
+    // Closing 4428 balance at period end (art. 282/297). A = output VAT not yet chargeable,
+    // B = input VAT not yet deducted; A1/B1 = the portion from this period + the prior 5 months.
+    // Purely informational — these NEVER feed R17/R27/R32/R34 (OPANAF 174/2026).
+    /// Rândul A — valoare (bază) livrări cu TVA neexigibilă în sold.
+    pub valoare_a: Option<i64>,
+    /// Rândul A — TVA neexigibilă în sold (livrări).
+    pub tva_a: Option<i64>,
+    /// Rândul A1 — valoarea aferentă perioadei + ultimelor 5 luni.
+    pub valoare_a1: Option<i64>,
+    /// Rândul A1 — TVA aferentă perioadei + ultimelor 5 luni.
+    pub tva_a1: Option<i64>,
+    /// Rândul B — valoare (bază) achiziții cu TVA nededusă în sold.
+    pub valoare_b: Option<i64>,
+    /// Rândul B — TVA nededusă în sold (achiziții).
+    pub tva_b: Option<i64>,
+    /// Rândul B1 — valoarea aferentă perioadei + ultimelor 5 luni.
+    pub valoare_b1: Option<i64>,
+    /// Rândul B1 — TVA aferentă perioadei + ultimelor 5 luni.
+    pub tva_b1: Option<i64>,
 }
 
 /// Convert a `bool` flag to the XSD `Str_listaDaNuSType` ("D"/"N").
@@ -917,6 +938,17 @@ pub fn map_to_rows(
         r40_2: r40_2_v,
         r41_2: r41_2_v,
         r42_2: r42_2_v,
+
+        // Informational memo rows A/A1/B/B1 — closing TVA neexigibilă (4428), in lei. Computed in
+        // compute_d300 from the GL; emitted only when non-zero; never part of any total.
+        valoare_a: opt_nonzero(report.cash_vat_memo.a_base),
+        tva_a: opt_nonzero(report.cash_vat_memo.a_vat),
+        valoare_a1: opt_nonzero(report.cash_vat_memo.a1_base),
+        tva_a1: opt_nonzero(report.cash_vat_memo.a1_vat),
+        valoare_b: opt_nonzero(report.cash_vat_memo.b_base),
+        tva_b: opt_nonzero(report.cash_vat_memo.b_vat),
+        valoare_b1: opt_nonzero(report.cash_vat_memo.b1_base),
+        tva_b1: opt_nonzero(report.cash_vat_memo.b1_vat),
     })
 }
 
@@ -1024,6 +1056,7 @@ mod tests {
             reg_colectata_tva: "0.00".to_string(),
             reg_dedusa_baza: "0.00".to_string(),
             reg_dedusa_tva: "0.00".to_string(),
+            cash_vat_memo: Default::default(),
         }
     }
 

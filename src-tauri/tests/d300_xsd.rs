@@ -18,7 +18,7 @@ use efactura_desktop_lib::anaf_decl::d300::D300Submission;
 use efactura_desktop_lib::anaf_decl::validation::{validate_with_xsd, xmllint_available};
 use efactura_desktop_lib::anaf_decl::version::resolve;
 use efactura_desktop_lib::anaf_decl::DeclKind;
-use efactura_desktop_lib::commands::declarations::{D300Group, D300Report};
+use efactura_desktop_lib::commands::declarations::{CashVatMemo, D300Group, D300Report};
 use efactura_desktop_lib::db::companies::Company;
 
 #[allow(unused_imports)]
@@ -112,6 +112,17 @@ fn test_report() -> D300Report {
         reg_colectata_tva: "0.00".to_string(),
         reg_dedusa_baza: "0.00".to_string(),
         reg_dedusa_tva: "0.00".to_string(),
+        // Non-zero informational TVA-neexigibilă memo rows A/A1/B/B1 — exercises their XSD emission.
+        cash_vat_memo: CashVatMemo {
+            a_base: 10000,
+            a_vat: 2100,
+            a1_base: 10000,
+            a1_vat: 2100,
+            b_base: 5000,
+            b_vat: 1050,
+            b1_base: 5000,
+            b1_vat: 1050,
+        },
     }
 }
 
@@ -213,6 +224,7 @@ fn d300_empty_period_generates_valid_xml() {
         reg_colectata_tva: "0.00".to_string(),
         reg_dedusa_baza: "0.00".to_string(),
         reg_dedusa_tva: "0.00".to_string(),
+        cash_vat_memo: Default::default(),
     };
 
     // Use 2026 period to resolve v12 (vendored XSD)
@@ -322,6 +334,7 @@ fn d300_wave4_scenario_a_reverse_charge_ae() {
         reg_colectata_tva: "0.00".to_string(),
         reg_dedusa_baza: "0.00".to_string(),
         reg_dedusa_tva: "0.00".to_string(),
+        cash_vat_memo: Default::default(),
     };
 
     let rows =
@@ -428,6 +441,7 @@ fn d300_wave4_scenario_e_reverse_charge_buyer_and_seller() {
         reg_colectata_tva: "0.00".to_string(),
         reg_dedusa_baza: "0.00".to_string(),
         reg_dedusa_tva: "0.00".to_string(),
+        cash_vat_memo: Default::default(),
     };
 
     let rows =
@@ -502,6 +516,7 @@ fn d300_wave4_scenario_b_intra_eu_k_purchase() {
         reg_colectata_tva: "0.00".to_string(),
         reg_dedusa_baza: "0.00".to_string(),
         reg_dedusa_tva: "0.00".to_string(),
+        cash_vat_memo: Default::default(),
     };
 
     let rows =
@@ -602,6 +617,7 @@ fn d300_wave4_scenario_c_multirate_sales() {
         reg_colectata_tva: "0.00".to_string(),
         reg_dedusa_baza: "0.00".to_string(),
         reg_dedusa_tva: "0.00".to_string(),
+        cash_vat_memo: Default::default(),
     };
 
     let rows =
@@ -695,6 +711,7 @@ fn d300_wave4_scenario_d_9pct_purchase_excluded() {
         reg_colectata_tva: "0.00".to_string(),
         reg_dedusa_baza: "1000.00".to_string(),
         reg_dedusa_tva: "90.00".to_string(),
+        cash_vat_memo: Default::default(),
     };
 
     let rows =
@@ -839,6 +856,7 @@ fn d300_wave7_intra_eu_services() {
         reg_colectata_tva: "0.00".to_string(),
         reg_dedusa_baza: "0.00".to_string(),
         reg_dedusa_tva: "0.00".to_string(),
+        cash_vat_memo: Default::default(),
     };
 
     let rows =
@@ -974,6 +992,7 @@ fn d300_wave8_old_rate_sales_to_r16() {
         reg_colectata_tva: "190.00".to_string(),
         reg_dedusa_baza: "0.00".to_string(),
         reg_dedusa_tva: "0.00".to_string(),
+        cash_vat_memo: Default::default(),
     };
 
     let rows =
@@ -1093,6 +1112,7 @@ fn d300_wave8_old_rate_purchase_to_r30() {
         reg_colectata_tva: "0.00".to_string(),
         reg_dedusa_baza: "1000.00".to_string(),
         reg_dedusa_tva: "90.00".to_string(),
+        cash_vat_memo: Default::default(),
     };
 
     let rows =
@@ -1213,6 +1233,7 @@ fn d300_wave8_override() {
         reg_colectata_tva: "190.00".to_string(), // auto-computed
         reg_dedusa_baza: "0.00".to_string(),
         reg_dedusa_tva: "0.00".to_string(),
+        cash_vat_memo: Default::default(),
     };
 
     // User overrides reg_colectata_tva to 180 (e.g. after reviewing rounding).

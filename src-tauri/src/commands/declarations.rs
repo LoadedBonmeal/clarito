@@ -309,6 +309,26 @@ pub struct D300Report {
     pub reg_dedusa_baza: String,
     /// Auto-computed Σ TVA din achizițiile S la cote vechi 19%/9%/5% → R30_2.
     pub reg_dedusa_tva: String,
+
+    /// Informational TVA-neexigibilă memo balances (D300 rows A/A1/B/B1), in lei.
+    #[serde(default)]
+    pub cash_vat_memo: CashVatMemo,
+}
+
+/// Closing 4428 (TVA neexigibilă) balances for the informational D300 memo rows A/A1/B/B1, in lei.
+/// A = output VAT not yet chargeable (cash-VAT sales, art. 282); B = input VAT not yet deducted
+/// (art. 297(2)/(3)); A1/B1 = the slice from the reporting period + the prior 5 months.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CashVatMemo {
+    pub a_base: i64,
+    pub a_vat: i64,
+    pub a1_base: i64,
+    pub a1_vat: i64,
+    pub b_base: i64,
+    pub b_vat: i64,
+    pub b1_base: i64,
+    pub b1_vat: i64,
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -1224,6 +1244,112 @@ pub(crate) async fn compute_plafon_status(
 /// **Vânzări**: facturile cu status VALIDATED sau STORNED (setul fiscal autorizat
 /// BIZ-11/storno-fix), identic cu rapoartele TVA, jurnalele, D394 și SAF-T,
 /// astfel încât D300 reconciliază cu celelalte declarații.
+/// Closing TVA-neexigibilă (4428) memo balances for the informational D300 rows A/A1/B/B1.
+/// Splits the 4428 GL entries by side — output (sales: `journal_type='SALES'`, or a `'PAYMENT'`
+/// journal carrying a customer = a sales collection) vs input (purchases) — nets the still-deferred
+/// VAT as of `period_to`, and derives the base from each entry's rate (`tax_percentage`). A1/B1 keep
+/// only the slice from the reporting period + the prior 5 months. Purely informational: never feeds
+/// any total (OPANAF 174/2026).
+#[allow(clippy::type_complexity)]
+async fn cash_vat_memo_balances(
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<CashVatMemo> {
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    // A1/B1 window: reporting period + the prior 5 months (monthly fiscal period).
+    let aging_from = {
+        let y: i32 = period_from
+            .get(0..4)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2026);
+        let m: i32 = period_from
+            .get(5..7)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1);
+        let t = y * 12 + (m - 1) - 5;
+        format!("{:04}-{:02}-01", t / 12, t % 12 + 1)
+    };
+
+    let rows: Vec<(
+        String,
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+        String,
+        Option<String>,
+    )> = sqlx::query_as(
+        "SELECT j.journal_type, j.customer_id, j.supplier_id, j.transaction_date, \
+                e.debit, e.credit, e.tax_percentage \
+         FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
+         WHERE j.company_id = ?1 AND e.account_code = '4428' AND j.transaction_date <= ?2",
+    )
+    .bind(company_id)
+    .bind(period_to)
+    .fetch_all(pool)
+    .await?;
+
+    let (mut a_vat, mut a_base, mut a1_vat, mut a1_base) =
+        (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
+    let (mut b_vat, mut b_base, mut b1_vat, mut b1_base) =
+        (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
+
+    for (jt, cust, supp, date, debit, credit, rate_s) in &rows {
+        let rate = rate_s
+            .as_deref()
+            .and_then(|s| Decimal::from_str(s).ok())
+            .unwrap_or(Decimal::ZERO);
+        if rate <= Decimal::ZERO {
+            continue; // cash-VAT is standard-rate only; no rate → no derivable base
+        }
+        let d = Decimal::from_str(debit).unwrap_or(Decimal::ZERO);
+        let c = Decimal::from_str(credit).unwrap_or(Decimal::ZERO);
+        let is_output = jt == "SALES" || (jt == "PAYMENT" && cust.is_some());
+        let is_input = jt == "PURCHASE" || (jt == "PAYMENT" && supp.is_some());
+        // Deferred output VAT accumulates as a 4428 credit (released = debit); input is the reverse.
+        let signed_vat = if is_output {
+            c - d
+        } else if is_input {
+            d - c
+        } else {
+            continue;
+        };
+        let base = signed_vat * Decimal::from(100) / rate; // base = VAT / (rate%/100)
+        let in_aging = date.as_str() >= aging_from.as_str();
+        if is_output {
+            a_vat += signed_vat;
+            a_base += base;
+            if in_aging {
+                a1_vat += signed_vat;
+                a1_base += base;
+            }
+        } else {
+            b_vat += signed_vat;
+            b_base += base;
+            if in_aging {
+                b1_vat += signed_vat;
+                b1_base += base;
+            }
+        }
+    }
+
+    let lei = |x: Decimal| crate::anaf_decl::round_lei(x).max(0);
+    Ok(CashVatMemo {
+        a_base: lei(a_base),
+        a_vat: lei(a_vat),
+        a1_base: lei(a1_base),
+        a1_vat: lei(a1_vat),
+        b_base: lei(b_base),
+        b_vat: lei(b_vat),
+        b1_base: lei(b1_base),
+        b1_vat: lei(b1_vat),
+    })
+}
+
 /// **Achiziții**: facturile primite cu status != REJECTED, defalcate din
 /// `received_invoice_vat_lines`. Facturile fără defalcare sunt contorizate în
 /// `purchase_unparsed_count` și nu contribuie la totaluri.
@@ -1658,6 +1784,8 @@ pub async fn compute_d300(
         }
     }
 
+    let cash_vat_memo = cash_vat_memo_balances(pool, &company_id, &period_from, &period_to).await?;
+
     Ok(D300Report {
         company_cui,
         period_from,
@@ -1694,6 +1822,7 @@ pub async fn compute_d300(
         reg_dedusa_tva: reg_ded_tva
             .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
             .to_string(),
+        cash_vat_memo,
     })
 }
 
@@ -2293,6 +2422,7 @@ mod tests {
             reg_colectata_tva: "0.00".to_string(),
             reg_dedusa_baza: "0.00".to_string(),
             reg_dedusa_tva: "0.00".to_string(),
+            cash_vat_memo: Default::default(),
         };
 
         let dir = std::env::temp_dir();
@@ -2337,6 +2467,7 @@ mod tests {
             reg_colectata_tva: "0.00".to_string(),
             reg_dedusa_baza: "0.00".to_string(),
             reg_dedusa_tva: "0.00".to_string(),
+            cash_vat_memo: Default::default(),
         };
 
         let dir = std::env::temp_dir();
@@ -2382,6 +2513,7 @@ mod tests {
             reg_colectata_tva: "0.00".to_string(),
             reg_dedusa_baza: "0.00".to_string(),
             reg_dedusa_tva: "0.00".to_string(),
+            cash_vat_memo: Default::default(),
         };
 
         // Simulate the R4 override logic from export_d300 with override = 120.00.
@@ -2446,6 +2578,7 @@ mod tests {
             reg_colectata_tva: "0.00".to_string(),
             reg_dedusa_baza: "0.00".to_string(),
             reg_dedusa_tva: "0.00".to_string(),
+            cash_vat_memo: Default::default(),
         };
 
         // Simulate None override — no changes applied.
@@ -2717,6 +2850,94 @@ mod cash_vat_routing_tests {
             .await
             .expect("migrations");
         pool
+    }
+
+    /// Insert a raw 4428 (TVA neexigibilă) GL entry for the memo-balance test.
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_4428(
+        pool: &SqlitePool,
+        company: &str,
+        jtype: &str,
+        date: &str,
+        debit: &str,
+        credit: &str,
+        rate: &str,
+    ) {
+        let jid = crate::db::models::new_id();
+        sqlx::query(
+            "INSERT INTO gl_journal (id, company_id, journal_id, journal_type, transaction_id, \
+             transaction_date, description, source_type, source_id, customer_id, supplier_id) \
+             VALUES (?1,?2,'X',?3,?4,?5,'t',?3,?4,NULL,NULL)",
+        )
+        .bind(&jid)
+        .bind(company)
+        .bind(jtype)
+        .bind(crate::db::models::new_id())
+        .bind(date)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO gl_entry (id, journal_pk, record_id, account_code, debit, credit, \
+             tax_type, tax_code, tax_percentage) VALUES (?1,?2,1,'4428',?3,?4,'300','000000',?5)",
+        )
+        .bind(crate::db::models::new_id())
+        .bind(&jid)
+        .bind(debit)
+        .bind(credit)
+        .bind(rate)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cash_vat_memo_balances_split_and_aging() {
+        let pool = pool().await;
+        seed_company(&pool, "co", true, Some("2026-01-01")).await;
+        // Output (sales) deferred VAT: Jun-2026 (in aging) 210 @21% → base 1000; Dec-2025 (out) 105 → 500.
+        insert_4428(
+            &pool,
+            "co",
+            "SALES",
+            "2026-06-15",
+            "0.00",
+            "210.00",
+            "21.00",
+        )
+        .await;
+        insert_4428(
+            &pool,
+            "co",
+            "SALES",
+            "2025-12-15",
+            "0.00",
+            "105.00",
+            "21.00",
+        )
+        .await;
+        // Input (purchase) deferred VAT: Jun-2026, 21 @21% → base 100.
+        insert_4428(
+            &pool,
+            "co",
+            "PURCHASE",
+            "2026-06-10",
+            "21.00",
+            "0.00",
+            "21.00",
+        )
+        .await;
+
+        let m = cash_vat_memo_balances(&pool, "co", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        assert_eq!(m.a_vat, 315); // 210 + 105 (closing, all)
+        assert_eq!(m.a_base, 1500); // 1000 + 500
+        assert_eq!(m.a1_vat, 210); // only Jun-2026 (Dec-2025 is outside the 6-month window)
+        assert_eq!(m.a1_base, 1000);
+        assert_eq!(m.b_vat, 21);
+        assert_eq!(m.b_base, 100);
+        assert_eq!(m.b1_vat, 21);
     }
 
     async fn seed_company(pool: &SqlitePool, id: &str, cash_vat: bool, start: Option<&str>) {
