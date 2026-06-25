@@ -1608,7 +1608,7 @@ function PontajPanel({ companyId, period, employees }: PontajPanelProps) {
       });
       setEditing(null);
     } catch (e) {
-      console.error(e);
+      notify.error(formatError(e, "Nu s-a putut salva pontajul."));
     } finally {
       setSaving(false);
     }

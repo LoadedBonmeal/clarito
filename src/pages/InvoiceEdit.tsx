@@ -127,7 +127,10 @@ export function InvoiceEditPage() {
       void api.contacts
         .get(inv.contactId, activeCompanyId ?? "")
         .then((c) => setSelectedContact(c))
-        .catch(() => setSelectedContact(null));
+        .catch((e) => {
+          notify.error(formatError(e, "Nu s-a putut încărca clientul facturii."));
+          setSelectedContact(null);
+        });
       setSeries(inv.series);
       setInvoiceNumber(inv.number);
       setIssueDate(inv.issueDate);

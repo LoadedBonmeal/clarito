@@ -715,7 +715,10 @@ export function DeclarationsPage() {
               className="pill-btn spin-btn"
               disabled={intrastatFetching}
               onClick={() => {
-                void refetchIntrastat().then(() => notify.success(t("declarations.notify.intrastatUpdated")));
+                void refetchIntrastat().then((r) => {
+                  if (r.isError) notify.error(formatError(r.error, t("declarations.notify.intrastatUpdated")));
+                  else notify.success(t("declarations.notify.intrastatUpdated"));
+                });
               }}
             >
               {calcIcon}{intrastatFetching ? t("declarations.cards.intrastat.checking") : t("declarations.cards.intrastat.check")}
