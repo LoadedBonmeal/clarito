@@ -12,68 +12,42 @@ jobs:
   check-signing-secrets:
     name: Verify signing secrets are configured
     runs-on: ubuntu-latest
+    outputs:
+      signed: ${{ steps.check.outputs.signed }}
     steps:
-      - name: Check macOS signing secrets
+      - name: Determine whether all signing secrets are present
+        id: check
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          if [ -z "${{ secrets.APPLE_CERTIFICATE }}" ]; then
-            echo "❌ APPLE_CERTIFICATE secret is not set"
-            echo "   Set this in GitHub → Settings → Secrets → Actions"
-            exit 1
+          missing=0
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_PASSWORD \
+                   WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD APPLE_ID \
+                   APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then echo "⚠️  $v is not set"; missing=1; fi
+          done
+          if [ "$missing" -eq 0 ]; then
+            echo "✅ All signing secrets are configured — the signed/notarized release will run."
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Signing secrets are absent — the SIGNED release is skipped (not failed). Unsigned installers are produced by release-build.yml on the same tag."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
           fi
-          if [ -z "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" ]; then
-            echo "❌ APPLE_CERTIFICATE_PASSWORD secret is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.APPLE_SIGNING_IDENTITY }}" ]; then
-            echo "❌ APPLE_SIGNING_IDENTITY secret is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.APPLE_PASSWORD }}" ]; then
-            echo "❌ APPLE_PASSWORD (app-specific password for notarization) secret is not set"
-            echo "   Generate at https://account.apple.com → Sign-In and Security → App-Specific Passwords"
-            exit 1
-          fi
-          echo "✅ All macOS signing secrets are configured"
-
-      - name: Check Windows signing secrets
-        run: |
-          if [ -z "${{ secrets.WINDOWS_CERTIFICATE }}" ]; then
-            echo "❌ WINDOWS_CERTIFICATE secret is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}" ]; then
-            echo "❌ WINDOWS_CERTIFICATE_PASSWORD secret is not set"
-            exit 1
-          fi
-          echo "✅ All Windows signing secrets are configured"
-
-      - name: Check Tauri updater and keychain secrets
-        run: |
-          if [ -z "${{ secrets.KEYCHAIN_PASSWORD }}" ]; then
-            echo "❌ KEYCHAIN_PASSWORD secret is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.APPLE_ID }}" ]; then
-            echo "❌ APPLE_ID secret is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.APPLE_TEAM_ID }}" ]; then
-            echo "❌ APPLE_TEAM_ID secret is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
-            echo "❌ TAURI_SIGNING_PRIVATE_KEY secret is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" ]; then
-            echo "❌ TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is not set"
-            exit 1
-          fi
-          echo "✅ All Tauri updater and keychain secrets are configured"
 
   release-macos:
     name: Release macOS (universal)
     needs: check-signing-secrets
+    if: needs.check-signing-secrets.outputs.signed == 'true'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -140,6 +114,7 @@ jobs:
   release-windows:
     name: Release Windows x64
     needs: check-signing-secrets
+    if: needs.check-signing-secrets.outputs.signed == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
