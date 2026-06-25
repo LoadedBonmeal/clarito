@@ -559,6 +559,11 @@ pub fn run() {
                     commands::accruals::list_accruals,
                     commands::accruals::delete_accrual,
                     commands::accruals::run_accruals,
+                    // provizioane (class 15x)
+                    commands::provisions::create_provision,
+                    commands::provisions::list_provisions,
+                    commands::provisions::reverse_provision,
+                    commands::provisions::delete_provision,
                     // payment instruments — CEC & BO (P3 Wave C)
                     commands::payment_instruments::create_payment_instrument,
                     commands::payment_instruments::list_payment_instruments,

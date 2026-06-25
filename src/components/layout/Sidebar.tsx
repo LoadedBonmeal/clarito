@@ -113,6 +113,7 @@ export function Sidebar() {
       { key: "cecuri", label: t("shell.nav.paymentInstruments"), icon: "banknotes", path: "/payment-instruments", more: true },
       { key: "contracte", label: t("shell.nav.contracts"), icon: "docText", path: "/contracts", more: true },
       { key: "accruals", label: "Chelt./venit în avans", icon: "calc", path: "/accruals", more: true },
+      { key: "provizioane", label: "Provizioane", icon: "scale", path: "/provisions", more: true },
     ]},
     { id: "stocuri", sec: t("shell.nav.groupStock"), items: [
       { key: "nir", label: t("shell.nav.nir"), icon: "docDown", path: "/nir" },

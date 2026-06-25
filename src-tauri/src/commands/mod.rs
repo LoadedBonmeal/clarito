@@ -72,6 +72,7 @@ pub mod payroll_config;
 pub mod pontaj;
 pub mod productie;
 pub mod products;
+pub mod provisions;
 pub mod quotes;
 pub mod receipts;
 pub mod received;

@@ -1174,6 +1174,50 @@ export const accruals = {
     invoke<RegisterPostResult>("run_accruals", { companyId, period }),
 };
 
+// ─── Provizioane (class 15x, OMFP 1802/2014 pct. 374) ───────────────────────
+
+export interface Provision {
+  id: string;
+  companyId: string;
+  account15x: string;
+  description: string;
+  amount: string;
+  probability: string | null;
+  expectedSettlement: string | null;
+  deductible: boolean;
+  status: "active" | "reversed";
+  createdPeriod: string;
+  reversedPeriod: string | null;
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateProvisionInput {
+  companyId: string;
+  account15x: string;
+  description: string;
+  amount: string;
+  probability?: string | null;
+  expectedSettlement?: string | null;
+  deductible?: boolean;
+  createdPeriod: string;
+  notes?: string | null;
+  obligationPresent: boolean;
+  outflowProbable: boolean;
+  estimateReliable: boolean;
+}
+
+export const provisions = {
+  list: (companyId: string) => invoke<Provision[]>("list_provisions", { companyId }),
+  create: (input: CreateProvisionInput) => invoke<Provision>("create_provision", { input }),
+  /** Reluare/utilizare: D 15x / C 7812 în perioada AAAA-LL. */
+  reverse: (id: string, companyId: string, period: string) =>
+    invoke<Provision>("reverse_provision", { id, companyId, period }),
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_provision", { id, companyId }),
+};
+
 // ─── Dividende (impozit pe dividende, Legea 141/2025) ───────────────────────
 
 export interface Dividend {
