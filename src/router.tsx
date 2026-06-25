@@ -102,6 +102,7 @@ import { AvizePage } from "@/pages/Avize";
 import { DezmembrariPage } from "@/pages/Dezmembrari";
 import { AccrualsPage } from "@/pages/Accruals";
 import { ProvisionsPage } from "@/pages/Provisions";
+import { CapitalGoodsPage } from "@/pages/CapitalGoods";
 
 // ─── Layout root ──────────────────────────────────────────────────────────
 
@@ -431,6 +432,12 @@ const provisionsRoute = createRoute({
   component: ProvisionsPage,
 });
 
+const capitalGoodsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/capital-goods",
+  component: CapitalGoodsPage,
+});
+
 // ─── Build tree + router ──────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -484,6 +491,7 @@ const routeTree = rootRoute.addChildren([
   dezmembrariRoute,
   accrualsRoute,
   provisionsRoute,
+  capitalGoodsRoute,
 ]);
 
 export const router = createRouter({

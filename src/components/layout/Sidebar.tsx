@@ -114,6 +114,7 @@ export function Sidebar() {
       { key: "contracte", label: t("shell.nav.contracts"), icon: "docText", path: "/contracts", more: true },
       { key: "accruals", label: "Chelt./venit în avans", icon: "calc", path: "/accruals", more: true },
       { key: "provizioane", label: "Provizioane", icon: "scale", path: "/provisions", more: true },
+      { key: "bunuri-capital", label: "Bunuri de capital", icon: "building", path: "/capital-goods", more: true },
     ]},
     { id: "stocuri", sec: t("shell.nav.groupStock"), items: [
       { key: "nir", label: t("shell.nav.nir"), icon: "docDown", path: "/nir" },

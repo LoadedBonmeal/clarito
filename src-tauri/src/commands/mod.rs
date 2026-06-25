@@ -33,6 +33,7 @@ pub mod auth;
 pub mod avize;
 pub mod bank_import;
 pub mod bnr;
+pub mod capital_goods;
 pub mod companies;
 pub mod contacts;
 pub mod contracts;

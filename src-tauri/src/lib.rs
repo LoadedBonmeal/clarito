@@ -564,6 +564,13 @@ pub fn run() {
                     commands::provisions::list_provisions,
                     commands::provisions::reverse_provision,
                     commands::provisions::delete_provision,
+                    // registrul bunurilor de capital — ajustare TVA art. 305
+                    commands::capital_goods::create_capital_good,
+                    commands::capital_goods::list_capital_goods,
+                    commands::capital_goods::list_capital_good_adjustments,
+                    commands::capital_goods::record_capital_good_adjustment,
+                    commands::capital_goods::capital_good_period_adjustment,
+                    commands::capital_goods::delete_capital_good,
                     // payment instruments — CEC & BO (P3 Wave C)
                     commands::payment_instruments::create_payment_instrument,
                     commands::payment_instruments::list_payment_instruments,

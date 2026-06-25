@@ -1218,6 +1218,75 @@ export const provisions = {
     invoke<void>("delete_provision", { id, companyId }),
 };
 
+// ─── Registrul bunurilor de capital — ajustare TVA (Cod fiscal art. 305) ─────
+
+export interface CapitalGood {
+  id: string;
+  companyId: string;
+  assetId: string | null;
+  description: string;
+  kind: "movable" | "immovable";
+  acquisitionDate: string;
+  baseValue: string;
+  vatDeducted: string;
+  adjustmentYears: number;
+  initialDeductionPct: number;
+  status: "active" | "disposed";
+  disposedDate: string | null;
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CapitalGoodAdjustment {
+  id: string;
+  companyId: string;
+  capitalGoodId: string;
+  year: number;
+  newDeductionPct: number;
+  adjustmentAmount: string;
+  period: string;
+  posted: boolean;
+  notes: string | null;
+  createdAt: number;
+}
+
+export interface CreateCapitalGoodInput {
+  companyId: string;
+  assetId?: string | null;
+  description: string;
+  kind: "movable" | "immovable";
+  acquisitionDate: string;
+  baseValue: string;
+  vatDeducted: string;
+  initialDeductionPct?: number;
+  notes?: string | null;
+}
+
+export interface RecordAdjustmentInput {
+  companyId: string;
+  capitalGoodId: string;
+  year: number;
+  newDeductionPct: number;
+  period: string;
+  notes?: string | null;
+}
+
+export const capitalGoods = {
+  list: (companyId: string) => invoke<CapitalGood[]>("list_capital_goods", { companyId }),
+  create: (input: CreateCapitalGoodInput) => invoke<CapitalGood>("create_capital_good", { input }),
+  listAdjustments: (capitalGoodId: string, companyId: string) =>
+    invoke<CapitalGoodAdjustment[]>("list_capital_good_adjustments", { capitalGoodId, companyId }),
+  /** Calculează + înregistrează ajustarea unui an cu schimbare de utilizare + postează GL. */
+  recordAdjustment: (input: RecordAdjustmentInput) =>
+    invoke<CapitalGoodAdjustment>("record_capital_good_adjustment", { input }),
+  /** Σ semnată a ajustărilor dintr-o perioadă (AAAA-LL), în lei — pentru D300. */
+  periodAdjustment: (companyId: string, period: string) =>
+    invoke<number>("capital_good_period_adjustment", { companyId, period }),
+  delete: (id: string, companyId: string) =>
+    invoke<void>("delete_capital_good", { id, companyId }),
+};
+
 // ─── Dividende (impozit pe dividende, Legea 141/2025) ───────────────────────
 
 export interface Dividend {

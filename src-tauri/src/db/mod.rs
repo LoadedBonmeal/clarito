@@ -31,6 +31,7 @@ pub mod advance_invoices;
 pub mod aging;
 pub mod assets;
 pub mod avize;
+pub mod capital_goods;
 pub mod concedii;
 pub mod declaration_filings;
 pub mod deconturi;
