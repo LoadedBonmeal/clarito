@@ -17,6 +17,10 @@ on:
   push:
     tags: ["v*"]
 
+# tauri-action creates a GitHub Release on tag builds → needs write access to contents.
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
