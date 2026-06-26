@@ -1876,6 +1876,19 @@ pub(crate) async fn post_manual_journal(
     j: &ManualJournal<'_>,
     lines: &[(&str, Decimal, Decimal)],
 ) -> AppResult<()> {
+    // Period-lock guard (OMFP 2634/2015 immutability): a manual GL note (NIR, dividende, decont,
+    // inventar etc.) must not post into a FILED (locked) period — that would overwrite declared
+    // figures. Unlock the period to book a correction. Mirrors generate_gl_entries / post_vat_settlement
+    // / fx_revaluation, so EVERY direct GL-posting path is now covered.
+    if let Some(ym) = j.date.get(..7) {
+        if crate::db::period_locks::is_period_locked(pool, j.company_id, ym).await {
+            return Err(crate::error::AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — nota contabilă nu poate fi postată. \
+                 Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
+
     let entries: Vec<GlEntry> = lines
         .iter()
         .enumerate()
@@ -9551,6 +9564,53 @@ mod tests {
         assert!(!is_partner_account("4427"), "4427 = TVA colectat");
         assert!(!is_partner_account("117"), "117 = rezultat reportat");
         assert!(!is_partner_account("457"), "457 = dividende de plată");
+    }
+
+    #[tokio::test]
+    async fn manual_journal_refused_on_locked_period() {
+        // OMFP 2634/2015 immutability: a manual GL note must not post into a filed (locked) period.
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id,cui,legal_name,address,city,county,country) \
+             VALUES ('co_l','11111111','Test SRL','S','B','B','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        crate::db::period_locks::lock_period(
+            &pool,
+            "co_l",
+            "2026-03",
+            "declaration:D300",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let src = new_id();
+        let r = post_manual_journal(
+            &pool,
+            &ManualJournal {
+                company_id: "co_l",
+                journal_id: "NC",
+                journal_type: "MANUAL",
+                source_type: "MANUAL",
+                source_id: &src,
+                date: "2026-03-15",
+                description: "into locked period",
+                partner_cui: None,
+            },
+            &[
+                ("6588", rdec!(100), Decimal::ZERO),
+                ("5311", Decimal::ZERO, rdec!(100)),
+            ],
+        )
+        .await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "manual journal into a locked period must be refused, got {r:?}"
+        );
     }
 
     /// `post_manual_journal` cu `partner_cui: Some("RO123")`:
