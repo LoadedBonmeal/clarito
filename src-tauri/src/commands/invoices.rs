@@ -518,11 +518,26 @@ pub async fn validate_invoice_draft(
     );
 
     let all_errors: Vec<String> = xml_result.errors.into_iter().chain(data_errors).collect();
-    let all_warnings: Vec<String> = xml_result
+    let mut all_warnings: Vec<String> = xml_result
         .warnings
         .into_iter()
         .chain(data_warnings)
         .collect();
+
+    // Closed-period heads-up (non-blocking). Per OMFP 2634/2015 a filed period is immutable: an
+    // invoice dated in a locked month won't post to the GL until the period is unlocked (and the
+    // figures re-filed as a declarație rectificativă). We WARN rather than block — a legitimate late
+    // document is corrected forward, not refused.
+    if let Some(ym) = input.invoice.issue_date.get(..7) {
+        if crate::db::period_locks::is_period_locked(&state.db, &input.invoice.company_id, ym).await
+        {
+            all_warnings.push(format!(
+                "Factura este datată în perioada {ym}, BLOCATĂ (declarație depusă). Înregistrarea în \
+                 contabilitate nu se va posta până la deblocarea perioadei și depunerea unei \
+                 declarații rectificative."
+            ));
+        }
+    }
 
     Ok(InvoiceDraftValidation {
         is_valid: all_errors.is_empty(),
