@@ -349,7 +349,11 @@ pub(crate) async fn do_sync_spv(
             // ZIP is supplementary; proceed even if it fails.
         }
 
-        // ── Insert VAT breakdown lines ─────────────────────────────
+        // ── Insert VAT breakdown lines (ATOMIC with the parent) ────────
+        // A partial breakdown is worse than none: compute_d300 sums these per-rate lines, so a parent
+        // with MISSING lines silently UNDER-reports deductible VAT. If any line fails, roll the whole
+        // invoice back (parent + lines + files); it re-ingests on the next SPV sync.
+        let mut vat_lines_ok = true;
         for vat_line in &parsed.vat_lines {
             let line_id = crate::db::models::new_id();
             if let Err(e) = sqlx::query(
@@ -366,12 +370,30 @@ pub(crate) async fn do_sync_spv(
             .execute(pool)
             .await
             {
-                tracing::warn!(
+                tracing::error!(
                     error = ?e,
                     received_invoice_id = %recv_id,
-                    "Failed to insert VAT line (continuing)"
+                    "Failed to insert VAT line — rolling back the received invoice to avoid an \
+                     incomplete breakdown that under-reports D300"
                 );
+                vat_lines_ok = false;
+                break;
             }
+        }
+        if !vat_lines_ok {
+            let _ = sqlx::query(
+                "DELETE FROM received_invoice_vat_lines WHERE received_invoice_id = ?1",
+            )
+            .bind(&recv_id)
+            .execute(pool)
+            .await;
+            let _ = sqlx::query("DELETE FROM received_invoices WHERE id = ?1")
+                .bind(&recv_id)
+                .execute(pool)
+                .await;
+            let _ = tokio::fs::remove_file(&xml_path).await;
+            let _ = tokio::fs::remove_file(&zip_path).await;
+            continue;
         }
 
         // ── Upgrade the tentative notification with the final text ───
