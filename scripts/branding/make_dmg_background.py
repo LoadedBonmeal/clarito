@@ -1,4 +1,7 @@
-"""Generate the 660x400 RoFactura DMG window background PNG.
+"""Generate the 660x400 Clarito DMG window background PNG.
+
+Clarito branding: clean light background, the real app logo + "Clarito"
+wordmark, a neutral drag arrow and instruction. No RoFactura blue/amber.
 
 Usage: python3 scripts/branding/make_dmg_background.py [output_path]
 Default output: src-tauri/resources/dmg-background.png
@@ -11,54 +14,47 @@ from PIL import Image, ImageDraw  # noqa: E402
 import _brand  # noqa: E402
 
 W, H = 660, 400
+NEAR_WHITE = (245, 246, 248)
+RULE = (210, 210, 214)
 
 
 def make():
-    img = Image.new("RGB", (W, H), _brand.WHITE)
+    img = Image.new("RGB", (W, H), NEAR_WHITE)
     d = ImageDraw.Draw(img)
 
-    # Top brand band (0..150px) with blue gradient, fading to white by 220px.
-    band_h = 150
-    fade_to = 220
-    near_white = (244, 246, 251)
-    for y in range(H):
-        if y < band_h:
-            t = y / max(band_h - 1, 1)
-            color = _brand.lerp_color(_brand.BLUE, _brand.BLUE_DARK, t)
-        elif y < fade_to:
-            t = (y - band_h) / (fade_to - band_h)
-            color = _brand.lerp_color(_brand.BLUE_DARK, near_white, t)
-        else:
-            color = near_white
-        d.line([(0, y), (W, y)], fill=color)
-
-    # Wordmark "RoFactura" centered in the band.
-    title_font = _brand.load_font(46, bold=True)
-    title = "RoFactura"
-    tb = d.textbbox((0, 0), title, font=title_font)
-    tw = tb[2] - tb[0]
-    d.text(((W - tw) / 2 - tb[0], 38), title, font=title_font, fill=_brand.WHITE)
+    # Header: logo + wordmark, centred near the top.
+    ls = 56
+    logo = _brand.load_logo(ls)
+    title_font = _brand.load_font(40, bold=True)
+    tb = d.textbbox((0, 0), _brand.WORDMARK, font=title_font)
+    tw, th = tb[2] - tb[0], tb[3] - tb[1]
+    gap = 16
+    block_w = ls + gap + tw
+    x0 = (W - block_w) / 2
+    top = 40
+    if logo is not None:
+        img.paste(logo, (int(x0), int(top)), logo)
+    d.text((x0 + ls + gap - tb[0], top + (ls - th) / 2 - tb[1]),
+           _brand.WORDMARK, font=title_font, fill=_brand.INK)
 
     # Subtitle.
-    sub_font = _brand.load_font(18, bold=False)
-    sub = "Aplicatie e-Factura ANAF"  # ASCII-safe; avoids font glyph gaps
-    sb = d.textbbox((0, 0), sub, font=sub_font)
-    sw = sb[2] - sb[0]
-    d.text(((W - sw) / 2 - sb[0], 96), sub, font=sub_font, fill=(214, 222, 240))
+    sub_font = _brand.load_font(17, bold=False)
+    sub = "Aplicatie e-Factura ANAF"  # ASCII-safe
+    sbx = d.textbbox((0, 0), sub, font=sub_font)
+    sw = sbx[2] - sbx[0]
+    d.text(((W - sw) / 2 - sbx[0], top + ls + 14), sub, font=sub_font, fill=_brand.MUTED)
 
-    # Amber arrow from the app-icon zone toward the Applications zone.
-    # Icon drop zones are at x=180 and x=480 (centers), y~200.
-    arrow_y = 200
+    # Neutral drag arrow from the app-icon zone toward the Applications zone.
+    arrow_y = 210
     x_start, x_end = 250, 410
-    shaft_h = 8
+    shaft_h = 7
     d.rounded_rectangle(
         (x_start, arrow_y - shaft_h // 2, x_end - 18, arrow_y + shaft_h // 2),
-        radius=shaft_h // 2,
-        fill=_brand.AMBER,
+        radius=shaft_h // 2, fill=_brand.INK,
     )
     d.polygon(
-        [(x_end - 26, arrow_y - 18), (x_end, arrow_y), (x_end - 26, arrow_y + 18)],
-        fill=_brand.AMBER,
+        [(x_end - 26, arrow_y - 17), (x_end, arrow_y), (x_end - 26, arrow_y + 17)],
+        fill=_brand.INK,
     )
 
     # Instruction text under the arrow.
@@ -67,15 +63,13 @@ def make():
     ib = d.textbbox((0, 0), inst, font=inst_font)
     iw = ib[2] - ib[0]
     mid = (x_start + x_end) / 2
-    d.text((mid - iw / 2 - ib[0], arrow_y + 28), inst, font=inst_font, fill=_brand.BLUE)
-
+    d.text((mid - iw / 2 - ib[0], arrow_y + 26), inst, font=inst_font, fill=_brand.DIM)
     return img
 
 
 def main():
     out_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "..",
-        "src-tauri", "resources", "dmg-background.png",
+        _brand.REPO_ROOT, "src-tauri", "resources", "dmg-background.png",
     )
     out_path = os.path.abspath(out_path)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
