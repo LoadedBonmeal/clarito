@@ -191,6 +191,7 @@ pub async fn run_if_empty(pool: &SqlitePool) -> AppResult<()> {
     invoices::set_status(
         pool,
         &invoice_submitted.id,
+        &invoice_submitted.company_id,
         InvoiceStatus::Submitted,
         Some("Trimisă către ANAF".into()),
     )

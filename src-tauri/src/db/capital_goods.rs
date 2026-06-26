@@ -89,6 +89,7 @@ fn is_ym(s: &str) -> bool {
         && s.as_bytes()[4] == b'-'
         && s[..4].chars().all(|c| c.is_ascii_digit())
         && s[5..].chars().all(|c| c.is_ascii_digit())
+        && matches!(s[5..].parse::<u32>(), Ok(1..=12)) // month in range → period_end never malformed
 }
 
 fn period_end(ym: &str) -> String {
@@ -310,8 +311,9 @@ pub async fn record_adjustment(
             lines,
         )
         .await?;
-        sqlx::query("UPDATE capital_good_adjustments SET posted=1 WHERE id=?1")
+        sqlx::query("UPDATE capital_good_adjustments SET posted=1 WHERE id=?1 AND company_id=?2")
             .bind(&row.id)
+            .bind(&input.company_id)
             .execute(pool)
             .await?;
     }

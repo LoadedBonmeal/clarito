@@ -810,18 +810,27 @@ pub async fn create_imported(
 pub async fn set_status(
     pool: &SqlitePool,
     id: &str,
+    company_id: &str,
     status: InvoiceStatus,
     message: Option<String>,
 ) -> AppResult<()> {
     let now = now_unix();
     let mut tx = pool.begin().await?;
 
-    sqlx::query("UPDATE invoices SET status = ?2, updated_at = ?3 WHERE id = ?1")
-        .bind(id)
-        .bind(status.as_str())
-        .bind(now)
-        .execute(&mut *tx)
-        .await?;
+    // Scope by company_id (defense-in-depth multi-tenant guard): a status change must never reach
+    // an invoice belonging to another company even if an id leaks.
+    let res = sqlx::query(
+        "UPDATE invoices SET status = ?2, updated_at = ?3 WHERE id = ?1 AND company_id = ?4",
+    )
+    .bind(id)
+    .bind(status.as_str())
+    .bind(now)
+    .bind(company_id)
+    .execute(&mut *tx)
+    .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
 
     sqlx::query(
         "INSERT INTO invoice_events (id, invoice_id, event_type, message, created_at)

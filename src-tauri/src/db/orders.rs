@@ -123,7 +123,9 @@ fn to_invoice_line(o: &CreateOrderLineInput) -> CreateLineInput {
 
 // ─── Queries ───────────────────────────────────────────────────────────────
 
-pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Order> {
+// Internal-only (the public command layer uses the company-scoped `get_with_lines`). `pub(crate)`
+// prevents a future command from fetching an order by bare id without a company_id guard.
+pub(crate) async fn get(pool: &SqlitePool, id: &str) -> AppResult<Order> {
     sqlx::query_as::<_, Order>("SELECT * FROM orders WHERE id = ?1")
         .bind(id)
         .fetch_optional(pool)
