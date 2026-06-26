@@ -63,11 +63,27 @@ pub fn pretty_print(xml: &str) -> String {
     out
 }
 
-/// `<name>text</name>` (text is auto-escaped).
+/// Strip XML-1.0-forbidden control characters (C0 controls except tab/LF/CR, plus
+/// U+FFFE/U+FFFF). quick-xml escapes `&<>` but passes control bytes through, so a
+/// stray control char in user data (company/partner name, address...) would make
+/// a declaration that ANAF's validator rejects. Borrows untouched when clean.
+fn xml_text_sanitize(s: &str) -> std::borrow::Cow<'_, str> {
+    fn forbidden(c: char) -> bool {
+        matches!(c as u32, 0x00..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F | 0xFFFE | 0xFFFF)
+    }
+    if s.chars().any(forbidden) {
+        std::borrow::Cow::Owned(s.chars().filter(|c| !forbidden(*c)).collect())
+    } else {
+        std::borrow::Cow::Borrowed(s)
+    }
+}
+
+/// `<name>text</name>` (text is auto-escaped + control-char sanitized).
 pub fn write_text_elem(w: &mut XmlWriter, name: &str, text: &str) -> AppResult<()> {
     w.write_event(Event::Start(BytesStart::new(name)))
         .map_err(map_err)?;
-    w.write_event(Event::Text(BytesText::new(text)))
+    let text = xml_text_sanitize(text);
+    w.write_event(Event::Text(BytesText::new(&text)))
         .map_err(map_err)?;
     w.write_event(Event::End(BytesEnd::new(name)))
         .map_err(map_err)?;
@@ -198,6 +214,24 @@ mod tests {
         assert!(
             xml.contains("<b>12.34</b>"),
             "expected decimal 12.34 in <b>, got: {xml}"
+        );
+    }
+
+    #[test]
+    fn write_text_elem_strips_xml_forbidden_control_chars() {
+        let mut w = new_writer().expect("new_writer");
+        start_elem(&mut w, "root").expect("start root");
+        // U+000B (vertical tab) + U+0000 are forbidden in XML 1.0; a real tab must survive.
+        write_text_elem(&mut w, "n", "A\u{0B}B\u{0}C\tD").expect("write n");
+        end_elem(&mut w, "root").expect("end root");
+        let xml = finish(w).expect("finish");
+        assert!(
+            xml.contains("<n>ABC\tD</n>"),
+            "forbidden control chars stripped, tab kept, got: {xml:?}"
+        );
+        assert!(
+            !xml.contains('\u{0B}') && !xml.contains('\u{0}'),
+            "no forbidden control chars may remain, got: {xml:?}"
         );
     }
 

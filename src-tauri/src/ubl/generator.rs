@@ -590,12 +590,30 @@ fn write_invoice_line(
 
 // ─── Low-level helpers ────────────────────────────────────────────────────────
 
+/// Strip XML-1.0-forbidden control characters — the C0 controls except tab/LF/CR,
+/// plus the two non-characters U+FFFE/U+FFFF. quick-xml escapes `&<>` but passes
+/// control bytes through verbatim, so a stray control char in user-entered data
+/// (contact name, address, item description, notes — including pasted or imported
+/// text) would otherwise produce an invalid UBL document that ANAF/SPV rejects.
+/// Returns the input borrowed untouched when it is already clean.
+fn xml_text_sanitize(s: &str) -> std::borrow::Cow<'_, str> {
+    fn forbidden(c: char) -> bool {
+        matches!(c as u32, 0x00..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F | 0xFFFE | 0xFFFF)
+    }
+    if s.chars().any(forbidden) {
+        std::borrow::Cow::Owned(s.chars().filter(|c| !forbidden(*c)).collect())
+    } else {
+        std::borrow::Cow::Borrowed(s)
+    }
+}
+
 fn write_text(writer: &mut Writer<Cursor<Vec<u8>>>, tag: &str, value: &str) -> AppResult<()> {
     writer
         .write_event(Event::Start(BytesStart::new(tag)))
         .map_err(|e| AppError::Xml(e.to_string()))?;
+    let value = xml_text_sanitize(value);
     writer
-        .write_event(Event::Text(BytesText::new(value)))
+        .write_event(Event::Text(BytesText::new(&value)))
         .map_err(|e| AppError::Xml(e.to_string()))?;
     writer
         .write_event(Event::End(BytesEnd::new(tag)))
@@ -1232,5 +1250,13 @@ mod tests {
             "RON invoice must have exactly 1 TaxTotal, got {}: {}",
             tax_total_count, body
         );
+    }
+
+    #[test]
+    fn xml_text_sanitize_strips_forbidden_controls() {
+        // Forbidden C0 controls removed; tab/LF/CR preserved; clean text borrowed untouched.
+        assert_eq!(xml_text_sanitize("clean").as_ref(), "clean");
+        assert_eq!(xml_text_sanitize("A\u{0B}B\u{0}C\tD").as_ref(), "ABC\tD");
+        assert_eq!(xml_text_sanitize("a\tb\nc\rd").as_ref(), "a\tb\nc\rd");
     }
 }
