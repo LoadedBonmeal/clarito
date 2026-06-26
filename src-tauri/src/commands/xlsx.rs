@@ -559,14 +559,18 @@ pub async fn open_doc_in_browser(
     std::fs::write(&path, html.as_bytes())?;
 
     #[cfg(target_os = "macos")]
-    std::process::Command::new("open").arg(&path).spawn()?;
+    crate::process_util::hidden_command("open")
+        .arg(&path)
+        .spawn()?;
     #[cfg(target_os = "windows")]
-    std::process::Command::new("cmd")
+    crate::process_util::hidden_command("cmd")
         .args(["/C", "start", ""])
         .arg(&path)
         .spawn()?;
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    std::process::Command::new("xdg-open").arg(&path).spawn()?;
+    crate::process_util::hidden_command("xdg-open")
+        .arg(&path)
+        .spawn()?;
 
     Ok(())
 }

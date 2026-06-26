@@ -439,19 +439,19 @@ pub async fn refresh_token_bundle_with_client_id(
 
 fn open_browser(url: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    std::process::Command::new("open")
+    crate::process_util::hidden_command("open")
         .arg(url)
         .spawn()
         .map_err(|e| format!("Nu pot deschide browser-ul: {e}"))?;
 
     #[cfg(target_os = "windows")]
-    std::process::Command::new("cmd")
+    crate::process_util::hidden_command("cmd")
         .args(["/c", "start", "", url])
         .spawn()
         .map_err(|e| format!("Nu pot deschide browser-ul: {e}"))?;
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    std::process::Command::new("xdg-open")
+    crate::process_util::hidden_command("xdg-open")
         .arg(url)
         .spawn()
         .map_err(|e| format!("Nu pot deschide browser-ul: {e}"))?;

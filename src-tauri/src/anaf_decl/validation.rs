@@ -5,7 +5,8 @@
 //! false and callers skip, so the normal build stays green.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+use crate::process_util::hidden_command;
 
 use crate::anaf_decl::DeclKind;
 use crate::error::{AppError, AppResult};
@@ -29,7 +30,7 @@ pub fn duk_available() -> bool {
     if !Path::new(&jar).is_file() {
         return false;
     }
-    Command::new("java")
+    hidden_command("java")
         .arg("-version")
         .output()
         .map(|o| o.status.success())
@@ -50,7 +51,7 @@ pub fn run_java_validator(
         .unwrap_or("decl");
     let result_path =
         std::env::temp_dir().join(format!("duk_result_{}_{}.txt", stem, uuid::Uuid::now_v7()));
-    let output = std::process::Command::new(java)
+    let output = hidden_command(java)
         .arg("-jar")
         .arg(jar)
         .arg("-v")
@@ -70,7 +71,7 @@ pub fn run_java_validator(
 /// to STDOUT/STDERR. Returns the combined output (stdout + stderr) for parsing by
 /// `parse_duk_output`. Used by `run_duk` when `decl.is_standalone_validator()`.
 pub fn run_standalone_validator(java: &Path, jar: &Path, xml_path: &Path) -> AppResult<String> {
-    let output = std::process::Command::new(java)
+    let output = hidden_command(java)
         .arg("-jar")
         .arg(jar)
         .arg(xml_path)
@@ -140,7 +141,7 @@ pub fn validate_with_duk(decl: DeclKind, xml_path: &Path) -> AppResult<DukResult
 /// namespace, required attributes, enums, and type patterns. DUKIntegrator adds
 /// ANAF business rules on top but is harder to drive headlessly.
 pub fn xmllint_available() -> bool {
-    Command::new("xmllint")
+    hidden_command("xmllint")
         .arg("--version")
         .output()
         .map(|o| o.status.success())
@@ -151,7 +152,7 @@ pub fn xmllint_available() -> bool {
 /// `passed` is true iff xmllint exits 0 (schema-valid); libxml validity/parser
 /// error lines are collected into `errors`.
 pub fn validate_with_xsd(xsd_path: &Path, xml_path: &Path) -> AppResult<DukResult> {
-    let output = Command::new("xmllint")
+    let output = hidden_command("xmllint")
         .arg("--noout")
         .arg("--schema")
         .arg(xsd_path)

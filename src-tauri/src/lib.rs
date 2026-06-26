@@ -15,6 +15,7 @@ mod constraint_guard;
 pub mod db;
 mod error;
 pub mod notifications;
+pub mod process_util;
 mod state;
 mod ubl;
 

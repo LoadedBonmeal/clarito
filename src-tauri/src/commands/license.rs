@@ -173,17 +173,17 @@ fn machine_id() -> String {
 /// Reads the system hostname via OS-specific tooling, bypassing env vars.
 /// Returns `None` if the call fails — caller falls back to env vars.
 fn read_hostname_os() -> Option<String> {
-    use std::process::Command;
+    use crate::process_util::hidden_command;
 
     #[cfg(target_os = "macos")]
-    let out = Command::new("scutil")
+    let out = hidden_command("scutil")
         .arg("--get")
         .arg("LocalHostName")
         .output()
         .ok()?;
 
     #[cfg(target_os = "windows")]
-    let out = Command::new("hostname").output().ok()?;
+    let out = hidden_command("hostname").output().ok()?;
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
@@ -195,7 +195,7 @@ fn read_hostname_os() -> Option<String> {
             }
         }
         // Fall back to `hostname` binary.
-        let out = Command::new("hostname").output().ok()?;
+        let out = hidden_command("hostname").output().ok()?;
         let s = String::from_utf8(out.stdout).ok()?;
         let trimmed = s.trim();
         if trimmed.is_empty() {
@@ -219,12 +219,12 @@ fn read_hostname_os() -> Option<String> {
 /// Reads the current user's login name via OS tooling, bypassing env vars.
 /// Returns `None` if the call fails — caller falls back to env vars.
 fn read_username_os() -> Option<String> {
-    use std::process::Command;
+    use crate::process_util::hidden_command;
 
     #[cfg(unix)]
     {
         // `id -un` queries the password DB via the OS, not env vars.
-        let out = Command::new("id").arg("-un").output().ok()?;
+        let out = hidden_command("id").arg("-un").output().ok()?;
         let s = String::from_utf8(out.stdout).ok()?;
         let trimmed = s.trim();
         if trimmed.is_empty() {
@@ -236,7 +236,7 @@ fn read_username_os() -> Option<String> {
     #[cfg(windows)]
     {
         // `whoami` prints "DOMAIN\user"; strip the domain.
-        let out = Command::new("whoami").output().ok()?;
+        let out = hidden_command("whoami").output().ok()?;
         let s = String::from_utf8(out.stdout).ok()?;
         let trimmed = s.trim();
         if trimmed.is_empty() {
