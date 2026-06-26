@@ -12,11 +12,22 @@
 import type { Company, Contact, Invoice, License, Notification, Paginated, ReceivedInvoice } from "@/types";
 
 export function isDemoMode(): boolean {
-  return (
-    import.meta.env.DEV &&
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).has("demo")
-  );
+  if (!import.meta.env.DEV || typeof window === "undefined") return false;
+  // Latch the flag: the router strips unknown search params on navigation, so the
+  // first time ?demo=1 is seen we persist it and honor it for the rest of the session.
+  if (new URLSearchParams(window.location.search).has("demo")) {
+    try {
+      window.sessionStorage.setItem("clarito-demo", "1");
+    } catch {
+      /* sessionStorage unavailable — fall back to URL-only detection */
+    }
+    return true;
+  }
+  try {
+    return window.sessionStorage.getItem("clarito-demo") === "1";
+  } catch {
+    return false;
+  }
 }
 
 // ── Fixture data (mirrors the design prototype) ───────────────────────────────
@@ -214,6 +225,13 @@ const HANDLERS: Record<string, (args?: Record<string, unknown>) => unknown> = {
   mark_all_notifications_read: () => null,
   get_license: () => (isFresh() ? null : license),
   check_license_validity: () => true,
+  // Auth gate: render straight into the app (already-authenticated admin) unless
+  // ?demo=1&fresh=1, which simulates a first run that still needs admin setup.
+  auth_status: () => ({
+    needsSetup: isFresh(),
+    authenticated: !isFresh(),
+    currentUser: isFresh() ? null : { id: "demo-user", username: "Demo", role: "ADMIN" },
+  }),
   anaf_is_authenticated: () => true,
   get_setting: () => null,
   set_setting: () => null,

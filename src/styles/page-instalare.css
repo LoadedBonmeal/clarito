@@ -8,8 +8,8 @@
 /* prototype <body> → fullscreen overlay */
 .wiz-wrap{position:fixed;inset:0;z-index:9999;overflow:auto;display:flex;align-items:center;justify-content:center;padding:32px 20px;background:#E9E9EB;background-image:radial-gradient(circle at 50% 0,#F0F0F2,#E9E9EB 60%);--ink:var(--text);--ease:cubic-bezier(.2,.8,.2,1)}
 
-.wiz{width:520px;max-width:100%;margin:auto;background:var(--bg-content);border:1px solid var(--line);border-radius:20px;box-shadow:0 30px 80px -36px rgba(0,0,0,.4);overflow:hidden}
-.wiz-top{padding:24px 30px 0}
+.wiz{width:520px;max-width:100%;margin:auto;background:var(--bg-content);border:1px solid var(--line);border-radius:20px;box-shadow:0 30px 80px -36px rgba(0,0,0,.4);overflow:hidden;display:flex;flex-direction:column;max-height:calc(100vh - 64px)}
+.wiz-top{padding:24px 30px 0;flex:none}
 .wiz .brand{display:flex;align-items:center;gap:11px;justify-content:center;width:auto;flex:none;padding:0}
 .wiz .brand .word{font-size:21px;font-weight:600;letter-spacing:-.025em}
 
@@ -23,7 +23,9 @@
 .wiz .step-meta .k{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);font-weight:600}
 .wiz .step-meta .c{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
 
-.wiz-body{padding:18px 30px 4px;min-height:330px;position:relative}
+.wiz-body{padding:18px 30px 4px;min-height:0;flex:1 1 auto;overflow-y:auto;position:relative}
+.wiz-body::-webkit-scrollbar{width:8px}
+.wiz-body::-webkit-scrollbar-thumb{background:#D8D8DC;border-radius:8px;border:2px solid var(--bg-content)}
 .wiz .step{display:none}
 .wiz .step::before{display:none}
 .wiz .step.active{display:block;min-height:300px;text-align:left}
@@ -57,7 +59,7 @@
 .wiz .btn-dark:hover .ic.arrow{transform:translateX(2px)}
 .wiz .ic-flip{display:inline-flex;transform:scaleX(-1)}
 
-.wiz-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:18px 30px 24px;border-top:1px solid var(--line);margin-top:14px}
+.wiz-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:18px 30px 24px;border-top:1px solid var(--line);margin-top:14px;flex:none}
 
 /* plan / regime selectable cards */
 .wiz .opts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}

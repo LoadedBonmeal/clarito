@@ -40,6 +40,9 @@
 @import "./page-pdf-viewer.css";
 @import "./page-xml-viewer.css";
 
+/* Responsive layer — loaded last so its width-based rules win on equal specificity. */
+@import "./responsive.css";
+
 @custom-variant dark (&:is(.dark *));
 
 /* Bridge shadcn → design.css.

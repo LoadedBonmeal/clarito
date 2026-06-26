@@ -1,0 +1,100 @@
+/* ============================================================================
+   responsive.css — fluid layout across every window size, ratio & resolution.
+
+   Loaded LAST (see globals.css) so its width-based rules win on equal
+   specificity. This is a desktop app whose window cannot go below the Tauri
+   minimum of 1024×600 (src-tauri/tauri.conf.json), so the target range is
+   1024 px → FHD (1920) → QHD/4K (2560/3840) → ultrawide (3440, 21:9). CSS
+   pixels are resolution-independent, so the same rules cover macOS Retina and
+   Windows display scaling (125/150/175/200 %): at 150 % a 1920-px panel reports
+   a 1280-px CSS viewport, which everything here handles.
+
+   Two failure modes are fixed: (a) horizontal flex bars (toolbars, tab strips,
+   page headers) that ran off the edge and were clipped, and (b) wide data
+   tables that were cut off inside overflow:hidden cards. Bars now wrap; tables
+   now scroll.
+   ========================================================================== */
+
+/* ── 1. Dense data tables scroll horizontally instead of clipping columns ──
+   `.scr-card` / `.table-wrap` clip to their rounded corners (overflow:hidden),
+   so on a narrow card a wide table's right-hand columns were cut off and
+   unreachable. Let the card scroll on the X axis (Y stays clipped for the
+   radius) and let the table keep its natural column widths so it overflows and
+   scrolls rather than squashing cells. */
+.scr-card { overflow-x: auto; overflow-y: hidden; }
+.table-wrap { overflow-x: auto; }
+.scr-table { min-width: max-content; }
+/* min-width:0 lets a card shrink to its flex/grid track and scroll *inside*,
+   instead of growing to the table's content width and blowing the parent out. */
+.scr-card,
+.table-wrap { min-width: 0; }
+/* the line-items editor is an INPUT grid, not a data list — its inputs should
+   flex to the column, never force the column to its natural (fixed-th) width. */
+.scr-table.li-table { min-width: 0; }
+/* cards that explicitly opt into visible overflow (row menus / popovers) keep it */
+.scr-card.overflow { overflow: visible; }
+/* slim, unobtrusive horizontal scrollbar on the scrolling cards */
+.scr-card::-webkit-scrollbar,
+.table-wrap::-webkit-scrollbar { height: 10px; }
+
+/* ── 2. Horizontal flex bars wrap instead of overflowing / being clipped ──
+   Toolbars, bulk-action bars, totals footers, page headers and segmented tab
+   strips are flex rows with no wrap, so their controls ran past the edge (and
+   were clipped) once the content area got tight — on table pages this happened
+   even at 1440 px. Wrapping onto extra rows keeps every control reachable.
+   row-gap only takes effect once a bar actually wraps, so wide layouts are
+   unchanged. */
+.scr-toolbar,
+.bulkbar,
+.tot-foot,
+.page-head,
+.head-actions { flex-wrap: wrap; row-gap: 8px; }
+.tabs { flex-wrap: wrap; row-gap: 3px; }
+/* keep the toolbar search usable but let it shrink / grow within its row */
+.scr-toolbar .scr-search { width: auto; flex: 1 1 200px; min-width: 150px; max-width: 280px; }
+
+/* ── 3. KPI tiles reflow to fit any width (ratio-agnostic, no breakpoints) ──
+   repeat(4,1fr) crammed tiles to ~120 px on small laptops; auto-fit keeps each
+   tile ≥196 px and drops to 3 / 2 columns as the content area shrinks, and back
+   up on wide monitors. (The dashboard pins its own column count inline, so this
+   only governs the list-page KPI rows.) */
+.kpis { grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); }
+
+/* ── 4. The 1.7 : 1 split sections can't force the page wider than the
+   viewport — minmax(0,…) lets a wide chart or table inside a column shrink
+   instead of blowing the grid out horizontally. */
+.mid { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
+
+/* ── 4b. Invoice editor (form + 320 px totals sidebar): keep the totals panel
+   on-screen. minmax(0,…) stops the form column being forced wide by its
+   contents, and below ~1200 px the sidebar drops under the form so the line
+   items get the full width instead of a cramped, scrolling column. */
+.inv-grid { grid-template-columns: minmax(0, 1fr) 320px; }
+@media (max-width: 1200px) {
+  .inv-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── 5. Use the space on large & ultrawide monitors for data-heavy pages ──
+   Reading / form pages stay centred at their base width for line length; the
+   `.wide` data pages (lists, ledgers, reports) grow so big screens show more
+   columns without scrolling and waste less margin. */
+@media (min-width: 1600px) {
+  .main-inner.wide { max-width: 1320px; }
+}
+@media (min-width: 2040px) {
+  .main-inner.wide { max-width: 1520px; }
+}
+
+/* ── 6. Windows persistent-scrollbar fix ────────────────────────────────────
+   Windows/WebView2 can draw classic scrollbars that consume ~17 px of layout
+   width (macOS WKWebView uses 0-px overlay bars), so a two-column layout that
+   "just fits" on macOS grows a spurious HORIZONTAL page scrollbar on Windows.
+   The page must never scroll horizontally — wide tables already scroll inside
+   their own card (section 1). So: clip the page's X axis, and let grid children
+   shrink below their content (default min-width:auto refuses to, which is what
+   lets a wide table card push the page wider than the viewport). Harmless on
+   macOS. (The table-card scroll rule from the Windows doc is already covered by
+   section 1's `.scr-card{overflow-x:auto}` + `min-width:0`.) */
+.main { overflow-x: hidden; }
+.cols-2 > *, .cols-2-even > *, .rep-grid > *,
+.sum-row > *, .fgrid > *, .fgrid-form > * { min-width: 0; }

@@ -289,7 +289,7 @@ export function LineItemsEditor({
           <span>{t("shared.lineItems.housing9Warn")}</span>
         </div>
       )}
-      <table className="scr-table">
+      <table className="scr-table li-table">
         <thead>
           <tr>
             <th style={{ width: 32, padding: "9px 8px", textAlign: "center" }}>#</th>
