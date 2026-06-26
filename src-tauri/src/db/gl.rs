@@ -4565,6 +4565,18 @@ pub async fn post_payroll(
     period_to: &str,
     totals: PayrollTotals,
 ) -> AppResult<PayrollPostResult> {
+    // Period-lock guard (OMFP 2634/2015 immutability): never re-post payroll GL into a FILED (locked)
+    // period — that would overwrite declared figures. Mirrors generate_gl_entries / post_manual_journal.
+    let locked =
+        crate::db::period_locks::locked_months_in_range(pool, company_id, period_from, period_to)
+            .await?;
+    if let Some(first) = locked.first() {
+        return Err(crate::error::AppError::Validation(format!(
+            "Perioada {first} este blocată (declarație depusă) — salariile nu pot fi repostate. \
+             Deblocați perioada pentru a înregistra o corecție."
+        )));
+    }
+
     let PayrollTotals {
         gross,
         cas,
@@ -4827,6 +4839,17 @@ pub async fn post_depreciation(
     period_to: &str,
     lines: Vec<(String, String, Decimal)>,
 ) -> AppResult<DepreciationPostResult> {
+    // Period-lock guard (OMFP 2634/2015 immutability): never re-post depreciation GL into a FILED period.
+    let locked =
+        crate::db::period_locks::locked_months_in_range(pool, company_id, period_from, period_to)
+            .await?;
+    if let Some(first) = locked.first() {
+        return Err(crate::error::AppError::Validation(format!(
+            "Perioada {first} este blocată (declarație depusă) — amortizarea nu poate fi repostată. \
+             Deblocați perioada pentru a înregistra o corecție."
+        )));
+    }
+
     let source_id = format!("{period_from}_{period_to}");
     let total: Decimal = lines.iter().map(|(_, _, a)| *a).sum();
 
@@ -4930,6 +4953,17 @@ pub async fn post_register_lines(
     description: &str,
     lines: Vec<(String, String, Decimal)>,
 ) -> AppResult<RegisterPostResult> {
+    // Period-lock guard (OMFP 2634/2015 immutability): accruals / provisions / capital-goods registers
+    // must not post into a FILED period. Mirrors post_manual_journal (gl.rs:1884).
+    if let Some(ym) = transaction_date.get(..7) {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await {
+            return Err(crate::error::AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — nota contabilă nu poate fi postată. \
+                 Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
+
     let total: Decimal = lines.iter().map(|(_, _, a)| *a).sum();
 
     let mut tx = pool.begin().await?;
@@ -9564,6 +9598,83 @@ mod tests {
         assert!(!is_partner_account("4427"), "4427 = TVA colectat");
         assert!(!is_partner_account("117"), "117 = rezultat reportat");
         assert!(!is_partner_account("457"), "457 = dividende de plată");
+    }
+
+    async fn locked_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id,cui,legal_name,address,city,county,country) \
+             VALUES ('co_l','11111111','Test SRL','S','B','B','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        crate::db::period_locks::lock_period(
+            &pool,
+            "co_l",
+            "2026-03",
+            "declaration:D300",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn payroll_refused_on_locked_period() {
+        let pool = locked_pool().await;
+        let totals = PayrollTotals {
+            gross: Decimal::ZERO,
+            cas: Decimal::ZERO,
+            cass: Decimal::ZERO,
+            impozit: Decimal::ZERO,
+            cam: Decimal::ZERO,
+            cas_diff: Decimal::ZERO,
+            cass_diff: Decimal::ZERO,
+            indemn: IndemnityTotals::default(),
+            excess_reclass: Decimal::ZERO,
+            excess_receivable: Decimal::ZERO,
+            retineri: vec![],
+        };
+        let r = post_payroll(&pool, "co_l", "2026-03-01", "2026-03-31", totals).await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "got {r:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn depreciation_refused_on_locked_period() {
+        let pool = locked_pool().await;
+        let r = post_depreciation(&pool, "co_l", "2026-03-01", "2026-03-31", vec![]).await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "got {r:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn register_lines_refused_on_locked_period() {
+        // backs accruals / provisions / capital-goods
+        let pool = locked_pool().await;
+        let r = post_register_lines(
+            &pool,
+            "co_l",
+            "DIVERSE",
+            "ACCRUAL",
+            "src1",
+            "2026-03-15",
+            "test",
+            vec![],
+        )
+        .await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "got {r:?}"
+        );
     }
 
     #[tokio::test]
