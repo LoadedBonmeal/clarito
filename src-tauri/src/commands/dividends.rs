@@ -173,7 +173,7 @@ pub async fn export_d205_official(
 
     std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
     // Înregistrează depunerea în istoric (best-effort — erorile sunt înghițite).
-    let _ = crate::db::declaration_filings::record(
+    crate::db::declaration_filings::record_or_warn(
         &state.db,
         crate::db::declaration_filings::FilingInput {
             company_id: company_id.clone(),
@@ -266,7 +266,7 @@ pub async fn export_d207_official(
     let xml = build_d207_xml_for(&state.db, &company_id, year, is_rectificative).await?;
     std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
     // Înregistrează depunerea în istoric (best-effort — erorile sunt înghițite).
-    let _ = crate::db::declaration_filings::record(
+    crate::db::declaration_filings::record_or_warn(
         &state.db,
         crate::db::declaration_filings::FilingInput {
             company_id: company_id.clone(),

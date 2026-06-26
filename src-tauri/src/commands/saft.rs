@@ -181,7 +181,7 @@ pub async fn export_saft_official(
     } else {
         date_from.get(0..7).unwrap_or(&date_from).to_string()
     };
-    let _ = crate::db::declaration_filings::record(
+    crate::db::declaration_filings::record_or_warn(
         &state.db,
         crate::db::declaration_filings::FilingInput {
             company_id: params.company_id.clone(),

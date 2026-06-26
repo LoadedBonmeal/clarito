@@ -2097,7 +2097,7 @@ pub async fn export_d300_official(
     // `period` (NaiveDate) derivat din period_from înainte de a fi mutat în compute_d300.
     use chrono::Datelike as _;
     let filing_period = format!("{}-{:02}", period.year(), period.month());
-    let _ = crate::db::declaration_filings::record(
+    crate::db::declaration_filings::record_or_warn(
         &pool,
         crate::db::declaration_filings::FilingInput {
             company_id: company.id.clone(),

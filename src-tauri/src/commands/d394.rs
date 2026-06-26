@@ -634,7 +634,7 @@ pub async fn export_d394_official(
     {
         use chrono::Datelike as _;
         let filing_period = format!("{}-{:02}", period.year(), period.month());
-        let _ = crate::db::declaration_filings::record(
+        crate::db::declaration_filings::record_or_warn(
             &pool,
             crate::db::declaration_filings::FilingInput {
                 company_id: company.id.clone(),

@@ -247,7 +247,7 @@ pub async fn export_d390(
     // period_from are forma YYYY-MM-DD; primele 7 caractere = YYYY-MM.
     let d390_period = period_from.get(0..7).unwrap_or(&period_from).to_string();
     let d_rec = submission.d_rec;
-    let _ = crate::db::declaration_filings::record(
+    crate::db::declaration_filings::record_or_warn(
         &state.db,
         crate::db::declaration_filings::FilingInput {
             company_id: company_id.clone(),

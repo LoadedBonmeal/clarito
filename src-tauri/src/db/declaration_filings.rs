@@ -83,6 +83,21 @@ pub async fn record(pool: &SqlitePool, input: FilingInput) -> AppResult<()> {
     Ok(())
 }
 
+/// Like [`record`] but never propagates — it logs a `warn` on failure instead of silently
+/// swallowing it. The exporters must not abort an otherwise-successful export because of this
+/// secondary bookkeeping record, but a failed auto-lock (period left UNLOCKED after a filing)
+/// must be VISIBLE in the logs rather than vanish.
+pub async fn record_or_warn(pool: &SqlitePool, input: FilingInput) {
+    let kind = input.kind.clone();
+    let period = input.period.clone();
+    if let Err(e) = record(pool, input).await {
+        tracing::warn!(
+            error = ?e, %kind, %period,
+            "auto-lock: declaration filing record failed — period may NOT be locked"
+        );
+    }
+}
+
 /// Listează depunerile pentru o firmă, cele mai recente primele.
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Filing>> {
     let rows = sqlx::query_as::<_, FilingRow>(

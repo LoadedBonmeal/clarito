@@ -260,7 +260,7 @@ pub async fn export_bilant_xml(
     let dest = crate::commands::integrations::validate_export_path(&dest_path)?;
     std::fs::write(&dest, xml).map_err(|e| AppError::Other(e.to_string()))?;
     // Înregistrează depunerea în istoric (best-effort — erorile sunt înghițite).
-    let _ = crate::db::declaration_filings::record(
+    crate::db::declaration_filings::record_or_warn(
         &state.db,
         crate::db::declaration_filings::FilingInput {
             company_id: company_id.clone(),

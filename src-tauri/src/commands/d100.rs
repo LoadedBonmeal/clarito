@@ -89,7 +89,7 @@ pub async fn export_d100_xml(
     }
 
     std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
-    let _ = crate::db::declaration_filings::record(
+    crate::db::declaration_filings::record_or_warn(
         &state.db,
         crate::db::declaration_filings::FilingInput {
             company_id: params.company_id.clone(),

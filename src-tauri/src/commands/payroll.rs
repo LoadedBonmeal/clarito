@@ -210,7 +210,7 @@ pub async fn export_d112_xml(
 
     std::fs::write(&dest, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
     // Înregistrează depunerea în istoric (best-effort — erorile sunt înghițite).
-    let _ = crate::db::declaration_filings::record(
+    crate::db::declaration_filings::record_or_warn(
         &state.db,
         crate::db::declaration_filings::FilingInput {
             company_id: company_id.clone(),
