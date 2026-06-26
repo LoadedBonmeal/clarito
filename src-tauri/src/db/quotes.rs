@@ -128,7 +128,9 @@ fn to_invoice_line(q: &CreateQuoteLineInput) -> CreateLineInput {
 
 // ─── Queries ───────────────────────────────────────────────────────────────
 
-pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Quote> {
+// Internal-only (the command layer uses the company-scoped `get_with_lines`). `pub(crate)` prevents a
+// future command from fetching a quote by bare id without a company_id guard.
+pub(crate) async fn get(pool: &SqlitePool, id: &str) -> AppResult<Quote> {
     sqlx::query_as::<_, Quote>("SELECT * FROM quotes WHERE id = ?1")
         .bind(id)
         .fetch_optional(pool)

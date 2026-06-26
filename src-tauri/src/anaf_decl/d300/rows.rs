@@ -60,7 +60,7 @@
 //!   (R6/R8/R64/R65 absent; R7 added Wave 7; R16 added Wave 8)
 //! R27_2 = R18_2 + R20_2 + R22_2 + R23_2 + R25_2 + R43_2 + R44_2
 //!   (R19/R21/R43/R44 absent; R20 added Wave 7; R30 does NOT feed R27)
-//! R28_2 = R27_2 (no pro-rata)
+//! R28_2 = R27_2 × pro_rata/100  (= R27_2 when pro_rata = 100, the default; pro-rata art. 300 is applied)
 //! R32_2 = R28_2 + R30_2   (regularizări dedusă feeds R32 directly — DUK R108)
 //!
 //! ## REGULARIZĂRI (Wave 8 — OPANAF 174/2026)

@@ -62,7 +62,7 @@ export function Sidebar() {
     queryFn: () => api.notifications.unreadCount(),
   });
   const { data: license } = useQuery({
-    queryKey: ["license", "current"],
+    queryKey: queryKeys.license,
     queryFn: () => api.license.get(),
   });
 
@@ -165,7 +165,7 @@ export function Sidebar() {
     mutationFn: () => api.auth.logout(),
     onSuccess: () => {
       clearCurrentUser();
-      void queryClient.invalidateQueries({ queryKey: ["auth", "status"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.auth.status });
     },
   });
 
