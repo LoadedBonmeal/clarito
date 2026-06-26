@@ -72,6 +72,19 @@ pub async fn unlock_period(pool: &SqlitePool, company_id: &str, period: &str) ->
         .execute(pool)
         .await?;
 
+    // Audit trail: unlocking a filed period is the ONE operation that re-permits re-posting (and thus
+    // overwriting) a previously-declared period. OMFP 2634/2015 requires a trace of such modifications
+    // to accounting records, so we record who/when even though the lock row itself is removed.
+    let _ = crate::db::audit::log_user_action(
+        pool,
+        "PERIOD_UNLOCK",
+        "period_lock",
+        period,
+        Some(company_id),
+        None,
+    )
+    .await;
+
     Ok(())
 }
 
@@ -196,6 +209,24 @@ mod tests {
             !is_period_locked(&pool, "co-A", "2026-05").await,
             "trebuie să fie deblocat după unlock"
         );
+    }
+
+    #[tokio::test]
+    async fn unlock_writes_audit_trail() {
+        // OMFP 2634/2015: unlocking a filed period (the immutability override) must leave a trace.
+        let pool = setup().await;
+        lock_period(&pool, "co-A", "2026-05", "declaration:D300", None, None)
+            .await
+            .unwrap();
+        unlock_period(&pool, "co-A", "2026-05").await.unwrap();
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM audit_log \
+             WHERE action='PERIOD_UNLOCK' AND entity_id='2026-05' AND company_id='co-A'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(n, 1, "unlock must record a PERIOD_UNLOCK audit entry");
     }
 
     #[tokio::test]
