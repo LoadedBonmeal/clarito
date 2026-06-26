@@ -39,6 +39,20 @@ pub fn get_contacts_csv_template() -> &'static str {
 /// Format așteptat (header obligatoriu):
 /// company_cui;customer_cui;customer_name;series;number;issue_date;due_date;item_name;qty;unit;unit_price;vat_rate
 ///
+/// True when an imported customer CUI should be REJECTED: a Romanian-format CUI (i.e. NOT a foreign
+/// VAT number, which carries a non-"RO" two-letter country prefix) whose check digit is invalid.
+/// Empty + foreign CUIs pass through; only a malformed Romanian CUI is a hard error.
+fn customer_cui_invalid(cui: &str) -> bool {
+    if cui.is_empty() {
+        return false;
+    }
+    let foreign = cui.len() >= 2
+        && cui.as_bytes()[0].is_ascii_alphabetic()
+        && cui.as_bytes()[1].is_ascii_alphabetic()
+        && !cui[..2].eq_ignore_ascii_case("ro");
+    !foreign && !crate::anaf_decl::valid_cui(cui)
+}
+
 /// Dacă `dry_run` = true, validează liniile fără a insera în DB (preview).
 #[tauri::command]
 pub async fn import_invoices_csv(
@@ -176,6 +190,13 @@ pub async fn import_invoices_csv(
             .unwrap_or("")
             .trim()
             .to_string();
+        // Validate the Romanian customer CUI check digit; foreign VAT numbers pass through.
+        if customer_cui_invalid(&customer_cui) {
+            errors.push(format!(
+                "Linia {row_num}: CUI client '{customer_cui}' are cifra de control invalidă."
+            ));
+            continue;
+        }
         let customer_name = record
             .get(idx_customer_name)
             .unwrap_or("")
@@ -1042,6 +1063,18 @@ async fn import_invoice_xml_inner(
 #[cfg(test)]
 mod tests {
     use rust_decimal::Decimal;
+
+    #[test]
+    fn customer_cui_invalid_rejects_bad_ro_passes_foreign() {
+        use super::customer_cui_invalid;
+        assert!(!customer_cui_invalid("")); // empty → ok (absent CUI)
+        assert!(!customer_cui_invalid("12345674")); // valid RO check digit
+        assert!(!customer_cui_invalid("RO12345674")); // valid, RO-prefixed
+        assert!(customer_cui_invalid("12345670")); // bad check digit → reject
+        assert!(customer_cui_invalid("RO12345670")); // bad check digit → reject
+        assert!(!customer_cui_invalid("DE123456789")); // foreign (DE) → pass through
+        assert!(!customer_cui_invalid("HU12345678")); // foreign (HU) → pass through
+    }
 
     /// Mirrors the production header lookup logic so we can unit-test header
     /// parsing without spinning up a Tauri AppState + SQLite pool.

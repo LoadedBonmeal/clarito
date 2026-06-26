@@ -3816,6 +3816,18 @@ pub async fn post_vat_settlement(
     period_from: &str,
     period_to: &str,
 ) -> AppResult<VatSettlementResult> {
+    // OMFP 1802/2014 (pct. 65-68): don't overwrite a filed period. Refuse the VAT settlement close if
+    // any month in the range is locked (the user unlocks explicitly to book a correction).
+    let locked =
+        crate::db::period_locks::locked_months_in_range(pool, company_id, period_from, period_to)
+            .await?;
+    if let Some(first) = locked.first() {
+        return Err(crate::error::AppError::Validation(format!(
+            "Perioada {first} este blocată (declarație depusă) — închiderea TVA ar modifica cifrele \
+             declarate. Deblocați perioada."
+        )));
+    }
+
     // Net exigible balances straight from the GL, excluding 4428 and any prior close.
     let row = sqlx::query(
         "SELECT \
@@ -8410,6 +8422,28 @@ mod tests {
         assert_eq!(c4427 - d4427, Decimal::ZERO, "4427 closed to zero");
         assert_eq!(d4426 - c4426, Decimal::ZERO, "4426 closed to zero");
         assert_eq!(c4423, dec("95"), "TVA de plată on 4423");
+    }
+
+    #[tokio::test]
+    async fn vat_settlement_refused_on_locked_period() {
+        // OMFP 1802/2014: a filed (locked) period must not be overwritten by the VAT close.
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        crate::db::period_locks::lock_period(
+            &pool,
+            "co",
+            "2025-01",
+            "declaration:D300",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let r = post_vat_settlement(&pool, "co", "2025-01-01", "2025-01-31").await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "locked period must be refused, got {r:?}"
+        );
     }
 
     #[tokio::test]

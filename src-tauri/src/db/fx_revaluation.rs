@@ -299,6 +299,16 @@ pub async fn compute_fx_revaluation(
     // BNR XML-uri injectate în teste (None = fetch real din rețea — nu testat)
     bnr_xml_override: Option<&str>,
 ) -> AppResult<FxRevaluationResult> {
+    // OMFP 1802/2014 (pct. 65-68): a filed period is corrected forward, never silently overwritten.
+    // Refuse to re-post the month-end FX revaluation into a locked period; the user unlocks
+    // explicitly to book a correction.
+    if crate::db::period_locks::is_period_locked(pool, company_id, period).await {
+        return Err(crate::error::AppError::Validation(format!(
+            "Perioada {period} este blocată (declarație depusă) — reevaluarea valutară ar modifica \
+             cifrele declarate. Deblocați perioada pentru a o reposta."
+        )));
+    }
+
     // ── 1. Ultima zi bancară + cursuri BNR ────────────────────────────────────
     let month_end_date = last_banking_day(period)?;
 
@@ -1502,6 +1512,28 @@ mod tests {
     // diff_2 = 1000×(4.95-5.00) = -50 → D 665 / C 4111 (baza = 5.00, nu 4.97!)
     //
     // Testul direct verifică prior_rate chain.
+
+    #[tokio::test]
+    async fn fx_revaluation_refused_on_locked_period() {
+        // OMFP 1802/2014: month-end FX revaluation must not overwrite a filed (locked) period.
+        let pool = make_pool().await;
+        insert_company(&pool, "co").await;
+        crate::db::period_locks::lock_period(
+            &pool,
+            "co",
+            "2026-01",
+            "declaration:D300",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let r = compute_fx_revaluation(&pool, "co", "2026-01", Some("")).await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "locked period must be refused, got {r:?}"
+        );
+    }
 
     #[tokio::test]
     async fn multi_month_chain_art322_base() {
