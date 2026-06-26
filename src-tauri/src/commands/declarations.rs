@@ -2013,6 +2013,53 @@ fn build_and_write_xml(report: D300Report, dest_path: String) -> AppResult<Strin
 /// - Toate datele sunt atribute, sumele sunt rotunjite la lei întregi
 /// - Maparea rândurilor respectă structura_D300_v12 oficială
 ///
+/// Per-invoice D300 deductible-VAT reconciliation. A received invoice's header `vat_amount` must equal
+/// the sum of its per-rate `received_invoice_vat_lines` (same currency → no FX/rounding noise); a
+/// divergence > 1 leu means the breakdown is incomplete/orphaned, and since `compute_d300` sums the
+/// LINES, that invoice's VAT is silently dropped from the D300 deductible total. Research (OPANAF
+/// 174/2026): D300 is whole-lei, so > 1 leu is the band that catches a genuine gap (missing lines)
+/// without false-flagging normal rounding. Returns a `warning` issue, never an error (advisory only).
+async fn received_vat_breakdown_warning(
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    period_from: &str,
+    period_to: &str,
+) -> AppResult<Option<crate::anaf_decl::preflight::PreflightIssue>> {
+    let (n, total_diff): (i64, f64) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(d), 0.0) FROM ( \
+           SELECT ABS(CAST(ri.vat_amount AS REAL) - COALESCE(( \
+             SELECT SUM(CAST(vl.vat_amount AS REAL)) FROM received_invoice_vat_lines vl \
+             WHERE vl.received_invoice_id = ri.id), 0.0)) AS d \
+           FROM received_invoices ri \
+           WHERE ri.company_id = ?1 AND ri.issue_date >= ?2 AND ri.issue_date <= ?3 \
+             AND ri.status != 'REJECTED' \
+             AND ri.vat_amount IS NOT NULL AND TRIM(ri.vat_amount) != '' \
+         ) WHERE d > 1.0",
+    )
+    .bind(company_id)
+    .bind(period_from)
+    .bind(period_to)
+    .fetch_one(pool)
+    .await?;
+
+    if n > 0 {
+        Ok(Some(crate::anaf_decl::preflight::PreflightIssue {
+            severity: "warning".to_string(),
+            code: "D300_RECV_VAT_BREAKDOWN".to_string(),
+            message: format!(
+                "{n} factură(i) primită(e) au defalcarea TVA incompletă (diferență ~{total_diff:.0} \
+                 lei față de totalul facturii). TVA deductibilă din D300 poate fi sub-raportată."
+            ),
+            hint:
+                "Verificați facturile primite din perioadă — re-descărcați-le din SPV sau completați \
+                 liniile de TVA lipsă."
+                    .to_string(),
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Parametrul `submission` conține câmpurile completate de utilizator (declarant, CAEN, bancă etc.)
 /// care nu sunt derivabile din datele fiscale.
 #[tauri::command]
@@ -2061,6 +2108,12 @@ pub async fn export_d300_official(
         crate::db::capital_goods::period_adjustment_lei_range(&pool, &company_id, &cg_from, &cg_to)
             .await?;
 
+    // Pre-submission reconciliation: flag received invoices whose header VAT diverges from the sum of
+    // their per-rate breakdown lines (compute_d300 sums the LINES, so an incomplete breakdown
+    // under-reports deductible VAT). Computed before the ids move into compute_d300.
+    let recv_warning =
+        received_vat_breakdown_warning(&pool, &company_id, &period_from, &period_to).await?;
+
     // Compute the fiscal aggregates.
     let report = compute_d300(state, company_id, period_from, period_to).await?;
 
@@ -2077,10 +2130,13 @@ pub async fn export_d300_official(
     let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
     let duk = crate::anaf_decl::duk::run_duk(&provider, DeclKind::D300, &tmp)?;
     let _ = std::fs::remove_file(&tmp);
-    let (duk_available, duk_passed, issues) = match &duk {
+    let (duk_available, duk_passed, mut issues) = match &duk {
         Some(o) => (true, o.passed, o.errors.clone()),
         None => (false, false, Vec::new()),
     };
+    if let Some(w) = recv_warning {
+        issues.push(w);
+    }
     if !duk_gate_allows_write(duk_available, duk_passed, skip_duk_override) {
         return Ok(OfficialExportResult {
             path: String::new(),
@@ -3300,6 +3356,46 @@ mod cash_vat_routing_tests {
         .execute(pool)
         .await
         .expect("insert vat line");
+    }
+
+    #[tokio::test]
+    async fn recv_vat_breakdown_warning_flags_incomplete() {
+        let pool = pool().await;
+        seed_company(&pool, "co", false, None).await;
+        let parent = |rid: &str, dl: &str, vat: &str| {
+            sqlx::query(
+                "INSERT INTO received_invoices (id, company_id, anaf_download_id, issuer_cui, \
+                 issuer_name, total_amount, currency, issue_date, xml_path, status, vat_amount) \
+                 VALUES (?1,'co',?2,'RO1','F',119.0,'RON','2026-06-10','/x.xml','REVIEWED',?3)",
+            )
+            .bind(rid.to_string())
+            .bind(dl.to_string())
+            .bind(vat.to_string())
+        };
+        // Complete: header VAT 100 = the one line's 100 → no gap.
+        parent("r1", "d1", "100.00").execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO received_invoice_vat_lines \
+             (id, received_invoice_id, vat_rate, vat_category, base_amount, vat_amount) \
+             VALUES ('vl1','r1','21','S','476.00','100.00')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            received_vat_breakdown_warning(&pool, "co", "2026-06-01", "2026-06-30")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        // Incomplete: header VAT 50, NO breakdown lines → gap of 50 lei > 1 → warn.
+        parent("r2", "d2", "50.00").execute(&pool).await.unwrap();
+        let w = received_vat_breakdown_warning(&pool, "co", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let w = w.expect("incomplete breakdown must warn");
+        assert_eq!(w.severity, "warning");
+        assert_eq!(w.code, "D300_RECV_VAT_BREAKDOWN");
     }
 
     async fn seed_received_payment(
