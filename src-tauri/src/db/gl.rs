@@ -1959,6 +1959,16 @@ pub(crate) async fn post_manual_journal_ex(
     j: &ManualJournal<'_>,
     lines: &[(&str, Decimal, Decimal, Option<&str>)],
 ) -> AppResult<()> {
+    // Period-lock guard (OMFP 2634/2015 immutability): never post into a FILED (locked) period.
+    if let Some(ym) = j.date.get(..7) {
+        if crate::db::period_locks::is_period_locked(pool, j.company_id, ym).await {
+            return Err(crate::error::AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — nota contabilă nu poate fi postată. \
+                 Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
+
     let entries: Vec<GlEntry> = lines
         .iter()
         .enumerate()
@@ -2198,6 +2208,15 @@ pub async fn post_fiscal_receipt(
     .ok_or(crate::error::AppError::NotFound)?;
 
     let report_date: String = r.try_get("report_date").unwrap_or_default();
+    // Period-lock guard (OMFP 2634/2015 immutability): never post into a FILED (locked) period.
+    if let Some(ym) = report_date.get(..7) {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await {
+            return Err(crate::error::AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — bonul fiscal nu poate fi postat. \
+                 Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
     let serie_casa: String = r.try_get("serie_casa").unwrap_or_default();
     let nr_z: i64 = r.try_get("nr_z").unwrap_or(0);
     let total = dec(&r.try_get::<String, _>("total").unwrap_or_default());
@@ -4078,6 +4097,17 @@ pub async fn post_period_close(
     period_from: &str,
     period_to: &str,
 ) -> AppResult<ClosePeriodResult> {
+    // Period-lock guard (OMFP 2634/2015 immutability): never (re)post a close into a FILED period.
+    if let Some(first) =
+        crate::db::period_locks::locked_months_in_range(pool, company_id, period_from, period_to)
+            .await?
+            .first()
+    {
+        return Err(crate::error::AppError::Validation(format!(
+            "Perioada {first} este blocată (declarație depusă) — închiderea de perioadă nu poate fi \
+             repostată. Deblocați perioada pentru a înregistra o corecție."
+        )));
+    }
     let balances = class67_balances(pool, company_id, period_from, period_to).await?;
     let source_id = format!("{period_from}_{period_to}");
 
@@ -4207,6 +4237,17 @@ pub async fn post_income_tax(
     period_to: &str,
     amount: Option<Decimal>,
 ) -> AppResult<IncomeTaxResult> {
+    // Period-lock guard (OMFP 2634/2015 immutability): never (re)post tax into a FILED period.
+    if let Some(first) =
+        crate::db::period_locks::locked_months_in_range(pool, company_id, period_from, period_to)
+            .await?
+            .first()
+    {
+        return Err(crate::error::AppError::Validation(format!(
+            "Perioada {first} este blocată (declarație depusă) — impozitul pe venit/profit nu poate fi \
+             repostat. Deblocați perioada pentru a înregistra o corecție."
+        )));
+    }
     let (expense_account, payable_account) = if tax_regime == "micro" {
         ("698", "4418")
     } else {
@@ -4346,6 +4387,18 @@ pub async fn post_annual_close(
 ) -> AppResult<AnnualCloseResult> {
     let from = format!("{year}-01-01");
     let to = format!("{year}-12-31");
+    // Period-lock guard (OMFP 2634/2015 immutability): never (re)post the annual close if any month
+    // of the year is FILED (locked) — that would corrupt 121→117 after the bilanț was submitted.
+    if let Some(first) =
+        crate::db::period_locks::locked_months_in_range(pool, company_id, &from, &to)
+            .await?
+            .first()
+    {
+        return Err(crate::error::AppError::Validation(format!(
+            "Perioada {first} este blocată (declarație depusă) — închiderea anuală nu poate fi \
+             repostată. Deblocați perioada pentru a înregistra o corecție."
+        )));
+    }
     let row = sqlx::query(
         "SELECT COALESCE(SUM(CAST(e.credit AS REAL)-CAST(e.debit AS REAL)),0.0) AS net_credit \
          FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
@@ -5052,6 +5105,15 @@ pub async fn post_asset_disposal(
     asset_acct: &str,
     amort_acct: &str,
 ) -> AppResult<()> {
+    // Period-lock guard (OMFP 2634/2015 immutability): never post into a FILED (locked) period.
+    if let Some(ym) = disposal_date.get(..7) {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await {
+            return Err(crate::error::AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — casarea/cedarea mijlocului fix nu \
+                 poate fi postată. Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
     let residual = (cost - accumulated).max(Decimal::ZERO);
     let mut tx = pool.begin().await?;
     sqlx::query(
@@ -5158,6 +5220,16 @@ pub(crate) async fn post_asset_revaluation(
 ) -> AppResult<()> {
     use rust_decimal::Decimal;
     let zero = Decimal::ZERO;
+
+    // Period-lock guard (OMFP 2634/2015 immutability): never post into a FILED (locked) period.
+    if let Some(ym) = revaluation_date.get(..7) {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await {
+            return Err(crate::error::AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — reevaluarea mijlocului fix nu poate \
+                 fi postată. Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
 
     let mk = |record_id: i64, account: &str, debit: Decimal, credit: Decimal| GlEntry {
         id: new_id(),
@@ -5317,6 +5389,15 @@ pub async fn post_stock_movement(
     value: Decimal,
     is_transfer: bool,
 ) -> AppResult<()> {
+    // Period-lock guard (OMFP 2634/2015 immutability): never post into a FILED (locked) period.
+    if let Some(ym) = date.get(..7) {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await {
+            return Err(crate::error::AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — mișcarea de stoc nu poate fi \
+                 postată. Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
     let mut tx = pool.begin().await?;
     sqlx::query(
         "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='STOCK' AND source_id=?2",
@@ -10672,5 +10753,149 @@ mod tests {
         let jpk = get_journal_pk(&pool, "adv_inv7").await;
         let (d, c) = sum_entries(&pool, &jpk).await;
         assert_eq!(d, c, "avans idempotent: GL dezechilibrat");
+    }
+
+    // ── Period-lock coverage completion (audit-2026-final): every remaining direct GL poster
+    //    must refuse a FILED (locked) period (OMFP 2634/2015 immutability). ──────────────────
+    #[tokio::test]
+    async fn period_close_refused_on_locked_period() {
+        let pool = locked_pool().await;
+        let r = post_period_close(&pool, "co_l", "2026-03-01", "2026-03-31").await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "got {r:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn income_tax_refused_on_locked_period() {
+        let pool = locked_pool().await;
+        let r = post_income_tax(
+            &pool,
+            "co_l",
+            "micro",
+            "2026-03-01",
+            "2026-03-31",
+            Some(Decimal::ZERO),
+        )
+        .await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "got {r:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn annual_close_refused_on_locked_period() {
+        // The 2026 range spans the locked month 2026-03 → refuse.
+        let pool = locked_pool().await;
+        let r = post_annual_close(&pool, "co_l", 2026).await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "got {r:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn asset_disposal_refused_on_locked_period() {
+        let pool = locked_pool().await;
+        let r = post_asset_disposal(
+            &pool,
+            "co_l",
+            "a1",
+            "2026-03-15",
+            Decimal::ZERO,
+            Decimal::ZERO,
+            "213",
+            "2813",
+        )
+        .await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "got {r:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn asset_revaluation_refused_on_locked_period() {
+        let pool = locked_pool().await;
+        let z = Decimal::ZERO;
+        let r = post_asset_revaluation(
+            &pool,
+            "co_l",
+            "r1",
+            "2026-03-15",
+            "213",
+            "2813",
+            z,
+            z,
+            z,
+            z,
+            z,
+            z,
+            z,
+        )
+        .await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "got {r:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stock_movement_refused_on_locked_period() {
+        let pool = locked_pool().await;
+        let r = post_stock_movement(
+            &pool,
+            "co_l",
+            "l1",
+            "2026-03-15",
+            "371",
+            true,
+            Decimal::ZERO,
+            false,
+        )
+        .await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "got {r:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_journal_ex_refused_on_locked_period() {
+        let pool = locked_pool().await;
+        let j = ManualJournal {
+            company_id: "co_l",
+            journal_id: "j1",
+            journal_type: "DIVERSE",
+            source_type: "TEST",
+            source_id: "s1",
+            date: "2026-03-15",
+            description: "test",
+            partner_cui: None,
+        };
+        let r = post_manual_journal_ex(&pool, &j, &[]).await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "got {r:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fiscal_receipt_refused_on_locked_period() {
+        let pool = locked_pool().await;
+        sqlx::query(
+            "INSERT INTO fiscal_receipts (id,company_id,serie_casa,nr_z,report_date) \
+             VALUES ('fr1','co_l','AB',1,'2026-03-10')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let r = post_fiscal_receipt(&pool, "co_l", "fr1").await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "got {r:?}"
+        );
     }
 }
