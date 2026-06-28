@@ -13,12 +13,17 @@
 //!    `expires_at` în SQLite, fingerprint-ul nu mai corespunde → licență
 //!    tratată ca expirată.
 //!
-//! 3. **Anti-rollback ceas** — La fiecare verificare, timestamp-ul curent
-//!    este comparat cu `license_last_seen`. Dacă ceasul sistemului a fost
-//!    dat înapoi cu mai mult de 5 minute, licența este respinsă.
+//! 3. **Anti-rollback ceas** — Se păstrează un high-water-mark (cel mai mare
+//!    timestamp văzut vreodată) atât în `settings`, cât și în OS keychain;
+//!    copia din keychain supraviețuiește ștergerii rândului din SQLite.
+//!    Expirarea e evaluată față de `max(now, high-water-mark)`, deci o dare
+//!    înapoi a ceasului nu poate „dez-expira” licența; o dare înapoi de peste
+//!    30 de zile sub high-water-mark respinge licența.
 //!
-//! 4. **Machine ID îmbunătățit** — Combină hostname + username + OS,
-//!    hash-uit cu SHA-256 (primii 24 de caractere hex).
+//! 4. **Machine ID îmbunătățit** — Folosește UID-ul stabil al mașinii din OS
+//!    (Windows MachineGuid / macOS IOPlatformUUID / Linux /etc/machine-id),
+//!    cu fallback la hostname + username + OS; hash-uit cu SHA-256 (primii 24
+//!    de caractere hex).
 
 use hmac::{Hmac, Mac};
 use keyring::Entry;
@@ -105,18 +110,9 @@ pub fn validate_license_key(key: &str) -> bool {
     let payload = format!("{}-{}-{}", parts[0], parts[1], parts[2]);
     let full_checksum = key_checksum(payload.as_bytes());
 
-    match checksum_part.len() {
-        8 => checksum_part.eq_ignore_ascii_case(&full_checksum[..8]),
-        4 => {
-            // Legacy keys (16-bit checksum). Deprecated — keep accepting for
-            // transitional compatibility but warn in logs.
-            tracing::warn!(
-                "Legacy 4-char license checksum detected — please request a new 8-char key."
-            );
-            checksum_part.eq_ignore_ascii_case(&full_checksum[..4])
-        }
-        _ => false,
-    }
+    // Only the 8-char (32-bit) checksum is accepted. Legacy 4-char (16-bit) checksums were
+    // offline-brute-forceable and are no longer valid (pre-publication: no legacy keys in the wild).
+    checksum_part.len() == 8 && checksum_part.eq_ignore_ascii_case(&full_checksum[..8])
 }
 
 /// RFC 2104 HMAC-SHA256(KEY_HMAC_SECRET, data) → full hex digest (64 chars).
@@ -152,19 +148,25 @@ pub fn machine_id_for_diagnostic() -> String {
 }
 
 fn machine_id() -> String {
-    let host = read_hostname_os().unwrap_or_else(|| {
-        std::env::var("HOSTNAME")
-            .or_else(|_| std::env::var("COMPUTERNAME"))
-            .unwrap_or_else(|_| "host_unknown".into())
-    });
-    let user = read_username_os().unwrap_or_else(|| {
-        std::env::var("USER")
-            .or_else(|_| std::env::var("USERNAME"))
-            .unwrap_or_else(|_| "user_unknown".into())
-    });
-    let os = std::env::consts::OS;
-
-    let raw = format!("{}||{}||{}", host, user, os);
+    // Prefer the stable OS machine UID (Windows MachineGuid / macOS IOPlatformUUID /
+    // Linux /etc/machine-id): it survives hostname/user changes and can't be spoofed via
+    // env vars. Fall back to hostname‖user‖os only when the OS UID is unavailable.
+    let raw = match machine_uid::get() {
+        Ok(uid) if !uid.trim().is_empty() => format!("uid||{}", uid.trim()),
+        _ => {
+            let host = read_hostname_os().unwrap_or_else(|| {
+                std::env::var("HOSTNAME")
+                    .or_else(|_| std::env::var("COMPUTERNAME"))
+                    .unwrap_or_else(|_| "host_unknown".into())
+            });
+            let user = read_username_os().unwrap_or_else(|| {
+                std::env::var("USER")
+                    .or_else(|_| std::env::var("USERNAME"))
+                    .unwrap_or_else(|_| "user_unknown".into())
+            });
+            format!("{}||{}||{}", host, user, std::env::consts::OS)
+        }
+    };
     let hash = Sha256::digest(raw.as_bytes());
     // Primii 24 hex chars = 96 biți — suficient pentru unicitate, compact pentru stocare
     format!("{:x}", hash)[..24].to_string()
@@ -288,6 +290,21 @@ fn mark_trial_used_in_keychain(mid: &str) {
     }
 }
 
+/// Keychain account holding the anti-rollback high-water-mark (highest unix-ts ever seen).
+/// Stored in the OS keychain so it survives the user deleting the `settings` row in SQLite.
+const LAST_SEEN_KC_ACCOUNT: &str = "last_seen";
+
+fn read_last_seen_keychain() -> Option<i64> {
+    let entry = Entry::new(TRIAL_KC_SERVICE, LAST_SEEN_KC_ACCOUNT).ok()?;
+    entry.get_password().ok()?.trim().parse::<i64>().ok()
+}
+
+fn write_last_seen_keychain(ts: i64) {
+    if let Ok(entry) = Entry::new(TRIAL_KC_SERVICE, LAST_SEEN_KC_ACCOUNT) {
+        let _ = entry.set_password(&ts.to_string());
+    }
+}
+
 // ─── Helpers DB ──────────────────────────────────────────────────────────────
 
 /// Scrie o valoare în tabelul `settings` (upsert).
@@ -365,7 +382,31 @@ pub async fn check_license_validity(state: State<'_, AppState>) -> AppResult<boo
     let email: String = row.try_get("email").unwrap_or_default();
     let stored_mid: String = row.try_get("machine_id").unwrap_or_default();
 
-    if expires_at <= now {
+    // Anti-rollback high-water-mark: the highest unix-ts ever seen, kept in BOTH the settings
+    // table and the OS keychain. The keychain copy survives the user deleting the SQLite row, so a
+    // backdated clock can't drop the effective "now" below it (or un-expire the licence).
+    let high_water = {
+        let sqlite_ls = get_setting(pool, LAST_SEEN_KEY)
+            .await
+            .and_then(|s| s.parse::<i64>().ok());
+        let kc_ls = read_last_seen_keychain();
+        sqlite_ls.into_iter().chain(kc_ls).max()
+    };
+    let effective_now = high_water.map_or(now, |hw| now.max(hw));
+
+    // Hard-fail if the clock was rolled back well below the highest timestamp ever seen.
+    if let Some(hw) = high_water {
+        if hw - now > 30 * 24 * 60 * 60 {
+            tracing::warn!(
+                drift_seconds = hw - now,
+                "license anti-rollback hard-fail (clock rolled back > 30 days below high-water-mark)"
+            );
+            return Ok(false);
+        }
+    }
+
+    // Expiry is gated on effective_now (= max(now, high-water-mark)) so backdating can't un-expire.
+    if expires_at <= effective_now {
         return Ok(false);
     }
 
@@ -394,38 +435,10 @@ pub async fn check_license_validity(state: State<'_, AppState>) -> AppResult<boo
         }
     }
 
-    // ── 3. Anti-rollback ceas ────────────────────────────────────────────
-    let last_seen: Option<i64> = get_setting(pool, LAST_SEEN_KEY)
-        .await
-        .and_then(|s| s.parse::<i64>().ok());
-
-    if let Some(ls) = last_seen {
-        let drift = ls - now; // pozitiv = last_seen înaintea lui now
-        const TOLERANCE: i64 = 24 * 60 * 60; // 1 zi: clamp silențios
-        const HARD_FAIL: i64 = 30 * 24 * 60 * 60; // 30 zile: posibilă manipulare
-
-        if drift > HARD_FAIL {
-            // Ceasul a dat înapoi > 30 zile SAU last_seen masiv în viitor → refuză.
-            tracing::warn!(
-                drift_seconds = drift,
-                "license anti-rollback hard-fail (drift > 30 days)"
-            );
-            return Ok(false);
-        }
-
-        if drift > TOLERANCE {
-            // Suspect dar plauzibil (DST, NTP, date de test).
-            // Logăm și continuăm; set_setting de mai jos clampează la now.
-            tracing::warn!(
-                drift_seconds = drift,
-                "license anti-rollback drift > 1 day; clamping last_seen to now"
-            );
-        }
-        // drift <= TOLERANCE → clamp silențios prin set_setting de mai jos.
-    }
-
-    // ── 4. Actualizare last_seen ─────────────────────────────────────────
-    set_setting(pool, LAST_SEEN_KEY, &now.to_string()).await;
+    // ── 3. Advance the high-water-mark in BOTH stores (settings + keychain) ──
+    let new_hw = high_water.map_or(now, |hw| hw.max(now));
+    set_setting(pool, LAST_SEEN_KEY, &new_hw.to_string()).await;
+    write_last_seen_keychain(new_hw);
 
     Ok(true)
 }
