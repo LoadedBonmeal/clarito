@@ -513,7 +513,8 @@ pub(crate) fn parse_received_xml(xml_bytes: &[u8]) -> ParsedReceived {
     let mut issuer_cui = String::new();
     let mut issuer_name = String::new();
     let mut total_amount_str = "0.00".to_string();
-    let mut issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    // Local calendar date as the fallback issue_date (drives VAT period if the XML omits it).
+    let mut issue_date = chrono::Local::now().format("%Y-%m-%d").to_string();
     // A3: parse DocumentCurrencyCode; default to "RON" when absent.
     let mut currency = "RON".to_string();
     let mut net_amount: Option<String> = None;

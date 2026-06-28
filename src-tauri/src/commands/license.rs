@@ -329,7 +329,13 @@ pub async fn get_license(state: State<'_, AppState>) -> AppResult<Option<License
     // For TRIAL licenses, compute days remaining (negative = already expired)
     if lic.tier == "TRIAL" {
         let seconds_remaining = lic.expires_at - now;
-        lic.trial_days_remaining = Some(seconds_remaining / 86_400);
+        // Ceil a partial final day so 12h left shows "1 day", not "0" (which reads as expired).
+        // Already-expired (negative) keeps its truncated-toward-zero value.
+        lic.trial_days_remaining = Some(if seconds_remaining > 0 {
+            (seconds_remaining + 86_399) / 86_400
+        } else {
+            seconds_remaining / 86_400
+        });
     }
 
     Ok(Some(lic))

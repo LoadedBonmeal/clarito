@@ -230,8 +230,9 @@ pub async fn fetch_anaf_company_data(cui: String) -> AppResult<AnafCompanyData> 
         .parse()
         .map_err(|_| AppError::Validation(format!("CUI invalid: {cui}")))?;
 
-    // Today's date as "YYYY-MM-DD"
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    // Today's date as "YYYY-MM-DD" — local, so the VAT-status lookup doesn't query the prior
+    // day near local midnight (RO is UTC+2/+3).
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     // POST to ANAF API
     let body = serde_json::json!([{"cui": cui_number, "data": today}]);

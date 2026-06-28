@@ -886,7 +886,8 @@ async fn import_invoice_xml_inner(
         });
     }
     if issue_date.is_empty() {
-        issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        // Local calendar date as the fallback issue_date (drives VAT period if the source omits it).
+        issue_date = chrono::Local::now().format("%Y-%m-%d").to_string();
     }
     if issuer_name.is_empty() {
         issuer_name = issuer_cui.clone();

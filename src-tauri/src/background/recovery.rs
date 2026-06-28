@@ -50,13 +50,17 @@ pub(crate) async fn recover_stale_queued(app: &AppHandle) {
         let event_sql =
             "INSERT INTO invoice_events (id, invoice_id, event_type, message, metadata, created_at)
              VALUES (?1, ?2, ?3, ?4, NULL, unixepoch())";
-        let _ = sqlx::query(event_sql)
+        if let Err(e) = sqlx::query(event_sql)
             .bind(&event_id)
             .bind(&invoice_id)
             .bind("RECOVERED_FROM_QUEUED")
             .bind("Factura resetata la DRAFT dupa esec de incarcare ANAF (crash recovery)")
             .execute(&db)
-            .await;
+            .await
+        {
+            // Don't lose the crash-recovery audit trail silently.
+            tracing::warn!("Recuperare factura {invoice_id}: scriere invoice_events eșuată: {e}");
+        }
 
         tracing::warn!("Factura {invoice_id} recuperata: QUEUED → DRAFT (crash recovery)");
 

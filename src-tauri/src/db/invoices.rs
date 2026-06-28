@@ -17,18 +17,24 @@ use crate::db::models::{
 };
 use crate::error::{AppError, AppResult};
 
-/// FISCAL-001 (Legea 141/2025): `true` when a line's VAT rate is a pre-reform rate (19% or 5%)
-/// that is no longer valid for an invoice issued on/after the 2025-08-01 reform (they became
-/// 21%/11%). 9% stays valid — it's the transitional housing rate to 2026-07. `issue_date` is an
-/// ISO `YYYY-MM-DD` string (lexicographic compare = chronological); a malformed/empty date does
-/// not trigger the block. Shared by `create` and `update_invoice_draft` so the rule lives once.
+/// FISCAL-001 (Legea 141/2025): `true` when a line's VAT rate is a pre-reform rate no longer valid
+/// for the invoice's `issue_date`. 19% and 5% became invalid at the 2025-08-01 reform (→ 21%/11%).
+/// 9% survived only as the transitional housing rate and expires 2026-07-31 — a 9% line dated
+/// 2026-08-01 or later is therefore also blocked. `issue_date` is an ISO `YYYY-MM-DD` string
+/// (lexicographic compare = chronological); a malformed/empty date does not trigger the block.
+/// Shared by `create` and `update_invoice_draft` so the rule lives once.
 pub(crate) fn old_vat_rate_blocked(issue_date: &str, vat_rate: f64) -> bool {
     if issue_date < "2025-08-01" {
         return false;
     }
     let rate = Decimal::try_from(vat_rate).unwrap_or(Decimal::ZERO);
-    (rate - Decimal::from(19)).abs() < Decimal::new(1, 3)
-        || (rate - Decimal::from(5)).abs() < Decimal::new(1, 3)
+    let eps = Decimal::new(1, 3);
+    // 19% and 5% became invalid at the 2025-08-01 reform.
+    if (rate - Decimal::from(19)).abs() < eps || (rate - Decimal::from(5)).abs() < eps {
+        return true;
+    }
+    // 9% (transitional housing rate) is valid only through 2026-07-31, then blocked too.
+    (rate - Decimal::from(9)).abs() < eps && issue_date > "2026-07-31"
 }
 
 /// Round money to 2 decimals using COMMERCIAL rounding (half away from zero), the Romanian/
@@ -1551,6 +1557,10 @@ mod tests {
         assert!(!old_vat_rate_blocked("2026-03-01", 11.0));
         assert!(!old_vat_rate_blocked("2026-03-01", 9.0));
         assert!(!old_vat_rate_blocked("2026-03-01", 0.0));
+        // 9% transitional housing rate: valid through 2026-07-31, blocked from 2026-08-01.
+        assert!(!old_vat_rate_blocked("2026-07-31", 9.0));
+        assert!(old_vat_rate_blocked("2026-08-01", 9.0));
+        assert!(old_vat_rate_blocked("2026-09-15", 9.0));
         // A malformed/empty issue_date must never block.
         assert!(!old_vat_rate_blocked("", 19.0));
     }

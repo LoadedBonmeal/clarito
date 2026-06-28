@@ -1,8 +1,10 @@
-//! DUKIntegrator validation harness (dev/CI only). ANAF's official Java validator
-//! has a scriptable CLI: `java -jar DUKIntegrator.jar -v <TYPE> <xml> <result>`.
-//! We never bundle Java in the shipped app — this is a developer/CI gate. It
-//! degrades gracefully: when Java or the jar are absent, `duk_available()` is
-//! false and callers skip, so the normal build stays green.
+//! DUKIntegrator validation harness. ANAF's official Java validator has a
+//! scriptable CLI: `java -jar DUKIntegrator.jar -v <TYPE> <xml> <result>`.
+//! These low-level runners serve two callers (see `anaf_decl::duk`): the dev/CI
+//! `EnvProvider` (system `java` + `$EFACTURA_DUK_JAR`), and the shipped app's
+//! `BundledProvider`, which resolves the bundled `jre-min` + `duk/` resources.
+//! It degrades gracefully: when no Java/jar is available the provider resolves
+//! to none and callers skip, so a build without the bundled validators stays green.
 
 use std::path::{Path, PathBuf};
 

@@ -667,7 +667,9 @@ pub async fn storno_invoice(
     let vat_total = round2(vat_total_dec).to_string();
     let total = round2(subtotal_dec + vat_total_dec).to_string();
 
-    let issue_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    // Local calendar date: this storno's issue_date sets its VAT period. UTC would shift it to
+    // the previous day near local midnight (RO is UTC+2/+3) → wrong period at month boundaries.
+    let issue_date = chrono::Local::now().format("%Y-%m-%d").to_string();
     // BIZ-14: due_date defaults to issue_date when not explicitly provided.
     let due_date = due_date_input.unwrap_or_else(|| issue_date.clone());
     let storno_id = new_id();
@@ -872,7 +874,8 @@ pub async fn duplicate_invoice(
     }
 
     let new_invoice_id = new_id();
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    // Local calendar date (the duplicate's issue_date drives its VAT period); timestamp stays UTC.
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let now = chrono::Utc::now().timestamp();
     let dup_note = format!("Duplicat din {}", source.full_number);
 
