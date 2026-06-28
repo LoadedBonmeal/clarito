@@ -48,7 +48,8 @@
 .bulkbar,
 .tot-foot,
 .page-head,
-.head-actions { flex-wrap: wrap; row-gap: 8px; }
+.head-actions,
+.set-row { flex-wrap: wrap; row-gap: 8px; }
 .tabs { flex-wrap: wrap; row-gap: 3px; }
 /* keep the toolbar search usable but let it shrink / grow within its row */
 .scr-toolbar .scr-search { width: auto; flex: 1 1 200px; min-width: 150px; max-width: 280px; }

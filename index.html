@@ -5,6 +5,19 @@
     <link rel="icon" type="image/png" href="/clarito.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Clarito</title>
+    <script>
+      // Apply the persisted theme before first paint so dark-mode users don't see a flash of light.
+      // Mirrors use-theme.ts (toggles `dark` on <html>; "system" follows the OS preference).
+      try {
+        var s = JSON.parse(localStorage.getItem("rofactura-app-state") || "{}");
+        var t = s && s.state && s.state.theme;
+        if (t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches)) {
+          document.documentElement.classList.add("dark");
+        }
+      } catch (e) {
+        /* ignore — React will apply the theme on hydrate */
+      }
+    </script>
   </head>
 
   <body>

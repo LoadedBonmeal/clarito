@@ -254,7 +254,19 @@ export function TopBar() {
               </div>
               {recent.length > 0 ? (
                 recent.slice(0, 6).map((n) => (
-                  <div key={n.id} className="notif-item" onClick={() => openNotif(n)}>
+                  <div
+                    key={n.id}
+                    className="notif-item"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openNotif(n)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openNotif(n);
+                      }
+                    }}
+                  >
                     <div className="notif-ic"><Ic name={notifIcon(n.notificationType)} /></div>
                     <div className="notif-tx">
                       <div className="n1">{n.isRead ? n.title : <b>{n.title}</b>}</div>
