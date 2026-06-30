@@ -43,6 +43,13 @@ echo "▶ rust tests"
 cargo test --lib
 echo ""
 
+# Integration tests live in tests/ and are NOT run by `cargo test --lib`. The SAF-T D406 suite
+# validates the generated declaration against the official Ro_SAFT XSD (xmllint) + the bundled DUK
+# validator — both local-only (gitignored), so this gate runs here, not in CI.
+echo "▶ saft d406 integration gate (XSD + DUK)"
+cargo test --test saft_xsd
+echo ""
+
 echo "▶ rust clippy (strict)"
 cargo clippy --all-targets --all-features -- -D warnings
 echo "  ✓ clippy OK"

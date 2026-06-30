@@ -60,7 +60,6 @@ fn test_company() -> Company {
 ///   - One stock movement with one line (Phase 6a)
 ///   - One fixed asset (Phase 6b)
 async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
-    use sqlx::Executor;
     use sqlx::SqlitePool;
 
     // generate_gl_entries opens a transaction AND runs a concurrent pool query, so the pool must hand
@@ -71,271 +70,40 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
         .await
         .expect("in-memory pool");
 
-    // ── Schema ─────────────────────────────────────────────────────────────────
-    pool.execute(sqlx::query(
-        "CREATE TABLE companies (
-            id TEXT PRIMARY KEY, cui TEXT, legal_name TEXT, trade_name TEXT,
-            registry_number TEXT, vat_payer INTEGER, address TEXT, city TEXT,
-            county TEXT, postal_code TEXT, country TEXT, email TEXT, phone TEXT,
-            iban TEXT, bank_name TEXT, is_active INTEGER, spv_enabled INTEGER,
-            invoice_series TEXT, last_invoice_number INTEGER, logo_path TEXT,
-            created_at INTEGER, updated_at INTEGER,
-            cash_vat INTEGER DEFAULT 0, cash_vat_start TEXT, cash_vat_end TEXT
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE chart_of_accounts (
-            id TEXT PRIMARY KEY, company_id TEXT, account_code TEXT,
-            account_name TEXT, account_class INTEGER, parent_code TEXT,
-            active INTEGER DEFAULT 1, created_at INTEGER, updated_at INTEGER,
-            UNIQUE(company_id, account_code)
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE contacts (
-            id TEXT PRIMARY KEY, company_id TEXT, contact_type TEXT,
-            cui TEXT, legal_name TEXT, vat_payer INTEGER,
-            address TEXT, city TEXT, county TEXT, country TEXT,
-            email TEXT, phone TEXT, currency TEXT,
-            created_at INTEGER, updated_at INTEGER,
-            cash_vat INTEGER DEFAULT 0
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE products (
-            id TEXT PRIMARY KEY, company_id TEXT, name TEXT, unit TEXT,
-            unit_price TEXT, description TEXT, code TEXT,
-            created_at INTEGER, updated_at INTEGER
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE invoices (
-            id TEXT PRIMARY KEY, company_id TEXT, contact_id TEXT,
-            series TEXT, number INTEGER, full_number TEXT,
-            issue_date TEXT, due_date TEXT,
-            subtotal_amount TEXT, vat_amount TEXT, total_amount TEXT,
-            currency TEXT, exchange_rate REAL, storno_of_invoice_id TEXT,
-            status TEXT, payment_means_code TEXT,
-            created_at INTEGER, updated_at INTEGER
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE invoice_line_items (
-            id TEXT PRIMARY KEY, invoice_id TEXT, position INTEGER,
-            name TEXT, description TEXT, quantity TEXT, unit TEXT,
-            unit_price TEXT, vat_rate TEXT, vat_category TEXT,
-            subtotal_amount TEXT, vat_amount TEXT, total_amount TEXT,
-            cpv_code TEXT, art331_code TEXT, revenue_kind TEXT DEFAULT 'goods'
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE received_invoices (
-            id TEXT PRIMARY KEY, company_id TEXT,
-            anaf_download_id TEXT, anaf_index TEXT,
-            issuer_cui TEXT, issuer_name TEXT,
-            series TEXT, number TEXT,
-            total_amount TEXT, net_amount TEXT, vat_amount TEXT,
-            currency TEXT, exchange_rate REAL, issue_date TEXT,
-            xml_path TEXT, pdf_path TEXT, status TEXT,
-            downloaded_at INTEGER, created_at INTEGER
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE payments (
-            id TEXT PRIMARY KEY, invoice_id TEXT, company_id TEXT,
-            amount TEXT, currency TEXT, paid_at TEXT,
-            method TEXT, reference TEXT, notes TEXT, created_at INTEGER,
-            exchange_rate TEXT, received_invoice_id TEXT
-        )",
-    ))
-    .await
-    .unwrap();
-
-    // received_invoice_payments (supplier-invoice payments; GL cash-VAT release joins it). No seed rows.
-    pool.execute(sqlx::query(
-        "CREATE TABLE received_invoice_payments (
-            id TEXT PRIMARY KEY, received_invoice_id TEXT, company_id TEXT,
-            amount TEXT, currency TEXT, paid_at TEXT, method TEXT,
-            reference TEXT, notes TEXT, created_at INTEGER, exchange_rate TEXT
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE received_invoice_vat_lines (
-            id TEXT PRIMARY KEY,
-            received_invoice_id TEXT,
-            vat_category TEXT,
-            vat_rate TEXT,
-            base_amount TEXT,
-            vat_amount TEXT
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE stock_movements (
-            id TEXT NOT NULL PRIMARY KEY,
-            company_id TEXT NOT NULL,
-            movement_ref TEXT NOT NULL,
-            movement_date TEXT NOT NULL,
-            posting_date TEXT NOT NULL,
-            movement_type TEXT NOT NULL DEFAULT '10',
-            direction TEXT NOT NULL DEFAULT 'IN',
-            document_type TEXT,
-            document_number TEXT,
-            source_type TEXT,
-            source_id TEXT,
-            notes TEXT,
-            created_at INTEGER NOT NULL DEFAULT 0,
-            updated_at INTEGER NOT NULL DEFAULT 0,
-            UNIQUE(company_id, movement_ref)
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE stock_movement_lines (
-            id TEXT NOT NULL PRIMARY KEY,
-            movement_id TEXT NOT NULL,
-            line_number INTEGER NOT NULL DEFAULT 1,
-            product_id TEXT,
-            product_code TEXT NOT NULL,
-            account_id TEXT NOT NULL DEFAULT '371',
-            customer_id TEXT NOT NULL DEFAULT '0',
-            supplier_id TEXT NOT NULL DEFAULT '0',
-            quantity TEXT NOT NULL DEFAULT '1',
-            unit_of_measure TEXT NOT NULL DEFAULT 'H87',
-            uom_conv_factor TEXT NOT NULL DEFAULT '1',
-            book_value TEXT NOT NULL DEFAULT '0.00',
-            movement_subtype TEXT NOT NULL DEFAULT '10',
-            comments TEXT
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE fixed_assets (
-            id TEXT NOT NULL PRIMARY KEY,
-            company_id TEXT NOT NULL,
-            asset_code TEXT NOT NULL,
-            account_id TEXT NOT NULL DEFAULT '213',
-            description TEXT NOT NULL,
-            valuation_class TEXT NOT NULL DEFAULT 'Corporala',
-            supplier_id TEXT NOT NULL DEFAULT '0',
-            supplier_name TEXT NOT NULL DEFAULT '',
-            date_of_acquisition TEXT NOT NULL,
-            start_up_date TEXT NOT NULL,
-            acquisition_cost TEXT NOT NULL DEFAULT '0.00',
-            life_months INTEGER NOT NULL DEFAULT 60,
-            depreciation_method TEXT NOT NULL DEFAULT 'liniara',
-            depreciation_pct TEXT NOT NULL DEFAULT '0.00',
-            disposal_date TEXT,
-            active INTEGER NOT NULL DEFAULT 1,
-            created_at INTEGER NOT NULL DEFAULT 0,
-            updated_at INTEGER NOT NULL DEFAULT 0,
-            UNIQUE(company_id, asset_code)
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE asset_transactions (
-            id TEXT NOT NULL PRIMARY KEY,
-            company_id TEXT NOT NULL,
-            asset_id TEXT NOT NULL,
-            transaction_code TEXT NOT NULL,
-            transaction_type TEXT NOT NULL DEFAULT '10',
-            transaction_date TEXT NOT NULL,
-            description TEXT NOT NULL DEFAULT '',
-            gl_transaction_id TEXT,
-            acq_prod_cost TEXT NOT NULL DEFAULT '0.00',
-            book_value TEXT NOT NULL DEFAULT '0.00',
-            amount TEXT NOT NULL DEFAULT '0.00',
-            created_at INTEGER NOT NULL DEFAULT 0
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE gl_journal (
-            id TEXT PRIMARY KEY, company_id TEXT NOT NULL,
-            journal_id TEXT NOT NULL, journal_type TEXT NOT NULL,
-            transaction_id TEXT NOT NULL, transaction_date TEXT NOT NULL,
-            description TEXT, source_type TEXT NOT NULL, source_id TEXT NOT NULL,
-            customer_id TEXT, supplier_id TEXT,
-            created_at INTEGER NOT NULL DEFAULT 0
-        )",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE UNIQUE INDEX idx_gl_journal_source ON gl_journal(company_id, source_type, source_id)",
-    ))
-    .await
-    .unwrap();
-
-    pool.execute(sqlx::query(
-        "CREATE TABLE gl_entry (
-            id TEXT PRIMARY KEY, journal_pk TEXT NOT NULL,
-            record_id INTEGER NOT NULL, account_code TEXT NOT NULL,
-            debit TEXT NOT NULL DEFAULT '0.00', credit TEXT NOT NULL DEFAULT '0.00',
-            partner_cui TEXT, customer_id TEXT, supplier_id TEXT,
-            tax_type TEXT, tax_code TEXT,
-            tax_percentage TEXT, tax_base TEXT, tax_amount TEXT
-        )",
-    ))
-    .await
-    .unwrap();
+    // ── Schema: run the real migrations so the schema never drifts ─────────────
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("migrations failed");
 
     // ── Seed company ───────────────────────────────────────────────────────────
-    sqlx::query("INSERT INTO companies VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,'F',5,NULL,0,0,0,NULL,NULL)")
-        .bind(&company.id)
-        .bind(&company.cui)
-        .bind(&company.legal_name)
-        .bind(company.trade_name.as_deref())
-        .bind(company.registry_number.as_deref())
-        .bind(company.vat_payer as i32)
-        .bind(&company.address)
-        .bind(&company.city)
-        .bind(&company.county)
-        .bind(company.postal_code.as_deref())
-        .bind(&company.country)
-        .bind(company.email.as_deref())
-        .bind(company.phone.as_deref())
-        .bind(company.iban.as_deref())
-        .bind(company.bank_name.as_deref())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO companies \
+         (id, cui, legal_name, trade_name, registry_number, vat_payer, \
+          address, city, county, postal_code, country, email, phone, \
+          iban, bank_name, is_active, spv_enabled, invoice_series, \
+          last_invoice_number, logo_path, created_at, updated_at, \
+          cash_vat, cash_vat_start, cash_vat_end, tax_regime) \
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,'F',5,NULL,0,0,0,NULL,NULL,'micro')",
+    )
+    .bind(&company.id)
+    .bind(&company.cui)
+    .bind(&company.legal_name)
+    .bind(company.trade_name.as_deref())
+    .bind(company.registry_number.as_deref())
+    .bind(company.vat_payer as i32)
+    .bind(&company.address)
+    .bind(&company.city)
+    .bind(&company.county)
+    .bind(company.postal_code.as_deref())
+    .bind(&company.country)
+    .bind(company.email.as_deref())
+    .bind(company.phone.as_deref())
+    .bind(company.iban.as_deref())
+    .bind(company.bank_name.as_deref())
+    .execute(&pool)
+    .await
+    .unwrap();
 
     // ── Seed chart of accounts ─────────────────────────────────────────────────
     let accounts = [
@@ -364,7 +132,12 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
 
     // ── Seed contacts ──────────────────────────────────────────────────────────
     sqlx::query(
-        "INSERT INTO contacts VALUES ('cust-1',?,'CUSTOMER','RO99887760','FIRMA CLIENT SRL',1,'Str. Test 1','Cluj','CJ','RO',NULL,NULL,'RON',0,0,0)",
+        "INSERT INTO contacts \
+         (id, company_id, contact_type, cui, legal_name, vat_payer, \
+          address, city, county, country, email, phone, currency, \
+          created_at, updated_at, cash_vat, is_individual) \
+         VALUES ('cust-1',?,'CUSTOMER','RO99887760','FIRMA CLIENT SRL',1,\
+                 'Str. Test 1','Cluj','CJ','RO',NULL,NULL,'RON',0,0,0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -372,7 +145,12 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO contacts VALUES ('supp-1',?,'SUPPLIER','RO11223342','FIRMA FURNIZOR SRL',1,'Str. Furnizor 2','Timisoara','TM','RO',NULL,NULL,'RON',0,0,0)",
+        "INSERT INTO contacts \
+         (id, company_id, contact_type, cui, legal_name, vat_payer, \
+          address, city, county, country, email, phone, currency, \
+          created_at, updated_at, cash_vat, is_individual) \
+         VALUES ('supp-1',?,'SUPPLIER','RO11223342','FIRMA FURNIZOR SRL',1,\
+                 'Str. Furnizor 2','Timisoara','TM','RO',NULL,NULL,'RON',0,0,0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -381,7 +159,10 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
 
     // ── Seed products ──────────────────────────────────────────────────────────
     sqlx::query(
-        "INSERT INTO products VALUES ('prod-1',?,'Serviciu consultanta','ora','100.00','Consultanta IT','SVC01',0,0)",
+        "INSERT INTO products \
+         (id, company_id, name, unit, unit_price, vat_rate, vat_category, \
+          code, active, created_at, updated_at) \
+         VALUES ('prod-1',?,'Serviciu consultanta','ora','100.00','19','S','SVC01',1,0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -389,12 +170,14 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .unwrap();
 
     // ── Seed invoices ──────────────────────────────────────────────────────────
-    // Columns: id, company_id, contact_id, series, number, full_number,
-    //          issue_date, due_date, subtotal_amount, vat_amount, total_amount,
-    //          currency, exchange_rate, storno_of_invoice_id, status,
-    //          payment_means_code, created_at, updated_at
     sqlx::query(
-        "INSERT INTO invoices VALUES ('inv-1',?,'cust-1','F',1,'F-0001','2025-01-15','2025-02-15','1000.00','190.00','1190.00','RON',NULL,NULL,'VALIDATED','42',0,0)",
+        "INSERT INTO invoices \
+         (id, company_id, contact_id, series, number, full_number, \
+          issue_date, due_date, subtotal_amount, vat_amount, total_amount, \
+          currency, exchange_rate, storno_of_invoice_id, status, \
+          payment_means_code, invoice_kind, created_at, updated_at) \
+         VALUES ('inv-1',?,'cust-1','F',1,'F-0001','2025-01-15','2025-02-15',\
+                 1000.00,190.00,1190.00,'RON',NULL,NULL,'VALIDATED','42','standard',0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -402,14 +185,25 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO invoice_line_items VALUES ('line-1','inv-1',1,'Serviciu consultanta','Serviciu IT','10.000000','ora','100.00','19','S','1000.00','190.00','1190.00',NULL,NULL,'service')",
+        "INSERT INTO invoice_line_items \
+         (id, invoice_id, position, name, description, quantity, unit, \
+          unit_price, vat_rate, vat_category, subtotal_amount, vat_amount, \
+          total_amount, cpv_code, art331_code, revenue_kind) \
+         VALUES ('line-1','inv-1',1,'Serviciu consultanta','Serviciu IT',\
+                 10.0,'ora',100.00,19,'S',1000.00,190.00,1190.00,NULL,NULL,'service')",
     )
     .execute(&pool)
     .await
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO invoices VALUES ('inv-2',?,'cust-1','F',2,'F-0002','2025-01-20','2025-02-20','500.00','0.00','500.00','RON',NULL,NULL,'VALIDATED','42',0,0)",
+        "INSERT INTO invoices \
+         (id, company_id, contact_id, series, number, full_number, \
+          issue_date, due_date, subtotal_amount, vat_amount, total_amount, \
+          currency, exchange_rate, storno_of_invoice_id, status, \
+          payment_means_code, invoice_kind, created_at, updated_at) \
+         VALUES ('inv-2',?,'cust-1','F',2,'F-0002','2025-01-20','2025-02-20',\
+                 500.00,0.00,500.00,'RON',NULL,NULL,'VALIDATED','42','standard',0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -417,7 +211,12 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO invoice_line_items VALUES ('line-2','inv-2',1,'Transport','Transport marfa','1.000000','buc','500.00','0','Z','500.00','0.00','500.00',NULL,NULL,'goods')",
+        "INSERT INTO invoice_line_items \
+         (id, invoice_id, position, name, description, quantity, unit, \
+          unit_price, vat_rate, vat_category, subtotal_amount, vat_amount, \
+          total_amount, cpv_code, art331_code, revenue_kind) \
+         VALUES ('line-2','inv-2',1,'Transport','Transport marfa',\
+                 1.0,'buc',500.00,0,'Z',500.00,0.00,500.00,NULL,NULL,'goods')",
     )
     .execute(&pool)
     .await
@@ -425,7 +224,13 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
 
     // ── Seed received invoices + VAT lines ────────────────────────────────────
     sqlx::query(
-        "INSERT INTO received_invoices VALUES ('recv-1',?,'DL-1',NULL,'RO11223342','FIRMA FURNIZOR SRL','FACT','001','595.00','500.00','95.00','RON',NULL,'2025-01-10','','NULL','APPROVED',0,0)",
+        "INSERT INTO received_invoices \
+         (id, company_id, anaf_download_id, anaf_index, issuer_cui, issuer_name, \
+          series, number, total_amount, net_amount, vat_amount, currency, exchange_rate, \
+          issue_date, xml_path, pdf_path, status, is_advance, downloaded_at, created_at) \
+         VALUES ('recv-1',?,'DL-1',NULL,'RO11223342','FIRMA FURNIZOR SRL',\
+                 'FACT','001',595.00,'500.00','95.00','RON',NULL,'2025-01-10',\
+                 '','','APPROVED',0,0,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -433,8 +238,11 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .unwrap();
 
     // VAT line for the purchase invoice so GL posting works
+    // Real column order (migration 0012): id, received_invoice_id, vat_rate, vat_category, base_amount, vat_amount
     sqlx::query(
-        "INSERT INTO received_invoice_vat_lines VALUES ('rvl-1','recv-1','S','19','500.00','95.00')",
+        "INSERT INTO received_invoice_vat_lines \
+         (id, received_invoice_id, vat_rate, vat_category, base_amount, vat_amount) \
+         VALUES ('rvl-1','recv-1','19','S','500.00','95.00')",
     )
     .execute(&pool)
     .await
@@ -442,7 +250,10 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
 
     // ── Seed payments ──────────────────────────────────────────────────────────
     sqlx::query(
-        "INSERT INTO payments VALUES ('pay-1','inv-1',?,'1190.00','RON','2025-01-20','transfer','REF-001',NULL,0,NULL,NULL)",
+        "INSERT INTO payments \
+         (id, invoice_id, company_id, amount, currency, paid_at, \
+          method, reference, notes, created_at) \
+         VALUES ('pay-1','inv-1',?,'1190.00','RON','2025-01-20','transfer','REF-001',NULL,0)",
     )
     .bind(&company.id)
     .execute(&pool)
@@ -481,8 +292,7 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
           acquisition_cost, life_months, depreciation_method, depreciation_pct, \
           active, created_at, updated_at) \
          VALUES ('fa-1',?,'MF-001','213','Laptop Test','Corporala',\
-                 '0','',\
-                 '2024-01-01','2024-01-01',\
+                 '0','','2024-01-01','2024-01-01',\
                  '3000.00',36,'liniara','0.00',1,0,0)",
     )
     .bind(&company.id)
@@ -569,6 +379,64 @@ async fn saft_d406_validates_against_official_xsd() {
         "SAF-T D406 XML failed XSD validation. Errors:\n{}",
         result.errors.join("\n")
     );
+
+    // Best-effort DUK gate: run the bundled ANAF D406Validator on the same XML (ANAF business
+    // rules, beyond the XSD's structural checks). Skips gracefully when the bundled jre-min /
+    // D406Validator.jar aren't present (e.g. an unbundled checkout / CI).
+    {
+        use efactura_desktop_lib::anaf_decl::duk::{run_duk, DukProvider, DukRuntime};
+        use efactura_desktop_lib::anaf_decl::DeclKind;
+        use std::path::PathBuf;
+
+        let res = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
+        let java = res.join(if cfg!(windows) {
+            "jre-min/bin/java.exe"
+        } else {
+            "jre-min/bin/java"
+        });
+        let jar_dir = res.join("duk");
+
+        struct LocalBundle {
+            java: PathBuf,
+            jar_dir: PathBuf,
+        }
+        impl DukProvider for LocalBundle {
+            fn resolve(&self) -> Option<DukRuntime> {
+                if self.java.is_file()
+                    && self.jar_dir.join("DUKIntegrator.jar").is_file()
+                    && self.jar_dir.join("lib/D406Validator.jar").is_file()
+                {
+                    Some(DukRuntime {
+                        java: self.java.clone(),
+                        jar_dir: self.jar_dir.clone(),
+                    })
+                } else {
+                    None
+                }
+            }
+        }
+
+        let duk_tmp = std::env::temp_dir().join("saft_d406_duk_test.xml");
+        std::fs::write(&duk_tmp, xml.as_bytes()).expect("write DUK temp XML");
+        let outcome = run_duk(&LocalBundle { java, jar_dir }, DeclKind::D406, &duk_tmp)
+            .expect("run_duk must not fail");
+        let _ = std::fs::remove_file(&duk_tmp);
+        match outcome {
+            Some(o) => {
+                assert!(
+                    o.passed,
+                    "ANAF D406Validator reported errors on the generated D406:\n{}",
+                    o.errors
+                        .iter()
+                        .map(|e| format!("{e:?}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                eprintln!("DUK D406 VALIDATION PASSED");
+            }
+            None => eprintln!("SKIP DUK: bundled jre-min/D406Validator not present"),
+        }
+    }
 }
 
 // ── Phase 6 annual XSD test ────────────────────────────────────────────────────
