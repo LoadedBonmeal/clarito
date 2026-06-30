@@ -44,6 +44,60 @@ pub fn account_type_for_class(class: i64) -> &'static str {
     }
 }
 
+/// Per-entity (account / customer / supplier) opening & closing net balance in RON, debit-positive.
+/// Opening = Σ(debit−credit) for `transaction_date < date_from`; closing = through `date_to` (=
+/// opening + period movements). Mirrors the `trial_balance` pattern (db/gl.rs). `match_col` is a
+/// FIXED internal column name ("e.account_code" | "e.customer_id" | "e.supplier_id"), never user
+/// input — safe to interpolate. Grouped: one query per entity kind.
+async fn balance_map(
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    match_col: &str,
+    date_from: &str,
+    date_to: &str,
+) -> AppResult<std::collections::HashMap<String, (f64, f64)>> {
+    let sql = format!(
+        "SELECT {match_col} AS k, \
+           COALESCE(SUM(CASE WHEN j.transaction_date < ?2 \
+                             THEN CAST(e.debit AS REAL)-CAST(e.credit AS REAL) ELSE 0 END),0.0) AS opening_net, \
+           COALESCE(SUM(CAST(e.debit AS REAL)-CAST(e.credit AS REAL)),0.0) AS closing_net \
+         FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
+         WHERE j.company_id = ?1 AND j.transaction_date <= ?3 \
+           AND {match_col} IS NOT NULL AND {match_col} != '' \
+         GROUP BY {match_col}"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(company_id)
+        .bind(date_from)
+        .bind(date_to)
+        .fetch_all(pool)
+        .await?;
+    let mut map = std::collections::HashMap::new();
+    for r in &rows {
+        let k: String = r.try_get("k").unwrap_or_default();
+        if k.is_empty() {
+            continue;
+        }
+        let opening: f64 = r.try_get("opening_net").unwrap_or(0.0);
+        let closing: f64 = r.try_get("closing_net").unwrap_or(0.0);
+        map.insert(k, (opening, closing));
+    }
+    Ok(map)
+}
+
+/// Emit a sign-based SAF-T balance: the positive magnitude on the side matching the net's sign,
+/// exactly ONE element (the schema's `xs:choice` — emitting both Debit and Credit is a DUK reject).
+/// `kind` is "Opening" or "Closing". Rounds to bani first so f64 noise near zero can't flip the side.
+fn write_signed_balance(w: &mut XmlWriter, kind: &str, net: f64) -> AppResult<()> {
+    let rounded = (net * 100.0).round() / 100.0;
+    let tag = if rounded >= 0.0 {
+        format!("{kind}DebitBalance")
+    } else {
+        format!("{kind}CreditBalance")
+    };
+    write_text_elem(w, &tag, &format!("{:.2}", rounded.abs()))
+}
+
 // ── Direction for tax-code lookup ─────────────────────────────────────────────
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TaxDirection {
@@ -331,8 +385,11 @@ pub async fn write_general_ledger_accounts(
     w: &mut XmlWriter,
     pool: &sqlx::SqlitePool,
     company_id: &str,
+    date_from: &str,
+    date_to: &str,
 ) -> AppResult<()> {
     start_elem(w, "GeneralLedgerAccounts")?;
+    let bal = balance_map(pool, company_id, "e.account_code", date_from, date_to).await?;
 
     let rows = sqlx::query(
         "SELECT account_code, account_name, account_class \
@@ -349,14 +406,15 @@ pub async fn write_general_ledger_accounts(
         let name: String = row.try_get("account_name").unwrap_or_default();
         let class: Option<i64> = row.try_get("account_class").unwrap_or(None);
         let acct_type = account_type_for_class(class.unwrap_or(4));
+        let (opening, closing) = bal.get(&code).copied().unwrap_or((0.0, 0.0));
 
         start_elem(w, "Account")?;
         write_text_elem(w, "AccountID", &esc(&trunc(&code, 70)))?;
         write_text_elem(w, "AccountDescription", &esc(&trunc(&name, 256)))?;
         write_text_elem(w, "AccountType", acct_type)?;
-        // xs:choice: emit Debit variant = 0.00
-        write_text_elem(w, "OpeningDebitBalance", "0.00")?;
-        write_text_elem(w, "ClosingDebitBalance", "0.00")?;
+        // xs:choice: real opening/closing balance, sign-based (Debit if net ≥ 0, else Credit).
+        write_signed_balance(w, "Opening", opening)?;
+        write_signed_balance(w, "Closing", closing)?;
         end_elem(w, "Account")?;
     }
 
@@ -370,8 +428,11 @@ pub async fn write_customers(
     w: &mut XmlWriter,
     pool: &sqlx::SqlitePool,
     company_id: &str,
+    date_from: &str,
+    date_to: &str,
 ) -> AppResult<()> {
     start_elem(w, "Customers")?;
+    let bal = balance_map(pool, company_id, "e.customer_id", date_from, date_to).await?;
 
     let rows = sqlx::query(
         "SELECT id, contact_type, cui, legal_name, address, city, county, country, iban \
@@ -431,9 +492,10 @@ pub async fn write_customers(
         end_elem(w, "CompanyStructure")?;
         write_text_elem(w, "CustomerID", &esc(&trunc(&canon_id, 35)))?;
         write_text_elem(w, "AccountID", "4111")?;
-        // xs:choice opening balance
-        write_text_elem(w, "OpeningDebitBalance", "0.00")?;
-        write_text_elem(w, "ClosingDebitBalance", "0.00")?;
+        // xs:choice: real per-partner balance, sign-based (Debit if net ≥ 0, else Credit).
+        let (opening, closing) = bal.get(&canon_id).copied().unwrap_or((0.0, 0.0));
+        write_signed_balance(w, "Opening", opening)?;
+        write_signed_balance(w, "Closing", closing)?;
         end_elem(w, "Customer")?;
     }
 
@@ -447,8 +509,11 @@ pub async fn write_suppliers(
     w: &mut XmlWriter,
     pool: &sqlx::SqlitePool,
     company_id: &str,
+    date_from: &str,
+    date_to: &str,
 ) -> AppResult<()> {
     start_elem(w, "Suppliers")?;
+    let bal = balance_map(pool, company_id, "e.supplier_id", date_from, date_to).await?;
 
     // Contacts that are SUPPLIER or BOTH
     let rows = sqlx::query(
@@ -511,8 +576,10 @@ pub async fn write_suppliers(
         end_elem(w, "CompanyStructure")?;
         write_text_elem(w, "SupplierID", &esc(&trunc(&canon_id, 35)))?;
         write_text_elem(w, "AccountID", "401")?;
-        write_text_elem(w, "OpeningCreditBalance", "0.00")?;
-        write_text_elem(w, "ClosingCreditBalance", "0.00")?;
+        // xs:choice: real per-partner balance, sign-based (Credit if net < 0, else Debit).
+        let (opening, closing) = bal.get(&canon_id).copied().unwrap_or((0.0, 0.0));
+        write_signed_balance(w, "Opening", opening)?;
+        write_signed_balance(w, "Closing", closing)?;
         end_elem(w, "Supplier")?;
     }
 
@@ -559,8 +626,10 @@ pub async fn write_suppliers(
         // SupplierID and RegistrationNumber use the same canonical "00"+CUI format
         write_text_elem(w, "SupplierID", &esc(&trunc(&issuer_canon_id, 35)))?;
         write_text_elem(w, "AccountID", "401")?;
-        write_text_elem(w, "OpeningCreditBalance", "0.00")?;
-        write_text_elem(w, "ClosingCreditBalance", "0.00")?;
+        // xs:choice: real per-partner balance, sign-based (Credit if net < 0, else Debit).
+        let (opening, closing) = bal.get(&issuer_canon_id).copied().unwrap_or((0.0, 0.0));
+        write_signed_balance(w, "Opening", opening)?;
+        write_signed_balance(w, "Closing", closing)?;
         end_elem(w, "Supplier")?;
     }
 
@@ -1059,7 +1128,7 @@ pub async fn write_master_files(
     start_elem(w, "MasterFiles")?;
 
     // GeneralLedgerAccounts and Assets are POPULATED in both L and A profiles.
-    write_general_ledger_accounts(w, pool, &company.id).await?;
+    write_general_ledger_accounts(w, pool, &company.id, date_from, date_to).await?;
 
     if is_annual {
         // A-profile: Customers, Suppliers, TaxTable, UOMTable, Products are
@@ -1082,8 +1151,8 @@ pub async fn write_master_files(
         end_elem(w, "Owners")?;
     } else {
         // L-profile: all MasterFiles sections populated normally.
-        write_customers(w, pool, &company.id).await?;
-        write_suppliers(w, pool, &company.id).await?;
+        write_customers(w, pool, &company.id, date_from, date_to).await?;
+        write_suppliers(w, pool, &company.id, date_from, date_to).await?;
         write_tax_table(w, pool, &company.id, date_from, date_to).await?;
         write_uom_table(w, pool, &company.id).await?;
         write_empty_analysis_type_table(w)?;
@@ -1250,5 +1319,88 @@ mod tests {
         assert_eq!(uom_to_rec20("luna"), "MON");
         assert_eq!(uom_to_rec20("zi"), "DAY");
         assert_eq!(uom_to_rec20("UNKNOWN_UOM"), "H87"); // default to piece
+    }
+
+    #[tokio::test]
+    async fn gl_account_balances_real_and_sign_based() {
+        // Real opening/closing balances (replacing the old hardcoded "0.00"), variant chosen by the
+        // ACTUAL net sign: a receivable (4111) → Debit, a payable (401) → Credit, and a pre-period
+        // bank entry → a non-zero OpeningDebitBalance carried from before period_from.
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id,cui,legal_name,address,city,county,country) \
+             VALUES ('co1','11111111','Test SRL','S','B','B','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (code, cls) in [("4111", 4), ("401", 4), ("5121", 5)] {
+            sqlx::query(
+                "INSERT INTO chart_of_accounts \
+                 (id, company_id, account_code, account_name, account_class, active, created_at, updated_at) \
+                 VALUES (?1,'co1',?2,?3,?4,1,0,0)",
+            )
+            .bind(format!("acc-{code}"))
+            .bind(code)
+            .bind(format!("Cont {code}"))
+            .bind(cls)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        async fn post(
+            pool: &sqlx::SqlitePool,
+            jid: &str,
+            date: &str,
+            acct: &str,
+            d: &str,
+            c: &str,
+        ) {
+            sqlx::query(
+                "INSERT INTO gl_journal (id, company_id, journal_id, journal_type, transaction_id, \
+                 transaction_date, source_type, source_id) \
+                 VALUES (?1,'co1','DIVERSE','DIVERSE',?1,?2,'TEST',?1)",
+            )
+            .bind(jid)
+            .bind(date)
+            .execute(pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO gl_entry (id, journal_pk, record_id, account_code, debit, credit) \
+                 VALUES (?1,?2,1,?3,?4,?5)",
+            )
+            .bind(format!("e-{jid}"))
+            .bind(jid)
+            .bind(acct)
+            .bind(d)
+            .bind(c)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+        post(&pool, "j-open", "2026-01-15", "5121", "200.00", "0.00").await; // before period
+        post(&pool, "j-cust", "2026-02-10", "4111", "1000.00", "0.00").await; // receivable (debit)
+        post(&pool, "j-supp", "2026-02-12", "401", "0.00", "500.00").await; // payable (credit)
+
+        let mut w = crate::anaf_decl::xml::new_writer().unwrap();
+        write_general_ledger_accounts(&mut w, &pool, "co1", "2026-02-01", "2026-02-28")
+            .await
+            .unwrap();
+        let xml = crate::anaf_decl::xml::finish(w).unwrap();
+
+        assert!(
+            xml.contains("<OpeningDebitBalance>200.00</OpeningDebitBalance>"),
+            "pre-period opening balance not carried into Opening: {xml}"
+        );
+        assert!(
+            xml.contains("<ClosingDebitBalance>1000.00</ClosingDebitBalance>"),
+            "receivable closing must be a Debit balance: {xml}"
+        );
+        assert!(
+            xml.contains("<ClosingCreditBalance>500.00</ClosingCreditBalance>"),
+            "payable closing must be a positive Credit balance (sign-based variant): {xml}"
+        );
     }
 }
