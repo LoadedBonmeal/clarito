@@ -109,6 +109,13 @@ pub fn generate_d300_xml(rows: &D300Rows, ver: &SchemaVersion) -> AppResult<Stri
 
     // Sales rows
     push_opt!(rows.r1_1, "R1_1");
+    // FIX 1 (audit wave 3): R3_1/R3_1_1 (loc livrare/prestare în afara RO — wired,
+    // unpopulated pending a sales-side goods/services flag) / R14_1 (export cat. G +
+    // zero-rated cat. Z, scutite CU drept, art. 294(1)) / R15_1 (cat. E, fără drept).
+    push_opt!(rows.r3_1, "R3_1");
+    push_opt!(rows.r3_1_1, "R3_1_1");
+    push_opt!(rows.r14_1, "R14_1");
+    push_opt!(rows.r15_1, "R15_1");
     push_opt!(rows.r9_1, "R9_1");
     push_opt!(rows.r9_2, "R9_2");
     push_opt!(rows.r10_1, "R10_1");

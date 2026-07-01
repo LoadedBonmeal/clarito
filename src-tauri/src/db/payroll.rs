@@ -739,10 +739,17 @@ pub async fn compute_payroll_run(
         let spor = sporuri_map.get(&e.id).copied().unwrap_or(Decimal::ZERO);
         let gross = dec(&e.gross_salary);
         let gross_eff = gross + spor;
+        // FIX 2 (audit wave 3, P1): the 4.300/4.600 RON ceiling test (OUG 156/2024 art.
+        // LXVI(1)(b)) must use TOTAL venit brut realizat = base salary + sporuri +
+        // assimilated income (incl. taxable diurnă excess), NOT the bare base `gross`.
+        // `extra_income` (payroll_extra_income, taxable diurnă excess per employee) is
+        // already fetched above (before this loop), so fold it in here.
+        let emp_extra = extra_income.get(&e.id).copied().unwrap_or(Decimal::ZERO);
+        let ceiling_test_gross = gross_eff + emp_extra;
         let non_taxable = suma_netaxabila(
             e.beneficiar_suma_netaxabila,
             &e.tip_contract,
-            gross,
+            ceiling_test_gross,
             year,
             month,
         );
@@ -1810,6 +1817,57 @@ mod tests {
             tb.balanced,
             "sporuri GL≡D112 golden journal trebuie să fie echilibrat"
         );
+    }
+
+    /// FIX 2 (audit wave 3, P1): the 4.300/4.600 RON ceiling test for suma_netaxabilă
+    /// (OUG 156/2024 art. LXVI(1)(b)) must use TOTAL venit brut realizat = bază + sporuri,
+    /// NOT the bare base salary. August 2026 (H2) ceiling = 4.600 RON, carve-out = 200 RON.
+    /// Angajat: bază 4500 (≤ 4600 alone) + spor 200 → gross_eff 4700 (> 4600).
+    /// Before the fix: ceiling test used bare `gross`=4500 ≤ 4600 → carve-out WRONGLY granted
+    /// (200 non-taxable). After the fix: ceiling test uses gross_eff=4700 > 4600 → carve-out
+    /// correctly DENIED (0 non-taxable) — verified indirectly via total_income_tax/total_net,
+    /// since PayrollRunResult does not expose non_taxable directly.
+    #[tokio::test]
+    async fn suma_netaxabila_ceiling_uses_gross_plus_sporuri_not_bare_base() {
+        let pool = setup().await;
+        let mut input = emp_input_f("1", "Ceiling Test", "4500");
+        input.tip_contract = Some("N".into());
+        input.beneficiar_suma_netaxabila = Some(true);
+        let emp = create(&pool, input).await.unwrap();
+
+        crate::db::payroll_sporuri::create(
+            &pool,
+            crate::db::payroll_sporuri::CreateSporInput {
+                company_id: "co1".into(),
+                employee_id: emp.id.clone(),
+                period: "2026-08".into(),
+                amount: "200".into(),
+                kind: None,
+                description: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let run = run_payroll(&pool, "co1", "2026-08-01", "2026-08-31")
+            .await
+            .unwrap();
+
+        // gross_eff = 4700; CAS 25%=1175, CASS 10%=470.
+        // non_taxable must be 0 (gross_eff 4700 > ceiling 4600) — if the bug were still present
+        // (ceiling tested against bare 4500 ≤ 4600), non_taxable would wrongly be 200, reducing
+        // the taxable base by 200 and the income tax by 10%×200=20 lei.
+        // Taxable base = 4700 - 1175 - 470 - 0(non_taxable) - 0(personal_deduction) = 3055.
+        // Income tax = 10% × 3055 = 305.50, rounded to 306.00 per compute_payroll's rounding.
+        assert_eq!(run.total_gross, "4700.00");
+        assert_eq!(run.total_cas, "1175.00");
+        assert_eq!(run.total_cass, "470.00");
+        assert_eq!(
+            run.total_income_tax, "306.00",
+            "carve-out must be DENIED (0 non-taxable) because gross_eff 4700 > ceiling 4600 — \
+             if this is 286.00 instead, the ceiling test is still using bare base gross (bug)"
+        );
+        assert_eq!(run.total_net, "2749.00");
     }
 
     /// RETINERE-1: angajat net 2925 (brut 5000 = 4000+1000 spor), poprire 800.

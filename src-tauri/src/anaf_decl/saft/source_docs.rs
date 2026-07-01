@@ -709,8 +709,18 @@ pub async fn write_payments(
     date_from: &str,
     date_to: &str,
 ) -> AppResult<()> {
+    // FIX 3 (audit wave 3, P1): join the invoice's currency + exchange_rate (and the
+    // payment's own exchange_rate override) so the RON amount here matches EXACTLY what
+    // db::gl.rs's post_payment posts to the GL for the same payment (gl.rs ~3438-3463:
+    // "Use the INVOICE currency ... not the payment row's"; pay_fx = payment.exchange_rate,
+    // falling back to the invoice's rate). Before this fix, `p.currency` (which is NOT
+    // necessarily synced with the invoice) was used together with `None` for the rate,
+    // silently treating any foreign-currency amount as if it were already RON — causing
+    // D406 Payments to disagree with the GL section for foreign-currency invoices.
     let pay_rows = sqlx::query(
-        "SELECT p.id, p.invoice_id, p.amount, p.currency, p.paid_at, p.method, p.reference, \
+        "SELECT p.id, p.invoice_id, p.amount, p.paid_at, p.method, p.reference, \
+                p.exchange_rate AS pay_rate, \
+                COALESCE(i.currency, 'RON') AS inv_currency, i.exchange_rate AS inv_rate, \
                 COALESCE(c.id, '') AS contact_id, \
                 COALESCE(c.cui, '') AS contact_cui, \
                 COALESCE(c.city, '') AS contact_city, \
@@ -728,19 +738,26 @@ pub async fn write_payments(
     .fetch_all(pool)
     .await?;
 
+    // Compute the same "cash_ron" gl.rs uses for the bank-side leg of a payment: convert
+    // at the payment's own rate when present, else fall back to the invoice's rate.
+    let payment_cash_ron = |row: &sqlx::sqlite::SqliteRow| -> Decimal {
+        let amount = dec(&row
+            .try_get::<String, _>("amount")
+            .unwrap_or_else(|_| "0".to_string()));
+        let currency: String = row
+            .try_get("inv_currency")
+            .unwrap_or_else(|_| "RON".to_string());
+        let inv_fx = parse_rate(row.try_get::<Option<f64>, _>("inv_rate").unwrap_or(None));
+        let pay_fx = parse_rate(row.try_get::<Option<f64>, _>("pay_rate").unwrap_or(None)).or(inv_fx);
+        amount_to_ron(amount, &currency, pay_fx)
+    };
+
     let count = pay_rows.len();
     let mut total_debit = Decimal::ZERO;
     let mut total_credit = Decimal::ZERO;
 
     for row in &pay_rows {
-        let amount = dec(&row
-            .try_get::<String, _>("amount")
-            .unwrap_or_else(|_| "0".to_string()));
-        let currency: String = row
-            .try_get("currency")
-            .unwrap_or_else(|_| "RON".to_string());
-        // Payments are already in RON or local currency; convert if needed
-        let amount_ron = amount_to_ron(amount, &currency, None); // no FX for payments (stored net)
+        let amount_ron = payment_cash_ron(row);
         total_debit += amount_ron;
         total_credit += amount_ron;
     }
@@ -752,13 +769,7 @@ pub async fn write_payments(
 
     for row in &pay_rows {
         let id: String = row.try_get("id").map_err(AppError::Database)?;
-        let amount = dec(&row
-            .try_get::<String, _>("amount")
-            .unwrap_or_else(|_| "0".to_string()));
-        let currency: String = row
-            .try_get("currency")
-            .unwrap_or_else(|_| "RON".to_string());
-        let amount_ron = amount_to_ron(amount, &currency, None);
+        let amount_ron = payment_cash_ron(row);
         let paid_at: String = row.try_get("paid_at").map_err(AppError::Database)?;
         let method: String = row
             .try_get("method")

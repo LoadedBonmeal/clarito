@@ -22,7 +22,9 @@
 //! | S        | 11%      | R10_1      | R10_2      | Cotă redusă 11%, DUK margin 8–10%         |
 //! | S        | 9%       | R11_1      | R11_2      | Cotă redusă 9% (from 2026), DUK 8–10%     |
 //! | S        | 19%/5%   | R16_1      | R16_2      | Regularizări cote vechi (Wave 8)           |
-//! | Z/K/E    | 0%       | R1_1       | —          | Scutite art.294 (intra-EU / export)        |
+//! | K        | 0%       | R1_1       | —          | Livrări intracom. scutite art.294(2)(a,d)  |
+//! | G / Z    | 0%       | R14_1      | —          | Export + alte scutite CU drept (art.294(1))|
+//! | E        | 0%       | R15_1      | —          | Scutite FĂRĂ drept de deducere             |
 //! | AE       | 21%      | R12_1_1    | R12_1_2    | Beneficiar taxare inversă 21%              |
 //! | AE       | 11%      | R12_2_1    | R12_2_2    | Beneficiar taxare inversă 11%              |
 //! | AE (Σ)   | —        | R12_1      | R12_2      | Sum of all AE sub-rows (parents)           |
@@ -126,8 +128,37 @@ pub struct D300Rows {
     pub total_plata_a: i64,   // IntNeg18SType
 
     // ── Sales rows (TVA colectată) ────────────────────────────────────────────
-    /// R1_1 — scutite art.294 (livrări intracomunitare / export / Z / K / E)
+    /// R1_1 — livrări intracomunitare de bunuri, scutite art.294 alin.(2) lit.a)/d)
+    ///   (structura D300 v12 rd.1 — ONLY these, per the official row text).
+    ///   Populated from category K (intra-EU delivery — `deduceVatCategory` assigns K
+    ///   exactly when the buyer country is in the EU). See the FIX 1 (audit wave 3)
+    ///   verification notes in `map_to_rows` for the K goods-vs-services limitation.
     pub r1_1: Option<i64>,
+    /// R3_1 — livrări/prestări cu locul livrării/prestării în afara României (UE sau
+    ///   non-UE) + livrări intracomunitare scutite art.294(2)(b)/(c) (rd.3), din care:
+    ///   R3_1_1 (rd.3.1) — prestări de servicii intracomunitare care nu beneficiază de
+    ///   scutire în statul membru în care taxa este datorată (corelat D390).
+    ///   NOT populated today: sales-side K SERVICES belong here, but the sales grouping
+    ///   (commands/declarations.rs) does not carry `revenue_kind`/`intra_eu_kind` for
+    ///   sales groups, so K services cannot be told apart from K goods at this layer.
+    ///   Wired into the emitter/control-sum so only the accumulation is missing.
+    pub r3_1: Option<i64>,
+    pub r3_1_1: Option<i64>,
+    /// R14_1 — livrări scutite CU drept de deducere, altele decât cele de la rd.1-3
+    ///   (structura D300 v12 rd.14). NOTE: the structura PDF misprints "fără drept"
+    ///   here, but ANAF's own D300Pdf.jar form label reads "scutite cu drept de
+    ///   deducere, altele decat cele de la rd. 1-3" and rd.14's sub-rows 14.1/14.2
+    ///   (art. 294(5), not in the v12 XSD) are explicitly "cu drept de deducere".
+    ///   Populated from category G (export extra-UE, art. 294(1) — the place of supply
+    ///   of an RO-departure export IS Romania per art. 275(1)(a), so exports belong
+    ///   here, NOT on rd.3) and category Z (zero-rated with deduction right — never
+    ///   auto-deduced; manual/import only).
+    pub r14_1: Option<i64>,
+    /// R15_1 — livrări scutite FĂRĂ drept de deducere (structura D300 v12 rd.15).
+    ///   Populated from category E (domestic exempt without deduction right;
+    ///   `deduceVatCategory` assigns E for a VAT-payer seller with a domestic
+    ///   0%-rate line — matches VATEX-EU-132 "Scutire fără drept de deducere").
+    pub r15_1: Option<i64>,
     /// R9_1 / R9_2 — livrări taxabile cotă 21% (standard)
     pub r9_1: Option<i64>,
     pub r9_2: Option<i64>,
@@ -442,16 +473,71 @@ pub fn map_to_rows(
 
     // ── Sales row accumulation ────────────────────────────────────────────────
 
-    // R1_1 — scutite art.294: livrări intracomunitare + export
-    //   category Z (zero-rated intra-EU), K (intra-community delivery on sale side),
-    //   E (exempt without right of deduction / export scutit)
+    // FIX 1 (audit wave 3, VERIFY-FIRST) — sales-side exempt-row split.
+    //
+    //   Previously R1_1 absorbed ALL of Z/K/E and category G (exports) was accumulated
+    //   NOWHERE (silently dropped from the whole declaration — the P1 finding).
+    //
+    //   Verified row semantics (structura_D300_v12.pdf poz. 27/29/30/61/64 + the form
+    //   labels embedded in ANAF's own D300Pdf.jar + the v12 XSD attribute list):
+    //     rd.1  (R1_1)  = ONLY "Livrări intracomunitare de bunuri, scutite conform
+    //                     art. 294 alin.(2) lit.a) şi d)".
+    //     rd.3  (R3_1)  = livrări/prestări cu locul livrării/prestării în afara României
+    //                     + livrări intracom. scutite art.294(2) lit.b)/c), din care
+    //                     rd.3.1 (R3_1_1) = prestări de servicii intracomunitare
+    //                     neimpozabile în RO (corelat D390).
+    //     rd.14 (R14_1) = "Livrari... scutite CU drept de deducere, altele decat cele
+    //                     de la rd. 1-3" (D300Pdf.jar label; the structura PDF misprints
+    //                     "fără" but its own sub-rows 14.1/14.2 = art.294(5) "cu drept").
+    //                     → exporturi (art. 294(1)) + alte scutiri cu drept.
+    //     rd.15 (R15_1) = "Livrări... scutite fără drept de deducere".
+    //
+    //   Category mapping (per `deduceVatCategory` in LineItemsEditor.tsx + UBL BIZ-12):
+    //     K (buyer in EU, intra-EU delivery)        → R1_1
+    //     G (buyer non-EU → export; place of supply = RO per art. 275(1)(a),
+    //        exempt per art. 294(1), NOT an "outside-RO place of supply" op) → R14_1
+    //     Z (zero-rated WITH deduction right; never auto-deduced, manual/import only;
+    //        not an intra-EU delivery, so it does not belong on rd.1)        → R14_1
+    //     E (domestic exempt WITHOUT deduction right, VATEX-EU-132)          → R15_1
+    //
+    //   NOTE — K goods-vs-services on the SALES side: `revenue_kind` DOES distinguish
+    //   goods/services on `invoice_line_items` (migration 0028), but it is NOT threaded
+    //   into `D300Group`/the sales SQL in commands/declarations.rs (declarations.rs:1548
+    //   hardcodes intra_eu_kind=None for sales groups). So there is currently no reliable
+    //   signal to split sales-side K into goods (R1_1) vs services (R3_1/R3_1_1) —
+    //   ALL sales-side K is routed to R1_1 (goods, the default/common case) and
+    //   R3_1/R3_1_1 stay unpopulated (wired into the struct/emitter/control-sum only).
+    //   Threading revenue_kind into the sales grouping is the documented follow-up
+    //   (out of this wave's allowlist).
+
+    // R1_1 — livrări intracomunitare de bunuri scutite art.294(2)(a)/(d): category K.
     let mut r1_1_base = Decimal::ZERO;
     let mut _r1_1_vat = Decimal::ZERO; // VAT on exempt deliveries is always 0
     accumulate(
         &report.groups,
-        |g| matches!(g.vat_category.as_str(), "Z" | "K" | "E"),
+        |g| g.vat_category == "K",
         &mut r1_1_base,
         &mut _r1_1_vat,
+    );
+
+    // R14_1 — export (G, art. 294(1)) + zero-rated cu drept de deducere (Z).
+    let mut r14_1_base = Decimal::ZERO;
+    let mut _r14_1_vat = Decimal::ZERO; // base-only row, no VAT column in the XSD
+    accumulate(
+        &report.groups,
+        |g| matches!(g.vat_category.as_str(), "G" | "Z"),
+        &mut r14_1_base,
+        &mut _r14_1_vat,
+    );
+
+    // R15_1 — livrări scutite fără drept de deducere, category E.
+    let mut r15_1_base = Decimal::ZERO;
+    let mut _r15_1_vat = Decimal::ZERO; // base-only row, no VAT column in the XSD
+    accumulate(
+        &report.groups,
+        |g| g.vat_category == "E",
+        &mut r15_1_base,
+        &mut _r15_1_vat,
     );
 
     // R9_1 / R9_2 — standard rate 21%
@@ -665,10 +751,17 @@ pub fn map_to_rows(
     // R16_2 is the regularizări colectată for old rates (Wave 8).
     // R7_2 is the collected leg of intra-EU SERVICES (Wave 7)
     let r17_vat = r5_vat + r7_vat + r9_vat + r10_vat + r11_vat + r12_2_total + r16_2_dec;
-    // R17_1 = R1_1 + R5_1 + R7_1 + R9_1 + R10_1 + R11_1 + R12_1 + R13_1 + R16_1 + ...
-    // (structura D300 v12 rând 67 / OPANAF 174/2026; DUK hard-rule "calcul VAL(17)").
-    // R1_1 (livrări intracom. scutite, art.294) și R13_1 (taxare inversă vânzător, art.331) sunt
-    // bază-only (fără coloană TVA), deci intră DOAR în R17_1, nu și în R17_2.
+    // R17_1 = R1_1+R2_1+R3_1+R4_1+R5_1+R6_1+R7_1+R8_1+R9_1+R10_1+R11_1+R12_1+R14_1+R15_1+
+    //         R16_1+R13_1+R64_1+R65_1+R69_1+R70_1+R71_1
+    // (structura D300 v12 rând 67, versiunea 01.08.25; DUK hard-rule "calcul VAL(1719)";
+    // sub-rândurile rd.3.1/5.1/7.1/12.x/14.1/14.2 sunt EXCLUSE din total).
+    // R2/R4/R6/R8/R64/R65/R69/R70/R71 nu sunt populate în acest model (absente/N-A) → 0;
+    // R3_1 e momentan nepopulat (vezi nota K goods-vs-services de mai sus) → 0.
+    // R1_1, R14_1, R15_1 (livrări scutite, art.294) și R13_1 (taxare inversă vânzător,
+    // art.331) sunt bază-only (fără coloană TVA), deci intră DOAR în R17_1, nu și în R17_2.
+    // FIX 1 (audit wave 3): R14_1 (export G + zero-rated Z) și R15_1 (scutit fără drept
+    // ded., cat. E) erau omise anterior din total — G era complet dropped din declarație
+    // (P1 bug), iar Z/E erau vărsate greșit în R1_1.
     let r17_base = r1_1_base
         + r5_base
         + r7_base
@@ -677,6 +770,8 @@ pub fn map_to_rows(
         + r11_base
         + r12_1_total
         + r13_base
+        + r14_1_base
+        + r15_1_base
         + r16_1_dec;
 
     // R25 = R12 (DUK V_19/V_20 enforced equality)
@@ -768,6 +863,14 @@ pub fn map_to_rows(
     let opt_nonzero = |v: i64| if v != 0 { Some(v) } else { None };
 
     let r1_1_v = opt_nonzero(round_to_lei(r1_1_base));
+    // FIX 1 (audit wave 3): R14_1 (export G + zero-rated Z) and R15_1 (cat. E).
+    let r14_1_v = opt_nonzero(round_to_lei(r14_1_base));
+    let r15_1_v = opt_nonzero(round_to_lei(r15_1_base));
+    // R3_1/R3_1_1 — wired but not populated (K services indistinguishable at this
+    // layer; see the FIX 1 note above). Always None until revenue_kind is threaded
+    // into the sales grouping.
+    let r3_1_v: Option<i64> = None;
+    let r3_1_1_v: Option<i64> = None;
     let r5_1_v = opt_nonzero(round_to_lei(r5_base));
     let r5_2_v = opt_nonzero(round_to_lei(r5_vat));
     // R7 — intra-EU services collected (Wave 7)
@@ -836,13 +939,16 @@ pub fn map_to_rows(
     // D300Rows so they contribute 0 as well.
     // Wave 7: include R7_* and R20_* in the control sum.
     // Wave 8: include R16_* and R30_* in the control sum.
+    // Wave 3 audit FIX 1: include R3_1/R3_1_1/R14_1/R15_1 in the control sum
+    // (R3_1/R3_1_1 are always None/0 today but are included for completeness).
     let total_plata_a: i64 = [
-        r1_1_v, r5_1_v, r5_2_v, r7_1_v, r7_2_v, r7_1_1_v, r7_1_2_v, r9_1_v, r9_2_v, r10_1_v,
-        r10_2_v, r11_1_v, r11_2_v, r12_1_v, r12_2_v, r12_1_1_v, r12_1_2_v, r12_2_1_v, r12_2_2_v,
-        r13_1_v, r16_1_v, r16_2_v, r18_1_v, r18_2_v, r17_1_v, r17_2_v, r20_1_v, r20_2_v, r20_1_1_v,
-        r20_1_2_v, r22_1_v, r22_2_v, r23_1_v, r23_2_v, r25_1_v, r25_2_v, r25_1_1_v, r25_1_2_v,
-        r25_2_1_v, r25_2_2_v, r27_1_v, r27_2_v, r28_2_v, r30_1_v, r30_2_v, r31_2_v, r32_2_v,
-        r33_2_v, r34_2_v, r37_2_v, r40_2_v, r41_2_v, r42_2_v,
+        r1_1_v, r3_1_v, r3_1_1_v, r14_1_v, r15_1_v, r5_1_v, r5_2_v, r7_1_v, r7_2_v, r7_1_1_v,
+        r7_1_2_v,
+        r9_1_v, r9_2_v, r10_1_v, r10_2_v, r11_1_v, r11_2_v, r12_1_v, r12_2_v, r12_1_1_v,
+        r12_1_2_v, r12_2_1_v, r12_2_2_v, r13_1_v, r16_1_v, r16_2_v, r18_1_v, r18_2_v, r17_1_v,
+        r17_2_v, r20_1_v, r20_2_v, r20_1_1_v, r20_1_2_v, r22_1_v, r22_2_v, r23_1_v, r23_2_v,
+        r25_1_v, r25_2_v, r25_1_1_v, r25_1_2_v, r25_2_1_v, r25_2_2_v, r27_1_v, r27_2_v, r28_2_v,
+        r30_1_v, r30_2_v, r31_2_v, r32_2_v, r33_2_v, r34_2_v, r37_2_v, r40_2_v, r41_2_v, r42_2_v,
     ]
     .iter()
     .map(|o| o.unwrap_or(0))
@@ -890,6 +996,10 @@ pub fn map_to_rows(
 
         // sales
         r1_1: r1_1_v,
+        r3_1: r3_1_v,
+        r3_1_1: r3_1_1_v,
+        r14_1: r14_1_v,
+        r15_1: r15_1_v,
         r9_1: r9_1_v,
         r9_2: r9_2_v,
         r10_1: r10_1_v,
@@ -1310,10 +1420,10 @@ mod tests {
 
     #[test]
     fn intra_eu_categories_map_to_r1_and_r5() {
-        // Intra-EU delivery Z → R1_1 (sales, no VAT)
+        // Intra-EU delivery K → R1_1 (sales, no VAT; art. 294(2)(a)/(d))
         // Intra-EU acquisition K purchases → R5_1/R5_2 + R18 mirror
         let report = make_report(
-            vec![("0.00", "Z", "2000.00", "0.00")],
+            vec![("0.00", "K", "2000.00", "0.00")],
             vec![("0.21", "K", "1000.00", "210.00")],
         );
         let sub = make_submission();
@@ -1322,7 +1432,7 @@ mod tests {
 
         let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
 
-        assert_eq!(rows.r1_1, Some(2000), "R1_1 = 2000 (Z sales)");
+        assert_eq!(rows.r1_1, Some(2000), "R1_1 = 2000 (K sales, intra-EU)");
         assert_eq!(rows.r9_1, None, "R9_1 = None (no standard-rate sales)");
         assert_eq!(rows.r5_1, Some(1000), "R5_1 = 1000 (K purchases)");
         assert_eq!(rows.r5_2, Some(210), "R5_2 = 210 (K purchases VAT)");
@@ -1331,14 +1441,130 @@ mod tests {
     }
 
     #[test]
+    fn sales_k_maps_to_r1_1() {
+        // FIX 1 (audit wave 3): sales-side K (intra-EU delivery, buyer in EU per
+        // `deduceVatCategory`) must land on R1_1 (art.294(2)(a)/(d)) — goods default;
+        // K services would belong on rd.3/rd.3.1 but are indistinguishable at this
+        // layer (see the map_to_rows note), so ALL K goes to R1_1.
+        let report = make_report(vec![("0.00", "K", "3000.00", "0.00")], vec![]);
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
+
+        assert_eq!(rows.r1_1, Some(3000), "R1_1 = 3000 (K sales, intra-EU goods)");
+        assert_eq!(rows.r3_1, None, "R3_1 = None (unpopulated pending K-services flag)");
+        assert_eq!(rows.r14_1, None, "R14_1 = None (no G/Z lines)");
+        assert_eq!(rows.r15_1, None, "R15_1 = None (no E lines)");
+    }
+
+    #[test]
+    fn sales_g_maps_to_r14_1_export() {
+        // FIX 1 (audit wave 3, P1): category G (export outside EU, `deduceVatCategory`
+        // assigns G when buyer country is non-RO/non-EU) was previously accumulated
+        // NOWHERE — silently dropped from the whole declaration. Must now land on R14_1
+        // (rd.14 "scutite cu drept de deducere, altele decât cele de la rd.1-3" —
+        // exports art. 294(1); the place of supply of an RO-departure export IS Romania
+        // per art. 275(1)(a), so rd.3 does not apply).
+        let report = make_report(vec![("0.00", "G", "5000.00", "0.00")], vec![]);
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
+
+        assert_eq!(rows.r14_1, Some(5000), "R14_1 = 5000 (G export)");
+        assert_eq!(rows.r1_1, None, "R1_1 = None (G must not land on rd.1)");
+        assert_eq!(rows.r3_1, None, "R3_1 = None (G must not land on rd.3)");
+        assert_eq!(
+            rows.r17_1,
+            Some(5000),
+            "R17_1 must include R14_1 (was previously omitted, causing the bug)"
+        );
+    }
+
+    #[test]
+    fn sales_z_maps_to_r14_1_zero_rated() {
+        // FIX 1 (audit wave 3): category Z (zero-rated WITH deduction right — never
+        // auto-deduced by `deduceVatCategory`, only manual/import) was previously dumped
+        // into R1_1. rd.1 is strictly intra-EU goods art. 294(2)(a)/(d) (that's K), so Z
+        // must land on rd.14 ("alte scutite cu drept de deducere") to avoid corrupting
+        // the D300 rd.1 ↔ D390 livrări-intracomunitare cross-check.
+        let report = make_report(vec![("0.00", "Z", "700.00", "0.00")], vec![]);
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
+
+        assert_eq!(rows.r14_1, Some(700), "R14_1 = 700 (Z zero-rated)");
+        assert_eq!(rows.r1_1, None, "R1_1 = None (Z must no longer land on rd.1)");
+        assert_eq!(rows.r17_1, Some(700), "R17_1 includes R14_1");
+    }
+
+    #[test]
+    fn sales_e_maps_to_r15_1_exempt_no_deduction() {
+        // FIX 1 (audit wave 3): category E (domestic exempt without deduction right,
+        // VATEX-EU-132) was previously dumped into R1_1 alongside Z/K. Must now land
+        // on R15_1 (structura D300 v12 rd.15: "scutite fără drept de deducere").
+        let report = make_report(vec![("0.00", "E", "1200.00", "0.00")], vec![]);
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
+
+        assert_eq!(rows.r15_1, Some(1200), "R15_1 = 1200 (E exempt no-deduction)");
+        assert_eq!(rows.r1_1, None, "R1_1 = None (E must not land on rd.1)");
+        assert_eq!(rows.r14_1, None, "R14_1 = None (E is fără drept → rd.15, not rd.14)");
+        assert_eq!(
+            rows.r17_1,
+            Some(1200),
+            "R17_1 must include R15_1 (was previously mis-included via R1_1)"
+        );
+    }
+
+    #[test]
+    fn sales_z_k_g_e_all_categories_route_correctly_and_sum_in_r17() {
+        // Comprehensive routing + total-reconciliation test covering every category
+        // touched by FIX 1 in one declaration: K→R1_1, Z→R14_1, G→R14_1, E→R15_1.
+        let report = make_report(
+            vec![
+                ("0.00", "Z", "1000.00", "0.00"), // → R14_1
+                ("0.00", "K", "2000.00", "0.00"), // → R1_1
+                ("0.00", "G", "3000.00", "0.00"), // → R14_1
+                ("0.00", "E", "4000.00", "0.00"), // → R15_1
+            ],
+            vec![],
+        );
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
+
+        assert_eq!(rows.r1_1, Some(2000), "R1_1 = K(2000)");
+        assert_eq!(rows.r14_1, Some(4000), "R14_1 = Z(1000) + G(3000)");
+        assert_eq!(rows.r15_1, Some(4000), "R15_1 = E(4000)");
+        assert_eq!(rows.r3_1, None, "R3_1 = None (unpopulated pending K-services flag)");
+        assert_eq!(
+            rows.r17_1,
+            Some(10000),
+            "R17_1 = R1_1 + R14_1 + R15_1 = 2000+4000+4000 (nothing silently dropped)"
+        );
+        assert_eq!(rows.r17_2, None, "R17_2 = None (all base-only rows, no VAT)");
+    }
+
+    #[test]
     fn r17_1_total_includes_r1_and_r13() {
         // Regression for D300-01 (P0): R17_1 (TOTAL TAXĂ COLECTATĂ — bază) trebuie să includă
-        // R1_1 (livrări intracom. scutite, cat. Z, art. 294) și R13_1 (taxare inversă vânzător,
+        // R1_1 (livrări intracom. scutite, cat. K, art. 294) și R13_1 (taxare inversă vânzător,
         // cat. AE cu TVA 0, art. 331) pe lângă livrările taxabile — structura D300 v12 rând 67;
         // DUK hard-rule "calcul VAL(17)". Înainte de fix, R17_1 le omitea → fișier respins de DUK.
         let report = make_report(
             vec![
-                ("0.00", "Z", "2000.00", "0.00"), // → R1_1 (livrare intracom. scutită)
+                ("0.00", "K", "2000.00", "0.00"), // → R1_1 (livrare intracom. scutită)
                 ("0.00", "AE", "1500.00", "0.00"), // → R13_1 (taxare inversă vânzător)
                 ("0.21", "S", "1000.00", "210.00"), // → R9 (livrare taxabilă 21%)
             ],
@@ -1350,7 +1576,7 @@ mod tests {
 
         let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
 
-        assert_eq!(rows.r1_1, Some(2000), "R1_1 = 2000 (Z)");
+        assert_eq!(rows.r1_1, Some(2000), "R1_1 = 2000 (K)");
         assert_eq!(rows.r13_1, Some(1500), "R13_1 = 1500 (AE vânzător)");
         assert_eq!(rows.r9_1, Some(1000), "R9_1 = 1000 (S)");
         // R17_1 = R1_1 + R13_1 + livrările taxabile — NU doar rândurile taxabile.

@@ -14,7 +14,7 @@ use efactura_desktop_lib::anaf_decl::saft::generator::{
 };
 use efactura_desktop_lib::anaf_decl::validation::{validate_with_xsd, xmllint_available};
 use efactura_desktop_lib::db::companies::Company;
-use efactura_desktop_lib::db::gl::generate_gl_entries;
+use efactura_desktop_lib::db::gl::{generate_gl_entries, trial_balance};
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -530,6 +530,136 @@ async fn saft_d406_foreign_supplier_id_matches_gl_and_masterfiles() {
         );
     } else {
         eprintln!("SKIP xmllint check in foreign-supplier test: XSD or xmllint not available");
+    }
+}
+
+/// FIX 3 (audit wave 3, P1): D406 Payments must use the SAME FX conversion as GL for a
+/// foreign-currency invoice payment. Before the fix, `source_docs::write_payments` passed
+/// `None` for the rate (relying on the payment row's OWN `currency`, defaulting to 'RON',
+/// with no rate at all) — silently treating the raw EUR numeric amount as if it were RON.
+/// `db::gl::post_payment` (via the `cash_ron` computed at ~gl.rs:3448-3463) uses the
+/// PAYMENT's own `exchange_rate` (falling back to the INVOICE's rate) to convert the
+/// invoice's currency to RON for the bank-side (5124, foreign) leg. This test seeds a EUR
+/// invoice (rate 5.0000) + a payment with its OWN distinct rate (5.2000 — simulating FX
+/// movement between invoice and payment dates), posts GL, generates SAF-T, and asserts the
+/// Payments section's RON amount equals the GL's 5124 (foreign bank) debit for that same
+/// payment — NOT the raw EUR amount misinterpreted as RON.
+#[tokio::test]
+async fn saft_d406_payments_fx_matches_gl_for_foreign_currency_invoice() {
+    let company = test_company();
+    let pool = setup_test_pool(&company).await;
+
+    // A EUR invoice booked at rate 5.0000 (receivable = 200 EUR × 5.0 = 1000.00 RON).
+    sqlx::query(
+        "INSERT INTO invoices \
+         (id, company_id, contact_id, series, number, full_number, \
+          issue_date, due_date, subtotal_amount, vat_amount, total_amount, \
+          currency, exchange_rate, storno_of_invoice_id, status, \
+          payment_means_code, invoice_kind, created_at, updated_at) \
+         VALUES ('inv-eur-1',?,'cust-1','F',3,'F-0003','2025-01-05','2025-02-05',\
+                 200.00,0.00,200.00,'EUR',5.0,NULL,'VALIDATED','42','standard',0,0)",
+    )
+    .bind(&company.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO invoice_line_items \
+         (id, invoice_id, position, name, description, quantity, unit, \
+          unit_price, vat_rate, vat_category, subtotal_amount, vat_amount, \
+          total_amount, cpv_code, art331_code, revenue_kind) \
+         VALUES ('line-eur-1','inv-eur-1',1,'Consultanta export','Serviciu extern',\
+                 1.0,'buc',200.00,0,'G',200.00,0.00,200.00,NULL,NULL,'service')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The payment carries its OWN rate (5.2000, distinct from the invoice's 5.0000) — this is
+    // exactly the case gl.rs's `pay_fx` (falling back to `inv_fx`) models, and the case the
+    // pre-fix `None` in source_docs.rs completely ignored.
+    sqlx::query(
+        "INSERT INTO payments \
+         (id, invoice_id, company_id, amount, currency, paid_at, \
+          method, reference, notes, created_at, exchange_rate) \
+         VALUES ('pay-eur-1','inv-eur-1',?,'200.00','EUR','2025-01-25','transfer','REF-EUR-1',NULL,0,5.2)",
+    )
+    .bind(&company.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31", false)
+        .await
+        .expect("generate_gl_entries must not fail");
+
+    let xml = generate_saft_xml(&pool, &company, "2025-01-01", "2025-01-31")
+        .await
+        .expect("generate_saft_xml must not fail");
+
+    // Expected: 200 EUR × 5.2000 (payment's own rate) = 1040.00 RON — this is what gl.rs's
+    // `cash_ron` computes for the bank-side leg (foreign=true → account 5124).
+    const EXPECTED_PAYMENT_RON: &str = "1040.00";
+    // The pre-fix bug would have emitted "200.00" (raw EUR amount, unconverted).
+    const BUGGY_UNCONVERTED_RON: &str = "200.00";
+
+    // 1) SAF-T Payments section: find PaymentRefNo REF-EUR-1's PaymentLineAmount/Amount.
+    let payments_start = xml.find("<Payments>").expect("Payments section present");
+    let payments_section = &xml[payments_start..];
+    let ref_pos = payments_section
+        .find("REF-EUR-1")
+        .expect("payment REF-EUR-1 must be present in Payments section");
+    // The PaymentLineAmount/Amount follows PaymentRefNo within the same <Payment> block.
+    let after_ref = &payments_section[ref_pos..];
+    let amount_tag_start = after_ref.find("<Amount>").expect("Amount tag present after ref");
+    let amount_value_start = amount_tag_start + "<Amount>".len();
+    let amount_tag_end = after_ref[amount_value_start..]
+        .find("</Amount>")
+        .expect("closing Amount tag");
+    let saft_amount = &after_ref[amount_value_start..amount_value_start + amount_tag_end];
+
+    assert_ne!(
+        saft_amount, BUGGY_UNCONVERTED_RON,
+        "D406 Payments must NOT emit the raw EUR amount unconverted (pre-fix bug): {xml}"
+    );
+    assert_eq!(
+        saft_amount, EXPECTED_PAYMENT_RON,
+        "D406 Payments RON amount must equal 200 EUR × payment rate 5.2 = 1040.00: {xml}"
+    );
+
+    // 2) Cross-check against the GL: trial_balance for account 5124 (foreign bank, since this
+    // is a foreign-currency payment) must show the SAME closing_debit for the period — this is
+    // the actual bank-side RON amount gl.rs::post_payment posted for pay-eur-1.
+    let tb = trial_balance(&pool, &company.id, "2025-01-01", "2025-01-31")
+        .await
+        .expect("trial_balance must not fail");
+    let bal_5124 = tb
+        .rows
+        .iter()
+        .find(|r| r.account_code == "5124")
+        .map(|r| r.closing_debit.clone());
+    assert_eq!(
+        bal_5124.as_deref(),
+        Some(EXPECTED_PAYMENT_RON),
+        "GL account 5124 (foreign bank) closing debit must equal 1040.00 (same conversion as \
+         D406 Payments) — if these disagree, the FX-mismatch bug (FIX 3) has regressed"
+    );
+
+    // 3) XSD validation, if available.
+    let xsd_path = Path::new("tools/anaf/Ro_SAFT_Schema_v249_prod.xsd");
+    if xsd_path.exists() && xmllint_available() {
+        let tmp = std::env::temp_dir().join("saft_d406_payments_fx_test.xml");
+        std::fs::write(&tmp, xml.as_bytes()).expect("write temp XML");
+        let result = validate_with_xsd(xsd_path, &tmp).expect("validate_with_xsd must not fail");
+        let _ = std::fs::remove_file(&tmp);
+        assert!(
+            result.passed,
+            "SAF-T D406 XML (FX payments fixture) failed XSD validation. Errors:\n{}",
+            result.errors.join("\n")
+        );
+    } else {
+        eprintln!("SKIP xmllint check in FX-payments test: XSD or xmllint not available");
     }
 }
 

@@ -36,10 +36,28 @@ pub fn dividend_tax_rate(distribution_date: &str, interim_2025: bool) -> i64 {
 /// Termenul de plată/declarare a impozitului pe dividende (Cod fiscal art. 43(2)/97(7)/224(4)): 25 a
 /// lunii următoare celei în care s-a făcut PLATA; pentru dividende distribuite dar NEPLĂTITE până la
 /// finalul anului, 25 ianuarie a anului următor anului distribuirii. Întoarce ISO `YYYY-MM-DD`.
+///
+/// FIX 4 (audit wave 3, P2): art. 97(7) plafonează termenul la 25 ianuarie anul următor
+/// distribuirii — indiferent de CÂND se face efectiv plata ulterioară. Dacă plata are loc
+/// într-un an calendaristic ULTERIOR anului distribuirii (dividend distribuit dar neplătit la
+/// 31.12, apoi plătit mai târziu), termenul rămâne plafonat la 25 ianuarie (distribution_year+1)
+/// — NU se recalculează pe baza lunii plății efective (ceea ce ar amâna nelegal scadența).
 pub fn dividend_tax_deadline(distribution_date: &str, payment_date: Option<&str>) -> String {
     use chrono::Datelike;
+    let distribution_year = distribution_date
+        .get(0..4)
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(0);
+    let unpaid_by_year_end_deadline = format!("{:04}-01-25", distribution_year + 1);
+
     if let Some(pd) = payment_date.map(|s| s.trim()).filter(|s| !s.is_empty()) {
         if let Ok(d) = chrono::NaiveDate::parse_from_str(pd, "%Y-%m-%d") {
+            // Plata într-un an ULTERIOR distribuirii ⇒ dividendul era deja neplătit la 31.12 al
+            // anului distribuirii, deci termenul legal (25 ian. anul următor distribuirii) a
+            // trecut deja — plafonăm aici, nu-l "amânăm" pe baza lunii plății reale.
+            if d.year() > distribution_year {
+                return unpaid_by_year_end_deadline;
+            }
             let (y, m) = if d.month() == 12 {
                 (d.year() + 1, 1)
             } else {
@@ -48,11 +66,7 @@ pub fn dividend_tax_deadline(distribution_date: &str, payment_date: Option<&str>
             return format!("{y:04}-{m:02}-25");
         }
     }
-    let year = distribution_date
-        .get(0..4)
-        .and_then(|s| s.parse::<i32>().ok())
-        .unwrap_or(0);
-    format!("{:04}-01-25", year + 1)
+    unpaid_by_year_end_deadline
 }
 
 fn round2(d: Decimal) -> Decimal {
@@ -718,6 +732,43 @@ mod tests {
         // Distribuit dar neplătit → 25 ianuarie a anului următor anului distribuirii.
         assert_eq!(dividend_tax_deadline("2026-09-10", None), "2027-01-25");
         assert_eq!(dividend_tax_deadline("2026-09-10", Some("")), "2027-01-25");
+    }
+
+    /// FIX 4 (audit wave 3, P2): plata într-un an calendaristic ULTERIOR distribuirii trebuie
+    /// să rămână plafonată la 25 ianuarie (distribution_year+1) — art. 97(7) — NU amânată pe
+    /// baza lunii plății efective. Un dividend distribuit în 2025 și plătit abia în martie 2027
+    /// era deja restant la 25 ianuarie 2026; termenul NU devine 25 aprilie 2027.
+    #[test]
+    fn deadline_capped_at_25_jan_when_payment_crosses_into_a_later_year() {
+        // Distribuit 2025, plătit martie 2027 (2 ani mai târziu) → plafonat la 25 ian. 2026,
+        // NU 25 aprilie 2027 (ceea ce ar rezulta din "25 a lunii următoare plății" fără plafon).
+        assert_eq!(
+            dividend_tax_deadline("2025-06-15", Some("2027-03-10")),
+            "2026-01-25"
+        );
+        // Distribuit 2025, plătit ianuarie 2026 (imediat anul următor, dar TOT ulterior anului
+        // distribuirii) → tot plafonat la 25 ian. 2026 (nu 25 februarie 2026).
+        assert_eq!(
+            dividend_tax_deadline("2025-11-01", Some("2026-01-15")),
+            "2026-01-25"
+        );
+        // Distribuit 2026, plătit decembrie 2026 (SAME an ca distribuirea) → comportament
+        // existent, neschimbat: 25 ianuarie 2027 (25 a lunii următoare lui decembrie).
+        assert_eq!(
+            dividend_tax_deadline("2026-03-01", Some("2026-12-20")),
+            "2027-01-25"
+        );
+    }
+
+    /// FIX 4: cazul "distribuit dar neplătit la sfârșitul anului" (payment_date=None sau gol)
+    /// rămâne plafonat la 25 ianuarie anul următor distribuirii, indiferent de anul distribuirii.
+    #[test]
+    fn deadline_unpaid_by_year_end_always_25_jan_next_year() {
+        assert_eq!(dividend_tax_deadline("2025-01-01", None), "2026-01-25");
+        assert_eq!(dividend_tax_deadline("2025-01-01", Some("")), "2026-01-25");
+        assert_eq!(dividend_tax_deadline("2025-01-01", Some("   ")), "2026-01-25");
+        // An diferit — plafonul urmează anul distribuirii, nu anul curent.
+        assert_eq!(dividend_tax_deadline("2027-06-01", None), "2028-01-25");
     }
 
     #[tokio::test]

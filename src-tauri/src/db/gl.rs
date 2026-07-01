@@ -3949,17 +3949,35 @@ pub async fn post_vat_settlement(
 
     let mut entries: Vec<GlEntry> = Vec::new();
     let mut record_id: i64 = 1;
-    // D 4427 — zero the collected.
+    // D 4427 — zero the collected. In a storno-heavy month `collected` (credit-debit net) can be
+    // NEGATIVE — i.e. 4427 actually sits with a net DEBIT balance. A GL entry's debit/credit
+    // amounts must never be negative (OMFP 2634/2015 pct.58 lit.o); the sign must be expressed by
+    // WHICH side the amount sits on, not by a negative magnitude. FIX 5 (audit wave 3, P1): when
+    // `collected` < 0, flip to the CREDIT side using the absolute value (standard contra-entry
+    // convention) instead of debiting a negative amount — this also keeps the entry balanced
+    // (assert_balanced only checks Σdebit==Σcredit, it does not reject negative magnitudes, so
+    // this bug was silently passing that guard before).
     if !collected.is_zero() {
-        entries.push(mk(record_id, "4427", collected, Decimal::ZERO));
+        if collected > Decimal::ZERO {
+            entries.push(mk(record_id, "4427", collected, Decimal::ZERO));
+        } else {
+            entries.push(mk(record_id, "4427", Decimal::ZERO, -collected));
+        }
         record_id += 1;
     }
-    // C 4426 — zero the deductible.
+    // C 4426 — zero the deductible. Same storno-heavy-month risk as above, mirrored: a negative
+    // `deductible` means 4426 sits with a net CREDIT balance, so flip to the DEBIT side with the
+    // absolute value instead of crediting a negative amount.
     if !deductible.is_zero() {
-        entries.push(mk(record_id, "4426", Decimal::ZERO, deductible));
+        if deductible > Decimal::ZERO {
+            entries.push(mk(record_id, "4426", Decimal::ZERO, deductible));
+        } else {
+            entries.push(mk(record_id, "4426", -deductible, Decimal::ZERO));
+        }
         record_id += 1;
     }
-    // Difference → 4423 (de plată) or 4424 (de recuperat); never both.
+    // Difference → 4423 (de plată) or 4424 (de recuperat); never both. Already sign-safe: both
+    // branches post a non-negative magnitude (net_vat or -net_vat, whichever is positive here).
     if net_vat > Decimal::ZERO {
         entries.push(mk(record_id, "4423", Decimal::ZERO, net_vat));
     } else if net_vat < Decimal::ZERO {
@@ -8673,6 +8691,118 @@ mod tests {
         // No 4423/4424 movement.
         let (_, c4423) = account_balance(&pool, "co", "4423").await;
         assert_eq!(c4423, Decimal::ZERO);
+    }
+
+    /// FIX 5 (audit wave 3, P1): in a storno-heavy month, the running (credit-debit) balance of
+    /// 4427 (or 4426) can be NEGATIVE — post_vat_settlement must never book that negative value
+    /// directly as a debit/credit amount (invalid for SAF-T/accounting; magnitude must always be
+    /// ≥ 0, sign expressed by which side it sits on). Construct: a large original sale (VAT 1000)
+    /// issued+STORNED in a PRIOR month (December 2024, so this run's Jan-2025 window never
+    /// re-posts it) + its credit note (VALIDATED, storno_of=original, VAT -1000) issued in
+    /// January 2025 + one small real January sale (VAT 100). Net collected for January =
+    /// -1000 (credit note) + 100 (small sale) = -900 (negative — the storno-heavy scenario).
+    #[tokio::test]
+    async fn vat_settlement_storno_heavy_month_never_posts_negative_debit_credit() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co").await;
+        insert_contact(&pool, "co", "ct", "CUI999").await;
+
+        // Original large sale, issued AND already STORNED in December 2024 (prior period —
+        // outside this run's window, so it is NOT re-posted by this generate_gl_entries call).
+        insert_invoice_on(
+            &pool,
+            "co",
+            "inv-orig",
+            "ct",
+            "STORNED",
+            "5000",
+            "1000",
+            "6000",
+            None,
+            "2024-12-10",
+        )
+        .await;
+        // Its credit note (negative stored lines), issued in January 2025 — the only leg this
+        // run actually posts for that pair.
+        insert_invoice_on(
+            &pool,
+            "co",
+            "inv-storno",
+            "ct",
+            "VALIDATED",
+            "-5000",
+            "-1000",
+            "-6000",
+            Some("inv-orig"),
+            "2025-01-10",
+        )
+        .await;
+        // A small real January sale so the period isn't degenerate (net collected != 0 either way).
+        insert_invoice_on(
+            &pool, "co", "inv-small", "ct", "VALIDATED", "500", "100", "600", None, "2025-01-20",
+        )
+        .await;
+
+        generate_gl_entries(&pool, "co", "2025-01-01", "2025-01-31", false)
+            .await
+            .unwrap();
+
+        let r = post_vat_settlement(&pool, "co", "2025-01-01", "2025-01-31")
+            .await
+            .unwrap();
+        assert!(r.posted, "there is exigible VAT activity to close");
+        // Net collected in January: -1000 (credit note) + 100 (small sale) = -900.
+        assert_eq!(
+            dec(&r.collected),
+            dec("-900"),
+            "collected must reflect the storno-heavy negative net (sanity check on the fixture)"
+        );
+        assert_eq!(dec(&r.deductible), dec("0"));
+        // net_vat = collected - deductible = -900 → de_recuperat = 900, de_plata = 0.
+        assert_eq!(dec(&r.de_recuperat), dec("900"));
+        assert_eq!(dec(&r.de_plata), dec("0"));
+
+        // ── The actual FIX 5 assertion: no negative debit/credit anywhere in the posted journal ──
+        // source_id for post_vat_settlement is "{period_from}_{period_to}" (see the function body).
+        let jpk = get_journal_pk(&pool, "2025-01-01_2025-01-31").await;
+        let rows = sqlx::query("SELECT account_code, debit, credit FROM gl_entry WHERE journal_pk=?1")
+            .bind(&jpk)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert!(!rows.is_empty(), "VAT_CLOSE journal must have entries");
+        let mut total_debit = Decimal::ZERO;
+        let mut total_credit = Decimal::ZERO;
+        for row in &rows {
+            let account_code: String = row.try_get("account_code").unwrap();
+            let debit_s: String = row.try_get("debit").unwrap();
+            let credit_s: String = row.try_get("credit").unwrap();
+            let debit = dec(&debit_s);
+            let credit = dec(&credit_s);
+            assert!(
+                debit >= Decimal::ZERO,
+                "account {account_code}: debit must never be negative, got {debit}"
+            );
+            assert!(
+                credit >= Decimal::ZERO,
+                "account {account_code}: credit must never be negative, got {credit}"
+            );
+            total_debit += debit;
+            total_credit += credit;
+        }
+        assert_eq!(
+            total_debit, total_credit,
+            "VAT_CLOSE journal must stay balanced (Σdebit == Σcredit) even with the sign fix"
+        );
+
+        // 4427 must have been credited (not debited) with the absolute value 900, since the
+        // negative `collected` (-900) means 4427 actually sits with a net DEBIT balance to zero.
+        let (d4427, c4427) = account_balance(&pool, "co", "4427").await;
+        assert_eq!(
+            c4427 - d4427,
+            Decimal::ZERO,
+            "4427 must be closed to zero even when collected was negative"
+        );
     }
 
     // ── Balanța de verificare (Phase 2.4) ────────────────────────────────────

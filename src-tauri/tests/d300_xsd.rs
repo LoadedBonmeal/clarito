@@ -945,6 +945,155 @@ fn d300_wave7_intra_eu_services() {
     }
 }
 
+// ── Wave 3 (audit) scenario — FIX 1: Z/K/G/E sales routing ─────────────────────
+
+/// WAVE 3 AUDIT FIX 1: sales with categories Z, K, G, E in the same period.
+///
+/// Prior bug: Z/K/E were all dumped into R1_1, and G was accumulated NOWHERE
+/// (silently dropped from the whole declaration — a P1 finding). This scenario
+/// exercises the corrected routing end-to-end (XSD + DUK):
+///   - K (2000, intra-EU)  → R1_1 = 2000 (rd.1 = ONLY art. 294(2)(a)/(d))
+///   - Z (1000) + G (3000) → R14_1 = 4000 (rd.14 scutite CU drept de deducere:
+///                           export art. 294(1) + zero-rated; G previously vanished)
+///   - E (4000, exempt)    → R15_1 = 4000 (rd.15 fără drept; previously wrongly in R1_1)
+///   - a 21% S sale (1000/210) so the totals aren't degenerate
+/// Must pass XSD AND DUK ("Validare fara erori").
+#[test]
+fn d300_wave3_audit_fix1_zkge_sales_routing() {
+    let xsd_path = std::path::Path::new("tools/anaf/sample_d300_v12.xml");
+    if !xsd_path.exists() {
+        eprintln!("SKIP: XSD not found");
+        return;
+    }
+    if !efactura_desktop_lib::anaf_decl::validation::xmllint_available() {
+        eprintln!("SKIP: xmllint not available");
+        return;
+    }
+
+    let period = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("date");
+    let ver = resolve(DeclKind::D300, period).expect("version");
+
+    let report = D300Report {
+        company_cui: "RO12345674".to_string(),
+        period_from: "2026-01-01".to_string(),
+        period_to: "2026-01-31".to_string(),
+        groups: vec![
+            D300Group {
+                vat_rate: "0.00".to_string(),
+                vat_category: "Z".to_string(),
+                base: "1000.00".to_string(),
+                vat: "0.00".to_string(),
+                intra_eu_kind: None,
+            },
+            D300Group {
+                vat_rate: "0.00".to_string(),
+                vat_category: "K".to_string(),
+                base: "2000.00".to_string(),
+                vat: "0.00".to_string(),
+                intra_eu_kind: None,
+            },
+            D300Group {
+                vat_rate: "0.00".to_string(),
+                vat_category: "G".to_string(),
+                base: "3000.00".to_string(),
+                vat: "0.00".to_string(),
+                intra_eu_kind: None,
+            },
+            D300Group {
+                vat_rate: "0.00".to_string(),
+                vat_category: "E".to_string(),
+                base: "4000.00".to_string(),
+                vat: "0.00".to_string(),
+                intra_eu_kind: None,
+            },
+            D300Group {
+                vat_rate: "0.21".to_string(),
+                vat_category: "S".to_string(),
+                base: "1000.00".to_string(),
+                vat: "210.00".to_string(),
+                intra_eu_kind: None,
+            },
+        ],
+        total_base: "11000.00".to_string(),
+        total_vat: "210.00".to_string(),
+        invoice_count: 5,
+        purchase_groups: vec![],
+        total_deductible_base: "0.00".to_string(),
+        total_deductible_vat: "0.00".to_string(),
+        purchase_invoice_count: 0,
+        purchase_unparsed_count: 0,
+        net_vat: "210.00".to_string(),
+        reg_colectata_baza: "0.00".to_string(),
+        reg_colectata_tva: "0.00".to_string(),
+        reg_dedusa_baza: "0.00".to_string(),
+        reg_dedusa_tva: "0.00".to_string(),
+        cash_vat_memo: Default::default(),
+    };
+
+    let rows =
+        map_to_rows(&report, &test_submission(), &test_company(), period, 0).expect("map_to_rows");
+
+    assert_eq!(rows.r1_1, Some(2000), "Wave3 FIX1: R1_1 = K(2000) only");
+    assert_eq!(
+        rows.r14_1,
+        Some(4000),
+        "Wave3 FIX1: R14_1 = Z(1000)+G(3000), G no longer dropped"
+    );
+    assert_eq!(rows.r15_1, Some(4000), "Wave3 FIX1: R15_1 = E(4000)");
+    assert_eq!(rows.r9_1, Some(1000), "Wave3 FIX1: R9_1 = S(1000)");
+    assert_eq!(
+        rows.r3_1, None,
+        "Wave3 FIX1: R3_1 unpopulated (pending sales-side K goods/services flag)"
+    );
+    assert_eq!(
+        rows.r17_1,
+        Some(11000),
+        "Wave3 FIX1: R17_1 = R1_1+R14_1+R15_1+R9_1 = 2000+4000+4000+1000 (nothing dropped)"
+    );
+    assert_eq!(rows.r17_2, Some(210), "Wave3 FIX1: R17_2 = 210 (only S has VAT)");
+
+    let xml = generate_d300_xml(&rows, &ver).expect("generate");
+    eprintln!("Wave3 FIX1 ZKGE XML:\n{xml}");
+
+    if let Ok(dump_dir) = std::env::var("EFACTURA_DUMP_DIR") {
+        let path = std::path::Path::new(&dump_dir).join("d300_wave3_fix1_zkge.xml");
+        std::fs::write(&path, xml.as_bytes()).expect("write dump");
+        eprintln!("DUMP: wave3 fix1 zkge → {:?}", path);
+    }
+
+    assert!(xml.contains("R1_1=\"2000\""), "XML must have R1_1=2000");
+    assert!(xml.contains("R14_1=\"4000\""), "XML must have R14_1=4000");
+    assert!(xml.contains("R15_1=\"4000\""), "XML must have R15_1=4000");
+    assert!(
+        !xml.contains("R3_1="),
+        "XML must NOT have R3_1 (unpopulated pending K-services flag)"
+    );
+
+    let tmp = std::env::temp_dir().join("d300_wave3_fix1_zkge.xml");
+    std::fs::write(&tmp, xml.as_bytes()).expect("write tmp");
+    let xsd_result = efactura_desktop_lib::anaf_decl::validation::validate_with_xsd(xsd_path, &tmp)
+        .expect("xmllint");
+    if !xsd_result.passed {
+        for e in &xsd_result.errors {
+            eprintln!("XSD error: {e}");
+        }
+    }
+    assert!(
+        xsd_result.passed,
+        "Wave3 FIX1 ZKGE must pass XSD: {:?}",
+        xsd_result.errors
+    );
+    let _ = std::fs::remove_file(&tmp);
+
+    match run_duk(&xml, "wave3_fix1_zkge") {
+        Ok(passed) => assert!(
+            passed,
+            "Wave3 FIX1 ZKGE: DUK must say 'Validare fara erori'"
+        ),
+        Err(e) => eprintln!("SKIP DUK Wave3 FIX1 ZKGE: {e}"),
+    }
+}
+
 // ── Wave 8 scenarios — old-rate regularizări (R16/R30) ─────────────────────────
 
 /// WAVE 8 SCENARIO: 19% S SALE → R16_1/R16_2 (regularizări colectată).
