@@ -53,15 +53,25 @@ fn dec(s: &str) -> Decimal {
 /// Build match suggestions for one bank transaction (no DB writes).
 ///
 /// `txn_amount` is the signed transaction amount (positive = incoming, negative = outgoing).
+/// `txn_currency` is the transaction's currency; empty/blank is treated as RON (the same
+/// COALESCE(NULLIF(TRIM(...)),'RON') default the payment code applies to invoice currency).
+/// Wave 4 audit: candidates must be in the SAME currency — a EUR 500 bank transaction must
+/// never suggest a RON 500 invoice just because the numeric amounts collide.
 pub async fn suggest_matches(
     pool: &SqlitePool,
     company_id: &str,
     txn_amount: &Decimal,
+    txn_currency: &str,
     txn_reference: Option<&str>,
     counterparty_cui: Option<&str>,
 ) -> AppResult<Vec<MatchSuggestion>> {
     let abs_amount = txn_amount.abs();
     let threshold = Decimal::new(1, 2); // 0.01 amount match tolerance
+    let txn_cur = {
+        let t = txn_currency.trim();
+        if t.is_empty() { "RON" } else { t }
+    }
+    .to_uppercase();
 
     let mut suggestions: Vec<MatchSuggestion> = Vec::new();
 
@@ -69,6 +79,7 @@ pub async fn suggest_matches(
         // ── Incoming: match against OPEN issued invoices (4111) ──────────────
         let inv_rows = sqlx::query(
             "SELECT i.id, i.full_number, i.total_amount, \
+                    COALESCE(NULLIF(TRIM(i.currency),''),'RON') AS currency, \
                     COALESCE(c.legal_name,'') AS partner_name, \
                     COALESCE(c.cui,'')        AS partner_cui \
              FROM invoices i \
@@ -112,6 +123,14 @@ pub async fn suggest_matches(
                 .unwrap_or_else(|_| "0".to_string());
             let partner_name: String = row.try_get("partner_name").unwrap_or_default();
             let partner_cui: String = row.try_get("partner_cui").unwrap_or_default();
+
+            // Wave 4 audit: currency must match — amounts in different currencies never compare.
+            let inv_cur: String = row
+                .try_get("currency")
+                .unwrap_or_else(|_| "RON".to_string());
+            if inv_cur.trim().to_uppercase() != txn_cur {
+                continue;
+            }
 
             let total = dec(&total_str);
             let paid = paid_map.get(&inv_id).copied().unwrap_or(Decimal::ZERO);
@@ -315,6 +334,7 @@ mod tests {
             &pool,
             "co",
             &amount,
+            "RON",
             Some("Incasare factura F2026-001 CLIENT SRL"),
             Some("12345678"),
         )
@@ -335,7 +355,7 @@ mod tests {
         seed_issued(&pool, "inv2", "2000.00", "F2026-002").await;
 
         let amount = Decimal::from_str("2000.00").unwrap();
-        let sugg = suggest_matches(&pool, "co", &amount, None, None)
+        let sugg = suggest_matches(&pool, "co", &amount, "RON", None, None)
             .await
             .unwrap();
 
@@ -359,7 +379,7 @@ mod tests {
         .unwrap();
 
         let amount = Decimal::from_str("500.00").unwrap();
-        let sugg = suggest_matches(&pool, "co", &amount, None, None)
+        let sugg = suggest_matches(&pool, "co", &amount, "RON", None, None)
             .await
             .unwrap();
 
@@ -386,12 +406,47 @@ mod tests {
         .unwrap();
 
         let amount = Decimal::from_str("777.00").unwrap();
-        let sugg = suggest_matches(&pool, "co", &amount, Some("Plata factura F2026-004"), None)
+        let sugg = suggest_matches(
+            &pool,
+            "co",
+            &amount,
+            "RON",
+            Some("Plata factura F2026-004"),
+            None,
+        )
             .await
             .unwrap();
 
         assert!(sugg.len() >= 2);
         // HIGH confidence suggestion must come first
         assert_eq!(sugg[0].confidence, MatchConfidence::High);
+    }
+
+    /// Wave 4 audit: matching must be currency-aware — a EUR bank transaction must never
+    /// suggest a RON invoice just because the numeric amounts coincide (a match would
+    /// create a mis-denominated payment).
+    #[tokio::test]
+    async fn suggest_no_cross_currency_amount_match() {
+        let pool = pool().await;
+        seed_issued(&pool, "inv6", "500.00", "F2026-006").await; // RON invoice
+
+        let amount = Decimal::from_str("500.00").unwrap();
+        let sugg = suggest_matches(&pool, "co", &amount, "EUR", None, None)
+            .await
+            .unwrap();
+        assert!(
+            sugg.iter().all(|s| s.invoice_id != "inv6"),
+            "a EUR transaction must not match a RON invoice on amount alone, got: {:?}",
+            sugg
+        );
+
+        // Same transaction in RON matches as before.
+        let sugg_ron = suggest_matches(&pool, "co", &amount, "RON", None, None)
+            .await
+            .unwrap();
+        assert!(
+            sugg_ron.iter().any(|s| s.invoice_id == "inv6"),
+            "the RON control case must still match"
+        );
     }
 }

@@ -353,6 +353,7 @@ pub async fn list_bank_transactions(
         let reference: Option<String> = row.try_get("reference").ok().flatten();
         let counterparty_cui: Option<String> = row.try_get("counterparty_cui").ok().flatten();
         let amount = Decimal::from_str(amount_str.trim()).unwrap_or(Decimal::ZERO);
+        let txn_currency: String = row.try_get("currency").unwrap_or_else(|_| "RON".to_string());
 
         // Build suggestions only for UNMATCHED transactions
         let suggestions = if status == "UNMATCHED" {
@@ -360,6 +361,7 @@ pub async fn list_bank_transactions(
                 &state.db,
                 &company_id,
                 &amount,
+                &txn_currency,
                 reference.as_deref(),
                 counterparty_cui.as_deref(),
             )
@@ -475,7 +477,11 @@ pub async fn match_bank_txn(state: State<'_, AppState>, args: MatchBankTxnArgs) 
         p.id
     };
 
-    sqlx::query(
+    // Wave 4 audit: the payment creation and the transaction flag can't share one SQL
+    // transaction (the create fns own their pool-level GL posting), so compensate instead —
+    // if flagging the transaction fails, best-effort delete the just-created payment rather
+    // than leaving an invisible duplicate-risk payment behind an UNMATCHED transaction.
+    let flagged = sqlx::query(
         "UPDATE bank_transactions \
          SET status = 'MATCHED', matched_invoice_id = ?1, matched_payment_id = ?2 \
          WHERE id = ?3 AND company_id = ?4",
@@ -485,7 +491,22 @@ pub async fn match_bank_txn(state: State<'_, AppState>, args: MatchBankTxnArgs) 
     .bind(&args.txn_id)
     .bind(&args.company_id)
     .execute(&state.db)
-    .await?;
+    .await;
+
+    if let Err(e) = flagged {
+        let compensate = if args.direction == "issued" {
+            payments::delete(&state.db, &payment_id, &args.company_id).await
+        } else {
+            received_payments::delete(&state.db, &payment_id, &args.company_id).await
+        };
+        if let Err(comp_err) = compensate {
+            tracing::error!(
+                "match_bank_txn: flag failed ({e}) AND compensation delete failed ({comp_err}) — \
+                 payment {payment_id} may be orphaned"
+            );
+        }
+        return Err(e.into());
+    }
 
     Ok(())
 }
@@ -518,10 +539,30 @@ pub async fn unmatch_bank_txn(
     let payment_id: Option<String> = row.try_get("matched_payment_id").ok().flatten();
 
     if let Some(pid) = &payment_id {
-        // Try issued payment first; fall through to received payment on failure
-        let issued_ok = payments::delete(&state.db, pid, &company_id).await.is_ok();
-        if !issued_ok {
-            let _ = received_payments::delete(&state.db, pid, &company_id).await;
+        // Try the issued side first, then the received side. Wave 4 audit: errors MUST
+        // propagate — the old `let _ =` fall-through swallowed the period-lock Validation
+        // from the delete fns and reset the transaction anyway, orphaning a payment whose
+        // GL sits in a FILED month (re-matching would then duplicate it). A period-lock
+        // Validation beats a NotFound when picking which error to surface; when BOTH
+        // sides report NotFound the payment is already gone, and resetting the
+        // transaction is the correct repair.
+        match payments::delete(&state.db, pid, &company_id).await {
+            Ok(_) => {}
+            Err(issued_err) => match received_payments::delete(&state.db, pid, &company_id).await {
+                Ok(_) => {}
+                Err(received_err) => {
+                    let issued_nf = matches!(issued_err, AppError::NotFound);
+                    let received_nf = matches!(received_err, AppError::NotFound);
+                    if !(issued_nf && received_nf) {
+                        return Err(match (&issued_err, &received_err) {
+                            (AppError::Validation(_), _) => issued_err,
+                            (_, AppError::Validation(_)) => received_err,
+                            _ => issued_err,
+                        });
+                    }
+                    // both NotFound → payment already deleted; proceed with the reset
+                }
+            },
         }
     }
 

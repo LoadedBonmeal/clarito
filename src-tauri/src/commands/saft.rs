@@ -82,6 +82,66 @@ pub fn d406_deadline(year: i32, period_end_month: u32) -> chrono::NaiveDate {
     d
 }
 
+/// Re-post the GL entries for every UNLOCKED month in `[date_from, date_to]` before a
+/// periodic (L-profile) D406 generation, skipping LOCKED months entirely.
+///
+/// Wave 4 audit: `generate_gl_entries(.., allow_locked=false)` refuses when ANY month in
+/// the range is locked (e.g. auto-locked by a same-month declaration export), which used
+/// to hard-fail the whole D406 export. A locked period's GL is immutable and was locked
+/// in-sync with the filed documents, so its STORED entries are authoritative — only the
+/// unlocked months need (idempotent) regeneration for freshness.
+async fn regenerate_gl_unlocked_months(
+    pool: &sqlx::SqlitePool,
+    company_id: &str,
+    date_from: &str,
+    date_to: &str,
+) -> AppResult<()> {
+    let locked: std::collections::HashSet<String> =
+        crate::db::period_locks::locked_months_in_range(
+            pool,
+            company_id,
+            &date_from[..7],
+            &date_to[..7],
+        )
+        .await?
+        .into_iter()
+        .collect();
+
+    let parse_ym = |s: &str| -> AppResult<(i32, u32)> {
+        let y: i32 = s[..4]
+            .parse()
+            .map_err(|_| AppError::Other(format!("perioadă invalidă: {s}")))?;
+        let m: u32 = s[5..7]
+            .parse()
+            .map_err(|_| AppError::Other(format!("perioadă invalidă: {s}")))?;
+        Ok((y, m))
+    };
+    let (mut y, mut m) = parse_ym(date_from)?;
+    let (end_y, end_m) = parse_ym(date_to)?;
+
+    while (y, m) <= (end_y, end_m) {
+        let period = format!("{y:04}-{m:02}");
+        if !locked.contains(&period) {
+            let last = crate::db::payroll::days_in_month(y, m);
+            crate::db::gl::generate_gl_entries(
+                pool,
+                company_id,
+                &format!("{period}-01"),
+                &format!("{period}-{last:02}"),
+                false,
+            )
+            .await?;
+        }
+        if m == 12 {
+            y += 1;
+            m = 1;
+        } else {
+            m += 1;
+        }
+    }
+    Ok(())
+}
+
 /// Generate a complete, schema-conformant SAF-T D406 XML and save it to `dest_path`.
 /// The file is validated by structure (element order, types, enums) when xmllint is
 /// available — see `anaf_decl::validation::validate_with_xsd`.
@@ -137,16 +197,11 @@ pub async fn export_saft_official(
         // call the annual generator which applies A-profile section rules.
         generate_saft_xml_annual(&state.db, &company, &date_from, &date_to).await?
     } else {
-        // Periodic L-profile: auto-post GL entries (idempotent) before generating
-        // so that GeneralLedgerEntries is populated with current period data.
-        crate::db::gl::generate_gl_entries(
-            &state.db,
-            &params.company_id,
-            &date_from,
-            &date_to,
-            false,
-        )
-        .await?;
+        // Periodic L-profile: auto-post GL entries (idempotent) before generating so
+        // GeneralLedgerEntries is populated with current data — LOCKED months keep their
+        // stored (authoritative) entries instead of hard-failing the export.
+        regenerate_gl_unlocked_months(&state.db, &params.company_id, &date_from, &date_to)
+            .await?;
         generate_saft_xml(&state.db, &company, &date_from, &date_to).await?
     };
 
@@ -246,14 +301,10 @@ pub async fn preview_saft_official_xml(
     let xml = if is_annual {
         generate_saft_xml_annual(&state.db, &company, &date_from, &date_to).await?
     } else {
-        crate::db::gl::generate_gl_entries(
-            &state.db,
-            &params.company_id,
-            &date_from,
-            &date_to,
-            false,
-        )
-        .await?;
+        // Same locked-period handling as export_saft_official: stored GL is authoritative
+        // for a locked (filed) month — regenerate only the unlocked months.
+        regenerate_gl_unlocked_months(&state.db, &params.company_id, &date_from, &date_to)
+            .await?;
         generate_saft_xml(&state.db, &company, &date_from, &date_to).await?
     };
 

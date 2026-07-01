@@ -47,6 +47,16 @@ pub struct PaymentSummary {
 }
 
 pub async fn create(pool: &SqlitePool, input: CreatePaymentInput) -> AppResult<Payment> {
+    let mut conn = pool.acquire().await?;
+    create_in(&mut conn, input).await
+}
+
+/// Variantă pe conexiune/tranzacție EXISTENTĂ a lui [`create`] — folosită de `match_bank_txn`
+/// pentru a crea plata și a marca tranzacția bancară MATCHED atomic (o singură tranzacție).
+pub async fn create_in(
+    conn: &mut sqlx::SqliteConnection,
+    input: CreatePaymentInput,
+) -> AppResult<Payment> {
     use rust_decimal::Decimal;
     use std::str::FromStr;
     let amount_dec = Decimal::from_str(input.amount.trim())
@@ -66,7 +76,7 @@ pub async fn create(pool: &SqlitePool, input: CreatePaymentInput) -> AppResult<P
     )
     .bind(&input.invoice_id)
     .bind(&input.company_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await
     .map_err(AppError::Database)?;
 
@@ -97,10 +107,17 @@ pub async fn create(pool: &SqlitePool, input: CreatePaymentInput) -> AppResult<P
     .bind(&input.reference)
     .bind(&input.notes)
     .bind(input.exchange_rate)
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
-    get_by_id(pool, &id, &input.company_id).await
+    Ok(sqlx::query_as::<_, Payment>(
+        "SELECT id, invoice_id, company_id, amount, currency, paid_at, method, reference, notes, created_at \
+         FROM payments WHERE id = ?1 AND company_id = ?2",
+    )
+    .bind(&id)
+    .bind(&input.company_id)
+    .fetch_one(&mut *conn)
+    .await?)
 }
 
 pub async fn get_by_id(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<Payment> {
@@ -130,6 +147,42 @@ pub async fn list_for_invoice(
 }
 
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
+    // Wave 4 audit — period-lock guard: deleting a payment dated in a FILED (locked) month
+    // would silently reverse its GL journal inside a declared period (D300/SAF-T already
+    // reported the cleared receivable). Same fail-closed pattern as db/invoices.rs create.
+    let paid_at: Option<String> =
+        sqlx::query_scalar("SELECT paid_at FROM payments WHERE id = ?1 AND company_id = ?2")
+            .bind(id)
+            .bind(company_id)
+            .fetch_optional(pool)
+            .await?;
+    let paid_at = paid_at.ok_or(AppError::NotFound)?;
+    let period = paid_at.get(..7).unwrap_or("");
+    if !period.is_empty()
+        && crate::db::period_locks::is_period_locked(pool, company_id, period).await?
+    {
+        return Err(AppError::Validation(format!(
+            "Perioada {period} este blocată (declarație depusă) — plata nu poate fi ștearsă. \
+             Deblocați perioada pentru a continua."
+        )));
+    }
+
+    // Wave 4 audit — atomicity: the payment row + its GL journal go in ONE transaction, so a
+    // failure between the two statements can no longer leave an orphan PAYMENT journal.
+    let mut tx = pool.begin().await?;
+    delete_in(&mut tx, id, company_id).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Variantă pe tranzacție EXISTENTĂ a lui [`delete`] — FĂRĂ guard de period-lock (apelanții
+/// trebuie să fi verificat deja blocarea perioadei). Folosită de `delete` și de
+/// `unmatch_bank_txn` (plata + resetarea tranzacției bancare într-o singură tranzacție).
+pub async fn delete_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    id: &str,
+    company_id: &str,
+) -> AppResult<()> {
     // Delete the payment row first so we can distinguish NotFound (0 rows) from
     // a successful delete.  Then remove the GL journal for this payment (gl_entry
     // cascades via its FK on gl_journal.id — no separate DELETE needed).
@@ -138,7 +191,7 @@ pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<
     let rows = sqlx::query("DELETE FROM payments WHERE id = ?1 AND company_id = ?2")
         .bind(id)
         .bind(company_id)
-        .execute(pool)
+        .execute(&mut **tx)
         .await?
         .rows_affected();
 
@@ -154,7 +207,7 @@ pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<
     )
     .bind(company_id)
     .bind(id)
-    .execute(pool)
+    .execute(&mut **tx)
     .await?;
 
     Ok(())
@@ -709,6 +762,50 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(after, 0, "GL journal must be deleted with the payment");
+    }
+
+    // ─── Wave 4 audit: delete refused when the payment's month is LOCKED ───
+
+    #[tokio::test]
+    async fn delete_payment_refused_on_locked_period() {
+        let pool = pool().await;
+        seed_invoice(&pool, "inv1", "co", "100.00", "RON").await;
+        let payment = create(
+            &pool,
+            CreatePaymentInput {
+                invoice_id: "inv1".into(),
+                company_id: "co".into(),
+                amount: "100".into(),
+                currency: None,
+                paid_at: "2026-01-10".into(),
+                method: None,
+                reference: None,
+                notes: None,
+                exchange_rate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Lock the payment's month (a declaration was filed for 2026-01).
+        crate::db::period_locks::lock_period(&pool, "co", "2026-01", "declaration:D300", None, None)
+            .await
+            .unwrap();
+
+        let r = delete(&pool, &payment.id, "co").await;
+        assert!(
+            matches!(r, Err(AppError::Validation(_))),
+            "delete in a locked month must be a Validation error, got {r:?}"
+        );
+        // The payment must still exist.
+        assert!(get_by_id(&pool, &payment.id, "co").await.is_ok());
+
+        // Unlock → delete succeeds.
+        crate::db::period_locks::unlock_period(&pool, "co", "2026-01")
+            .await
+            .unwrap();
+        delete(&pool, &payment.id, "co").await.unwrap();
+        assert!(get_by_id(&pool, &payment.id, "co").await.is_err());
     }
 
     // ─── Test 5: corrupted amount does NOT panic — treated as 0 ────────────

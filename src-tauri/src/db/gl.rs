@@ -3018,8 +3018,8 @@ pub async fn generate_gl_entries(
         // sale — i.e. not a credit note (is_storno) AND not a STORNED original. A STORNED original
         // will never be collected, so its VAT must stay exigible on 4427 (the payment loop posts no
         // 4428→4427 release for STORNED, and D300 counts it as collected at issue) — keeping the
-        // three sides consistent. (Credit-note 4428/4427 reversal under cash VAT is deferred — see
-        // CASH_VAT_DESIGN.md TODO 5.)
+        // three sides consistent. (Credit-note 4428/4427 reversal under cash VAT is IMPLEMENTED —
+        // the settlement-aware `cash_vat_storno_split` right below, art. 282 alin. (9)/(10).)
         let cash_vat_applies = !is_storno && status != "STORNED" && in_cash_vat_window(&issue_date);
 
         // TVA la încasare — STORNO settlement-aware split (art. 282 alin. (9)/(10), Norme pct. 24):
@@ -4415,6 +4415,16 @@ pub async fn post_annual_close(
         return Err(crate::error::AppError::Validation(format!(
             "Perioada {first} este blocată (declarație depusă) — închiderea anuală nu poate fi \
              repostată. Deblocați perioada pentru a înregistra o corecție."
+        )));
+    }
+    // Wave 4 audit: the close POSTS on {year+1}-01-01, a month the range guard above does NOT
+    // scan (it covers only the closed year). Without this check a re-run would DELETE + re-post
+    // the ANNUAL_CLOSE journal inside a FILED January — violating GL immutability (OMFP 2634/2015).
+    let posting_month = format!("{}-01", year + 1);
+    if crate::db::period_locks::is_period_locked(pool, company_id, &posting_month).await? {
+        return Err(crate::error::AppError::Validation(format!(
+            "Perioada {posting_month} este blocată (declarație depusă) — închiderea anuală {year} \
+             nu poate fi (re)postată. Deblocați perioada pentru a continua."
         )));
     }
     let row = sqlx::query(
@@ -10924,6 +10934,104 @@ mod tests {
             matches!(r, Err(crate::error::AppError::Validation(_))),
             "got {r:?}"
         );
+    }
+
+    /// Wave 4 audit: the close posts on {year+1}-01-01 — a locked POSTING month (outside the
+    /// closed-year range guard) must also refuse the (re)post, else the DELETE+re-post would
+    /// mutate GL inside a filed January.
+    #[tokio::test]
+    async fn annual_close_refused_when_posting_month_locked() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co_pm").await;
+        // Profit of 3.900 sitting on 121 (credit) inside 2026.
+        manual_journal(
+            &pool,
+            "co_pm",
+            "2026-06-30",
+            "prof",
+            &[
+                ("4111", rdec!(3900), Decimal::ZERO),
+                ("121", Decimal::ZERO, rdec!(3900)),
+            ],
+        )
+        .await;
+        // Lock ONLY the posting month (January of year+1) — the closed year stays unlocked.
+        crate::db::period_locks::lock_period(&pool, "co_pm", "2027-01", "declaration:D101", None, None)
+            .await
+            .unwrap();
+        let r = post_annual_close(&pool, "co_pm", 2026).await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "locked posting month must refuse the annual close, got {r:?}"
+        );
+        // Nothing was posted.
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM gl_journal WHERE company_id='co_pm' AND source_type='ANNUAL_CLOSE'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(n, 0, "no ANNUAL_CLOSE journal may exist after refusal");
+    }
+
+    /// Wave 4 audit (verify-first): re-running the close must NOT double-post the 121→117
+    /// entries — the DELETE+re-post idempotency-by-replace keeps exactly ONE close journal and
+    /// an unchanged trial balance.
+    #[tokio::test]
+    async fn annual_close_rerun_replaces_not_duplicates() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co_rr").await;
+        manual_journal(
+            &pool,
+            "co_rr",
+            "2026-06-30",
+            "prof",
+            &[
+                ("4111", rdec!(3900), Decimal::ZERO),
+                ("121", Decimal::ZERO, rdec!(3900)),
+            ],
+        )
+        .await;
+
+        let a1 = post_annual_close(&pool, "co_rr", 2026).await.unwrap();
+        assert!(a1.posted);
+        assert_eq!(a1.result_121, "3900.00");
+        let tb1 = trial_balance(&pool, "co_rr", "2026-01-01", "2027-12-31")
+            .await
+            .unwrap();
+
+        let a2 = post_annual_close(&pool, "co_rr", 2026).await.unwrap();
+        assert_eq!(a2.result_121, "3900.00", "re-run recomputes the same close");
+
+        // Exactly ONE close journal (replaced, not duplicated).
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM gl_journal WHERE company_id='co_rr' AND source_type='ANNUAL_CLOSE' AND source_id='2026'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(n, 1, "re-run must replace, not duplicate, the close journal");
+
+        // 117 carries the profit exactly once...
+        let tb2 = trial_balance(&pool, "co_rr", "2026-01-01", "2027-12-31")
+            .await
+            .unwrap();
+        let c117 = tb2.rows.iter().find(|x| x.account_code == "117").unwrap();
+        assert_eq!(c117.closing_credit, "3900.00", "117 must hold the profit ONCE");
+        // ...and the whole trial balance is unchanged vs. the first run.
+        for r1 in &tb1.rows {
+            let r2 = tb2
+                .rows
+                .iter()
+                .find(|x| x.account_code == r1.account_code)
+                .expect("account present after re-run");
+            assert_eq!(
+                (&r1.closing_debit, &r1.closing_credit),
+                (&r2.closing_debit, &r2.closing_credit),
+                "trial balance must be identical after the re-run (account {})",
+                r1.account_code
+            );
+        }
     }
 
     #[tokio::test]

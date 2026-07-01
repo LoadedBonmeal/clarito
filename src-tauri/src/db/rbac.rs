@@ -125,7 +125,8 @@ pub fn role_allows(role: Role, perm: Perm) -> bool {
 /// NOTE on official `export_*` commands: `export_d300_official`,
 /// `export_d390`, `export_d394_official`, `export_saft_official`,
 /// `export_d205_official`, `export_d207_official`, `export_bilant_xml`,
-/// `export_d112_xml` are all mapped to `SubmitAnaf` in the explicit map
+/// `export_d112_xml`, `export_d100_xml`, `export_d101_xml`, `export_d301_xml`,
+/// `export_d700_xml`, `export_d710_xml` are all mapped to `SubmitAnaf` in the explicit map
 /// BEFORE `is_read_cmd` is evaluated, so the `export_` read-prefix in
 /// `is_read_cmd` only applies to non-official CSV/XLSX exports.
 pub fn required_perm(cmd: &str) -> Option<Perm> {
@@ -189,6 +190,14 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "export_bilant_xml"
         | "etransport_submit"
         | "export_d112_xml"
+        // Wave 4 audit: the newer declaration exporters were missing from this map, so the
+        // `export_` read-prefix wrongly freed them for Viewer users. Every official
+        // declaration XML writer must sit here, before is_read_cmd.
+        | "export_d100_xml"
+        | "export_d101_xml"
+        | "export_d301_xml"
+        | "export_d700_xml"
+        | "export_d710_xml"
         | "smartbill_push_invoice" => Some(Perm::SubmitAnaf),
 
         // ── ManageUsers ───────────────────────────────────────────────────
@@ -958,6 +967,44 @@ mod tests {
             Decision::Allow,
             "Admin must be allowed to call export_all_my_data"
         );
+    }
+
+    /// Wave 4 audit: EVERY official declaration exporter must map to SubmitAnaf — the
+    /// newer ones (D100/D101/D301/D700/D710) were missing from the explicit map, so the
+    /// `export_` read-prefix wrongly freed them for Viewer users.
+    #[test]
+    fn all_declaration_exporters_require_submit_anaf() {
+        for cmd in [
+            "export_d100_xml",
+            "export_d101_xml",
+            "export_d301_xml",
+            "export_d700_xml",
+            "export_d710_xml",
+            "export_d300_official",
+            "export_d390",
+            "export_d394_official",
+            "export_saft_official",
+            "export_d205_official",
+            "export_d207_official",
+            "export_bilant_xml",
+            "export_d112_xml",
+        ] {
+            assert_eq!(
+                required_perm(cmd),
+                Some(Perm::SubmitAnaf),
+                "{cmd} must require SubmitAnaf (not freed by the export_ read-prefix)"
+            );
+            assert_eq!(
+                authorize(cmd, true, Some(Role::Viewer)),
+                Decision::Forbidden,
+                "Viewer must be Forbidden on {cmd}"
+            );
+            assert_eq!(
+                authorize(cmd, true, Some(Role::Contabil)),
+                Decision::Allow,
+                "Contabil must be allowed on {cmd}"
+            );
+        }
     }
 
     /// Unknown future command returns CreateDraft from required_perm.
