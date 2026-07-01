@@ -80,14 +80,6 @@
         "headerImage": "resources/nsis-header.bmp",
         "sidebarImage": "resources/nsis-sidebar.bmp"
       }
-    },
-    "fileAssociations": [
-      {
-        "name": "RO e-Factura XML",
-        "description": "Fisier factura electronica RO",
-        "ext": ["xml"],
-        "mimeType": "application/xml"
-      }
-    ]
+    }
   }
 }

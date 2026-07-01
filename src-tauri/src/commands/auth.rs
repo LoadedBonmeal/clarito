@@ -10,9 +10,8 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::db::audit::log_user_action_attributed;
-use crate::db::rbac::Role;
 use crate::db::users::{self, CreateUserInput, CurrentUser, UpdateUserInput, UserRow};
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::state::AppState;
 
 // ─── Auth status ─────────────────────────────────────────────────────────────
@@ -210,29 +209,4 @@ pub async fn reset_password(
 /// Snapshot of the current user for audit log attribution.
 async fn current_actor(state: &State<'_, AppState>) -> Option<CurrentUser> {
     state.current_user.read().await.clone()
-}
-
-/// Returns the current user's role, or errors with Unauthorized if not logged in.
-/// Used by commands that need to enforce role restrictions beyond the gate.
-#[allow(dead_code)]
-pub async fn require_role(
-    state: &State<'_, AppState>,
-    required: &[&str],
-) -> AppResult<CurrentUser> {
-    let guard = state.current_user.read().await;
-    match guard.as_ref() {
-        None => Err(AppError::Other("UNAUTHORIZED".to_string())),
-        Some(u) if required.contains(&u.role.as_str()) => Ok(u.clone()),
-        Some(u) => Err(AppError::Other(format!(
-            "FORBIDDEN: role '{}' cannot perform this action.",
-            u.role
-        ))),
-    }
-}
-
-/// Validate that the gate's role snapshot matches what the DB says.
-/// Called only in tests / diagnostics.
-#[allow(dead_code)]
-pub fn gate_role_is_consistent(state: &AppState, expected_role: Option<Role>) -> bool {
-    state.current_role_snapshot() == expected_role
 }

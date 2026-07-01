@@ -54,6 +54,8 @@
       "generateXml": "Generate XML",
       "viewXml": "View XML",
       "storno": "Storno",
+      "devalidate": "Un-validate",
+      "devalidating": "Un-validating…",
       "recordPayment": "Record payment",
       "moreTitle": "More actions",
       "invoiceActions": "Invoice actions",
@@ -190,6 +192,18 @@
       "pending": "Crediting…",
       "confirm": "Create storno"
     },
+    "devalidateModal": {
+      "title": "Un-validate invoice",
+      "sub": "the invoice reverts to draft — the GL entry is reversed immediately",
+      "body1": "This operation:",
+      "bullet1": "Deletes this invoice's accounting (GL) entries.",
+      "bullet2": "Reopens the invoice for editing (status DRAFT).",
+      "bullet3": "Keeps the fiscal number {{nr}} — re-validation will reuse the same number.",
+      "warn": "Not allowed if: the period is locked, the invoice has payments, or it was submitted to ANAF.",
+      "cancel": "Cancel",
+      "pending": "Un-validating…",
+      "confirm": "Un-validate"
+    },
     "payModal": {
       "balance": "balance {{amount}} {{currency}}",
       "amountLabel": "Amount collected ({{currency}})",
@@ -297,6 +311,8 @@
       "duplicateError": "Duplication error.",
       "stornoCreated": "Storno invoice created: {{nr}}",
       "stornoError": "Storno error.",
+      "devalidated": "The invoice was un-validated and reopened for correction.",
+      "devalidateError": "Un-validation error.",
       "smartbillSent": "Invoice sent to SmartBill: {{result}}",
       "smartbillError": "SmartBill submission error.",
       "paymentAdded": "Payment recorded.",

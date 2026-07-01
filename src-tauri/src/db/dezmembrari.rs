@@ -205,7 +205,7 @@ pub async fn create_dezmembrare(
 
     // ── Period lock check ─────────────────────────────────────────────────────
     let period = &input.dezmembrare_date[..7]; // "YYYY-MM"
-    if period_locks::is_period_locked(pool, &input.company_id, period).await {
+    if period_locks::is_period_locked(pool, &input.company_id, period).await? {
         return Err(AppError::Validation(format!(
             "Perioada {} este blocată. Nu se pot crea dezmembrări în această perioadă.",
             period
@@ -317,7 +317,7 @@ pub async fn post_dezmembrare(
 
     // ── Period lock check ─────────────────────────────────────────────────────
     let period = &dez.dezmembrare_date[..7];
-    if period_locks::is_period_locked(pool, company_id, period).await {
+    if period_locks::is_period_locked(pool, company_id, period).await? {
         return Err(AppError::Validation(format!(
             "Perioada {} este blocată. Nu se poate posta dezmembrarea.",
             period

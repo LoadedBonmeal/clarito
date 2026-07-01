@@ -228,7 +228,7 @@ pub async fn update_invoice_draft(
     // într-o perioadă blocată (declarație depusă).
     let issue_month = input.issue_date.get(..7).unwrap_or("");
     if !issue_month.is_empty()
-        && crate::db::period_locks::is_period_locked(&state.db, &company_id, issue_month).await
+        && crate::db::period_locks::is_period_locked(&state.db, &company_id, issue_month).await?
     {
         return Err(AppError::Validation(format!(
             "Factura are data într-o perioadă blocată ({}) — modificarea necesită declarație rectificativă. \
@@ -529,7 +529,8 @@ pub async fn validate_invoice_draft(
     // figures re-filed as a declarație rectificativă). We WARN rather than block — a legitimate late
     // document is corrected forward, not refused.
     if let Some(ym) = input.invoice.issue_date.get(..7) {
-        if crate::db::period_locks::is_period_locked(&state.db, &input.invoice.company_id, ym).await
+        if crate::db::period_locks::is_period_locked(&state.db, &input.invoice.company_id, ym)
+            .await?
         {
             all_warnings.push(format!(
                 "Factura este datată în perioada {ym}, BLOCATĂ (declarație depusă). Înregistrarea în \
@@ -1045,7 +1046,7 @@ pub async fn devalidate_invoice(
     // 4. Guard: period lock on the invoice's issue-date month.
     let issue_month = inv.issue_date.get(..7).unwrap_or("");
     if !issue_month.is_empty()
-        && crate::db::period_locks::is_period_locked(pool, &company_id, issue_month).await
+        && crate::db::period_locks::is_period_locked(pool, &company_id, issue_month).await?
     {
         return Err(AppError::Validation(format!(
             "Perioada {} este blocată (declarație depusă) — devalidarea este interzisă. \
@@ -2125,7 +2126,9 @@ mod tests {
         // Guard: period lock.
         let issue_month = inv.issue_date.get(..7).unwrap_or("");
         if !issue_month.is_empty()
-            && crate::db::period_locks::is_period_locked(pool, "comp-1", issue_month).await
+            && crate::db::period_locks::is_period_locked(pool, "comp-1", issue_month)
+                .await
+                .map_err(|e| e.to_string())?
         {
             return Err(format!(
                 "Perioada {} este blocată (declarație depusă) — devalidarea este interzisă.",

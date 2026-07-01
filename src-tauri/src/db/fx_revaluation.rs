@@ -302,7 +302,7 @@ pub async fn compute_fx_revaluation(
     // OMFP 1802/2014 (pct. 65-68): a filed period is corrected forward, never silently overwritten.
     // Refuse to re-post the month-end FX revaluation into a locked period; the user unlocks
     // explicitly to book a correction.
-    if crate::db::period_locks::is_period_locked(pool, company_id, period).await {
+    if crate::db::period_locks::is_period_locked(pool, company_id, period).await? {
         return Err(crate::error::AppError::Validation(format!(
             "Perioada {period} este blocată (declarație depusă) — reevaluarea valutară ar modifica \
              cifrele declarate. Deblocați perioada pentru a o reposta."

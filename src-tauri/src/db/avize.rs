@@ -187,7 +187,7 @@ pub async fn create_aviz(pool: &SqlitePool, input: CreateAvizInput) -> AppResult
         ));
     }
     let period = &input.aviz_date[..7]; // "YYYY-MM"
-    if is_period_locked(pool, &input.company_id, period).await {
+    if is_period_locked(pool, &input.company_id, period).await? {
         return Err(AppError::Validation(format!(
             "Perioada {period} este blocată."
         )));
@@ -368,7 +368,7 @@ pub async fn issue_aviz(pool: &SqlitePool, company_id: &str, aviz_id: &str) -> A
     }
 
     let period = &aviz.aviz_date[..7];
-    if is_period_locked(pool, company_id, period).await {
+    if is_period_locked(pool, company_id, period).await? {
         return Err(AppError::Validation(format!(
             "Perioada {period} este blocată."
         )));
@@ -571,7 +571,7 @@ pub async fn convert_aviz_to_invoice(
 
     // P2: period-lock on the invoice issue period (VAT exigibility is at invoice date).
     let invoice_period = &invoice_issue_date[..7];
-    if is_period_locked(pool, company_id, invoice_period).await {
+    if is_period_locked(pool, company_id, invoice_period).await? {
         return Err(AppError::Validation(format!(
             "Perioada {invoice_period} este blocată — conversia avizului nu poate posta în ea."
         )));

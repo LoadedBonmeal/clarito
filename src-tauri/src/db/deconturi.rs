@@ -49,6 +49,14 @@ fn parse_date_to_period(date_iso: &str) -> Option<String> {
     Some(format!("{year:04}-{month:02}"))
 }
 
+/// Limit-A factor (HG 714/2018 art.2 + CF art.76(4)(h)): daily non-taxable diurnă cap A
+/// = this factor × `diurna_interna` (the configured internal per-diem rate).
+const DIURNA_LIMIT_A_FACTOR: &str = "2.5";
+
+/// Limit-B salary factor (CF art.76(2)(k)): monthly non-taxable diurnă cap B
+/// = gross salary × this factor ÷ working_days(year, month).
+const DIURNA_LIMIT_B_SALARY_FACTOR: i64 = 3;
+
 fn dp(s: &str) -> Decimal {
     Decimal::from_str(s).unwrap_or_default()
 }
@@ -107,13 +115,13 @@ pub fn compute_diurna(
     let nzl = working_days(year, month);
 
     // Limit A per day: 2.5 × diurna_interna (HG 714/2018 art.2 + CF art.76(4)(h))
-    let limit_a_zi = round2(Decimal::from_str("2.5").unwrap() * interna);
+    let limit_a_zi = round2(Decimal::from_str(DIURNA_LIMIT_A_FACTOR).unwrap() * interna);
 
     // Limit B per day: salariu × 3 ÷ working_days (CF art.76(2)(k))
     let limit_b_zi = if nzl == 0 {
         Decimal::ZERO
     } else {
-        round2(sal * Decimal::from(3) / Decimal::from(nzl))
+        round2(sal * Decimal::from(DIURNA_LIMIT_B_SALARY_FACTOR) / Decimal::from(nzl))
     };
 
     // Cap per day = min(A, B)
@@ -233,7 +241,7 @@ pub fn compute_diurna_multimonth(
     let sal = round2(dp(salariu_brut));
     let interna = round2(dp(diurna_interna));
     // Limit A per day = 2.5 × diurna_interna (HG 714/2018 art.2)
-    let limit_a_zi = round2(Decimal::from_str("2.5").unwrap() * interna);
+    let limit_a_zi = round2(Decimal::from_str(DIURNA_LIMIT_A_FACTOR).unwrap() * interna);
 
     // Accumulate delegation_days per (year, month).
     // We walk every calendar day from start to end (inclusive).
@@ -260,7 +268,7 @@ pub fn compute_diurna_multimonth(
         let limit_b_zi = if nzl == 0 {
             Decimal::ZERO
         } else {
-            round2(sal * Decimal::from(3) / Decimal::from(nzl))
+            round2(sal * Decimal::from(DIURNA_LIMIT_B_SALARY_FACTOR) / Decimal::from(nzl))
         };
         let cap_zi = round2(limit_a_zi.min(limit_b_zi));
         let cap_total = round2(cap_zi * Decimal::from(del_days));
@@ -1064,7 +1072,7 @@ pub async fn approve_report(
                                     company_id,
                                     &seg.period,
                                 )
-                                .await;
+                                .await?;
                                 let lock_status = if is_locked {
                                     "needs_rectificativa"
                                 } else {
@@ -1099,7 +1107,7 @@ pub async fn approve_report(
                 let period = parse_date_to_period(approve_date)
                     .unwrap_or_else(|| approve_date.get(..7).unwrap_or("2026-01").to_string());
                 let is_locked =
-                    crate::db::period_locks::is_period_locked(pool, company_id, &period).await;
+                    crate::db::period_locks::is_period_locked(pool, company_id, &period).await?;
                 let lock_status = if is_locked {
                     "needs_rectificativa"
                 } else {

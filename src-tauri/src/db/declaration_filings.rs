@@ -274,7 +274,9 @@ mod tests {
 
         // Perioada YYYY-MM trebuie să fie auto-blocată
         assert!(
-            crate::db::period_locks::is_period_locked(&pool, "co-A", "2026-05").await,
+            crate::db::period_locks::is_period_locked(&pool, "co-A", "2026-05")
+                .await
+                .unwrap(),
             "depunerea D300 trebuie să blocheze automat perioada"
         );
 
@@ -293,7 +295,9 @@ mod tests {
         .unwrap();
 
         assert!(
-            !crate::db::period_locks::is_period_locked(&pool, "co-A", "2025").await,
+            !crate::db::period_locks::is_period_locked(&pool, "co-A", "2025")
+                .await
+                .unwrap(),
             "declarația anuală nu trebuie să creeze o blocare lunară"
         );
     }

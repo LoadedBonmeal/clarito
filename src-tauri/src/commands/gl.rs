@@ -418,7 +418,7 @@ pub async fn is_period_locked(
     company_id: String,
     period: String,
 ) -> AppResult<bool> {
-    Ok(crate::db::period_locks::is_period_locked(&state.db, &company_id, &period).await)
+    crate::db::period_locks::is_period_locked(&state.db, &company_id, &period).await
 }
 
 /// Blochează manual o perioadă (admin/contabil).

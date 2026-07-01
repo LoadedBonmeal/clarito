@@ -1881,7 +1881,7 @@ pub(crate) async fn post_manual_journal(
     // figures. Unlock the period to book a correction. Mirrors generate_gl_entries / post_vat_settlement
     // / fx_revaluation, so EVERY direct GL-posting path is now covered.
     if let Some(ym) = j.date.get(..7) {
-        if crate::db::period_locks::is_period_locked(pool, j.company_id, ym).await {
+        if crate::db::period_locks::is_period_locked(pool, j.company_id, ym).await? {
             return Err(crate::error::AppError::Validation(format!(
                 "Perioada {ym} este blocată (declarație depusă) — nota contabilă nu poate fi postată. \
                  Deblocați perioada pentru a înregistra o corecție."
@@ -1961,7 +1961,7 @@ pub(crate) async fn post_manual_journal_ex(
 ) -> AppResult<()> {
     // Period-lock guard (OMFP 2634/2015 immutability): never post into a FILED (locked) period.
     if let Some(ym) = j.date.get(..7) {
-        if crate::db::period_locks::is_period_locked(pool, j.company_id, ym).await {
+        if crate::db::period_locks::is_period_locked(pool, j.company_id, ym).await? {
             return Err(crate::error::AppError::Validation(format!(
                 "Perioada {ym} este blocată (declarație depusă) — nota contabilă nu poate fi postată. \
                  Deblocați perioada pentru a înregistra o corecție."
@@ -2210,7 +2210,7 @@ pub async fn post_fiscal_receipt(
     let report_date: String = r.try_get("report_date").unwrap_or_default();
     // Period-lock guard (OMFP 2634/2015 immutability): never post into a FILED (locked) period.
     if let Some(ym) = report_date.get(..7) {
-        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
             return Err(crate::error::AppError::Validation(format!(
                 "Perioada {ym} este blocată (declarație depusă) — bonul fiscal nu poate fi postat. \
                  Deblocați perioada pentru a înregistra o corecție."
@@ -5009,7 +5009,7 @@ pub async fn post_register_lines(
     // Period-lock guard (OMFP 2634/2015 immutability): accruals / provisions / capital-goods registers
     // must not post into a FILED period. Mirrors post_manual_journal (gl.rs:1884).
     if let Some(ym) = transaction_date.get(..7) {
-        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
             return Err(crate::error::AppError::Validation(format!(
                 "Perioada {ym} este blocată (declarație depusă) — nota contabilă nu poate fi postată. \
                  Deblocați perioada pentru a înregistra o corecție."
@@ -5107,7 +5107,7 @@ pub async fn post_asset_disposal(
 ) -> AppResult<()> {
     // Period-lock guard (OMFP 2634/2015 immutability): never post into a FILED (locked) period.
     if let Some(ym) = disposal_date.get(..7) {
-        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
             return Err(crate::error::AppError::Validation(format!(
                 "Perioada {ym} este blocată (declarație depusă) — casarea/cedarea mijlocului fix nu \
                  poate fi postată. Deblocați perioada pentru a înregistra o corecție."
@@ -5223,7 +5223,7 @@ pub(crate) async fn post_asset_revaluation(
 
     // Period-lock guard (OMFP 2634/2015 immutability): never post into a FILED (locked) period.
     if let Some(ym) = revaluation_date.get(..7) {
-        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
             return Err(crate::error::AppError::Validation(format!(
                 "Perioada {ym} este blocată (declarație depusă) — reevaluarea mijlocului fix nu poate \
                  fi postată. Deblocați perioada pentru a înregistra o corecție."
@@ -5391,7 +5391,7 @@ pub async fn post_stock_movement(
 ) -> AppResult<()> {
     // Period-lock guard (OMFP 2634/2015 immutability): never post into a FILED (locked) period.
     if let Some(ym) = date.get(..7) {
-        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
             return Err(crate::error::AppError::Validation(format!(
                 "Perioada {ym} este blocată (declarație depusă) — mișcarea de stoc nu poate fi \
                  postată. Deblocați perioada pentru a înregistra o corecție."

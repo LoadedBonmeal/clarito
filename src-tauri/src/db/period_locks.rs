@@ -89,17 +89,24 @@ pub async fn unlock_period(pool: &SqlitePool, company_id: &str, period: &str) ->
 }
 
 /// Returnează `true` dacă perioada este blocată.
-/// Înghite erorile DB (returnează `false` în caz de eroare).
-pub async fn is_period_locked(pool: &SqlitePool, company_id: &str, period: &str) -> bool {
-    let result: Result<Option<i64>, _> = sqlx::query_scalar(
+///
+/// Propagă erorile DB (`?`) în loc să le înghită — un eșec tranzitoriu de citire nu
+/// trebuie interpretat ca "deblocat", altfel `post_*` ar putea scrie într-o perioadă
+/// FILED pe o eroare DB trecătoare. Fail-closed, ca și `locked_months_in_range`.
+pub async fn is_period_locked(
+    pool: &SqlitePool,
+    company_id: &str,
+    period: &str,
+) -> AppResult<bool> {
+    let result: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM period_locks WHERE company_id = ?1 AND period = ?2 LIMIT 1",
     )
     .bind(company_id)
     .bind(period)
     .fetch_optional(pool)
-    .await;
+    .await?;
 
-    matches!(result, Ok(Some(_)))
+    Ok(result.is_some())
 }
 
 /// Listează toate perioadele blocate pentru o firmă, cele mai recente primele.
@@ -200,13 +207,13 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            is_period_locked(&pool, "co-A", "2026-05").await,
+            is_period_locked(&pool, "co-A", "2026-05").await.unwrap(),
             "trebuie să fie blocat după lock"
         );
 
         unlock_period(&pool, "co-A", "2026-05").await.unwrap();
         assert!(
-            !is_period_locked(&pool, "co-A", "2026-05").await,
+            !is_period_locked(&pool, "co-A", "2026-05").await.unwrap(),
             "trebuie să fie deblocat după unlock"
         );
     }
@@ -284,7 +291,7 @@ mod tests {
         let pool = setup().await;
 
         assert!(
-            !is_period_locked(&pool, "co-A", "2026-01").await,
+            !is_period_locked(&pool, "co-A", "2026-01").await.unwrap(),
             "fără rânduri → deblocat"
         );
 
@@ -308,7 +315,7 @@ mod tests {
 
         // co-B nu trebuie să vadă blocarea co-A
         assert!(
-            !is_period_locked(&pool, "co-B", "2026-06").await,
+            !is_period_locked(&pool, "co-B", "2026-06").await.unwrap(),
             "blocarea co-A nu este vizibilă pentru co-B"
         );
         let locks_b = list_period_locks(&pool, "co-B").await.unwrap();
