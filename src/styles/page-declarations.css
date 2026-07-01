@@ -1,14 +1,19 @@
 /* imported-by: globals.css (wired centrally) */
 /* Declarații — hub cards (verbatim from design Declaratii.html inline <style>) */
-.dec-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
-.dec{background:var(--bg-content);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column}
+/* minmax(0,1fr) lets the two tracks shrink to fit the container (a plain 1fr keeps a
+   min-content floor, so a card's button row could push the grid wider than .main —
+   which has overflow-x:hidden — and clip the right column's badge + Export button).
+   Below ~1080px of card area the grid collapses to a single column. */
+.dec-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media (max-width:1080px){.dec-grid{grid-template-columns:1fr}}
+.dec{min-width:0;background:var(--bg-content);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column}
 .dec .dh{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 .dec .dt{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
 .dec .dt .doc{font-size:11.5px}
 .dec .ds{font-size:12px;color:var(--text-2);margin-top:5px;line-height:1.5}
 .dec .dkv{display:flex;gap:18px;margin-top:13px;font-size:12px;color:var(--text-2);flex-wrap:wrap}
 .dec .dkv b{color:var(--text);font-weight:600}
-.dec .dfoot{display:flex;gap:8px;margin-top:14px;padding-top:13px;border-top:1px solid var(--line)}
+.dec .dfoot{display:flex;flex-wrap:wrap;row-gap:8px;gap:8px;margin-top:14px;padding-top:13px;border-top:1px solid var(--line)}
 .dec .dfoot .pill-btn{height:30px;font-size:12.5px;padding:0 11px}
 .dec .dfoot .btn-dark{height:30px;font-size:12.5px;padding:0 12px}
 .dec .dfoot .spacer{flex:1}

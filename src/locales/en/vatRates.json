@@ -13,7 +13,7 @@
       "date2": "01 Aug 2025",
       "p3": "the standard rates are",
       "rates": "21% / 11%",
-      "p4": ". The app automatically warns when the chosen rate does not match the invoice issue date."
+      "p4": ". Exception: the reduced 9% rate for housing deliveries applies transitionally until 31.07.2026. The app automatically warns when the chosen rate does not match the invoice issue date."
     },
     "states": {
       "loading": "Loading…",
