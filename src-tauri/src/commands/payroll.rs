@@ -440,8 +440,21 @@ async fn build_d112_xml(
         de.baza_cass += excess_lei;
         de.baza_cam += excess_lei;
         de.baza_impozit = leid(eb.comb_impozit_base);
-        de.cas = comb_cas;
-        de.cass = comb_cass;
+        // Part-time min-base lift (art. 146 alin. (5^6)/(5^9)) + diurnă excess: the DECLARED CAS/CASS
+        // must stay on the LIFTED base + excess so `B4_8 = ROUND(B4_7 × 25%)` holds (matching the
+        // non-excess part-time convention — `de.baza_cas` is the lifted base here). `comb_cas` is only
+        // 25%×(realized+excess), so using it would leave B4_8 inconsistent with the lifted B4_7 and
+        // under-declare CAS/CASS for a below-minimum part-timer who also has a diurnă excess. The
+        // employee-withheld portion on realized+excess still feeds the income-tax base
+        // (`comb_impozit_base`, unchanged); the employer-borne lift difference is tracked separately in
+        // `t_cas_diff`/`t_cass_diff` (cod 458/459).
+        if eb.part_time_min.is_some() {
+            de.cas = leid(round2((eb.baza_cas + eb.excess) * Decimal::new(25, 2)));
+            de.cass = leid(round2((eb.baza_cass + eb.excess) * Decimal::new(10, 2)));
+        } else {
+            de.cas = comb_cas;
+            de.cass = comb_cass;
+        }
         de.impozit = comb_impozit;
         de.e3_23 = excess_lei;
     }
@@ -777,6 +790,115 @@ mod tests {
         assert_eq!(gl_credit("4316"), oblig("432"), "CASS: GL 4316 ≠ D112 432");
         assert_eq!(gl_credit("444"), oblig("602"), "impozit: GL 444 ≠ D112 602");
         assert_eq!(gl_credit("436"), oblig("480"), "CAM: GL 436 ≠ D112 480");
+    }
+
+    /// GOLDEN — GL≡D112 for a PART-TIME below-minimum employee WHO ALSO has a diurnă excess (the combo
+    /// the pre-publication audit flagged). The art.146(5^6) lift raises the CAS/CASS base to the minimum
+    /// wage (employer bears the difference, art.146(5^9)); the diurnă excess is added on top. The
+    /// DECLARED CAS/CASS (D112 412/432 = Σ de.cas) must equal the GL 4315/4316 (employee contribution +
+    /// employer lift diff = the total on the lifted base + excess), and the per-insured B4_8 must satisfy
+    /// B4_8 = ROUND(B4_7 × 25%). Before the Wave-E fix, de.cas was only 25%×(realized+excess) → D112
+    /// under-declared vs the GL by the employer lift diff, and B4_8 ≠ ROUND(B4_7 × 25%).
+    #[tokio::test]
+    async fn gl_d112_golden_part_time_below_min_with_diurna_excess() {
+        use rust_decimal::prelude::ToPrimitive;
+        let pool = setup().await;
+        // Part-time (P1), 4h/day, realized gross 2000 < H1 2026 minimum base (4050−300=3750) → lifted.
+        let emp = crate::db::payroll::create(
+            &pool,
+            CreateEmployeeInput {
+                company_id: "co1".into(),
+                cnp: "1960101410019".into(),
+                full_name: "Pop Ana".into(),
+                gross_salary: "2000".into(),
+                personal_deduction: Some("0".into()),
+                employment_date: Some("2024-01-01".into()),
+                contract_end_date: None,
+                tip_asigurat: None,
+                pensionar: None,
+                tip_contract: Some("P1".into()),
+                ore_norma: Some(4),
+                exceptie_cas_min: None,
+                sediu_cif: None,
+                beneficiar_suma_netaxabila: None,
+                functia: None,
+                cod_cor: None,
+            },
+        )
+        .await
+        .unwrap();
+        let excess = rust_decimal::Decimal::from_str("500").unwrap();
+        crate::db::payroll_diurna::upsert_extra_income(
+            &pool,
+            "co1",
+            &emp.id,
+            "2026-06",
+            "dec-pt-test",
+            excess,
+            "open",
+        )
+        .await
+        .unwrap();
+        crate::db::payroll::run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let gl_credit = |code: &str| -> i64 {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| {
+                    Decimal::from_str(&r.closing_credit)
+                        .unwrap_or(Decimal::ZERO)
+                        .round_dp_with_strategy(
+                            0,
+                            rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                        )
+                        .to_i64()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+        };
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
+            .await
+            .unwrap();
+        let oblig = |cod: &str| -> i64 {
+            let key = format!("A_codOblig=\"{cod}\"");
+            let i = xml
+                .find(&key)
+                .unwrap_or_else(|| panic!("obligația {cod} lipsește"));
+            let dk = "A_datorat=\"";
+            let j = i + xml[i..].find(dk).expect("A_datorat") + dk.len();
+            let end = xml[j..].find('"').unwrap();
+            xml[j..j + end].parse::<i64>().unwrap()
+        };
+        // The invariant the fix restores: declared CAS/CASS == GL (total on lifted base + excess).
+        assert_eq!(
+            gl_credit("4315"),
+            oblig("412"),
+            "part-time+excess CAS: GL 4315 ≠ D112 412"
+        );
+        assert_eq!(
+            gl_credit("4316"),
+            oblig("432"),
+            "part-time+excess CASS: GL 4316 ≠ D112 432"
+        );
+        // Exact expected numbers: H1 lifted base = min 4050 − 300 = 3750, + excess 500 = 4250.
+        // CAS = ROUND(4250 × 25%) = 1063; CASS = ROUND(4250 × 10%) = 425. Before the fix D112 412 was
+        // only 25%×(2000+500) = 625 ≠ GL 4315 = 1063 (under-declared by the 438 employer lift diff).
+        assert_eq!(
+            oblig("412"),
+            1063,
+            "D112 CAS = 25% × (lifted 3750 + excess 500)"
+        );
+        assert_eq!(
+            oblig("432"),
+            425,
+            "D112 CASS = 10% × (lifted 3750 + excess 500)"
+        );
     }
 
     /// P1 GOLDEN TEST — GL≡D112 with diurnă excess (the invariant that broke before the fix).
