@@ -181,6 +181,7 @@
     "activity": {
       "title": "Activity log",
       "exportCsv": "Export CSV",
+      "exported": "Activity log saved to {{path}}.",
       "exportFailed": "Activity log export failed.",
       "empty": "No activity recorded.",
       "th": {

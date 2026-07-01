@@ -437,26 +437,17 @@ pub async fn refresh_token_bundle_with_client_id(
 
 // ─── Internals ─────────────────────────────────────────────────────────────
 
+/// Deschide `url` în browser-ul implicit al sistemului, cross-platform.
+///
+/// Folosește `tauri_plugin_opener::open_url`, care deschide URL-ul direct
+/// (fără a trece prin shell), evitând bug-ul de pe Windows unde
+/// `cmd /c start "" <url>` trunchiază URL-ul la primul `&` (cmd.exe tratează
+/// `&` ca separator de comenzi când argumentul nu e citat, iar Rust std nu
+/// citează automat argumentele fără spații) — ceea ce rupea autentificarea
+/// SPV, al cărei URL de autorizare conține mai mulți parametri `&`.
 fn open_browser(url: &str) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    crate::process_util::hidden_command("open")
-        .arg(url)
-        .spawn()
-        .map_err(|e| format!("Nu pot deschide browser-ul: {e}"))?;
-
-    #[cfg(target_os = "windows")]
-    crate::process_util::hidden_command("cmd")
-        .args(["/c", "start", "", url])
-        .spawn()
-        .map_err(|e| format!("Nu pot deschide browser-ul: {e}"))?;
-
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    crate::process_util::hidden_command("xdg-open")
-        .arg(url)
-        .spawn()
-        .map_err(|e| format!("Nu pot deschide browser-ul: {e}"))?;
-
-    Ok(())
+    tauri_plugin_opener::open_url(url, None::<&str>)
+        .map_err(|e| format!("Nu pot deschide browser-ul: {e}"))
 }
 
 fn extract_query_param(request_line: &str, param: &str) -> Option<String> {

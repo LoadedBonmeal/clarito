@@ -1140,14 +1140,19 @@ export function SettingsPage() {
                 onClick={async () => {
                   if (!activeCompanyId) return;
                   try {
+                    // Native save dialog + fs write instead of a browser blob/anchor
+                    // download — the latter is a silent no-op in Tauri's macOS
+                    // WKWebView (no download manager to catch the anchor click).
+                    const { save } = await import("@tauri-apps/plugin-dialog");
+                    const path = await save({
+                      filters: [{ name: "CSV", extensions: ["csv"] }],
+                      defaultPath: "jurnal-activitate.csv",
+                    });
+                    if (!path) return;
                     const csv = await api.system.exportActivityLogCsv(activeCompanyId);
-                    const blob = new Blob([csv], { type: "text/csv" });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = "jurnal-activitate.csv";
-                    a.click();
-                    URL.revokeObjectURL(url);
+                    const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+                    await writeTextFile(path, csv);
+                    notify.success(t("settings.activity.exported", { path }));
                   } catch (err) {
                     notify.error(formatError(err, t("settings.activity.exportFailed")));
                   }
