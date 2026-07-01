@@ -120,7 +120,11 @@ csv = "1"
 encoding_rs = "0.8"
 
 # DBF (dBase) file reading and writing — used by the SAGA DBF import adapter (W3).
-dbase = "0.7"
+# "yore" enables dbase's built-in CP852/CP1250/etc code-page decoders (Reader::new_with_encoding),
+# so the SAGA adapter can decode Romanian diacritics losslessly instead of the crate default
+# UnicodeLossy (= String::from_utf8_lossy, which replaces non-UTF-8 diacritic bytes with U+FFFD
+# before any Rust-side heuristic ever sees them). See saga_dbf.rs `pick_dbf_encoding`.
+dbase = { version = "0.7", features = ["yore"] }
 machine-uid = "0.5"
 
 [target.'cfg(target_os = "macos")'.dependencies]

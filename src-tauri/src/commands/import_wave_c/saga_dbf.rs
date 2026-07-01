@@ -30,15 +30,19 @@
 //! # Codepage detection (defensive heuristic)
 //!
 //! SAGA DBF files are commonly CP852 (MS-DOS East-European) or CP1250
-//! (Windows Central-European). The adapter tries three candidates in order:
-//! CP852 → CP1250 → UTF-8. It picks the first encoding whose decoded string
-//! contains valid Romanian diacritics (ă â î ș ț — both comma-below and
-//! cedilla variants) and no Unicode replacement character (U+FFFD). If none
-//! satisfies the heuristic, it falls through to UTF-8 with lossy replacement.
+//! (Windows Central-European). The adapter opens the file under three candidate
+//! encodings in order — CP852 → CP1250 → strict UTF-8 (`dbase`'s `yore`-backed
+//! `Reader::new_with_encoding`, one full re-parse per candidate) — and picks the
+//! first whose first-record sample contains valid Romanian diacritics (ă â î ș ț —
+//! both comma-below and cedilla variants) and no Unicode replacement character
+//! (U+FFFD). If none satisfies the heuristic, it falls through to the crate default
+//! (`UnicodeLossy`, i.e. UTF-8 with lossy replacement — the pre-fix behavior).
 //!
-//! This heuristic is documented here rather than trusted blindly — a real
-//! export file should be tested to confirm. The DBF header `ldid` byte is NOT
-//! relied on because it is often 0x00 in SAGA exports.
+//! This heuristic is documented here rather than trusted blindly — a real export
+//! file should be tested to confirm (see `pick_dbf_encoding`/`open_dbf_reader`). The
+//! DBF header `ldid` code-page byte is NOT relied on because it is often 0x00
+//! ("Undefined") in SAGA exports, which even with `yore` enabled resolves to a
+//! lossy CP1252 decode rather than the correct CP852/CP1250 one.
 //!
 //! # UNVERIFIED column names
 //!
@@ -48,7 +52,6 @@
 //! are marked with a comment.
 
 use dbase::{FieldValue, Record};
-use encoding_rs::WINDOWS_1250;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
@@ -189,11 +192,105 @@ fn require_bytes<'a>(input: &'a ImportInput, caller: &str) -> AppResult<&'a [u8]
     }
 }
 
+// ─── DBF codepage detection ──────────────────────────────────────────────────
+//
+// SAGA DBF files are commonly CP852 (MS-DOS East-European) or CP1250 (Windows
+// Central-European); the DBF header's own code-page byte (`ldid`) is NOT relied on
+// because it is often 0x00 ("Undefined") in SAGA exports — and even when the `yore`
+// feature lets dbase resolve an "Undefined" ldid, it falls back to a LOSSY CP1252
+// decode (never errors, but silently mis-decodes CP852/CP1250 bytes as if they were
+// CP1252). So this picker re-opens the file under each candidate encoding in turn,
+// decodes the first record's Character fields, and scores each candidate the same
+// way `decode_ro_string` used to score raw bytes: prefer the first candidate whose
+// decoded sample contains at least one valid Romanian diacritic (ă â î ș ț, both
+// comma-below and cedilla variants) and no U+FFFD replacement character. Falls back
+// to UTF-8 lossy (today's pre-fix behavior) when no candidate scores — e.g. an
+// ASCII-only file, or one that genuinely has no diacritics in its very first record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DbfCodePage {
+    Cp852,
+    Cp1250,
+    Utf8,
+}
+
+/// Open a fresh `dbase::Reader` over `bytes` under the given candidate encoding.
+fn open_reader_with(
+    bytes: &[u8],
+    cp: DbfCodePage,
+) -> Result<dbase::Reader<std::io::Cursor<&[u8]>>, dbase::Error> {
+    let cursor = std::io::Cursor::new(bytes);
+    match cp {
+        DbfCodePage::Cp852 => {
+            dbase::Reader::new_with_encoding(cursor, dbase::yore::code_pages::CP852)
+        }
+        DbfCodePage::Cp1250 => {
+            dbase::Reader::new_with_encoding(cursor, dbase::yore::code_pages::CP1250)
+        }
+        // Strict UTF-8 (errors on invalid bytes rather than lossy-replacing them), so a
+        // genuinely-non-UTF-8 file fails the sample read here and the picker moves on, instead
+        // of masking the mismatch behind U+FFFD like UnicodeLossy would. `dbase::Unicode`
+        // itself doesn't implement `Into<DynEncoding>` with the `yore` feature on (only
+        // `yore::CodePage` impls do), so go through the public `DynEncoding::from_name`
+        // constructor instead, which resolves "UTF-8" to the same strict `Unicode` encoding.
+        DbfCodePage::Utf8 => {
+            let enc = dbase::encoding::DynEncoding::from_name("UTF-8")
+                .expect("dbase must resolve the built-in \"UTF-8\" encoding name");
+            dbase::Reader::new_with_encoding(cursor, enc)
+        }
+    }
+}
+
+/// Does `record`'s Character fields, taken together, look like a correctly-decoded
+/// Romanian string? Mirrors the old `decode_ro_string` scoring heuristic, but applied
+/// to an already-decoded `Record` (each candidate encoding decodes at the dbase level,
+/// not via a post-hoc byte reinterpretation).
+fn record_looks_like_ro(record: &Record) -> bool {
+    let mut any_diacritic = false;
+    for (_, value) in record.clone().into_iter() {
+        if let FieldValue::Character(Some(s)) = &value {
+            if s.contains('\u{FFFD}') {
+                return false;
+            }
+            if s.chars().any(|c| RO_DIACRITICS.contains(&c)) {
+                any_diacritic = true;
+            }
+        }
+    }
+    any_diacritic
+}
+
+/// Pick the best-scoring codepage for this DBF file by sampling its first record
+/// under each candidate in turn. Returns `None` if no candidate scores (falls back to
+/// UTF-8 lossy, the pre-fix default, at the call site).
+fn pick_dbf_encoding(bytes: &[u8]) -> Option<DbfCodePage> {
+    for cp in [DbfCodePage::Cp852, DbfCodePage::Cp1250, DbfCodePage::Utf8] {
+        let Ok(mut reader) = open_reader_with(bytes, cp) else {
+            continue;
+        };
+        let Some(Ok(first)) = reader.iter_records().next() else {
+            continue;
+        };
+        if record_looks_like_ro(&first) {
+            return Some(cp);
+        }
+    }
+    None
+}
+
+/// Open the real reader for `bytes`, using the best-scoring codepage (see
+/// `pick_dbf_encoding`), falling back to the crate default (`UnicodeLossy`, matching
+/// the pre-fix behavior) when no candidate's sample scored.
+fn open_dbf_reader(bytes: &[u8]) -> Result<dbase::Reader<std::io::Cursor<&[u8]>>, dbase::Error> {
+    match pick_dbf_encoding(bytes) {
+        Some(cp) => open_reader_with(bytes, cp),
+        None => dbase::Reader::new(std::io::Cursor::new(bytes)),
+    }
+}
+
 // ─── DBF column detection ─────────────────────────────────────────────────────
 
 fn detect_dbf_columns(bytes: &[u8]) -> AppResult<Vec<DetectedColumn>> {
-    let cursor = std::io::Cursor::new(bytes);
-    let mut reader = dbase::Reader::new(cursor)
+    let mut reader = open_dbf_reader(bytes)
         .map_err(|e| AppError::Other(format!("SAGA DBF: citire header eșuată: {e}")))?;
 
     let field_names: Vec<String> = reader
@@ -228,8 +325,7 @@ fn detect_dbf_columns(bytes: &[u8]) -> AppResult<Vec<DetectedColumn>> {
 fn parse_dbf_bytes(bytes: &[u8], ctx: &ParseCtx) -> AppResult<StagedData> {
     let mut out = StagedData::empty();
 
-    let cursor = std::io::Cursor::new(bytes);
-    let mut reader = dbase::Reader::new(cursor)
+    let mut reader = open_dbf_reader(bytes)
         .map_err(|e| AppError::Other(format!("SAGA DBF: nu se poate deschide fișierul: {e}")))?;
 
     // Collect all field names from the header.
@@ -523,38 +619,27 @@ fn parse_as_products(
 
 // ─── Codepage-aware field decoding ───────────────────────────────────────────
 
-/// Decode a `FieldValue` to a String, applying the codepage heuristic for
-/// character fields. Numeric/date/logical values are converted directly.
+/// Decode a `FieldValue` to a String. Numeric/date/logical values are converted
+/// directly; Character values are just trimmed, because by this point `dbase`
+/// itself has ALREADY decoded the field's raw bytes using the file-wide codepage
+/// chosen by `pick_dbf_encoding`/`open_dbf_reader` (CP852, CP1250, or strict UTF-8 —
+/// whichever scored best on the file's first record), so the string is correct RO
+/// text already.
 ///
-/// # Codepage heuristic (DEFENSIVE)
-///
-/// SAGA DBF files are commonly CP852 or CP1250. We try three candidates:
-///   1. CP852 (MS-DOS East-European)
-///   2. CP1250 (Windows Central-European)
-///   3. UTF-8 (modern / some newer SAGA versions)
-///
-/// We pick the first encoding that produces no U+FFFD replacement character
-/// AND contains at least one valid Romanian diacritic (ă â î ș ț — both
-/// comma-below and cedilla variants). If none qualifies we fall through to
-/// UTF-8 with lossy replacement.
-///
-/// This heuristic is per-field so that files with mixed-encoding records
-/// (rare, but observed in older exports) degrade gracefully.
-///
-/// KNOWN LIMITATION (found by the pre-publication audit; deferred, not blind-fixed): `dbase::Reader::new`
-/// decodes character fields with the crate default `UnicodeLossy` (= `String::from_utf8_lossy`) BEFORE
-/// this heuristic runs, so a CP852/CP1250 SAGA file already has its non-UTF-8 diacritic bytes replaced by
-/// U+FFFD by the time we see them — the recovery below then cannot restore ă/â/î/ș/ț (imported
-/// names/addresses are garbled; numeric amounts are unaffected). The clean fix — a lossless
-/// byte-preserving custom `Encoding` passed to `Reader::new_with_encoding` — is BLOCKED by dbase 0.7.0:
-/// it exposes the `Encoding` trait but keeps its `DecodeError`/`EncodeError` return types in a private
-/// `mod error`, so an external impl cannot name them. Viable follow-ups (each needs a real SAGA DBF to
-/// validate, hence deferred): enable the dbase `yore` feature and read via a fixed code page
-/// (`Reader::new_with_encoding(cursor, dbase::yore::code_pages::CP852)`), accepting one encoding; or
-/// upgrade dbase to a release that re-exports the error types so this passthrough becomes possible.
+/// FIXED (previously a KNOWN LIMITATION, found by the pre-publication audit):
+/// `dbase::Reader::new` (no explicit encoding) used the crate default `UnicodeLossy`
+/// (= `String::from_utf8_lossy`), which replaced non-UTF-8 CP852/CP1250 diacritic bytes
+/// with U+FFFD BEFORE any Rust-side heuristic could see the original bytes — so ă/â/î/ș/ț
+/// were unrecoverably lost for CP852/CP1250 files. Fixed by enabling dbase's `yore`
+/// feature (Cargo.toml) and opening the reader with `Reader::new_with_encoding` under a
+/// per-file-detected code page (see `open_dbf_reader`), instead of ever going through
+/// `UnicodeLossy` for a file that scores as CP852/CP1250. The old per-record post-hoc
+/// `decode_ro_string`/`decode_cp852` byte-reinterpretation was removed — encoding is now
+/// resolved once, at reader-open time; the RO-diacritic scoring lives in
+/// `record_looks_like_ro`/`pick_dbf_encoding`.
 fn field_value_to_string_decoded(value: &FieldValue) -> String {
     match value {
-        FieldValue::Character(Some(s)) => decode_ro_string(s.as_bytes()),
+        FieldValue::Character(Some(s)) => s.trim().to_string(),
         other => field_value_to_string(other),
     }
 }
@@ -581,102 +666,12 @@ fn field_value_to_string(value: &FieldValue) -> String {
 }
 
 /// Romanian diacritics in both comma-below (correct) and cedilla (legacy) forms,
-/// plus their uppercase equivalents.
+/// plus their uppercase equivalents. Used by `record_looks_like_ro` to score each
+/// codepage candidate in `pick_dbf_encoding`.
 const RO_DIACRITICS: &[char] = &[
     'ă', 'â', 'î', 'ș', 'ț', 'Ă', 'Â', 'Î', 'Ș', 'Ț', 'ş', 'ţ', 'Ş',
     'Ţ', // cedilla legacy forms
 ];
-
-/// CP852 (IBM852 / MS-DOS Latin-2) high-byte map for the range 0x80–0xFF.
-///
-/// `encoding_rs` only implements WHATWG-specified encodings and does NOT include
-/// CP852. This static table was derived from the Unicode Consortium's IBM852
-/// mapping (ftp://ftp.unicode.org/Public/MAPPINGS/VENDORS/MICSFT/PC/CP852.TXT).
-/// Only used by `decode_ro_string` for the codepage-probe heuristic.
-///
-/// Entry index i corresponds to byte value (0x80 + i).
-/// '\u{FFFD}' marks unmapped/undefined code points.
-// CP852_HIGH verified against Unicode Consortium IBM852 mapping via Python codecs.
-// Key Romanian codepoints: â=0x83(idx 3), Â=0xB6(idx 54), î=0x8C(idx 12),
-// Î=0xD7(idx 87), ă=0xC7(idx 71), Ă=0xC6(idx 70), ş=0xAD(idx 45),
-// ţ=0xEE(idx 110), Ţ=0xDD(idx 93).
-#[rustfmt::skip]
-const CP852_HIGH: [char; 128] = [
-    // 0x80–0x8F
-    '\u{00C7}','\u{00FC}','\u{00E9}','\u{00E2}','\u{00E4}','\u{016F}','\u{0107}','\u{00E7}',
-    '\u{0142}','\u{00EB}','\u{0150}','\u{0151}','\u{00EE}','\u{0179}','\u{00C4}','\u{0106}',
-    // 0x90–0x9F
-    '\u{00C9}','\u{0139}','\u{013A}','\u{00F4}','\u{00F6}','\u{013D}','\u{013E}','\u{015A}',
-    '\u{015B}','\u{00D6}','\u{00DC}','\u{0164}','\u{0165}','\u{0141}','\u{00D7}','\u{010D}',
-    // 0xA0–0xAF
-    '\u{00E1}','\u{00ED}','\u{00F3}','\u{00FA}','\u{0104}','\u{0105}','\u{017D}','\u{017E}',
-    '\u{0118}','\u{0119}','\u{00AC}','\u{017A}','\u{010C}','\u{015F}','\u{00AB}','\u{00BB}',
-    // 0xB0–0xBF  (0xB6=Â U+00C2, 0xB8=Ş U+015E)
-    '\u{2591}','\u{2592}','\u{2593}','\u{2502}','\u{2524}','\u{00C1}','\u{00C2}','\u{011A}',
-    '\u{015E}','\u{2563}','\u{2551}','\u{2557}','\u{255D}','\u{017B}','\u{017C}','\u{2510}',
-    // 0xC0–0xCF  (0xC6=Ă U+0102, 0xC7=ă U+0103)
-    '\u{2514}','\u{2534}','\u{252C}','\u{251C}','\u{2500}','\u{253C}','\u{0102}','\u{0103}',
-    '\u{255A}','\u{2554}','\u{2569}','\u{2566}','\u{2560}','\u{2550}','\u{256C}','\u{00A4}',
-    // 0xD0–0xDF  (0xD7=Î U+00CE, 0xDD=Ţ U+0162)
-    '\u{0111}','\u{0110}','\u{010E}','\u{00CB}','\u{010F}','\u{0147}','\u{00CD}','\u{00CE}',
-    '\u{011B}','\u{2518}','\u{250C}','\u{2588}','\u{2584}','\u{0162}','\u{016E}','\u{2580}',
-    // 0xE0–0xEF  (0xEE=ţ U+0163)
-    '\u{00D3}','\u{00DF}','\u{00D4}','\u{0143}','\u{0144}','\u{0148}','\u{0160}','\u{0161}',
-    '\u{0154}','\u{00DA}','\u{0155}','\u{0170}','\u{00FD}','\u{00DD}','\u{0163}','\u{00B4}',
-    // 0xF0–0xFF
-    '\u{00AD}','\u{02DD}','\u{02DB}','\u{02C7}','\u{02D8}','\u{00A7}','\u{00F7}','\u{00B8}',
-    '\u{00B0}','\u{00A8}','\u{02D9}','\u{0171}','\u{0158}','\u{0159}','\u{25A0}','\u{00A0}',
-];
-
-/// Decode raw bytes assuming CP852 (MS-DOS Latin-2 / IBM852).
-///
-/// ASCII bytes (0x00–0x7F) are passed through; high bytes (0x80–0xFF) are
-/// looked up in `CP852_HIGH`. Returns `None` if any byte maps to U+FFFD
-/// (undefined/unmapped), signalling the caller to try another encoding.
-fn decode_cp852(raw: &[u8]) -> Option<String> {
-    let mut out = String::with_capacity(raw.len());
-    for &b in raw {
-        if b < 0x80 {
-            out.push(b as char);
-        } else {
-            let ch = CP852_HIGH[(b - 0x80) as usize];
-            if ch == '\u{FFFD}' {
-                return None;
-            }
-            out.push(ch);
-        }
-    }
-    Some(out)
-}
-
-/// Attempt to decode raw bytes as CP852 → CP1250 → UTF-8, picking the first
-/// candidate that (a) has no replacement characters AND (b) contains at least
-/// one Romanian diacritic. Falls back to UTF-8 lossy if none qualifies.
-fn decode_ro_string(raw: &[u8]) -> String {
-    // Try CP852 first (MS-DOS East-European, common in older SAGA DBF exports).
-    if let Some(s) = decode_cp852(raw) {
-        if s.chars().any(|c| RO_DIACRITICS.contains(&c)) {
-            return s.trim().to_string();
-        }
-    }
-
-    // Try CP1250 (Windows Central-European, common in newer SAGA exports).
-    // encoding_rs::WINDOWS_1250 is in the WHATWG standard and is available.
-    let (decoded_1250, _, had_errors_1250) = WINDOWS_1250.decode(raw);
-    if !had_errors_1250 && decoded_1250.chars().any(|c| RO_DIACRITICS.contains(&c)) {
-        return decoded_1250.trim().to_string();
-    }
-
-    // Try plain UTF-8.
-    if let Ok(s) = std::str::from_utf8(raw) {
-        if !s.contains('\u{FFFD}') {
-            return s.trim().to_string();
-        }
-    }
-
-    // Last resort: lossy UTF-8.
-    String::from_utf8_lossy(raw).trim().to_string()
-}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -739,6 +734,47 @@ mod tests {
         cursor.into_inner()
     }
 
+    /// Same as `write_dbf`, but writes Character fields under an explicit encoding —
+    /// i.e. what a real MS-DOS/Windows-era SAGA export actually looks like on disk,
+    /// instead of dbase's `UnicodeLossy` (UTF-8) writer default.
+    fn write_dbf_with_encoding<E: dbase::Encoding + 'static>(
+        encoding: E,
+        fields: &[&str],
+        rows: Vec<Vec<(&str, &str)>>,
+    ) -> Vec<u8> {
+        let mut builder = TableWriterBuilder::with_encoding(encoding);
+        for name in fields {
+            builder = builder.add_character_field(
+                dbase::FieldName::try_from(*name).expect("valid field name"),
+                64,
+            );
+        }
+        let mut cursor = Cursor::new(Vec::<u8>::new());
+        let mut writer = builder.build_with_dest(&mut cursor);
+
+        for row in rows {
+            let mut record = Record::default();
+            for (name, val) in row {
+                record.insert(
+                    name.to_string(),
+                    FieldValue::Character(Some(val.to_string())),
+                );
+            }
+            writer.write_record(&record).expect("write row");
+        }
+        writer.finalize().expect("finalize");
+        drop(writer);
+        cursor.into_inner()
+    }
+
+    fn write_dbf_cp852(fields: &[&str], rows: Vec<Vec<(&str, &str)>>) -> Vec<u8> {
+        write_dbf_with_encoding(dbase::yore::code_pages::CP852, fields, rows)
+    }
+
+    fn write_dbf_cp1250(fields: &[&str], rows: Vec<Vec<(&str, &str)>>) -> Vec<u8> {
+        write_dbf_with_encoding(dbase::yore::code_pages::CP1250, fields, rows)
+    }
+
     fn ctx_no_map() -> ParseCtx<'static> {
         ParseCtx {
             company_cui_canonical: "12345678",
@@ -783,40 +819,135 @@ mod tests {
         );
     }
 
-    // ─── (b) CP852-encoded Romanian diacritics decode correctly ──────────────
-
+    // ─── (b) CP852-encoded Romanian diacritics survive the full parse pipeline ─
+    //
+    // End-to-end regression for the diacritics fix: a DBF whose Character fields are
+    // genuinely CP852-encoded bytes (built via `write_dbf_cp852`, i.e. what a real
+    // MS-DOS-era SAGA export looks like on disk — NOT dbase's default UTF-8 writer)
+    // must come out the OTHER end of `SagaDbfAdapter::parse` with the correct
+    // Romanian text, not U+FFFD replacement characters. This exercises the real
+    // production path (`open_dbf_reader` → `pick_dbf_encoding` → `parse_as_contacts`
+    // → `field_value_to_string_decoded`), unlike the old unit tests this replaces,
+    // which only tested the superseded post-hoc byte-reinterpretation helpers
+    // directly and never caught that `dbase::Reader::new`'s default `UnicodeLossy`
+    // destroyed the original bytes before those helpers ever ran.
     #[test]
-    fn codepage_cp852_ro_diacritics_decoded() {
-        // CP852 (IBM852) byte mapping (verified via Python codecs):
-        //   0x83 → â  (U+00E2)
-        //   0xC7 → ă  (U+0103)  ← Romanian-specific, confirmed by Python
-        //
-        // Test: bytes containing 0xC7 must decode to ă via decode_ro_string.
-        // decode_ro_string picks the CP852 path because the decoded string
-        // contains ă which is in RO_DIACRITICS.
-        let cp852_bytes: &[u8] = b"G\xC7e\x9Fti"; // 0xC7=ă
-        let decoded = decode_ro_string(cp852_bytes);
+    fn cp852_encoded_dbf_diacritics_survive_full_parse() {
+        // CP852 has no comma-below ș/ț codepoints (those are post-Unicode); real
+        // MS-DOS-era Romanian text used the cedilla ş/ţ approximations, which
+        // `RO_DIACRITICS` already treats as valid Romanian diacritics.
+        let fields = ["CIF", "DENUMIRE", "LOCALITATE"];
+        let rows = vec![vec![
+            ("CIF", "RO12345678"),
+            ("DENUMIRE", "SC Constanţa Trading SRL"),
+            ("LOCALITATE", "Iaşi"),
+        ]];
+        let bytes = write_dbf_cp852(&fields, rows);
+
+        // Sanity check: the raw bytes on disk are NOT valid UTF-8 (genuinely CP852).
         assert!(
-            decoded.contains('\u{0103}'),
-            "CP852 byte 0xC7 must decode to ă (U+0103); got: {decoded:?}"
+            std::str::from_utf8(&bytes).is_err(),
+            "fixture must contain real non-UTF-8 CP852 bytes, not ASCII/UTF-8 text"
+        );
+
+        let adapter = SagaDbfAdapter;
+        let input = ImportInput::Bytes(bytes);
+        let ctx = ctx_no_map();
+        let data = adapter.parse(&input, &ctx).unwrap();
+
+        assert_eq!(data.contacts.len(), 1, "should produce one contact");
+        let c = &data.contacts[0];
+        assert_eq!(
+            c.legal_name.as_deref(),
+            Some("SC Constanţa Trading SRL"),
+            "CP852 'ţ' must decode to U+0163, not U+FFFD"
+        );
+        assert_eq!(
+            c.city.as_deref(),
+            Some("Iaşi"),
+            "CP852 'ş' must decode to U+015F, not U+FFFD"
+        );
+        assert!(
+            !c.legal_name.as_deref().unwrap_or("").contains('\u{FFFD}'),
+            "no replacement characters in legal_name"
+        );
+        assert!(
+            !c.city.as_deref().unwrap_or("").contains('\u{FFFD}'),
+            "no replacement characters in city"
         );
     }
 
     #[test]
-    fn decode_cp852_known_ro_chars() {
-        // CP852 byte 0x83 → â (U+00E2), per Python: bytes([0x83]).decode('cp852') == 'â'
-        let result = decode_cp852(b"\x83");
-        assert!(result.is_some(), "0x83 must decode in CP852");
-        assert_eq!(result.unwrap(), "\u{00E2}", "CP852 0x83 = â (U+00E2)");
+    fn pick_dbf_encoding_selects_cp852_for_cp852_file() {
+        let fields = ["DENUMIRE"];
+        let rows = vec![vec![("DENUMIRE", "Constanţa")]];
+        let bytes = write_dbf_cp852(&fields, rows);
 
-        // CP852 byte 0xC7 → ă (U+0103), per Python
-        let result2 = decode_cp852(b"\xC7");
-        assert!(result2.is_some(), "0xC7 must decode in CP852");
-        assert_eq!(result2.unwrap(), "\u{0103}", "CP852 0xC7 = ă (U+0103)");
+        let chosen = pick_dbf_encoding(&bytes);
+        assert!(
+            matches!(chosen, Some(DbfCodePage::Cp852)),
+            "a genuinely CP852-encoded file must be detected as CP852"
+        );
+    }
 
-        // ASCII bytes pass through unchanged.
-        let result3 = decode_cp852(b"abc");
-        assert_eq!(result3, Some("abc".to_string()), "ASCII passthrough");
+    #[test]
+    fn cp1250_encoded_dbf_diacritics_survive_full_parse() {
+        // Neither CP852 nor CP1250 (real Windows-1250, confirmed against Python's stdlib
+        // `cp1250` codec) has the MODERN comma-below ș/ț/Ș/Ț codepoints — those postdate
+        // the legacy code pages. A real Windows-era SAGA export uses the cedilla ş/ţ/Ş/Ţ
+        // approximations instead, same as a real MS-DOS/CP852 export would.
+        let fields = ["CIF", "DENUMIRE", "LOCALITATE"];
+        let rows = vec![vec![
+            ("CIF", "RO87654321"),
+            ("DENUMIRE", "SC Ploieşti Distribuţie SRL"),
+            ("LOCALITATE", "Constanţa"),
+        ]];
+        let bytes = write_dbf_cp1250(&fields, rows);
+
+        assert!(
+            std::str::from_utf8(&bytes).is_err(),
+            "fixture must contain real non-UTF-8 CP1250 bytes, not ASCII/UTF-8 text"
+        );
+
+        let chosen = pick_dbf_encoding(&bytes);
+        assert!(
+            matches!(chosen, Some(DbfCodePage::Cp1250)),
+            "a genuinely CP1250-encoded file must be detected as CP1250: got {chosen:?}"
+        );
+
+        let adapter = SagaDbfAdapter;
+        let input = ImportInput::Bytes(bytes);
+        let ctx = ctx_no_map();
+        let data = adapter.parse(&input, &ctx).unwrap();
+
+        assert_eq!(data.contacts.len(), 1, "should produce one contact");
+        let c = &data.contacts[0];
+        assert_eq!(
+            c.legal_name.as_deref(),
+            Some("SC Ploieşti Distribuţie SRL"),
+            "CP1250 'ş'/'ţ' must decode correctly, not U+FFFD"
+        );
+        assert_eq!(
+            c.city.as_deref(),
+            Some("Constanţa"),
+            "CP1250 'ţ' must decode correctly, not U+FFFD"
+        );
+    }
+
+    #[test]
+    fn pick_dbf_encoding_falls_back_to_none_for_plain_ascii() {
+        // A plain-ASCII file has no diacritics to score on — no candidate wins,
+        // and `open_dbf_reader` falls back to the crate default (UnicodeLossy),
+        // which is correct and lossless for pure ASCII anyway.
+        let fields = ["DENUMIRE"];
+        let rows = vec![vec![("DENUMIRE", "Test SRL")]];
+        let bytes = write_dbf(&fields, rows);
+
+        assert_eq!(
+            pick_dbf_encoding(&bytes),
+            None,
+            "plain ASCII has no diacritic signal, so no candidate should win"
+        );
     }
 
     // ─── (c) detect_columns returns header names ──────────────────────────────

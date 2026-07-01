@@ -1162,6 +1162,7 @@ dependencies = [
  "bufrw",
  "byteorder",
  "time",
+ "yore",
 ]
 
 [[package]]
@@ -8144,6 +8145,12 @@ dependencies = [
  "syn 2.0.117",
  "synstructure",
 ]
+
+[[package]]
+name = "yore"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a7947b754c504609dca276b5904e1049423769126de1dcd8259d96b43a5a764"
 
 [[package]]
 name = "zbus"
