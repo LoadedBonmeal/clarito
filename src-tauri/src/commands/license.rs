@@ -62,7 +62,8 @@ const LAST_SEEN_KEY: &str = "license_last_seen_v2";
 //
 // SEC-10 note: the key checksum was extended from 4 to 8 hex chars (16-bit →
 // 32-bit) for significantly better collision resistance. Legacy 4-char keys
-// are still accepted during transition to avoid breaking deployed installations.
+// are no longer accepted (dropped in bcdea01, pre-publication — no legacy keys
+// in the wild); `validate_license_key` requires exactly 8 chars.
 include!(concat!(env!("OUT_DIR"), "/license_secrets.rs"));
 
 use std::sync::OnceLock;
@@ -116,7 +117,8 @@ pub fn validate_license_key(key: &str) -> bool {
 }
 
 /// RFC 2104 HMAC-SHA256(KEY_HMAC_SECRET, data) → full hex digest (64 chars).
-/// Callers slice the prefix they need (`..4` legacy, `..8` current).
+/// Callers use the 8-char prefix (`..8`); the legacy 4-char prefix was dropped
+/// (bcdea01) and `validate_license_key` now rejects anything but 8 chars.
 ///
 /// BREAKING (Wave 8): replaced the old SHA-256(secret || 0x00 || data)
 /// construction, which was vulnerable to length-extension attacks. Any keys
@@ -286,7 +288,11 @@ fn trial_already_used_in_keychain() -> bool {
 /// Stochează machine_id-ul curent ca valoare — util pentru debugging.
 fn mark_trial_used_in_keychain(mid: &str) {
     if let Ok(entry) = Entry::new(TRIAL_KC_SERVICE, TRIAL_KC_ACCOUNT) {
-        let _ = entry.set_password(mid);
+        if let Err(e) = entry.set_password(mid) {
+            tracing::warn!(
+                "Nu s-a putut marca trial-ul în keychain (protecție reinstalare degradată): {e}"
+            );
+        }
     }
 }
 
@@ -301,7 +307,11 @@ fn read_last_seen_keychain() -> Option<i64> {
 
 fn write_last_seen_keychain(ts: i64) {
     if let Ok(entry) = Entry::new(TRIAL_KC_SERVICE, LAST_SEEN_KC_ACCOUNT) {
-        let _ = entry.set_password(&ts.to_string());
+        if let Err(e) = entry.set_password(&ts.to_string()) {
+            tracing::warn!(
+                "Nu s-a putut scrie high-water-mark anti-rollback în keychain (protecție ceas degradată): {e}"
+            );
+        }
     }
 }
 
@@ -484,9 +494,12 @@ pub async fn start_trial(state: State<'_, AppState>, email: String) -> AppResult
     let fp = compute_fingerprint(&email, &mid, lic.expires_at, "TRIAL");
     set_setting(pool, FP_SETTINGS_KEY, &fp).await;
 
-    // Last-seen inițial
+    // Last-seen inițial — în AMBELE straturi (settings + keychain) chiar de la creare,
+    // ca high-water-mark-ul anti-rollback să existe înainte de primul check_license_validity
+    // (altfel ștergerea rândului din SQLite înainte de prima validare ar lăsa keychain-ul gol).
     let now = chrono::Utc::now().timestamp();
     set_setting(pool, LAST_SEEN_KEY, &now.to_string()).await;
+    write_last_seen_keychain(now);
 
     // Marcare keychain — ultimul pas (dacă ceva a eșuat înainte, nu marcăm)
     mark_trial_used_in_keychain(&mid);
@@ -534,9 +547,11 @@ pub async fn activate_license(
     let fp = compute_fingerprint(&email_lower, &mid, lic.expires_at, "SOLO");
     set_setting(pool, FP_SETTINGS_KEY, &fp).await;
 
-    // 4. Anti-rollback timestamp
+    // 4. Anti-rollback timestamp — în AMBELE straturi (settings + keychain) chiar de la activare,
+    // ca high-water-mark-ul să existe înainte de primul check_license_validity.
     let now = chrono::Utc::now().timestamp();
     set_setting(pool, LAST_SEEN_KEY, &now.to_string()).await;
+    write_last_seen_keychain(now);
 
     Ok(lic)
 }
@@ -589,6 +604,35 @@ mod sec_tests {
         let ls = now + 31 * 24 * 60 * 60;
         let drift = ls - now;
         assert!(drift > 30 * 24 * 60 * 60);
+    }
+
+    #[test]
+    fn keychain_high_water_mark_round_trips() {
+        // Sămânța anti-rollback de la creare (start_trial / activate_license) se bazează pe
+        // persistența în keychain: write → read trebuie să facă round-trip. Verificăm mecanismul
+        // pe platformele cu backend de keychain, folosind un cont temporar unic (creat de acest
+        // binar → fără prompt cross-app, fără a atinge intrarea de producție "last_seen") și
+        // sărim elegant unde nu există backend (CI headless).
+        let acct = format!("__clarito_test_hw_{}", std::process::id());
+        let entry = match Entry::new(TRIAL_KC_SERVICE, &acct) {
+            Ok(e) => e,
+            Err(_) => return, // fără backend de keychain — skip
+        };
+        let probe: i64 = 1_700_000_042;
+        if entry.set_password(&probe.to_string()).is_err() {
+            return; // backend prezent dar nescriabil (headless) — skip
+        }
+        let read_back = entry
+            .get_password()
+            .ok()
+            .and_then(|s| s.trim().parse::<i64>().ok());
+        let _ = entry.delete_credential(); // curățare best-effort
+        if let Some(v) = read_back {
+            assert_eq!(
+                v, probe,
+                "high-water-mark-ul trebuie să facă round-trip în keychain"
+            );
+        }
     }
 
     #[test]

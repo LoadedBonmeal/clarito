@@ -171,7 +171,18 @@ export function TopBar() {
 
       {/* Centered search → command palette */}
       <div className="searchwrap">
-        <div className="search" onClick={() => setCommandOpen(true)} role="button" tabIndex={0}>
+        <div
+          className="search"
+          onClick={() => setCommandOpen(true)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setCommandOpen(true);
+            }
+          }}
+        >
           <Ic name="lens" />
           <input type="text" placeholder={t("shell.topbar.searchPlaceholder")} readOnly />
           <span className="kbd">⌘ K</span>
